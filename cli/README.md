@@ -457,17 +457,23 @@ the submission says `--env host`. Nothing falls back: a machine with no reachabl
 fails the job with a message that says so, and a task that needs what the image cannot give is
 refused with the reason.
 
-- The image is built from the Dockerfile as the job's commit has it, with no build context, and is
-  cached by the Dockerfile's content. The first `submit` of a task builds the image before the job
-  is queued, so that submission takes as long as the build. The image digest is recorded with each
-  result and is part of what makes two results comparable, so results from different images are
-  never mixed.
-- A Dockerfile that copies files from the repository (`COPY` or `ADD` of a local path, or `RUN
-  --mount`) is refused: the image must be the same for every commit that has the same Dockerfile.
+- The image is built from the task's directory as the job's commit has it: the directory is the
+  build context, so the Dockerfile can `COPY` the task's scripts into the image, and the build sees
+  no file of the candidate. The image is tagged by a digest of those files, so it is built again
+  exactly when a file of the task changes. The first `submit` of a task builds the image before the
+  job is queued, so that submission takes as long as the build. The image digest is recorded with
+  each result and is part of what makes two results comparable, so results from different images
+  are never mixed.
 - Commands run in a container as the invoking user, in a clean checkout of the exact commit. The
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
-  no container runtime. A task for an accelerator backend is refused: containers get no GPU yet.
+  no container runtime. A task for the `cuda` backend runs when the operator config passes GPUs
+  (`gpus` in `[docker]`), and is refused otherwise; other accelerator backends are refused.
+- A container also gets the cache directory of the task's image at `/vibesys/cache`, kept across
+  commits and jobs, an empty `/vibesys/artifacts` that is kept with the job, and the operator's
+  read-only mounts at `/vibesys/mounts/<name>`. The variables `VIBESYS_CACHE_DIR`,
+  `VIBESYS_ARTIFACTS_DIR` and `VIBESYS_MOUNTS` name them. Why the task environment is shaped this
+  way is in [docs/contributing/cli-task-environment.md](../docs/contributing/cli-task-environment.md).
 - Every container is named and labelled for the daemon that started it. A cancelled or timed out
   job removes its container, and the next job removes any container an earlier job left, for
   instance when the supervisor was killed. Containers that other tools started are never touched.

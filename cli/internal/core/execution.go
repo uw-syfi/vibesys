@@ -18,7 +18,12 @@ type Execution struct {
 	// share the host's files makes it visible at the same path, writable by the command. Empty
 	// means the command has none.
 	Scratch string
-	Argv    []string
+	// Artifacts, when set, is an empty directory outside the checkout that the command may leave
+	// files in for a person to read after the job: an absolute path. An environment whose
+	// commands do not share the host's files brings what they leave there back to it. Empty means
+	// the command has none.
+	Artifacts string
+	Argv      []string
 	// Service, when set, is started first and the command runs against it.
 	Service *ServiceSpec
 	// Timeout bounds the whole execution. It must be positive.

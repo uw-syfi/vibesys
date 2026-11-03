@@ -7,9 +7,11 @@ import (
 	"io"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // Engine is the Docker engine as the docker environment uses it. It is the environment's whole
@@ -24,9 +26,9 @@ type Engine interface {
 	// there, which is not an error.
 	Image(ctx context.Context, ref string) (Image, bool, error)
 
-	// Build builds an image from the Dockerfile alone, with no build context, and tags it. The
-	// build's output goes to log as it happens, and a build that fails says why in its error,
-	// with the end of that output. Building the same Dockerfile again may reuse the engine's
+	// Build builds an image from a build context, a tar with the Dockerfile at its root, and tags
+	// it. The build's output goes to log as it happens, and a build that fails says why in its
+	// error, with the end of that output. Building the same context again may reuse the engine's
 	// layers, and may produce a different image if the Dockerfile is not reproducible.
 	Build(ctx context.Context, spec BuildSpec, log io.Writer) error
 
@@ -90,9 +92,9 @@ var imageID = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 type BuildSpec struct {
 	// Tag names the image.
 	Tag string
-	// Dockerfile is the whole build input.
-	Dockerfile []byte
-	Labels     Labels
+	// Context is the whole build input: a tar with the Dockerfile at its root, made by Context.
+	Context []byte
+	Labels  Labels
 }
 
 // Mount is a directory of the host made visible in the container.
@@ -103,6 +105,15 @@ type Mount struct {
 
 // User is the user and group a container's processes run as.
 type User struct{ UID, GID int }
+
+// GPUs says which GPUs a container gets, and how.
+type GPUs struct {
+	// Devices is a docker --gpus value, such as "all" or "device=0,1". Empty passes no GPU.
+	Devices string
+	// Runtime, when set, is the container runtime that passes them ("nvidia"), with the devices in
+	// NVIDIA_VISIBLE_DEVICES, instead of --gpus.
+	Runtime string
+}
 
 // ContainerSpec is a container to start.
 type ContainerSpec struct {
@@ -117,12 +128,20 @@ type ContainerSpec struct {
 	Mounts []Mount
 	// Env is set for every process, over the image's own environment.
 	Env map[string]string
+	// GPUs are the GPUs the container gets. The zero value gives it none.
+	GPUs GPUs
+	// Limit is the longest the container's commands may run. An engine that places the container
+	// in an allocation with a time limit of its own bounds the allocation by it; zero means the
+	// caller gave none.
+	Limit time.Duration
 }
 
 var (
 	containerNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 	labelKeyPattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 	envNamePattern       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	gpuDevicesPattern    = regexp.MustCompile(`^[A-Za-z0-9=,:._-]*$`)
+	runtimePattern       = regexp.MustCompile(`^[a-z0-9._-]*$`)
 )
 
 // Validate refuses a spec an engine would have to refuse or misread, with a *core.Failure of kind
@@ -140,6 +159,14 @@ func (s ContainerSpec) Validate() error {
 		return invalid("the image %q is not an exact digest (sha256:<64 hex digits>)", s.Image)
 	case s.User.UID < 0 || s.User.GID < 0:
 		return invalid("the user %d:%d is negative", s.User.UID, s.User.GID)
+	case !gpuDevicesPattern.MatchString(s.GPUs.Devices):
+		return invalid("%q is not a --gpus value", s.GPUs.Devices)
+	case !runtimePattern.MatchString(s.GPUs.Runtime):
+		return invalid("%q is not a container runtime name", s.GPUs.Runtime)
+	case s.GPUs.Runtime != "" && s.GPUs.Devices == "":
+		return invalid("the runtime %q is for GPUs, and no GPU is given", s.GPUs.Runtime)
+	case s.Limit < 0:
+		return invalid("the limit %v is negative", s.Limit)
 	}
 	if err := checkPath("the working directory", s.Dir); err != nil {
 		return invalid("%v", err)
@@ -178,8 +205,8 @@ func checkPath(what, p string) error {
 }
 
 // Source reads what a task asks of its image, from the repository at the commit. The checkout a
-// job runs in does not exist yet when the fingerprint is taken, so the Dockerfile is read from the
-// repository and not from a working copy, which may differ from the commit.
+// job runs in does not exist yet when the fingerprint is taken, so the task's files are read from
+// the repository and not from a working copy, which may differ from the commit.
 type Source interface {
 	// Spec returns the task's image spec. It fails with core.FailureNotFound if the task has no
 	// Dockerfile at the commit, and core.FailureUnavailable if the repository cannot be read.
@@ -190,6 +217,12 @@ type Source interface {
 type Spec struct {
 	// Dockerfile is the text of the task's Dockerfile.
 	Dockerfile []byte
+	// Files are the other files of the task's directory, by their path from it: with the
+	// Dockerfile they are the image's build context. A "Dockerfile" among them is replaced by the
+	// Dockerfile above.
+	Files task.Tree
+	// Backend is the compute stack the task targets. Empty means cpu.
+	Backend core.BackendKind
 	// NestedDocker says the task starts containers of its own, which a container does not give.
 	NestedDocker bool
 }

@@ -16,10 +16,9 @@ import (
 // Config configures New. Every field but ProbePause is required.
 type Config struct {
 	Engine Engine
-	// Source reads the Dockerfile of a task at a commit.
+	// Source reads the files of a task at a commit.
 	Source Source
-	// Backend describes the machine: what the fingerprint is made of, and which backend the
-	// containers serve. Only the CPU backend is supported.
+	// Backend describes the machine the engine runs containers on: what the fingerprint is made of.
 	Backend backend.Backend
 	// Timers makes every timeout and pause Run waits on. The first timer a Run arms is the
 	// execution's limit, with the duration of its Timeout; later ones are pauses between probes.
@@ -35,6 +34,24 @@ type Config struct {
 	User User
 	// ProbePause is the pause between two probes. Zero means environment.DefaultProbePause.
 	ProbePause time.Duration
+
+	// Machine is where the engine's containers run, as a run's files see it. Nil means Shared,
+	// as User: the engine runs on this machine and mounts the caller's directories.
+	Machine Machine
+	// GPUs are the GPUs every container gets. The zero value gives none, and a task for an
+	// accelerator is refused.
+	GPUs GPUs
+	// GPUFacts reads the GPUs for the fingerprint. It is required when GPUs gives any.
+	GPUFacts GPUFacts
+	// Mounts are the operator's read-only mounts: by name, a directory on the engine's machine,
+	// which every container sees at MountsDir/<name>.
+	Mounts map[string]string
+}
+
+// GPUFacts reads what identifies the GPUs of the engine's machine: their model, count, driver and
+// the driver's CUDA version, as fingerprint facts.
+type GPUFacts interface {
+	GPUFacts(ctx context.Context) (map[string]string, error)
 }
 
 // Provider makes the docker environments of one process. They share what must be one per
@@ -72,6 +89,20 @@ func New(cfg Config) (*Provider, error) {
 	if err := checkScope(cfg.Scope); err != nil {
 		return nil, err
 	}
+	if cfg.GPUs.Devices != "" && cfg.GPUFacts == nil {
+		return nil, missing("GPUFacts, which a config that passes GPUs needs")
+	}
+	for name, dir := range cfg.Mounts {
+		if err := CheckMountName(name); err != nil {
+			return nil, err
+		}
+		if err := checkPath("mount "+name, dir); err != nil {
+			return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "docker: " + err.Error()}
+		}
+	}
+	if cfg.Machine == nil {
+		cfg.Machine = Shared{As: cfg.User}
+	}
 	if cfg.ProbePause <= 0 {
 		cfg.ProbePause = environment.DefaultProbePause
 	}
@@ -101,15 +132,15 @@ func (e *env) spec(ctx context.Context) (Spec, error) {
 	if err != nil {
 		return Spec{}, err
 	}
-	if err := refusal(spec, e.p.cfg.Backend.Kind()); err != nil {
+	if err := refusal(spec, e.p.cfg.GPUs); err != nil {
 		return Spec{}, err
 	}
 	return spec, nil
 }
 
-// Fingerprint implements environment.Environment. It pins the exact image the task's Dockerfile
-// builds, which it builds first if the engine does not have it, and the machine the image runs
-// on.
+// Fingerprint implements environment.Environment. It pins the exact image the task's files
+// build, which it builds first if the engine does not have it, the machine the image runs on, and
+// the GPUs its containers get.
 func (e *env) Fingerprint(ctx context.Context) (core.Fingerprint, error) {
 	spec, err := e.spec(ctx)
 	if err != nil {
@@ -123,17 +154,23 @@ func (e *env) Fingerprint(ctx context.Context) (core.Fingerprint, error) {
 	if err != nil {
 		return core.Fingerprint{}, err
 	}
+	var gpu map[string]string
+	if e.p.cfg.GPUs.Devices != "" {
+		if gpu, err = e.p.cfg.GPUFacts.GPUFacts(ctx); err != nil {
+			return core.Fingerprint{}, err
+		}
+	}
 	return core.Fingerprint{
 		Kind:        core.EnvironmentDocker,
-		Backend:     e.p.cfg.Backend.Kind(),
+		Backend:     backendOf(spec),
 		ImageDigest: img.ID,
-		Facts:       facts(m, img),
+		Facts:       facts(m, img, gpu),
 	}, nil
 }
 
-// image returns the image the Dockerfile builds. An image the engine already has under the
-// Dockerfile's tag is not built again. Builds are one at a time, so that a Fingerprint and a Run
-// that ask for the same image build it once; the build's progress goes to log.
+// image returns the image the task's files build. An image the engine already has under their
+// tag is not built again. Builds are one at a time, so that a Fingerprint and a Run that ask for
+// the same image build it once; the build's progress goes to log.
 func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, error) {
 	select {
 	case p.build <- struct{}{}:
@@ -141,11 +178,15 @@ func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, 
 	case <-ctx.Done():
 		return Image{}, ctx.Err()
 	}
-	tag := imageTag(spec.Dockerfile)
+	buildContext, err := Context(spec)
+	if err != nil {
+		return Image{}, err
+	}
+	tag := imageTag(buildContext)
 	if img, ok, err := p.cfg.Engine.Image(ctx, tag); err != nil || ok {
 		return checked(img, err)
 	}
-	if err := p.cfg.Engine.Build(ctx, BuildSpec{Tag: tag, Dockerfile: spec.Dockerfile, Labels: Labels{LabelOwner: Owner}}, log); err != nil {
+	if err := p.cfg.Engine.Build(ctx, BuildSpec{Tag: tag, Context: buildContext, Labels: Labels{LabelOwner: Owner}}, log); err != nil {
 		return Image{}, err
 	}
 	img, ok, err := p.cfg.Engine.Image(ctx, tag)

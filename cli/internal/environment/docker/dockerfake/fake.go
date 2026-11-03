@@ -260,14 +260,14 @@ func (c *Client) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	if fault != nil && !fault.Late {
 		return fault.Err
 	}
-	if spec.Tag == "" || len(spec.Dockerfile) == 0 {
-		return &core.Failure{Kind: core.FailureInvalidInput, Message: "docker: a build needs a tag and a Dockerfile"}
+	if spec.Tag == "" || len(spec.Context) == 0 {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: "docker: a build needs a tag and a build context"}
 	}
 	c.d.mu.Lock()
 	c.d.builds++
-	seed := spec.Dockerfile
+	seed := spec.Context
 	if !c.d.reproducible {
-		seed = fmt.Appendf(slices.Clone(spec.Dockerfile), "\nbuild %d", c.d.builds)
+		seed = fmt.Appendf(slices.Clone(spec.Context), "\nbuild %d", c.d.builds)
 	}
 	sum := sha256.Sum256(seed)
 	c.d.images[spec.Tag] = docker.Image{ID: "sha256:" + hex.EncodeToString(sum[:]), Platform: Platform}
