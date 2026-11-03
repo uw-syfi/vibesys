@@ -17,7 +17,7 @@ from e2e.actor import Actor
 from e2e.effects import EffectFailedError, Mcp, Outcome, Shell, UnscriptedError, perform
 from e2e.peers import ActingClaudePeers, ActingCodex
 from e2e.scripts import ROLES, Me
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from tests import helpers as h
@@ -231,3 +231,28 @@ def test_a_message_the_script_does_not_expect_fails_the_turn_and_leaves_a_record
         driver.run_turn(lambda _event: None)
     assert "UnscriptedError" in (tmp_path / "peer-failure.txt").read_text()
     assert machine.effects == []
+
+
+@pytest.mark.regression
+@example(counts=[0, 0, 0, 1, 1], outcome="succeeded")
+@given(
+    counts=st.lists(st.integers(0, 3), min_size=5, max_size=5),
+    outcome=st.sampled_from(["succeeded", "failed", "cancelled", "lost"]),
+)
+def test_job_notifications_never_advance_the_lead_handoff_script(
+    counts: list[int], outcome: str
+) -> None:
+    messages = lead_messages("a" * 40, 14, "c" * 40, 17)
+    history: list[str] = []
+    for index, count in enumerate(counts):
+        for number in range(count):
+            history.append(f"Job j{index}-{number} finished: {outcome}. reason")
+            machine = FakeMachine()
+            perform(ROLES["lead"](ME, history), machine)
+            assert machine.effects == []
+        if index < len(messages):
+            history.append(messages[index])
+            actual, expected = FakeMachine(), FakeMachine()
+            perform(ROLES["lead"](ME, history), actual)
+            perform(ROLES["lead"](ME, messages[: index + 1]), expected)
+            assert actual.effects == expected.effects
