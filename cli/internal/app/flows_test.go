@@ -11,6 +11,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
@@ -595,4 +596,120 @@ func TestAJobsKeyIsMadeOfItsKindCommitTaskVersionEnvironmentSettingsAndSchema(t 
 	if keys[0] != keys[1] || keys[1] != keys[2] {
 		t.Errorf("measure keys %v, want one key for every sample count and recheck", keys)
 	}
+}
+
+// A candidate whose task files differ from the base's, the commit the result branch is at, is
+// refused before any job exists, with a message that names the paths. Generated files under the
+// task do not count: a rewritten bytecode file is not a change to the task.
+func TestACandidateThatChangesTheTaskIsRefusedAndNamesThePaths(t *testing.T) {
+	repo := string(call.Scope.Repository())
+	candidate := func(n int) core.Commit { return core.Commit(strings.Repeat(fmt.Sprintf("%x", n), 40)) }
+	withFiles := func(edit func(task.Tree)) task.Tree {
+		tree := tasktest.Scripted("task", passes, scores)
+		tree[taskDir+"check.py"] = task.File{Data: []byte("assert True")}
+		tree[taskDir+"data/in.txt"] = task.File{Data: []byte("1")}
+		tree["main.py"] = task.File{Data: []byte("x = 1")}
+		if edit != nil {
+			edit(tree)
+		}
+		return tree
+	}
+	cases := map[string]struct {
+		edit    func(task.Tree)
+		refused []string // paths the message must name; none means accepted
+	}{
+		"nothing changed": {edit: nil},
+		"code outside the task changed": {edit: func(tr task.Tree) {
+			tr["main.py"] = task.File{Data: []byte("x = 2")}
+		}},
+		"bytecode rewritten": {edit: func(tr task.Tree) {
+			tr[taskDir+"__pycache__/check.cpython-312.pyc"] = task.File{Data: []byte("new bytes")}
+			tr[taskDir+"data/__pycache__/x.pyc"] = task.File{Data: []byte("other")}
+		}},
+		"checker edited": {
+			edit:    func(tr task.Tree) { tr[taskDir+"check.py"] = task.File{Data: []byte("assert False")} },
+			refused: []string{taskDir + "check.py (changed)"},
+		},
+		"file added": {
+			edit:    func(tr task.Tree) { tr[taskDir+"extra.py"] = task.File{Data: []byte("")} },
+			refused: []string{taskDir + "extra.py (added)"},
+		},
+		"file removed": {
+			edit:    func(tr task.Tree) { delete(tr, taskDir+"data/in.txt") },
+			refused: []string{taskDir + "data/in.txt (removed)"},
+		},
+		"bytecode and checker": {
+			edit: func(tr task.Tree) {
+				tr[taskDir+"__pycache__/a.pyc"] = task.File{Data: []byte("a")}
+				tr[taskDir+"check.py"] = task.File{Data: []byte("assert False")}
+			},
+			refused: []string{taskDir + "check.py (changed)"},
+		},
+	}
+	for name, c := range cases {
+		for _, settings := range []core.Settings{core.CheckSettings{}, core.MeasureSettings{Samples: 3}} {
+			t.Run(name+"/"+string(settings.Kind()), func(t *testing.T) {
+				w := newWorld(t)
+				w.branches = gitrepo.NewFakeBranches()
+				w.branches.AddBranch(repo, "vibesys/result/task", commit)
+				w.tasks.Put(repo, commit, withFiles(nil))
+				w.tasks.Put(repo, candidate(1), withFiles(c.edit))
+				a := w.newApp()
+
+				_, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: candidate(1), Settings: settings}})
+				if len(c.refused) == 0 {
+					if err != nil {
+						t.Fatalf("Submit = %v, want accepted", err)
+					}
+					return
+				}
+				f := wantFailure(t, "Submit", err, core.FailureConflict)
+				for _, path := range c.refused {
+					if !strings.Contains(f.Message, path) {
+						t.Errorf("message %q does not name %q", f.Message, path)
+					}
+				}
+				if jobs, err := a.Jobs(ctxFor(t), scope, core.JobFilter{}); err != nil || len(jobs) != 0 {
+					t.Fatalf("jobs = %v, %v; a refused submission queues nothing", jobs, err)
+				}
+			})
+		}
+	}
+}
+
+// The base itself, a command job on a changed commit, and any commit while the run has no result
+// branch are not held to the base's task.
+func TestOnlyCheckAndMeasureOfARunWithABranchAreHeldToTheBasesTask(t *testing.T) {
+	repo := string(call.Scope.Repository())
+	changed := core.Commit(strings.Repeat("1", 40))
+	edited := tasktest.Scripted("task", passes, scores)
+	edited[taskDir+"check.py"] = task.File{Data: []byte("changed")}
+	setup := func(t *testing.T, branch bool) *app.App {
+		w := newWorld(t)
+		w.branches = gitrepo.NewFakeBranches()
+		if branch {
+			w.branches.AddBranch(repo, "vibesys/result/task", commit)
+		}
+		w.tasks.Put(repo, commit, tasktest.Scripted("task", passes, scores))
+		w.tasks.Put(repo, changed, edited)
+		return w.newApp()
+	}
+	t.Run("the base", func(t *testing.T) {
+		_, err := setup(t, true).Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: flowSpec(core.CheckSettings{})})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("a command job", func(t *testing.T) {
+		_, err := setup(t, true).Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: changed, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"exit", "0"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("no result branch yet", func(t *testing.T) {
+		_, err := setup(t, false).Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: changed, Settings: core.CheckSettings{}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
 }

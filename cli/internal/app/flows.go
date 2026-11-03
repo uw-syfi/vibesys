@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -19,6 +21,9 @@ import (
 func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec) (core.JobSpec, core.JobKey, error) {
 	t, err := a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
 	if err != nil {
+		return spec, "", err
+	}
+	if err := a.refuseChangedTask(ctx, c.Scope, spec.Commit, t); err != nil {
 		return spec, "", err
 	}
 	kind, err := core.ChooseEnvironment(t.Setup(), spec.Environment)
@@ -39,6 +44,62 @@ func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec
 		Environment: fingerprint, Settings: spec.Settings, SchemaVersion: core.SchemaVersion,
 	})
 	return spec, key, err
+}
+
+// maxNamedChanges bounds how many changed paths a refusal names.
+const maxNamedChanges = 5
+
+// refuseChangedTask fails a submission whose commit changes the task's files from the base's: the
+// commit the result branch is at. A result is only comparable with the base's under one task
+// version, so a candidate that edits its checker, its benchmark or anything else under the task's
+// directory could never be promoted, and would score under a check it chose for itself. The
+// refusal comes here, before any job runs, and names the paths. Generated files such as bytecode
+// are not part of the task (task.Generated), so they never cause it.
+//
+// Without a result branch there is no base to hold the task to, so nothing is refused; the base
+// of a run is the commit its result branch is created at, and a task is written before that.
+func (a *App) refuseChangedTask(ctx context.Context, scope core.Scope, commit core.Commit, candidate task.Task) error {
+	if a.cfg.Branches == nil {
+		return nil
+	}
+	branch, err := core.ResultBranch(string(scope.Task()))
+	if err != nil {
+		return err
+	}
+	repository := string(scope.Repository())
+	head, err := a.cfg.Branches.Head(ctx, repository, branch)
+	var f *core.Failure
+	if errors.As(err, &f) && f.Kind == core.FailureNotFound {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if head == commit {
+		return nil
+	}
+	base, err := a.taskAt(ctx, repository, head, string(scope.Task()))
+	if errors.As(err, &f) {
+		return &core.Failure{Kind: f.Kind, Message: fmt.Sprintf("the result branch %s is at %s, whose task cannot be compared with this commit's: %s", branch, head, f.Message)}
+	}
+	if err != nil {
+		return err
+	}
+	changes := candidate.ChangesFrom(base)
+	if len(changes) == 0 {
+		return nil
+	}
+	named := make([]string, 0, maxNamedChanges)
+	for _, c := range changes[:min(len(changes), maxNamedChanges)] {
+		named = append(named, c.String())
+	}
+	more := ""
+	if len(changes) > len(named) {
+		more = fmt.Sprintf(" and %d more", len(changes)-len(named))
+	}
+	return &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf(
+		"commit %s changes the task %q from its base %s: %s%s; a candidate must not change anything under %s/%s, so restore those files from the base",
+		commit, scope.Task(), head, strings.Join(named, ", "), more, task.TasksDir, scope.Task())}
 }
 
 // planFlow makes the plan of a queued check or measure job that is about to start: the rule for

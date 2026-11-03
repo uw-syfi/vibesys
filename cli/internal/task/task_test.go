@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"math/rand/v2"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -485,4 +486,122 @@ func FuzzParse(f *testing.F) {
 			t.Fatalf("accepted %+v", got)
 		}
 	})
+}
+
+// Generated files never change a task's version, whatever they hold, wherever under the task they
+// are, and whether they are added, rewritten or removed; any change to another file does. And
+// ChangesFrom is empty exactly when the versions are equal, and otherwise names every file that
+// differs.
+func TestGeneratedFilesNeverChangeTheVersionAndOtherFilesAlwaysDo(t *testing.T) {
+	rng := rand.New(rand.NewPCG(13, 17))
+	segments := []string{"bench", "checker", "data", "lib", "a", "b"}
+	dirOf := func(generated bool) string {
+		parts := []string{}
+		for range rng.IntN(3) {
+			parts = append(parts, segments[rng.IntN(len(segments))])
+		}
+		if generated {
+			parts = append(parts[:rng.IntN(len(parts)+1)], append([]string{[]string{"__pycache__", ".pytest_cache"}[rng.IntN(2)]}, parts...)...)
+		}
+		return strings.Join(parts, "/")
+	}
+	generatedPath := func() string {
+		name := fmt.Sprintf("f%d", rng.IntN(5))
+		switch rng.IntN(3) {
+		case 0: // a bytecode file anywhere
+			return path.Join(dirOf(false), name+[]string{".pyc", ".pyo"}[rng.IntN(2)])
+		default: // anything under a cache directory
+			return path.Join(dirOf(true), name+[]string{".pyc", ".txt", ""}[rng.IntN(3)])
+		}
+	}
+	ordinaryPath := func() string {
+		return path.Join(dirOf(false), fmt.Sprintf("g%d", rng.IntN(5))+[]string{".py", ".toml", ".json", ""}[rng.IntN(4)])
+	}
+	read := func(files map[string]string) task.Task {
+		tk, err := task.Read(repo(files), "t")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tk
+	}
+	const dir = ".vibesys/tasks/t/"
+	for i := range 200 {
+		base := taskFiles("t", jsonManifest, objectives)
+		for range rng.IntN(6) {
+			base[dir+ordinaryPath()] = fmt.Sprint(rng.Uint32())
+		}
+		for range rng.IntN(4) {
+			base[dir+generatedPath()] = fmt.Sprint(rng.Uint32())
+		}
+		clone := func() map[string]string {
+			out := map[string]string{}
+			for k, v := range base {
+				out[k] = v
+			}
+			return out
+		}
+		want := read(base)
+
+		// Generated files added, rewritten and removed.
+		churned := clone()
+		for range 1 + rng.IntN(4) {
+			p := dir + generatedPath()
+			if _, ok := churned[p]; ok && rng.IntN(2) == 0 {
+				delete(churned, p)
+			} else {
+				churned[p] = fmt.Sprint(rng.Uint32(), "churn")
+			}
+		}
+		got := read(churned)
+		if got.Version != want.Version {
+			t.Fatalf("example %d: generated files changed the version", i)
+		}
+		if changes := got.ChangesFrom(want); len(changes) != 0 {
+			t.Fatalf("example %d: generated files are changes: %v", i, changes)
+		}
+
+		// An ordinary file added, rewritten or removed.
+		edited := clone()
+		p := dir + ordinaryPath()
+		var kind string
+		if old, ok := edited[p]; ok && rng.IntN(2) == 0 {
+			delete(edited, p)
+			kind = "removed"
+		} else if ok {
+			edited[p] = old + "!"
+			kind = "changed"
+		} else {
+			edited[p] = "new"
+			kind = "added"
+		}
+		got = read(edited)
+		if got.Version == want.Version {
+			t.Fatalf("example %d: %s %s did not change the version", i, kind, p)
+		}
+		changes := got.ChangesFrom(want)
+		if len(changes) != 1 || changes[0] != (task.Change{Path: p, Kind: kind}) {
+			t.Fatalf("example %d: changes = %v, want %s (%s)", i, changes, p, kind)
+		}
+	}
+}
+
+func TestGeneratedNamesWhatATaskDirectoryHoldsButATaskDoesNotUse(t *testing.T) {
+	for p, want := range map[string]bool{
+		"__pycache__/x.cpython-312.pyc": true,
+		"bench/__pycache__/x.pyc":       true,
+		"bench/__pycache__/notes.txt":   true,
+		"a/b/mod.pyc":                   true,
+		"mod.pyo":                       true,
+		".pytest_cache/v/cache":         true,
+		"__pycache__":                   true,
+		"checker.py":                    false,
+		"bench/benchmark.py":            false,
+		"pycache/x.txt":                 false,
+		"data/file.pyc.txt":             false,
+		"my__pycache__/x.txt":           false,
+	} {
+		if got := task.Generated(p); got != want {
+			t.Errorf("Generated(%q) = %v, want %v", p, got, want)
+		}
+	}
 }
