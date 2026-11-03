@@ -1,0 +1,23 @@
+{
+  "format":  2,
+  "seq":  "2",
+  "promotion":  {
+    "commit":  "c4",
+    "previous_head":  "c1",
+    "verdict":  {
+      "kind":  "VERDICT_KIND_BETTER",
+      "candidate_samples":  3,
+      "base_samples":  3,
+      "candidate_mean":  2.5,
+      "base_mean":  2,
+      "ratio":  1.25,
+      "noise":  0.5
+    },
+    "environment":  {
+      "kind":  "ENVIRONMENT_KIND_HOST",
+      "backend":  "BACKEND_KIND_CPU"
+    },
+    "result_job_id":  "j1",
+    "at":  "2026-11-01T00:00:14Z"
+  }
+}

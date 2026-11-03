@@ -1,0 +1,46 @@
+{
+  "format":  2,
+  "job":  {
+    "id":  "j1",
+    "spec":  {
+      "commit":  "c1",
+      "measure":  {
+        "samples":  3
+      }
+    },
+    "state":  "JOB_STATE_SUCCEEDED",
+    "key":  "k1",
+    "environment":  {
+      "kind":  "ENVIRONMENT_KIND_HOST",
+      "backend":  "BACKEND_KIND_CPU",
+      "facts":  {
+        "go":  "1.25"
+      }
+    },
+    "notes":  [
+      {
+        "text":  "first",
+        "at":  "2026-11-01T00:00:01Z",
+        "agent":  "agent-a"
+      },
+      {
+        "text":  "second",
+        "at":  "2026-11-01T00:00:02Z",
+        "agent":  "agent-a"
+      },
+      {
+        "text":  "third",
+        "at":  "2026-11-01T00:00:07Z",
+        "agent":  "agent-a"
+      }
+    ],
+    "plans":  [
+      1
+    ],
+    "submitted_at":  "2026-11-01T00:00:01Z",
+    "started_at":  "2026-11-01T00:00:05Z",
+    "finished_at":  "2026-11-01T00:00:06Z",
+    "result_job_id":  "j1",
+    "check_job_id":  "j-check"
+  }
+}

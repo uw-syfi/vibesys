@@ -1,28 +1,29 @@
 package filestore_test
 
 import (
-	"encoding/json"
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"google.golang.org/protobuf/encoding/protojson"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore/fsys"
 )
 
 // This fixture was exported by the preceding implementation at fa9d95d1f^,
 // using its full store script, including results, promotions, plans and logs.
 func TestPreviousVersionStoreLoadsWithoutInventingSubmitters(t *testing.T) {
-	data, err := os.ReadFile("testdata/format2.json")
+	mem := previousStore(t)
+	index, err := filestore.OpenIndex("index", filestore.WithFS(mem))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var files map[string][]byte
-	if err := json.Unmarshal(data, &files); err != nil {
-		t.Fatal(err)
-	}
-	mem := fsys.NewMemFS()
-	for name, data := range files {
-		mem.Put(name, data)
+	tasks, err := index.Tasks()
+	if err != nil || len(tasks) != 1 || tasks[0].Repository != "/repo" || tasks[0].Name != "task" {
+		t.Fatalf("index = %v, %v", tasks, err)
 	}
 	s := openOn(t, mem)
 	jobs, err := s.Jobs(t.Context(), core.JobFilter{})
@@ -56,31 +57,46 @@ func FuzzPreviousVersionJob(f *testing.F) {
 	f.Fuzz(func(t *testing.T, agent string) {
 		// Generated old records have no submitters. Vary a historical note without
 		// accidentally relying on the new writer to produce the old encoding.
-		data, err := os.ReadFile("testdata/format2.json")
+		mem := previousStore(t)
+		data := file(t, mem, "state/jobs/j1.json")
+		var record cliv1.JobFile
+		if err := protojson.Unmarshal(data, &record); err != nil {
+			t.Fatal(err)
+		}
+		record.Job.Notes = []*cliv1.Note{{Text: agent}}
+		data, err := protojson.Marshal(&record)
 		if err != nil {
-			t.Fatal(err)
+			t.Skip("not protobuf text")
 		}
-		var files map[string][]byte
-		if err := json.Unmarshal(data, &files); err != nil {
-			t.Fatal(err)
-		}
-		var job map[string]any
-		if err := json.Unmarshal(files["state/jobs/j1.json"], &job); err != nil {
-			t.Fatal(err)
-		}
-		job["job"].(map[string]any)["notes"] = []any{map[string]any{"text": agent}}
-		files["state/jobs/j1.json"], err = json.Marshal(job)
-		if err != nil {
-			t.Fatal(err)
-		}
-		mem := fsys.NewMemFS()
-		for name, data := range files {
-			mem.Put(name, data)
-		}
+		mem.Put("state/jobs/j1.json", data)
 		s := openOn(t, mem)
 		j, err := s.Job(t.Context(), "j1")
 		if err != nil || len(j.Submitters) != 0 {
 			t.Fatalf("job = %+v, %v", j, err)
 		}
 	})
+}
+
+// previousStore loads each preceding writer's bytes without defining another
+// record format in the test.
+func previousStore(t testing.TB) *fsys.MemFS {
+	t.Helper()
+	mem := fsys.NewMemFS()
+	err := fs.WalkDir(os.DirFS("testdata/format2"), ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := os.ReadFile(filepath.Join("testdata/format2", name))
+		if err == nil {
+			mem.Put(name, data)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mem
 }

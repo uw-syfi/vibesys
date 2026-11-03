@@ -1,0 +1,19 @@
+{
+  "format":  2,
+  "job":  {
+    "id":  "j3",
+    "spec":  {
+      "commit":  "c3",
+      "command":  {
+        "argv":  [
+          "make",
+          "test"
+        ]
+      }
+    },
+    "state":  "JOB_STATE_CANCELLED",
+    "submitted_at":  "2026-11-01T00:00:30Z",
+    "finished_at":  "2026-11-01T00:00:31Z",
+    "cancel_reason":  "not needed"
+  }
+}
