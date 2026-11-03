@@ -1,0 +1,60 @@
+{
+  "search": {
+    "runId": "run-1",
+    "revision": "2",
+    "health": {
+      "liveSince": "2026-01-01T00:00:00Z"
+    },
+    "jobs": [
+      {
+        "id": "j1",
+        "submitters": [
+          {
+            "runId": "run-1",
+            "agent": "lead",
+            "at": "2026-01-01T00:00:00Z"
+          }
+        ]
+      }
+    ],
+    "results": [
+      {
+        "jobId": "j1",
+        "commit": "abc"
+      }
+    ],
+    "judgments": [
+      {
+        "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "against": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "refused": {
+          "message": "not comparable"
+        }
+      }
+    ],
+    "promotions": [
+      {
+        "seq": "1",
+        "promotion": {}
+      }
+    ],
+    "plans": [
+      {
+        "number": 1
+      }
+    ],
+    "head": {
+      "none": {}
+    },
+    "troubles": [
+      {
+        "jobId": "j1",
+        "failure": {
+          "message": "waiting"
+        }
+      }
+    ],
+    "unattributedJobs": 1,
+    "truncated": true
+  }
+}

@@ -171,23 +171,19 @@ func (s *Service) runOf(c core.Caller) core.RunID {
 func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, []*pb.WatchRunsResponse, error) {
 	run := s.runOf(caller)
 	_, scoped := caller.(core.AgentCaller)
+	// One goroutine owns open, Poll and resync for a watch, including this cursor.
+	seen := map[string]uint64{}
+	latest := func(search *pb.SearchState) (*pb.WatchRunsResponse, bool) {
+		if scoped && core.RunID(search.RunId) != run || search.Revision <= seen[search.RunId] {
+			return nil, false
+		}
+		seen[search.RunId] = search.Revision
+		return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Search{Search: search}}, true
+	}
 	w := &RunsWatch{
-		e: s.e, run: run,
+		e: s.e, run: run, maxBytes: MaxWatchFrameBytes,
 		snapshot: func(state core.State, last uint64) (*pb.WatchRunsResponse, error) {
-			snap := &pb.RunsSnapshot{Sequence: last}
-			for _, r := range state.Runs() {
-				if scoped && r.ID != run {
-					continue
-				}
-				snap.Runs = append(snap.Runs, wire.RunMessage(r))
-				for _, a := range state.Agents(r.ID) {
-					snap.Agents = append(snap.Agents, wire.AgentMessage(a))
-				}
-				if err := s.addHistory(snap, r.ID); err != nil {
-					return nil, err
-				}
-			}
-			return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Snapshot{Snapshot: snap}}, nil
+			return s.runsSnapshot(state, last, run, scoped, seen)
 		},
 		event: func(ev *pb.Event) (*pb.WatchRunsResponse, bool) {
 			if scoped && core.RunID(ev.GetRunId()) != run {
@@ -195,7 +191,17 @@ func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, [
 			}
 			return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Event{Event: ev}}, true
 		},
-		delta: func(*pb.Delta) (*pb.WatchRunsResponse, bool) { return nil, false },
+		delta:  func(*pb.Delta) (*pb.WatchRunsResponse, bool) { return nil, false },
+		latest: latest,
+		current: func(state core.State) []*pb.WatchRunsResponse {
+			var out []*pb.WatchRunsResponse
+			for _, r := range state.Runs() {
+				if msg, ok := latest(s.e.searchState(r.ID)); ok {
+					out = append(out, msg)
+				}
+			}
+			return out
+		},
 	}
 	first, err := w.open(hub.Interest{Everything: true}, after)
 	return w, first, err

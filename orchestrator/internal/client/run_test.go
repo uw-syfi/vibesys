@@ -208,3 +208,9 @@ func TestAWholeRunFromAClient(t *testing.T) {
 		return r != nil && r.GetId() == string(run) && r.GetStatus() == pb.RunStatus_RUN_STATUS_ENDED
 	})
 }
+
+func TestWatchSnapshotFitsReceiveLimit(t *testing.T) {
+	if daemon.MaxSnapshotBytes+5 > client.MaxReceiveMessageBytes || daemon.MaxWatchFrameBytes != client.MaxReceiveMessageBytes {
+		t.Fatal("watch frame and receive budgets diverge")
+	}
+}

@@ -5,6 +5,7 @@ import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/orchestrator/v1/events.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
+import "vibesys/orchestrator/v1/search.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
@@ -79,6 +80,10 @@ message RunsSnapshot {
   // WatchAgent and ListItems page them.
   repeated Turn turns = 4;
   repeated Message messages = 5;
+  repeated SearchState searches = 6;
+  // Older run bundles or history were omitted to fit the snapshot byte budget.
+  // Search views omitted here follow as individual search responses.
+  bool truncated = 7;
 }
 
 message WatchRunsResponse {
@@ -86,6 +91,7 @@ message WatchRunsResponse {
     option (buf.validate.oneof).required = true;
     RunsSnapshot snapshot = 1;
     Event event = 2;
+    SearchState search = 3;
   }
 }
 

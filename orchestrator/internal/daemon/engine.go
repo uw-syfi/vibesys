@@ -9,6 +9,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
@@ -18,6 +19,7 @@ var ErrCommandConflict = errors.New("daemon: this command id was used for anothe
 
 // EngineDeps is what an Engine is made of.
 type EngineDeps struct {
+	Search *search.Store
 	Store  store.Store
 	Clock  Clock
 	Nonces Nonces
@@ -35,9 +37,10 @@ type EngineDeps struct {
 // and only then shown to watchers.
 type Engine struct {
 	EngineDeps
-	mu    sync.Mutex
-	state core.State
-	last  uint64
+	mu       sync.Mutex
+	searches map[core.RunID]*pb.SearchState
+	state    core.State
+	last     uint64
 }
 
 // OpenEngine recovers the state from the store. It is the whole of starting up: a daemon that
@@ -54,7 +57,7 @@ func OpenEngine(d EngineDeps) (*Engine, error) {
 	if d.Log == nil {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
-	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence}
+	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}}
 	if err := e.upgradeLocations(); err != nil {
 		return nil, err
 	}

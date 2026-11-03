@@ -4,6 +4,7 @@
  */
 import {type ClientHttp2Session, connect, constants, type IncomingHttpHeaders} from 'node:http2';
 import type {Duplex} from 'node:stream';
+import {ORCHESTRATOR_MAX_MESSAGE_BYTES, OrchestratorService} from '@vibesys/orchestrator-proto';
 import {HOST_API_MAX_MESSAGE_BYTES} from '@vibesys/proto';
 import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
@@ -74,6 +75,7 @@ const watchStream = (
   receive: Receive,
   finish: (error?: GrpcFailed) => void,
   settled: () => boolean,
+  receiveLimit: number,
 ): void => {
   let rest: Uint8Array = new Uint8Array(0);
   let status: string | undefined;
@@ -109,7 +111,7 @@ const watchStream = (
   stream.on('error', error => finish(unavailable(error.message)));
   stream.on('data', (chunk: Buffer) => {
     if (settled()) return;
-    const decoded = decodeFrames(rest, chunk, HOST_API_MAX_MESSAGE_BYTES);
+    const decoded = decodeFrames(rest, chunk, receiveLimit);
     if (isFault(decoded)) return finish(new GrpcFailed(decoded));
     rest = decoded.rest;
     deliver(decoded.messages);
@@ -149,6 +151,9 @@ const callOver =
           }
         },
         () => settled,
+        method.startsWith(`/${OrchestratorService.typeName}/`)
+          ? ORCHESTRATOR_MAX_MESSAGE_BYTES
+          : HOST_API_MAX_MESSAGE_BYTES,
       );
       return Effect.sync(() => {
         if (settled) return;
