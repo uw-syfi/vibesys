@@ -1,3 +1,4 @@
+export {type FakeBridge, makeFakeBridge, type OpenedPort} from './fake-bridge.js';
 export {
   type CallRecord,
   type FakeTransport,

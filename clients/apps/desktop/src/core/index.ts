@@ -35,3 +35,4 @@ export {
   PROTOCOL_VERSION,
 } from './protocol.js';
 export {type CallTarget, GatewayTransport} from './transport/gateway-transport.js';
+export {GatewayPorts, GatewayPortsFromWindow, GatewayTransportLive} from './transport/live.js';
