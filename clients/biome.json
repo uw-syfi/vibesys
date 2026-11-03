@@ -157,6 +157,42 @@
       "plugins": ["./tools/lint-rules/control-state-no-store-kernel.grit"]
     },
     {
+      "includes": [
+        "apps/desktop/src/**/*.ts",
+        "apps/desktop/src/**/*.tsx",
+        "apps/desktop/src/**/*.cts"
+      ],
+      "plugins": ["./tools/lint-rules/effect-namespace-imports.grit"]
+    },
+    {
+      "includes": [
+        "apps/desktop/src/**/*.ts",
+        "apps/desktop/src/**/*.tsx",
+        "!apps/desktop/src/main/index.ts",
+        "!apps/desktop/src/ui/main.tsx"
+      ],
+      "plugins": ["./tools/lint-rules/effect-run-only-in-entries.grit"]
+    },
+    {
+      "includes": [
+        "apps/desktop/src/core/**/*.ts",
+        "apps/desktop/src/state/**/*.ts",
+        "apps/desktop/src/ui/**/*.ts",
+        "apps/desktop/src/ui/**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
+      "plugins": ["./tools/lint-rules/effect-no-ambient-time-random.grit"]
+    },
+    {
+      "includes": ["apps/desktop/src/core/**/*.ts"],
+      "plugins": ["./tools/lint-rules/effect-core-no-promises.grit"]
+    },
+    {
+      "includes": ["apps/desktop/src/**/*.test.ts", "apps/desktop/src/**/*.test.tsx"],
+      "plugins": ["./tools/lint-rules/effect-tests-no-real-time.grit"]
+    },
+    {
       "includes": ["apps/desktop-shell/e2e/**/*.ts", "!apps/desktop-shell/e2e/read.ts"],
       "plugins": ["./tools/lint-rules/e2e-rail-through-read.grit"]
     },

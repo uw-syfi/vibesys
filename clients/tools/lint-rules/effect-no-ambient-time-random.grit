@@ -1,0 +1,25 @@
+// The clock, the random source and ids are services (`Clock`, `Random`, an id service): a test
+// replaces them with `TestClock` and `TestRandom`, and a simulated run replays. A direct call reads
+// the real one and makes a test depend on when and where it runs. Any reference counts, not only a
+// call: `const later = setTimeout` schedules all the same. Wired to the desktop app's src/core,
+// src/state and src/ui, tests and src/testing excluded (biome.json).
+language js;
+
+or {
+  `Date.now()`,
+  `new Date()`,
+  `performance.now()`,
+  `Math.random()`,
+  `crypto.randomUUID()`,
+  `globalThis.crypto.randomUUID()`,
+  `globalThis.setTimeout`,
+  `globalThis.setInterval`,
+  JsIdentifierExpression(name = `setTimeout`),
+  JsIdentifierExpression(name = `setInterval`)
+} as $reference where {
+  register_diagnostic(
+    span = $reference,
+    message = "Do not read the real clock, random source or timers. Use Clock / Random / Effect.sleep / Schedule, or an id service, so a test controls them with TestClock and TestRandom.",
+    severity = "error"
+  )
+}

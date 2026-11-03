@@ -1,0 +1,26 @@
+// The core is Effects, Streams and Layers; a Promise is wrapped once at the boundary
+// (`Effect.tryPromise`, `Stream.fromAsyncIterable`) and never leaves it. An `async` function or a
+// `Promise` in the core is an operation that cannot be interrupted, retried by a Schedule or
+// timed by TestClock. `await` and the `Promise` name are matched wherever they appear, so a
+// `Promise<T>` return type is caught too.
+language js;
+
+or {
+  `async function $name($params) { $body }`,
+  `async function* $name($params) { $body }`,
+  `async function ($params) { $body }`,
+  `async $name($params) { $body }`,
+  `async *$name($params) { $body }`,
+  `static async $name($params) { $body }`,
+  `async ($params) => $body`,
+  `async $p => $body`,
+  JsMethodObjectMember() as $method where { $method <: r"(?s)^async\b.*" },
+  JsAwaitExpression(),
+  `Promise`
+} as $promise where {
+  register_diagnostic(
+    span = $promise,
+    message = "The core uses Effect, not async/await or Promise. Wrap a Promise API once with Effect.tryPromise (or Stream.fromAsyncIterable) and write the rest as Effect.gen / Effect.fn.",
+    severity = "error"
+  )
+}
