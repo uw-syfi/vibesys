@@ -50,14 +50,13 @@ export const makeAgentView = Effect.fn('AgentView.make')(function* (parts: HostP
   const {connection, store} = parts;
   const statuses = yield* SubscriptionRef.make<Statuses>({});
   const statusesAtom = Atom.keepAlive(Atom.subscriptionRef(statuses));
+  /** The gate of each mounted agent's feed: there while it is mounted, gone when it unmounts. */
   const gates = new Map<string, RetryGate>();
-  const gateOf = Effect.fnUntraced(function* (agentId: string) {
-    const held = gates.get(agentId);
-    if (held !== undefined) return held;
-    const made = yield* makeRetryGate;
-    gates.set(agentId, made);
-    return made;
-  });
+  const forgetAgent = (agentId: string) =>
+    Effect.suspend(() => {
+      gates.delete(agentId);
+      return SubscriptionRef.update(statuses, ({[agentId]: _gone, ...rest}) => rest);
+    });
 
   const status = Atom.family((agentId: string) =>
     Atom.make(get => get(statusesAtom)[agentId] ?? OPENING),
@@ -65,7 +64,8 @@ export const makeAgentView = Effect.fn('AgentView.make')(function* (parts: HostP
   const watch = Atom.family((agentId: string) =>
     Atom.make(
       Effect.gen(function* () {
-        const gate = yield* gateOf(agentId);
+        const gate = yield* makeRetryGate;
+        gates.set(agentId, gate);
         return yield* runFeed(
           {
             connection,
@@ -75,7 +75,11 @@ export const makeAgentView = Effect.fn('AgentView.make')(function* (parts: HostP
           },
           agentSpec(parts, agentId),
         );
-      }).pipe(Effect.provideContext(parts.ambient)),
+      }).pipe(
+        Effect.provideContext(parts.ambient),
+        // Unmounting ends the feed: its status and gate go with it.
+        Effect.ensuring(forgetAgent(agentId)),
+      ),
     ),
   );
   const view: AgentView = {
@@ -90,7 +94,8 @@ export const makeAgentView = Effect.fn('AgentView.make')(function* (parts: HostP
         ),
       ),
     ),
-    retry: agentId => Effect.flatMap(gateOf(agentId), gate => gate.open),
+    // Only a mounted feed has a gate; a retry for any other agent has nothing to release.
+    retry: agentId => gates.get(agentId)?.open ?? Effect.void,
   };
   return view;
 });

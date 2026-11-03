@@ -69,6 +69,19 @@ describe('the run stream', () => {
     }),
   );
 
+  it.effect('says it follows nothing once unmounted', () =>
+    Effect.gen(function* () {
+      const h = yield* hostHarness(daemonAt());
+      const unmount = h.mount(h.session.runs.watch);
+      yield* h.elapse(1);
+      expect(yield* h.read(h.session.runs.freshness)).toBe('live');
+      unmount();
+      yield* h.elapse(1);
+      expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Opening'});
+      expect(yield* h.read(h.session.runs.freshness)).not.toBe('live');
+    }),
+  );
+
   it.effect('dials only when mounted, and closes its stream when unmounted', () =>
     Effect.gen(function* () {
       const h = yield* hostHarness(daemonAt());
@@ -287,6 +300,24 @@ describe('an agent stream', () => {
         yield* h.elapse(1);
         expect(requestedAfter(h).at(-1)).toBe(0n);
       }),
+  );
+
+  it.effect('says it follows nothing once unmounted, and has no retry to release', () =>
+    Effect.gen(function* () {
+      const daemon = daemonAt();
+      const id = agentFor(daemon);
+      const h = yield* hostHarness(daemon);
+      const unmount = h.mount(h.session.agents.watch(id));
+      yield* h.elapse(1);
+      expect(yield* h.read(h.session.agents.status(id))).toEqual({_tag: 'Live'});
+      unmount();
+      yield* h.elapse(1);
+      expect(yield* h.read(h.session.agents.status(id))).toEqual({_tag: 'Opening'});
+      expect(yield* h.read(h.session.agents.freshness(id))).not.toBe('live');
+      yield* h.session.agents.retry(id);
+      yield* h.elapse(1);
+      expect(openStreams(h)).toHaveLength(0);
+    }),
   );
 
   it.effect('fails alone when the agent is unknown, and reopens on the user retry', () =>

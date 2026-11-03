@@ -28,8 +28,8 @@ export interface FeedPorts {
   readonly connection: HostConnectionApi;
   readonly model: SubscriptionRef.SubscriptionRef<HostModel>;
   readonly setStatus: (status: FeedStatus) => Effect.Effect<void>;
-  /** Suspends until the user asks to retry a failed feed. */
-  readonly awaitRetry: Effect.Effect<void>;
+  /** Runs `announce`, then suspends until the user asks to retry (see `RetryGate.wait`). */
+  readonly awaitRetry: (announce: Effect.Effect<void>) => Effect.Effect<void>;
 }
 
 type Why = Extract<FeedStatus, {readonly _tag: 'Restarting'}>['why'];
@@ -105,8 +105,7 @@ const afterPass = (ports: FeedPorts, epoch: number, quiet: number, ended: Ended)
         yield* ports.connection.suspect(epoch, ended.error);
         return {quiet: 0, why: 'reconnect', after: epoch} satisfies Next;
       case 'Failed':
-        yield* ports.setStatus({_tag: 'Failed', fault: faultOf(ended.error)});
-        yield* ports.awaitRetry;
+        yield* ports.awaitRetry(ports.setStatus({_tag: 'Failed', fault: faultOf(ended.error)}));
         return {quiet: 0, why: null, after: stay} satisfies Next;
       case 'Restart': {
         const quietNow = ended.progressed ? 0 : quiet + 1;

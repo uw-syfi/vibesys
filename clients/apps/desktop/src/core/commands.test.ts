@@ -166,6 +166,21 @@ describe('commands (P6: no mutation is sent twice by the app)', () => {
       }),
   );
 
+  it.effect('retries made at the same moment send the command once', () =>
+    Effect.gen(function* () {
+      const daemon = freshDaemon();
+      const h = yield* hostHarness(daemon, {
+        dispatch: nth => (nth === 0 ? 'lose-request' : 'ok'),
+      });
+      const id = yield* h.session.commands.submit(say(liveAgentId(daemon), 'hello'));
+      yield* h.elapse(1);
+      const retries = Array.from({length: 4}, () => h.session.commands.retry(id));
+      yield* Effect.all(retries, {concurrency: 'unbounded'});
+      yield* h.elapse(60);
+      expect(dispatched(h).map(call => call.id)).toEqual([id, id]);
+    }),
+  );
+
   it.effect('does not send into a host that is incompatible', () =>
     Effect.gen(function* () {
       const daemon = freshDaemon();

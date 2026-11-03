@@ -113,13 +113,16 @@ export const makeCommands = Effect.fn('Commands.make')(function* (parts: HostPar
   });
 
   const retry = Effect.fn('Commands.retry')(function* (commandId: string) {
-    const model = yield* SubscriptionRef.get(parts.store.ref);
-    const held = (yield* SubscriptionRef.get(entries))[commandId];
-    if (held === undefined) return;
-    const now = settle(held, model.data.receipts);
-    if (now._tag !== 'Unconfirmed') return;
-    yield* record(commandId, {_tag: 'Sending', command: now.command});
-    yield* send(now.command);
+    const {receipts} = (yield* SubscriptionRef.get(parts.store.ref)).data;
+    // Deciding and recording Sending is one step, so two retries of one command send it once.
+    const command = yield* SubscriptionRef.modify(entries, (all): [Command | null, Entries] => {
+      const held = all[commandId];
+      const now = held === undefined ? undefined : settle(held, receipts);
+      return now?._tag === 'Unconfirmed'
+        ? [now.command, {...all, [commandId]: {_tag: 'Sending', command: now.command}}]
+        : [null, all];
+    });
+    if (command !== null) yield* send(command);
   });
 
   const progress = Atom.family((commandId: string) =>
