@@ -214,7 +214,7 @@ func (g *gen) job() core.Job {
 		ID: core.JobID(g.name()), Spec: g.spec(), State: core.JobStates()[g.pick(6)], Key: core.JobKey(g.name()), NoCache: true, Environment: &env,
 		Notes: []core.Note{g.note(), g.note()}, Plans: []core.PlanNumber{core.PlanNumber(1 + g.r.Uint32()), 2},
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
-		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(),
+		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(), Submitters: g.submitters(),
 	}
 }
 
@@ -384,6 +384,15 @@ func (g *gen) attempts() []core.PastAttempt {
 			cut = g.cut()
 		}
 		out = append(out, core.PastAttempt{StartedAt: g.instant(), EndedAt: g.instant(), Cut: cut})
+	}
+	return out
+}
+
+// submitters is one or more callers of a job, each a distinct (run, agent) as a job keeps them.
+func (g *gen) submitters() []core.Submitter {
+	out := []core.Submitter{{Run: core.RunID(g.name()), Agent: g.text(), At: g.instant()}}
+	for i := range g.pick(3) {
+		out = append(out, core.Submitter{Run: core.RunID(g.name()), Agent: fmt.Sprintf("%s-%d", g.text(), i), At: g.instant()})
 	}
 	return out
 }

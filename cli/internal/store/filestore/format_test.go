@@ -77,7 +77,7 @@ const eventFileName = "state/runs/run-a/1.json"
 func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	t.Run("the layout", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put("state/format", []byte(`{"format":3}`))
+		mem.Put("state/format", []byte(`{"format":4}`))
 		_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		wantFailure(t, "newer format file", err, core.FailureIncompatible, "state/format")
 	})
@@ -85,7 +85,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	for _, name := range recordFiles {
 		t.Run(name, func(t *testing.T) {
 			mem := populated(t)
-			mem.Put(name, withVersion(file(t, mem, name), "3"))
+			mem.Put(name, withVersion(file(t, mem, name), "4"))
 			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 			wantFailure(t, "newer record", err, core.FailureIncompatible, name)
 		})
@@ -93,7 +93,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 
 	t.Run("an event, read when asked for", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "3"))
+		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "4"))
 		s, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -113,11 +113,11 @@ func TestDamagedFilesAreRefusedWithTheFileNamed(t *testing.T) {
 		"truncated":    func(v []byte) []byte { return v[:len(v)/2] },
 		"no version":   func([]byte) []byte { return []byte(`{"unrelated":1}`) },
 		"version zero": func([]byte) []byte { return []byte(`{"format":0}`) },
-		"no body":      func([]byte) []byte { return []byte(`{"format":2}`) },
+		"no body":      func([]byte) []byte { return []byte(`{"format":3}`) },
 		"an unknown field": func(v []byte) []byte {
-			return withVersion(v, "2, \"surprise\": true")
+			return withVersion(v, "3, \"surprise\": true")
 		},
-		"data after it":     func(v []byte) []byte { return append(bytes.Clone(v), []byte(`{"format":2}`)...) },
+		"data after it":     func(v []byte) []byte { return append(bytes.Clone(v), []byte(`{"format":3}`)...) },
 		"a wrong type":      func(v []byte) []byte { return withVersion(v, `"two"`) },
 		"binary":            func([]byte) []byte { return []byte{0, 1, 2, 0xff, 0xfe} },
 		"a different field": func(v []byte) []byte { return bytes.Replace(v, []byte(`"format"`), []byte(`"formats"`), 1) },
@@ -318,11 +318,11 @@ func TestEncodingIsPinned(t *testing.T) {
 	if err := script()[0].run(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := unspaced(file(t, mem, "state/format")), `{"format":2}`; got != want {
+	if got, want := unspaced(file(t, mem, "state/format")), `{"format":3}`; got != want {
 		t.Errorf("format file = %q, want %q", got, want)
 	}
 	const wantJob = `{
-  "format": 2,
+  "format": 3,
   "job": {
     "id": "j1",
     "spec": {
@@ -340,7 +340,12 @@ func TestEncodingIsPinned(t *testing.T) {
         "agent": "agent-a"
       }
     ],
-    "submitted_at": "2026-11-01T00:00:01Z"
+    "submitted_at": "2026-11-01T00:00:01Z",
+    "submitters": [
+      {
+        "at": "2026-11-01T00:00:01Z"
+      }
+    ]
   }
 }
 `
@@ -355,7 +360,7 @@ func TestEncodingIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const wantPromotion = `{
-  "format": 2,
+  "format": 3,
   "seq": "1",
   "promotion": {
     "commit": "c1",
@@ -403,6 +408,21 @@ func TestAStoreOfThePrereleaseEncodingIsRefusedWithTheFileNamed(t *testing.T) {
 	}
 }
 
+// Version 3 added Job.submitters. A store of version 2 is not migrated: it is refused as one this
+// program does not read, naming the file, and the way back is to remove the store. The other side of
+// the change is the test of a newer format above: a program of version 2 meets a version 3 store by
+// being told it is newer, and never reports its records as damaged.
+func TestAStoreOfVersionTwoIsRefusedWithTheFileNamed(t *testing.T) {
+	for _, name := range append([]string{"state/format"}, recordFiles...) {
+		t.Run(name, func(t *testing.T) {
+			mem := populated(t)
+			mem.Put(name, withVersion(file(t, mem, name), "2"))
+			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
+			wantFailure(t, "version 2", err, core.FailureIncompatible, name, "remove the store")
+		})
+	}
+}
+
 // A store that ran to the end holds exactly these files, and no temporary one.
 func TestLayoutOfAFinishedScript(t *testing.T) {
 	want := []string{
@@ -416,5 +436,21 @@ func TestLayoutOfAFinishedScript(t *testing.T) {
 	}
 	if got := slices.Sorted(maps.Keys(populated(t).Files())); !slices.Equal(got, want) {
 		t.Errorf("files =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// The callers of a job survive a crash and a reopen: the script has a second run join the job and a
+// third reuse its result, and the job read back from the files names all three, in order.
+func TestTheSubmittersOfAJobSurviveAReopen(t *testing.T) {
+	s := openOn(t, populated(t))
+	job, err := s.Job(t.Context(), "j1")
+	if err != nil {
+		t.Fatalf("Job: %v", err)
+	}
+	want := []core.Submitter{
+		{At: at(1)}, {Run: "run-b", Agent: "lead", At: at(2)}, {Run: "run-c", Agent: "lead", At: at(7)},
+	}
+	if !reflect.DeepEqual(job.Submitters, want) {
+		t.Errorf("submitters = %+v, want %+v", job.Submitters, want)
 	}
 }

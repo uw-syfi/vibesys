@@ -224,3 +224,39 @@ func TestCurrentResultAnswersNoneThenTheNumber(t *testing.T) {
 		t.Fatalf("result after a fresh measurement = %+v, %v", third, err)
 	}
 }
+
+// A plan's linked jobs carry the verdict of their commit against the result branch's head, and a
+// job whose commit is not measured carries none.
+func TestViewPlanFillsEachLinkedJobsVerdict(t *testing.T) {
+	r := newResultsRig(t)
+	r.measured(cm(0), levelAt...)
+	r.measured(cm(1), winning...)
+	ctx := ctxFor(t)
+	created, err := r.client.CreatePlan(ctx, &cliv1.CreatePlanRequest{Context: call, Title: "tile"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []core.Commit{cm(1), cm(2)} {
+		spec := wire.JobSpec(core.JobSpec{Commit: c, Environment: core.EnvironmentHost, Settings: core.CommandSettings{Argv: []string{"exit", "0"}}})
+		if _, err := r.client.Submit(ctx, &cliv1.SubmitRequest{Context: call, Spec: spec, Plan: created.GetPlan().GetNumber()}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+	}
+	view, err := r.client.ViewPlan(ctx, &cliv1.ViewPlanRequest{Context: call, Number: created.GetPlan().GetNumber()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	byCommit := map[string]*cliv1.LinkedJob{}
+	for _, j := range view.GetView().GetJobs() {
+		byCommit[j.GetJob().GetSpec().GetCommit()] = j
+	}
+	if len(byCommit) != 2 {
+		t.Fatalf("linked jobs = %v, want one for each of two commits", view.GetView().GetJobs())
+	}
+	if v := byCommit[string(cm(1))].GetVerdict(); v.GetKind() != cliv1.VerdictKind_VERDICT_KIND_BETTER || v.GetCandidateSamples() != 5 || v.GetBaseSamples() != 5 {
+		t.Errorf("verdict of the measured commit = %v, want better over 5 and 5 samples", v)
+	}
+	if v := byCommit[string(cm(2))].GetVerdict(); v != nil {
+		t.Errorf("verdict of the unmeasured commit = %v, want none", v)
+	}
+}

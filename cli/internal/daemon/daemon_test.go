@@ -296,3 +296,19 @@ func TestStopEndsWaitingCallsAndSignalsTheProcess(t *testing.T) {
 	}
 	r.gates.Release("g")
 }
+
+// The caller named in the call's context is who the job records as having submitted it, and the job
+// a daemon returns carries it through the contract.
+func TestASubmittedJobNamesTheRunAndAgentOfTheCall(t *testing.T) {
+	r := newRig(t)
+	job := r.submit("exit", "0")
+	subs := job.GetSubmitters()
+	if len(subs) != 1 || subs[0].GetRunId() != call.GetRunId() || subs[0].GetAgent() != call.GetAgent() || subs[0].GetAt() == nil {
+		t.Fatalf("submitters of the submitted job = %v, want %s/%s at the time of the call", subs, call.GetRunId(), call.GetAgent())
+	}
+	r.final(job.GetId())
+	list, err := r.client.ListJobs(ctxFor(t), &cliv1.ListJobsRequest{Context: call})
+	if err != nil || len(list.GetJobs()) != 1 || len(list.GetJobs()[0].GetSubmitters()) != 1 {
+		t.Fatalf("ListJobs = %v, %v; want the job with its one submitter", list.GetJobs(), err)
+	}
+}

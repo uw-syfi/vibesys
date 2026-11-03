@@ -74,6 +74,16 @@ func ToNote(n *cliv1.Note) core.Note {
 	return core.Note{Text: n.GetText(), At: toTime(n.GetAt()), Agent: n.GetAgent()}
 }
 
+// Submitter returns the contract's message for a caller that submitted a job.
+func Submitter(s core.Submitter) *cliv1.Submitter {
+	return &cliv1.Submitter{RunId: string(s.Run), Agent: s.Agent, At: timestamp(s.At)}
+}
+
+// ToSubmitter returns the domain submitter for the contract's message.
+func ToSubmitter(s *cliv1.Submitter) core.Submitter {
+	return core.Submitter{Run: core.RunID(s.GetRunId()), Agent: s.GetAgent(), At: toTime(s.GetAt())}
+}
+
 // ServiceSpec returns the contract's message for a service, or nil for none.
 func serviceSpec(s *core.ServiceSpec) *cliv1.ServiceSpec {
 	if s == nil {
@@ -194,6 +204,9 @@ func Job(j core.Job) *cliv1.Job {
 	for _, a := range j.Attempts {
 		out.Attempts = append(out.Attempts, Attempt(a))
 	}
+	for _, sub := range j.Submitters {
+		out.Submitters = append(out.Submitters, Submitter(sub))
+	}
 	return out
 }
 
@@ -281,6 +294,9 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 			return core.Job{}, err
 		}
 		out.Attempts = append(out.Attempts, past)
+	}
+	for _, sub := range j.GetSubmitters() {
+		out.Submitters = append(out.Submitters, ToSubmitter(sub))
 	}
 	return out, nil
 }

@@ -221,8 +221,11 @@ default to the environment variables shown:
 Plans belong to a task, are numbered 1, 2, ... by the daemon and never renumbered, and take one of
 five statuses: `open`, `chosen`, `won`, `parked` and `rejected`. The CLI orders none of them, so an
 agent may move a plan from any status to any other, and it stores the body and the comments as they
-are given. A plan number may be written `3` or `#3`. `plan view` shows the jobs linked to a plan; it
-does not show their verdicts, so run `compare` on a linked job's commit for one. A submission or `plan create` makes a task's store, so a planner can write plans before
+are given. A plan number may be written `3` or `#3`. `plan view` shows the jobs linked to a plan. With
+`--json`, each linked job carries `verdict`, the daemon's comparison of the job's commit with the
+result branch's head (the function `compare` uses), and no `verdict` when there is none to give: no
+head, a commit or the head not measured, or measurements from two environments. The text view does not print it, so
+run `compare` on a linked job's commit for one. A submission or `plan create` makes a task's store, so a planner can write plans before
 the first job. The other plan commands refuse a task with no store with a "no store" error, and
 `plan list` prints nothing for it.
 
@@ -265,6 +268,22 @@ Text output rounds numbers to four significant digits. `--json` and the verdicts
 the exact values.
 
 A signal ends the command and nothing more. A job the command submitted or waits on keeps running.
+
+## Who submitted a job
+
+A job records every caller that submitted it in `Job.submitters`: one entry for each distinct
+`(run_id, agent)`, oldest first, each with the time of that caller's first submission. The entry
+comes from the call's `VIBESYS_RUN` and `VIBESYS_AGENT`; a person at a terminal names neither, and
+their entry has an empty run and agent. A submission that joins a queued or running job, or is
+answered from a finished job's saved result, adds its caller to that job and changes nothing else,
+so a final job gains a submitter without changing state. A caller already on the job adds nothing.
+
+A store written with `submitters` is format version 3. Version 3 is a new format because a program
+of version 2 refuses a record with a field it does not know: it now meets the store, reads the
+format file, and says the store is newer and to upgrade `vibesys-cli`, where it would otherwise
+report its jobs as damaged. A store of version 2 is not read by this build and is not migrated: it
+is refused, naming the file, with the instruction to remove the store and let the daemon make it
+again. No release wrote version 2 (it came after `cli-v0.1.0-rc.2`), so no released store is lost.
 
 ## The daemon and the supervisors
 

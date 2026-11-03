@@ -132,6 +132,10 @@ func CheckPlanComment(field, text string) error {
 type PlanView struct {
 	Plan Plan
 	Jobs []Job
+	// Verdicts is how each commit of a linked job compares with the result branch's head, for the
+	// commits that could be compared. A commit with no entry has none to give: there is no head,
+	// or a side is not measured, or the sides were measured in two environments.
+	Verdicts map[Commit]Verdict
 }
 
 // LinkedTo returns the jobs that link to the plan, in the order given.

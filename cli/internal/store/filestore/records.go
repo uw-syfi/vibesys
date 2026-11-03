@@ -22,8 +22,10 @@ import (
 //
 // Version 1 was a hand-written JSON encoding. Version 2 is protojson of the messages in
 // proto/vibesys/cli/v1/store.proto, so the stored form is generated from the contract and not kept
-// by hand. A prerelease store of version 1 is thrown away and never converted.
-const formatVersion = 2
+// by hand. A prerelease store of version 1 is thrown away and never converted. Version 3 adds
+// Job.submitters, which a program of version 2 refuses as an unknown field; no release wrote version
+// 2, so a store of it is thrown away too.
+const formatVersion = 3
 
 // The files of a store are the messages of store.proto in protojson: the proto field names, and
 // only the fields that are set, so that adding a field to a message does not change the bytes of
@@ -248,6 +250,9 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 		}
 		past.StartedAt, past.EndedAt = instant(a.GetStartedAt()), instant(a.GetEndedAt())
 		j.Attempts = append(j.Attempts, past)
+	}
+	for _, sub := range m.GetSubmitters() {
+		j.Submitters = append(j.Submitters, wire.ToSubmitter(sub))
 	}
 	return j, nil
 }
