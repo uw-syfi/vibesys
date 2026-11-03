@@ -46,7 +46,7 @@ from vs_sidecar.server import Wakeup
 from vs_sidecar.store import FileStore
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
 
     from agentshim import RawFrame, StdioMcpServer
     from agentshim.execution.process import SpawnRequest
@@ -89,10 +89,17 @@ def _turn(number: int) -> list[dict[str, Any]]:
     ]
 
 
+def _without_token(argv: Sequence[str]) -> list[str]:
+    """*argv* with the value of ``--mcp-config`` left out: it holds the session's token."""
+    return [
+        "<mcp config>" if i and argv[i - 1] == "--mcp-config" else arg for i, arg in enumerate(argv)
+    ]
+
+
 def dump_spawns(executor: FakeExecutor, provider: str, path: Path) -> None:
     """Write what the real driver asked the executor to run: the provider's argv and config home, and plugin commands."""
     spawns = [
-        {"argv": list(spawn.argv), "home": spawn.env.get(HOMES[provider], "")}
+        {"argv": _without_token(spawn.argv), "home": spawn.env.get(HOMES[provider], "")}
         for spawn in executor.spawns
     ]
     commands = [list(request.argv) for request in executor.requests]

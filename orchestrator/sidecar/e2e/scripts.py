@@ -143,7 +143,7 @@ def _judged(me: Me, messages: Sequence[str]) -> Script:
     yield cli(me, ["submit", "check", best.commit], "--no-cache", "--wait")
     yield cli(me, ["submit", "measure", best.commit], "--samples", "3", "--no-cache", "--wait")
     result = yield cli(me, ["result"], "--json")
-    value = json.loads(result.text)["value"]
+    value = json.loads(result.text)["current"]["result"]["measure"]["value"]
     yield Mcp(
         "post_report",
         {"headline": f"best score {value} at {best.commit}", "changed": f"promoted {best.commit}"},

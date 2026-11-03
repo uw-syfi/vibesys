@@ -54,7 +54,12 @@ class FakeMachine:
         if argv[0] == "git" and "rev-parse" in argv:
             return Outcome(ok=True, text=self.head + "\n")
         if argv[0] == "vibesys-cli" and argv[1] == "result":
-            return Outcome(ok=True, text=json.dumps({"value": 17.01}))
+            return Outcome(
+                ok=True,
+                text=json.dumps(
+                    {"current": {"head": "x", "result": {"measure": {"value": 17.01}}}}
+                ),
+            )
         if argv[0] == "vibesys-cli" and argv[1] == "compare":
             return Outcome(ok=True, text="better\n")
         return Outcome(ok=True, text="ok")
