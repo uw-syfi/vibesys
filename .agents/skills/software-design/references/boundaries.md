@@ -81,6 +81,18 @@ reconcile tagged resources on restart, and retain ownership until termination
 is confirmed or explicitly unresolved. See
 [functional-core.md#durable-intent](functional-core.md#durable-intent).
 
+## Daemons
+
+A long-lived local process that owns state and that another process reads and
+commands over a socket is a boundary with its own failure modes: it may be
+missing, too old, owned by someone else, or restarted under the caller. Give
+every such link the same shape (contract owned by the callee, a private
+socket directory, a documented discovery rule, a handshake first, reads as
+streams that start with a reset, writes as deduplicated commands, one owner of
+the lifetime, one Fake and one contract suite) rather than a protocol of its
+own. A codebase states the rules of its own pattern and what enforces each
+in its architecture documentation.
+
 ## Agent tool servers
 
 An MCP tool server is an external contract that agents call with arbitrary

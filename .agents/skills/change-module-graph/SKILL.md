@@ -28,6 +28,7 @@ graph.
 - A new import that crosses modules or packages.
 - A new I/O interface, or a new implementation of one.
 - Placing an agent tool server.
+- A new link from one process to a long-lived local daemon (the CLI daemon, the sidecar).
 - `check_tach`, the package-graph check, or a size limit fails.
 
 ## Steps
@@ -73,6 +74,13 @@ graph.
 9. **Treat a size limit as a cue to factor, not a target to dodge.**
    `check_file_length`, Ruff `C901` and `PLR0912`, and Biome's
    `noExcessiveLinesPerFile` hold the numbers.
+10. **Link a process to a daemon by the pattern** in the "Talking to daemons"
+    section of [architecture.md](../../../docs/contributing/architecture.md#talking-to-daemons):
+    the callee owns the contract, a private socket, documented discovery, a
+    handshake, reads as streams that start with a reset, one lifetime owner,
+    one Fake and one contract suite. That section names the check for each
+    rule, and the ones not yet written. Unenforced: whether a link follows the
+    pattern needs a reader.
 
 ## Testing
 
