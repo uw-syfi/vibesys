@@ -82,6 +82,9 @@ func anyJob(r *rand.Rand) core.Job {
 		}
 		j.Attempts = append(j.Attempts, past)
 	}
+	for i := range r.IntN(3) {
+		j.Submitters = append(j.Submitters, core.Submitter{Run: core.RunID(pick(r, "", "run-a", "run-b")), Agent: fmt.Sprintf("agent-%d", i), At: epoch.Add(time.Duration(i) * time.Second)})
+	}
 	if r.IntN(2) == 0 {
 		at := epoch.Add(time.Hour)
 		j.StartedAt = &at

@@ -1,0 +1,29 @@
+{
+  "format":  2,
+  "job":  {
+    "id":  "j2",
+    "spec":  {
+      "commit":  "c2",
+      "check":  {}
+    },
+    "state":  "JOB_STATE_FAILED",
+    "key":  "k2",
+    "environment":  {
+      "kind":  "ENVIRONMENT_KIND_HOST",
+      "backend":  "BACKEND_KIND_CPU",
+      "facts":  {
+        "go":  "1.25"
+      }
+    },
+    "notes":  [
+      {
+        "text":  "flaky",
+        "at":  "2026-11-01T00:00:11Z",
+        "agent":  "agent-b"
+      }
+    ],
+    "submitted_at":  "2026-11-01T00:00:08Z",
+    "started_at":  "2026-11-01T00:00:09Z",
+    "finished_at":  "2026-11-01T00:00:10Z"
+  }
+}

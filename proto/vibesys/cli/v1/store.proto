@@ -17,6 +17,9 @@ option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 // Every file starts with `format`, the version of the layout and of every record in it. A program
 // reads files of its own version and refuses any other. A file of an older version is not
 // migrated: the store is thrown away.
+//
+// Versions: 1 was a hand-written encoding that no release wrote. 2 is protojson of these messages.
+// Submitters are additive in format 2; old writers reject jobs containing the new field.
 
 // FormatFile is the `format` file of a store, and the part of every other file that is read first,
 // so that a file of another version is reported as that and not as a record with unknown fields.

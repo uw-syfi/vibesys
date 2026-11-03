@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/environment.proto";
@@ -78,6 +79,25 @@ message Note {
   string agent = 3;
 }
 
+// Submitter is one caller that submitted a job: a submission that created it, joined it or was
+// answered from it. It is the caller's identity as the submission named it, and a submission that
+// named no run or no agent leaves that field empty (a person at a terminal).
+message Submitter {
+  string run_id = 1;
+  string agent = 2;
+  // When this caller first submitted the job.
+  google.protobuf.Timestamp at = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).timestamp = {
+      gte: {seconds: -62135596800}
+      lte: {
+        seconds: 253402300799
+        nanos: 999999999
+      }
+    }
+  ];
+}
+
 // CutCause is how an attempt's supervisor was proved gone.
 enum CutCause {
   CUT_CAUSE_UNSPECIFIED = 0;
@@ -130,4 +150,8 @@ message Job {
   // The earlier attempts that were cut off, oldest first. The current attempt is the next one.
   // There are fewer than the most attempts a job gets, which is 3.
   repeated Attempt attempts = 16;
+  // Everyone who submitted the job, one entry for each distinct (run_id, agent), oldest first. A
+  // submission that joins a job or is answered from it adds its caller here, also when the job is
+  // final, and changes nothing else.
+  repeated Submitter submitters = 17;
 }

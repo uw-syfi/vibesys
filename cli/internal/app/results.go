@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
@@ -69,6 +70,67 @@ func (a *App) Compare(ctx context.Context, c core.CallContext, commit, against c
 		return core.Comparison{}, err
 	}
 	return core.CompareCommits(core.CompareRequest{Commit: commit, Against: against, Results: results, RelativeNoise: noDeclaredNoise})
+}
+
+// judgeAgainstHead judges each commit against the result branch's head with the task's saved
+// results, in the order given, one judgment for each distinct commit. It is the one place that
+// makes judgments, and every verdict the daemon states about a commit against the head comes from
+// it. A task with no readable head has none to judge against, which is not a failure: the answer
+// is nil, and a head that cannot be read for a reason other than the branch not being there is noted.
+func (a *App) judgeAgainstHead(ctx context.Context, t taskStore, commits []core.Commit) []core.Judgment {
+	if len(commits) == 0 {
+		return nil
+	}
+	a.branchMu.Lock()
+	head, err := a.settledHead(ctx, t)
+	a.branchMu.Unlock()
+	if err != nil {
+		var f *core.Failure
+		if !errors.As(err, &f) || (f.Kind != core.FailureNotFound && f.Kind != core.FailureUnavailable) {
+			a.cfg.Logf("task %s in %s: judging against the result branch: %v", string(t.scope.Task()), string(t.scope.Repository()), err)
+		}
+		return nil
+	}
+	distinct := []core.Commit{head}
+	for _, c := range commits {
+		if !slices.Contains(distinct, c) {
+			distinct = append(distinct, c)
+		}
+	}
+	results, err := resultsOf(ctx, t, distinct...)
+	if err != nil {
+		a.cfg.Logf("task %s in %s: reading results to judge against the result branch: %v", string(t.scope.Task()), string(t.scope.Repository()), err)
+		return nil
+	}
+	out := make([]core.Judgment, 0, len(commits))
+	var judged []core.Commit
+	for _, c := range commits {
+		if slices.Contains(judged, c) {
+			continue
+		}
+		judged = append(judged, c)
+		out = append(out, core.Judge(c, head, results, noDeclaredNoise))
+	}
+	return out
+}
+
+// verdictsOf is the verdict of each commit the jobs ran from against the result branch's head, for
+// the commits that could be compared.
+func (a *App) verdictsOf(ctx context.Context, t taskStore, jobs []core.Job) map[core.Commit]core.Verdict {
+	var commits []core.Commit
+	for _, j := range jobs {
+		commits = append(commits, j.Spec.Commit)
+	}
+	var out map[core.Commit]core.Verdict
+	for _, j := range a.judgeAgainstHead(ctx, t, commits) {
+		if v := j.Verdict(); v != nil {
+			if out == nil {
+				out = map[core.Commit]core.Verdict{}
+			}
+			out[j.Commit] = *v
+		}
+	}
+	return out
 }
 
 // Promote moves the task's result branch to the commit if core says the commit is better than the
@@ -226,7 +288,12 @@ func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.Resul
 // resultsOf returns the saved results of the commits.
 func resultsOf(ctx context.Context, t taskStore, commits ...core.Commit) ([]core.Result, error) {
 	var out []core.Result
+	var seen []core.Commit
 	for _, commit := range commits {
+		if slices.Contains(seen, commit) {
+			continue
+		}
+		seen = append(seen, commit)
 		rs, err := t.store.Results(ctx, core.ResultFilter{Commit: commit})
 		if err != nil {
 			return nil, err

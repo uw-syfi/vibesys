@@ -120,6 +120,16 @@ type Note struct {
 	Agent string
 }
 
+// Submitter is one caller that submitted a job: the submission that created it, or one that joined it
+// or was answered from it. Run and Agent are what the submission's call context named, and either
+// is empty when the caller named none (a person at a terminal).
+type Submitter struct {
+	Run   RunID
+	Agent string
+	// At is when this caller first submitted the job.
+	At time.Time
+}
+
 // Job is a submission and where it stands.
 type Job struct {
 	ID    JobID
@@ -150,6 +160,9 @@ type Job struct {
 	// when its supervisor was proved gone, and the job was queued again. The current attempt is
 	// number len(Attempts)+1, and there are always fewer than MaxAttempts.
 	Attempts []PastAttempt
+	// Submitters are the callers that submitted the job, one for each distinct (Run, Agent), oldest
+	// first. A submission that joins or reuses the job adds its caller, also once the job is final.
+	Submitters []Submitter
 }
 
 // MaxAttempts is the most attempts a job gets. A job whose supervisor is proved gone is queued again
@@ -245,6 +258,22 @@ type Submission struct {
 	Note *Note
 	Plan PlanNumber
 	At   time.Time
+}
+
+// SubmitterOf is the caller a submission names: its run and agent, at the time it was made.
+func SubmitterOf(sub Submission) Submitter {
+	return Submitter{Run: sub.Context.Run, Agent: sub.Context.Agent, At: sub.At}
+}
+
+// WithSubmitter returns the submitters with s added, and says whether it was: a caller that is
+// already there (the same run and the same agent) is not added again, and keeps its first time.
+func WithSubmitter(submitters []Submitter, s Submitter) ([]Submitter, bool) {
+	for _, have := range submitters {
+		if have.Run == s.Run && have.Agent == s.Agent {
+			return submitters, false
+		}
+	}
+	return append(slices.Clone(submitters), s), true
 }
 
 // SubmitDisposition says what a submission turned into.

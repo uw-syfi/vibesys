@@ -73,6 +73,8 @@ func TestLayerRules(t *testing.T) {
 		{"the transport imports the supervisor domain", map[string]string{"cli/internal/supervisor/rpc/a.go": goFile(module+"internal/supervisor", module+"internal/wire")}, false},
 		{"the wiring imports the daemon and the client", map[string]string{"cli/internal/production/a.go": goFile(module+"internal/daemon", module+"internal/client")}, false},
 		{"nothing but the wiring and the command line imports the wiring", map[string]string{"cli/internal/daemon/a.go": goFile(module + "internal/production")}, true},
+		{"an app test loads historical files through fake FS", map[string]string{"cli/internal/app/a_test.go": goFile(module + "internal/store/filestore/fsys")}, false},
+		{"app product code cannot import filesystem implementation", map[string]string{"cli/internal/app/a.go": goFile(module + "internal/store/filestore/fsys")}, true},
 		{"a daemon test composes fakes", map[string]string{"cli/internal/daemon/a_test.go": goFile(module + "internal/environment/fakeenv")}, false},
 		{"daemon code cannot import a fake", map[string]string{"cli/internal/daemon/a.go": goFile(module + "internal/environment/fakeenv")}, true},
 		{"the wiring cannot import a fake", map[string]string{"cli/internal/production/a.go": goFile(module + "internal/environment/fakeenv")}, true},

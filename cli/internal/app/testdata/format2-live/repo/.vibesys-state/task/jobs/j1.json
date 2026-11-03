@@ -1,0 +1,30 @@
+{
+  "format":  2,
+  "job":  {
+    "id":  "j1",
+    "spec":  {
+      "commit":  "1111111111111111111111111111111111111111",
+      "environment":  "ENVIRONMENT_KIND_HOST",
+      "command":  {
+        "argv":  [
+          "hold",
+          "g",
+          ";",
+          "exit",
+          "0"
+        ],
+        "timeout":  "3600s"
+      }
+    },
+    "state":  "JOB_STATE_RUNNING",
+    "environment":  {
+      "kind":  "ENVIRONMENT_KIND_HOST",
+      "backend":  "BACKEND_KIND_CPU",
+      "facts":  {
+        "go":  "1.25"
+      }
+    },
+    "submitted_at":  "2026-01-01T00:00:00Z",
+    "started_at":  "2026-01-01T00:00:00Z"
+  }
+}

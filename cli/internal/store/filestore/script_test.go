@@ -95,7 +95,7 @@ func script() []op {
 	note := func(text string, n int) *core.Note { return &core.Note{Text: text, At: at(n), Agent: "agent-a"} }
 	return []op{
 		submit("create a measure job", core.Submission{Spec: measureSpec("c1"), Key: "k1", Note: note("first", 1), At: at(1)}),
-		submit("join it with a note", core.Submission{Spec: measureSpec("c1"), Key: "k1", Note: note("second", 2), At: at(2)}),
+		submit("join it with a note, from a second run", core.Submission{Context: core.CallContext{Run: "run-b", Agent: "lead"}, Spec: measureSpec("c1"), Key: "k1", Note: note("second", 2), At: at(2)}),
 		{"create a plan", func(ctx context.Context, s store.Store) error {
 			_, err := s.CreatePlan(ctx, core.NewPlan{Title: "tile the loop", Body: "try 8x8", At: at(3)})
 			return err
@@ -105,7 +105,7 @@ func script() []op {
 		move("finish it with a result", core.Transition{
 			Job: "j1", From: core.JobRunning, To: core.JobSucceeded, At: at(6), Result: savedResult("j1", "k1", "c1"),
 		}),
-		submit("reuse the result with a note", core.Submission{Spec: measureSpec("c1"), Key: "k1", Note: note("third", 7), At: at(7)}),
+		submit("reuse the result with a note, from a third run", core.Submission{Context: core.CallContext{Run: "run-c", Agent: "lead"}, Spec: measureSpec("c1"), Key: "k1", Note: note("third", 7), At: at(7)}),
 		submit("create a check job", core.Submission{Spec: core.JobSpec{Commit: "c2", Settings: core.CheckSettings{}}, Key: "k2", At: at(8)}),
 		move("start the check", core.Transition{Job: "j2", From: core.JobQueued, To: core.JobRunning, At: at(9), Environment: pinned()}),
 		move("fail the check", core.Transition{Job: "j2", From: core.JobRunning, To: core.JobFailed, At: at(10)}),

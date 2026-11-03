@@ -267,7 +267,7 @@ func TestADamagedOwnerRecordIsRefusedWithItsName(t *testing.T) {
 	}
 	t.Run("a newer format", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put(ownerRecord, []byte(`{"format":3}`))
+		mem.Put(ownerRecord, []byte(`{"format":4}`))
 		_, err := openAs(mem, daemonA)
 		wantFailure(t, "Open", err, core.FailureIncompatible, ownerRecord)
 	})
@@ -276,7 +276,7 @@ func TestADamagedOwnerRecordIsRefusedWithItsName(t *testing.T) {
 func FuzzOwnerRecord(f *testing.F) {
 	f.Add([]byte(`{"format":2,"generation":"7","host":"host-a","dir":"/run/user/1","pid":"10"}`))
 	f.Add([]byte(`{"format":2,"generation":"18446744073709551615"}`))
-	f.Add([]byte(`{"format":3}`))
+	f.Add([]byte(`{"format":2}`))
 	f.Add([]byte(`{"format":1,"generation":7,"host":"host-a","dir":"/run/user/1","pid":10}`))
 	f.Add([]byte(`[]`))
 	f.Add([]byte(`{"format":2,"generation":"3","host":"host-a","dir":"/run/user/1","pid":"10","given_up":["j1","j2"]}`))

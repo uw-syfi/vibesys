@@ -1,0 +1,17 @@
+{
+  "format":  2,
+  "event":  {
+    "sequence":  "1",
+    "schema_version":  1,
+    "run_id":  "run-b",
+    "host_id":  "host-a",
+    "task":  "kv-store",
+    "commit":  "c1",
+    "harness":  "h",
+    "agent":  "agent-a",
+    "at":  "2026-11-01T00:00:16Z",
+    "command":  "COMMAND_WAIT",
+    "outcome":  "COMMAND_OUTCOME_SUCCEEDED",
+    "job_id":  "j1"
+  }
+}

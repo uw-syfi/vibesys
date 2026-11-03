@@ -90,12 +90,16 @@ func ToPlan(p *cliv1.Plan) (core.Plan, error) {
 	return out, nil
 }
 
-// PlanView returns the contract's message for a plan and the jobs linked to it. The linked jobs'
-// verdicts are not filled in yet: the comparison they come from is not available in this build.
+// PlanView returns the contract's message for a plan and the jobs linked to it, each with its
+// commit's verdict against the result branch's head when the view has one.
 func PlanView(v core.PlanView) *cliv1.PlanView {
 	out := &cliv1.PlanView{Plan: Plan(v.Plan)}
 	for _, j := range v.Jobs {
-		out.Jobs = append(out.Jobs, &cliv1.LinkedJob{Job: Job(j)})
+		linked := &cliv1.LinkedJob{Job: Job(j)}
+		if verdict, ok := v.Verdicts[j.Spec.Commit]; ok {
+			linked.Verdict = Verdict(verdict)
+		}
+		out.Jobs = append(out.Jobs, linked)
 	}
 	return out
 }
