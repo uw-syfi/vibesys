@@ -133,7 +133,9 @@ npm_install_global \
 PIP_BREAK_SYSTEM_PACKAGES=1 pip_install uv
 
 UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install retry uv python install "${PYTHON_VERSION}"
-UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install uv venv --offline \
+# The Feature may be reapplied to an image that already includes it. Rebuild
+# this Feature-owned environment from the selected Python and dependencies.
+UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install uv venv --offline --clear \
     --python "${PYTHON_VERSION}" --python-preference only-managed "${PYTHON_HOME}"
 retry uv pip install --python "${PYTHON_HOME}/bin/python" 'mcp>=1.0,<2'
 chmod -R a+rX /opt/vibesys-python-install "${PYTHON_HOME}"
