@@ -298,9 +298,13 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 		}
 	}
 
-	// The lead was woken once for each handoff, and no more.
-	if prompts, _ := filepath.Glob(filepath.Join(leadDir, "prompts", "*.md")); len(prompts) != 4 {
-		t.Errorf("the lead was sent %d messages (a brief and three handoffs expected): %v", len(prompts), prompts)
+	// One brief, three handoffs, and exactly eight job-completion notices wake
+	// the lead. Wait for typed delivery acknowledgments before counting files;
+	// the report itself may arrive before the last job notice was delivered.
+	r.awaitLeadDeliveries(lead.ID)
+	const expectedPrompts = 1 + 3 + 8
+	if prompts, err := filepath.Glob(filepath.Join(leadDir, "prompts", "*.md")); err != nil || len(prompts) != expectedPrompts {
+		t.Errorf("the lead was sent %d prompts, want exactly %d: %v (glob: %v)", len(prompts), expectedPrompts, prompts, err)
 	}
 
 	// Each worker's commit was measured by vibesys-cli and the number is the worker's score; the

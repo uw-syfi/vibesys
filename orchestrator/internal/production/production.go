@@ -262,7 +262,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 	h := hub.New(hub.DefaultLimits)
 	x.d, err = daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log, Location: wiring.Location,
+			Search: searchStore(wiring.Search), Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log, Location: wiring.Location,
 			OnCommit: func() {
 				for _, c := range []chan struct{}{x.wake, x.commits} {
 					select {

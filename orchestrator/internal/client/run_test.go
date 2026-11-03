@@ -45,9 +45,10 @@ func watchRuns(ctx context.Context, t testing.TB, c *client.Client, after uint64
 				close(f.events)
 				return
 			}
-			if s := msg.GetSnapshot(); s != nil {
-				f.snap <- s
-			} else {
+			switch {
+			case msg.GetSnapshot() != nil:
+				f.snap <- msg.GetSnapshot()
+			case msg.GetEvent() != nil:
 				f.events <- msg.GetEvent()
 			}
 		}
@@ -207,4 +208,10 @@ func TestAWholeRunFromAClient(t *testing.T) {
 		r := ev.GetRunUpdated()
 		return r != nil && r.GetId() == string(run) && r.GetStatus() == pb.RunStatus_RUN_STATUS_ENDED
 	})
+}
+
+func TestWatchSnapshotFitsReceiveLimit(t *testing.T) {
+	if daemon.MaxSnapshotBytes+5 > client.MaxReceiveMessageBytes || daemon.MaxWatchFrameBytes != client.MaxReceiveMessageBytes {
+		t.Fatal("watch frame and receive budgets diverge")
+	}
 }

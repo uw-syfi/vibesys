@@ -132,6 +132,12 @@ func (s *sim) feed(sw *simWatcher, msgs []*pb.WatchRunsResponse) {
 			s.tally["snapshot"]++
 			continue
 		}
+		if search := m.GetSearch(); search != nil {
+			if err := wire.Validate(search); err != nil {
+				s.fail("invalid search state: %v", err)
+			}
+			continue
+		}
 		ev := m.GetEvent()
 		if ev.GetSequence() != sw.v.seq+1 {
 			s.fail("a watcher at %d was sent event %d: an event was lost, repeated or reordered", sw.v.seq, ev.GetSequence())

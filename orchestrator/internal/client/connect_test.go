@@ -202,6 +202,10 @@ func TestAClientSurvivesCutsAndSlowPipesThroughConnect(t *testing.T) {
 						}
 						continue
 					}
+					if msg.GetSearch() != nil {
+						// A whole search view carries no sequence and does not advance the event stream.
+						continue
+					}
 					ev := msg.GetEvent()
 					if last != 0 && ev.GetSequence() != last+1 {
 						fail("event %d came after %d: a gap or a repeat", ev.GetSequence(), last)

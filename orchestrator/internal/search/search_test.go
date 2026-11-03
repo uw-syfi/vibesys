@@ -43,3 +43,25 @@ func TestSourceOrdersTellsBySubmissionTime(t *testing.T) {
 		t.Fatal(got, err)
 	}
 }
+
+func TestStoreRevisionReportsOnlyChanges(t *testing.T) {
+	store := new(search.Store)
+	if store.Revision("r") != 0 {
+		t.Fatal("absent entry has revision")
+	}
+	v := search.Fold(search.Facts{{Fact: &pb.TaskFact_Job{Job: &pb.Job{Id: "j"}}}})
+	store.Put("r", v)
+	first := store.Revision("r")
+	store.Put("r", v)
+	if first == 0 || store.Revision("r") != first {
+		t.Fatal("identical facts advanced revision")
+	}
+	store.Delete("r")
+	if store.Revision("r") != 0 {
+		t.Fatal("deleted entry has revision")
+	}
+	store.Put("r", v)
+	if store.Revision("r") <= first {
+		t.Fatal("recreated entry regressed")
+	}
+}

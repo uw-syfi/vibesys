@@ -35,7 +35,7 @@ var rules = map[string][]string{
 	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "gen/vibesys/orchestrator/"},
 	"internal/production":              {"internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/core":                    {},
-	"internal/search":                  {"internal/core", "internal/jobs", "gen/vibesys/cli/"},
+	"internal/search":                  {"internal/core", "internal/jobs", "gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
 	"internal/jobs":                    {"internal/core"},
 	"internal/jobs/jobstest":           {"internal/core", "internal/jobs"},
 	"internal/wire":                    {"internal/core", "gen/vibesys/orchestrator/"},
@@ -46,7 +46,7 @@ var rules = map[string][]string{
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/client":                  {"gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "gen/vibesys/orchestrator/"},
-	"internal/daemon":                  {"internal/core", "internal/hub", "internal/jobs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/daemon":                  {"internal/search", "internal/core", "internal/hub", "internal/jobs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
 	"internal/localfs/localfstest": {"internal/localfs"},

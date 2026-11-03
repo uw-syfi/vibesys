@@ -43,10 +43,11 @@ type Config struct {
 // inputs. Its methods are for one goroutine, the loop; the Engine is safe to share.
 type Daemon struct {
 	*Engine
-	cfg     Config
-	conns   map[core.Session]Sidecar
-	follows map[core.Session]*follow
-	polled  time.Time
+	searchPublished map[core.RunID]uint64
+	cfg             Config
+	conns           map[core.Session]Sidecar
+	follows         map[core.Session]*follow
+	polled          time.Time
 	// toAttach holds the sessions of a previous daemon whose sidecar this one has not found yet. A
 	// live session in neither conns nor toAttach is waiting for its launch, which is in the outbox.
 	toAttach map[core.Session]bool
@@ -82,7 +83,7 @@ func Open(cfg Config) (*Daemon, error) {
 		return nil, err
 	}
 	return &Daemon{
-		Engine: engine, cfg: cfg,
+		Engine: engine, cfg: cfg, searchPublished: map[core.RunID]uint64{},
 		conns: map[core.Session]Sidecar{}, follows: map[core.Session]*follow{},
 		toAttach: map[core.Session]bool{}, deltaThrough: map[core.Session]uint64{},
 	}, nil
@@ -260,6 +261,7 @@ func (d *Daemon) Step(ctx context.Context) (progress bool, err error) {
 			errs = append(errs, err)
 		}
 	}
+	progress = d.publishSearch() || progress
 	return progress, errors.Join(errs...)
 }
 

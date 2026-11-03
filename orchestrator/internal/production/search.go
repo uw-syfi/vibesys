@@ -219,3 +219,10 @@ func reconcile(r *Reconciler) func(context.Context, []core.Run) {
 	}
 	return r.Sync
 }
+
+func searchStore(r *Reconciler) *search.Store {
+	if r == nil {
+		return nil
+	}
+	return r.Store
+}
