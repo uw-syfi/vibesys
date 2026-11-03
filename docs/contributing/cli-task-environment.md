@@ -116,7 +116,8 @@ one passes the same environment contract suite (`envtest`).
 ### The image is built from the task directory and named by the task version
 
 The build context is a tar of the task directory, sent on standard input, so
-the build sees the task's files and nothing else. The image tag is the task
+the build sees the task's files and nothing else; files a tool generates
+(`__pycache__`, `*.pyc`) are left out, as they are of the task version. The image tag is the task
 version (the digest of every file in the directory), so the image changes
 exactly when the task does. The old rule that refused `COPY` and `ADD` is gone:
 it existed because the build had no context. The image digest, not the tag,
