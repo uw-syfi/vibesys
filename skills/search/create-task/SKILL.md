@@ -10,6 +10,11 @@ what number counts as better. An optimization finds every hole in it, so a task 
 when real jobs show that the checker rejects broken code and the benchmark gives a stable number.
 You write the task; you never optimize the code.
 
+**Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
+`PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
+started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
+set; export it as the absolute path of the vibesys-cli to use`.
+
 Needs git and `vibesys-cli` (install it as `vibesys:optimize` says). File format:
 [task-format.md](references/task-format.md). Validation recipes:
 [validation.md](references/validation.md).

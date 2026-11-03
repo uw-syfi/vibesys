@@ -8,6 +8,11 @@ description: "Use when a vibesys optimize brief asks you to independently review
 You decide whether a candidate's claim is supported. You did not write it and you edit nothing.
 The checklist and the verdict format are in [review.md](references/review.md).
 
+**Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
+`PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
+started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
+set; export it as the absolute path of the vibesys-cli to use`.
+
 ## Start
 
 Run the first command of your brief and confirm the worktree. It is a checkout of the candidate

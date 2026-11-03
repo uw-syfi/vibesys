@@ -164,6 +164,20 @@ The lead's first message is rendered by the sidecar from the run's task, its `--
 optional `--brief`, the operator's steering text: it tells the lead to run `vibesys:optimize` for the
 task, so the repository must hold `.vibesys/tasks/TASK/`.
 
+### Which `vibesys-cli` the agents run
+
+An agent's shell may be a login shell (Codex runs `bash -lc`), which reads the user's profile again
+and can put another `vibesys-cli` first on `PATH`. So the daemon picks one build when it starts and
+hands every session its absolute path as `VIBESYS_CLI`. The daemon picks, in order:
+`VIBESYS_ORCHESTRATOR_CLI` (an absolute path to an executable file; a relative path or a file that
+is not executable stops the orchestrator from starting, naming the setting, and no other build is
+substituted), a `vibesys-cli` beside the `vibesysd` binary, then the first `vibesys-cli` on the
+daemon's own `PATH`. With none of them the orchestrator does not start, because the skills have no
+`PATH` fallback: they run `"$VIBESYS_CLI"` and stop with a clear message when it is unset. Whatever
+was inherited under the name `VIBESYS_CLI` is dropped, so a stale value never reaches an agent. The
+variable is set in the sidecar process's environment, which is where the agent's commands run; the
+launch environment's token and identity stay in the tool server's.
+
 Live smoke run with Claude Code and Haiku 4.5 (it uses a real account, so an operator runs it; the
 repository needs the task bundle named by `--task`):
 

@@ -8,6 +8,11 @@ description: Write a periodic progress report for a long-running multi-agent eff
 The reader was away. A report tells them what changed since the last one, how much to trust it,
 and what you decided without them. It is not a log of what you did.
 
+**Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
+`PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
+started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
+set; export it as the absolute path of the vibesys-cli to use`.
+
 ## Steps
 
 1. Read the state, not your memory: `vibesys-cli plan list` and `result`, the jobs and saved
