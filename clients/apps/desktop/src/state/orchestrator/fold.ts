@@ -147,7 +147,10 @@ export function applyEvent(state: OrchestratorState, event: Event): Orchestrator
       return {...next, messages: {...next.messages, [body.value.id]: body.value}};
     case 'receiptRecorded':
       return {...next, receipts: {...next.receipts, [body.value.commandId]: body.value}};
+    case undefined:
+      return next;
     default:
+      body satisfies never;
       return next;
   }
 }
@@ -204,7 +207,10 @@ export function applyAgentFeed(state: OrchestratorState, frame: AgentFrame): Orc
       return withDelta(state, body.value, sequence);
     case 'turn':
       return withTurn(state, body.value);
+    case undefined:
+      return state;
     default:
+      body satisfies never;
       return state;
   }
 }

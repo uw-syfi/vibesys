@@ -641,6 +641,7 @@ it.effect(
       });
       const last = scenario.events.at(-1);
       if (last === undefined) throw new Error('scenario must have an event');
+      const cursors: bigint[] = [];
       const h = yield* hostHarness(daemonAt(TOTAL - 1), {
         wrap: base => ({
           respond: (target, nth) => {
@@ -657,15 +658,14 @@ it.effect(
                 },
                 {close: true},
               ];
-            expect(fromBinary(WatchRunsRequestSchema, target.request).afterSequence).toBe(
-              BigInt(TOTAL),
-            );
+            cursors.push(fromBinary(WatchRunsRequestSchema, target.request).afterSequence);
             return [encode(next), {hang: true}];
           },
         }),
       });
       h.mount(h.session.runs.watch);
       const data = (yield* h.model).data;
+      expect(cursors).toEqual([BigInt(TOTAL)]);
       expect(data.searches[scenario.runId]).toEqual(next);
       expect(data.sequence).toBe(BigInt(TOTAL));
       expect(data.gap).toBeNull();
@@ -675,6 +675,7 @@ it.effect(
 it.effect('the Fake sends current search frames on resume after replayed events', () =>
   Effect.gen(function* () {
     const daemon = new FakeDaemon({...scenario, search: true});
+    const resumed: {cursor: bigint; cases: unknown[]}[] = [];
     const h = yield* hostHarness(daemon, {
       wrap: base => ({
         respond: (target, nth) => {
@@ -684,16 +685,17 @@ it.effect('the Fake sends current search frames on resume after replayed events'
           const frames = steps.flatMap(step =>
             'frame' in step ? [fromBinary(WatchRunsResponseSchema, step.frame)] : [],
           );
-          expect(fromBinary(WatchRunsRequestSchema, target.request).afterSequence).toBe(
-            daemon.sequence,
-          );
-          expect(frames.map(frame => frame.body.case)).toEqual(['search']);
+          resumed.push({
+            cursor: fromBinary(WatchRunsRequestSchema, target.request).afterSequence,
+            cases: frames.map(frame => frame.body.case),
+          });
           return steps;
         },
       }),
     });
     h.mount(h.session.runs.watch);
     const data = (yield* h.model).data;
+    expect(resumed).toEqual([{cursor: daemon.sequence, cases: ['search']}]);
     expect(data.searches[scenario.runId]).toEqual(daemon.snapshot().searches[0]);
     expect(callsTo(h, 'WatchRuns')).toHaveLength(2);
     expect(data.gap).toBeNull();
