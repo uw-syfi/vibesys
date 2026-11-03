@@ -2,7 +2,8 @@
 // (`Effect.tryPromise`, `Stream.fromAsyncIterable`) and never leaves it. An `async` function or a
 // `Promise` in the core is an operation that cannot be interrupted, retried by a Schedule or
 // timed by TestClock. `await` and the `Promise` name are matched wherever they appear, so a
-// `Promise<T>` return type is caught too.
+// `Promise<T>` return type is caught too. An `AbortController` is hand-rolled cancellation:
+// interruption is the core's cancellation, and `Effect.tryPromise` hands its `try` the signal.
 language js;
 
 or {
@@ -16,11 +17,12 @@ or {
   `async $p => $body`,
   JsMethodObjectMember() as $method where { $method <: r"(?s)^async\b.*" },
   JsAwaitExpression(),
+  JsIdentifierExpression(name = `AbortController`),
   `Promise`
 } as $promise where {
   register_diagnostic(
     span = $promise,
-    message = "The core uses Effect, not async/await or Promise. Wrap a Promise API once with Effect.tryPromise (or Stream.fromAsyncIterable) and write the rest as Effect.gen / Effect.fn.",
+    message = "The core uses Effect, not async/await, Promise or AbortController (interruption cancels). Wrap a Promise API once with Effect.tryPromise (or Stream.fromAsyncIterable) and write the rest as Effect.gen / Effect.fn.",
     severity = "error"
   )
 }

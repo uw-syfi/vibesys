@@ -25,9 +25,9 @@ How to make one kind of change in this repository.
 - [add-bundled-skill](add-bundled-skill/SKILL.md): add or change a bundled
   product skill, its sidecar selection rules, platform references or its
   vendoring update script.
-- [build-client-feature](build-client-feature/SKILL.md): add or change a
-  feature in the TypeScript clients: package placement, machines and folds,
-  run-session wiring, cancellation and bounded waits.
+- [build-client-feature](build-client-feature/SKILL.md): place and wire a
+  change in the TypeScript clients: package graph, the legacy XState features,
+  and where new desktop work goes.
 - [change-container-images](change-container-images/SKILL.md): change the
   agent container image or a Dev Container Feature (toolchains, container
   runtime, pip extras) and the mechanism that builds it.
@@ -37,6 +37,9 @@ How to make one kind of change in this repository.
   mechanism that holds it, from types and lint rules to marked prose.
 - [write-agent-prompt](write-agent-prompt/SKILL.md): write or change the text
   sent to agents at the layer that owns it, with its checks and goldens.
+- [write-effect-code](write-effect-code/SKILL.md): write Effect code in the Effect
+  desktop app: services and layers, tagged errors, streams, atoms, TestClock tests
+  and the lint and folder rules that hold them.
 - [write-vibesys-tests](write-vibesys-tests/SKILL.md): this repository's test
   harness: tiers, vs-sim, depth, contract suites, faults, goldens, budgets.
 

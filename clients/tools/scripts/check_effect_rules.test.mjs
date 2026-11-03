@@ -183,6 +183,7 @@ const PROMISES = {
   'an async object method': 'export const loader = {\n  async load() {\n    return 1;\n  },\n};\n',
   await: 'export const load = (p: unknown) => (async () => await p)();\n',
   'a Promise return type': 'export const load = (): Promise<number> => undefined as never;\n',
+  'an AbortController': 'export const stop = () => new AbortController();\n',
   'Promise.resolve': 'export const load = () => Promise.resolve(1);\n',
   'new Promise': 'export const load = () => new Promise(() => undefined);\n',
 };
