@@ -123,6 +123,7 @@ export function TreeRow(props: {
     <div
       className="vs-tree-row"
       role="treeitem"
+      data-row-id={props.id}
       aria-level={props.depth + 1}
       aria-expanded={props.expanded}
       aria-selected={props.id === selected}

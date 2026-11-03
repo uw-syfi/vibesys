@@ -293,8 +293,7 @@ The same session carries `vibesys.orchestrator.v1.OrchestratorService`, which `v
 same socket. `GatewayConnection` checks every payload against the generated descriptors of the
 services it carries (`validateServicePayload`), so a method outside them is refused, and the
 `HostService` `Hello` is still the one handshake. An orchestrator stream is not re-issued when the
-session is lost: it ends as `UNAVAILABLE`, and its caller (`GatewaySource` in
-`@vibesys/orchestrator-source`, under the host machine's backoff) opens the next one from the
+session is lost: it ends as `UNAVAILABLE`, and its caller (the desktop app's `HostConnection` and run feeds, under its one backoff) opens the next one from the
 sequence it has reached. A second `vibesysd` on the same state answers every orchestrator call
 `UNAVAILABLE` with the holder named, which the window shows as the host's connection state.
 

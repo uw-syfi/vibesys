@@ -73,10 +73,18 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     ],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
   },
-  'apps/orchestrator': {
-    // The orchestrator window as a page (`index.html`, built by `vite.config.ts`), driven by fixtures.
-    entry: ['src/main.tsx', 'src/**/*.test.ts'],
-    project: ['src/**/*.ts', 'src/**/*.tsx'],
+  'apps/desktop': {
+    // The Electron main process and preload, the renderer page (`index.html`, built by
+    // `vite.config.ts`), and the Playwright journey that drives the built app.
+    entry: [
+      'src/main/index.ts',
+      'src/preload/index.cts',
+      'src/ui/main.tsx',
+      'src/**/*.test.ts',
+      'src/**/*.test.tsx',
+      'e2e/**/*.spec.ts',
+    ],
+    project: ['src/**/*.ts', 'src/**/*.cts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
   },
   'apps/ui-gallery': {
     // The development-only component gallery (`index.html`, built by `vite.config.ts`), its

@@ -7,6 +7,7 @@
     "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
   },
   "include": ["src/**/*.test.ts", "src/testing/**/*.ts"],
+  "exclude": ["src/ui/**"],
   "references": [
     {"path": "../../libs/hosts/tsconfig.lib.json"},
     {"path": "../../libs/ipc/tsconfig.lib.json"},

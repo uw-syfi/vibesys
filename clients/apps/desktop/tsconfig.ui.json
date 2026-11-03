@@ -1,14 +1,40 @@
 {
   "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "types": [],
     "jsx": "react-jsx",
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.ui.tsbuildinfo"
   },
-  "include": ["src/ui/**/*.ts", "src/ui/**/*.tsx"],
-  "exclude": ["src/ui/**/*.test.ts", "src/ui/**/*.test.tsx"],
-  "references": [{"path": "./tsconfig.core.json"}, {"path": "./tsconfig.state.json"}]
+  "include": [
+    "src/ui/**/*.ts",
+    "src/ui/**/*.tsx"
+  ],
+  "exclude": [
+    "src/ui/**/*.test.ts",
+    "src/ui/**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.core.json"
+    },
+    {
+      "path": "./tsconfig.state.json"
+    },
+    {
+      "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/orchestrator-proto/tsconfig.lib.json"
+    }
+  ]
 }
