@@ -17,7 +17,8 @@ from vibesys.records.api import DISPOSITIONS, MappedEvent, MappingState, map_eve
 from vs_core.api import EndReason
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
-_ROOT = Path(__file__).resolve().parents[3]
+_EVENT_CORPUS = tuple(sorted((Path(__file__).parent / "fixtures/events").glob("*.json")))
+assert _EVENT_CORPUS, "the semantic record mapping corpus must not be empty"
 
 
 def test_every_event_kind_has_exactly_one_documented_disposition() -> None:
@@ -84,21 +85,11 @@ def test_one_stopped_end_retains_the_core_ending_summary_and_resume_decision(
     assert p.SearchEnded.from_binary(ends[0].detail.value).reason == p.EndReason.STOPPED
 
 
-@pytest.mark.parametrize(
-    "path", sorted((_ROOT / "tests/conformance/events").glob("*.json")), ids=lambda p: p.stem
-)
+@pytest.mark.parametrize("path", _EVENT_CORPUS, ids=lambda p: p.stem)
 def test_current_event_corpus_maps_to_typed_records(path: Path) -> None:
     raw = json.loads(path.read_text())
-    if raw["type"] not in e.CoreEventType:
-        pytest.skip("server-only event, never written by the core journal")
     fields = {name: value for name, value in raw.items() if name in e.CoreEvent.model_fields}
     observation = e.CoreEvent.model_validate(fields)
-    if (
-        observation.data is None
-        and DISPOSITIONS[observation.type] == "typed record"
-        and observation.type is not e.CoreEventType.RUN_FINISHED
-    ):
-        pytest.skip("wire corpus omits semantic payload; generated union test covers it")
     state = MappingState("run-a")
     if isinstance(
         observation.data,

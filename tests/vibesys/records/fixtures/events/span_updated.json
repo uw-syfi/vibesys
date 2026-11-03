@@ -1,0 +1,24 @@
+{
+  "protocol_version": 1,
+  "type": "span_updated",
+  "sequence": 42,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "data": {
+    "kind": "span_updated",
+    "span": {
+      "id": "flow:w1/#1",
+      "parent": "flow:#1",
+      "type": "flow",
+      "name": "workstream",
+      "status": "running",
+      "started_at": 1.0,
+      "ended_at": null,
+      "label": {
+        "kind": "an_unknown_kind",
+        "title": "ws-1",
+        "verdict": null
+      }
+    }
+  }
+}

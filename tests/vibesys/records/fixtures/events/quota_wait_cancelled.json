@@ -1,0 +1,12 @@
+{
+  "protocol_version": 1,
+  "type": "quota_wait_cancelled",
+  "sequence": 46,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "data": {
+    "kind": "quota_wait_cancelled",
+    "provider": "claude",
+    "reason": "paused"
+  }
+}

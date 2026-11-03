@@ -1,0 +1,8 @@
+{
+  "protocol_version": 1,
+  "type": "invocation_started",
+  "sequence": 15,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "invocation_id": "inv-1"
+}
