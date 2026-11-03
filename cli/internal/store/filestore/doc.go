@@ -26,6 +26,9 @@
 //	runs/<run>/<n>.json        the nth event of a run
 //	logs/<job>/<offset>        the bytes appended to a job's log at that offset, as written
 //
+// OpenTask also keeps a .gitignore of "*" in <repository>/.vibesys-state, written when it is
+// missing and never replaced, so that git add -A never commits a store into the repository.
+//
 // A file is never appended to or edited in place. The spec's first sketch kept the events of a
 // run in one appended file; an append is not atomic on NFS, so each event is its own file.
 //

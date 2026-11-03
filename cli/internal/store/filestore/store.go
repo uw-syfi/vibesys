@@ -164,7 +164,45 @@ func OpenTask(repository, task string, opts ...Option) (*Store, error) {
 	} else if err != nil {
 		return nil, store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s cannot be read: %v", repository, err)}, store.ErrAway)
 	}
-	return Open(taskDir(repository, task), opts...)
+	s, err := Open(taskDir(repository, task), opts...)
+	if err != nil {
+		return nil, err
+	}
+	if err := ignoreState(optionsOf(opts).fs, path.Join(path.Clean(repository), stateDirName), task); err != nil {
+		_ = s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// ignoreState writes a .gitignore that ignores everything into the state directory of a
+// repository, unless one is there, so that no store file reaches a commit made with git add -A. A
+// state directory made before this is given one on its next open. A .gitignore the user wrote is
+// left as it is. The temporary file is named for the task, whose store this opener owns, so two
+// openers of different tasks never write the same one.
+func ignoreState(f fsys.FS, dir, task string) error {
+	name := path.Join(dir, gitignoreFile)
+	_, err := f.ReadFile(name)
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return unavailable(dir, err)
+	}
+	b := newBackend(f, dir)
+	tmp := path.Join(dir, tempPrefix+gitignoreFile+"-"+task)
+	if err := b.writeFile(tmp, []byte(gitignoreContent)); err != nil {
+		_ = f.Remove(tmp)
+		return unavailable(dir, err)
+	}
+	if err := f.Rename(tmp, name); err != nil {
+		_ = f.Remove(tmp)
+		return unavailable(dir, err)
+	}
+	if err := f.SyncDir(dir); err != nil {
+		return unavailable(dir, err)
+	}
+	return nil
 }
 
 func unavailable(root string, err error) error {

@@ -397,6 +397,11 @@ Recovery is the daemon's start, with no separate path:
   it that the daemon does find is its own, and the job goes on.
 - A repository that is gone for good is given up with `daemon forget`.
 
+Each task's store is a directory under `.vibesys-state/` in its repository. The daemon writes a
+`.gitignore` of `*` into `.vibesys-state/` when it makes it, and into one an older build made when it
+next opens a store there, so `git add -A` in a repository or a candidate never commits a store. A
+`.gitignore` already there is left as it is.
+
 A store that goes away while the daemon runs stops no job: the supervisor's spool keeps the output,
 and the daemon records it when the store is back. A job whose store is away at its turn waits for
 the store.

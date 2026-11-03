@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -193,5 +194,105 @@ func TestOnlyAStoreWhosePlaceIsNotThereIsGone(t *testing.T) {
 	entry := filepath.Join(repo, "the-index-entry")
 	if _, err := filestore.OpenTask(repo, "task", filestore.Existing(entry)); !errors.Is(err, store.ErrGone) {
 		t.Errorf("a store that was made and whose directory is not there: %v, want it gone", err)
+	}
+}
+
+// ignoreFile is the .gitignore OpenTask keeps in a repository's state directory.
+const ignoreFile = "repo/.vibesys-state/.gitignore"
+
+func openTaskOn(t *testing.T, mem *fsys.MemFS, task string, opts ...filestore.Option) (*filestore.Store, error) {
+	t.Helper()
+	return filestore.OpenTask("repo", task, append([]filestore.Option{filestore.WithFS(mem)}, opts...)...)
+}
+
+// The state directory of a repository ignores itself for git, whether OpenTask made it or found it
+// made by a program that wrote no .gitignore, and a .gitignore the user wrote there is kept as it is.
+func TestTheStateDirectoryIsIgnoredByGit(t *testing.T) {
+	mem := fsys.NewMemFS()
+	if err := mem.Mkdir("repo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openTaskOn(t, mem, "kv", filestore.LookOnly()); err == nil {
+		t.Fatal("LookOnly opened a store that was never made")
+	}
+	if _, ok := mem.Files()[ignoreFile]; ok {
+		t.Fatal("a look at a store that is not there wrote a .gitignore")
+	}
+	s, err := openTaskOn(t, mem, "kv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(mem.Files()[ignoreFile]); got != "*\n" {
+		t.Fatalf("a new state directory has .gitignore %q, want %q", got, "*\n")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A state directory an older program made has no .gitignore until its next open.
+	if err := mem.Remove(ignoreFile); err != nil {
+		t.Fatal(err)
+	}
+	for _, opts := range [][]filestore.Option{nil, {filestore.LookOnly()}} {
+		s, err = openTaskOn(t, mem, "kv", opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := string(mem.Files()[ignoreFile]); got != "*\n" {
+			t.Fatalf("an existing state directory has .gitignore %q after an open, want %q", got, "*\n")
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := mem.Remove(ignoreFile); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mem.Put(ignoreFile, []byte("jobs\n"))
+	for _, task := range []string{"kv", "other"} {
+		s, err := openTaskOn(t, mem, task)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := string(mem.Files()[ignoreFile]); got != "jobs\n" {
+		t.Fatalf("the user's .gitignore became %q", got)
+	}
+	for name := range mem.Files() {
+		if strings.HasPrefix(name, "repo/.vibesys-state/.tmp-") {
+			t.Errorf("a temporary file is left: %s", name)
+		}
+	}
+}
+
+// A machine that dies at any step of the first open leaves the .gitignore whole or not there, and
+// the next open leaves it whole.
+func TestTheGitignoreIsWholeAfterACrashAtAnyStep(t *testing.T) {
+	probe := fsys.NewMemFS()
+	probe.Put("repo/README", nil)
+	if _, err := openTaskOn(t, probe, "kv"); err != nil {
+		t.Fatal(err)
+	}
+	for step := range probe.Steps() {
+		for _, kind := range []fsys.FaultKind{fsys.FaultCrash, fsys.FaultTornWrite} {
+			mem := fsys.NewMemFS()
+			mem.Put("repo/README", nil)
+			mem.SetFault(fsys.Fault{At: mem.Steps() + step, Kind: kind})
+			_, _ = openTaskOn(t, mem, "kv")
+			image := mem.CrashImage(kind == fsys.FaultTornWrite)
+			if got, ok := image.Files()[ignoreFile]; ok && string(got) != "*\n" {
+				t.Fatalf("step %d kind %d: after the crash .gitignore is %q", step, kind, got)
+			}
+			if _, err := openTaskOn(t, image, "kv"); err != nil {
+				t.Fatalf("step %d kind %d: reopening: %v", step, kind, err)
+			}
+			if got := string(image.Files()[ignoreFile]); got != "*\n" {
+				t.Fatalf("step %d kind %d: after reopening .gitignore is %q", step, kind, got)
+			}
+		}
 	}
 }
