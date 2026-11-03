@@ -17,6 +17,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/gateway/schemahash"
 )
 
 // desktopUIEnv opts the desktop path test in to the UI observer: the built desktop app is
@@ -88,13 +91,16 @@ func observeWithDesktopApp(t *testing.T, world uiWorld) {
 		t.Errorf("process %d started by the desktop app still runs after the observer; killing it", pid)
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
-	installed, _ := filepath.Glob(filepath.Join(world.Home, ".vibesys", "gateway", "*", "vibesysd"))
-	for _, binary := range installed {
-		for _, pid := range processesOf(binary) {
-			t.Errorf("the desktop app's own gateway (%d) runs; it should have used the running one", pid)
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-		}
+	gatewayDir := filepath.Dir(filepath.Dir(lifecycle.SocketPath(filepath.Join(world.Home, ".vibesys"), schemahash.APISchemaHash)))
+	table := processTable()
+	for i := range table {
+		table[i].exe, _ = filepath.Rel(gatewayDir, table[i].exe)
 	}
+	for _, pid := range leakedHosts(os.DirFS(gatewayDir), []string{"vibesysd", "vibesys-host"}, table) {
+		t.Errorf("the desktop app's own gateway (%d) runs; it should have used the running one", pid)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+
 	if runErr != nil {
 		t.Fatalf("the desktop app observer failed: %v\n%s", runErr, out)
 	}
