@@ -32,6 +32,11 @@ func (r *rig) useCLI() {
 	if out, err := build.CombinedOutput(); err != nil {
 		r.t.Fatalf("build vibesys-cli: %v\n%s", err, out)
 	}
+	for i, env := range r.env {
+		if strings.HasPrefix(env, "VIBESYS_ORCHESTRATOR_CLI=") {
+			r.env[i] = "VIBESYS_ORCHESTRATOR_CLI=" + filepath.Join(bin, "vibesys-cli")
+		}
+	}
 	r.env = append(r.env, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	r.t.Cleanup(func() { r.stopCLIDaemon(filepath.Join(bin, "vibesys-cli")) })
 }

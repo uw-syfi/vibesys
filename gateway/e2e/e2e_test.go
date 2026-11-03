@@ -69,6 +69,10 @@ func newRig(t *testing.T) *rig {
 	if out, err := exec.Command("uv", "sync", "--frozen", "--quiet", "--project", sidecar).CombinedOutput(); err != nil {
 		t.Fatalf("prepare the sidecar environment: %v\n%s", err, out)
 	}
+	cli := filepath.Join(dir, "vibesys-cli")
+	if err := os.WriteFile(cli, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	// The daemon's root is the .vibesys directory of a home of its own (dir). A client that finds
 	// the gateway by the user's home, as the desktop app does, reaches this one when its HOME is dir.
 	r := &rig{t: t, binary: binary, dir: dir, root: filepath.Join(dir, ".vibesys"), state: filepath.Join(dir, "state")}
