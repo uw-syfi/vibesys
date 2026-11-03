@@ -6,6 +6,7 @@ import (
 	cli "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"testing"
 	"time"
@@ -26,6 +27,15 @@ func TestCapsKeepNewestJobsTheirResultsAndFullSource(t *testing.T) {
 			t.Fatalf("notification source capped %d jobs to %d: %v", n, len(updates), err)
 		}
 		capped := search.Cap(view)
+		twice := search.Cap(capped)
+		if twice.Truncated != capped.Truncated || twice.UnattributedJobs != capped.UnattributedJobs || len(twice.Facts) != len(capped.Facts) {
+			t.Fatal("cap is not idempotent")
+		}
+		for i := range twice.Facts {
+			if !proto.Equal(twice.Facts[i], capped.Facts[i]) {
+				t.Fatal("cap changed retained facts")
+			}
+		}
 		jobs, results := 0, 0
 		for _, f := range capped.Facts {
 			if j := f.GetJob(); j != nil {

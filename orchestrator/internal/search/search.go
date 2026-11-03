@@ -66,6 +66,7 @@ func Fold(facts []*pb.TaskFact) View {
 func Cap(v View) View {
 	out := Fold(v.Facts)
 	out.Reason, out.Detail = v.Reason, v.Detail
+	out.Truncated, out.UnattributedJobs = v.Truncated, v.UnattributedJobs
 	sort.SliceStable(out.Facts, func(i, j int) bool {
 		a, b := out.Facts[i], out.Facts[j]
 		if a.GetJob() != nil && b.GetJob() != nil {
