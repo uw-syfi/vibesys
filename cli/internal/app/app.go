@@ -34,8 +34,9 @@ type App struct {
 	// Close.
 	sups *ownedSupervisors
 
-	inbox chan message
-	view  atomic.Pointer[view]
+	inbox       chan message
+	view        atomic.Pointer[view]
+	generations storeGenerations
 
 	// branchMu is held while a result branch is read for a decision or moved, so promotions go
 	// one at a time and nothing reads the branch between a recorded promotion and its move.
@@ -146,7 +147,6 @@ func (a *App) loop() {
 	state := lifecycle.Recovering()
 	scopes := map[lifecycle.StoreID]core.Scope{}
 	handles := map[lifecycle.Ref]supervisor.Handle{}
-	generations := map[lifecycle.StoreID]*effectGeneration{}
 	defer func() {
 		for _, h := range handles {
 			h.Close()
@@ -159,9 +159,12 @@ func (a *App) loop() {
 		case <-a.ctx.Done():
 			return
 		}
-		if g := m.generation; g != nil && generations[g.store] != g {
+		if g := m.generation; g != nil && !a.generations.current(g) {
 			if m.handle != nil {
 				m.handle.Close()
+			}
+			if m.done != nil {
+				close(m.done)
 			}
 			continue
 		}
@@ -177,14 +180,11 @@ func (a *App) loop() {
 		keepHandle(handles, m, reqs, state)
 		dropLetGo(handles, before, state, reqs)
 		if e, ok := m.event.(lifecycle.StoreForgotten); ok {
-			delete(generations, e.Store)
+			a.generations.retire(e.Store)
 		}
 		for _, r := range reqs {
 			id := r.Target().Store
-			if generations[id] == nil {
-				generations[id] = &effectGeneration{store: id}
-			}
-			a.startEffect(r, scopes, handles, generations[id])
+			a.startEffect(r, scopes, handles, a.generations.get(id))
 		}
 		switch e := m.event.(type) {
 		case lifecycle.Closed:

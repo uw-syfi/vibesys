@@ -57,12 +57,13 @@ func (a *App) Start(ctx context.Context) error {
 		return run
 	}
 	for _, scope := range scopes {
-		if err := a.recoverScope(ctx, scope, take); err != nil {
+		scopeCtx := a.generationContext(ctx, storeIDOf(scope))
+		if err := a.recoverScope(scopeCtx, scope, take); err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			a.cfg.Logf("the store of task %s in %s cannot be read yet: %v", string(scope.Task()), string(scope.Repository()), err)
-			a.markUnread(scope, err)
+			a.markUnread(scopeCtx, scope, err)
 			away[storeIDOf(scope)] = true
 		}
 	}
@@ -70,6 +71,7 @@ func (a *App) Start(ctx context.Context) error {
 	// that could not be read.
 	for _, ref := range sortedRefs(byRef) {
 		r := byRef[ref]
+		ctx := a.generationContext(ctx, ref.Store)
 		found := lifecycle.Recovered{Ref: ref, Finding: lifecycle.NoSuchJob{}, Supervisor: a.presenceOf(r), At: a.now()}
 		m := message{handle: handleOf(r)}
 		scope, known := scopeOfRun(r)
@@ -81,7 +83,7 @@ func (a *App) Start(ctx context.Context) error {
 			// Reading it says which.
 			found.Finding = a.lookInStore(ctx, ref, scope, found.Supervisor)
 			if _, unread := found.Finding.(lifecycle.StoreAway); unread {
-				a.markUnread(scope, errNoRead)
+				a.markUnread(ctx, scope, errNoRead)
 				away[ref.Store] = true
 			}
 		}
@@ -89,7 +91,7 @@ func (a *App) Start(ctx context.Context) error {
 			m.scope = &scope
 		}
 		m.event = found
-		a.post(m)
+		a.postEffect(ctx, m)
 	}
 	a.settleBranches(ctx, scopes)
 	a.post(message{event: lifecycle.RecoveryDone{}, then: func() { a.sweep(named(a.ctx, "sweep")) }})
@@ -100,8 +102,8 @@ func (a *App) Start(ctx context.Context) error {
 var errNoRead = &core.Failure{Kind: core.FailureUnavailable, Message: "it could not be read"}
 
 // markUnread tells the machine a store could not be read, so that none of its jobs starts.
-func (a *App) markUnread(scope core.Scope, err error) {
-	a.post(message{event: lifecycle.StoreUnread{Store: storeIDOf(scope), Failure: failureOf(err)}, scope: &scope})
+func (a *App) markUnread(ctx context.Context, scope core.Scope, err error) {
+	a.postEffect(ctx, message{event: lifecycle.StoreUnread{Store: storeIDOf(scope), Failure: failureOf(err)}, scope: &scope})
 }
 
 func sortedRefs(runs map[lifecycle.Ref]supervisor.Run) []lifecycle.Ref {
@@ -113,6 +115,7 @@ func sortedRefs(runs map[lifecycle.Ref]supervisor.Run) []lifecycle.Ref {
 // recoverScope tells the machine of the unfinished jobs of one store, each with what runOf finds
 // of its run.
 func (a *App) recoverScope(ctx context.Context, scope core.Scope, runOf func(lifecycle.Ref) supervisor.Run) error {
+	ctx = a.generationContext(ctx, storeIDOf(scope))
 	// Most failures here wait for the slow sweep, and hold up nothing. A daemon that died a moment
 	// ago is different: its store is free as soon as the kernel gets to it, and its jobs are this
 	// daemon's to answer for.
@@ -137,7 +140,7 @@ func (a *App) recoverScope(ctx context.Context, scope core.Scope, runOf func(lif
 		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}
 		run := runOf(ref)
 		presence := a.presenceOf(run)
-		a.post(message{
+		a.postEffect(ctx, message{
 			event: lifecycle.Recovered{
 				Ref: ref, Finding: a.jobIn(ctx, scope, job, presence, given),
 				Supervisor: presence, At: a.now(),
@@ -191,16 +194,18 @@ func (a *App) sweepOnce(ctx context.Context) {
 
 // readAgain takes up a store that could not be read before.
 func (a *App) readAgain(ctx context.Context, scope core.Scope) {
+	ctx = a.generationContext(ctx, storeIDOf(scope))
 	err := a.recoverScope(ctx, scope, func(ref lifecycle.Ref) supervisor.Run { return a.look(ctx, ref) })
 	if err != nil {
 		a.cfg.Logf("the store of task %s in %s cannot be read yet: %v", string(scope.Task()), string(scope.Repository()), err)
 		return
 	}
-	a.post(message{event: lifecycle.StoreRead{Store: storeIDOf(scope)}})
+	a.postEffect(ctx, message{event: lifecycle.StoreRead{Store: storeIDOf(scope)}})
 }
 
 // sweepStore looks at a store the machine has read before.
 func (a *App) sweepStore(ctx context.Context, scope core.Scope) {
+	ctx = a.generationContext(ctx, storeIDOf(scope))
 	st, err := a.cfg.Stores.Find(ctx, scope)
 	var jobs []core.Job
 	if err == nil {
@@ -209,7 +214,7 @@ func (a *App) sweepStore(ctx context.Context, scope core.Scope) {
 	if err != nil {
 		if ctx.Err() == nil {
 			a.cfg.Logf("the store of task %s in %s cannot be read: %v", string(scope.Task()), string(scope.Repository()), err)
-			a.markUnread(scope, err)
+			a.markUnread(ctx, scope, err)
 		}
 		return
 	}
@@ -221,11 +226,11 @@ func (a *App) sweepStore(ctx context.Context, scope core.Scope) {
 		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}
 		switch {
 		case job.State == core.JobQueued:
-			a.post(message{event: admittedOf(ref, job), scope: &scope})
+			a.postEffect(ctx, message{event: admittedOf(ref, job), scope: &scope})
 		case !held[ref]:
 			run := a.look(ctx, ref)
 			presence := a.presenceOf(run)
-			a.post(message{
+			a.postEffect(ctx, message{
 				event:  lifecycle.Recovered{Ref: ref, Finding: a.lookInStore(ctx, ref, scope, presence), Supervisor: presence, At: a.now()},
 				handle: handleOf(run), scope: &scope,
 			})

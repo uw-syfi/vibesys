@@ -74,6 +74,14 @@ func TestAWatcherConvergesAfterForgettingWithAnEffectStillFinishing(t *testing.T
 					close(g.release)
 					synctest.Wait()
 				}
+				if seed != 0 && r.IntN(2) == 0 {
+					o.takeAway(repoA)
+					o.limits.pass()
+					synctest.Wait()
+					o.bringBack(repoA)
+					o.limits.pass()
+					synctest.Wait()
+				}
 				o.remove(repoA)
 				if _, e := a.ForgetRepository(ctxFor(t), repoA); e != nil {
 					t.Fatal(e)
@@ -84,6 +92,10 @@ func TestAWatcherConvergesAfterForgettingWithAnEffectStillFinishing(t *testing.T
 					synctest.Wait()
 				}
 				j = submitAs(t, a, callA, "hold", "new", ";", "exit", "0")
+				if seed != 0 && r.IntN(2) == 0 {
+					o.limits.pass()
+					synctest.Wait()
+				}
 				// Let the old move's Closed event arrive before the new job ends.
 				if releaseAt == 2 {
 					close(g.release)

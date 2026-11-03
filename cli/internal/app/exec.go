@@ -28,11 +28,6 @@ func (a *App) startEffect(r lifecycle.Request, scopes map[lifecycle.StoreID]core
 	a.group.Go(func() { run(ctx) })
 }
 
-// effectGeneration belongs to one lifetime of a store in the loop. Forgetting the
-// store retires it, even when an effect is still finishing a bounded release.
-type effectGeneration struct{ store lifecycle.StoreID }
-type generationKey struct{}
-
 func (a *App) postEffect(ctx context.Context, m message) bool {
 	m.generation, _ = ctx.Value(generationKey{}).(*effectGeneration)
 	return a.post(m)
