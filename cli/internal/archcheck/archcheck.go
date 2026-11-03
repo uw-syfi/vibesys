@@ -84,8 +84,8 @@ var rules = map[string][]string{
 	"internal/flow":                          {"internal/core", "internal/reading", "internal/task"},
 	"internal/hostfs":                        {},
 	"internal/flowrun": {
-		"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/flow",
-		"internal/hostfs", "internal/reading",
+		"internal/clock", "internal/core", "internal/environment", "internal/flow", "internal/hostfs",
+		"internal/reading",
 	},
 	"internal/runtimedir": {"internal/core"},
 
@@ -104,7 +104,7 @@ var rules = map[string][]string{
 
 	// Supervisors: the domain, its channel to the daemon, and the process that serves it.
 	"internal/supervisor": {
-		"internal/backend", "internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow",
+		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow",
 		"internal/flowrun", "internal/hostfs", "internal/lifecycle", "internal/owned",
 	},
 	"internal/supervisor/suptest": {"internal/core", "internal/lifecycle", "internal/owned", "internal/supervisor"},

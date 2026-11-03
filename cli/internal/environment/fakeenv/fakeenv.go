@@ -44,6 +44,7 @@ type Environment struct {
 	gates  Gates
 	timers clock.Timers
 	pause  time.Duration
+	reader environment.MachineReader
 
 	mu       sync.Mutex
 	runs     []core.Execution
@@ -79,6 +80,10 @@ func WithProbePause(d time.Duration) Option { return func(e *Environment) { e.pa
 // WithFingerprintError makes Fingerprint fail with err, as an environment does that cannot be
 // reached.
 func WithFingerprintError(err error) Option { return func(e *Environment) { e.finger = err } }
+
+// WithMachine sets the machine the environment's commands run on. Without it reading the
+// machine fails as unavailable, which a job records as facts and load it could not read.
+func WithMachine(m environment.MachineReader) Option { return func(e *Environment) { e.reader = m } }
 
 // New returns an environment of a kind whose scripts wait at the given gates.
 func New(kind core.EnvironmentKind, gates Gates, opts ...Option) *Environment {
@@ -136,6 +141,24 @@ func (e *Environment) HoldFingerprint(gate string) {
 	defer e.mu.Unlock()
 	e.hold = gate
 }
+
+// Machine implements environment.Environment.
+func (e *Environment) Machine(ctx context.Context) (core.MachineFacts, error) {
+	if e.reader == nil {
+		return core.MachineFacts{}, errNoMachine
+	}
+	return e.reader.Machine(ctx)
+}
+
+// Load implements environment.Environment.
+func (e *Environment) Load(ctx context.Context) (core.MachineLoad, error) {
+	if e.reader == nil {
+		return core.MachineLoad{}, errNoMachine
+	}
+	return e.reader.Load(ctx)
+}
+
+var errNoMachine = &core.Failure{Kind: core.FailureUnavailable, Message: "the fake environment was given no machine"}
 
 // Fingerprinted returns how many times Fingerprint was called.
 func (e *Environment) Fingerprinted() int {

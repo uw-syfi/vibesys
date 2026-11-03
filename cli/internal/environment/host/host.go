@@ -69,6 +69,14 @@ func (e *Environment) Fingerprint(ctx context.Context) (core.Fingerprint, error)
 	}, nil
 }
 
+// Machine implements environment.Environment: the commands run on this machine.
+func (e *Environment) Machine(ctx context.Context) (core.MachineFacts, error) {
+	return e.backend.Machine(ctx)
+}
+
+// Load implements environment.Environment.
+func (e *Environment) Load(ctx context.Context) (core.MachineLoad, error) { return e.backend.Load(ctx) }
+
 // Run implements environment.Environment.
 func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) core.Attempt {
 	if err := environment.Validate(x); err != nil {

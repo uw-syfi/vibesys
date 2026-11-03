@@ -168,6 +168,15 @@ func (e *env) Fingerprint(ctx context.Context) (core.Fingerprint, error) {
 	}, nil
 }
 
+// Machine implements environment.Environment: the machine the engine runs containers on, which
+// for an engine reached over ssh is that machine and not the daemon's.
+func (e *env) Machine(ctx context.Context) (core.MachineFacts, error) {
+	return e.p.cfg.Backend.Machine(ctx)
+}
+
+// Load implements environment.Environment.
+func (e *env) Load(ctx context.Context) (core.MachineLoad, error) { return e.p.cfg.Backend.Load(ctx) }
+
 // image returns the image the task's files build. An image the engine already has under their
 // tag is not built again. Builds are one at a time, so that a Fingerprint and a Run that ask for
 // the same image build it once; the build's progress goes to log.

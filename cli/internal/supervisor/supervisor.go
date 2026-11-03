@@ -7,7 +7,6 @@ import (
 	"io"
 	"sync"
 
-	"github.com/uw-syfi/vibesys/cli/internal/backend"
 	"github.com/uw-syfi/vibesys/cli/internal/changed"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -22,13 +21,12 @@ import (
 // ErrReleased ends an Attach on a supervisor that was released while it waited.
 var ErrReleased = errors.New("the supervisor was released")
 
-// Host is what a check or a measure job needs of the machine besides its environment: the
-// machine's facts and load, the file system for the benchmark's result files, and the time. A
-// supervisor of a command job does not use it.
+// Host is what a check or a measure job needs of the daemon's machine besides its environment,
+// which reads the machine the job runs on: the file system for the benchmark's result files, and
+// the time. A supervisor of a command job does not use it.
 type Host struct {
-	Backend backend.Backend
-	Files   hostfs.FS
-	Clock   clock.Clock
+	Files hostfs.FS
+	Clock clock.Clock
 	// Artifacts, when set, names the artifacts directory of a job, which outlives it. A job of a
 	// host with none keeps no artifacts.
 	Artifacts func(repository, task string, job core.JobID) string
@@ -258,7 +256,7 @@ func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 // the daemon's decision, so nothing here chooses what to run.
 func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Verdict {
 	h := s.cfg.Host
-	if h.Backend == nil || h.Files == nil || h.Clock == nil {
+	if h.Files == nil || h.Clock == nil {
 		return lifecycle.NotAttempted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: "this supervisor was started without the machine a check or a measure job needs"}}
 	}
 	l := s.cfg.Launch
@@ -268,7 +266,7 @@ func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Verdict {
 	}
 	cfg := flowrun.Config{
 		Repository: l.Repository, Commit: l.Spec.Commit, Environment: env, Checkouts: s.cfg.Checkouts,
-		Backend: h.Backend, Files: h.Files, Clock: h.Clock, Output: writer{s},
+		Files: h.Files, Clock: h.Clock, Output: writer{s},
 	}
 	if h.Artifacts != nil {
 		cfg.Artifacts = h.Artifacts(l.Repository, l.Task, l.Job)

@@ -288,13 +288,11 @@ running one's store works in a separate clone.
 ## What is not done
 
 - Multi-node Slurm clusters, where the ssh host is a login node: images, exec
-  and removal would have to go through `srun --overlap` into the allocation.
+  and removal would have to go through `srun --overlap` into the allocation, and
+  the machine facts and load a result records, which the environment reads over
+  ssh, would have to be read on the allocated node.
 - Passing exactly the GPUs Slurm allocated on a node with several, instead of
   the configured `--gpus` value.
-- The per-sample load reading and the machine facts recorded with a result
-  (`MachineFacts`, never compared) come from the supervisor's own machine, not
-  the engine's: the fingerprint's facts are read over ssh, but the supervisor's
-  host backend stays local.
 - A build's log is kept only when the build fails (its last lines are in the
   error); a successful build's output is discarded, so its duration is not in
   the job's log.

@@ -26,6 +26,10 @@ type Environment interface {
 	// Kind is the kind this environment is.
 	Kind() core.EnvironmentKind
 
+	// MachineReader reads the machine the environment's commands run on, which is not the
+	// daemon's when the environment runs them on another machine.
+	MachineReader
+
 	// Fingerprint returns the environment's identity: what a result's comparability and a check
 	// pass's reuse are judged by. For docker it pins the exact image digest. It returns the same
 	// value for the same environment, and fails with core.FailureUnavailable when the
@@ -44,4 +48,15 @@ type Environment interface {
 	// endings. An attempt that failed while ctx was being cancelled is core.Ended with
 	// core.ExecCancelled: the cancel is what ended it.
 	Run(ctx context.Context, execution core.Execution, out io.Writer) core.Attempt
+}
+
+// MachineReader reads a machine. A job's results record what it reads of the machine the job ran
+// on.
+type MachineReader interface {
+	// Machine returns what does not change while the daemon runs: host identity, operating
+	// system, CPU and memory.
+	Machine(ctx context.Context) (core.MachineFacts, error)
+
+	// Load samples the machine's current load. It is reported and never acted on.
+	Load(ctx context.Context) (core.MachineLoad, error)
 }
