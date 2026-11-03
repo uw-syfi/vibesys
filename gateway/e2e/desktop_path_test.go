@@ -298,16 +298,13 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 		}
 	}
 
-	// Job-finished notifications also wake the lead. Count the semantic handoffs
-	// in the mailbox instead of prompt files, whose count includes those notices.
-	handoffs := 0
-	for _, message := range w.messages {
-		if message.To == lead.ID && message.Handoff != nil {
-			handoffs++
-		}
-	}
-	if handoffs != 3 {
-		t.Errorf("the lead received %d handoffs, want three", handoffs)
+	// One brief, three handoffs, and exactly eight job-completion notices wake
+	// the lead. Wait for typed delivery acknowledgments before counting files;
+	// the report itself may arrive before the last job notice was delivered.
+	r.awaitLeadDeliveries(lead.ID)
+	const expectedPrompts = 1 + 3 + 8
+	if prompts, err := filepath.Glob(filepath.Join(leadDir, "prompts", "*.md")); err != nil || len(prompts) != expectedPrompts {
+		t.Errorf("the lead was sent %d prompts, want exactly %d: %v (glob: %v)", len(prompts), expectedPrompts, prompts, err)
 	}
 
 	// Each worker's commit was measured by vibesys-cli and the number is the worker's score; the
