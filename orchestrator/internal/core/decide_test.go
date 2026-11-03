@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"slices"
 	"testing"
@@ -153,15 +154,22 @@ func TestTheLeadsFirstMessageCarriesTheTaskTheFanoutAndTheSteering(t *testing.T)
 func started(t *testing.T, fanout uint32, caps core.Capabilities) (*script, core.RunID, core.AgentID) {
 	t.Helper()
 	w := newScript(t)
-	r := w.command(operator, core.StartRun{Repository: "repo", Task: "task", FanoutLimit: fanout, Lead: lead, Brief: "go"})
+	run, leadID := w.startRun("task", fanout, caps)
+	return w, run, leadID
+}
+
+// startRun adds a run on a task to the script and rests its lead after its brief.
+func (w *script) startRun(task string, fanout uint32, caps core.Capabilities) (core.RunID, core.AgentID) {
+	w.t.Helper()
+	r := w.command(operator, core.StartRun{Repository: "repo", Task: task, FanoutLimit: fanout, Lead: lead, Brief: "go"})
 	w.wantEffects("LaunchSession")
 	w.open(r.Agent, caps)
 	if got := w.turn(r.Agent).Trigger; got != core.TriggerBrief {
-		t.Fatalf("the first turn's trigger = %s", got)
+		w.t.Fatalf("the first turn's trigger = %s", got)
 	}
 	w.wantEffects("StartTurn")
 	w.endTurn(r.Agent, core.TurnCompleted)
-	return w, r.Run, r.Agent
+	return r.Run, r.Agent
 }
 
 func (w *script) spawn(run core.RunID, by core.AgentID, caps core.Capabilities) core.AgentID {
@@ -509,6 +517,110 @@ func TestAFinishedJobWakesTheLeadOnceHoweverOftenItIsReported(t *testing.T) {
 	replayed := core.Replay(core.State{}, w.log)
 	if _, events, _ := core.Decide(replayed, core.Input{At: w.now, Nonce: "n", Body: update}); len(events) != 0 {
 		t.Fatalf("a job repeated after a restart recorded %v", events)
+	}
+}
+
+// A job id is only unique within one task's store (j1, j2, ...), so two runs, on one task or on two,
+// each see a job j1 of their own. The lead of each is told of its own.
+func TestTwoRunsThatEachFinishJobJ1AreBothTold(t *testing.T) {
+	for name, tasks := range map[string][2]string{
+		"two tasks": {"task-a", "task-b"}, "one task": {"task", "task"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newScript(t)
+			runA, leadA := w.startRun(tasks[0], 1, noSteer)
+			runB, leadB := w.startRun(tasks[1], 1, noSteer)
+			w.step(core.JobUpdate{Job: "j1", Run: runA, State: core.JobSucceeded})
+			if got := w.turn(leadA).Trigger; got != core.TriggerJobFinished {
+				t.Fatalf("the first lead woke for %s", got)
+			}
+			w.step(core.JobUpdate{Job: "j1", Run: runB, State: core.JobFailed})
+			if got := w.turn(leadB).Trigger; got != core.TriggerJobFinished {
+				t.Fatalf("the second run's j1 was not told: its lead woke for %s", got)
+			}
+			for _, update := range []core.JobUpdate{
+				{Job: "j1", Run: runA, State: core.JobSucceeded}, {Job: "j1", Run: runB, State: core.JobFailed},
+			} {
+				w.step(update)
+				if len(w.events) != 0 {
+					t.Fatalf("a repeated job update recorded %v", w.events)
+				}
+			}
+			restored := core.Replay(core.State{}, w.s.Checkpoint())
+			for _, run := range []core.RunID{runA, runB} {
+				update := core.JobUpdate{Job: "j1", Run: run, State: core.JobSucceeded}
+				if _, events, _ := core.Decide(restored, core.Input{At: w.now, Nonce: "n", Body: update}); len(events) != 0 {
+					t.Fatalf("run %s's j1 was told again after a restart from a checkpoint: %v", run, events)
+				}
+			}
+		})
+	}
+}
+
+// Whatever order job updates come in, from however many runs, each (run, job) that ended is told
+// to its lead exactly once, and a restart from a checkpoint or from the whole log forgets none.
+func TestEachEndedJobOfEachRunIsToldExactlyOnceAcrossRestarts(t *testing.T) {
+	type key struct {
+		run core.RunID
+		job core.JobID
+	}
+	ended := []core.JobState{core.JobSucceeded, core.JobFailed, core.JobCancelled, core.JobLost}
+	live := []core.JobState{core.JobRunning, core.JobQueued}
+	for seed := range uint64(200) {
+		r := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))
+		w := newScript(t)
+		var runs []core.RunID
+		for i := range 2 + r.IntN(3) {
+			run, _ := w.startRun(fmt.Sprintf("task-%d", r.IntN(2)+i%2), 1, noSteer)
+			runs = append(runs, run)
+		}
+		start := len(w.log)
+		everEnded := map[key]bool{}
+		for range 20 + r.IntN(60) {
+			switch r.IntN(8) {
+			case 0:
+				before := w.s
+				w.s = core.Replay(core.State{}, w.s.Checkpoint())
+				if !w.s.Equal(before) {
+					t.Fatalf("seed %d: a checkpoint replays to a different state", seed)
+				}
+			case 1:
+				before := w.s
+				w.s = core.Replay(core.State{}, w.log)
+				if !w.s.Equal(before) {
+					t.Fatalf("seed %d: the whole log replays to a different state", seed)
+				}
+			default:
+				run, job := runs[r.IntN(len(runs))], core.JobID(fmt.Sprintf("j%d", 1+r.IntN(3)))
+				state := live[r.IntN(len(live))]
+				if r.IntN(2) == 0 {
+					state = ended[r.IntN(len(ended))]
+					everEnded[key{run, job}] = true
+				}
+				w.step(core.JobUpdate{Job: job, Run: run, State: state})
+			}
+		}
+		// A message passes through several deliveries, and each is an event, so count message ids.
+		told := map[key]map[core.MessageID]bool{}
+		for _, e := range w.log[start:] {
+			if m, ok := e.Body.(core.Message); ok {
+				if b, ok := m.Body.(core.JobFinished); ok {
+					k := key{m.Run, b.Job}
+					if told[k] == nil {
+						told[k] = map[core.MessageID]bool{}
+					}
+					told[k][m.ID] = true
+				}
+			}
+		}
+		for k := range everEnded {
+			if len(told[k]) != 1 {
+				t.Fatalf("seed %d: job %s of run %s was told %d times, want once", seed, k.job, k.run, len(told[k]))
+			}
+		}
+		if len(told) != len(everEnded) {
+			t.Fatalf("seed %d: %d (run, job) pairs were told, %d ended", seed, len(told), len(everEnded))
+		}
 	}
 }
 

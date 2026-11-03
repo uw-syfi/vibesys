@@ -1,6 +1,7 @@
 package core
 
 import (
+	"cmp"
 	"maps"
 	"reflect"
 	"slices"
@@ -20,7 +21,7 @@ const checkpointID = "checkpoint"
 //
 // The events are a description of the state and not a history: a few of them are invented to
 // carry what the fold keeps without an entity, namely the counters of turns and items an agent has
-// used, and the jobs already told. They pass the contract like any event, and no reader sees them.
+// used, and the jobs already told, each under the run it was told to. They pass the contract like any event, and no reader sees them.
 // They come in an order that makes the fold rebuild the queues, so it is part of what Checkpoint
 // returns.
 func (s State) Checkpoint() []Event {
@@ -82,10 +83,13 @@ func (s State) Checkpoint() []Event {
 		r := s.receipts[id]
 		out = append(out, Event{Run: r.Run, Command: r.Command, At: checkpointAt, Body: r})
 	}
-	for _, job := range slices.Sorted(maps.Keys(s.jobs)) {
-		emit(checkpointID, Message{
-			ID: MessageID(checkpointID + "/" + string(job)), Run: checkpointID, Delivery: DeliveryConsumed,
-			At: checkpointAt, Body: JobFinished{Job: job, Outcome: JobSucceeded},
+	for _, told := range slices.SortedFunc(maps.Keys(s.jobs), func(a, b toldJob) int {
+		return cmp.Or(cmp.Compare(a.run, b.run), cmp.Compare(a.job, b.job))
+	}) {
+		emit(told.run, Message{
+			ID:  MessageID(checkpointID + "/" + string(told.run) + "/" + string(told.job)),
+			Run: told.run, Delivery: DeliveryConsumed, At: checkpointAt,
+			Body: JobFinished{Job: told.job, Outcome: JobSucceeded},
 		})
 	}
 	return out

@@ -78,7 +78,9 @@ type sim struct {
 	sessions map[core.Session]*session
 	timers   []core.ArmTimer
 	jobs     *jobstest.FakeJobSource
-	jobIDs   int
+	// jobIDs counts the jobs set for each run. A real job id is only unique within one task's store,
+	// so every run's first job is called j1, and the core has to tell runs apart by more than the id.
+	jobIDs map[core.RunID]int
 	// retries holds commands a client has sent and may send again.
 	retries []core.Command
 	// silent holds sessions that will not answer a close, which only the grace timer ends.
@@ -97,7 +99,7 @@ type sim struct {
 func newSim(t *testing.T, seed uint64) *sim {
 	w := &sim{
 		t: t, r: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)), now: epoch, seed: seed,
-		read: map[core.Session]int{}, sessions: map[core.Session]*session{}, jobs: jobstest.NewFakeJobSource(),
+		read: map[core.Session]int{}, sessions: map[core.Session]*session{}, jobs: jobstest.NewFakeJobSource(), jobIDs: map[core.RunID]int{},
 		silent: map[core.Session]bool{}, caps: map[core.AgentID]core.Capabilities{}, monitor: newMonitor(),
 	}
 	w.plan = w.drawPlan()
@@ -379,13 +381,13 @@ func (w *sim) pollJobs() {
 	}
 	switch w.r.IntN(3) {
 	case 0:
-		w.jobIDs++
-		w.jobs.Set(core.JobUpdate{Job: core.JobID(fmt.Sprintf("job-%d", w.jobIDs)), Run: run.ID, State: core.JobRunning})
+		w.jobIDs[run.ID]++
+		w.jobs.Set(core.JobUpdate{Job: core.JobID(fmt.Sprintf("j%d", w.jobIDs[run.ID])), Run: run.ID, State: core.JobRunning})
 	case 1:
-		if w.jobIDs > 0 {
+		if w.jobIDs[run.ID] > 0 {
 			states := []core.JobState{core.JobSucceeded, core.JobFailed, core.JobCancelled, core.JobLost}
 			w.jobs.Set(core.JobUpdate{
-				Job: core.JobID(fmt.Sprintf("job-%d", 1+w.r.IntN(w.jobIDs))), Run: run.ID, State: states[w.r.IntN(len(states))],
+				Job: core.JobID(fmt.Sprintf("j%d", 1+w.r.IntN(w.jobIDs[run.ID]))), Run: run.ID, State: states[w.r.IntN(len(states))],
 			})
 		}
 	default:
