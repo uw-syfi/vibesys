@@ -163,7 +163,7 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 func (s *ProcessSidecars) awaitReady(ctx context.Context, session core.Session, dir string) (daemon.Sidecar, error) {
 	for {
 		if pid, ok := readPid(dir); ok {
-			if !alive(pid) {
+			if !running(pid, dir) {
 				return nil, fmt.Errorf("the sidecar exited at start: %s", tail(filepath.Join(dir, "sidecar.log")))
 			}
 			if conn, err := (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(dir, "sock")); err == nil {
@@ -183,7 +183,7 @@ func (s *ProcessSidecars) awaitReady(ctx context.Context, session core.Session, 
 func (s *ProcessSidecars) Attach(_ context.Context, session core.Session) (daemon.Sidecar, error) {
 	dir := s.sessionDir(session)
 	pid, ok := readPid(dir)
-	if !ok || !alive(pid) {
+	if !ok || !running(pid, dir) {
 		reap(dir)
 		return nil, daemon.ErrSidecarGone
 	}
@@ -218,7 +218,7 @@ func (s *ProcessSidecars) reapAgent(agent core.AgentID) {
 	for _, e := range sessions {
 		if _, err := strconv.ParseUint(e.Name(), 10, 32); err == nil && e.IsDir() {
 			dir := filepath.Join(s.agentDir(agent), e.Name())
-			if pid, ok := readPid(dir); !ok || !alive(pid) {
+			if pid, ok := readPid(dir); !ok || !running(pid, dir) {
 				reap(dir)
 			}
 		}
@@ -264,7 +264,7 @@ type sidecarProcess struct {
 }
 
 func (c *sidecarProcess) gone(err error) error {
-	if !alive(c.pid) {
+	if !running(c.pid, c.dir) {
 		return daemon.ErrSidecarGone
 	}
 	return err
@@ -310,12 +310,18 @@ func (c *sidecarProcess) Follow(_ context.Context, after uint64) (daemon.EventSt
 	return f, nil
 }
 
-// Kill implements daemon.Sidecar.
+// Kill implements daemon.Sidecar. It ends the sidecar and the agent processes it recorded, and
+// leaves nothing that names either, so a repeat, or a later look at the directory, finds nothing to
+// kill: a process id the system has since given to another program is never signalled.
 func (c *sidecarProcess) Kill(context.Context) error {
-	if err := syscall.Kill(c.pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return err
+	if running(c.pid, c.dir) {
+		if err := syscall.Kill(c.pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			return err
+		}
 	}
 	reap(c.dir)
+	retire(c.dir)
+	c.log.Info("the sidecar was ended")
 	return nil
 }
 
@@ -364,6 +370,32 @@ func readPid(dir string) (int, bool) {
 func alive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
+}
+
+// running says pid is the sidecar of dir and not a program that was given the number after the
+// sidecar exited. Where the system names a process's command line, it must carry the directory,
+// which every sidecar is started with (`--state-dir DIR`, whatever program the setting names);
+// elsewhere liveness is all there is to go on.
+func running(pid int, dir string) bool {
+	if !alive(pid) {
+		return false
+	}
+	if _, err := os.Stat("/proc/self"); err != nil {
+		return true
+	}
+	cmdline, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
+	return err == nil && commandOwns(cmdline, dir)
+}
+
+// commandOwns says a NUL-separated command line has dir as a whole argument.
+func commandOwns(cmdline []byte, dir string) bool {
+	return bytes.Contains(cmdline, []byte("\x00"+dir+"\x00"))
+}
+
+// retire removes what names a session's processes once they are ended.
+func retire(dir string) {
+	_ = os.Remove(filepath.Join(dir, "sidecar.pid"))
+	_ = os.WriteFile(filepath.Join(dir, "agent.pgids"), nil, 0o600)
 }
 
 // reap kills each process group a gone sidecar recorded, so its agent does not run on unowned.
