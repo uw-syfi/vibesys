@@ -3,7 +3,7 @@ package search_test
 import (
 	"context"
 	"fmt"
-	cli "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/cli/v1"
+	cli "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 	"google.golang.org/protobuf/proto"

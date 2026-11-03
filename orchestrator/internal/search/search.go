@@ -7,7 +7,7 @@ import (
 	"sort"
 	"sync"
 
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/cli/v1"
+	pb "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"google.golang.org/protobuf/proto"
 )
