@@ -14,7 +14,7 @@ import type * as Layer from 'effect/Layer';
 import * as Schema from 'effect/Schema';
 import * as Stream from 'effect/Stream';
 import {GatewayTransport} from '../../core/transport/gateway-transport.js';
-import {settle} from '../settle.js';
+import {quiescent, settle} from '../settle.js';
 import type {Recording, Step} from './fake-transport.js';
 
 /** An implementation under test, playing `recording`. */
@@ -145,7 +145,7 @@ const releaseProperty = (run: Run): void => {
           if (interrupt || how === 'hang') yield* Fiber.interrupt(fiber);
           else yield* Fiber.join(fiber);
           expect(world.calls()).toEqual([{open: false, released: 1}]);
-        }),
+        }).pipe(quiescent),
       ),
     {arbitrary: {runs: 40}},
   );

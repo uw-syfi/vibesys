@@ -5,6 +5,7 @@ import * as Effect from 'effect/Effect';
 import * as Fiber from 'effect/Fiber';
 import * as AtomRegistry from 'effect/reactivity/AtomRegistry';
 import * as Schema from 'effect/Schema';
+import type * as Scope from 'effect/Scope';
 import * as TestClock from 'effect/testing/TestClock';
 import type {HostConnectionState} from '../state/index.js';
 import {
@@ -14,7 +15,7 @@ import {
   generateScenario,
   methodPathOf,
 } from '../testing/orchestrator/index.js';
-import {settle} from '../testing/settle.js';
+import {quiescent, settle} from '../testing/settle.js';
 import {makeFakeTransport} from '../testing/transport/index.js';
 import {ConnectionTerminal, makeHostConnection} from './connection.js';
 import {RpcStatus, Unavailable} from './errors.js';
@@ -43,8 +44,12 @@ type Connected = Effect.Success<ReturnType<typeof connect>>;
 
 const loss = new Unavailable({detail: 'link lost'});
 
+/** A test whose fibers all run on the counting scheduler `settle` watches. */
+const itQuiet = (name: string, body: () => Effect.Effect<void, unknown, Scope.Scope>) =>
+  it.effect(name, () => quiescent(body()));
+
 describe('the host connection', () => {
-  it.effect('is Idle until something asks, and dials only then', () =>
+  itQuiet('is Idle until something asks, and dials only then', () =>
     Effect.gen(function* () {
       const {state, hellos} = yield* connect();
       expect(yield* state).toEqual({_tag: 'Idle'});
@@ -52,7 +57,7 @@ describe('the host connection', () => {
     }),
   );
 
-  it.effect('is Ready only after a COMPATIBLE Hello, at epoch 1', () =>
+  itQuiet('is Ready only after a COMPATIBLE Hello, at epoch 1', () =>
     Effect.gen(function* () {
       const {connection, state, hellos, fake} = yield* connect();
       const epoch = yield* connection.ready();
@@ -63,7 +68,7 @@ describe('the host connection', () => {
     }),
   );
 
-  it.effect(
+  itQuiet(
     'refuses an incompatible build, terminally and without retrying, until the user retries',
     () =>
       Effect.gen(function* () {
@@ -81,7 +86,7 @@ describe('the host connection', () => {
       }),
   );
 
-  it.effect('stops for good on a status a retry cannot change, and says why', () =>
+  itQuiet('stops for good on a status a retry cannot change, and says why', () =>
     Effect.gen(function* () {
       const {connection, state, hellos} = yield* connect({
         helloFails: () => RpcStatus.UNIMPLEMENTED,
@@ -94,7 +99,7 @@ describe('the host connection', () => {
     }),
   );
 
-  it.effect('waits and dials again after a lost Hello, and is Ready once one is answered', () =>
+  itQuiet('waits and dials again after a lost Hello, and is Ready once one is answered', () =>
     Effect.gen(function* () {
       const {connection, state, hellos} = yield* connect({
         helloFails: nth => (nth < 2 ? RpcStatus.UNAVAILABLE : undefined),
@@ -109,7 +114,7 @@ describe('the host connection', () => {
     }),
   );
 
-  it.effect(
+  itQuiet(
     'leaves Ready when a feed suspects the epoch, and a stale suspicion changes nothing',
     () =>
       Effect.gen(function* () {
@@ -127,7 +132,7 @@ describe('the host connection', () => {
       }),
   );
 
-  it.effect('skips the wait when the user retries', () =>
+  itQuiet('skips the wait when the user retries', () =>
     Effect.gen(function* () {
       const {connection, state, hellos} = yield* connect({
         helloFails: nth => (nth === 0 ? RpcStatus.UNAVAILABLE : undefined),
@@ -140,7 +145,7 @@ describe('the host connection', () => {
     }),
   );
 
-  it.effect('an interrupted wait for Ready leaves the connection loop running', () =>
+  itQuiet('an interrupted wait for Ready leaves the connection loop running', () =>
     Effect.gen(function* () {
       const {connection, state} = yield* connect({
         helloFails: nth => (nth === 0 ? RpcStatus.UNAVAILABLE : undefined),
@@ -211,7 +216,7 @@ describe('the wait between attempts, over generated histories of losses', () => 
           }
           yield* Fiber.interrupt(dial);
         }),
-      ),
+      ).pipe(quiescent),
     {arbitrary: {runs: 25}},
   );
 });

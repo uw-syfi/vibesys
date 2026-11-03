@@ -14,7 +14,7 @@ import * as Layer from 'effect/Layer';
 import * as Schema from 'effect/Schema';
 import * as Stream from 'effect/Stream';
 import * as TestClock from 'effect/testing/TestClock';
-import {settle} from '../../testing/settle.js';
+import {quiescent, settle} from '../../testing/settle.js';
 import {
   type CallRecord,
   type FakeTransport,
@@ -175,7 +175,7 @@ it.effect('a stream with no first frame fails at its deadline; later silence is 
     expect(got).toEqual([1]);
     yield* Fiber.interrupt(consumer);
     expect(states(quiet)).toEqual([[false, 1]]);
-  }),
+  }).pipe(quiescent),
 );
 
 // P3: interrupt cancels exactly once
@@ -225,7 +225,7 @@ it.effect.prop(
       expect(call?.open).toBe(false);
       expect(call?.released).toBe(1);
       expect(fake.calls().length).toBe(1);
-    }),
+    }).pipe(quiescent),
 );
 
 it.effect.prop(
@@ -277,7 +277,7 @@ it.effect.prop(
       if (interrupt || how === 'hang') yield* Fiber.interrupt(fiber);
       else yield* Fiber.join(fiber);
       expect(bridge.ports().map(port => port.cancels)).toEqual([1]);
-    }),
+    }).pipe(quiescent),
   {arbitrary: {runs: 40}},
 );
 

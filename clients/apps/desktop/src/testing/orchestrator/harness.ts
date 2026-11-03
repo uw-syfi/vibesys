@@ -7,11 +7,12 @@ import * as Duration from 'effect/Duration';
 import * as Effect from 'effect/Effect';
 import type * as Atom from 'effect/reactivity/Atom';
 import * as AtomRegistry from 'effect/reactivity/AtomRegistry';
+import * as Scheduler from 'effect/Scheduler';
 import * as TestClock from 'effect/testing/TestClock';
 import {type HostSession, makeHostSession} from '../../core/host-session.js';
 import {Ids} from '../../core/ids.js';
 import type {HostModel} from '../../state/index.js';
-import {settle} from '../settle.js';
+import {makeQuiescence} from '../settle.js';
 import {
   type FaultPlan,
   faultySteps,
@@ -38,11 +39,14 @@ export const faultsOn =
 
 export const hostHarness = (daemon: FakeDaemon, options: HarnessOptions = {}) =>
   Effect.gen(function* () {
+    const {scheduler, settle} = yield* makeQuiescence;
     const base = daemonRecording(daemon, options);
     const fake = makeFakeTransport(options.wrap === undefined ? base : options.wrap(base));
     const session: HostSession = yield* makeHostSession('local').pipe(
       Effect.provide(fake.layer),
       Effect.provide(Ids.layer),
+      // Every fiber of the session runs on the scheduler `settle` watches.
+      Effect.provideService(Scheduler.Scheduler, scheduler),
     );
     const registry = AtomRegistry.make();
     return {

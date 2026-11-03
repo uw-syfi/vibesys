@@ -8,7 +8,7 @@ import * as Layer from 'effect/Layer';
 import * as Option from 'effect/Option';
 import * as Schema from 'effect/Schema';
 import * as Stream from 'effect/Stream';
-import {settle} from '../../testing/settle.js';
+import {quiescent, settle} from '../../testing/settle.js';
 import {type FakeBridge, makeFakeBridge, type OpenedPort} from '../../testing/transport/index.js';
 import {GatewayTransport} from './gateway-transport.js';
 import {GatewayPorts, GatewayTransportLive} from './live.js';
@@ -42,7 +42,7 @@ it.effect('a unary call sends its routing and returns the reply, releasing the p
     port?.reply(gatewayEnd());
     expect(yield* Fiber.join(fiber)).toEqual(Uint8Array.of(5));
     expect(fake.ports()[0]?.cancels).toBe(1);
-  }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(layer), quiescent);
 });
 
 it.effect('a unary call that ends with a failure carries the status, or none', () =>
@@ -72,7 +72,7 @@ it.effect('a unary call that ends with a failure carries the status, or none', (
         expect({message: error.message, status: error.status}).toEqual(expected);
       expect(fake.ports()[0]?.cancels).toBe(1);
     }
-  }),
+  }).pipe(quiescent),
 );
 
 it.effect('without a gateway every call fails with NoBridge', () =>
@@ -96,7 +96,7 @@ it.effect('interrupting a unary call cancels its port once', () => {
     yield* settle;
     yield* Fiber.interrupt(fiber);
     expect(fake.ports().map(port => port.cancels)).toEqual([1]);
-  }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(layer), quiescent);
 });
 
 /** Run a stream call to its end against a fresh fake, with `drive` playing the main process. */
@@ -117,7 +117,7 @@ const runStream = (capacity: number, drive: (port: OpenedPort) => void) => {
     yield* settle;
     const exit = yield* Fiber.join(fiber);
     return {seen: bytesOf(seen), exit, cancels: fake.ports().map(p => p.cancels)};
-  }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(layer), quiescent);
 };
 
 const failureTag = (exit: Exit.Exit<unknown, unknown>): string | undefined => {
@@ -173,7 +173,7 @@ it.effect.prop(
       const exit = yield* Fiber.join(fiber);
       expect(failureTag(exit)).toBe(extra > 0 ? 'StreamOverflow' : undefined);
       expect(fake.ports().map(p => p.cancels)).toEqual([1]);
-    }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(layer), quiescent);
   },
 );
 
@@ -204,6 +204,6 @@ it.effect.prop(
       expect(delivered).toBe(before);
       expect(seen.length).toBe(delivered);
       expect(fake.ports().map(p => p.cancels)).toEqual([1]);
-    }).pipe(Effect.provide(layer));
+    }).pipe(Effect.provide(layer), quiescent);
   },
 );

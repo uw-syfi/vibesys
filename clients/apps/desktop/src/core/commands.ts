@@ -100,6 +100,7 @@ export const makeCommands = Effect.fn('Commands.make')(function* (parts: HostPar
   const send = (command: Command) =>
     dispatchOnce(parts, command).pipe(
       Effect.flatMap(progress => record(command.id, progress)),
+      Effect.provideContext(parts.ambient),
       Effect.forkIn(scope),
       Effect.asVoid,
     );
