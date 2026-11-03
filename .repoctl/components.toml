@@ -380,7 +380,7 @@ class = "manual"
 job = "orchestrator"
 # The contract the module is generated from selects its checks too, as for the CLI. The proto job
 # checks that the bindings are current.
-roots = ["orchestrator", "proto/vibesys/orchestrator"]
+roots = ["orchestrator", "cli/gen", "proto/vibesys/orchestrator", "proto/vibesys/cli"]
 files = ["buf.gen.orchestrator.yaml", "buf.gen.orchestrator-ts.yaml"]
 
 [[components]]
@@ -390,7 +390,7 @@ job = "desktop_path"
 # The desktop path end to end test (gateway/e2e) runs the gateway, the orchestrator and its sidecar,
 # the CLI and the skills plugin together, so a change to any of them selects it. The plugin
 # marketplace manifest is read from the repository root.
-roots = ["gateway", "cli", "orchestrator", "skills", "proto/vibesys/orchestrator"]
+roots = ["gateway", "cli", "orchestrator", "skills", "proto/vibesys/orchestrator", "proto/vibesys/cli"]
 files = [".claude-plugin/marketplace.json"]
 # With VIBESYS_E2E_DESKTOP_UI=1 the test also builds the desktop app and drives it on screen, so a
 # change to the app or to a package it uses (found through the package graph) selects it too.

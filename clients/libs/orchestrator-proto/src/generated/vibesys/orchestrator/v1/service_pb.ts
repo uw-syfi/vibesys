@@ -559,7 +559,8 @@ export const CompatibilitySchema: GenEnum<Compatibility> = /*@__PURE__*/
 
 /**
  * PlanStatus mirrors vibesys-cli's plan status. The orchestrator shows it and decides nothing on
- * it. This module does not import the CLI's contract, so the read-through has its own message.
+ * it. New consumers use the CLI contract generated in this module. This legacy read-through
+ * remains until ListPlans and ViewPlan are retired.
  *
  * @generated from enum vibesys.orchestrator.v1.PlanStatus
  */

@@ -30,21 +30,23 @@ const (
 // beyond itself. An entry ending in "/" allows the whole subtree. A package with Go files and no
 // entry fails the check, so a new package states its layer in the change that adds it.
 var rules = map[string][]string{
-	"hosted":                     {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "gen/"},
-	"internal/production":        {"internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/localfs", "internal/store", "internal/wire", "gen/"},
-	"internal/core":              {},
-	"internal/jobs":              {"internal/core"},
-	"internal/jobs/jobstest":     {"internal/core", "internal/jobs"},
-	"internal/wire":              {"internal/core", "gen/"},
-	"internal/archcheck":         {},
-	"internal/store":             {"internal/core", "internal/wire", "internal/localfs"},
-	"internal/store/storetest":   {"internal/core", "internal/store", "internal/wire"},
-	"internal/localfs":           {},
-	"internal/hub":               {"internal/core", "gen/"},
-	"internal/client":            {"gen/"},
-	"internal/mcp":               {"internal/core", "gen/"},
-	"internal/daemon":            {"internal/core", "internal/hub", "internal/jobs", "internal/store", "internal/wire", "gen/"},
-	"internal/daemon/daemontest": {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/store", "gen/"},
+	"internal/clidaemon":               {"gen/vibesys/cli/"},
+	"internal/clidaemon/clidaemontest": {"internal/clidaemon", "gen/vibesys/cli/"},
+	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "gen/vibesys/orchestrator/"},
+	"internal/production":              {"internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/core":                    {},
+	"internal/jobs":                    {"internal/core"},
+	"internal/jobs/jobstest":           {"internal/core", "internal/jobs"},
+	"internal/wire":                    {"internal/core", "gen/vibesys/orchestrator/"},
+	"internal/archcheck":               {},
+	"internal/store":                   {"internal/core", "internal/wire", "internal/localfs"},
+	"internal/store/storetest":         {"internal/core", "internal/store", "internal/wire"},
+	"internal/localfs":                 {},
+	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
+	"internal/client":                  {"gen/vibesys/orchestrator/"},
+	"internal/mcp":                     {"internal/core", "gen/vibesys/orchestrator/"},
+	"internal/daemon":                  {"internal/core", "internal/hub", "internal/jobs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
 	"internal/localfs/localfstest": {"internal/localfs"},
 }
@@ -55,6 +57,7 @@ var rules = map[string][]string{
 var testRules = map[string][]string{
 	// Upgrade fixtures compose the durable store and daemon using deterministic world Fakes.
 	"internal/production": {"internal/daemon/daemontest", "internal/localfs/localfstest"},
+	"internal/clidaemon":  {"internal/clidaemon/clidaemontest"},
 	// The store's tests run the contract suite, which depends on the store.
 	// The store's tests also open stores on directories the fake detector vouches for, which
 	// no non-test file may import.
@@ -62,7 +65,7 @@ var testRules = map[string][]string{
 	// localfs's own tests run its checks against the fake.
 	"internal/localfs": {"internal/localfs/localfstest"},
 	"internal/client":  {"internal/core", "internal/daemon", "internal/daemon/daemontest", "internal/mcp"},
-	"internal/core":    {"internal/jobs/jobstest", "internal/wire", "gen/"},
+	"internal/core":    {"internal/jobs/jobstest", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/wire":    {"internal/core"},
 	"internal/daemon":  {"internal/daemon/daemontest", "internal/store", "internal/jobs/jobstest"},
 }
@@ -78,7 +81,7 @@ var impureTime = regexp.MustCompile(`\btime\.(Now|Since|Until|Sleep|After|AfterF
 // shellDirs are the packages of the daemon's shell and its clients that decide or relay and must
 // run in a simulation: they read no clock, start no process, draw no random number and handle no
 // signal. internal/production is where each of those happens, once.
-var shellDirs = []string{"internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
+var shellDirs = []string{"internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
 
 // realIO is the standard library a shell package may not import.
 var realIO = []string{"os/exec", "os/signal", "crypto/rand", "math/rand", "syscall", "net/http"}
@@ -116,6 +119,7 @@ func Violations(files map[string]string) []string {
 			found = append(found, layering(name, source)...)
 			found = append(found, purity(name, source)...)
 			found = append(found, confinement(name, source)...)
+			found = append(found, capabilities(name, source)...)
 		}
 	}
 	sort.Strings(found)
@@ -161,7 +165,7 @@ func layering(name, source string) []string {
 	for _, target := range targets {
 		rest, inModule := strings.CutPrefix(target, modulePath)
 		switch {
-		case !inModule && strings.HasPrefix(target, repositoryPath):
+		case !inModule && strings.HasPrefix(target, repositoryPath) && target != "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !(strings.HasSuffix(name, "/internal/clidaemon/client_integration_test.go") && target == "github.com/uw-syfi/vibesys/cli/daemontest"):
 			found = append(found, fmt.Sprintf("%s: imports %s; this module stands apart from the rest of the repository", name, target))
 		case inModule && !slices.ContainsFunc(allowed, func(rule string) bool { return permits(rule, rest) }):
 			found = append(found, fmt.Sprintf("%s: imports %s, which its layer does not allow", name, rest))

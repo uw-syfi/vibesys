@@ -54,7 +54,8 @@ func startWithConfig(t *testing.T, config server.Config) fixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// This guards hangs across the whole fixture, including tests with many retained logs.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	endpoint, err := lifecycle.Listen(root, schemahash.APISchemaHash)
 	if err != nil {
 		cancel()
