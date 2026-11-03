@@ -26,7 +26,7 @@ func (ExecRunner) Run(ctx context.Context, program string, args, env []string) e
 	return cmd.Run()
 }
 
-// ExecEnsurer always runs the sibling binary, never a PATH lookup.
+// ExecEnsurer runs the recorded absolute CLI binary, never a PATH lookup.
 type ExecEnsurer struct {
 	Executable string
 	Runner     Runner
@@ -36,7 +36,10 @@ func (e ExecEnsurer) Ensure(ctx context.Context, loc clidaemon.Location) error {
 	if _, ok := ctx.Deadline(); !ok {
 		return errors.New("ensure requires a deadline")
 	}
-	binary := filepath.Join(filepath.Dir(e.Executable), "vibesys-cli")
+	binary := e.Executable
+	if !filepath.IsAbs(binary) {
+		return &clidaemon.Unreadable{Reason: clidaemon.CLINotInstalled, Detail: "recorded CLI executable must be absolute"}
+	}
 	env := []string{}
 	for _, v := range os.Environ() {
 		if !strings.HasPrefix(v, "HOME=") && !strings.HasPrefix(v, "XDG_RUNTIME_DIR=") && !strings.HasPrefix(v, "XDG_STATE_HOME=") {

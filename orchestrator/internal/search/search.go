@@ -1,5 +1,5 @@
 // Package search derives in-memory search views from committed CLI task facts.
-// The CLI remains the source of truth; caps apply only to presentation, never notifications.
+// The CLI remains the source of truth.
 package search
 
 import (
@@ -25,6 +25,8 @@ const (
 	StreamLost
 	StoreOwnedElsewhere
 	StoreAway
+	Connecting
+	MessageTooLarge
 )
 
 // View owns its facts. Unreadable retains facts and records a typed link failure.
@@ -59,76 +61,6 @@ func Fold(facts []*pb.TaskFact) View {
 		}
 	}
 	return v
-}
-
-// Cap returns the display window: newest 500 jobs and their results, 100 judgments,
-// and newest 200 plans and promotions. Full facts stay available to Source.
-func Cap(v View) View {
-	out := Fold(v.Facts)
-	out.Reason, out.Detail = v.Reason, v.Detail
-	out.Truncated, out.UnattributedJobs = v.Truncated, v.UnattributedJobs
-	sort.SliceStable(out.Facts, func(i, j int) bool {
-		a, b := out.Facts[i], out.Facts[j]
-		if a.GetJob() != nil && b.GetJob() != nil {
-			x, y := a.GetJob(), b.GetJob()
-			if x.GetSubmittedAt().AsTime() != y.GetSubmittedAt().AsTime() {
-				return x.GetSubmittedAt().AsTime().After(y.GetSubmittedAt().AsTime())
-			}
-			return x.Id > y.Id
-		}
-		if a.GetPlan() != nil && b.GetPlan() != nil {
-			return a.GetPlan().Number > b.GetPlan().Number
-		}
-		if a.GetPromotion() != nil && b.GetPromotion() != nil {
-			return a.GetPromotion().Seq > b.GetPromotion().Seq
-		}
-		return factOrder(a) < factOrder(b)
-	})
-	counts := map[int]int{}
-	jobs := map[string]bool{}
-	var kept []*pb.TaskFact
-	for _, f := range out.Facts {
-		kind := factOrder(f)
-		limit := 0
-		switch kind {
-		case 0:
-			limit = 500
-		case 2:
-			limit = 100
-		case 3, 4:
-			limit = 200
-		}
-		counts[kind]++
-		if limit > 0 && counts[kind] > limit {
-			out.Truncated = true
-			continue
-		}
-		if j := f.GetJob(); j != nil {
-			jobs[j.Id] = true
-		}
-		if r := f.GetResult(); r != nil && !jobs[r.JobId] {
-			continue
-		}
-		kept = append(kept, f)
-	}
-	out.Facts = kept
-	return out
-}
-func factOrder(f *pb.TaskFact) int {
-	switch f.GetFact().(type) {
-	case *pb.TaskFact_Job:
-		return 0
-	case *pb.TaskFact_Result:
-		return 1
-	case *pb.TaskFact_Judgment:
-		return 2
-	case *pb.TaskFact_Promotion:
-		return 3
-	case *pb.TaskFact_Plan:
-		return 4
-	default:
-		return 5
-	}
 }
 
 // Store owns each run's full view and a boot-local monotonic revision.
@@ -174,13 +106,19 @@ func (s Source) Jobs(ctx context.Context, run core.Run) ([]core.JobUpdate, error
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	v, _ := s.Store.Get(run.ID)
+	// Entries are immutable after Put; hold the lock while reading rather than
+	// cloning every protobuf for each run on each poll.
+	s.Store.mu.Lock()
+	defer s.Store.mu.Unlock()
+	v := s.Store.views[run.ID].view
+	submitted := map[core.JobID]int64{}
 	var out []core.JobUpdate
 	for _, f := range v.Facts {
 		j := f.GetJob()
 		if j == nil {
 			continue
 		}
+		submitted[core.JobID(j.Id)] = j.GetSubmittedAt().AsTime().UnixNano()
 		var state core.JobState
 		switch j.State {
 		case pb.JobState_JOB_STATE_QUEUED:
@@ -210,7 +148,13 @@ func (s Source) Jobs(ctx context.Context, run core.Run) ([]core.JobUpdate, error
 			break
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Job < out[j].Job })
+	sort.Slice(out, func(i, j int) bool {
+		a, b := submitted[out[i].Job], submitted[out[j].Job]
+		if a != b {
+			return a < b
+		}
+		return out[i].Job < out[j].Job
+	})
 	return out, nil
 }
 

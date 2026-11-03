@@ -45,15 +45,15 @@ func (r *runner) Run(_ context.Context, p string, a, e []string) error {
 	r.env = e
 	return r.err
 }
-func TestEnsureUsesSiblingPinnedArgvAndRecordedEnvironment(t *testing.T) {
+func TestEnsureUsesRecordedPinnedArgvAndRecordedEnvironment(t *testing.T) {
 	r := new(runner)
-	e := production.ExecEnsurer{Executable: "/opt/app/vibesysd", Runner: r}
+	e := production.ExecEnsurer{Executable: "/opt/custom/vibesys-cli", Runner: r}
 	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1<<40, 0))
 	defer cancel()
 	if err := e.Ensure(ctx, clidaemon.Location{Home: "/home/agent", XDGStateHome: "/state", XDGRuntimeDir: "/run/agent"}); err != nil {
 		t.Fatal(err)
 	}
-	if r.program != "/opt/app/vibesys-cli" || !reflect.DeepEqual(r.args, []string{"daemon", "ensure"}) {
+	if r.program != "/opt/custom/vibesys-cli" || !reflect.DeepEqual(r.args, []string{"daemon", "ensure"}) {
 		t.Fatal(r)
 	}
 	want := map[string]bool{"HOME=/home/agent": false, "XDG_STATE_HOME=/state": false, "XDG_RUNTIME_DIR=/run/agent": false}
@@ -78,7 +78,8 @@ func FuzzPlanStartsExactlyMissingKeys(f *testing.F) {
 		have := map[production.Subscription]bool{}
 		for i, v := range data {
 			r := core.Run{Repository: "/repo", Task: string(rune('a' + v%10)), Status: core.RunRunning}
-			k := production.Subscription{Repository: r.Repository, Task: r.Task}
+			r.Location = core.CliLocation{CLI: []string{"/a/cli", "/b/cli"}[v%2]}
+			k := production.Subscription{Location: r.Location, Repository: r.Repository, Task: r.Task}
 			if i%2 == 0 {
 				live = append(live, r)
 				want[k] = true
@@ -113,11 +114,24 @@ func TestEnsureReportsMissingBinaryAndStartFailure(t *testing.T) {
 		err  error
 		want clidaemon.Reason
 	}{{os.ErrNotExist, clidaemon.CLINotInstalled}, {errors.New("exit 4"), clidaemon.StartFailed}} {
-		e := production.ExecEnsurer{Executable: "/opt/app/vibesysd", Runner: &runner{err: tc.err}}
+		e := production.ExecEnsurer{Executable: "/opt/custom/vibesys-cli", Runner: &runner{err: tc.err}}
 		err := clidaemon.Ensure(ctx, e, clidaemon.Location{}, clidaemon.NoDaemon)
 		var unreadable *clidaemon.Unreadable
 		if !errors.As(err, &unreadable) || unreadable.Reason != tc.want {
 			t.Fatalf("%v", err)
+		}
+	}
+}
+
+func TestEnsureRejectsEmptyAndRelativeCLI(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Unix(1<<40, 0))
+	defer cancel()
+	for _, path := range []string{"", "vibesys-cli", "./vibesys-cli"} {
+		r := new(runner)
+		err := (production.ExecEnsurer{Executable: path, Runner: r}).Ensure(ctx, clidaemon.Location{})
+		var u *clidaemon.Unreadable
+		if !errors.As(err, &u) || u.Reason != clidaemon.CLINotInstalled || r.program != "" {
+			t.Fatalf("path %q: %v, runner %+v", path, err, r)
 		}
 	}
 }

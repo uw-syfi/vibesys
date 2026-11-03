@@ -5,6 +5,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"testing"
 )
 
@@ -27,5 +28,18 @@ func TestSourceAttributionAndDetail(t *testing.T) {
 				t.Fatal(got)
 			}
 		}
+	}
+}
+
+func TestSourceOrdersTellsBySubmissionTime(t *testing.T) {
+	store := new(search.Store)
+	var facts search.Facts
+	for i, id := range []string{"j10", "j2", "j1"} {
+		facts = append(facts, &pb.TaskFact{Fact: &pb.TaskFact_Job{Job: &pb.Job{Id: id, State: pb.JobState_JOB_STATE_SUCCEEDED, SubmittedAt: &timestamppb.Timestamp{Seconds: int64(3 - i)}, Submitters: []*pb.Submitter{{RunId: "r"}}}}})
+	}
+	store.Put("r", search.Fold(facts))
+	got, err := (search.Source{Store: store}).Jobs(context.Background(), core.Run{ID: "r"})
+	if err != nil || len(got) != 3 || got[0].Job != "j1" || got[1].Job != "j2" || got[2].Job != "j10" {
+		t.Fatal(got, err)
 	}
 }
