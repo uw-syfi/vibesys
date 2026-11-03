@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"os"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -239,7 +238,7 @@ func TestFrameCorpus(t *testing.T) {
 			// after Synced, inside the minimum interval, so it cannot be sent
 			// between Put and Remove even when the sender is scheduled there.
 			func(p *producer) { p.put("a", 1); p.synced() },
-			func(p *producer) { p.put("b", 2); runtime.Gosched(); p.remove("b") },
+			func(p *producer) { p.put("b", 2); p.remove("b") },
 		}}}},
 		{"writes between flushes are conflated to the latest value", []streamScript{{steps: []step{
 			func(p *producer) { p.put("a", 1); p.synced() },
@@ -282,4 +281,45 @@ func TestFrameCorpus(t *testing.T) {
 	if !bytes.Equal(want, data) {
 		t.Fatal("the hub no longer sends the frames in the corpus; run with -update-corpus and review the diff")
 	}
+}
+
+// A joining subscriber snapshots only the current map, even if another subscriber
+// previously saw a key. Produce and remove it before opening the second stream.
+func TestKeyRemovedBeforeSnapshotIsAbsent(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ready := make(chan subscription.Sink[stats], 1)
+		source := script(func(ctx context.Context, sink subscription.Sink[stats]) error {
+			ready <- sink
+			return wait(ctx)
+		})
+		hub := subscription.New(clock.System{}, topic(source))
+		first := subscriptiontest.Open(hub, 1, request)
+		defer first.Stop()
+		synctest.Wait()
+		var sink subscription.Sink[stats]
+		select {
+		case sink = <-ready:
+		default:
+			t.Fatal("the producer did not start")
+		}
+		sink.Put("a", value(1))
+		sink.Put("b", value(2))
+		sink.Remove("b")
+		sink.Synced()
+		synctest.Wait()
+		second := subscriptiontest.Open(hub, 2, request)
+		defer second.Stop()
+		synctest.Wait()
+		var keys []string
+		synced := false
+		for _, frame := range second.Frames() {
+			if key := keyOf(frame); key != "" {
+				keys = append(keys, key)
+			}
+			synced = synced || frame.GetSynced() != nil
+		}
+		if !synced || !slices.Equal(keys, []string{"a"}) {
+			t.Fatalf("snapshot keys %v, synced %v; want only a and synced", keys, synced)
+		}
+	})
 }

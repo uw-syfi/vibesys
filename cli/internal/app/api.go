@@ -93,6 +93,11 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	}
 	// Settled, so a returned submission is in Status, even while recovery waits.
 	err = a.settleEffect(ctx, message{event: event, readiness: readiness, scope: &scope, changed: true})
+	// The store has accepted the job. Closing only prevents this App from
+	// observing it; the next App recovers it. Do not invite a duplicate retry.
+	if errors.Is(err, context.Canceled) && a.ctx.Err() != nil {
+		return out, nil
+	}
 	return out, err
 }
 

@@ -82,8 +82,8 @@ class Driver(Protocol):
         """Start (or resume) the provider session and say what it can do."""
         ...
 
-    def begin_turn(self, turn_id: str, prompt: str) -> None:
-        """Announce the next turn, so a steer or an interrupt addressed to it is routed to it."""
+    def begin_turn(self, turn_id: str, prompt: str, *, message: orch.Message | None = None) -> None:
+        """Announce the next turn with its typed source message and route commands to it."""
         ...
 
     def run_turn(self, emit: Callable[[AgentEvent], None]) -> TurnResult:
@@ -94,7 +94,7 @@ class Driver(Protocol):
         """
         ...
 
-    def steer(self, turn_id: str, text: str) -> None:
+    def steer(self, turn_id: str, text: str, *, message: orch.Message | None = None) -> None:
         """Send *text* to turn *turn_id* if it is the one running, or raise ``SteerRefusedError``."""
         ...
 
@@ -178,8 +178,10 @@ class AgentshimDriver:
             raise SessionStateError(msg)
         return self._session
 
-    def begin_turn(self, turn_id: str, prompt: str) -> None:
+    def begin_turn(self, turn_id: str, prompt: str, *, message: orch.Message | None = None) -> None:
         """See ``Driver.begin_turn``."""
+        # Provider sessions consume the rendered prompt; scripted drivers use the typed source.
+        del message
         with self._lock:
             self._active = _Active(turn_id, prompt)
 
@@ -218,8 +220,9 @@ class AgentshimDriver:
                 return None
             return active.ticket
 
-    def steer(self, turn_id: str, text: str) -> None:
+    def steer(self, turn_id: str, text: str, *, message: orch.Message | None = None) -> None:
         """See ``Driver.steer``."""
+        del message
         ticket = self._ticket_of(turn_id)
         if ticket is None:
             msg = f"turn {turn_id} is not running"

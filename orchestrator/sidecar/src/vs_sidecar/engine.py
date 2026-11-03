@@ -80,7 +80,7 @@ class Engine:
         self._notify = notify
         self._lock = threading.RLock()
         self._driver: Driver | None = None
-        self._pending: deque[tuple[str, str]] = deque()
+        self._pending: deque[tuple[str, str, orch.Message]] = deque()
         self._turn: TurnNormalizer | None = None
         self._idle: TurnNormalizer | None = None
         self._idle_runs = 0
@@ -237,7 +237,7 @@ class Engine:
         with self._lock:
             if self._unusable:
                 return
-            self._pending.append((start.turn_id, prompt))
+            self._pending.append((start.turn_id, prompt, start.message))
         self._notify()
 
     def _steer(self, steer: fx.Steer) -> None:
@@ -256,7 +256,7 @@ class Engine:
         if not running or driver is None:
             return
         try:
-            driver.steer(steer.turn_id, text)
+            driver.steer(steer.turn_id, text, message=steer.message)
         except SteerRefusedError:
             with self._lock:
                 if self._steers.take(text) is not None:
@@ -271,8 +271,8 @@ class Engine:
 
         Call with the lock held.
         """
-        kept: deque[tuple[str, str]] = deque()
-        for turn_id, prompt in self._pending:
+        kept: deque[tuple[str, str, orch.Message]] = deque()
+        for turn_id, prompt, message in self._pending:
             if matches(turn_id):
                 self._append(
                     sc.SidecarEvent(
@@ -282,7 +282,7 @@ class Engine:
                     )
                 )
             else:
-                kept.append((turn_id, prompt))
+                kept.append((turn_id, prompt, message))
         self._pending = kept
 
     def _interrupt(self, interrupt: fx.Interrupt) -> None:
@@ -339,14 +339,14 @@ class Engine:
             driver = self._driver
             if not self._pending or self._unusable or driver is None:
                 return False
-            turn_id, prompt = self._pending.popleft()
+            turn_id, prompt, message = self._pending.popleft()
             self._end_idle(orch.TURN_STATUS_FAILED)
             normalizer = TurnNormalizer(turn_id, self._steers)
             # The driver learns the turn before anyone can address it (``_turn`` is what
             # ``_interrupt`` and ``_steer`` check), so an interrupt is never sent to a driver that
             # has not heard of the turn, and the driver keeps one that comes before the provider
             # starts it.
-            driver.begin_turn(turn_id, prompt)
+            driver.begin_turn(turn_id, prompt, message=message)
             self._turn = normalizer
 
         def emit(event: AgentEvent) -> None:

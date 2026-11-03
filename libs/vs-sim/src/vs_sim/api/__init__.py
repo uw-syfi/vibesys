@@ -4,7 +4,7 @@ Product code takes these interfaces; wiring passes the real implementations; tes
 the simulators and Fakes from :mod:`vs_sim.api.testing`.
 
 Names load on first use (PEP 562), so a process pays only for the modules it
-touches: the host helper's ``hello`` path uses a few of these and must not load
+touches: lightweight entrypoints use a few of these and need not load
 the process, signal and streaming machinery behind the rest.
 """
 

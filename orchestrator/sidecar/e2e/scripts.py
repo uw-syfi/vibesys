@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
     from e2e.effects import Effect, Script
+    from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 
 TASK = "toy"
 CLI = "vibesys-cli"
@@ -155,22 +156,12 @@ def _judged(me: Me, messages: Sequence[str]) -> Script:
 LEAD_STEPS = {1: _start, 2: _first_handoff, 3: _second_handoff, 4: _judged}
 
 
-def lead(me: Me, messages: Sequence[str]) -> Script:
+def lead(
+    me: Me, messages: Sequence[str], *, notification: orch.JobFinished | None = None
+) -> Script:
     """The lead: base, two workers, a judge, promote, report."""
-
-    def is_job(message: str) -> bool:
-        return (
-            re.fullmatch(
-                r"Job \S+ finished: (?:succeeded|failed|cancelled|lost)\.(?: .*)?",
-                message,
-                flags=re.DOTALL,
-            )
-            is not None
-        )
-
-    if messages and is_job(messages[-1]):
+    if notification is not None:
         return "Noted job completion."
-    messages = [message for message in messages if not is_job(message)]
     step = LEAD_STEPS.get(len(messages))
     if step is None:
         msg = f"the lead was sent message {len(messages)}, which its script does not expect"

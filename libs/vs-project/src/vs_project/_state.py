@@ -1083,7 +1083,7 @@ class ProjectState:
     ) -> tuple[RetainedFile, ...]:
         """List originals with their sizes, without requiring today's manifest schema."""
         # lint-waiver: LW-337002 [PLC0415]; hello never reads retained files.
-        # > An eager import exceeds the host helper module budget; a dynamic loader
+        # > An eager import exceeds the lightweight entrypoint module budget; a dynamic loader
         # > hides this dependency from tach and adds indirection to its only caller.
         from vs_project._retained import list_retained  # noqa: PLC0415
 
@@ -1101,7 +1101,7 @@ class ProjectState:
     def input_fingerprint(self) -> str:
         """Hash the portable project input, excluding metadata, secrets, and caches."""
         # lint-waiver: LW-337001 [PLC0415]; hello never fingerprints project inputs.
-        # > An eager import exceeds the host helper module budget; a dynamic loader
+        # > An eager import exceeds the lightweight entrypoint module budget; a dynamic loader
         # > hides this dependency from tach and adds indirection to its only caller.
         from vs_project._fingerprint import _is_excluded, _update_fingerprint  # noqa: PLC0415
 

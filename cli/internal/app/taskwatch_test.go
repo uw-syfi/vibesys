@@ -84,15 +84,21 @@ func (w *watcher) count() int {
 func converge(t *testing.T, a *app.App, w *watcher, o *outage, s core.Scope, pass bool) core.TaskView {
 	t.Helper()
 	ctx := ctxFor(t)
+	passed := false
 	for {
 		wake := w.signal.Wait()
 		if v, ok := a.TaskView(ctx, s, core.DefaultJudgedCommits); ok && w.holds(v) {
 			return v
 		}
-		if pass {
+		if pass && !passed {
 			// Drain the bubble so the watcher has armed its fake slow timer.
 			synctest.Wait()
 			o.limits.pass()
+			passed = true
+			synctest.Wait()
+			if v, ok := a.TaskView(ctx, s, core.DefaultJudgedCommits); !ok || !w.holds(v) {
+				t.Fatalf("the watcher did not converge within one slow period\nheld %+v\nview %+v", w.held, v.Facts())
+			}
 		}
 		select {
 		case <-wake:

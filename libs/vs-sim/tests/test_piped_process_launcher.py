@@ -171,7 +171,7 @@ def test_a_leader_whose_exit_cannot_be_watched_is_never_reported_as_exited(error
 
 
 def test_building_a_launcher_or_running_a_command_loads_no_exit_waiter_module() -> None:
-    """The host helper's hello builds a launcher, and its test caps the modules hello loads.
+    """Building a launcher keeps unrelated process machinery unloaded.
 
     The exit waiter loads when a group first waits, and the process table when a refused group
     signal reads it: not when a launcher is built (this was loaded eagerly there) and not by

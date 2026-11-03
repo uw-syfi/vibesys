@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import deque
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,7 +30,7 @@ from e2e.actor import Actor
 from e2e.host import HostMachine
 from e2e.peers import ActingClaudePeers, ActingCodex
 from e2e.scripts import Me
-from vs_sidecar.driver import PROVIDERS, AgentshimDriver, Identity, build_session
+from vs_sidecar.driver import PROVIDERS, AgentshimDriver, Identity, SteerRefusedError, build_session
 from vs_sidecar.engine import Engine
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 from vs_sidecar.main import (
@@ -48,7 +49,7 @@ from vs_sidecar.store import FileStore
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from agentshim import RawFrame, StdioMcpServer
+    from agentshim import RawFrame, Session, StdioMcpServer
     from agentshim.execution.process import SpawnRequest
     from agentshim.testing import FakePeer
 
@@ -115,7 +116,10 @@ def replying_executor() -> tuple[FakeExecutor, str]:
 
 
 def acting_executor(
-    launch: fx.LaunchSession, servers: list[StdioMcpServer], state_dir: Path
+    launch: fx.LaunchSession,
+    servers: list[StdioMcpServer],
+    state_dir: Path,
+    pending: deque[orch.Message],
 ) -> tuple[FakeExecutor, str]:
     """The peer for the launch's harness whose turns run its role's script."""
     provider = PROVIDERS[launch.harness]
@@ -132,7 +136,7 @@ def acting_executor(
         harness=orch.Harness.Name(launch.harness).removeprefix("HARNESS_").lower(),
     )
     role = orch.AgentRole.Name(launch.role).removeprefix("AGENT_ROLE_").lower()
-    actor = Actor(me, role, machine, state_dir)
+    actor = Actor(me, role, machine, state_dir, pending=pending)
     holder: list[FakeExecutor] = []
 
     def on_turn() -> None:
@@ -148,6 +152,35 @@ def acting_executor(
     return executor, provider
 
 
+class ScriptedDriver(AgentshimDriver):
+    """Carry typed inputs to the acting peer, including steers during a turn."""
+
+    def __init__(
+        self, factory: Callable[[str | None], Session], pending: deque[orch.Message]
+    ) -> None:
+        """Build the scripted session and share its typed inbox with the actor."""
+        super().__init__(factory, preferred_id=CONVERSATION)
+        self.pending = pending
+
+    def begin_turn(self, turn_id: str, prompt: str, *, message: orch.Message | None = None) -> None:
+        """Announce a turn and discard any input from an interrupted earlier turn."""
+        self.pending.clear()
+        if message is not None:
+            self.pending.append(message)
+        super().begin_turn(turn_id, prompt, message=message)
+
+    def steer(self, turn_id: str, text: str, *, message: orch.Message | None = None) -> None:
+        """Queue the typed steer before the provider can answer it, undoing a refusal."""
+        if message is not None:
+            self.pending.append(message)
+        try:
+            super().steer(turn_id, text, message=message)
+        except SteerRefusedError:
+            if message is not None and message in self.pending:
+                self.pending.remove(message)
+            raise
+
+
 def main() -> int:
     """Run one scripted session with the sidecar's command line."""
     args = parse_args(sys.argv[1:])
@@ -161,8 +194,9 @@ def main() -> int:
     args.state_dir.mkdir(parents=True, exist_ok=True)
     write_atomically(args.state_dir / PIDFILE, f"{os.getpid()}\n")
     servers = load_mcp(args.mcp_config)
+    pending: deque[orch.Message] = deque()
     if os.environ.get(MODE_VARIABLE) == "act":
-        executor, _provider = acting_executor(launch, servers, args.state_dir)
+        executor, _provider = acting_executor(launch, servers, args.state_dir, pending)
     else:
         executor, _provider = replying_executor()
 
@@ -183,7 +217,7 @@ def main() -> int:
         )
 
     def make(raw_sink: Callable[[RawFrame], None]) -> AgentshimDriver:
-        return AgentshimDriver(
+        return ScriptedDriver(
             lambda conversation_id: build_session(
                 launch,
                 agent=agent,
@@ -191,7 +225,7 @@ def main() -> int:
                 raw_sink=raw_sink,
                 new_conversation_id=conversation_id,
             ),
-            preferred_id=CONVERSATION,
+            pending,
         )
 
     wakeup = Wakeup()

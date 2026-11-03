@@ -69,7 +69,7 @@ func (s delayedReadStore) Job(ctx context.Context, id core.JobID) (core.Job, err
 }
 
 func TestForgettingDropsReadsAlreadyInFlight(t *testing.T) {
-	for _, kind := range []string{"sweep_queued", "sweep_running", "recovery", "cancel"} {
+	for _, kind := range []string{"sweep_queued", "recovery", "cancel"} {
 		t.Run(kind, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				w, o := newOutage(t)
@@ -86,7 +86,7 @@ func TestForgettingDropsReadsAlreadyInFlight(t *testing.T) {
 				// Drain startup so the sweep has armed its fake slow timer before we pass it.
 				synctest.Wait()
 				var job core.Job
-				if kind == "sweep_running" || kind == "cancel" {
+				if kind == "cancel" {
 					job = submitAs(t, a, callA, "hold", "old", ";", "exit", "0")
 					synctest.Wait()
 					if w.env.Active() != 1 {

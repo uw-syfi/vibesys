@@ -224,7 +224,7 @@ class Project:
     def retained_event_journal(self, run_id: str, *, max_bytes: int) -> bytes | None:
         """Read the original bounded JSONL journal for a semantic restart, without writing."""
         # lint-waiver: LW-337003 [PLC0415]; hello never reads a retained journal.
-        # > An eager import exceeds the host helper module budget; a dynamic loader
+        # > An eager import exceeds the lightweight entrypoint module budget; a dynamic loader
         # > hides this dependency from tach and adds indirection to its only caller.
         from vs_project._retained import read_retained_bytes  # noqa: PLC0415
 
@@ -312,7 +312,7 @@ class Project:
     def log_streams_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return where a run's log store (``vs_logs``) keeps its streams.
 
-        The run writes there and the host helper reads there; both ask here, so the
+        The run writes there and log readers read there; both ask here, so the
         layout has one owner.
         """
         return cls.log_directory_for(project_root, run_id) / "streams"
