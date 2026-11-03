@@ -22,8 +22,8 @@ bundles, and the desktop app.
 src/vibesys/             Orchestration policy and thin product API/composition
 src/server/              Frontend-serving runtime and protocol
 src/entrypoints/         Process composition and command entrypoints
-clients/libs/contracts/      TypeScript server protocol types and validator
-clients/libs/transport/      Runtime-neutral transport and the WebSocket adapter
+clients/apps/desktop/        The Effect desktop app
+clients/libs/                Generated protocol bindings, display names and the design system
 libs/                    Reusable standalone libraries
 examples/                Candidate repositories, tasks, and input bundles
 resources/evaluators/    Reusable versioned evaluator packages
@@ -319,7 +319,6 @@ The TypeScript client has its own workflow:
 ```bash
 cd clients
 pnpm install --frozen-lockfile
-pnpm --dir contracts generate:protocol
 pnpm check:ts-architecture
 pnpm check:knip
 pnpm check:clients
@@ -336,8 +335,8 @@ checks one package. The [clients architecture](clients-architecture.md) guide de
 model. `tsc -b` keeps each package's `dist` incrementally; `pnpm exec tsc -b --clean` in a package
 removes it.
 
-When Python protocol models change, regenerate the files under
-`clients/libs/contracts/src/generated/` and review the diff.
+When the display-name catalog changes, run `pnpm --dir libs/display-names generate` and review the
+diff. When a `.proto` changes, run `./scripts/generate_proto.sh`.
 
 The [desktop development guide](desktop-development.md) covers local and SSH
 connections, the shell, and the Electron app.

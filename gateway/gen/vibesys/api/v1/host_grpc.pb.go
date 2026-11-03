@@ -19,10 +19,6 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	HostService_HostCall_FullMethodName         = "/vibesys.api.v1.HostService/HostCall"
-	HostService_Read_FullMethodName             = "/vibesys.api.v1.HostService/Read"
-	HostService_Watch_FullMethodName            = "/vibesys.api.v1.HostService/Watch"
-	HostService_Mutate_FullMethodName           = "/vibesys.api.v1.HostService/Mutate"
 	HostService_Hello_FullMethodName            = "/vibesys.api.v1.HostService/Hello"
 	HostService_ListChatSessions_FullMethodName = "/vibesys.api.v1.HostService/ListChatSessions"
 	HostService_Tail_FullMethodName             = "/vibesys.api.v1.HostService/Tail"
@@ -38,18 +34,11 @@ const (
 //
 // HostService is a stateless view over a host user's run files.
 // API schemas require an exact hash match, with no compatibility negotiation.
+// Legacy clients using retired host RPCs are unsupported; their request and
+// response messages remain for the Python server follow-up.
 type HostServiceClient interface {
 	// Hello compares the client and gateway API schema hashes. A mismatch fails
 	// with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
-	HostCall(ctx context.Context, in *HostCallRequest, opts ...grpc.CallOption) (*HostCallResponse, error)
-	// Read runs one registered catalog operation. The runner deadline is that operation's cap.
-	Read(ctx context.Context, in *ReadRequest, opts ...grpc.CallOption) (*ReadResponse, error)
-	// Watch runs one registered stream. The host keeps it until completion or cancellation.
-	// Closing a panel drops the client's subscription and does not cancel this stream.
-	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
-	// Mutate runs one registered unary admission or idempotent write. An admission
-	// keeps running after the caller disconnects, until the operation cap.
-	Mutate(ctx context.Context, in *MutateRequest, opts ...grpc.CallOption) (*MutateResponse, error)
 	Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error)
 	ListChatSessions(ctx context.Context, in *ListChatSessionsRequest, opts ...grpc.CallOption) (*ListChatSessionsResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
@@ -70,55 +59,6 @@ type hostServiceClient struct {
 
 func NewHostServiceClient(cc grpc.ClientConnInterface) HostServiceClient {
 	return &hostServiceClient{cc}
-}
-
-func (c *hostServiceClient) HostCall(ctx context.Context, in *HostCallRequest, opts ...grpc.CallOption) (*HostCallResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HostCallResponse)
-	err := c.cc.Invoke(ctx, HostService_HostCall_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *hostServiceClient) Read(ctx context.Context, in *ReadRequest, opts ...grpc.CallOption) (*ReadResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ReadResponse)
-	err := c.cc.Invoke(ctx, HostService_Read_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *hostServiceClient) Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[0], HostService_Watch_FullMethodName, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	x := &grpc.GenericClientStream[WatchRequest, WatchResponse]{ClientStream: stream}
-	if err := x.ClientStream.SendMsg(in); err != nil {
-		return nil, err
-	}
-	if err := x.ClientStream.CloseSend(); err != nil {
-		return nil, err
-	}
-	return x, nil
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HostService_WatchClient = grpc.ServerStreamingClient[WatchResponse]
-
-func (c *hostServiceClient) Mutate(ctx context.Context, in *MutateRequest, opts ...grpc.CallOption) (*MutateResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(MutateResponse)
-	err := c.cc.Invoke(ctx, HostService_Mutate_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *hostServiceClient) Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error) {
@@ -143,7 +83,7 @@ func (c *hostServiceClient) ListChatSessions(ctx context.Context, in *ListChatSe
 
 func (c *hostServiceClient) Tail(ctx context.Context, in *TailRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[1], HostService_Tail_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[0], HostService_Tail_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +122,7 @@ func (c *hostServiceClient) GetBlobs(ctx context.Context, in *GetBlobsRequest, o
 
 func (c *hostServiceClient) TailStream(ctx context.Context, in *TailStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailStreamResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[2], HostService_TailStream_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[1], HostService_TailStream_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +141,7 @@ type HostService_TailStreamClient = grpc.ServerStreamingClient[TailStreamRespons
 
 func (c *hostServiceClient) Subscribe(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SubscribeResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[3], HostService_Subscribe_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[2], HostService_Subscribe_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -224,18 +164,11 @@ type HostService_SubscribeClient = grpc.ServerStreamingClient[SubscribeResponse]
 //
 // HostService is a stateless view over a host user's run files.
 // API schemas require an exact hash match, with no compatibility negotiation.
+// Legacy clients using retired host RPCs are unsupported; their request and
+// response messages remain for the Python server follow-up.
 type HostServiceServer interface {
 	// Hello compares the client and gateway API schema hashes. A mismatch fails
 	// with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
-	HostCall(context.Context, *HostCallRequest) (*HostCallResponse, error)
-	// Read runs one registered catalog operation. The runner deadline is that operation's cap.
-	Read(context.Context, *ReadRequest) (*ReadResponse, error)
-	// Watch runs one registered stream. The host keeps it until completion or cancellation.
-	// Closing a panel drops the client's subscription and does not cancel this stream.
-	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
-	// Mutate runs one registered unary admission or idempotent write. An admission
-	// keeps running after the caller disconnects, until the operation cap.
-	Mutate(context.Context, *MutateRequest) (*MutateResponse, error)
 	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
 	ListChatSessions(context.Context, *ListChatSessionsRequest) (*ListChatSessionsResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
@@ -258,18 +191,6 @@ type HostServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedHostServiceServer struct{}
 
-func (UnimplementedHostServiceServer) HostCall(context.Context, *HostCallRequest) (*HostCallResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method HostCall not implemented")
-}
-func (UnimplementedHostServiceServer) Read(context.Context, *ReadRequest) (*ReadResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Read not implemented")
-}
-func (UnimplementedHostServiceServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
-	return status.Error(codes.Unimplemented, "method Watch not implemented")
-}
-func (UnimplementedHostServiceServer) Mutate(context.Context, *MutateRequest) (*MutateResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Mutate not implemented")
-}
 func (UnimplementedHostServiceServer) Hello(context.Context, *HelloRequest) (*HelloResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Hello not implemented")
 }
@@ -310,71 +231,6 @@ func RegisterHostServiceServer(s grpc.ServiceRegistrar, srv HostServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&HostService_ServiceDesc, srv)
-}
-
-func _HostService_HostCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HostCallRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(HostServiceServer).HostCall(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: HostService_HostCall_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HostServiceServer).HostCall(ctx, req.(*HostCallRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _HostService_Read_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ReadRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(HostServiceServer).Read(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: HostService_Read_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HostServiceServer).Read(ctx, req.(*ReadRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _HostService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(WatchRequest)
-	if err := stream.RecvMsg(m); err != nil {
-		return err
-	}
-	return srv.(HostServiceServer).Watch(m, &grpc.GenericServerStream[WatchRequest, WatchResponse]{ServerStream: stream})
-}
-
-// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HostService_WatchServer = grpc.ServerStreamingServer[WatchResponse]
-
-func _HostService_Mutate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MutateRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(HostServiceServer).Mutate(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: HostService_Mutate_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HostServiceServer).Mutate(ctx, req.(*MutateRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _HostService_Hello_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -490,18 +346,6 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*HostServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "HostCall",
-			Handler:    _HostService_HostCall_Handler,
-		},
-		{
-			MethodName: "Read",
-			Handler:    _HostService_Read_Handler,
-		},
-		{
-			MethodName: "Mutate",
-			Handler:    _HostService_Mutate_Handler,
-		},
-		{
 			MethodName: "Hello",
 			Handler:    _HostService_Hello_Handler,
 		},
@@ -519,11 +363,6 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
-		{
-			StreamName:    "Watch",
-			Handler:       _HostService_Watch_Handler,
-			ServerStreams: true,
-		},
 		{
 			StreamName:    "Tail",
 			Handler:       _HostService_Tail_Handler,

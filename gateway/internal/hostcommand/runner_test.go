@@ -2,7 +2,6 @@ package hostcommand_test
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -36,17 +35,6 @@ func TestProgram(t *testing.T) {
 			fmt.Fprint(os.Stdout, strings.Repeat("x", hostcommand.MaxOutput+1))
 		case "stderr":
 			fmt.Fprint(os.Stderr, strings.Repeat("x", hostcommand.MaxStderr+10))
-		case "frame":
-			writeTestFrame(os.Stdout, []byte("hi"))
-		case "group":
-			cmd := exec.Command(os.Args[0], "-test.run=^TestProgram$", "--", "--host-command-program", "pause")
-			if err := cmd.Start(); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(3)
-			}
-			writeTestFrame(os.Stdout, []byte(strconv.Itoa(cmd.Process.Pid)))
-			waitForTerm()
-			_ = cmd.Wait()
 		case "groupfile":
 			cmd := exec.Command(os.Args[0], "-test.run=^TestProgram$", "--", "--host-command-program", "pause")
 			if err := cmd.Start(); err != nil {
@@ -134,71 +122,6 @@ func TestRunnerContract(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestStreamDeliversOnePayload(t *testing.T) {
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, implementation := range []string{"exec", "fake"} {
-		t.Run(implementation, func(t *testing.T) {
-			var runner hostcommand.Runner = hostcommand.ExecRunner{}
-			command := hostcommand.Command{
-				Executable: binary,
-				Args:       []string{"-test.run=^TestProgram$", "--", "--host-command-program", "frame"},
-				StateRoot:  t.TempDir(),
-			}
-			if implementation == "fake" {
-				runner = hostcommand.FakeRunner{Program: func(context.Context, hostcommand.Command) (hostcommand.Result, error) {
-					return hostcommand.Result{Output: []byte("hi")}, nil
-				}}
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			var got []byte
-			err := runner.Stream(ctx, command, func(frame []byte) error {
-				got = append(got, frame...)
-				return nil
-			})
-			if err != nil || string(got) != "hi" {
-				t.Fatalf("stream: %q %v", got, err)
-			}
-		})
-	}
-}
-
-func TestStreamCancelReapsTheProcessGroup(t *testing.T) {
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	var pid int
-	err = hostcommand.ExecRunner{}.Stream(ctx, hostcommand.Command{
-		Executable: binary,
-		Args:       []string{"-test.run=^TestProgram$", "--", "--host-command-program", "group"},
-		StateRoot:  t.TempDir(),
-	}, func(frame []byte) error {
-		parsed, parseErr := strconv.Atoi(string(frame))
-		if parseErr != nil {
-			return parseErr
-		}
-		pid = parsed
-		cancel()
-		return nil
-	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancel: %v", err)
-	}
-	if pid == 0 {
-		t.Fatal("child pid was not reported")
-	}
-	// Stream waits for its direct child, but the kernel may still be reaping
-	// descendants after the process-group signal. Observe their disappearance;
-	// the deadline only guards a hang, rather than synchronizing cancellation.
-	waitUntilGone(t, pid)
 }
 
 // A wrapper that times out takes its children with it: killing only the wrapper
@@ -341,13 +264,6 @@ func zombieState(stat string) bool {
 	}
 	fields := strings.Fields(stat[end+1:])
 	return len(fields) > 0 && (fields[0] == "Z" || fields[0] == "X")
-}
-
-func writeTestFrame(writer io.Writer, payload []byte) {
-	var header [4]byte
-	binary.BigEndian.PutUint32(header[:], uint32(len(payload)))
-	_, _ = writer.Write(header[:])
-	_, _ = writer.Write(payload)
 }
 
 func waitForTerm() {

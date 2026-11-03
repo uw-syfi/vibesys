@@ -275,7 +275,7 @@ func TestTheRepositoryGateFollowsTheChange(t *testing.T) {
 		want  []string
 	}{
 		{"python only", []string{"scripts/check_purity.py"}, []string{"always_on", "python_impact_tests", "python_quality", "python_types"}},
-		{"clients only", []string{"clients/libs/connection/src/state/host-connection.ts"}, []string{"always_on", "clients_quality", "clients_tests"}},
+		{"clients only", []string{"clients/libs/ui/src/index.ts"}, []string{"always_on", "clients_quality", "clients_tests"}},
 		{"docs only", []string{"docs/contributing/development.md"}, []string{"always_on"}},
 	}
 	for _, tc := range cases {

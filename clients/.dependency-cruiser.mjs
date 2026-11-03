@@ -14,10 +14,6 @@ const OWN_PACKAGE = `^(${PACKAGE_DIRECTORIES})/`;
 const TOOLING = `^(?:${pathAlternation(layout.toolingDirectories)})/`;
 const SCANNED = `${PACKAGES}|${TOOLING}`;
 const TEST_FILE = '\\.test\\.[cm]?[jt]sx?$';
-const TRANSPORT_TEST_ONLY = '^libs/(?:transport|contracts)/src/(?:test-support/|testing/)';
-const STORE_TEST_ONLY = '^libs/store/src/testing/';
-// A package's own test-support directory (`connection/src/testing/`): Fakes that only tests import.
-const PACKAGE_TEST_SUPPORT = '^libs/[^/]+/src/testing/';
 // Any package's test support, at any depth of its sources: the `testing/` entries that ship Fakes
 // to other packages' tests, and the `test-support/` helpers.
 // Two patterns, because the one-pattern `src/(?:.+/)?` nests quantifiers that dependency-cruiser's
@@ -42,55 +38,27 @@ const LEAF_TOOLS = `^(?:${LEAF_TOOL_DIRECTORIES})/`;
 // `^$1/` matches no path: such an importer may reach no tool directory at all.
 const LEAF_TOOL_IMPORTER = `^(${LEAF_TOOL_DIRECTORIES})/|${PACKAGES}`;
 
-const TRANSPORT = ['^libs/transport(?:-node)?/', '/node_modules/@vibesys/transport(?:-node)?/'];
-// The protocol vocabulary, which presentational code never names.
-const CONTRACTS = ['^libs/contracts/', '/node_modules/@vibesys/contracts/'];
-
-// The desktop app's Electron main process is composed from packages
-// (`docs/contributing/clients-architecture.md`): `@vibesys/connection` (the connection manager, a
-// pure `state/` machine and a `shell/` that owns its processes, channels, and timers),
-// `@vibesys/settings`, and `apps/desktop`, which composes them in `src/main/`. Which package may
-// reach which is the package-graph checker's; these rules hold the modules inside those packages.
-const CONNECTION_STATE = '^libs/connection/src/state/';
-const CONNECTION_SHELL = '^libs/connection/src/shell/';
+// The desktop app's Electron main process is `apps/desktop/src/main`. Which package may reach
+// which is the package-graph checker's; these rules hold the modules inside the app.
 const DESKTOP_PROCESS_FILE = '^apps/desktop/src/main/process\\.ts$';
 const DESKTOP_LOCAL_HOST_FILE = '^apps/desktop/src/main/local-host\\.ts$';
-// Every module of the main process: the app's, and the packages only it runs.
-const MAIN_PROCESS = ['^apps/desktop/src/main/', '^libs/connection/src/', '^libs/settings/src/'];
-const UI_RUNTIME = '(?:^|/)node_modules/(?:react|react-dom|electron)/';
+const MAIN_PROCESS = '^apps/desktop/src/main/';
 
 function desktopRules() {
   return [
-    {
-      // The connection manager's functional core folds events into state and requests: no Node or
-      // Electron, no shell, no view.
-      name: 'connection-state-is-pure',
-      severity: 'error',
-      from: {path: CONNECTION_STATE, pathNot: TEST_FILE},
-      to: {
-        path: [CONNECTION_SHELL, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS, '^libs/request-identity/'],
-        dependencyTypesNot: ['type-only'],
-      },
-    },
-    {
-      name: 'connection-state-has-no-node-runtime',
-      severity: 'error',
-      from: {path: CONNECTION_STATE, pathNot: TEST_FILE},
-      to: {dependencyTypes: ['core']},
-    },
     {
       // Every process the main process starts goes through `ProcessSpawner` (main/process.ts), which
       // owns bounded retirement, so a child is never started anywhere else.
       name: 'desktop-main-starts-processes-only-in-process-ts',
       severity: 'error',
-      from: {path: MAIN_PROCESS, pathNot: [TEST_FILE, CONNECTION_SHELL, DESKTOP_PROCESS_FILE]},
+      from: {path: MAIN_PROCESS, pathNot: [TEST_FILE, DESKTOP_PROCESS_FILE]},
       to: {dependencyTypes: ['core'], path: '^(?:node:)?child_process$'},
     },
     {
       // The one socket the main process opens itself is the local gateway's (main/local-host.ts).
       name: 'desktop-main-opens-sockets-only-in-local-host-ts',
       severity: 'error',
-      from: {path: MAIN_PROCESS, pathNot: [TEST_FILE, CONNECTION_SHELL, DESKTOP_LOCAL_HOST_FILE]},
+      from: {path: MAIN_PROCESS, pathNot: [TEST_FILE, DESKTOP_LOCAL_HOST_FILE]},
       to: {dependencyTypes: ['core'], path: '^(?:node:)?net$'},
     },
   ];
@@ -262,24 +230,6 @@ export default {
       severity: 'error',
       from: {path: SCANNED, pathNot: TEST_FILE},
       to: {path: TEST_FILE},
-    },
-    {
-      // Cross-runtime test helpers may use runtime adapters or deterministic scheduling seams
-      // that shipping code must not reach. Keep them reachable only from test files.
-      name: 'production-code-does-not-import-transport-test-support',
-      severity: 'error',
-      // Test support may build on test support, e.g. the testing entry re-exporting its Fakes, or
-      // another package's harness building on the protocol fixtures.
-      from: {path: SCANNED, pathNot: [TEST_FILE, TRANSPORT_TEST_ONLY, PACKAGE_TEST_SUPPORT]},
-      to: {path: TRANSPORT_TEST_ONLY},
-    },
-    {
-      // The store model checker and its seeded generator are test support for every frontend's
-      // screen stores; only tests and other test support reach them.
-      name: 'production-code-does-not-import-store-test-support',
-      severity: 'error',
-      from: {path: SCANNED, pathNot: [TEST_FILE, PACKAGE_TEST_SUPPORT]},
-      to: {path: STORE_TEST_ONLY},
     },
     {
       // Another package's Fakes and test helpers are for tests: a package's shipping code that

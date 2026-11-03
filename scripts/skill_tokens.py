@@ -19,7 +19,7 @@ Path tokens (`path_tokens`):
         into the skills directory (another skill), to a tracked page under
         `docs/`, or to a root file in `WELL_KNOWN_FILES` (`AGENTS.md`); a
         bare skill layout entry (`references/`); an npm scope package
-        (`@vibesys/connection`); and `STABLE_COMMANDS`.
+        (`@vibesys/proto`); and `STABLE_COMMANDS`.
     file
         A bare file name that a tracked file has, such as `test_loop.py` or
         `loop.py:run`, except `WELL_KNOWN_FILES`, which name a tool's

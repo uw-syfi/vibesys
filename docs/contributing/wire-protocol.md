@@ -14,6 +14,7 @@ cannot silently disagree.
 This contract is transport level, not payload level. It specifies how protocol messages are framed,
 which connection carries which role, how errors and disconnects are expressed, and how liveness and
 flow control behave. It does not specify the schema of the messages themselves: those are the
+The generated client package described here is historical and has been removed.
 Pydantic models in `src/server/api/protocol.py` (built on the light control envelope in
 `src/server/control_envelope.py`), generated into
 `clients/libs/contracts/src/generated/`. A transport relays whole protocol messages opaquely. If the
@@ -331,8 +332,8 @@ since only the run process knows its declared roles and live attempts.
 ## Framing and connection decisions
 
 Each decision below carries a stable token. The conformance corpus (`tests/conformance/`, see
-`tests/conformance/README.md`) tags every scenario with the tokens it exercises, and the corpus gate
-(`clients/tools/scripts/check_conformance_corpus.mjs`) fails if any token here is never exercised or a
+`tests/conformance/README.md`) tags every scenario with the tokens it exercises, and
+`tests/conformance/test_corpus_files.py` fails if any token here is never exercised or a
 scenario tags a token that does not appear here. So this document cannot drift from the wire without
 a test failing.
 
@@ -662,17 +663,16 @@ ends one viewer's connection, not the run itself.
 ## The conformance corpus
 
 The framing decisions above are enforced by one shared fixture corpus at `tests/conformance/`, read
-by both conformance suites: the client-side fold suite (#812) and the server-side scenario suite
-(#811). Neither side keeps a private copy. The corpus has two parts:
+by the server-side scenario, relay and host helper suites. None keeps a private copy; the
+client-side fold suite (#812) was deleted with the legacy client libraries. The corpus has two parts:
 
 - `tests/conformance/events/` holds one fixture per `EventType` (the event-kind enum in the generated
-  schema). The corpus gate enumerates the enum from
-  `clients/libs/contracts/src/generated/protocol.schema.json` and fails if a kind has no fixture, so
+  schema). `test_corpus_files.py` enumerates the enum and fails if a kind has no fixture, so
   a new event kind cannot land without a fixture.
 - `tests/conformance/scenarios/` holds the connection scenarios (bootstrap, resume, rebootstrap,
   capability probes, protocol error, and so on), each tagging the framing decisions it exercises.
 
-See `tests/conformance/README.md` for the layout and how to run the gate, and
+See `tests/conformance/README.md` for the layout and how to run the suites, and
 `tests/conformance/FORMAT.md` for
 the fixture and scenario formats. The replay runners that execute the scenarios against a live
 transport land with the transports themselves (888b for the client fold runner over the Unix

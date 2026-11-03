@@ -249,8 +249,7 @@ func TestFrameCorpus(t *testing.T) {
 	}
 	got := corpusFile{
 		Provenance: "Emitted by gateway/internal/subscription/corpus_test.go from the real hub. " +
-			"Run `go test ./internal/subscription -run TestFrameCorpus -update-corpus` to rewrite it. " +
-			"@vibesys/subscription folds every stream in a test.",
+			"Run `go test ./internal/subscription -run TestFrameCorpus -update-corpus` to rewrite it.",
 		MaxKeys: corpusMaxKeys,
 	}
 	for _, each := range cases {

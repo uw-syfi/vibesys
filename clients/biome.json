@@ -18,7 +18,6 @@
       "libs/ui/src/**/*.css",
       "!libs/ui/src/tokens.css",
       "!**/dist",
-      "!libs/contracts/src/generated",
       "!libs/display-names/src/generated",
       "!libs/proto/src/generated",
       "!libs/orchestrator-proto/src/generated"
@@ -127,14 +126,6 @@
     {
       "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
       "plugins": ["./tools/lint-rules/ui-no-timers.grit"]
-    },
-    {
-      "includes": ["libs/connection/src/state/**/*.ts", "!**/*.test.ts", "!**/*.test.tsx"],
-      "plugins": ["./tools/lint-rules/features-no-hand-rolled-control.grit"]
-    },
-    {
-      "includes": ["libs/connection/src/**/*.ts", "!**/*.test.ts", "!**/*.test.tsx"],
-      "plugins": ["./tools/lint-rules/control-state-no-store-kernel.grit"]
     },
     {
       "includes": [

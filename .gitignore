@@ -36,8 +36,6 @@ dist/
 # `finally`, but a killed runner cannot execute cleanup.
 clients/*/.vibesys-node-tests-*/
 clients/*/*/.vibesys-node-tests-*/
-# `tools/scripts/new_package.test.mjs` scaffolds into these and removes them when it finishes.
-clients/.vibesys-scaffold-test-*/
 clients/apps/ui-gallery/test-results/
 clients/apps/desktop-shell/test-results/
 clients/apps/desktop/test-results/

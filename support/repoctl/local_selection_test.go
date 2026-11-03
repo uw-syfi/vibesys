@@ -250,7 +250,7 @@ func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 		want  []string
 	}{
 		{"python", []string{"libs/vs-dst/src/vs_dst/__init__.py"}, []string{"always_on", "python_architecture", "python_guards", "python_quality", "python_types"}},
-		{"clients", []string{"clients/libs/connection/src/state/host-connection.ts"}, []string{"always_on", "clients_build", "clients_quality"}},
+		{"clients", []string{"clients/libs/ui/src/index.ts"}, []string{"always_on", "clients_build", "clients_quality"}},
 		{"proto", []string{"proto/vibesys/store/v1/record.proto"}, []string{"always_on", "clients_build", "clients_quality", "proto"}},
 		{"docs", []string{"docs/contributing/development.md"}, []string{"always_on"}},
 	}

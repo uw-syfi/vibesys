@@ -92,7 +92,7 @@ Named by public entry point; read them before writing something similar.
 | 5 | The libraries, each a separately declared unit behind `<pkg>.api` |
 | 6 | The orchestration registry (stable ids to registrations) and the domain registry keyed by enums |
 | 7 | The `server.api.protocol` models (`extra="forbid"`) |
-| 8 | `server.api.protocol` to the generated JSON schema to generated TypeScript types (`pnpm generate:protocol`); `vs_project.api.Project.open` as the only way to reach the `.vibesys` layout |
+| 8 | `vibesys.api.display_catalog` to the generated display-name table (`pnpm --filter @vibesys/display-names generate`); `vs_project.api.Project.open` as the only way to reach the `.vibesys` layout |
 | 9 | `vs_agent.api.testing` (`FakeAgentClient`) |
 | 10 | `vs_sim.api.testing.hostile_json_frames` (the shared hostile-input corpus every untrusted JSON decoder runs against) |
 | 14 | `vs_core.api.step` (`state + event -> new state + requests`) and the vs-core property tests |

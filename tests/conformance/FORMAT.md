@@ -2,11 +2,9 @@
 
 Three file kinds live in this corpus: event fixtures under `events/`, connection scenarios under
 `scenarios/`, and runner inventories under `runners/`. All are plain JSON so any language can read
-them. The corpus gate
-(`clients/tools/scripts/check_conformance_corpus.mjs`) validates every file against the rules below with no
-external schema library, so the rules are intentionally simple and structural. Deep payload
-validation happens when the runners replay a scenario
-against a live transport (#811); the gate's job is coverage and well-formedness.
+them. `test_corpus_files.py` checks that every event kind has a fixture and that each file names
+itself, so the rules are intentionally simple and structural. Deep payload validation happens when
+the runners replay a scenario against a live transport (#811).
 
 ## Event fixtures: `events/<kind>.json`
 
@@ -23,11 +21,12 @@ Each file is a single `RunEvent` instance (the model in `src/server/api/protocol
 }
 ```
 
-Rules the gate enforces:
+Rules for event fixtures (the first two are held by `test_corpus_files.py`; the rest by the server
+suites that replay them):
 
 - The filename stem equals `type` (`run_started.json` carries `"type": "run_started"`).
 - `type` is a member of the `EventType` enum in the generated schema.
-- The `RunEvent` required fields are present. The gate reads that set from the schema
+- The `RunEvent` required fields are present. Read that set from the schema
   (`$defs.RunEvent.required`, currently `type` and `timestamp`) rather than hardcoding it, so the
   rule tracks the generated source.
 - No top-level field outside the `RunEvent` property set (the schema declares
@@ -35,8 +34,7 @@ Rules the gate enforces:
 
 Fixtures are minimal but valid: fields a kind does not need are omitted and take their schema
 default. A fixture may carry the fields its kind semantically uses (for example `execution_id` on an
-`agent_execution_started`), which makes it more useful to the fold runner, but the gate only requires
-a structurally valid envelope. There is one fixture per kind; richer per-kind fixtures and the
+`agent_execution_started`), which makes it more useful to the fold runner, but only a structurally valid envelope. There is one fixture per kind; richer per-kind fixtures and the
 rendering-disposition tables are #834, not here.
 
 ## Scenarios: `scenarios/<id>.json`
@@ -91,10 +89,8 @@ Fields:
   - `type` inside `frame`/`expect` must be a known protocol message type: a `ProtocolRequest` member
     for `c2s`, or a `ServerMessage`/`Response` member for `s2c`.
 
-The gate validates structure, decision anchoring, and whether every scenario is either registered by
-a runner or declares `required_setup`. It does not execute the steps; the runners do. Keeping the
-steps declarative and partial lets one scenario file drive both a Python transport replay and a
-TypeScript fold without either owning the wire values.
+A scenario file does not execute anything; the runners do. Keeping the steps declarative and partial
+lets one scenario file drive every runner without any of them owning the wire values.
 
 ### Host helper scenarios
 
@@ -133,7 +129,7 @@ Fields:
   register the same scenario, since transport conformance is intentionally checked at multiple
   boundaries.
 
-The gate rejects unknown runner fields or scenario ids, malformed groups, duplicate registration
-within one runner, an unregistered scenario without `required_setup`, and a registered scenario that
+A runner inventory must not carry unknown runner fields or scenario ids, malformed groups, duplicate registration
+within one runner, an unregistered scenario without `required_setup`, or a registered scenario that
 still carries `required_setup`. The last rule makes removing a stale exemption part of adding runner
 coverage.

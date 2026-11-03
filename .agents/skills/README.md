@@ -25,9 +25,6 @@ How to make one kind of change in this repository.
 - [add-bundled-skill](add-bundled-skill/SKILL.md): add or change a bundled
   product skill, its sidecar selection rules, platform references or its
   vendoring update script.
-- [build-client-feature](build-client-feature/SKILL.md): place and wire a
-  change in the TypeScript clients: package graph, the legacy XState features,
-  and where new desktop work goes.
 - [change-container-images](change-container-images/SKILL.md): change the
   agent container image or a Dev Container Feature (toolchains, container
   runtime, pip extras) and the mechanism that builds it.

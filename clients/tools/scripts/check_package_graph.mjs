@@ -30,8 +30,7 @@
  *   that entry is `neutral` or of the same runtime, so a Node-only package is unreachable from a
  *   `dom` or `neutral` entry.
  * - `external-dependencies`: React only in `dom` entries, Electron only in `node` and `preload`
- *   entries of features and apps, XState only where control state lives (features' `./state` and
- *   `./renderer`, and the effect-owning packages in `MACHINE_PACKAGES`), Effect only in the
+ *   entries of features and apps, Effect only in the
  *   desktop app's `./core`, `./ui` and `./main` entries (`EFFECT_PACKAGES`), Node builtins only in
  *   `node` entries (`EXTERNAL_DEPENDENCIES`); a package that declares one of them in
  *   `dependencies` has an entry that may use it.
@@ -139,20 +138,6 @@ export const FEATURE_ENTRIES = {'./state': 'neutral', './renderer': 'dom', './ma
 /** A feature may also publish its views' stylesheet, a `dom` asset its apps import. */
 const FEATURE_STYLESHEET = {'./styles.css': 'dom'};
 
-/**
- * The packages that own effects and run control-state machines outside a feature
- * (docs/contributing/clients-architecture.md, "State"): the machine glue and its test kit, and the
- * desktop connection manager (its host connection machine), the live run session (its session
- * machine), and the log follower (one machine per stream on screen). Folds (`store`,
- * `run-state`), models (`hosts`, `runs`), primitives (`ui`), and the wire packages (`contracts`,
- * `transport`, `ipc`) never import XState.
- */
-export const MACHINE_PACKAGES = [
-  '@vibesys/machine',
-  '@vibesys/connection',
-  '@vibesys/logs',
-  '@vibesys/subscription',
-];
 const ALL_RUNTIMES = Object.keys(RUNTIMES);
 /** The Effect runtime and its React bindings (the test kit, `@effect/vitest`, is test code). */
 export const EFFECT_PACKAGES = ['effect', '@effect/atom-react'];
@@ -168,13 +153,6 @@ export const EFFECT_PACKAGES = ['effect', '@effect/atom-react'];
 export const EXTERNAL_DEPENDENCIES = [
   {packages: ['react', 'react-dom'], runtimes: ['dom']},
   {packages: ['electron'], runtimes: ['node', 'preload'], layers: ['feature', 'app']},
-  {
-    packages: ['xstate'],
-    runtimes: ALL_RUNTIMES,
-    layers: ['feature'],
-    subpaths: ['./state', './renderer'],
-  },
-  {packages: ['xstate'], runtimes: ALL_RUNTIMES, names: MACHINE_PACKAGES},
   // Effect is the new desktop app's control layer (docs/contributing/clients-architecture.md,
   // "State"). Its folds (`./state`) and sandboxed preload stay free of it, and no other package
   // adopts it without a rule here.
@@ -202,7 +180,7 @@ export const LEGACY_EXEMPTIONS = {};
  * name it. Matching is per word: identifiers are split at case changes (`runStatus` is `run` and
  * `status`), and a plural `s` is dropped.
  */
-export const DOMAIN_FREE = new Set(['@vibesys/ui', '@vibesys/store']);
+export const DOMAIN_FREE = new Set(['@vibesys/ui']);
 export const DOMAIN_WORDS = new Set([
   'agent',
   'candidate',
@@ -926,19 +904,6 @@ export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/display-names': ['.'],
   // The gateway's wire contract: the main process speaks it, so it is a typed dependency.
   '@vibesys/proto': null,
-  '@vibesys/contracts': null,
-  '@vibesys/store': null,
-  '@vibesys/machine': null,
-  '@vibesys/request-identity': ['.'],
-  '@vibesys/transport': null,
-  '@vibesys/hosts': null,
-  '@vibesys/runs': null,
-  '@vibesys/logs': null,
-  '@vibesys/ipc': null,
-  '@vibesys/connection': null,
-  '@vibesys/subscription': null,
-  // Its entries are node-only, so `runtime-reachability` already keeps it in `./main` entries.
-  '@vibesys/settings': null,
   // The orchestrator screens read a run through its generated messages.
   '@vibesys/orchestrator-proto': null,
 };
@@ -951,7 +916,6 @@ const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css', './components.css
 export const STRICT_THIRD_PARTY = [
   'react',
   'react-dom',
-  'xstate',
   ...EFFECT_PACKAGES,
   // The wire contract's runtime: a typed client builds, encodes and validates generated messages.
   '@bufbuild/protobuf',

@@ -9,7 +9,6 @@ const STREAMS = {
   subscribe: 'the live-state primitive itself',
   tail: 'every record matters, so values cannot conflate',
   tailStream: 'a byte stream, where a skipped byte corrupts the output',
-  watch: "a Python operation's progress stream, ending with the operation",
 };
 
 test('the host service streams exactly where a value cannot be skipped', () => {

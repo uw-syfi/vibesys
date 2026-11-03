@@ -318,7 +318,6 @@ func TestStreamingMethodsAreTheAllowedOnes(t *testing.T) {
 		"Subscribe":  "the live-state primitive itself",
 		"Tail":       "every record matters, so values cannot conflate",
 		"TailStream": "a byte stream, where a skipped byte corrupts the output",
-		"Watch":      "a Python operation's progress stream, ending with the operation",
 	}
 	methods := apiv1.File_vibesys_api_v1_host_proto.Services().ByName("HostService").Methods()
 	found := map[string]bool{}

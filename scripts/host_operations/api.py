@@ -14,10 +14,6 @@ from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 from scripts.generate_proto_framing import HOST_API_MAX_MESSAGE_BYTES
 from scripts.host_operations._emit import (
     Topic,
-    go_host_call,
-    go_host_mutate,
-    go_host_read,
-    go_host_watch,
     go_registry,
     go_topics,
     helper_types,
@@ -364,8 +360,6 @@ def compile_outputs(
         "gateway/internal/hostoperations/registry_generated.go": go_registry(
             neutral, failures, minimum
         ),
-        "gateway/internal/hostoperations/host_call_generated.go": go_host_call(host_calls),
-        "gateway/internal/hostoperations/host_read_generated.go": go_host_read(reads),
         "proto/vibesys/api/v1/host_read_generated.proto": read_envelope(reads),
         "clients/libs/proto/src/generated/host-operations.ts": typescript_registry(
             reads, failures, host_calls, mutations, watch_ops
@@ -375,12 +369,6 @@ def compile_outputs(
     }
     if mutations:
         outputs["proto/vibesys/api/v1/host_mutate_generated.proto"] = mutate_envelope(mutations)
-        outputs["gateway/internal/hostoperations/host_mutate_generated.go"] = go_host_mutate(
-            mutations
-        )
     if watch_ops:
         outputs["proto/vibesys/api/v1/host_watch_generated.proto"] = watch_envelope(watch_ops)
-        outputs["gateway/internal/hostoperations/host_watch_generated.go"] = go_host_watch(
-            watch_ops
-        )
     return outputs

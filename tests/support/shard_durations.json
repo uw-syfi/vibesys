@@ -1171,7 +1171,6 @@
  "tests/vibesys/inputs/test_profile_guided.py": 0.01,
  "tests/vibesys/inputs/test_resources.py": 0.02,
  "tests/vibesys/inputs/test_synthesis.py": 0.27,
- "tests/vibesys/inputs/test_synthesized_task_contract.py": 0.0,
  "tests/vibesys/loops/test_analyze_rocprof.py": 0.86,
  "tests/vibesys/loops/test_capture_runtime.py": 0.5,
  "tests/vibesys/loops/test_flashinfer_profiler.py": 0.84,

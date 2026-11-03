@@ -4,7 +4,6 @@ import copy
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -18,40 +17,20 @@ from launch import built_in_orchestrations
 from server.api.protocol import (
     MAX_ACTIVE_EXECUTIONS_CHUNKS,
     ProtocolRequest,
-    Response,
     ServerMessage,
 )
 from server.api.schema import (
-    fully_populated_response,
     host_helper_json_schema,
-    host_helper_typescript,
     protocol_json_schema,
     require_supported_response_payload_schema,
     require_supported_run_event_schema,
     require_tagged_union_discriminants,
-    response_payload_json_schema,
-    response_payload_typescript,
-    run_event_typescript,
 )
 from server.events import EventData
 from server.events import GateKind as ServerGateKind
 from server.host_api import HelperFeature
 from vibesys.api import GateKind, RunFailedData, RunFailure, ToolResultPayload
 from vs_logs.api import NarrationLevel, NarrationLine
-
-SCHEMA_PATH = Path("clients/libs/contracts/src/generated/protocol.schema.json")
-HOST_HELPER_SCHEMA_PATH = Path("clients/libs/contracts/src/generated/host-helper.schema.json")
-RESPONSE_PAYLOAD_SCHEMA_PATH = Path(
-    "clients/libs/contracts/src/generated/response-payload.schema.json"
-)
-RESPONSE_PAYLOAD_MODULE_PATH = Path(
-    "clients/libs/contracts/src/generated/response-payload.schema.ts"
-)
-RESPONSE_PAYLOAD_FIXTURE_PATH = Path(
-    "clients/libs/contracts/src/generated/response-payload.fixture.json"
-)
-RUN_EVENT_MODULE_PATH = Path("clients/libs/contracts/src/generated/run-event.schema.ts")
-HOST_HELPER_MODULE_PATH = Path("clients/libs/contracts/src/generated/host-helper.schema.ts")
 
 # The public alias of every tagged union the protocol publishes. A member model
 # is only reachable through one of these, which is why the exported schema may
@@ -61,8 +40,8 @@ TAGGED_UNION_ALIASES = (ProtocolRequest, ServerMessage, EventData, ToolResultPay
 IDENTIFIERS = st.text(alphabet="abcdefg", min_size=1, max_size=3)
 
 
-def _committed_schema() -> dict[str, Any]:
-    return json.loads(SCHEMA_PATH.read_text())
+def _published_schema() -> dict[str, Any]:
+    return protocol_json_schema(built_in_span_attributes())
 
 
 def _discriminated_members(node: object, path: str) -> Iterator[tuple[str, str, str]]:
@@ -85,10 +64,6 @@ def _discriminated_members(node: object, path: str) -> Iterator[tuple[str, str, 
 
 def _definition(document: dict[str, Any], ref: str) -> dict[str, Any]:
     return document["$defs"][ref.removeprefix("#/$defs/")]
-
-
-def test_committed_protocol_schema_matches_python_contract() -> None:
-    assert _committed_schema() == protocol_json_schema(built_in_span_attributes())
 
 
 def test_the_protocol_exports_the_span_kinds_attribute_schema_of_every_built_in_search() -> None:
@@ -145,11 +120,11 @@ def test_the_protocol_exports_the_span_kinds_attribute_schema_of_every_built_in_
     message=st.text(max_size=20),
     traceback=st.none() | st.text(max_size=20),
 )
-def test_committed_schema_accepts_every_narration_line_the_run_writes(
+def test_protocol_schema_accepts_every_narration_line_the_run_writes(
     level: NarrationLevel, message: str, traceback: str | None
 ) -> None:
     """A log view decodes narration with the generated type: every written line must fit it."""
-    document = _committed_schema()
+    document = _published_schema()
     line = NarrationLine(
         at=datetime(2026, 10, 15, tzinfo=UTC),
         level=level,
@@ -160,32 +135,6 @@ def test_committed_schema_accepts_every_narration_line_the_run_writes(
     )
     schema = {**_definition(document, "#/$defs/NarrationLine"), "$defs": document["$defs"]}
     Draft202012Validator(schema).validate(json.loads(line.model_dump_json()))
-
-
-def test_committed_host_helper_schema_matches_python_contract() -> None:
-    assert json.loads(HOST_HELPER_SCHEMA_PATH.read_text()) == host_helper_json_schema()
-
-
-def test_committed_response_payload_schema_matches_python_contract() -> None:
-    assert json.loads(RESPONSE_PAYLOAD_SCHEMA_PATH.read_text()) == response_payload_json_schema()
-
-
-def test_committed_response_payload_module_matches_python_contract() -> None:
-    assert RESPONSE_PAYLOAD_MODULE_PATH.read_text() == response_payload_typescript()
-
-
-def test_committed_response_payload_fixture_is_a_real_server_model_dump() -> None:
-    response = fully_populated_response()
-    assert isinstance(response, Response)
-    assert RESPONSE_PAYLOAD_FIXTURE_PATH.read_text() == response.model_dump_json() + "\n"
-
-
-def test_committed_run_event_module_matches_python_contract() -> None:
-    assert RUN_EVENT_MODULE_PATH.read_text() == run_event_typescript()
-
-
-def test_committed_host_helper_module_matches_python_contract() -> None:
-    assert HOST_HELPER_MODULE_PATH.read_text() == host_helper_typescript()
 
 
 def test_host_helper_schema_exports_the_instance_log_utf8_byte_limit() -> None:
@@ -478,9 +427,9 @@ def test_run_event_descriptor_rejects_repeated_tagged_union_references(
         )
 
 
-def test_committed_schema_requires_every_tagged_union_discriminant() -> None:
+def test_protocol_schema_requires_every_tagged_union_discriminant() -> None:
     """Regression for #860: an optional tag is a union no client can narrow."""
-    document = _committed_schema()
+    document = _published_schema()
     members = list(_discriminated_members(document, ""))
     assert members, "expected the protocol document to publish tagged unions"
     optional = [
@@ -491,8 +440,8 @@ def test_committed_schema_requires_every_tagged_union_discriminant() -> None:
     assert optional == []
 
 
-def test_committed_schema_discriminants_are_literal_tags() -> None:
-    document = _committed_schema()
+def test_protocol_schema_discriminants_are_literal_tags() -> None:
+    document = _published_schema()
     non_literal = [
         f"{path} -> {ref}.{discriminant}"
         for path, discriminant, ref in _discriminated_members(document, "")
@@ -501,9 +450,9 @@ def test_committed_schema_discriminants_are_literal_tags() -> None:
     assert non_literal == []
 
 
-def test_committed_schema_reuses_the_active_execution_list_definition() -> None:
+def test_protocol_schema_reuses_the_active_execution_list_definition() -> None:
     """Snapshots and event batches expose one shared execution checkpoint type."""
-    document = _committed_schema()
+    document = _published_schema()
     definitions = document["$defs"]
 
     assert definitions["RunSnapshot"]["properties"]["active_executions"] == {
@@ -590,7 +539,7 @@ def test_committed_schema_reuses_the_active_execution_list_definition() -> None:
 def test_draft_2020_schema_enforces_deferred_checkpoint_relationship(
     checkpoint_fields: dict[str, object], outcome: str
 ) -> None:
-    document = _committed_schema()
+    document = _published_schema()
     Draft202012Validator.check_schema(document)
     validator = Draft202012Validator(
         {"$ref": "#/$defs/EventBatchMessage", "$defs": document["$defs"]}

@@ -286,7 +286,7 @@ connect; a release build later downloads the released binary instead. It is stat
 | `TailStream` | stream | a log stream from an offset, then live |
 | `Subscribe` | stream | one topic's keyed state, then conflated changes; the `runs` topic is `run.head` and liveness of every linked run; see below |
 | `PostIntent` | unary | writes the run's (or session's) inbox |
-| `HostCall` | unary | typed host operations, including `relaunch` of an existing run; `vibesys host <method>` with protobuf on stdin and stdout |
+| `HostCall` (retired) | unary | typed host operations, including `relaunch` of an existing run; `vibesys host <method>` with protobuf on stdin and stdout |
 | `Attach` | bidi | reserved |
 
 The same session carries `vibesys.orchestrator.v1.OrchestratorService`, which `vibesysd` serves on the
@@ -313,7 +313,7 @@ at `heartbeat_ms`, and a client counts a stream with no frame for `lease_ms` as 
 projects both into Go and TypeScript tables and refuses a lease that cannot hold a beat. The client
 sends no keepalive of its own: the gateway server sets no keepalive enforcement policy, so a client
 ping faster than gRPC's default would be refused, and the lease on frames already finds a silent
-stream. A client reads a stream through `@vibesys/subscription`, in main through `Subscriptions`,
+stream. The following client integration describes the retired client libraries. A client reads a stream through `@vibesys/subscription`, in main through `Subscriptions`,
 and never through the generic gateway port, which refuses `Subscribe`. A lost session ends a
 `Subscribe` stream instead of re-issuing it, because a second stream in one call would deliver a
 second snapshot into state the caller already holds; the subscription's machine opens the next one.
