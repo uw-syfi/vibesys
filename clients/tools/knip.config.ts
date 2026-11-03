@@ -43,9 +43,16 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'src/testing/page/main.tsx',
       'src/**/*.test.ts',
       'src/**/*.test.tsx',
-      'e2e/**/*.spec.ts',
+      // The journey the desktop path test (`gateway/e2e`) runs against the built app.
+      'e2e/observe-run.ts',
     ],
-    project: ['src/**/*.ts', 'src/**/*.cts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
+    project: [
+      'src/**/*.ts',
+      'src/**/*.cts',
+      'src/**/*.tsx',
+      'e2e/**/*.{ts,mjs}',
+      'playwright.config.ts',
+    ],
   },
   'apps/ui-gallery': {
     // The development-only component gallery (`index.html`, built by `vite.config.ts`), its

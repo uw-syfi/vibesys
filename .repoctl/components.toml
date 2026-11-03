@@ -392,3 +392,6 @@ job = "desktop_path"
 # marketplace manifest is read from the repository root.
 roots = ["gateway", "cli", "orchestrator", "skills", "proto/vibesys/orchestrator"]
 files = [".claude-plugin/marketplace.json"]
+# With VIBESYS_E2E_DESKTOP_UI=1 the test also builds the desktop app and drives it on screen, so a
+# change to the app or to a package it uses (found through the package graph) selects it too.
+depends_on = ["pnpm:@vibesys/desktop"]

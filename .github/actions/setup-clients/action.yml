@@ -5,9 +5,18 @@ description: >-
   Go for repoctl. Every client job
   of test.yml starts from this, so the
   legs cannot drift apart. Set `playwright` to install cached Chromium using
-  the runner-provided system libraries for end-to-end jobs.
+  the runner-provided system libraries for end-to-end jobs. Set
+  `workspace-only` for a job that needs the built desktop app and nothing else
+  of the client toolchain: it keeps Node, pnpm, the Electron binary and the
+  workspace install, and leaves out Bun, uv, Python, the replays and Go.
 
 inputs:
+  workspace-only:
+    description: >-
+      Install only Node, pnpm, the Electron binary and the client workspace. A job
+      that sets this provides its own Go and uv.
+    required: false
+    default: "false"
   playwright:
     description: >-
       Install the cached Chromium browser using the runner system libraries. Client
@@ -66,6 +75,7 @@ runs:
         restore-keys: pnpm-store-${{ runner.os }}-
 
     - name: Set up verified Bun 1.4.2 for client tests
+      if: inputs.workspace-only != 'true'
       shell: bash
       run: |
         bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
@@ -73,18 +83,21 @@ runs:
         echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
 
     - name: Install uv
+      if: inputs.workspace-only != 'true'
       uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       with:
         enable-cache: true
         cache-dependency-glob: uv.lock
 
     - name: Set up Python
+      if: inputs.workspace-only != 'true'
       shell: bash
       run: |
         bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
           uv python install 3.12
 
     - name: Install Python dependencies
+      if: inputs.workspace-only != 'true'
       shell: bash
       run: |
         bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
@@ -117,6 +130,7 @@ runs:
       run: echo "TURBO_TELEMETRY_DISABLED=1" >> "$GITHUB_ENV"
 
     - name: Set up Go for repoctl
+      if: inputs.workspace-only != 'true'
       uses: actions/setup-go@v5
       with:
         go-version-file: support/repoctl/go.mod

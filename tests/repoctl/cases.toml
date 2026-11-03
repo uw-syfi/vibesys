@@ -569,3 +569,23 @@ dockerfile_contexts = []
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "desktop app changes select the desktop path end to end test that drives it"
+paths = ["clients/apps/desktop/e2e/observe-run.ts"]
+jobs = ["clients", "desktop_path"]
+[cases.collections]
+native_languages = []
+dockerfile_contexts = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/desktop" }
+
+[[cases]]
+name = "a package the desktop app uses selects the desktop path end to end test"
+paths = ["clients/libs/connection/src/shell/gateway.ts"]
+jobs = ["clients", "desktop_path"]
+[cases.collections]
+native_languages = []
+dockerfile_contexts = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/connection" }

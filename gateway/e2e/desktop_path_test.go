@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -45,18 +46,24 @@ func (r *rig) stopCLIDaemon(binary string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		r.t.Errorf("vibesys-cli daemon stop: %v\n%s", err, out)
 	}
-	// The stop returns when the daemon has been told; the process exits a moment later. The wait
-	// ends when none is left, and the bound only guards against a daemon that never exits.
-	deadline := time.Now().Add(bound)
-	left := processesOf(binary)
-	for len(left) > 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-		left = processesOf(binary)
-	}
-	for _, pid := range left {
+	// The stop returns when the daemon has been told; the process exits a moment later.
+	for _, pid := range untilNoneRunning(func() []int { return processesOf(binary) }) {
 		r.t.Errorf("a vibesys-cli process (%d) still runs after the test; killing it", pid)
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
+}
+
+// untilNoneRunning calls list until it returns no process and returns what is left when the bound
+// passes. The wait ends as soon as nothing is left; the bound only guards against a process that
+// never exits.
+func untilNoneRunning(list func() []int) []int {
+	deadline := time.Now().Add(bound)
+	left := list()
+	for len(left) > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		left = list()
+	}
+	return left
 }
 
 // processesOf lists the live processes running the executable at path.
@@ -190,17 +197,32 @@ func (r *rig) pgids() []int {
 type uiWorld struct {
 	// Root and Binary are the daemon's --root and the vibesysd to run client verbs with.
 	Root, Binary string
+	// Home is the home directory whose .vibesys is Root: a client that finds the gateway by the
+	// user's home reaches this world when it runs with HOME set to Home.
+	Home string
 	// Env is the environment every process of the world was started with.
 	Env []string
 	// RunID and LeadID name the run, which has reported and not yet been stopped.
 	RunID, LeadID string
 	Repository    string
+	// Task is the task the run optimizes, and Report the headline of the lead's report.
+	Task, Report string
+	// Agents are the run's agents as the daemon reported them, by the daemon's own enum names.
+	Agents []uiAgent
 }
 
-// observeUI is the hook for the UI observer (the Playwright spec of the desktop app). When set, the
-// test calls it once the lead has reported and before the operator's Stop: the observer attaches
-// to the running world, asserts what the Run screen shows against it, presses Stop in the UI
-// instead of the test doing it, and returns. Nil until the app has a Run screen with Stop.
+// uiAgent is one agent of the run, as the daemon reported it.
+type uiAgent struct {
+	ID      string `json:"id"`
+	Role    string `json:"role"`
+	Harness string `json:"harness"`
+}
+
+// observeUI is the hook for the UI observer (the Playwright spec of the desktop app, run by
+// desktop_ui_test.go when VIBESYS_E2E_DESKTOP_UI=1). When set, the test calls it once the lead has
+// reported and before the operator's Stop: the observer attaches to the running world, asserts
+// what the Run screen shows against it, presses Stop in the UI instead of the test doing it, and
+// returns. Nil when the opt-in is not set, and then the test presses Stop itself.
 var observeUI func(t *testing.T, world uiWorld)
 
 func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
@@ -326,7 +348,16 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 	t.Logf("result branch at %s with score %v; the lead reported %q", current.Current.Head, current.Current.Result.Measure.Value, w.report())
 
 	if observeUI != nil {
-		observeUI(t, uiWorld{Root: r.root, Binary: r.binary, Env: r.env, RunID: started.RunID, LeadID: started.AgentID, Repository: repository.path})
+		var agents []uiAgent
+		for _, a := range w.agents {
+			agents = append(agents, uiAgent{ID: a.ID, Role: a.Role, Harness: a.Harness})
+		}
+		sort.Slice(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
+		observeUI(t, uiWorld{
+			Root: r.root, Binary: r.binary, Home: r.dir, Env: r.env,
+			RunID: started.RunID, LeadID: started.AgentID, Repository: repository.path,
+			Task: toyTask, Report: w.report(), Agents: agents,
+		})
 	}
 
 	// Stop ends the run: every agent ended, and the agent process groups the sidecars recorded
