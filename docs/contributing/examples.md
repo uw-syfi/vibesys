@@ -60,6 +60,7 @@ check consumes it.
 | `candidate-build` | A task whose evaluator package requires candidate outputs (`candidate_outputs`) but declares no `[build]`, so every measurement fails its check (`InputBundle.missing_build`, the rule New run preflight applies too) | Example, task, the missing outputs |
 | `backend` | A task that declares no `backends`, so a run would fall back to the CLI's `cuda` default and fail a CPU task on a CPU-only host | Example, task |
 | `catalogue` | A task of an in-tree example with no `[catalogue]` table in its `vibesys.input.toml`, or an LLM-serving task whose table has no model and maker (see below) | Example, task |
+| `candidate-import` | A task script that does `from main import ...` and does not put the project root on `sys.path` itself. Running `python .vibesys/tasks/<task>/<dir>/checker.py` puts the script's own directory there, not the root where the candidate's `main.py` lives | Script, and the line to add |
 | Stale references (repo-wide) | `examples/...` literals in workflows, scripts, docs, and READMEs whose target is gone | File and literal; exclusions live in the test with a comment |
 
 `known_failing` is a strict xfail: when the check starts passing the test fails
@@ -73,4 +74,4 @@ External repos are fetched in CI. A missing checkout fails there
 `uv run python scripts/example_repositories.py` first.
 
 Not covered: running an evaluator, and files a command reads indirectly
-(imports, config it loads from disk).
+(config it loads from disk, imports other than the candidate's `main`).

@@ -14,6 +14,7 @@ model weights. See ``docs/contributing/examples.md``.
 
 from __future__ import annotations
 
+import ast
 import posixpath
 import re
 import shutil
@@ -246,6 +247,59 @@ def test_command_path_references_exist(entry: ExampleEntry) -> None:
         )
         pytest.skip(f"explicit skip: {skip.reason}")
     assert not failures, "\n".join(failures)
+
+
+@pytest.mark.parametrize(
+    "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
+)
+def test_task_scripts_that_import_the_candidate_put_the_project_root_on_sys_path(
+    entry: ExampleEntry,
+) -> None:
+    """A checker or benchmark that does ``from main import ...`` can import it when run by path.
+
+    Running ``python .vibesys/tasks/<task>/<dir>/checker.py`` puts the script's own directory on
+    ``sys.path``, not the project root where the candidate's ``main.py`` lives, so the script has
+    to add the root itself. The check reads the ``sys.path.insert`` calls of each such script and
+    resolves their ``Path(__file__)...parents[n]`` arguments; running a script is out of scope.
+    """
+    root = example_root(entry)
+    failures = [
+        f"{script.relative_to(REPO_ROOT)}: imports main but does not insert the project "
+        f"root {root.relative_to(REPO_ROOT)} into sys.path "
+        "(sys.path.insert(0, str(Path(__file__).resolve().parents[n])))"
+        for script in sorted((root / ".vibesys" / "tasks").rglob("*.py"))
+        if _imports_module(script, "main") and root not in _inserted_roots(script)
+    ]
+    assert not failures, "\n".join(failures)
+
+
+def _imports_module(script: Path, module: str) -> bool:
+    return any(
+        (isinstance(node, ast.ImportFrom) and node.module == module)
+        or (isinstance(node, ast.Import) and any(alias.name == module for alias in node.names))
+        for node in ast.walk(ast.parse(script.read_text()))
+    )
+
+
+def _inserted_roots(script: Path) -> set[Path]:
+    """Directories the script puts on ``sys.path`` as ``str(Path(__file__)[.resolve()].parents[n])``."""
+    roots = set()
+    for node in ast.walk(ast.parse(script.read_text())):
+        is_insert = (
+            isinstance(node, ast.Call)
+            and ast.unparse(node.func) == "sys.path.insert"
+            and len(node.args) == 2
+        )
+        if not is_insert:
+            continue
+        match = re.fullmatch(
+            r"str\(Path\(__file__\)(?:\.resolve\(\))?\.parents\[(\d+)\]\)",
+            ast.unparse(node.args[1]),
+        )
+        parents = script.resolve().parents
+        if match and int(match[1]) < len(parents):
+            roots.add(parents[int(match[1])])
+    return roots
 
 
 _ROOT_REF = re.compile(r"\$\{PROJECT_ROOT\}((?:/[^\s\"'\\,\[\]=;&|]+)*)")

@@ -47,6 +47,9 @@ def _dtype_for(device: str) -> torch.dtype:
 
 def _load_custom_model_class():
     """Import VibeServeModel from main.py."""
+    # Running this file puts its own directory on sys.path, not the repository root, where the
+    # candidate's main.py lives.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
     try:
         from main import VibeServeModel
     except ImportError as exc:
