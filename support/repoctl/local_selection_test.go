@@ -161,7 +161,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 		},
 		{
 			name:        "clients change selects the client quality groups",
-			paths:       []string{"clients/libs/connection/src/state/host-connection.ts"},
+			paths:       []string{"clients/libs/ui/src/apply-theme.ts"},
 			wantCI:      []string{"clients", "desktop_path"},
 			wantGroups:  []string{"always_on", "clients_build", "clients_quality", "clients_tests", "desktop_path_e2e"},
 			wantSkipped: []string{"clients_e2e"},
