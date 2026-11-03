@@ -55,3 +55,18 @@ def test_an_environment_that_refuses_docker_in_docker_needs_no_sysbox(
     environment = build_run_environment(spec)
 
     assert environment.requires_sysbox_runtime(docker_in_docker=True) is False
+
+
+@pytest.mark.parametrize(
+    ("spec", "needs_image"),
+    [
+        (RunEnvironmentSpec("docker"), True),
+        (RunEnvironmentSpec("modal", {"gpu": "A10G"}), False),
+        (RunEnvironmentSpec("host"), False),
+    ],
+    ids=["docker", "modal", "host"],
+)
+def test_only_an_environment_that_builds_its_container_on_the_backend_image_needs_one(
+    spec: RunEnvironmentSpec, *, needs_image: bool
+) -> None:
+    assert build_run_environment(spec).requires_backend_image() is needs_image

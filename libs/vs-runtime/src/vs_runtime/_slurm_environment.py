@@ -377,6 +377,10 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         del docker_in_docker
         return False
 
+    def requires_backend_image(self) -> bool:
+        """The local editor is Docker's, built on the backend's image."""
+        return self._docker.requires_backend_image()
+
     def __init__(
         self,
         settings: SlurmOperatorSettings,

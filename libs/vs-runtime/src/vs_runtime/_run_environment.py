@@ -603,6 +603,14 @@ class RunEnvironment(CaptureRecoverySource, Protocol):
         """Whether a run here needs the host's Docker daemon to register Sysbox."""
         ...
 
+    def requires_backend_image(self) -> bool:
+        """Whether a run here builds its agent container on the compute backend's image.
+
+        Such a run stops at launch when the backend names none (``EvaluatorToolError``
+        ``docker_image_unconfigured``), so a backend without one cannot run here.
+        """
+        ...
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
         ...
@@ -695,6 +703,10 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """No container: the host agent reaches the accelerator itself."""
         del docker_in_docker
+        return False
+
+    def requires_backend_image(self) -> bool:
+        """No container: the agent runs on the host."""
         return False
 
     def __init__(
@@ -1072,6 +1084,10 @@ class DockerEnvironment(NoCaptureRecovery):
         """A docker-in-docker sandbox runs under the host daemon's Sysbox."""
         return docker_in_docker
 
+    def requires_backend_image(self) -> bool:
+        """The editor container is built on the backend's image (``_docker_backend_image``)."""
+        return True
+
     def build_editor(
         self,
         request: RunEnvironmentRequest,
@@ -1261,6 +1277,10 @@ class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """The local editor is CPU-only; the Modal deployment holds the accelerator."""
         del docker_in_docker
+        return False
+
+    def requires_backend_image(self) -> bool:
+        """The Modal deployment brings its own image; no backend image is read."""
         return False
 
     def reap_orphans(
