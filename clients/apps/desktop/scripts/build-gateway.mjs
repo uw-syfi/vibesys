@@ -8,7 +8,7 @@ import {API_SCHEMA_HASH as apiHash} from '@vibesys/proto';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const gateway = join(root, 'gateway');
-const buildFlags = ['-trimpath', '-ldflags', '-s -w'];
+const buildFlags = ['-trimpath', '-buildvcs=false', '-ldflags', '-s -w'];
 const output = join(root, 'clients/apps/desktop/dist/gateway', apiHash.slice(0, 16));
 
 async function sources(directory) {
