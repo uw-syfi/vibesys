@@ -260,3 +260,21 @@ func TestAChangedScriptBuildsANewImage(t *testing.T) {
 		t.Errorf("%d builds, digests %s and %s: a changed script must build a new image", s.daemon.Builds(), first.ImageDigest, second.ImageDigest)
 	}
 }
+
+// A measured command's container says so, so an engine that shares the machine can give it all
+// of it; an unmeasured one does not.
+func TestAContainerIsMeasuredExactlyWhenItsCommandIs(t *testing.T) {
+	for _, measured := range []bool{false, true} {
+		s := newScene(t, options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile)}})
+		s.daemon.SetFaults(func(c dockerfake.Call) *dockerfake.Fault {
+			if c.Op == dockerfake.OpRemove {
+				return &dockerfake.Fault{Err: errors.New("kept for the test")}
+			}
+			return nil
+		})
+		_ = runIn(t, s, core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour, Measured: measured})
+		if got := onlyContainer(t, s.daemon).Measured; got != measured {
+			t.Errorf("command measured %v: container measured %v", measured, got)
+		}
+	}
+}

@@ -134,6 +134,9 @@ type ContainerSpec struct {
 	// in an allocation with a time limit of its own bounds the allocation by it; zero means the
 	// caller gave none.
 	Limit time.Duration
+	// Measured says the container's commands are timed: an engine that places the container in
+	// an allocation gives it the whole machine, and an unmeasured container only its share.
+	Measured bool
 }
 
 var (

@@ -506,7 +506,7 @@ change. Unknown keys are refused. With no file, docker runs on this machine with
 | `[docker.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`. |
 | `[remote] host`, `ssh_command`, `rsync_command` | The ssh destination and the programs that reach it. |
 | `[remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). |
-| `[slurm] partition`, `gres`, `exclusive`, `srun_arguments` | What each allocation asks for; `exclusive` defaults to true. |
+| `[slurm] partition`, `gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | What an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `gres` and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
 | `[slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
 
 On another machine, a run's checkout and scratch directory are copied to `remote_workspace_root`

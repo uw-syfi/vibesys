@@ -43,8 +43,13 @@ func TestASlurmConfigReadsWithItsDefaults(t *testing.T) {
 	if c.Remote == nil || c.Remote.Host != "host-a" || c.Remote.SSHCommand[0] != "ssh" || c.Remote.RsyncCommand[0] != "rsync" {
 		t.Errorf("remote %+v", c.Remote)
 	}
-	if s := c.Slurm; s == nil || !s.Exclusive || s.QueueTimeout != 10*time.Minute || s.PollInterval != operator.DefaultPollInterval || s.Gres != "gpu:1" {
+	if s := c.Slurm; s == nil || !s.Exclusive || s.QueueTimeout != 10*time.Minute || s.PollInterval != operator.DefaultPollInterval || s.Gres != "gpu:1" ||
+		s.CPUs != operator.DefaultCPUs || s.Memory != "" {
 		t.Errorf("slurm %+v", c.Slurm)
+	}
+	c, err = operator.Parse([]byte(strings.Replace(slurmConfig, "[slurm]", "[slurm]\ncpus = 12\nmemory = \"48G\"", 1)))
+	if err != nil || c.Slurm.CPUs != 12 || c.Slurm.Memory != "48G" {
+		t.Errorf("slurm %+v, %v; want 12 CPUs and 48G", c.Slurm, err)
 	}
 }
 
@@ -67,26 +72,29 @@ func TestNoConfigIsLocalDockerWithNoGPU(t *testing.T) {
 // Every mistake is refused, naming the key: a typo must never be a setting quietly left out.
 func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 	cases := map[string]string{
-		"an unknown key":                "[docker]\nplacment = \"ssh\"\n",
-		"an unknown section":            "[sluurm]\n",
-		"an unknown placement":          "[docker]\nplacement = \"k8s\"\n",
-		"ssh with no remote":            "[docker]\nplacement = \"ssh\"\n",
-		"slurm with no slurm":           strings.Replace(slurmConfig, "[slurm]", "[ignored]", 1),
-		"a remote that is unused":       "[remote]\nhost = \"h\"\nremote_workspace_root = \"/r\"\n",
-		"a host with an option":         strings.Replace(slurmConfig, `"host-a"`, `"-oProxyCommand=x"`, 1),
-		"a relative workspace":          strings.Replace(slurmConfig, `"/home/u/vibesys-cli"`, `"vibesys-cli"`, 1),
-		"the root as workspace":         strings.Replace(slurmConfig, `"/home/u/vibesys-cli"`, `"/"`, 1),
-		"a relative mount":              strings.Replace(slurmConfig, `"/data/hf"`, `"data/hf"`, 1),
-		"a mount name with a slash":     strings.Replace(slurmConfig, "hf-cache =", "\"hf/cache\" =", 1),
-		"a runtime with no GPU":         "[docker]\nruntime = \"nvidia\"\n",
-		"a gpus value with a space":     "[docker]\ngpus = \"all --privileged\"\n",
-		"an srun argument not a flag":   strings.Replace(slurmConfig, `"--nodelist=node-a"`, `"node-a"`, 1),
-		"a negative queue timeout":      strings.Replace(slurmConfig, "600", "-1", 1),
-		"a wrong type":                  "[docker]\ngpus = 1\n",
-		"an unused slurm on ssh":        strings.Replace(slurmConfig, `placement = "slurm"`, `placement = "ssh"`, 1),
-		"an empty ssh command":          strings.Replace(slurmConfig, "[slurm]", "ssh_command = []\n[slurm]", 1),
-		"a gres that is not a value":    strings.Replace(slurmConfig, `"gpu:1"`, `"gpu:1 --x"`, 1),
-		"an unknown key in a sub-table": strings.Replace(slurmConfig, "[slurm]", "[slurm]\nnodes = 1", 1),
+		"an unknown key":                    "[docker]\nplacment = \"ssh\"\n",
+		"an unknown section":                "[sluurm]\n",
+		"an unknown placement":              "[docker]\nplacement = \"k8s\"\n",
+		"ssh with no remote":                "[docker]\nplacement = \"ssh\"\n",
+		"slurm with no slurm":               strings.Replace(slurmConfig, "[slurm]", "[ignored]", 1),
+		"a remote that is unused":           "[remote]\nhost = \"h\"\nremote_workspace_root = \"/r\"\n",
+		"a host with an option":             strings.Replace(slurmConfig, `"host-a"`, `"-oProxyCommand=x"`, 1),
+		"a relative workspace":              strings.Replace(slurmConfig, `"/home/u/vibesys-cli"`, `"vibesys-cli"`, 1),
+		"the root as workspace":             strings.Replace(slurmConfig, `"/home/u/vibesys-cli"`, `"/"`, 1),
+		"a relative mount":                  strings.Replace(slurmConfig, `"/data/hf"`, `"data/hf"`, 1),
+		"a mount name with a slash":         strings.Replace(slurmConfig, "hf-cache =", "\"hf/cache\" =", 1),
+		"a runtime with no GPU":             "[docker]\nruntime = \"nvidia\"\n",
+		"a gpus value with a space":         "[docker]\ngpus = \"all --privileged\"\n",
+		"an srun argument not a flag":       strings.Replace(slurmConfig, `"--nodelist=node-a"`, `"node-a"`, 1),
+		"a negative queue timeout":          strings.Replace(slurmConfig, "600", "-1", 1),
+		"a wrong type":                      "[docker]\ngpus = 1\n",
+		"an unused slurm on ssh":            strings.Replace(slurmConfig, `placement = "slurm"`, `placement = "ssh"`, 1),
+		"an empty ssh command":              strings.Replace(slurmConfig, "[slurm]", "ssh_command = []\n[slurm]", 1),
+		"a gres that is not a value":        strings.Replace(slurmConfig, `"gpu:1"`, `"gpu:1 --x"`, 1),
+		"an unknown key in a sub-table":     strings.Replace(slurmConfig, "[slurm]", "[slurm]\nnodes = 1", 1),
+		"no CPUs":                           strings.Replace(slurmConfig, "[slurm]", "[slurm]\ncpus = 0", 1),
+		"a memory with no unit":             strings.Replace(slurmConfig, "[slurm]", "[slurm]\nmemory = \"32\"", 1),
+		"a memory Docker reads another way": strings.Replace(slurmConfig, "[slurm]", "[slurm]\nmemory = \"32GB\"", 1),
 	}
 	for name, text := range cases {
 		_, err := operator.Parse([]byte(text))

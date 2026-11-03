@@ -138,15 +138,16 @@ func (r *run) containerSpec(id string, img Image) (ContainerSpec, error) {
 		env[EnvMounts] = strings.Join(names, ",")
 	}
 	return ContainerSpec{
-		Name:   r.name,
-		Image:  img.ID,
-		Labels: runLabels(p.cfg.Scope, id),
-		User:   user,
-		Dir:    r.x.Checkout.Dir,
-		Mounts: mounts,
-		Env:    env,
-		GPUs:   p.cfg.GPUs,
-		Limit:  r.x.Timeout,
+		Name:     r.name,
+		Image:    img.ID,
+		Labels:   runLabels(p.cfg.Scope, id),
+		User:     user,
+		Dir:      r.x.Checkout.Dir,
+		Mounts:   mounts,
+		Env:      env,
+		GPUs:     p.cfg.GPUs,
+		Limit:    r.x.Timeout,
+		Measured: r.x.Measured,
 	}, nil
 }
 

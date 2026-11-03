@@ -45,6 +45,8 @@ const (
 const (
 	DefaultPollInterval = 5 * time.Second
 	DefaultQueueTimeout = 24 * time.Hour
+	// DefaultCPUs is how many CPUs a build or an unmeasured container asks for.
+	DefaultCPUs = 8
 )
 
 // Config is the operator config.
@@ -82,8 +84,14 @@ type Remote struct {
 // SlurmConfig is how an allocation is asked for.
 type SlurmConfig struct {
 	Partition string
-	Gres      string
+	// Gres is what a container asks for; a build asks for no GRES.
+	Gres string
+	// Exclusive gives a measured container, a benchmark sample, the whole node.
 	Exclusive bool
+	// CPUs is how many CPUs a build or an unmeasured container asks for.
+	CPUs int
+	// Memory, when set, is the memory a build or an unmeasured container asks for, a Slurm size.
+	Memory string
 	// SrunArguments are passed to srun as they are, after the ones above.
 	SrunArguments []string
 	// PollInterval is the pause between two reads of a job's state.
@@ -139,6 +147,8 @@ type file struct {
 		Partition           string   `toml:"partition"`
 		Gres                string   `toml:"gres"`
 		Exclusive           *bool    `toml:"exclusive"`
+		CPUs                *int     `toml:"cpus"`
+		Memory              string   `toml:"memory"`
 		SrunArguments       []string `toml:"srun_arguments"`
 		PollIntervalSeconds float64  `toml:"poll_interval_seconds"`
 		QueueTimeoutSeconds float64  `toml:"queue_timeout_seconds"`
@@ -149,6 +159,8 @@ var (
 	hostPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]*$`)
 	valuePattern = regexp.MustCompile(`^[A-Za-z0-9=,:._/+-]*$`)
 	runtimeName  = regexp.MustCompile(`^[a-z0-9._-]*$`)
+	// memoryPattern is a size both Slurm (--mem) and Docker (memory=) read the same way.
+	memoryPattern = regexp.MustCompile(`^[1-9][0-9]*[KMGT]$`)
 )
 
 func invalid(format string, args ...any) error {
@@ -231,11 +243,20 @@ func Parse(data []byte) (Config, error) {
 	}
 	if s := f.Slurm; s != nil {
 		c.Slurm = &SlurmConfig{
-			Partition: s.Partition, Gres: s.Gres, Exclusive: true, SrunArguments: s.SrunArguments,
+			Partition: s.Partition, Gres: s.Gres, Exclusive: true, CPUs: DefaultCPUs, Memory: s.Memory, SrunArguments: s.SrunArguments,
 			PollInterval: DefaultPollInterval, QueueTimeout: DefaultQueueTimeout,
 		}
 		if s.Exclusive != nil {
 			c.Slurm.Exclusive = *s.Exclusive
+		}
+		if s.CPUs != nil {
+			if *s.CPUs < 1 {
+				return Config{}, invalid("slurm.cpus: %d is not a number of CPUs", *s.CPUs)
+			}
+			c.Slurm.CPUs = *s.CPUs
+		}
+		if s.Memory != "" && !memoryPattern.MatchString(s.Memory) {
+			return Config{}, invalid("slurm.memory: %q is not a Slurm size such as 32G", s.Memory)
 		}
 		for key, v := range map[string]string{"partition": s.Partition, "gres": s.Gres} {
 			if !valuePattern.MatchString(v) {

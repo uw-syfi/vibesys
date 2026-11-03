@@ -57,6 +57,9 @@ type Allocation struct {
 	Limit time.Duration
 	// Build says the command builds an image.
 	Build bool
+	// Measured says the container's commands are timed, so the allocation must hold the whole
+	// machine; an unmeasured container or a build needs only a share of it.
+	Measured bool
 }
 
 // Engine is a docker.Engine over the docker program. Create it with New. It is safe for

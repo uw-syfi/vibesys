@@ -93,6 +93,24 @@ func TestRunsEachSampleWithItsOwnFileInTheScratchDirectory(t *testing.T) {
 	}
 }
 
+// Only a benchmark sample is measured: a check's timing is not its result, so an environment may
+// run it beside other work.
+func TestOnlyABenchmarkSampleIsMeasured(t *testing.T) {
+	r := newFakeRig(t).(*fakeRig)
+	if _, err := flowrun.Run(context.Background(), r.config(io.Discard), scenarios()[2].plan(false)); err != nil {
+		t.Fatal(err)
+	}
+	runs := r.env.Runs()
+	if len(runs) < 2 {
+		t.Fatalf("%d commands ran, want a check and samples", len(runs))
+	}
+	for i, x := range runs {
+		if want := i > 0; x.Measured != want {
+			t.Errorf("command %d (%q): measured %v, want %v", i, x.Argv, x.Measured, want)
+		}
+	}
+}
+
 // Every command of a job gets its own artifacts directory in the job's, made before it runs and
 // named in the order the commands ran; a job with no artifacts directory gives its commands none.
 func TestEachCommandGetsItsOwnArtifactsDirectoryInTheJobs(t *testing.T) {

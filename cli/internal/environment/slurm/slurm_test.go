@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -179,19 +180,126 @@ func TestAnAllocationNotConfirmedEndedMakesTheRunUnobserved(t *testing.T) {
 	}
 }
 
-func TestAnAllocationAsksForTheNodeAndOutlastsTheCommand(t *testing.T) {
-	a := slurm.Allocator{Partition: "gpu", Gres: "gpu:1", Exclusive: true, Arguments: []string{"--nodelist=node-a"}}
-	got := a.Allocate(dockercli.Allocation{Name: "vibesys-cli-0123", Scope: "d42", Limit: time.Hour}, []string{"docker", "run", "x"})
-	want := []string{
-		"srun", "--job-name=vibesys-docker-vibesys-cli-0123", "--nodes=1", "--ntasks=1", "--time=70",
-		"--comment=d42", "--partition=gpu", "--gres=gpu:1", "--exclusive", "--nodelist=node-a", "--", "docker", "run", "x",
+// srunOptions are the options before "--" of an allocated command line, and the rest after it.
+func srunOptions(t *testing.T, argv []string) ([]string, []string) {
+	t.Helper()
+	i := slices.Index(argv, "--")
+	if i < 0 || argv[0] != "srun" {
+		t.Fatalf("%q is not an srun command line", argv)
 	}
-	if !slices.Equal(got, want) {
-		t.Errorf("\n%q\nwant\n%q", got, want)
+	return argv[1:i], argv[i+1:]
+}
+
+// Builds ask for CPUs only, checks for the GPUs and a share of the node, and only a measured
+// container, when the operator asks for it, for the whole node.
+func TestAnAllocationIsSizedByWhatTheCommandIs(t *testing.T) {
+	base := []string{"--job-name=vibesys-docker-c", "--nodes=1", "--ntasks=1"}
+	cases := []struct {
+		name      string
+		allocator slurm.Allocator
+		x         dockercli.Allocation
+		want      []string
+	}{
+		{"a build", slurm.Allocator{Partition: "gpu", Gres: "gpu:1", Exclusive: true, CPUs: 6, Memory: "16G"},
+			dockercli.Allocation{Name: "c", Build: true},
+			[]string{"--time=240", "--partition=gpu", "--cpus-per-task=6", "--mem=16G"}},
+		{"a check", slurm.Allocator{Partition: "gpu", Gres: "gpu:1", Exclusive: true, Memory: "16G"},
+			dockercli.Allocation{Name: "c", Scope: "d42", Limit: time.Hour},
+			[]string{"--time=70", "--comment=d42", "--partition=gpu", "--gres=gpu:1", "--cpus-per-task=8", "--mem=16G"}},
+		{"a sample", slurm.Allocator{Partition: "gpu", Gres: "gpu:1", Exclusive: true, Memory: "16G", Arguments: []string{"--nodelist=node-a"}},
+			dockercli.Allocation{Name: "c", Scope: "d42", Limit: time.Hour, Measured: true},
+			[]string{"--time=70", "--comment=d42", "--partition=gpu", "--gres=gpu:1", "--exclusive", "--nodelist=node-a"}},
+		{"a sample on a shared node", slurm.Allocator{Gres: "gpu:1", CPUs: 4},
+			dockercli.Allocation{Name: "c", Limit: time.Minute, Measured: true},
+			[]string{"--time=11", "--gres=gpu:1", "--cpus-per-task=4"}},
 	}
-	build := a.Allocate(dockercli.Allocation{Name: "b", Build: true}, []string{"docker", "build", "-"})
-	if !slices.Contains(build, "--time=240") || slices.ContainsFunc(build, func(s string) bool { return strings.HasPrefix(s, "--comment") }) {
-		t.Errorf("a build's allocation %q", build)
+	for _, c := range cases {
+		opts, _ := srunOptions(t, c.allocator.Allocate(c.x, []string{"docker", "run", "x"}))
+		if want := append(slices.Clone(base), c.want...); !slices.Equal(opts, want) {
+			t.Errorf("%s: srun %q\nwant      %q", c.name, opts, want)
+		}
+	}
+}
+
+// fakeDocker writes a docker program that records each call's arguments, one call per line, and
+// fails the subcommand named by $FAIL.
+func fakeDocker(t *testing.T) (program, calls string) {
+	t.Helper()
+	dir := t.TempDir()
+	program, calls = dir+"/docker", dir+"/calls"
+	script := "#!/bin/sh\necho \"$*\" >> " + calls + "\n[ \"$1 $2\" = \"$FAIL\" ] && exit 7\nexit 0\n"
+	if err := writeExecutable(program, script); err != nil {
+		t.Fatal(err)
+	}
+	return program, calls
+}
+
+// runAllocated runs what srun would run of an allocated command line, here.
+func runAllocated(t *testing.T, argv []string, fail string) (int, string) {
+	t.Helper()
+	_, inner := srunOptions(t, argv)
+	cmd := exec.Command(inner[0], inner[1:]...)
+	cmd.Env = append(cmd.Environ(), "FAIL="+fail)
+	err := cmd.Run()
+	code := 0
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		code = exit.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	cpus, err := exec.Command("sh", "-c", `sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' /proc/self/status`).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code, strings.TrimSpace(string(cpus))
+}
+
+func writeExecutable(path, content string) error { return os.WriteFile(path, []byte(content), 0o755) }
+
+func readLines(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+}
+
+func TestAContainerIsConfinedToTheCPUsOfItsAllocation(t *testing.T) {
+	program, calls := fakeDocker(t)
+	argv := slurm.Allocator{}.Allocate(dockercli.Allocation{Name: "c"}, []string{program, "run", "--rm", "img", "sh", "-c", "a b"})
+	code, cpus := runAllocated(t, argv, "")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	if got, want := readLines(t, calls), []string{"run --cpuset-cpus=" + cpus + " --rm img sh -c a b"}; !slices.Equal(got, want) {
+		t.Errorf("docker was called with %q, want %q", got, want)
+	}
+}
+
+// A build runs in a builder of its own, confined to the allocation's CPUs and memory, that is
+// removed with its state kept after the build, whether the build worked or failed, so the next
+// build starts from the same cache; a builder an earlier build left is removed first.
+func TestABuildRunsInAConfinedBuilderThatKeepsItsState(t *testing.T) {
+	for _, fail := range []string{"", "buildx build", "buildx create"} {
+		program, calls := fakeDocker(t)
+		a := slurm.Allocator{Memory: "16G", Builder: "vibesys-cli-builder-d42"}
+		argv := a.Allocate(dockercli.Allocation{Name: "b", Build: true}, []string{program, "build", "--progress=plain", "--tag", "t:1", "-"})
+		code, cpus := runAllocated(t, argv, fail)
+		rm := "buildx rm --keep-state vibesys-cli-builder-d42"
+		create := "buildx create --name vibesys-cli-builder-d42 --driver docker-container --driver-opt cpuset-cpus=" + cpus + ",memory=16G"
+		build := "buildx build --builder vibesys-cli-builder-d42 --load --progress=plain --tag t:1 -"
+		want, wantCode := []string{rm, create, build, rm}, 0
+		switch fail {
+		case "buildx build":
+			wantCode = 7
+		case "buildx create":
+			want, wantCode = []string{rm, create, rm}, 7
+		}
+		if got := readLines(t, calls); !slices.Equal(got, want) || code != wantCode {
+			t.Errorf("failing %q: exit %d, calls\n%q\nwant exit %d, calls\n%q", fail, code, got, wantCode, want)
+		}
 	}
 }
 
@@ -267,3 +375,48 @@ func TestACancelWaitsUntilTheJobIsGone(t *testing.T) {
 }
 
 var _ remote.Shell = (*scriptShell)(nil)
+
+// The builder is removed with its state kept when it is there, and nothing is done when it is not.
+func TestBuildxRemovesOnlyABuilderThatIsThere(t *testing.T) {
+	for _, there := range []bool{true, false} {
+		program, calls := fakeDocker(t)
+		fail := ""
+		if !there {
+			fail = "buildx inspect"
+		}
+		t.Setenv("FAIL", fail)
+		b := slurm.Buildx{Shell: remote.Local{}, Timers: clock.System{}, Program: program, Name: "vibesys-cli-builder-d42"}
+		if err := b.Remove(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"buildx inspect vibesys-cli-builder-d42"}
+		if there {
+			want = append(want, "buildx rm --keep-state vibesys-cli-builder-d42")
+		}
+		if got := readLines(t, calls); !slices.Equal(got, want) {
+			t.Errorf("builder there %v: calls %q, want %q", there, got, want)
+		}
+	}
+}
+
+// failingBuild is an engine whose builds fail.
+type failingBuild struct{ docker.Engine }
+
+func (failingBuild) Build(context.Context, docker.BuildSpec, io.Writer) error {
+	return errors.New("the build failed")
+}
+
+type countingBuilders struct{ removed int }
+
+func (c *countingBuilders) Remove(context.Context) error { c.removed++; return nil }
+
+// A build that did not finish has its allocation cancelled and its builder removed; one that
+// finished keeps both to the build's own script.
+func TestABuildCutShortEndsItsAllocationAndItsBuilder(t *testing.T) {
+	sched, builders := newScheduler(), &countingBuilders{}
+	e := slurm.Engine{Inner: failingBuild{}, Scheduler: sched, Builders: builders}
+	err := e.Build(context.Background(), docker.BuildSpec{Tag: "vibesys-cli-task:abc"}, io.Discard)
+	if err == nil || !slices.Equal(sched.Cancelled(), []string{slurm.JobName(dockercli.BuildName("vibesys-cli-task:abc"))}) || builders.removed != 1 {
+		t.Errorf("error %v, cancelled %q, builders removed %d", err, sched.Cancelled(), builders.removed)
+	}
+}

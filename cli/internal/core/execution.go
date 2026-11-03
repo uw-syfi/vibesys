@@ -28,6 +28,10 @@ type Execution struct {
 	Service *ServiceSpec
 	// Timeout bounds the whole execution. It must be positive.
 	Timeout time.Duration
+	// Measured says the command's own timing is its result, as a benchmark sample's is. An
+	// environment that shares a machine with other work gives a measured command the whole
+	// machine, and an unmeasured one only its share.
+	Measured bool
 }
 
 // ExecKind is how an execution that the environment saw end ended. The set is closed.

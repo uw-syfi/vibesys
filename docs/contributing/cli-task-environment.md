@@ -91,8 +91,10 @@ remote_workspace_root = "/home/user/vibesys-cli"
 
 [slurm]
 partition = "gpu"
-gres = "gpu:1"
-exclusive = true
+gres = "gpu:1"             # what a check and a benchmark sample ask for
+exclusive = true           # a benchmark sample holds the whole node
+cpus = 8                   # what a build and a check ask for
+memory = "32G"             # optional, a Slurm size
 srun_arguments = []
 queue_timeout_seconds = 86400
 ```
@@ -187,10 +189,10 @@ through `ssh`, so the image is built and kept on the machine that runs it.
 ### Slurm: the allocation holds the container
 
 Under `slurm`, the container's first process is started by `srun` inside a new
-allocation (the configured partition, GRES, `--exclusive` and
+allocation (sized as the next section says, with the configured partition and
 extra arguments, and a time limit of the command's timeout plus a margin), and
-image builds run under `srun` too, so neither perturbs another job's
-measurement. The Docker daemon runs outside Slurm's cgroups, so ending the
+image builds run under `srun` too, so neither runs on CPUs Slurm gave to
+another job. The Docker daemon runs outside Slurm's cgroups, so ending the
 allocation does not end the container; the CLI removes the container itself on
 every path, then cancels the allocation and confirms it ended. From `vs-slurm`
 this keeps the semantics, not the code:
@@ -217,8 +219,46 @@ The ssh host must be the node that Docker runs on: the CLI inspects images,
 starts processes in the container and removes it by running `docker` there.
 That fits a single-node Slurm partition such as the DGX Spark, or a partition
 pinned to one node with `srun_arguments`. GPUs are passed with the configured
-`--gpus` value, so `exclusive = true` is what makes "all" mean the allocated
-GPUs.
+`--gpus` value, not the GPUs Slurm allocated: on a node with one GPU, such as
+the Spark, "all" is the allocated GPU; on a node with several, a check that is
+not exclusive could see a GPU allocated to another job (see "What is not
+done").
+
+### An allocation asks for what its command needs
+
+Only a timed command needs the node to itself. Holding the whole node for an
+image build or a check would make every other job on the node wait hours for
+work that does not care what runs beside it, so an allocation is sized by what
+it runs:
+
+| Command | Asks for | Confined by |
+| --- | --- | --- |
+| Image build | `cpus` and `memory`; no GRES, not exclusive | a BuildKit builder of its own whose container is limited to the allocation's CPUs and `memory` |
+| Check (accuracy) | `gres`, `cpus` and `memory`; not exclusive | `docker run --cpuset-cpus` with the allocation's CPUs |
+| Benchmark sample | `gres` and, with `exclusive = true`, the whole node | the same, which is then every CPU |
+
+The core marks an execution `Measured` when it is a benchmark sample, the docker
+environment passes that to the engine, and only the Slurm allocator reads it. A
+task cannot ask for an exclusive check: the manifest stays free of machines,
+and a check that is slow beside other work only takes longer. The CPU list
+comes from the allocation itself (`Cpus_allowed_list` of the srun step), so it
+is the set Slurm's cgroup gives the step, not a guess.
+
+Builds cannot be confined the obvious ways. The Docker daemon runs outside
+Slurm's cgroups, so the build's CPU use is not the `srun` step's; BuildKit,
+Docker's default builder, takes no `--cpuset-cpus`; and the legacy builder,
+which does, has no `RUN --mount=type=cache`, which a task's Dockerfile may use
+to keep a compiler cache across image builds. So a build runs in a `buildx`
+builder with the `docker-container` driver, created inside the allocation with
+`--driver-opt cpuset-cpus=<the step's CPUs>,memory=<memory>`, used with
+`--builder <name> --load`, and removed with `buildx rm --keep-state` when the
+build ends. Its state (layers and cache mounts) lives in a volume named by the
+builder, and the builder is named by the daemon's scope, so the next build
+creates a builder of the same name, with that allocation's CPUs, over the same
+state: checked by building twice through two builders and seeing the cache
+mount's contents survive, and the second builder's container limited to its
+own CPU set. A builder a killed build left is removed before the next build
+and after a build that did not finish.
 
 ### GPU passthrough uses the runtime, not CDI
 

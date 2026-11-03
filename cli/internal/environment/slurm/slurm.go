@@ -25,8 +25,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockercli"
+	"github.com/uw-syfi/vibesys/cli/internal/remote"
 )
 
 // JobPrefix starts the name of every Slurm job this package starts.
@@ -52,18 +54,43 @@ type Scheduler interface {
 	Cancel(ctx context.Context, name string) error
 }
 
-// Allocator is the dockercli.Allocator that runs a command under srun in a new allocation.
+// DefaultCPUs is how many CPUs an allocation that does not hold the whole node asks for.
+const DefaultCPUs = 8
+
+// Allocator is the dockercli.Allocator that runs a command under srun in a new allocation, sized
+// by what the command is:
+//
+//   - An image build asks for CPUs and memory only, and builds in a BuildKit builder of its own
+//     whose container is confined to the CPUs and memory Slurm gave it (Docker's own builder
+//     runs in the daemon, outside Slurm's cgroups, and cannot be confined).
+//   - A container whose commands are not measured, a check, asks for the GPUs (Gres) and its
+//     share of CPUs and memory, so it can run beside other work on the node.
+//   - A measured container, a benchmark sample, asks for the GPUs and, when Exclusive, the whole
+//     node, so nothing else runs while it is timed.
+//
+// Every container is confined to the CPUs of its allocation with docker run --cpuset-cpus, read
+// from the allocation itself.
 type Allocator struct {
 	Partition string
 	Gres      string
+	// Exclusive gives a measured container the whole node.
 	Exclusive bool
+	// CPUs is how many CPUs a build or an unmeasured container asks for; zero means DefaultCPUs.
+	CPUs int
+	// Memory, when set, is the memory (a Slurm size, such as "32G") a build or an unmeasured
+	// container asks for, and the limit of a build's builder.
+	Memory string
 	// Arguments are passed to srun as they are, after the ones above.
 	Arguments []string
+	// Builder names the BuildKit builder of the daemon's builds: its state, the layer cache and
+	// every RUN --mount=type=cache, is kept between builds under that name.
+	Builder string
 }
 
 var _ dockercli.Allocator = Allocator{}
 
-// Allocate implements dockercli.Allocator.
+// Allocate implements dockercli.Allocator. The argv is the docker program, then its subcommand
+// (build or run), then the subcommand's arguments.
 func (a Allocator) Allocate(x dockercli.Allocation, argv []string) []string {
 	limit := BuildLimit
 	if !x.Build {
@@ -83,21 +110,108 @@ func (a Allocator) Allocate(x dockercli.Allocation, argv []string) []string {
 	if a.Partition != "" {
 		out = append(out, "--partition="+a.Partition)
 	}
-	if a.Gres != "" {
+	if !x.Build && a.Gres != "" {
 		out = append(out, "--gres="+a.Gres)
 	}
-	if a.Exclusive {
+	if x.Measured && a.Exclusive {
 		out = append(out, "--exclusive")
+	} else {
+		cpus := a.CPUs
+		if cpus <= 0 {
+			cpus = DefaultCPUs
+		}
+		out = append(out, "--cpus-per-task="+strconv.Itoa(cpus))
+		if a.Memory != "" {
+			out = append(out, "--mem="+a.Memory)
+		}
 	}
 	out = append(out, a.Arguments...)
-	return append(append(out, "--"), argv...)
+	out = append(out, "--")
+	if len(argv) < 2 {
+		return append(out, argv...)
+	}
+	if x.Build {
+		return append(append(out, "sh", "-c", buildScript, "vs-build", a.builder(), a.Memory, argv[0]), argv[2:]...)
+	}
+	return append(append(out, "sh", "-c", confineScript, "vs-run", argv[0], argv[1]), argv[2:]...)
+}
+
+func (a Allocator) builder() string {
+	if a.Builder != "" {
+		return a.Builder
+	}
+	return dockercli.BuildPrefix + "builder"
+}
+
+// allowedCPUs prints the CPUs the allocation's step may run on, in cpuset syntax.
+const allowedCPUs = `sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' /proc/self/status`
+
+// confineScript runs "$1 $2 --cpuset-cpus=<the step's CPUs> ${@:3}": the docker subcommand,
+// confined to the allocation's CPUs. exec keeps the process the one srun started, so its stdin,
+// signals and exit status are docker's.
+const confineScript = `cpus=$(` + allowedCPUs + `)
+program=$1; sub=$2; shift 2
+exec "$program" "$sub" --cpuset-cpus="$cpus" "$@"`
+
+// buildScript builds with "$3 buildx build --builder $1 --load ${@:4}" in a builder whose
+// container is confined to the step's CPUs and to the memory $2 (none when empty). The builder is
+// made for the build and removed after it with its state kept, so the next build under the same
+// name starts from the same cache. A builder a killed build left is removed first.
+const buildScript = `cpus=$(` + allowedCPUs + `)
+builder=$1; memory=$2; program=$3; shift 3
+opts="cpuset-cpus=$cpus"
+[ -n "$memory" ] && opts="$opts,memory=$memory"
+"$program" buildx rm --keep-state "$builder" >/dev/null 2>&1
+trap '"$program" buildx rm --keep-state "$builder" >/dev/null 2>&1' EXIT
+trap 'exit 143' TERM INT HUP
+"$program" buildx create --name "$builder" --driver docker-container --driver-opt "$opts" >/dev/null || exit
+"$program" buildx build --builder "$builder" --load "$@"`
+
+// BuilderName is the name of the BuildKit builder of a daemon's builds, by its scope.
+func BuilderName(scope string) string {
+	return docker.Owner + "-builder-" + strings.ReplaceAll(scope, ".", "-")
+}
+
+// Builders removes the builder a build was confined in.
+type Builders interface {
+	// Remove removes the builder and keeps its state; a builder that is not there is no error.
+	Remove(ctx context.Context) error
+}
+
+// Buildx is the Builders of a builder that the docker program reaches through a shell.
+type Buildx struct {
+	Shell   remote.Shell
+	Timers  clock.Timers
+	Program string
+	Name    string
+}
+
+var _ Builders = Buildx{}
+
+// Remove implements Builders.
+func (b Buildx) Remove(ctx context.Context) error {
+	bounded, done := remote.Bounded(ctx, b.Timers, CallTimeout)
+	defer done()
+	program := b.Program
+	if program == "" {
+		program = dockercli.DefaultProgram
+	}
+	script := `"$1" buildx inspect "$2" >/dev/null 2>&1 || exit 0; exec "$1" buildx rm --keep-state "$2"`
+	if _, err := remote.Output(bounded, b.Shell, []string{"sh", "-c", script, "vs-builder", program, b.Name}, nil); err != nil {
+		return fmt.Errorf("removing the builder %s: %w", b.Name, err)
+	}
+	return nil
 }
 
 // Engine is a docker.Engine whose containers and builds live in Slurm allocations: an inner engine
-// that places them there (a dockercli.Engine with an Allocator), and the scheduler that ends them.
+// that places them there (a dockercli.Engine with an Allocator), the scheduler that ends them,
+// and the builder a build that did not finish leaves behind.
 type Engine struct {
 	Inner     docker.Engine
 	Scheduler Scheduler
+	// Builders, when set, removes the builder of a build that did not finish, after its
+	// allocation ended.
+	Builders Builders
 }
 
 var _ docker.Engine = Engine{}
@@ -114,8 +228,14 @@ func (e Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer)
 	if err == nil {
 		return nil
 	}
-	if cerr := e.Scheduler.Cancel(context.WithoutCancel(ctx), JobName(dockercli.BuildName(spec.Tag))); cerr != nil {
-		return errors.Join(err, fmt.Errorf("and the build's allocation was not confirmed ended: %w", cerr))
+	cleanup := context.WithoutCancel(ctx)
+	if cerr := e.Scheduler.Cancel(cleanup, JobName(dockercli.BuildName(spec.Tag))); cerr != nil {
+		err = errors.Join(err, fmt.Errorf("and the build's allocation was not confirmed ended: %w", cerr))
+	}
+	if e.Builders != nil {
+		if rerr := e.Builders.Remove(cleanup); rerr != nil {
+			err = errors.Join(err, fmt.Errorf("and the build's builder was not removed: %w", rerr))
+		}
 	}
 	return err
 }

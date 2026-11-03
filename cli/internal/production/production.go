@@ -194,7 +194,10 @@ func (p Process) machineEnvironments(clk clock.System, dir runtimedir.Dir) (envi
 		cfg.Machine = &machine.Remote{Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: r.RsyncCommand}, Root: r.WorkspaceRoot, Scope: scope, Timers: clk}
 		cfg.GPUFacts = &nvidia.GPUs{Shell: ssh, Timers: clk}
 		if s := op.Slurm; s != nil {
-			engineCfg.Allocator = slurm.Allocator{Partition: s.Partition, Gres: s.Gres, Exclusive: s.Exclusive, Arguments: s.SrunArguments}
+			engineCfg.Allocator = slurm.Allocator{
+				Partition: s.Partition, Gres: s.Gres, Exclusive: s.Exclusive, CPUs: s.CPUs, Memory: s.Memory,
+				Arguments: s.SrunArguments, Builder: slurm.BuilderName(scope),
+			}
 			engineCfg.StartTimeout = s.QueueTimeout
 		}
 	}
@@ -204,7 +207,10 @@ func (p Process) machineEnvironments(clk clock.System, dir runtimedir.Dir) (envi
 	}
 	cfg.Engine = engine
 	if s := op.Slurm; s != nil {
-		cfg.Engine = slurm.Engine{Inner: engine, Scheduler: slurm.CLI{Shell: engineCfg.Shell, Timers: clk, Poll: s.PollInterval}}
+		cfg.Engine = slurm.Engine{
+			Inner: engine, Scheduler: slurm.CLI{Shell: engineCfg.Shell, Timers: clk, Poll: s.PollInterval},
+			Builders: slurm.Buildx{Shell: engineCfg.Shell, Timers: clk, Name: slurm.BuilderName(scope)},
+		}
 	}
 	containers, err := docker.New(cfg)
 	if err != nil {
