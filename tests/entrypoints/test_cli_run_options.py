@@ -13,6 +13,7 @@ from tests.support.task_project import DEFAULT_TASK, task_path, write_task
 
 from entrypoints import cli
 from entrypoints.cli.config import load_config_and_skills
+from entrypoints.cli.loops import validated_run_request
 from entrypoints.cli.preflight import (
     ACCELERATOR_UNAVAILABLE,
     AGENT_IMAGES_COMMAND,
@@ -42,7 +43,7 @@ from server.host_preflight import (
     TaskImageUnsupported,
 )
 from vibesys.api import ComputeBackend, DomainName
-from vibesys.api.request import run_environment_uses_docker
+from vibesys.api.request import run_environment_uses_docker, run_host_shortfall
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.inputs import InputBundle, load_task
 from vs_project.api.testing import FakeGitRepositories
@@ -541,8 +542,16 @@ def _slurm_flags(tmp_path: Path) -> list[str]:
     return ["--run-environment", "slurm", "--slurm-config", str(config)]
 
 
-@pytest.mark.parametrize("backend", ["cuda", "rocm", "metal"])
-@pytest.mark.parametrize("environment", ["slurm", "modal"])
+@pytest.mark.parametrize(
+    ("environment", "backend"),
+    [
+        ("slurm", "cuda"),
+        ("slurm", "rocm"),
+        ("modal", "cuda"),
+        ("modal", "rocm"),
+        ("modal", "metal"),
+    ],
+)
 def test_a_gpu_task_measured_on_a_cluster_or_cloud_needs_no_gpu_on_the_agents_machine(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, backend: str, environment: str
 ) -> None:
@@ -706,3 +715,50 @@ def test_a_role_provider_flag_reaches_the_roles_configuration(tmp_path: Path) ->
 
     assert config.agent.roles["implementer"].provider == "claude"
     assert config.agent.roles["implementer"].model == "claude-opus-5"
+
+
+_SYSBOX_PRESENT = ScriptedProbe(
+    lambda argv: ProbeResult(0, '{"sysbox-runc": {}}') if argv == _DOCKER_INFO else None
+)
+
+
+def _declares(project: Path, backend: Backend, *, docker_in_docker: bool) -> None:
+    """Rewrite the project's one task to declare ``backend``, inside Docker when asked."""
+    manifest = _DOCKER_IN_DOCKER_TASK.replace(
+        "docker_in_docker = true", f"docker_in_docker = {str(docker_in_docker).lower()}"
+    )
+    write_task(project, manifest.replace("version = 1", f'version = 1\nbackends = ["{backend}"]'))
+
+
+@pytest.mark.parametrize("backend", list(Backend))
+@pytest.mark.parametrize("environment", ["docker-in-docker", "slurm", "modal"])
+def test_a_container_run_of_a_backend_with_no_image_fails_preflight_naming_the_backend(
+    tmp_path: Path, backend: Backend, environment: str
+) -> None:
+    """Regression: a metal task passed preflight in Docker, then the run stopped for want of an image.
+
+    These runs hand the agent no accelerator, so the host's hardware is not asked; what a
+    container run can still lack is the backend's container image, which only Metal has none of.
+    Modal starts no local container, so it needs none.
+    """
+    project = _project_declaring(tmp_path, f'"{backend}"')
+    _declares(project, backend, docker_in_docker=environment == "docker-in-docker")
+    flags = {
+        "docker-in-docker": [],
+        "slurm": _slurm_flags(tmp_path),
+        "modal": ["--run-environment", "modal"],
+    }[environment]
+    argv = [
+        "--outer-loop", "agent", "--runs-dir", str(tmp_path / "runs"), "--input", str(project),
+        "--no-skills", "--profiler", "none", *flags,
+    ]  # fmt: skip
+    request, _config = validated_run_request(_parse(argv), _SYSBOX_PRESENT)
+
+    shortfall = run_host_shortfall(request, _SYSBOX_PRESENT, platform="linux")
+
+    if backend is Backend.METAL and environment != "modal":
+        assert shortfall is not None
+        assert shortfall.backend is ComputeBackend.METAL
+        assert "metal" in shortfall.reason
+    else:
+        assert shortfall is None

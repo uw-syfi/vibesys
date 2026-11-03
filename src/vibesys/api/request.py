@@ -196,7 +196,9 @@ class HostShortfall:
     """The run's compute backend when that is what the host lacks, else ``None``."""
 
 
-def run_host_shortfall(request: RunRequest, probe: CommandProbe) -> HostShortfall | None:
+def run_host_shortfall(
+    request: RunRequest, probe: CommandProbe, *, platform: str = sys.platform
+) -> HostShortfall | None:
     """What this host cannot give `request`'s run before its image build, or `None`.
 
     A run stops before its image build when its environment would hand the agent the
@@ -205,8 +207,12 @@ def run_host_shortfall(request: RunRequest, probe: CommandProbe) -> HostShortfal
     questions through `probe`, with the run's own decisions, so a run that passes it does
     not stop on either at launch. A backend the host lacks is reported with the backend,
     so a caller can say which one; the reason names what is missing, never a flag.
+
+    A backend with no container image (Metal) also stops a run whose container is built on the
+    backend's image, so that is a shortfall too. ``platform`` is the host's ``sys.platform``,
+    which decides the environment the run resolves to.
     """
-    environment = _run_environment_of(request)
+    environment = _run_environment_of(request, platform)
     docker_in_docker = request.input_bundle.docker_in_docker
     backend = request.backend
     if environment.attaches_backend_accelerator(
@@ -217,19 +223,24 @@ def run_host_shortfall(request: RunRequest, probe: CommandProbe) -> HostShortfal
             reason=reason or f"the '{backend}' backend needs hardware this host does not report",
             backend=backend,
         )
+    if environment.requires_backend_image() and backend_default_image(backend) is None:
+        return HostShortfall(
+            reason=f"the '{backend}' backend has no container image, so Docker cannot run it",
+            backend=backend,
+        )
     if environment.requires_sysbox_runtime(docker_in_docker=docker_in_docker):
         reason = sysbox_unavailable(probe)
         return None if reason is None else HostShortfall(reason=reason, backend=None)
     return None
 
 
-def _run_environment_of(request: RunRequest) -> RunEnvironment:
+def _run_environment_of(request: RunRequest, platform: str) -> RunEnvironment:
     """The environment `request`'s run resolves to, as the run resolves it."""
     spec = resolve_run_environment_spec(
         request.run_environment or make_run_environment_spec(),
         request.backend,
         task_dockerfile=request.input_bundle.dockerfile_path,
-        platform=sys.platform,
+        platform=platform,
         log=lambda _line: None,
     )
     return build_run_environment(spec)
