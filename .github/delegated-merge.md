@@ -20,13 +20,18 @@ membership. They must still issue the exact command and pass the path, rename,
 named-CI, PR-state, base, cleanliness, live-role, and head-SHA checks. Empty
 member lists are valid and grant no non-admin user access.
 
+The checked-in capability table is explicitly empty: no scope is granted.
+The broker refuses every delegation request with an empty-table reason, before
+any landing operation; pull requests use normal review. Populated tables retain
+the scope and membership checks below.
+
 Membership is source-controlled and changes through the normal maintainer path.
-For example:
+This placeholder illustrates the syntax and grants no checked-in scope:
 
 ```toml
-[capabilities.headless]
-members = ["alice"]
-prefixes = ["src/headless/"]
+[capabilities.example_scope]
+members = ["example-maintainer"]
+prefixes = ["example/scope/"]
 paths = []
 additional_checks = []
 ```

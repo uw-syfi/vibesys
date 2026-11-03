@@ -486,10 +486,16 @@ def authorize_pull_request(
     return _string(head.get("sha"), "pull request head SHA")
 
 
+def _require_delegation_scope(policy: Policy) -> None:
+    if not policy.capabilities:
+        _refuse("the capabilities table is empty; no delegated scope is granted; use normal review")
+
+
 def authorize_files(
     files: object, *, changed_files: object, policy: Policy
 ) -> tuple[frozenset[str], frozenset[str]]:
-    """Resolve the capability and check union for a complete changed-file list."""
+    """Resolve the capability/check union, refusing a policy that grants no delegation."""
+    _require_delegation_scope(policy)
     count = _positive_int(changed_files, "pull request changed_files")
     if count > MAX_CHANGED_FILES:
         _refuse(f"the pull request exceeds the {MAX_CHANGED_FILES}-file validation limit")
@@ -725,6 +731,7 @@ def run(event_path: Path, *, api: GitHubClient, landing_api: GitHubClient | None
     policy = load_policy()
     event = parse_event(json.loads(event_path.read_text()))
     authorize_event(event, policy)
+    _require_delegation_scope(policy)
     repository = quote(policy.repository, safe="/")
     pull_endpoint = f"repos/{repository}/pulls/{event.number}"
     actor = quote(event.actor, safe="")
