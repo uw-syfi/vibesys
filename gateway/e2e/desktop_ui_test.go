@@ -92,11 +92,11 @@ func observeWithDesktopApp(t *testing.T, world uiWorld) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 	gatewayDir := filepath.Dir(filepath.Dir(lifecycle.SocketPath(filepath.Join(world.Home, ".vibesys"), schemahash.APISchemaHash)))
-	table := processTable()
-	for i := range table {
-		table[i].exe, _ = filepath.Rel(gatewayDir, table[i].exe)
+	pids, err := leakedHostsUnder(gatewayDir, []string{"vibesysd", "vibesys-host"}, processTable())
+	if err != nil {
+		t.Errorf("check for leaked gateways: %v", err)
 	}
-	for _, pid := range leakedHosts(os.DirFS(gatewayDir), []string{"vibesysd", "vibesys-host"}, table) {
+	for _, pid := range pids {
 		t.Errorf("the desktop app's own gateway (%d) runs; it should have used the running one", pid)
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
