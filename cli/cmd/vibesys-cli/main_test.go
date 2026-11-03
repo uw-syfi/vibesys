@@ -88,7 +88,7 @@ func (c *cli) run(args ...string) result {
 // after the kind of job, for submit).
 func withTask(args ...string) []string {
 	at := 1
-	if args[0] == "submit" {
+	if args[0] == "submit" || args[0] == "frontier" {
 		at = 2
 	}
 	return append(append(append([]string{}, args[:at]...), "--task", "kv"), args[at:]...)

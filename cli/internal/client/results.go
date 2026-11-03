@@ -24,6 +24,18 @@ func (c *Client) Promote(ctx context.Context, req *cliv1.PromoteRequest) (*cliv1
 	return resp, c.fail(err)
 }
 
+// AddToFrontier admits a commit to the task's frontier. A refusal is the response, not an error.
+func (c *Client) AddToFrontier(ctx context.Context, req *cliv1.AddToFrontierRequest) (*cliv1.AddToFrontierResponse, error) {
+	resp, err := c.rpc.AddToFrontier(ctx, req)
+	return resp, c.fail(err)
+}
+
+// ListFrontier lists the task's frontier with each member's headline numbers.
+func (c *Client) ListFrontier(ctx context.Context, req *cliv1.ListFrontierRequest) (*cliv1.ListFrontierResponse, error) {
+	resp, err := c.rpc.ListFrontier(ctx, req)
+	return resp, c.fail(err)
+}
+
 // CurrentResult returns the head of the result branch and its final number, or why there is none.
 func (c *Client) CurrentResult(ctx context.Context, req *cliv1.CurrentResultRequest) (*cliv1.CurrentResultResponse, error) {
 	resp, err := c.rpc.CurrentResult(ctx, req)

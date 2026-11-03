@@ -108,7 +108,10 @@ func compareCommand(ctx context.Context, d deps, args []string) int {
 		}
 		cmp := resp.GetComparison()
 		fmt.Fprintf(d.stdout, "%s\t%s vs %s\n", verdictWord(cmp.GetVerdict()), shortCommit(cmp.GetCommit()), shortCommit(cmp.GetAgainst()))
-		fmt.Fprintf(d.stdout, "  %s\n  environment %s\n", describeVerdict(cmp.GetVerdict()), environmentName(cmp.GetEnvironment()))
+		for _, line := range verdictLines(cmp.GetVerdict(), cmp.GetObjectives()) {
+			fmt.Fprintf(d.stdout, "  %s\n", line)
+		}
+		fmt.Fprintf(d.stdout, "  environment %s\n", environmentName(cmp.GetEnvironment()))
 		return exitOK
 	})
 }
@@ -154,14 +157,28 @@ func promoteCommand(ctx context.Context, d deps, args []string) int {
 			if p.GetPreviousHead() != "" {
 				previous = " (the branch was at " + shortCommit(p.GetPreviousHead()) + ")"
 			}
-			fmt.Fprintf(d.stdout, "promoted %s%s\n  %s: %s\n", shortCommit(p.GetCommit()), previous, verdictWord(p.GetVerdict()), describeVerdict(p.GetVerdict()))
+			if len(p.GetObjectives()) == 0 {
+				fmt.Fprintf(d.stdout, "promoted %s%s\n  %s: %s\n", shortCommit(p.GetCommit()), previous, verdictWord(p.GetVerdict()), describeVerdict(p.GetVerdict()))
+				return code
+			}
+			fmt.Fprintf(d.stdout, "promoted %s%s\n  %s\n", shortCommit(p.GetCommit()), previous, verdictWord(p.GetVerdict()))
+			for _, line := range describeObjectiveVerdicts(p.GetObjectives()) {
+				fmt.Fprintf(d.stdout, "    %s\n", line)
+			}
+			if f := resp.GetFrontier(); f != nil {
+				for _, line := range strings.Split(strings.TrimSuffix(describeFrontierDecision(f, p.GetCommit()), "\n"), "\n") {
+					fmt.Fprintf(d.stdout, "  %s\n", line)
+				}
+			}
 			return code
 		}
 		fmt.Fprintf(d.stdout, "refused %s\n", shortCommit(string(commit)))
 		for _, reason := range resp.GetRefused().GetReasons() {
 			fmt.Fprintf(d.stdout, "  %s: %s\n", refusalName(reason.GetKind()), reason.GetMessage())
 			if v := reason.GetVerdict(); v != nil {
-				fmt.Fprintf(d.stdout, "    %s\n", describeVerdict(v))
+				for _, line := range verdictLines(v, reason.GetObjectives()) {
+					fmt.Fprintf(d.stdout, "    %s\n", line)
+				}
 			}
 			if reason.GetKind() == cliv1.PromoteRefusalKind_PROMOTE_REFUSAL_KIND_STALE {
 				fmt.Fprintf(d.stdout, "    measured against %s, the branch is at %s\n", shortCommit(reason.GetMeasuredAgainst()), shortCommit(reason.GetCurrentHead()))
@@ -273,6 +290,15 @@ func describeVerdict(v *cliv1.Verdict) string {
 var notComparable = map[cliv1.InconclusiveReason]string{
 	cliv1.InconclusiveReason_INCONCLUSIVE_REASON_TASK_VERSION_MISMATCH: "the two commits were measured under different task versions",
 	cliv1.InconclusiveReason_INCONCLUSIVE_REASON_METRIC_MISMATCH:       "the two commits were measured for different metrics",
+}
+
+// verdictLines is the numbers behind a verdict: its own for a single metric, and a line per
+// objective for a multi-objective comparison, whose overall verdict has no numbers of its own.
+func verdictLines(v *cliv1.Verdict, objectives []*cliv1.ObjectiveVerdict) []string {
+	if len(objectives) == 0 {
+		return []string{describeVerdict(v)}
+	}
+	return describeObjectiveVerdicts(objectives)
 }
 
 func environmentName(e *cliv1.EnvironmentFingerprint) string {
