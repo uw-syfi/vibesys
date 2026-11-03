@@ -25,7 +25,7 @@ export type Step =
   | {readonly overflow: true}
   /** Let virtual time pass. */
   | {readonly sleep: Duration.Input}
-  /** Do nothing more until the call is cancelled. */
+  /** Do nothing more until the call is given up on. */
   | {readonly hang: true};
 
 export interface Recording {
@@ -38,9 +38,13 @@ export interface CallRecord {
   readonly target: CallTarget;
   /** Its index among the calls to the same method. */
   readonly nth: number;
-  /** How many times the caller cancelled it while it was open: never more than one. */
-  readonly cancelled: number;
-  /** Neither ended by the recording nor cancelled yet. */
+  /**
+   * How many times the call's resources were released: once the call is over, however it ended
+   * (the recording ended it, or the caller gave up), exactly once; while it is open, never. Counted
+   * at the single place that releases, so a second release shows as 2.
+   */
+  readonly released: number;
+  /** Neither ended nor given up on yet. */
   readonly open: boolean;
 }
 
@@ -54,7 +58,7 @@ interface MutableCall {
   readonly kind: 'unary' | 'stream';
   readonly target: CallTarget;
   readonly nth: number;
-  cancelled: number;
+  released: number;
   open: boolean;
 }
 
@@ -94,15 +98,14 @@ export const makeFakeTransport = (recording: Recording): FakeTransport => {
   const open = (kind: 'unary' | 'stream', target: CallTarget): MutableCall => {
     const nth = countByMethod.get(target.method) ?? 0;
     countByMethod.set(target.method, nth + 1);
-    const call: MutableCall = {kind, target, nth, cancelled: 0, open: true};
+    const call: MutableCall = {kind, target, nth, released: 0, open: true};
     calls.push(call);
     return call;
   };
-  /** The caller gave up on an open call. Idempotent, as the gateway's cancel is. */
-  const cancel = (call: MutableCall): void => {
-    if (!call.open) return;
+  /** Release a call's resources: called once per call, by the construct every exit passes through. */
+  const release = (call: MutableCall): void => {
     call.open = false;
-    call.cancelled += 1;
+    call.released += 1;
   };
 
   const unary: GatewayTransport['Service']['unary'] = target =>
@@ -120,21 +123,14 @@ export const makeFakeTransport = (recording: Recording): FakeTransport => {
         ),
       };
       yield* Effect.forkChild(play(recording.respond(target, call.nth), sink));
-      return yield* Deferred.await(answer).pipe(
-        Effect.onInterrupt(() => Effect.sync(() => cancel(call))),
-        Effect.ensuring(
-          Effect.sync(() => {
-            call.open = false;
-          }),
-        ),
-      );
+      return yield* Deferred.await(answer).pipe(Effect.ensuring(Effect.sync(() => release(call))));
     });
 
   const stream: GatewayTransport['Service']['stream'] = (target, capacity) =>
     Stream.callback<Uint8Array, CallEnded | StreamOverflow>(
       Effect.fnUntraced(function* (queue) {
         const call = open('stream', target);
-        yield* Effect.addFinalizer(() => Effect.sync(() => cancel(call)));
+        yield* Effect.addFinalizer(() => Effect.sync(() => release(call)));
         const finish = (end: () => void): Effect.Effect<void> =>
           Effect.sync(() => {
             call.open = false;
@@ -144,7 +140,7 @@ export const makeFakeTransport = (recording: Recording): FakeTransport => {
           frame: bytes =>
             Effect.sync(() => {
               if (Queue.offerUnsafe(queue, bytes)) return true;
-              cancel(call);
+              call.open = false;
               Queue.failCauseUnsafe(queue, Cause.fail(new StreamOverflow({capacity})));
               return false;
             }),
