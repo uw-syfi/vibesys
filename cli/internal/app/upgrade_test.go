@@ -31,6 +31,11 @@ func TestUpgradeRecoversPreviousWriterJobWithLiveSupervisor(t *testing.T) {
 				name = "/" + name
 			}
 			mem.Put(name, data)
+			if strings.HasSuffix(name, "/.fixture-empty") {
+				if err := mem.Remove(name); err != nil {
+					return err
+				}
+			}
 		}
 		return err
 	})

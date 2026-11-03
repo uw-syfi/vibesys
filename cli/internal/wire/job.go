@@ -300,6 +300,9 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 		out.Attempts = append(out.Attempts, past)
 	}
 	for _, sub := range j.GetSubmitters() {
+		if err := sub.GetAt().CheckValid(); err != nil {
+			return core.Job{}, fmt.Errorf("submitter.at: %w", err)
+		}
 		out.Submitters = append(out.Submitters, ToSubmitter(sub))
 	}
 	return out, nil

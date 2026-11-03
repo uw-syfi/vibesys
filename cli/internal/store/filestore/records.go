@@ -252,6 +252,9 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 		j.Attempts = append(j.Attempts, past)
 	}
 	for _, sub := range m.GetSubmitters() {
+		if err := sub.GetAt().CheckValid(); err != nil {
+			return fail(fmt.Errorf("submitter.at: %w", err))
+		}
 		j.Submitters = append(j.Submitters, wire.ToSubmitter(sub))
 	}
 	return j, nil

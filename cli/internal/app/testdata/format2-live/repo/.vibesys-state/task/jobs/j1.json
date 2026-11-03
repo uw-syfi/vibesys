@@ -12,7 +12,8 @@
           ";",
           "exit",
           "0"
-        ]
+        ],
+        "timeout":  "3600s"
       }
     },
     "state":  "JOB_STATE_RUNNING",
