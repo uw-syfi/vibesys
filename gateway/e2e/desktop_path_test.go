@@ -12,7 +12,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // useCLI builds vibesys-cli and puts it first on the PATH of everything the rig starts, so the
@@ -30,7 +32,48 @@ func (r *rig) useCLI() {
 		r.t.Fatalf("build vibesys-cli: %v\n%s", err, out)
 	}
 	r.env = append(r.env, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	r.t.Cleanup(func() { _ = exec.Command(filepath.Join(bin, "vibesys-cli"), "daemon", "stop").Run() })
+	r.t.Cleanup(func() { r.stopCLIDaemon(filepath.Join(bin, "vibesys-cli")) })
+}
+
+// stopCLIDaemon stops the vibesys-cli daemon this rig started and fails the test if any process
+// of the rig's vibesys-cli binary is left. The daemon is per user and found through the runtime
+// directory in the environment, so the stop must run with the rig's environment: without it the
+// stop reaches no daemon (or the developer's own) and the rig's daemon outlives the test.
+func (r *rig) stopCLIDaemon(binary string) {
+	cmd := exec.Command(binary, "daemon", "stop")
+	cmd.Env = r.env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		r.t.Errorf("vibesys-cli daemon stop: %v\n%s", err, out)
+	}
+	// The stop returns when the daemon has been told; the process exits a moment later. The wait
+	// ends when none is left, and the bound only guards against a daemon that never exits.
+	deadline := time.Now().Add(bound)
+	left := processesOf(binary)
+	for len(left) > 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		left = processesOf(binary)
+	}
+	for _, pid := range left {
+		r.t.Errorf("a vibesys-cli process (%d) still runs after the test; killing it", pid)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+}
+
+// processesOf lists the live processes running the executable at path.
+func processesOf(path string) []int {
+	entries, _ := filepath.Glob("/proc/[0-9]*/exe")
+	var pids []int
+	for _, entry := range entries {
+		target, err := os.Readlink(entry)
+		if err != nil || target != path {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.Split(entry, "/")[2])
+		if err == nil && running(pid) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids
 }
 
 // useMarketplace points the orchestrator at this repository's own plugin marketplace, which is
