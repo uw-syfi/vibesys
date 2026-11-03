@@ -1040,6 +1040,20 @@ function strictDependencyMessage(dependency) {
   return `${dependency} is outside ${STRICT_THIRD_PARTY.join(', ')}; ${STRICT_FIX}`;
 }
 
+/** Search fact readers cannot reach agent items or tool-text projections through imports. */
+export function searchFactImportMessage(path, specifier) {
+  if (
+    !/^apps\/desktop\/src\/state\/orchestrator\/search[^/]*\.ts$/.test(path) ||
+    path.endsWith('.test.ts')
+  )
+    return undefined;
+  if (specifier === '@vibesys/orchestrator-proto' || specifier === './time.js') return undefined;
+  return (
+    'search facts may import only generated protocol fields and the pure timestamp conversion; remove ' +
+    specifier
+  );
+}
+
 function strictImportErrors(root, workspacePackage, byName) {
   const {directory} = workspacePackage;
   const packageRoot = join(root, directory);
@@ -1047,6 +1061,9 @@ function strictImportErrors(root, workspacePackage, byName) {
   for (const path of sourceFiles(packageRoot).filter(file => !isTestCode(file))) {
     const text = readFileSync(join(packageRoot, path), 'utf8');
     for (const {specifier, line} of importedSpecifierLines(text)) {
+      const factMessage = searchFactImportMessage(`${directory}/${path}`, specifier);
+      if (factMessage !== undefined)
+        errors.push(violation('search-fact-imports', `${directory}/${path}:${line}`, factMessage));
       const message = strictSpecifierMessage(workspacePackage, specifier, byName);
       if (message !== undefined) {
         errors.push(violation('strict-imports', `${directory}/${path}:${line}`, message));

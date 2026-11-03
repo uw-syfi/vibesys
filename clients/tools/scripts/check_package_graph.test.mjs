@@ -10,6 +10,7 @@ import {
   packageGraphErrors,
   RULES,
   STRICT_LINT_PLUGINS,
+  searchFactImportMessage,
   workspaceSpecifiers,
 } from './check_package_graph.mjs';
 
@@ -867,4 +868,13 @@ test('strict packages can allocate request identities through the neutral founda
     path: '../../libs/request-identity/tsconfig.lib.json',
   });
   assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
+});
+
+test('search fact readers import only the generated protocol and pure timestamp conversion', () => {
+  const path = 'apps/desktop/src/state/orchestrator/search-views.ts';
+  for (const specifier of ['@vibesys/orchestrator-proto', './time.js'])
+    assert.equal(searchFactImportMessage(path, specifier), undefined);
+  for (const specifier of ['./views.js', '../index.js', 'effect/Effect'])
+    assert.match(searchFactImportMessage(path, specifier), /search facts may import only/);
+  assert.equal(searchFactImportMessage(path.replace('.ts', '.test.ts'), './views.js'), undefined);
 });
