@@ -628,7 +628,7 @@ def _signal_process_group(pid: int, number: signal.Signals) -> None:
 
 def _host_exit_waiter() -> ExitWaiter:
     """The host's exit waiter, loading ``vs_sim.exit_wait`` when a group first needs one."""
-    from vs_sim.exit_wait import (  # noqa: PLC0415  # lint-waiver: LW-731051 [PLC0415]; the host helper's hello path imports this module and its test caps the modules hello loads, so the waiter's module loads when a group first needs it; a top-level import adds a module to every hello, and importlib would hide the declared dependency from tach.
+    from vs_sim.exit_wait import (  # noqa: PLC0415  # lint-waiver: LW-731051 [PLC0415]; lightweight entrypoints import this module and the launcher test caps the modules launcher construction loads, so the waiter's module loads when a group first needs it; a top-level import adds a module to every launcher construction, and importlib would hide the declared dependency from tach.
         host_exit_waiter,
     )
 

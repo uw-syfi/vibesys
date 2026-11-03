@@ -204,6 +204,8 @@ func TestAClientSurvivesCutsAndSlowPipesThroughConnect(t *testing.T) {
 					}
 					if msg.GetSearch() != nil {
 						// A whole search view carries no sequence and does not advance the event stream.
+						// Search delivery: daemon.TestSearchWatchConvergesAcrossLagAndReconnect
+						// and hub.TestLatestThousandPublishesAndLag.
 						continue
 					}
 					ev := msg.GetEvent()

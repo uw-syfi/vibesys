@@ -329,7 +329,7 @@ def _read(path: Path, uid: int, *, directory: int | None = None) -> OperatorKey 
 def _random_hex(count: int) -> str:
     """``count`` bytes from the OS CSPRNG as hex, as ``secrets.token_hex`` returns.
 
-    Without importing ``secrets``, which the host helper must not load on hello (#2351).
+    Without importing ``secrets`` on lightweight entrypoint paths (#2351).
     """
     return os.urandom(count).hex()
 

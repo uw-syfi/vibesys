@@ -1,7 +1,6 @@
 """The read side of vs_logs: list a store's streams and read bounded chunks of one.
 
-Only the host helper imports this module (``tach.toml`` exposes it to nothing else):
-logs are for humans, and product code never reads them back for facts.
+This interface reads logs for human consumption; product code does not use logs as facts.
 
 :func:`open_log_directory` reads a store any process writes; :func:`reader_of` reads the
 store an in-process :class:`~vs_logs.api.LogStore` writes. A read starts at

@@ -14,6 +14,8 @@ type generationKey struct{}
 
 // storeObservation stamps a read independently of running effects. Only a
 // newer accepted successful observation supersedes it within a lifetime.
+// A read begun before a successful write is dropped even if a later outage
+// caused its failure. Detecting that outage waits until the next slow period.
 type storeObservation struct{ generation *effectGeneration }
 type observationKey struct{}
 

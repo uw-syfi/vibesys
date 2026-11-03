@@ -51,6 +51,8 @@ class ScriptedDriver:
     idle: list[Sequence[AgentEvent]] = field(default_factory=list)
     alive: bool = True
     prompts: list[str] = field(default_factory=list)
+    messages: list[orch.Message | None] = field(default_factory=list)
+    steer_messages: list[orch.Message | None] = field(default_factory=list)
     steers: list[tuple[str, str]] = field(default_factory=list)
     interrupts: list[str] = field(default_factory=list)
     ignored_interrupts: list[str] = field(default_factory=list)
@@ -70,10 +72,11 @@ class ScriptedDriver:
             self.conversation_id, orch.Capabilities(streams_text=True, steers=True, resumes=True)
         )
 
-    def begin_turn(self, turn_id: str, prompt: str) -> None:
+    def begin_turn(self, turn_id: str, prompt: str, *, message: orch.Message | None = None) -> None:
         """See ``Driver.begin_turn``."""
         self._current, self._stopped = turn_id, False
         self.prompts.append(prompt)
+        self.messages.append(message)
 
     def run_turn(self, emit: Callable[[AgentEvent], None]) -> TurnResult:
         """See ``Driver.run_turn``."""
@@ -105,7 +108,7 @@ class ScriptedDriver:
             self.at_end()
         return TurnResult(status, script.usage)
 
-    def steer(self, turn_id: str, text: str) -> None:
+    def steer(self, turn_id: str, text: str, *, message: orch.Message | None = None) -> None:
         """See ``Driver.steer``."""
         if (
             turn_id != self._current
@@ -116,6 +119,7 @@ class ScriptedDriver:
             msg = "the turn does not take steers"
             raise SteerRefusedError(msg)
         self.steers.append((turn_id, text))
+        self.steer_messages.append(message)
         for event in self._running.on_steer:
             self._emit(event)
 

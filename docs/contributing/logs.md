@@ -199,6 +199,5 @@ Known gaps:
   server is reparented to init, so no vibesys process waits on it; recording it needs a
   supervisor.
 - The `run-*.log` files and the stderr tee are not yet retired.
-- The deprecated inspect `include_log` tail is removed at helper protocol v2.
 - The Slurm `service_log_tail` is still pasted into failure text. It should become a log
   reference.

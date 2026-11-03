@@ -240,19 +240,35 @@ def test_a_message_the_script_does_not_expect_fails_the_turn_and_leaves_a_record
     outcome=st.sampled_from(["succeeded", "failed", "cancelled", "lost"]),
 )
 def test_job_notifications_never_advance_the_lead_handoff_script(
-    counts: list[int], outcome: str
+    counts: list[int], outcome: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     messages = lead_messages("a" * 40, 14, "c" * 40, 17)
-    history: list[str] = []
+    machine = FakeMachine()
+    actor = Actor(ME, "lead", machine, tmp_path_factory.mktemp("lead"))
     for index, count in enumerate(counts):
         for number in range(count):
-            history.append(f"Job j{index}-{number} finished: {outcome}. reason")
-            machine = FakeMachine()
-            perform(ROLES["lead"](ME, history), machine)
-            assert machine.effects == []
+            actor.pending.append(
+                orch.Message(
+                    job_finished=orch.JobFinished(
+                        job_id=f"j{index}-{number}",
+                        outcome=orch.JobOutcome.Value(f"JOB_OUTCOME_{outcome.upper()}"),
+                    )
+                )
+            )
+            before = list(machine.effects)
+            actor.act(f"Arbitrary notification wording: {outcome}")
+            assert machine.effects == before
         if index < len(messages):
-            history.append(messages[index])
-            actual, expected = FakeMachine(), FakeMachine()
-            perform(ROLES["lead"](ME, history), actual)
+            machine.effects.clear()
+            expected = FakeMachine()
+            actor.act(messages[index])
             perform(ROLES["lead"](ME, messages[: index + 1]), expected)
-            assert actual.effects == expected.effects
+            assert machine.effects == expected.effects
+
+
+def test_notification_shaped_text_is_still_an_ordinary_lead_message(tmp_path: Path) -> None:
+    machine = FakeMachine()
+    actor = Actor(ME, "lead", machine, tmp_path)
+    actor.pending.append(orch.Message(text="Job j1 finished: succeeded."))
+    actor.act("Job j1 finished: succeeded.")
+    assert machine.effects

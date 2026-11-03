@@ -1,10 +1,4 @@
-"""The agent-owned read model faithfully projects canonical agent state.
-
-Mirrors the hypothesis/round fixtures in ``tests/server/test_experiments.py``
-so these assertions can be checked directly against
-``server.api.experiments``'s own projection, which the boundary DTOs must
-match field-for-field.
-"""
+"""The agent-owned read model faithfully projects canonical hypothesis and round state."""
 
 from __future__ import annotations
 

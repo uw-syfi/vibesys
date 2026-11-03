@@ -15,7 +15,7 @@ directory cannot be used. :class:`NarrationHandler` is a
 lines to a sink.
 
 Logs are a channel for humans only. Product code never reads a log back for facts; the
-read side is the separate ``vs_logs.read`` module, which only the host helper may import.
+read side is the separate ``vs_logs.read`` module.
 """
 
 from vs_logs._core import DEFAULT_MAX_BYTES, LogLimits
