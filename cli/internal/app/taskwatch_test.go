@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"reflect"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -91,13 +90,9 @@ func converge(t *testing.T, a *app.App, w *watcher, o *outage, s core.Scope, pas
 			return v
 		}
 		if pass {
-			// The watcher may not have started waiting yet, so the slow period passes again
-			// until what it holds is right.
+			// Drain the bubble so the watcher has armed its fake slow timer.
+			synctest.Wait()
 			o.limits.pass()
-			runtime.Gosched()
-			if ctx.Err() == nil {
-				continue
-			}
 		}
 		select {
 		case <-wake:
@@ -123,6 +118,7 @@ func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 				away := false
 				for step := 0; step < 14; step++ {
 					synctest.Wait()
+					pass := false
 					switch op := r.IntN(10); {
 					case op < 5 && !away:
 						job := submitAs(t, a, callA, "print", fmt.Sprint(seed, step), ";", "exit", "0")
@@ -130,10 +126,10 @@ func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 						o.awaitFinal(t, a, scopeA, job.ID)
 					case op < 7 && !away:
 						o.takeAway(repoA)
-						away = true
+						away, pass = true, true
 					case op < 8 && away:
 						o.bringBack(repoA)
-						away = false
+						away, pass = false, true
 					case op < 9 && !away && len(submitted) > 0:
 						o.remove(repoA)
 						if _, err := a.ForgetRepository(ctxFor(t), repoA); err != nil {
@@ -142,11 +138,13 @@ func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 						// Let the watcher observe removal before restoring the repository.
 						synctest.Wait()
 						o.bringBackRemoved(repoA)
+						pass = true
 						submitted = nil
+					default:
+						pass = true
 					}
-					// Eventual convergence includes the slow fallback for unannounced
-					// restoration and a bounded task fold that did not settle.
-					v := converge(t, a, wt, o, scopeA, true)
+					// Only unannounced changes need the slow-period fallback.
+					v := converge(t, a, wt, o, scopeA, pass)
 					synctest.Wait()
 					if v.Content == nil {
 						continue
@@ -265,29 +263,32 @@ func TestACommitThatFailedAfterLandingStillWakesAWatcher(t *testing.T) {
 // A store that is away is a health fact and not a loss of what was held: the watcher keeps the jobs
 // it had, and when the store is back it is told only what changed.
 func TestAWatcherKeepsWhatItHadWhileTheStoreIsAway(t *testing.T) {
-	w, o := newOutage(t)
-	a := o.start(w.supervisors())
-	job := submitAs(t, a, callA, "print", "x", ";", "exit", "0")
-	o.awaitFinal(t, a, scopeA, job.ID)
-	wt := watch(t, a, scopeA)
-	converge(t, a, wt, o, scopeA, false)
-	before := wt.count()
-	o.takeAway(repoA)
-	for wt.count() == before {
-		o.limits.pass()
+	synctest.Test(t, func(t *testing.T) {
+		w, o := newOutage(t)
+		a := o.start(w.supervisors())
+		job := submitAs(t, a, callA, "print", "x", ";", "exit", "0")
+		o.awaitFinal(t, a, scopeA, job.ID)
+		wt := watch(t, a, scopeA)
+		converge(t, a, wt, o, scopeA, false)
+		before := wt.count()
+		o.takeAway(repoA)
+		for wt.count() == before {
+			o.limits.pass()
+			converge(t, a, wt, o, scopeA, true)
+		}
+		wt.mu.Lock()
+		health, _ := wt.held["health"].(core.StoreHealth)
+		_, hasJob := wt.held[core.FactKey("job/"+string(job.ID))]
+		wt.mu.Unlock()
+		if health.Away != core.AwayUnavailable || !hasJob {
+			t.Fatalf("while the store is away the watcher holds health %+v and job %v, want unavailable and the job kept", health, hasJob)
+		}
+		o.bringBack(repoA)
 		converge(t, a, wt, o, scopeA, true)
-	}
-	wt.mu.Lock()
-	health, _ := wt.held["health"].(core.StoreHealth)
-	_, hasJob := wt.held[core.FactKey("job/"+string(job.ID))]
-	wt.mu.Unlock()
-	if health.Away != core.AwayUnavailable || !hasJob {
-		t.Fatalf("while the store is away the watcher holds health %+v and job %v, want unavailable and the job kept", health, hasJob)
-	}
-	o.bringBack(repoA)
-	converge(t, a, wt, o, scopeA, true)
-	last := wt.sends[len(wt.sends)-1]
-	if last.Reset || len(last.Facts) != 1 || last.Facts[0].Key != "health" {
-		t.Fatalf("a store that came back unchanged sends %+v, want only the health", last)
-	}
+		last := wt.sends[len(wt.sends)-1]
+		if last.Reset || len(last.Facts) != 1 || last.Facts[0].Key != "health" {
+			t.Fatalf("a store that came back unchanged sends %+v, want only the health", last)
+		}
+
+	})
 }
