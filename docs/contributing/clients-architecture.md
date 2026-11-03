@@ -476,7 +476,7 @@ can fail on any a screen draws as text outside a `data-mono-id` element.
 
 Client state comes in two kinds, and each has one form. The new desktop app (`apps/desktop`,
 `@vibesys/desktop`) is built on Effect 4 (`effect`, pinned exactly; `@effect/atom-react` joins with
-the first screen). The packages that predate it keep the [XState form](#legacy-packages-xstate)
+the first screen). The packages that predate it keep the [XState form](#packages-that-run-xstate-machines)
 until the app replaces them.
 
 **Control state is Effect services and atoms.** Control state is a mode with effects: it starts
