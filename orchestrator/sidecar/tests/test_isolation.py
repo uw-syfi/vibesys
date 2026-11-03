@@ -5,13 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentshim import (
-    Agent,
-    ApprovalPolicy,
-    NativePermissions,
     StdioMcpServer,
-    TransportKind,
 )
-from agentshim.testing import ClaudeFramePeer, FakeClock, FakeExecutor, SequentialIds
+from agentshim.testing import ClaudeFramePeer, FakeExecutor
 
 from tests import helpers as h
 from vs_sidecar.driver import AgentshimDriver, build_session
@@ -31,17 +27,7 @@ SERVER = StdioMcpServer(name="vibesys", command="/bin/vibesysd", args=("mcp",), 
 
 def _claude_argv() -> list[str]:
     executor = FakeExecutor([], peers=lambda _request: ClaudeFramePeer([[INIT]]))
-    agent = Agent(
-        "claude",
-        transport=TransportKind.STREAM,
-        model="fake-model",
-        executor=executor,
-        env={"PATH": "/usr/bin:/bin", "HOME": "/home/tester"},
-        permissions=NativePermissions.bypass(),
-        approvals=ApprovalPolicy.DENY,
-        clock=FakeClock(),
-        ids=SequentialIds(),
-    )
+    agent = h.scripted_agents("claude", executor)
     launch = h.launch(orch.HARNESS_CLAUDE_CODE)
 
     def make(raw_sink: Callable[[RawFrame], None]) -> AgentshimDriver:

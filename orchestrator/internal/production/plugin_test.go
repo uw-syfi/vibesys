@@ -101,7 +101,7 @@ func launcher(t *testing.T) *ProcessSidecars {
 
 func lead(agent core.AgentID, session uint32) core.LaunchSession {
 	return core.LaunchSession{
-		Session: core.Session{Agent: agent, N: session}, Run: "run", Repository: "/repo", Role: core.RoleLead,
+		Session: core.Session{Agent: agent, N: session}, Run: "run", Repository: "/repo", Task: "task", Role: core.RoleLead,
 		Spec: core.AgentSpec{Harness: core.ClaudeCode},
 	}
 }

@@ -12,7 +12,19 @@ func runOut(r core.Run) *pb.Run {
 		Id: string(r.ID), Repository: r.Repository, Task: r.Task, Status: runStatuses.out(r.Status),
 		LeadAgentId: string(r.Lead), FanoutLimit: r.FanoutLimit, Deadline: when(r.Deadline),
 		CreatedAt: when(r.CreatedAt), StopReason: stopReasons.out(r.StopReason), EndedAt: when(r.EndedAt),
+		CliLocation: locationOut(r.Location),
 	}
+}
+
+func locationOut(l core.CliLocation) *pb.CliLocation {
+	if l == (core.CliLocation{}) {
+		return nil
+	}
+	return &pb.CliLocation{Cli: l.CLI, XdgRuntimeDir: l.RuntimeDir, XdgStateHome: l.StateHome, Home: l.Home}
+}
+
+func locationIn(l *pb.CliLocation) core.CliLocation {
+	return core.CliLocation{CLI: l.GetCli(), RuntimeDir: l.GetXdgRuntimeDir(), StateHome: l.GetXdgStateHome(), Home: l.GetHome()}
 }
 
 func runIn(r *pb.Run, errs *errorList) core.Run {
@@ -21,7 +33,7 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		Status: runStatuses.in(r.GetStatus(), errs), Lead: core.AgentID(r.GetLeadAgentId()),
 		FanoutLimit: r.GetFanoutLimit(), Deadline: moment(r.GetDeadline(), errs),
 		CreatedAt: moment(r.GetCreatedAt(), errs), StopReason: stopReasons.in(r.GetStopReason(), errs),
-		EndedAt: moment(r.GetEndedAt(), errs),
+		EndedAt: moment(r.GetEndedAt(), errs), Location: locationIn(r.GetCliLocation()),
 	}
 }
 

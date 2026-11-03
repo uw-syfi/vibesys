@@ -53,6 +53,8 @@ var rules = map[string][]string{
 // addition to rules. The core's simulation replays through the wire and draws jobs from the fake
 // source; the core's own code reaches neither.
 var testRules = map[string][]string{
+	// Upgrade fixtures compose the durable store and daemon using deterministic world Fakes.
+	"internal/production": {"internal/daemon/daemontest", "internal/localfs/localfstest"},
 	// The store's tests run the contract suite, which depends on the store.
 	// The store's tests also open stores on directories the fake detector vouches for, which
 	// no non-test file may import.

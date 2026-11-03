@@ -126,7 +126,10 @@ func (w *sim) decide(body core.InputBody) {
 	w.inputs++
 	w.nonce++
 	w.now = w.now.Add(time.Duration(1+w.r.IntN(5)) * time.Second)
-	in := core.Input{At: w.now, Nonce: core.Nonce(fmt.Sprintf("%d-%d", w.seed, w.nonce)), Body: body}
+	// The shell's own location changes between inputs, as it does between daemon starts; a run keeps
+	// the one in force when it started.
+	where := core.CliLocation{CLI: fmt.Sprintf("/cli/%d", w.inputs%3), Home: fmt.Sprintf("/home/%d", w.inputs%2)}
+	in := core.Input{At: w.now, Nonce: core.Nonce(fmt.Sprintf("%d-%d", w.seed, w.nonce)), Location: where, Body: body}
 	w.note("%d input %T %+v", w.inputs, body, body)
 	before := w.state
 	var events []core.Event
@@ -440,6 +443,9 @@ func (w *sim) carryOut(e core.Effect) {
 		}
 		return
 	case core.LaunchSession:
+		if run, ok := w.state.Run(b.Run); !ok || b.Task != run.Task || b.Location != run.Location || b.Location == (core.CliLocation{}) {
+			w.fail("launch %+v does not carry the task and recorded location of run %+v", b, run)
+		}
 		if _, ok := w.sessions[b.Session]; ok {
 			return
 		}

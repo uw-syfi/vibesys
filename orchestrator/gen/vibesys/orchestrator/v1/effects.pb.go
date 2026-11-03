@@ -300,7 +300,10 @@ type LaunchSession struct {
 	// The plugin every session loads, and none of the operator's own plugins, skills or config.
 	// Absent from the stored effect: the daemon's sidecar launcher fills it from its configuration
 	// when it writes the launch file, and the sidecar refuses a launch file without it.
-	Plugin        *SessionPlugin `protobuf:"bytes,10,opt,name=plugin,proto3" json:"plugin,omitempty"`
+	Plugin *SessionPlugin `protobuf:"bytes,10,opt,name=plugin,proto3" json:"plugin,omitempty"`
+	// The run task and CLI location for the agent.
+	Task          string       `protobuf:"bytes,11,opt,name=task,proto3" json:"task,omitempty"`
+	CliLocation   *CliLocation `protobuf:"bytes,12,opt,name=cli_location,json=cliLocation,proto3" json:"cli_location,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -401,6 +404,20 @@ func (x *LaunchSession) GetWorktree() string {
 func (x *LaunchSession) GetPlugin() *SessionPlugin {
 	if x != nil {
 		return x.Plugin
+	}
+	return nil
+}
+
+func (x *LaunchSession) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
+func (x *LaunchSession) GetCliLocation() *CliLocation {
+	if x != nil {
+		return x.CliLocation
 	}
 	return nil
 }
@@ -787,7 +804,7 @@ const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\n" +
 	"SessionRef\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12!\n" +
-	"\asession\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\asession\"\xfe\x03\n" +
+	"\asession\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\asession\"\xe4\x04\n" +
 	"\rLaunchSession\x12E\n" +
 	"\asession\x18\x01 \x01(\v2#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\asession\x12\x1e\n" +
 	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12'\n" +
@@ -803,7 +820,9 @@ const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\x16resume_conversation_id\x18\b \x01(\tR\x14resumeConversationId\x12\x1a\n" +
 	"\bworktree\x18\t \x01(\tR\bworktree\x12>\n" +
 	"\x06plugin\x18\n" +
-	" \x01(\v2&.vibesys.orchestrator.v1.SessionPluginR\x06plugin\"\x8d\x02\n" +
+	" \x01(\v2&.vibesys.orchestrator.v1.SessionPluginR\x06plugin\x12\x1b\n" +
+	"\x04task\x18\v \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12G\n" +
+	"\fcli_location\x18\f \x01(\v2$.vibesys.orchestrator.v1.CliLocationR\vcliLocation\"\x8d\x02\n" +
 	"\rSessionPlugin\x12y\n" +
 	"\vmarketplace\x18\x01 \x01(\tBW\xbaHT\xba\x01M\n" +
 	"\x1bplugin.marketplace.absolute\x12\x18must be an absolute path\x1a\x14this.startsWith('/')r\x02\x10\x01R\vmarketplace\x12\x1b\n" +
@@ -863,8 +882,9 @@ var file_vibesys_orchestrator_v1_effects_proto_goTypes = []any{
 	(*ArmTimer)(nil),              // 9: vibesys.orchestrator.v1.ArmTimer
 	(AgentRole)(0),                // 10: vibesys.orchestrator.v1.AgentRole
 	(Harness)(0),                  // 11: vibesys.orchestrator.v1.Harness
-	(*Message)(nil),               // 12: vibesys.orchestrator.v1.Message
-	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*CliLocation)(nil),           // 12: vibesys.orchestrator.v1.CliLocation
+	(*Message)(nil),               // 13: vibesys.orchestrator.v1.Message
+	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_effects_proto_depIdxs = []int32{
 	3,  // 0: vibesys.orchestrator.v1.Effect.launch_session:type_name -> vibesys.orchestrator.v1.LaunchSession
@@ -877,20 +897,21 @@ var file_vibesys_orchestrator_v1_effects_proto_depIdxs = []int32{
 	10, // 7: vibesys.orchestrator.v1.LaunchSession.role:type_name -> vibesys.orchestrator.v1.AgentRole
 	11, // 8: vibesys.orchestrator.v1.LaunchSession.harness:type_name -> vibesys.orchestrator.v1.Harness
 	4,  // 9: vibesys.orchestrator.v1.LaunchSession.plugin:type_name -> vibesys.orchestrator.v1.SessionPlugin
-	2,  // 10: vibesys.orchestrator.v1.StartTurn.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	12, // 11: vibesys.orchestrator.v1.StartTurn.message:type_name -> vibesys.orchestrator.v1.Message
-	2,  // 12: vibesys.orchestrator.v1.Steer.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	12, // 13: vibesys.orchestrator.v1.Steer.message:type_name -> vibesys.orchestrator.v1.Message
-	2,  // 14: vibesys.orchestrator.v1.Interrupt.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	2,  // 15: vibesys.orchestrator.v1.CloseSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	0,  // 16: vibesys.orchestrator.v1.ArmTimer.kind:type_name -> vibesys.orchestrator.v1.TimerKind
-	2,  // 17: vibesys.orchestrator.v1.ArmTimer.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	13, // 18: vibesys.orchestrator.v1.ArmTimer.fire_at:type_name -> google.protobuf.Timestamp
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	12, // 10: vibesys.orchestrator.v1.LaunchSession.cli_location:type_name -> vibesys.orchestrator.v1.CliLocation
+	2,  // 11: vibesys.orchestrator.v1.StartTurn.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	13, // 12: vibesys.orchestrator.v1.StartTurn.message:type_name -> vibesys.orchestrator.v1.Message
+	2,  // 13: vibesys.orchestrator.v1.Steer.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	13, // 14: vibesys.orchestrator.v1.Steer.message:type_name -> vibesys.orchestrator.v1.Message
+	2,  // 15: vibesys.orchestrator.v1.Interrupt.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	2,  // 16: vibesys.orchestrator.v1.CloseSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	0,  // 17: vibesys.orchestrator.v1.ArmTimer.kind:type_name -> vibesys.orchestrator.v1.TimerKind
+	2,  // 18: vibesys.orchestrator.v1.ArmTimer.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	14, // 19: vibesys.orchestrator.v1.ArmTimer.fire_at:type_name -> google.protobuf.Timestamp
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_effects_proto_init() }

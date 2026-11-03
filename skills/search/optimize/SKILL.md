@@ -23,7 +23,7 @@ and `vibesys-cli`. Where things live and how to resume: `vibesys:state`. Command
 `vibesys:measure`. Brief templates: [briefs.md](references/briefs.md). Read
 [failure-patterns.md](references/failure-patterns.md) before you plan.
 
-Harness-specific mechanics (subagents, background tasks, scheduling): when `VIBESYS_RUN_ID` is set
+Harness-specific mechanics (subagents, background tasks, scheduling): when `VIBESYS_RUN` is set
 in your environment, read `references/harness/vibesys-orchestrator.md`; otherwise read
 `references/harness/<harness>.md` for the harness you are running in.
 

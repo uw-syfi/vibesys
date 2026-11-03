@@ -210,8 +210,9 @@ type Wiring struct {
 	Plans    daemon.PlanReader
 	// Version is the binary's version, reported by Hello.
 	Version string
-	// AgentCLI is the vibesys-cli every agent is told to run, from ResolveCLI; empty names none.
-	AgentCLI string
+	// Location is where the agents of every run this daemon starts find the vibesys-cli and its
+	// daemon and store: the CLI from ResolveCLI, the rest from the daemon's own environment.
+	Location core.CliLocation
 }
 
 // Daemon is an opened daemon: it holds the state directory's lock and its database, and serves the
@@ -259,7 +260,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 	h := hub.New(hub.DefaultLimits)
 	x.d, err = daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log,
+			Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log, Location: wiring.Location,
 			OnCommit: func() {
 				for _, c := range []chan struct{}{x.wake, x.commits} {
 					select {
@@ -270,7 +271,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 			},
 		},
 		Sidecars: wiring.Sidecars, Jobs: wiring.Jobs, Authority: authority, Bounds: Timeouts{},
-		AgentCLI: wiring.AgentCLI, AgentSocket: layout.AgentSocket, JobPollEvery: 5 * time.Second,
+		AgentSocket: layout.AgentSocket, JobPollEvery: 5 * time.Second,
 	})
 	if err != nil {
 		db.Close()

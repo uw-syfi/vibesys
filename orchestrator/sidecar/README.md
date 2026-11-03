@@ -42,9 +42,28 @@ python -m vs_sidecar --launch launch.json --state-dir DIR --socket DIR/sidecar.s
 `launch.json` is a `LaunchSession` in protobuf JSON, validated at start. The agent needs a
 directory: the launch must carry `worktree` (the daemon creates it and passes it in every
 launch), or `--worktree` fills it in; with neither the process exits with code 2 naming the key. `mcp.json` is a list of
-`{"name", "command", "args", "env"}` stdio servers; each gets `VIBESYS_AGENT_ID`,
-`VIBESYS_RUN_ID` and `VIBESYS_SESSION` in its environment. `--detach` double-forks and logs to
+`{"name", "command", "args", "env"}` stdio servers; each gets the session's identity, laid over its
+own `env`, so a server cannot be told it is another agent. `--detach` double-forks and logs to
 `DIR/sidecar.log`; a daemon can instead start it in its own session.
+
+### The agent's environment
+
+The sidecar builds one environment per session and gives it to the agent's processes and to every
+tool server: the login shell's environment (agentshim builds a provider's environment from that
+probe and never from the sidecar process's own) with the session's identity laid over it. The names,
+what fills each and who reads it are in `proto/vibesys/cli/v1/conformance/identity_env.golden.json`,
+which the sidecar's tests and the vibesys-cli's tests both read:
+
+| Name | Filled from the launch |
+| --- | --- |
+| `VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_AGENT` | `repository`, `task`, `run_id` and `session.agent_id`: the vibesys-cli's flag defaults |
+| `VIBESYS_HARNESS` | the harness, as the CLI names it (`claude-code`, `codex`) |
+| `VIBESYS_SESSION` | `session.session` |
+| `VIBESYS_CLI` | `cli_location.cli`: the vibesys-cli the orchestrator chose; the skills run `"$VIBESYS_CLI"` |
+| `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `HOME` | `cli_location`: where that CLI finds its daemon and store |
+
+A location value that is empty unsets its name, so the agent resolves the place as the orchestrator's
+own process would; `HOME` is the exception and is kept, because the provider's own CLI needs it.
 
 ## Behaviour a client can rely on
 

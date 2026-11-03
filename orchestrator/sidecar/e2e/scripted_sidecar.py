@@ -29,7 +29,7 @@ from e2e.actor import Actor
 from e2e.host import HostMachine
 from e2e.peers import ActingClaudePeers, ActingCodex
 from e2e.scripts import Me
-from vs_sidecar.driver import PROVIDERS, AgentshimDriver, build_session, identity_env
+from vs_sidecar.driver import PROVIDERS, AgentshimDriver, Identity, build_session
 from vs_sidecar.engine import Engine
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 from vs_sidecar.main import (
@@ -119,12 +119,12 @@ def acting_executor(
 ) -> tuple[FakeExecutor, str]:
     """The peer for the launch's harness whose turns run its role's script."""
     provider = PROVIDERS[launch.harness]
-    identity = identity_env(launch)
+    identity = Identity.of(launch)
     server = servers[0]
     machine = HostMachine(
         cwd=Path(launch.worktree),
-        env={**os.environ, **identity},
-        server=replace(server, env={**server.env, **identity}),
+        env=identity.over(os.environ),
+        server=replace(server, env=identity.over(server.env)),
     )
     me = Me(
         run_id=launch.run_id,
@@ -162,19 +162,22 @@ def main() -> int:
     write_atomically(args.state_dir / PIDFILE, f"{os.getpid()}\n")
     servers = load_mcp(args.mcp_config)
     if os.environ.get(MODE_VARIABLE) == "act":
-        executor, provider = acting_executor(launch, servers, args.state_dir)
+        executor, _provider = acting_executor(launch, servers, args.state_dir)
     else:
-        executor, provider = replying_executor()
-    agent = Agent(
-        provider,
-        transport=TransportKind.STREAM,
-        model="scripted",
-        executor=executor,
-        permissions=NativePermissions.bypass(),
-        approvals=ApprovalPolicy.DENY,
-        clock=FakeClock(),
-        ids=SequentialIds(),
-    )
+        executor, _provider = replying_executor()
+
+    def agent(provider: str, identity: Identity) -> Agent:
+        return Agent(
+            provider,
+            transport=TransportKind.STREAM,
+            env=identity.over(os.environ),
+            model="scripted",
+            executor=executor,
+            permissions=NativePermissions.bypass(),
+            approvals=ApprovalPolicy.DENY,
+            clock=FakeClock(),
+            ids=SequentialIds(),
+        )
 
     def make(raw_sink: Callable[[RawFrame], None]) -> AgentshimDriver:
         return AgentshimDriver(

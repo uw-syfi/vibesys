@@ -45,8 +45,8 @@ func (t *tx) resume(a agentState) {
 	t.emit(a.Run, a.Agent)
 	run := t.s.runs[a.Run]
 	t.effect(LaunchSession{
-		Session: Session{a.ID, a.Session}, Run: run.ID, Repository: run.Repository, Role: a.Role, Spec: a.Spec,
-		ConversationID: a.ConversationID, Worktree: a.Worktree,
+		Session: Session{a.ID, a.Session}, Run: run.ID, Repository: run.Repository, Task: run.Task, Role: a.Role, Spec: a.Spec,
+		Location: run.Location, ConversationID: a.ConversationID, Worktree: a.Worktree,
 	})
 }
 
