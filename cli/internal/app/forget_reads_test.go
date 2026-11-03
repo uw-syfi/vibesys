@@ -83,10 +83,15 @@ func TestForgettingDropsReadsAlreadyInFlight(t *testing.T) {
 					}
 				})
 				a := o.start(w.supervisors())
+				// Drain startup so the sweep has armed its fake slow timer before we pass it.
+				synctest.Wait()
 				var job core.Job
 				if kind == "sweep_running" || kind == "cancel" {
 					job = submitAs(t, a, callA, "hold", "old", ";", "exit", "0")
-					awaitActive(t, w)
+					synctest.Wait()
+					if w.env.Active() != 1 {
+						t.Fatal("the held command did not start")
+					}
 				} else {
 					st, err := w.stores.Create(ctxFor(t), scopeA)
 					if err != nil {
@@ -120,11 +125,17 @@ func TestForgettingDropsReadsAlreadyInFlight(t *testing.T) {
 				if _, err := a.ForgetRepository(ctxFor(t), repoA); err != nil {
 					t.Fatal(err)
 				}
+				// Finish the old run's cleanup before reusing its store. The delayed
+				// read stays blocked, isolating its reply from cleanup I/O.
+				synctest.Wait()
 				var next core.Job
 				if kind == "cancel" {
 					o.bringBackRemoved(repoA)
 					next = submitAs(t, a, callA, "hold", "new", ";", "exit", "0")
-					awaitActive(t, w)
+					synctest.Wait()
+					if w.env.Active() != 1 {
+						t.Fatal("the held command did not start")
+					}
 				}
 				close(d.g.release)
 				synctest.Wait()
