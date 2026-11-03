@@ -94,6 +94,12 @@ listed, with its statfs number. There is no override: the error says to point th
 path, and a default on a network filesystem is refused and never replaced by another place. An empty
 home directory is an error, not a default relative to the working directory.
 
+The gateway that hosts the orchestrator is found through its root, and the root follows the state
+directory: without `--root`, `vibesysd serve`, `connect` and the client verbs (`run`, `send`, `mcp`)
+use `$VIBESYS_ORCHESTRATOR_STATE_DIR/host` when the variable is set, and `~/.vibesys` when it is not.
+So `run start` with the variable set reaches, or starts, the gateway of that state directory and
+never one that serves another; `--root` overrides both. The rule is `hosted.GatewayRoot`.
+
 Writes never block reads, and the long ones never block the writer for long. `Verify` and the
 read-heavy part of `Compact` run on a snapshot beside the writer. `Compact` writes in steps of at
 most `StepRows` rows (1000 by default), each its own short transaction, and a crash between steps
