@@ -42,27 +42,15 @@ importers:
       '@effect/atom-react':
         specifier: 4.1.2
         version: 4.1.2(effect@4.1.2)(react@19.1.1)(scheduler@0.26.0)
-      '@vibesys/connection':
+      '@vibesys/display-names':
         specifier: workspace:*
-        version: link:../../libs/connection
-      '@vibesys/contracts':
-        specifier: workspace:*
-        version: link:../../libs/contracts
-      '@vibesys/hosts':
-        specifier: workspace:*
-        version: link:../../libs/hosts
-      '@vibesys/ipc':
-        specifier: workspace:*
-        version: link:../../libs/ipc
+        version: link:../../libs/display-names
       '@vibesys/orchestrator-proto':
         specifier: workspace:*
         version: link:../../libs/orchestrator-proto
-      '@vibesys/settings':
+      '@vibesys/proto':
         specifier: workspace:*
-        version: link:../../libs/settings
-      '@vibesys/transport':
-        specifier: workspace:*
-        version: link:../../libs/transport
+        version: link:../../libs/proto
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../../libs/ui
@@ -91,9 +79,6 @@ importers:
       '@types/react-dom':
         specifier: 19.1.9
         version: 19.1.9(@types/react@19.1.13)
-      '@vibesys/proto':
-        specifier: workspace:*
-        version: link:../../libs/proto
       '@vitejs/plugin-react':
         specifier: 5.0.4
         version: 5.0.4(vite@7.1.5(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.1))
@@ -115,9 +100,9 @@ importers:
 
   apps/ui-gallery:
     dependencies:
-      '@vibesys/contracts':
+      '@vibesys/display-names':
         specifier: workspace:*
-        version: link:../../libs/contracts
+        version: link:../../libs/display-names
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../../libs/ui
@@ -222,6 +207,15 @@ importers:
       json-schema-to-typescript:
         specifier: ^15.0.4
         version: 15.0.4
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/display-names:
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

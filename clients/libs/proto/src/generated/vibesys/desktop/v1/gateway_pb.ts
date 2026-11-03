@@ -11,7 +11,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/desktop/v1/gateway.proto.
  */
 export const file_vibesys_desktop_v1_gateway: GenFile = /*@__PURE__*/
-  fileDesc("CiB2aWJlc3lzL2Rlc2t0b3AvdjEvZ2F0ZXdheS5wcm90bxISdmliZXN5cy5kZXNrdG9wLnYxIooCChVEZXNrdG9wR2F0ZXdheVJlcXVlc3QSQAoEa2luZBgBIAEoDjImLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wR2F0ZXdheUtpbmRCCrpIB4IBBBABIAASSQoEaG9zdBgCIAEoCUI7ukg4cjYyNF4obG9jYWx8c3NoOltBLVphLXowLTlfLkA6XVtBLVphLXowLTlfLkA6LV17MCwyNTR9KSQSSQoGbWV0aG9kGAMgASgJQjm6SDZyNCiACDIvXi9bQS1aYS16XVtBLVphLXowLTlfLl0qL1tBLVphLXpdW0EtWmEtejAtOV9dKiQSGQoFYnl0ZXMYBCABKAxCCrpIB3oFGICAgAgiZwoRRGVza3RvcEdhdGV3YXlFbmQSHQoFZXJyb3IYASABKAlCCbpIBnIEKICABEgAiAEBEh4KBnN0YXR1cxgCIAEoBUIJukgGGgQYECgASAGIAQFCCAoGX2Vycm9yQgkKB19zdGF0dXMidwoTRGVza3RvcEdhdGV3YXlSZXBseRIbCgVieXRlcxgBIAEoDEIKukgHegUYgICACEgAEjQKA2VuZBgCIAEoCzIlLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wR2F0ZXdheUVuZEgAQg0KBGJvZHkSBbpIAggBKnsKEkRlc2t0b3BHYXRld2F5S2luZBIkCiBERVNLVE9QX0dBVEVXQVlfS0lORF9VTlNQRUNJRklFRBAAEh4KGkRFU0tUT1BfR0FURVdBWV9LSU5EX1VOQVJZEAESHwobREVTS1RPUF9HQVRFV0FZX0tJTkRfU1RSRUFNEAJCRVpDZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9kZXNrdG9wL3YxO2Rlc2t0b3B2MWIGcHJvdG8z", [file_buf_validate_validate]);
+  fileDesc("CiB2aWJlc3lzL2Rlc2t0b3AvdjEvZ2F0ZXdheS5wcm90bxISdmliZXN5cy5kZXNrdG9wLnYxIooCChVEZXNrdG9wR2F0ZXdheVJlcXVlc3QSQAoEa2luZBgBIAEoDjImLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wR2F0ZXdheUtpbmRCCrpIB4IBBBABIAASSQoEaG9zdBgCIAEoCUI7ukg4cjYyNF4obG9jYWx8c3NoOltBLVphLXowLTlfLkA6XVtBLVphLXowLTlfLkA6LV17MCwyNTR9KSQSSQoGbWV0aG9kGAMgASgJQjm6SDZyNCiACDIvXi9bQS1aYS16XVtBLVphLXowLTlfLl0qL1tBLVphLXpdW0EtWmEtejAtOV9dKiQSGQoFYnl0ZXMYBCABKAxCCrpIB3oFGICAgAgixwEKEURlc2t0b3BHYXRld2F5RW5kEh0KBWVycm9yGAEgASgJQgm6SAZyBCiAgARIAIgBARIeCgZzdGF0dXMYAiABKAVCCbpIBhoEGBAoAEgBiAEBEk0KDGxpbmtfcHJvYmxlbRgDIAEoDjImLnZpYmVzeXMuZGVza3RvcC52MS5EZXNrdG9wTGlua1Byb2JsZW1CCrpIB4IBBBABIABIAogBAUIICgZfZXJyb3JCCQoHX3N0YXR1c0IPCg1fbGlua19wcm9ibGVtIncKE0Rlc2t0b3BHYXRld2F5UmVwbHkSGwoFYnl0ZXMYASABKAxCCrpIB3oFGICAgAhIABI0CgNlbmQYAiABKAsyJS52aWJlc3lzLmRlc2t0b3AudjEuRGVza3RvcEdhdGV3YXlFbmRIAEINCgRib2R5EgW6SAIIASp7ChJEZXNrdG9wR2F0ZXdheUtpbmQSJAogREVTS1RPUF9HQVRFV0FZX0tJTkRfVU5TUEVDSUZJRUQQABIeChpERVNLVE9QX0dBVEVXQVlfS0lORF9VTkFSWRABEh8KG0RFU0tUT1BfR0FURVdBWV9LSU5EX1NUUkVBTRACKpsBChJEZXNrdG9wTGlua1Byb2JsZW0SJAogREVTS1RPUF9MSU5LX1BST0JMRU1fVU5TUEVDSUZJRUQQABIdChlERVNLVE9QX0xJTktfUFJPQkxFTV9BVVRIEAESHQoZREVTS1RPUF9MSU5LX1BST0JMRU1fTElOSxACEiEKHURFU0tUT1BfTElOS19QUk9CTEVNX0NBUEFDSVRZEANCRVpDZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9kZXNrdG9wL3YxO2Rlc2t0b3B2MWIGcHJvdG8z", [file_buf_validate_validate]);
 
 /**
  * Electron routes this message as protobuf bytes. The preload owns the port,
@@ -64,6 +64,11 @@ export type DesktopGatewayEnd = Message<"vibesys.desktop.v1.DesktopGatewayEnd"> 
    * @generated from field: optional int32 status = 2;
    */
   status?: number | undefined;
+
+  /**
+   * @generated from field: optional vibesys.desktop.v1.DesktopLinkProblem link_problem = 3;
+   */
+  linkProblem?: DesktopLinkProblem | undefined;
 };
 
 /**
@@ -127,3 +132,34 @@ export enum DesktopGatewayKind {
  */
 export const DesktopGatewayKindSchema: GenEnum<DesktopGatewayKind> = /*@__PURE__*/
   enumDesc(file_vibesys_desktop_v1_gateway, 0);
+
+/**
+ * @generated from enum vibesys.desktop.v1.DesktopLinkProblem
+ */
+export enum DesktopLinkProblem {
+  /**
+   * @generated from enum value: DESKTOP_LINK_PROBLEM_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: DESKTOP_LINK_PROBLEM_AUTH = 1;
+   */
+  AUTH = 1,
+
+  /**
+   * @generated from enum value: DESKTOP_LINK_PROBLEM_LINK = 2;
+   */
+  LINK = 2,
+
+  /**
+   * @generated from enum value: DESKTOP_LINK_PROBLEM_CAPACITY = 3;
+   */
+  CAPACITY = 3,
+}
+
+/**
+ * Describes the enum vibesys.desktop.v1.DesktopLinkProblem.
+ */
+export const DesktopLinkProblemSchema: GenEnum<DesktopLinkProblem> = /*@__PURE__*/
+  enumDesc(file_vibesys_desktop_v1_gateway, 1);

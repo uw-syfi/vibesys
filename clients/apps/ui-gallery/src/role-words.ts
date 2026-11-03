@@ -2,7 +2,7 @@
  * The names the demos give the roles they draw, taken from the catalog like any screen so a
  * rename shows here too and no demo spells a role word itself.
  */
-import {roleName} from '@vibesys/contracts';
+import {roleName} from '@vibesys/display-names';
 
 /** What a screen calls the role that plans each round. */
 export const PLANNER = roleName('orchestrator');

@@ -1,0 +1,167 @@
+import {describe, expect, it} from '@effect/vitest';
+import * as Effect from 'effect/Effect';
+import * as Fiber from 'effect/Fiber';
+import * as Schema from 'effect/Schema';
+import * as TestClock from 'effect/testing/TestClock';
+import {fakeGateway, HELLO} from '../testing/main/fake-gateway.js';
+import {GrpcFailed} from './errors.js';
+import {openSession} from './grpc-session.js';
+
+const bytes = (...values: number[]): Uint8Array => Uint8Array.from(values);
+const SERVE = '/vibesys.test.v1/Serve';
+
+/** Wait until the peer has received `count` scripted calls; the peer answers from real I/O. */
+const received = (peer: ReturnType<typeof fakeGateway>, count: number) =>
+  Effect.promise(async () => {
+    while (peer.calls.length < count) await new Promise(resolve => setImmediate(resolve));
+  });
+
+describe('gateway session', () => {
+  it.effect("answers a unary call with the peer's one message", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const peer = fakeGateway();
+        const session = yield* openSession(peer.connect());
+        const reply = yield* session.unary(HELLO, new Uint8Array(0));
+        expect(reply.byteLength).toBeGreaterThan(0);
+        expect(peer.methods).toEqual([HELLO]);
+      }),
+    ),
+  );
+
+  it.effect.prop(
+    "hands a stream's messages over in order, however the peer splits its frames",
+    {
+      messages: Schema.Array(Schema.Uint8Array.check(Schema.isMaxLength(40))).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(6),
+      ),
+    },
+    ({messages}) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const peer = fakeGateway();
+          const session = yield* openSession(peer.connect());
+          const heard: Uint8Array[] = [];
+          const running = yield* Effect.forkChild(
+            session.call(SERVE, bytes(1), message => heard.push(Uint8Array.from(message))),
+          );
+          yield* received(peer, 1);
+          const call = peer.calls[0];
+          for (const message of messages) call?.send(message);
+          call?.end();
+          yield* Fiber.join(running);
+          expect(heard).toEqual(messages);
+        }),
+      ),
+    {arbitrary: {runs: 25}},
+  );
+
+  it.effect('ends a call with the status the peer ended it with', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const peer = fakeGateway();
+        const session = yield* openSession(peer.connect());
+        const running = yield* Effect.forkChild(
+          Effect.flip(session.call(SERVE, bytes(), () => {})),
+        );
+        yield* received(peer, 1);
+        peer.calls[0]?.end(9, 'schema mismatch');
+        const failure = yield* Fiber.join(running);
+        expect(failure).toBeInstanceOf(GrpcFailed);
+        expect(failure).toMatchObject({code: 9, message: 'schema mismatch'});
+      }),
+    ),
+  );
+
+  it.effect('ends a call whose consumer throws with INTERNAL, naming the consumer', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const peer = fakeGateway();
+        const session = yield* openSession(peer.connect());
+        const running = yield* Effect.forkChild(
+          Effect.flip(
+            session.call(SERVE, bytes(), () => {
+              throw new Error('refused');
+            }),
+          ),
+        );
+        yield* received(peer, 1);
+        peer.calls[0]?.send(bytes(7));
+        const failure = yield* Fiber.join(running);
+        expect(failure.code).toBe(13);
+        expect(failure.message).toContain('refused');
+      }),
+    ),
+  );
+
+  it.effect('resets the stream of a call that is interrupted, and only that one', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const peer = fakeGateway();
+        const session = yield* openSession(peer.connect());
+        const first = yield* Effect.forkChild(session.call(SERVE, bytes(1), () => {}));
+        const second = yield* Effect.forkChild(session.call(SERVE, bytes(2), () => {}));
+        yield* received(peer, 2);
+        yield* Fiber.interrupt(first);
+        yield* Effect.promise(async () => {
+          while (peer.calls[0]?.cancelled() !== true) await new Promise(r => setImmediate(r));
+        });
+        expect(peer.calls[1]?.cancelled()).toBe(false);
+        peer.calls[1]?.end();
+        yield* Fiber.join(second);
+      }),
+    ),
+  );
+
+  it.effect('reports a lost session, fails the calls under it, and refuses new ones', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const peer = fakeGateway();
+        const session = yield* openSession(peer.connect());
+        const running = yield* Effect.forkChild(
+          Effect.flip(session.call(SERVE, bytes(), () => {})),
+        );
+        yield* received(peer, 1);
+        peer.drop();
+        yield* session.lost;
+        expect((yield* Fiber.join(running)).code).toBe(14);
+        expect((yield* Effect.flip(session.unary(SERVE, bytes()))).code).toBe(14);
+      }),
+    ),
+  );
+
+  it.effect('refuses a method that is not a gRPC path, and a message above the limit', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const peer = fakeGateway();
+        const session = yield* openSession(peer.connect());
+        expect((yield* Effect.flip(session.unary('Serve', bytes()))).message).toContain('invalid');
+        const huge = new Uint8Array(64 * 1024 * 1024 + 1);
+        expect((yield* Effect.flip(session.unary(SERVE, huge))).code).toBe(8);
+        expect(peer.methods).toEqual([]);
+      }),
+    ),
+  );
+
+  it.effect('gives a unary call 15 seconds in total, then fails it as a deadline', () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const peer = fakeGateway();
+        const session = yield* openSession(peer.connect());
+        const running = yield* Effect.forkChild(Effect.flip(session.unary(SERVE, bytes())));
+        yield* received(peer, 1);
+        yield* TestClock.adjust('15 seconds');
+        expect((yield* Fiber.join(running)).code).toBe(4);
+      }),
+    ),
+  );
+
+  it.effect('ends the session with its scope', () =>
+    Effect.gen(function* () {
+      const peer = fakeGateway();
+      const session = yield* Effect.scoped(openSession(peer.connect()));
+      yield* session.lost;
+    }),
+  );
+});

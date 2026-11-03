@@ -2,8 +2,8 @@
 
 An agent role has an id (``perf-evaluator``) that a program matches on and a person must never be
 shown. The role's name is the ``title`` its search declares on its ``Role``; this module gathers
-them into the catalog the clients receive (``@vibesys/contracts``, generated from
-:class:`DisplayNames`). A client reads a role a plugin declares as the words of its id.
+them into the catalog the clients receive (``@vibesys/display-names``, generated from
+:class:`DisplayNames` by :func:`display_names_typescript`). A client reads a role a plugin declares as the words of its id.
 
 Harness and model names are not here: agentshim owns them and serves them through
 ``vs_agent.api``. :func:`code_ids` lists only their ids, so the screen checks can fail on any a
@@ -12,6 +12,7 @@ screen draws as text.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -102,4 +103,19 @@ def code_ids() -> CodeIds:
         harnesses=SHIPPED_PROVIDERS,
         models=tuple(model for provider in SHIPPED_PROVIDERS for model in vetted_models(provider)),
         roles=tuple(display_names().roles),
+    )
+
+
+def display_names_typescript() -> str:
+    """The TypeScript module of the role names a person reads and the ids a screen must not draw.
+
+    ``python scripts/generate_display_names.py OUTPUT`` writes it, so the clients' copy is generated
+    from the one definition above and the two cannot drift.
+    """
+    names = json.dumps(display_names().model_dump(), indent=2)
+    ids = json.dumps(code_ids().model_dump(), indent=2)
+    return (
+        "/* Generated from the Python display names (vibesys.api.display_catalog). Do not edit. */\n\n"
+        f"export const DISPLAY_NAMES = {names} as const;\n\n"
+        f"export const CODE_IDS = {ids} as const;\n"
     )

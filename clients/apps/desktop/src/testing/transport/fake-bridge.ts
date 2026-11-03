@@ -3,7 +3,12 @@
  * replies by hand, or gives a `Recording` to play on each open (the replies arrive during `open`,
  * as a port that already holds them would deliver them).
  */
-import {type GatewayPortBridge, gatewayEnd, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
+import {
+  type GatewayPortBridge,
+  gatewayEnd,
+  gatewayReply,
+  parseGatewayRequest,
+} from '../../core/gateway-codec.js';
 import type {Recording, Step} from './fake-transport.js';
 
 export interface OpenedPort {

@@ -207,8 +207,8 @@ commands = [
   ["pnpm", "check:ts"],
   ["pnpm", "check:ts-architecture"],
   ["pnpm", "check:knip"],
-  ["pnpm", "--dir", "libs/contracts", "generate:protocol"],
-  ["git", "diff", "--exit-code", "--", "libs/contracts/src/generated/"],
+  ["pnpm", "--dir", "libs/display-names", "generate"],
+  ["git", "diff", "--exit-code", "--", "libs/display-names/src/generated/"],
   ["pnpm", "--dir", "libs/ui", "check:tokens"],
   ["pnpm", "check:clients"],
 ]

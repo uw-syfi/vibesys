@@ -5,10 +5,10 @@
  */
 import type {DescMessage, DescMethod, MessageInitShape, MessageShape} from '@bufbuild/protobuf';
 import type {GenService, GenServiceMethods} from '@bufbuild/protobuf/codegenv2';
-import type {HostKey} from '@vibesys/hosts';
 import * as Duration from 'effect/Duration';
 import * as Effect from 'effect/Effect';
 import * as Stream from 'effect/Stream';
+import type {HostKey} from '../../state/index.js';
 import {type AppError, DeadlineExceeded, fromTransportError} from '../errors.js';
 import {GatewayTransport} from '../transport/gateway-transport.js';
 import {decodeResponse, encodeRequest} from './validate.js';

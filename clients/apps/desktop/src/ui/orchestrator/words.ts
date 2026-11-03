@@ -2,7 +2,7 @@
  * What the screens say. Every state, role and outcome is named here in plain words, so a screen
  * never shows a protocol name and a new value cannot reach the user unnamed.
  */
-import {roleName} from '@vibesys/contracts';
+import {roleName} from '@vibesys/display-names';
 import {
   AgentRole,
   AgentStatus,
@@ -158,6 +158,8 @@ export function formatMoment(atMs: number): string {
 /** Why a connection or a request did not work, in a sentence a person can act on. */
 export function faultWord(kind: FaultKind): string {
   switch (kind) {
+    case 'AuthenticationFailed':
+      return 'SSH key authentication failed. Configure a key accepted by the host and try again.';
     case 'NoBridge':
       return 'This page is not running inside the VibeSys app, so it has no connection to a host.';
     case 'TransportFailed':

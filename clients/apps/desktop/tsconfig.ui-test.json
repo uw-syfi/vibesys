@@ -29,13 +29,11 @@
       "path": "../../libs/orchestrator-proto/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/hosts/tsconfig.lib.json"
-    },
-    {
       "path": "./tsconfig.core.json"
     }
   ],
   "exclude": [
-    "src/testing/**/*.test.ts"
+    "src/testing/**/*.test.ts",
+    "src/testing/main/**"
   ]
 }

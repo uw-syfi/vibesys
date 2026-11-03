@@ -53,6 +53,8 @@ const CONTRACTS = ['^libs/contracts/', '/node_modules/@vibesys/contracts/'];
 // reach which is the package-graph checker's; these rules hold the modules inside those packages.
 const CONNECTION_STATE = '^libs/connection/src/state/';
 const CONNECTION_SHELL = '^libs/connection/src/shell/';
+const DESKTOP_PROCESS_FILE = '^apps/desktop/src/main/process\\.ts$';
+const DESKTOP_LOCAL_HOST_FILE = '^apps/desktop/src/main/local-host\\.ts$';
 // Every module of the main process: the app's, and the packages only it runs.
 const MAIN_PROCESS = ['^apps/desktop/src/main/', '^libs/connection/src/', '^libs/settings/src/'];
 const UI_RUNTIME = '(?:^|/)node_modules/(?:react|react-dom|electron)/';
@@ -77,11 +79,19 @@ function desktopRules() {
       to: {dependencyTypes: ['core']},
     },
     {
-      // Only the connection manager's shell starts processes or opens sockets in the main process.
-      name: 'desktop-only-connection-shell-opens-processes-and-sockets',
+      // Every process the main process starts goes through `ProcessSpawner` (main/process.ts), which
+      // owns bounded retirement, so a child is never started anywhere else.
+      name: 'desktop-main-starts-processes-only-in-process-ts',
       severity: 'error',
-      from: {path: MAIN_PROCESS, pathNot: [TEST_FILE, CONNECTION_SHELL]},
-      to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
+      from: {path: MAIN_PROCESS, pathNot: [TEST_FILE, CONNECTION_SHELL, DESKTOP_PROCESS_FILE]},
+      to: {dependencyTypes: ['core'], path: '^(?:node:)?child_process$'},
+    },
+    {
+      // The one socket the main process opens itself is the local gateway's (main/local-host.ts).
+      name: 'desktop-main-opens-sockets-only-in-local-host-ts',
+      severity: 'error',
+      from: {path: MAIN_PROCESS, pathNot: [TEST_FILE, CONNECTION_SHELL, DESKTOP_LOCAL_HOST_FILE]},
+      to: {dependencyTypes: ['core'], path: '^(?:node:)?net$'},
     },
   ];
 }

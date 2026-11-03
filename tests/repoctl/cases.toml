@@ -273,7 +273,7 @@ pnpm_packages = []
 [[cases]]
 name = "connection state changes select their dependents"
 paths = ["clients/libs/connection/src/state/host-connection.ts"]
-jobs = ["clients", "desktop_path"]
+jobs = ["clients"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
@@ -334,7 +334,7 @@ pnpm_packages = []
 
 [[cases]]
 name = "a clients change selects the client quality groups"
-paths = ["clients/libs/connection/src/state/host-connection.ts"]
+paths = ["clients/libs/ui/src/apply-theme.ts"]
 jobs = ["clients", "desktop_path"]
 local_groups = ["always_on", "clients_build", "clients_quality", "clients_tests", "desktop_path_e2e"]
 checks_groups = ["always_on", "clients_build", "clients_quality"]
@@ -343,7 +343,7 @@ skipped_groups = ["clients_e2e"]
 native_languages = []
 dockerfile_contexts = []
 native_targets = []
-pnpm_packages = { dependents_of = "pnpm:@vibesys/connection" }
+pnpm_packages = { dependents_of = "pnpm:@vibesys/ui" }
 
 [[cases]]
 name = "a proto change selects the contract check"
@@ -463,7 +463,7 @@ pnpm_packages = []
 [[cases]]
 name = "request identity changes reach every client request producer"
 paths = ["clients/libs/request-identity/src/index.ts"]
-jobs = ["clients", "desktop_path"]
+jobs = ["clients"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
@@ -582,10 +582,10 @@ pnpm_packages = { dependents_of = "pnpm:@vibesys/desktop" }
 
 [[cases]]
 name = "a package the desktop app uses selects the desktop path end to end test"
-paths = ["clients/libs/connection/src/shell/gateway.ts"]
+paths = ["clients/libs/ui/src/apply-theme.ts"]
 jobs = ["clients", "desktop_path"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
 native_targets = []
-pnpm_packages = { dependents_of = "pnpm:@vibesys/connection" }
+pnpm_packages = { dependents_of = "pnpm:@vibesys/ui" }

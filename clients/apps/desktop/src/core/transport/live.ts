@@ -1,11 +1,6 @@
 /** `GatewayTransport` over the preload's gateway bridge: one MessagePort per call. */
 
-import {
-  decodeGatewayReply,
-  encodeGatewayRequest,
-  type GatewayPortBridge,
-  type GatewayRequest,
-} from '@vibesys/ipc';
+import type {DesktopLinkProblem} from '@vibesys/proto';
 import * as Cause from 'effect/Cause';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
@@ -13,6 +8,12 @@ import * as Layer from 'effect/Layer';
 import * as Queue from 'effect/Queue';
 import * as Stream from 'effect/Stream';
 import {CallEnded, NoBridge, StreamOverflow} from '../errors.js';
+import {
+  decodeGatewayReply,
+  encodeGatewayRequest,
+  type GatewayPortBridge,
+  type GatewayRequest,
+} from '../gateway-codec.js';
 import {type CallTarget, GatewayTransport} from './gateway-transport.js';
 
 /** The window's gateway handle, if it has one. */
@@ -57,18 +58,27 @@ const openCall = (
     release();
     terminal(how);
   };
-  const failed = (message: string, status?: number): Terminal => ({
+  const failed = (
+    message: string,
+    status?: number,
+    linkProblem?: DesktopLinkProblem,
+  ): Terminal => ({
     kind: 'failed',
-    end: new CallEnded({message, ...(status === undefined ? {} : {status})}),
+    end: new CallEnded({
+      message,
+      ...(status === undefined ? {} : {status}),
+      ...(linkProblem === undefined ? {} : {linkProblem}),
+    }),
   });
   /** Act on one decoded reply: a frame, or the end. */
   const interpret = (body: ReturnType<typeof decodeGatewayReply>): void => {
     if (body.case === 'bytes') {
       if (!frame(body.value)) release();
     } else if (body.case === 'end') {
-      const {error, status} = body.value;
-      const clean = error === undefined && (status === undefined || status === 0);
-      end(clean ? {kind: 'closed'} : failed(error ?? '', status));
+      const {error, status, linkProblem} = body.value;
+      const clean =
+        error === undefined && linkProblem === undefined && (status === undefined || status === 0);
+      end(clean ? {kind: 'closed'} : failed(error ?? '', status, linkProblem));
     }
   };
   try {

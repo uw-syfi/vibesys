@@ -1,7 +1,7 @@
 import {expect, it} from '@effect/vitest';
-import {decodeGatewayReply, gatewayReply} from '@vibesys/ipc';
-import {GrpcError} from '@vibesys/transport';
 import * as Schema from 'effect/Schema';
+import {decodeGatewayReply, gatewayReply} from '../core/gateway-codec.js';
+import {GatewayFailed, GrpcFailed, LinkFailed} from './errors.js';
 import {
   endOf,
   isOwnWindow,
@@ -258,7 +258,20 @@ it('terminal replies keep every gRPC status and a single error prefix', () => {
     return {error: reply.value.error, status: reply.value.status};
   };
   for (let code = 0; code <= 16; code++)
-    expect(ended(new GrpcError(code, 'missing run'))).toEqual({error: 'missing run', status: code});
+    expect(ended(new GrpcFailed({code, message: 'missing run'}))).toEqual({
+      error: 'missing run',
+      status: code,
+    });
+  expect(ended(new GatewayFailed({message: 'host unreachable'}))).toEqual({
+    error: 'host unreachable',
+    status: undefined,
+  });
+  expect(
+    ended(new LinkFailed({problem: 'auth', message: 'ssh host-a: Permission denied'})),
+  ).toEqual({
+    error: 'ssh host-a: Permission denied',
+    status: undefined,
+  });
   expect(ended(new Error('caller cancelled'))).toEqual({
     error: 'Error: caller cancelled',
     status: undefined,

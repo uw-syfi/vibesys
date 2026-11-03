@@ -1,5 +1,5 @@
 /** The hosts a window was opened to read: one `host` parameter per host key, set by the main process. */
-import {type HostKey, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostKey, hostLabel} from '../state/index.js';
 
 export interface WindowHost {
   readonly key: HostKey;

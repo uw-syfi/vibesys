@@ -66,7 +66,7 @@ class DesktopGatewayRequest(Message[_DesktopGatewayRequestFields]):
         method: str
         bytes: bytes
 
-_DesktopGatewayEndFields: TypeAlias = Literal["error", "status"]
+_DesktopGatewayEndFields: TypeAlias = Literal["error", "status", "link_problem"]
 
 class DesktopGatewayEnd(Message[_DesktopGatewayEndFields]):
     """
@@ -86,9 +86,13 @@ class DesktopGatewayEnd(Message[_DesktopGatewayEndFields]):
             ```proto
             optional int32 status = 2;
             ```
+        link_problem:
+            ```proto
+            optional vibesys.desktop.v1.DesktopLinkProblem link_problem = 3;
+            ```
     """
 
-    __slots__ = ("error", "status")
+    __slots__ = ("error", "status", "link_problem")
 
     if TYPE_CHECKING:
 
@@ -97,11 +101,13 @@ class DesktopGatewayEnd(Message[_DesktopGatewayEndFields]):
             *,
             error: str | None = None,
             status: int | None = None,
+            link_problem: DesktopLinkProblem | None = None,
         ) -> None:
             pass
 
         error: str
         status: int
+        link_problem: DesktopLinkProblem
 
 _DesktopGatewayReplyFields: TypeAlias = Literal["bytes", "end"]
 
@@ -156,9 +162,39 @@ class DesktopGatewayKind(Enum):
     UNARY = 1
     STREAM = 2
 
+class DesktopLinkProblem(Enum):
+    """
+    ```proto
+    enum vibesys.desktop.v1.DesktopLinkProblem
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            DESKTOP_LINK_PROBLEM_UNSPECIFIED = 0
+            ```
+        AUTH:
+            ```proto
+            DESKTOP_LINK_PROBLEM_AUTH = 1
+            ```
+        LINK:
+            ```proto
+            DESKTOP_LINK_PROBLEM_LINK = 2
+            ```
+        CAPACITY:
+            ```proto
+            DESKTOP_LINK_PROBLEM_CAPACITY = 3
+            ```
+    """
+
+    UNSPECIFIED = 0
+    AUTH = 1
+    LINK = 2
+    CAPACITY = 3
+
 
 _DESC = file_desc(
-    b'\n vibesys/desktop/v1/gateway.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto"\xa5\x02\n\x15DesktopGatewayRequest\x12F\n\x04kind\x18\x01 \x01(\x0e2&.vibesys.desktop.v1.DesktopGatewayKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12O\n\x04host\x18\x02 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12Q\n\x06method\x18\x03 \x01(\tR\x06methodB9\xbaH6r4(\x80\x082/^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$\x12 \n\x05bytes\x18\x04 \x01(\x0cR\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08"v\n\x11DesktopGatewayEnd\x12$\n\x05error\x18\x01 \x01(\tH\x00R\x05errorB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12&\n\x06status\x18\x02 \x01(\x05H\x01R\x06statusB\t\xbaH\x06\x1a\x04\x18\x10(\x00\x88\x01\x01B\x08\n\x06_errorB\t\n\x07_status"\x83\x01\n\x13DesktopGatewayReply\x12"\n\x05bytes\x18\x01 \x01(\x0cH\x00R\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08\x129\n\x03end\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopGatewayEndH\x00R\x03endB\r\n\x04body\x12\x05\xbaH\x02\x08\x01*{\n\x12DesktopGatewayKind\x12$\n DESKTOP_GATEWAY_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aDESKTOP_GATEWAY_KIND_UNARY\x10\x01\x12\x1f\n\x1bDESKTOP_GATEWAY_KIND_STREAM\x10\x02BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
+    b'\n vibesys/desktop/v1/gateway.proto\x12\x12vibesys.desktop.v1\x1a\x1bbuf/validate/validate.proto"\xa5\x02\n\x15DesktopGatewayRequest\x12F\n\x04kind\x18\x01 \x01(\x0e2&.vibesys.desktop.v1.DesktopGatewayKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12O\n\x04host\x18\x02 \x01(\tR\x04hostB;\xbaH8r624^(local|ssh:[A-Za-z0-9_.@:][A-Za-z0-9_.@:-]{0,254})$\x12Q\n\x06method\x18\x03 \x01(\tR\x06methodB9\xbaH6r4(\x80\x082/^/[A-Za-z][A-Za-z0-9_.]*/[A-Za-z][A-Za-z0-9_]*$\x12 \n\x05bytes\x18\x04 \x01(\x0cR\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08"\xe3\x01\n\x11DesktopGatewayEnd\x12$\n\x05error\x18\x01 \x01(\tH\x00R\x05errorB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12&\n\x06status\x18\x02 \x01(\x05H\x01R\x06statusB\t\xbaH\x06\x1a\x04\x18\x10(\x00\x88\x01\x01\x12Z\n\x0clink_problem\x18\x03 \x01(\x0e2&.vibesys.desktop.v1.DesktopLinkProblemH\x02R\x0blinkProblemB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01B\x08\n\x06_errorB\t\n\x07_statusB\x0f\n\r_link_problem"\x83\x01\n\x13DesktopGatewayReply\x12"\n\x05bytes\x18\x01 \x01(\x0cH\x00R\x05bytesB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08\x129\n\x03end\x18\x02 \x01(\x0b2%.vibesys.desktop.v1.DesktopGatewayEndH\x00R\x03endB\r\n\x04body\x12\x05\xbaH\x02\x08\x01*{\n\x12DesktopGatewayKind\x12$\n DESKTOP_GATEWAY_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aDESKTOP_GATEWAY_KIND_UNARY\x10\x01\x12\x1f\n\x1bDESKTOP_GATEWAY_KIND_STREAM\x10\x02*\x9b\x01\n\x12DesktopLinkProblem\x12$\n DESKTOP_LINK_PROBLEM_UNSPECIFIED\x10\x00\x12\x1d\n\x19DESKTOP_LINK_PROBLEM_AUTH\x10\x01\x12\x1d\n\x19DESKTOP_LINK_PROBLEM_LINK\x10\x02\x12!\n\x1dDESKTOP_LINK_PROBLEM_CAPACITY\x10\x03BEZCgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/desktop/v1;desktopv1b\x06proto3',
     [
         validate_pb.desc(),
     ],
@@ -167,6 +203,7 @@ _DESC = file_desc(
         "DesktopGatewayEnd": DesktopGatewayEnd,
         "DesktopGatewayReply": DesktopGatewayReply,
         "DesktopGatewayKind": DesktopGatewayKind,
+        "DesktopLinkProblem": DesktopLinkProblem,
     },
 )
 

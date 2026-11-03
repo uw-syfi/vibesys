@@ -7,9 +7,14 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from scripts.generate_display_names import main
 
-from server.api.schema import display_names_typescript, main
-from vibesys.api.display_catalog import ConflictingNamesError, code_ids, display_names
+from vibesys.api.display_catalog import (
+    ConflictingNamesError,
+    code_ids,
+    display_names,
+    display_names_typescript,
+)
 from vibesys.orchestration.dynamic.search.api import dynamic
 from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vs_agent.api import SHIPPED_PROVIDERS, harnesses
@@ -45,6 +50,11 @@ def test_the_code_ids_are_every_shipped_harness_vetted_model_and_role() -> None:
     assert set(ids.roles) == set(display_names().roles)
 
 
+def test_the_generator_names_its_usage_when_given_no_output_path() -> None:
+    with pytest.raises(SystemExit, match=r"usage: python scripts/generate_display_names.py OUTPUT"):
+        main([])
+
+
 def test_two_searches_that_title_one_role_differently_are_refused() -> None:
     retitled = replace(
         issue_queue,
@@ -56,13 +66,13 @@ def test_two_searches_that_title_one_role_differently_are_refused() -> None:
 
 _GENERATED = (
     Path(__file__).resolve().parents[3]
-    / "clients/libs/contracts/src/generated/display-names.generated.ts"
+    / "clients/libs/display-names/src/generated/display-names.generated.ts"
 )
 
 
 def test_the_generated_module_is_what_the_registry_says(tmp_path: Path) -> None:
     written = tmp_path / "out" / "names.ts"
-    main(["--display-names-module", str(written)])
+    main([str(written)])
     assert written.read_text() == display_names_typescript()
     assert written.read_text() == _GENERATED.read_text()
     assert '"perf-evaluator": "Perf evaluator"' in written.read_text()

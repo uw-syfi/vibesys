@@ -922,6 +922,10 @@ function bucketNameErrors({name, directory, manifest}) {
  */
 export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/ui': ['.', './tokens'],
+  // The names a person reads for roles; generated from the one Python catalog.
+  '@vibesys/display-names': ['.'],
+  // The gateway's wire contract: the main process speaks it, so it is a typed dependency.
+  '@vibesys/proto': null,
   '@vibesys/contracts': null,
   '@vibesys/store': null,
   '@vibesys/machine': null,
