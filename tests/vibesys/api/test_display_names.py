@@ -7,8 +7,8 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-
 from scripts.generate_display_names import main
+
 from vibesys.api.display_catalog import (
     ConflictingNamesError,
     code_ids,
