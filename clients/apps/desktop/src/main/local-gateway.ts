@@ -12,7 +12,7 @@ import * as Queue from 'effect/Queue';
 import * as Scope from 'effect/Scope';
 import {gatewayTarget} from '../state/gateway-target.js';
 import {GatewayFailed} from './errors.js';
-import {GatewayArtifacts} from './gateway-provision.js';
+import {GatewayArtifacts, HOST_PROGRAM} from './gateway-provision.js';
 import {LocalHost} from './local-host.js';
 import {type ProcessSpawner, spawnScoped} from './process.js';
 
@@ -53,7 +53,7 @@ export const dialLocalGateway = (): Effect.Effect<
     yield* host.ensureDirectory;
     // Read first to fail clearly when development skipped the Go build.
     const bytes = yield* artifacts.read(target);
-    const binary = join(host.directory, 'vibesysd');
+    const binary = join(host.directory, HOST_PROGRAM);
     const socket = join(host.directory, 'sock');
     yield* install(binary, bytes);
 

@@ -1,4 +1,4 @@
-// Package hosted is the orchestrator as a host process serves it: vibesysd opens it beside its own
+// Package hosted is the orchestrator as a host process serves it: vibesys-host opens it beside its own
 // API, registers its operator service on its own gRPC server and socket, and keeps itself up while
 // a run is live. It is the one package outside this module's internals that other modules import.
 //

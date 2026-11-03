@@ -346,7 +346,7 @@ job = "gateway"
 # The gateway tests read the conversion and retained goldens and compare the Skeleton wire golden
 # byte for byte, so a change to any of them runs them.
 roots = ["gateway", "proto/testdata"]
-# vibesysd hosts the orchestrator through a replace of the sibling module, so its changes run these.
+# vibesys-host hosts the orchestrator through a replace of the sibling module, so its changes run these.
 depends_on = ["orchestrator"]
 
 [[components]]

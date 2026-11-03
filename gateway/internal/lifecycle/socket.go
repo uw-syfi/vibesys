@@ -14,6 +14,10 @@ import (
 // entire API hash before declaring compatibility.
 const HashPrefixLength = 16
 
+// lockFileName is shared with older hosts. Changing it would let a new host
+// win a different lock and remove a live old host's socket.
+const lockFileName = "vibesysd.lock"
+
 var ErrServing = errors.New("gateway already serving")
 
 // SocketPath is shared by serve and connect. Root is the host's .vibesys
@@ -43,7 +47,7 @@ func Listen(root, schemaHash string) (*Endpoint, error) {
 			return nil, err
 		}
 	}
-	lock, err := os.OpenFile(filepath.Join(directory, "vibesysd.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(filepath.Join(directory, lockFileName), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}

@@ -14,8 +14,8 @@ export const CLIENT_BUILD = {
 
 /** The daemon reports this app is too old for it. */
 export const CLIENT_TOO_OLD_TEXT =
-  'this app is too old to talk to vibesysd on this host; update the app';
+  'this app is too old to talk to vibesys-host on this host; update the app';
 
 /** The daemon reports it is too old for this app; `daemonVersion` is its release or `dev`. */
 export const daemonTooOldText = (daemonVersion: string | undefined): string =>
-  `vibesysd on this host (${daemonVersion ?? 'unknown'}) is too old for this app; update vibesysd there`;
+  `vibesys-host on this host (${daemonVersion ?? 'unknown'}) is too old for this app; update vibesys-host there`;

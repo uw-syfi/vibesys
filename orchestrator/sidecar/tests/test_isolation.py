@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 SESSION = "11111111-1111-4111-8111-111111111111"
 INIT: dict[str, Any] = {"type": "system", "subtype": "init", "session_id": SESSION, "model": "m"}
-SERVER = StdioMcpServer(name="vibesys", command="/bin/vibesysd", args=("mcp",), env={})
+SERVER = StdioMcpServer(name="vibesys", command="/bin/vibesys-host", args=("mcp",), env={})
 
 
 def _claude_argv() -> list[str]:

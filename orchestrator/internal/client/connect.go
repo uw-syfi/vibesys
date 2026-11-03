@@ -9,7 +9,7 @@ import (
 
 // Connect pipes a client's stdio to the daemon: bytes from in go to the daemon's connection and
 // bytes from it go to out, until either side ends or ctx does. It is what
-// `vibesys-orchestrator connect` runs, so that `ssh host vibesys-orchestrator connect` is a
+// `vibesys-host connect` runs, so that `ssh host vibesys-host connect` is a
 // connection to the daemon on that host. It understands none of what it carries.
 //
 // It returns nil when the client closes its input, and the first error otherwise. Both ends are

@@ -2,6 +2,7 @@ package hosted_test
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
@@ -25,7 +26,7 @@ func start(t *testing.T, settings map[string]string) *hosted.Orchestrator {
 	settings["VIBESYS_ORCHESTRATOR_STATE_DIR"] = state
 	ctx, cancel := context.WithCancel(context.Background())
 	x := hosted.Start(ctx, hosted.Options{
-		Version: "test", Executable: filepath.Join(state, "bin", "vibesysd"), Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Version: "test", Executable: filepath.Join(state, "bin", "vibesys-host"), Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Getenv: func(k string) string { return settings[k] }, Home: state,
 	})
 	t.Cleanup(func() {
@@ -130,7 +131,32 @@ func TestTheGatewayRootRefusesWhatItCannotPlaceWithoutGuessing(t *testing.T) {
 
 // test-isolation: pin the private argv builder without starting a real ssh process.
 func TestSSHCommand(t *testing.T) {
-	if got := hosted.SSHCommand("h"); !slices.Equal(got, []string{"ssh", "h", "vibesysd", "connect"}) {
+	if got := hosted.SSHCommand("h"); !slices.Equal(got, []string{"ssh", "h", "vibesys-host", "connect"}) {
 		t.Fatalf("sshCommand = %v", got)
+	}
+}
+
+func TestHostProgramGolden(t *testing.T) {
+	data, err := os.ReadFile("../../proto/testdata/host_program.golden.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden struct{ Program string }
+	if err := json.Unmarshal(data, &golden); err != nil {
+		t.Fatal(err)
+	}
+	if hosted.HostProgram != golden.Program {
+		t.Fatalf("program = %q, want %q", hosted.HostProgram, golden.Program)
+	}
+	command := filepath.Join("../../gateway/cmd", golden.Program)
+	if info, err := os.Stat(command); err != nil || !info.IsDir() {
+		t.Fatalf("command directory: %v", err)
+	}
+	build, err := os.ReadFile("../../gateway/build.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(build), "./cmd/"+golden.Program) || !strings.Contains(string(build), "/"+golden.Program+`"`) {
+		t.Fatalf("build.sh does not build %s", golden.Program)
 	}
 }

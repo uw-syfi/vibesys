@@ -599,12 +599,12 @@ jobs:
       - name: Check the orchestrator
         run: ./support/repoctl/repoctl run-checks --group orchestrator_checks
 
-  # The deterministic end to end test of the desktop path (gateway/e2e): vibesysd, the orchestrator,
+  # The deterministic end to end test of the desktop path (gateway/e2e): vibesys-host, the orchestrator,
   # real sidecars over agentshim's scripted providers, the vibesys-cli daemon and git run a lead, two
   # workers and a judge on a toy task. No model is called. The built Electron desktop app is then
   # launched against that world and a Playwright journey checks the run list, each agent's harness
   # and the lead's report on screen and presses Stop (VIBESYS_E2E_DESKTOP_UI=1). Its own job, so it
-  # adds no time to the gateway, cli or orchestrator jobs; it builds vibesysd and vibesys-cli from
+  # adds no time to the gateway, cli or orchestrator jobs; it builds vibesys-host and vibesys-cli from
   # the Go caches those jobs share. Runs on every push to main for the same reason as `gateway`.
   desktop-path:
     needs: changes

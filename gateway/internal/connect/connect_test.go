@@ -93,7 +93,7 @@ func TestStartupFailure(t *testing.T) {
 	defer os.RemoveAll(root)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if connection, err := Dial(ctx, filepath.Join(root, "missing.sock"), "/nonexistent/vibesysd", nil, io.Discard); err == nil {
+	if connection, err := Dial(ctx, filepath.Join(root, "missing.sock"), "/nonexistent/vibesys-host", nil, io.Discard); err == nil {
 		connection.Close()
 		t.Fatal("missing executable accepted")
 	}

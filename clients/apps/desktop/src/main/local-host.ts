@@ -16,7 +16,7 @@ import * as Layer from 'effect/Layer';
 import * as Queue from 'effect/Queue';
 import type * as Scope from 'effect/Scope';
 import {GatewayFailed} from './errors.js';
-import {GATEWAY_DIRECTORY} from './gateway-provision.js';
+import {GATEWAY_DIRECTORY, HOST_PROGRAM} from './gateway-provision.js';
 
 /** Nothing is listening on the socket yet (no file, or no process behind it). */
 export class NotListening {
@@ -75,7 +75,7 @@ const NodeLocalHostImpl = (): Context.Service.Shape<typeof LocalHost> => {
     replace: (path, bytes) =>
       Effect.tryPromise({
         try: async () => {
-          const temporary = join(dirname(path), `.vibesysd-${randomUUID()}`);
+          const temporary = join(dirname(path), `.${HOST_PROGRAM}-${randomUUID()}`);
           try {
             await writeFile(temporary, bytes, {flag: 'wx', mode: 0o700});
             await chmod(temporary, 0o700);

@@ -25,7 +25,7 @@ func cliTestEnv(kv ...string) func(string) string {
 
 func TestAnExplicitCLIWinsOverEveryOtherBuild(t *testing.T) {
 	files := fakeFiles{"/pick/vibesys-cli": true, "/install/vibesys-cli": true, "/usr/bin/vibesys-cli": true}
-	got, err := ResolveCLI(cliTestEnv(EnvCLI, "/pick/vibesys-cli", "PATH", "/usr/bin"), "/install/vibesysd", files)
+	got, err := ResolveCLI(cliTestEnv(EnvCLI, "/pick/vibesys-cli", "PATH", "/usr/bin"), "/install/vibesys-host", files)
 	if err != nil || got != "/pick/vibesys-cli" {
 		t.Fatalf("got %q, %v, want the chosen build", got, err)
 	}
@@ -36,7 +36,7 @@ func TestAnExplicitCLIWinsOverEveryOtherBuild(t *testing.T) {
 func TestAnExplicitCLIThatCannotBeUsedIsRefusedAndNeverReplaced(t *testing.T) {
 	files := fakeFiles{"/install/vibesys-cli": true, "/usr/bin/vibesys-cli": true}
 	for _, setting := range []string{"vibesys-cli", "./vibesys-cli", "/missing/vibesys-cli", "/usr/bin"} {
-		got, err := ResolveCLI(cliTestEnv(EnvCLI, setting, "PATH", "/usr/bin"), "/install/vibesysd", files)
+		got, err := ResolveCLI(cliTestEnv(EnvCLI, setting, "PATH", "/usr/bin"), "/install/vibesys-host", files)
 		if err == nil || got != "" || !strings.Contains(err.Error(), EnvCLI) {
 			t.Errorf("%q gave %q, %v, want an error naming %s", setting, got, err, EnvCLI)
 		}
@@ -65,7 +65,7 @@ func TestTheCLIBesideTheDaemonThenTheFirstOnPATHIsChosen(t *testing.T) {
 		order := slices.Clone(dirs)
 		rng.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
 		path := strings.Join(slices.Concat([]string{"bin"}, order), ":")
-		got, err := ResolveCLI(cliTestEnv("PATH", path), "/inst/vibesysd", files)
+		got, err := ResolveCLI(cliTestEnv("PATH", path), "/inst/vibesys-host", files)
 		want := ""
 		switch {
 		case beside:
@@ -88,7 +88,7 @@ func TestTheCLIBesideTheDaemonThenTheFirstOnPATHIsChosen(t *testing.T) {
 }
 
 func TestNoCLIAnywhereIsAnErrorNamingTheSettingAndNotAGuess(t *testing.T) {
-	got, err := ResolveCLI(cliTestEnv("PATH", "/usr/bin:relative"), "/install/vibesysd", fakeFiles{"relative/vibesys-cli": true})
+	got, err := ResolveCLI(cliTestEnv("PATH", "/usr/bin:relative"), "/install/vibesys-host", fakeFiles{"relative/vibesys-cli": true})
 	if err == nil || got != "" || !strings.Contains(err.Error(), EnvCLI) {
 		t.Fatalf("got %q, %v, want an error naming %s", got, err, EnvCLI)
 	}

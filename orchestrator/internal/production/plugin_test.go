@@ -80,7 +80,7 @@ func TestWithoutAMarketplaceEveryLaunchIsRefused(t *testing.T) {
 			return "true"
 		}
 		return ""
-	}, t.TempDir(), "vibesysd", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, t.TempDir(), "vibesys-host", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,5 +1,5 @@
 /**
- * A real in-process HTTP/2 gRPC peer over memory duplexes, standing in for a `vibesysd`. It speaks
+ * A real in-process HTTP/2 gRPC peer over memory duplexes, standing in for a `vibesys-host`. It speaks
  * the same framing the client does and answers the handshake; a test scripts the other methods.
  */
 import {createServer, type ServerHttp2Session, type ServerHttp2Stream} from 'node:http2';

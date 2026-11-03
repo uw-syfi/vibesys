@@ -52,7 +52,7 @@ clients/
 
 The four libraries are the ones the desktop app still needs as clean typed dependencies. `proto` and
 `orchestrator-proto` are generated from `.proto` files and carry no hand-written logic. `display-names`
-is one generated table and a lookup. `ui` is the design system. The app talks to `vibesysd` only
+is one generated table and a lookup. `ui` is the design system. The app talks to `vibesys-host` only
 through the generated bindings; it uses no type generated from Python besides the display-name table,
 and no library of hand-written client logic.
 
@@ -602,7 +602,7 @@ names a missing or extra one, and the Knip and Biome globs cover the new package
 
 | Package | Layer | Status |
 | --- | --- | --- |
-| `@vibesys/proto` | foundation | exists: the generated store-record and host API bindings the app speaks to `vibesysd` |
+| `@vibesys/proto` | foundation | exists: the generated store-record and host API bindings the app speaks to `vibesys-host` |
 | `@vibesys/orchestrator-proto` | foundation | exists: the generated orchestrator bindings |
 | `@vibesys/display-names` | foundation | exists: the generated role-name table and its lookup |
 | `@vibesys/ui` | foundation | exists: the components (`.`, `dom`; see [Components](#components)), the legacy primitives (`./legacy`, unused) and the design tokens (`./tokens`, `./tokens.css`, `./fonts.css`, `./components.css`) |

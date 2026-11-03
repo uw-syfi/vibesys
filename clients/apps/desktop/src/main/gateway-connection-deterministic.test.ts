@@ -18,7 +18,7 @@ import type {GatewaySession} from './grpc-session.js';
 
 const hello = toBinary(
   HelloResponseSchema,
-  create(HelloResponseSchema, {apiSchemaHash: API_SCHEMA_HASH, gatewayVersion: 'test'}),
+  create(HelloResponseSchema, {apiSchemaHash: API_SCHEMA_HASH, gatewayVersion: '0.1.0'}),
 );
 const quiet = () => {};
 const duplex = {} as Duplex;
@@ -42,7 +42,7 @@ it.effect('closes an outstanding dial with its owning scope', () =>
   }),
 );
 
-it.effect('redials after session loss and a long outage', () =>
+it.effect('attaches to a 0.1.0 host and redials after session loss and a long outage', () =>
   Effect.scoped(
     Effect.gen(function* () {
       const lost = yield* Deferred.make<void>();

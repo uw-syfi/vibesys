@@ -500,7 +500,7 @@ include_in_test = true
 language = "go"
 directory = "gateway"
 # A cold Go cache costs about 3 minutes on a CI runner: module download, then vet and test of the
-# host (about 90 s) and a vet per other release target. vibesysd links the orchestrator's store,
+# host (about 90 s) and a vet per other release target. vibesys-host links the orchestrator's store,
 # so every target compiles modernc.org/sqlite: measured cold on 4 cores, 28 to 41 s per target
 # vet against about 20 s without it. A warm cache, the usual case, costs a few seconds; a change to
 # gateway/go.sum starts cold.
@@ -538,9 +538,9 @@ trigger_job = "desktop_path"
 include_in_test = true
 language = "go"
 directory = "gateway"
-# The desktop path end to end test (gateway/e2e, build tag e2e): vibesysd, the orchestrator, real
+# The desktop path end to end test (gateway/e2e, build tag e2e): vibesys-host, the orchestrator, real
 # sidecars over agentshim's scripted providers, the vibesys-cli daemon and git, with a toy task. No
-# model is called. It builds vibesysd and vibesys-cli, so a cold Go cache costs about a minute on a
+# model is called. It builds vibesys-host and vibesys-cli, so a cold Go cache costs about a minute on a
 # CI runner; the sidecar environment is a uv sync of the orchestrator's sidecar project. With
 # VIBESYS_E2E_DESKTOP_UI=1, which CI sets under a virtual display, it then builds the desktop app and
 # runs its Playwright journey (clients/apps/desktop/e2e) against the same world. A warm run takes

@@ -32,7 +32,7 @@ import (
 func TestConnectCLI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	binary := filepath.Join(t.TempDir(), "vibesysd")
+	binary := filepath.Join(t.TempDir(), "vibesys-host")
 	build := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
@@ -44,6 +44,7 @@ func TestConnectCLI(t *testing.T) {
 			}
 		})
 	}
+	t.Run("second-serve", func(t *testing.T) { testSecondServe(t, binary) })
 	t.Run("Tail", func(t *testing.T) { testTailCLI(t, binary) })
 	t.Run("closed-output", func(t *testing.T) { testClosedOutput(t, binary) })
 	t.Run("state-directory-root", func(t *testing.T) { testStateDirectoryRoot(t, binary) })
@@ -55,7 +56,7 @@ func TestConnectCLI(t *testing.T) {
 		if err := command.Run(); !errors.As(err, &exit) || exit.ExitCode() != 1 {
 			t.Fatalf("no arguments: %v", err)
 		}
-		const usage = "usage: vibesysd {serve|connect} [options]\n  vibesysd [--root PATH] VERB, where VERB is one of\n  mcp\n  [--host HOST] run start --repository DIR --task NAME --brief TEXT [--harness claude_code|codex] [--fanout N] [--model M] [--effort E] [--deadline RFC3339]\n  [--host HOST] run stop RUN\n  [--host HOST] run watch [--after SEQUENCE]\n  [--host HOST] send AGENT TEXT\n\n"
+		const usage = "usage: vibesys-host {serve|connect} [options]\n  vibesys-host [--root PATH] VERB, where VERB is one of\n  mcp\n  [--host HOST] run start --repository DIR --task NAME --brief TEXT [--harness claude_code|codex] [--fanout N] [--model M] [--effort E] [--deadline RFC3339]\n  [--host HOST] run stop RUN\n  [--host HOST] run watch [--after SEQUENCE]\n  [--host HOST] send AGENT TEXT\n\n"
 		if stdout.Len() != 0 || stderr.String() != usage {
 			t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
 		}
@@ -331,7 +332,43 @@ func testRunStartDialFailure(t *testing.T, binary string) {
 	if err := command.Run(); !errors.As(err, &exit) || exit.ExitCode() != 1 {
 		t.Fatalf("run start: %v, stderr: %s", err, &stderr)
 	}
-	if stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "vibesysd: handshake with the orchestrator:") {
+	if stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "vibesys-host: handshake with the orchestrator:") {
 		t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
 	}
+}
+
+func testSecondServe(t *testing.T, binary string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	root, err := os.MkdirTemp("", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+	first := exec.CommandContext(ctx, binary, "serve", "--root", root)
+	first.Env = append(os.Environ(), "VIBESYS_ORCHESTRATOR_STATE_DIR="+filepath.Join(root, "state"))
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { first.Process.Signal(os.Interrupt); first.Wait() }()
+	connection, err := grpc.NewClient("passthrough:///host", grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", lifecycle.SocketPath(root, schemahash.APISchemaHash))
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	client := apiv1.NewHostServiceClient(connection)
+	hello := func() {
+		response, err := client.Hello(ctx, &apiv1.HelloRequest{ApiSchemaHash: schemahash.APISchemaHash}, grpc.WaitForReady(true))
+		if err != nil || response.GetGatewayVersion() != "0.2.0" {
+			t.Fatalf("Hello = %v, %v", response, err)
+		}
+	}
+	hello()
+	if output, err := exec.CommandContext(ctx, binary, "serve", "--root", root).CombinedOutput(); err != nil || len(output) != 0 {
+		t.Fatalf("second serve = %v, %q", err, output)
+	}
+	hello()
 }

@@ -18,6 +18,9 @@ import {GatewayFailed, type LinkFailed, type SpawnFailed} from './errors.js';
 import type {SpawnedProcess} from './process.js';
 import type {SshLink} from './ssh-link.js';
 
+/** Host executable name, pinned across languages by the host-program golden. */
+export const HOST_PROGRAM = 'vibesys-host';
+
 const compress = promisify(gzip);
 
 /** Where a host keeps the gateway for this build, relative to its home directory. */
@@ -116,13 +119,13 @@ export const provisionGateway = (
     const artifacts = yield* GatewayArtifacts;
     const bytes = yield* artifacts.read(target);
     const digest = createHash('sha256').update(bytes).digest('hex');
-    const binary = `"$HOME/${GATEWAY_DIRECTORY}/vibesysd"`;
+    const binary = `"$HOME/${GATEWAY_DIRECTORY}/${HOST_PROGRAM}"`;
     const matches = (path: string) =>
       `[ -f ${path} ] && [ "$(wc -c < ${path} | tr -d ' ')" = '${bytes.length}' ] && ` +
       `[ "$(if command -v sha256sum >/dev/null 2>&1; then sha256sum ${path}; else shasum -a 256 ${path}; fi | cut -d ' ' -f 1)" = '${digest}' ]`;
     const holds = (path: string) => run(`if ${matches(path)}; then printf match; fi`);
     if (!force && (yield* holds(binary)) === 'match') return;
-    const temporary = `"$HOME/${GATEWAY_DIRECTORY}/.vibesysd-${randomUUID()}"`;
+    const temporary = `"$HOME/${GATEWAY_DIRECTORY}/.${HOST_PROGRAM}-${randomUUID()}"`;
     const packed = yield* Effect.tryPromise({
       try: () => compress(bytes),
       catch: cause =>
@@ -143,4 +146,4 @@ export const provisionGateway = (
   });
 
 /** The command that runs the gateway's stdio bridge on a host. */
-export const GATEWAY_CONNECT_SCRIPT = `exec "$HOME/${GATEWAY_DIRECTORY}/vibesysd" connect`;
+export const GATEWAY_CONNECT_SCRIPT = `exec "$HOME/${GATEWAY_DIRECTORY}/${HOST_PROGRAM}" connect`;

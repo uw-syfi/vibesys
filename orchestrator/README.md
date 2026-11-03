@@ -8,7 +8,7 @@ module here, and it reaches `vibesys-cli` only through that tool's public contra
 
 Work is landing in stages. This module holds the contract, the pure decision core, the interface
 over `vibesys-cli` jobs, the code that converts between the two, the store, the daemon with its
-live hub, the MCP server, a headless client and the sidecar launcher, all hosted by `vibesysd`. The
+live hub, the MCP server, a headless client and the sidecar launcher, all hosted by `vibesys-host`. The
 plan reader is a placeholder in production and the job source is left unwired until their items land
 (`internal/production`); both say so when asked.
 
@@ -41,7 +41,7 @@ plan reader is a placeholder in production and the job source is left unwired un
 | `internal/client` | The client library, `connect` and the headless commands, over the public service API | `gen` only |
 | `internal/mcp` | The stdio MCP server an agent talks to, over a small `Daemon` interface the client satisfies | `core`, `gen` |
 | `internal/production` | The one place that reads the real clock, sockets and files | `client`, `core`, `daemon`, `hub`, `jobs`, `localfs`, `store`, `gen` |
-| `hosted` | The orchestrator as `vibesysd` hosts it, and its `mcp`, `run` and `send` verbs. The one package other modules import | `client`, `core`, `daemon`, `mcp`, `production`, `gen` |
+| `hosted` | The orchestrator as `vibesys-host` hosts it, and its `mcp`, `run` and `send` verbs. The one package other modules import | `client`, `core`, `daemon`, `mcp`, `production`, `gen` |
 | `gen/` | Generated from the `.proto` files. Do not edit | Nothing of this module |
 
 `internal/archcheck` enforces this table and the purity of the core from the import graph of every
@@ -95,7 +95,7 @@ path, and a default on a network filesystem is refused and never replaced by ano
 home directory is an error, not a default relative to the working directory.
 
 The gateway that hosts the orchestrator is found through its root, and the root follows the state
-directory: without `--root`, `vibesysd serve`, `connect` and the client verbs (`run`, `send`, `mcp`)
+directory: without `--root`, `vibesys-host serve`, `connect` and the client verbs (`run`, `send`, `mcp`)
 use `$VIBESYS_ORCHESTRATOR_STATE_DIR/host` when the variable is set, and `~/.vibesys` when it is not.
 So `run start` with the variable set reaches, or starts, the gateway of that state directory and
 never one that serves another; `--root` overrides both. The rule is `hosted.GatewayRoot`.
@@ -119,8 +119,8 @@ time and read latency on generated data.
 
 ## The daemon and its commands
 
-`vibesysd` hosts the daemon (`orchestrator/hosted`): `vibesysd serve` registers `OrchestratorService`
-beside `HostService` on the gateway's socket and serves the agent-only socket itself. One `vibesysd`
+`vibesys-host` hosts the daemon (`orchestrator/hosted`): `vibesys-host serve` registers `OrchestratorService`
+beside `HostService` on the gateway's socket and serves the agent-only socket itself. One `vibesys-host`
 holds the state directory through the store's lock; any other answers orchestrator calls
 `UNAVAILABLE` naming the holder's pid and version, and keeps serving `HostService`. It does not exit
 for being idle while a run is live. It is crash-only: starting is recovering. A serial loop feeds commands, sidecar events, job polls and timers to `Decide`, commits
@@ -128,13 +128,13 @@ the result through the store, and then a worker carries out the effects at least
 nonces are injected, and an input that changes nothing is logged.
 
 ```sh
-vibesysd serve                                       # the gateway, with the orchestrator
-ssh host vibesysd connect                            # the one client transport: stdio to the socket
-vibesysd mcp                                         # stdio MCP server; identity comes from the environment
-vibesysd run start --repository R --task T --brief B --harness claude_code
-vibesysd run watch                                   # a snapshot, then events, as JSON lines
-vibesysd run stop RUN
-vibesysd send AGENT "text"
+vibesys-host serve                                       # the gateway, with the orchestrator
+ssh host vibesys-host connect                            # the one client transport: stdio to the socket
+vibesys-host mcp                                         # stdio MCP server; identity comes from the environment
+vibesys-host run start --repository R --task T --brief B --harness claude_code
+vibesys-host run watch                                   # a snapshot, then events, as JSON lines
+vibesys-host run stop RUN
+vibesys-host send AGENT "text"
 ```
 
 The daemon ends the sidecar process of every session the core no longer counts as live, whatever ended
@@ -163,8 +163,8 @@ there is no default for any of them. Every session, lead and subagent, on either
 `vibesys` plugin from that checkout and none of the operator's own plugins, skills or configuration.
 The plugin is installed once per agent into `STATE/sessions/AGENT/plugin-home`, which a resume reuses.
 A missing or wrong marketplace refuses every launch, naming the setting. Build with
-`go build -o ~/.local/bin/vibesysd ./gateway/cmd/vibesysd`, run `uv sync --frozen --project
-orchestrator/sidecar` once, then `vibesysd run start ...` starts a gateway if none serves. Each
+`go build -o ~/.local/bin/vibesys-host ./gateway/cmd/vibesys-host`, run `uv sync --frozen --project
+orchestrator/sidecar` once, then `vibesys-host run start ...` starts a gateway if none serves. Each
 session's files, logs and socket are under `STATE/sessions/`.
 
 The lead's first message is rendered by the sidecar from the run's task, its `--fanout` and the
@@ -177,7 +177,7 @@ An agent's shell may be a login shell (Codex runs `bash -lc`), which reads the u
 and can put another `vibesys-cli` first on `PATH`. So the daemon picks one build when it starts. It
 picks, in order: `VIBESYS_ORCHESTRATOR_CLI` (an absolute path to an executable file; a relative path
 or a file that is not executable stops the orchestrator from starting, naming the setting, and no
-other build is substituted), a `vibesys-cli` beside the `vibesysd` binary, then the first
+other build is substituted), a `vibesys-cli` beside the `vibesys-host` binary, then the first
 `vibesys-cli` on the daemon's own `PATH`. With none of them the orchestrator does not start, because
 the skills have no `PATH` fallback: they run `"$VIBESYS_CLI"` and stop with a clear message when it
 is unset.
@@ -197,13 +197,13 @@ repository needs the task bundle named by `--task`):
 
 ```sh
 export VIBESYS_ORCHESTRATOR_STATE_DIR=/local/disk/vo-smoke VIBESYS_ORCHESTRATOR_SIDECAR=$PWD/orchestrator/sidecar VIBESYS_ORCHESTRATOR_MARKETPLACE=$PWD
-go build -o ~/.local/bin/vibesysd ./gateway/cmd/vibesysd && uv sync --frozen --project orchestrator/sidecar
+go build -o ~/.local/bin/vibesys-host ./gateway/cmd/vibesys-host && uv sync --frozen --project orchestrator/sidecar
 git init -q /local/disk/smoke-repo && printf 'def add(a, b):\n    return a - b\n' > /local/disk/smoke-repo/calc.py
 git -C /local/disk/smoke-repo add -A && git -C /local/disk/smoke-repo commit -qm init
-vibesysd run start --repository /local/disk/smoke-repo --task fix-add --harness claude_code \
+vibesys-host run start --repository /local/disk/smoke-repo --task fix-add --harness claude_code \
   --model claude-haiku-4-5 --fanout 2 \
   --brief 'calc.py has a bug in add; keep the run to one worker and one judge.'
-vibesysd run watch --after 1 # in another shell; stop with `vibesysd run stop RUN` when the lead reports
+vibesys-host run watch --after 1 # in another shell; stop with `vibesys-host run stop RUN` when the lead reports
 ```
 
 ### Who may call
@@ -211,7 +211,7 @@ vibesysd run watch --after 1 # in another shell; stop with `vibesysd run stop RU
 The daemon serves two sockets, and which one a caller reached decides who it is:
 
 - The **operator socket** takes calls with no credentials and refuses any call that carries an
-  agent's. It is the gateway socket that `vibesysd run`, `send` and `connect` use, and it is never put in
+  agent's. It is the gateway socket that `vibesys-host run`, `send` and `connect` use, and it is never put in
   an agent's environment.
 - The **agent socket** is the only socket a launched session is told (`VIBESYS_ORCHESTRATOR_SOCKET`).
   Every call on it needs the credentials of the agent's current session (agent id, session number
@@ -308,3 +308,8 @@ go test ./internal/wire -run '^$' -fuzz '^FuzzParseCommand$' -fuzztime 30s
 
 The code in `gen/` comes from `proto/vibesys/orchestrator/v1/` through `buf.gen.orchestrator.yaml`,
 and `scripts/generate_proto.sh` regenerates it with the rest of the repository's generated code.
+
+Remote client verbs require `vibesys-host` on the remote PATH. A remote with only
+`vibesysd` installed must install the new name; there is no fallback. Desktop
+provisioning installs the new executable beside old files and leaves them untouched,
+since existing agent sessions can still name the old executable in their MCP configuration.

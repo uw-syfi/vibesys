@@ -1,10 +1,13 @@
 import {describe, expect, it} from '@effect/vitest';
 import {API_SCHEMA_HASH} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
+import hostProgram from '../../../../../proto/testdata/host_program.golden.json' with {
+  type: 'json',
+};
 import {gatewayArtifactsFrom} from './gateway-artifacts.js';
 import {GatewayArtifacts} from './gateway-provision.js';
 
-const PATH = `/app/gateway/${API_SCHEMA_HASH.slice(0, 16)}/vibesysd-linux-amd64`;
+const PATH = `/app/gateway/${API_SCHEMA_HASH.slice(0, 16)}/${hostProgram.program}-linux-amd64`;
 
 const read = (_files: Record<string, Uint8Array>) =>
   Effect.gen(function* () {

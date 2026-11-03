@@ -1,6 +1,6 @@
 //go:build e2e
 
-// Package e2e runs vibesysd end to end with real processes: the gateway serving the orchestrator,
+// Package e2e runs vibesys-host end to end with real processes: the gateway serving the orchestrator,
 // real sidecar processes over agentshim's scripted Claude peer, and the headless client. No model
 // is called. Run it from gateway/ with `go test -tags e2e ./e2e -v`; it needs uv and Python.
 package e2e
@@ -47,10 +47,10 @@ func newRig(t *testing.T) *rig {
 		}
 		os.RemoveAll(dir)
 	})
-	binary := filepath.Join(dir, "vibesysd")
-	build := exec.Command("go", "build", "-o", binary, "../cmd/vibesysd")
+	binary := filepath.Join(dir, "vibesys-host")
+	build := exec.Command("go", "build", "-o", binary, "../cmd/vibesys-host")
 	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build vibesysd: %v\n%s", err, out)
+		t.Fatalf("build vibesys-host: %v\n%s", err, out)
 	}
 	cli := filepath.Join(dir, "vibesys-cli")
 	buildCLI := exec.Command("go", "build", "-o", cli, "./cmd/vibesys-cli")
@@ -138,7 +138,7 @@ func (r *rig) client(args ...string) string {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		r.t.Fatalf("vibesysd %s: %v\n%s\nserve log:\n%s", strings.Join(args, " "), err, stderr.String(), r.serveLog())
+		r.t.Fatalf("vibesys-host %s: %v\n%s\nserve log:\n%s", strings.Join(args, " "), err, stderr.String(), r.serveLog())
 	}
 	return string(out)
 }
@@ -164,7 +164,7 @@ func (r *rig) receipt(args ...string) receipt {
 	}
 	sequence, err := strconv.ParseUint(raw.Sequence, 10, 64)
 	if err != nil {
-		r.t.Fatalf("vibesysd %s printed no receipt sequence: %+v", strings.Join(args, " "), raw)
+		r.t.Fatalf("vibesys-host %s printed no receipt sequence: %+v", strings.Join(args, " "), raw)
 	}
 	return receipt{RunID: raw.RunID, AgentID: raw.AgentID, Sequence: sequence}
 }

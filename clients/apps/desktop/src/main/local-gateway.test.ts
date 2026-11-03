@@ -4,6 +4,9 @@ import * as Exit from 'effect/Exit';
 import * as Layer from 'effect/Layer';
 import * as Scope from 'effect/Scope';
 import * as TestClock from 'effect/testing/TestClock';
+import hostProgram from '../../../../../proto/testdata/host_program.golden.json' with {
+  type: 'json',
+};
 import {joinDriving, untilTrue} from '../testing/main/drive.js';
 import {fakeGateway} from '../testing/main/fake-gateway.js';
 import {fakeLocalHost} from '../testing/main/fake-local-host.js';
@@ -13,7 +16,7 @@ import {dialLocalGateway} from './local-gateway.js';
 
 const ARTIFACT = new Uint8Array([1, 2, 3]);
 const artifacts = Layer.succeed(GatewayArtifacts, {read: () => Effect.succeed(ARTIFACT)});
-const BINARY = '/home/user/.vibesys/gateway/0123456789abcdef/vibesysd';
+const BINARY = `/home/user/.vibesys/gateway/0123456789abcdef/${hostProgram.program}`;
 
 describe('local gateway dial', () => {
   it.effect('installs the gateway, starts it once, and dials its socket when it appears', () =>
@@ -68,6 +71,9 @@ describe('local gateway dial', () => {
   it.effect('replaces an executable from another build', () =>
     Effect.gen(function* () {
       const host = fakeLocalHost();
+      const oldBinary = BINARY.replace(hostProgram.program, 'vibesysd');
+      const oldBytes = new Uint8Array([8, 7, 6]);
+      host.files.set(oldBinary, oldBytes);
       host.files.set(BINARY, new Uint8Array([9]));
       host.listen(fakeGateway());
       const scope = yield* Scope.make();
@@ -77,6 +83,7 @@ describe('local gateway dial', () => {
       );
       expect(host.replaced).toEqual([BINARY]);
       expect(host.files.get(BINARY)).toEqual(ARTIFACT);
+      expect(host.files.get(oldBinary)).toEqual(oldBytes);
       yield* Scope.close(scope, Exit.void);
     }),
   );

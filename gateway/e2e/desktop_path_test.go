@@ -211,7 +211,7 @@ func (r *rig) pgids() []int {
 
 // uiWorld is a running world, as a UI test needs to attach to it.
 type uiWorld struct {
-	// Root and Binary are the daemon's --root and the vibesysd to run client verbs with.
+	// Root and Binary are the daemon's --root and the vibesys-host to run client verbs with.
 	Root, Binary string
 	// Home is the home directory whose .vibesys is Root: a client that finds the gateway by the
 	// user's home reaches this world when it runs with HOME set to Home.

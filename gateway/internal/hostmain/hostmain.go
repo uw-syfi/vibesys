@@ -20,7 +20,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 // Main runs the host command and returns its process exit status.
 func Main(args []string) int {
