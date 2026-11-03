@@ -17,7 +17,7 @@ const sidebars: SidebarsConfig = {
         'contributing/development',
         'contributing/coding-best-practices',
         'contributing/architecture',
-        'contributing/run-transport',
+        'contributing/python-module-graph',
         'contributing/run-recovery',
         'contributing/agent-drivers',
         'contributing/domains',

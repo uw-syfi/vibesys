@@ -208,8 +208,7 @@ macOS when full read confinement matters.
   services on host loopback remain reachable. Docker has a separate network namespace.
   A reachable user bus or Docker daemon can let an agent run unconfined commands. Use
   the Docker run environment where such a listener may exist and the host must be
-  protected. The deleted Python server's key handshake and connection-admission tests
-  provide no guarantee for the current daemon transports.
+  protected. Runtime-root protection alone does not authenticate daemon connections.
 - **Seatbelt** reads are broader than bubblewrap (above).
 - **Hidden-path design.** The planning issue for prebuilt agent images (#674,
   closed) proposed "no explicit hidden access: deny what is not listed". The

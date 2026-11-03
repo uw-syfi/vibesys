@@ -117,7 +117,7 @@ def test_citation_to_a_renamed_symbol_is_reported_with_its_doc_location(tmp_path
 
 
 def test_line_range_citation_is_reported_even_when_the_lines_exist(tmp_path: Path) -> None:
-    """Every drifted citation in `wire-protocol.md` named lines that existed."""
+    """Every drifted citation in the former transport guide named lines that existed."""
     files = {"docs/a.md": "See `mod.py:5-7`.\n", "mod.py": HANDLER_MODULE}
 
     (reason,) = _reasons(tmp_path, "docs/a.md", files)

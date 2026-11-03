@@ -1,5 +1,10 @@
 # Orchestrator
 
+Remote client verbs require `vibesys-host` on the remote PATH. Install that name
+on the remote before connecting; there is no fallback to the former host name.
+Desktop provisioning installs it beside old executables and leaves them untouched,
+since existing agent sessions may still name the old executable in their MCP configuration.
+
 The orchestrator is a Go daemon that runs on the host doing the work, usually a remote one. It
 launches Claude Code and Codex agents, records everything they do, relays typed messages between
 them, and wakes a lead agent when a subagent or a job finishes. It sits beside the Python runs and
@@ -308,8 +313,3 @@ go test ./internal/wire -run '^$' -fuzz '^FuzzParseCommand$' -fuzztime 30s
 
 The code in `gen/` comes from `proto/vibesys/orchestrator/v1/` through `buf.gen.orchestrator.yaml`,
 and `scripts/generate_proto.sh` regenerates it with the rest of the repository's generated code.
-
-Remote client verbs require `vibesys-host` on the remote PATH. A remote with only
-`vibesysd` installed must install the new name; there is no fallback. Desktop
-provisioning installs the new executable beside old files and leaves them untouched,
-since existing agent sessions can still name the old executable in their MCP configuration.

@@ -55,7 +55,7 @@ const config: Config = {
       {
         redirects: [
           {from: '/docs/contributing/devcontainer-features', to: '/docs/contributing/development'},
-          ...['contributing/kernel3-contract-decisions', 'design/strategies-on-core', 'design/launch', 'design/iteration-navigation', 'design/core-agent-evaluation-bridge'].map(id => ({from: `/docs/${id}`, to: '/docs/contributing/architecture'})),
+          ...['contributing/desktop-connection', 'contributing/wire-protocol', 'contributing/run-transport', 'contributing/kernel3-contract-decisions', 'design/strategies-on-core', 'design/launch', 'design/iteration-navigation', 'design/core-agent-evaluation-bridge'].map(id => ({from: `/docs/${id}`, to: '/docs/contributing/architecture'})),
           ...[
           'development',
           'coding-best-practices',

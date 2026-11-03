@@ -39,7 +39,7 @@ Tach is module-granular: each `[[modules]]` entry lists its allowed
    move the shared code down.
 3. `uv run python -m scripts.check_tach`
 4. `uv run python -m scripts.check_tach_graph --write`, then commit the updated
-   graph in the architecture doc.
+   graph in the Python module graph doc.
 
 A new module also needs its `[[modules]]` entry (and `[[interfaces]]`), and a
 new library needs its `source_roots` entry.

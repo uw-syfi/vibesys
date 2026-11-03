@@ -1,4 +1,4 @@
-// Rule S8 of the desktop design system (docs/contributing/clients-architecture.md, "Design
+// The desktop design system (docs/contributing/clients-architecture.md, "Design
 // system enforcement"), for `@vibesys/ui`'s hand-written stylesheets (`libs/ui/src/*.css`, except
 // the generated `tokens.css`): a declaration value holds no hex color, `rgb(`, `rgba(`, `hsl(`,
 // `hsla(`, `oklch(`, `color-mix(`, or CSS length (`<number>px`, `rem`, `em`, `vh`, `vw`). Values

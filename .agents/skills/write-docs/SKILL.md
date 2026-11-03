@@ -49,7 +49,7 @@ current docs, so a banned-word check would start with false positives.
   range: a range keeps resolving after the code under it moves. A path suffix
   must name one tracked file. `check_doc_citations` enforces this for a gated
   set of pages (currently the
-  [wire-protocol](../../../docs/contributing/wire-protocol.md) page). Known
+  [run recovery](../../../docs/contributing/run-recovery.md) page). Known
   gap: other pages are unchecked; run `check_doc_citations` with the page as
   its argument before you finish. (This rule is about docs pages; skills
   themselves may not cite paths.)

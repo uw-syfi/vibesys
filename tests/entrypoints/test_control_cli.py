@@ -141,7 +141,7 @@ def test_a_posted_control_is_what_the_run_records(
     assert request.action == command[0].replace("-", "_")
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     if "--fallback" in command:
-        # Only a turn waiting on a quota stop takes a fallback resume (wire-protocol.md).
+        # Only a turn waiting on a quota stop takes a fallback resume (run-recovery.md).
         channel.enter_capacity()
         channel.pause_for_quota()
     inbox = OperatorInbox(

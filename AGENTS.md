@@ -2,8 +2,9 @@
 
 # Always follow
 
-These rules apply to every code change. The module graph is in
-[`docs/contributing/architecture.md`](docs/contributing/architecture.md).
+These rules apply to every code change. The process boundaries are in
+[Architecture](docs/contributing/architecture.md). The module graph is in
+[`docs/contributing/python-module-graph.md`](docs/contributing/python-module-graph.md).
 
 Skills (load them, in every language):
 
@@ -39,7 +40,7 @@ Architecture:
   Backends emit semantic event data; formatting, colors, and layout belong to
   frontends.
 - TypeScript client control state follows the `write-effect-code` skill; data folds are plain reducers.
-- Follow the package layout and placement rule in [architecture.md](docs/contributing/architecture.md).
+- Follow the package layout and placement rule in [python-module-graph.md](docs/contributing/python-module-graph.md).
 - Design stateful systems with a pure core and a thin shell. Follow
   [Functional core, interfaces and implementations](.agents/skills/software-design/references/functional-core.md)
   for durable intent, I/O ownership, and interchangeable implementations.

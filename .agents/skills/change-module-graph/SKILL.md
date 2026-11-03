@@ -36,7 +36,7 @@ graph.
 1. **Place code by ownership.** Put it in the module or library that owns the
    responsibility, or a new one, never where similar code happens to sit; the
    layout and placement rule are in
-   [architecture.md](../../../docs/contributing/architecture.md).
+   [python-module-graph.md](../../../docs/contributing/python-module-graph.md).
    Unenforced: ownership needs judgment.
 2. **Declare every Python module and its interface in `tach.toml`.** A module
    needs a `[[modules]]` entry; a library also needs its `source_roots` entry
@@ -45,7 +45,7 @@ graph.
    undeclared edge or a cycle.
 3. **Add the edge in the same PR as the import**, never upward and never
    closing a cycle; prefer removing an edge. Then regenerate the graph in
-   architecture.md with `check_tach_graph --write`; `check_tach_graph --check`
+   python-module-graph.md with `check_tach_graph --write`; `check_tach_graph --check`
    fails on drift. `test_the_libraries_import_each_other_without_a_cycle`
    also rejects cycles between whole libraries that tach's module edges miss.
 4. **Import a library only through `<pkg>.api`, and core only through
@@ -111,7 +111,7 @@ graph.
 ## Sources of truth
 
 - `tach.toml`: Python modules, edges and interfaces.
-- [architecture.md](../../../docs/contributing/architecture.md): the layout,
+- [python-module-graph.md](../../../docs/contributing/python-module-graph.md): the layout,
   the placement rule and the generated module graph.
 - [clients-architecture.md](../../../docs/contributing/clients-architecture.md):
   the client package graph and state rules.
