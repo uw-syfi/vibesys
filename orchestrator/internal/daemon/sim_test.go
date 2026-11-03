@@ -670,6 +670,13 @@ func (s *sim) finish() {
 	if v := state.Violations(); len(v) > 0 {
 		s.fail("invariants broken: %v", v)
 	}
+	// A run that is over has no sidecar left running, whatever its sessions were doing when it ended
+	// and wherever the daemon was killed meanwhile.
+	for _, se := range s.rig.Sidecars.Sessions() {
+		if !se.Dead() {
+			s.fail("the sidecar of %s/%d still runs after every run is over", se.Launch.Session.Agent, se.Launch.Session.N)
+		}
+	}
 	recovered, err := s.rig.Store.Recover()
 	if err != nil {
 		s.fail("recover: %v", err)

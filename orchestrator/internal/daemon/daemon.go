@@ -98,6 +98,19 @@ func liveSessions(s core.State) []core.Session {
 	return out
 }
 
+// overSessions are the current sessions of the agents that are over, which have no more say.
+func overSessions(s core.State) []core.Session {
+	var out []core.Session
+	for _, run := range s.Runs() {
+		for _, a := range s.Agents(run.ID) {
+			if a.Session > 0 && a.Status.Over() {
+				out = append(out, core.Session{Agent: a.ID, N: a.Session})
+			}
+		}
+	}
+	return out
+}
+
 func isLive(s core.State, session core.Session) bool {
 	a, ok := s.Agent(session.Agent)
 	return ok && a.Session == session.N && !a.Status.Over()
@@ -130,6 +143,11 @@ func (d *Daemon) Reattach(ctx context.Context) error {
 			_, err := d.sidecar(ctx, session)
 			errs = append(errs, err)
 		}
+	}
+	// A daemon that stopped between committing the end of a session and ending its sidecar left that
+	// sidecar running.
+	for _, session := range overSessions(d.State()) {
+		errs = append(errs, d.releaseUnattached(ctx, session))
 	}
 	return errors.Join(errs...)
 }
@@ -172,6 +190,45 @@ func (d *Daemon) lose(session core.Session, detail string) error {
 	}
 	_, err := d.Apply(core.SidecarLost{Session: session, Detail: detail})
 	return err
+}
+
+// release ends the sidecar process of a session that is no longer live, and forgets what the daemon
+// held for it. Whatever made the session over (a close the sidecar reported, a failure, a stop that
+// went unanswered, a resume that replaced it), the process is the daemon's to end: the core has
+// accounted for the session, and a sidecar left running would hold its agent's process groups and
+// socket until its own linger ran out. It is safe to repeat, and a call that fails or outlives its
+// bound leaves the session held, so the next step tries again.
+func (d *Daemon) release(ctx context.Context, session core.Session) error {
+	sc, ok := d.conns[session]
+	if !ok {
+		d.forget(session)
+		return nil
+	}
+	if err := bounded(d.cfg.Bounds, ctx, sc.Kill); err != nil && !errors.Is(err, ErrSidecarGone) {
+		return fmt.Errorf("release %s/%d: %w", session.Agent, session.N, err)
+	}
+	d.forget(session)
+	return nil
+}
+
+// releaseUnattached ends the sidecar of a session this daemon holds no connection to, which a
+// previous daemon may have left running: an over session found at a restart, or the session a
+// resume replaced.
+func (d *Daemon) releaseUnattached(ctx context.Context, session core.Session) error {
+	if _, held := d.conns[session]; held {
+		return nil // the next step's sweep releases it.
+	}
+	sc, err := bound(d.cfg.Bounds, ctx, func(c context.Context) (Sidecar, error) {
+		return d.cfg.Sidecars.Attach(c, session)
+	})
+	switch {
+	case errors.Is(err, ErrSidecarGone):
+		return nil
+	case err != nil:
+		return fmt.Errorf("find the sidecar of %s/%d to release it: %w", session.Agent, session.N, err)
+	}
+	d.conns[session] = sc // not live, so the next step's sweep ends it, and retries if that fails.
+	return nil
 }
 
 func (d *Daemon) forget(session core.Session) {
@@ -326,6 +383,13 @@ func effectSession(e core.Effect) core.Session {
 }
 
 func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
+	if l.Session.N > 1 {
+		// A resume replaces a session whose sidecar may still run: it ends before the new one starts.
+		prev := core.Session{Agent: l.Session.Agent, N: l.Session.N - 1}
+		if err := d.releaseUnattached(ctx, prev); err != nil {
+			return err
+		}
+	}
 	env := LaunchEnv{
 		EnvSocket: d.cfg.AgentSocket, EnvAgent: string(l.Session.Agent), EnvSession: fmt.Sprint(l.Session.N),
 		EnvToken: d.cfg.Authority.Token(l.Session), EnvRun: string(l.Run), EnvRole: string(l.Role),
@@ -355,12 +419,12 @@ func (d *Daemon) pumpSidecars(ctx context.Context) (bool, error) {
 	for _, session := range liveSessions(state) {
 		live[session] = true
 	}
+	var errs []error
 	for session := range d.conns {
 		if !live[session] {
-			d.forget(session)
+			errs = append(errs, d.release(ctx, session))
 		}
 	}
-	var errs []error
 	progress := false
 	for _, session := range liveSessions(state) {
 		moved, err := d.pump(ctx, session)
@@ -444,8 +508,7 @@ func (d *Daemon) pump(ctx context.Context, session core.Session) (bool, error) {
 		f.stash = nil
 		progress = true
 		if !isLive(d.State(), session) {
-			d.forget(session)
-			return true, nil
+			return true, d.release(ctx, session)
 		}
 	}
 	return progress, nil

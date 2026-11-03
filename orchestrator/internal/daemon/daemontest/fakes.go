@@ -140,6 +140,9 @@ type Sidecars struct {
 	Unbounded int
 	// LaunchError, when set, is what a failing launch reports.
 	LaunchError error
+	// KillFailures makes that many Kill calls fail before any succeeds, as a signal that cannot be
+	// delivered does.
+	KillFailures int
 	// AfterSend, when set, is called after each command a session took, with the session's lock
 	// released. A test crashes the process from it.
 	AfterSend func()
@@ -356,6 +359,15 @@ func (c *conn) Follow(ctx context.Context, after uint64) (daemon.EventStream, er
 func (c *conn) Kill(ctx context.Context) error {
 	if hung, err := c.host.hang(ctx); hung {
 		return err
+	}
+	c.host.mu.Lock()
+	failing := c.host.KillFailures > 0
+	if failing {
+		c.host.KillFailures--
+	}
+	c.host.mu.Unlock()
+	if failing {
+		return ErrInjected
 	}
 	c.s.mu.Lock()
 	defer c.s.mu.Unlock()
