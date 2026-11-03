@@ -148,6 +148,10 @@ func FuzzDecodeLaunch(f *testing.F) {
 	for range 12 {
 		seeds = append(seeds, &cliv1.Launch{Repository: "/repo", Task: "kv", JobId: "j1", Spec: wire.JobSpec(anyJob(r).Spec)})
 	}
+	for range 12 {
+		p := anyFlowPlan(r)
+		seeds = append(seeds, wire.Launch(launchWith(r, &p)))
+	}
 	seedMessages(f, seeds...)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.Launch{}

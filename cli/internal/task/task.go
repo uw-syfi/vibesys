@@ -102,8 +102,13 @@ type Task struct {
 	// Samples is how many benchmark samples a measurement takes when the submission does not say.
 	Samples uint32
 	// Others are the metrics a protocol 2 benchmark reports besides the scored one, and which way
-	// each improves. They are recorded beside the result and never scored.
+	// each improves. They are recorded beside the result, and scored only as Objectives.
 	Others []core.Metric
+	// Objectives is set for a multi-objective (Pareto) task: one whose objectives.toml has a
+	// [pareto] section and more than one objective. Its measurements are judged on every objective,
+	// in the order declared, under the [pareto] relative_noise. It is the zero value for any other
+	// task, which is judged on Metric alone.
+	Objectives core.Objectives
 }
 
 // Setup is what the task declares that decides where its jobs run.
@@ -426,6 +431,15 @@ func build(name string, m manifest, o objectivesFile) (Task, error) {
 	}
 	if err := resultOf(&t, bench, m.Metric, axes); err != nil {
 		return Task{}, err
+	}
+	if o.Pareto != nil && len(axes) > 1 {
+		if !t.Result.Protocol2 {
+			return Task{}, invalid("%s: a [pareto] task with %d objectives needs result_protocol = 2 in [benchmark], so every sample reports every objective; [benchmark.result] reads one field", ObjectiveName, len(axes))
+		}
+		t.Objectives.RelativeNoise = o.Pareto.RelativeNoise
+		for _, a := range axes {
+			t.Objectives.Metrics = append(t.Objectives.Metrics, core.Metric{Name: a.name, Direction: a.direction})
+		}
 	}
 	return t, nil
 }

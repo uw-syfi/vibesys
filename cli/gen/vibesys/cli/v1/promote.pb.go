@@ -39,6 +39,9 @@ const (
 	PromoteRefusalKind_PROMOTE_REFUSAL_KIND_STALE PromoteRefusalKind = 6
 	// The commit and the result branch were measured in different environments.
 	PromoteRefusalKind_PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH PromoteRefusalKind = 7
+	// A multi-objective commit is better than the result branch head on some objective and worse on
+	// another. `frontier add` keeps such a commit.
+	PromoteRefusalKind_PROMOTE_REFUSAL_KIND_TRADEOFF PromoteRefusalKind = 8
 )
 
 // Enum value maps for PromoteRefusalKind.
@@ -52,6 +55,7 @@ var (
 		5: "PROMOTE_REFUSAL_KIND_INCONCLUSIVE",
 		6: "PROMOTE_REFUSAL_KIND_STALE",
 		7: "PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH",
+		8: "PROMOTE_REFUSAL_KIND_TRADEOFF",
 	}
 	PromoteRefusalKind_value = map[string]int32{
 		"PROMOTE_REFUSAL_KIND_UNSPECIFIED":          0,
@@ -62,6 +66,7 @@ var (
 		"PROMOTE_REFUSAL_KIND_INCONCLUSIVE":         5,
 		"PROMOTE_REFUSAL_KIND_STALE":                6,
 		"PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH": 7,
+		"PROMOTE_REFUSAL_KIND_TRADEOFF":             8,
 	}
 )
 
@@ -150,12 +155,14 @@ type PromoteRefusalReason struct {
 	Kind  PromoteRefusalKind     `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.cli.v1.PromoteRefusalKind" json:"kind,omitempty"`
 	// Display text. Callers branch on kind.
 	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// The verdict the refusal rests on. Set for WORSE, WITHIN_NOISE and INCONCLUSIVE.
+	// The verdict the refusal rests on. Set for WORSE, WITHIN_NOISE, INCONCLUSIVE and TRADEOFF.
 	Verdict *Verdict `protobuf:"bytes,3,opt,name=verdict,proto3" json:"verdict,omitempty"`
 	// The result branch head the commit was measured against. Set for STALE.
 	MeasuredAgainst string `protobuf:"bytes,4,opt,name=measured_against,json=measuredAgainst,proto3" json:"measured_against,omitempty"`
 	// The result branch head now. Set for STALE.
-	CurrentHead   string `protobuf:"bytes,5,opt,name=current_head,json=currentHead,proto3" json:"current_head,omitempty"`
+	CurrentHead string `protobuf:"bytes,5,opt,name=current_head,json=currentHead,proto3" json:"current_head,omitempty"`
+	// The verdict on each objective, with `verdict`, for a multi-objective task.
+	Objectives    []*ObjectiveVerdict `protobuf:"bytes,6,rep,name=objectives,proto3" json:"objectives,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -225,6 +232,13 @@ func (x *PromoteRefusalReason) GetCurrentHead() string {
 	return ""
 }
 
+func (x *PromoteRefusalReason) GetObjectives() []*ObjectiveVerdict {
+	if x != nil {
+		return x.Objectives
+	}
+	return nil
+}
+
 // PromoteRefusal is a normal answer to a promotion, not an error: `promote` moves the result
 // branch only when the commit is better than its current head, and otherwise says why not.
 type PromoteRefusal struct {
@@ -281,8 +295,10 @@ type Promotion struct {
 	Verdict      *Verdict                `protobuf:"bytes,3,opt,name=verdict,proto3" json:"verdict,omitempty"`
 	Environment  *EnvironmentFingerprint `protobuf:"bytes,4,opt,name=environment,proto3" json:"environment,omitempty"`
 	// The measurement the promotion rests on.
-	ResultJobId   string                 `protobuf:"bytes,5,opt,name=result_job_id,json=resultJobId,proto3" json:"result_job_id,omitempty"`
-	At            *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=at,proto3" json:"at,omitempty"`
+	ResultJobId string                 `protobuf:"bytes,5,opt,name=result_job_id,json=resultJobId,proto3" json:"result_job_id,omitempty"`
+	At          *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=at,proto3" json:"at,omitempty"`
+	// The verdict on each objective, for a multi-objective task.
+	Objectives    []*ObjectiveVerdict `protobuf:"bytes,7,rep,name=objectives,proto3" json:"objectives,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -355,6 +371,13 @@ func (x *Promotion) GetResultJobId() string {
 func (x *Promotion) GetAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.At
+	}
+	return nil
+}
+
+func (x *Promotion) GetObjectives() []*ObjectiveVerdict {
+	if x != nil {
+		return x.Objectives
 	}
 	return nil
 }
@@ -469,28 +492,34 @@ var File_vibesys_cli_v1_promote_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_promote_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/cli/v1/promote.proto\x12\x0evibesys.cli.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/verdict.proto\"\xe9\x01\n" +
+	"\x1cvibesys/cli/v1/promote.proto\x12\x0evibesys.cli.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/verdict.proto\"\xab\x02\n" +
 	"\x14PromoteRefusalReason\x126\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\".vibesys.cli.v1.PromoteRefusalKindR\x04kind\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x121\n" +
 	"\averdict\x18\x03 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\x12)\n" +
 	"\x10measured_against\x18\x04 \x01(\tR\x0fmeasuredAgainst\x12!\n" +
-	"\fcurrent_head\x18\x05 \x01(\tR\vcurrentHead\"P\n" +
+	"\fcurrent_head\x18\x05 \x01(\tR\vcurrentHead\x12@\n" +
+	"\n" +
+	"objectives\x18\x06 \x03(\v2 .vibesys.cli.v1.ObjectiveVerdictR\n" +
+	"objectives\"P\n" +
 	"\x0ePromoteRefusal\x12>\n" +
-	"\areasons\x18\x01 \x03(\v2$.vibesys.cli.v1.PromoteRefusalReasonR\areasons\"\x95\x02\n" +
+	"\areasons\x18\x01 \x03(\v2$.vibesys.cli.v1.PromoteRefusalReasonR\areasons\"\xd7\x02\n" +
 	"\tPromotion\x12\x16\n" +
 	"\x06commit\x18\x01 \x01(\tR\x06commit\x12#\n" +
 	"\rprevious_head\x18\x02 \x01(\tR\fpreviousHead\x121\n" +
 	"\averdict\x18\x03 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\x12H\n" +
 	"\venvironment\x18\x04 \x01(\v2&.vibesys.cli.v1.EnvironmentFingerprintR\venvironment\x12\"\n" +
 	"\rresult_job_id\x18\x05 \x01(\tR\vresultJobId\x12*\n" +
-	"\x02at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\"S\n" +
+	"\x02at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12@\n" +
+	"\n" +
+	"objectives\x18\a \x03(\v2 .vibesys.cli.v1.ObjectiveVerdictR\n" +
+	"objectives\"S\n" +
 	"\rCurrentResult\x12\x12\n" +
 	"\x04head\x18\x01 \x01(\tR\x04head\x12.\n" +
 	"\x06result\x18\x02 \x01(\v2\x16.vibesys.cli.v1.ResultR\x06result\"d\n" +
 	"\x0fNoCurrentResult\x12=\n" +
 	"\x06reason\x18\x01 \x01(\x0e2%.vibesys.cli.v1.NoCurrentResultReasonR\x06reason\x12\x12\n" +
-	"\x04head\x18\x02 \x01(\tR\x04head*\xc4\x02\n" +
+	"\x04head\x18\x02 \x01(\tR\x04head*\xe7\x02\n" +
 	"\x12PromoteRefusalKind\x12$\n" +
 	" PROMOTE_REFUSAL_KIND_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fPROMOTE_REFUSAL_KIND_UNMEASURED\x10\x01\x12&\n" +
@@ -499,7 +528,8 @@ const file_vibesys_cli_v1_promote_proto_rawDesc = "" +
 	"!PROMOTE_REFUSAL_KIND_WITHIN_NOISE\x10\x04\x12%\n" +
 	"!PROMOTE_REFUSAL_KIND_INCONCLUSIVE\x10\x05\x12\x1e\n" +
 	"\x1aPROMOTE_REFUSAL_KIND_STALE\x10\x06\x12-\n" +
-	")PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH\x10\a*\xa2\x01\n" +
+	")PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH\x10\a\x12!\n" +
+	"\x1dPROMOTE_REFUSAL_KIND_TRADEOFF\x10\b*\xa2\x01\n" +
 	"\x15NoCurrentResultReason\x12(\n" +
 	"$NO_CURRENT_RESULT_REASON_UNSPECIFIED\x10\x00\x12$\n" +
 	" NO_CURRENT_RESULT_REASON_NO_HEAD\x10\x01\x129\n" +
@@ -528,24 +558,27 @@ var file_vibesys_cli_v1_promote_proto_goTypes = []any{
 	(*CurrentResult)(nil),          // 5: vibesys.cli.v1.CurrentResult
 	(*NoCurrentResult)(nil),        // 6: vibesys.cli.v1.NoCurrentResult
 	(*Verdict)(nil),                // 7: vibesys.cli.v1.Verdict
-	(*EnvironmentFingerprint)(nil), // 8: vibesys.cli.v1.EnvironmentFingerprint
-	(*timestamppb.Timestamp)(nil),  // 9: google.protobuf.Timestamp
-	(*Result)(nil),                 // 10: vibesys.cli.v1.Result
+	(*ObjectiveVerdict)(nil),       // 8: vibesys.cli.v1.ObjectiveVerdict
+	(*EnvironmentFingerprint)(nil), // 9: vibesys.cli.v1.EnvironmentFingerprint
+	(*timestamppb.Timestamp)(nil),  // 10: google.protobuf.Timestamp
+	(*Result)(nil),                 // 11: vibesys.cli.v1.Result
 }
 var file_vibesys_cli_v1_promote_proto_depIdxs = []int32{
 	0,  // 0: vibesys.cli.v1.PromoteRefusalReason.kind:type_name -> vibesys.cli.v1.PromoteRefusalKind
 	7,  // 1: vibesys.cli.v1.PromoteRefusalReason.verdict:type_name -> vibesys.cli.v1.Verdict
-	2,  // 2: vibesys.cli.v1.PromoteRefusal.reasons:type_name -> vibesys.cli.v1.PromoteRefusalReason
-	7,  // 3: vibesys.cli.v1.Promotion.verdict:type_name -> vibesys.cli.v1.Verdict
-	8,  // 4: vibesys.cli.v1.Promotion.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	9,  // 5: vibesys.cli.v1.Promotion.at:type_name -> google.protobuf.Timestamp
-	10, // 6: vibesys.cli.v1.CurrentResult.result:type_name -> vibesys.cli.v1.Result
-	1,  // 7: vibesys.cli.v1.NoCurrentResult.reason:type_name -> vibesys.cli.v1.NoCurrentResultReason
-	8,  // [8:8] is the sub-list for method output_type
-	8,  // [8:8] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	8,  // 2: vibesys.cli.v1.PromoteRefusalReason.objectives:type_name -> vibesys.cli.v1.ObjectiveVerdict
+	2,  // 3: vibesys.cli.v1.PromoteRefusal.reasons:type_name -> vibesys.cli.v1.PromoteRefusalReason
+	7,  // 4: vibesys.cli.v1.Promotion.verdict:type_name -> vibesys.cli.v1.Verdict
+	9,  // 5: vibesys.cli.v1.Promotion.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	10, // 6: vibesys.cli.v1.Promotion.at:type_name -> google.protobuf.Timestamp
+	8,  // 7: vibesys.cli.v1.Promotion.objectives:type_name -> vibesys.cli.v1.ObjectiveVerdict
+	11, // 8: vibesys.cli.v1.CurrentResult.result:type_name -> vibesys.cli.v1.Result
+	1,  // 9: vibesys.cli.v1.NoCurrentResult.reason:type_name -> vibesys.cli.v1.NoCurrentResultReason
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_promote_proto_init() }

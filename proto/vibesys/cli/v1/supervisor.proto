@@ -101,6 +101,9 @@ message FlowPlan {
   uint32 samples = 11;
   // The saved check pass a measure job links instead of running the check.
   string check_pass_job_id = 12;
+  // For a measure job of a multi-objective task: the objectives every sample reports and the
+  // result records.
+  Objectives objectives = 13;
 }
 
 // ExecutionKind is how a command ended.

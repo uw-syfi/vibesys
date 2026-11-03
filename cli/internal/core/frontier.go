@@ -260,3 +260,19 @@ func judgeAgainst(commit Commit, candidate []Result, member Commit, results []Re
 	}
 	return nil, v.Kind, nil
 }
+
+// FrontierEntry is a member with its headline number on each objective.
+type FrontierEntry struct {
+	Member FrontierMember
+	Values []ObjectiveValue
+}
+
+// FrontierEntries returns each member of a frontier, in its order, with the headline numbers
+// ObjectiveValues gives it over the results.
+func FrontierEntries(f Frontier, results []Result) []FrontierEntry {
+	out := make([]FrontierEntry, 0, len(f.Members))
+	for _, m := range f.Members {
+		out = append(out, FrontierEntry{Member: m, Values: ObjectiveValues(m.Commit, results)})
+	}
+	return out
+}

@@ -50,7 +50,7 @@ func (s *Server) Promote(ctx context.Context, req *cliv1.PromoteRequest) (*cliv1
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	return wire.PromoteResponse(decision), nil
+	return wire.PromoteResponse(decision, nil), nil
 }
 
 // CurrentResult implements cliv1.DaemonServiceServer.

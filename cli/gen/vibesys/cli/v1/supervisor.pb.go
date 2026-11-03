@@ -435,8 +435,11 @@ type FlowPlan struct {
 	Samples uint32 `protobuf:"varint,11,opt,name=samples,proto3" json:"samples,omitempty"`
 	// The saved check pass a measure job links instead of running the check.
 	CheckPassJobId string `protobuf:"bytes,12,opt,name=check_pass_job_id,json=checkPassJobId,proto3" json:"check_pass_job_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// For a measure job of a multi-objective task: the objectives every sample reports and the
+	// result records.
+	Objectives    *Objectives `protobuf:"bytes,13,opt,name=objectives,proto3" json:"objectives,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FlowPlan) Reset() {
@@ -551,6 +554,13 @@ func (x *FlowPlan) GetCheckPassJobId() string {
 		return x.CheckPassJobId
 	}
 	return ""
+}
+
+func (x *FlowPlan) GetObjectives() *Objectives {
+	if x != nil {
+		return x.Objectives
+	}
+	return nil
 }
 
 type ExecutionOutcome struct {
@@ -1628,7 +1638,7 @@ const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\fResultFormat\x12\x1c\n" +
 	"\tprotocol2\x18\x01 \x01(\bR\tprotocol2\x12#\n" +
 	"\rjson_argument\x18\x02 \x01(\tR\fjsonArgument\x12\x14\n" +
-	"\x05field\x18\x03 \x01(\tR\x05field\"\xa3\x04\n" +
+	"\x05field\x18\x03 \x01(\tR\x05field\"\xdf\x04\n" +
 	"\bFlowPlan\x12+\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x17.vibesys.cli.v1.JobKindR\x04kind\x12\x12\n" +
 	"\x04task\x18\x02 \x01(\tR\x04task\x12!\n" +
@@ -1642,7 +1652,10 @@ const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\x06metric\x18\n" +
 	" \x01(\v2\x16.vibesys.cli.v1.MetricR\x06metric\x12\x18\n" +
 	"\asamples\x18\v \x01(\rR\asamples\x12)\n" +
-	"\x11check_pass_job_id\x18\f \x01(\tR\x0echeckPassJobId\"b\n" +
+	"\x11check_pass_job_id\x18\f \x01(\tR\x0echeckPassJobId\x12:\n" +
+	"\n" +
+	"objectives\x18\r \x01(\v2\x1a.vibesys.cli.v1.ObjectivesR\n" +
+	"objectives\"b\n" +
 	"\x10ExecutionOutcome\x121\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1d.vibesys.cli.v1.ExecutionKindR\x04kind\x12\x1b\n" +
 	"\texit_code\x18\x02 \x01(\x05R\bexitCode\"\xc8\x01\n" +
@@ -1768,11 +1781,12 @@ var file_vibesys_cli_v1_supervisor_proto_goTypes = []any{
 	(JobKind)(0),                   // 25: vibesys.cli.v1.JobKind
 	(*EnvironmentFingerprint)(nil), // 26: vibesys.cli.v1.EnvironmentFingerprint
 	(*Metric)(nil),                 // 27: vibesys.cli.v1.Metric
-	(*Failure)(nil),                // 28: vibesys.cli.v1.Failure
-	(*Result)(nil),                 // 29: vibesys.cli.v1.Result
-	(Component)(0),                 // 30: vibesys.cli.v1.Component
-	(*BuildVersions)(nil),          // 31: vibesys.cli.v1.BuildVersions
-	(Compatibility)(0),             // 32: vibesys.cli.v1.Compatibility
+	(*Objectives)(nil),             // 28: vibesys.cli.v1.Objectives
+	(*Failure)(nil),                // 29: vibesys.cli.v1.Failure
+	(*Result)(nil),                 // 30: vibesys.cli.v1.Result
+	(Component)(0),                 // 31: vibesys.cli.v1.Component
+	(*BuildVersions)(nil),          // 32: vibesys.cli.v1.BuildVersions
+	(Compatibility)(0),             // 33: vibesys.cli.v1.Compatibility
 }
 var file_vibesys_cli_v1_supervisor_proto_depIdxs = []int32{
 	23, // 0: vibesys.cli.v1.Launch.spec:type_name -> vibesys.cli.v1.JobSpec
@@ -1785,43 +1799,44 @@ var file_vibesys_cli_v1_supervisor_proto_depIdxs = []int32{
 	4,  // 7: vibesys.cli.v1.FlowPlan.benchmark:type_name -> vibesys.cli.v1.PlanCommand
 	5,  // 8: vibesys.cli.v1.FlowPlan.result_format:type_name -> vibesys.cli.v1.ResultFormat
 	27, // 9: vibesys.cli.v1.FlowPlan.metric:type_name -> vibesys.cli.v1.Metric
-	0,  // 10: vibesys.cli.v1.ExecutionOutcome.kind:type_name -> vibesys.cli.v1.ExecutionKind
-	28, // 11: vibesys.cli.v1.CommandEnd.not_started:type_name -> vibesys.cli.v1.Failure
-	7,  // 12: vibesys.cli.v1.CommandEnd.ended:type_name -> vibesys.cli.v1.ExecutionOutcome
-	28, // 13: vibesys.cli.v1.CommandEnd.unobserved:type_name -> vibesys.cli.v1.Failure
-	29, // 14: vibesys.cli.v1.FlowEnd.passed:type_name -> vibesys.cli.v1.Result
-	7,  // 15: vibesys.cli.v1.FlowEnd.stopped:type_name -> vibesys.cli.v1.ExecutionOutcome
-	28, // 16: vibesys.cli.v1.FlowEnd.not_attempted:type_name -> vibesys.cli.v1.Failure
-	28, // 17: vibesys.cli.v1.FlowEnd.lost:type_name -> vibesys.cli.v1.Failure
-	7,  // 18: vibesys.cli.v1.SupervisorOutcome.executed:type_name -> vibesys.cli.v1.ExecutionOutcome
-	28, // 19: vibesys.cli.v1.SupervisorOutcome.not_attempted:type_name -> vibesys.cli.v1.Failure
-	29, // 20: vibesys.cli.v1.SupervisorOutcome.passed:type_name -> vibesys.cli.v1.Result
-	8,  // 21: vibesys.cli.v1.SupervisorOutcome.command:type_name -> vibesys.cli.v1.CommandEnd
-	9,  // 22: vibesys.cli.v1.SupervisorOutcome.flow:type_name -> vibesys.cli.v1.FlowEnd
-	30, // 23: vibesys.cli.v1.HandshakeRequest.component:type_name -> vibesys.cli.v1.Component
-	31, // 24: vibesys.cli.v1.HandshakeRequest.versions:type_name -> vibesys.cli.v1.BuildVersions
-	31, // 25: vibesys.cli.v1.HandshakeResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
-	32, // 26: vibesys.cli.v1.HandshakeResponse.compatibility:type_name -> vibesys.cli.v1.Compatibility
-	1,  // 27: vibesys.cli.v1.HandshakeResponse.phase:type_name -> vibesys.cli.v1.SupervisorPhase
-	3,  // 28: vibesys.cli.v1.RunRecord.launch:type_name -> vibesys.cli.v1.Launch
-	2,  // 29: vibesys.cli.v1.RunRecord.start_mark:type_name -> vibesys.cli.v1.StartMark
-	17, // 30: vibesys.cli.v1.AttachResponse.output:type_name -> vibesys.cli.v1.OutputChunk
-	10, // 31: vibesys.cli.v1.AttachResponse.outcome:type_name -> vibesys.cli.v1.SupervisorOutcome
-	11, // 32: vibesys.cli.v1.SupervisorService.Handshake:input_type -> vibesys.cli.v1.HandshakeRequest
-	14, // 33: vibesys.cli.v1.SupervisorService.Start:input_type -> vibesys.cli.v1.StartRequest
-	16, // 34: vibesys.cli.v1.SupervisorService.Attach:input_type -> vibesys.cli.v1.AttachRequest
-	19, // 35: vibesys.cli.v1.SupervisorService.CancelJob:input_type -> vibesys.cli.v1.CancelJobRequest
-	21, // 36: vibesys.cli.v1.SupervisorService.Release:input_type -> vibesys.cli.v1.ReleaseRequest
-	12, // 37: vibesys.cli.v1.SupervisorService.Handshake:output_type -> vibesys.cli.v1.HandshakeResponse
-	15, // 38: vibesys.cli.v1.SupervisorService.Start:output_type -> vibesys.cli.v1.StartResponse
-	18, // 39: vibesys.cli.v1.SupervisorService.Attach:output_type -> vibesys.cli.v1.AttachResponse
-	20, // 40: vibesys.cli.v1.SupervisorService.CancelJob:output_type -> vibesys.cli.v1.CancelJobResponse
-	22, // 41: vibesys.cli.v1.SupervisorService.Release:output_type -> vibesys.cli.v1.ReleaseResponse
-	37, // [37:42] is the sub-list for method output_type
-	32, // [32:37] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	28, // 10: vibesys.cli.v1.FlowPlan.objectives:type_name -> vibesys.cli.v1.Objectives
+	0,  // 11: vibesys.cli.v1.ExecutionOutcome.kind:type_name -> vibesys.cli.v1.ExecutionKind
+	29, // 12: vibesys.cli.v1.CommandEnd.not_started:type_name -> vibesys.cli.v1.Failure
+	7,  // 13: vibesys.cli.v1.CommandEnd.ended:type_name -> vibesys.cli.v1.ExecutionOutcome
+	29, // 14: vibesys.cli.v1.CommandEnd.unobserved:type_name -> vibesys.cli.v1.Failure
+	30, // 15: vibesys.cli.v1.FlowEnd.passed:type_name -> vibesys.cli.v1.Result
+	7,  // 16: vibesys.cli.v1.FlowEnd.stopped:type_name -> vibesys.cli.v1.ExecutionOutcome
+	29, // 17: vibesys.cli.v1.FlowEnd.not_attempted:type_name -> vibesys.cli.v1.Failure
+	29, // 18: vibesys.cli.v1.FlowEnd.lost:type_name -> vibesys.cli.v1.Failure
+	7,  // 19: vibesys.cli.v1.SupervisorOutcome.executed:type_name -> vibesys.cli.v1.ExecutionOutcome
+	29, // 20: vibesys.cli.v1.SupervisorOutcome.not_attempted:type_name -> vibesys.cli.v1.Failure
+	30, // 21: vibesys.cli.v1.SupervisorOutcome.passed:type_name -> vibesys.cli.v1.Result
+	8,  // 22: vibesys.cli.v1.SupervisorOutcome.command:type_name -> vibesys.cli.v1.CommandEnd
+	9,  // 23: vibesys.cli.v1.SupervisorOutcome.flow:type_name -> vibesys.cli.v1.FlowEnd
+	31, // 24: vibesys.cli.v1.HandshakeRequest.component:type_name -> vibesys.cli.v1.Component
+	32, // 25: vibesys.cli.v1.HandshakeRequest.versions:type_name -> vibesys.cli.v1.BuildVersions
+	32, // 26: vibesys.cli.v1.HandshakeResponse.versions:type_name -> vibesys.cli.v1.BuildVersions
+	33, // 27: vibesys.cli.v1.HandshakeResponse.compatibility:type_name -> vibesys.cli.v1.Compatibility
+	1,  // 28: vibesys.cli.v1.HandshakeResponse.phase:type_name -> vibesys.cli.v1.SupervisorPhase
+	3,  // 29: vibesys.cli.v1.RunRecord.launch:type_name -> vibesys.cli.v1.Launch
+	2,  // 30: vibesys.cli.v1.RunRecord.start_mark:type_name -> vibesys.cli.v1.StartMark
+	17, // 31: vibesys.cli.v1.AttachResponse.output:type_name -> vibesys.cli.v1.OutputChunk
+	10, // 32: vibesys.cli.v1.AttachResponse.outcome:type_name -> vibesys.cli.v1.SupervisorOutcome
+	11, // 33: vibesys.cli.v1.SupervisorService.Handshake:input_type -> vibesys.cli.v1.HandshakeRequest
+	14, // 34: vibesys.cli.v1.SupervisorService.Start:input_type -> vibesys.cli.v1.StartRequest
+	16, // 35: vibesys.cli.v1.SupervisorService.Attach:input_type -> vibesys.cli.v1.AttachRequest
+	19, // 36: vibesys.cli.v1.SupervisorService.CancelJob:input_type -> vibesys.cli.v1.CancelJobRequest
+	21, // 37: vibesys.cli.v1.SupervisorService.Release:input_type -> vibesys.cli.v1.ReleaseRequest
+	12, // 38: vibesys.cli.v1.SupervisorService.Handshake:output_type -> vibesys.cli.v1.HandshakeResponse
+	15, // 39: vibesys.cli.v1.SupervisorService.Start:output_type -> vibesys.cli.v1.StartResponse
+	18, // 40: vibesys.cli.v1.SupervisorService.Attach:output_type -> vibesys.cli.v1.AttachResponse
+	20, // 41: vibesys.cli.v1.SupervisorService.CancelJob:output_type -> vibesys.cli.v1.CancelJobResponse
+	22, // 42: vibesys.cli.v1.SupervisorService.Release:output_type -> vibesys.cli.v1.ReleaseResponse
+	38, // [38:43] is the sub-list for method output_type
+	33, // [33:38] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_supervisor_proto_init() }

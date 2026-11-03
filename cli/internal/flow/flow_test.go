@@ -452,6 +452,37 @@ func TestACancelledContextEndsTheJobBeforeTheNextRequest(t *testing.T) {
 	}
 }
 
+// A measure job of a multi-objective task records its objectives with the result, and a sample that
+// leaves one of them out ends the job rejected, naming it: a commit must be judged on every
+// objective, so nothing is saved without one.
+func TestAMultiObjectiveMeasureRecordsItsObjectivesAndNeedsEveryOne(t *testing.T) {
+	objectives := core.Objectives{
+		Metrics:       []core.Metric{{Name: "ops", Direction: core.Maximize}, {Name: "p99", Direction: core.Minimize}},
+		RelativeNoise: 0.01,
+	}
+	p := shape{kind: core.JobMeasure, protocol2: true, samples: 2}.plan()
+	p.Objectives = objectives
+	w := &world{p: p, at: -1}
+	v, err := flow.Drive(context.Background(), p, w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := p.Record("j1", commit, passedOf(t, v), time.Unix(1, 0))
+	if got := r.Outcome.(core.MeasureOutcome).Objectives; !got.Equal(objectives) {
+		t.Errorf("the result records objectives %+v, want %+v", got, objectives)
+	}
+
+	p.Objectives.Metrics = append(p.Objectives.Metrics, core.Metric{Name: "ttft", Direction: core.Minimize})
+	w = &world{p: p, at: -1}
+	v, err = flow.Drive(context.Background(), p, w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected, ok := v.(flow.Rejected); !ok || !strings.Contains(rejected.Reason, `"ttft"`) || !strings.Contains(rejected.Reason, "sample 1") {
+		t.Errorf("a sample without an objective ended %+v, want rejected naming it", v)
+	}
+}
+
 func TestAnInvalidPlanNeverStarts(t *testing.T) {
 	good := shape{kind: core.JobMeasure, build: true, samples: 2}
 	for name, mutate := range map[string]func(*flow.Plan){
@@ -465,6 +496,17 @@ func TestAnInvalidPlanNeverStarts(t *testing.T) {
 		"no task":                         func(p *flow.Plan) { p.Task = "" },
 		"no key":                          func(p *flow.Plan) { p.Key = "" },
 		"another kind":                    func(p *flow.Plan) { p.Kind = core.JobCommand },
+		"objectives read from one field": func(p *flow.Plan) {
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric, {Name: "p99", Direction: core.Minimize}}}
+		},
+		"objectives without the scored metric": func(p *flow.Plan) {
+			p.Result = task.Result{Protocol2: true}
+			p.Objectives = core.Objectives{Metrics: []core.Metric{{Name: "a", Direction: core.Maximize}, {Name: "b", Direction: core.Minimize}}}
+		},
+		"one objective": func(p *flow.Plan) {
+			p.Result = task.Result{Protocol2: true}
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric}}
+		},
 	} {
 		p := good.plan()
 		mutate(&p)

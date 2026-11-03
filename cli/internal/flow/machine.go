@@ -328,6 +328,9 @@ func (s State) sampled(r Ran) (State, Request) {
 		}
 		return s.end(Rejected{Reason: why}), nil
 	}
+	if missing := s.missingObjective(got); missing != "" {
+		return s.end(Rejected{Reason: fmt.Sprintf("sample %d: the benchmark reported no value of the objective %q, and a multi-objective task judges every sample on every objective", n+1, missing)}), nil
+	}
 	s.samples = append(slices.Clip(s.samples), got.Value)
 	for _, o := range got.Others {
 		s.others = addObservation(s.others, o)
@@ -337,6 +340,20 @@ func (s State) sampled(r Ran) (State, Request) {
 	}
 	s.phase = phaseAfter
 	return s, Observe{}
+}
+
+// missingObjective names an objective of a multi-objective plan that a reading has no value of, and
+// is empty when it has every one.
+func (s State) missingObjective(got reading.Reading) string {
+	for _, m := range s.plan.Objectives.Metrics {
+		if m.Name == s.plan.Metric.Name {
+			continue
+		}
+		if !slices.ContainsFunc(got.Others, func(o reading.Named) bool { return o.Name == m.Name }) {
+			return m.Name
+		}
+	}
+	return ""
 }
 
 // read applies the reader the plan names to what the run wrote.
