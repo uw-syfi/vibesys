@@ -1,8 +1,9 @@
 /** The pages for the user's own project: which project (a recent one, or a folder), then its task. */
 
-import {type CompletionAction, type CompletionState, suggestions} from '@vibesys/hosts';
+import {type CompletionAction, type CompletionState, suggestedEntries} from '@vibesys/hosts';
 import {Button, ChoiceTiles, Field, PathInput, Row, Select, Stack, Text} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
+import {PROJECT_FOLDER_WORDS, USE_FOLDER_WORDS} from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {type MachineOption, machineLabel, recentChoices} from './view.js';
 
@@ -39,7 +40,12 @@ function Folder(props: ProjectProps): JSX.Element {
     setDraft(value);
     completion.dispatch({type: 'input', field: 'project', host: machine, value});
   };
-  const completions = suggestions(completion.state, 'project').map(value => ({value}));
+  // Each folder by its name, the projects first and named so.
+  const completions = suggestedEntries(completion.state, 'project').map(each => ({
+    value: each.value,
+    label: `${each.name}/`,
+    ...(each.fits ? {detail: PROJECT_FOLDER_WORDS} : {}),
+  }));
   const open = (): void => {
     // A completion ends in `/`; the project is the folder itself.
     const path = draft.trim().replace(/(.)\/+$/, '$1');
@@ -57,12 +63,19 @@ function Folder(props: ProjectProps): JSX.Element {
           />
         </Field>
       )}
-      <Field label={`Folder on ${machineLabel(machine)}`}>
-        <PathInput value={draft} change={type} completions={completions} placeholder="~/project" />
-      </Field>
-      <Row>
+      <Row gap="space-3" align="end">
+        <Stack grow>
+          <Field label={`Folder on ${machineLabel(machine)}`}>
+            <PathInput
+              value={draft}
+              change={type}
+              completions={completions}
+              placeholder="~/project"
+            />
+          </Field>
+        </Stack>
         <Button
-          text="Use this folder"
+          text={USE_FOLDER_WORDS}
           press={open}
           {...(draft.trim() === ''
             ? {disabledReason: 'Type or choose a folder first.', quietReason: true}

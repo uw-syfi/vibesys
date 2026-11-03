@@ -487,11 +487,12 @@ test('the folder field completes paths on the machine', async () => {
     one(main(shell), {role: 'combobox', name: 'Folder on host-b'}) as HTMLInputElement;
   await fillIn(folder(), '/home/me/pro');
   await pause();
-  const option = (name: string) => one(shell.container, {role: 'option', name});
-  await press(option('/home/me/projects/'));
+  // Each folder by its name; a project says so.
+  const option = (name: string | RegExp) => one(shell.container, {role: 'option', name});
+  await press(option('projects/'));
   await pause();
   expect(folder().value).toBe('/home/me/projects/');
-  await press(option('/home/me/projects/queue-rs/'));
+  await press(option(/^queue-rs\/.*VibeSys project$/));
   await pause();
   expect(folder().value).toBe('/home/me/projects/queue-rs/');
   await press(button(main(shell), 'Use this folder'));

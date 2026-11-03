@@ -149,6 +149,7 @@ export {
   targetFacts,
 } from './measure.js';
 export {type Problem, problemOf, type Step, StepFailure, startUnconfirmed} from './problem.js';
+export {PROJECT_FOLDER_WORDS, USE_FOLDER_WORDS} from './project-words.js';
 export {OPEN_LOGINS_WORDS, rolesWaitWords, signInWords} from './review-words.js';
 export {
   agentWithRoles,
