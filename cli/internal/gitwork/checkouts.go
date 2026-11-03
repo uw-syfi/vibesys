@@ -17,6 +17,14 @@ type Checkouts struct {
 	Base string
 }
 
+// Dir returns the directory the checkouts are made in.
+func (c Checkouts) Dir() string {
+	if c.Base != "" {
+		return c.Base
+	}
+	return os.TempDir()
+}
+
 // Checkout returns a checkout of the commit and the function that removes it. It fails with
 // core.FailureNotFound for a commit the repository does not have and core.FailureUnavailable for a
 // repository git cannot read or a checkout it cannot make.
@@ -28,7 +36,7 @@ func (c Checkouts) Checkout(ctx context.Context, repository string, commit core.
 	if !ok {
 		return core.Checkout{}, nil, noCommit(repository, commit)
 	}
-	parent, err := os.MkdirTemp(c.Base, "vibesys-checkout-")
+	parent, err := os.MkdirTemp(c.Dir(), "vibesys-checkout-")
 	if err == nil {
 		// The path commands see, with no link in it.
 		parent, err = filepath.EvalSymlinks(parent)

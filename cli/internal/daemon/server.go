@@ -18,8 +18,9 @@ import (
 // Server serves an App as the DaemonService. Create it with NewServer.
 type Server struct {
 	cliv1.UnimplementedDaemonServiceServer
-	app    *app.App
-	binary string
+	app       *app.App
+	binary    string
+	inherited Inherited
 
 	// ctx is cancelled when the daemon is asked to stop. Every call is bound to it, so a call
 	// that waits for a job does not hold the daemon's shutdown.
@@ -31,10 +32,11 @@ type Server struct {
 var _ cliv1.DaemonServiceServer = (*Server)(nil)
 
 // NewServer returns a server for the App. binaryVersion is the build's release version, which
-// the handshake and the status report.
-func NewServer(a *app.App, binaryVersion string) *Server {
+// the handshake and the status report. inherited is what the jobs inherit, which the status
+// reports.
+func NewServer(a *app.App, binaryVersion string, inherited Inherited) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{app: a, binary: binaryVersion, ctx: ctx, shutdown: cancel}
+	return &Server{app: a, binary: binaryVersion, inherited: inherited, ctx: ctx, shutdown: cancel}
 }
 
 // Stopping is closed when the daemon has been asked to stop, by the Stop call or by Shutdown.
@@ -108,11 +110,13 @@ func (s *Server) WatchTask(req *cliv1.WatchTaskRequest, stream cliv1.DaemonServi
 func (s *Server) Status(context.Context, *cliv1.StatusRequest) (*cliv1.StatusResponse, error) {
 	st := s.app.Status()
 	return &cliv1.StatusResponse{
-		Versions:    wire.BuildVersions(s.binary, core.CurrentVersions()),
-		Pid:         uint32(os.Getpid()),
-		StartedAt:   timestamppb.New(st.StartedAt),
-		QueuedJobs:  uint32(st.Queued),
-		RunningJobs: uint32(st.Running),
+		Versions:          wire.BuildVersions(s.binary, core.CurrentVersions()),
+		Pid:               uint32(os.Getpid()),
+		StartedAt:         timestamppb.New(st.StartedAt),
+		QueuedJobs:        uint32(st.Queued),
+		RunningJobs:       uint32(st.Running),
+		Environment:       inheritedVariables(s.inherited.Environ),
+		CheckoutDirectory: s.inherited.CheckoutDirectory,
 	}, nil
 }
 

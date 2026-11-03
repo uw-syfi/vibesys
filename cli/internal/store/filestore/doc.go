@@ -26,6 +26,9 @@
 //	runs/<run>/<n>.json        the nth event of a run
 //	logs/<job>/<offset>        the bytes appended to a job's log at that offset, as written
 //
+// OpenTask also keeps a .gitignore of "*" in <repository>/.vibesys-state, written when it is
+// missing and never replaced, so that git add -A never commits a store into the repository.
+//
 // A file is never appended to or edited in place. The spec's first sketch kept the events of a
 // run in one appended file; an append is not atomic on NFS, so each event is its own file.
 //
@@ -99,7 +102,9 @@
 // read, with an error of kind core.FailureIncompatible that names the file: a newer version says to
 // upgrade, and version 1, the hand-written encoding that came before protojson, says the store is
 // to be removed, because nothing migrates it and no release wrote it. This program reads versions 2
-// and 3. Version 3 only added to version 2 (the frontier directory, and fields of a measurement, a
+// and 3. The refusal of version 1 names the store's directory and, when the index records it, the
+// index entry to remove. The index reads an entry of another version for its task when it has this
+// version's shape, so such a store stays known and is refused alone. Version 3 only added to version 2 (the frontier directory, and fields of a measurement, a
 // promotion and a refusal), so Open migrates a store of version 2 under the owner's lock: it makes
 // the directories version 2 did not have, then writes the format file at version 3, which is the
 // migration's one commit point. A record keeps the version it was written with.

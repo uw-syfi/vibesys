@@ -2,6 +2,7 @@ package filestore
 
 import (
 	"buf.build/go/protovalidate"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/ledger"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
@@ -83,9 +85,9 @@ func decode(name string, data []byte, file proto.Message) error {
 		return &core.Failure{Kind: core.FailureIncompatible, Message: fmt.Sprintf(
 			"%s is format version %d, and this program reads version %d: upgrade vibesys-cli", name, v, formatVersion)}
 	case v < oldestFormat:
-		return &core.Failure{Kind: core.FailureIncompatible, Message: fmt.Sprintf(
+		return store.Mark(&core.Failure{Kind: core.FailureIncompatible, Message: fmt.Sprintf(
 			"%s is format version %d, from a prerelease encoding that this program does not read (it reads versions %d to %d): "+
-				"remove the store and let the daemon make it again", name, v, oldestFormat, formatVersion)}
+				"%s", name, v, oldestFormat, formatVersion, prereleaseFix)}, errPrerelease)
 	}
 	if err := recordReader.Unmarshal(data, file); err != nil {
 		return corrupt(name, "%v", err)
@@ -95,6 +97,13 @@ func decode(name string, data []byte, file proto.Message) error {
 	}
 	return nil
 }
+
+// errPrerelease marks a refusal of a file of a version older than oldestFormat, which Open completes
+// with what to remove.
+var errPrerelease = errors.New("a prerelease encoding")
+
+// prereleaseFix ends the refusal of a file of a prerelease encoding where Open cannot say more.
+const prereleaseFix = "remove the store and let the daemon make it again"
 
 func corrupt(name, format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("%s is damaged: %s", name, fmt.Sprintf(format, args...))}

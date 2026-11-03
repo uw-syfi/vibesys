@@ -107,7 +107,7 @@ func runLifecycleScenario(t *testing.T, sc scenario) [][]map[string]any {
 		ctx, cancel := context.WithCancel(ctxFor(t))
 		packets := make(chan corpusPacket)
 		stream := &gatedTaskStream{ctx: ctx, packets: packets}
-		server := daemon.NewServer(b.app, "test")
+		server := daemon.NewServer(b.app, "test", daemon.Inherited{})
 		done := make(chan error, 1)
 		go func() { done <- server.WatchTask(&cliv1.WatchTaskRequest{Context: call}, stream) }()
 		defer func() { cancel(); <-done }()

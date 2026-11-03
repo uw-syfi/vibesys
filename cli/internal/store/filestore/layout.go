@@ -12,6 +12,10 @@ import (
 // The names below are the whole physical layout. Nothing outside this package spells them.
 const (
 	stateDirName = ".vibesys-state"
+	// gitignoreFile, in the state directory, keeps git from committing any store: an agent that runs
+	// git add -A in its candidate would otherwise commit the store into it.
+	gitignoreFile    = ".gitignore"
+	gitignoreContent = "*\n"
 
 	formatFile = "format"
 	// lockFile is the file the owner holds a lock on. It is never renamed: a hold is on the file.

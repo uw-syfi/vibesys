@@ -49,7 +49,9 @@ type Config struct {
 	Dir     runtimedir.Dir
 	Version string
 	Runtime Runtime
-	Clock   clock.Clock
+	// Inherited is what the jobs inherit from the daemon, which the status reports.
+	Inherited Inherited
+	Clock     clock.Clock
 	// Timers is what the daemon's waits go through. It defaults to the system's.
 	Timers clock.Timers
 	// Retry is how the daemon tries again. It defaults to app.DefaultRetry.
@@ -138,7 +140,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		return fmt.Errorf("daemon: %w", err)
 	}
 
-	srv := NewServer(a, cfg.Version)
+	srv := NewServer(a, cfg.Version, cfg.Inherited)
 	server := grpc.NewServer()
 	cliv1.RegisterDaemonServiceServer(server, srv)
 	served := make(chan error, 1)

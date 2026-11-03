@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math/rand"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -115,20 +116,39 @@ func TestIndexAddIsAtomicAtEveryStep(t *testing.T) {
 	}
 }
 
-func TestIndexNamesAnEntryItCannotRead(t *testing.T) {
-	mem := fsys.NewMemFS()
-	x := openMemIndex(t, mem)
-	if err := x.Add(Task{"/r", "t"}); err != nil {
-		t.Fatal(err)
-	}
-	for name := range mem.Files() {
-		if len(name) > 5 && name[len(name)-5:] == ".json" {
-			mem.Put(name, []byte(`{"format":99,"repository":"/r","task":"t"}`))
+// An entry of another version is a pointer still: one with this version's shape is read for its
+// task, so the store it points to is known and refuses on its own. One of another shape fails the
+// call and names the file.
+func TestIndexReadsAnEntryOfAnotherVersionOnlyForItsTask(t *testing.T) {
+	for _, tc := range []struct {
+		content string
+		read    bool
+	}{
+		{`{"format":1,"repository":"/r","task":"t"}`, true},
+		{`{"format":99,"repository":"/r","task":"t"}`, true},
+		{`{"format":99,"repository":"/r","task":"t","owner":"x"}`, false},
+		{`{"format":1,"repository":"/r","task":"other"}`, false},
+	} {
+		mem := fsys.NewMemFS()
+		x := openMemIndex(t, mem)
+		if err := x.Add(Task{"/r", "t"}); err != nil {
+			t.Fatal(err)
 		}
-	}
-	_, err := x.Tasks()
-	var f *core.Failure
-	if !errors.As(err, &f) || f.Kind != core.FailureIncompatible {
-		t.Fatalf("Tasks = %v, want an incompatible-format failure naming the file", err)
+		entry, err := x.Entry(Task{"/r", "t"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mem.Put(entry, []byte(tc.content))
+		got, err := x.Tasks()
+		if tc.read {
+			if err != nil || !slices.Equal(got, []Task{{"/r", "t"}}) {
+				t.Errorf("%s: Tasks = %v, %v; want the task", tc.content, got, err)
+			}
+			continue
+		}
+		var f *core.Failure
+		if !errors.As(err, &f) || !strings.Contains(f.Message, entry) {
+			t.Errorf("%s: Tasks = %v, %v; want a failure naming %s", tc.content, got, err, entry)
+		}
 	}
 }

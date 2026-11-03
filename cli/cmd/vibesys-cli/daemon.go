@@ -78,6 +78,18 @@ func daemonStatus(ctx context.Context, d deps, args []string) int {
 	}
 	fmt.Fprintf(d.stdout, "running\tpid %d\tversion %s\tqueued %d\trunning %d\n",
 		st.GetPid(), st.GetVersions().GetBinaryVersion(), st.GetQueuedJobs(), st.GetRunningJobs())
+	// What a job inherits: the checkout directory, then one line per variable, with its value
+	// only where the daemon shows it.
+	if dir := st.GetCheckoutDirectory(); dir != "" {
+		fmt.Fprintf(d.stdout, "checkouts\t%s\n", dir)
+	}
+	for _, v := range st.GetEnvironment() {
+		if v.Value != nil {
+			fmt.Fprintf(d.stdout, "env\t%s=%s\n", v.GetName(), v.GetValue())
+		} else {
+			fmt.Fprintf(d.stdout, "env\t%s\n", v.GetName())
+		}
+	}
 	return exitOK
 }
 

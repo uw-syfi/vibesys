@@ -36,6 +36,8 @@ type Process struct {
 	// Executable is the path of the running binary, which starts the daemon and the supervisors.
 	Executable string
 	Getenv     func(string) string
+	// Environ returns the whole environment, which the daemon's jobs inherit.
+	Environ func() []string
 	// UID and GID are the user and group the process runs as. Docker jobs run as them, so the
 	// files a job writes are the user's.
 	UID  int
@@ -98,8 +100,11 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	return daemon.Run(ctx, daemon.Config{
 		Dir:     dir,
 		Version: p.Version,
-		Clock:   clk,
-		Ready:   ready,
+		// The supervisors are started with the daemon's environment and make the checkouts, so
+		// they make them where the daemon would.
+		Inherited: daemon.Inherited{Environ: p.Environ(), CheckoutDirectory: gitwork.Checkouts{}.Dir()},
+		Clock:     clk,
+		Ready:     ready,
 		Logf: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
 		},
