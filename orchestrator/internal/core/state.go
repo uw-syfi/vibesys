@@ -75,6 +75,14 @@ func (s *State) apply(e Event, w *written) {
 	case Run:
 		own(&s.runs, &w.runs)
 		s.runs[b.ID] = b
+		if b.Status.Final() {
+			own(&s.jobs, &w.jobs)
+			for key := range s.jobs {
+				if key.run == b.ID {
+					delete(s.jobs, key)
+				}
+			}
+		}
 	case Agent:
 		own(&s.agents, &w.agents)
 		a := s.agents[b.ID]
@@ -142,7 +150,7 @@ func (s *State) applyMessage(m Message, w *written) {
 	} else {
 		s.messages[m.ID] = m
 	}
-	if job, ok := m.Body.(JobFinished); ok {
+	if job, ok := m.Body.(JobFinished); ok && !s.runs[m.Run].Status.Final() {
 		own(&s.jobs, &w.jobs)
 		s.jobs[toldJob{run: m.Run, job: job.Job}] = struct{}{}
 	}

@@ -205,6 +205,8 @@ func secretIn(dir string) ([]byte, error) {
 // says so. A nil Jobs means there is no job source, which the daemon treats as no source and not as
 // a source with no jobs.
 type Wiring struct {
+	Search *Reconciler
+
 	Sidecars daemon.Sidecars
 	Jobs     jobs.JobSource
 	Plans    daemon.PlanReader
@@ -270,7 +272,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 				}
 			},
 		},
-		Sidecars: wiring.Sidecars, Jobs: wiring.Jobs, Authority: authority, Bounds: Timeouts{},
+		Sidecars: wiring.Sidecars, Jobs: wiring.Jobs, Reconcile: reconcile(wiring.Search), Authority: authority, Bounds: Timeouts{},
 		AgentSocket: layout.AgentSocket, JobPollEvery: 5 * time.Second,
 	})
 	if err != nil {
@@ -313,6 +315,9 @@ func (x *Daemon) Run(ctx context.Context) error {
 	}
 	ctx, stopAll := context.WithCancel(ctx)
 	defer stopAll()
+	if x.wiring.Search != nil {
+		defer x.wiring.Search.Close()
+	}
 	listener, err := listenPrivate(x.layout.AgentSocket)
 	if err != nil {
 		return err

@@ -10,6 +10,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs/jobstest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 )
@@ -46,6 +47,8 @@ type Rig struct {
 	Location core.CliLocation
 	// JobStall makes that many polls of the job source hang until their bound ends.
 	JobStall int
+	// JobSource overrides the default Fake for integrated deterministic tests.
+	JobSource jobs.JobSource
 	// ReattachErr is what the last restart's Reattach reported.
 	ReattachErr error
 	// Wake is signalled by every commit, for a daemon run with Daemon.Run.
@@ -153,6 +156,9 @@ func (g gatedJobs) Jobs(ctx context.Context, run core.Run) ([]core.JobUpdate, er
 		g.r.Bounds.Expire()
 		<-ctx.Done()
 		return nil, ctx.Err()
+	}
+	if g.r.JobSource != nil {
+		return g.r.JobSource.Jobs(ctx, run)
 	}
 	return g.r.Jobs.Jobs(ctx, run)
 }

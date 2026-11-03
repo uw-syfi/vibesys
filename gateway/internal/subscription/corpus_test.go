@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -234,7 +235,11 @@ func TestFrameCorpus(t *testing.T) {
 			func(p *producer) { p.synced() },
 		}}}},
 		{"a key removed before it was sent is never sent", []streamScript{{steps: []step{
-			func(p *producer) { p.put("a", 1); p.put("b", 2); p.remove("b"); p.synced() },
+			// The initial snapshot is not rate limited. Put the transient key
+			// after Synced, inside the minimum interval, so it cannot be sent
+			// between Put and Remove even when the sender is scheduled there.
+			func(p *producer) { p.put("a", 1); p.synced() },
+			func(p *producer) { p.put("b", 2); runtime.Gosched(); p.remove("b") },
 		}}}},
 		{"writes between flushes are conflated to the latest value", []streamScript{{steps: []step{
 			func(p *producer) { p.put("a", 1); p.synced() },

@@ -18,4 +18,4 @@ go test -count=1 -timeout 180s ./...
 # detector.
 go test -race -count=1 -timeout 180s -run 'PassesTheContract/ReadersAndClaimers' ./internal/store/
 go test -race -count=1 -timeout 180s -run 'TestCommitsAndCompactionsAndVerifiesInterleave|TestVerifyRunsBesideTheWriter' ./internal/store/
-go test -race -count=1 -timeout 300s ./internal/hub ./internal/daemon/... ./internal/client ./internal/mcp
+go test -race -count=1 -timeout 300s ./internal/hub ./internal/daemon/... ./internal/client ./internal/mcp ./internal/production ./internal/search

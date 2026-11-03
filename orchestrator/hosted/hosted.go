@@ -21,6 +21,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/production"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
 // Options are what the host process tells the orchestrator about itself.
@@ -60,7 +61,8 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 		return x.unavailable(o.Log, err.Error())
 	}
 	o.Log.Info("agents are told to run this vibesys-cli", "path", cli)
-	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Plans: production.NoPlans{}, Version: o.Version, Location: production.LocationFor(o.Getenv, o.Home, cli)}, o.Log)
+	searches := production.SearchFor()
+	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Plans: production.NoPlans{}, Version: o.Version, Location: production.LocationFor(o.Getenv, o.Home, cli)}, o.Log)
 	if err != nil {
 		return x.unavailable(o.Log, "the orchestrator is not served by this process: "+err.Error())
 	}

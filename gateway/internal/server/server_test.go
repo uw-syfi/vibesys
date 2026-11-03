@@ -48,8 +48,9 @@ func startWithClock(t *testing.T, clock server.Clock) fixture {
 
 func startWithConfig(t *testing.T, config server.Config) fixture {
 	t.Helper()
-	// Keep Unix socket paths short even on hosts with long temporary roots.
-	root, err := os.MkdirTemp("/tmp", "g")
+	// Avoid t.TempDir's long test-name paths for Unix sockets, while honoring
+	// TMPDIR so repoctl doctor can select local storage on NFS hosts.
+	root, err := os.MkdirTemp("", "g")
 	if err != nil {
 		t.Fatal(err)
 	}

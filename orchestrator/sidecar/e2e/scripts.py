@@ -157,6 +157,20 @@ LEAD_STEPS = {1: _start, 2: _first_handoff, 3: _second_handoff, 4: _judged}
 
 def lead(me: Me, messages: Sequence[str]) -> Script:
     """The lead: base, two workers, a judge, promote, report."""
+
+    def is_job(message: str) -> bool:
+        return (
+            re.fullmatch(
+                r"Job \S+ finished: (?:succeeded|failed|cancelled|lost)\.(?: .*)?",
+                message,
+                flags=re.DOTALL,
+            )
+            is not None
+        )
+
+    if messages and is_job(messages[-1]):
+        return "Noted job completion."
+    messages = [message for message in messages if not is_job(message)]
     step = LEAD_STEPS.get(len(messages))
     if step is None:
         msg = f"the lead was sent message {len(messages)}, which its script does not expect"
