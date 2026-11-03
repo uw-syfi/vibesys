@@ -97,7 +97,7 @@ export function HandoffCards(props: {
     );
   }
   return (
-    <Stack gap="space-4">
+    <Stack gap="space-4" align="start">
       {messages.map(message =>
         message.body.case === 'handoff' ? (
           <HandoffCard

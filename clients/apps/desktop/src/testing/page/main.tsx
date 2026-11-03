@@ -6,10 +6,10 @@
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
+import {DesktopLinkProblem} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
-import {RpcStatus} from '../../core/errors.js';
 import {Ids, makeHostSession} from '../../core/index.js';
 import {ConnectedApp} from '../../ui/orchestrator/connected.js';
 import {FakeDaemon, generateScenario} from '../orchestrator/index.js';
@@ -36,10 +36,13 @@ const daemon = new FakeDaemon({
   searchStale: query.has('stale'),
 });
 const fake = makeFakeTransport(
-  daemonRecording(
-    daemon,
-    query.has('login-failed') ? {helloFails: () => RpcStatus.UNAUTHENTICATED} : {},
-  ),
+  query.has('login-failed')
+    ? {
+        respond: () => [
+          {end: {linkProblem: DesktopLinkProblem.AUTH, message: 'Permission denied (publickey).'}},
+        ],
+      }
+    : daemonRecording(daemon),
 );
 
 const root = document.getElementById('root');

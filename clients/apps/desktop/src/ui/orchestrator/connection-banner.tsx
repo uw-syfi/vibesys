@@ -1,4 +1,4 @@
-import {Button, Row, Text} from '@vibesys/ui';
+import {Button, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   type Fault,
@@ -21,6 +21,7 @@ export interface ConnectionNote {
 }
 
 interface Say {
+  readonly context?: string;
   readonly text: string;
   readonly tone: 'muted' | 'warn';
   readonly fault: Fault | null;
@@ -45,7 +46,8 @@ function sayAbout(note: ConnectionNote): Say | null {
   }
   if (connection._tag === 'Unusable') {
     return {
-      text: `${faultWord(connection.fault.kind)} ${staleTail}`,
+      text: faultWord(connection.fault.kind),
+      context: `Automatic retries stopped. ${hasData ? staleTail : 'No runs have been read.'}`,
       tone: 'warn',
       fault: connection.fault,
       canRetry: true,
@@ -53,7 +55,8 @@ function sayAbout(note: ConnectionNote): Say | null {
   }
   if (connection._tag === 'Waiting') {
     return {
-      text: `${faultWord(connection.fault.kind)} ${staleTail} Trying again.`,
+      text: faultWord(connection.fault.kind),
+      context: `${staleTail} Trying again.`,
       tone: 'warn',
       fault: connection.fault,
       canRetry: true,
@@ -62,7 +65,8 @@ function sayAbout(note: ConnectionNote): Say | null {
   const freshness = freshnessOf(connection, feed, hasData);
   if (feed._tag === 'Failed' && connection._tag === 'Ready') {
     return {
-      text: `${faultWord(feed.fault.kind)} ${staleTail}`,
+      text: faultWord(feed.fault.kind),
+      context: staleTail,
       tone: 'warn',
       fault: feed.fault,
       canRetry: true,
@@ -92,15 +96,24 @@ export function ConnectionBanner(props: {
   return (
     <div role="status" aria-live="polite" aria-label="Connection">
       {shown.map(({note, say}) => (
-        <Row key={note.key} gap="space-3" wrap>
+        <Stack key={note.key} gap="space-2" align="start">
           <Text tone={say.tone}>{say.text}</Text>
-          {say.fault === null ? null : (
-            <Text tone="muted" variant="small">{`Details: ${say.fault.detail}`}</Text>
-          )}
-          {say.canRetry ? (
-            <Button text="Retry" variant="secondary" size="sm" press={note.tryAgain} />
-          ) : null}
-        </Row>
+          {say.context === undefined ? null : <Text variant="small">{say.context}</Text>}
+          <Row gap="space-3" wrap>
+            {say.fault === null ? null : (
+              <Text tone="muted" variant="small">{`Details: ${say.fault.detail}`}</Text>
+            )}
+            {say.canRetry ? (
+              <Button
+                text="Retry connection"
+                label={`Retry connection to read ${note.what}`}
+                variant="secondary"
+                size="sm"
+                press={note.tryAgain}
+              />
+            ) : null}
+          </Row>
+        </Stack>
       ))}
     </div>
   );

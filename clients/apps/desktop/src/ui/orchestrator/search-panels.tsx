@@ -1,5 +1,5 @@
-import {type SearchState, UnreadableReason} from '@vibesys/orchestrator-proto';
-import {Card, KeyValue, Stack, Text} from '@vibesys/ui';
+import {JobState, type SearchState, UnreadableReason} from '@vibesys/orchestrator-proto';
+import {Card, Chip, KeyValue, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
   candidates,
@@ -8,6 +8,8 @@ import {
   planStatus,
   resultSoFar,
 } from '../../state/orchestrator/search-views.js';
+import {ms} from '../../state/orchestrator/time.js';
+import {formatDuration} from './words.js';
 
 /** One wording for every typed unreadable reason, including an unspecified peer response. */
 const unreadableWords = {
@@ -35,57 +37,60 @@ export function SearchPanels(props: {
   return (
     <Stack gap="space-4">
       {health?.case === 'unreadable' ? (
-        <Card section="Search state is stale">
+        <Row gap="space-3" wrap>
+          <Chip label="Search state is stale" tone="warn" />
+          <Text title={health.value.detail}>{unreadableWords[health.value.reason]}</Text>
+          <Text
+            variant="small"
+            tone="muted"
+          >{`Unreadable for ${formatDuration(Math.max(0, nowMs - (ms(health.value.since) ?? nowMs)))}. Previously read facts are kept.`}</Text>
+        </Row>
+      ) : null}
+      <Row gap="space-4" align="start" wrap>
+        <Card section="Result so far">
           <Stack gap="space-2">
-            <Text tone="warn">{unreadableWords[health.value.reason]}</Text>
-            <Text tone="muted">Previously read facts are kept and may be out of date.</Text>
-            {health.value.detail === '' ? null : <Text variant="small">{health.value.detail}</Text>}
+            <Text>
+              {measure === undefined
+                ? 'No official measurement of the current result yet.'
+                : `${measure.metric?.name ?? 'Score'}: ${measure.value}`}
+            </Text>
+            {head?.case === 'current' ? (
+              <Text variant="code" title={head.value.head}>
+                {head.value.head.slice(0, 12)}
+              </Text>
+            ) : null}
+            <Text variant="small">{`Jobs with no run: ${jobsWithNoRun(search)}`}</Text>
+            {search.truncated ? (
+              <Text tone="muted">Some search facts were omitted to fit the stream limits.</Text>
+            ) : null}
           </Stack>
         </Card>
-      ) : null}
-      <Card section="Result so far">
-        <Stack gap="space-2">
-          <Text>
-            {measure === undefined
-              ? 'No official measurement of the current result yet.'
-              : `${measure.metric?.name ?? 'Score'}: ${measure.value}`}
-          </Text>
-          {head?.case === 'current' ? (
-            <Text variant="code" title={head.value.head}>
-              {head.value.head.slice(0, 12)}
-            </Text>
-          ) : null}
-          <Text variant="small">{`Jobs with no run: ${jobsWithNoRun(search)}`}</Text>
-          {search.truncated ? (
-            <Text tone="muted">Some search facts were omitted to fit the stream limits.</Text>
-          ) : null}
-        </Stack>
-      </Card>
-      <Card section="Candidates">
-        <KeyValue
-          items={candidates(search).map(row => ({
-            key: row.result.commit.slice(0, 12),
-            mono: true,
-            value: `${row.result.outcome.case === 'measure' ? `${row.result.outcome.value.metric?.name ?? 'Score'} ${row.result.outcome.value.value}` : ''}: ${row.label}${row.stale ? ' (previous head)' : ''}`,
-          }))}
-        />
-      </Card>
-      <Card section="Job queue">
-        <KeyValue
-          items={jobQueue(search, nowMs).map(({job, elapsedMs, trouble}) => ({
-            key: job.id,
-            value: `${job.startedAt === undefined ? 'Queued' : 'Running'}, ${Math.floor(elapsedMs / 1000)}s${trouble === undefined ? '' : `: ${trouble.failure?.message ?? 'Needs attention'}`}`,
-          }))}
-        />
-      </Card>
-      <Card section="Plans">
-        <KeyValue
-          items={planStatus(search).map(({plan, label}) => ({
-            key: `Plan ${plan.number}: ${plan.title}`,
-            value: label,
-          }))}
-        />
-      </Card>
+        <Card section="Candidates">
+          <KeyValue
+            items={candidates(search).map(row => ({
+              key: row.result.commit.slice(0, 12),
+              mono: true,
+              value: `${row.result.outcome.case === 'measure' ? `${row.result.outcome.value.metric?.name ?? 'Score'} ${row.result.outcome.value.value}` : ''}: ${row.label}${row.stale ? ' (previous head)' : ''}`,
+            }))}
+          />
+        </Card>
+        <Card section="Job queue">
+          <KeyValue
+            items={jobQueue(search, nowMs).map(({job, elapsedMs, trouble}) => ({
+              key: job.id,
+              value: `${job.state === JobState.QUEUED ? 'Queued' : 'Running'}, ${formatDuration(elapsedMs)}${trouble === undefined ? '' : `: ${trouble.failure?.message ?? 'Needs attention'}`}`,
+            }))}
+          />
+        </Card>
+        <Card section="Plans">
+          <KeyValue
+            items={planStatus(search).map(({plan, label}) => ({
+              key: `Plan ${plan.number}: ${plan.title}`,
+              value: label,
+            }))}
+          />
+        </Card>
+      </Row>
     </Stack>
   );
 }

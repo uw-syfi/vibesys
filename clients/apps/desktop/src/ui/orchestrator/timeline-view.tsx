@@ -90,9 +90,9 @@ export function TimelineView(props: {
   return (
     <Stack gap="space-6">
       <Row gap="space-6" wrap>
-        <Stat label="Agents so far" value={String(agentCount)} />
-        <Stat label="Most at once" value={String(peak)} />
-        <Stat label="Run time" value={formatDuration(to - from)} />
+        <Stat inline label="Agents so far" value={String(agentCount)} />
+        <Stat inline label="Most at once" value={String(peak)} />
+        <Stat inline label="Run time" value={formatDuration(to - from)} />
       </Row>
       <Card section="When each agent worked">
         <Gantt

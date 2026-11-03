@@ -91,6 +91,9 @@ export function OrchestratorApp(props: {
             openRun={(host, runId) => go({type: 'open-run', host, runId})}
           />
           <RunList
+            unreadHosts={hosts
+              .filter(host => host.runsFeed._tag !== 'Live')
+              .map(host => host.label)}
             hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
             open={(host, runId) => go({type: 'open-run', host, runId})}
           />
@@ -145,6 +148,7 @@ export function OrchestratorApp(props: {
           agentPanel={
             agent === undefined ? null : (
               <AgentPanel
+                nowMs={props.nowMs}
                 state={state}
                 agent={agent}
                 name={nameOf(names, agent)}

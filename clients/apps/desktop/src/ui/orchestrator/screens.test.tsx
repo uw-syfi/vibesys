@@ -69,6 +69,7 @@ function screen(
 function panel(state: OrchestratorState, agent: Agent, sendProgress?: CommandProgress): string {
   return renderToStaticMarkup(
     <AgentPanel
+      nowMs={0}
       state={state}
       agent={agent}
       name="Worker 1"
@@ -301,4 +302,12 @@ describe('the screens', () => {
     expect(harnessWord(Harness.CLAUDE_CODE)).toBe('Claude Code');
     expect(harnessWord(Harness.CODEX)).toBe('Codex');
   });
+});
+
+it('an unread run inventory is unknown rather than a claim that no runs exist', () => {
+  const html = renderToStaticMarkup(
+    <RunList hosts={[]} unreadHosts={['host-a']} open={() => undefined} />,
+  );
+  expect(html).toContain('has not been read');
+  expect(html).not.toContain('No runs yet');
 });

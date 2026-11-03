@@ -8,9 +8,8 @@
  */
 
 export {sendMessageCommand} from './commands.js';
-export {JobSchema, JobState, SubmitterSchema} from './generated/vibesys/cli/v1/job_pb.js';
-export {PlanSchema as SearchPlanSchema, PlanStatus} from './generated/vibesys/cli/v1/plan_pb.js';
-export {ResultSchema} from './generated/vibesys/cli/v1/result_pb.js';
+export {JobState} from './generated/vibesys/cli/v1/job_pb.js';
+export {PlanStatus} from './generated/vibesys/cli/v1/plan_pb.js';
 export {VerdictKind} from './generated/vibesys/cli/v1/verdict_pb.js';
 export * from './generated/vibesys/orchestrator/v1/events_pb.js';
 export * from './generated/vibesys/orchestrator/v1/orchestrator_pb.js';
