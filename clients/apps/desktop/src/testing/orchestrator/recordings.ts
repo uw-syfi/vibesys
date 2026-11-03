@@ -16,6 +16,7 @@ import {
   ListItemsRequestSchema,
   ListItemsResponseSchema,
   OrchestratorService,
+  oneofIs,
   WatchAgentRequestSchema,
   WatchAgentResponseSchema,
   WatchRunsRequestSchema,
@@ -23,6 +24,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import {RpcStatus} from '../../core/errors.js';
 import type {CallTarget} from '../../core/transport/gateway-transport.js';
+import {invokeCallback} from '../callback-errors.js';
 import type {Recording, Step} from '../transport/index.js';
 import type {FakeDaemon} from './fake-daemon.js';
 
@@ -61,10 +63,30 @@ function agentFrameOf(
   agentId: string,
 ): Parameters<typeof create<typeof WatchAgentResponseSchema>>[1] | null {
   const {body} = event;
-  if (body.case === 'itemUpdated' && body.value.agentId === agentId) {
+  if (
+    oneofIs(body, 'itemUpdated', {
+      runUpdated: true,
+      agentUpdated: true,
+      turnUpdated: true,
+      itemUpdated: true,
+      messageUpdated: true,
+      receiptRecorded: true,
+    }) &&
+    body.value.agentId === agentId
+  ) {
     return {sequence: event.sequence, body: {case: 'item', value: body.value}};
   }
-  if (body.case === 'turnUpdated' && body.value.agentId === agentId) {
+  if (
+    oneofIs(body, 'turnUpdated', {
+      runUpdated: true,
+      agentUpdated: true,
+      turnUpdated: true,
+      itemUpdated: true,
+      messageUpdated: true,
+      receiptRecorded: true,
+    }) &&
+    body.value.agentId === agentId
+  ) {
     return {sequence: event.sequence, body: {case: 'turn', value: body.value}};
   }
   return null;
@@ -75,7 +97,7 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     options.closeStreams === true ? [{close: true}] : [{hang: true}];
 
   const hello = (nth: number): ReadonlyArray<Step> => {
-    const failure = options.helloFails?.(nth);
+    const failure = invokeCallback(() => options.helloFails?.(nth));
     if (failure !== undefined) return [{end: {message: 'hello failed', status: failure}}];
     const bytes = toBinary(
       HelloResponseSchema,
@@ -88,7 +110,7 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
   };
 
   const dispatch = (target: CallTarget, nth: number): ReadonlyArray<Step> => {
-    const fate = options.dispatch?.(nth) ?? 'ok';
+    const fate = invokeCallback(() => options.dispatch?.(nth)) ?? 'ok';
     if (fate === 'lose-request') return [lost('connection lost before the command arrived')];
     const {command} = fromBinary(DispatchRequestSchema, target.request);
     if (command === undefined) return [{end: {status: RpcStatus.INVALID_ARGUMENT}}];

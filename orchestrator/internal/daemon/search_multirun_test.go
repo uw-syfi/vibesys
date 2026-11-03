@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"fmt"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"math/rand"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func TestMultipleRunsConvergeAcrossLagReconnectAndSnapshotOmissions(t *testing.T
 				if proto.Size(f) > daemon.MaxWatchFrameBytes {
 					return false
 				}
-				if snap := f.GetSnapshot(); snap != nil {
+				if snap := client.WatchRunsSnapshot(f); snap != nil {
 					clear(views)
 					for _, s := range snap.Searches {
 						if !accept(s) {
@@ -58,7 +59,7 @@ func TestMultipleRunsConvergeAcrossLagReconnectAndSnapshotOmissions(t *testing.T
 						}
 					}
 				}
-				if s := f.GetSearch(); s != nil {
+				if s := client.WatchRunsSearch(f); s != nil {
 					if !accept(s) {
 						return false
 					}

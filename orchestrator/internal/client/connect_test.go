@@ -195,20 +195,20 @@ func TestAClientSurvivesCutsAndSlowPipesThroughConnect(t *testing.T) {
 					if msg, err = stream.Recv(); err != nil {
 						break
 					}
-					if s := msg.GetSnapshot(); s != nil {
+					s, ev, search := client.DecodeWatchRuns(msg)
+					if s != nil {
 						last = s.GetSequence()
 						for _, r := range s.GetRuns() {
 							ended = ended || r.GetStatus() == pb.RunStatus_RUN_STATUS_ENDED
 						}
 						continue
 					}
-					if msg.GetSearch() != nil {
+					if search != nil {
 						// A whole search view carries no sequence and does not advance the event stream.
 						// Search delivery: daemon.TestSearchWatchConvergesAcrossLagAndReconnect
 						// and hub.TestLatestThousandPublishesAndLag.
 						continue
 					}
-					ev := msg.GetEvent()
 					if last != 0 && ev.GetSequence() != last+1 {
 						fail("event %d came after %d: a gap or a repeat", ev.GetSequence(), last)
 					}

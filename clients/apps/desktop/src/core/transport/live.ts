@@ -72,13 +72,24 @@ const openCall = (
   });
   /** Act on one decoded reply: a frame, or the end. */
   const interpret = (body: ReturnType<typeof decodeGatewayReply>): void => {
-    if (body.case === 'bytes') {
-      if (!frame(body.value)) release();
-    } else if (body.case === 'end') {
-      const {error, status, linkProblem} = body.value;
-      const clean =
-        error === undefined && linkProblem === undefined && (status === undefined || status === 0);
-      end(clean ? {kind: 'closed'} : failed(error ?? '', status, linkProblem));
+    switch (body.case) {
+      case 'bytes':
+        if (!frame(body.value)) release();
+        break;
+      case 'end': {
+        const {error, status, linkProblem} = body.value;
+        const clean =
+          error === undefined &&
+          linkProblem === undefined &&
+          (status === undefined || status === 0);
+        end(clean ? {kind: 'closed'} : failed(error ?? '', status, linkProblem));
+        break;
+      }
+      case undefined:
+        end(failed('missing gateway reply body'));
+        break;
+      default:
+        body satisfies never;
     }
   };
   try {

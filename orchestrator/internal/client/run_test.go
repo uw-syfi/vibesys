@@ -45,11 +45,12 @@ func watchRuns(ctx context.Context, t testing.TB, c *client.Client, after uint64
 				close(f.events)
 				return
 			}
+			snapshot, event, _ := client.DecodeWatchRuns(msg)
 			switch {
-			case msg.GetSnapshot() != nil:
-				f.snap <- msg.GetSnapshot()
-			case msg.GetEvent() != nil:
-				f.events <- msg.GetEvent()
+			case snapshot != nil:
+				f.snap <- snapshot
+			case event != nil:
+				f.events <- event
 			}
 		}
 	}()

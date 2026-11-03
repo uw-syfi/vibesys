@@ -9,6 +9,7 @@ import {
   ItemSchema,
   ItemStatus,
   ItemsPageSchema,
+  oneofIs,
   ReceiptSchema,
   type WatchAgentResponse,
   WatchAgentResponseSchema,
@@ -263,11 +264,31 @@ const frame = (body: WatchAgentResponse['body'], sequence: bigint): WatchAgentRe
 function agentSession(history: Versioned, cut: number): WatchAgentResponse[] {
   const newest = new Map<string, Item>();
   for (const event of history.events.slice(0, cut)) {
-    if (event.body.case === 'itemUpdated') newest.set(event.body.value.id, event.body.value);
+    if (
+      oneofIs(event.body, 'itemUpdated', {
+        runUpdated: true,
+        agentUpdated: true,
+        turnUpdated: true,
+        itemUpdated: true,
+        messageUpdated: true,
+        receiptRecorded: true,
+      })
+    )
+      newest.set(event.body.value.id, event.body.value);
   }
   const page = create(ItemsPageSchema, {items: [...newest.values()], sequence: BigInt(cut)});
   const later = history.events.slice(cut).flatMap(event => {
-    if (event.body.case !== 'itemUpdated') return [];
+    if (
+      !oneofIs(event.body, 'itemUpdated', {
+        runUpdated: true,
+        agentUpdated: true,
+        turnUpdated: true,
+        itemUpdated: true,
+        messageUpdated: true,
+        receiptRecorded: true,
+      })
+    )
+      return [];
     const progress =
       event.body.value.status === ItemStatus.RUNNING
         ? [
@@ -470,7 +491,19 @@ describe('progress on running items', () => {
         const daemon = new FakeDaemon(scenario);
         const agent = Object.keys(fold(scenario.events).agents)[0];
         if (agent === undefined) return;
-        let state = fold(scenario.events.filter(event => event.body.case !== 'itemUpdated'));
+        let state = fold(
+          scenario.events.filter(
+            event =>
+              !oneofIs(event.body, 'itemUpdated', {
+                runUpdated: true,
+                agentUpdated: true,
+                turnUpdated: true,
+                itemUpdated: true,
+                messageUpdated: true,
+                receiptRecorded: true,
+              }),
+          ),
+        );
         let before = 0;
         for (;;) {
           const page = daemon.page(agent, pageSize, before);

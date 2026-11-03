@@ -8,14 +8,20 @@ import {
   WatchRunsRequestSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/orchestrator-proto';
+import * as Deferred from 'effect/Deferred';
 import * as Effect from 'effect/Effect';
 import * as Random from 'effect/Random';
+import * as Atom from 'effect/reactivity/Atom';
 import * as Schema from 'effect/Schema';
+import * as Stream from 'effect/Stream';
+import * as SubscriptionRef from 'effect/SubscriptionRef';
 import {
   applyEvent,
+  emptyHostModel,
   emptyState,
   type FeedStatus,
   type Freshness,
+  type HostModel,
   type OrchestratorState,
 } from '../state/index.js';
 import {
@@ -28,6 +34,7 @@ import {
 } from '../testing/orchestrator/index.js';
 import type {FaultPlan, Recording, Step} from '../testing/transport/index.js';
 import {RpcStatus} from './errors.js';
+import {runFeed} from './feeds.js';
 import {MAX_QUIET_RESTARTS, STABLE_PASS_FRAMES} from './policy.js';
 import {defaultReconnect, delayMs} from './reconnect.js';
 
@@ -641,6 +648,7 @@ it.effect(
       });
       const last = scenario.events.at(-1);
       if (last === undefined) throw new Error('scenario must have an event');
+      const cursors: bigint[] = [];
       const h = yield* hostHarness(daemonAt(TOTAL - 1), {
         wrap: base => ({
           respond: (target, nth) => {
@@ -657,15 +665,14 @@ it.effect(
                 },
                 {close: true},
               ];
-            expect(fromBinary(WatchRunsRequestSchema, target.request).afterSequence).toBe(
-              BigInt(TOTAL),
-            );
+            cursors.push(fromBinary(WatchRunsRequestSchema, target.request).afterSequence);
             return [encode(next), {hang: true}];
           },
         }),
       });
       h.mount(h.session.runs.watch);
       const data = (yield* h.model).data;
+      expect(cursors).toEqual([BigInt(TOTAL)]);
       expect(data.searches[scenario.runId]).toEqual(next);
       expect(data.sequence).toBe(BigInt(TOTAL));
       expect(data.gap).toBeNull();
@@ -675,6 +682,7 @@ it.effect(
 it.effect('the Fake sends current search frames on resume after replayed events', () =>
   Effect.gen(function* () {
     const daemon = new FakeDaemon({...scenario, search: true});
+    const resumed: {cursor: bigint; cases: unknown[]}[] = [];
     const h = yield* hostHarness(daemon, {
       wrap: base => ({
         respond: (target, nth) => {
@@ -684,18 +692,63 @@ it.effect('the Fake sends current search frames on resume after replayed events'
           const frames = steps.flatMap(step =>
             'frame' in step ? [fromBinary(WatchRunsResponseSchema, step.frame)] : [],
           );
-          expect(fromBinary(WatchRunsRequestSchema, target.request).afterSequence).toBe(
-            daemon.sequence,
-          );
-          expect(frames.map(frame => frame.body.case)).toEqual(['search']);
+          resumed.push({
+            cursor: fromBinary(WatchRunsRequestSchema, target.request).afterSequence,
+            cases: frames.map(frame => frame.body.case),
+          });
           return steps;
         },
       }),
     });
     h.mount(h.session.runs.watch);
     const data = (yield* h.model).data;
+    expect(resumed).toEqual([{cursor: daemon.sequence, cases: ['search']}]);
     expect(data.searches[scenario.runId]).toEqual(daemon.snapshot().searches[0]);
     expect(callsTo(h, 'WatchRuns')).toHaveLength(2);
     expect(data.gap).toBeNull();
+  }),
+);
+
+it.effect('opening a feed without begin publishes no unchanged model', () =>
+  Effect.gen(function* () {
+    const model = yield* SubscriptionRef.make(emptyHostModel);
+    const initial = yield* Deferred.make<void>();
+    const opened = yield* Deferred.make<void>();
+    const publications: HostModel[] = [];
+    const retry = Effect.void;
+    yield* SubscriptionRef.changes(model).pipe(
+      Stream.runForEach(value =>
+        Effect.gen(function* () {
+          publications.push(value);
+          yield* Deferred.succeed(initial, undefined);
+        }),
+      ),
+      Effect.forkScoped,
+    );
+    yield* Deferred.await(initial);
+    yield* runFeed(
+      {
+        model,
+        connection: {
+          state: Atom.make({_tag: 'Idle'} as const),
+          ready: () => Effect.succeed(1),
+          suspect: () => Effect.void,
+          retry,
+          leftTerminal: Effect.never,
+        },
+        setStatus: () => Effect.void,
+        awaitRetry: () => Effect.never,
+      },
+      {
+        open: () =>
+          Stream.fromEffect(Deferred.succeed(opened, undefined)).pipe(
+            Stream.flatMap(() => Stream.never),
+          ),
+        apply: value => value,
+        gapped: () => false,
+      },
+    ).pipe(Effect.forkScoped);
+    yield* Deferred.await(opened);
+    expect(publications).toEqual([emptyHostModel]);
   }),
 );

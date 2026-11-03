@@ -32,9 +32,9 @@ require (
 
 require (
 	github.com/uw-syfi/vibesys/orchestrator v0.0.0
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/sys v0.49.0
-	golang.org/x/text v0.40.0
+	golang.org/x/text v0.43.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
 )
 

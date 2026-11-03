@@ -1,6 +1,6 @@
 import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {RunsSnapshotSchema, SearchStateSchema} from '@vibesys/orchestrator-proto';
+import {EventSchema, RunsSnapshotSchema, SearchStateSchema} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {applyHostFrame, beginRunsStream, emptyHostModel} from '../host-model.js';
 import {applySearch, applySnapshot} from './fold.js';
@@ -109,4 +109,55 @@ describe('whole search facts', () => {
     });
     expect(model.data.searches).toEqual({r: restarted});
   });
+});
+
+it('search frames preserve the cursor and gap in arbitrary snapshot and event interleavings', () => {
+  fc.assert(
+    fc.property(
+      fc.array(
+        fc.oneof(
+          fc.record({kind: fc.constant('snapshot'), sequence: fc.bigInt({min: 0n, max: 20n})}),
+          fc.record({kind: fc.constant('event'), sequence: fc.bigInt({min: 1n, max: 25n})}),
+          fc.record({kind: fc.constant('search'), revision: fc.bigInt({min: 1n, max: 20n})}),
+        ),
+        {maxLength: 80},
+      ),
+      steps => {
+        let model = emptyHostModel;
+        let withoutSearch = emptyHostModel;
+        for (const step of steps) {
+          if (step.kind === 'search') {
+            const before = model.data;
+            const view = create(SearchStateSchema, {runId: 'r', revision: step.revision});
+            model = applyHostFrame(model, {
+              from: 'runs',
+              body: {
+                case: 'search',
+                value: view,
+              },
+            });
+            const previous = before.searches['r'];
+            expect(model.data.searches['r']).toEqual(
+              previous !== undefined && previous.revision > view.revision ? previous : view,
+            );
+            expect(model.data.sequence).toBe(before.sequence);
+            expect(model.data.gap).toBe(before.gap);
+          } else {
+            const body =
+              step.kind === 'snapshot'
+                ? {
+                    case: 'snapshot' as const,
+                    value: create(RunsSnapshotSchema, {sequence: step.sequence}),
+                  }
+                : {case: 'event' as const, value: create(EventSchema, {sequence: step.sequence})};
+            model = applyHostFrame(model, {from: 'runs', body});
+            withoutSearch = applyHostFrame(withoutSearch, {from: 'runs', body});
+          }
+          expect(model.data.sequence).toBe(withoutSearch.data.sequence);
+          expect(model.data.gap).toEqual(withoutSearch.data.gap);
+        }
+      },
+    ),
+    {seed: 73},
+  );
 });

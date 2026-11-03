@@ -3,6 +3,7 @@ import {
   Delivery,
   ItemStatus,
   type Message,
+  oneofIs,
   type Receipt,
   type ToolCall,
   TurnTrigger,
@@ -86,11 +87,18 @@ function speaker(kind: 'prompt' | 'reasoning' | 'assistant', name: string) {
 function threadItem(shown: ShownItem, name: string): ThreadItem {
   const {item} = shown;
   const body = item.body;
-  if (body.case === 'tool') return toolItem(shown, body.value);
+  if (oneofIs(body, 'tool', {assistant: true, reasoning: true, prompt: true, tool: true}))
+    return toolItem(shown, body.value);
   return {
     kind: 'message',
     id: item.id,
-    ...speaker(body.case === 'prompt' || body.case === 'reasoning' ? body.case : 'assistant', name),
+    ...speaker(
+      oneofIs(body, 'prompt', {assistant: true, reasoning: true, prompt: true}) ||
+        oneofIs(body, 'reasoning', {assistant: true, reasoning: true})
+        ? body.case
+        : 'assistant',
+      name,
+    ),
     text: shown.text,
     ...(item.status === ItemStatus.RUNNING ? {notice: 'In progress'} : {}),
     startOpen: true,
@@ -177,7 +185,19 @@ function SentMessages(props: {
       {props.sent.map(message => (
         <SentMessage
           key={message.id}
-          text={message.body.case === 'text' ? message.body.value : ''}
+          text={
+            oneofIs(message.body, 'text', {
+              text: true,
+              handoff: true,
+              report: true,
+              jobFinished: true,
+              subagentSettled: true,
+              brief: true,
+              leadBrief: true,
+            })
+              ? message.body.value
+              : ''
+          }
           atMs={ms(message.at)}
           line={storedLine(message)}
         />
@@ -282,7 +302,17 @@ export function AgentPanel(props: {
         agent={agent}
         progress={props.sendProgress}
         sent={messagesOf(state, agent.id).filter(
-          message => message.fromAgentId === '' && message.body.case === 'text',
+          message =>
+            message.fromAgentId === '' &&
+            oneofIs(message.body, 'text', {
+              text: true,
+              handoff: true,
+              report: true,
+              jobFinished: true,
+              subagentSettled: true,
+              brief: true,
+              leadBrief: true,
+            }),
         )}
         send={props.send}
         retry={props.retrySend}

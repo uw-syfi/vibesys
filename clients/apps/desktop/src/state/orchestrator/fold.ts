@@ -24,6 +24,7 @@ import {
   type Event,
   type Item,
   ItemStatus,
+  oneofIs,
   type RunsSnapshot,
   type SearchState,
   type Turn,
@@ -147,7 +148,10 @@ export function applyEvent(state: OrchestratorState, event: Event): Orchestrator
       return {...next, messages: {...next.messages, [body.value.id]: body.value}};
     case 'receiptRecorded':
       return {...next, receipts: {...next.receipts, [body.value.commandId]: body.value}};
+    case undefined:
+      return next;
     default:
+      body satisfies never;
       return next;
   }
 }
@@ -159,8 +163,10 @@ function withDelta(state: OrchestratorState, delta: Delta, sequence: bigint): Or
   if (sequence < (state.itemSequences[delta.itemId] ?? 0n)) return state;
   const piece: Progress = {
     sequence,
-    text: delta.body.case === 'text' ? delta.body.value : '',
-    commandOutput: delta.body.case === 'commandOutput' ? delta.body.value : '',
+    text: oneofIs(delta.body, 'text', {text: true, commandOutput: true}) ? delta.body.value : '',
+    commandOutput: oneofIs(delta.body, 'commandOutput', {text: true, commandOutput: true})
+      ? delta.body.value
+      : '',
   };
   const before = state.overlays[delta.itemId];
   const pieces = [...(before?.pieces ?? []), piece];
@@ -204,7 +210,10 @@ export function applyAgentFeed(state: OrchestratorState, frame: AgentFrame): Orc
       return withDelta(state, body.value, sequence);
     case 'turn':
       return withTurn(state, body.value);
+    case undefined:
+      return state;
     default:
+      body satisfies never;
       return state;
   }
 }

@@ -19,3 +19,5 @@ export {decodeValidated, decodeValidatedJson, encodeJson, encodeMessage} from '.
 
 /** Maximum encoded response on the orchestrator link; checked before allocating a frame. */
 export const ORCHESTRATOR_MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
+
+export {oneofIs} from './oneof.js';

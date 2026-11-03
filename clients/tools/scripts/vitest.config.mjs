@@ -1,3 +1,5 @@
+import {fileURLToPath} from 'node:url';
+
 /**
  * The one Vitest configuration every Effect package runs with, passed by `run_vitest.mjs`.
  *
@@ -10,6 +12,13 @@ const SOURCE_CONDITION = '@vibesys/source';
 
 export default {
   root: process.cwd(),
+  test: {
+    setupFiles: [
+      fileURLToPath(
+        new URL('../../apps/desktop/src/testing/callback-errors.setup.ts', import.meta.url),
+      ),
+    ],
+  },
   resolve: {conditions: [SOURCE_CONDITION, 'module', 'browser', 'development|production']},
   ssr: {resolve: {conditions: [SOURCE_CONDITION, 'module', 'node', 'development|production']}},
 };

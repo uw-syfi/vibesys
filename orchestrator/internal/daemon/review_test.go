@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"errors"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"strings"
 	"testing"
 
@@ -233,7 +234,7 @@ func agentOnWire(t *testing.T, r *daemontest.Rig, id core.AgentID) *pb.Agent {
 	}
 	defer w.Close()
 	for _, m := range first {
-		for _, a := range m.GetSnapshot().GetAgents() {
+		for _, a := range client.WatchRunsSnapshot(m).GetAgents() {
 			if a.GetId() == string(id) {
 				return a
 			}

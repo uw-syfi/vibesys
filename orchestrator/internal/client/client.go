@@ -179,10 +179,11 @@ func (c *Client) Snapshot(ctx context.Context) (*pb.RunsSnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	if msg.GetSnapshot() == nil {
+	snapshot, _, _, classifyErr := classifyWatchRuns(msg)
+	if classifyErr != nil || snapshot == nil {
 		return nil, errors.New("the orchestrator began a stream of runs with something other than a snapshot")
 	}
-	return msg.GetSnapshot(), nil
+	return snapshot, nil
 }
 
 // Agents lists the agents the daemon shows this caller: all of them for an operator, those of its

@@ -68,8 +68,8 @@ var testRules = map[string][]string{
 	"internal/localfs": {"internal/localfs/localfstest"},
 	"internal/client":  {"internal/core", "internal/daemon", "internal/daemon/daemontest", "internal/mcp"},
 	"internal/core":    {"internal/jobs/jobstest", "internal/wire", "gen/vibesys/orchestrator/"},
-	"internal/wire":    {"internal/core"},
-	"internal/daemon":  {"internal/daemon/daemontest", "internal/store", "internal/jobs/jobstest"},
+	"internal/wire":    {"internal/core", "internal/client"},
+	"internal/daemon":  {"internal/client", "internal/daemon/daemontest", "internal/store", "internal/jobs/jobstest"},
 }
 
 // pureImports is the standard library the core may use. Nothing here reaches a clock, a file, the

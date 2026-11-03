@@ -19,6 +19,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
@@ -127,18 +128,18 @@ func (s *sim) openRuns(after uint64, held view) *simWatcher {
 
 func (s *sim) feed(sw *simWatcher, msgs []*pb.WatchRunsResponse) {
 	for _, m := range msgs {
-		if snap := m.GetSnapshot(); snap != nil {
+		snap, ev, search := client.DecodeWatchRuns(m)
+		if snap != nil {
 			sw.v.snapshot(snap)
 			s.tally["snapshot"]++
 			continue
 		}
-		if search := m.GetSearch(); search != nil {
+		if search != nil {
 			if err := wire.Validate(search); err != nil {
 				s.fail("invalid search state: %v", err)
 			}
 			continue
 		}
-		ev := m.GetEvent()
 		if ev.GetSequence() != sw.v.seq+1 {
 			s.fail("a watcher at %d was sent event %d: an event was lost, repeated or reordered", sw.v.seq, ev.GetSequence())
 		}

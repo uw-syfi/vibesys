@@ -329,3 +329,9 @@ it('shows the truncation note exactly when facts are truncated, and the unreadab
       expect(html).toContain('Throughput: 42');
     }
 });
+
+it('the timeline says when no finished jobs have been read', () => {
+  const {state, runId, scenario} = stateOf(9, 0, false);
+  const html = screen({...state, searches: {}}, runId, 'timeline', scenario.endMs);
+  expect(html).toContain('0 finished jobs read.');
+});

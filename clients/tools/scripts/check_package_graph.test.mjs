@@ -823,7 +823,7 @@ test('an app composes feature screens without marker declarations', async t => {
 test('search fact readers can reach only generated search fields and timestamp conversion', () => {
   const path = 'apps/desktop/src/state/orchestrator/search-views.ts';
   const good =
-    "import type {SearchState as State} from '@vibesys/orchestrator-proto'; import {JobState, JobOutcome, SearchStateSchema} from '@vibesys/orchestrator-proto'; import {ms} from './time.js';";
+    "import type {SearchState as State} from '@vibesys/orchestrator-proto'; import {JobState, JobOutcome, SearchStateSchema, oneofIs} from '@vibesys/orchestrator-proto'; import {ms} from './time.js';";
   assert.deepEqual(searchFactErrors(path, good), []);
   for (const source of [
     "import {timeline} from './views.js';",

@@ -1,6 +1,7 @@
 package wire_test
 
 import (
+	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,7 +54,7 @@ func TestSearchCapsAreValidatedAtTheBoundary(t *testing.T) {
 	}
 	for field, cap := range map[string]int{"jobs": 500, "results": 500, "judgments": 100, "promotions": 200, "plans": 200, "troubles": 500} {
 		t.Run(field, func(t *testing.T) {
-			s := proto.Clone(frame.GetSearch()).(*pb.SearchState)
+			s := proto.Clone(client.WatchRunsSearch(frame)).(*pb.SearchState)
 			m := s.ProtoReflect()
 			fd := m.Descriptor().Fields().ByName(protoreflect.Name(field))
 			list := m.Mutable(fd).List()
