@@ -103,6 +103,19 @@ test('a load or check can be tried again from the status; a fix or start is pres
   expect(ALL_STEPS.filter(retry).sort()).toEqual(retried);
 });
 
+test('property: a project with no tasks is not read again; a connection or unknown failure is', () => {
+  for (const problem of problemsOf('tasks')) {
+    const answered = problem.cause === null && problem.detail !== null;
+    expect(problemWords(problem, 'host-a').retry, JSON.stringify(problem)).toBe(!answered);
+  }
+  // Every other read is tried again, whatever the machine said.
+  for (const problem of ALL_STEPS.filter(step => step !== 'tasks').flatMap(problemsOf)) {
+    expect(problemWords(problem, 'host-a').retry, JSON.stringify(problem)).toBe(
+      problemWords({...problem, detail: null, cause: null}, 'host-a').retry,
+    );
+  }
+});
+
 test('an unreported start does not claim that nothing started', () => {
   const unreported: Problem = {step: 'start', detail: null, cause: null};
   expect(problemWords(unreported, 'host-a').body).toContain('may have started');

@@ -39,6 +39,7 @@ import {
 } from '../../state/index.js';
 import {IdeasField} from './budget-fields.js';
 import type {CardProps} from './card-props.js';
+import {ReadFailed} from './read-failed.js';
 import {RoleAgents} from './role-agents.js';
 import {agentMakerMark, harnessMark, machineLabel} from './view.js';
 
@@ -151,7 +152,14 @@ export function AgentPage(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
   const {agent, machine} = context.form;
   const offers = context.harnesses?.for === machine ? context.harnesses.list : null;
-  if (offers === null) return <Text tone="muted">Listing</Text>;
+  if (offers === null) {
+    // A list that failed says so here, where the agents would be, not "Listing" for good.
+    return context.problem?.step === 'harnesses' ? (
+      <ReadFailed {...props} />
+    ) : (
+      <Text tone="muted">Listing</Text>
+    );
+  }
   const groups = agentGroups(offers);
   const group =
     agent === null ? undefined : (groupOf(offers, agent.provider, agent.model) ?? groups[0]);

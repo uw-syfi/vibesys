@@ -66,6 +66,12 @@ const RETRYABLE: Readonly<Record<Step, boolean>> = {
   start: false,
 };
 
+/**
+ * Reads of the user's own project: when the machine answered in its own words (the folder has no
+ * tasks), reading the same folder again finds the same, so the way on is another project.
+ */
+const ANSWERED_FOR_GOOD: ReadonlySet<Step> = new Set(['tasks']);
+
 /** A start that threw may have started: say so rather than invite a second run. */
 const START_UNKNOWN =
   'Something unexpected happened. The run may have started: look in Runs before starting again.';
@@ -82,7 +88,9 @@ export function problemWords(problem: Problem, machine: string): ProblemWords {
       ? FAILURE_CAUSE_WORDS[problem.cause as NonNullable<Problem['cause']>]
       : (problem.detail ?? (look ? START_UNKNOWN : UNEXPECTED_FAILURE)),
     detail: typed ? problem.detail : null,
-    retry: RETRYABLE[problem.step],
+    retry:
+      RETRYABLE[problem.step] &&
+      !(ANSWERED_FOR_GOOD.has(problem.step) && !typed && problem.detail !== null),
     look,
   };
 }

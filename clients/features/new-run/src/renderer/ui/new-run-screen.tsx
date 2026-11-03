@@ -25,6 +25,7 @@ import {
   type NewRunEvent,
   type NewRunSnapshot,
   type StepId,
+  TASKS_UNREAD_WORDS,
 } from '../../state/index.js';
 import {AgentPage} from './agent-page.js';
 import {
@@ -41,6 +42,7 @@ import {
 import {GoalPage} from './goal-page.js';
 import {type FolderCompletion, ProjectPage, TaskPage} from './project-pages.js';
 import {Nav, Question} from './question.js';
+import {pageShowsProblem} from './read-failed.js';
 import {ProblemStatus, ReviewPage, StartButton} from './review-page.js';
 import {progressLine, type StepView, stepViews} from './steps.js';
 import {entriesIn, type MachineOption} from './view.js';
@@ -190,6 +192,8 @@ function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: bool
   const done = isDone(at, context.answers, entriesIn(context), {
     agent: context.form.agent !== null,
   });
+  // The project's tasks could not be read: its page says why, and the form waits for another.
+  const unread = at === 'project' && context.problem?.step === 'tasks';
   return (
     <Nav
       {...(props.first ? {} : {back: () => dispatch({type: 'back'})})}
@@ -200,7 +204,7 @@ function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: bool
             ? dispatch({type: 'answer', change: {kind: 'goal'}, advance: true})
             : dispatch({type: 'next'}),
         // The goal is answered by accepting it, which is what its button does.
-        blocked: done || at === 'goal' ? undefined : '',
+        blocked: unread ? TASKS_UNREAD_WORDS : done || at === 'goal' ? undefined : '',
       }}
     />
   );
@@ -279,7 +283,9 @@ export function NewRunScreen(props: ScreenProps): JSX.Element {
       >
         <Stack gap="space-5">
           {at === 'start' ? <Wordmark art={VIBESYS_WORDMARK} size="compact" /> : null}
-          <ProblemStatus context={context} dispatch={dispatch} showRuns={props.showRuns} />
+          {pageShowsProblem(context, at, examplesFailed(context, at)) ? null : (
+            <ProblemStatus context={context} dispatch={dispatch} showRuns={props.showRuns} />
+          )}
           {at === null || copy === null ? (
             examplesFailed(context, at) ? (
               <ExamplesFailed context={context} dispatch={dispatch} machines={props.machines} />

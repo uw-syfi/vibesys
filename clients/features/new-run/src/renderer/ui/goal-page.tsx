@@ -19,6 +19,7 @@ import {
 } from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {backendLabel} from './cause-words.js';
+import {ReadFailed} from './read-failed.js';
 import {entriesIn, NEEDS_UPDATE} from './view.js';
 
 const READING = 'Reading the goal';
@@ -141,6 +142,8 @@ function OwnGoalPage(props: CardProps): JSX.Element {
   const {context} = props;
   const goal = ownGoal(context);
   const task = context.answers.task ?? 'default';
+  // A read that failed says why here, with its retry, where the goal would be.
+  if (goal === null && context.problem?.step === 'goal') return <ReadFailed {...props} />;
   if (goal === null) {
     // Reading while the helper can read it and has not answered or failed.
     return (

@@ -313,6 +313,31 @@ test('Start over forgets the answers', async () => {
   expect(all(steps(shell), {role: 'button', name: 'Start over'})).toHaveLength(0);
 });
 
+/** The user's own project in `path`, chosen, with the page of `step` shown. */
+const ownFolder = (step: 'project' | 'task', path: string): NewRunPage => ({
+  name: `own folder ${step}`,
+  step,
+  answers: {...pageNamed('project').answers, project: {source: 'folder', path}},
+});
+
+test('regression: a project whose tasks cannot be read says why where they go, and leads back', async () => {
+  const shell = await openAt(ownFolder('task', '/home/me/notes'));
+  await expectQuestion(shell, 'Which task?');
+  await see(main(shell), '/home/me/notes is not a VibeSys project.');
+  // Not "Reading" for good, and not read again: the same folder answers the same.
+  notSee(main(shell), 'Reading', true);
+  expect(all(main(shell), {role: 'button', name: 'Try again'})).toHaveLength(0);
+  expect(all(main(shell), {role: 'button', name: 'Continue', exact: true}).every(closed)).toBe(
+    true,
+  );
+  await press(button(main(shell), 'Choose another project'));
+  await settle();
+  await expectQuestion(shell, 'Which project?');
+  // The project page says it too, before the task step, and holds Continue until another is chosen.
+  await see(main(shell), '/home/me/notes is not a VibeSys project.');
+  expect(closed(button(main(shell), 'Continue', true))).toBe(true);
+});
+
 /** The rail: the app's one navigation. */
 const rail = (shell: OpenShell): HTMLElement =>
   one(shell.container, {role: 'navigation', name: 'VibeSys'});

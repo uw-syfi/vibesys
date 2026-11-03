@@ -1,10 +1,14 @@
-/** The pages for the user's own project: which project (a recent one, or a folder), then its task. */
+/**
+ * The pages for the user's own project: which project (a recent one, or a folder), then its task.
+ * A project whose tasks could not be read says so on both pages, where its tasks would be.
+ */
 
 import {type CompletionAction, type CompletionState, suggestedEntries} from '@vibesys/hosts';
 import {Button, ChoiceTiles, Field, PathInput, Row, Select, Stack, Text} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import {PROJECT_FOLDER_WORDS, USE_FOLDER_WORDS} from '../../state/index.js';
+import {OTHER_PROJECT_WORDS, PROJECT_FOLDER_WORDS, USE_FOLDER_WORDS} from '../../state/index.js';
 import type {CardProps} from './card-props.js';
+import {ReadFailed} from './read-failed.js';
 import {type MachineOption, machineLabel, recentChoices} from './view.js';
 
 /** The folder field's path completion: the hosts' completion reducer's state and its actions. */
@@ -94,6 +98,7 @@ export function ProjectPage(props: ProjectProps): JSX.Element {
     project?.source === 'recent' ? `${context.form.machine}${KEY}${project.path}` : null;
   return (
     <Stack gap="space-5">
+      {context.problem?.step === 'tasks' ? <ReadFailed {...props} /> : null}
       {recents.length === 0 ? null : (
         <Stack gap="space-3">
           <Text variant="section">Recent</Text>
@@ -127,6 +132,14 @@ export function TaskPage(props: CardProps): JSX.Element {
     answers.project !== null && context.tasks?.for === answers.project.path
       ? context.tasks.list
       : null;
+  if (context.problem?.step === 'tasks') {
+    return (
+      <ReadFailed
+        {...props}
+        other={{text: OTHER_PROJECT_WORDS, press: () => dispatch({type: 'go', step: 'project'})}}
+      />
+    );
+  }
   if (tasks === null) return <Text tone="muted">Reading</Text>;
   if (tasks.length === 0) return <Text tone="warn">No tasks</Text>;
   return (
