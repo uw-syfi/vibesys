@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"buf.build/go/protovalidate"
 	"fmt"
 	"maps"
 	"time"
@@ -255,6 +256,9 @@ func Jobs(jobs []core.Job) []*cliv1.Job {
 
 // ToJob returns the domain job for the contract's message.
 func ToJob(j *cliv1.Job) (core.Job, error) {
+	if err := protovalidate.Validate(j); err != nil {
+		return core.Job{}, fmt.Errorf("job: %w", err)
+	}
 	spec, err := ToJobSpec("job.spec", j.GetSpec())
 	if err != nil {
 		return core.Job{}, err

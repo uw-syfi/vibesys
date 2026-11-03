@@ -106,6 +106,13 @@ func TestAPlanViewGivesTheVerdictOfEachLinkedCommitAgainstTheHead(t *testing.T) 
 	for c, v := range view.Verdicts {
 		kinds[c] = v.Kind
 	}
+	comparison, err := r.app.Compare(ctx, call, base, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := view.Verdicts[base]; !ok || !reflect.DeepEqual(got, comparison.Verdict) {
+		t.Fatalf("head verdict = %+v, want %+v", got, comparison.Verdict)
+	}
 	// cm(3) is not measured and has none. The head is base, which is measured, and is judged against itself.
 	if got := kinds[cm(1)]; got != core.Better {
 		t.Errorf("verdict of cm(1) = %q, want better", got)

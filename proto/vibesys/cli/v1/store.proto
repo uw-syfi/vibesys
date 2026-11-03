@@ -19,8 +19,7 @@ option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 // migrated: the store is thrown away.
 //
 // Versions: 1 was a hand-written encoding that no release wrote. 2 is protojson of these messages.
-// 3 adds Job.submitters (job.proto), a field an older program refuses, so an older program that
-// meets a version 3 store says it is newer and to upgrade, and does not call its records damaged.
+// Submitters are additive in format 2; old writers reject jobs containing the new field.
 
 // FormatFile is the `format` file of a store, and the part of every other file that is read first,
 // so that a file of another version is reported as that and not as a record with unknown fields.

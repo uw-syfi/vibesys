@@ -130,7 +130,7 @@ func TestNoFieldOfAStoredMessageIsDropped(t *testing.T) {
 			event := &cliv1.Event{}
 			fill(event.ProtoReflect(), variant)
 			event.Sequence, event.RunId = 1, "run-a"
-			want := &cliv1.EventFile{Format: 3, Event: event}
+			want := &cliv1.EventFile{Format: 2, Event: event}
 			data, err := protojson.Marshal(want)
 			if err != nil {
 				t.Fatal(err)
@@ -180,7 +180,7 @@ func seedFrom(f *testing.F, name string) {
 	f.Add(data)
 	f.Add(withVersion(data, "1"))
 	f.Add(withVersion(data, "3"))
-	f.Add([]byte(`{"format": 3}`))
+	f.Add([]byte(`{"format": 2}`))
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`[]`))
 	f.Add([]byte(nil))
@@ -267,7 +267,7 @@ func FuzzDecodeTaskFile(f *testing.F) {
 	f.Add(valid)
 	f.Add(withVersion(valid, "1"))
 	f.Add(withVersion(valid, "3"))
-	f.Add([]byte(`{"format": 3, "repository": "/other", "task": "other"}`))
+	f.Add([]byte(`{"format": 2, "repository": "/other", "task": "other"}`))
 	f.Add([]byte(`{}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		image := mem.CrashImage(false)

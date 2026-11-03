@@ -113,11 +113,11 @@ func TestDamagedFilesAreRefusedWithTheFileNamed(t *testing.T) {
 		"truncated":    func(v []byte) []byte { return v[:len(v)/2] },
 		"no version":   func([]byte) []byte { return []byte(`{"unrelated":1}`) },
 		"version zero": func([]byte) []byte { return []byte(`{"format":0}`) },
-		"no body":      func([]byte) []byte { return []byte(`{"format":3}`) },
+		"no body":      func([]byte) []byte { return []byte(`{"format":2}`) },
 		"an unknown field": func(v []byte) []byte {
-			return withVersion(v, "3, \"surprise\": true")
+			return withVersion(v, "2, \"surprise\": true")
 		},
-		"data after it":     func(v []byte) []byte { return append(bytes.Clone(v), []byte(`{"format":3}`)...) },
+		"data after it":     func(v []byte) []byte { return append(bytes.Clone(v), []byte(`{"format":2}`)...) },
 		"a wrong type":      func(v []byte) []byte { return withVersion(v, `"two"`) },
 		"binary":            func([]byte) []byte { return []byte{0, 1, 2, 0xff, 0xfe} },
 		"a different field": func(v []byte) []byte { return bytes.Replace(v, []byte(`"format"`), []byte(`"formats"`), 1) },
@@ -318,11 +318,11 @@ func TestEncodingIsPinned(t *testing.T) {
 	if err := script()[0].run(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := unspaced(file(t, mem, "state/format")), `{"format":3}`; got != want {
+	if got, want := unspaced(file(t, mem, "state/format")), `{"format":2}`; got != want {
 		t.Errorf("format file = %q, want %q", got, want)
 	}
 	const wantJob = `{
-  "format": 3,
+  "format": 2,
   "job": {
     "id": "j1",
     "spec": {
@@ -360,7 +360,7 @@ func TestEncodingIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const wantPromotion = `{
-  "format": 3,
+  "format": 2,
   "seq": "1",
   "promotion": {
     "commit": "c1",
@@ -404,21 +404,6 @@ func TestAStoreOfThePrereleaseEncodingIsRefusedWithTheFileNamed(t *testing.T) {
 			mem.Put(name, content)
 			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 			wantFailure(t, "old encoding", err, core.FailureIncompatible, name, "prerelease")
-		})
-	}
-}
-
-// Version 3 added Job.submitters. A store of version 2 is not migrated: it is refused as one this
-// program does not read, naming the file, and the way back is to remove the store. The other side of
-// the change is the test of a newer format above: a program of version 2 meets a version 3 store by
-// being told it is newer, and never reports its records as damaged.
-func TestAStoreOfVersionTwoIsRefusedWithTheFileNamed(t *testing.T) {
-	for _, name := range append([]string{"state/format"}, recordFiles...) {
-		t.Run(name, func(t *testing.T) {
-			mem := populated(t)
-			mem.Put(name, withVersion(file(t, mem, name), "2"))
-			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
-			wantFailure(t, "version 2", err, core.FailureIncompatible, name, "remove the store")
 		})
 	}
 }

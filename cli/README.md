@@ -278,12 +278,9 @@ their entry has an empty run and agent. A submission that joins a queued or runn
 answered from a finished job's saved result, adds its caller to that job and changes nothing else,
 so a final job gains a submitter without changing state. A caller already on the job adds nothing.
 
-A store written with `submitters` is format version 3. Version 3 is a new format because a program
-of version 2 refuses a record with a field it does not know: it now meets the store, reads the
-format file, and says the store is newer and to upgrade `vibesys-cli`, where it would otherwise
-report its jobs as damaged. A store of version 2 is not read by this build and is not migrated: it
-is refused, naming the file, with the instruction to remove the store and let the daemon make it
-again. No release wrote version 2 (it came after `cli-v0.1.0-rc.2`), so no released store is lost.
+The store retains protojson format version 2. Existing records load without rewriting, and
+historical jobs keep an empty submitter list rather than invented identities. Upgrade all writers:
+an older writer rejects the unknown field in a job that has submitters. No store deletion is needed.
 
 ## The daemon and the supervisors
 

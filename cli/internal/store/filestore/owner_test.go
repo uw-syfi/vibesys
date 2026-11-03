@@ -256,7 +256,7 @@ func TestADamagedOwnerRecordIsRefusedWithItsName(t *testing.T) {
 	for what, data := range map[string]string{
 		"not json":      "not json",
 		"no version":    `{"host":"host-a"}`,
-		"unknown field": `{"format":3,"generation":"1","host":"host-a","dir":"/d","pid":"1","surprise":true}`,
+		"unknown field": `{"format":2,"generation":"1","host":"host-a","dir":"/d","pid":"1","surprise":true}`,
 	} {
 		t.Run(what, func(t *testing.T) {
 			mem := populated(t)
@@ -274,12 +274,12 @@ func TestADamagedOwnerRecordIsRefusedWithItsName(t *testing.T) {
 }
 
 func FuzzOwnerRecord(f *testing.F) {
-	f.Add([]byte(`{"format":3,"generation":"7","host":"host-a","dir":"/run/user/1","pid":"10"}`))
-	f.Add([]byte(`{"format":3,"generation":"18446744073709551615"}`))
-	f.Add([]byte(`{"format":3}`))
+	f.Add([]byte(`{"format":2,"generation":"7","host":"host-a","dir":"/run/user/1","pid":"10"}`))
+	f.Add([]byte(`{"format":2,"generation":"18446744073709551615"}`))
+	f.Add([]byte(`{"format":2}`))
 	f.Add([]byte(`{"format":1,"generation":7,"host":"host-a","dir":"/run/user/1","pid":10}`))
 	f.Add([]byte(`[]`))
-	f.Add([]byte(`{"format":3,"generation":"3","host":"host-a","dir":"/run/user/1","pid":"10","given_up":["j1","j2"]}`))
+	f.Add([]byte(`{"format":2,"generation":"3","host":"host-a","dir":"/run/user/1","pid":"10","given_up":["j1","j2"]}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		mem := fsys.NewMemFS()
 		seed := mustOpenAs(t, mem, daemonA)

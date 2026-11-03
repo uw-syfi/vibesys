@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/environment.proto";
@@ -85,7 +86,7 @@ message Submitter {
   string run_id = 1;
   string agent = 2;
   // When this caller first submitted the job.
-  google.protobuf.Timestamp at = 3;
+  google.protobuf.Timestamp at = 3 [(buf.validate.field).required = true];
 }
 
 // CutCause is how an attempt's supervisor was proved gone.

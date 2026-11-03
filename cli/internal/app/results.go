@@ -102,8 +102,13 @@ func (a *App) judgeAgainstHead(ctx context.Context, t taskStore, commits []core.
 		a.cfg.Logf("task %s in %s: reading results to judge against the result branch: %v", string(t.scope.Task()), string(t.scope.Repository()), err)
 		return nil
 	}
-	out := make([]core.Judgment, 0, len(distinct)-1)
-	for _, c := range distinct[1:] {
+	out := make([]core.Judgment, 0, len(commits))
+	var judged []core.Commit
+	for _, c := range commits {
+		if slices.Contains(judged, c) {
+			continue
+		}
+		judged = append(judged, c)
 		out = append(out, core.Judge(c, head, results, noDeclaredNoise))
 	}
 	return out
@@ -283,7 +288,12 @@ func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.Resul
 // resultsOf returns the saved results of the commits.
 func resultsOf(ctx context.Context, t taskStore, commits ...core.Commit) ([]core.Result, error) {
 	var out []core.Result
+	var seen []core.Commit
 	for _, commit := range commits {
+		if slices.Contains(seen, commit) {
+			continue
+		}
+		seen = append(seen, commit)
 		rs, err := t.store.Results(ctx, core.ResultFilter{Commit: commit})
 		if err != nil {
 			return nil, err
