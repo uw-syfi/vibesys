@@ -59,7 +59,7 @@ def _open(launch: fx.LaunchSession, agent: Agent) -> str:
     """Open *launch*'s session, close it, and return the conversation id it was given."""
     driver = AgentshimDriver(
         lambda conversation_id: build_session(
-            launch, agent=agent, new_conversation_id=conversation_id
+            launch, agent=lambda _name, _identity: agent, new_conversation_id=conversation_id
         ),
         preferred_id=CONVERSATION,
     )
@@ -130,7 +130,7 @@ def test_a_launch_without_a_plugin_starts_no_agent(harness: int, provider: str) 
     launch.ClearField("plugin")
     agent, executor = _agent(provider)
     with pytest.raises(ValueError, match=r"launch\.plugin"):
-        build_session(launch, agent=agent)
+        build_session(launch, agent=lambda _name, _identity: agent)
     assert executor.requests == []
 
 

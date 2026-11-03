@@ -63,9 +63,11 @@ func (r *recorder) names() []string {
 // the vibesys-cli as a reader. A name the CLI starts to read that the orchestrator does not set, or
 // one the orchestrator sets for the CLI that the CLI no longer reads, fails here.
 func TestTheCLIReadsExactlyTheNamesTheGoldenListsForIt(t *testing.T) {
-	rec := &recorder{asked: map[string]bool{}, env: map[string]string{
-		"XDG_RUNTIME_DIR": "/run/user/1", "XDG_STATE_HOME": "/state", "HOME": "/home/u",
-	}}
+	// Every name the golden lists gets an absolute path as its value, so that every place resolves.
+	rec := &recorder{asked: map[string]bool{}, env: map[string]string{}}
+	for _, n := range golden(t) {
+		rec.env[n.Name] = "/value/" + n.Name
+	}
 	var stdout, stderr bytes.Buffer
 	d := depsFrom(&stdout, &stderr, rec.getenv)
 	// -h makes each command build its flags, which is where the context flags read their defaults,

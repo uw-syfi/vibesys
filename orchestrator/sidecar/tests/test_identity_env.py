@@ -9,6 +9,7 @@ these tests read the environment of the process the scripted executor was asked 
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -119,7 +120,9 @@ def _open(
         ),
         preferred_id=SESSION,
     )
-    driver.open()
+    with tempfile.TemporaryDirectory() as directory:
+        launch.plugin.home = str(Path(directory) / "plugin-home")
+        driver.open()
     return executor, driver
 
 
@@ -132,7 +135,19 @@ def test_the_provider_process_gets_exactly_the_golden_names_with_the_launchs_val
     )
     assert executor.spawns, "the session never started its provider"
     for spawn in executor.spawns:
-        _check_environment(dict(spawn.env), launch, LOGIN_ENV, who="provider process")
+        _check_environment(
+            dict(spawn.env),
+            launch,
+            LOGIN_ENV
+            | {
+                (
+                    "CLAUDE_CONFIG_DIR"
+                    if launch.harness == orch.HARNESS_CLAUDE_CODE
+                    else "CODEX_HOME"
+                ): launch.plugin.home
+            },
+            who="provider process",
+        )
 
 
 @given(

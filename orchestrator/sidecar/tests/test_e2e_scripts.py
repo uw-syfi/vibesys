@@ -192,7 +192,7 @@ def _driver(provider: str, actor: Actor, turns: list[None]) -> AgentshimDriver:
     launch = h.launch(harness)
     return AgentshimDriver(
         lambda conversation_id: build_session(
-            launch, agent=agent, new_conversation_id=conversation_id
+            launch, agent=lambda _name, _identity: agent, new_conversation_id=conversation_id
         ),
         preferred_id="11111111-1111-4111-8111-111111111111",
     )

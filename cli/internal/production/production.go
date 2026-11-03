@@ -52,8 +52,7 @@ func (p Process) RuntimeDir() (runtimedir.Dir, error) {
 	return runtimedir.Open(p.RuntimePath(), p.UID, runtimedir.System())
 }
 
-// IndexDir is where the task index is: under XDG_STATE_HOME when it is an absolute path, and
-// otherwise under the state directory of the user's home.
+// IndexDir is where the task index is, which filestore decides from the environment and the home.
 func (p Process) IndexDir() string { return filestore.IndexDir(p.Getenv, p.Home) }
 
 // ClientOptions returns how a client reaches the daemon, starting it from this binary when none
