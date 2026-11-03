@@ -5,6 +5,11 @@ every call. Wait as `vibesys:measure` says and branch on the exit code.
 
 ## The base
 
+Prove the result path first. Before any long measurement, bring-up or tuning, one job of one
+sample must leave its number in `vibesys-cli show <base> --json` (`measure.value`). A benchmark
+whose number reaches only its logs, or a wrapper that loses the result file, wastes every run made
+before the break is found.
+
 ```
 vibesys-cli submit check <base> --wait --json
 vibesys-cli submit measure <base> --samples 5 --wait --json
@@ -18,8 +23,29 @@ vibesys-cli show <base> --json
   a workload too short to time, a cold cache, a background service, a timer of too coarse a grain.
 - One sample over a few minutes makes every comparison slow; shrink the workload while it still
   exercises the same path.
+- When the workload must stay as it is and the base itself is far too slow (a server that takes
+  many minutes per request, a default configuration nobody runs in production), dispatch a
+  bring-up pass before any measurement: a subagent applies the obvious fixes (configuration,
+  build flags, a known fast path) on a branch, and the check must still pass. Its commit becomes
+  the base. This leaves the task's version alone, and every later number is measured from the
+  faster base.
 - Set `relative_noise` in `objectives.toml` to the spread you saw, rounded up, if you declare it.
   That edit changes the task's version: measure the base again after it.
+
+## Honest variants
+
+Before the mutants, check that the gate admits correct code that is not bit-identical to the
+reference: the same program at another batch size or thread count, another build or another CPU.
+A numerical gate with fixed tolerances that only the reference itself can pass blocks every real
+optimization. Measure the error between such honest variants on the checker's own probes, and
+set tolerances above it, scaled where the output is uncertain, before you prove they still catch
+the mutants below.
+
+Per-token or per-output limits set above that noise also admit small systematic damage, because
+one short output cannot tell a shift from noise. Add at least one aggregate statistic over many
+tokens or outputs (a mean error over a varied corpus), whose noise shrinks with the count. Build
+long probes from varied text, never one repeated snippet, which hides damage that depends on
+distance, such as a shortened attention window.
 
 ## Mutants
 
@@ -32,6 +58,7 @@ optimizing agent might, by accident or on purpose. Write at least three, each on
 | Skipped work | return early on large inputs, process a sample of the input |
 | Benchmark gaming | detect the benchmark's input or seed and return a stored answer |
 | Broken guarantee | drop a lock, reorder writes, lose durability the scope requires |
+| Small systematic damage | one layer at lower precision, a shorter attention window, added noise |
 
 ```
 git switch -c vibesys-task/<task>-mutant-1 <base>
