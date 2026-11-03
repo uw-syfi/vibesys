@@ -18,6 +18,13 @@ func RunMessage(r core.Run) *pb.Run { return runOut(r) }
 // AgentMessage returns an agent as the contract states it.
 func AgentMessage(a core.Agent) *pb.Agent { return agentOut(a) }
 
+// TurnMessage returns a turn as the contract states it.
+func TurnMessage(t core.Turn) *pb.Turn { return turnOut(t) }
+
+// MailboxMessage returns a message between agents (a brief, a handoff, a report) as the contract
+// states it.
+func MailboxMessage(m core.Message) *pb.Message { return messageOut(m) }
+
 // ItemMessage returns an item as the contract states it.
 func ItemMessage(i core.Item) *pb.Item { return itemOut(i) }
 

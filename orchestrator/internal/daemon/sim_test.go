@@ -88,10 +88,14 @@ type view struct {
 	runs   map[string]*pb.Run
 	agents map[string]*pb.Agent
 	seq    uint64
+	// messages and turns are what the last snapshot held. Events after it are not folded into them.
+	messages []*pb.Message
+	turns    []*pb.Turn
 }
 
 func (v *view) snapshot(snap *pb.RunsSnapshot) {
 	v.runs, v.agents, v.seq = map[string]*pb.Run{}, map[string]*pb.Agent{}, snap.GetSequence()
+	v.messages, v.turns = snap.GetMessages(), snap.GetTurns()
 	for _, r := range snap.GetRuns() {
 		v.runs[r.GetId()] = r
 	}
@@ -694,6 +698,16 @@ func (s *sim) finish() {
 	// A client that connects now and one that stayed all along hold the same picture.
 	fresh := s.openRuns(0, view{})
 	s.compare(-1, fresh)
+	// Its snapshot holds every message and turn the store has, of every run, whatever the faults did.
+	var wantMessages []*pb.Message
+	var wantTurns []*pb.Turn
+	for _, run := range s.rig.Daemon.State().Runs() {
+		messages, turns := storedHistory(s.t, s.rig, run.ID)
+		wantMessages, wantTurns = append(wantMessages, messages...), append(wantTurns, turns...)
+	}
+	if !sameSet(fresh.v.messages, wantMessages) || !sameSet(fresh.v.turns, wantTurns) {
+		s.fail("a snapshot holds %d messages and %d turns, the store holds %d and %d", len(fresh.v.messages), len(fresh.v.turns), len(wantMessages), len(wantTurns))
+	}
 	for id, iw := range s.agents {
 		msgs, err := iw.w.Poll()
 		if err != nil {
@@ -711,6 +725,19 @@ func (s *sim) finish() {
 			}
 		}
 	}
+}
+
+// sameSet says two lists hold the same messages, in the same order.
+func sameSet[M proto.Message](a, b []M) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !proto.Equal(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *sim) compare(i int, w *simWatcher) {

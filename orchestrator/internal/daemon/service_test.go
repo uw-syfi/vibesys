@@ -2,15 +2,20 @@ package daemon_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
 func hello(client, min uint32) *pb.HelloRequest {
@@ -153,5 +158,76 @@ func TestAClientAheadOfTheLogIsToldToStartOver(t *testing.T) {
 	beginRun(t, rig)
 	if _, _, err := rig.Service.WatchRunsFrom(core.Operator{}, rig.Daemon.Last()+10); err == nil {
 		t.Fatal("a watch ahead of the log was accepted")
+	}
+}
+
+// A client that connects late learns what the run has already said and done from the snapshot: the
+// contract puts every message and turn of a run in it, however many pages the messages fill. A
+// snapshot without them left a client that opened after the lead reported with no report to show.
+func TestTheRunsSnapshotHoldsEveryMessageAndTurnOfTheRun(t *testing.T) {
+	for _, extra := range []int{0, 1, 5, store.MaxPageMessages + 3} {
+		t.Run(fmt.Sprintf("%d messages sent after the start", extra), func(t *testing.T) {
+			rig := daemontest.NewRig(t)
+			run, lead := beginRun(t, rig)
+			for i := range extra {
+				if _, err := rig.Service.Dispatch(context.Background(), &pb.DispatchRequest{Command: &pb.Command{
+					Id: fmt.Sprintf("tell-%d", i), Body: &pb.Command_SendMessage{SendMessage: &pb.SendMessage{AgentId: string(lead.ID), Text: "again"}}}}); err != nil {
+					t.Fatal(err)
+				}
+				rig.Settle(t)
+			}
+			wantMessages, wantTurns := storedHistory(t, rig, run.ID)
+			if len(wantMessages) < extra+1 || len(wantTurns) == 0 {
+				t.Fatalf("the run holds %d messages and %d turns; the test needs the history it checks", len(wantMessages), len(wantTurns))
+			}
+			w, first, err := rig.Service.WatchRunsFrom(core.Operator{}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer w.Close()
+			snap := first[0].GetSnapshot()
+			assertSame(t, "messages", snap.GetMessages(), wantMessages)
+			assertSame(t, "turns", snap.GetTurns(), wantTurns)
+		})
+	}
+}
+
+// storedHistory is what the store holds of a run's messages and turns, as the contract states them.
+func storedHistory(t *testing.T, rig *daemontest.Rig, run core.RunID) ([]*pb.Message, []*pb.Turn) {
+	t.Helper()
+	var messages []*pb.Message
+	for after := uint64(0); ; {
+		page, err := rig.Store.Messages(run, after, store.MaxPageMessages)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, rec := range page {
+			messages = append(messages, wire.MailboxMessage(rec.Message))
+			after = rec.Seq
+		}
+		if len(page) < store.MaxPageMessages {
+			break
+		}
+	}
+	window, err := rig.Store.Turns(run, time.Time{}, time.Date(9999, time.December, 31, 0, 0, 0, 0, time.UTC), store.MaxWindowTurns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var turns []*pb.Turn
+	for _, turn := range window.Turns {
+		turns = append(turns, wire.TurnMessage(turn))
+	}
+	return messages, turns
+}
+
+func assertSame[M proto.Message](t *testing.T, what string, got, want []M) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("the snapshot holds %d %s, the store holds %d", len(got), what, len(want))
+	}
+	for i := range want {
+		if !proto.Equal(got[i], want[i]) {
+			t.Fatalf("%s[%d]: the snapshot holds %v, the store holds %v", what, i, got[i], want[i])
+		}
 	}
 }
