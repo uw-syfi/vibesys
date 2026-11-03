@@ -15,21 +15,21 @@ Baselines are not examples and are not registered; shared evaluators are
 versioned packages under `resources/evaluators/`. Users start a run from an
 example with `vibesys example new` ([Running VibeSys](../running-vibesys.md)).
 
-## What New run shows about a task
+## Task metadata and objectives
 
-New run offers a task by its domain, served model, hardware and workload, read
-from the `[catalogue]` table of its `vibesys.input.toml`, never from a directory
-name: `domain` (`llm-serving`, `data-structures`, `databases` or
-`microservices`), `[catalogue.hardware]` (`accelerator`, `count`, `vendor`),
-`[catalogue.model]` (`name`, `maker`; required for `llm-serving`) and
-`[catalogue.workload]` (`name`, `description`; required for `data-structures`).
-The compute backend is the first of the file's `backends`. The objectives come
-from the task's `objectives.toml` (every in-tree task declares at least one) and the goal from its
-`OBJECTIVE.md`, cut at 32,000 characters. `vibesys example list --json` and the
-helper's `examples.list` (with `with_catalogue`, feature `example_catalogue`)
-carry them as each example's `task_details`. A task of an `external_repo`
-example declares its table in that repository and is listed without details
-until it does.
+In-tree examples declare `[catalogue]` metadata in `vibesys.input.toml`.
+The manifest reader validates its domain, hardware, model and workload fields.
+This metadata remains part of the task format; the retired desktop helper no
+longer exposes it as `task_details` or `examples.list`.
+
+The Python run CLI reads `objectives.toml` to select the metric axes and their
+`max` or `min` directions. Every in-tree task declares at least one objective.
+`OBJECTIVE.md` holds the task's goal. These files are validated independently
+of the example listing.
+
+`vibesys example list` prints categories, example names and task names as text.
+The legacy `example list --json` command is removed. Use `vibesys example new`
+to create a project, as described in [Running VibeSys](../running-vibesys.md).
 
 ## Static checks run for every example
 
@@ -57,9 +57,10 @@ check consumes it.
 | `validate` | Everything `vibesys validate` rejects, per task | Example path plus task |
 | `path-refs` | `${PROJECT_ROOT}/...` in check/measure (accuracy/benchmark) commands pointing at nothing | Example, task, path |
 | `trust-policy` | Files those commands read that the agent could edit, using `build_project_path_policy` on a scratch copy | Lists the writable files and the read-only set |
-| `candidate-build` | A task whose evaluator package requires candidate outputs (`candidate_outputs`) but declares no `[build]`, so every measurement fails its check (`InputBundle.missing_build`, the rule New run preflight applies too) | Example, task, the missing outputs |
+| `candidate-build` | A task whose evaluator package requires candidate outputs (`candidate_outputs`) but declares no `[build]`, so every measurement fails its check (`InputBundle.missing_build`, validated by the task input loader) | Example, task, the missing outputs |
 | `backend` | A task that declares no `backends`, so a run would fall back to the CLI's `cuda` default and fail a CPU task on a CPU-only host | Example, task |
-| `catalogue` | A task of an in-tree example with no `[catalogue]` table in its `vibesys.input.toml`, or an LLM-serving task whose table has no model and maker (see below) | Example, task |
+| `catalogue` | Missing or invalid catalogue metadata in an in-tree task, checked through the manifest reader | Example, task |
+| Objective direction | An in-tree task with no metric axis or an invalid `max`/`min` direction in `objectives.toml` | Example, task |
 | `candidate-import` | A task script that does `from main import ...` and does not put the project root on `sys.path` itself. Running `python .vibesys/tasks/<task>/<dir>/checker.py` puts the script's own directory there, not the root where the candidate's `main.py` lives | Script, and the line to add |
 | Stale references (repo-wide) | `examples/...` literals in workflows, scripts, docs, and READMEs whose target is gone | File and literal; exclusions live in the test with a comment |
 

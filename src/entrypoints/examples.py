@@ -219,12 +219,18 @@ def format_examples(checkout: Path) -> str:
     entries = sorted(
         load_registry(checkout).example, key=lambda entry: (entry.category, entry.name)
     )
-    return (
-        "\n".join(
-            f"{entry.name}  {', '.join(example_tasks(checkout / entry.path))}" for entry in entries
-        )
-        or "The catalog has no examples."
-    )
+    width = max((len(entry.name) for entry in entries), default=0)
+    category = None
+    lines: list[str] = []
+    for entry in entries:
+        if entry.category != category:
+            category = entry.category
+            lines.append(f"{category}:")
+        tasks = ", ".join(example_tasks(checkout / entry.path))
+        if not tasks:
+            tasks = "(external repository, not fetched)" if entry.external_repo else "(no tasks)"
+        lines.append(f"  {entry.name:<{width}}  {tasks}")
+    return "\n".join(lines) if lines else "The catalog has no examples."
 
 
 def _parser() -> argparse.ArgumentParser:

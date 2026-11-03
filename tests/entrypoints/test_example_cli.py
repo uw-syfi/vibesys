@@ -69,9 +69,12 @@ def test_human_list_groups_by_category(checkout: Path) -> None:
 
     assert code == 0
     assert stdout.splitlines() == [
-        "database/kv  default",
-        "serving/repositories/engine  ",
-        "structures/stack  mpmc, spsc",
+        "database:",
+        "  database/kv                  default",
+        "serving:",
+        "  serving/repositories/engine  (external repository, not fetched)",
+        "structures:",
+        "  structures/stack             mpmc, spsc",
     ]
 
 

@@ -43,7 +43,7 @@ from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
 )
-from vs_project.api import Project
+from vs_project.api import Project, load_objectives
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -198,6 +198,28 @@ def test_every_task_declares_the_backends_it_targets(entry: ExampleEntry) -> Non
         if not load_task(example_root(entry), task).declared_backends
     ]
     assert not undeclared, "\n".join(undeclared)
+
+
+@pytest.mark.parametrize(
+    "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
+)
+def test_every_task_describes_itself_to_the_catalogue(entry: ExampleEntry) -> None:
+    """In-tree example metadata stays valid through the shipping manifest reader."""
+    for task in Project.open(example_root(entry)).discover_tasks():
+        assert load_input_manifest(task.manifest_path).catalogue is not None, (
+            f"{entry.path} task={task.name.value}: declare [catalogue] in {task.manifest_path}"
+        )
+
+
+@pytest.mark.parametrize(
+    "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
+)
+def test_every_task_declares_which_way_its_objective_improves(entry: ExampleEntry) -> None:
+    """The run CLI consumes these metric axes and their validated max/min directions."""
+    for task in Project.open(example_root(entry)).discover_tasks():
+        assert load_objectives(task.manifest_path.parent).objective, (
+            f"{entry.path} task={task.name.value}: declare an [[objective]] (name, direction)"
+        )
 
 
 @pytest.mark.parametrize("entry", [_param(e, Check.PATH_REFS) for e in ENTRIES])
