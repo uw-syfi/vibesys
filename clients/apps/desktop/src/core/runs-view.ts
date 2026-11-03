@@ -50,7 +50,7 @@ export const makeRunsView = Effect.fn('RunsView.make')(function* (parts: HostPar
   };
   const statusAtom = Atom.keepAlive(Atom.subscriptionRef(status));
   const view: RunsView = {
-    watch: Atom.make(runFeed(ports, runsSpec(parts))),
+    watch: Atom.make(runFeed(ports, runsSpec(parts)).pipe(Effect.provideContext(parts.ambient))),
     status: statusAtom,
     freshness: Atom.make(get =>
       freshnessOf(get(connection.state), get(statusAtom), hasRuns(get(store.atom))),

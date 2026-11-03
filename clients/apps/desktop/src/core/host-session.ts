@@ -33,7 +33,8 @@ export const makeHostSession = Effect.fn('HostSession.make')(function* (
   const client = yield* makeOrchestratorClient(host);
   const connection = yield* makeHostConnection(client);
   const store = yield* makeHostStore;
-  const parts = {client, connection, store};
+  const ambient = yield* Effect.context<never>();
+  const parts = {client, connection, store, ambient};
   return {
     connection,
     model: store.atom,

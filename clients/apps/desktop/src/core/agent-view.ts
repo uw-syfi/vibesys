@@ -75,7 +75,7 @@ export const makeAgentView = Effect.fn('AgentView.make')(function* (parts: HostP
           },
           agentSpec(parts, agentId),
         );
-      }),
+      }).pipe(Effect.provideContext(parts.ambient)),
     ),
   );
   const view: AgentView = {

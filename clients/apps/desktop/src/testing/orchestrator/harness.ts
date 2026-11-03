@@ -3,6 +3,7 @@
  * with atoms mounted and unmounted. Time is the ambient clock, so a test under `TestClock` moves
  * it with `elapse`.
  */
+import * as Duration from 'effect/Duration';
 import * as Effect from 'effect/Effect';
 import type * as Atom from 'effect/reactivity/Atom';
 import * as AtomRegistry from 'effect/reactivity/AtomRegistry';
@@ -21,23 +22,24 @@ import type {FakeDaemon} from './fake-daemon.js';
 import {type DaemonOptions, daemonRecording, methodPathOf} from './recordings.js';
 
 export interface HarnessOptions extends DaemonOptions {
-  /** Link faults on the run stream (Hello and the other calls are never cut). */
-  readonly runStreamFaults?: FaultPlan;
+  /** Changes what the daemon's recording does, for faults the daemon options cannot express. */
+  readonly wrap?: (base: Recording) => Recording;
 }
 
-const onlyRunStream = (base: Recording, plan: FaultPlan): Recording => ({
-  respond: (target, nth) => {
-    const steps = base.respond(target, nth);
-    return target.method === methodPathOf('WatchRuns') ? faultySteps(steps, plan, nth) : steps;
-  },
-});
+/** `plan` laid over the calls to one method only (Hello and the rest are never cut). */
+export const faultsOn =
+  (method: string, plan: FaultPlan) =>
+  (base: Recording): Recording => ({
+    respond: (target, nth) => {
+      const steps = base.respond(target, nth);
+      return target.method === methodPathOf(method) ? faultySteps(steps, plan, nth) : steps;
+    },
+  });
 
 export const hostHarness = (daemon: FakeDaemon, options: HarnessOptions = {}) =>
   Effect.gen(function* () {
     const base = daemonRecording(daemon, options);
-    const fake = makeFakeTransport(
-      options.runStreamFaults === undefined ? base : onlyRunStream(base, options.runStreamFaults),
-    );
+    const fake = makeFakeTransport(options.wrap === undefined ? base : options.wrap(base));
     const session: HostSession = yield* makeHostSession('local').pipe(
       Effect.provide(fake.layer),
       Effect.provide(Ids.layer),
@@ -58,12 +60,12 @@ export const hostHarness = (daemon: FakeDaemon, options: HarnessOptions = {}) =>
         yield* settle;
         return registry.get(session.model) as HostModel;
       }),
-      /** Let `seconds` of virtual time pass, one second at a time, giving fibers their turns. */
-      elapse: (seconds: number) =>
+      /** Let `seconds` of virtual time pass in steps, giving fibers their turns after each. */
+      elapse: (seconds: number, stepSeconds = 1) =>
         Effect.gen(function* () {
           yield* settle;
-          for (let second = 0; second < seconds; second += 1) {
-            yield* TestClock.adjust('1 second');
+          for (let passed = 0; passed < seconds; passed += stepSeconds) {
+            yield* TestClock.adjust(Duration.seconds(stepSeconds));
             yield* settle;
           }
         }),

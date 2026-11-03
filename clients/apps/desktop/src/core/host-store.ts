@@ -1,4 +1,5 @@
 /** The one store both streams fold into, and what every view needs to build on it. */
+import type * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
 import * as Atom from 'effect/reactivity/Atom';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
@@ -22,4 +23,10 @@ export interface HostParts {
   readonly client: OrchestratorClient;
   readonly connection: HostConnectionApi;
   readonly store: HostStore;
+  /**
+   * The ambient services (clock, randomness) the session was built under. Atoms run their effects
+   * on the registry's own runtime, so a feed provides these to keep time and randomness the
+   * session's, not the registry's.
+   */
+  readonly ambient: Context.Context<never>;
 }
