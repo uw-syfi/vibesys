@@ -58,6 +58,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 			return core.SubmitOutcome{}, err
 		}
 	}
+	ctx = a.generationContext(ctx, storeIDOf(scope))
 	st, err := a.createStore(ctx, scope)
 	if err != nil {
 		return core.SubmitOutcome{}, err
@@ -79,13 +80,14 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	}
 	if out.Disposition != core.SubmitReused && out.Job.State == core.JobQueued {
 		// Settled, so that a submission that returned is in Status.
-		a.settle(message{
-			event: admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job),
-			scope: &scope, changed: true,
+		a.settleEffect(ctx, message{
+			readable: true,
+			event:    admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job),
+			scope:    &scope, changed: true,
 		})
 		return out, nil
 	}
-	a.notifyJobs()
+	a.settleEffect(ctx, message{event: lifecycle.StoreRead{Store: storeIDOf(scope)}, readable: true, scope: &scope, changed: true})
 	return out, nil
 }
 

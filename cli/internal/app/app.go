@@ -57,7 +57,10 @@ type message struct {
 	event lifecycle.Event
 	// generation rejects replies from a store forgotten since the read or effect
 	// started. postEffect attaches the token captured in its context.
-	generation *effectGeneration
+	generation  *effectGeneration
+	observation *storeObservation
+	// readable supersedes older reads and clears unread state in the same loop step.
+	readable bool
 	// scope, when set, is the scope of the store the event's job is in.
 	scope *core.Scope
 	// handle, when set, reaches the event's job's supervisor.
@@ -157,7 +160,7 @@ func (a *App) loop() {
 		case <-a.ctx.Done():
 			return
 		}
-		if g := m.generation; g != nil && !a.generations.current(g) {
+		if (m.generation != nil && !a.generations.current(m.generation)) || (m.observation != nil && !a.generations.observed(m.observation)) {
 			if m.handle != nil {
 				m.handle.Close()
 			}
@@ -171,7 +174,15 @@ func (a *App) loop() {
 		}
 		var reqs []lifecycle.Request
 		before := state
-		state, reqs = lifecycle.Step(state, m.event)
+		if m.readable {
+			a.generations.advance(m.generation)
+			if _, read := m.event.(lifecycle.StoreRead); !read {
+				state, reqs = lifecycle.Step(state, lifecycle.StoreRead{Store: m.generation.store})
+			}
+		}
+		var more []lifecycle.Request
+		state, more = lifecycle.Step(state, m.event)
+		reqs = append(reqs, more...)
 		// Before any effect starts: whoever sees an effect's work in a store finds the counts
 		// already past it.
 		a.publish(state, scopes, m.changed)
