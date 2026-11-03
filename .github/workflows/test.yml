@@ -161,6 +161,9 @@ jobs:
       - name: Check doc code citations
         run: python3 -m scripts.check_doc_citations
 
+      - name: Check conceptual architecture
+        run: python3 -m scripts.check_architecture_conceptual
+
       # Here as well as in python_quality: `.repoctl/components.toml` ignores `.agents/`,
       # so a skills-only change selects no Python job. Stdlib only, about a second.
       - name: Check agent skills
