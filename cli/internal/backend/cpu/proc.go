@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -15,24 +16,45 @@ import (
 )
 
 // ParseCPUInfo reads /proc/cpuinfo: the model name of the first processor that has one, and how
-// many processors there are. The model name is empty on a machine whose cpuinfo does not carry one.
+// many processors there are. An arm64 kernel names no model, only each core's implementer and
+// part, so the model of a cpuinfo without a name is those of all its cores, such as
+// "implementer 0x41 part 0xd85+0xd87" for a machine of two kinds of core: machines of other cores
+// get another model. The model name is empty on a machine whose cpuinfo carries neither.
 func ParseCPUInfo(text string) (model string, processors int) {
+	var implementers, parts []string
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	for scanner.Scan() {
 		key, value, ok := strings.Cut(scanner.Text(), ":")
 		if !ok {
 			continue
 		}
+		value = strings.Join(strings.Fields(value), " ")
 		switch strings.TrimSpace(key) {
 		case "processor":
 			processors++
 		case "model name", "Model", "Hardware", "cpu model", "Processor":
 			if model == "" {
-				model = strings.Join(strings.Fields(value), " ")
+				model = value
 			}
+		case "CPU implementer":
+			implementers = appendNew(implementers, value)
+		case "CPU part":
+			parts = appendNew(parts, value)
 		}
 	}
+	if model == "" && len(implementers) > 0 && len(parts) > 0 {
+		slices.Sort(implementers)
+		slices.Sort(parts)
+		model = "implementer " + strings.Join(implementers, "+") + " part " + strings.Join(parts, "+")
+	}
 	return model, processors
+}
+
+func appendNew(values []string, v string) []string {
+	if v == "" || slices.Contains(values, v) {
+		return values
+	}
+	return append(values, v)
 }
 
 // ParseMemInfo reads /proc/meminfo: the total memory and the memory available to start a program,

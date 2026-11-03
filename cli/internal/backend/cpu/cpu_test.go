@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -162,6 +163,46 @@ func TestParseCPUInfo(t *testing.T) {
 	}
 	if model, n := cpu.ParseCPUInfo(""); model != "" || n != 0 {
 		t.Errorf("ParseCPUInfo of nothing = %q, %d", model, n)
+	}
+}
+
+// An arm64 kernel names no model, only each core's implementer and part: the model is the set of
+// them, whatever order the cores are listed in, so machines of other cores get another model.
+func TestTheModelOfAnArmMachineIsItsCores(t *testing.T) {
+	rng := rand.New(rand.NewSource(3))
+	kinds := []string{"0xd85", "0xd87", "0xd4f", "0xd40"}
+	for i := 0; i < 200; i++ {
+		var cores []string
+		have := map[string]bool{}
+		for n := 1 + rng.Intn(24); len(cores) < n; {
+			part := kinds[rng.Intn(len(kinds))]
+			cores, have[part] = append(cores, part), true
+		}
+		var want []string
+		for _, k := range kinds {
+			if have[k] {
+				want = append(want, k)
+			}
+		}
+		slices.Sort(want)
+		render := func(order []string) string {
+			var b strings.Builder
+			for j, part := range order {
+				fmt.Fprintf(&b, "processor\t: %d\nBogoMIPS\t: 2000.00\nCPU implementer\t: 0x41\nCPU part\t: %s\nCPU variant\t: 0x0\n\n", j, part)
+			}
+			return b.String()
+		}
+		model, n := cpu.ParseCPUInfo(render(cores))
+		if wantModel := "implementer 0x41 part " + strings.Join(want, "+"); model != wantModel || n != len(cores) {
+			t.Fatalf("cores %v: ParseCPUInfo = %q, %d; want %q, %d", cores, model, n, wantModel, len(cores))
+		}
+		rng.Shuffle(len(cores), func(a, b int) { cores[a], cores[b] = cores[b], cores[a] })
+		if again, _ := cpu.ParseCPUInfo(render(cores)); again != model {
+			t.Fatalf("cores %v in another order: model %q, want %q", cores, again, model)
+		}
+	}
+	if model, _ := cpu.ParseCPUInfo("processor\t: 0\nmodel name\t: Named\nCPU implementer\t: 0x41\nCPU part\t: 0xd85\n"); model != "Named" {
+		t.Errorf("a cpuinfo that names its model: %q, want the name", model)
 	}
 }
 
