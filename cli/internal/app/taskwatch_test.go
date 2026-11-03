@@ -122,13 +122,12 @@ func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 				var submitted []core.JobID
 				away := false
 				for step := 0; step < 14; step++ {
+					synctest.Wait()
 					switch op := r.IntN(10); {
 					case op < 5 && !away:
 						job := submitAs(t, a, callA, "print", fmt.Sprint(seed, step), ";", "exit", "0")
 						submitted = append(submitted, job.ID)
-						// A sweep can still report the preceding outage after Submit.
-						// Recovery needs the slow period even though the repository is back.
-						o.awaitFinalIn(t, a, scopeA, job.ID)
+						o.awaitFinal(t, a, scopeA, job.ID)
 					case op < 7 && !away:
 						o.takeAway(repoA)
 						away = true
@@ -148,6 +147,7 @@ func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 					// Eventual convergence includes the slow fallback for unannounced
 					// restoration and a bounded task fold that did not settle.
 					v := converge(t, a, wt, o, scopeA, true)
+					synctest.Wait()
 					if v.Content == nil {
 						continue
 					}
