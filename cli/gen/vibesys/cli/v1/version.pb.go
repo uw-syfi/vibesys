@@ -23,14 +23,16 @@ const (
 
 // Component names a process role that speaks this contract. The CLI and the daemon are the two
 // ends of every call; the job supervisor runs one per job and must stay compatible with the
-// daemon that started it across upgrades.
+// daemon that started it across upgrades. The orchestrator is a second client of the daemon: it
+// reads a task's state through WatchTask and does not run commands.
 type Component int32
 
 const (
-	Component_COMPONENT_UNSPECIFIED Component = 0
-	Component_COMPONENT_CLI         Component = 1
-	Component_COMPONENT_DAEMON      Component = 2
-	Component_COMPONENT_SUPERVISOR  Component = 3
+	Component_COMPONENT_UNSPECIFIED  Component = 0
+	Component_COMPONENT_CLI          Component = 1
+	Component_COMPONENT_DAEMON       Component = 2
+	Component_COMPONENT_SUPERVISOR   Component = 3
+	Component_COMPONENT_ORCHESTRATOR Component = 4
 )
 
 // Enum value maps for Component.
@@ -40,12 +42,14 @@ var (
 		1: "COMPONENT_CLI",
 		2: "COMPONENT_DAEMON",
 		3: "COMPONENT_SUPERVISOR",
+		4: "COMPONENT_ORCHESTRATOR",
 	}
 	Component_value = map[string]int32{
-		"COMPONENT_UNSPECIFIED": 0,
-		"COMPONENT_CLI":         1,
-		"COMPONENT_DAEMON":      2,
-		"COMPONENT_SUPERVISOR":  3,
+		"COMPONENT_UNSPECIFIED":  0,
+		"COMPONENT_CLI":          1,
+		"COMPONENT_DAEMON":       2,
+		"COMPONENT_SUPERVISOR":   3,
+		"COMPONENT_ORCHESTRATOR": 4,
 	}
 )
 
@@ -218,12 +222,13 @@ const file_vibesys_cli_v1_version_proto_rawDesc = "" +
 	"\x0ebinary_version\x18\x01 \x01(\tR\rbinaryVersion\x12)\n" +
 	"\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x120\n" +
 	"\x14min_protocol_version\x18\x03 \x01(\rR\x12minProtocolVersion\x12%\n" +
-	"\x0eschema_version\x18\x04 \x01(\rR\rschemaVersion*i\n" +
+	"\x0eschema_version\x18\x04 \x01(\rR\rschemaVersion*\x85\x01\n" +
 	"\tComponent\x12\x19\n" +
 	"\x15COMPONENT_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rCOMPONENT_CLI\x10\x01\x12\x14\n" +
 	"\x10COMPONENT_DAEMON\x10\x02\x12\x18\n" +
-	"\x14COMPONENT_SUPERVISOR\x10\x03*\x90\x01\n" +
+	"\x14COMPONENT_SUPERVISOR\x10\x03\x12\x1a\n" +
+	"\x16COMPONENT_ORCHESTRATOR\x10\x04*\x90\x01\n" +
 	"\rCompatibility\x12\x1d\n" +
 	"\x19COMPATIBILITY_UNSPECIFIED\x10\x00\x12\x1c\n" +
 	"\x18COMPATIBILITY_COMPATIBLE\x10\x01\x12 \n" +

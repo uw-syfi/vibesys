@@ -1,0 +1,250 @@
+{
+  "description": "a stream cut after its Reset and before its CaughtUp: the next stream resets again and has the whole state",
+  "judged_commits": 0,
+  "setup": [
+    {
+      "op": "measure",
+      "commit": "c0",
+      "samples": "level"
+    }
+  ],
+  "ops": [
+    {
+      "op": "create_plan",
+      "title": "after the cut",
+      "body": "b"
+    }
+  ],
+  "cuts": [
+    2
+  ],
+  "expect": [
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "checkJobId": "j1",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j1",
+                "key": "seed-1",
+                "resultJobId": "j1",
+                "spec": {
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST",
+                  "measure": {
+                    "samples": 5
+                  }
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_SUCCEEDED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "at": "T"
+                  }
+                ]
+              }
+            },
+            {
+              "result": {
+                "commit": "c0",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "jobId": "j1",
+                "key": "seed-1",
+                "load": {
+                  "loadAverage1m": 0.25,
+                  "sampledAt": "T"
+                },
+                "machine": {
+                  "arch": "amd64",
+                  "hostId": "host",
+                  "logicalCpus": 8,
+                  "memoryBytes": "17179869184",
+                  "os": "linux"
+                },
+                "measure": {
+                  "checkJobId": "j1",
+                  "metric": {
+                    "direction": "DIRECTION_MAXIMIZE",
+                    "name": "ops"
+                  },
+                  "samples": [
+                    100,
+                    101,
+                    99,
+                    100,
+                    102
+                  ],
+                  "value": 100.4
+                },
+                "recordedAt": "T",
+                "schemaVersion": 1,
+                "task": "kv-store",
+                "taskVersion": "v1"
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "checkJobId": "j1",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j1",
+                "key": "seed-1",
+                "resultJobId": "j1",
+                "spec": {
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST",
+                  "measure": {
+                    "samples": 5
+                  }
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_SUCCEEDED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "at": "T"
+                  }
+                ]
+              }
+            },
+            {
+              "result": {
+                "commit": "c0",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "jobId": "j1",
+                "key": "seed-1",
+                "load": {
+                  "loadAverage1m": 0.25,
+                  "sampledAt": "T"
+                },
+                "machine": {
+                  "arch": "amd64",
+                  "hostId": "host",
+                  "logicalCpus": 8,
+                  "memoryBytes": "17179869184",
+                  "os": "linux"
+                },
+                "measure": {
+                  "checkJobId": "j1",
+                  "metric": {
+                    "direction": "DIRECTION_MAXIMIZE",
+                    "name": "ops"
+                  },
+                  "samples": [
+                    100,
+                    101,
+                    99,
+                    100,
+                    102
+                  ],
+                  "value": 100.4
+                },
+                "recordedAt": "T",
+                "schemaVersion": 1,
+                "task": "kv-store",
+                "taskVersion": "v1"
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "plan": {
+                "body": "b",
+                "createdAt": "T",
+                "number": 1,
+                "status": "PLAN_STATUS_OPEN",
+                "title": "after the cut",
+                "updatedAt": "T"
+              }
+            }
+          ]
+        },
+        "sequence": "4"
+      }
+    ]
+  ]
+}

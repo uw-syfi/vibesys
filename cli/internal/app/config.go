@@ -62,6 +62,9 @@ type Config struct {
 	// batch is this big, or when its first byte has waited this long.
 	LogBatchBytes int
 	LogBatchDelay time.Duration
+	// Epoch names this boot of the daemon in the streams that report a task's state: a client
+	// resumes only within one. It defaults to a name made from the time the App started.
+	Epoch string
 	// Logf receives the daemon's own diagnostics: what it could not do and will retry. It may be
 	// nil.
 	Logf func(format string, args ...any)

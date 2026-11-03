@@ -238,7 +238,9 @@ func (a *App) carryOut(ctx context.Context, t taskStore, branch string, approved
 			recorded = true
 		case core.MoveBranchStep:
 			recorded = true
-			if err := a.cfg.Branches.FastForward(ctx, string(t.scope.Repository()), branch, step.From, step.To); err != nil {
+			err := a.cfg.Branches.FastForward(ctx, string(t.scope.Repository()), branch, step.From, step.To)
+			a.tasksChanged.Notify()
+			if err != nil {
 				return fail(err)
 			}
 		case core.PromotionDoneStep:
@@ -341,7 +343,9 @@ func (a *App) settledHead(ctx context.Context, t taskStore) (core.Commit, error)
 	if !pending {
 		return head, nil // done, or moved by someone else, and then it is theirs
 	}
-	if err := a.cfg.Branches.FastForward(ctx, string(t.scope.Repository()), branch, move.From, move.To); err != nil {
+	err = a.cfg.Branches.FastForward(ctx, string(t.scope.Repository()), branch, move.From, move.To)
+	a.tasksChanged.Notify()
+	if err != nil {
 		return "", err
 	}
 	return move.To, nil

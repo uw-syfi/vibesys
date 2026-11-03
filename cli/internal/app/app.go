@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,6 +43,12 @@ type App struct {
 
 	jobsChanged changed.Signal
 	logsChanged changed.Signal
+	// tasksChanged wakes whoever watches a task: it is notified after every call that may have
+	// changed a task's store (see boundedStores), after the result branch moves, whenever a job
+	// changes or is in trouble, and by the slow period's look.
+	tasksChanged changed.Signal
+	// epoch names this boot of the daemon, for the streams that report a task's state.
+	epoch string
 }
 
 // message is an event for the machine, with what the loop must keep because of it.
@@ -76,13 +84,17 @@ type view struct {
 // stores and the supervisors hold.
 func New(cfg Config) *App {
 	cfg = cfg.withDefaults()
-	cfg.Stores = boundedStores{inner: cfg.Stores, timers: cfg.Timers, limit: cfg.CallTimeout}
 	sups := newOwnedSupervisors(cfg.Supervisors)
 	cfg.Supervisors = sups
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &App{
 		cfg: cfg, ctx: ctx, cancel: cancel, startedAt: cfg.Clock.Now(), sups: sups,
 		inbox: make(chan message),
+	}
+	a.cfg.Stores = boundedStores{inner: cfg.Stores, timers: cfg.Timers, limit: cfg.CallTimeout, tasks: &a.tasksChanged}
+	a.epoch = cfg.Epoch
+	if a.epoch == "" {
+		a.epoch = strconv.FormatInt(a.startedAt.UnixNano(), 36)
 	}
 	a.view.Store(&view{})
 	a.group.Go(a.loop)
@@ -260,6 +272,9 @@ func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]core.Scope
 	}
 	last := a.view.Load()
 	a.view.Store(next)
+	if !reflect.DeepEqual(next.trouble, last.trouble) || !reflect.DeepEqual(next.waits, last.waits) {
+		a.tasksChanged.Notify()
+	}
 	// One wake-up for a message, whatever it did: a waiter that re-arms between two would look once
 	// or twice, by the scheduler's choice. Only what is new ends a wait. One that passes is seen at
 	// the next change of the job.
@@ -300,6 +315,7 @@ func (a *App) now() time.Time { return a.cfg.Clock.Now() }
 func (a *App) notifyJobs() {
 	a.jobsChanged.Notify()
 	a.logsChanged.Notify()
+	a.tasksChanged.Notify()
 }
 
 // failureOf is the failure an error stands for.

@@ -32,6 +32,7 @@ func Run(t *testing.T, newStore New) {
 		name string
 		run  func(*testing.T, New)
 	}{
+		{"snapshot", testSnapshot},
 		{"submit", testSubmit},
 		{"transition", testTransition},
 		{"notes", testNotes},

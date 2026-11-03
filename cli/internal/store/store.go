@@ -39,7 +39,17 @@ import (
 //     is ever reused.
 //
 // Values come back as copies: changing one never changes the store.
+// TaskSnapshot is a single store revision. Its values are independent copies.
+type TaskSnapshot struct {
+	Revision   uint64
+	Jobs       []core.Job
+	Results    []core.Result
+	Promotions []core.Promotion
+	Plans      []core.Plan
+}
+
 type Store interface {
+	Snapshot(context.Context) (TaskSnapshot, error)
 	JobStore
 	ResultStore
 	PlanStore
@@ -137,6 +147,12 @@ var ErrNoStore = errors.New("no store was made here")
 // owner that lost the store. Whoever gets it holds what it knows and tries again later. A failure
 // that does not carry it is the store's answer.
 var ErrAway = errors.New("the store is away")
+
+// ErrOwnedElsewhere marks a refusal that says another daemon, or another place, owns the store: a
+// store is held by another daemon, or has running jobs that belong to another place. It always
+// comes with ErrAway. A reader that reports the store's state names it, rather than a store that
+// is merely out of reach.
+var ErrOwnedElsewhere = errors.New("the store is owned elsewhere")
 
 // ErrGone marks a failure that says the place of a store that was made is not there: its
 // repository or its directory does not exist. It comes with ErrAway, as a disk that is not mounted

@@ -660,3 +660,10 @@ func TestALineSayingAJobRunsAgainMatchesItsRecordedAttempts(t *testing.T) {
 		}
 	}
 }
+
+func (s crashStore) Snapshot(ctx context.Context) (store.TaskSnapshot, error) {
+	if err := s.c.read(); err != nil {
+		return store.TaskSnapshot{}, err
+	}
+	return s.Store.Snapshot(ctx)
+}

@@ -1,0 +1,695 @@
+{
+  "lifecycle": true,
+  "description": "Distinct created, joined and reused submitters survive final result publication, ownership loss, return, and daemon crash/reopen",
+  "judged_commits": 0,
+  "setup": [],
+  "ops": [
+    {
+      "op": "submit",
+      "run": "run-a",
+      "agent": "lead",
+      "commit": "c0"
+    },
+    {
+      "op": "submit",
+      "run": "run-b",
+      "agent": "lead",
+      "commit": "c0"
+    },
+    {
+      "op": "start",
+      "job": "j1"
+    },
+    {
+      "op": "finish",
+      "job": "j1"
+    },
+    {
+      "op": "submit",
+      "run": "run-c",
+      "agent": "lead",
+      "commit": "c0"
+    },
+    {
+      "op": "owner_loss"
+    },
+    {
+      "op": "owner_return"
+    },
+    {
+      "op": "crash_reopen"
+    }
+  ],
+  "cuts": [
+    1,
+    2
+  ],
+  "expect": [
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "id": "j1",
+                "key": "corpus-check",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "state": "JOB_STATE_QUEUED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "id": "j1",
+                "key": "corpus-check",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "state": "JOB_STATE_QUEUED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  },
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-b"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "id": "j1",
+                "key": "corpus-check",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_RUNNING",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  },
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-b"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j1",
+                "key": "corpus-check",
+                "resultJobId": "j1",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_SUCCEEDED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  },
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-b"
+                  }
+                ]
+              }
+            },
+            {
+              "result": {
+                "check": {
+                  "duration": "1s"
+                },
+                "commit": "c0",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "jobId": "j1",
+                "key": "corpus-check",
+                "load": {},
+                "machine": {},
+                "recordedAt": "T",
+                "schemaVersion": 1,
+                "task": "task",
+                "taskVersion": "v1"
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j1",
+                "key": "corpus-check",
+                "resultJobId": "j1",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_SUCCEEDED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  },
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-b"
+                  },
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-c"
+                  }
+                ]
+              }
+            },
+            {
+              "result": {
+                "check": {
+                  "duration": "1s"
+                },
+                "commit": "c0",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "jobId": "j1",
+                "key": "corpus-check",
+                "load": {},
+                "machine": {},
+                "recordedAt": "T",
+                "schemaVersion": 1,
+                "task": "task",
+                "taskVersion": "v1"
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "away": {
+                  "failure": {
+                    "kind": "FAILURE_KIND_CONFLICT",
+                    "message": "store owned elsewhere"
+                  },
+                  "reason": "AWAY_REASON_OWNED_ELSEWHERE"
+                }
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j1",
+                "key": "corpus-check",
+                "resultJobId": "j1",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_SUCCEEDED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  },
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-b"
+                  },
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-c"
+                  }
+                ]
+              }
+            },
+            {
+              "result": {
+                "check": {
+                  "duration": "1s"
+                },
+                "commit": "c0",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "jobId": "j1",
+                "key": "corpus-check",
+                "load": {},
+                "machine": {},
+                "recordedAt": "T",
+                "schemaVersion": 1,
+                "task": "task",
+                "taskVersion": "v1"
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ],
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j1",
+                "key": "corpus-check",
+                "resultJobId": "j1",
+                "spec": {
+                  "check": {},
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST"
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_SUCCEEDED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-a"
+                  },
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-b"
+                  },
+                  {
+                    "agent": "lead",
+                    "at": "T",
+                    "runId": "run-c"
+                  }
+                ]
+              }
+            },
+            {
+              "result": {
+                "check": {
+                  "duration": "1s"
+                },
+                "commit": "c0",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "jobId": "j1",
+                "key": "corpus-check",
+                "load": {},
+                "machine": {},
+                "recordedAt": "T",
+                "schemaVersion": 1,
+                "task": "task",
+                "taskVersion": "v1"
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      }
+    ]
+  ]
+}

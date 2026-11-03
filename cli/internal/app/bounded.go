@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/changed"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
@@ -24,6 +25,17 @@ type boundedStores struct {
 	inner  Stores
 	timers clock.Timers
 	limit  time.Duration
+	// tasks, when set, is notified after every call that may have changed what a task's store
+	// holds, whatever the call said: a call that failed may have landed, and the one that watches
+	// a task reads the store again to know. Reads never notify, or a reader would wake itself.
+	tasks *changed.Signal
+}
+
+// touched wakes whoever watches the tasks, after a call that may have changed one.
+func touched(tasks *changed.Signal) {
+	if tasks != nil {
+		tasks.Notify()
+	}
 }
 
 // errNoAnswer says a store did not answer in time, and it is marked as away, which says nothing of
@@ -62,7 +74,7 @@ func (s boundedStores) store(st store.Store, err error) (store.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return boundedStore{inner: st, timers: s.timers, limit: s.limit}, nil
+	return boundedStore{inner: st, timers: s.timers, limit: s.limit, tasks: s.tasks}, nil
 }
 
 func (s boundedStores) Find(ctx context.Context, scope core.Scope) (store.Store, error) {
@@ -70,6 +82,7 @@ func (s boundedStores) Find(ctx context.Context, scope core.Scope) (store.Store,
 }
 
 func (s boundedStores) Create(ctx context.Context, scope core.Scope) (store.Store, error) {
+	defer touched(s.tasks)
 	return s.store(bounded(ctx, s.timers, s.limit, func(ctx context.Context) (store.Store, error) { return s.inner.Create(ctx, scope) }))
 }
 
@@ -78,6 +91,7 @@ func (s boundedStores) Known(ctx context.Context) ([]core.Scope, error) {
 }
 
 func (s boundedStores) Forget(ctx context.Context, scope core.Scope) error {
+	defer touched(s.tasks)
 	_, err := bounded(ctx, s.timers, s.limit, func(ctx context.Context) (struct{}, error) { return struct{}{}, s.inner.Forget(ctx, scope) })
 	return err
 }
@@ -87,6 +101,7 @@ func (s boundedStores) GivenUp(ctx context.Context, scope core.Scope) ([]core.Jo
 }
 
 func (s boundedStores) Reclaim(ctx context.Context, scope core.Scope, job core.JobID) error {
+	defer touched(s.tasks)
 	_, err := bounded(ctx, s.timers, s.limit, func(ctx context.Context) (struct{}, error) { return struct{}{}, s.inner.Reclaim(ctx, scope, job) })
 	return err
 }
@@ -99,6 +114,7 @@ type boundedStore struct {
 	inner  store.Store
 	timers clock.Timers
 	limit  time.Duration
+	tasks  *changed.Signal
 }
 
 var _ store.Store = boundedStore{}
@@ -108,6 +124,7 @@ func call[T any](s boundedStore, ctx context.Context, do func(store.Store, conte
 }
 
 func (s boundedStore) Submit(ctx context.Context, sub core.Submission) (core.SubmitOutcome, error) {
+	defer touched(s.tasks)
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.SubmitOutcome, error) { return st.Submit(ctx, sub) })
 }
 
@@ -120,10 +137,12 @@ func (s boundedStore) Jobs(ctx context.Context, filter core.JobFilter) ([]core.J
 }
 
 func (s boundedStore) Transition(ctx context.Context, t core.Transition) (core.Job, error) {
+	defer touched(s.tasks)
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Job, error) { return st.Transition(ctx, t) })
 }
 
 func (s boundedStore) AddNote(ctx context.Context, id core.JobID, note core.Note) (core.Job, error) {
+	defer touched(s.tasks)
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Job, error) { return st.AddNote(ctx, id, note) })
 }
 
@@ -132,6 +151,7 @@ func (s boundedStore) Results(ctx context.Context, filter core.ResultFilter) ([]
 }
 
 func (s boundedStore) RecordPromotion(ctx context.Context, p core.Approved) error {
+	defer touched(s.tasks)
 	_, err := call(s, ctx, func(st store.Store, ctx context.Context) (struct{}, error) {
 		return struct{}{}, st.RecordPromotion(ctx, p)
 	})
@@ -143,6 +163,7 @@ func (s boundedStore) Promotions(ctx context.Context) ([]core.Promotion, error) 
 }
 
 func (s boundedStore) CreatePlan(ctx context.Context, plan core.NewPlan) (core.Plan, error) {
+	defer touched(s.tasks)
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Plan, error) { return st.CreatePlan(ctx, plan) })
 }
 
@@ -155,6 +176,7 @@ func (s boundedStore) Plans(ctx context.Context, filter core.PlanFilter) ([]core
 }
 
 func (s boundedStore) EditPlan(ctx context.Context, number core.PlanNumber, edit core.PlanEdit) (core.Plan, error) {
+	defer touched(s.tasks)
 	return call(s, ctx, func(st store.Store, ctx context.Context) (core.Plan, error) { return st.EditPlan(ctx, number, edit) })
 }
 
@@ -335,3 +357,7 @@ func (a *App) endRun(ctx context.Context, run supervisor.Run) error {
 
 // errMayLive says nothing proves a supervisor gone.
 var errMayLive = errors.New("what is left of its supervisor may still live")
+
+func (s boundedStore) Snapshot(ctx context.Context) (store.TaskSnapshot, error) {
+	return call(s, ctx, func(st store.Store, ctx context.Context) (store.TaskSnapshot, error) { return st.Snapshot(ctx) })
+}

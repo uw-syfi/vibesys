@@ -233,6 +233,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `plan edit <n> [--title t] [--body text \| --body-file path] [--status s]` | Change what is given and keep the rest. |
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
+| `daemon ensure` | Make sure a compatible daemon answers, starting one if none runs (the start protocol below). It prints `ready`, the pid and the version, or the daemon's status with `--json`. It exits `0` when a daemon answers and `4` when none does, whatever the reason, and the message says why; only a malformed command exits `2`. A program that starts the daemon, such as the orchestrator, runs this and reads the exit code. |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon status` with no daemon prints `not running` (with `--json`, an `UNAVAILABLE` `Failure`) and exits `4`. `daemon install` is not available yet (exit `2`). |
 | `daemon forget <repository>` | Give up a repository that is gone for good, such as a store an older daemon made inside a removed linked worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. The answer comes after the supervisor directories of the repository's other jobs are removed, so none is listed after it but the ones reported left. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
 
@@ -256,7 +257,7 @@ command's own yes or no, how a `wait` ended (a `WaitOutcomeKind`), or the kind o
 | 1 | the answer is no | `SOME_FAILED`, `FIRST_FAILED`; a refused promote; no current result; `CONFLICT`, `ENVIRONMENT_MISMATCH`, `NOT_MEASURED` |
 | 2 | invalid input | usage errors; `INVALID_INPUT`, `NOT_FOUND` |
 | 3 | timed out | `TIMED_OUT` |
-| 4 | no answer | `UNAVAILABLE`, `INCOMPATIBLE`, `INTERNAL`, `UNSPECIFIED`; a kind or outcome this build does not know; a wait that could not learn how its jobs ended; no daemon for `daemon status` |
+| 4 | no answer | `UNAVAILABLE`, `INCOMPATIBLE`, `INTERNAL`, `UNSPECIFIED`; a kind or outcome this build does not know; a wait that could not learn how its jobs ended; no daemon for `daemon status` or `daemon ensure` |
 
 Exit `4` says nothing about the jobs: they may still succeed. A value from a newer daemon that this
 build cannot read is `4`, never `0`. `TestTheReadmeExitTableIsTheCode` holds this table to the code.
@@ -319,6 +320,40 @@ A command that needs the daemon connects and, if none runs, starts one and waits
 signal. A daemon that fails to start closes the signal without it, so the client reports the failure
 at once and does not wait out a timeout. The client and the daemon exchange their versions when they
 connect, and a mismatch is a refusal that says which side is older and what to run: `daemon restart` for an old daemon, an upgrade for an old client.
+
+`daemon ensure` is that same start protocol as a command: it holds `start.lock`, so any number of
+`ensure` commands and other commands that run at once start one daemon between them. A new client
+replaces a daemon older than protocol 3 (`MinDaemonProtocolVersion`), because only a daemon of
+protocol 3 can serve `WatchTask`. The entire ensure operation has a two-minute limit,
+including the start-lock wait, handshakes, stop, child readiness and final status. Expiry
+releases startup ownership and returns a typed unavailable failure with exit 4.
+
+### Watching a task
+
+`WatchTask` is a server-streaming call that tells a program everything it needs to show a task:
+the head of the result branch, plans, promotions, jobs and their results, a judgment of each of the
+newest measured commits (`judged_commits`, 0 for 20, at most 100), jobs that are held up and why,
+and whether the task's store is readable. The state is a set of keyed facts. On every wake the
+daemon captures the store under one request lock, checks its revision and lifecycle view after
+deriving branch and trouble facts, and sends the facts that differ from what the stream last sent, so a
+wake missed or merged with another loses nothing. Wakes are store commits (including failed ones),
+fast-forwards of the result branch, new jobs, changes in what holds a job up, and the slow period.
+
+- A stream starts with a reset: `Reset`, the whole state in messages of at most 500 facts, then
+  `CaughtUp`. A client holds a reset aside until `CaughtUp`, so it never shows half of one.
+  A later reset is sent when a fact stopped existing, since a client cannot be told a fact is gone,
+  or when more than 500 facts changed at once. A judgment that leaves the judged commits is dropped
+  without a reset.
+- `sequence` counts the messages of one stream from 1, with no gaps. Protocol 3 ignores the resume
+  token: a new stream starts with a reset.
+- A store that is away changes only the health fact; what was sent stays true until it is read again.
+- `Hello` takes a component, `COMPONENT_CLI` or `COMPONENT_ORCHESTRATOR`; an unknown one is
+  `INVALID_INPUT`, and a client of a protocol older than the daemon's minimum is told to upgrade.
+
+`proto/vibesys/cli/v1/conformance/` holds the files a client of the daemon and the daemon agree on:
+the protocol number that added `WatchTask`, where the daemon's socket is for an environment, and
+transcripts of `WatchTask`. This module replays them against the real server, so a second reader
+cannot drift from it.
 
 Each running job has its own supervisor process. It owns the job's process group and keeps the
 job's output, so it outlives the daemon. The queue is first in, first out; the daemon runs one job
