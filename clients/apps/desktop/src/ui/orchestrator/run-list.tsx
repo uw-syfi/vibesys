@@ -1,5 +1,5 @@
 import type {Run} from '@vibesys/orchestrator-proto';
-import {Chip, EmptyState, Stack, Table, type TableColumn} from '@vibesys/ui';
+import {Chip, EmptyState, Stack, Table, type TableColumn, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {ms, type OrchestratorState} from '../../state/index.js';
 import {formatMoment, runWord} from './words.js';
@@ -56,12 +56,15 @@ const COLUMNS: readonly TableColumn<RunRow>[] = [
 /** Runs across every connected host, newest first. */
 export function RunList(props: {
   readonly hosts: readonly HostRuns[];
+  readonly unreadHosts?: readonly string[];
   readonly open: (hostKey: string, runId: string) => void;
 }): JSX.Element {
   const rows = rowsOf(props.hosts);
   return (
     <Stack gap="space-4">
-      {rows.length === 0 ? (
+      {rows.length === 0 && (props.unreadHosts?.length ?? 0) > 0 ? (
+        <Text tone="muted">Run information has not been read from every host yet.</Text>
+      ) : rows.length === 0 ? (
         <EmptyState
           title="No runs yet"
           body="Runs started on a connected host appear here as soon as the host reports them."

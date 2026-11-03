@@ -3,7 +3,15 @@
  * version of one fact, replaced by id: the daemon sends whole facts, so there is nothing to merge
  * (docs: `proto/vibesys/orchestrator/v1/events.proto`). Selectors read it; only `fold.ts` writes it.
  */
-import type {Agent, Item, Message, Receipt, Run, Turn} from '@vibesys/orchestrator-proto';
+import type {
+  Agent,
+  Item,
+  Message,
+  Receipt,
+  Run,
+  SearchState,
+  Turn,
+} from '@vibesys/orchestrator-proto';
 
 /** One piece of progress on a running item, with the sequence it was made at. */
 export interface Progress {
@@ -32,6 +40,9 @@ export interface Gap {
 export interface OrchestratorState {
   /** The last event applied, or the sequence of the snapshot; 0n before any. */
   readonly sequence: bigint;
+  /** Revision floors for the current WatchRuns stream, separate from retained display facts. */
+  readonly searchRevisions: Readonly<Record<string, bigint>>;
+  readonly searches: Readonly<Record<string, SearchState>>;
   readonly runs: Readonly<Record<string, Run>>;
   readonly agents: Readonly<Record<string, Agent>>;
   readonly turns: Readonly<Record<string, Turn>>;
@@ -48,6 +59,8 @@ export interface OrchestratorState {
 
 export const emptyState: OrchestratorState = {
   sequence: 0n,
+  searches: {},
+  searchRevisions: {},
   runs: {},
   agents: {},
   turns: {},

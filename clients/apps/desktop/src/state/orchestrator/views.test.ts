@@ -9,6 +9,9 @@ import {
   Harness,
   ItemSchema,
   ItemStatus,
+  JobOutcome,
+  MessageSchema,
+  SearchStateSchema,
   TurnSchema,
   TurnStatus,
   TurnTrigger,
@@ -16,7 +19,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {emptyState, type OrchestratorState} from './state.js';
-import {agentTree, flattenTree, unbrokenFrom, usageOf} from './views.js';
+import {agentTree, flattenTree, timeline, unbrokenFrom, usageOf} from './views.js';
 
 const agent = (id: string, parent: string, role: AgentRole, startMs: number) =>
   create(AgentSchema, {
@@ -152,4 +155,41 @@ describe('reading older steps', () => {
       ),
     );
   });
+});
+
+it('timeline job timing uses typed facts and is independent of tool text', () => {
+  fc.assert(
+    fc.property(fc.integer({min: 0, max: 10000}), fc.string(), (toolAt, text) => {
+      const state = {
+        ...emptyState,
+        searches: {
+          r: create(SearchStateSchema, {
+            runId: 'r',
+            revision: 1n,
+            jobs: [{id: 'job-1', startedAt: timestampFromMs(50), finishedAt: timestampFromMs(100)}],
+          }),
+        },
+        messages: {
+          m: create(MessageSchema, {
+            runId: 'r',
+            at: timestampFromMs(200),
+            body: {case: 'jobFinished', value: {jobId: 'job-1', outcome: JobOutcome.SUCCEEDED}},
+          }),
+        },
+        items: {
+          i: create(ItemSchema, {
+            at: timestampFromMs(toolAt),
+            body: {case: 'tool', value: {output: `job-1 ${text}`, argsJson: 'job-1'}},
+          }),
+        },
+      };
+      expect(timeline(state, 'r', 1000).jobs.map(job => [job.startMs, job.endMs])).toEqual([
+        [50, 100],
+      ]);
+      expect(
+        timeline({...state, searches: {}}, 'r', 1000).jobs.map(job => [job.startMs, job.endMs]),
+      ).toEqual([[null, 200]]);
+    }),
+    {seed: 9, examples: [[0, 'job-1']]},
+  );
 });

@@ -3,6 +3,7 @@
  * knows no service: a test, or a domain's own recordings, decide what the frames mean. Time is the
  * ambient clock, so a test under `TestClock` decides when each step happens.
  */
+import type {DesktopLinkProblem} from '@vibesys/proto';
 import * as Cause from 'effect/Cause';
 import * as Deferred from 'effect/Deferred';
 import type * as Duration from 'effect/Duration';
@@ -18,7 +19,13 @@ export type Step =
   /** Deliver a reply (the reply of a unary call, a frame of a stream). */
   | {readonly frame: Uint8Array}
   /** End the call with a failure. */
-  | {readonly end: {readonly message?: string; readonly status?: number}}
+  | {
+      readonly end: {
+        readonly message?: string;
+        readonly status?: number;
+        readonly linkProblem?: DesktopLinkProblem;
+      };
+    }
   /** End a stream cleanly. */
   | {readonly close: true}
   /** Fail a stream as a reader too slow for it does: its buffer is full. */
@@ -62,8 +69,20 @@ interface MutableCall {
   open: boolean;
 }
 
-const endedBy = ({message, status}: {message?: string; status?: number}): CallEnded =>
-  new CallEnded({message: message ?? '', ...(status === undefined ? {} : {status})});
+const endedBy = ({
+  message,
+  status,
+  linkProblem,
+}: {
+  message?: string;
+  status?: number;
+  linkProblem?: DesktopLinkProblem;
+}): CallEnded =>
+  new CallEnded({
+    message: message ?? '',
+    ...(status === undefined ? {} : {status}),
+    ...(linkProblem === undefined ? {} : {linkProblem}),
+  });
 
 /** Where a played step sends its effect; `false` from `frame` stops the playback. */
 interface Sink {

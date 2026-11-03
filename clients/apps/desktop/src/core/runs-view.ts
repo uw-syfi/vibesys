@@ -6,6 +6,7 @@ import * as Stream from 'effect/Stream';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
 import {
   applyHostFrame,
+  beginRunsStream,
   type FeedStatus,
   type Freshness,
   freshnessOf,
@@ -31,6 +32,7 @@ const runsSpec = ({client}: HostParts): FeedSpec<HostFrame> => ({
     client
       .watchRuns({afterSequence: runsCursor(model)})
       .pipe(Stream.map(response => ({from: 'runs', body: response.body}) as const)),
+  begin: beginRunsStream,
   apply: applyHostFrame,
   gapped: model => model.data.gap !== null,
 });

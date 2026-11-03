@@ -7,6 +7,7 @@ import type {
   HostModel,
   Route,
   RouteAction,
+  RunView,
 } from '../../state/index.js';
 import {AgentPanel} from './agent-panel.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
@@ -16,7 +17,13 @@ import {RunScreen} from './run-screen.js';
 import type {StartRunRequest} from './start-draft.js';
 import {StartRunForm} from './start-run-form.js';
 
-const TITLE = 'Orchestrated runs';
+const TITLE = 'Runs';
+const RUN_TITLES = {
+  timeline: 'Search and activity',
+  cost: 'Cost',
+  handoffs: 'Handoffs and reports',
+  ideas: 'Ideas',
+} satisfies Record<RunView, string>;
 
 /** Everything the screens know about one host at this moment. */
 export interface HostSnapshot {
@@ -79,7 +86,15 @@ export function OrchestratorApp(props: {
       <Page
         width="wide"
         state={pageState(hosts.length === 0)}
-        header={<Text variant="title">{TITLE}</Text>}
+        header={
+          <Text variant="title">
+            {hosts.some(host => host.connection._tag === 'Unusable')
+              ? 'Runs unavailable'
+              : commands.start?._tag === 'Refused'
+                ? 'Start run refused'
+                : TITLE}
+          </Text>
+        }
       >
         <Stack gap="space-4">
           <ConnectionBanner notes={hosts.map(host => runsNote(host, props.retryHost))} />
@@ -91,6 +106,9 @@ export function OrchestratorApp(props: {
             openRun={(host, runId) => go({type: 'open-run', host, runId})}
           />
           <RunList
+            unreadHosts={hosts
+              .filter(host => host.runsFeed._tag !== 'Live')
+              .map(host => host.label)}
             hosts={hosts.map(host => ({key: host.key, label: host.label, state: host.model.data}))}
             open={(host, runId) => go({type: 'open-run', host, runId})}
           />
@@ -110,6 +128,7 @@ export function OrchestratorApp(props: {
   const {runId} = route;
   const agent = route.agentId === null ? undefined : state.agents[route.agentId];
   const names = agentNames(state, runId);
+  const title = `${state.runs[runId]?.task ?? 'Run'}: ${agent === undefined ? RUN_TITLES[route.view] : nameOf(names, agent)}`;
   const notes = [
     runsNote(host, props.retryHost),
     ...(agent === undefined
@@ -126,7 +145,7 @@ export function OrchestratorApp(props: {
         ]),
   ];
   return (
-    <Page width="fill" state="ready" header={<Text variant="title">{TITLE}</Text>}>
+    <Page width="fill" state="ready" header={<Text variant="title">{title}</Text>}>
       <Stack gap="space-4">
         <ConnectionBanner notes={notes} />
         <RunScreen
@@ -145,6 +164,7 @@ export function OrchestratorApp(props: {
           agentPanel={
             agent === undefined ? null : (
               <AgentPanel
+                nowMs={props.nowMs}
                 state={state}
                 agent={agent}
                 name={nameOf(names, agent)}

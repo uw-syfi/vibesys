@@ -26,7 +26,7 @@
     background-color var(--duration-fast) var(--easing),
     color var(--duration-fast) var(--easing);
 }
-.vs-button:hover {
+.vs-button:not([aria-disabled="true"]):hover {
   background: var(--panel-2);
 }
 .vs-button[data-size="sm"] {
@@ -48,7 +48,7 @@
   border-color: var(--text);
   color: var(--bg);
 }
-.vs-button[data-variant="primary"]:hover {
+.vs-button[data-variant="primary"]:not([aria-disabled="true"]):hover {
   background: var(--text);
   opacity: 0.88;
 }
@@ -58,7 +58,7 @@
   color: var(--muted);
   padding: 0 var(--space-3);
 }
-.vs-button[data-variant="quiet"]:hover {
+.vs-button[data-variant="quiet"]:not([aria-disabled="true"]):hover {
   background: var(--panel-2);
   color: var(--text);
 }
@@ -66,7 +66,7 @@
   color: var(--err);
   border-color: var(--chip-err-border);
 }
-.vs-button[data-variant="danger"]:hover {
+.vs-button[data-variant="danger"]:not([aria-disabled="true"]):hover {
   background: var(--chip-err-bg);
 }
 .vs-button[aria-disabled="true"] {

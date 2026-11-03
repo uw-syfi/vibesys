@@ -25,6 +25,7 @@ import {
   type Item,
   ItemStatus,
   type RunsSnapshot,
+  type SearchState,
   type Turn,
   TurnStatus,
   type WatchAgentResponse,
@@ -36,18 +37,32 @@ function byId<T extends {readonly id: string}>(rows: readonly T[]): Record<strin
 }
 
 /**
- * A read of the runs from scratch: replaces runs, agents and messages wholesale. A snapshot older
- * than what is applied changes nothing, unless the state is waiting out a gap: the read that was
+ * A read of the runs from scratch: replaces runs, agents and messages wholesale. An older stored
+ * sequence leaves those records alone, unless the state is waiting out a gap: the read that was
  * asked for to close the gap is authoritative, even when the daemon's sequence restarted below
  * the one held, or the same gap would reopen forever. What it does not carry (items, receipts,
  * progress) stays, and a turn the agent stream already finished is not taken back to running.
+ * Search facts always replace the held map, including omitted runs: their revisions restart
+ * with the host, independently of the stored event sequence.
  */
 export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot): OrchestratorState {
-  if (snapshot.sequence < state.sequence && state.gap === null) return state;
+  if (snapshot.sequence < state.sequence && state.gap === null) {
+    return {
+      ...state,
+      searches: Object.fromEntries(snapshot.searches.map(search => [search.runId, search])),
+      searchRevisions: Object.fromEntries(
+        snapshot.searches.map(search => [search.runId, search.revision]),
+      ),
+    };
+  }
   const turns = snapshot.turns.reduce(withTurn, state).turns;
   return {
     ...state,
     sequence: snapshot.sequence,
+    searches: Object.fromEntries(snapshot.searches.map(search => [search.runId, search])),
+    searchRevisions: Object.fromEntries(
+      snapshot.searches.map(search => [search.runId, search.revision]),
+    ),
     runs: byId(snapshot.runs),
     agents: byId(snapshot.agents),
     turns,
@@ -192,4 +207,15 @@ export function applyAgentFeed(state: OrchestratorState, frame: AgentFrame): Orc
     default:
       return state;
   }
+}
+
+/** Whole search revisions are comparable only within the current WatchRuns stream. */
+export function applySearch(state: OrchestratorState, search: SearchState): OrchestratorState {
+  const held = state.searchRevisions[search.runId];
+  if (held !== undefined && search.revision <= held) return state;
+  return {
+    ...state,
+    searches: {...state.searches, [search.runId]: search},
+    searchRevisions: {...state.searchRevisions, [search.runId]: search.revision},
+  };
 }

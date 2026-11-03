@@ -67,15 +67,13 @@ export function CostView(props: {
   return (
     <Stack gap="space-6">
       <Row gap="space-6" wrap>
-        <Stat label="Reported cost" value={formatCost(usage.run.costUsd)} />
-        <Stat label="Tokens read" value={formatTokens(usage.run.inputTokens)} />
-        <Stat label="Tokens written" value={formatTokens(usage.run.outputTokens)} />
+        <Stat inline label="Reported cost" value={formatCost(usage.run.costUsd)} />
+        <Stat inline label="Tokens read" value={formatTokens(usage.run.inputTokens)} />
+        <Stat inline label="Tokens written" value={formatTokens(usage.run.outputTokens)} />
       </Row>
       <Text tone="muted" variant="small">
-        A token is a small piece of text, roughly three quarters of a word; agents are billed by the
-        tokens they read and write. Some tools do not report a cost or a count. Those show "Not
-        reported" and are left out of the totals, never counted as zero, so the cost is only what
-        was reported.
+        Tokens measure text read and written. Totals omit unreported usage; missing counts are not
+        zero.
       </Text>
       <Card section="By role">
         <Table label="Usage by role" columns={COLUMNS} rows={roles} rowKey={line => line.key} />

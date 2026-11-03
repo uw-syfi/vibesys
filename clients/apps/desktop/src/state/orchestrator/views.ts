@@ -157,7 +157,7 @@ export interface JobBar {
   readonly jobId: string;
   readonly outcome: JobOutcome;
   readonly submittedBy: string;
-  readonly startMs: number;
+  readonly startMs: number | null;
   readonly endMs: number;
   readonly detail: string;
 }
@@ -167,25 +167,6 @@ export interface Timeline {
   readonly endMs: number;
   readonly rows: readonly TimelineRow[];
   readonly jobs: readonly JobBar[];
-}
-
-/** The earliest tool call of the submitting agent that mentions the job: when it was started. */
-function jobStart(
-  state: OrchestratorState,
-  jobId: string,
-  submittedBy: string,
-  endMs: number,
-): number {
-  const times = Object.values(state.items)
-    .filter(
-      item =>
-        jobId !== '' &&
-        (submittedBy === '' || item.agentId === submittedBy) &&
-        item.body.case === 'tool' &&
-        (item.body.value.output.includes(jobId) || item.body.value.argsJson.includes(jobId)),
-    )
-    .map(item => ms(item.at) ?? endMs);
-  return times.length === 0 ? endMs : Math.min(...times);
 }
 
 /** When each agent ran, and the jobs underneath. */
@@ -208,23 +189,31 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
   }));
   const jobs = Object.values(state.messages)
     .filter(message => message.runId === runId && message.body.case === 'jobFinished')
-    .map((message): JobBar => {
+    .flatMap((message): JobBar[] => {
       const job = message.body.case === 'jobFinished' ? message.body.value : null;
-      const endMs = ms(message.at) ?? nowMs;
-      return {
-        jobId: job?.jobId ?? '',
-        outcome: job?.outcome ?? JobOutcome.UNSPECIFIED,
-        submittedBy: job?.submittedByAgentId ?? '',
-        startMs: jobStart(state, job?.jobId ?? '', job?.submittedByAgentId ?? '', endMs),
-        endMs,
-        detail: job?.detail ?? '',
-      };
+      const fact = state.searches[runId]?.jobs.find(candidate => candidate.id === job?.jobId);
+      const startMs = ms(fact?.startedAt) ?? ms(fact?.submittedAt);
+      const endMs = ms(fact?.finishedAt) ?? ms(message.at);
+      // Missing timing is unknown, including jobs outside the producer's retained window.
+      if (endMs === null) return [];
+      return [
+        {
+          jobId: job?.jobId ?? '',
+          outcome: job?.outcome ?? JobOutcome.UNSPECIFIED,
+          submittedBy: job?.submittedByAgentId ?? '',
+          startMs,
+          endMs,
+          detail: job?.detail ?? '',
+        },
+      ];
     })
-    .sort((a, b) => a.startMs - b.startMs || a.jobId.localeCompare(b.jobId));
+    .sort(
+      (a, b) => (a.startMs ?? a.endMs) - (b.startMs ?? b.endMs) || a.jobId.localeCompare(b.jobId),
+    );
   const all = [
     ms(run?.createdAt) ?? nowMs,
     ...rows.flatMap(row => row.bars.map(bar => bar.startMs)),
-    ...jobs.map(job => job.startMs),
+    ...jobs.map(job => job.startMs ?? job.endMs),
   ];
   const ends = [
     ms(run?.endedAt) ?? nowMs,

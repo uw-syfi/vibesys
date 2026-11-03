@@ -8,6 +8,9 @@
  */
 
 export {sendMessageCommand} from './commands.js';
+export {JobState} from './generated/vibesys/cli/v1/job_pb.js';
+export {PlanStatus} from './generated/vibesys/cli/v1/plan_pb.js';
+export {VerdictKind} from './generated/vibesys/cli/v1/verdict_pb.js';
 export * from './generated/vibesys/orchestrator/v1/events_pb.js';
 export * from './generated/vibesys/orchestrator/v1/orchestrator_pb.js';
 export * from './generated/vibesys/orchestrator/v1/search_pb.js';

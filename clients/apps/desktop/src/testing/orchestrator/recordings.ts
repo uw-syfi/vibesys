@@ -115,13 +115,19 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
     });
     let after = afterSequence;
     const steps: Step[] = [];
+    const seen = new Map<string, bigint>();
     if (after === 0n) {
       const snapshot = daemon.snapshot();
       after = snapshot.sequence;
       steps.push(encode({body: {case: 'snapshot', value: snapshot}}));
+      for (const search of snapshot.searches) seen.set(search.runId, search.revision);
     }
     for (const event of daemon.eventsAfter(after)) {
       steps.push(encode({body: {case: 'event', value: event}}));
+    }
+    for (const search of daemon.snapshot().searches) {
+      if (search.revision > (seen.get(search.runId) ?? 0n))
+        steps.push(encode({body: {case: 'search', value: search}}));
     }
     return [...steps, ...tail];
   };

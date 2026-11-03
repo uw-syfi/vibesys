@@ -10,7 +10,8 @@ import "vibesys/cli/v1/service.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
-// SearchState is a whole, ephemeral view. Revisions grow within one daemon boot.
+// SearchState is a whole, ephemeral view. Revisions are comparable only within
+// one WatchRuns stream; a new stream starts a new revision scope.
 message SearchState {
   string run_id = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
   uint64 revision = 2 [(buf.validate.field).uint64.gt = 0];

@@ -23,11 +23,13 @@ import {
   type RunView,
 } from '../../state/index.js';
 import {generateScenario} from '../../testing/orchestrator/index.js';
+import {searchFixture} from '../../testing/orchestrator/search.js';
 import {AgentPanel} from './agent-panel.js';
 import {ConnectionBanner, type ConnectionNote} from './connection-banner.js';
 import {HandoffCards, verdictOf} from './handoff-cards.js';
 import {RunList} from './run-list.js';
 import {RunScreen} from './run-screen.js';
+import {SearchPanels} from './search-panels.js';
 import {describeArgs, harnessWord, toolLabel} from './words.js';
 
 const VIEWS: readonly RunView[] = ['timeline', 'cost', 'handoffs'];
@@ -69,6 +71,7 @@ function screen(
 function panel(state: OrchestratorState, agent: Agent, sendProgress?: CommandProgress): string {
   return renderToStaticMarkup(
     <AgentPanel
+      nowMs={0}
       state={state}
       agent={agent}
       name="Worker 1"
@@ -175,7 +178,7 @@ describe('the screens', () => {
         }),
       },
     });
-    expect(panel(state, agent, progress)).toContain('Sent, not yet confirmed');
+    expect(panel(state, agent, progress)).toContain('Sent; delivery to agent unconfirmed');
     expect(panel(stored(Delivery.CONSUMED), agent, progress)).toContain('Read by the agent');
     const rejected = panel(stored(Delivery.REJECTED, Rejection.AGENT_GONE), agent, progress);
     expect(rejected).toContain('Not delivered');
@@ -301,4 +304,28 @@ describe('the screens', () => {
     expect(harnessWord(Harness.CLAUDE_CODE)).toBe('Claude Code');
     expect(harnessWord(Harness.CODEX)).toBe('Codex');
   });
+});
+
+it('an unread run inventory is unknown rather than a claim that no runs exist', () => {
+  fc.assert(
+    fc.property(fc.array(fc.string(), {minLength: 1, maxLength: 8}), unreadHosts => {
+      const html = renderToStaticMarkup(
+        <RunList hosts={[]} unreadHosts={unreadHosts} open={() => undefined} />,
+      );
+      expect(html).toContain('has not been read');
+      expect(html).not.toContain('No runs yet');
+    }),
+    {seed: 3858, examples: [[['host-a']]]},
+  );
+});
+
+it('shows the truncation note exactly when facts are truncated, and the unreadable banner only when stale', () => {
+  for (const truncated of [false, true])
+    for (const stale of [false, true]) {
+      const search = searchFixture('r', 100, stale, truncated);
+      const html = renderToStaticMarkup(<SearchPanels search={search} nowMs={100} />);
+      expect(html.includes('Some search facts were omitted')).toBe(truncated);
+      expect(html.includes('Search state is stale')).toBe(stale);
+      expect(html).toContain('Throughput: 42');
+    }
 });

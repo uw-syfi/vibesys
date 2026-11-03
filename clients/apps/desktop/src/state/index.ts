@@ -24,6 +24,7 @@ export {
 } from './host.js';
 export {
   applyHostFrame,
+  beginRunsStream,
   emptyHostModel,
   type HostFrame,
   type HostModel,
@@ -33,10 +34,18 @@ export {
   type AgentFrame,
   applyAgentFeed,
   applyEvent,
+  applySearch,
   applySnapshot,
   isFinalItem,
   type OlderFrame,
 } from './orchestrator/fold.js';
+export {
+  candidates,
+  jobQueue,
+  jobsWithNoRun,
+  planStatus,
+  resultSoFar,
+} from './orchestrator/search-views.js';
 export {
   emptyState,
   type Gap,

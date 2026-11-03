@@ -10,6 +10,7 @@ import {
   packageGraphErrors,
   RULES,
   STRICT_LINT_PLUGINS,
+  searchFactErrors,
   workspaceSpecifiers,
 } from './check_package_graph.mjs';
 
@@ -389,6 +390,12 @@ const RULE_CASES = {
   },
   'strict-no-stylesheets': workspace => {
     workspace.screen.files['src/renderer/screen.css'] = '.screen { color: red; }\n';
+  },
+  'search-fact-imports': workspace => {
+    workspace.desktop = effectAppPackage();
+    workspace.desktop.files['src/state/orchestrator/search-views.ts'] =
+      "import {hidden} from './other.js';";
+    workspace.desktop.files['src/state/orchestrator/other.ts'] = 'export const hidden = 1;';
   },
   'strict-imports': workspace => {
     workspace.screen.files['src/renderer/index.ts'] += "import '@radix-ui/react-dialog';\n";
@@ -812,4 +819,43 @@ test('an app composes feature screens without marker declarations', async t => {
   app.manifest.dependencies['@vibesys/feature-stop-run'] = 'workspace:*';
   app.files['src/index.ts'] += "import '@vibesys/feature-stop-run/renderer';\n";
   assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
+});
+test('search fact readers can reach only generated search fields and timestamp conversion', () => {
+  const path = 'apps/desktop/src/state/orchestrator/search-views.ts';
+  const good =
+    "import type {SearchState as State} from '@vibesys/orchestrator-proto'; import {JobState, JobOutcome, SearchStateSchema} from '@vibesys/orchestrator-proto'; import {ms} from './time.js';";
+  assert.deepEqual(searchFactErrors(path, good), []);
+  for (const source of [
+    "import {timeline} from './views.js';",
+    "import {Item as Alias} from '@vibesys/orchestrator-proto';",
+    "import * as proto from '@vibesys/orchestrator-proto';",
+    "import proto from '@vibesys/orchestrator-proto';",
+    "type Item = import('@vibesys/orchestrator-proto').Item;",
+    "const proto = import('@vibesys/orchestrator-proto');",
+    "import proto = require('@vibesys/orchestrator-proto');",
+    "const proto = require('@vibesys/orchestrator-proto');",
+    "export * from './views.js';",
+  ]) {
+    const errors = searchFactErrors(path, source);
+    assert.ok(errors.length > 0, source);
+    assert.match(
+      errors[0],
+      /search-fact-imports: apps\/desktop\/src\/state\/orchestrator\/search-views.ts:1:/,
+    );
+    assert.deepEqual(searchFactErrors(path.replace('.ts', '.test.ts'), source), []);
+  }
+});
+
+test('all search readers reject tool argument reads', () => {
+  for (const name of [
+    'state/orchestrator/search-views.ts',
+    'state/orchestrator/views.ts',
+    'state/orchestrator/fold.ts',
+    'ui/orchestrator/search-panels.tsx',
+  ]) {
+    const path = `apps/desktop/src/${name}`;
+    for (const text of ['const x = item.argsJson;', "const x = item['argsJson'];"])
+      assert.match(searchFactErrors(path, text).join('\n'), /never argsJson/);
+    assert.deepEqual(searchFactErrors(path, 'const x = search.jobs;'), []);
+  }
 });

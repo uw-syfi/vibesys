@@ -6,6 +6,7 @@
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
+import {DesktopLinkProblem} from '@vibesys/proto';
 import * as Effect from 'effect/Effect';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
@@ -28,8 +29,22 @@ function scenarioOf(search: string) {
   });
 }
 
-const daemon = new FakeDaemon(scenarioOf(window.location.search));
-const fake = makeFakeTransport(daemonRecording(daemon));
+const query = new URLSearchParams(window.location.search);
+const daemon = new FakeDaemon({
+  ...scenarioOf(window.location.search),
+  search: true,
+  searchStale: query.has('stale'),
+  searchTruncated: query.has('truncated'),
+});
+const fake = makeFakeTransport(
+  query.has('login-failed')
+    ? {
+        respond: () => [
+          {end: {linkProblem: DesktopLinkProblem.AUTH, message: 'Permission denied (publickey).'}},
+        ],
+      }
+    : daemonRecording(daemon),
+);
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('fixture.html has no #root');

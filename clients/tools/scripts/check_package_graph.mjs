@@ -98,6 +98,7 @@ export const RULES = [
   'layer-matches-folder',
   'strict-no-stylesheets',
   'strict-imports',
+  'search-fact-imports',
 ];
 
 /**
@@ -1004,12 +1005,152 @@ function strictDependencyMessage(dependency) {
   return `${dependency} is outside ${STRICT_THIRD_PARTY.join(', ')}; ${STRICT_FIX}`;
 }
 
+/** The isolated projection has an import boundary; shared folds and panels also carry agent data. */
+function isSearchProjection(path) {
+  return (
+    /^apps\/desktop\/src\/state\/orchestrator\/search[^/]*\.ts$/.test(path) &&
+    !path.endsWith('.test.ts')
+  );
+}
+
+function isSearchFactFile(path) {
+  return (
+    isSearchProjection(path) ||
+    [
+      'apps/desktop/src/state/orchestrator/views.ts',
+      'apps/desktop/src/state/orchestrator/fold.ts',
+      'apps/desktop/src/ui/orchestrator/search-panels.tsx',
+    ].includes(path)
+  );
+}
+
+/** Search fact readers cannot reach agent items or tool-text projections through imports. */
+function searchFactImportMessage(path, specifier) {
+  if (!isSearchProjection(path)) return undefined;
+  if (specifier === '@vibesys/orchestrator-proto' || specifier === './time.js') return undefined;
+  return (
+    'search facts may import only generated protocol fields and the pure timestamp conversion; remove ' +
+    specifier
+  );
+}
+
+// Derive permitted bindings from the generated search contract and its CLI facts rather than
+// copying enum names here. The orchestrator item/agent contract is deliberately outside this set.
+const searchBindings = new Set(
+  [
+    'orchestrator/v1/search',
+    'orchestrator/v1/orchestrator',
+    'cli/v1/job',
+    'cli/v1/plan',
+    'cli/v1/result',
+    'cli/v1/service',
+    'cli/v1/verdict',
+    'cli/v1/failure',
+    'cli/v1/promote',
+  ].flatMap(file => {
+    const path = fileURLToPath(
+      new URL(`../../libs/orchestrator-proto/src/generated/vibesys/${file}_pb.ts`, import.meta.url),
+    );
+    const source = ts.createSourceFile(
+      path,
+      readFileSync(path, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    return source.statements.flatMap(node => {
+      if (file === 'orchestrator/v1/orchestrator')
+        return ts.isEnumDeclaration(node) ? [node.name.text] : [];
+      if (ts.isVariableStatement(node))
+        return node.declarationList.declarations.flatMap(declaration =>
+          ts.isIdentifier(declaration.name) ? [declaration.name.text] : [],
+        );
+      return ts.isTypeAliasDeclaration(node) ||
+        ts.isEnumDeclaration(node) ||
+        ts.isInterfaceDeclaration(node)
+        ? [node.name.text]
+        : [];
+    });
+  }),
+);
+
+function checkSearchBindings(node, report) {
+  const clause = node.importClause;
+  const bindings = clause?.namedBindings;
+  if (clause?.name !== undefined || bindings === undefined || !ts.isNamedImports(bindings)) {
+    report(
+      node,
+      'import generated search fields by name; namespace and default imports expose agent items',
+    );
+    return;
+  }
+  for (const binding of bindings.elements) {
+    const name = binding.propertyName?.text ?? binding.name.text;
+    if (!searchBindings.has(name))
+      report(
+        binding,
+        `search facts cannot import ${name}; use named bindings from the generated search contract or its CLI fact contracts`,
+      );
+  }
+}
+
+/** The complete import boundary for fact readers, including relative imports and aliases. */
+export function searchFactErrors(path, text) {
+  if (!isSearchFactFile(path)) return [];
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+  const errors = [];
+  const report = (node, message) =>
+    errors.push(
+      violation(
+        'search-fact-imports',
+        `${path}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`,
+        message,
+      ),
+    );
+  for (const node of source.statements) {
+    if (!ts.isImportDeclaration(node)) continue;
+    const specifier = node.moduleSpecifier.text;
+    const message = searchFactImportMessage(path, specifier);
+    if (message !== undefined) {
+      report(node, message);
+      continue;
+    }
+    if (specifier !== '@vibesys/orchestrator-proto') continue;
+    if (isSearchProjection(path)) checkSearchBindings(node, report);
+  }
+  const visit = node => {
+    if (
+      (ts.isPropertyAccessExpression(node) && node.name.text === 'argsJson') ||
+      (ts.isElementAccessExpression(node) &&
+        ts.isStringLiteral(node.argumentExpression) &&
+        node.argumentExpression.text === 'argsJson')
+    )
+      report(node, 'search facts must use typed fields, never argsJson');
+    if (
+      isSearchProjection(path) &&
+      ((ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) ||
+        ts.isImportTypeNode(node) ||
+        ts.isImportEqualsDeclaration(node) ||
+        (ts.isCallExpression(node) &&
+          (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+            (ts.isIdentifier(node.expression) && node.expression.text === 'require'))))
+    )
+      report(
+        node,
+        'search facts use named static imports only; do not load or re-export another module',
+      );
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return errors;
+}
+
 function strictImportErrors(root, workspacePackage, byName) {
   const {directory} = workspacePackage;
   const packageRoot = join(root, directory);
   const errors = [];
   for (const path of sourceFiles(packageRoot).filter(file => !isTestCode(file))) {
     const text = readFileSync(join(packageRoot, path), 'utf8');
+    errors.push(...searchFactErrors(`${directory}/${path}`, text));
     for (const {specifier, line} of importedSpecifierLines(text)) {
       const message = strictSpecifierMessage(workspacePackage, specifier, byName);
       if (message !== undefined) {

@@ -18,6 +18,8 @@ import {MAX_QUIET_RESTARTS, STABLE_PASS_FRAMES} from './policy.js';
 export interface FeedSpec<F> {
   /** The stream to open. `firstOpen` is true only for the first open since the feed was mounted. */
   readonly open: (model: HostModel, firstOpen: boolean) => Stream.Stream<F, AppError>;
+  /** Reset stream-local ordering before opening, retaining displayed facts. */
+  readonly begin?: (model: HostModel) => HostModel;
   readonly apply: (model: HostModel, frame: F) => HostModel;
   /** The model skipped events and must read again from a snapshot. */
   readonly gapped: (model: HostModel) => boolean;
@@ -64,7 +66,10 @@ const pass = <F>(ports: FeedPorts, spec: FeedSpec<F>, firstOpen: boolean) =>
   Effect.gen(function* () {
     let inOrder = 0;
     let live = false;
-    const opened = yield* SubscriptionRef.get(ports.model);
+    const opened = yield* SubscriptionRef.updateAndGet(
+      ports.model,
+      model => spec.begin?.(model) ?? model,
+    );
     const result = yield* spec.open(opened, firstOpen).pipe(
       Stream.mapEffect(frame =>
         Effect.gen(function* () {
