@@ -2,7 +2,7 @@
 # runs `devcontainer features test` with it. It drives the host's Docker daemon
 # through a mounted /var/run/docker.sock, which a hardened host may forbid, so a
 # run never uses it (runs build images with plain `docker build`). See
-# docs/contributing/devcontainer-features.md.
+# libs/vs-sandbox/src/vs_sandbox/features/README.md.
 FROM node:24.21.0-bookworm-slim
 ARG DEVCONTAINERS_CLI_VERSION=0.89.0
 ARG DOCKER_CLI_VERSION=27.5.1

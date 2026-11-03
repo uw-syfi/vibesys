@@ -74,47 +74,32 @@ the folders inside the app:
   Effect.
 - `src/ui/` is the React screens and the renderer entry; `src/testing/` holds the Fakes and the
   fixture page, which only tests import.
-- `@vibesys/connection` is the connection manager, a pure `state/` machine and a `shell/`; only
-  its shell starts processes or opens sockets. `@vibesys/settings` is `hosts.json` and
-  `recent.json` with `SettingsStore` as their one writer.
+- `src/main/` is the main process shell: Effect services over a process seam and a socket seam
+  (`process.ts`, `local-host.ts`), the ssh link, the gateway dialers and the saved-hosts file. Only
+  those two files start processes or open sockets.
 
 ### Connections
 
-`@vibesys/connection` is the only code that creates links and channels
-(`docs/contributing/desktop-connection.md`, "Connection manager"):
+The main process is the only code that creates links and channels (`src/main/`; the services and
+their order are described under "The main process shell" in
+[clients-architecture.md](clients-architecture.md#state)):
 
-- A `Link` reaches one host. `LocalLink` starts each helper as a child of `/bin/sh`; `SshLink`
-  uses the system `ssh`, so `~/.ssh/config`, ProxyJump, agents, and certificates work unchanged.
-  The app owns one master connection per host (`ControlMaster`, `ControlPath=/tmp/vsd-<uid>/%C`,
-  `ControlPersist=30m`, `ServerAliveInterval`), shared by every connection to that host. Only the
-  master authenticates, through an askpass helper that shows ssh's prompt in a native dialog, and
-  only when the user asks (a machine's sign-in); a host key is never accepted
-  silently. Every helper is a `BatchMode` exec channel over the master.
-- Both links start the helper with the same bootstrap (`shell/bootstrap.ts`), the only shell text
-  the app sends to a host: `sh -c '<one-line script>' vibesys-helper xHEX`, a fixed script with no
-  quote or line break, its one datum (the checkout) hex-encoded for `sh` to decode, so it means the
-  same under any login shell. It checks the checkout, finds `uv` (the non-interactive PATH, a
-  login shell's PATH, or a few common directories), and `exec`s `uv run --no-sync --project
-  CHECKOUT python -I -m entrypoints.host_helper`; otherwise it exits 64 (the checkout predates the
-  helper), 65 (not a VibeSys checkout), or 66 (no `uv`), with a word saying which.
-- `HelperChannel` is one channel: `hello`, then requests answered concurrently by id, each under
-  a deadline, every line parsed strictly against the generated contract
-  (`@vibesys/contracts/host-helper`). A run channel's one `run.connect` makes it a byte relay
-  carrying the run protocol; its end is the helper's exit status and `ChannelEnd` line.
-- `HostConnection` is one host's connection: a pure machine (`state/host-connection.ts`: idle,
-  linking, handshaking, ready, reconnecting, offline, auth-needed, incompatible, closed) under a
-  shell that owns the control channel, every run channel, and every timer through one
-  `AsyncDisposableStack` and `AbortSignal`. It is the app's one retry loop per host, and its check
-  is the failing operation: the control channel is checked by `ping`, a run channel by a fresh
-  `run.connect` to the same run. Callers never retry: a request or a run channel waits until the
-  host is ready, or fails with the machine's terminal reason.
-- `ConnectionManager` keeps one `HostConnection` per host, and owns every connection and link:
-  quitting closes every channel and master once. Runs are detached: closing the app never ends a
-  run (`vibesys instances stop ID` does).
+- `SshLink` reaches one host with the system `ssh`, so `~/.ssh/config`, ProxyJump, agents and
+  certificates work unchanged. The app owns one master connection per host (`ControlMaster`,
+  `ControlPersist`, `ServerAliveInterval`), shared by every channel to that host. Every channel is a
+  `BatchMode=yes` exec session, so the app never prompts: a host that wants a password or an unknown
+  host key fails as `auth` with ssh's own words, and the user fixes it in their terminal.
+- `GatewayDialers` start `vibesysd connect` on the host (this machine, or over the ssh link, uploading
+  the gateway binary when the host lacks the right one). The gateway is the only program on the host
+  the app talks to; it starts no Python.
+- `GatewayConnection` is one host's HTTP/2 gRPC session: a `Hello` that compares the API schema hash,
+  then calls and streams. One reconnect policy lives in `state/gateway-policy.ts`; a call in flight
+  when the link drops fails with `UNAVAILABLE` and is never re-issued, so a command cannot run twice.
+- `GatewayCalls` serves the window's calls: each call is one `MessagePort`, framed by
+  `core/gateway-codec.ts`, validated against the generated bindings on both sides.
 
-Every implementation passes one contract suite (`testing/host-connection-contract.ts`): the
-in-memory `FakeHelper`, which speaks the helper protocol on the wire and replays the `helper-*`
-conformance scenarios, and the real helper of this checkout (`VIBESYS_REAL_CONTRACTS=1`).
+Every service has a Fake in `src/testing/main/` (a process, a gateway, a local host), so the shell is
+tested with no real ssh, socket or child.
 
 ### The window
 
@@ -130,4 +115,4 @@ a Retry.
 Host data is pushed, never polled: each feed is a stream the session restarts after a reconnect
 and folds into state; a view reads atoms over that state.
 
-`main/index.ts` releases the connection manager once, bounded, when the app quits.
+`main/index.ts` releases the gateway connections once, bounded, when the app quits.

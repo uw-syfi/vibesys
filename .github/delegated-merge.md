@@ -24,16 +24,14 @@ Membership is source-controlled and changes through the normal maintainer path.
 For example:
 
 ```toml
-[capabilities.clients]
+[capabilities.server]
 members = ["alice"]
-prefixes = ["clients/libs/transport/src/"]
+prefixes = ["src/server/"]
 paths = []
 additional_checks = []
 ```
 
-Capabilities also bound source ownership. Shared client state and transport code use the
-`clients` capability; server source uses `server`. A pull request spanning both requires
-membership in both capabilities.
+Capabilities also bound source ownership. Client paths have no delegated capability; server source uses `server`.
 
 The broker's policy, workflow, implementation, and configured check workflow
 paths are always denied, even if a future capability section would otherwise

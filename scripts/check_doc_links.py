@@ -78,14 +78,7 @@ SIDEBAR_STRING = re.compile(r"""['"]([\w./-]+)['"]""")
 # Pages under docs/ that nothing linked to when the orphan check was added.
 # Shrink-only: link the page from a related doc or the sidebar, or delete it,
 # then remove its entry here. Never add one.
-ORPHAN_ALLOWLIST = frozenset(
-    {
-        "docs/contributing/kernel3-contract-decisions.md",
-        "docs/design/core-agent-evaluation-bridge.md",
-        "docs/design/iteration-navigation.md",
-        "docs/design/launch.md",
-    }
-)
+ORPHAN_ALLOWLIST: frozenset[str] = frozenset()
 
 # Inline `[text](target)` links plus `[id]: target` reference definitions.
 INLINE_LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s<>]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)")

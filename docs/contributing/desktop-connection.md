@@ -1,4 +1,9 @@
 > This page describes the stack that [`run-transport.md`](run-transport.md) replaces. Read that page for the target design.
+>
+> The TypeScript client libraries it names (`connection`, `contracts`, `hosts`, `ipc`, `logs`, `machine`, `runs`,
+> `settings`, `store`, `subscription`, `transport`) were deleted. The Effect desktop app reaches a host only through
+> the Go gateway; see "The main process shell" in [clients-architecture.md](clients-architecture.md#state). Where
+> this page names one of those libraries, it records what the Python helper still serves, not a live client.
 
 # Desktop connection architecture
 
@@ -81,10 +86,10 @@ desktop main process (apps/desktop)                   host (local or ssh)
 | Helper entrypoint | `entrypoints.host_helper` (console script `vibesys-host-helper`) | Wires real I/O, reads stdin, writes stdout. Replaced `entrypoints.stdio_bridge` (phase 5). |
 | Relay core | `server.relay` (kept) | Byte relay between stdio and a run's Unix socket, with its deadlines and typed outcomes. Used by `run.connect`. |
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
-| Generated helper types | `clients/libs/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
-| Connection manager | `@vibesys/connection` (`clients/libs/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
+| Generated helper types | `src/server/api/schema.py` | `host-helper.schema.json` is no longer committed or read by a client; the generator remains in `server.api.schema` until the Python server is deleted. |
+| Connection manager | `clients/apps/desktop/src/main/` | The only code that creates links and channels: Effect services over ssh and the Go gateway. |
 | Host session and screens | `clients/apps/desktop` (`src/core`, `src/state`, `src/ui`) | One session per host: feeds folded by pure functions into a model the screens read. |
-| App lifecycle | `clients/apps/desktop` (`src/main/index.ts`) and `@vibesys/settings` | Single-instance lock, the quit sequence, the settings store. |
+| App lifecycle | `clients/apps/desktop` (`src/main/index.ts`, `src/main/saved-hosts.ts`) | Single-instance lock, the quit sequence, the saved hosts. |
 
 Placement follows [architecture.md](architecture.md): the registry and relay are generic mechanisms
 under `server`, with no VibeSys policy; the helper's request handling is product wiring over them;

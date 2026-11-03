@@ -34,8 +34,9 @@ type App struct {
 	// Close.
 	sups *ownedSupervisors
 
-	inbox chan message
-	view  atomic.Pointer[view]
+	inbox       chan message
+	view        atomic.Pointer[view]
+	generations storeGenerations
 
 	// branchMu is held while a result branch is read for a decision or moved, so promotions go
 	// one at a time and nothing reads the branch between a recorded promotion and its move.
@@ -54,6 +55,9 @@ type App struct {
 // message is an event for the machine, with what the loop must keep because of it.
 type message struct {
 	event lifecycle.Event
+	// generation rejects replies from a store forgotten since the read or effect
+	// started. postEffect attaches the token captured in its context.
+	generation *effectGeneration
 	// scope, when set, is the scope of the store the event's job is in.
 	scope *core.Scope
 	// handle, when set, reaches the event's job's supervisor.
@@ -136,9 +140,6 @@ func (a *App) settle(m message) {
 	}
 }
 
-// tell posts an event that needs nothing else kept.
-func (a *App) tell(e lifecycle.Event) bool { return a.post(message{event: e}) }
-
 // loop is the only place the machine steps.
 func (a *App) loop() {
 	state := lifecycle.Recovering()
@@ -156,6 +157,15 @@ func (a *App) loop() {
 		case <-a.ctx.Done():
 			return
 		}
+		if g := m.generation; g != nil && !a.generations.current(g) {
+			if m.handle != nil {
+				m.handle.Close()
+			}
+			if m.done != nil {
+				close(m.done)
+			}
+			continue
+		}
 		if m.scope != nil {
 			scopes[storeIDOf(*m.scope)] = *m.scope
 		}
@@ -167,8 +177,12 @@ func (a *App) loop() {
 		a.publish(state, scopes, m.changed)
 		keepHandle(handles, m, reqs, state)
 		dropLetGo(handles, before, state, reqs)
+		if e, ok := m.event.(lifecycle.StoreForgotten); ok {
+			a.generations.retire(e.Store)
+		}
 		for _, r := range reqs {
-			a.startEffect(r, scopes, handles)
+			id := r.Target().Store
+			a.startEffect(r, scopes, handles, a.generations.get(id))
 		}
 		switch e := m.event.(type) {
 		case lifecycle.Closed:

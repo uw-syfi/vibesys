@@ -70,8 +70,8 @@ conformance corpus.
    through the shared golden helper. Which golden covers which prompt, and how
    to update one, is in the `write-agent-prompt` skill's goldens reference.
    Protocol changes extend the shared conformance corpus, and
-   `pnpm check:conformance` fails when an event or scenario lacks coverage or
-   no runner executes it.
+   `test_every_event_kind_has_exactly_one_fixture_and_no_fixture_is_unknown`
+   fails when an event kind lacks a fixture.
 8. **Never print a full diff of a large golden.** pytest's diff of two stale
    300 KB replays took 223 to 803 s under `-v` and cancelled a shard. The
    bounded-comparison plugin explains a failed `==` over a large operand by
@@ -130,8 +130,8 @@ conformance corpus.
   sums them. Unenforced: no check measures per-layer CPU yet; a test that
   needs a real process or repository says why in a comment.
 - A conformance scenario that validates structurally but that no runner
-  registers has never executed against a transport; `pnpm check:conformance`
-  reports it as a setup need.
+  registers has never executed against a transport. Unenforced: no check
+  reports an unregistered scenario since the Node corpus gate was deleted.
 
 ## Sources of truth
 

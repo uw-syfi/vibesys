@@ -5,9 +5,11 @@ published run logs and has no product policy or dependency on Python. It can
 serve multiple clients from one process; a blocked Tail stream retains its own
 bounded batch and uses HTTP/2 flow control.
 
-The existing Python host helper and per-run byte relay remain in use by the
-current desktop. This binary supplies Hello, Tail, Skeleton,
-GetBlobs, TailStream and Subscribe for the new client integration.
+The Effect desktop app talks to this binary and nothing else on the host. It
+supplies Hello, ListChatSessions, Tail, Skeleton, GetBlobs, TailStream and
+Subscribe, and the orchestrator service below. It never starts a Python
+process: the host RPCs that ran `vibesys host` commands (HostCall, Read, Watch
+and Mutate, including InspectCandidate) were removed from the API.
 
 ## Run
 
@@ -129,7 +131,8 @@ explicit handshakes. Timeouts only guard hangs; tests contain no sleeps.
 - `cmd/vibesysd` wires CLI options, process signals, and standard streams.
 - `internal/runlog` owns framing and filesystem following.
 - `internal/runindex` resolves published run symlinks.
-- `internal/server` implements Hello and Tail and owns gRPC serving.
+- `internal/server` implements the HostService reads (Hello, Tail, Skeleton, GetBlobs, TailStream,
+  ListChatSessions, Subscribe) and owns gRPC serving.
 - `internal/lifecycle` owns socket publication, locks, and connection idleness.
 - `internal/connect` owns detached startup and socket readiness.
 - `internal/pipe` owns bidirectional copy and cancellation cleanup.

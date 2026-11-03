@@ -271,14 +271,14 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "connection state changes select their dependents"
-paths = ["clients/libs/connection/src/state/host-connection.ts"]
-jobs = ["clients"]
+name = "UI library changes select their dependents"
+paths = ["clients/libs/ui/src/index.ts"]
+jobs = ["clients", "desktop_path"]
 [cases.collections]
 native_languages = []
 dockerfile_contexts = []
 native_targets = []
-pnpm_packages = { dependents_of = "pnpm:@vibesys/connection" }
+pnpm_packages = { dependents_of = "pnpm:@vibesys/ui" }
 
 [[cases]]
 name = "core value compiler and generated values select regeneration and Python checks"
@@ -459,16 +459,6 @@ native_languages = []
 dockerfile_contexts = []
 native_targets = []
 pnpm_packages = []
-
-[[cases]]
-name = "request identity changes reach every client request producer"
-paths = ["clients/libs/request-identity/src/index.ts"]
-jobs = ["clients"]
-[cases.collections]
-native_languages = []
-dockerfile_contexts = []
-native_targets = []
-pnpm_packages = { dependents_of = "pnpm:@vibesys/request-identity" }
 
 [[cases]]
 name = "Pause-now escalation selects its Python owners"

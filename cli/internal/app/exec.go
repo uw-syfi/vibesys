@@ -19,13 +19,23 @@ import (
 
 // startEffect starts carrying out one request of the machine. It is called by the loop, and what
 // the effect needs of the loop's maps is handed to it, because the effect runs beside the loop.
-// Every request is answered, whatever happens, unless the App closes: an unanswered request would
-// hold the machine for good. SignalCancel is answered only when it did not arrive, as the job's
-// outcome answers it otherwise.
-func (a *App) startEffect(r lifecycle.Request, scopes map[lifecycle.StoreID]core.Scope, handles map[lifecycle.Ref]supervisor.Handle) {
+// Every request is answered unless the App closes. Replies for a retired generation
+// are dropped: the machine has already forgotten that store's requests. Otherwise an
+// unanswered request would hold the machine for good. SignalCancel is answered only
+// when it did not arrive, as the job's outcome answers it otherwise.
+func (a *App) startEffect(r lifecycle.Request, scopes map[lifecycle.StoreID]core.Scope, handles map[lifecycle.Ref]supervisor.Handle, generation *effectGeneration) {
 	ref, run := a.effectOf(r, scopes, handles)
-	ctx := named(a.ctx, fmt.Sprintf("%T %s", r, ref))
+	ctx := context.WithValue(named(a.ctx, fmt.Sprintf("%T %s", r, ref)), generationKey{}, generation)
 	a.group.Go(func() { run(ctx) })
+}
+
+func (a *App) postEffect(ctx context.Context, m message) bool {
+	m.generation, _ = ctx.Value(generationKey{}).(*effectGeneration)
+	return a.post(m)
+}
+
+func (a *App) answer(ctx context.Context, e lifecycle.Event) bool {
+	return a.postEffect(ctx, message{event: e})
 }
 
 type effectKey struct{}
@@ -268,7 +278,7 @@ func (a *App) record(ctx context.Context, st store.Store, t core.Transition) err
 // job whose supervisor the next start adopts and starts.
 func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope core.Scope, known bool) {
 	if !known {
-		a.tell(lifecycle.LaunchFailed{Ref: ref, Cause: lifecycle.CauseRefused, Failure: *errNoScope, At: a.now()})
+		a.answer(ctx, lifecycle.LaunchFailed{Ref: ref, Cause: lifecycle.CauseRefused, Failure: *errNoScope, At: a.now()})
 		return
 	}
 	h, gone, err := a.prepare(ctx, ref, scope)
@@ -278,11 +288,11 @@ func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope core.Scope, k
 		// for the next start to find, and Close gives up the connection to it: the App owns every
 		// connection a call returned (ownedSupervisors), whether or not this goroutine hands it on.
 	case gone:
-		a.tell(lifecycle.Closed{Ref: ref})
+		a.answer(ctx, lifecycle.Closed{Ref: ref})
 	case err != nil:
-		a.post(message{event: lifecycle.LaunchFailed{Ref: ref, Cause: launchCauseOf(err), Failure: failureOf(err), At: a.now()}, handle: h})
+		a.postEffect(ctx, message{event: lifecycle.LaunchFailed{Ref: ref, Cause: launchCauseOf(err), Failure: failureOf(err), At: a.now()}, handle: h})
 	default:
-		a.post(message{event: lifecycle.Launched{Ref: ref}, handle: h, changed: true})
+		a.postEffect(ctx, message{event: lifecycle.Launched{Ref: ref}, handle: h, changed: true})
 	}
 }
 
@@ -360,7 +370,7 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 // it needs only the supervisor, and a store that is away must not hold it back.
 func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope core.Scope, h supervisor.Handle) {
 	if h == nil {
-		a.tell(lifecycle.FollowFailed{Ref: r.Ref, Cause: lifecycle.CauseSupervisorSilent, Failure: *errNoHandle, At: a.now()})
+		a.answer(ctx, lifecycle.FollowFailed{Ref: r.Ref, Cause: lifecycle.CauseSupervisorSilent, Failure: *errNoHandle, At: a.now()})
 		return
 	}
 	delay, attempts := a.cfg.Retry.First, 0
@@ -387,10 +397,10 @@ func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope core.Scope, h
 		case ctx.Err() != nil:
 			return
 		case err == nil:
-			a.tell(lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
+			a.answer(ctx, lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
 			return
 		case gone:
-			a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: g.Proof, Start: g.Start, At: a.now()})
+			a.answer(ctx, lifecycle.SupervisorLost{Ref: r.Ref, Proof: g.Proof, Start: g.Start, At: a.now()})
 			return
 		}
 		a.cfg.Logf("job %s: following it: %v", r.Ref, err)
@@ -399,7 +409,7 @@ func (a *App) follow(ctx context.Context, r lifecycle.Adopt, scope core.Scope, h
 		}
 		attempts++
 		if !transient(err) || attempts >= a.cfg.Retry.Attempts {
-			a.tell(lifecycle.FollowFailed{Ref: r.Ref, Cause: causeOf(err), Failure: failureOf(err), At: a.now()})
+			a.answer(ctx, lifecycle.FollowFailed{Ref: r.Ref, Cause: causeOf(err), Failure: failureOf(err), At: a.now()})
 			return
 		}
 		if !a.sleep(ctx, delay) {
@@ -509,7 +519,7 @@ func (a *App) signalCancel(ctx context.Context, r lifecycle.SignalCancel, h supe
 	}
 	if err != nil && ctx.Err() == nil {
 		a.cfg.Logf("job %s: asking its supervisor to cancel: %v", r.Ref, err)
-		a.tell(lifecycle.CancelFailed{Ref: r.Ref})
+		a.answer(ctx, lifecycle.CancelFailed{Ref: r.Ref})
 	}
 }
 
@@ -519,7 +529,7 @@ const pastTheEnd = 1 << 62
 // stopJob ends the command of a job the daemon gave up following and learns how it ended.
 func (a *App) stopJob(ctx context.Context, r lifecycle.Stop, h supervisor.Handle) {
 	if h == nil {
-		a.tell(lifecycle.StopFailed{Ref: r.Ref, Failure: *errNoHandle})
+		a.answer(ctx, lifecycle.StopFailed{Ref: r.Ref, Failure: *errNoHandle})
 		return
 	}
 	var outcome lifecycle.Outcome
@@ -537,11 +547,11 @@ func (a *App) stopJob(ctx context.Context, r lifecycle.Stop, h supervisor.Handle
 	switch {
 	case ctx.Err() != nil:
 	case err == nil:
-		a.tell(lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
+		a.answer(ctx, lifecycle.Finished{Ref: r.Ref, Outcome: outcome, At: a.now()})
 	case gone:
-		a.tell(lifecycle.SupervisorLost{Ref: r.Ref, Proof: g.Proof, Start: g.Start, At: a.now()})
+		a.answer(ctx, lifecycle.SupervisorLost{Ref: r.Ref, Proof: g.Proof, Start: g.Start, At: a.now()})
 	default:
-		a.tell(lifecycle.StopFailed{Ref: r.Ref, Failure: failureOf(err)})
+		a.answer(ctx, lifecycle.StopFailed{Ref: r.Ref, Failure: failureOf(err)})
 	}
 }
 
@@ -560,13 +570,13 @@ func (a *App) move(ctx context.Context, m lifecycle.Move, scope core.Scope, know
 		return
 	case err != nil:
 		a.cfg.Logf("job %s: recording its end: %v", m.Ref, err)
-		a.tell(lifecycle.MoveFailed{Ref: m.Ref, Failure: failureOf(err)})
+		a.answer(ctx, lifecycle.MoveFailed{Ref: m.Ref, Failure: failureOf(err)})
 		return
 	}
 	a.notifyJobs()
 	if m.Settlement.Requeues() {
 		// The machine releases the run that was cut off before it launches the job again.
-		a.tell(lifecycle.Requeued{Ref: m.Ref})
+		a.answer(ctx, lifecycle.Requeued{Ref: m.Ref})
 		return
 	}
 	if m.Release {
@@ -574,7 +584,7 @@ func (a *App) move(ctx context.Context, m lifecycle.Move, scope core.Scope, know
 			a.cfg.Logf("job %s: releasing its supervisor: %v", m.Ref, err)
 		}
 	}
-	a.tell(lifecycle.Closed{Ref: m.Ref})
+	a.answer(ctx, lifecycle.Closed{Ref: m.Ref})
 }
 
 func (a *App) moveInStore(ctx context.Context, m lifecycle.Move, scope core.Scope) error {
@@ -650,11 +660,11 @@ func (a *App) discard(ctx context.Context, d lifecycle.Discard, h supervisor.Han
 	case ctx.Err() != nil:
 	case err != nil:
 		a.cfg.Logf("job %s: clearing its run: %v", d.Ref, err)
-		a.tell(lifecycle.DiscardFailed{Ref: d.Ref, Failure: failureOf(err)})
+		a.answer(ctx, lifecycle.DiscardFailed{Ref: d.Ref, Failure: failureOf(err)})
 	case d.Queued:
-		a.tell(lifecycle.Discarded{Ref: d.Ref, At: a.now()})
+		a.answer(ctx, lifecycle.Discarded{Ref: d.Ref, At: a.now()})
 	default:
-		a.tell(lifecycle.Closed{Ref: d.Ref})
+		a.answer(ctx, lifecycle.Closed{Ref: d.Ref})
 	}
 }
 
@@ -699,7 +709,7 @@ func (a *App) forget(ctx context.Context, ref lifecycle.Ref, proof lifecycle.Dea
 // armRetry answers after the slow period.
 func (a *App) armRetry(ctx context.Context, ref lifecycle.Ref) {
 	if a.sleep(ctx, a.cfg.SlowPeriod) {
-		a.tell(lifecycle.RetryDue{Ref: ref})
+		a.answer(ctx, lifecycle.RetryDue{Ref: ref})
 	}
 }
 
@@ -717,7 +727,7 @@ func (a *App) reexamine(ctx context.Context, ref lifecycle.Ref, scope core.Scope
 	}
 	found.At = a.now()
 	m.event = found
-	a.post(m)
+	a.postEffect(ctx, m)
 }
 
 // look finds what is left of a job's run. A look that fails says nothing, which is what Unknown

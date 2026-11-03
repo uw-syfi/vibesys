@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "name": "VibeSys Rust toolchain",
   "description": "rustup and a pinned minimal Rust toolchain under /opt/rustup and /opt/cargo, readable by every user. Debian/Ubuntu bases only.",
-  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/docs/contributing/devcontainer-features.md",
+  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/libs/vs-sandbox/src/vs_sandbox/features/README.md",
   "options": {
     "rust_version": {
       "type": "string",

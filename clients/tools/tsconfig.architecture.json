@@ -2,45 +2,48 @@
   "compilerOptions": {
     "baseUrl": "..",
     "paths": {
-      "@vibesys/connection": ["libs/connection/src/index.ts"],
-      "@vibesys/connection/testing": ["libs/connection/src/testing/index.ts"],
-      "@vibesys/contracts": ["libs/contracts/src/index.ts"],
-      "@vibesys/contracts/host-helper": ["libs/contracts/src/host-helper.ts"],
-      "@vibesys/contracts/testing": ["libs/contracts/src/testing/index.ts"],
-      "@vibesys/desktop/core": ["apps/desktop/src/core/index.ts"],
-      "@vibesys/desktop/main": ["apps/desktop/src/main/index.ts"],
-      "@vibesys/desktop/preload": ["apps/desktop/src/preload/index.cts"],
-      "@vibesys/desktop/state": ["apps/desktop/src/state/index.ts"],
-      "@vibesys/desktop/ui": ["apps/desktop/src/ui/index.ts"],
-      "@vibesys/display-names": ["libs/display-names/src/index.ts"],
-      "@vibesys/hosts": ["libs/hosts/src/index.ts"],
-      "@vibesys/ipc": ["libs/ipc/src/index.ts"],
-      "@vibesys/ipc/testing": ["libs/ipc/src/testing/index.ts"],
-      "@vibesys/logs": ["libs/logs/src/index.ts"],
-      "@vibesys/machine": ["libs/machine/src/index.ts"],
-      "@vibesys/machine/testing": ["libs/machine/src/testing/index.ts"],
-      "@vibesys/orchestrator-proto": ["libs/orchestrator-proto/src/index.ts"],
-      "@vibesys/proto": ["libs/proto/src/index.ts"],
-      "@vibesys/request-identity": ["libs/request-identity/src/index.ts"],
-      "@vibesys/runs": ["libs/runs/src/index.ts"],
-      "@vibesys/runs/chat": ["libs/runs/src/chat/index.ts"],
-      "@vibesys/runs/intents": ["libs/runs/src/intents/index.ts"],
-      "@vibesys/settings": ["libs/settings/src/index.ts"],
-      "@vibesys/settings/testing": ["libs/settings/src/testing/index.ts"],
-      "@vibesys/store": ["libs/store/src/index.ts"],
-      "@vibesys/store/testing": ["libs/store/src/testing/index.ts"],
-      "@vibesys/subscription": ["libs/subscription/src/index.ts"],
-      "@vibesys/subscription/contract": ["libs/subscription/src/testing/port-contract.ts"],
-      "@vibesys/subscription/testing": ["libs/subscription/src/testing/index.ts"],
-      "@vibesys/transport": ["libs/transport/src/index.ts"],
-      "@vibesys/transport/testing": ["libs/transport/src/testing/index.ts"],
-      "@vibesys/transport/websocket": ["libs/transport/src/websocket.ts"],
-      "@vibesys/ui": ["libs/ui/src/index.ts"],
-      "@vibesys/ui/components.css": ["libs/ui/src/components.css"],
-      "@vibesys/ui/fonts.css": ["libs/ui/src/fonts.css"],
-      "@vibesys/ui/legacy": ["libs/ui/src/legacy/index.ts"],
-      "@vibesys/ui/tokens": ["libs/ui/src/tokens/index.ts"],
-      "@vibesys/ui/tokens.css": ["libs/ui/src/tokens.css"]
+      "@vibesys/desktop/core": [
+        "apps/desktop/src/core/index.ts"
+      ],
+      "@vibesys/desktop/main": [
+        "apps/desktop/src/main/index.ts"
+      ],
+      "@vibesys/desktop/preload": [
+        "apps/desktop/src/preload/index.cts"
+      ],
+      "@vibesys/desktop/state": [
+        "apps/desktop/src/state/index.ts"
+      ],
+      "@vibesys/desktop/ui": [
+        "apps/desktop/src/ui/index.ts"
+      ],
+      "@vibesys/display-names": [
+        "libs/display-names/src/index.ts"
+      ],
+      "@vibesys/orchestrator-proto": [
+        "libs/orchestrator-proto/src/index.ts"
+      ],
+      "@vibesys/proto": [
+        "libs/proto/src/index.ts"
+      ],
+      "@vibesys/ui": [
+        "libs/ui/src/index.ts"
+      ],
+      "@vibesys/ui/components.css": [
+        "libs/ui/src/components.css"
+      ],
+      "@vibesys/ui/fonts.css": [
+        "libs/ui/src/fonts.css"
+      ],
+      "@vibesys/ui/legacy": [
+        "libs/ui/src/legacy/index.ts"
+      ],
+      "@vibesys/ui/tokens": [
+        "libs/ui/src/tokens/index.ts"
+      ],
+      "@vibesys/ui/tokens.css": [
+        "libs/ui/src/tokens.css"
+      ]
     }
   }
 }

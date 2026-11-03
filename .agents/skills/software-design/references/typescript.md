@@ -37,13 +37,7 @@ place.
 - **State.** Frontend state changes only from backend events; keep folds pure
   and pass time as event data. See [functional-core.md](functional-core.md).
   Ask whether the state is a mode with effects or a fold:
-  - Control state (a mode that starts work, waits, retries, cancels) is a
-    state machine (XState v5: `setup({types, actors, actions, guards,
-    delays})`), each operation an injected `invoke` with an explicit `id`,
-    delays as `after`, cancellation by leaving the state. The shell provides
-    the operations with `machine.provide`.
+  - Control state follows the project's state-management guidance.
   - A data fold (events in, a value out, no mode) is a plain reducer.
-  - Test a machine with pure `getNextSnapshot`/`transition` steps; test stale
-    replies on a live actor.
 - **I/O.** Keep transport behind an interface called by the shell, and use an
   in-memory implementation in composed tests (see the `testing` skill).

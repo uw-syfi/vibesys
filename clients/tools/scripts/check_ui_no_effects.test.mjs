@@ -38,13 +38,13 @@ const FORBIDDEN = {
   websocket: "export const open = () => new WebSocket('ws://x');\n",
   timeout: 'export const later = () => setTimeout(() => {}, 1);\n',
   interval: 'export const every = () => setInterval(() => {}, 1);\n',
-  'transport import': "import {createClient} from '@vibesys/transport';\nexport {createClient};\n",
+  'proto import': "import {HostService} from '@vibesys/proto';\nexport {HostService};\n",
   // Regression: a statement pattern matched a named import of one specifier only.
   'multi-specifier import':
-    "import {createClient, request} from '@vibesys/transport';\nexport {createClient, request};\n",
+    "import {HostService, Hello} from '@vibesys/proto';\nexport {HostService, Hello};\n",
   're-export': "export {ipcRenderer} from 'electron';\n",
-  'transport subpath type import':
-    "import type {Foo} from '@vibesys/transport/websocket';\nexport type {Foo};\n",
+  'proto subpath type import':
+    "import type {Foo} from '@vibesys/proto/testing';\nexport type {Foo};\n",
   'namespace import': "import * as fs from 'node:fs';\nexport {fs};\n",
   'side-effect import': "import 'node:os';\n",
   'electron import': "import {ipcRenderer} from 'electron';\nexport {ipcRenderer};\n",

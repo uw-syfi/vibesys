@@ -1,5 +1,5 @@
 {
-  "provenance": "Emitted by gateway/internal/subscription/corpus_test.go from the real hub. Run `go test ./internal/subscription -run TestFrameCorpus -update-corpus` to rewrite it. @vibesys/subscription folds every stream in a test.",
+  "provenance": "Emitted by gateway/internal/subscription/corpus_test.go from the real hub. Run `go test ./internal/subscription -run TestFrameCorpus -update-corpus` to rewrite it.",
   "max_keys": 4,
   "cases": [
     {

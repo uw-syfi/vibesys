@@ -183,11 +183,11 @@ index holds a complete record that does not decode; the host helper answers that
 | `vs_sim` sinks and `ByteSource` | built |
 | `vs_logs` store, scope, reader; `LogOwner` and its TypeScript | built |
 | Startup producers (image build, container start) | built |
-| Host helper `logs` feature and the client logs lib | built |
+| Host helper `logs` feature | built; the client logs library was deleted |
 | Narration handler and excepthook | built |
 | `NarrationLine` in the generated protocol types | built |
-| Run view Startup log panel and Inspect log sheet | built |
-| Terminal escape sequences (colors, cursor moves, titles) dropped by the client's fold, across chunk boundaries, so a log view renders text only | built: `clients/libs/logs/src/escapes.ts`, property tests in `escapes.test.ts` |
+| Run view Startup log panel and Inspect log sheet | deleted with the legacy desktop app |
+| Terminal escape sequences (colors, cursor moves, titles) dropped by the client's fold, across chunk boundaries, so a log view renders text only | deleted with the legacy client libraries; the Effect desktop app does not show a log view yet |
 | Gate stage and tool build openers in the libraries | built |
 | `vibesys` openers for gate stages and tool builds | built for in-process stages; the host environment's hook-driven tool install still discards |
 | SkyPilot stage output | built: streams through the command runner sink |

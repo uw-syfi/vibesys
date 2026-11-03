@@ -305,29 +305,13 @@ def test_checked_in_policy_names_one_existing_job_for_every_check() -> None:
 
 
 @pytest.mark.parametrize(
-    ("filenames", "expected_capabilities", "expected_checks"),
-    [
-        (["clients/libs/transport/src/index.ts"], {"clients"}, {"pr-ci"}),
-        (
-            ["clients/libs/transport/src/index.ts", "src/server/events.py"],
-            {"clients", "server"},
-            {"pr-ci"},
-        ),
-    ],
+    "filename", ["clients/libs/ui/src/index.ts", "clients/libs/transport/src/index.ts"]
 )
-def test_checked_in_policy_selects_checks_that_run_for_the_changed_paths(
-    filenames: list[str],
-    expected_capabilities: set[str],
-    expected_checks: set[str],
-) -> None:
+def test_checked_in_policy_grants_no_client_paths(filename: str) -> None:
     policy = load_policy()
-    entries = [{"filename": name} for name in filenames]
-
-    capabilities, checks = authorize_files([entries], changed_files=len(entries), policy=policy)
-
-    assert capabilities == expected_capabilities
-    assert checks == expected_checks
-    assert {"ayanbinrafaih", "nano-ai"} <= policy.capabilities["clients"].members
+    assert "clients" not in policy.capabilities
+    with pytest.raises(MergeRefusalError, match="does not match"):
+        authorize_files([[{"filename": filename}]], changed_files=1, policy=policy)
 
 
 @pytest.mark.parametrize(

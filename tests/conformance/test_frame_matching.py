@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -24,12 +22,6 @@ from server.diagnostics import Diagnostic, DiagnosticScope
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-# The Node corpus gate runs in its own process, so it cannot import the
-# derivation. It declares the same name as a literal and this test is what
-# fails when the two drift apart.
-_GATE = Path("clients/tools/scripts/check_conformance_corpus.mjs")
-_GATE_CONSTANT = re.compile(r"^const RESPONSE_PSEUDO_TYPE = '([^']*)';$", re.MULTILINE)
-
 _IDENTIFIERS = st.text(alphabet="abc", max_size=3)
 
 
@@ -44,12 +36,6 @@ def test_the_pseudo_type_exists_because_a_response_carries_no_discriminant() -> 
     would name it by its tag and the pseudo-type would have no reason to exist.
     """
     assert "type" not in Response.model_fields
-
-
-def test_the_node_corpus_gate_names_the_same_pseudo_type() -> None:
-    match = _GATE_CONSTANT.search(_GATE.read_text())
-    assert match is not None, f"{_GATE} no longer declares a RESPONSE_PSEUDO_TYPE literal"
-    assert match.group(1) == RESPONSE_PSEUDO_TYPE
 
 
 def test_a_response_frame_satisfies_the_pseudo_type() -> None:

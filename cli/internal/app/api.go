@@ -169,6 +169,7 @@ func (a *App) AddNote(ctx context.Context, c core.CallContext, id core.JobID, te
 // before it heard of the job is not lost. The machine counts a job's cancel once.
 func (a *App) Cancel(ctx context.Context, c core.CallContext, id core.JobID, reason string) (core.Job, error) {
 	scope := c.Scope
+	ctx = a.generationContext(ctx, storeIDOf(scope))
 	st, err := a.open(ctx, scope)
 	if err != nil {
 		return core.Job{}, err
@@ -180,7 +181,7 @@ func (a *App) Cancel(ctx context.Context, c core.CallContext, id core.JobID, rea
 		if err != nil || job.State.Final() {
 			return job, err
 		}
-		a.post(message{event: lifecycle.CancelAsked{
+		a.postEffect(ctx, message{event: lifecycle.CancelAsked{
 			Ref: ref, Reason: reason, State: job.State, SubmittedAt: job.SubmittedAt, At: a.now(),
 		}, scope: &scope})
 		if f, troubled := a.troubleOf(ref); troubled {
