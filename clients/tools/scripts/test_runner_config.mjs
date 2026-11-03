@@ -10,3 +10,15 @@ export const NODE_TEST_ARGUMENTS = [
   `--test-timeout=${PER_TEST_BOUND_MS}`,
   '--test-concurrency=1',
 ];
+
+/**
+ * Vitest runs the Effect packages' tests (`@effect/vitest`), whose clock is `TestClock`. The same
+ * hang guard as the other runners, one test file at a time. The first argument is the sub-command
+ * and the rest are flags: nothing here changes which tests run.
+ */
+export const VITEST_ARGUMENTS = [
+  'run',
+  `--testTimeout=${PER_TEST_BOUND_MS}`,
+  `--hookTimeout=${PER_TEST_BOUND_MS}`,
+  '--no-file-parallelism',
+];

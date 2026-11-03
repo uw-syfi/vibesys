@@ -173,6 +173,82 @@ function desktopRules() {
   ];
 }
 
+// The Effect desktop app (`apps/desktop`, docs/contributing/clients-architecture.md, "State") is one
+// package with a folder per role, because its parts share one set of services and one release
+// (a package is justified later only by a second real consumer, generated code, or a measured
+// build problem). Which package may reach which is the package-graph checker's, and its entries
+// carry the runtimes; these rules hold the folders inside it:
+//
+//   state    plain folds and views. Imports nothing outside itself at run time and never Effect.
+//   core     Effect services, transport, atoms. May import state.
+//   ui       React screens. May import core and state.
+//   main     Electron main process; preload: the sandboxed bridge. Never import ui.
+//   testing  doubles at process, network and clock boundaries. Only tests import it.
+const DESKTOP_APP = '^apps/desktop/src/';
+const DESKTOP_PART = part => `^apps/desktop/src/${part}/`;
+const EFFECT_RUNTIME = '(?:^|/)node_modules/(?:effect|@effect/[^/]+)/';
+
+function desktopAppRules() {
+  return [
+    {
+      // A fold is a function from data to data that a test calls directly. Only a type, which the
+      // compiler erases, may name another module (the protocol's messages a fold reads).
+      name: 'desktop-state-imports-nothing-outside-itself',
+      severity: 'error',
+      from: {path: DESKTOP_PART('state'), pathNot: TEST_FILE},
+      to: {pathNot: DESKTOP_PART('state'), dependencyTypesNot: ['type-only']},
+    },
+    {
+      // Not even for a type: a fold that names an Effect type is on its way to running one.
+      name: 'desktop-state-never-imports-effect',
+      severity: 'error',
+      from: {path: DESKTOP_PART('state'), pathNot: TEST_FILE},
+      to: {path: EFFECT_RUNTIME},
+    },
+    {
+      name: 'desktop-core-does-not-reach-the-shells',
+      severity: 'error',
+      from: {path: DESKTOP_PART('core'), pathNot: TEST_FILE},
+      to: {path: [DESKTOP_PART('ui'), DESKTOP_PART('main'), DESKTOP_PART('preload')]},
+    },
+    {
+      // A screen reads services and folds; the main process and the preload reach it only through
+      // the bridge.
+      name: 'desktop-ui-does-not-reach-main-or-preload',
+      severity: 'error',
+      from: {path: DESKTOP_PART('ui'), pathNot: TEST_FILE},
+      to: {path: [DESKTOP_PART('main'), DESKTOP_PART('preload')]},
+    },
+    {
+      name: 'desktop-main-and-preload-do-not-import-ui',
+      severity: 'error',
+      from: {path: [DESKTOP_PART('main'), DESKTOP_PART('preload')], pathNot: TEST_FILE},
+      to: {path: DESKTOP_PART('ui')},
+    },
+    {
+      // The main process loads a preload by path into a page; it never runs one itself.
+      name: 'desktop-main-does-not-import-the-preload',
+      severity: 'error',
+      from: {path: DESKTOP_PART('main'), pathNot: TEST_FILE},
+      to: {path: DESKTOP_PART('preload')},
+    },
+    {
+      // A sandboxed preload's `require` reaches Electron only (`preload-sandbox` in the
+      // package-graph checker); types are erased and may name the app's own.
+      name: 'desktop-preload-loads-only-electron',
+      severity: 'error',
+      from: {path: DESKTOP_PART('preload'), pathNot: TEST_FILE},
+      to: {pathNot: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
+    },
+    {
+      name: 'desktop-production-code-does-not-import-testing',
+      severity: 'error',
+      from: {path: DESKTOP_APP, pathNot: [TEST_FILE, DESKTOP_PART('testing')]},
+      to: {path: DESKTOP_PART('testing')},
+    },
+  ];
+}
+
 /** The renderers' rules: what no renderer may reach. */
 function rendererRules() {
   return [
@@ -297,6 +373,7 @@ export default {
       },
     },
     ...desktopRules(),
+    ...desktopAppRules(),
     ...rendererRules(),
     ...featureRules(),
   ],

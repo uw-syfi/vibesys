@@ -1,6 +1,6 @@
 ---
 name: build-client-feature
-description: Add or change a feature in the TypeScript clients (the desktop app, features, and shared libraries), placing it in the package graph, writing its control state as an XState machine and its data folds as reducers, wiring the live run through @vibesys/run-session, and bounding and cancelling its asynchronous work. Use when changing client apps, features or shared libraries, scaffolding a client package, or fixing a client bug about stale results, hangs, or leaked connections.
+description: Place and wire a change in the TypeScript clients (the legacy desktop packages, features and shared libraries): the package graph, a legacy feature's XState machines and reducer folds, run-session wiring, and bounded, cancellable work. New desktop work goes in the Effect desktop app and the write-effect-code skill. Use when changing client apps, features or shared libraries, scaffolding a client package, or fixing a client bug about stale results, hangs, or leaked connections in a legacy package.
 metadata:
   kind: codebase
 ---
@@ -10,17 +10,16 @@ metadata:
 The clients are a pnpm workspace (the clients workspace): one package per concept, in
 layers that depend only downward ("Layers" and "State" in
 [clients-architecture.md](../../../docs/contributing/clients-architecture.md)).
-**Control state** is a mode with effects: it starts work, waits, retries,
-times out, cancels, and decides what a late answer means (a live run session,
-a host connection). A **data fold** turns ordered inputs into a value and has
-no mode (the run event fold). The **shell** is the impure code around a pure
-core; it owns sockets, timers and processes.
+**New desktop work goes in the Effect desktop app** (`@vibesys/desktop`), written with the
+`write-effect-code` skill. The packages below that app (the features, `connection`,
+`run-session`, `subscription`) are legacy: they keep their XState machines and may break while
+the app is rebuilt, so change them only to fix or remove them.
 
 ## Builds on
 
 - `software-design` (pure core, thin shell) and `testing` (Fakes, model tests).
-- `write-vibesys-tests` for test tiers; `enforce-rules` when a fix reveals a
-  bug class a check could close.
+- `write-effect-code` for new desktop work; `write-vibesys-tests` for test tiers;
+  `enforce-rules` when a fix reveals a bug class a check could close.
 
 ## When this applies
 
@@ -43,14 +42,16 @@ core; it owns sockets, timers and processes.
    `pnpm new:package <layer> <name>` (or `pnpm new:package feature <name>`),
    then `pnpm install`; a feature starts from a machine skeleton with its
    tests. `check_package_graph` fails a hand-made package by rule name.
-3. **Write control state as an XState machine, data folds as reducers.**
-   Follow [references/state-and-async.md](references/state-and-async.md):
+3. **New control state is an Effect service in the Effect desktop app; follow
+   `write-effect-code`.** In a legacy package that still runs machines, keep its
+   form and follow [references/state-and-async.md](references/state-and-async.md):
    invoked operations with ids, `after` delays on an injected clock, folds on
    `@vibesys/store` in their own modules. The Grit rule
    `features-no-hand-rolled-control` forbids timers and abort controllers in a
    feature's state and effects code, `control-state-no-store-kernel` forbids
    the reducer kernel in migrated features, and `check_package_graph` confines
-   `xstate` to features and the machine packages. Migrating a feature adds it
+   `xstate` to features and the machine packages and `effect` to the Effect
+   desktop app. Migrating a feature adds it
    to the second rule's scope in the Biome configuration and drops its
    exclusion from the first.
 4. **Cancel by ownership.** Every async operation takes an abort signal owned

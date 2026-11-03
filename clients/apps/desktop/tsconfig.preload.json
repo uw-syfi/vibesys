@@ -1,0 +1,11 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.preload.tsbuildinfo"
+  },
+  "include": ["src/preload/**/*.cts"]
+}

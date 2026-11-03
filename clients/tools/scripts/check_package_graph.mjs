@@ -31,7 +31,8 @@
  *   `dom` or `neutral` entry.
  * - `external-dependencies`: React only in `dom` entries, Electron only in `node` and `preload`
  *   entries of features and apps, XState only where control state lives (features' `./state` and
- *   `./renderer`, and the effect-owning packages in `MACHINE_PACKAGES`), Node builtins only in
+ *   `./renderer`, and the effect-owning packages in `MACHINE_PACKAGES`), Effect only in the
+ *   desktop app's `./core`, `./ui` and `./main` entries (`EFFECT_PACKAGES`), Node builtins only in
  *   `node` entries (`EXTERNAL_DEPENDENCIES`); a package that declares one of them in
  *   `dependencies` has an entry that may use it.
  * - `preload-sandbox`: a `preload` entry's emitted code loads only Electron. Electron's sandbox
@@ -155,6 +156,8 @@ export const MACHINE_PACKAGES = [
   '@vibesys/subscription',
 ];
 const ALL_RUNTIMES = Object.keys(RUNTIMES);
+/** The Effect runtime and its React bindings (the test kit, `@effect/vitest`, is test code). */
+export const EFFECT_PACKAGES = ['effect', '@effect/atom-react'];
 
 /**
  * Third-party imports confined by runtime and layer, the one allowlist for them. A specifier
@@ -174,6 +177,15 @@ export const EXTERNAL_DEPENDENCIES = [
     subpaths: ['./state', './renderer'],
   },
   {packages: ['xstate'], runtimes: ALL_RUNTIMES, names: MACHINE_PACKAGES},
+  // Effect is the new desktop app's control layer (docs/contributing/clients-architecture.md,
+  // "State"). Its folds (`./state`) and sandboxed preload stay free of it, and no other package
+  // adopts it without a rule here.
+  {
+    packages: EFFECT_PACKAGES,
+    runtimes: ALL_RUNTIMES,
+    names: ['@vibesys/desktop'],
+    subpaths: ['./core', './ui', './main'],
+  },
 ];
 const NODE_BUILTINS = {runtimes: ['node']};
 /** What a sandboxed preload's `require` reaches. */
@@ -943,7 +955,7 @@ const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css', './components.css
  * The third-party packages a feature or app imports and declares: no component kit, utility CSS or
  * icon package. Electron and Node builtins stay confined by `external-dependencies`.
  */
-export const STRICT_THIRD_PARTY = ['react', 'react-dom', 'xstate'];
+export const STRICT_THIRD_PARTY = ['react', 'react-dom', 'xstate', ...EFFECT_PACKAGES];
 const STRICT_STYLE_FILE = /\.(?:css|scss|sass|less|styl|pcss)$/;
 const STRICT_FIX =
   'build the UI from @vibesys/ui (add the missing component there) and drop the dependency';

@@ -143,6 +143,19 @@ const VALID_FILES = {
   'libs/connection/src/testing/index.ts': "import '../state/machine.js';\n",
   'apps/desktop-main/src/preload/bridge.cts':
     "import 'electron';\nimport type {} from '@vibesys/ipc';\n",
+  // The Effect desktop app: state is plain and stands alone (a type may name another module),
+  // core builds on state and Effect, ui on both, and the main process and the preload never see
+  // ui. The testing doubles are for tests.
+  'apps/desktop/src/state/index.ts': "import './fold.js';\nimport type {} from '@vibesys/hosts';\n",
+  'apps/desktop/src/state/fold.ts': '',
+  'apps/desktop/src/core/index.ts': "import 'effect/Effect';\nimport '../state/index.js';\n",
+  'apps/desktop/src/ui/index.ts': "import '../core/index.js';\nimport '../state/index.js';\n",
+  'apps/desktop/src/main/index.ts': "import '../core/index.js';\nimport 'node:path';\n",
+  'apps/desktop/src/preload/index.cts':
+    "import 'electron';\nimport type {} from '../core/index.js';\n",
+  'apps/desktop/src/testing/index.ts': "import '../core/index.js';\n",
+  'apps/desktop/src/core/index.test.ts':
+    "import '../testing/index.js';\nimport '@effect/vitest';\n",
 };
 
 const RULE_CASES = [
@@ -197,6 +210,66 @@ const RULE_CASES = [
   {
     rule: 'desktop-only-connection-shell-opens-processes-and-sockets',
     files: {'apps/desktop-main/src/main/index.ts': "import 'node:child_process';\n"},
+  },
+  {
+    rule: 'desktop-state-imports-nothing-outside-itself',
+    files: {'apps/desktop/src/state/fold.ts': "import '../core/index.js';\n"},
+  },
+  {
+    rule: 'desktop-state-imports-nothing-outside-itself',
+    files: {'apps/desktop/src/state/fold.ts': "import '@vibesys/hosts';\n"},
+  },
+  {
+    rule: 'desktop-state-imports-nothing-outside-itself',
+    files: {'apps/desktop/src/state/fold.ts': "import 'node:fs';\n"},
+  },
+  {
+    rule: 'desktop-state-never-imports-effect',
+    files: {'apps/desktop/src/state/fold.ts': "import 'effect/Effect';\n"},
+  },
+  {
+    rule: 'desktop-state-never-imports-effect',
+    files: {'apps/desktop/src/state/fold.ts': "import type {} from 'effect/Option';\n"},
+  },
+  {
+    rule: 'desktop-core-does-not-reach-the-shells',
+    files: {'apps/desktop/src/core/index.ts': "import '../ui/index.js';\n"},
+  },
+  {
+    rule: 'desktop-core-does-not-reach-the-shells',
+    files: {'apps/desktop/src/core/index.ts': "import '../main/index.js';\n"},
+  },
+  {
+    rule: 'desktop-ui-does-not-reach-main-or-preload',
+    files: {'apps/desktop/src/ui/index.ts': "import '../main/index.js';\n"},
+  },
+  {
+    rule: 'desktop-ui-does-not-reach-main-or-preload',
+    files: {'apps/desktop/src/ui/index.ts': "import '../preload/index.cjs';\n"},
+  },
+  {
+    rule: 'desktop-main-and-preload-do-not-import-ui',
+    files: {'apps/desktop/src/main/index.ts': "import '../ui/index.js';\n"},
+  },
+  {
+    rule: 'desktop-main-and-preload-do-not-import-ui',
+    files: {'apps/desktop/src/preload/index.cts': "import '../ui/index.js';\n"},
+  },
+  {
+    rule: 'desktop-main-does-not-import-the-preload',
+    files: {'apps/desktop/src/main/index.ts': "import '../preload/index.cjs';\n"},
+  },
+  {
+    rule: 'desktop-preload-loads-only-electron',
+    files: {'apps/desktop/src/preload/index.cts': "import '../core/index.js';\n"},
+  },
+  {
+    rule: 'desktop-preload-loads-only-electron',
+    files: {'apps/desktop/src/preload/index.cts': "import 'node:fs';\n"},
+  },
+  {
+    rule: 'desktop-production-code-does-not-import-testing',
+    files: {'apps/desktop/src/core/index.ts': "import '../testing/index.js';\n"},
   },
   {
     rule: 'renderers-do-not-import-electron',
@@ -329,6 +402,9 @@ async function violatedRules(t, files) {
   );
   await writeExternalPackage(root, 'declared-package');
   await writeExternalPackage(root, 'electron');
+  await writeExternalPackage(root, 'effect/Effect');
+  await writeExternalPackage(root, 'effect/Option');
+  await writeExternalPackage(root, '@effect/vitest');
   await writeFile(join(root, 'package.json'), JSON.stringify({name: 'fixture-workspace'}));
   for (const directory of PACKAGE_DIRECTORIES) {
     await writePackage(root, directory, `@vibesys/${directory}`, ['src']);

@@ -12,15 +12,19 @@ export function testRunnerErrors(path, manifest) {
   for (const [name, script] of Object.entries(manifest.scripts ?? {})) {
     for (const command of script.split(/&&|\|\||[;|]/)) {
       const words = command.trim().split(/\s+/);
-      const raw = /(?:^|\s)(?:bun\s+test|node\s+[^;&|]*--test(?:\s|=|$))/.test(command);
+      // `vitest` as a command word (the shared `run_vitest.mjs` is a path, not matched here).
+      const raw =
+        /(?:^|\s)(?:bun\s+test|node\s+[^;&|]*--test(?:\s|=|$)|(?:(?:pnpm\s+(?:exec\s+)?|npx\s+)?vitest)(?:\s|$))/.test(
+          command,
+        );
       const runner = words.findIndex(word =>
-        /(?:^|\/)run_(?:bun_tests|node_tests|node_suite)\.mjs$/.test(word),
+        /(?:^|\/)run_(?:bun_tests|node_tests|node_suite|vitest)\.mjs$/.test(word),
       );
       const overrides = runner >= 0 && words.slice(runner + 1).some(word => word.startsWith('-'));
       if (raw || overrides) {
         errors.push(
           `test-runner-policy: ${path}: scripts.${name}: use run_bun_tests.mjs, ` +
-            'run_node_tests.mjs or run_node_suite.mjs without runner flags; ' +
+            'run_node_tests.mjs, run_node_suite.mjs or run_vitest.mjs without runner flags; ' +
             'the shared configuration owns the per-test hang guard',
         );
       }
@@ -35,6 +39,7 @@ export function testRunnerCacheErrors(turbo) {
     'tools/scripts/run_bun_tests.mjs',
     'tools/scripts/run_node_tests.mjs',
     'tools/scripts/run_node_suite.mjs',
+    'tools/scripts/run_vitest.mjs',
     'tools/scripts/test_runner_config.mjs',
   ]
     .filter(path => !turbo.globalDependencies?.includes(path))

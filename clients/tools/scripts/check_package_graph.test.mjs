@@ -243,6 +243,33 @@ function validWorkspace() {
   };
 }
 
+/** The Effect desktop app: one package whose folders are entries, and the only user of Effect. */
+function effectAppPackage() {
+  return {
+    manifest: {
+      name: '@vibesys/desktop',
+      vibesys: {
+        layer: 'app',
+        entries: {'./core': 'neutral', './state': 'neutral', './ui': 'dom'},
+      },
+      exports: {
+        './core': source('core/index'),
+        './state': source('state/index'),
+        './ui': source('ui/index'),
+      },
+      dependencies: {effect: '4.1.2'},
+    },
+    files: {
+      'src/core/index.ts': "import * as Effect from 'effect/Effect';\nexport const e = Effect;\n",
+      'src/state/index.ts': 'export const s = 1;\n',
+      'src/ui/index.ts': "import {e} from '../core/index.js';\nexport const u = e;\n",
+      'tsconfig.core.json': project({include: ['src/core']}),
+      'tsconfig.state.json': project({include: ['src/state']}),
+      'tsconfig.ui.json': project({lib: ['ES2022', 'DOM'], include: ['src/ui']}),
+    },
+  };
+}
+
 /** Where a fixture package is filed: its layer's folder, unless the fixture says otherwise. */
 function directoryOf(label, {manifest, directory}) {
   return directory ?? `${LAYER_FOLDERS[manifest.vibesys?.layer] ?? 'libs'}/${label}`;
@@ -489,6 +516,45 @@ for (const [name, mutate] of Object.entries(EXTERNAL_CASES)) {
     const errors = packageGraphErrors(await materialize(t, workspace));
     assert.equal(errors.length, 1, errors.join('\n'));
     assert.ok(errors[0].startsWith('external-dependencies: '), errors[0]);
+  });
+}
+
+// Effect is the Effect desktop app's control layer: its core, ui and main entries use it, and no
+// fold (`./state`), preload or other package does.
+const EFFECT_CASES = {
+  'Effect in the app folds': workspace => {
+    workspace.desktop.files['src/state/index.ts'] += "import 'effect/Option';\n";
+  },
+  'Effect in another app': workspace => {
+    workspace['web-app'].files['src/index.ts'] += "import 'effect/Effect';\n";
+  },
+  'Effect declared by a foundation package': workspace => {
+    workspace.contracts.manifest.dependencies = {effect: '4.1.2'};
+  },
+  'the Effect React bindings in the app folds': workspace => {
+    workspace.desktop.manifest.dependencies['@effect/atom-react'] = '4.1.2';
+    workspace.desktop.files['src/state/index.ts'] += "import '@effect/atom-react';\n";
+  },
+};
+
+test('Effect is allowed in the Effect desktop app core, ui and main entries', async t => {
+  const workspace = validWorkspace();
+  workspace.desktop = effectAppPackage();
+  workspace.desktop.manifest.dependencies['@effect/atom-react'] = '4.1.2';
+  workspace.desktop.files['src/ui/index.ts'] += "import '@effect/atom-react';\n";
+  assert.deepEqual(packageGraphErrors(await materialize(t, workspace)), []);
+});
+
+for (const [name, mutate] of Object.entries(EFFECT_CASES)) {
+  test(`external-dependencies rejects ${name}`, async t => {
+    const workspace = validWorkspace();
+    workspace.desktop = effectAppPackage();
+    mutate(workspace);
+    const errors = packageGraphErrors(await materialize(t, workspace));
+    assert.ok(
+      errors.length >= 1 && errors.every(error => error.startsWith('external-dependencies: ')),
+      errors.join('\n'),
+    );
   });
 }
 

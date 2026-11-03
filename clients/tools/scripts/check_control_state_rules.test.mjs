@@ -99,3 +99,22 @@ test('a feature still on the reducer kernel is not held to the control-state rul
     [],
   );
 });
+
+// `apps/desktop` is the Effect desktop app: its control state is Effect services, held by the
+// `effect-*` rules (docs/contributing/clients-architecture.md, "State"). The two XState-era rules
+// above stay scoped to the packages that still run machines, and name no path of the new app.
+test('the XState control-state rules are not wired to the Effect desktop app', async () => {
+  const {readFile} = await import('node:fs/promises');
+  const config = JSON.parse(await readFile(join(WORKSPACE_ROOT, 'biome.json'), 'utf8'));
+  const wired = config.overrides.filter(override =>
+    (override.plugins ?? []).some(plugin =>
+      /(?:features-no-hand-rolled-control|control-state-no-store-kernel)\.grit$/.test(plugin),
+    ),
+  );
+  assert.equal(wired.length, 2);
+  for (const override of wired) {
+    for (const glob of override.includes) {
+      assert.ok(!glob.includes('apps/desktop/'), `${glob} would apply an XState rule to the app`);
+    }
+  }
+});

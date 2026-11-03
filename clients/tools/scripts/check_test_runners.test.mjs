@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {testRunnerCacheErrors, testRunnerErrors} from './check_test_runners.mjs';
-import {NODE_TEST_ARGUMENTS, PER_TEST_BOUND_MS} from './test_runner_config.mjs';
+import {NODE_TEST_ARGUMENTS, PER_TEST_BOUND_MS, VITEST_ARGUMENTS} from './test_runner_config.mjs';
 
-for (const runtime of ['bun test', 'node --test', 'node --test --test-timeout=0']) {
+for (const runtime of [
+  'bun test',
+  'node --test',
+  'node --test --test-timeout=0',
+  'vitest run',
+  'pnpm exec vitest run',
+  'npx vitest',
+]) {
   for (const prefix of ['', 'tsc -b && ', 'FLAG=value ']) {
     test(`reject an unguarded or overridden runner: ${prefix}${runtime}`, () => {
       const errors = testRunnerErrors('libs/new-package/package.json', {
@@ -14,11 +21,16 @@ for (const runtime of ['bun test', 'node --test', 'node --test --test-timeout=0'
     });
   }
 }
-for (const runner of ['bun_tests', 'node_tests', 'node_suite']) {
+for (const runner of ['bun_tests', 'node_tests', 'node_suite', 'vitest']) {
   test(`${runner} keeps shared policy and rejects package overrides`, () => {
     const script = `node ../../tools/scripts/run_${runner}.mjs ./src`;
     assert.deepEqual(testRunnerErrors('package.json', {scripts: {test: script}}), []);
-    for (const flag of ['--timeout 0', '--test-timeout=0', '--preload bypass.mjs']) {
+    for (const flag of [
+      '--timeout 0',
+      '--test-timeout=0',
+      '--preload bypass.mjs',
+      '--testTimeout=0',
+    ]) {
       assert.equal(
         testRunnerErrors('package.json', {scripts: {test: `${script} ${flag}`}}).length,
         1,
@@ -30,6 +42,11 @@ test('both runtimes use the same generous hang guard', () => {
   assert.equal(PER_TEST_BOUND_MS, 60_000);
   assert.ok(NODE_TEST_ARGUMENTS.includes(`--test-timeout=${PER_TEST_BOUND_MS}`));
   assert.ok(NODE_TEST_ARGUMENTS.includes('--test-concurrency=1'));
+});
+test('vitest gets the same hang guard and runs one file at a time', () => {
+  assert.ok(VITEST_ARGUMENTS.includes(`--testTimeout=${PER_TEST_BOUND_MS}`));
+  assert.ok(VITEST_ARGUMENTS.includes(`--hookTimeout=${PER_TEST_BOUND_MS}`));
+  assert.ok(VITEST_ARGUMENTS.includes('--no-file-parallelism'));
 });
 test('delegated and browser test scripts keep their own runtime', () => {
   assert.deepEqual(
@@ -45,6 +62,7 @@ test('every runner and its shared policy invalidate cached package tests', () =>
     'tools/scripts/run_bun_tests.mjs',
     'tools/scripts/run_node_tests.mjs',
     'tools/scripts/run_node_suite.mjs',
+    'tools/scripts/run_vitest.mjs',
     'tools/scripts/test_runner_config.mjs',
   ];
   assert.deepEqual(testRunnerCacheErrors({globalDependencies: files}), []);

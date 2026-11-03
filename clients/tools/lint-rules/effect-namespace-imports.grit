@@ -1,0 +1,29 @@
+// Effect modules are imported as namespaces from their own subpath
+// (`import * as Effect from 'effect/Effect'`): call sites then read `Effect.map`, `Layer.provide`,
+// `Schedule.recurs`, a bundler drops the modules a file does not touch, and two modules' same-named
+// members never meet in one scope. The root barrel (`from 'effect'`) and a named import from a
+// module (`import {map} from 'effect/Effect'`) are the two ways around that. `effect/Function`
+// (`pipe`, `identity`, `flow`) is a bag of free functions and keeps its named imports.
+language js;
+
+or {
+  JsModuleSource() as $root where {
+    $root <: r"['\"]effect['\"]",
+    register_diagnostic(
+      span = $root,
+      message = "Import Effect modules from their subpath as namespaces: `import * as Effect from 'effect/Effect'`, not from the 'effect' barrel.",
+      severity = "error"
+    )
+  },
+  JsImport() as $import where {
+    $import <: contains JsNamedImportSpecifiers(),
+    $import <: contains JsModuleSource() as $source,
+    $source <: r"['\"]effect/.*['\"]",
+    $source <: not r"['\"]effect/Function['\"]",
+    register_diagnostic(
+      span = $import,
+      message = "Import an Effect module as a namespace (`import * as Layer from 'effect/Layer'`), not by member name. `effect/Function` may be imported by name.",
+      severity = "error"
+    )
+  }
+}

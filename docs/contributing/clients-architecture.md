@@ -69,6 +69,9 @@ clients/
   libs/settings/    @vibesys/settings         settings store, atomic files       -> hosts, runs
   features/<x>/     @vibesys/feature-<x>      hosts, run-control (main process only), app-shell,
                                               settings, machines, new-run, run-page, usage
+  apps/desktop           @vibesys/desktop               the Effect rebuild of the desktop app, one
+                                                        package with a folder per role (see
+                                                        "The Effect desktop app")
   apps/desktop-main      @vibesys/app-desktop-main      composition only (Electron main), and the
                                                         sandboxed preloads
   apps/desktop-shell     @vibesys/app-desktop-shell     composition only: the desktop
@@ -197,7 +200,7 @@ through no path: only `node` entries may import them, and only `desktop-main` an
 | 6 | `@vibesys/ui` and `@vibesys/store` have no domain dependencies and name no domain concept; helpers live in the lowest package that needs them, with no shared junk drawer | `layer-direction` (both are rank 0), `domain-free` (no word of `DOMAIN_WORDS`, or an inflection of one, in their production source or stylesheet); review |
 | 7 | A foundation, core, or domain package is named for the concept it owns, not for a bucket | `bucket-names` (no segment of its name in `BUCKET_NAMES`) |
 | 8 | A sandboxed preload loads only Electron at run time; every workspace import in it is erased | `preload-sandbox` (what the entry's emitted CommonJS still requires); `.dependency-cruiser.mjs` keeps a preload's imports to `@vibesys/ipc` and Electron |
-| 9 | Control state is an XState machine; data folds are plain reducers (see [State](#state)) | `external-dependencies` (`xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); `tools/lint-rules/features-no-hand-rolled-control.grit`, `tools/lint-rules/control-state-no-store-kernel.grit` |
+| 9 | In `apps/desktop`, control state is Effect services and atoms and data folds are plain reducers; the packages that predate it keep XState machines (see [State](#state)) | `external-dependencies` (`effect` only in the app's `./core`, `./ui` and `./main` entries; `xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); the app's folder rules in `.dependency-cruiser.mjs` and the `tools/lint-rules/effect-*.grit` rules; for the legacy packages `tools/lint-rules/features-no-hand-rolled-control.grit` and `tools/lint-rules/control-state-no-store-kernel.grit` |
 | 10 | A package's folder matches the layer its manifest declares: `libs/*` is foundation, core, domain, or service; `features/*` is feature; `apps/*` is app; nothing else | `layer-matches-folder` |
 | 11 | Every feature and app builds UI only from `@vibesys/ui` (see [Design system enforcement](#design-system-enforcement)) | `strict-no-stylesheets`, `strict-imports`; `tools/lint-rules/strict-*.grit` through `biome.json` |
 
@@ -238,6 +241,7 @@ checker (`EXTERNAL_DEPENDENCIES`, rule `external-dependencies`):
 | --- | --- |
 | `react`, `react-dom` (and subpaths) | `dom` entries: `ui`, features' `./renderer`, browser and renderer apps |
 | `electron` | `node` and `preload` entries of features (`./main`) and apps (`desktop-main`) |
+| `effect`, `@effect/atom-react` | `@vibesys/desktop`'s `./core`, `./ui` and `./main` entries (`EFFECT_PACKAGES`). Never its `./state` folds or its sandboxed preload, and no other package |
 | `xstate` | features' `./state` and `./renderer`; `MACHINE_PACKAGES`: `machine`, `connection` (its host connection machine), `run-session` (its session machine), and `subscription` (its subscription machine). Never `store`, `run-state`, `hosts`, `runs`, `ui`, `contracts`, `transport`, or `ipc` |
 | Node builtins (`node:*` and bare names) | `node` entries |
 
@@ -245,6 +249,20 @@ A package that declares one of them in `dependencies` must have an entry allowed
 (`pnpm check:knip`) composes with this: it reports dependencies declared but never imported and
 imports of packages not declared, so between the two a dependency is declared exactly when it is
 used, and used only where its runtime allows.
+
+## The Effect desktop app
+
+`apps/desktop` (`@vibesys/desktop`) is the rebuild of the desktop app on the skills and
+orchestrator path. It is an `app`-layer package with five entries, each compiled by its own
+`tsconfig.<entry>.json` with its runtime's `lib` and `types`: `./main` (`node`), `./preload`
+(`preload`), `./core` and `./state` (`neutral`) and `./ui` (`dom`). It may depend on `@vibesys/ui`,
+`@vibesys/connection`, `@vibesys/orchestrator-proto` and `@vibesys/hosts`; a dependency is declared
+when the first file imports it. The existing desktop packages are legacy: they may break while the
+app is rebuilt, and nothing new is written in them. The [State](#state) section holds its rules.
+
+It is one package on purpose. A new package is justified later only by a second real consumer,
+generated code, or a measured build problem; until one of those exists, the folder rules and the
+entries give the same isolation without a manifest, a build step and a graph edge per folder.
 
 ## Design tokens and themes
 
@@ -611,7 +629,76 @@ screen checks fail on any a screen draws as text outside a `data-mono-id` elemen
 
 ## State
 
-Client state comes in two kinds, and each has one form.
+Client state comes in two kinds, and each has one form. The new desktop app (`apps/desktop`,
+`@vibesys/desktop`) is built on Effect 4 (`effect`, pinned exactly; `@effect/atom-react` joins with
+the first screen). The packages that predate it keep the [XState form](#legacy-packages-xstate)
+until the app replaces them.
+
+**Control state is Effect services and atoms.** Control state is a mode with effects: it starts
+work, waits for it, retries, times out, cancels, and decides what a late answer means. In the
+app it is written once, in `core/`:
+
+- a *service* is a `Context.Service` class named for its role, with one `Layer` per implementation
+  (the real one and a Fake). A caller `yield*`s the service and never names an implementation;
+  the layers are wired once, in the entry files;
+- an operation is `Effect.fn("Service.op")`, so it carries a span and a stack trace, and its
+  failures are typed: `Data.TaggedError` values in the error channel, handled with
+  `Effect.catchTag`. A defect is a bug and is not caught;
+- a subscription is a `Stream`. Cancellation is interruption: ending the fiber or scope that
+  consumes it stops the stream, cancels its delays and runs its finalizers, so there are no abort
+  controllers, reply tokens or hand-written timers;
+- time, randomness and ids are services (`Clock`, `Random`, an id service), so a wait is
+  `Effect.sleep` or a `Schedule` and a test controls it;
+- a view reads state through atoms (`effect/reactivity/Atom`), which `@effect/atom-react` binds to
+  React; the atom registry runs the effects behind them;
+- an Effect program is a value. It runs only in the entry files (`Effect.runFork` and the other
+  `run*` calls), which build the layers and start the first fiber.
+
+**A data fold is a plain reducer.** A data fold turns ordered inputs into a value and has no mode:
+the run event fold, a host's listing, recent runs. In the app it lives in `state/` as a pure
+`(state, action) -> state` that imports no Effect, so any test calls it directly and a seeded
+property test covers it.
+
+**Folders.** One package, a folder per role, because the parts share one set of services and one
+release. A new package is justified later only by a second real consumer, generated code, or a
+measured build problem; until then a folder boundary is cheaper than a package boundary and the
+rules below hold it.
+
+| Folder | Runtime | Holds | May import | Enforced by |
+| --- | --- | --- | --- | --- |
+| `state/` | `neutral` | plain folds and views | itself; other modules' types only; never `effect` | `desktop-state-imports-nothing-outside-itself`, `desktop-state-never-imports-effect`, `external-dependencies` |
+| `core/` | `neutral` | services, transport, atoms | `state/`, `effect` | `desktop-core-does-not-reach-the-shells`, `effect-core-no-promises` |
+| `ui/` | `dom` | React screens | `core/`, `state/` | `desktop-ui-does-not-reach-main-or-preload`, and the existing `ui-no-*` rules |
+| `main/`, `preload/` | `node`, `preload` | Electron main, the sandboxed typed bridge | `core/`, `state/`; a preload loads only Electron | `desktop-main-and-preload-do-not-import-ui`, `desktop-main-does-not-import-the-preload`, `desktop-preload-loads-only-electron`, `preload-sandbox` |
+| `testing/` | `neutral` | Fakes at process, network, clock, id and filesystem boundaries | `core/`, `state/`; only tests import it | `desktop-production-code-does-not-import-testing` |
+
+The Biome rules (`tools/lint-rules/effect-*.grit`, wired in `biome.json`) hold the style:
+`effect-namespace-imports` (modules are imported as namespaces from their subpath, as in
+`import * as Effect from 'effect/Effect'`), `effect-no-ambient-time-random` (no `Date.now`,
+`setTimeout`, `Math.random` or `crypto.randomUUID` in `core/`, `state/` or `ui/`),
+`effect-run-only-in-entries` (`Effect.run*` only in `main/index.ts` and `ui/main.tsx`),
+`effect-core-no-promises` (no `async`, `await`, `Promise` or `AbortController` in `core/`; wrap a
+Promise API once with `Effect.tryPromise`), and `effect-tests-no-real-time`. A suppression needs
+a comment that says why each alternative is worse.
+
+**Tests.** A test is `it.effect` from `@effect/vitest`, which runs on `TestClock`: the test advances
+time with `TestClock.adjust` and asserts the state after each step, so it never waits, polls,
+retries or sets a timeout, and its result cannot depend on timing (`effect-tests-no-real-time`).
+Randomness is `Random.withSeed`. A Fake exists only at a process, network, clock, id or filesystem
+boundary, as a `Layer` in `testing/`; everything above it runs for real. `pnpm test` in the app
+runs them through `tools/scripts/run_vitest.mjs`, which owns the hang guard like the Bun and Node
+runners (`test-runner-policy`).
+
+**Why.** Hand-rolled control state kept producing the same bugs: a reply token compared against the
+wrong slot, a timer not cleared on one exit path, an abort controller that outlived its owner.
+Fibers and scopes make "this work belongs to this owner" structural, and a clock that is a service
+makes every wait a step a test takes. The machines' seeded invariant harness was the reason the
+earlier form chose XState over Effect; the rebuilt app has no machines to step, and its folds,
+where the seeded model tests belong, are plain functions.
+
+### Legacy packages (XState)
+
+The packages that predate `apps/desktop` (the features, `connection`, `run-session`, `subscription`) keep the form below until the new app replaces them. Nothing new is written in it: new control state goes in `apps/desktop` as Effect services.
 
 **Control state is an XState v5 machine.** Control state is a mode with effects: it starts work,
 waits for it, retries, times out, cancels, and decides what a late answer means. The live run
@@ -664,11 +751,8 @@ wrong slot, a timer not cleared on one exit path, an abort controller that outli
 Each fix added bookkeeping that the next change missed. A machine makes "this work belongs to
 this state" structural, and the kit checks it over every seeded interleaving.
 
-**Rejected alternatives.**
+**Rejected alternatives** (when this form was chosen; Effect was later adopted for the new app, see above).
 
-- *Effect.ts.* Its fibers and scopes solve cancellation, but the model-based tests that are the
-  core of this codebase's testing cannot enumerate or step a fiber: the seeded invariant harness
-  would not port. XState keeps the transition pure (`transition` is a function), so it does.
 - *No library.* Reducers with reply tokens plus hand-written timer and abort bookkeeping in the
   shell were what we had. Cancellation and timing lived in the shell, outside the tested core,
   and kept regressing.
@@ -694,7 +778,7 @@ its outcome was delivered, so an operation disposes what it opened on that abort
 `transition` keeps taking events in a final state, which the live actor does not: a model stops
 generating events once the snapshot's `status` is `done`.
 
-**Where XState may appear** is rule 9: the `external-dependencies` table confines the import, and
+**Where XState may appear** is rule 9 (the Effect desktop app is outside it: neither rule below applies to `apps/desktop`, and `biome.json` does not list it): the `external-dependencies` table confines the import, and
 two GritQL rules (wired in `biome.json`) keep features' `state/` and `effects/` (and
 `connection`'s `state/`) free of `setTimeout`, `setInterval`, and `AbortController`, and keep
 migrated control-state packages (`run-control`, `connection`, `run-session`) off `createStore`
@@ -816,6 +900,7 @@ names a missing or extra one.
 | `apps/desktop-main` | app | exists: composition only (Electron main, `.`, `node`): the lifecycle, page confinement, the windows, launch arguments, and the shell's requests routed to the features' `./main` controllers; and the sandboxed preload (`./preload-welcome`, `preload`; the name is the surface's historical one). Its build copies the shell's bundle into `dist/ui` | desktop main process (phase 8 of #1878) |
 | `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |
 | `@vibesys/desktop` | app | deleted: emptied into `connection`, `settings`, the features' `./main`, and `apps/desktop-main` | desktop main process (phase 8 of #1878) |
+| `@vibesys/desktop` | app | exists again as the Effect rebuild (`apps/desktop`; see [The Effect desktop app](#the-effect-desktop-app)): the name of the package deleted above, reused for a new package | Effect desktop app (#3799, roadmap #3796) |
 | `@vibesys/web` | app | deleted with the browser client; desktop shell is the renderer | desktop cutover (#2850) |
 
 Roadmap [#1878](https://github.com/uw-syfi/vibesys/issues/1878) tracks this migration; each item gets
