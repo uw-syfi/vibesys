@@ -38,6 +38,7 @@ func TestConnectCLI(t *testing.T) {
 	}
 	t.Run("Tail", func(t *testing.T) { testTailCLI(t, binary) })
 	t.Run("closed-output", func(t *testing.T) { testClosedOutput(t, binary) })
+	t.Run("state-directory-root", func(t *testing.T) { testStateDirectoryRoot(t, binary) })
 }
 
 func testTailCLI(t *testing.T, binary string) {
@@ -234,5 +235,40 @@ func testClosedOutput(t *testing.T, binary string) {
 	case <-ctx.Done():
 		command.Process.Kill()
 		t.Fatal(ctx.Err())
+	}
+}
+
+// Without --root, a client whose orchestrator state directory is set dials the gateway of that state
+// directory, not the one under the default ~/.vibesys; the default root's socket is never made.
+func testStateDirectoryRoot(t *testing.T, binary string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	home, err := os.MkdirTemp("/tmp", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(home)
+	state := filepath.Join(home, "state")
+	derived := filepath.Join(state, "host")
+	endpoint, err := lifecycle.Listen(derived, schemahash.APISchemaHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer endpoint.Close()
+	endpoint.Listener.SetDeadline(time.Now().Add(5 * time.Second))
+	command := exec.CommandContext(ctx, binary, "connect")
+	command.Env = append(os.Environ(), "HOME="+home, "VIBESYS_ORCHESTRATOR_STATE_DIR="+state)
+	command.Stdin = bytes.NewReader(nil)
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { command.Process.Kill(); command.Wait() }()
+	connection, err := endpoint.Listener.Accept()
+	if err != nil {
+		t.Fatalf("connect did not dial the gateway of the state directory: %v", err)
+	}
+	connection.Close()
+	if _, err := os.Stat(filepath.Join(home, ".vibesys")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the default root was touched: %v", err)
 	}
 }
