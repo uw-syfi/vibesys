@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentshim import Agent, ApprovalPolicy, NativePermissions, TransportKind
-from agentshim.testing import ClaudeFramePeer, FakeClock, FakeExecutor, SequentialIds
+from agentshim.testing import ClaudeFramePeer, FakeExecutor, SequentialIds
 
 from e2e.actor import Actor
 from e2e.host import HostMachine
@@ -175,7 +175,10 @@ def main() -> int:
             executor=executor,
             permissions=NativePermissions.bypass(),
             approvals=ApprovalPolicy.DENY,
-            clock=FakeClock(),
+            # This fixture runs real commands on another thread. Virtual time would
+            # expire a queued steer while its peer is still executing a command,
+            # causing a false rejection and a second delivery. Agent's production
+            # clock measures those waits in real time; unit tests inject FakeClock.
             ids=SequentialIds(),
         )
 

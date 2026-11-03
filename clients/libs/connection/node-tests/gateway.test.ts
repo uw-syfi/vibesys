@@ -1,6 +1,10 @@
 import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
-import {ORCHESTRATOR_MAX_MESSAGE_BYTES} from '@vibesys/orchestrator-proto';
+import {
+  ORCHESTRATOR_MAX_MESSAGE_BYTES,
+  RunsSnapshotSchema,
+  WatchRunsResponseSchema,
+} from '@vibesys/orchestrator-proto';
 import {
   API_SCHEMA_HASH,
   encodeHostMutate,
@@ -504,4 +508,28 @@ test('the orchestrator receive limit accepts its largest frame and refuses a lar
   const header = Buffer.alloc(5);
   header.writeUInt32BE(ORCHESTRATOR_MAX_MESSAGE_BYTES + 1, 1);
   expect(() => decoder.push(header)).toThrow('exceeds');
+});
+
+test('a packed snapshot at the daemon byte budget fits the desktop receive limit', () => {
+  const snapshotBudget = 1024 * 1024;
+  const snapshot = create(RunsSnapshotSchema, {
+    sequence: 1n,
+    searches: Array.from({length: 4}, (_, i) => ({
+      runId: `run-${i}`,
+      revision: 1n,
+      health: {state: {case: 'liveSince' as const, value: {seconds: 0n, nanos: 0}}},
+      plans: [{number: 1, body: 'x'.repeat(snapshotBudget / 4 - 1024)}],
+    })),
+  });
+  const bytes = toBinary(
+    WatchRunsResponseSchema,
+    create(WatchRunsResponseSchema, {
+      body: {case: 'snapshot', value: snapshot},
+    }),
+  );
+  expect(bytes.byteLength).toBeLessThanOrEqual(snapshotBudget + 5);
+  expect(bytes.byteLength).toBeGreaterThan(snapshotBudget - 8192);
+  const decoder = new GrpcDecoder(ORCHESTRATOR_MAX_MESSAGE_BYTES);
+  expect(decoder.push(grpcFrame(bytes))[0]).toEqual(bytes);
+  decoder.finish();
 });
