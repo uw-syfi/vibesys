@@ -525,8 +525,23 @@ func submitHeld(t *testing.T, s *setup, c *client.Client, req *cliv1.SubmitReque
 	}
 	t.Cleanup(func() { c2.Close() })
 	s.world.Gates.Release("image")
-	a := <-done
-	return a.resp, a.err
+	// Time passes for the client only once the restart is over, so its attempts reach the next
+	// daemon and never the one that is stopping. A client that sent again at once could reach
+	// the stopping daemon, which cancels the call again, as many times as it has attempts: it
+	// must pause first, and its pause is the one timer it arms shorter than a second.
+	paused := false
+	for {
+		select {
+		case a := <-done:
+			if a.err == nil && !paused {
+				t.Error("the submission was sent again with no pause after the daemon stopped")
+			}
+			return a.resp, a.err
+		case d := <-s.timers.Armed():
+			paused = paused || d < time.Second
+			s.timers.Fire()
+		}
+	}
 }
 
 // F21: a daemon restart while a submission waits for the environment (an image build) used to
