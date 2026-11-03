@@ -25,6 +25,7 @@ const sidebars: SidebarsConfig = {
         'contributing/skill-metadata',
         'contributing/openevolve',
         'contributing/remote-slurm-execution',
+        'contributing/cli-task-environment',
         'contributing/issue-authoring',
         'contributing/publishing',
       ],

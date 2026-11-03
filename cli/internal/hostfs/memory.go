@@ -16,6 +16,7 @@ type Memory struct {
 	mu      sync.Mutex
 	files   map[string][]byte
 	scratch map[string]bool
+	dirs    map[string]bool
 	next    int
 }
 
@@ -23,7 +24,33 @@ var _ FS = (*Memory)(nil)
 
 // NewMemory returns an empty file system.
 func NewMemory() *Memory {
-	return &Memory{files: map[string][]byte{}, scratch: map[string]bool{}}
+	return &Memory{files: map[string][]byte{}, scratch: map[string]bool{}, dirs: map[string]bool{}}
+}
+
+// MakeDir implements FS.
+func (m *Memory) MakeDir(ctx context.Context, dir string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if !path.IsAbs(dir) {
+		return fmt.Errorf("making a directory: %q is not an absolute path", dir)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dirs[path.Clean(dir)] = true
+	return nil
+}
+
+// Dirs returns the directories MakeDir made, sorted.
+func (m *Memory) Dirs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.dirs))
+	for d := range m.dirs {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // MakeScratch implements FS.

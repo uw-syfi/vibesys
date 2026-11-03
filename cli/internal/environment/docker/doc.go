@@ -3,13 +3,17 @@
 //
 // # What a run does
 //
-// A run takes the Dockerfile of the task at the job's commit and tags the image it builds by a
-// digest of the Dockerfile's text, so a task that did not change finds its image already built and
-// builds nothing. The fingerprint pins the image's exact digest, and the container is made from
-// that digest and not from the tag, so a result is a result of the image that is recorded with it.
-// The build gets the Dockerfile and no files: it has no build context, and a Dockerfile that needs
-// one (a COPY or ADD of a local file, a bind mount of the context) is refused before docker is
-// asked, with the line that needs it.
+// A run takes the files of the task's directory at the job's commit as the build context, with the
+// Dockerfile at its root, and tags the image it builds by a digest of the context, so a task that
+// did not change finds its image already built and builds nothing. The build sees the task's files
+// and no file of the candidate. The fingerprint pins the image's exact digest, the machine and the
+// GPUs, and the container is made from that digest and not from the tag, so a result is a result
+// of the image that is recorded with it.
+//
+// Besides the checkout, a container gets the cache directory of the task's image (CacheDir), an
+// empty artifacts directory when the caller gives one (ArtifactsDir), the operator's read-only
+// mounts (MountsDir), and the GPUs the operator passes. A Machine says where these come from: the
+// engine may run on another machine, and then a run's directories are copied there and back.
 //
 // The checkout is mounted at its own path and is the working directory, so a command written with
 // the checkout's path means the same thing here as on the host, and the commands run as the
@@ -44,5 +48,6 @@
 // dockerfake is the in-memory Fake. Both pass the contract in dockertest, and the environment
 // passes envtest's.
 //
-// It supports the CPU backend. An accelerator is refused, not ignored.
+// It supports the CPU backend, and the CUDA backend when the operator passes GPUs. Any other
+// accelerator is refused, not ignored.
 package docker

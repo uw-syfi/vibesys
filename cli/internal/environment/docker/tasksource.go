@@ -29,5 +29,5 @@ func (s TaskSource) Spec(ctx context.Context, target environment.Target) (Spec, 
 		return Spec{}, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf(
 			"task %q has no Dockerfile at commit %s, so it has no image to run in; run it with --env host", target.Task, target.Commit)}
 	}
-	return Spec{Dockerfile: t.Dockerfile, NestedDocker: t.NestedDocker}, nil
+	return Spec{Dockerfile: t.Dockerfile, Files: t.Context, Backend: t.Backend, NestedDocker: t.NestedDocker}, nil
 }

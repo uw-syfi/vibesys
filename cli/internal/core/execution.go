@@ -18,11 +18,20 @@ type Execution struct {
 	// share the host's files makes it visible at the same path, writable by the command. Empty
 	// means the command has none.
 	Scratch string
-	Argv    []string
+	// Artifacts, when set, is an empty directory outside the checkout that the command may leave
+	// files in for a person to read after the job: an absolute path. An environment whose
+	// commands do not share the host's files brings what they leave there back to it. Empty means
+	// the command has none.
+	Artifacts string
+	Argv      []string
 	// Service, when set, is started first and the command runs against it.
 	Service *ServiceSpec
 	// Timeout bounds the whole execution. It must be positive.
 	Timeout time.Duration
+	// Measured says the command's own timing is its result, as a benchmark sample's is. An
+	// environment that shares a machine with other work gives a measured command the whole
+	// machine, and an unmeasured one only its share.
+	Measured bool
 }
 
 // ExecKind is how an execution that the environment saw end ended. The set is closed.

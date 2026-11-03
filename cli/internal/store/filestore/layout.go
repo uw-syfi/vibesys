@@ -32,6 +32,10 @@ const (
 	runsDir       = "runs"
 	logsDir       = "logs"
 
+	// artifactsDir, in the state directory, keeps what jobs left for a person to read, by task and
+	// job. It is not a store: no store is named with a leading dot.
+	artifactsDir = ".artifacts"
+
 	recordSuffix = ".json"
 	tempPrefix   = ".tmp-"
 )
@@ -90,3 +94,9 @@ func hidden(name string) bool { return strings.HasPrefix(name, ".") }
 
 // taskDir is where a repository keeps the state of one task.
 func taskDir(repository, task string) string { return path.Join(repository, stateDirName, task) }
+
+// ArtifactsDir is where the job of the task in the repository keeps its artifacts: beside the
+// stores, in the repository's state directory, which git ignores.
+func ArtifactsDir(repository, task string, job core.JobID) string {
+	return path.Join(repository, stateDirName, artifactsDir, task, string(job))
+}

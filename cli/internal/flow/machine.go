@@ -317,6 +317,12 @@ func (s *State) observe(o Observed) {
 func (s State) sampled(r Ran) (State, Request) {
 	n := len(s.samples)
 	if v, ended := s.commandEnded(StageBenchmark, r); ended {
+		if why := s.reportedError(r); why != "" {
+			if stopped, ok := v.(Stopped); ok {
+				stopped.Reason += "; " + why
+				v = stopped
+			}
+		}
 		return s.end(v), nil
 	}
 	got, err := s.read(r)
@@ -340,6 +346,20 @@ func (s State) sampled(r Ran) (State, Request) {
 	}
 	s.phase = phaseAfter
 	return s, Observe{}
+}
+
+// reportedError is what a benchmark that did not succeed said about it in its record stream: the
+// message of the error record it wrote, or empty when it wrote none or the plan reads no stream. A
+// stream that holds a result, or is not one the protocol allows, says nothing about the failure.
+func (s State) reportedError(r Ran) string {
+	if !s.plan.Result.Protocol2 || !r.Found || r.ReadError != "" {
+		return ""
+	}
+	var reported *reading.Reported
+	if _, err := reading.Protocol2(r.Output, s.plan.Metric.Name); errors.As(err, &reported) {
+		return reported.Error()
+	}
+	return ""
 }
 
 // missingObjective names an objective of a multi-objective plan that a reading has no value of, and

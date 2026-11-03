@@ -23,11 +23,11 @@ const maxError = 8 << 10
 // ending a line cannot use all memory. The end of an over-long line is kept.
 const maxLine = 64 << 10
 
-// Build implements docker.Engine. The Dockerfile is the whole build context: it is passed on
-// standard input, so the build can see no other file.
+// Build implements docker.Engine. The build context is passed as a tar on standard input, so the
+// build can see no file but the context's.
 func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer) error {
-	if !tagPattern.MatchString(spec.Tag) || len(spec.Dockerfile) == 0 {
-		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("dockercli: a build needs a tag (got %q) and a Dockerfile", spec.Tag)}
+	if !tagPattern.MatchString(spec.Tag) || len(spec.Context) == 0 {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("dockercli: a build needs a tag (got %q) and a build context", spec.Tag)}
 	}
 	args := []string{"build", "--progress=plain", "--tag", spec.Tag}
 	for _, k := range sortedKeys(spec.Labels) {
@@ -37,8 +37,8 @@ func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 		args = append(args, "--label", k+"="+spec.Labels[k])
 	}
 	args = append(args, "-")
-	cmd := exec.CommandContext(ctx, e.program, args...)
-	cmd.Stdin = bytes.NewReader(spec.Dockerfile)
+	cmd := e.command(ctx, &Allocation{Name: BuildName(spec.Tag), Scope: spec.Labels[docker.LabelScope], Build: true}, args...)
+	cmd.Stdin = bytes.NewReader(spec.Context)
 	out := &tail{w: log}
 	// One writer for both streams: the build's progress is one ordered log.
 	cmd.Stdout, cmd.Stderr = out, out
@@ -53,8 +53,20 @@ func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	if !asExit(err, &exit) {
 		return unavailable("cannot run %q to build: %v; %s", e.program, err, hint)
 	}
+	if e.shell.Lost(exit.ExitCode()) {
+		return unavailable("the build of the task's image on %s ended with the transport's own exit code %d (a lost connection, or a command that exited with it); the end of the build's output:\n%s", e.shell.Where(), exit.ExitCode(), out.last())
+	}
 	return unavailable("building the task's image failed (exit %d); the end of the build's output:\n%s", exit.ExitCode(), out.last())
 }
+
+// BuildName is the unique name of a build of the tag, as an Allocator is given it: a build of one
+// tag runs at most once at a time in one process, and its name says which image it builds.
+func BuildName(tag string) string {
+	return BuildPrefix + strings.ReplaceAll(strings.ReplaceAll(tag, ":", "-"), "/", "-")
+}
+
+// BuildPrefix starts the name of every build.
+const BuildPrefix = docker.Owner + "-build-"
 
 // tail passes a log on and remembers its last lines.
 type tail struct {

@@ -41,6 +41,8 @@ type options struct {
 	process uint32
 	backend backend.Backend
 	timers  clock.Timers
+	// configure, when set, changes the config before the provider is made.
+	configure func(*docker.Config)
 }
 
 func newRig(t testing.TB, daemon *dockerfake.Daemon, o options) *rig {
@@ -56,10 +58,14 @@ func newRig(t testing.TB, daemon *dockerfake.Daemon, o options) *rig {
 	}
 	client := daemon.Connect()
 	ids := dockerfake.NewIDs(o.process)
-	p, err := docker.New(docker.Config{
+	cfg := docker.Config{
 		Engine: client, Source: dockerfake.Fixed(o.spec), Backend: o.backend, Timers: o.timers,
 		IDs: ids, Scope: "test", User: docker.User{UID: 1000, GID: 1000},
-	})
+	}
+	if o.configure != nil {
+		o.configure(&cfg)
+	}
+	p, err := docker.New(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

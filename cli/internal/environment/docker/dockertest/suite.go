@@ -154,7 +154,7 @@ func (h *harness) ensureImage() string {
 	if h.image != "" {
 		return h.image
 	}
-	if err := h.engine.Build(h.ctx, docker.BuildSpec{Tag: imageTag, Dockerfile: h.dockerfile}, io.Discard); err != nil {
+	if err := h.engine.Build(h.ctx, docker.BuildSpec{Tag: imageTag, Context: h.context()}, io.Discard); err != nil {
 		h.t.Fatalf("Build: %v", err)
 	}
 	img, ok, err := h.engine.Image(h.ctx, imageTag)
@@ -268,7 +268,7 @@ func caseNoImage(h *harness) {
 }
 
 func caseBuildAndFind(h *harness) {
-	if err := h.engine.Build(h.ctx, docker.BuildSpec{Tag: imageTag, Dockerfile: h.dockerfile}, io.Discard); err != nil {
+	if err := h.engine.Build(h.ctx, docker.BuildSpec{Tag: imageTag, Context: h.context()}, io.Discard); err != nil {
 		h.t.Fatalf("Build: %v", err)
 	}
 	byTag, ok, err := h.engine.Image(h.ctx, imageTag)
@@ -283,7 +283,7 @@ func caseBuildAndFind(h *harness) {
 		h.t.Fatalf("Image by ID: %+v, %v, %v; want %+v", byID, ok, err, byTag)
 	}
 	// Building again is allowed, and the tag still names an image.
-	if err := h.engine.Build(h.ctx, docker.BuildSpec{Tag: imageTag, Dockerfile: h.dockerfile}, io.Discard); err != nil {
+	if err := h.engine.Build(h.ctx, docker.BuildSpec{Tag: imageTag, Context: h.context()}, io.Discard); err != nil {
 		h.t.Fatalf("second Build: %v", err)
 	}
 	if _, ok, err := h.engine.Image(h.ctx, imageTag); err != nil || !ok {
@@ -485,4 +485,13 @@ func caseUnknownImage(h *harness) {
 	if got := h.names(docker.Labels{labelCase: h.id}); len(got) != 0 {
 		h.t.Errorf("a failed Start left %v; the caller removes what a failed Start may leave, but an image that is not there leaves nothing", got)
 	}
+}
+
+// context is the build context of the rig's Dockerfile, with no other file.
+func (h *harness) context() []byte {
+	c, err := docker.Context(docker.Spec{Dockerfile: h.dockerfile})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return c
 }

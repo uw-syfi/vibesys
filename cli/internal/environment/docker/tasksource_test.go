@@ -3,6 +3,7 @@ package docker_test
 import (
 	"context"
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 
@@ -37,6 +38,30 @@ func TestTheSpecIsTheDockerfileOfTheTasksCommit(t *testing.T) {
 	spec, err := src.Spec(context.Background(), environment.Target{Repository: repository, Commit: "c1", Task: "t"})
 	if err != nil || string(spec.Dockerfile) != "FROM scratch\n" || spec.NestedDocker {
 		t.Fatalf("Spec = %+v, %v", spec, err)
+	}
+}
+
+// The build context is the task's directory: every file its version names, and nothing outside
+// it or generated in it, so the image changes exactly when the version does.
+func TestTheSpecCarriesEveryFileOfTheTaskAndNoOther(t *testing.T) {
+	src := sourceWith("c1", taskTree(map[string]string{
+		dockerfilePath:                       "FROM scratch\n",
+		".vibesys/tasks/t/scripts/check.sh":  "exit 0\n",
+		".vibesys/tasks/t/__pycache__/x.pyc": "bytecode",
+		".vibesys/tasks/t/scripts/y.pyc":     "bytecode",
+		"serve/build.sh":                     "candidate code\n",
+	}))
+	spec, err := src.Spec(context.Background(), environment.Target{Repository: repository, Commit: "c1", Task: "t"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(spec.Files["scripts/check.sh"].Data) != "exit 0\n" || string(spec.Files["Dockerfile"].Data) != "FROM scratch\n" {
+		t.Errorf("files %v: want the task's files by their path from its directory", maps.Keys(spec.Files))
+	}
+	for name := range spec.Files {
+		if strings.Contains(name, "serve") || strings.HasPrefix(name, ".vibesys") || task.Generated(name) {
+			t.Errorf("the context holds %q, which is not a file of the task's version", name)
+		}
 	}
 }
 

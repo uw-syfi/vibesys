@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uw-syfi/vibesys/cli/internal/backend"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockerfake"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv/fakeworld"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // scene is a fake daemon, the world its scripts run in, and a docker environment over them.
@@ -170,24 +170,16 @@ func TestARunStartsItsContainerAsTheUserInTheCheckout(t *testing.T) {
 	}
 }
 
-// kindBackend reports another backend kind over a CPU machine.
-type kindBackend struct {
-	backend.Backend
-	kind core.BackendKind
-}
-
-func (b kindBackend) Kind() core.BackendKind { return b.kind }
-
 func TestWhatAContainerCannotGiveIsRefusedBeforeAnythingStarts(t *testing.T) {
 	cases := map[string]struct {
 		o    options
 		want string
 		kind core.FailureKind
 	}{
-		"an accelerator":     {options{backend: kindBackend{cpuBackend(), core.BackendCUDA}}, "--env host", core.FailureUnavailable},
-		"nested docker":      {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), NestedDocker: true}}, "docker_in_docker", core.FailureUnavailable},
-		"a file of the task": {options{spec: docker.Spec{Dockerfile: []byte("FROM x\nCOPY run.py /run.py\n")}}, "build context", core.FailureUnavailable},
-		"no base image":      {options{spec: docker.Spec{Dockerfile: []byte("RUN true\n")}}, "FROM", core.FailureInvalidInput},
+		"cuda with no GPU passed":   {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendCUDA}}, "gpus", core.FailureUnavailable},
+		"an accelerator not NVIDIA": {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendROCm}, configure: withGPUs}, "--env host", core.FailureUnavailable},
+		"nested docker":             {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), NestedDocker: true}}, "docker_in_docker", core.FailureUnavailable},
+		"no Dockerfile":             {options{spec: docker.Spec{Dockerfile: []byte{}, Files: task.Tree{"run.sh": {Data: []byte("true")}}}}, "Dockerfile", core.FailureInvalidInput},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
