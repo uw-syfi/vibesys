@@ -61,6 +61,11 @@ func Plan(live []core.Run, followed []Subscription) (start, stop []Subscription)
 // Reconciler owns follower lifetimes. Sync is called by the daemon's single writer.
 // Updates and membership changes serialize under mu so late callbacks cannot
 // restore a removed run. Close cancels and joins every follower.
+// Sync scans run membership each step, but only writes views when membership or
+// facts change. It never compares all facts on every daemon wake.
+// Terminal exits remain unreadable until the subscription is removed or its
+// recorded location changes. Retrying unchanged inputs cannot repair a terminal
+// protocol/install/size failure and would spin on every daemon step.
 type Reconciler struct {
 	Store  *search.Store
 	Follow func(context.Context, Subscription, func(search.View))
@@ -92,9 +97,13 @@ func (r *Reconciler) Sync(ctx context.Context, live []core.Run) {
 			r.Store.Delete(id)
 		}
 	}
+	oldRuns := r.runs
 	r.runs = next
 	for id, k := range next {
 		if a := r.active[k]; a != nil {
+			if previous, existed := oldRuns[id]; existed && previous == k {
+				continue
+			}
 			r.Store.Put(id, a.view)
 		}
 	}
@@ -110,7 +119,12 @@ func (r *Reconciler) Sync(ctx context.Context, live []core.Run) {
 	}
 	for _, k := range starts {
 		c, cancel := context.WithCancel(ctx)
-		a := &following{cancel: cancel, done: make(chan struct{})}
+		a := &following{cancel: cancel, done: make(chan struct{}), view: search.View{Reason: search.Connecting}}
+		for id, key := range next {
+			if key == k {
+				r.Store.Put(id, a.view)
+			}
+		}
 		r.active[k] = a
 		go func() {
 			defer close(a.done)
@@ -149,12 +163,12 @@ func (r *Reconciler) Close() {
 }
 
 // SearchFor wires the production edges around the read-only link library.
-func SearchFor(executable string) *Reconciler {
+func SearchFor() *Reconciler {
 	return &Reconciler{Store: new(search.Store), Follow: func(ctx context.Context, k Subscription, publish func(search.View)) {
 		loc := clidaemon.Location{XDGRuntimeDir: k.Location.RuntimeDir, XDGStateHome: k.Location.StateHome, Home: k.Location.Home}
 		var view search.View
 		f := clidaemon.Follower{
-			Location: loc, Ensurer: ExecEnsurer{Executable: executable, Runner: ExecRunner{}},
+			Location: loc, Ensurer: ExecEnsurer{Executable: k.Location.CLI, Runner: ExecRunner{}},
 			Connect: func(ctx context.Context) (clidaemon.Connection, error) { return connectCLI(ctx, loc) },
 			Bound: func(ctx context.Context) (context.Context, context.CancelFunc) {
 				return context.WithTimeout(ctx, 10*time.Second)
@@ -188,7 +202,9 @@ func followSearch(ctx context.Context, f clidaemon.Follower, k Subscription, vie
 			view.Reason = search.ClientTooOld
 		case clidaemon.DaemonTooOld:
 			view.Reason = search.DaemonTooOld
-		case clidaemon.StreamLost:
+		case clidaemon.MessageTooLarge:
+			view.Reason = search.MessageTooLarge
+		default:
 			view.Reason = search.StreamLost
 		}
 		view.Detail = err.Detail

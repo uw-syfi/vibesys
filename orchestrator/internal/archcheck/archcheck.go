@@ -58,8 +58,8 @@ var rules = map[string][]string{
 var testRules = map[string][]string{
 	"internal/search": {"internal/clidaemon", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/wire", "gen/vibesys/orchestrator/"},
 	// Upgrade fixtures compose the durable store and daemon using deterministic world Fakes.
-	"internal/production": {"internal/daemon/daemontest", "internal/localfs/localfstest"},
-	"internal/clidaemon":  {"internal/clidaemon/clidaemontest"},
+	"internal/production": {"internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/localfs/localfstest"},
+	"internal/clidaemon": {"internal/clidaemon/clidaemontest"},
 	// The store's tests run the contract suite, which depends on the store.
 	// The store's tests also open stores on directories the fake detector vouches for, which
 	// no non-test file may import.
