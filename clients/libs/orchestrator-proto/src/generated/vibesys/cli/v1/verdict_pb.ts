@@ -6,13 +6,15 @@ import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2"
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { EnvironmentFingerprint } from "./environment_pb.js";
 import { file_vibesys_cli_v1_environment } from "./environment_pb.js";
+import type { Metric } from "./result_pb.js";
+import { file_vibesys_cli_v1_result } from "./result_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/cli/v1/verdict.proto.
  */
 export const file_vibesys_cli_v1_verdict: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NsaS92MS92ZXJkaWN0LnByb3RvEg52aWJlc3lzLmNsaS52MSLiAQoHVmVyZGljdBIpCgRraW5kGAEgASgOMhsudmliZXN5cy5jbGkudjEuVmVyZGljdEtpbmQSMgoGcmVhc29uGAIgASgOMiIudmliZXN5cy5jbGkudjEuSW5jb25jbHVzaXZlUmVhc29uEhkKEWNhbmRpZGF0ZV9zYW1wbGVzGAMgASgNEhQKDGJhc2Vfc2FtcGxlcxgEIAEoDRIWCg5jYW5kaWRhdGVfbWVhbhgFIAEoARIRCgliYXNlX21lYW4YBiABKAESDQoFcmF0aW8YByABKAESDQoFbm9pc2UYCCABKAEilAEKCkNvbXBhcmlzb24SDgoGY29tbWl0GAEgASgJEg8KB2FnYWluc3QYAiABKAkSKAoHdmVyZGljdBgDIAEoCzIXLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3QSOwoLZW52aXJvbm1lbnQYBCABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50KpoBCgtWZXJkaWN0S2luZBIcChhWRVJESUNUX0tJTkRfVU5TUEVDSUZJRUQQABIXChNWRVJESUNUX0tJTkRfQkVUVEVSEAESFgoSVkVSRElDVF9LSU5EX1dPUlNFEAISHQoZVkVSRElDVF9LSU5EX1dJVEhJTl9OT0lTRRADEh0KGVZFUkRJQ1RfS0lORF9JTkNPTkNMVVNJVkUQBCrkAQoSSW5jb25jbHVzaXZlUmVhc29uEiMKH0lOQ09OQ0xVU0lWRV9SRUFTT05fVU5TUEVDSUZJRUQQABInCiNJTkNPTkNMVVNJVkVfUkVBU09OX1RPT19GRVdfU0FNUExFUxABEigKJElOQ09OQ0xVU0lWRV9SRUFTT05fQ09OU1RBTlRfU0FNUExFUxACEicKI0lOQ09OQ0xVU0lWRV9SRUFTT05fTUVUUklDX01JU01BVENIEAMSLQopSU5DT05DTFVTSVZFX1JFQVNPTl9UQVNLX1ZFUlNJT05fTUlTTUFUQ0gQBEI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_vibesys_cli_v1_environment]);
+  fileDesc("Chx2aWJlc3lzL2NsaS92MS92ZXJkaWN0LnByb3RvEg52aWJlc3lzLmNsaS52MSLiAQoHVmVyZGljdBIpCgRraW5kGAEgASgOMhsudmliZXN5cy5jbGkudjEuVmVyZGljdEtpbmQSMgoGcmVhc29uGAIgASgOMiIudmliZXN5cy5jbGkudjEuSW5jb25jbHVzaXZlUmVhc29uEhkKEWNhbmRpZGF0ZV9zYW1wbGVzGAMgASgNEhQKDGJhc2Vfc2FtcGxlcxgEIAEoDRIWCg5jYW5kaWRhdGVfbWVhbhgFIAEoARIRCgliYXNlX21lYW4YBiABKAESDQoFcmF0aW8YByABKAESDQoFbm9pc2UYCCABKAEiZAoQT2JqZWN0aXZlVmVyZGljdBImCgZtZXRyaWMYASABKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSKAoHdmVyZGljdBgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3QiygEKCkNvbXBhcmlzb24SDgoGY29tbWl0GAEgASgJEg8KB2FnYWluc3QYAiABKAkSKAoHdmVyZGljdBgDIAEoCzIXLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3QSOwoLZW52aXJvbm1lbnQYBCABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50EjQKCm9iamVjdGl2ZXMYBSADKAsyIC52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVWZXJkaWN0KrUBCgtWZXJkaWN0S2luZBIcChhWRVJESUNUX0tJTkRfVU5TUEVDSUZJRUQQABIXChNWRVJESUNUX0tJTkRfQkVUVEVSEAESFgoSVkVSRElDVF9LSU5EX1dPUlNFEAISHQoZVkVSRElDVF9LSU5EX1dJVEhJTl9OT0lTRRADEh0KGVZFUkRJQ1RfS0lORF9JTkNPTkNMVVNJVkUQBBIZChVWRVJESUNUX0tJTkRfVFJBREVPRkYQBSrkAQoSSW5jb25jbHVzaXZlUmVhc29uEiMKH0lOQ09OQ0xVU0lWRV9SRUFTT05fVU5TUEVDSUZJRUQQABInCiNJTkNPTkNMVVNJVkVfUkVBU09OX1RPT19GRVdfU0FNUExFUxABEigKJElOQ09OQ0xVU0lWRV9SRUFTT05fQ09OU1RBTlRfU0FNUExFUxACEicKI0lOQ09OQ0xVU0lWRV9SRUFTT05fTUVUUklDX01JU01BVENIEAMSLQopSU5DT05DTFVTSVZFX1JFQVNPTl9UQVNLX1ZFUlNJT05fTUlTTUFUQ0gQBEI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_vibesys_cli_v1_environment, file_vibesys_cli_v1_result]);
 
 /**
  * Verdict is a pure function of the two sample sets, the metric's direction and the task's declared
@@ -77,6 +79,31 @@ export const VerdictSchema: GenMessage<Verdict> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_verdict, 0);
 
 /**
+ * ObjectiveVerdict is the verdict on one objective of a multi-objective comparison: the comparison of
+ * that objective's samples alone, with its numbers.
+ *
+ * @generated from message vibesys.cli.v1.ObjectiveVerdict
+ */
+export type ObjectiveVerdict = Message<"vibesys.cli.v1.ObjectiveVerdict"> & {
+  /**
+   * @generated from field: vibesys.cli.v1.Metric metric = 1;
+   */
+  metric?: Metric | undefined;
+
+  /**
+   * @generated from field: vibesys.cli.v1.Verdict verdict = 2;
+   */
+  verdict?: Verdict | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.ObjectiveVerdict.
+ * Use `create(ObjectiveVerdictSchema)` to create a new message.
+ */
+export const ObjectiveVerdictSchema: GenMessage<ObjectiveVerdict> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_verdict, 1);
+
+/**
  * Comparison is a verdict with what it compared.
  *
  * @generated from message vibesys.cli.v1.Comparison
@@ -93,6 +120,13 @@ export type Comparison = Message<"vibesys.cli.v1.Comparison"> & {
   against: string;
 
   /**
+   * For a single-metric task, the verdict on its metric. For a multi-objective (Pareto) task, the
+   * overall verdict of `objectives`: BETTER when better on some objective and worse on none, WORSE
+   * when worse on some and better on none, TRADEOFF when better on one and worse on another,
+   * WITHIN_NOISE when within noise on all, and INCONCLUSIVE with the first inconclusive objective's
+   * reason when any is. Only its kind, reason and sample counts are set then: its means, ratio and
+   * noise are zero, and each objective's are in `objectives`.
+   *
    * @generated from field: vibesys.cli.v1.Verdict verdict = 3;
    */
   verdict?: Verdict | undefined;
@@ -104,6 +138,14 @@ export type Comparison = Message<"vibesys.cli.v1.Comparison"> & {
    * @generated from field: vibesys.cli.v1.EnvironmentFingerprint environment = 4;
    */
   environment?: EnvironmentFingerprint | undefined;
+
+  /**
+   * The verdict on each objective of a multi-objective task, in the order the task declares them.
+   * Empty for a single-metric task.
+   *
+   * @generated from field: repeated vibesys.cli.v1.ObjectiveVerdict objectives = 5;
+   */
+  objectives: ObjectiveVerdict[];
 };
 
 /**
@@ -111,7 +153,7 @@ export type Comparison = Message<"vibesys.cli.v1.Comparison"> & {
  * Use `create(ComparisonSchema)` to create a new message.
  */
 export const ComparisonSchema: GenMessage<Comparison> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_verdict, 1);
+  messageDesc(file_vibesys_cli_v1_verdict, 2);
 
 /**
  * VerdictKind is the outcome of comparing a commit's samples with a base's.
@@ -143,6 +185,14 @@ export enum VerdictKind {
    * @generated from enum value: VERDICT_KIND_INCONCLUSIVE = 4;
    */
   INCONCLUSIVE = 4,
+
+  /**
+   * The overall verdict of a multi-objective comparison that is better on some objective and worse
+   * on another. A single metric is never a tradeoff.
+   *
+   * @generated from enum value: VERDICT_KIND_TRADEOFF = 5;
+   */
+  TRADEOFF = 5,
 }
 
 /**

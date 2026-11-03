@@ -90,11 +90,11 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | Path | Role |
 | --- | --- |
 | `cmd/vibesys-cli/` | Argument parsing and output. Nothing else. |
-| `internal/core/` | Pure domain types and rules (job keys, state machine, cache reuse, verdicts, promotion checks): no I/O, no clock, no goroutines. |
-| `internal/store/` | `Store`: the logical interface to results, events, logs, job state and plans. No paths, no formats. |
+| `internal/core/` | Pure domain types and rules (job keys, state machine, cache reuse, verdicts, promotion checks, frontier membership): no I/O, no clock, no goroutines. |
+| `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists; a store of another format version is refused and never migrated. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 is migrated to version 3 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
@@ -224,9 +224,11 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
 | `show <commit>` | Every result saved for a commit, checks and measurements, oldest first. A measurement's `value` is its headline number, the mean of its samples that `compare` uses, computed by the daemon. |
-| `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. Refuses to mix environments. |
-| `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. |
+| `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. For a multi-objective task, also `tradeoff`, with a verdict on every objective (see "Multi-objective tasks" below). Refuses to mix environments. |
+| `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. A promoted multi-objective commit is also offered to the frontier. |
 | `result` | The head and a final number measured after the head last moved, or why there is none (exit `1`). |
+| `frontier add <commit>` | Add a measured, check-passed commit of a multi-objective task to the task's frontier, evicting the members it beats, or print every reason it was refused. A refusal exits `1` and is printed on stdout; a commit of a single-metric task is `INVALID_INPUT`. |
+| `frontier list` | The frontier's members in the order they were added, each with its headline number on every objective, computed by the daemon. |
 | `plan create --title t [--body text \| --body-file path]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. |
 | `plan list [--status s] [--search text]` | List the task's plans by number. With no `--status` every plan is listed. |
 | `plan view <n>` | Print a plan, its comments and the jobs linked to it (`submit --plan <n>` links one). |
@@ -254,7 +256,7 @@ command's own yes or no, how a `wait` ended (a `WaitOutcomeKind`), or the kind o
 | Code | Meaning | Endings |
 | --- | --- | --- |
 | 0 | yes | success; `ALL_SUCCEEDED`, `FIRST_SUCCEEDED` |
-| 1 | the answer is no | `SOME_FAILED`, `FIRST_FAILED`; a refused promote; no current result; `CONFLICT`, `ENVIRONMENT_MISMATCH`, `NOT_MEASURED` |
+| 1 | the answer is no | `SOME_FAILED`, `FIRST_FAILED`; a refused promote or frontier add; no current result; `CONFLICT`, `ENVIRONMENT_MISMATCH`, `NOT_MEASURED` |
 | 2 | invalid input | usage errors; `INVALID_INPUT`, `NOT_FOUND` |
 | 3 | timed out | `TIMED_OUT` |
 | 4 | no answer | `UNAVAILABLE`, `INCOMPATIBLE`, `INTERNAL`, `UNSPECIFIED`; a kind or outcome this build does not know; a wait that could not learn how its jobs ended; no daemon for `daemon status` or `daemon ensure` |
@@ -271,8 +273,8 @@ because no daemon said the jobs were not done.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line. That is the response for `submit`, `cancel`,
-`note`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan`
-subcommands. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
+`note`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan` and
+`frontier` subcommands. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
 that decided it in `decided_by`, and every job's last state. An error that a command reports is a
 `Failure` on stderr: a refusal from the daemon, a missing argument, a job that does not exist, or a
 `wait` that gave up. The `Failure` the daemon sent is printed as it was sent, a kind this build does
@@ -471,7 +473,7 @@ forward: the new head must contain the old one, which a commit that does not is 
 
 `promote` decides from the saved measurements alone (internal/core), in this order: it is refused
 with every reason that applies (`unmeasured`, `check_missing`, `worse`, `within_noise`,
-`inconclusive`, `stale`, `environment_mismatch`), or it approves, which is a `core.Approved` that
+`inconclusive`, `tradeoff`, `stale`, `environment_mismatch`), or it approves, which is a `core.Approved` that
 only that decision makes and that a store requires to record a promotion. The daemon records the
 promotion in the store and then moves the branch. The sequence is one pure function, `core.NextPromotionStep`: from the branch
 head and the record it names the next effect (record, move, done, or diverged), and the daemon does
@@ -483,10 +485,50 @@ before and after it took place, in core over a model and in the daemon over the 
 A branch someone moved by hand is diverged: nothing writes over it, it is the head the next
 commands use, and `result` reports no number for a head the last promotion did not set.
 
+## Multi-objective tasks
+
+A task is multi-objective (Pareto) when its `objectives.toml` has a `[pareto]` section and declares
+more than one objective. It must report its score with `result_protocol = 2`, so that every sample
+reports every objective; a sample that leaves one out ends the measure job `failed` and saves
+nothing. Each saved measurement records the objectives, so `compare`, `promote` and `frontier`
+decide from what was saved. Every other task is judged on its one metric, exactly as before.
+
+`compare` judges each objective with the same statistic as a single metric, under the `[pareto]`
+`relative_noise` as the noise floor (none declared is Welch's t test), and combines the verdicts:
+
+| Overall | When |
+| --- | --- |
+| `inconclusive` | Any objective is inconclusive; the reason is the first such objective's. |
+| `better` | Better on some objective and worse on none. |
+| `worse` | Worse on some objective and better on none. |
+| `tradeoff` | Better on one objective and worse on another. |
+| `within_noise` | Within noise on every objective. |
+
+With `--json`, `comparison.verdict` holds the overall `kind`, `reason` and sample counts, with its
+means, ratio and noise left at zero, and `comparison.objectives` holds one `{metric, verdict}` per
+objective in the order the task declares them, each verdict with its own numbers. `promote` moves
+the branch only on an overall `better`, and refuses a `tradeoff` with the reason `tradeoff`; its
+refusal reasons and its promotion carry the same `objectives`.
+
+The frontier is the set of the task's commits that no member beats. `frontier add` judges the
+commit against each member with the comparison `compare` makes: it evicts a member it is `better`
+than, keeps one it is a `tradeoff` against, and is refused with every reason that applies, each
+naming the `member` it is about: `unmeasured`, `check_missing`, `dominated` (the member is better),
+`within_noise`, `inconclusive`, `stale` (measured under another task version) and
+`environment_mismatch`. A commit that is a member already is answered `already_member` and nothing
+changes. The JSON answer is `decision.admitted` (`added`, `evicted`, `already_member`, `members`)
+or `decision.refused.reasons`. A successful `promote` of a multi-objective commit offers it to the
+frontier in the same way, and its answer's `frontier` field says what the frontier made of it; the
+promotion stands even when the frontier refuses the commit. The frontier takes the commit before
+the promotion is recorded, so a crash between the two leaves a frontier that is right, and the
+promotion can be asked for again. `frontier list` prints `members`, each a `member` (`commit`,
+`added_at`) and its `values`: per objective, the `metric`, the mean of every sample of the commit
+(`value`) and the number of `samples`.
+
 ## Contract
 
 The contract is `proto/vibesys/cli/v1/`: the daemon's gRPC service, the job, result, verdict,
-environment, event and plan messages, typed refusals, and the version handshake. The same messages
+environment, event, plan and frontier messages, typed refusals, and the version handshake. The same messages
 are the `--json` output of every command, in protobuf's canonical JSON form with the original field
 names. Generated Go lives in `gen/`.
 

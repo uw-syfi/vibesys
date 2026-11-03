@@ -108,7 +108,8 @@ func (r *resultsRig) measured(commit core.Commit, samples []float64) core.Result
 
 func (r *resultsRig) promote(commit core.Commit) (core.PromotionDecision, error) {
 	r.t.Helper()
-	return r.app.Promote(ctxFor(r.t), call, commit)
+	d, _, err := r.app.Promote(ctxFor(r.t), call, commit)
+	return d, err
 }
 
 // promoted promotes a commit that must be accepted.
@@ -295,7 +296,7 @@ func TestInvalidCommitsAreInvalidInput(t *testing.T) {
 	r := newResultsRig(t)
 	ctx := ctxFor(t)
 	for _, bad := range []core.Commit{"", "main", "ABCDEF", cm(1)[:39]} {
-		_, err := r.app.Promote(ctx, call, bad)
+		_, _, err := r.app.Promote(ctx, call, bad)
 		wantFailure(t, "Promote "+string(bad), err, core.FailureInvalidInput)
 		_, err = r.app.Compare(ctx, call, bad, "")
 		wantFailure(t, "Compare "+string(bad), err, core.FailureInvalidInput)
@@ -465,7 +466,7 @@ func TestParallelPromotionsOfOneCommitMakeOnePromotion(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			d, err := r.app.Promote(ctxFor(t), call, cm(1))
+			d, _, err := r.app.Promote(ctxFor(t), call, cm(1))
 			switch {
 			case err != nil:
 				t.Errorf("Promote: %v", err)
@@ -607,7 +608,7 @@ func TestWithoutBranchesTheBranchCommandsAreUnavailable(t *testing.T) {
 	if _, err := w.stores.Create(ctxFor(t), scope); err != nil {
 		t.Fatal(err)
 	}
-	_, err := a.Promote(ctxFor(t), call, cm(1))
+	_, _, err := a.Promote(ctxFor(t), call, cm(1))
 	wantFailure(t, "Promote", err, core.FailureUnavailable)
 	_, err = a.Compare(ctxFor(t), call, cm(1), "")
 	wantFailure(t, "Compare", err, core.FailureUnavailable)
@@ -632,7 +633,7 @@ func TestResultCommandsOnATaskWithNoStoreMakeNone(t *testing.T) {
 	}
 	_, err = r.app.Compare(ctx, other, cm(1), cm(0))
 	wantFailure(t, "Compare", err, core.FailureNotFound)
-	_, err = r.app.Promote(ctx, other, cm(1))
+	_, _, err = r.app.Promote(ctx, other, cm(1))
 	wantFailure(t, "Promote", err, core.FailureNotFound)
 	known, err := w.stores.Known(ctx)
 	if err != nil || slices.Contains(known, otherScope) {

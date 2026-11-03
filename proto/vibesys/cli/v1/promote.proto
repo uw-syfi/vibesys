@@ -23,18 +23,23 @@ enum PromoteRefusalKind {
   PROMOTE_REFUSAL_KIND_STALE = 6;
   // The commit and the result branch were measured in different environments.
   PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH = 7;
+  // A multi-objective commit is better than the result branch head on some objective and worse on
+  // another. `frontier add` keeps such a commit.
+  PROMOTE_REFUSAL_KIND_TRADEOFF = 8;
 }
 
 message PromoteRefusalReason {
   PromoteRefusalKind kind = 1;
   // Display text. Callers branch on kind.
   string message = 2;
-  // The verdict the refusal rests on. Set for WORSE, WITHIN_NOISE and INCONCLUSIVE.
+  // The verdict the refusal rests on. Set for WORSE, WITHIN_NOISE, INCONCLUSIVE and TRADEOFF.
   Verdict verdict = 3;
   // The result branch head the commit was measured against. Set for STALE.
   string measured_against = 4;
   // The result branch head now. Set for STALE.
   string current_head = 5;
+  // The verdict on each objective, with `verdict`, for a multi-objective task.
+  repeated ObjectiveVerdict objectives = 6;
 }
 
 // PromoteRefusal is a normal answer to a promotion, not an error: `promote` moves the result
@@ -54,6 +59,8 @@ message Promotion {
   // The measurement the promotion rests on.
   string result_job_id = 5;
   google.protobuf.Timestamp at = 6;
+  // The verdict on each objective, for a multi-objective task.
+  repeated ObjectiveVerdict objectives = 7;
 }
 
 // NoCurrentResultReason is why `result` has nothing to report.

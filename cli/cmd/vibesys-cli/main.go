@@ -81,6 +81,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"compare":    compareCommand,
 	"promote":    promoteCommand,
 	"result":     resultCommand,
+	"frontier":   frontierCommand,
 	"plan":       planCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
@@ -100,9 +101,11 @@ commands:
   jobs [--commit rev] [--state s] [--note-contains text]
   logs <job> [--follow]                          print a job's output
   show <commit>                                  results saved for a commit
-  compare <commit> [--against rev]               better, worse, within_noise or inconclusive
+  compare <commit> [--against rev]               better, worse, within_noise, tradeoff or inconclusive
   promote <commit>                               move the result branch, or say why not
   result                                         the head and a fresh final number
+  frontier add <commit>                          add a multi-objective commit to the frontier, or say why not
+  frontier list                                  the frontier, with each member's numbers
   plan create|list|view|edit|comment|close       store and find plans
   daemon status|stop|restart                     manage the daemon
   upgrade                                        replace this binary with the newest release

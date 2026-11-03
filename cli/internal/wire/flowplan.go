@@ -47,6 +47,7 @@ func flowPlan(p *flow.Plan) *cliv1.FlowPlan {
 		out.Benchmark = planCommand(&p.Benchmark)
 		out.ResultFormat = &cliv1.ResultFormat{Protocol2: p.Result.Protocol2, JsonArgument: p.Result.JSONArgument, Field: p.Result.Field}
 		out.Metric = &cliv1.Metric{Name: p.Metric.Name, Direction: direction(p.Metric.Direction)}
+		out.Objectives = Objectives(p.Objectives)
 	}
 	return out
 }
@@ -93,6 +94,9 @@ func toFlowPlan(field string, p *cliv1.FlowPlan) (*flow.Plan, error) {
 			return nil, err
 		}
 		out.Metric.Name = m.GetName()
+	}
+	if out.Objectives, err = toObjectives(field+".objectives", p.GetObjectives(), toDirection); err != nil {
+		return nil, err
 	}
 	if err := out.Validate(); err != nil {
 		return nil, err

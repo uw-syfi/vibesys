@@ -130,7 +130,7 @@ func TestNoFieldOfAStoredMessageIsDropped(t *testing.T) {
 			event := &cliv1.Event{}
 			fill(event.ProtoReflect(), variant)
 			event.Sequence, event.RunId = 1, "run-a"
-			want := &cliv1.EventFile{Format: 2, Event: event}
+			want := &cliv1.EventFile{Format: 3, Event: event}
 			data, err := protojson.Marshal(want)
 			if err != nil {
 				t.Fatal(err)
@@ -179,7 +179,8 @@ func seedFrom(f *testing.F, name string) {
 	}
 	f.Add(data)
 	f.Add(withVersion(data, "1"))
-	f.Add(withVersion(data, "3"))
+	f.Add(withVersion(data, "2"))
+	f.Add(withVersion(data, "4"))
 	f.Add([]byte(`{"format": 2}`))
 	f.Add([]byte(`{}`))
 	f.Add([]byte(`[]`))
@@ -239,6 +240,7 @@ func FuzzDecodePlanFile(f *testing.F)   { fuzzRecord(f, "state/plans/1.json", no
 func FuzzDecodePromotionFile(f *testing.F) {
 	fuzzRecord(f, "state/promotions/1.json", noRead)
 }
+func FuzzDecodeFrontierFile(f *testing.F) { fuzzRecord(f, "state/frontier/2.json", noRead) }
 
 // An event is read when it is asked for, not when the store opens.
 func FuzzDecodeEventFile(f *testing.F) {

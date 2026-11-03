@@ -264,9 +264,14 @@ func testCancelled(t *testing.T, newStore New) {
 			"Results":         func() error { _, err := e.s.Results(ctx, core.ResultFilter{}); return err },
 			"RecordPromotion": func() error { return e.s.RecordPromotion(ctx, core.AssumeApproved(g.promotion())) },
 			"Promotions":      func() error { _, err := e.s.Promotions(ctx); return err },
-			"CreatePlan":      func() error { _, err := e.s.CreatePlan(ctx, core.NewPlan{Title: "t", At: e.now()}); return err },
-			"Plan":            func() error { _, err := e.s.Plan(ctx, plan.Number); return err },
-			"Plans":           func() error { _, err := e.s.Plans(ctx, core.PlanFilter{}); return err },
+			"Frontier":        func() error { _, err := e.s.Frontier(ctx); return err },
+			"UpdateFrontier": func() error {
+				_, err := e.s.UpdateFrontier(ctx, core.AssumeAdmitted(0, g.members()))
+				return err
+			},
+			"CreatePlan": func() error { _, err := e.s.CreatePlan(ctx, core.NewPlan{Title: "t", At: e.now()}); return err },
+			"Plan":       func() error { _, err := e.s.Plan(ctx, plan.Number); return err },
+			"Plans":      func() error { _, err := e.s.Plans(ctx, core.PlanFilter{}); return err },
 			"EditPlan": func() error {
 				_, err := e.s.EditPlan(ctx, plan.Number, core.PlanEdit{Title: &title, At: e.now()})
 				return err

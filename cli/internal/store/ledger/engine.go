@@ -170,6 +170,16 @@ func (e *Engine) Promotions(ctx context.Context) ([]core.Promotion, error) {
 	return read(e, ctx, func(l *Ledger) ([]core.Promotion, error) { return l.Promotions(), nil })
 }
 
+// Frontier implements store.FrontierStore.
+func (e *Engine) Frontier(ctx context.Context) (core.Frontier, error) {
+	return read(e, ctx, func(l *Ledger) (core.Frontier, error) { return l.Frontier(), nil })
+}
+
+// UpdateFrontier implements store.FrontierStore.
+func (e *Engine) UpdateFrontier(ctx context.Context, admission core.FrontierAdmission) (core.Frontier, error) {
+	return write(e, ctx, func(l *Ledger) (Change, core.Frontier, error) { return l.UpdateFrontier(admission) })
+}
+
 // CreatePlan implements store.PlanStore.
 func (e *Engine) CreatePlan(ctx context.Context, plan core.NewPlan) (core.Plan, error) {
 	return write(e, ctx, func(l *Ledger) (Change, core.Plan, error) { return l.CreatePlan(plan) })

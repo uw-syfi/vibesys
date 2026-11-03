@@ -44,6 +44,9 @@ func (b *backend) Recover() (ledger.Snapshot, error) {
 	if snap.Promotions, err = b.loadPromotions(); err != nil {
 		return snap, err
 	}
+	if snap.Frontier, err = b.loadFrontier(); err != nil {
+		return snap, err
+	}
 	if snap.Events, err = b.countEvents(); err != nil {
 		return snap, err
 	}
@@ -217,6 +220,31 @@ func (b *backend) loadPromotions() ([]core.Promotion, error) {
 		promotions = append(promotions, promotion)
 	}
 	return promotions, nil
+}
+
+// loadFrontier reads every revision of the frontier, numbered from 1 with no gap, and returns the
+// last. A revision is written whole, so the last one is the frontier and the others are its history.
+func (b *backend) loadFrontier() (core.Frontier, error) {
+	files, err := b.recordFiles(path.Join(b.root, frontierDir))
+	if err != nil {
+		return core.Frontier{}, err
+	}
+	var last core.Frontier
+	for n := uint64(1); n <= uint64(len(files)); n++ {
+		name, ok := files[n]
+		if !ok {
+			return core.Frontier{}, corrupt(frontierPath(b.root, n), "it is missing, and later revisions of the frontier are there")
+		}
+		var file cliv1.FrontierFile
+		if err := b.readRecord(name, &file); err != nil {
+			return core.Frontier{}, err
+		}
+		if file.GetSeq() != n {
+			return core.Frontier{}, corrupt(name, "it holds revision %d of the frontier", file.GetSeq())
+		}
+		last = frontierFromFile(&file)
+	}
+	return last, nil
 }
 
 // countEvents counts the events of each run by their file names. The events themselves are read

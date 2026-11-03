@@ -99,6 +99,10 @@ func Open(root string, opts ...Option) (*Store, error) {
 		return nil, err
 	}
 	b.guard = g
+	if err := migrate(c.fs, root); err != nil {
+		_ = g.release()
+		return nil, err
+	}
 	engine, err := ledger.NewEngine(b, c.rules)
 	if err != nil {
 		_ = g.release()
@@ -229,6 +233,37 @@ func unmake(f fsys.FS, root string, made []string) {
 	for _, dir := range slices.Backward(made) {
 		_ = f.Remove(dir)
 	}
+}
+
+// migrate brings a store of an older version this program reads up to formatVersion, under the
+// owner's lock. Version 3 only added to version 2, so the migration makes the directories version 2
+// did not have and then writes the format file, which is its commit point: a crash before it
+// leaves a store of version 2 with an empty directory more, which the next Open migrates again.
+func migrate(f fsys.FS, root string) error {
+	name := path.Join(root, formatFile)
+	data, err := f.ReadFile(name)
+	if err != nil {
+		return unavailable(root, err)
+	}
+	var file cliv1.FormatFile
+	if err := decode(name, data, &file); err != nil {
+		return err
+	}
+	if file.GetFormat() == formatVersion {
+		return nil
+	}
+	for _, dir := range topDirs {
+		if err := f.Mkdir(path.Join(root, dir)); err != nil && !errors.Is(err, fs.ErrExist) {
+			return unavailable(root, err)
+		}
+	}
+	if err := f.SyncDir(root); err != nil {
+		return unavailable(root, err)
+	}
+	if err := newBackend(f, root).publish(name, &cliv1.FormatFile{Format: formatVersion}); err != nil {
+		return unavailable(root, err)
+	}
+	return nil
 }
 
 // initialize makes the directory root a store when it is empty, and otherwise checks that it is

@@ -46,11 +46,42 @@ func (s *Server) Promote(ctx context.Context, req *cliv1.PromoteRequest) (*cliv1
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	decision, err := s.app.Promote(ctx, call, core.Commit(req.GetCommit()))
+	decision, frontier, err := s.app.Promote(ctx, call, core.Commit(req.GetCommit()))
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	return wire.PromoteResponse(decision), nil
+	return wire.PromoteResponse(decision, frontier), nil
+}
+
+// AddToFrontier implements cliv1.DaemonServiceServer. A refusal is the response; an error is a
+// failure.
+func (s *Server) AddToFrontier(ctx context.Context, req *cliv1.AddToFrontierRequest) (*cliv1.AddToFrontierResponse, error) {
+	ctx, cancel := s.bound(ctx)
+	defer cancel()
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	decision, err := s.app.AddToFrontier(ctx, call, core.Commit(req.GetCommit()))
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	return &cliv1.AddToFrontierResponse{Decision: wire.FrontierDecision(decision)}, nil
+}
+
+// ListFrontier implements cliv1.DaemonServiceServer.
+func (s *Server) ListFrontier(ctx context.Context, req *cliv1.ListFrontierRequest) (*cliv1.ListFrontierResponse, error) {
+	ctx, cancel := s.bound(ctx)
+	defer cancel()
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	entries, err := s.app.Frontier(ctx, call)
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	return &cliv1.ListFrontierResponse{Members: wire.FrontierEntries(entries)}, nil
 }
 
 // CurrentResult implements cliv1.DaemonServiceServer.

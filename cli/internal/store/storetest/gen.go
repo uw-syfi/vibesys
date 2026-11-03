@@ -151,7 +151,31 @@ func (g *gen) outcome(measure bool) core.Outcome {
 		Samples:      g.floats(),
 		Observations: []core.Observation{{Name: g.text(), Values: g.floats()}, {Name: g.text(), Values: g.floats()}},
 		CheckJob:     core.JobID(g.name()),
+		Objectives:   g.objectives(),
 	}
+}
+
+func (g *gen) metric() core.Metric {
+	return core.Metric{Name: g.text(), Direction: []core.Direction{core.Maximize, core.Minimize}[g.pick(2)]}
+}
+
+// objectives are the objectives of a multi-objective task, which a store holds whatever they
+// name: a store does not judge them.
+func (g *gen) objectives() core.Objectives {
+	return core.Objectives{Metrics: []core.Metric{g.metric(), g.metric()}, RelativeNoise: g.float()}
+}
+
+func (g *gen) objectiveVerdicts() []core.ObjectiveVerdict {
+	return []core.ObjectiveVerdict{{Metric: g.metric(), Verdict: g.verdict()}, {Metric: g.metric(), Verdict: g.verdict()}}
+}
+
+// members is a frontier's members, with distinct commits, as a store holds them.
+func (g *gen) members() []core.FrontierMember {
+	out := make([]core.FrontierMember, 1+g.pick(4))
+	for i := range out {
+		out[i] = core.FrontierMember{Commit: core.Commit(fmt.Sprintf("%d-%s", i, g.text())), AddedAt: g.instant()}
+	}
+	return out
 }
 
 // result is a saved result with every field set, for a job with this id, key and commit.
@@ -174,7 +198,7 @@ func (g *gen) acceptedResult(job core.Job, measure bool) core.Result {
 
 func (g *gen) verdict() core.Verdict {
 	return core.Verdict{
-		Kind:             []core.VerdictKind{core.Better, core.Worse, core.WithinNoise, core.Inconclusive}[g.pick(4)],
+		Kind:             []core.VerdictKind{core.Better, core.Worse, core.WithinNoise, core.Inconclusive, core.Tradeoff}[g.pick(5)],
 		Reason:           []core.InconclusiveReason{core.ReasonTooFewSamples, core.ReasonConstantSamples, core.ReasonMetricMismatch, core.ReasonTaskVersionMismatch}[g.pick(4)],
 		CandidateSamples: 1 + g.r.Uint32(), BaseSamples: 1 + g.r.Uint32(), CandidateMean: g.float(), BaseMean: g.float(), Ratio: g.float(), Noise: g.float(),
 	}
@@ -183,15 +207,15 @@ func (g *gen) verdict() core.Verdict {
 func (g *gen) promotion() core.Promotion {
 	return core.Promotion{
 		Commit: core.Commit(g.text()), PreviousHead: core.Commit(g.text()), Verdict: g.verdict(), Environment: g.fingerprint(),
-		ResultJob: core.JobID(g.name()), At: g.instant(),
+		ResultJob: core.JobID(g.name()), At: g.instant(), Objectives: g.objectiveVerdicts(),
 	}
 }
 
 func (g *gen) refusal() core.PromoteRefusal {
 	v := g.verdict()
 	return core.PromoteRefusal{Reasons: []core.PromoteRefusalReason{
-		{Kind: core.RefusalWorse, Message: g.text(), Verdict: &v, MeasuredAgainst: core.Commit(g.text()), CurrentHead: core.Commit(g.text())},
-		{Kind: core.RefusalStale, Message: g.text(), Verdict: &v, MeasuredAgainst: core.Commit(g.text()), CurrentHead: core.Commit(g.text())},
+		{Kind: core.RefusalWorse, Message: g.text(), Verdict: &v, MeasuredAgainst: core.Commit(g.text()), CurrentHead: core.Commit(g.text()), Objectives: g.objectiveVerdicts()},
+		{Kind: core.RefusalTradeoff, Message: g.text(), Verdict: &v, MeasuredAgainst: core.Commit(g.text()), CurrentHead: core.Commit(g.text()), Objectives: g.objectiveVerdicts()},
 	}}
 }
 
