@@ -9,5 +9,12 @@
   },
   "include": ["src/main/**/*.ts"],
   "exclude": ["src/main/**/*.test.ts"],
-  "references": [{"path": "./tsconfig.core.json"}, {"path": "./tsconfig.state.json"}]
+  "references": [
+    {"path": "../../libs/connection/tsconfig.lib.json"},
+    {"path": "../../libs/hosts/tsconfig.lib.json"},
+    {"path": "../../libs/ipc/tsconfig.lib.json"},
+    {"path": "../../libs/transport/tsconfig.lib.json"},
+    {"path": "./tsconfig.core.json"},
+    {"path": "./tsconfig.state.json"}
+  ]
 }

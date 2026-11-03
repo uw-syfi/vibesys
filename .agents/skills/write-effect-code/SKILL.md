@@ -117,4 +117,5 @@ Adding a client package or a screen of the old desktop packages is the
 - The clients Biome configuration (which Grit rule covers which folder) and the
   dependency-cruiser configuration (the `desktop-*` rules).
 - The package-graph checker (`check_package_graph`) for the confinement of `effect`.
+- [references/effect-4-names.md](references/effect-4-names.md): the exact Effect 4.1.2 names this package uses.
 - The Effect library's own documentation for the current API of each module.

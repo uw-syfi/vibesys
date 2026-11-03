@@ -36,11 +36,13 @@ import {type CallBound, GatewaySession} from './grpc.js';
  */
 const SERVICES = [HostService, OrchestratorService];
 
-/** The orchestrator's server streams, from its generated descriptor. */
-const ORCHESTRATOR_STREAMS: ReadonlySet<string> = new Set(
-  OrchestratorService.methods
-    .filter(method => method.methodKind === 'server_streaming')
-    .map(method => `/${OrchestratorService.typeName}/${method.name}`),
+/**
+ * Every orchestrator method, from its generated descriptor: a stream or a command (Dispatch). The
+ * gateway never re-issues one of these after a lost session, because its caller decides whether
+ * and from where to try again.
+ */
+const ORCHESTRATOR_METHODS: ReadonlySet<string> = new Set(
+  OrchestratorService.methods.map(method => `/${OrchestratorService.typeName}/${method.name}`),
 );
 
 export const HELLO_METHOD = `/${HostService.typeName}/${HostService.method.hello.name}`;
@@ -104,9 +106,11 @@ export class GatewayConnection {
             for (const call of [...this.#calls]) {
               // A subscription is not re-issued: a second stream in the same call would deliver
               // a second snapshot into state the caller already holds. Its machine reopens it.
-              // An orchestrator stream is not either: its caller knows the sequence it has
-              // reached, and reopens from there instead of from the one it first asked for.
-              if (call.method === SUBSCRIBE_METHOD || ORCHESTRATOR_STREAMS.has(call.method))
+              // An orchestrator call is not either. A stream's caller knows the sequence it has
+              // reached, and reopens from there instead of from the one it first asked for. A
+              // command may have been applied before the link dropped, so its caller sees the
+              // loss and decides whether to send the same command again.
+              if (call.method === SUBSCRIBE_METHOD || ORCHESTRATOR_METHODS.has(call.method))
                 call.finish(new GrpcError(14, 'gateway connection lost'));
               call.abort?.abort();
               call.abort = null;

@@ -135,3 +135,38 @@ test('a lost session ends an orchestrator stream, and the next one starts where 
     await second;
   });
 });
+
+test('a lost session ends an in-flight orchestrator command, which is not sent again on reconnect', {
+  timeout: 15000,
+}, async () => {
+  await withConnection(async (fake, connection, clock) => {
+    const dispatch = (id: string): Uint8Array =>
+      toBinary(
+        DispatchRequestSchema,
+        create(DispatchRequestSchema, {
+          command: create(CommandSchema, {
+            id,
+            body: {case: 'sendMessage', value: {agentId: 'a', text: 'hi'}},
+          }),
+        }),
+      );
+    const first = connection
+      .unary(DISPATCH, dispatch('cmd-1'), new AbortController().signal)
+      .catch(error => error as {code?: number});
+    const served = await fake.nextServed(DISPATCH);
+    expect(fromBinary(DispatchRequestSchema, served.request).command?.id).toBe('cmd-1');
+    served.disconnect();
+    expect(((await first) as {code?: number}).code).toBe(14);
+    // The session redials. The next command the gateway serves is the caller's new one: the lost
+    // command was not queued behind it.
+    await clock.waitUntilScheduled(500);
+    clock.advanceBy(500);
+    const second = connection
+      .unary(DISPATCH, dispatch('cmd-2'), new AbortController().signal)
+      .catch(() => undefined);
+    const next = await fake.nextServed(DISPATCH);
+    expect(fromBinary(DispatchRequestSchema, next.request).command?.id).toBe('cmd-2');
+    next.end();
+    await second;
+  });
+});

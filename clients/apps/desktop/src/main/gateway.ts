@@ -1,0 +1,98 @@
+/**
+ * The gateway as the renderer reaches it: one port per call, authorized before anything is
+ * provisioned or dialed, answered by `GatewayCalls` over one session per host. The app calls only
+ * `OrchestratorService`, so no host-call or read configuration is applied.
+ */
+import {arch, platform} from 'node:os';
+import {
+  type ConnectionManager,
+  GATEWAY_DIRECTORY,
+  GatewayCalls,
+  type GatewayDialer,
+  gatewayArtifact,
+  gatewayProcess,
+  gatewayTarget,
+  localGateway,
+  provisionGateway,
+  SshLink,
+} from '@vibesys/connection';
+import {type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
+import {GATEWAY_CHANNEL, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
+import type {ScheduleTimeout} from '@vibesys/transport';
+import {type PortEvent, type PortIpc, servePort} from './port-ipc.js';
+
+/** How long a session started ahead of the first call waits for it: a slow window on a busy Mac. */
+const LOCAL_GATEWAY_WARM_MS = 15_000;
+
+export function createGatewayCalls(
+  manager: ConnectionManager,
+  resources: string,
+  schedule: ScheduleTimeout,
+  log: (message: string) => void,
+): GatewayCalls {
+  const calls = new GatewayCalls(
+    key => gatewayFor(key, manager, resources, schedule, line => log(`${key}: ${line}`)),
+    schedule,
+    (host, diagnostic) => log(`${host} gateway call failed: ${diagnostic}`),
+  );
+  manager.onDisposing(() => calls.close());
+  // This machine's gateway may have to be started, which takes 0.3 s, and the window needs about as
+  // long to load before its first call: start it now so that the two run side by side.
+  calls.warm(hostKey({kind: 'local'}), LOCAL_GATEWAY_WARM_MS);
+  return calls;
+}
+
+export function installGatewayIpc(
+  ipc: PortIpc,
+  {calls, admits}: {calls: GatewayCalls; admits: (event: PortEvent) => boolean},
+): void {
+  servePort(ipc, GATEWAY_CHANNEL, admits, async (value, signal, send) => {
+    const request = parseGatewayRequest(value);
+    const receive = (bytes: Uint8Array): void => send(gatewayReply(bytes));
+    if (request.kind === 'unary')
+      receive(await calls.unary(request.host, request.method, request.bytes, signal));
+    else await calls.stream(request.host, request.method, request.bytes, signal, receive);
+  });
+}
+
+function gatewayFor(
+  key: HostKey,
+  manager: ConnectionManager,
+  resources: string,
+  schedule: ScheduleTimeout,
+  log: (line: string) => void,
+): GatewayDialer {
+  const host = hostFromKey(key);
+  return {
+    dial: async (signal, force) => {
+      if (host.kind === 'local')
+        return localGateway(resources, gatewayTarget(`${platform()} ${arch()}`), signal, schedule);
+      const lease = await manager.leaseLink(host);
+      try {
+        if (!(lease.link instanceof SshLink)) throw new Error('host has no SSH command link');
+        await lease.link.establish(false, signal);
+        await provisionGateway(
+          lease.link,
+          target => gatewayArtifact(resources, target),
+          force,
+          signal,
+          schedule,
+        );
+        if (signal.aborted) throw new Error('gateway dial cancelled');
+        const duplex = gatewayProcess(
+          lease.link.spawnCommand(`exec "$HOME/${GATEWAY_DIRECTORY}/vibesysd" connect`),
+          schedule,
+          log,
+          (code, tail) => lease.link.explain(code, tail, 'the gateway').message,
+        );
+        duplex.once('close', () => {
+          void lease.release();
+        });
+        return duplex;
+      } catch (error) {
+        await lease.release();
+        throw error;
+      }
+    },
+  };
+}

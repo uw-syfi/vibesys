@@ -7,5 +7,6 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.preload.tsbuildinfo"
   },
-  "include": ["src/preload/**/*.cts"]
+  "include": ["src/preload/**/*.cts"],
+  "references": [{"path": "../../libs/ipc/tsconfig.lib.json"}]
 }
