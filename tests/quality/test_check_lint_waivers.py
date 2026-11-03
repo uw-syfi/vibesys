@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import configparser
+from pathlib import Path
 
 from scripts.check_lint_waivers import audit, discover_ruff_files, scan_source_file
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def write_source(root: Path, source: str) -> Path:
@@ -124,3 +122,23 @@ def test_requires_waiver_ids_to_be_unique_across_files(tmp_path: Path) -> None:
     assert audit(tmp_path, [first, second]) == [
         "src/other.py:1: LW-000001 is also used at src/sample.py:1"
     ]
+
+
+def test_all_submodules_are_excluded_from_waiver_discovery(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[2]
+    config = configparser.ConfigParser()
+    config.read(root / ".gitmodules", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        (root / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    for section in config.sections():
+        source = tmp_path / config[section]["path"] / "submodule_probe.py"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("", encoding="utf-8")
+
+    files, error = discover_ruff_files(tmp_path)
+
+    assert error is None
+    assert not files, (
+        f"Submodule paths not excluded: {[str(p.relative_to(tmp_path).parent) for p in files]}"
+    )
