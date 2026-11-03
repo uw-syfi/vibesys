@@ -1,12 +1,23 @@
 {
   "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ES2022"],
+    "lib": [
+      "ES2022"
+    ],
     "types": [],
     "rootDir": "src",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/.state.tsbuildinfo"
   },
-  "include": ["src/state/**/*.ts"],
-  "exclude": ["src/state/**/*.test.ts"]
+  "include": [
+    "src/state/**/*.ts"
+  ],
+  "exclude": [
+    "src/state/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../../libs/orchestrator-proto/tsconfig.lib.json"
+    }
+  ]
 }

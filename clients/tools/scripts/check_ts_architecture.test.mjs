@@ -107,6 +107,7 @@ const VALID_FILES = {
   // A package's test support may build on another's, and its tests may use another's Fakes.
   'libs/hosts/src/index.ts': '',
   'libs/ipc/src/index.ts': "import type {} from '@vibesys/hosts';\n",
+  'libs/orchestrator-proto/src/index.ts': '',
   // The web app's composition enters a feature through its entries, and only the backend adapter
   // imports transport's runtime values. A feature's renderer drives its pure state; the state
   // names transport's types only.
@@ -147,7 +148,8 @@ const VALID_FILES = {
   // core builds on state and Effect, ui on both, and the main process and the preload never see
   // ui. The testing doubles are for tests.
   'apps/desktop/src/state/index.ts': "import './fold.js';\nimport type {} from '@vibesys/hosts';\n",
-  'apps/desktop/src/state/fold.ts': '',
+  // A fold reads the generated protocol's enums at run time; nothing else outside the folder.
+  'apps/desktop/src/state/fold.ts': "import '@vibesys/orchestrator-proto';\n",
   'apps/desktop/src/core/index.ts': "import 'effect/Effect';\nimport '../state/index.js';\n",
   'apps/desktop/src/ui/index.ts': "import '../core/index.js';\nimport '../state/index.js';\n",
   'apps/desktop/src/main/index.ts': "import '../core/index.js';\nimport 'node:path';\n",
@@ -395,6 +397,7 @@ async function violatedRules(t, files) {
           '@vibesys/connection': ['libs/connection/src/index.ts'],
           '@vibesys/hosts': ['libs/hosts/src/index.ts'],
           '@vibesys/ipc': ['libs/ipc/src/index.ts'],
+          '@vibesys/orchestrator-proto': ['libs/orchestrator-proto/src/index.ts'],
           '@vibesys/connection/testing': ['libs/connection/src/testing/index.ts'],
         },
       },
