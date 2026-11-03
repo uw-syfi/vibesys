@@ -1,6 +1,11 @@
-import {describe, expect, it} from '@effect/vitest';
 import {create, toBinary} from '@bufbuild/protobuf';
-import {ORCHESTRATOR_MAX_MESSAGE_BYTES, OrchestratorService, RunsSnapshotSchema, WatchRunsResponseSchema} from '@vibesys/orchestrator-proto';
+import {describe, expect, it} from '@effect/vitest';
+import {
+  ORCHESTRATOR_MAX_MESSAGE_BYTES,
+  OrchestratorService,
+  RunsSnapshotSchema,
+  WatchRunsResponseSchema,
+} from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import * as Fiber from 'effect/Fiber';
 import * as Schema from 'effect/Schema';
@@ -167,37 +172,49 @@ describe('gateway session', () => {
     }),
   );
 
-  it.effect('accepts a packed WatchRuns snapshot and refuses an over-limit orchestrator reply', () =>
-    Effect.scoped(Effect.gen(function* () {
-      const snapshotBudget = 1024 * 1024;
-      const snapshot = create(RunsSnapshotSchema, {
-        sequence: 1n,
-        searches: Array.from({length: 4}, (_, i) => ({
-          runId: `run-${i}`, revision: 1n,
-          health: {state: {case: 'liveSince' as const, value: {seconds: 0n, nanos: 0}}},
-          plans: [{number: 1, body: 'x'.repeat(snapshotBudget / 4 - 1024)}],
-        })),
-      });
-      const packed = toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, {
-        body: {case: 'snapshot', value: snapshot},
-      }));
-      expect(packed.byteLength).toBeLessThanOrEqual(snapshotBudget + 5);
-      expect(packed.byteLength).toBeGreaterThan(snapshotBudget - 8192);
-      const peer = fakeGateway();
-      const session = yield* openSession(peer.connect());
-      const method = `/${OrchestratorService.typeName}/${OrchestratorService.method.watchRuns.name}`;
-      const heard: Uint8Array[] = [];
-      const watching = yield* Effect.forkChild(session.call(method, bytes(), message => heard.push(Uint8Array.from(message))));
-      yield* received(peer, 1);
-      peer.calls[0]?.send(packed);
-      peer.calls[0]?.end();
-      yield* Fiber.join(watching);
-      expect(heard).toEqual([packed]);
-      const oversized = yield* Effect.forkChild(Effect.flip(session.call(method, bytes(), () => {})));
-      yield* received(peer, 2);
-      peer.calls[1]?.send(new Uint8Array(ORCHESTRATOR_MAX_MESSAGE_BYTES + 1));
-      expect((yield* Fiber.join(oversized)).code).toBe(8);
-    })),
+  it.effect(
+    'accepts a packed WatchRuns snapshot and refuses an over-limit orchestrator reply',
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const snapshotBudget = 1024 * 1024;
+          const snapshot = create(RunsSnapshotSchema, {
+            sequence: 1n,
+            searches: Array.from({length: 4}, (_, i) => ({
+              runId: `run-${i}`,
+              revision: 1n,
+              health: {state: {case: 'liveSince' as const, value: {seconds: 0n, nanos: 0}}},
+              plans: [{number: 1, body: 'x'.repeat(snapshotBudget / 4 - 1024)}],
+            })),
+          });
+          const packed = toBinary(
+            WatchRunsResponseSchema,
+            create(WatchRunsResponseSchema, {
+              body: {case: 'snapshot', value: snapshot},
+            }),
+          );
+          expect(packed.byteLength).toBeLessThanOrEqual(snapshotBudget + 5);
+          expect(packed.byteLength).toBeGreaterThan(snapshotBudget - 8192);
+          const peer = fakeGateway();
+          const session = yield* openSession(peer.connect());
+          const method = `/${OrchestratorService.typeName}/${OrchestratorService.method.watchRuns.name}`;
+          const heard: Uint8Array[] = [];
+          const watching = yield* Effect.forkChild(
+            session.call(method, bytes(), message => heard.push(Uint8Array.from(message))),
+          );
+          yield* received(peer, 1);
+          peer.calls[0]?.send(packed);
+          peer.calls[0]?.end();
+          yield* Fiber.join(watching);
+          expect(heard).toEqual([packed]);
+          const oversized = yield* Effect.forkChild(
+            Effect.flip(session.call(method, bytes(), () => {})),
+          );
+          yield* received(peer, 2);
+          peer.calls[1]?.send(new Uint8Array(ORCHESTRATOR_MAX_MESSAGE_BYTES + 1));
+          peer.calls[1]?.end();
+          expect((yield* Fiber.join(oversized)).code).toBe(8);
+        }),
+      ),
   );
-
 });
