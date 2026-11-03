@@ -2,34 +2,37 @@
 
 
 The connection design (one host helper, one connection manager, explicit run identity and
-lifecycle phases, per-screen stores) is in [desktop-connection.md](desktop-connection.md); this
+lifecycle phases) is in [desktop-connection.md](desktop-connection.md); this
 section says how the code is laid out and how to run it.
 
-The desktop app (`clients/apps/desktop-main`) ships its own UI (`clients/apps/desktop-shell`) and
-reaches servers through its main process, without the web gateway. A server is
-a detached run (`vibesys --detach`) on this machine
-or on an SSH host. The main process reaches every host the same way: it runs the
-host helper there (`python -m entrypoints.host_helper`) and speaks its typed
-protocol; This Mac and an SSH host differ only in how the helper is started, and
-the page cannot tell them apart.
+The desktop app (`clients/apps/desktop`, `@vibesys/desktop`) is an Electron app that operates
+orchestrated runs: the operator picks a host, starts a run, watches its agent map, messages an
+agent and stops the run. It reaches servers through its main process, without the web gateway. A
+host is this machine or an SSH host; the main process reaches every host the same way, by running
+the host helper there (`python -m entrypoints.host_helper`) and speaking its typed protocol, so
+the page cannot tell them apart. The page talks to the orchestrator daemon on the host through the
+`vibesys-gateway` binary that `build` compiles (it needs Go).
 
 ```bash
-# The main window: the sidebar, New run, Machines, Settings
-pnpm --dir clients --filter @vibesys/app-desktop-main start
+# Install once, then build and open the app (the main window lists the saved hosts)
+pnpm --dir clients install
+pnpm --dir clients --filter @vibesys/desktop start
 
-# One of a host's detached runs, in a window of its own (--instance alone: one on this machine)
-pnpm --dir clients --filter @vibesys/app-desktop-main start -- --host HOST --instance ID
-
-# Start a detached run for a local project and open it in a window of its own
-pnpm --dir clients --filter @vibesys/app-desktop-main start -- --project ~/proj [-- RUN_ARGS...]
+# Open it on named hosts (a saved host's key, as in hosts.json)
+pnpm --dir clients --filter @vibesys/desktop start -- --host=ssh:host-a
 ```
 
-`start` builds the app, including the page bundle the windows load from the `app://vibesys` origin
-(`@vibesys/app-desktop-shell`'s `build`, from `clients/apps/desktop-shell/shell.html`). The page has
-no network access: the main process cancels every http(s) and ws(s) request and the page's Content
-Security Policy forbids connections. Its only way to the server is the preload bridge
-(`window.vibesysWelcome`, whose `connectRun` takes no host or path): the main process binds a window
-to one run.
+`start` builds the app (`tsc -b` for each folder, `vite build` for the page in `dist/renderer`, and
+the gateway binaries in `dist/gateway`) and runs `electron .`. The page has no network access: the
+main process cancels every http(s) and ws(s) request, denies permissions, blocks navigation and
+new windows, and the page's Content Security Policy forbids connections. Its only way to a host is
+the preload's `window.vibesysGateway`, which hands the page one `MessagePort` per call; the main
+process admits a port only for its own window. `VIBESYS_DESKTOP_USER_DATA` points the app's
+settings and Chromium data at another directory.
+
+`pnpm --filter @vibesys/desktop build:fixture` builds the same screens over a scripted fake daemon
+(`dist/fixture`, served by any static server, with `?scenario=<seed>-<subagents>-<live|done>`). It
+needs no Electron, host or daemon, and is how a screen is looked at without a display.
 
 ### Test a branch in the app
 
@@ -40,16 +43,15 @@ to one run.
 ```
 
 `dev` installs the client packages only when the lockfile or a package manifest changed since the
-last successful install (a stamp under `build/dev/`), builds the app and the packages it uses with
-the build `test:e2e` runs, syncs this checkout's Python environment, and opens the app on a profile
-of its own, `build/dev/desktop-profile` (`VIBESYS_USER_DATA_DIR`), so the installed app and other
+last successful install (a stamp under `build/dev/`), builds the app and the packages it uses
+(`turbo run build`), syncs this checkout's Python environment, and opens the app on a profile
+of its own, `build/dev/desktop-profile` (`VIBESYS_DESKTOP_USER_DATA`), so the installed app and other
 Electron apps keep their settings. It returns when the app closes. Commands and paths are in
 `.repoctl/dev.toml`.
 
 With `--machine`, the committed HEAD is pushed over ssh to a dev ref in the machine's checkout (no
 GitHub involved) and checked out detached; a checkout that is not a git working tree gets its
-tracked files by rsync. The machine's checkout is the one the desktop app saved for it (its `hosts.json`, set on the
-Machines screen); `--checkout` overrides it, and an unsaved machine is an error naming the file. `dev` refuses before changing anything if the local tree or the
+tracked files by rsync. The machine's checkout is the one the desktop app saved for it (its `hosts.json`); `--checkout` overrides it, and an unsaved machine is an error naming the file. `dev` refuses before changing anything if the local tree or the
 machine's checkout has uncommitted changes to tracked files. It then runs `uv sync` there and starts
 a fresh helper the way the app does, and fails unless that helper's `hello` reports the shipped
 commit within 60 seconds. Each step prints its duration. The helper keeps no state and every run is
@@ -59,36 +61,22 @@ imports new code.
 
 ### Layout
 
-The Electron main process is composed from packages, as the renderer is; the package-graph
-checker holds the boundaries between them, and `clients/.dependency-cruiser.mjs` the modules
-inside them:
+One package, a folder per role (`clients-architecture.md`, "The Effect desktop app"); the
+package-graph checker holds the boundaries between packages, and `clients/.dependency-cruiser.mjs`
+the folders inside the app:
 
-- `clients/apps/desktop-main` (`@vibesys/app-desktop-main`) is composition only: `src/main/` is
-  the composition root, the windows, the lifecycle, page confinement, launch arguments, and the
-  shell's IPC boundary, which routes each request `@vibesys/ipc` parsed to the feature that owns
-  it. `src/preload/` holds the one sandboxed preload (`welcome.cts`, the surface's historical
-  name), a single file, which the main process loads by path and never imports.
-- The features' `./main` entries are their main-process controllers: `@vibesys/feature-hosts`
-  (`Hosts`: checkouts, tasks, path completion, pushed listings) and
-  `@vibesys/feature-run-control` (`RunControl`: attach, start, resume, stop, and the relay of a
-  window's run connections). These packages have no renderer; the screens are the strict features
-  (`app-shell`, `settings`, `machines`, `new-run`, `run-page`).
+- `src/main/` is the Electron composition root: the connection manager and settings store, the
+  gateway IPC (`gateway.ts`, `port-ipc.ts`), page confinement and the window (`window-policy.ts`).
+- `src/preload/` is the one sandboxed preload; it loads only Electron.
+- `src/core/` is the Effect client: the typed transport, the orchestrator client and the
+  per-host session (connection, run and agent feeds, commands) as services and atoms.
+- `src/state/` is the plain folds and views (the run model, routes, feed status); it imports no
+  Effect.
+- `src/ui/` is the React screens and the renderer entry; `src/testing/` holds the Fakes and the
+  fixture page, which only tests import.
 - `@vibesys/connection` is the connection manager, a pure `state/` machine and a `shell/`; only
   its shell starts processes or opens sockets. `@vibesys/settings` is `hosts.json` and
   `recent.json` with `SettingsStore` as their one writer.
-- The renderer is `clients/apps/desktop-shell` (`@vibesys/app-desktop-shell`), composition only:
-  `main.tsx` (the entry) and `shell.tsx` (each strict feature's store over the bridge, and the
-  screen the sidebar selects). The screens are built from `@vibesys/ui` alone.
-- The processes share only workspace packages: `@vibesys/hosts` (host naming, a host's listed
-  runs), `@vibesys/runs` (ids, recent runs, the stop and resume decisions), and `@vibesys/ipc`
-  (the run connection's port messages and the typed shell IPC, each feature's requests with the
-  parser the main process runs on them).
-
-`apps/desktop-main` declares one entry per process: `.` (`node`, `src/main/index.ts`, the Electron
-main) and `./preload-welcome` (`preload`, the preload file), so the package-graph checker holds
-each side to its runtime and its third-party imports, and a preload to loading only Electron.
-`src/preload/welcome.test.ts` drives the preload's bridge into
-`@vibesys/ipc`'s parser, so the renderer and the main process agree on every channel's arguments.
 
 ### Connections
 
@@ -128,34 +116,18 @@ Every implementation passes one contract suite (`testing/host-connection-contrac
 in-memory `FakeHelper`, which speaks the helper protocol on the wire and replays the `helper-*`
 conformance scenarios, and the real helper of this checkout (`VIBESYS_REAL_CONTRACTS=1`).
 
-### The desktop shell
+### The window
 
-The window opens on the app shell (`clients/apps/desktop-shell/shell.html`, a React bundle with
-the preload above): the sidebar (live and recent runs, Machines), New run, Machines, Settings, and
-the Run screen. The main process answers its requests only for a window's own shell document and
-validates every value before it reaches a host. Host data is pushed, never polled: the main
-process watches each shown host's registry (`instances.watch`) and sends every change
-(`HostListing`); recent runs' statuses derive from those listings. The checkout and project fields
-complete paths as you type (`paths.complete`: one listing per directory, filtered in the view).
+The window opens on the page `src/ui/main.tsx` renders: a session per host (`makeHostSession`) and
+the orchestrator screens over it. The runs list shows each host's runs and whether the host is
+connected; Start run takes a repository, a task, a fanout limit, the lead agent's harness and an
+optional brief; a run opens its agent map (the lead and its subagents, each with its harness, live
+status, timeline and handoffs), an agent opens a panel to message it, and Stop run ends the run.
+Every command shows what became of it (sending, accepted, refused with the reason, or unconfirmed
+with a Try again). A connection that is not working says so above what it makes out of date, with
+a Retry.
 
-On first use of an SSH host the Machines screen asks for the checkout on that host and checks the
-answer by starting the helper there before saving it (`hosts.json`, version 2: one `checkout` per
-host key); This Mac defaults to the checkout the app was built from. New run lists a project's
-tasks (`tasks.list`) and starts it (`run.start`). Recent rows are stored by `(host, run id)` from
-the run's record when the app starts or attaches to it (`recent.json`, version 2).
+Host data is pushed, never polled: each feed is a stream the session restarts after a reconnect
+and folds into state; a view reads atoms over that state.
 
-A shown run is attached to its window, and the Run screen's session is that window's. Each
-connection is a MessagePort the main process relays to a new run channel
-(`features/run-control/relay.ts`), reframing one port message as one newline-delimited line in each
-direction. The session (`@vibesys/run-session`) keeps its resume and reconciliation logic but no
-retry timer of its own: the main process wakes the page when the host connection recovers.
-
-The screens' stores are pure reducers or XState machines (`clients-architecture.md`, "State"); each
-feature's `renderer/ui/` is presentational and `renderer/effects/` its shell, and the app's
-`main.tsx` is the composition root. They are tested model-based with `checkModel` from
-`@vibesys/store/testing`.
-
-`AppLifecycle` (`main/app/app-lifecycle.ts`) is the one owner of process-wide state: a
-single-instance lock (a second launch focuses the first window and opens what it was asked to)
-and a pure quit machine (release every connection once, bounded, then exit through the one
-`app.exit` call site).
+`main/index.ts` releases the connection manager once, bounded, when the app quits.

@@ -1,8 +1,8 @@
 # TypeScript package graph
 
 Workspace: pnpm packages in the clients workspace, one per concept (the
-shared libraries `contracts`, `store`, `run-state`, `transport`, `hosts`,
-`runs`, `run-session`, `ipc`, `ui`; then feature packages and apps), with the
+shared libraries `contracts`, `store`, `transport`, `hosts`,
+`runs`, `connection`, `ipc`, `ui`; then apps), with the
 checkers and shared configs in a tools package. A package's folder follows the
 `layer` in its `package.json` `vibesys` field (`layer-matches-folder`); the
 graph and its rules are in
@@ -72,7 +72,7 @@ Named by package.
 
 | Rule | Look at |
 | --- | --- |
-| 1, 2 | `@vibesys/run-state` (small `exports`, logic behind it) |
+| 1, 2 | `@vibesys/connection` (small `exports`, logic behind it) |
 | 4 | The layering rules in the dependency-cruiser configuration |
 | 6 | The runtime-neutral `@vibesys/transport` versus the Node-only `@vibesys/connection` |
 | 8 | `@vibesys/contracts` generated protocol types |

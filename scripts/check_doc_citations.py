@@ -334,7 +334,7 @@ def is_dotted_name(text: str, index: RepoIndex) -> bool:
 def is_repo_path(text: str, index: RepoIndex) -> bool:
     """Whether a code span is a path into a tracked top-level directory.
 
-    A path through a build-output directory (`clients/apps/desktop-shell/dist/main.js`)
+    A path through a build-output directory (`clients/apps/desktop/dist/main/index.js`)
     names a file a build makes, which is never tracked, so it stays prose.
     """
     if "/" not in text or not REPO_PATH.match(text):

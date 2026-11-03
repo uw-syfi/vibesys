@@ -25,16 +25,6 @@ dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
 
 [[discoveries]]
 adapter = "package_json"
-manifest_glob = "clients/features/*/package.json"
-class = "workspace_package"
-id_prefix = "pnpm:"
-job = "clients"
-ownership_group = "workspace_packages"
-workspace_prefix = "workspace:"
-dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
-
-[[discoveries]]
-adapter = "package_json"
 manifest_glob = "clients/apps/*/package.json"
 class = "workspace_package"
 id_prefix = "pnpm:"
@@ -168,83 +158,18 @@ id = "server_transport"
 # from a client.
 roots = ["src/server/transport"]
 
+# The clients build their protocol bindings (`clients/libs/proto`, `clients/libs/orchestrator-proto`)
+# from the schemas, so a schema change has to select the `clients` job.
+[[components]]
+id = "client_protocol"
+roots = ["proto/vibesys"]
+
 [[components]]
 id = "clients"
 class = "manual"
 job = "clients"
 root = "clients"
-depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
-
-# What the native replays derive from, listed once, in two tiers. Every entry is a key input:
-# `tests/support/derived_replays.py` hashes it into the key of a replay set, so a set is never read
-# stale. An entry is also a selection input, a change to which selects the client jobs in CI and
-# locally, unless it is written `{ path = "...", selects = false }`. The libraries are every one the
-# generators reach through module-level imports, whole. The five a trace saw run (vs-core,
-# vs-proto, vs-runlog, vs-decode, vs-redaction) select; the thirteen the projection only imports
-# are key-only, so editing the runtime or the sandbox regenerates the set but does not run the
-# client jobs. The projection snapshots and the conversion golden, which the Python job runs,
-# still see a change from them. The two declaration directories also sit under `clients`.
-[[components]]
-id = "derived_replays"
-class = "manual"
-job = "clients"
-roots = [
-  "proto/vibesys",
-  { path = "libs/vs-agent/src", selects = false },
-  { path = "libs/vs-async-ops/src", selects = false },
-  "libs/vs-core/src",
-  "libs/vs-decode/src",
-  { path = "libs/vs-evaluation/src", selects = false },
-  { path = "libs/vs-evaluator-protocol/src", selects = false },
-  { path = "libs/vs-faults/src", selects = false },
-  { path = "libs/vs-issue-tracker/src", selects = false },
-  { path = "libs/vs-mcp/src", selects = false },
-  { path = "libs/vs-project/src", selects = false },
-  { path = "libs/vs-prompts/src", selects = false },
-  "libs/vs-proto/src",
-  "libs/vs-redaction/src",
-  "libs/vs-runlog/src",
-  { path = "libs/vs-runtime/src", selects = false },
-  { path = "libs/vs-sandbox/src", selects = false },
-  { path = "libs/vs-sim/src", selects = false },
-  { path = "libs/vs-slurm/src", selects = false },
-  "src/vibesys/records",
-  "src/vibesys/search_spans",
-  "clients/libs/run-fixtures/src/data",
-  "clients/apps/desktop-shell/e2e/scenarios",
-]
-files = [
-  "uv.lock",
-  "pyproject.toml",
-  { path = "libs/vs-agent/pyproject.toml", selects = false },
-  { path = "libs/vs-async-ops/pyproject.toml", selects = false },
-  "libs/vs-core/pyproject.toml",
-  "libs/vs-decode/pyproject.toml",
-  { path = "libs/vs-evaluation/pyproject.toml", selects = false },
-  { path = "libs/vs-evaluator-protocol/pyproject.toml", selects = false },
-  { path = "libs/vs-faults/pyproject.toml", selects = false },
-  { path = "libs/vs-issue-tracker/pyproject.toml", selects = false },
-  { path = "libs/vs-mcp/pyproject.toml", selects = false },
-  { path = "libs/vs-project/pyproject.toml", selects = false },
-  { path = "libs/vs-prompts/pyproject.toml", selects = false },
-  "libs/vs-proto/pyproject.toml",
-  "libs/vs-redaction/pyproject.toml",
-  "libs/vs-runlog/pyproject.toml",
-  { path = "libs/vs-runtime/pyproject.toml", selects = false },
-  { path = "libs/vs-sandbox/pyproject.toml", selects = false },
-  { path = "libs/vs-sim/pyproject.toml", selects = false },
-  { path = "libs/vs-slurm/pyproject.toml", selects = false },
-  "src/vibesys/__init__.py",
-  "src/vibesys/events.py",
-  "src/vibesys/metrics.py",
-  "tests/support/__init__.py",
-  "tests/support/derived_replays.py",
-  "tests/support/journey_fixtures.py",
-  "tests/support/lineage_fixture.py",
-  "tests/support/materialize_replays.py",
-  "tests/support/retained_events.py",
-  "tests/support/shared_scenarios.py",
-]
+depends_on = ["server_protocol", "server_transport", "client_protocol", "bun_fetcher"]
 
 [[components]]
 id = "stitch"

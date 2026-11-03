@@ -26,7 +26,7 @@ For example:
 ```toml
 [capabilities.clients]
 members = ["alice"]
-prefixes = ["clients/libs/run-state/src/"]
+prefixes = ["clients/libs/transport/src/"]
 paths = []
 additional_checks = []
 ```

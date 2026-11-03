@@ -21,18 +21,13 @@ GO_FAILURE_SITES = (
     "gateway/internal/server/writer_fixtures_test.go",
     "gateway/internal/server/retained_writers_test.go",
 )
-PYTHON_FAILURE_SITES = (
-    "tests/vibesys/run/test_runlog_conversion.py",
-    "tests/vibesys/run/test_journey_fixtures.py",
-    "tests/vibesys/run/test_projection_shapes.py",
-)
+PYTHON_FAILURE_SITES = ("tests/vibesys/run/test_runlog_conversion.py",)
 #: The pieces of the old chain, which only the script and the generators themselves may name.
 CHAIN = (
-    "python -m tests.support.shared_scenarios",
     "python proto/testdata/conversion/generate.py",
     "VIBESYS_UPDATE_GOLDEN=1 go test",
 )
-GUIDANCE = (".agents", "docs", "clients/apps/desktop-shell/e2e/tools", "proto/testdata")
+GUIDANCE = (".agents", "docs", "proto/testdata")
 
 
 def test_the_regeneration_command_is_an_executable_script() -> None:

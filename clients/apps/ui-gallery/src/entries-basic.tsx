@@ -1,4 +1,3 @@
-import {VIBESYS_WORDMARK} from '@vibesys/feature-new-run/renderer';
 import {
   ActionPanel,
   BRAND_MARK_NAMES,
@@ -37,6 +36,7 @@ import {
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {ComponentName, GalleryEntry} from './gallery-entry.js';
+import {VIBESYS_WORDMARK} from './wordmark-art.js';
 
 const STYLES: readonly TextStyle[] = [
   'title',

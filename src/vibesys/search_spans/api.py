@@ -5,7 +5,7 @@ call, a workstream (which hypothesis, based on which revision, passed or failed,
 workstream it is based on), an agent turn (which role and model) and a gate (a trusted measurement:
 its stages, the candidate's value and how it compares with the input, and whether it passed) and
 the adoption (the candidate the run adopts, what it measured and its ratio to the input's).
-Clients read these kinds (``@vibesys/run-state/overview`` and ``/candidates``) and word them.
+Clients read these kinds and word them.
 
 The candidates of a run are read from its workstreams, the same way for every search: a
 workstream is one attempt at a candidate, attempts at one idea share its ``hypothesis_id``, the

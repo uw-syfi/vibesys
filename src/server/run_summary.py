@@ -9,7 +9,7 @@ opens no file and reads no clock, so a property test can feed it every prefix of
 journal, as a disposable cache) and when it is valid.
 
 The fold holds the semantics of the client's, event by event (``foldTrace``, ``foldOverview`` and
-the reply entries of the transcript fold in ``@vibesys/run-state``): an event at or before the
+the reply entries of the transcript fold): an event at or before the
 last folded sequence is already in and is skipped whole, a span keeps the place it started at, and
 the latest event of a span or a turn wins. One definition of the fold lives here; the client's
 ideas, measurement points and chart are folds of what it returns.

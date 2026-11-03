@@ -150,9 +150,7 @@ const FEATURE_STYLESHEET = {'./styles.css': 'dom'};
 export const MACHINE_PACKAGES = [
   '@vibesys/machine',
   '@vibesys/connection',
-  '@vibesys/run-session',
   '@vibesys/logs',
-  '@vibesys/run-skeleton',
   '@vibesys/subscription',
 ];
 const ALL_RUNTIMES = Object.keys(RUNTIMES);
@@ -927,12 +925,7 @@ export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/contracts': null,
   '@vibesys/store': null,
   '@vibesys/machine': null,
-  '@vibesys/problems': null,
   '@vibesys/request-identity': ['.'],
-  '@vibesys/run-state': null,
-  '@vibesys/run-skeleton': null,
-  '@vibesys/run-session': null,
-  '@vibesys/run-history': null,
   '@vibesys/transport': null,
   '@vibesys/hosts': null,
   '@vibesys/runs': null,

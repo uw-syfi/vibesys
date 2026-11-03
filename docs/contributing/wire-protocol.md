@@ -97,7 +97,7 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   started at, so each span comes after its parent. `RunSnapshot.spans` is that fold at the
   snapshot's `sequence`. The server folds the same events as a journal listener
   (`src/server/trace.py`), live and on replay. A client starts from the snapshot and folds the events
-  after it (`@vibesys/run-state/trace`: `traceFromSnapshot`, `foldTrace`). Folding every span event
+  after it. Folding every span event
   gives the snapshot's spans; folding a prefix gives the trace at that prefix's last sequence.
 - **Generic.** A span's `label.kind` names a kind its search declared at `@search`. A client
   that does not know the kind renders it from `name`, `label.title`, `status`, `label.attrs_json`
@@ -113,7 +113,7 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   `candidate`, `metric_value`, `vs_baseline`). The adoption span is the operation that adopts the
   run's winner; a run that has not adopted yet has none, and `candidate` is null when the input
   itself stands. Clients read the run's candidates from these spans alone
-  (`@vibesys/run-state/candidates`, folded linearly in events): a `workstream` is one attempt;
+  (folded linearly in events): a `workstream` is one attempt;
   attempts sharing `hypothesis_id` are one candidate; `idea` is what it tries; `probe` marks one
   that only looks; a passed one (the gates measured its kept code and none turned it down)
   names the `revision` it kept, which the adoption's `candidate` names when it is the best at
@@ -125,7 +125,7 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   candidates form a chain. An `agent_turn` names its `agent` (its session's id, stable across
   replay and restart), `role`, `model` and `started_by`: the agents whose work started it, none
   when the search did, several for fan-in. Clients read the run's agents and who started whom
-  from these turns alone (`@vibesys/run-state/agents`, constant work per event): an agent's
+  from these turns alone (constant work per event): an agent's
   status and activity are its latest turn's, which runs within its nearest labelled ancestor. A
   gate span covers one measurement; each of its stages (`build`, `accuracy`, `benchmark`) has its own `gate_started`/`gate_finished` events (`GateKind`) and its own log stream, whose `GateStage` owner names the span. The
   kinds are additive within `PROTOCOL_VERSION` 1: a client that does not know one renders it
@@ -209,8 +209,7 @@ carries it, built from the task's input bundle (`vibesys.run.overview`):
 replay), with `objective.unit` and `objective.direction` filled in from the run's own
 measurements and objectives once it has them. It is null before the run started. Trajectories and
 key numbers are not part of it. They are queries over the run trace's gate and workstream spans:
-`@vibesys/run-state/overview` provides `gateTrajectory`, `bestVsBaseline` and `workstreamCounts`
-beside `overviewFromSnapshot` and `foldOverview`. `query.performance` and `PerformanceContext`
+A client derives the gate trajectory, the best result against the baseline and the workstream counts from them. `query.performance` and `PerformanceContext`
 stay unchanged for the frozen web run page. Gate tools' own versions are not measured today, so
 the overview does not carry them.
 
@@ -366,7 +365,7 @@ non-rebootstrap `event_batch`; folding it atomically publishes the staged execut
 the authoritative checkpoint without retaining or replaying the event frames. An ordinary live
 transfer needs only the completed checkpoint. A rebootstrap transfer rebuilds the same state as the
 unsplit authoritative batch inside that private transaction instead of reconciling into the
-pre-replay fold. A checkpoint prefix is never passed to the run-state fold. Fragments require the
+pre-replay fold. A checkpoint prefix is never passed to the client's trace fold. Fragments require the
 matching deferred batch immediately before their transfer; a new deferred or ordinary authoritative
 batch supersedes an interrupted transfer and fences its late fragments. A gap, duplicate,
 interleaved unrelated message, changed identity, changed cursor metadata, or content digest mismatch

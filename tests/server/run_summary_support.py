@@ -2,7 +2,7 @@
 
 ``events`` draws typed ``RunEvent`` values (the models a run records), ``journal_lines`` writes them
 as the event store does (``model_dump_json`` and a newline), and ``client_fold`` folds the typed
-events the way ``@vibesys/run-state`` does (``foldTrace``, ``foldOverview`` and the reply entries of
+events the way the client does (``foldTrace``, ``foldOverview`` and the reply entries of
 the transcript fold). It is written over the typed models, not over the documents the helper
 reads, so the helper's output is checked against the contract's own models and not against itself.
 """

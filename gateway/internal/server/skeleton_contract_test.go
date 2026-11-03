@@ -13,7 +13,7 @@ import (
 )
 
 // The shared Skeleton contract: the same cases drive this service and the
-// client's simulated gateway (clients/libs/run-skeleton sim-gateway), so the
+// client's simulated gateway, so the
 // simulation cannot be more capable or more forgiving than the service.
 type skeletonContract struct {
 	Constants struct {

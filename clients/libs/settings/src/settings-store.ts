@@ -5,8 +5,8 @@
  * Guarantees:
  *
  * - **One writer.** Every update goes through this store, one at a time across the files, so an
- *   update always reads what the one before it wrote and none drops another's change. With the
- *   app's single-instance lock (`apps/desktop-main`), no other process writes these files.
+ *   update always reads what the one before it wrote and none drops another's change. The
+ *   desktop app (`apps/desktop`) opens them through this store alone, so no other code writes them.
  * - **Atomic replacement with platform durability.** The text goes to a sibling file and is
  *   flushed before it is renamed over the target, so a reader sees the old file or the new one,
  *   never a partial write. POSIX systems also flush the parent directory before success. Node does

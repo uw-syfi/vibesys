@@ -1,6 +1,6 @@
 """A run tile's data: the digest's per-idea points and the attention reason.
 
-The points are the run page's chart (``performanceFold`` in ``clients/features/run-page``). The two
+The points are the run page's chart (``performanceFold``). The two
 folds are held to one rule by scenarios both sides read (``fixtures/run-dashboard``): each says what each idea
 did (its outcome, its reading and when it landed), a journal is built from it, and the digest's
 points must equal the chart the scenario's plain statement gives. The page's own test

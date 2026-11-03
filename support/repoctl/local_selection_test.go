@@ -161,7 +161,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 		},
 		{
 			name:        "clients change selects the client quality groups",
-			paths:       []string{"clients/features/run-intents/src/state/machine.ts"},
+			paths:       []string{"clients/libs/connection/src/state/host-connection.ts"},
 			wantCI:      []string{"clients"},
 			wantGroups:  []string{"always_on", "clients_build", "clients_quality", "clients_tests"},
 			wantSkipped: []string{"clients_e2e"},
@@ -250,7 +250,7 @@ func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 		want  []string
 	}{
 		{"python", []string{"libs/vs-dst/src/vs_dst/__init__.py"}, []string{"always_on", "python_architecture", "python_guards", "python_quality", "python_types"}},
-		{"clients", []string{"clients/features/run-intents/src/state/machine.ts"}, []string{"always_on", "clients_build", "clients_quality"}},
+		{"clients", []string{"clients/libs/connection/src/state/host-connection.ts"}, []string{"always_on", "clients_build", "clients_quality"}},
 		{"proto", []string{"proto/vibesys/store/v1/record.proto"}, []string{"always_on", "clients_build", "clients_quality", "proto"}},
 		{"docs", []string{"docs/contributing/development.md"}, []string{"always_on"}},
 	}

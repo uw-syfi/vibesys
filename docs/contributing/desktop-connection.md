@@ -2,9 +2,9 @@
 
 # Desktop connection architecture
 
-This document owns how the desktop app (`clients/apps/desktop-main`) reaches VibeSys on a host:
+This document owns how the desktop app (`clients/apps/desktop`) reaches VibeSys on a host:
 the one program it runs there, the one way it connects, how a run is identified and how its
-lifecycle is reported, and how the app's screens hold state. It is written as the design. Parts
+lifecycle is reported, and how the app's screens read it. It is written as the design. Parts
 not yet built are marked in the [status table](#status); the [migration plan](#migration-plan)
 says what each phase replaces.
 
@@ -29,7 +29,7 @@ mechanism that allowed it; the design removes the mechanism, not the instances.
 | Inferred facts | Pre-ready events stamped with run id `runs` (the socket directory's parent name), latched by the web client, freezing the run view. Records without a `run_id` until setup finishes. Recent rows saved before the id was known resume another run. A resumed run recorded under its server id. | Identity is derived late, or guessed, by whoever needs it. | [Run identity](#run-identity): allocated before detaching, present in the record and on every event from the first. |
 | Failure and progress only in logs | A run that fails at startup (`docker run --gpus` on a CPU host) shows "run ended" with no reason. The first image build takes about 90 s with no progress. A run that dies before a client attaches is invisible. | Lifecycle facts exist only as log lines and as the absence of a record. | [Lifecycle phases](#lifecycle-phases): typed phases with a failure reason, in the journal and the record; ended records kept with their reason. |
 | Per-action shell-built remote commands | csh and fish breakage. About 6 s per `vibesys` call over ssh. Raw argparse help from an older checkout instead of a version message. | Each action is a new shell command line and a new interpreter that imports the engine. | [The host helper](#the-host-helper): one long-lived program, one fixed bootstrap line, one `hello` that names versions. |
-| UI state as scattered flags and imperative DOM | Retry on an ended run. Start enabled for a stale task. Stale async replies overwriting newer state. Recent not refreshing. Hand-rolled modal focus. | State is many booleans mutated by handlers; replies are applied whenever they arrive. | [Screen stores](#screen-stores): one discriminated union per screen, a pure reducer, request tokens. |
+| UI state as scattered flags and imperative DOM | Retry on an ended run. Start enabled for a stale task. Stale async replies overwriting newer state. Recent not refreshing. Hand-rolled modal focus. | State is many booleans mutated by handlers; replies are applied whenever they arrive. | [Screens](#screens): one session per host with pure folds, request identity and command progress. |
 | Retry layers and a health check that tests the wrong thing | A registry read passes while every dial fails, so retries storm. | Two retry loops (page and supervisor), and a check that is not the failing operation. | [Connection manager](#connection-manager): one loop per host; the check is the operation that failed. |
 | No guards on cost and compatibility | Light commands import the engine. A strict parse of cross-version data broke when a field was added. Two app instances write the same files. Quit does not quit. | Nothing measures import cost; versions are not negotiated; no single owner of app lifecycle. | [Guards](#guards), [versioning](#handshake-and-versioning), [app lifecycle](#app-lifecycle). |
 
@@ -56,9 +56,9 @@ imports only `pydantic`, `vs_project.api`, and `vs_sim.api` starts in about 250 
 ## Components and ownership
 
 ```text
-desktop main process (apps/desktop-main)              host (local or ssh)
+desktop main process (apps/desktop)                   host (local or ssh)
 +-------------------------------------------+        +-------------------------------------+
-| AppLifecycle: single-instance lock, quit, |        | host helper (one process per        |
+| main: quit sequence, window policy,       |        | host helper (one process per        |
 |   settings store (sole writer)            |        |   channel; stateless)               |
 | ConnectionManager                         |  stdio | entrypoints.host_helper             |
 |   HostConnection per host                 |<------>|   -> server.host_helper (channel)   |
@@ -66,7 +66,7 @@ desktop main process (apps/desktop-main)              host (local or ssh)
 |     control channel  -> helper            |  exec  |   -> server.registry   (records)    |
 |     run channels     -> helper -> relay   |  chan- |   -> server.relay (relay)    |
 |     supervisor (XState machine + shell)   |  nels) |                                     |
-| screen stores (pure reducers) + React     |        | detached run servers (one per run)  |
+| host session (feeds, folds) + React       |        | detached run servers (one per run)  |
 +-------------------------------------------+        |   entrypoints.server --detach       |
                                                      +-------------------------------------+
 ```
@@ -83,8 +83,8 @@ desktop main process (apps/desktop-main)              host (local or ssh)
 | Detached run server | `entrypoints.server` (changed) | Takes the lock and publishes its record (with `run_id` and phase `starting/resolving`) before importing the engine; owns its phases. |
 | Generated helper types | `clients/libs/contracts/src/generated/`, read through `@vibesys/contracts/host-helper` | `host-helper.schema.json` (committed, language neutral), the TypeScript types and descriptor generated from it, and the strict parse every helper line goes through. |
 | Connection manager | `@vibesys/connection` (`clients/libs/connection`: a pure `state/` machine and a `shell/`) | The only code that creates links and channels. One `HostConnection` per host; its machine is the one retry loop. |
-| Screen stores | the desktop features (`clients/features/*`) and `clients/apps/desktop-shell` | One store per screen; pure reducer; React renders state. |
-| App lifecycle | `clients/apps/desktop-main` (`src/main/app-lifecycle.ts`) and `@vibesys/settings` | Single-instance lock, the quit sequence, the settings store. |
+| Host session and screens | `clients/apps/desktop` (`src/core`, `src/state`, `src/ui`) | One session per host: feeds folded by pure functions into a model the screens read. |
+| App lifecycle | `clients/apps/desktop` (`src/main/index.ts`) and `@vibesys/settings` | Single-instance lock, the quit sequence, the settings store. |
 
 Placement follows [architecture.md](architecture.md): the registry and relay are generic mechanisms
 under `server`, with no VibeSys policy; the helper's request handling is product wiring over them;
@@ -338,17 +338,8 @@ serves it in bounded chunks. Nothing about logs rides the run's event stream.
   channel. The first request of any lease opens it once the host is ready (a host whose control
   `hello` did not negotiate `logs` answers `feature_not_negotiated` and opens nothing), every lease
   shares it, the next request reopens it if it ended, and releasing the last lease closes it.
-- **From the Run screen.** The Run screen's Logs tab shows a run's logs, live or ended (the store
-  outlives the run). It names its host and instance on the shell channel `vibesys:welcome:logs`
-  (a listing, or a read that must name that instance, or a `withdraw` of an aborted read's token:
-  an IPC request cannot be withdrawn by itself, so each read carries a token the page chose, and an
-  aborted read sends a `withdraw` request naming it), answered by the hosts feature's main-process
-  `Hosts.logs`. `Hosts` keeps one connection lease and one logs lease per renderer document, on one
-  host at a time: the first request takes them, asking about another host swaps them, and leaving
-  the run (`vibesys:welcome:release-logs`) or the document going away releases them. The tab lists
-  the streams grouped by owner kind and follows only the one on screen; narration streams render
-  as records by level with their traceback, raw streams as monospace with stderr marked
-  (`foldChunk` keeps each line's pipe runs). The page drops an aborted read's late answer.
+- **From the app.** The desktop app does not show logs yet; a screen that does follows a stream
+  with `@vibesys/logs` over `HostConnection.openLogs()` and releases it when the screen goes.
 - **Not `server.log`.** `server.log` is the detached server's raw stdout and stderr, for a person at
   a terminal; no UI feature depends on it. `instances.inspect`'s `include_log` (a tail of it) is
   deprecated: the app no longer sends it, and refuses a reply that carries a tail. The helper keeps
@@ -572,180 +563,30 @@ Rules:
    it stopped waiting for is closed when the operation's signal aborts. A check that finds the host
    answering but the run gone emits `run-unreachable` and returns to `ready`.
 
-## Screen stores
+## Screens
 
-Every screen (Settings, Machines, New run, the Run screen, the sidebar) has one store:
-
-- **One discriminated union per screen.** For example New run's tasks are
-  `{kind: 'editing', project, tasks: {for: project, list} | null, picked} | {kind: 'starting',
-  token, ...} | {kind: 'failed', failure}`. Facts that must agree live in one variant, so "Start
-  enabled for a task listed from another project" is not representable.
-- **Pure reducer.** `step(state, action) -> {state, requests}`. No I/O, clock, or DOM in the
-  reducer. (A store whose state is control state, with work to start, wait for, and cancel, is an
-  XState machine instead, as the supervisor is: `clients-architecture.md`, "State".)
-- **Request tokens.** Every request the reducer emits carries a token stored in the state that
-  awaits it. A reply whose token is not the awaited one is dropped by the reducer. A stale task
-  list or overview reply cannot overwrite newer state, by construction.
-- **Render is a function of state.** React components read the store and dispatch actions; they hold
-  no state that changes behavior. The desktop shell is React.
-- **Native `<dialog>`.** Sheets are `<dialog>` opened with `showModal()`: focus containment, inert
-  background, Esc, and return of focus to the opener come from the platform.
-- **Data from watches.** Host panels and Recent statuses fold the host gateway's `runs` topic
-  (`@vibesys/connection`'s `hostRuns`, over the subscription hub and projected by
-  `hostListingFromRuns`); the listing and the connection status do not ask the host's helper, and the
-  subscription machine owns the lease, the retries and the end of the stream. Digests are a registered
-  read (`ListRunDigests`). There is no manual refresh path to forget.
-- **A wait has a name and an end.** The connection reports each step on the way to a machine's run
-  list (`ListingStep`: `gateway`, `handshake`, `runs`), a listing carries the step it stands at, and
-  `machineLoad` folds a machine into `loading` at a step, `failed` at a step, or `listed`
-  (`MachineLoad` in `@vibesys/hosts`). `loading` always ends: a stream that never answers fails its
-  lease, and after `RECONNECT_OFFLINE_AFTER` tries the watch stops and the machine is `failed` until
-  the user retries (`retryListing`, which starts the watch over) or a new listing arrives. The Runs
-  screen renders these values and decides nothing about the connection.
-
-The desktop window (`apps/desktop-shell`, the only renderer since the cutover, #2850) follows the same rules: the sidebar
-store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived runs, and the
-Settings store (`@vibesys/feature-settings`) saves each change under a token, so a slow save
-cannot undo a newer choice. Both have invariants checked over seeded action sequences.
-
-The New run screen (`@vibesys/feature-new-run`) is an XState machine: its role table lists the roles
-the latest preflight reported (a helper without `run_roles` gets an empty state instead), and its
-preflight checks are
-asked for the inputs' key and kept only for that key, so Start is enabled only when the checks
-shown are for the inputs now and none fails, and a reply for older inputs is never shown. Its
-model test checks that, and that an input never restarts what the machine offers. The run's compute
-backend is its task's: the screen shows what the checks reported (`run_backend`) read-only beside the
-task, never as an input, and words a typed `cause` for its own controls.
-
-The Machines store (`@vibesys/feature-machines`) keeps the saved machines and derives each one's
-status from its last report rather than storing one: `Sign in` when the connection waits for
-credentials, `Checkout not found` when the bootstrap reports no
-VibeSys checkout at the saved path (the connection manager's `incompatible` phase carries that as
-a typed `checkout` problem, `missing` or `too-old`), `Can't connect` for any other failure, and
-otherwise `Ready` with what `machine.describe` says. Adding a machine or changing its checkout is
-the hosts feature's `setCheckout`, which starts the helper from the path before it saves it; path
-suggestions are `paths.complete`, each listed checkout labelled with its version by
-`checkout.inspect`, so they need a helper already running on that host (This Mac, or a machine
-whose checkout works). Its invariants are checked over seeded action sequences.
-
-The Run screen (`@vibesys/feature-run-page`) has one store per shown run, a reducer over the run's
-registry record (from the host's watch, through the sidebar's listings) and its log streams. The
-phase follows durable state. Pause closes new admission and drains whole bounded turns;
-Pause now is available immediately, including during drain, and confirms with "Unfinished work
-may need repeating and may still incur charges." Its pending state stays visible until the
-record catches up. Every ended run offers Resume, which launches a new epoch. Quota holds
-remain internal. Logs are grouped by their owner (startup steps, gate stages, tool builds,
-narration) and read over the welcome bridge's `logs`, which the
-main process serves from the host's logs channel until the screen lets it go; the startup
-timeline is built from the startup steps' streams. "Open in new window" opens the run in a
-window of its own (see "Windows and notifications").
-
-A live run is attached to the window under a token (the store's `link`), through the same
-`RunControl.attach`. The window binds that run to its surface itself (`AppWindow`): no other page
-opens, the run IPC registry admits the shell document's connects, and the wake goes to it. The shell's `connectRun` hands main one end of a new
-channel and the page the other, as a window message (`RUN_PORT_MESSAGE`), because a port cannot
-cross the context bridge; the page speaks the relay's credit protocol over it
-(`@vibesys/ipc`'s `openPortSocket`) and the app shapes it as the session's transport. While the
-run is attached, the store keeps its `WebSession` open (bootstrap, stream, recovery stay in
-`@vibesys/run-session`'s machine) and folds what it reports: the session's state, the run fold, and
-the trace's accepted span events in sequence order (the session's `onTracePublication`), so the
-tabs fold the trace at the sequence they show (`viewedRun`). Pause and Pause now are typed
-`command.control` requests on the live session. Resume uses the launch path after the epoch
-exits. When a rebootstrap cannot prove that the current trace base still belongs to the run,
-its reset initiates a snapshot request fenced to the established store, including when that
-store is unchanged. A quota hold contributes status only; its automatic capacity handling
-stays internal. Leaving the run
-releases it (`releaseRun`), and a new shell document detaches the run the old one held. An ended run
-opens from its summary: the store asks for `runs.summary` (features `run_summary` and `run_trace`, through the welcome
-bridge's `readSummary`, whose main-process reader joins the pages and reads again when the run moved
-between two), seeds the trace from it as it does from a live session's snapshot (`traceStep`), and
-folds the turns' last replies and the run's spend into the core from events rebuilt from the summary
-(`run-summary.ts`), so the run level is final and interactive without reading the journal and the
-header, the hero and the idea rows read what they read for the whole history. A live run takes it
-for its first paint until its session's snapshot arrives. The transcript, the agents' models and a
-turn's tool output are in the history: a pane that needs them (an agent or a step is open, or the
-Agents face) asks for it (`need-history`), and it is read as below into a core of its own that
-replaces the seed only when it is all read; until then those panes show its progress and the run
-level stays. A host without the summary, or one whose summary read fails, is read through its
-history from the start, behind the loading screen. Only if that read also fails does the screen
-report an unavailable run:
-the store reads `runs.read_events` (feature `run_history`,
-through the welcome bridge's `readEvents`) with up to three pages in flight under tokens (the first
-open-ended; its reply's totals cut the rest of the journal into spans, `history-pager.ts`), validates
-each event, and folds the pages in journal order, each event once, into the same `run` slice, so the tabs have one source; an older host answers
-`unsupported`. While the pages are read the screen shows the read's progress, not the fold, since a
-prefix of the history is not the run (`historyLoading`). Every window's `readEvents` is answered by
-the main process's `RunHistoryStore` (`@vibesys/run-history`): the one copy of an ended run's pages,
-kept per (host, project, run) within a bound of 256 MiB (least recently read run dropped first, a
-run larger than the bound read through), shared by every window, and read from the host once for
-all windows that ask while it is in flight. A second window or a reopened run is answered from it
-without a request to the host. The store forgets a run the host lists as live again (a resume) and
-every run of a host that goes away; failures and `unsupported` are never kept. It holds the host's
-replies as typed raw data (never a fold or a view model), keyed by the request that produced them, so
-later tiers add reads of other ranges or executions as further methods of the same store. Its invariants (force offered only while stopping and only after its bound, no stop
-flow outliving the live run, the link holding exactly the live server, no session report without an
-attached run, trace events in increasing sequence, commands sent only when offered) are checked over
-seeded action sequences with stale replies. The theme is in the first paint: the welcome preload asks
-the main process synchronously for the stored theme and the window controls' inset
-(`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and sets them on the root element before
-the page's scripts run. The inset says what the window's controls cover: the top-left corner the
-macOS traffic lights sit in (the rail keeps its items below it), or the strip across the page's top
-that the Windows and Linux controls are drawn over. Full screen hides the controls, so the window
-pushes the inset again on entering and leaving it (`CHROME_INSET_CHANNEL`) and the page collapses
-the reserved room.
-
-## Windows and notifications
-
-The app has one main window and, for each run the user opens with "Open in new window" (the Run
-screen's "⋯" menu and the sidebar row menu), one run window that shows the Run screen for that
-run alone, with no sidebar (`RunWindow` in `apps/desktop-shell`, chosen by the run in the page's
-query). Opening a run that already has a window focuses it. `RunWindows` (`run-windows.ts`) is the
-registry, keyed by run, and `openRunWindow` on the welcome bridge is its request.
-
-Each `AppWindow` holds one surface (the shell page) and binds to at most one run at a time.
-`RunControl` keys bindings by the full `(host, run_id)` `RunRef`, and keys navigation claims
-separately by `(host, instance_id)` (`clients/features/run-control/src/main/run-control.ts`).
-`RunIpcRegistry` admits a request by its current main-process-owned window and sender; that
-`AppWindow` then supplies its retained `RunRef`, so a renderer never nominates a host. Windows
-attached to different hosts cannot cross-detach or cross-admit each other's connection even when
-their project-local run ids match. `RunControl`'s `openPage` binds a run to the exact
-composite-keyed window showing it (`RunWindows.showing`) and any other run to the main window, so a
-run with a window of its own is live there. Closing a run window forgets it and detaches only that
-run's live connection; the run itself goes on. That no window steals another's port or run is
-checked by `run-ipc.test.ts` (the registry), `run-control.test.ts` (independent bindings, including
-two hosts that publish the same project-local run id) and `desktop.test.ts` (a run window's surface
-answered until it closes).
-
-The welcome IPC has one handler per channel, because Electron allows one. `WelcomeRouter`
-registers each channel once and routes every request to the window whose current welcome document
-sent it, on that window's page; a sender that is no window's current document is refused. Each
-window has its own admission (document generations, replacement barrier, retirement), which ends
-when its native window closes. Pushed events (listings, recent runs, preferences) go to every
-window's surface.
-
-A launch from the command line (`--instance ID [--host NAME]`, or `--project PATH`) opens its run in
-a run window: `Desktop.open` attaches (or starts) the run to learn its identity, lets the binding go,
-and opens the run window, whose own shell document attaches it. A bare `--host NAME` is refused
-(it needs `--instance`), since the shell has no host panel to open.
-
-Known gaps: in a run window "Run again" only focuses the main window (`show-main-window`) instead
-of opening New run with the run's inputs there, and a notification click focuses the main window
-rather than the window of the run it names.
+The desktop app (`clients/apps/desktop`) reads a host through its session, not through per-screen
+stores: `makeHostSession` bundles the connection state, the run and agent feeds, the model they
+fold into and the command log, and the screens read atoms over it. Pure folds in `src/state/` own
+the data rules (a reply for an older request is dropped by its identity; a feed that has not
+answered reads as opening, never as empty), and the commands carry the progress a screen shows
+(sending, accepted, refused with the reason, or unconfirmed with a way to try again). The layout
+and the folder rules are in [desktop-development.md](desktop-development.md) and
+[clients-architecture.md](clients-architecture.md), "The Effect desktop app".
 
 ## App lifecycle
 
-`AppLifecycle` is the one owner of process-wide state:
+The main process (`clients/apps/desktop/src/main/index.ts`) owns process-wide state:
 
-- **Single instance.** `app.requestSingleInstanceLock()`; a second launch focuses the first and
-  forwards its arguments.
-- **Quit sequence.** A pure machine `running -> quitting(releasing) -> exiting`: the first quit
-  request starts a bounded release (close channels and masters), the second request or the bound
-  exits. There is exactly one `app.exit` call site.
-- **Settings store.** `hosts.json` and `recent.json` have one writer, the store, which serializes
-  updates and replaces files atomically. With the single-instance lock, no other process writes
-  them. A `recent.json` with unreadable entries is read for the others and reports each entry
-  skipped; updates write each unreadable entry back as it was, beside the valid runs, so the
-  user's entries are never dropped or rewritten silently and new runs still reach Recent.
+- **Quit sequence.** The first quit request starts a bounded release of the connection manager
+  (close channels and masters); the release finishing or its bound ends the app. There is exactly
+  one `app.exit` call site. There is no single-instance lock: two instances share no writable state
+  but `hosts.json`, which the settings store replaces atomically.
+- **Settings store.** `hosts.json`, `recent.json` and `preferences.json` have one writer per
+  process, the store, which serializes updates and replaces files atomically. A `recent.json` with
+  unreadable entries is read for the others and reports each entry skipped; updates write each
+  unreadable entry back as it was, beside the valid runs, so the user's entries are never dropped
+  or rewritten silently.
 
 ## Guards
 
@@ -754,9 +595,9 @@ rather than the window of the run it names.
 | Import closure (`tests/architecture/test_light_entrypoints.py`, new) | deterministic | The static module-level import closure (AST, excluding `TYPE_CHECKING` blocks and function-local imports) of `entrypoints.host_helper`, `entrypoints.instances`, `entrypoints.tasks`, and the launcher's dispatch stays within an allowlist: the standard library, `pydantic`, `vs_sim.api`, `vs_project.api`, `server.host_api`, `server.registry`, `server.host_helper`, `server.relay`, and the run protocol's control envelope. The allowlist has zero exceptions: no module is listed as a temporary hole. No `vibesys.*`, `vs_runtime`, `vs_agent`, `mcp`, `server.api`, `server.events`. |
 | Helper startup | real (`tests/e2e`) | A real helper answers `hello` and the modules it loaded (`sys.modules` in the helper process, so a module loaded through `importlib` counts) include none of the named forbidden groups: the run engine, the agent drivers, provider SDKs, heavy libraries, and the modules a later request loads. A failure names each module and its group. A loose total is only a backstop for what no group names. Wall time is reported as a metric against the 300 ms budget, not asserted, because a test's result must not depend on timing. |
 | Helper conformance | deterministic and real | Scenarios under `tests/conformance/scenarios/` (`helper-*`) are request and reply transcripts. Runner `tests/conformance/runners/host-helper.json` replays them against the Python helper in process (deterministic) and against any helper command over stdio (real), so another implementation is tested by pointing the runner at its command. |
-| Store invariants | deterministic | For each screen store, seeded random sequences of actions and replies (including stale, duplicated, and reordered replies) are folded through the reducer; after every step the store's `invariants(state)` hold (for example, no Retry on an ended phase), every awaited token was issued and no two request slots await one token, no reply is applied with a stale token, and per-store behavior properties pass (a start action asks to start a run only when Start is enabled). The generator runs across many seeds with no new dependency, and failing seeds are printed for replay, then pinned as examples. |
+| Fold invariants | deterministic | Seeded random sequences of feed events and replies (including stale, duplicated, and reordered ones) are folded through the app's pure state functions; after every step the invariants hold (no reply applied under a stale identity, a feed that has not answered reads as opening). The generator runs across many seeds, and failing seeds are printed for replay, then pinned as examples. |
 | Supervisor and quit machines | deterministic | Same model-based style over `HostConnection.step` and the quit machine: no orphan waits (every waiting state has a timer or channel that will produce its event), terminal states are absorbing. |
-| Journeys | real (CI job) | Playwright drives the real Electron app against a host that runs the real helper locally: connect, start (with a fake run that reports startup stages), attach, drop the channel, stop, resume, quit. Assertions are on rendered phase and identity, with bounded waits that only guard hangs. |
+| Journeys | none yet | The app is checked in a browser over a scripted fake daemon (`pnpm build:fixture` in `clients/apps/desktop`); a Playwright journey against the real Electron app has not been written. |
 | Record versions | deterministic | Property: a listing over any mix of known, unknown, and malformed record versions returns every id exactly once, in `live`, `ended`, or `unreadable`. |
 
 ## Contract pipeline and IDL

@@ -309,7 +309,7 @@ def test_checked_in_policy_names_one_existing_job_for_every_check() -> None:
     [
         (["clients/libs/transport/src/index.ts"], {"clients"}, {"pr-ci"}),
         (
-            ["clients/libs/run-state/src/index.ts", "src/server/events.py"],
+            ["clients/libs/transport/src/index.ts", "src/server/events.py"],
             {"clients", "server"},
             {"pr-ci"},
         ),

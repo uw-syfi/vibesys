@@ -2,7 +2,7 @@
 
 ``tests/conformance/fixtures/run-digest/*.json`` hold ``events`` (a run's recorded events) and the
 ``digest`` (its ideas and adopted ratio) that the run page reads from them. This side checks that
-the helper's digest equals it; ``clients/features/run-page`` checks that the page's own fold does
+the helper's digest equals it; the client checks that the page's own fold does
 (``run-digest-conformance.test.ts``), so a row of the sidebar and the page it opens cannot say
 different things about one run without a fixture failing.
 """

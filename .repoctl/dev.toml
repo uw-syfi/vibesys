@@ -4,9 +4,9 @@
 
 [local]
 client_directory = "clients"
-# The same build `test:e2e` runs: turbo builds the app and every workspace package it uses, and
-# skips what is current. `pnpm start` alone builds only the app package.
-build_command = ["pnpm", "exec", "turbo", "run", "build", "--filter=@vibesys/app-desktop-main..."]
+# Turbo builds the app and every workspace package it uses, and skips what is current. `pnpm start`
+# alone builds only the app package.
+build_command = ["pnpm", "exec", "turbo", "run", "build", "--filter=@vibesys/desktop..."]
 python_sync_command = ["uv", "sync"]
 install_command = ["pnpm", "install", "--frozen-lockfile"]
 # Install runs when a digest of these files differs from the one recorded after the last success.
@@ -15,15 +15,14 @@ install_inputs = [
   "clients/pnpm-workspace.yaml",
   "clients/package.json",
   "clients/apps/*/package.json",
-  "clients/features/*/package.json",
   "clients/libs/*/package.json",
 ]
 install_stamp = "build/dev/install.stamp"
-app_directory = "clients/apps/desktop-main"
+app_directory = "clients/apps/desktop"
 app_command = ["pnpm", "exec", "electron", "."]
 # The app's own settings, recent runs and Chromium data go here, so other Electron apps and the
 # installed VibeSys keep theirs.
-app_env = { VIBESYS_USER_DATA_DIR = "{profile}" }
+app_env = { VIBESYS_DESKTOP_USER_DATA = "{profile}" }
 profile_directory = "build/dev/desktop-profile"
 
 [machine]

@@ -32,47 +32,6 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     // whether or not a client uses it, and the file must not be edited by hand.
     ignore: ['src/generated/**'],
   },
-  'libs/run-state': {
-    // The entries its exports name, plus the hand-run benchmarks (`pnpm bench:*`).
-    entry: [
-      'src/index.ts',
-      'src/rounds/index.ts',
-      'src/performance/index.ts',
-      'src/transcript/index.ts',
-      'src/**/*.test.ts',
-      'bench/*.ts',
-    ],
-    project: ['src/**/*.ts', 'bench/**/*.ts'],
-  },
-  'apps/desktop-main': {
-    // The Electron main process and the two sandboxed preloads (`.cts`, loaded by path from
-    // `src/main/app-security.ts`) are the package's exports, entries by default; the build's copy
-    // step (`scripts/copy-ui.mjs`) is found from the `build` script. The opt-in Electron journey
-    // uses its own composition entry so production keeps no test-only control surface.
-    entry: ['src/**/*.test.ts', 'e2e/**/*.spec.ts', 'e2e/*.mjs'],
-    project: [
-      'src/**/*.ts',
-      'src/**/*.cts',
-      'scripts/*.mjs',
-      'playwright.config.ts',
-      'e2e/**/*.{ts,mjs}',
-    ],
-  },
-  'apps/desktop-shell': {
-    // The app shell's page (`shell.html`, built by `vite.config.ts`) and its Playwright journey.
-    entry: [
-      'src/main.tsx',
-      'src/**/*.test.ts',
-      'src/**/*.test.tsx',
-      'e2e/**/*.spec.ts',
-      // The static server the suite starts (`playwright.config.ts`).
-      'e2e/serve-dist.mjs',
-      // The fixture dev app (`dev:fixture`). Its script starts through `with_derived_replays.mjs`,
-      // which knip does not read through to the `bun` command it runs.
-      'e2e/tools/dev-fixture.ts',
-    ],
-    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
-  },
   'apps/desktop': {
     // The Electron main process and preload, the renderer page (`index.html`, built by
     // `vite.config.ts`), and the Playwright journey that drives the built app.
