@@ -23,7 +23,7 @@ export type HostConnectionState =
   | {
       readonly _tag: 'Incompatible';
       readonly side: 'client-too-old' | 'daemon-too-old';
-      readonly daemon?: BuildVersions;
+      readonly daemon?: BuildVersions | undefined;
     }
   /** No bridge, or the daemon rejects the call outright. Terminal until the user retries. */
   | {readonly _tag: 'Unusable'; readonly fault: Fault};
