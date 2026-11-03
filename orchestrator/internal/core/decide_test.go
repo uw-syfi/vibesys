@@ -876,3 +876,38 @@ func TestAFactAtACommittedOffsetIsDropped(t *testing.T) {
 		t.Fatalf("replay gives offset %d, want %d", got, committed)
 	}
 }
+
+func TestRunEndPrunesToldJobsAndLateDeliveryCannotRestoreThem(t *testing.T) {
+	w, run, _ := started(t, 1, noSteer)
+	w.step(core.JobUpdate{Run: run, Job: "j1", State: core.JobSucceeded})
+	ended, _ := w.s.Run(run)
+	ended.Status = core.RunEnded
+	s := core.Replay(w.s, []core.Event{{Run: run, At: w.now, Body: ended}})
+	for _, e := range s.Checkpoint() {
+		if m, ok := e.Body.(core.Message); ok {
+			if _, ok := m.Body.(core.JobFinished); ok && m.Delivery == core.DeliveryConsumed {
+				t.Fatal("ended run retains told marker")
+			}
+		}
+	}
+	// Compare with the same history without job completions. In-transit messages
+	// remain legitimate history, but no consumed synthetic told markers may survive.
+	for _, e := range w.log {
+		if m, ok := e.Body.(core.Message); ok {
+			if _, ok := m.Body.(core.JobFinished); ok {
+				m.Delivery = core.DeliveryConsumed
+				s = core.Replay(s, []core.Event{{Run: run, At: w.now, Body: m}})
+			}
+		}
+	}
+	for _, e := range s.Checkpoint() {
+		if m, ok := e.Body.(core.Message); ok {
+			if _, ok := m.Body.(core.JobFinished); ok {
+				t.Fatal("late delivery restored told marker")
+			}
+		}
+	}
+	if _, events, _ := core.Decide(s, core.Input{At: w.now, Nonce: "late", Body: core.JobUpdate{Run: run, Job: "j2", State: core.JobSucceeded}}); len(events) != 0 {
+		t.Fatal(events)
+	}
+}

@@ -12,10 +12,25 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// Reason describes whether the retained view can currently be refreshed.
+type Reason uint8
+
+const (
+	Readable Reason = iota
+	NoDaemon
+	StartFailed
+	CLINotInstalled
+	ClientTooOld
+	DaemonTooOld
+	StreamLost
+	StoreOwnedElsewhere
+	StoreAway
+)
+
 // View owns its facts. Unreadable retains facts and records a typed link failure.
 type View struct {
 	Facts            []*pb.TaskFact
-	Reason           uint8
+	Reason           Reason
 	Detail           string
 	Truncated        bool
 	UnattributedJobs uint32
@@ -26,6 +41,13 @@ func Fold(facts []*pb.TaskFact) View {
 	v := View{}
 	for _, f := range facts {
 		v.Facts = append(v.Facts, proto.Clone(f).(*pb.TaskFact))
+		if away := f.GetHealth().GetAway(); away != nil {
+			v.Reason = StoreAway
+			if away.Reason == pb.AwayReason_AWAY_REASON_OWNED_ELSEWHERE {
+				v.Reason = StoreOwnedElsewhere
+			}
+			v.Detail = away.GetFailure().GetMessage()
+		}
 		if j := f.GetJob(); j != nil {
 			attributed := false
 			for _, s := range j.Submitters {
@@ -128,6 +150,10 @@ func (s *Store) Put(run core.RunID, v View) {
 	if s.views == nil {
 		s.views = map[core.RunID]entry{}
 	}
+	old, ok := s.views[run]
+	if ok && old.view.Reason == v.Reason && old.view.Detail == v.Detail && equalFacts(old.view.Facts, v.Facts) {
+		return
+	}
 	s.revision++
 	c := Fold(v.Facts)
 	c.Reason, c.Detail = v.Reason, v.Detail
@@ -188,4 +214,16 @@ func (s Source) Jobs(ctx context.Context, run core.Run) ([]core.JobUpdate, error
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Job < out[j].Job })
 	return out, nil
+}
+
+func equalFacts(a, b Facts) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !proto.Equal(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }

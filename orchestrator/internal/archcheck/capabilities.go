@@ -24,8 +24,10 @@ var fsReads = map[string]allowance{
 	"internal/production/production.go": {1, "the orchestrator's own boot identity"},
 	"internal/production/sidecars.go":   {9, "sidecar source discovery and legacy pid, pgid and log reads; deferred sidecar-link migration F1"},
 	"internal/production/agentcli.go":   {1, "checks that the chosen vibesys-cli is an executable file"},
+	"internal/production/cli_transport.go": {1, "the callee-owned discovery contract requires inspecting socket directory metadata"},
 }
 var execFiles = map[string]string{
+	"internal/production/cli_ensure.go": "the callee owns shared daemon startup through daemon ensure",
 	"internal/production/production.go": "the command dialer owns its child process",
 	"internal/production/sidecars.go":   "sidecar lifetime and git worktree creation",
 }

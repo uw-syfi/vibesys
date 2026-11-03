@@ -18,6 +18,9 @@ import (
 
 // Config is what a Daemon is made of.
 type Config struct {
+	// Reconcile updates the live-run subscriptions before polling local jobs.
+	Reconcile func(context.Context, []core.Run)
+
 	Engine   EngineDeps
 	Sidecars Sidecars
 	// Jobs is the job source. Nil means there is none: no job is ever reported, which is the truth
@@ -246,6 +249,9 @@ func (d *Daemon) forget(session core.Session) {
 // caller that wants to settle repeats it until it does not. A failure of one part does not stop the
 // others; the first error is returned, and every part is retried by the next call.
 func (d *Daemon) Step(ctx context.Context) (progress bool, err error) {
+	if d.cfg.Reconcile != nil {
+		d.cfg.Reconcile(ctx, d.State().Runs())
+	}
 	var errs []error
 	for _, part := range []func(context.Context) (bool, error){d.runEffects, d.pumpSidecars, d.pollJobs} {
 		moved, err := part(ctx)

@@ -32,11 +32,11 @@ const (
 var rules = map[string][]string{
 	"internal/clidaemon":               {"gen/vibesys/cli/"},
 	"internal/clidaemon/clidaemontest": {"internal/clidaemon", "gen/vibesys/cli/"},
-	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "gen/vibesys/orchestrator/"},
-	"internal/production":              {"internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "gen/vibesys/orchestrator/"},
+	"internal/production":              {"internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/core":                    {},
-	"internal/search": {"internal/core", "internal/jobs", "gen/vibesys/cli/"},
- "internal/jobs":                    {"internal/core"},
+	"internal/search":                  {"internal/core", "internal/jobs", "gen/vibesys/cli/"},
+	"internal/jobs":                    {"internal/core"},
 	"internal/jobs/jobstest":           {"internal/core", "internal/jobs"},
 	"internal/wire":                    {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/archcheck":               {},
@@ -47,7 +47,7 @@ var rules = map[string][]string{
 	"internal/client":                  {"gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/daemon":                  {"internal/core", "internal/hub", "internal/jobs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
-	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/store", "gen/vibesys/orchestrator/"},
+	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
 	"internal/localfs/localfstest": {"internal/localfs"},
 }
@@ -56,6 +56,7 @@ var rules = map[string][]string{
 // addition to rules. The core's simulation replays through the wire and draws jobs from the fake
 // source; the core's own code reaches neither.
 var testRules = map[string][]string{
+	"internal/search": {"internal/clidaemon", "internal/clidaemon/clidaemontest", "internal/daemon/daemontest", "internal/wire", "gen/vibesys/orchestrator/"},
 	// Upgrade fixtures compose the durable store and daemon using deterministic world Fakes.
 	"internal/production": {"internal/daemon/daemontest", "internal/localfs/localfstest"},
 	"internal/clidaemon":  {"internal/clidaemon/clidaemontest"},
@@ -82,7 +83,7 @@ var impureTime = regexp.MustCompile(`\btime\.(Now|Since|Until|Sleep|After|AfterF
 // shellDirs are the packages of the daemon's shell and its clients that decide or relay and must
 // run in a simulation: they read no clock, start no process, draw no random number and handle no
 // signal. internal/production is where each of those happens, once.
-var shellDirs = []string{"internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
+var shellDirs = []string{"internal/search", "internal/clidaemon", "internal/daemon", "internal/hub", "internal/mcp", "internal/client"}
 
 // realIO is the standard library a shell package may not import.
 var realIO = []string{"os/exec", "os/signal", "crypto/rand", "math/rand", "syscall", "net/http"}
