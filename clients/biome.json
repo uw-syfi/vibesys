@@ -67,7 +67,13 @@
   },
   "overrides": [
     {
-      "includes": ["apps/desktop/src/state/orchestrator/search*.ts", "!**/*.test.ts"],
+      "includes": [
+        "apps/desktop/src/state/orchestrator/search*.ts",
+        "apps/desktop/src/state/orchestrator/views.ts",
+        "apps/desktop/src/state/orchestrator/fold.ts",
+        "apps/desktop/src/ui/orchestrator/search-panels.tsx",
+        "!**/*.test.ts"
+      ],
       "plugins": ["./tools/lint-rules/no-argsjson-in-fact-code.grit"]
     },
     {

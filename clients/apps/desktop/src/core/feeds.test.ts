@@ -2,6 +2,8 @@ import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
 import {
   Compatibility,
+  SearchStateSchema,
+  UnreadableReason,
   WatchAgentRequestSchema,
   WatchRunsRequestSchema,
   WatchRunsResponseSchema,
@@ -604,3 +606,96 @@ describe('a stream that keeps ending', () => {
     }),
   );
 });
+
+it.effect(
+  'a resumed stream replaces revision 5 with a new boot revision 1 without changing the cursor',
+  () =>
+    Effect.gen(function* () {
+      const encode = (search: ReturnType<typeof create<typeof SearchStateSchema>>): Step => ({
+        frame: toBinary(
+          WatchRunsResponseSchema,
+          create(WatchRunsResponseSchema, {body: {case: 'search', value: search}}),
+        ),
+      });
+      const first = create(SearchStateSchema, {
+        runId: scenario.runId,
+        revision: 5n,
+        unattributedJobs: 5,
+        health: {
+          state: {
+            case: 'unreadable',
+            value: {reason: UnreadableReason.NO_DAEMON, since: {seconds: 1n, nanos: 0}},
+          },
+        },
+      });
+      const next = create(SearchStateSchema, {
+        runId: scenario.runId,
+        revision: 1n,
+        unattributedJobs: 1,
+        health: {
+          state: {
+            case: 'unreadable',
+            value: {reason: UnreadableReason.NO_DAEMON, since: {seconds: 1n, nanos: 0}},
+          },
+        },
+      });
+      const last = scenario.events.at(-1);
+      if (last === undefined) throw new Error('scenario must have an event');
+      const h = yield* hostHarness(daemonAt(TOTAL - 1), {
+        wrap: base => ({
+          respond: (target, nth) => {
+            if (target.method !== methodPathOf('WatchRuns')) return base.respond(target, nth);
+            if (nth === 0)
+              return [
+                ...base.respond(target, nth).filter(step => 'frame' in step),
+                encode(first),
+                {
+                  frame: toBinary(
+                    WatchRunsResponseSchema,
+                    create(WatchRunsResponseSchema, {body: {case: 'event', value: last}}),
+                  ),
+                },
+                {close: true},
+              ];
+            expect(fromBinary(WatchRunsRequestSchema, target.request).afterSequence).toBe(
+              BigInt(TOTAL),
+            );
+            return [encode(next), {hang: true}];
+          },
+        }),
+      });
+      h.mount(h.session.runs.watch);
+      const data = (yield* h.model).data;
+      expect(data.searches[scenario.runId]).toEqual(next);
+      expect(data.sequence).toBe(BigInt(TOTAL));
+      expect(data.gap).toBeNull();
+    }),
+);
+
+it.effect('the Fake sends current search frames on resume after replayed events', () =>
+  Effect.gen(function* () {
+    const daemon = new FakeDaemon({...scenario, search: true});
+    const h = yield* hostHarness(daemon, {
+      wrap: base => ({
+        respond: (target, nth) => {
+          const steps = base.respond(target, nth);
+          if (target.method !== methodPathOf('WatchRuns')) return steps;
+          if (nth === 0) return [...steps.filter(step => 'frame' in step), {close: true}];
+          const frames = steps.flatMap(step =>
+            'frame' in step ? [fromBinary(WatchRunsResponseSchema, step.frame)] : [],
+          );
+          expect(fromBinary(WatchRunsRequestSchema, target.request).afterSequence).toBe(
+            daemon.sequence,
+          );
+          expect(frames.map(frame => frame.body.case)).toEqual(['search']);
+          return steps;
+        },
+      }),
+    });
+    h.mount(h.session.runs.watch);
+    const data = (yield* h.model).data;
+    expect(data.searches[scenario.runId]).toEqual(daemon.snapshot().searches[0]);
+    expect(callsTo(h, 'WatchRuns')).toHaveLength(2);
+    expect(data.gap).toBeNull();
+  }),
+);

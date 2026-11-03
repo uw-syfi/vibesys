@@ -1005,13 +1005,28 @@ function strictDependencyMessage(dependency) {
   return `${dependency} is outside ${STRICT_THIRD_PARTY.join(', ')}; ${STRICT_FIX}`;
 }
 
+/** The isolated projection has an import boundary; shared folds and panels also carry agent data. */
+function isSearchProjection(path) {
+  return (
+    /^apps\/desktop\/src\/state\/orchestrator\/search[^/]*\.ts$/.test(path) &&
+    !path.endsWith('.test.ts')
+  );
+}
+
+function isSearchFactFile(path) {
+  return (
+    isSearchProjection(path) ||
+    [
+      'apps/desktop/src/state/orchestrator/views.ts',
+      'apps/desktop/src/state/orchestrator/fold.ts',
+      'apps/desktop/src/ui/orchestrator/search-panels.tsx',
+    ].includes(path)
+  );
+}
+
 /** Search fact readers cannot reach agent items or tool-text projections through imports. */
 function searchFactImportMessage(path, specifier) {
-  if (
-    !/^apps\/desktop\/src\/state\/orchestrator\/search[^/]*\.ts$/.test(path) ||
-    path.endsWith('.test.ts')
-  )
-    return undefined;
+  if (!isSearchProjection(path)) return undefined;
   if (specifier === '@vibesys/orchestrator-proto' || specifier === './time.js') return undefined;
   return (
     'search facts may import only generated protocol fields and the pure timestamp conversion; remove ' +
@@ -1019,16 +1034,46 @@ function searchFactImportMessage(path, specifier) {
   );
 }
 
+// Derive permitted bindings from the generated search contract and its CLI facts rather than
+// copying enum names here. The orchestrator item/agent contract is deliberately outside this set.
+const searchBindings = new Set(
+  [
+    'orchestrator/v1/search',
+    'orchestrator/v1/orchestrator',
+    'cli/v1/job',
+    'cli/v1/plan',
+    'cli/v1/result',
+    'cli/v1/service',
+    'cli/v1/verdict',
+    'cli/v1/failure',
+    'cli/v1/promote',
+  ].flatMap(file => {
+    const path = fileURLToPath(
+      new URL(`../../libs/orchestrator-proto/src/generated/vibesys/${file}_pb.ts`, import.meta.url),
+    );
+    const source = ts.createSourceFile(
+      path,
+      readFileSync(path, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    return source.statements.flatMap(node => {
+      if (file === 'orchestrator/v1/orchestrator')
+        return ts.isEnumDeclaration(node) ? [node.name.text] : [];
+      if (ts.isVariableStatement(node))
+        return node.declarationList.declarations.flatMap(declaration =>
+          ts.isIdentifier(declaration.name) ? [declaration.name.text] : [],
+        );
+      return ts.isTypeAliasDeclaration(node) ||
+        ts.isEnumDeclaration(node) ||
+        ts.isInterfaceDeclaration(node)
+        ? [node.name.text]
+        : [];
+    });
+  }),
+);
+
 function checkSearchBindings(node, report) {
-  const allowed = new Set([
-    'SearchState',
-    'SearchHealth',
-    'Unreadable',
-    'UnreadableReason',
-    'JobState',
-    'PlanStatus',
-    'VerdictKind',
-  ]);
   const clause = node.importClause;
   const bindings = clause?.namedBindings;
   if (clause?.name !== undefined || bindings === undefined || !ts.isNamedImports(bindings)) {
@@ -1040,17 +1085,17 @@ function checkSearchBindings(node, report) {
   }
   for (const binding of bindings.elements) {
     const name = binding.propertyName?.text ?? binding.name.text;
-    if (!allowed.has(name))
+    if (!searchBindings.has(name))
       report(
         binding,
-        `search facts cannot import ${name}; use only generated search fields and CLI enums`,
+        `search facts cannot import ${name}; use named bindings from the generated search contract or its CLI fact contracts`,
       );
   }
 }
 
 /** The complete import boundary for fact readers, including relative imports and aliases. */
 export function searchFactErrors(path, text) {
-  if (searchFactImportMessage(path, '__probe__') === undefined) return [];
+  if (!isSearchFactFile(path)) return [];
   const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
   const errors = [];
   const report = (node, message) =>
@@ -1070,16 +1115,24 @@ export function searchFactErrors(path, text) {
       continue;
     }
     if (specifier !== '@vibesys/orchestrator-proto') continue;
-    checkSearchBindings(node, report);
+    if (isSearchProjection(path)) checkSearchBindings(node, report);
   }
   const visit = node => {
     if (
-      (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) ||
-      ts.isImportTypeNode(node) ||
-      ts.isImportEqualsDeclaration(node) ||
-      (ts.isCallExpression(node) &&
-        (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
-          (ts.isIdentifier(node.expression) && node.expression.text === 'require')))
+      (ts.isPropertyAccessExpression(node) && node.name.text === 'argsJson') ||
+      (ts.isElementAccessExpression(node) &&
+        ts.isStringLiteral(node.argumentExpression) &&
+        node.argumentExpression.text === 'argsJson')
+    )
+      report(node, 'search facts must use typed fields, never argsJson');
+    if (
+      isSearchProjection(path) &&
+      ((ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) ||
+        ts.isImportTypeNode(node) ||
+        ts.isImportEqualsDeclaration(node) ||
+        (ts.isCallExpression(node) &&
+          (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+            (ts.isIdentifier(node.expression) && node.expression.text === 'require'))))
     )
       report(
         node,

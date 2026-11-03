@@ -40,6 +40,8 @@ export interface Gap {
 export interface OrchestratorState {
   /** The last event applied, or the sequence of the snapshot; 0n before any. */
   readonly sequence: bigint;
+  /** Revision floors for the current WatchRuns stream, separate from retained display facts. */
+  readonly searchRevisions: Readonly<Record<string, bigint>>;
   readonly searches: Readonly<Record<string, SearchState>>;
   readonly runs: Readonly<Record<string, Run>>;
   readonly agents: Readonly<Record<string, Agent>>;
@@ -58,6 +60,7 @@ export interface OrchestratorState {
 export const emptyState: OrchestratorState = {
   sequence: 0n,
   searches: {},
+  searchRevisions: {},
   runs: {},
   agents: {},
   turns: {},

@@ -34,6 +34,7 @@ const daemon = new FakeDaemon({
   ...scenarioOf(window.location.search),
   search: true,
   searchStale: query.has('stale'),
+  searchTruncated: query.has('truncated'),
 });
 const fake = makeFakeTransport(
   query.has('login-failed')

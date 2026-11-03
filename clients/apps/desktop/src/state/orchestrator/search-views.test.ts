@@ -1,7 +1,13 @@
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from '@effect/vitest';
-import {JobState, SearchStateSchema, VerdictKind} from '@vibesys/orchestrator-proto';
+import {
+  JobState,
+  PlanStatus,
+  SearchStateSchema,
+  UnreadableReason,
+  VerdictKind,
+} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {candidates, jobQueue, jobsWithNoRun, planStatus, resultSoFar} from './search-views.js';
 
@@ -18,6 +24,7 @@ it('views preserve the facts while unreadable and only accept judgments against 
       fc.boolean(),
       (kind, current) => {
         const search = create(SearchStateSchema, {
+          health: {state: {case: 'unreadable', value: {reason: UnreadableReason.STREAM_LOST}}},
           head: {state: {case: 'none', value: {head: 'head'}}},
           results: [
             {jobId: 'j1', commit: 'candidate', outcome: {case: 'measure', value: {value: 17}}},
@@ -29,15 +36,26 @@ it('views preserve the facts while unreadable and only accept judgments against 
               outcome: {case: 'comparison', value: {verdict: {kind}}},
             },
           ],
+          plans: [{number: 1, status: PlanStatus.CHOSEN}],
           unattributedJobs: 7,
         });
         const [candidate] = candidates(search);
         expect(candidate?.result).toBe(search.results[0]);
         expect(candidate?.stale).toBe(!current);
-        if (!current) expect(candidate?.label).toBe('Not judged');
+        expect(candidate?.label).toBe(
+          !current
+            ? 'Not judged'
+            : {
+                [VerdictKind.BETTER]: 'Better',
+                [VerdictKind.WORSE]: 'Worse',
+                [VerdictKind.WITHIN_NOISE]: 'Within noise',
+                [VerdictKind.INCONCLUSIVE]: 'Inconclusive',
+                [VerdictKind.UNSPECIFIED]: 'Not judged',
+              }[kind],
+        );
         expect(resultSoFar(search)).toBe(search.head?.state);
         expect(jobsWithNoRun(search)).toBe(7);
-        expect(planStatus(search)).toEqual([]);
+        expect(planStatus(search)).toEqual([{plan: search.plans[0], label: 'Chosen'}]);
       },
     ),
     {seed: 99},
@@ -68,4 +86,31 @@ describe('job queue time', () => {
       {seed: 29},
     );
   });
+});
+
+it('separates measured candidates, refused judgments, and judgments for a previous head', () => {
+  fc.assert(
+    fc.property(fc.boolean(), current => {
+      const search = create(SearchStateSchema, {
+        head: {state: {case: 'none', value: {head: 'head'}}},
+        results: [
+          {commit: 'measured', outcome: {case: 'measure', value: {value: 1}}},
+          {commit: 'other', outcome: {case: 'measure', value: {value: 2}}},
+          {commit: 'failed'},
+        ],
+        judgments: [
+          {
+            commit: 'measured',
+            against: current ? 'head' : 'old',
+            outcome: {case: 'refused', value: {}},
+          },
+        ],
+      });
+      expect(candidates(search).map(row => [row.result.commit, row.label, row.stale])).toEqual([
+        ['measured', current ? 'Comparison unavailable' : 'Not judged', !current],
+        ['other', 'Not judged', false],
+      ]);
+    }),
+    {seed: 39},
+  );
 });

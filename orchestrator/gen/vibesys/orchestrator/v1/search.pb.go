@@ -91,7 +91,8 @@ func (UnreadableReason) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_search_proto_rawDescGZIP(), []int{0}
 }
 
-// SearchState is a whole, ephemeral view. Revisions grow within one daemon boot.
+// SearchState is a whole, ephemeral view. Revisions are comparable only within
+// one WatchRuns stream; a new stream starts a new revision scope.
 type SearchState struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	RunId            string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`

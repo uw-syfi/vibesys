@@ -5,10 +5,10 @@ import {
   candidates,
   jobQueue,
   jobsWithNoRun,
+  ms,
   planStatus,
   resultSoFar,
-} from '../../state/orchestrator/search-views.js';
-import {ms} from '../../state/orchestrator/time.js';
+} from '../../state/index.js';
 import {formatDuration} from './words.js';
 
 /** One wording for every typed unreadable reason, including an unspecified peer response. */

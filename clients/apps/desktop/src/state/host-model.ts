@@ -47,7 +47,10 @@ export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
       return {...model, data: applySearch(model.data, body.value)};
     case 'event':
       return {...model, data: applyEvent(model.data, body.value)};
+    case undefined:
+      return model;
     default:
+      body satisfies never;
       return model;
   }
 }
@@ -55,4 +58,9 @@ export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
 /** Where a new run stream starts: after the last applied event, or from a snapshot when behind. */
 export function runsCursor(model: HostModel): bigint {
   return model.data.gap === null ? model.data.sequence : 0n;
+}
+
+/** Start a revision scope without erasing facts while the new stream is still opening. */
+export function beginRunsStream(model: HostModel): HostModel {
+  return {...model, data: {...model.data, searchRevisions: {}}};
 }

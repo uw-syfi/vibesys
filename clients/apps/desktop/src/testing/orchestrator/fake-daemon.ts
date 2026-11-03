@@ -84,6 +84,7 @@ export class FakeDaemon {
                 this.scenario.runId,
                 this.scenario.endMs,
                 this.scenario.searchStale ?? false,
+                this.scenario.searchTruncated ?? false,
               ),
             ]
           : [],

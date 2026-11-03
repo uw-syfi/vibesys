@@ -157,7 +157,7 @@ export interface JobBar {
   readonly jobId: string;
   readonly outcome: JobOutcome;
   readonly submittedBy: string;
-  readonly startMs: number;
+  readonly startMs: number | null;
   readonly endMs: number;
   readonly detail: string;
 }
@@ -195,7 +195,7 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
       const startMs = ms(fact?.startedAt) ?? ms(fact?.submittedAt);
       const endMs = ms(fact?.finishedAt) ?? ms(message.at);
       // Missing timing is unknown, including jobs outside the producer's retained window.
-      if (startMs === null || endMs === null) return [];
+      if (endMs === null) return [];
       return [
         {
           jobId: job?.jobId ?? '',
@@ -207,11 +207,13 @@ export function timeline(state: OrchestratorState, runId: string, nowMs: number)
         },
       ];
     })
-    .sort((a, b) => a.startMs - b.startMs || a.jobId.localeCompare(b.jobId));
+    .sort(
+      (a, b) => (a.startMs ?? a.endMs) - (b.startMs ?? b.endMs) || a.jobId.localeCompare(b.jobId),
+    );
   const all = [
     ms(run?.createdAt) ?? nowMs,
     ...rows.flatMap(row => row.bars.map(bar => bar.startMs)),
-    ...jobs.map(job => job.startMs),
+    ...jobs.map(job => job.startMs ?? job.endMs),
   ];
   const ends = [
     ms(run?.endedAt) ?? nowMs,

@@ -9,7 +9,7 @@ import {
   VerdictKind,
 } from '@vibesys/orchestrator-proto';
 
-export function searchFixture(runId: string, nowMs: number, stale = false) {
+export function searchFixture(runId: string, nowMs: number, stale = false, truncated = false) {
   const commit = 'a'.repeat(40);
   const head = 'b'.repeat(40);
   const result = {
@@ -48,6 +48,6 @@ export function searchFixture(runId: string, nowMs: number, stale = false) {
     ],
     plans: [{number: 1, title: 'Reduce contention', status: PlanStatus.CHOSEN}],
     unattributedJobs: 2,
-    truncated: true,
+    truncated,
   });
 }

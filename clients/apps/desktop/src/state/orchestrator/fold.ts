@@ -50,6 +50,9 @@ export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot):
     return {
       ...state,
       searches: Object.fromEntries(snapshot.searches.map(search => [search.runId, search])),
+      searchRevisions: Object.fromEntries(
+        snapshot.searches.map(search => [search.runId, search.revision]),
+      ),
     };
   }
   const turns = snapshot.turns.reduce(withTurn, state).turns;
@@ -57,6 +60,9 @@ export function applySnapshot(state: OrchestratorState, snapshot: RunsSnapshot):
     ...state,
     sequence: snapshot.sequence,
     searches: Object.fromEntries(snapshot.searches.map(search => [search.runId, search])),
+    searchRevisions: Object.fromEntries(
+      snapshot.searches.map(search => [search.runId, search.revision]),
+    ),
     runs: byId(snapshot.runs),
     agents: byId(snapshot.agents),
     turns,
@@ -203,9 +209,13 @@ export function applyAgentFeed(state: OrchestratorState, frame: AgentFrame): Orc
   }
 }
 
-/** Whole search facts have a per-boot revision, independent of the stored event sequence. */
+/** Whole search revisions are comparable only within the current WatchRuns stream. */
 export function applySearch(state: OrchestratorState, search: SearchState): OrchestratorState {
-  const held = state.searches[search.runId];
-  if (held !== undefined && search.revision <= held.revision) return state;
-  return {...state, searches: {...state.searches, [search.runId]: search}};
+  const held = state.searchRevisions[search.runId];
+  if (held !== undefined && search.revision <= held) return state;
+  return {
+    ...state,
+    searches: {...state.searches, [search.runId]: search},
+    searchRevisions: {...state.searchRevisions, [search.runId]: search.revision},
+  };
 }

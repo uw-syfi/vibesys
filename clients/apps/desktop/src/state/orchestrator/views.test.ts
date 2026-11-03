@@ -186,7 +186,9 @@ it('timeline job timing uses typed facts and is independent of tool text', () =>
       expect(timeline(state, 'r', 1000).jobs.map(job => [job.startMs, job.endMs])).toEqual([
         [50, 100],
       ]);
-      expect(timeline({...state, searches: {}}, 'r', 1000).jobs).toEqual([]);
+      expect(
+        timeline({...state, searches: {}}, 'r', 1000).jobs.map(job => [job.startMs, job.endMs]),
+      ).toEqual([[null, 200]]);
     }),
     {seed: 9, examples: [[0, 'job-1']]},
   );

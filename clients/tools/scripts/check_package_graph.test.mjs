@@ -823,7 +823,7 @@ test('an app composes feature screens without marker declarations', async t => {
 test('search fact readers can reach only generated search fields and timestamp conversion', () => {
   const path = 'apps/desktop/src/state/orchestrator/search-views.ts';
   const good =
-    "import type {SearchState as State} from '@vibesys/orchestrator-proto'; import {JobState} from '@vibesys/orchestrator-proto'; import {ms} from './time.js';";
+    "import type {SearchState as State} from '@vibesys/orchestrator-proto'; import {JobState, JobOutcome, SearchStateSchema} from '@vibesys/orchestrator-proto'; import {ms} from './time.js';";
   assert.deepEqual(searchFactErrors(path, good), []);
   for (const source of [
     "import {timeline} from './views.js';",
@@ -843,5 +843,19 @@ test('search fact readers can reach only generated search fields and timestamp c
       /search-fact-imports: apps\/desktop\/src\/state\/orchestrator\/search-views.ts:1:/,
     );
     assert.deepEqual(searchFactErrors(path.replace('.ts', '.test.ts'), source), []);
+  }
+});
+
+test('all search readers reject tool argument reads', () => {
+  for (const name of [
+    'state/orchestrator/search-views.ts',
+    'state/orchestrator/views.ts',
+    'state/orchestrator/fold.ts',
+    'ui/orchestrator/search-panels.tsx',
+  ]) {
+    const path = `apps/desktop/src/${name}`;
+    for (const text of ['const x = item.argsJson;', "const x = item['argsJson'];"])
+      assert.match(searchFactErrors(path, text).join('\n'), /never argsJson/);
+    assert.deepEqual(searchFactErrors(path, 'const x = search.jobs;'), []);
   }
 });

@@ -63,7 +63,7 @@ export function TimelineView(props: {
   const jobs: GanttRow[] = chart.jobs.map(job => ({
     id: job.jobId,
     label: `Job ${job.jobId} (${nameOf(names, job.submittedBy)})`,
-    start: job.startMs,
+    start: job.startMs ?? job.endMs,
     end: job.endMs,
     outcome:
       job.outcome === JobOutcome.SUCCEEDED
@@ -71,12 +71,12 @@ export function TimelineView(props: {
         : job.outcome === JobOutcome.FAILED
           ? 'err'
           : 'muted',
-    figure: jobWord(job.outcome).label,
+    figure: `${jobWord(job.outcome).label}${job.startMs === null ? ', start unknown' : ''}`,
     press: () => props.pick(job.submittedBy),
     segments: [
       {
         id: job.jobId,
-        start: job.startMs,
+        start: job.startMs ?? job.endMs,
         end: job.endMs,
         kind: 'solid',
         label: job.detail === '' ? jobWord(job.outcome).label : job.detail,
@@ -127,10 +127,10 @@ export function TimelineView(props: {
           </Stack>
         )}
       </Card>
-      <Card section="Jobs">
-        {jobs.length === 0 ? (
-          <Text tone="muted">No finished job timing has been read.</Text>
-        ) : (
+      {jobs.length === 0 ? (
+        <Text tone="muted">0 finished jobs read.</Text>
+      ) : (
+        <Card section="Jobs">
           <Gantt
             label="Jobs the agents started"
             from={from}
@@ -140,8 +140,8 @@ export function TimelineView(props: {
             nameLabel="Job"
             figureLabel="Result"
           />
-        )}
-      </Card>
+        </Card>
+      )}
     </Stack>
   );
 }
