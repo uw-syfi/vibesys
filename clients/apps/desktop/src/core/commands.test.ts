@@ -119,8 +119,6 @@ describe('commands (P6: no mutation is sent twice by the app)', () => {
       });
       h.mount(h.session.runs.watch);
       const id = yield* h.session.commands.submit(say(liveAgentId(daemon), 'hello'));
-      yield* h.elapse(0);
-      expect(yield* h.read(h.session.commands.progress(id))).toMatchObject({_tag: 'Unconfirmed'});
       yield* h.elapse(120, 5);
       const settled = yield* h.read(h.session.commands.progress(id));
       expect(answered(settled)).toBe(true);

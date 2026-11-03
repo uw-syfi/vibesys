@@ -12,7 +12,7 @@ import type {FeedStatus, HostModel} from '../state/index.js';
 import type {HostConnectionApi} from './connection.js';
 import {type AppError, isRetryable, Unavailable} from './errors.js';
 import {faultOf} from './fault.js';
-import {MAX_QUIET_RESTARTS} from './policy.js';
+import {MAX_QUIET_RESTARTS, STABLE_PASS_FRAMES} from './policy.js';
 
 /** What differs between the run stream and an agent's stream. */
 export interface FeedSpec<F> {
@@ -36,35 +36,41 @@ type Why = Extract<FeedStatus, {readonly _tag: 'Restarting'}>['why'];
 
 /** How one open stream ended. */
 type Ended =
-  /** The stream is fine; open it again from the cursor. `progressed` says it delivered something. */
-  | {readonly _tag: 'Restart'; readonly why: 'gap' | 'fell-behind'; readonly progressed: boolean}
+  /**
+   * The stream, not the link, ended: a gap, a reader that fell behind, or a host that closed this
+   * stream cleanly. Open it again; `progressed` says the pass delivered `STABLE_PASS_FRAMES`
+   * frames in order, so it was healthy and the restarts before it no longer count.
+   */
+  | {readonly _tag: 'Restart'; readonly why: Why; readonly progressed: boolean}
   /** The link failed: hand it to the connection. */
   | {readonly _tag: 'Lost'; readonly error: AppError}
   /** This subscription cannot work (not found, invalid), whatever the link does. */
   | {readonly _tag: 'Failed'; readonly error: AppError};
 
-const hostLevel = (error: AppError): boolean =>
-  isRetryable(error) || error._tag === 'Unimplemented' || error._tag === 'NoBridge';
-
-const streamClosed = new Unavailable({detail: 'the host closed the stream'});
+/**
+ * Whether the failure says something about the link. An `Unimplemented` method or a missing
+ * entity is about this subscription alone, so it fails this feed and leaves the link and the other
+ * feeds running.
+ */
+const linkLevel = (error: AppError): boolean => isRetryable(error) || error._tag === 'NoBridge';
 
 const classify = (error: AppError, progressed: boolean): Ended => {
   if (error._tag === 'FellBehind') return {_tag: 'Restart', why: 'fell-behind', progressed};
-  return hostLevel(error) ? {_tag: 'Lost', error} : {_tag: 'Failed', error};
+  return linkLevel(error) ? {_tag: 'Lost', error} : {_tag: 'Failed', error};
 };
 
 /** Open the stream once and fold it until it ends, a gap appears, or it fails. */
 const pass = <F>(ports: FeedPorts, spec: FeedSpec<F>, firstOpen: boolean) =>
   Effect.gen(function* () {
-    let applied = 0;
+    let inOrder = 0;
     let live = false;
     const opened = yield* SubscriptionRef.get(ports.model);
     const result = yield* spec.open(opened, firstOpen).pipe(
       Stream.mapEffect(frame =>
         Effect.gen(function* () {
           const model = yield* SubscriptionRef.updateAndGet(ports.model, m => spec.apply(m, frame));
-          applied += 1;
           const gapped = spec.gapped(model);
+          if (!gapped) inOrder += 1;
           if (!gapped && !live) {
             live = true;
             yield* ports.setStatus({_tag: 'Live'});
@@ -76,12 +82,11 @@ const pass = <F>(ports: FeedPorts, spec: FeedSpec<F>, firstOpen: boolean) =>
       Stream.runDrain,
       Effect.result,
     );
-    if (result._tag === 'Failure') return classify(result.failure, applied > 0);
+    const progressed = inOrder >= STABLE_PASS_FRAMES;
+    if (result._tag === 'Failure') return classify(result.failure, progressed);
     const closed = yield* SubscriptionRef.get(ports.model);
-    // A gap ended the stream on purpose; otherwise the host hung up.
-    return spec.gapped(closed)
-      ? ({_tag: 'Restart', why: 'gap', progressed: false} as const)
-      : ({_tag: 'Lost', error: streamClosed} as const);
+    // A gap ended the stream on purpose; otherwise the host closed this stream.
+    return {_tag: 'Restart', why: spec.gapped(closed) ? 'gap' : 'reconnect', progressed} as const;
   });
 
 interface Next {
@@ -91,7 +96,7 @@ interface Next {
   readonly after: number;
 }
 
-/** What follows `ended`, which happened on `epoch` after `quiet` restarts that delivered nothing. */
+/** What follows `ended`, which happened on `epoch` after `quiet` restarts that were not healthy. */
 const afterPass = (ports: FeedPorts, epoch: number, quiet: number, ended: Ended) =>
   Effect.gen(function* () {
     const stay = epoch - 1;
@@ -108,8 +113,9 @@ const afterPass = (ports: FeedPorts, epoch: number, quiet: number, ended: Ended)
         if (quietNow <= MAX_QUIET_RESTARTS) {
           return {quiet: quietNow, why: ended.why, after: stay} satisfies Next;
         }
-        // Reopening keeps yielding nothing: the connection, not the stream, is the likely culprit.
-        const stuck = new Unavailable({detail: 'the stream keeps restarting without delivering'});
+        // Reopening keeps ending before it is healthy: hand the connection the failure, whose
+        // backoff then spaces the next open.
+        const stuck = new Unavailable({detail: 'the stream keeps ending before it delivers'});
         yield* ports.connection.suspect(epoch, stuck);
         return {quiet: 0, why: 'reconnect', after: epoch} satisfies Next;
       }

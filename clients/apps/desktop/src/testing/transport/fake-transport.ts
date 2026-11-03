@@ -21,6 +21,8 @@ export type Step =
   | {readonly end: {readonly message?: string; readonly status?: number}}
   /** End a stream cleanly. */
   | {readonly close: true}
+  /** Fail a stream as a reader too slow for it does: its buffer is full. */
+  | {readonly overflow: true}
   /** Let virtual time pass. */
   | {readonly sleep: Duration.Input}
   /** Do nothing more until the call is cancelled. */
@@ -64,6 +66,7 @@ interface Sink {
   readonly frame: (bytes: Uint8Array) => Effect.Effect<boolean>;
   readonly failed: (end: CallEnded) => Effect.Effect<void>;
   readonly closed: Effect.Effect<void>;
+  readonly overflowed: Effect.Effect<void>;
 }
 
 /** Whether the playback goes on after a step. */
@@ -72,6 +75,7 @@ const runStep = (step: Step, sink: Sink): Effect.Effect<boolean> => {
   if ('frame' in step) return sink.frame(step.frame);
   if ('end' in step) return Effect.as(sink.failed(endedBy(step.end)), false);
   if ('close' in step) return Effect.as(sink.closed, false);
+  if ('overflow' in step) return Effect.as(sink.overflowed, false);
   return Effect.never;
 };
 
@@ -111,6 +115,9 @@ export const makeFakeTransport = (recording: Recording): FakeTransport => {
         closed: Effect.asVoid(
           Deferred.fail(answer, new CallEnded({message: 'missing unary response'})),
         ),
+        overflowed: Effect.asVoid(
+          Deferred.fail(answer, new CallEnded({message: 'a unary reply has no buffer to fill'})),
+        ),
       };
       yield* Effect.forkChild(play(recording.respond(target, call.nth), sink));
       return yield* Deferred.await(answer).pipe(
@@ -143,6 +150,9 @@ export const makeFakeTransport = (recording: Recording): FakeTransport => {
             }),
           failed: end => finish(() => Queue.failCauseUnsafe(queue, Cause.fail(end))),
           closed: finish(() => Queue.endUnsafe(queue)),
+          overflowed: finish(() =>
+            Queue.failCauseUnsafe(queue, Cause.fail(new StreamOverflow({capacity}))),
+          ),
         };
         yield* Effect.forkScoped(play(recording.respond(target, call.nth), sink));
       }),

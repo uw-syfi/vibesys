@@ -11,7 +11,13 @@ export const RECONNECT = {baseMs: 500, capMs: 30_000} as const;
 /** A Ready period this long earns the whole schedule again; a link that flaps faster never does. */
 export const STABLE_AFTER_MS = 30_000;
 
-/** Restarts of one feed in a row, with no live frame between, before it blames the connection. */
+/**
+ * A pass that applied this many frames in order, the opening read included, was healthy: the
+ * restart that ends it (a gap, a reader that fell behind, a clean close) is not held against the
+ * feed. A pass that ends sooner is quiet.
+ */
+export const STABLE_PASS_FRAMES = 4;
+/** Quiet restarts of one feed in a row before it blames the connection, whose backoff spaces the next open. */
 export const MAX_QUIET_RESTARTS = 3;
 /** How many of an agent's newest items its first page holds. */
 export const AGENT_PAGE_SIZE = 40;

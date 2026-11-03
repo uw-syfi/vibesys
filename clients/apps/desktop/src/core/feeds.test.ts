@@ -8,6 +8,7 @@ import {
 } from '@vibesys/orchestrator-proto';
 import * as Effect from 'effect/Effect';
 import * as Random from 'effect/Random';
+import * as Schema from 'effect/Schema';
 import fc from 'fast-check';
 import {
   applyEvent,
@@ -26,6 +27,8 @@ import {
 } from '../testing/orchestrator/index.js';
 import type {FaultPlan, Recording, Step} from '../testing/transport/index.js';
 import {RpcStatus} from './errors.js';
+import {MAX_QUIET_RESTARTS, STABLE_PASS_FRAMES} from './policy.js';
+import {defaultReconnect, delayMs} from './reconnect.js';
 
 const SEED = 20261103;
 const scenario = generateScenario({seed: 7, subagents: 2, live: false});
@@ -337,6 +340,171 @@ describe('open streams (P8)', () => {
       runs?.();
       yield* h.elapse(1);
       expect(openStreams(h)).toHaveLength(0);
+    }),
+  );
+});
+
+/**
+ * A run stream that reads a snapshot, then `inOrder - 1` events in order, then ends the way
+ * `terminal` says: the next event skipped (`gap`), a reader too slow for the stream (`overflow`), a
+ * clean close by the host (`close`). The first `passes` opens play this and later ones play the
+ * daemon's own answer, so a test can see how many opens a misbehaving stream earns.
+ */
+describe('a stream that keeps ending', () => {
+  type Terminal = 'gap' | 'overflow' | 'close';
+  const TERMINALS: ReadonlyArray<Terminal> = ['gap', 'overflow', 'close'];
+  const empty = new FakeDaemon(scenario, 0);
+  const encode = (body: Parameters<typeof create<typeof WatchRunsResponseSchema>>[1]): Step => ({
+    frame: toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, body)),
+  });
+
+  /** The frames of one misbehaving pass: `inOrder` frames in order, then the way it ends. */
+  const passSteps = (inOrder: number, terminal: Terminal): ReadonlyArray<Step> => {
+    const steps: Step[] = [encode({body: {case: 'snapshot', value: empty.snapshot()}})];
+    for (const event of scenario.events.slice(0, inOrder - 1)) {
+      steps.push(encode({body: {case: 'event', value: event}}));
+    }
+    const skipped = scenario.events[inOrder];
+    if (terminal === 'gap' && skipped !== undefined) {
+      return [...steps, encode({body: {case: 'event', value: skipped}}), {hang: true}];
+    }
+    return [...steps, terminal === 'overflow' ? {overflow: true} : {close: true}];
+  };
+
+  const shaped =
+    (inOrder: number, terminal: Terminal, passes: number) =>
+    (base: Recording): Recording => ({
+      respond: (target, nth) =>
+        target.method === methodPathOf('WatchRuns') && nth < passes
+          ? passSteps(inOrder, terminal)
+          : base.respond(target, nth),
+    });
+
+  const opens = (h: HostHarness) => callsTo(h, 'WatchRuns').length;
+
+  /** The most dials the reconnect policy allows in `seconds`, taking its shortest wait each time. */
+  const mostDialsIn = (seconds: number): number => {
+    let waited = 0;
+    let dials = 1;
+    while (waited + delayMs(defaultReconnect, dials, 0) <= seconds * 1000) {
+      waited += delayMs(defaultReconnect, dials, 0);
+      dials += 1;
+    }
+    return dials;
+  };
+
+  describe('before it delivers', () => {
+    const pass = it.effect.prop(
+      'is opened at most MAX_QUIET_RESTARTS + 1 times per connection, and the connection backs off between',
+      {
+        inOrder: Schema.Int.check(Schema.isBetween({minimum: 1, maximum: STABLE_PASS_FRAMES - 1})),
+        terminal: Schema.Literals(TERMINALS),
+      },
+      ({inOrder, terminal}) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const h = yield* hostHarness(daemonAt(), {
+              wrap: shaped(inOrder, terminal, Number.POSITIVE_INFINITY),
+            });
+            h.mount(h.session.runs.watch);
+            yield* h.elapse(0);
+            // The first connection: four opens, no more, and the link is not yet blamed.
+            expect(opens(h)).toBe(MAX_QUIET_RESTARTS + 1);
+            expect(callsTo(h, 'Hello')).toHaveLength(1);
+            // Blamed once, the connection waits (a longer wait each time) before the next dial.
+            yield* h.elapse(300, 5);
+            const epochs = callsTo(h, 'Hello').length;
+            expect(epochs).toBeGreaterThan(1);
+            expect(epochs).toBeLessThanOrEqual(mostDialsIn(300));
+            expect(opens(h)).toBeLessThanOrEqual((MAX_QUIET_RESTARTS + 1) * epochs);
+          }),
+        ),
+      {arbitrary: {runs: 20}},
+    );
+    return pass;
+  });
+
+  describe('after a healthy pass', () => {
+    it.effect.prop(
+      'is reopened without blaming the connection, however many times it ends',
+      {
+        inOrder: Schema.Int.check(
+          Schema.isBetween({minimum: STABLE_PASS_FRAMES, maximum: STABLE_PASS_FRAMES + 3}),
+        ),
+        terminal: Schema.Literals(TERMINALS),
+      },
+      ({inOrder, terminal}) =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const passes = 3 * (MAX_QUIET_RESTARTS + 1);
+            const h = yield* hostHarness(daemonAt(), {wrap: shaped(inOrder, terminal, passes)});
+            h.mount(h.session.runs.watch);
+            yield* h.elapse(0);
+            expect(opens(h)).toBeGreaterThan(passes);
+            expect(callsTo(h, 'Hello')).toHaveLength(1);
+            expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+          }),
+        ),
+      {arbitrary: {runs: 20}},
+    );
+  });
+
+  it.effect('a healthy pass between quiet ones starts the count over', () =>
+    Effect.gen(function* () {
+      // Opens 0-2 and 4-6 end quiet; open 3 is healthy. Six quiet ends would blame the link
+      // if the healthy one did not start the count over. Open 7 and later are the daemon's own.
+      const quiet = shaped(1, 'gap', Number.POSITIVE_INFINITY);
+      const healthy = shaped(STABLE_PASS_FRAMES, 'gap', Number.POSITIVE_INFINITY);
+      const h = yield* hostHarness(daemonAt(), {
+        wrap: base => ({
+          respond: (target, nth) => {
+            if (target.method !== methodPathOf('WatchRuns') || nth >= 7) {
+              return base.respond(target, nth);
+            }
+            return (nth === 3 ? healthy : quiet)(base).respond(target, nth);
+          },
+        }),
+      });
+      h.mount(h.session.runs.watch);
+      yield* h.elapse(0);
+      expect(opens(h)).toBeGreaterThan(7);
+      expect(callsTo(h, 'Hello')).toHaveLength(1);
+    }),
+  );
+
+  it.effect('a clean close of one stream reopens that stream, not the connection', () =>
+    Effect.gen(function* () {
+      const h = yield* hostHarness(daemonAt(), {wrap: shaped(1, 'close', 1)});
+      h.mount(h.session.runs.watch);
+      yield* h.elapse(1);
+      expect(opens(h)).toBe(2);
+      expect(callsTo(h, 'Hello')).toHaveLength(1);
+      expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+    }),
+  );
+
+  it.effect('an agent method the host lacks fails that feed alone and leaves the link up', () =>
+    Effect.gen(function* () {
+      const daemon = daemonAt();
+      const id = agentIdOf(daemon);
+      const h = yield* hostHarness(daemon, {
+        wrap: base => ({
+          respond: (target, nth) =>
+            target.method === methodPathOf('WatchAgent')
+              ? [{end: {message: 'no such method', status: RpcStatus.UNIMPLEMENTED}}]
+              : base.respond(target, nth),
+        }),
+      });
+      h.mount(h.session.runs.watch);
+      h.mount(h.session.agents.watch(id));
+      yield* h.elapse(60);
+      expect(yield* h.read(h.session.agents.status(id))).toMatchObject({
+        _tag: 'Failed',
+        fault: {kind: 'Unimplemented'},
+      });
+      expect(yield* h.read(h.session.runs.status)).toEqual({_tag: 'Live'});
+      expect(callsTo(h, 'Hello')).toHaveLength(1);
+      expect(yield* h.read(h.session.runs.freshness)).toBe('live');
     }),
   );
 });
