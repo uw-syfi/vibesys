@@ -58,6 +58,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 			return core.SubmitOutcome{}, err
 		}
 	}
+	ctx = a.generationContext(ctx, storeIDOf(scope))
 	st, err := a.createStore(ctx, scope)
 	if err != nil {
 		return core.SubmitOutcome{}, err
@@ -73,20 +74,26 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 		// The change may have been made with only its answer lost. The sweep finds such a job.
 		return core.SubmitOutcome{}, err
 	}
-	// A store that took a submission can be read: its jobs are not left to the next sweep.
+	// A successful write supersedes older observations, but it cannot clear an
+	// unread store until all earlier unfinished jobs have been recovered.
+	readiness := storeReadable
+	var recoveryErr error
 	if slices.Contains(a.view.Load().unread, scope) {
-		a.readAgain(ctx, scope)
+		recoveryErr = a.readAgain(ctx, scope)
+		if recoveryErr != nil {
+			readiness = storeRecoveryPending
+		}
+	}
+	var event lifecycle.Event = lifecycle.StoreRead{Store: storeIDOf(scope)}
+	if recoveryErr != nil {
+		event = lifecycle.StoreUnread{Store: storeIDOf(scope), Failure: failureOf(recoveryErr)}
 	}
 	if out.Disposition != core.SubmitReused && out.Job.State == core.JobQueued {
-		// Settled, so that a submission that returned is in Status.
-		a.settle(message{
-			event: admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job),
-			scope: &scope, changed: true,
-		})
-		return out, nil
+		event = admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job)
 	}
-	a.notifyJobs()
-	return out, nil
+	// Settled, so a returned submission is in Status, even while recovery waits.
+	err = a.settleEffect(ctx, message{event: event, readiness: readiness, scope: &scope, changed: true})
+	return out, err
 }
 
 // createStore returns the store of a valid scope, making it if needed, trying for a bounded
