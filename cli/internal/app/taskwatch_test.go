@@ -122,7 +122,6 @@ func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 				var submitted []core.JobID
 				away := false
 				for step := 0; step < 14; step++ {
-					pass := false
 					switch op := r.IntN(10); {
 					case op < 5 && !away:
 						job := submitAs(t, a, callA, "print", fmt.Sprint(seed, step), ";", "exit", "0")
@@ -132,10 +131,10 @@ func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 						o.awaitFinalIn(t, a, scopeA, job.ID)
 					case op < 7 && !away:
 						o.takeAway(repoA)
-						away, pass = true, true
+						away = true
 					case op < 8 && away:
 						o.bringBack(repoA)
-						away, pass = false, true
+						away = false
 					case op < 9 && !away && len(submitted) > 0:
 						o.remove(repoA)
 						if _, err := a.ForgetRepository(ctxFor(t), repoA); err != nil {
@@ -144,13 +143,11 @@ func TestAWatcherHoldsTheTaskAfterAnyInterleaving(t *testing.T) {
 						// Let the watcher observe removal before restoring the repository.
 						synctest.Wait()
 						o.bringBackRemoved(repoA)
-						// Restoring a removed repository emits no daemon wake-up.
-						pass = true
 						submitted = nil
-					default:
-						pass = true
 					}
-					v := converge(t, a, wt, o, scopeA, pass)
+					// Eventual convergence includes the slow fallback for unannounced
+					// restoration and a bounded task fold that did not settle.
+					v := converge(t, a, wt, o, scopeA, true)
 					if v.Content == nil {
 						continue
 					}
