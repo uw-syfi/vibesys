@@ -348,6 +348,7 @@ func TestAlwaysOnCommandsAreWhatCIRunsOnEveryChange(t *testing.T) {
 		"scripts.check_example_pointers",
 		"scripts/check_doc_links.py",
 		"scripts.check_doc_citations",
+		"scripts.check_architecture_conceptual",
 		"scripts.check_skills",
 		"scripts.published_skills",
 	}

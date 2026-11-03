@@ -27,6 +27,7 @@ commands = [
   ["python3", "-m", "scripts.check_example_pointers", "--base-ref", "origin/main"],
   ["python3", "scripts/check_doc_links.py"],
   ["python3", "-m", "scripts.check_doc_citations"],
+  ["python3", "-m", "scripts.check_architecture_conceptual"],
   ["python3", "-m", "scripts.check_skills"],
   ["python3", "-m", "scripts.published_skills"],
 ]
@@ -39,6 +40,7 @@ gate_commands = [
   ["python3", "-m", "scripts.check_example_pointers", "--base-ref", "origin/main"],
   ["python3", "scripts/check_doc_links.py"],
   ["python3", "-m", "scripts.check_doc_citations"],
+  ["python3", "-m", "scripts.check_architecture_conceptual"],
   ["python3", "-m", "scripts.check_skills"],
   ["python3", "-m", "scripts.published_skills"],
 ]
