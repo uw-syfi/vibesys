@@ -261,48 +261,15 @@ func (s *session) perform(st Step) error {
 	case StepSync:
 		_, err := s.ssh(s.remoteLine(s.cfg.Machine.SyncCommand...), nil, 10*time.Minute)
 		return err
-	case StepHelper:
-		return s.waitForHello()
 	case StepApp:
+		if s.in.Remote != nil {
+			if err := s.seedProfile(); err != nil {
+				return err
+			}
+		}
 		return s.openApp()
 	}
 	return fmt.Errorf("unknown step %q", st.Kind)
-}
-
-const helloRequest = `{"type":"hello","request_id":"dev-1","deadline_ms":20000,"client_versions":[1,1],"app_version":"repoctl-dev"}` + "\n"
-
-// waitForHello starts a fresh helper the way the app does (one ssh exec channel running the
-// helper from the checkout) until its hello shows the shipped commit, within the policy's bound.
-func (s *session) waitForHello() error {
-	m := s.cfg.Machine
-	want := ""
-	if s.in.Remote.Kind == CheckoutGit {
-		want = s.in.Git.Head
-	}
-	deadline := s.env.Clock.Now().Add(time.Duration(m.HelloSeconds) * time.Second)
-	seen := "no reply"
-	for {
-		out, err := s.ssh(s.remoteLine(m.HelperCommand...), []byte(helloRequest), 40*time.Second)
-		if err != nil {
-			seen = err.Error()
-		} else {
-			first, _, _ := strings.Cut(string(out), "\n")
-			h, perr := ParseHello([]byte(first))
-			if perr != nil {
-				seen = perr.Error()
-			} else {
-				var ready bool
-				if ready, seen = HelloReady(h, want); ready {
-					s.printf("      helper hello: %s\n", seen)
-					return s.seedProfile()
-				}
-			}
-		}
-		if !s.env.Clock.Now().Add(time.Duration(m.HelloPollSeconds) * time.Second).Before(deadline) {
-			return fmt.Errorf("the helper did not answer hello at commit %s within %ds; last seen: %s", orNone(want), m.HelloSeconds, seen)
-		}
-		s.env.Clock.Sleep(time.Duration(m.HelloPollSeconds) * time.Second)
-	}
 }
 
 // seedProfile writes a hosts.json naming the machine into a profile that has none.

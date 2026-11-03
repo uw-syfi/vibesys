@@ -3,12 +3,7 @@
 A VibeSys source checkout keeps runnable examples under ``examples/<category>/``.
 Each is a project root whose tasks live in ``.vibesys/tasks/<task>/``, and each
 is declared once in ``examples/registry.toml``. This module owns that file's
-format (the one definition the CLI and the registry tests share) and turns it
-into an :class:`~server.host_examples.ExampleList`, the typed listing ``vibesys example list --json``
-prints and the desktop helper reads.
-
-Reading the catalog never imports the run engine: ``vibesys example`` is a light
-host command (``tests/architecture/test_light_entrypoints.py``).
+format and discovers the tasks of each registered example.
 """
 
 from __future__ import annotations
@@ -20,18 +15,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from server.host_examples import (
-    ExampleHardware,
-    ExampleList,
-    ExampleModel,
-    ExampleSummary,
-    ExampleTask,
-    ExampleWorkload,
-)
-from server.host_preflight import Backend
-from server.host_task_goal import read_task_goal
 from vs_project.api import (
-    CatalogueInput,
     Project,
     ProjectError,
     TaskDirectory,
@@ -182,76 +166,6 @@ def _task_directories(root: Path) -> tuple[TaskDirectory, ...]:
 def example_tasks(root: Path) -> tuple[str, ...]:
     """Return the sorted task names under ``root/.vibesys/tasks``; empty when there are none."""
     return tuple(task.name.value for task in _task_directories(root))
-
-
-def read_task_detail(task: TaskDirectory) -> ExampleTask | None:
-    """What ``task`` is about; ``None`` when its input file declares no ``[catalogue]``.
-
-    Reads only the facts a client shows: the ``[catalogue]`` table, the first of ``backends``,
-    ``objectives.toml`` and the goal file. Anything malformed raises ``CatalogError`` naming
-    its file, so one bad task is not silently listed without its facts.
-    """
-    try:
-        document = tomllib.loads(task.manifest_path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        message = f"cannot read {task.manifest_path}: {exc}"
-        raise CatalogError(message) from exc
-    table = document.get("catalogue")
-    if table is None:
-        return None
-    try:
-        catalogue = CatalogueInput.model_validate(table)
-        backends = document.get("backends") or ()
-        backend = Backend(backends[0]) if backends else None
-    except (ValidationError, ValueError) as exc:
-        message = f"invalid {task.manifest_path}: {exc}"
-        raise CatalogError(message) from exc
-    try:
-        goal = read_task_goal(task)
-    except (OSError, ValueError) as exc:
-        message = f"cannot read the goal of {task.manifest_path}: {exc}"
-        raise CatalogError(message) from exc
-    return ExampleTask(
-        task=goal.task,
-        objectives=goal.objectives,
-        goal=goal.goal,
-        goal_truncated=goal.goal_truncated,
-        domain=catalogue.domain,
-        hardware=ExampleHardware(backend=backend, **catalogue.hardware.model_dump()),
-        model=None if catalogue.model is None else ExampleModel(**catalogue.model.model_dump()),
-        workload=(
-            None
-            if catalogue.workload is None
-            else ExampleWorkload(**catalogue.workload.model_dump())
-        ),
-    )
-
-
-def example_task_details(root: Path) -> tuple[ExampleTask, ...]:
-    """The catalogue facts of each task of the example at ``root`` that declares them."""
-    details = (read_task_detail(task) for task in _task_directories(root))
-    return tuple(detail for detail in details if detail is not None)
-
-
-def list_examples(checkout: Path, *, with_task_details: bool = True) -> ExampleList:
-    """Describe every registered example of ``checkout``, sorted by category and name."""
-    root = checkout.expanduser().resolve()
-    entries = sorted(load_registry(root).example, key=lambda entry: (entry.category, entry.name))
-    return ExampleList(
-        checkout=str(root),
-        examples=tuple(
-            ExampleSummary(
-                name=entry.name,
-                category=entry.category,
-                tasks=example_tasks(root / entry.path),
-                external_repo=entry.external_repo,
-                task_details=(
-                    example_task_details(root / entry.path) if with_task_details else None
-                ),
-            )
-            for entry in entries
-        ),
-    )
 
 
 def find_example(registry: Registry, name: str) -> ExampleEntry:

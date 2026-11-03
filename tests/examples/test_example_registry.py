@@ -36,11 +36,14 @@ from tests.support.example_registry import (
 )
 
 from entrypoints.cli import _run_validate
-from entrypoints.example_catalog import REGISTRY_RELATIVE, Check, ExampleEntry, list_examples
+from entrypoints.example_catalog import REGISTRY_RELATIVE, Check, ExampleEntry
 from vibesys.errors import ConfigurationError
 from vibesys.inputs import load_input_manifest, load_task
-from vibesys.run.project_policy import build_project_path_policy, trusted_project_input_paths
-from vs_project.api import ExampleDomain, Project
+from vibesys.run.project_policy import (
+    build_project_path_policy,
+    trusted_project_input_paths,
+)
+from vs_project.api import Project, load_objectives
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -201,39 +204,22 @@ def test_every_task_declares_the_backends_it_targets(entry: ExampleEntry) -> Non
     "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
 )
 def test_every_task_describes_itself_to_the_catalogue(entry: ExampleEntry) -> None:
-    """New run offers a task by its domain, hardware, served model and workload, never by a
-    directory name; a task of another repository declares them there, not here."""
-    [summary] = [each for each in list_examples(REPO_ROOT).examples if each.name == entry.name]
-    listed = {detail.task: detail for detail in summary.task_details or ()}
-    undeclared = [
-        f"{entry.path} task={task}: declare `[catalogue]` in its vibesys.input.toml"
-        for task in _tasks(entry)
-        if task not in listed
-    ]
-    assert not undeclared, "\n".join(undeclared)
-    wrong = [
-        f"{entry.path} task={task}: an llm-serving task declares its model and maker"
-        for task, detail in listed.items()
-        if (detail.domain is ExampleDomain.LLM_SERVING) != (detail.model is not None)
-    ]
-    assert not wrong, "\n".join(wrong)
+    """In-tree example metadata stays valid through the shipping manifest reader."""
+    for task in Project.open(example_root(entry)).discover_tasks():
+        assert load_input_manifest(task.manifest_path).catalogue is not None, (
+            f"{entry.path} task={task.name.value}: declare [catalogue] in {task.manifest_path}"
+        )
 
 
 @pytest.mark.parametrize(
     "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
 )
 def test_every_task_declares_which_way_its_objective_improves(entry: ExampleEntry) -> None:
-    """New run's Goal page shows each objective with its direction; a task with no
-    `objectives.toml` axis shows none, and the run engine then ranks by its implicit maximum.
-    A task whose intent is ambiguous would be allowlisted here with a comment; none is."""
-    [summary] = [each for each in list_examples(REPO_ROOT).examples if each.name == entry.name]
-    listed = {detail.task: detail for detail in summary.task_details or ()}
-    undeclared = [
-        f"{entry.path} task={task}: declare an `[[objective]]` (name, direction) in objectives.toml"
-        for task in _tasks(entry)
-        if task not in listed or not listed[task].objectives
-    ]
-    assert not undeclared, "\n".join(undeclared)
+    """The run CLI consumes these metric axes and their validated max/min directions."""
+    for task in Project.open(example_root(entry)).discover_tasks():
+        assert load_objectives(task.manifest_path.parent).objective, (
+            f"{entry.path} task={task.name.value}: declare an [[objective]] (name, direction)"
+        )
 
 
 @pytest.mark.parametrize("entry", [_param(e, Check.PATH_REFS) for e in ENTRIES])
@@ -424,7 +410,10 @@ STALE_REFERENCE_EXCLUSIONS: frozenset[tuple[str, str]] = frozenset(
         ("docs/running-vibesys.md", "examples/deployment/service.py"),
         # Genuinely stale: no examples/model-serving/llama-mi300 exists.
         # NEEDS AN OWNER: point the Slurm walkthrough at a current example.
-        ("docs/contributing/remote-slurm-execution.md", "examples/model-serving/llama-mi300"),
+        (
+            "docs/contributing/remote-slurm-execution.md",
+            "examples/model-serving/llama-mi300",
+        ),
     }
 )
 

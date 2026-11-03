@@ -203,7 +203,7 @@ _NVIDIA_SMI = st.one_of(
 def test_accelerator_unavailable_answers_as_the_backend_itself_decides(
     backend: ComputeBackend, answer: ProbeResult | None, pinned: str
 ) -> None:
-    """A check made before the run (``vibesys preflight``) agrees with the run's own check.
+    """Startup validation agrees with the run's own accelerator check.
 
     The pinned device is an input (``CUDA_VISIBLE_DEVICES``), set for the example and
     restored after it.

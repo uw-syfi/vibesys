@@ -50,7 +50,7 @@ graph.
    also rejects cycles between whole libraries that tach's module edges miss.
 4. **Import a library only through `<pkg>.api`, and core only through
    `vibesys.api`.** The `tach.toml` interfaces enforce the first, and
-   `check_tach` fails on a `headless` to `server` import or the reverse.
+   `check_tach` fails on undeclared edges, including upward imports from core to entrypoints.
    `test_lower_libraries_do_not_discover_the_vibesys_product_dynamically`
    fails if a lower library reaches the product by dynamic import.
 5. **Keep the core pure.** `vs_core` imports no I/O library; its I/O goes

@@ -40,7 +40,6 @@ _ALLOWED_LITERALS_BY_PATH: dict[str, frozenset[str] | None] = {
     "libs/vs-agent/src/vs_agent/provider_profiles.py": None,
     # The chat model picker's suggestion catalog is keyed by shipped provider.
     # It is a list of model names to offer, not a behavior branch.
-    "src/server/chat/options.py": None,
     # Test fakes that script one provider's wire format (a Claude peer, the
     # profile a scripted session borrows, a Codex-shaped spec default). They
     # are not production behavior branches.

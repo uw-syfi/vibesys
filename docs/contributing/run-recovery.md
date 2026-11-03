@@ -2,7 +2,6 @@
 
 This page describes how a run continues after a crash, Pause, or host restart.
 The log is the authority for core state; `state.pb` is a cache of that log.
-[Run transport](run-transport.md) describes the files in a run.
 
 ## Rules
 
@@ -149,7 +148,7 @@ left.
 
 ### state.pb is a cache
 
-The log is the authority and `state.pb` is a cache of it ([run-transport.md](run-transport.md) lists the file).
+The log is the authority and `state.pb` is a cache of it.
 
 - A commit is one append of one atomic record (`vs_runlog` already frames, checksums and drops a torn
   tail; `RunLogReplayStore` is the precedent). There is no second write to wait for.
@@ -165,8 +164,7 @@ The log is the authority and `state.pb` is a cache of it ([run-transport.md](run
 
 The pause drain stops `Run` for new steps, waits until each running
 step ends or the drain deadline passes, records `Parked`, and exits. Three facts about it. A step cancelled by Pause now is recorded as `AttemptInterrupted(PAUSE)`, not as a result, so Resume
-runs it again as the next attempt. An attempt a pause interrupted is neither a policy failure nor a retry debit,
-as [run-transport.md](run-transport.md) already says; one whose runner raised is charged. The drain deadline is a field of the pause input,
+runs it again as the next attempt. An attempt a pause interrupted is neither a policy failure nor a retry debit; one whose runner raised is charged. The drain deadline is a field of the pause input,
 not a constant in the loop.
 
 ## Legacy reconciliation

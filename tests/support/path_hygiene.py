@@ -1,14 +1,8 @@
 """Keep ``sys.path`` edits made while collecting or running a test from outliving it.
 
 The standalone profiler bundles under ``resources/`` insert their own directory
-into ``sys.path`` at import time so their sibling modules resolve. Each of those
-directories holds a ``server.py``. A test module that imports one at collection
-leaves the directory on ``sys.path`` for the rest of the worker, and a later
-``import server`` that misses ``sys.modules`` then binds a profiler script
-instead of the ``src/server`` package, failing with ``'server' is not a
-package``. Whether it misses depends on what the worker happened to import
-first, so the failure appears in some shards and not others.
-
+into ``sys.path`` at import time so their sibling modules resolve. Leaving one
+there changes which module a later import loads, depending on test order.
 Restoring ``sys.path`` after each collection report and each test makes every
 test see the path the session started with, whatever ran before it.
 """

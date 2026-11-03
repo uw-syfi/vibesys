@@ -20,18 +20,23 @@ membership. They must still issue the exact command and pass the path, rename,
 named-CI, PR-state, base, cleanliness, live-role, and head-SHA checks. Empty
 member lists are valid and grant no non-admin user access.
 
+The checked-in capability table is explicitly empty: no scope is granted.
+The broker refuses every delegation request with an empty-table reason, before
+any landing operation; pull requests use normal review. Populated tables retain
+the scope and membership checks below.
+
 Membership is source-controlled and changes through the normal maintainer path.
-For example:
+This placeholder illustrates the syntax and grants no checked-in scope:
 
 ```toml
-[capabilities.server]
-members = ["alice"]
-prefixes = ["src/server/"]
+[capabilities.example_scope]
+members = ["example-maintainer"]
+prefixes = ["example/scope/"]
 paths = []
 additional_checks = []
 ```
 
-Capabilities also bound source ownership. Client paths have no delegated capability; server source uses `server`.
+Capabilities also bound source ownership. The retired client and Python server capabilities grant no paths.
 
 The broker's policy, workflow, implementation, and configured check workflow
 paths are always denied, even if a future capability section would otherwise
@@ -152,7 +157,7 @@ The temporary `Scoped merge gate` compatibility job was removed after the live
 repository was audited and had neither a branch-protection rule nor a ruleset
 that referred to it. `Required PR CI` is the broker's named test check and the
 merge queue's aggregate test result. Add each delegated maintainer to the
-`clients`, `server`, or applicable combination of capability member
+applicable capability member
 lists through the normal maintainer path. The accepted command is
 `/merge-scoped`; the old command is not accepted.
 

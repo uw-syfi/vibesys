@@ -2,33 +2,22 @@
 
 from __future__ import annotations
 
-import json
-from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import example, given
+from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.task_project import write_task
 
-from entrypoints.chat_session import serve_pending
 from vibesys.api import (
     AgentOutputChunkData,
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
-    RunReady,
-    RunStatus,
-    RunView,
     ToolResultData,
 )
 from vibesys.api.chat import ChatRuntime, ChatSession, SessionAction, SessionLifecycle, run_head
-from vibesys.api.host import host_call
-from vibesys.api.store import RunRecordFacts
-from vibesys.api.testing import FakeAuxiliaryAgents, FakeManagedAgent, FakeRunReader, FakeRunRecord
+from vibesys.api.testing import FakeManagedAgent
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_proto.api import (
@@ -36,18 +25,11 @@ from vs_proto.api import (
     ChatMessageRequest,
     ChatSessionCreated,
     ChatSteerProposed,
-    CreateChatSessionRequest,
-    Ended,
     EpochStarted,
-    HostCallRequest,
-    HostCallResponse,
     Lifecycle,
     Oneof,
-    Outcome,
     Parked,
     Record,
-    RunFailure,
-    RunFailureKind,
     RunHead,
     Running,
     RunProcess,
@@ -57,30 +39,12 @@ from vs_proto.api import (
     Timestamp,
     validate,
 )
-from vs_runlog.api import RunLogReader, assert_run_unlocked, encode_frame
-from vs_sim.api.testing import FakeProcesses, FakeProcessSignaller, ProcessScript, Sim, SimThreads
+from vs_runlog.api import RunLogReader, encode_frame
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-
-def chat_call(
-    payload: bytes, *, start_chat: Callable[[ChatMessageRequest], None] | None = None
-) -> bytes:
-    threads = SimThreads()
-    processes = FakeProcesses(lambda _spec: ProcessScript(), pass_time=threads.sleep)
-    response = host_call(
-        payload,
-        platform=replace(
-            Sim(seed=0).platform(
-                threads, processes=processes, signaller=FakeProcessSignaller(set())
-            ),
-            writer_signaller=None,
-        ),
-        start_chat=start_chat,
-    )
-    assert not processes.ran
-    return response
+    from pathlib import Path
 
 
 @pytest.fixture
@@ -199,42 +163,6 @@ def run(
     return agent
 
 
-def test_start_on_demand_idle_exit_and_relaunch_preserve_history(chat: ChatMessageRequest) -> None:
-    directory = Project.chat_session_directory_for(chat.project_root, chat.run_id, chat.session_id)
-    assert not directory.exists()
-    starts: list[ChatMessageRequest] = []
-    payload = HostCallRequest(
-        checkout="/src/vibesys", method=Oneof("chat_message", chat)
-    ).to_binary()
-    response = HostCallResponse.from_binary(chat_call(payload, start_chat=starts.append))
-    validate(response)
-    assert response.result is not None
-    assert response.result.field == "chat_message"
-    assert starts == [chat]
-    # Retrying admission is still one ordered inbox message.
-    assert chat_call(payload, start_chat=starts.append) == response.to_binary()
-    agent = run(chat, lambda text, _invocation: f"answer to {text}")
-    assert agent.closed
-    assert len(agent.messages) == 1
-    assert_run_unlocked(directory / "session.log")
-    prior = (directory / "session.log").read_bytes()
-    assert len(events(chat)) == 3
-    publish(chat, parked=True)
-    second = ChatMessageRequest.from_binary(chat.to_binary())
-    second.request_id, second.text = "q-2", "Why?"
-    post(second)
-    parked = run(second, lambda text, _invocation: text)
-    assert parked.messages == []
-    assert (directory / "session.log").read_bytes() == prior
-    publish(chat, epoch=2)
-    restored = run(second, lambda _text, _invocation: "continued")
-    prompt = json.loads(restored.messages[0][0])
-    assert prompt["question"] == "Why?"
-    assert json.loads(prompt["untrusted_prior_chat_transcript_jsonl"])["question"] == chat.text
-    assert (directory / "session.log").read_bytes().startswith(prior)
-    assert len(events(second)) == 5
-
-
 def test_tokens_and_proposals_are_session_data_and_never_intents(chat: ChatMessageRequest) -> None:
     threads = SimThreads()
     post(chat)
@@ -304,36 +232,6 @@ def test_lifecycle_has_no_idle_race(now: float, *, pending: bool, parked: bool) 
     else:
         assert action is (SessionAction.EXIT if now >= 10 else SessionAction.WAIT)
     assert state.next(now, 2, parked=False, pending=pending) is SessionAction.EXIT
-
-
-def test_conflicting_id_and_missing_launcher_are_typed_failures(chat: ChatMessageRequest) -> None:
-    payload = HostCallRequest(
-        checkout="/src/vibesys", method=Oneof("chat_message", chat)
-    ).to_binary()
-    unavailable = HostCallResponse.from_binary(chat_call(payload))
-    assert unavailable.result is not None
-    assert unavailable.result.field == "configuration_failed"
-    assert unavailable.result.value.code == "unavailable"
-    admitted = HostCallResponse.from_binary(
-        chat_call(
-            payload,
-            start_chat=lambda _request: None,
-        )
-    )
-    assert admitted.result is not None
-    assert admitted.result.field == "chat_message"
-    chat.text = "changed"
-    payload = HostCallRequest(
-        checkout="/src/vibesys", method=Oneof("chat_message", chat)
-    ).to_binary()
-    refused = HostCallResponse.from_binary(
-        chat_call(
-            payload,
-            start_chat=lambda _request: None,
-        )
-    )
-    assert refused.result is not None
-    assert refused.result.field == "configuration_failed"
 
 
 def test_stream_callbacks_validate_proposals_and_keep_large_answers(
@@ -477,248 +375,3 @@ def test_reading_an_unpublished_chat_epoch_is_refused(chat: ChatMessageRequest) 
     path.write_bytes(head.to_binary())
     with pytest.raises(ValueError, match="published epoch"):
         run_head(path)
-
-
-@pytest.mark.parametrize("session_id", ["default", "Research_A", "chat2"])
-def test_session_ids_follow_the_host_contract(chat: ChatMessageRequest, session_id: str) -> None:
-    chat.session_id = session_id
-    response = HostCallResponse.from_binary(
-        chat_call(
-            HostCallRequest(
-                checkout="/src/vibesys", method=Oneof("chat_message", chat)
-            ).to_binary(),
-            start_chat=post,
-        )
-    )
-    assert response.result is not None
-    assert response.result.field == "chat_message"
-    assert response.result.value.session_id == session_id
-    run(chat, lambda text, _invocation: text)
-    assert len(events(chat)) == 3
-
-
-def test_process_refreshes_after_relaunch_without_stranding_admitted_messages(
-    chat: ChatMessageRequest,
-) -> None:
-    project = Project.open(chat.project_root)
-    write_task(
-        project.root,
-        'version = 1\n[agent]\ndomain = "generic"\n[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
-        objective="Make the queue faster.\n",
-    )
-    ready = RunReady(
-        record=FakeRunRecord(
-            chat.run_id,
-            RunView(run_id=chat.run_id, loop="dynamic", status=RunStatus.ACTIVE),
-            RunRecordFacts(trusted_input_baseline="a" * 40),
-        ),
-        project_root=project.root,
-        log_directory=Project.run_log_path_for(chat.project_root, chat.run_id).parent,
-        frontend_state_directory=project.root / "frontend",
-        agent_provider="codex",
-        agent_model="gpt-test",
-        agent_providers=("codex",),
-    )
-    post(chat)
-    readers: list[FakeRunReader] = []
-    agents: list[FakeManagedAgent] = []
-
-    def open_reader(request: object) -> FakeRunReader:
-        del request
-
-        def respond(text: str, _invocation: str | None) -> str:
-            if len(readers) == 1:
-                publish(chat, epoch=2)
-                second = ChatMessageRequest.from_binary(chat.to_binary())
-                second.request_id, second.text = "q-2", "Why?"
-                post(second)
-            return text
-
-        agent = FakeManagedAgent(respond)
-        agents.append(agent)
-        reader = FakeRunReader(ready, FakeAuxiliaryAgents(lambda _launch: agent))
-        readers.append(reader)
-        return reader
-
-    threads = SimThreads()
-    threads.run(
-        lambda: serve_pending(
-            chat, ChatRuntime(threads.clock, threads, idle_seconds=0), open_reader
-        )
-    )
-    assert len(readers) == 2
-    assert all(reader.closed for reader in readers)
-    assert all(agent.closed for agent in agents)
-    assert agents[0].messages[0][0] == chat.text
-    assert json.loads(agents[1].messages[0][0])["question"] == "Why?"
-    assert len(events(chat)) == 5
-    scope = readers[0].agents
-    assert isinstance(scope, FakeAuxiliaryAgents)
-    assert scope.closed
-    assert scope.launches[0].readable_inputs[0].path == ready.log_directory
-    assert readers[0].sinks[0] is not None
-    with pytest.raises(RuntimeError, match="scope is closed"):
-        scope.create_auxiliary_agent(scope.launches[0])
-    with pytest.raises(RuntimeError, match="conversation is closed"):
-        agents[0].turn("late")
-
-
-@pytest.mark.parametrize(
-    ("outcome", "failure"),
-    [
-        (Outcome.FINISHED, None),
-        (Outcome.STOPPED, None),
-        (Outcome.INTERRUPTED, None),
-        *[
-            (Outcome.FAILED, kind)
-            for kind in RunFailureKind
-            if kind is not RunFailureKind.UNSPECIFIED
-        ],
-    ],
-)
-def test_every_ending_uses_the_same_chat_admission_and_retained_history(
-    chat: ChatMessageRequest, outcome: Outcome, failure: RunFailureKind | None
-) -> None:
-    path = Project.run_head_path_for(chat.project_root, chat.run_id)
-    head = RunHead.from_binary(path.read_bytes())
-    head.lifecycle = Lifecycle(
-        state=Oneof(
-            "ended",
-            Ended(
-                outcome=outcome,
-                resumable=True,
-                failure=None
-                if failure is None
-                else RunFailure(kind=failure, reason="Recorded ending"),
-            ),
-        )
-    )
-    validate(head)
-    original = head.to_binary()
-    path.write_bytes(original)
-    starts: list[ChatMessageRequest] = []
-    for index in range(2):
-        question = ChatMessageRequest.from_binary(chat.to_binary())
-        question.request_id, question.text = f"q-{index + 1}", f"Question {index + 1}"
-        response = HostCallResponse.from_binary(
-            chat_call(
-                HostCallRequest(
-                    checkout="/src/checkout", method=Oneof("chat_message", question)
-                ).to_binary(),
-                start_chat=starts.append,
-            )
-        )
-        validate(response)
-        assert response.result is not None
-        assert response.result.field == "chat_message"
-        assert response.result.value.request_id == question.request_id
-        agent = run(question, lambda text, _invocation: f"answer to {text}")
-        if index:
-            prompt = json.loads(agent.messages[0][0])
-            assert prompt["question"] == question.text
-            prior = json.loads(prompt["untrusted_prior_chat_transcript_jsonl"])
-            assert prior["question"] == "Question 1"
-        else:
-            assert agent.messages[0][0] == question.text
-        assert path.read_bytes() == original
-    assert len(starts) == 2
-    assert len(events(chat)) == 5
-
-
-@pytest.mark.regression
-@example(
-    actions=[
-        (0, "create"),
-        (0, "send"),
-        (1, "create"),
-        (0, "open"),
-        (0, "retry"),
-        (0, "conflict"),
-        (0, "lose-head"),
-        (0, "retry"),
-    ]
-)
-@given(
-    actions=st.lists(
-        st.tuples(
-            st.integers(0, 4),
-            st.sampled_from(["create", "send", "open", "retry", "conflict", "lose-head"]),
-        ),
-        min_size=1,
-        max_size=30,
-    )
-)
-def test_generated_thread_sequences_keep_creation_and_question_identity(
-    actions: list[tuple[int, str]],
-) -> None:
-    """Create/open/send/restart/retry through public codecs, without an agent process."""
-    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as environment:
-        root = Path(temporary)
-        environment.setenv("VIBESYS_STATE_HOME", str(root / "state"))
-        chat = chat_project(root / "project")
-        created: set[int] = set()
-        for index, action in actions:
-            provider, model = ("claude", "opus") if index % 2 == 0 else ("codex", "gpt-5")
-            request = CreateChatSessionRequest(
-                project_root=chat.project_root,
-                run_id=chat.run_id,
-                session_id=f"thread-{index}",
-                provider=provider,
-                model=model,
-            )
-            if action == "lose-head" and index in created:
-                (
-                    Project.chat_session_directory_for(
-                        chat.project_root, chat.run_id, request.session_id
-                    )
-                    / "run.head"
-                ).unlink(missing_ok=True)
-            if index not in created or action in {"create", "retry", "conflict", "lose-head"}:
-                if index in created and action == "conflict":
-                    request.model = "different"
-                payload = HostCallRequest(
-                    checkout="/checkout", method=Oneof("create_chat_session", request)
-                ).to_binary()
-                response = HostCallResponse.from_binary(chat_call(payload))
-                assert response.result is not None
-                if index in created and action == "conflict":
-                    assert response.result.field == "configuration_failed"
-                else:
-                    assert response.result.field == "create_chat_session"
-                    assert response.result.value.session_id == request.session_id
-                    created.add(index)
-            message = ChatMessageRequest.from_binary(chat.to_binary())
-            message.session_id = request.session_id
-            if action == "send":
-                response = HostCallResponse.from_binary(
-                    chat_call(
-                        HostCallRequest(
-                            checkout="/checkout", method=Oneof("chat_message", message)
-                        ).to_binary(),
-                        start_chat=lambda _: None,
-                    )
-                )
-                assert response.result is not None
-                assert response.result.field == "chat_message"
-                assert (
-                    len(
-                        Project.open(chat.project_root)
-                        .state.session_inbox(chat.run_id, request.session_id)
-                        .pending()
-                    )
-                    == 1
-                )
-            if action == "open":
-                threads = SimThreads()
-                session = ChatSession(message, ChatRuntime(threads.clock, threads))
-                try:
-                    saved = session.configuration(
-                        ChatSessionCreated(id=request.session_id, provider="other", model="other")
-                    )
-                    assert (saved.provider, saved.model) == (provider, model)
-                finally:
-                    session.close()
-            records = events(message)
-            assert len(records) == 1
-            assert records[0].field == "created"
-            assert (records[0].value.provider, records[0].value.model) == (provider, model)

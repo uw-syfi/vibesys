@@ -32,8 +32,7 @@ Architecture:
 
 - Product behavior lives in `src/vibesys/` and is reached through `vibesys.api`.
   The generic pure lifecycle lives in `libs/vs-core/`, through `vs_core.api`.
-  `src/headless/` and `src/server/` are peers over that facade; neither imports
-  the other. Import each `libs/` package through its `<package>.api` only.
+  `src/headless/` consumes that facade. Import each `libs/` package through its `<package>.api` only.
 - Data flows one way: inputs go through core to typed outputs or events that
   consumers interpret. Core never imports adapters, renderers, or the CLI, and
   never branches on a concrete sandbox or backend name outside the wiring code.
@@ -57,8 +56,8 @@ Data and validation:
 
 - Anything that crosses a process or is persisted is a `.proto` message, validated
   with protovalidate in the same file; the `.proto` is the single source of truth.
-  Existing Pydantic contracts migrate during the transport migration
-  ([run-transport.md](docs/contributing/run-transport.md)); a new contract starts as a `.proto`.
+  A new contract starts as a `.proto`; existing Pydantic contracts remain only where
+  they have not yet been replaced.
   Use `StrEnum` or `Literal` for closed sets. No raw strings where an enum or registry exists.
 - Never commit private server names, internal hostnames, personal paths, or keys and tokens;
   use generic placeholders such as `host-a`. No repository check can hold this, because the

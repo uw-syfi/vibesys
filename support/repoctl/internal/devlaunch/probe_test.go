@@ -75,31 +75,6 @@ func TestResolveCheckout(t *testing.T) {
 	}
 }
 
-func TestHelloReadiness(t *testing.T) {
-	h, err := ParseHello([]byte(`{"type":"hello","request_id":"1","protocol_version":1,"features":[],"vibesys_version":"0.1.1","checkout":{"root":"/r","commit":"abc","dirty":false}}`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ok, _ := HelloReady(h, "abc"); !ok {
-		t.Error("matching commit is not ready")
-	}
-	if ok, seen := HelloReady(h, "def"); ok || !strings.Contains(seen, "abc") {
-		t.Errorf("another commit: ready=%v seen=%q", ok, seen)
-	}
-	if ok, _ := HelloReady(h, ""); !ok {
-		t.Error("no wanted commit: any checkout is ready")
-	}
-	dist, _ := ParseHello([]byte(`{"type":"hello","vibesys_version":"0.1.1","checkout":null}`))
-	if ok, _ := HelloReady(dist, ""); ok {
-		t.Error("a helper from an installed distribution is not the shipped checkout")
-	}
-	for _, bad := range []string{`not json`, `{"type":"error","message":"incompatible"}`} {
-		if _, err := ParseHello([]byte(bad)); err == nil {
-			t.Errorf("ParseHello(%q) accepted", bad)
-		}
-	}
-}
-
 func TestSavedCheckoutAndSeedRoundTrip(t *testing.T) {
 	data, err := SeedHosts("host-a", "/srv/v")
 	if err != nil {

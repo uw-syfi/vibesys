@@ -26,17 +26,10 @@ example.
 
 ## Wire-protocol conformance
 
-The shared conformance corpus pins framing and connection semantics for every
-transport ([wire-protocol.md](../../../../docs/contributing/wire-protocol.md)):
-
-- It holds one fixture per event type, the connection-exchange scenarios, and
-  an inventory each runner registers to say which scenarios it executes.
-- `test_every_event_kind_has_exactly_one_fixture_and_no_fixture_is_unknown`
-  gates fixture coverage.
-- A Python test replays the scenarios on every server transport.
-
-Extend the corpus for a protocol change instead of adding a per-client
-snapshot, and register the scenario in a runner so it executes.
+Shared telemetry, subscription-frame and run-conversion fixtures pin the inputs
+consumed by the Go gateway and Python readers. Extend the relevant fixture and
+consumer tests for a contract change. `test_gateway_conversion_fixture_regenerates_identically`
+checks that the retained conversion fixture still comes from the native writer.
 
 ## Commands
 

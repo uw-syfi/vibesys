@@ -396,8 +396,7 @@ def validated_run_request(
 ) -> tuple[RunRequest, Config]:
     """The run's request and configuration, validated as a run validates them, with no effect.
 
-    Raises ``ConfigurationError`` naming what is wrong. Both a run and ``vibesys preflight``
-    call it, so a configuration preflight accepts is one the run accepts; neither discovers
+    Raises ``ConfigurationError`` naming what is wrong. Startup validation neither discovers
     a GitHub account nor builds an image before it returns. ``probe`` asks the host which of a
     task's several backends it provides (a real one by default).
     """

@@ -13,8 +13,8 @@ What counts as a citation:
 
     path
         A file path with an alphabetic extension, matched against the tracked
-        files as a segment-aligned suffix, so `unix_jsonl.py` and
-        `src/server/transport/unix_jsonl.py` both resolve, and an ambiguous
+        files as a segment-aligned suffix, so `launcher.py` and
+        `src/entrypoints/launcher.py` both resolve, and an ambiguous
         suffix fails until it is qualified.
     sep
         `:`, or pytest's `::`.

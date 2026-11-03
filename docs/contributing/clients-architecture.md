@@ -10,10 +10,13 @@ It builds on, and does not restate:
 
 - [`architecture.md`](architecture.md): the Python module graph and the placement rule. The same
   principles (deep modules, one-way dependencies, a pure core with a thin shell) apply here.
-- [`desktop-connection.md`](desktop-connection.md): what the desktop main process, the host helper,
-  and the screen stores do. This document says which package each of those lives in.
-- [`wire-protocol.md`](wire-protocol.md): the run protocol.
+- [Gateway README](https://github.com/uw-syfi/vibesys/blob/main/gateway/README.md): the live
+  gateway's RPCs, topic subscriptions, and orchestrator connection.
+- [Orchestrator README](https://github.com/uw-syfi/vibesys/blob/main/orchestrator/README.md):
+  the daemon and sidecar boundary.
 - [`desktop-development.md`](desktop-development.md): how to run the desktop app.
+
+The [legacy Python desktop connection](desktop-connection.md) is retained only as a historical URL.
 
 ## Why
 

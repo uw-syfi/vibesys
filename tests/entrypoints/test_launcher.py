@@ -19,8 +19,6 @@ if TYPE_CHECKING:
     [
         (["--input", "example.py"], "entrypoints.headless"),
         (["validate", "bundle"], "entrypoints.headless"),
-        (["--detach", "--input", "example.py"], "entrypoints.server"),
-        (["--web", "--input", "example.py"], "entrypoints.server"),
     ],
 )
 def test_launcher_routes_run_commands_to_python(args: list[str], module: str) -> None:

@@ -7,7 +7,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.server.support import CONTROL_KEY
 from tests.support.core_plugins import failing_plugin
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
@@ -17,7 +16,6 @@ from entrypoints.headless import print_uncaught
 from entrypoints.production import production_timing
 from entrypoints.run import run_headless
 from launch import LaunchSettings, default_runs
-from server.runtime import ServerRuntime
 from vibesys.api import (
     ComputeBackend,
     Config,
@@ -38,7 +36,6 @@ from vs_runlog.api import FileRunLogWriter
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import (
     OsThreads,
-    Platform,
     ThreadBlockingRunner,
     UnixNetwork,
 )
@@ -217,25 +214,6 @@ def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
     assert lines == ["run failed: _CoreRejectedError: core rejected the observation"]
 
 
-def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> None:
-    runs = _runs()
-    runtime = ServerRuntime(
-        run_id="run-1",
-        socket_path=tmp_path / "control.sock",
-        runs=runs,
-        platform=Platform.real(),
-        control_key=CONTROL_KEY,
-    )
-    try:
-        result = runtime.drive(_request(tmp_path / "project"))
-        assert any(event.type == "run_failed" for event in runtime.journal.read())
-        assert runtime.session is None
-        assert runs.attach(result.run_id).run_id == result.run_id
-        assert runs.list_active() == ()
-    finally:
-        runtime.integration.close()
-
-
 def test_launch_rejects_invalid_builtin_options_before_execution(tmp_path: Path) -> None:
     request = _request(tmp_path / "project").model_copy(
         update={
@@ -261,32 +239,3 @@ def test_launch_rejects_invalid_builtin_options_before_execution(tmp_path: Path)
         assert runs.list_active() == ()
 
     asyncio.run(execute())
-
-
-def test_server_retains_chat_after_run_result_and_releases_it_on_close(tmp_path: Path) -> None:
-    clients: list[FakeAgentClient] = []
-    runs = _runs(clients)
-    runtime = ServerRuntime(
-        run_id="run-1",
-        socket_path=tmp_path / "control.sock",
-        runs=runs,
-        platform=Platform.real(),
-        control_key=CONTROL_KEY,
-    )
-    try:
-        runtime.drive(_request(tmp_path / "project"))
-        assert clients, [
-            event.model_dump_json()
-            for event in runtime.journal.read()
-            if "unavailable" in event.model_dump_json()
-        ]
-        # The chat's client is made when the run is ready, before the run's own; the run's
-        # closed with its host, and the chat's outlives the run's result.
-        retained, *owned = clients
-        assert not retained.closed
-        assert all(client.closed for client in owned)
-        assert runtime.chat.chat("What happened in this run?") == "retained chat answer"
-    finally:
-        runtime.integration.close()
-
-    assert all(client.closed for client in clients)

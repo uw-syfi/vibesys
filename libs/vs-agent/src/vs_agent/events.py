@@ -1,11 +1,9 @@
-"""Agent-facing event payload types shared by core and the server.
+"""Agent-facing event payload types shared by the library and product.
 
-These are wire types for the ``core-events.jsonl`` / server event protocol:
-the ``kind`` discriminator literals (``"command"``, ``"json"``) are frozen
-format and must not change. ``EventPayload`` here is ``vs_agent``'s own copy
-of the immutable payload base, kept separate from ``vibesys.events`` and
-``server.events`` (each of which also has other, non-agent payloads that
-still need their own base) so this leaf library never imports ``vibesys.*``.
+The ``kind`` discriminator literals (``"command"``, ``"json"``) are frozen
+persisted format and must not change. ``EventPayload`` here is ``vs_agent``'s
+own immutable payload base, separate from the broader ``vibesys.events`` base,
+so this leaf library never imports ``vibesys.*``.
 """
 
 from __future__ import annotations

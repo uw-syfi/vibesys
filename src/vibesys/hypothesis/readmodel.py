@@ -40,11 +40,9 @@ if TYPE_CHECKING:
 class HypothesisRoundView(BaseModel):
     """One hypothesis's round, copied verbatim from its authoritative record.
 
-    A one-way projection, matching `server.api.experiments._round`: it copies
-    fields, never groups rounds, selects a baseline, or infers a resolution.
-    `hypothesis_outcome`/`candidate_disposition` are pre-resolved to their
-    plain string value (rather than exposing the enum members
-    `server.api.experiments` resolves them to) because a round's outcome can
+    A one-way projection: it copies fields, never groups rounds, selects a
+    baseline, or infers a resolution. `hypothesis_outcome`/`candidate_disposition`
+    expose plain string values because a round's outcome can
     legitimately hold either of two distinct core-private vocabularies
     (`HypothesisOutcome` or `HypothesisResolution`), which a single typed
     field on a boundary DTO cannot express without leaking those types.
@@ -66,7 +64,7 @@ class HypothesisRoundView(BaseModel):
 
 
 class HypothesisView(BaseModel):
-    """One hypothesis's full history, matching `server.api.experiments.HypothesisEntry`.
+    """One hypothesis's full history, projected from recorded facts.
 
     `title`, `resolved_outcome`, `strategy_disposition`, and `perf_delta_reason`
     are precomputed from `vibesys.hypothesis.state.Hypothesis`
@@ -92,10 +90,8 @@ class HypothesisView(BaseModel):
     perf_metric: float | None = None
     perf_unit: str | None = None
     perf_delta_pct: float | None = None
-    # The round that produced the measurement above: `server.api.performance.
-    # _latest_measurement` selects the newest headline measurement across
-    # hypotheses by this round number, without needing `HypothesisMeasurement`
-    # itself.
+    # The round that produced the measurement above, so consumers can compare
+    # headline measurements without importing the internal measurement type.
     perf_metric_round: int | None = None
     perf_metric_name: str | None = None
     perf_direction: Literal["max", "min"] | None = None
@@ -114,9 +110,8 @@ class HypothesisView(BaseModel):
 class RoundView(BaseModel):
     """One run-wide round, in chronological order across all hypotheses.
 
-    Unlike `server.api.service.performance_rounds`, this does not drop rounds
-    with no recorded measurement: it is the general-purpose round history,
-    not the performance-plot series.
+    Includes rounds with no recorded measurement so consumers see the complete
+    round history.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -278,8 +273,7 @@ def _agent_run_projection(
 def _hypothesis_view(hypothesis: Hypothesis, *, active_id: str | None) -> HypothesisView:
     """Copy one domain hypothesis into its boundary-safe DTO.
 
-    Field-for-field match of `server.api.experiments._to_hypothesis_entry`'s
-    source facts, with `plan.title`/`plan.hypothesis`/`plan.task` read and
+    Reads `plan.title`/`plan.hypothesis`/`plan.task`, with
     `plan` itself never exposed (`OrchestratorPlan` is core-owned but not part
     of this DTO's contract).
     """
@@ -319,13 +313,13 @@ def _hypothesis_view(hypothesis: Hypothesis, *, active_id: str | None) -> Hypoth
 
 
 def _hypothesis_round_view(record: RoundRecord) -> HypothesisRoundView:
-    """Copy one round record, matching `server.api.experiments._round`.
+    """Copy one authoritative round record.
 
     `judge_verdict` is copied verbatim (unlike the hypothesis-level field
     below, which narrows to the two terminal values): a round's own verdict
     legitimately holds `"deferred"` under sparse-review policy, and
     `HypothesisRoundView.judge_verdict` is typed to carry that third value so
-    the server's external protocol keeps reporting it unchanged.
+    consumers receive the recorded verdict unchanged.
     """
     return HypothesisRoundView(
         round_number=record.round_number,
@@ -343,7 +337,7 @@ def _hypothesis_round_view(record: RoundRecord) -> HypothesisRoundView:
 
 
 def _round_view(record: RoundRecord) -> RoundView:
-    """Copy one run-wide round, matching `server.api.service.performance_rounds`'s fields."""
+    """Copy one run-wide round, including rounds without a measurement."""
     return RoundView(
         round_number=record.round_number,
         commit=_text(record.commit),
@@ -393,8 +387,7 @@ def _outcome(value: str | None) -> str | None:
 
     A round record holds the implementer's declared outcome unless the
     framework resolved the hypothesis, in which case it holds the resolution
-    instead. Matches `server.api.experiments._outcome`, save that it returns
-    the resolved string rather than the enum member: the two vocabularies
+    instead. Returns the resolved string rather than the enum member: the two vocabularies
     (`HypothesisOutcome`, `HypothesisResolution`) are both core-private, and a
     single field can hold either, so a boundary DTO can only expose their
     shared `str` value, never a member of either type.

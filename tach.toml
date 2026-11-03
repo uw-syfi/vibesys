@@ -4,14 +4,12 @@
 # it. The goal is to only ever remove edges. `tach sync` regenerates
 # `depends_on` from the code; review its diff before committing.
 #
-# Scope: src/ (entrypoints, server, vibesys) and every libs/*/src. sdk/ is out.
+# Scope: src/ (entrypoints, headless, vibesys) and every libs/*/src. sdk/ is out.
 # Tach is the single boundary tool; there is no other import checker.
 #
 # Modeling: `vibesys` is a module whose children (`vibesys.orchestration`, ...) are
 # also modules. tach assigns each file to its deepest module, so `vibesys` means
-# the top-level vibesys/*.py files (config, schemas, ...). `server` is
-# modeled the same way: `server.api`, `server.runtime`, ... are modules, and
-# bare `server` is its package `__init__`.
+# the top-level product files.
 #
 # Cycles are forbidden (`forbid_circular_dependencies = true`). The `vibesys`
 # core modules are ordered by their explicit edges, bottom to top: product
@@ -21,16 +19,8 @@
 # to its owning lower layer instead.
 #
 # Tach `layers` are not used. Every edge is listed, including those of
-# `entrypoints` and each `server.*` module. Order is enforced by the explicit
-# edges: `server.runtime` sits on top, then transport, api, integration, chat,
-# controller, execution, journal, events, diagnostics at the bottom; a lower
-# module must not list a higher one. `entrypoints` builds the real implementations
-# (clocks, threads, run timing, sandboxes) from the libraries' public modules and
-# reaches the product core only through the `vibesys.api` facade, for both the
-# server path and the headless path, so it lists no `vibesys` module below that
-# facade. Upward imports (core importing
-# server/entrypoints, server importing entrypoints) fail because the edge is
-# undeclared.
+# `entrypoints` builds the real implementations from library public interfaces
+# and reaches product behavior through `vibesys.api`. Upward imports are undeclared.
 #
 # Libs form a DAG by review: every lib edge is explicit here. The edges are
 # `vs_agent` -> {`vs_sandbox`, `vs_project`, `vs_prompts`}, and
@@ -72,7 +62,6 @@ forbid_circular_dependencies = true
 
 # Orchestration-simplification target direction (loops > search >
 # orchestration host > prompts + lower libs), enforced only where a module
-# already carries a `layer` field below (`entrypoints`/`server`/`vibesys.api`
 # stay unlayered; their order is still pinned by the explicit edges above).
 # `vibesys.prompts` (templates + renderer) sits with policy,
 # other mechanics libraries: the host and lower layers render prompts, they
@@ -83,330 +72,17 @@ forbid_circular_dependencies = true
 # layers add one more check on top: no module may list a dependency on a
 # module in a strictly higher layer.
 # `logs` sits above every library, so no library can import `vs_logs`: only the
-# product (which names the owners) writes logs, and only the host helper reads them.
+# product (which names the owners) writes logs; the reader has only library-test consumers.
 layers = ["loops", "roles_search", "orchestration_host", "logs", "prompts_and_lower_libs"]
 layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.usage_pricing", "server.usage_scan", "server.usage_limits", "server.usage_limits_store", "server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_compute_runtime", "server.host_helper_readers", "server.host_agent_logins", "server.host_compute", "server.host_preflight", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_operation_reads", "server.host_task_goal", "server", "vibesys.comparisons"]
+depends_on = ["vibesys.api.chat", "vs_proto", "vs_runlog", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "headless", "launch", "vs_mcp", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
 depends_on = ["vibesys.api"]
-
-[[modules]]
-path = "server"
-depends_on = ["vibesys.api"]
-
-[[modules]]
-path = "server.api"
-depends_on = ["vs_decode.api", "vs_logs", "vibesys.api", "vibesys.api.hypothesis", "server.control_envelope", "server.host_api", "server.host_run_events", "server.diagnostics", "server.journal", "server.execution", "server.events", "server.controller", "server.chat", "server.integration", "server.run_lifecycle", "vs_sim.api"]
-
-[[modules]]
-path = "server.chat"
-depends_on = ["vibesys.api", "vs_prompts", "server", "server.controller", "server.host_api", "server.run_lifecycle", "server.journal", "server.events", "server.execution", "vs_sim.api"]
-
-[[modules]]
-path = "server.transport"
-depends_on = ["vs_decode.api", "server.api", "server.registry", "vs_async_ops.api", "vs_project", "vs_sim.api"]
-
-[[modules]]
-path = "server.controller"
-depends_on = ["server.diagnostics", "server.events", "server.execution", "server.run_lifecycle", "server.journal", "vibesys.api", "vs_sim.api"]
-
-[[modules]]
-path = "server.diagnostics"
-depends_on = ["vs_redaction.api"]
-
-[[modules]]
-path = "server.event_index"
-depends_on = []
-
-[[modules]]
-path = "server.events"
-depends_on = ["server.diagnostics", "server.host_api", "server.run_lifecycle", "server.event_index", "server.span_index", "vibesys.api", "vs_redaction.api", "vs_sim.api"]
-
-[[modules]]
-path = "server.execution"
-depends_on = ["server.diagnostics", "server.events", "server.journal", "vibesys.api", "vs_sim.api"]
-
-[[modules]]
-path = "server.integration"
-depends_on = ["server", "server.trace", "server.execution", "server.chat", "server.events", "vibesys.api", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "server.run_lifecycle", "vs_sim.api"]
-
-[[modules]]
-# Light contracts for host commands and the live registry record. Pydantic and
-# the standard library only; tests/architecture/test_light_entrypoints.py keeps
-# the light entrypoints' import closure free of the engine.
-path = "server.host_api"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary"]
-
-[[modules]]
-# The fields every helper request and reply carries. Pydantic only.
-path = "server.host_envelope"
-depends_on = []
-
-[[modules]]
-# The helper's reads of a run's recorded events: from a sequence, of a span, the newest.
-# Light: Pydantic and the envelope.
-path = "server.host_run_events"
-depends_on = ["server.host_envelope"]
-
-[[modules]]
-# The journal's span index: where each event sits by sequence and span, kept beside the
-# journal by its writer and read by the host helper. The standard library and the helper's
-# line limit only.
-path = "server.span_index"
-depends_on = ["server.host_api"]
-
-[[modules]]
-# The helper's run.reader messages: the server Chat reads a run through. Light: Pydantic and
-# the envelope.
-path = "server.host_run_reader"
-depends_on = ["server.host_envelope"]
-
-[[modules]]
-# The helper's runs.summary messages. Light: Pydantic and the envelope.
-path = "server.host_run_summary"
-depends_on = ["server.host_envelope"]
-
-[[modules]]
-# The facts machine.describe reports: hardware, Docker, checkout, run counts. Light; no
-# internal imports.
-path = "server.host_machine_facts"
-
-[[modules]]
-# The per-user live registry: lifetime locks, records, listing, and the stop
-# decision. Light; the control-socket stop requester is server.instances.
-path = "server.registry"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_envelope", "vs_project", "vs_sim.api"]
-
-[[modules]]
-# The run protocol's control envelope: request and response framing and
-# command.stop. Light; server.api builds the full protocol on it.
-path = "server.control_envelope"
-depends_on = ["server.diagnostics", "server.host_api"]
-
-[[modules]]
-# Asks a live server to stop over its control socket (control envelope only).
-path = "server.instances"
-depends_on = ["vs_decode.api", "server.control_envelope", "vs_project", "vs_sim.api"]
-
-[[modules]]
-path = "server.trace"
-depends_on = ["server.events"]
-
-[[modules]]
-path = "server.journal"
-depends_on = ["server.host_api", "server.events", "server.diagnostics", "server.trace", "vs_sim.api"]
-
-[[modules]]
-path = "server.read_model"
-depends_on = ["server.controller", "server.events", "vibesys.api"]
-
-[[modules]]
-path = "server.run_lifecycle"
-depends_on = ["server.host_api"]
-
-[[modules]]
-path = "server.runtime"
-depends_on = ["server.idle_watch", "server.read_model", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "server.host_api", "vs_project", "vs_sim.api"]
-
-[[modules]]
-# The pure decision that ends a read-only server no client holds. The standard library only.
-path = "server.idle_watch"
-depends_on = []
-
-[[modules]]
-# The per-connection stdio relay to a run's control socket, used by the host helper's
-# run channels. Light: the standard library, vs_sim, and the helper contracts (its
-# ChannelEnd line); it does not import the server runtime.
-path = "server.relay"
-depends_on = ["server.host_api", "vs_sim.api"]
-
-[[modules]]
-# The host helper's channel: its pure core and shell (docs/contributing/desktop-connection.md).
-# Light: no engine, no run protocol beyond the control envelope's requester.
-path = "server.host_helper"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests", "server.relay", "vs_sim.api"]
-
-[[modules]]
-# The host helper's request answering: one request through the host's interfaces.
-path = "server.host_helper_requests"
-depends_on = ["server.host_operation_reads", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_compute_runtime", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "vs_project", "vs_sim.api", "server.host_run_reads", "server", "server.host_harness", "server.usage_limits", "server.usage_limits_store", "vs_agent.api.usage_limits"]
-
-[[modules]]
-# The read-only servers Chat reads ended runs through: found by run, started on demand.
-path = "server.host_helper_readers"
-depends_on = ["server.host_api", "server.registry", "vs_sim.api"]
-
-[[modules]]
-# The host helper's `logs` feature: chunking, tails and the long poll over the LogReader role.
-path = "server.host_helper_logs"
-depends_on = ["server.host_api", "vs_sim.api"]
-
-[[modules]]
-# Light contracts for the example catalog and the projects made from it or copied out.
-path = "server.host_examples"
-depends_on = ["server.host_envelope", "server.host_preflight", "vs_project"]
-
-[[modules]]
-# What a task is for: the goal and axes one task directory declares, shared by the example and project catalogs.
-path = "server.host_task_goal"
-depends_on = ["server.host_examples", "vs_project"]
-
-[[modules]]
-# Light contracts for the harness a run starts with: the provider and model pair and how it reads.
-path = "server.host_harness"
-depends_on = []
-
-[[modules]]
-# Light contracts for starting a run from the desktop app: typed options and preflight checks.
-path = "server.host_preflight"
-depends_on = ["server.host_compute", "server.host_machine_facts"]
-
-[[modules]]
-# The host helper's typed run options and preflight checks, as pure decisions.
-path = "server.host_helper_preflight"
-depends_on = ["server.host_api", "server.host_compute", "server.host_machine_facts", "server.host_preflight"]
-
-[[modules]]
-# A machine's compute settings: Slurm clusters in one file, the Modal token, connection tests.
-# Files and commands come through seams; Pydantic, the standard library and vs_slurm otherwise.
-path = "server.host_compute_runtime"
-depends_on = ["server.host_compute", "server.host_envelope", "server.host_slurm", "server.host_machine_facts", "vs_sim.api"]
-
-[[modules]]
-# What vs_slurm says about a cluster of the compute settings; loaded only by a compute request.
-path = "server.host_slurm"
-depends_on = ["server.host_compute", "vs_slurm"]
-
-[[modules]]
-# Provider login facts and bounded process ownership shared by native commands and the helper.
-path = "server.host_agent_logins"
-depends_on = ["server.host_envelope", "vs_agent", "vs_sim.api"]
-
-[[modules]]
-# Where results are measured and a machine's compute settings, as helper messages. Pydantic only.
-path = "server.host_compute"
-depends_on = ["server.host_envelope", "server.host_machine_facts", "vs_proto"]
-
-[[modules]]
-# The host helper's MachineProbe on a real host: hardware, Docker, harness CLIs, checkouts.
-path = "server.host_helper_machine"
-depends_on = ["server.host_api", "server.host_compatibility_generated", "server.host_machine_facts", "vs_sim.api"]
-
-[[modules]]
-# What a run's tile draws (per-idea points, attention reason): contracts only. Pydantic only.
-path = "server.host_run_dashboard"
-depends_on = []
-
-[[modules]]
-# A run's usage rolled up to the quarter hour, and the one path from a journal to a rollup: pure,
-# over the journal and the file behind two interfaces. Light, loaded on the first usage read.
-path = "server.usage_rollup"
-depends_on = ["server.host_run_summary", "server.run_summary", "server.run_usage", "vs_proto"]
-
-[[interfaces]]
-from = ["server.usage_rollup"]
-expose = ["QUARTER_SECONDS", "ROLLUP_FILE", "ROLLUP_VERSION", "Budget", "FoldedJournal", "JournalIdentity", "Outcome", "RollupRead", "RollupStore", "UsageJournal", "build_rollup", "is_fresh", "quarter_of", "read_or_build"]
-
-[[modules]]
-# Which transcript sessions are a person's own: those no run of the host made. Pure.
-path = "server.usage_outside"
-depends_on = ["server.usage_rollup", "vs_proto"]
-
-[[interfaces]]
-from = ["server.usage_outside"]
-expose = ["Outside", "ProviderRow", "RunFacts", "exclude"]
-
-[[modules]]
-# What the Usage screen shows for one host: rollups cut into the caller's buckets, priced, and
-# folded to fit the reply's bound. A pure function. Light, loaded on the first usage read.
-path = "server.usage_summary"
-depends_on = ["server.usage_outside", "server.usage_rollup", "vs_proto"]
-
-[[interfaces]]
-from = ["server.usage_summary"]
-expose = ["MAX_AGENT_ROWS", "MAX_PROVIDERS", "MAX_RUN_ROWS", "OTHER", "OutsideInput", "USAGE_REPLY_MAX_BYTES", "Priced", "Pricing", "RunInput", "SummaryInputs", "summarize"]
-
-[[modules]]
-# What a row's tokens would cost, in the estimate order. Pure. Light, loaded on the first usage read.
-path = "server.usage_pricing"
-depends_on = ["server.usage_summary", "vs_agent.api.usage_pricing", "vs_proto"]
-
-[[interfaces]]
-from = ["server.usage_pricing"]
-expose = ["DocumentFetcher", "DocumentStore", "FetchError", "ListPricing", "PriceBookError", "PriceBookUnreadableError", "RateBook", "Rates", "RateDocument", "book_key", "check_book", "read_rate_book", "refresh_rate_book", "same_book", "saved_book"]
-
-[[modules]]
-# What each provider's plan limits are, and the policy for the host's last good reading of them.
-# Pure. Light, loaded on the first limits read.
-path = "server.usage_limits"
-depends_on = ["vs_agent.api.usage_limits", "vs_proto"]
-
-[[interfaces]]
-from = ["server.usage_limits"]
-expose = ["LIMITS_FILE", "LIMITS_VERSION", "LimitsReader", "LimitsStore", "PROBE_TIMEOUT_S", "Settled", "account_limits", "collect", "decide", "settle"]
-
-[[modules]]
-# The host's last good reading of each provider's limits in `limits.pb`, and its wiring of the
-# policy to the usage state directory and the provider CLIs. Light, loaded on the first limits read.
-path = "server.usage_limits_store"
-depends_on = ["server.host_agent_logins", "server.usage_limits", "vs_agent.api.usage_limits", "vs_project", "vs_proto"]
-
-[[interfaces]]
-from = ["server.usage_limits_store"]
-expose = ["FileLimitsStore", "read_here", "reader_here"]
-
-[[modules]]
-# A person's own CLI use on a host: the provider transcripts, read incrementally into a cache.
-# Light, loaded on the first usage read.
-path = "server.usage_transcripts"
-depends_on = ["server.usage_outside", "server.usage_rollup", "vs_agent.api.usage_transcripts", "vs_project", "vs_proto"]
-
-[[interfaces]]
-from = ["server.usage_transcripts"]
-expose = ["OutsideScan", "RETENTION", "RootReport", "SCAN_FILE", "SCAN_VERSION", "TRANSCRIPT_BUDGET_BYTES", "scan_transcripts"]
-
-[[modules]]
-# Reading a host's usage from disk: the journals behind the rollups and the byte budget that
-# bounds a read. Light, loaded on the first usage read.
-path = "server.usage_scan"
-depends_on = ["server.host_api", "server.run_digest", "server.run_summary", "server.run_summary_cache", "server.usage_outside", "server.usage_pricing", "server.usage_rollup", "server.usage_summary", "server.usage_transcripts", "vs_project", "vs_proto", "vs_sim.api"]
-
-[[interfaces]]
-from = ["server.usage_scan"]
-expose = ["COLD_BUDGET_BYTES", "CollectedRuns", "FilePriceBook", "FileRollupStore", "JsonlUsageJournal", "ProtoRateStore", "RATES_REFRESH_TIMEOUT_S", "UsageProjects", "collect_runs", "refresh_rates", "save_prices", "HttpsFetcher", "source_identity", "stored_pricing", "usage_directory", "usage_summary"]
-
-[[modules]]
-# A run's digest (ideas, best ratio, duration, ending) folded from its journal in one pass.
-# Light: the record contracts and the decoder only.
-path = "server.run_digest"
-depends_on = ["vs_proto", "vs_decode.api", "server.host_api", "server.host_run_dashboard", "server.host_run_summary"]
-
-[[modules]]
-# The host helper's interfaces on a real host: projects, directories, launches, the checkout.
-path = "server.host_helper_os"
-depends_on = ["server.run_digest_store", "vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "server.host_task_goal", "server", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api", "server.host_run_reads"]
-
-[[modules]]
-# A run's summary: the fold of its journal that the run level shows, as a pure read model.
-# Light: the standard library and the helper contracts.
-path = "server.run_summary"
-depends_on = ["server.host_run_summary", "server.run_usage", "vs_redaction.api"]
-
-[[modules]]
-# A run's usage records: the journal's turns joined to their executions, as a pure projection.
-# Light: Pydantic and the helper contracts.
-path = "server.run_usage"
-depends_on = ["server.host_run_summary"]
-
-[[modules]]
-# The run summary's cache beside the journal: restore, extend and keep it. Light.
-path = "server.run_summary_cache"
-depends_on = ["server.host_run_summary", "server.run_summary", "server.run_usage", "vs_project", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys"
@@ -422,7 +98,6 @@ depends_on = []
 
 [[modules]]
 # The narrow public facade over core (see the vibesys.api boundary plan): the
-# only vibesys.* module entrypoints/server are meant to import once later
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
@@ -702,21 +377,18 @@ depends_on = ["vs_decode.api", "vs_sandbox", "vs_project", "vs_prompts", "vs_mcp
 
 [[modules]]
 # The Usage screen's one door to agentshim's price list and cost arithmetic. Its only importer is
-# `server.usage_pricing`: no recorded cost can be computed from a list price without this edge.
 path = "vs_agent.api.usage_pricing"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 # A person's own CLI use on a host, read from the transcripts the provider CLIs keep. Its only
-# importer is `server.usage_transcripts`.
 path = "vs_agent.api.usage_transcripts"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
 # A provider account's plan limits, read on request through agentshim. Its only importers are
-# `server.usage_limits` and `server.usage_limits_store` (the host's policy and its stored copy) and the agent library's own fake.
 path = "vs_agent.api.usage_limits"
 layer = "prompts_and_lower_libs"
 depends_on = []
@@ -1007,8 +679,8 @@ layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.depth", "vs_sim.exit_wait_contracts", "vs_sim.fake_byte_source", "vs_sim.fake_piped_process", "vs_sim.fake_process_table", "vs_sim.fake_signal_relay", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.hostile_input", "vs_sim.manual", "vs_sim.output_contracts", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.signal_relay_contracts", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
 # Durable log streams for humans. Layer `logs`, above every library, so no library can
-# import it. `vs_logs.api` (the writer) is open to the product; `vs_logs.read` only to
-# the host helper (`server.host_helper_os`; see the [[interfaces]] entries), so nothing else reads logs back.
+# import it. `vs_logs.api` (the writer) is open to the product; `vs_logs.read` has no
+# product importer and remains covered by library contract tests.
 [[modules]]
 path = "vs_logs"
 layer = "logs"
@@ -1321,7 +993,6 @@ from = ["vs_prompts"]
 
 [[interfaces]]
 # `cpu_profilers` is the standard-library-only leaf the in-container linux-cpu profiler
-# server imports; `vs_runtime.api` pulls in the whole run runtime.
 expose = ["api", "api\\..*", "cpu_profilers"]
 from = ["vs_runtime"]
 
@@ -1363,7 +1034,7 @@ from = ["vs_logs"]
 [[interfaces]]
 expose = ["read", "read\\.[A-Za-z_]+"]
 from = ["vs_logs"]
-visibility = ["server.host_helper", "server.host_helper_os"]
+visibility = []
 
 [[interfaces]]
 expose = ["NARRATION_COMMAND", "RUN_LOG_OWNER", "TOOL_BUILD_COMMAND", "UNAVAILABLE_LIMITS", "open_run_log_store", "open_run_logs", "stage_output_opener", "startup_output_opener", "tool_build_name", "tool_build_output_opener"]
@@ -2123,14 +1794,6 @@ from = ["vs_runlog"]
 expose = ["api", "api\\..*"]
 
 [[modules]]
-path = "vibesys.api.transport"
-depends_on = ["vibesys.run"]
-
-[[interfaces]]
-from = ["vibesys.api.transport"]
-expose = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run", "convert_runs", "iter_conversions"]
-
-[[modules]]
 path = "vibesys.records"
 depends_on = ["vibesys", "vibesys.search_spans", "vs_core", "vs_decode.api", "vs_proto"]
 
@@ -2145,15 +1808,6 @@ depends_on = ["vibesys", "vibesys.records", "vs_decode.api", "vs_runlog", "vs_pr
 [[interfaces]]
 from = ["vibesys.run.runlog_tee"]
 expose = ["RunLogTee", "JOURNAL_EVENT_MAX_BYTES"]
-
-[[modules]]
-path = "vibesys.api.host"
-layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.api.host_terminate", "vibesys.api", "vibesys.api.chat", "vibesys.api.host_relaunch", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
-
-[[interfaces]]
-from = ["vibesys.api.host"]
-expose = ["host_call", "terminate_host"]
 
 [[modules]]
 path = "vs_core._generated"
@@ -2197,15 +1851,6 @@ depends_on = ["vibesys.chat"]
 [[interfaces]]
 from = ["vibesys.api.chat"]
 expose = ["ChatRuntime", "ChatSession", "SessionAction", "SessionLifecycle", "create_session", "import_legacy_chat", "run_head"]
-
-[[modules]]
-path = "vibesys.api.host_relaunch"
-layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.api", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
-
-[[interfaces]]
-from = ["vibesys.api.host_relaunch"]
-expose = ["relaunch_host"]
 
 [[modules]]
 path = "vs_core._revision_ref"
@@ -2257,129 +1902,7 @@ expose = ["RetainedReadLimits", "read_run_facts"]
 path = "vibesys.api.importing"
 depends_on = ["vibesys.fact_import", "vibesys.fact_import.reader"]
 
-[[modules]]
-path = "vibesys.api.host_operations"
-depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._frames", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start", "vibesys.api.host_operations._usage_prices"]
-
-[[interfaces]]
-# One module per family of host operations, so a process imports only the family it serves:
-# `reads` (registered reads), `saved_runs` (the run-listing stream), `candidate` (candidate
-# inspection) and `api` (the admitted workflows).
-from = ["vibesys.api.host_operations"]
-expose = ["api", "api\\..*", "reads", "saved_runs", "candidate"]
 
 [[modules]]
-path = "vibesys.api.host_operations._candidate"
-depends_on = ["vs_proto", "vs_project"]
-
-[[modules]]
-path = "vibesys.api.host_operations._handlers"
-depends_on = ["vs_proto", "vibesys.api.host_operations._reads"]
-
-[[modules]]
-path = "vibesys.api.host_operations._frames"
-depends_on = []
-
-[[modules]]
-path = "vibesys.api.host_operations._login"
-depends_on = ["vs_proto", "vibesys.api.host_operations._frames"]
-
-[[modules]]
-path = "vibesys.api.host_operations._start"
-depends_on = ["vs_proto", "vs_project"]
-
-[[modules]]
-path = "vibesys.api.host_operations._compute"
-depends_on = ["vs_proto", "vs_project"]
-
-[[modules]]
-path = "vibesys.api.host_operations._usage_prices"
-depends_on = ["vs_proto", "vs_project"]
-
-[[modules]]
-path = "vibesys.api.host_operations._project"
-depends_on = ["vs_proto", "vs_project"]
-
-[[modules]]
-path = "vibesys.api.host_operations._reads"
-depends_on = ["vs_proto"]
-
-[[modules]]
-path = "server.host_operation_types_generated"
-depends_on = ["server.host_api", "vs_proto"]
-
-[[interfaces]]
-from = ["server.host_operation_types_generated"]
-expose = ["is_registry_read", "RegistryReadRequest", "UnmigratedHelperRequest"]
-
-[[modules]]
-path = "server.host_compatibility_generated"
-depends_on = []
-
-[[interfaces]]
-from = ["server.host_compatibility_generated"]
-expose = ["MIN_CHECKOUT_VERSION"]
-
-[[modules]]
-path = "server.host_saved_runs"
-depends_on = ["server.host_run_reads", "vibesys.api.transport", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
-
-[[interfaces]]
-from = ["server.host_saved_runs"]
-expose = ["saved_run_rows"]
-
-[[modules]]
-path = "vibesys.api.host_terminate"
-layer = "prompts_and_lower_libs"
-depends_on = ["vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
-
-[[interfaces]]
-from = ["vibesys.api.host_terminate"]
-expose = ["pause_now", "serve_terminate", "terminate_run"]
-
-[[modules]]
-path = "server.host_operation_reads"
-depends_on = ["server.usage_pricing", "server.usage_scan", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_machine_facts", "vs_proto", "vibesys.api.host_operations", "server.host_run_reads", "server.host_run_wire", "server.host_run_summary", "server.host_saved_runs", "server", "server.registry", "server.run_summary", "vs_sim.api", "server.usage_limits", "server.usage_limits_store", "vs_agent.api.usage_limits"]
-
-[[interfaces]]
-from = ["server.host_operation_reads"]
-expose = ["HostReadFacts", "HostReadSource", "ReadRefusedError", "read_failure_category", "answer_registered_read"]
-
-[[modules]]
-# The reads of a project's runs (listing, digests), shared by the helper's runs.list and the
-# registered ListRunDigests. Light, like the helper.
-path = "server.host_run_reads"
-depends_on = ["server.host_api", "server.host_envelope", "server.host_examples", "server.host_run_dashboard", "server.host_run_summary", "server.registry", "server.run_digest", "server.run_summary", "vs_sim.api"]
-
-[[interfaces]]
-from = ["server.host_run_reads"]
-expose = ["ProjectRun", "RunProjects", "RunFacts", "run_summaries", "project_runs", "named_run_digests"]
-
-[[modules]]
-# The run digests restated as the registered read's message.
-path = "server.host_run_wire"
-depends_on = ["server.host_api", "server.host_run_dashboard", "vs_proto"]
-
-[[interfaces]]
-from = ["server.host_run_wire"]
-expose = ["digests_response"]
-
-[[interfaces]]
-from = ["server.host_compute_runtime"]
-expose = ["MachineCompute", "ConfigFiles", "OsConfigFiles", "CONFIG_DIRECTORY", "COMPUTE_FILE", "SLURM_FILE", "parse_sinfo", "accelerator_of_gpu_model", "render_toml", "remote_command"]
-
-[[interfaces]]
-from = ["server.host_slurm"]
-expose = ["slurm_config_of", "operator_document", "operator_cluster"]
-
-[[interfaces]]
-from = ["server.host_agent_logins"]
-expose = ["AccountLogin", "AgentLibraryLogins", "AgentLogin", "AgentLoginsListReply", "AgentLoginsListRequest", "AgentLoginsStartReply", "AgentLoginsStartRequest", "ApiKeyLogin", "HeldLogin", "LoginBounds", "LoginHow", "LoginStartResult", "LoginStarted", "LoginStarter", "LoginState", "LoginUnavailable", "LoginUnavailableReason", "harness_binaries", "host_logins", "launch_environment", "login_instruction"]
-
-[[modules]]
-path = "server.run_digest_store"
-depends_on = ["server.host_api", "server.run_digest", "vs_proto", "vs_runlog"]
-
-[[interfaces]]
-from = ["server.run_digest_store"]
-expose = ["read_digest"]
+path = "vibesys.api.transport"
+depends_on = ["vibesys.run"]

@@ -5,13 +5,13 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 import yaml
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from scripts import delegated_merge
 from scripts.delegated_merge import (
@@ -282,8 +282,10 @@ def _pull(**changes: object) -> dict[str, object]:
     return values
 
 
-def test_checked_in_policy_loads_and_hard_denies() -> None:
-    policy = load_policy()
+def test_fixture_policy_hard_denies_controlled_paths(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policy.toml"
+    policy_path.write_text(_policy_toml())
+    policy = load_policy(policy_path)
     controlled_paths = delegated_merge.HARD_DENIED_PATHS | {
         f".github/workflows/{check.workflow_file}" for check in policy.checks.values()
     }
@@ -304,24 +306,32 @@ def test_checked_in_policy_names_one_existing_job_for_every_check() -> None:
         assert len(matching_jobs) == 1, (check, workflow_path)
 
 
-@pytest.mark.parametrize(
-    "filename", ["clients/libs/ui/src/index.ts", "clients/libs/transport/src/index.ts"]
-)
-def test_checked_in_policy_grants_no_client_paths(filename: str) -> None:
-    policy = load_policy()
-    assert "clients" not in policy.capabilities
-    with pytest.raises(MergeRefusalError, match="does not match"):
+@given(filename=st.text(min_size=1, max_size=80))
+@example(filename=".github/workflows/test.yml")
+def test_an_empty_capability_table_refuses_every_pr(filename: str) -> None:
+    policy = replace(_policy(), capabilities={})
+    with pytest.raises(MergeRefusalError, match="capabilities table is empty"):
         authorize_files([[{"filename": filename}]], changed_files=1, policy=policy)
 
 
-@pytest.mark.parametrize(
-    "filename", ["docs/contributing/other.md", "docs/contributing/desktop-conventions.md"]
-)
-def test_checked_in_policy_keeps_other_contributing_docs_out_of_scope(filename: str) -> None:
-    policy = load_policy()
+def test_an_explicit_empty_capability_table_loads_and_grants_nothing(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policy.toml"
+    policy_path.write_text(_policy_toml().split("[capabilities.core]", 1)[0] + "[capabilities]\n")
+    policy = load_policy(policy_path)
+    assert not policy.capabilities
+    with pytest.raises(MergeRefusalError, match="capabilities table is empty"):
+        authorize_files([[{"filename": "owned/core/events.py"}]], changed_files=1, policy=policy)
 
+
+def test_a_populated_fixture_table_keeps_its_scope_and_required_checks(tmp_path: Path) -> None:
+    policy_path = tmp_path / "policy.toml"
+    policy_path.write_text(_policy_toml())
+    policy = load_policy(policy_path)
+    assert authorize_files(
+        [[{"filename": "owned/core/events.py"}]], changed_files=1, policy=policy
+    ) == (frozenset({"core"}), frozenset({"pr-ci"}))
     with pytest.raises(MergeRefusalError, match="does not match"):
-        authorize_files([[{"filename": filename}]], changed_files=1, policy=policy)
+        authorize_files([[{"filename": "unowned/file.py"}]], changed_files=1, policy=policy)
 
 
 @pytest.mark.parametrize(
@@ -672,6 +682,17 @@ def _write_event(path: Path) -> None:
             }
         )
     )
+
+
+def test_checked_in_empty_policy_refuses_before_reading_or_landing_a_pr(tmp_path: Path) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path)
+    api = FakeGitHubAPI()
+    with pytest.raises(MergeRefusalError, match="capabilities table is empty"):
+        run(event_path, api=api, landing_api=api)
+    assert api.pull_reads == 0
+    assert api.graphql_calls == []
+    assert api.writes == []
 
 
 def _use_test_policy(monkeypatch: pytest.MonkeyPatch) -> None:

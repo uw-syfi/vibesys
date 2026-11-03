@@ -28,10 +28,7 @@ profile_directory = "build/dev/profile"
 app_hosts_files = ["~/app/hosts.json"]
 ship_ref = "refs/dev/head"
 sync_command = ["uv", "sync"]
-helper_command = ["uv", "run", "helper"]
 path_directories = ["$HOME/.local/bin"]
-hello_seconds = 10
-hello_poll_seconds = 3
 `
 
 // fakeClock advances only when slept on, so waits cost no real time.
@@ -130,8 +127,6 @@ func baseFiles() map[string]string {
 	}
 }
 
-const helloAt = `{"type":"hello","request_id":"dev-1","protocol_version":1,"features":[],"vibesys_version":"0.1.1","checkout":{"root":"/srv/v","commit":"%s","dirty":false}}` + "\n"
-
 func TestLocalColdThenWarm(t *testing.T) {
 	files := baseFiles()
 	delete(files, "clients/node_modules")
@@ -184,15 +179,14 @@ func machineRules(branchHead, dirty string, extra ...rule) []rule {
 	}, extra...)
 }
 
-func TestMachineShipsSyncsAndWaitsForHello(t *testing.T) {
+func TestMachineShipsSyncsAndOpensApp(t *testing.T) {
 	h := newHarness(t, baseFiles(), machineRules("oldhead", "0",
-		rule{contains: "'uv' 'run' 'helper'", out: fmt.Sprintf(helloAt, "newhead")},
 		rule{contains: "'checkout'", cost: 2 * time.Second},
 	)...)
 	if err := Run(h.env, h.cfg, Options{Machine: "host-a"}); err != nil {
 		t.Fatal(err)
 	}
-	order := []string{"push --force --quiet ssh://host-a/srv/v HEAD:refs/dev/head", "'--detach'", "'uv' 'sync'", "'uv' 'run' 'helper'"}
+	order := []string{"push --force --quiet ssh://host-a/srv/v HEAD:refs/dev/head", "'--detach'", "'uv' 'sync'"}
 	at := 0
 	for _, want := range order {
 		found := false
@@ -212,7 +206,7 @@ func TestMachineShipsSyncsAndWaitsForHello(t *testing.T) {
 }
 
 func TestMachineAlreadyAtHeadShipsNothing(t *testing.T) {
-	h := newHarness(t, baseFiles(), machineRules("newhead", "0", rule{contains: "'uv' 'run' 'helper'", out: fmt.Sprintf(helloAt, "newhead")})...)
+	h := newHarness(t, baseFiles(), machineRules("newhead", "0")...)
 	if err := Run(h.env, h.cfg, Options{Machine: "host-a"}); err != nil {
 		t.Fatal(err)
 	}
@@ -239,23 +233,6 @@ func TestMachineRefusalsRunNothingMutating(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestHelloTimeoutNamesStepAndWhatWasSeen(t *testing.T) {
-	h := newHarness(t, baseFiles(), machineRules("oldhead", "0",
-		rule{contains: "'uv' 'run' 'helper'", out: fmt.Sprintf(helloAt, "stale")})...)
-	err := Run(h.env, h.cfg, Options{Machine: "host-a"})
-	if err == nil {
-		t.Fatal("a helper that never reports the shipped commit must fail")
-	}
-	for _, want := range []string{"start the machine's helper", "newhead", "within 10s", "commit stale"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q lacks %q", err, want)
-		}
-	}
-	if h.runner.ran("electron") {
-		t.Fatal("the app must not open after a failed step")
 	}
 }
 

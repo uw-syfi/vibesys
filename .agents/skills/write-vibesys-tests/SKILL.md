@@ -70,7 +70,7 @@ conformance corpus.
    through the shared golden helper. Which golden covers which prompt, and how
    to update one, is in the `write-agent-prompt` skill's goldens reference.
    Protocol changes extend the shared conformance corpus, and
-   `test_every_event_kind_has_exactly_one_fixture_and_no_fixture_is_unknown`
+   `test_gateway_conversion_fixture_regenerates_identically`
    fails when an event kind lacks a fixture.
 8. **Never print a full diff of a large golden.** pytest's diff of two stale
    300 KB replays took 223 to 803 s under `-v` and cancelled a shard. The
@@ -143,5 +143,5 @@ conformance corpus.
 - The CI test workflow: shards, wall-time thresholds, and which jobs run.
 - [testing-map.md](../../../docs/contributing/testing-map.md): the layers and
   where a new test goes.
-- The wire-protocol conformance corpus and its readers, described in
-  [wire-protocol.md](../../../docs/contributing/wire-protocol.md).
+- The retained conformance fixtures and their consumers, described in
+  [references/typescript.md](references/typescript.md).

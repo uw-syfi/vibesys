@@ -146,21 +146,6 @@ files = [
 ]
 
 [[components]]
-id = "server_protocol"
-files = ["src/server/api/schema.py", "src/server/events.py", "src/server/api/protocol.py", "src/server/controller.py", "src/server/diagnostics.py", ]
-
-[[components]]
-id = "server_transport"
-# The browser e2e suite is the only check that the served bundle still loads and
-# still reaches the gateway, so a transport change has to select the `clients` job.
-# Covers the directory rather than `websocket.py` alone: the framing in
-# `unix_jsonl.py` and the fan-out in `subscriptions.py` are equally observable
-# from a client.
-roots = ["src/server/transport"]
-
-# The clients build their protocol bindings (`clients/libs/proto`, `clients/libs/orchestrator-proto`)
-# from the schemas, so a schema change has to select the `clients` job.
-[[components]]
 id = "client_protocol"
 roots = ["proto/vibesys"]
 
@@ -169,7 +154,7 @@ id = "clients"
 class = "manual"
 job = "clients"
 root = "clients"
-depends_on = ["server_protocol", "server_transport", "client_protocol", "bun_fetcher"]
+depends_on = ["client_protocol", "bun_fetcher"]
 
 [[components]]
 id = "stitch"

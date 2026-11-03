@@ -180,8 +180,7 @@ workspace and placed at their declared paths in the checkouts where the check
 and the measure run, which receive their workspace-relative paths, `:`-joined,
 in `VIBESYS_CANDIDATE_OUTPUTS`. A commit is built once: a later stage or
 measurement of the same commit reuses its build. A task whose evaluator requires
-outputs but declares no build fails `vibesys preflight` and the desktop app's
-New run check. The build needs agent confinement, so the host run environment
+outputs but declares no build is rejected by run validation. The build needs agent confinement, so the host run environment
 refuses it, and the Slurm evaluation executor does not run build stages yet (#2968).
 
 For trusted serving captures, also declare a bundle-owned diagnostic workload:
@@ -362,9 +361,8 @@ vibesys --task spsc
 to run. The destination must be absent or an empty directory, outside the
 checkout. An example registered with `external_repo = true` is cloned from its
 repository at the commit the checkout pins instead. A unique last path
-component (`stack`) also selects an example. `vibesys example list --json`
-prints one `ExampleList` document (`entrypoints.example_catalog`), which the
-desktop app reads.
+component (`stack`) also selects an example. `vibesys example list` prints a
+text listing grouped by category; the legacy JSON listing is removed.
 
 ## Container Topologies
 
@@ -431,7 +429,7 @@ A run takes its backend from the task, never from the CLI's default:
 - Several declared, in preference order: the run uses the first this host
   provides (`cuda` needs an NVIDIA GPU, `rocm` a `/dev/kfd`, `trainium` Neuron
   devices, `metal` Apple Silicon; `cpu` always). When the host provides none, the first
-  is kept and `vibesys preflight` fails naming the task and that backend.
+  is kept for run validation.
 - `--backend NAME` overrides the choice and must be one the task declares, else
   the run is refused before it starts.
 - A task that declares none (written before backends were declared) falls back,
@@ -442,10 +440,7 @@ A run takes its backend from the task, never from the CLI's default:
   are given. Every bundled example declares its backends
   (`tests/examples/test_example_registry.py`).
 
-`vibesys preflight` (and the desktop app's Ready to start checks) fail when the
-host cannot provide the backend the run resolved to, reporting a typed fact (the
-task, the backend and the declared set) that the CLI words with `--backend` and
-the app words for its own controls.
+
 
 ## Task Layout Only
 
@@ -684,8 +679,7 @@ under `.vibesys/tasks/` are easier to review for projects maintained by people.
 - `vibesys --headless` remains accepted for command compatibility.
 - `vibesys validate [PROJECT] --task NAME` checks the static task contract
   without starting an agent or executing the checker and benchmark.
-- `vibesys tasks [PROJECT] [--json]` lists the tasks a project defines.
-- `vibesys example list [--json]` and `vibesys example new EXAMPLE DEST` list the
+- `vibesys example list` and `vibesys example new EXAMPLE DEST` list the
   example catalog and copy an example into a new project.
 
 

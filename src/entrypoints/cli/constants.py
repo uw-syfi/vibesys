@@ -35,3 +35,14 @@ _STANDALONE_INPUT_DESTS = (
     "input_evaluator_dir",
     "input_evaluator_source",
 )
+
+CLI_PROVIDER_FLAG = "--cli-provider"
+LOCAL_FLAG = "--local"
+MAX_RUN_SECONDS_FLAG = "--max-run-seconds"
+MODEL_FLAG = "--model"
+PUBLISH_FLAG = "--publish"
+REPO_FLAG = "--repo"
+ROLE_MODEL_FLAG = "--role-model"
+ROLE_PROVIDER_FLAG = "--role-provider"
+ROLE_REASONING_EFFORT_FLAG = "--role-reasoning-effort"
+UNVETTED_MODEL_FLAG = "--allow-unvetted-model"

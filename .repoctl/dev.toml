@@ -32,9 +32,5 @@ app_hosts_files = ["~/Library/Application Support/VibeSys/hosts.json", "~/.confi
 # Ref on the machine that receives HEAD; the checkout is then switched to that commit, detached.
 ship_ref = "refs/vibesys-dev/head"
 sync_command = ["uv", "sync"]
-# The command of the app's ssh exec channel (`desktop-connection.md`, "Bootstrap"), run in the checkout.
-helper_command = ["uv", "run", "--no-sync", "python", "-I", "-m", "entrypoints.host_helper"]
 # Where `uv` lives when the non-interactive ssh shell does not have it on PATH.
 path_directories = ["$HOME/.local/bin", "$HOME/.cargo/bin", "/opt/homebrew/bin", "/usr/local/bin"]
-hello_seconds = 60
-hello_poll_seconds = 3

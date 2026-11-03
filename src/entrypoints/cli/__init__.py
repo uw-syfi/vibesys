@@ -1,9 +1,6 @@
 """Shared VibeSys CLI: argument parsing and ``RunRequest`` building.
 
-Both the headless mode entry (``entrypoints.headless``) and the frontend
-server entry (``entrypoints.server``) build their run configuration through
-this package. Neither mode-entry module reaches into the other's internals;
-this package is the shared surface between them.
+The headless entry builds its run configuration through this package.
 
 The loop is picked by ``--outer-loop {agent, profile-guided, plain, evolve}``:
 
@@ -67,7 +64,6 @@ from entrypoints.cli.loops import (
     _validate_plain,
     validated_run_request,
 )
-from entrypoints.cli.preflight import run_preflight
 from entrypoints.cli.resume import (
     _load_resume_selection,
     _recorded_cli_selection,
@@ -286,9 +282,6 @@ def dispatch(argv: list[str], runs: Runs | None = None) -> None:
                 err=sys.stderr,
             )
         )
-    if argv and argv[0] == "preflight":
-        run_preflight(argv[1:], lambda arguments: parse_cli_invocation(arguments).args)
-        return
     with boot_trace.span("dispatch"), boot_trace.span("parse_cli_invocation"):
         invocation = parse_cli_invocation(argv)
     _run_request(invocation.args, runs)

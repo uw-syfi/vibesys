@@ -931,7 +931,7 @@ class MeasurementComparedData(EventPayload):
 
 
 class ComparisonStatus(StrEnum):
-    """What a run knows of one comparison baseline. Closed; mirrored by ``server.events``."""
+    """What a run knows of one comparison baseline, with a closed set of states."""
 
     MEASURED = "measured"
     FAILED = "failed"

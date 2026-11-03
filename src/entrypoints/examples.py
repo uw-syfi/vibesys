@@ -1,8 +1,6 @@
 """``vibesys example``: list the example catalog and start a project from an example.
 
-``vibesys example list [--json]`` prints every example in the checkout's
-``examples/registry.toml`` by category, with its tasks; ``--json`` prints one
-:class:`~entrypoints.example_catalog.ExampleList`.
+``vibesys example list`` prints the registered example names and tasks.
 
 ``vibesys example new EXAMPLE DEST`` copies the example's tracked files into
 ``DEST`` (absent or an empty directory), makes ``DEST`` a Git repository with
@@ -30,18 +28,13 @@ from entrypoints.example_catalog import (
     CatalogError,
     example_tasks,
     find_example,
-    list_examples,
     load_registry,
 )
-from server.host_api import HelperErrorCode
-from server.host_examples import CreatedProject, ExampleDestination, ProjectLookupError
 from vs_project.api import Git
 from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-
-    from server.host_examples import ExampleList
 
 
 class ExampleMaterializationError(Exception):
@@ -68,10 +61,6 @@ class ExampleMaterializer(Protocol):
 
     def clone_pinned(self, checkout: Path, example: PurePosixPath, destination: Path) -> None:
         """Clone the repository ``checkout`` pins as the submodule ``example``, at the pinned commit."""
-        ...
-
-    def repository_root(self, path: Path) -> Path | None:
-        """The root of the Git repository ``path`` is in, or ``None`` when it is in none."""
         ...
 
 
@@ -113,15 +102,6 @@ class GitExampleMaterializer:
         clone = ["clone", "--quiet", *(["--branch", branch] if branch else []), url]
         self._git(checkout, *clone, str(destination))
         self._git(destination, "checkout", "--quiet", "-B", branch or "vibesys", commit)
-
-    def repository_root(self, path: Path) -> Path | None:
-        """``git rev-parse --show-toplevel`` in ``path``; ``None`` outside any repository."""
-        try:
-            completed = self.git.run_text(("rev-parse", "--show-toplevel"), cwd=path)
-        except OSError:
-            return None
-        top = completed.stdout.strip()
-        return Path(top).resolve() if completed.returncode == 0 and top else None
 
     def _git(self, cwd: Path, *args: str) -> str:
         try:
@@ -185,10 +165,6 @@ class DestinationNestedError(DestinationError):
     """The destination lies inside the VibeSys checkout or another Git repository."""
 
 
-class NotNestedError(Exception):
-    """A folder to copy out is in no other Git repository; it can run where it is."""
-
-
 def new_example(
     checkout: Path, name: str, destination: Path, materializer: ExampleMaterializer
 ) -> NewProject:
@@ -218,67 +194,6 @@ def new_example(
     return NewProject(example=entry.name, destination=target, tasks=tasks)
 
 
-def example_destination(
-    checkout: Path, name: str, destination: Path
-) -> tuple[ExampleDestination, Path | None]:
-    """What :func:`new_example` would find at ``destination``, and the project there if it is one.
-
-    A project is the example's when its tasks are the example's; an example whose source is
-    another repository that is not fetched has none to compare, so nothing is its project.
-    """
-    root = checkout.expanduser().resolve()
-    entry = find_example(load_registry(root), name)
-    target = destination.expanduser().resolve()
-    if not target.exists() and not target.is_symlink():
-        return ExampleDestination.ABSENT, None
-    if not target.is_dir():
-        return ExampleDestination.OCCUPIED, None
-    if not any(target.iterdir()):
-        return ExampleDestination.EMPTY, None
-    wanted = example_tasks(root / entry.path)
-    try:
-        found = example_tasks(target)
-    except CatalogError:
-        found = ()
-    if wanted and found == wanted:
-        return ExampleDestination.EXAMPLE_PROJECT, target
-    return ExampleDestination.OCCUPIED, None
-
-
-def copy_out(source: Path, destination: Path, materializer: ExampleMaterializer) -> NewProject:
-    """Copy ``source``'s tracked files into their own new Git repository at ``destination``.
-
-    ``source`` must sit inside another repository (a project there cannot be its own
-    repository); ``destination`` must not exist, nor lie inside that repository. Nothing
-    is left behind on failure.
-    """
-    folder = source.expanduser().resolve()
-    if not folder.is_dir():
-        message = f"no folder to copy out at {folder}"
-        raise FileNotFoundError(message)
-    repository = materializer.repository_root(folder)
-    if repository is None or repository == folder:
-        message = f"{folder} is in no other Git repository; run it where it is"
-        raise NotNestedError(message)
-    target = destination.expanduser().resolve()
-    if target.exists() or target.is_symlink():
-        message = f"refusing to copy out to {target}: it exists"
-        raise DestinationExistsError(message)
-    if target.is_relative_to(repository):
-        message = f"refusing to copy out inside the repository {repository}: {target}"
-        raise DestinationNestedError(message)
-    relative = PurePosixPath(folder.relative_to(repository).as_posix())
-    try:
-        materializer.copy_tracked(
-            repository, relative, target, message=f"Copy {relative} out of {repository.name}"
-        )
-        tasks = example_tasks(target)
-    except BaseException:
-        _restore(target, existed=False)
-        raise
-    return NewProject(example=relative.as_posix(), destination=target, tasks=tasks)
-
-
 def _restore(target: Path, *, existed: bool) -> None:
     """Return ``target`` to absent, or to the empty directory it was."""
     if not target.exists():
@@ -293,96 +208,22 @@ def _restore(target: Path, *, existed: bool) -> None:
             child.unlink()
 
 
-@dataclass(frozen=True)
-class HelperExampleProjects:
-    """The host helper's ``ExampleProjects``: this checkout's catalog, through ``materializer``.
-
-    ``checkout`` is ``None`` for an installed distribution, which has no catalog.
-    """
-
-    checkout: Path | None
-    materializer: ExampleMaterializer
-
-    def list(self, *, with_catalogue: bool = False) -> ExampleList:
-        """Every catalogued example with its tasks, and with their catalogue facts if asked."""
-        root = self._catalog()
-        try:
-            return list_examples(root, with_task_details=with_catalogue)
-        except CatalogError as exc:
-            raise ProjectLookupError(
-                HelperErrorCode.EXAMPLES_UNAVAILABLE, str(root), str(exc)
-            ) from exc
-
-    def create(self, example: str, destination: Path) -> CreatedProject:
-        """Copy ``example`` into its own new Git repository at ``destination``."""
-        root = self._catalog()
-        try:
-            load_registry(root)
-        except CatalogError as exc:
-            raise ProjectLookupError(
-                HelperErrorCode.EXAMPLES_UNAVAILABLE, str(root), str(exc)
-            ) from exc
-        try:
-            project = new_example(root, example, destination, self.materializer)
-        except CatalogError as exc:
-            raise ProjectLookupError(HelperErrorCode.UNKNOWN_EXAMPLE, str(root), str(exc)) from exc
-        except (DestinationError, ExampleMaterializationError) as exc:
-            raise _lookup_error(exc, destination) from exc
-        return CreatedProject(project=str(project.destination), tasks=project.tasks)
-
-    def destination(self, example: str, destination: Path) -> tuple[ExampleDestination, str | None]:
-        """What :meth:`create` would find at ``destination``, and the project there if it is one."""
-        root = self._catalog()
-        try:
-            state, project = example_destination(root, example, destination)
-        except CatalogError as exc:
-            raise ProjectLookupError(HelperErrorCode.UNKNOWN_EXAMPLE, str(root), str(exc)) from exc
-        return state, None if project is None else str(project)
-
-    def copy_out(self, source: Path, destination: Path) -> CreatedProject:
-        """Copy ``source``'s tracked files into their own new Git repository at ``destination``."""
-        try:
-            project = copy_out(source, destination, self.materializer)
-        except FileNotFoundError as exc:
-            raise ProjectLookupError(HelperErrorCode.PATH_MISSING, str(source), str(exc)) from exc
-        except NotNestedError as exc:
-            raise ProjectLookupError(HelperErrorCode.NOT_NESTED, str(source), str(exc)) from exc
-        except (DestinationError, ExampleMaterializationError) as exc:
-            raise _lookup_error(exc, destination) from exc
-        return CreatedProject(project=str(project.destination), tasks=project.tasks)
-
-    def _catalog(self) -> Path:
-        if self.checkout is None:
-            message = "this VibeSys is an installed distribution, which has no example catalog"
-            raise ProjectLookupError(HelperErrorCode.EXAMPLES_UNAVAILABLE, "", message)
-        return self.checkout
-
-
-def _lookup_error(
-    error: DestinationError | ExampleMaterializationError, destination: Path
-) -> ProjectLookupError:
-    """The typed helper error for a refused destination or a failed copy, naming the destination."""
-    match error:
-        case DestinationExistsError():
-            code = HelperErrorCode.DESTINATION_EXISTS
-        case DestinationError():
-            code = HelperErrorCode.DESTINATION_NESTED
-        case ExampleMaterializationError():
-            code = HelperErrorCode.PROJECT_CREATE_FAILED
-    return ProjectLookupError(code, str(destination), str(error))
-
-
-def format_examples(listing: ExampleList) -> str:
-    """Render the catalog for a terminal: categories, then one example per line with its tasks."""
-    lines: list[str] = []
-    width = max((len(example.name) for example in listing.examples), default=0)
+def format_examples(checkout: Path) -> str:
+    """Render the registry as category, example and task names."""
+    entries = sorted(
+        load_registry(checkout).example, key=lambda entry: (entry.category, entry.name)
+    )
+    width = max((len(entry.name) for entry in entries), default=0)
     category = None
-    for example in listing.examples:
-        if example.category != category:
-            category = example.category
+    lines: list[str] = []
+    for entry in entries:
+        if entry.category != category:
+            category = entry.category
             lines.append(f"{category}:")
-        tasks = ", ".join(example.tasks) or "(external repository, not fetched)"
-        lines.append(f"  {example.name:<{width}}  {tasks}")
+        tasks = ", ".join(example_tasks(checkout / entry.path))
+        if not tasks:
+            tasks = "(external repository, not fetched)" if entry.external_repo else "(no tasks)"
+        lines.append(f"  {entry.name:<{width}}  {tasks}")
     return "\n".join(lines) if lines else "The catalog has no examples."
 
 
@@ -398,8 +239,7 @@ def _parser() -> argparse.ArgumentParser:
         help="the VibeSys source checkout whose examples/ to use (default: this one)",
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    listing = commands.add_parser("list", help="list examples by category with their tasks")
-    listing.add_argument("--json", action="store_true", help="print one JSON document")
+    commands.add_parser("list", help="list examples by category with their tasks")
     new = commands.add_parser("new", help="copy an example into a new Git repository")
     new.add_argument("example", help="the example name `vibesys example list` shows")
     new.add_argument("destination", type=Path, help="an absent or empty directory")
@@ -424,8 +264,7 @@ def run(
         root = cwd / root
     try:
         if args.command == "list":
-            listing = list_examples(root)
-            text = listing.model_dump_json() if args.json else format_examples(listing)
+            text = format_examples(root)
             return 0, text + "\n", ""
         destination = args.destination.expanduser()
         if not destination.is_absolute():

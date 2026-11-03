@@ -149,7 +149,7 @@ def sysbox_unavailable(probe: CommandProbe) -> str | None:
     """Why this host cannot run a docker-in-docker sandbox, asked through *probe*, or ``None``.
 
     The same decision :func:`require_sysbox_runtime` makes before a run builds its
-    image, so a check made ahead of the run (``vibesys preflight``) agrees with the
+    image, so startup validation agrees with the
     run and gives its message.
     """
     result = probe.run(RUNTIME_LISTING_COMMAND, timeout_seconds=_RUNTIME_PROBE_TIMEOUT_S)
