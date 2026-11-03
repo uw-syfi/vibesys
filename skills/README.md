@@ -1,7 +1,7 @@
 # Skills
 
-Everything in this directory is published as the `vibesys` plugin and as a set of Agent Skills,
-and nothing outside it is. Claude Code and Codex copy a plugin's source directory when they
+Everything in this directory is published as seven plugins and as a set of Agent Skills, and
+nothing outside it is. Claude Code and Codex copy a plugin's source directory when they
 install it, so a skill that lives elsewhere in the repository cannot reach a user.
 
 ## Install
@@ -10,16 +10,33 @@ Pick the tool you run. Each reads the same skills.
 
 | Tool | Install | Skill names |
 | --- | --- | --- |
-| Claude Code | `claude plugin marketplace add uw-syfi/vibesys`, then `claude plugin install vibesys@vibesys` | `vibesys:optimize` |
-| Codex | `codex plugin marketplace add uw-syfi/vibesys`, then `codex plugin add vibesys@vibesys` | `vibesys:optimize` |
+| Claude Code | `claude plugin marketplace add uw-syfi/vibesys`, then `claude plugin install <plugin>@vibesys` | `<plugin>:optimize` |
+| Codex | `codex plugin marketplace add uw-syfi/vibesys`, then `codex plugin add <plugin>@vibesys` | `<plugin>:optimize` |
 | Any agent, through [`npx skills`](https://github.com/vercel-labs/skills) | `npx skills add uw-syfi/vibesys/skills --skill '*' --agent <agent>` | `optimize` |
 
-Codex reads the `.claude-plugin/marketplace.json` described below, so the repository has one
-manifest for both. `npx skills` copies each skill into the chosen agent's skills directory
-(`.agents/skills/` for Codex; add `--global` for the user-level one), with no `vibesys:` prefix:
-read `vibesys:measure` in a skill as the skill `measure`. Give it the `/skills` path, as above,
-because the repository also holds developer skills in `.agents/skills/` that
-`npx skills add uw-syfi/vibesys` would offer too. `--list` shows what a command would install.
+Every plugin installs from the one source directory and differs only by the skills it lists:
+
+| Plugin | Skills |
+| --- | --- |
+| `vibesys` | the optimization loop (`search/`): install it first |
+| `vibesys-llm-serving` | `serving-systems` |
+| `vibesys-microservices` | `microservice-optimization` and the Tokio `dial9-*` skills |
+| `vibesys-database` | the Tokio `dial9-*` skills, which are listed in both `vibesys-database` and `vibesys-microservices` |
+| `vibesys-kernels-cuda` | `kernel-correctness`, `kernel-performance`, `kernel-ncu-analysis`, `kernel-timeline-analysis` |
+| `vibesys-kernels-rocm` | `kernel-correctness`, `kernel-performance`, `kernel-rocprof-analysis` |
+| `vibesys-kernels-trainium` | `kernel-correctness`, `kernel-performance`, the Neuron NKI pack |
+
+Install `vibesys` plus the domain plugin the task needs, chosen by the task's `[agent] domain` and
+`backends` (a Trainium LLM-serving task needs `vibesys-llm-serving` and `vibesys-kernels-trainium`);
+`optimize` stops with the install commands when one is missing. Skill names carry the plugin
+name, for example `vibesys-kernels-cuda:kernel-performance`. Codex reads the
+`.claude-plugin/marketplace.json` described below, so the repository has one manifest for both.
+`npx skills` copies each skill into the chosen agent's skills directory (`.agents/skills/` for
+Codex; add `--global` for the user-level one), with no plugin prefix: read
+`vibesys:measure` in a skill as the skill `measure`. It installs every skill at once, so the
+domain plugins do not apply. Give it the `/skills` path, as above, because the repository also
+holds developer skills in `.agents/skills/` that `npx skills add uw-syfi/vibesys` would offer too.
+`--list` shows what a command would install.
 
 The optimize loop needs a harness with subagents and background commands, git, and `vibesys-cli`,
 the standalone binary that measures, compares and promotes commits and stores the plans. Install
@@ -81,18 +98,24 @@ them is published.
 
 ## Manifest
 
-`.claude-plugin/marketplace.json` declares one plugin, `vibesys`, whose source is this
-directory. Claude Code and Codex install from it, and `npx skills` uses it to find the skills
-inside vendored packs. Its `skills` list is generated from the tree, and its `version` is set
-by hand: without one, every commit would look like a plugin update.
+`.claude-plugin/marketplace.json` declares the seven plugins above, each with the source `./skills`.
+Claude Code and Codex install from it, and `npx skills` uses it to find the skills inside vendored
+packs. Each plugin's `skills` list is generated from the tree and the plugin table in
+`scripts/published_skills/plugins.py`: a skill belongs to a plugin when its folder is, or lies
+under, one of the plugin's folders. A skill may be listed by several plugins (the kernel skills
+that no backend owns are listed by all three kernels plugins), but every skill must belong to at
+least one, and every folder in the table must match a skill. A `name`, `description`, `version`
+and `strict` are written by hand: without a `version`, every commit would look like a plugin
+update.
 
 ```bash
-python3 -m scripts.published_skills --write   # regenerate the skill list after adding or removing a skill
+python3 -m scripts.published_skills --write   # regenerate the skill lists after adding or removing a skill
 python3 -m scripts.published_skills           # what CI runs: manifest is current, every skill passes
 claude plugin validate .                      # Claude Code's own check of the manifest
 ```
 
-The check fails when the manifest differs from the tree, and when a skill breaks the
+The check fails when the manifest differs from the tree, when its plugin entries are not exactly
+the table's, and when a skill breaks the
 [Agent Skills specification](https://agentskills.io/specification) that all three tools read:
 a `name` that differs from its folder or is not lowercase letters, digits and single hyphens
 (at most 64 characters), a `description` over 1,024 characters, a `compatibility` over 500, a
@@ -104,8 +127,9 @@ byte-identical with upstream, are exempt from the tool-name rule and from the fi
 Neuron pack's `argument-hint` and `context` fields are Claude Code extensions that the
 specification's reference validator rejects.
 
-Bump the marketplace plugin version for every release that changes files under `skills/`
-including fixes to scripts and instructions. Use a patch bump for compatible
+Bump the version of each plugin whose listed skills changed, and only that plugin, for every
+release that changes files under `skills/`, including fixes to scripts and instructions. A change
+to a skill listed by several plugins bumps each of them. Use a patch bump for compatible
 fixes, a minor bump for new capabilities, and a major bump for incompatible contracts.
-The generator preserves this manually chosen release version; CI checks the generated list,
+The generator preserves these manually chosen versions; CI checks the generated lists,
 not release intent. Without a bump, installed Claude Code and Codex caches may retain the old payload.

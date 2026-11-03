@@ -18,12 +18,12 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Check the published surface, or with ``--write`` rewrite the manifest's skill list."""
+    """Check the published surface, or with ``--write`` rewrite the manifest's skill lists."""
     parser = argparse.ArgumentParser(
         prog="python3 -m scripts.published_skills", description=__doc__
     )
     parser.add_argument(
-        "--write", action="store_true", help="rewrite the manifest's skill list from the tree"
+        "--write", action="store_true", help="rewrite the manifest's skill lists from the tree"
     )
     args = parser.parse_args(argv)
     if args.write:

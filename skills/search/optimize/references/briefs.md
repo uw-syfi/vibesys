@@ -35,7 +35,8 @@ Rules:
 ```
 
 Domain skills: pick from the plugin's skill list those whose description fits the task's
-`[agent] domain` and `backends` in `vibesys.input.toml`. Give their full namespaced names.
+`[agent] domain` and `backends` in `vibesys.input.toml`. Give their full names, which carry the
+plugin name (`vibesys-kernels-cuda:kernel-performance`).
 
 ## Implement
 
