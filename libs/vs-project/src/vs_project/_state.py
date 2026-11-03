@@ -37,6 +37,7 @@ from pydantic import (
 import vs_project._paths as project_paths
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_project._control_inbox import FileControlInbox, validate_request_id
+from vs_project._fingerprint import _is_excluded, _update_fingerprint
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._layout import STATE_HOME_ENV as _STATE_HOME_ENV
 from vs_project._layout import (
@@ -52,6 +53,7 @@ from vs_project._manifests import (
     RunEnvironmentRecord,
     RunExecutionRecord,
 )
+from vs_project._retained import list_retained
 from vs_project._state_io import (
     STATE_DOCUMENT_MAX_BYTES,
     _atomic_write_model,
@@ -1082,11 +1084,6 @@ class ProjectState:
         self, run_id: str, *, local_namespace: str | None = None
     ) -> tuple[RetainedFile, ...]:
         """List originals with their sizes, without requiring today's manifest schema."""
-        # lint-waiver: LW-337002 [PLC0415]; hello never reads retained files.
-        # > An eager import exceeds the lightweight entrypoint module budget; a dynamic loader
-        # > hides this dependency from tach and adds indirection to its only caller.
-        from vs_project._retained import list_retained  # noqa: PLC0415
-
         if local_namespace is None:
             return list_retained(self._contained_run_dir(run_id))
         return list_retained(self._local_state_dir(run_id, local_namespace))
@@ -1100,11 +1097,6 @@ class ProjectState:
 
     def input_fingerprint(self) -> str:
         """Hash the portable project input, excluding metadata, secrets, and caches."""
-        # lint-waiver: LW-337001 [PLC0415]; hello never fingerprints project inputs.
-        # > An eager import exceeds the lightweight entrypoint module budget; a dynamic loader
-        # > hides this dependency from tach and adds indirection to its only caller.
-        from vs_project._fingerprint import _is_excluded, _update_fingerprint  # noqa: PLC0415
-
         digest = hashlib.sha256(b"vs-project-input-v1\0")
         paths = sorted(
             self.project_root.rglob("*"),

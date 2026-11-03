@@ -42,17 +42,16 @@ const feed = (bytes: Uint8Array, cuts: readonly number[]): Decoded | FrameFault 
 describe('gRPC framing', () => {
   it('accepts exactly 4 MiB and refuses one byte more in the shared decoder', () => {
     const limit = ORCHESTRATOR_MAX_MESSAGE_BYTES;
-    for (const size of [limit, limit + 1]) {
-      const frame = new Uint8Array(5 + size);
-      new DataView(frame.buffer).setUint32(1, size);
-      const result = decodeFrames(new Uint8Array(0), frame, limit);
-      if (size > limit) expect(result).toMatchObject({code: 8});
-      else {
-        expect(isFault(result)).toBe(false);
-        expect((result as Decoded).messages.map(message => message.length)).toEqual([limit]);
-        expect((result as Decoded).rest.length).toBe(0);
-      }
-    }
+    const frame = (size: number): Uint8Array => {
+      const bytes = new Uint8Array(5 + size);
+      new DataView(bytes.buffer).setUint32(1, size);
+      return bytes;
+    };
+    const result = decodeFrames(new Uint8Array(0), frame(limit), limit);
+    expect(isFault(result)).toBe(false);
+    expect((result as Decoded).messages.map(message => message.length)).toEqual([limit]);
+    expect((result as Decoded).rest.length).toBe(0);
+    expect(decodeFrames(new Uint8Array(0), frame(limit + 1), limit)).toMatchObject({code: 8});
   });
 
   it('reads back the messages written, however the bytes are cut into chunks', () => {

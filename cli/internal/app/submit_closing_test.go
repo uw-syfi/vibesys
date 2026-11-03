@@ -33,6 +33,7 @@ func (s closingSubmitStore) Submit(ctx context.Context, sub core.Submission) (co
 	}
 	return out, err
 }
+
 func TestSubmitReturnsDurableResultWhenTheAppCloses(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		w, o := newOutage(t)
