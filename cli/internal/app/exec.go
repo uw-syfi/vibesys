@@ -19,9 +19,10 @@ import (
 
 // startEffect starts carrying out one request of the machine. It is called by the loop, and what
 // the effect needs of the loop's maps is handed to it, because the effect runs beside the loop.
-// Every request is answered, whatever happens, unless the App closes: an unanswered request would
-// hold the machine for good. SignalCancel is answered only when it did not arrive, as the job's
-// outcome answers it otherwise.
+// Every request is answered unless the App closes. Replies for a retired generation
+// are dropped: the machine has already forgotten that store's requests. Otherwise an
+// unanswered request would hold the machine for good. SignalCancel is answered only
+// when it did not arrive, as the job's outcome answers it otherwise.
 func (a *App) startEffect(r lifecycle.Request, scopes map[lifecycle.StoreID]core.Scope, handles map[lifecycle.Ref]supervisor.Handle, generation *effectGeneration) {
 	ref, run := a.effectOf(r, scopes, handles)
 	ctx := context.WithValue(named(a.ctx, fmt.Sprintf("%T %s", r, ref)), generationKey{}, generation)

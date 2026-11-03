@@ -55,7 +55,8 @@ type App struct {
 // message is an event for the machine, with what the loop must keep because of it.
 type message struct {
 	event lifecycle.Event
-	// generation rejects effect replies from a store forgotten since the effect started.
+	// generation rejects replies from a store forgotten since the read or effect
+	// started. postEffect attaches the token captured in its context.
 	generation *effectGeneration
 	// scope, when set, is the scope of the store the event's job is in.
 	scope *core.Scope
