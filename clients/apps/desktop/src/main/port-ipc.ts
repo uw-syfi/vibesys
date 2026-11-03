@@ -4,8 +4,8 @@
  * ends (the port closing, a message on it, the sender destroyed, the page navigating), and is
  * answered with exactly one terminal reply, after which the port is closed.
  */
-import {gatewayEnd} from '@vibesys/ipc';
-import {grpcCode} from '@vibesys/transport';
+import {gatewayEnd} from '../core/gateway-codec.js';
+import {GatewayFailed, GrpcFailed, grpcCodeOf, LinkFailed} from './errors.js';
 
 /*
  * What the lifecycle uses of Electron, and no more: Electron's `IpcMain`, `IpcMainEvent` and
@@ -128,11 +128,11 @@ export function servePort(
 
 /** One terminal reply: the failure's text and, when the gateway refused the call, its gRPC status. */
 export function endOf(error?: unknown): Uint8Array {
-  const status = grpcCode(error);
+  const status = grpcCodeOf(error);
   const message =
     error === undefined
       ? undefined
-      : status !== undefined && error instanceof Error
+      : error instanceof GrpcFailed || error instanceof GatewayFailed || error instanceof LinkFailed
         ? error.message
         : String(error);
   return gatewayEnd(message, status);

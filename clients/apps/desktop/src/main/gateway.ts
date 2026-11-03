@@ -1,98 +1,38 @@
 /**
- * The gateway as the renderer reaches it: one port per call, authorized before anything is
- * provisioned or dialed, answered by `GatewayCalls` over one session per host. The app calls only
- * `OrchestratorService`, so no host-call or read configuration is applied.
+ * The gateway as the window reaches it: one port per call, authorized before anything is
+ * provisioned or dialed, answered by `GatewayCalls`. This is the one place a Promise-and-abort-signal
+ * world (the port lifecycle) meets the Effect world (the calls): `run` is the entry point's own
+ * runner, so no Effect is run from here.
  */
-import {arch, platform} from 'node:os';
-import {
-  type ConnectionManager,
-  GATEWAY_DIRECTORY,
-  GatewayCalls,
-  type GatewayDialer,
-  gatewayArtifact,
-  gatewayProcess,
-  gatewayTarget,
-  localGateway,
-  provisionGateway,
-  SshLink,
-} from '@vibesys/connection';
-import {type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
-import {GATEWAY_CHANNEL, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
-import type {ScheduleTimeout} from '@vibesys/transport';
+import * as Cause from 'effect/Cause';
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import {GATEWAY_CHANNEL, gatewayReply, parseGatewayRequest} from '../core/gateway-codec.js';
+import type {CallError, GatewayCalls} from './gateway-calls.js';
 import {type PortEvent, type PortIpc, servePort} from './port-ipc.js';
 
-/** How long a session started ahead of the first call waits for it: a slow window on a busy Mac. */
-const LOCAL_GATEWAY_WARM_MS = 15_000;
-
-export function createGatewayCalls(
-  manager: ConnectionManager,
-  resources: string,
-  schedule: ScheduleTimeout,
-  log: (message: string) => void,
-): GatewayCalls {
-  const calls = new GatewayCalls(
-    key => gatewayFor(key, manager, resources, schedule, line => log(`${key}: ${line}`)),
-    schedule,
-    (host, diagnostic) => log(`${host} gateway call failed: ${diagnostic}`),
-  );
-  manager.onDisposing(() => calls.close());
-  // This machine's gateway may have to be started, which takes 0.3 s, and the window needs about as
-  // long to load before its first call: start it now so that the two run side by side.
-  calls.warm(hostKey({kind: 'local'}), LOCAL_GATEWAY_WARM_MS);
-  return calls;
-}
+/** Run a call's effect to its exit; interrupting `signal` interrupts the effect. */
+export type RunCall = (
+  effect: Effect.Effect<void, CallError>,
+  signal: AbortSignal,
+) => Promise<Exit.Exit<void, CallError>>;
 
 export function installGatewayIpc(
   ipc: PortIpc,
-  {calls, admits}: {calls: GatewayCalls; admits: (event: PortEvent) => boolean},
+  {calls, admits, run}: {calls: GatewayCalls; admits: (event: PortEvent) => boolean; run: RunCall},
 ): void {
   servePort(ipc, GATEWAY_CHANNEL, admits, async (value, signal, send) => {
     const request = parseGatewayRequest(value);
     const receive = (bytes: Uint8Array): void => send(gatewayReply(bytes));
-    if (request.kind === 'unary')
-      receive(await calls.unary(request.host, request.method, request.bytes, signal));
-    else await calls.stream(request.host, request.method, request.bytes, signal, receive);
+    const call =
+      request.kind === 'unary'
+        ? Effect.map(calls.unary(request.host, request.method, request.bytes), receive)
+        : calls.stream(request.host, request.method, request.bytes, receive);
+    const exit = await run(call, signal);
+    if (Exit.isSuccess(exit)) return;
+    // The typed failure ends the call with its own words and status; an interruption (the window
+    // went away) has no one left to read it.
+    const failure = Cause.findErrorOption(exit.cause);
+    throw failure._tag === 'Some' ? failure.value : new Error('gateway caller cancelled');
   });
-}
-
-function gatewayFor(
-  key: HostKey,
-  manager: ConnectionManager,
-  resources: string,
-  schedule: ScheduleTimeout,
-  log: (line: string) => void,
-): GatewayDialer {
-  const host = hostFromKey(key);
-  return {
-    dial: async (signal, force) => {
-      if (host.kind === 'local')
-        return localGateway(resources, gatewayTarget(`${platform()} ${arch()}`), signal, schedule);
-      const lease = await manager.leaseLink(host);
-      try {
-        if (!(lease.link instanceof SshLink)) throw new Error('host has no SSH command link');
-        await lease.link.establish(false, signal);
-        await provisionGateway(
-          lease.link,
-          target => gatewayArtifact(resources, target),
-          force,
-          signal,
-          schedule,
-        );
-        if (signal.aborted) throw new Error('gateway dial cancelled');
-        const duplex = gatewayProcess(
-          lease.link.spawnCommand(`exec "$HOME/${GATEWAY_DIRECTORY}/vibesysd" connect`),
-          schedule,
-          log,
-          (code, tail) => lease.link.explain(code, tail, 'the gateway').message,
-        );
-        duplex.once('close', () => {
-          void lease.release();
-        });
-        return duplex;
-      } catch (error) {
-        await lease.release();
-        throw error;
-      }
-    },
-  };
 }

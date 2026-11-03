@@ -2,7 +2,7 @@
  * What the screens say. Every state, role and outcome is named here in plain words, so a screen
  * never shows a protocol name and a new value cannot reach the user unnamed.
  */
-import {roleName} from '@vibesys/contracts';
+import {roleName} from '@vibesys/display-names';
 import {
   AgentRole,
   AgentStatus,

@@ -1,10 +1,9 @@
 import {readFileSync} from 'node:fs';
 import {runInThisContext} from 'node:vm';
 import {expect, it} from '@effect/vitest';
-import type {GatewayPortBridge} from '@vibesys/ipc';
-import {GATEWAY_CHANNEL} from '@vibesys/ipc';
 import * as Schema from 'effect/Schema';
 import ts from 'typescript';
+import {GATEWAY_CHANNEL, type GatewayPortBridge} from '../core/gateway-codec.js';
 
 interface Preload {
   readonly GATEWAY_PRELOAD_CHANNEL: string;

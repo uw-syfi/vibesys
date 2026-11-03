@@ -1,25 +1,30 @@
 /**
- * Electron main process entry (`node` runtime): the composition root. It builds the connection
- * manager and the gateway calls, serves the gateway to the window over one MessagePort per call,
- * and opens the one window on the built UI with the hosts to read in its address. It calls no
- * `Effect.run*` of its own: the page owns every Effect program.
+ * Electron main process entry (`node` runtime): the composition root, and the one place the main
+ * process runs Effects. It builds the link pool, the gateway dialers and the gateway calls inside
+ * one scope that lives as long as the app, serves the gateway to the window over one MessagePort
+ * per call, and opens the one window on the built UI with the hosts to read in its address.
+ * Quitting closes the scope, which ends every call, gateway session and ssh master.
  */
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {
-  ConnectionManager,
-  controlDirectory,
-  installAskpass,
-  type Link,
-  LocalLink,
-  SshLink,
-} from '@vibesys/connection';
-import type {HostId} from '@vibesys/hosts';
-import {SettingsStore} from '@vibesys/settings';
-import type {ScheduleTimeout} from '@vibesys/transport';
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import * as Layer from 'effect/Layer';
+import * as Option from 'effect/Option';
+import * as Scope from 'effect/Scope';
 import {app, BrowserWindow, ipcMain, session, type WebContents} from 'electron';
-import {createGatewayCalls, installGatewayIpc} from './gateway.js';
+import {hostKey} from '../state/host.js';
+import {controlDirectory} from './control-directory.js';
+import {nodeReadFile} from './files.js';
+import {installGatewayIpc, type RunCall} from './gateway.js';
+import {NodeGatewayArtifacts} from './gateway-artifacts.js';
+import {makeGatewayCalls} from './gateway-calls.js';
+import {makeGatewayDialers} from './gateway-dialers.js';
+import {makeLinkPool} from './link-pool.js';
+import {NodeLocalHost} from './local-host.js';
 import {isOwnWindow, type PortEvent} from './port-ipc.js';
+import {NodeProcessSpawner} from './process.js';
+import {savedHosts} from './saved-hosts.js';
 import {hostsFromArgv, isAppPage, startupHosts, windowUrl} from './window-policy.js';
 
 /** `dist/renderer`: the built page, beside `dist/main`. */
@@ -29,6 +34,8 @@ const PRELOAD = fileURLToPath(new URL('../preload/index.cjs', import.meta.url));
 const GATEWAY_RESOURCES = fileURLToPath(new URL('../gateway/', import.meta.url));
 /** Where the app keeps its files; tests point it at a scratch directory. */
 const USER_DATA_ENV = 'VIBESYS_DESKTOP_USER_DATA';
+/** How long a session started ahead of the first call waits for it: a slow window on a busy Mac. */
+const LOCAL_GATEWAY_WARM = '15 seconds';
 /** How long quitting waits for the hosts to be released before exiting anyway. */
 const RELEASE_BOUND_MS = 5_000;
 
@@ -36,24 +43,42 @@ const log = (message: string): void => {
   console.error(`vibesys-desktop: ${message}`);
 };
 
-const realTimers: ScheduleTimeout = (callback, ms) => {
-  const timer = setTimeout(callback, ms);
-  return () => clearTimeout(timer);
-};
+/** Where the gateway's per-host logs go, with the host named. */
+const hostLog = (host: string, line: string): void => log(`${host}: ${line}`);
 
-async function connectionManager(): Promise<ConnectionManager> {
-  const controlPath = join(await controlDirectory(process.getuid?.() ?? 0), '%C');
-  const askpass = await installAskpass(join(app.getPath('userData'), 'askpass.sh'));
-  return new ConnectionManager({
-    linkFor: (host: HostId): Link =>
-      host.kind === 'local'
-        ? new LocalLink()
-        : new SshLink({alias: host.alias, controlPath, askpass, scheduleTimeout: realTimers}),
-    appVersion: app.getVersion(),
-    scheduleTimeout: realTimers,
-    log,
-  });
+/** The app's lifetime: everything the wiring opens ends when this closes. */
+const lifetime = Scope.makeUnsafe();
+
+/** What the app needs from the wiring once it is built. */
+async function wire(userData: string) {
+  const wiring = Effect.gen(function* () {
+    const controlPath = join(yield* controlDirectory(process.getuid?.() ?? 0), '%C');
+    const pool = yield* makeLinkPool(controlPath, log);
+    const dialers = yield* makeGatewayDialers(pool, hostLog);
+    const calls = yield* makeGatewayCalls(dialers, hostLog);
+    // This machine's gateway may have to be started, which takes 0.3 s, and the window needs about
+    // as long to load before its first call: start it now so that the two run side by side.
+    yield* calls.warm(hostKey({kind: 'local'}), LOCAL_GATEWAY_WARM);
+    const saved = yield* savedHosts(userData, nodeReadFile, log);
+    return {calls, saved};
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(NodeProcessSpawner, NodeLocalHost, NodeGatewayArtifacts(GATEWAY_RESOURCES)),
+    ),
+    Effect.provideService(Scope.Scope, lifetime),
+  );
+  return Effect.runPromise(wiring);
 }
+
+const run: RunCall = (effect, signal) => Effect.runPromiseExit(effect, {signal});
+
+/** End the app's lifetime, giving up on a host that does not release within the bound. */
+const release = (): Promise<void> =>
+  Effect.runPromise(
+    Scope.close(lifetime, Exit.void).pipe(Effect.timeoutOption(`${RELEASE_BOUND_MS} millis`)),
+  ).then(released => {
+    if (Option.isNone(released)) log('gave up waiting for the hosts to be released');
+  });
 
 /** Keep `contents` on the built page and refuse every new window and every network request. */
 function confine(contents: WebContents): void {
@@ -108,18 +133,11 @@ async function start(): Promise<void> {
   const asked = hostsFromArgv(process.argv);
   await app.whenReady();
   lockDownSession();
-  const manager = await connectionManager();
-  const settings = new SettingsStore({
-    settingsPath: join(app.getPath('userData'), 'hosts.json'),
-    recentPath: join(app.getPath('userData'), 'recent.json'),
-    preferencesPath: join(app.getPath('userData'), 'preferences.json'),
-    log,
-  });
-  const saved = Object.keys((await settings.hosts()).settings.hosts);
+  const {calls, saved} = await wire(app.getPath('userData'));
   const windows = new Set<number>();
-  const calls = createGatewayCalls(manager, GATEWAY_RESOURCES, realTimers, log);
   installGatewayIpc(ipcMain, {
     calls,
+    run,
     admits: (event: PortEvent) =>
       isOwnWindow(event, {
         has: id => windows.has(id),
@@ -127,7 +145,7 @@ async function start(): Promise<void> {
       }),
   });
   app.on('web-contents-created', (_event, contents) => confine(contents));
-  const window = openWindow(startupHosts(asked, saved));
+  const window = openWindow(startupHosts(asked, [...saved]));
   windows.add(window.webContents.id);
   window.on('closed', () => windows.delete(window.webContents.id));
   app.on('window-all-closed', () => app.quit());
@@ -136,8 +154,7 @@ async function start(): Promise<void> {
     if (releasing) return;
     releasing = true;
     event.preventDefault();
-    const bound = new Promise<void>(resolve => realTimers(resolve, RELEASE_BOUND_MS));
-    void Promise.race([manager[Symbol.asyncDispose](), bound]).finally(() => app.exit(0));
+    void release().finally(() => app.exit(0));
   });
 }
 

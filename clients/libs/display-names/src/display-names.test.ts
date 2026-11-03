@@ -1,6 +1,5 @@
-import {describe, it} from 'node:test';
+import {describe, expect, it} from 'bun:test';
 import {CODE_IDS, roleName, wordsOfId} from './display-names.js';
-import {expect} from './test-support/expect.js';
 
 describe('the catalog the backend declarations generate', () => {
   it('names every role id with words, not the id', () => {

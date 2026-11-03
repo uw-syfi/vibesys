@@ -2,13 +2,21 @@
  * Sandboxed preload (`preload` runtime): the page's only way out. It exposes `vibesysGateway`, a
  * byte-only bridge that opens one MessagePort to the main process per call and carries protobuf
  * bytes both ways; generated schemas and application state stay outside it. A sandboxed preload
- * cannot import local modules, so the channel name is repeated here (a test holds it to
- * `GATEWAY_CHANNEL` in `@vibesys/ipc`) and it loads only Electron at run time
- * (`preload-sandbox`); `@vibesys/ipc` is imported for types, which are erased.
+ * cannot import local modules, so the channel name and the bridge's shape are repeated here (a
+ * test holds the name to `GATEWAY_CHANNEL` and the shape to `GatewayPortBridge` in
+ * `core/gateway-codec.ts`) and it loads only Electron at run time (`preload-sandbox`).
  */
-import type {GatewayPortBridge} from '@vibesys/ipc';
 
-/** The channel main serves; it must equal `GATEWAY_CHANNEL` of `@vibesys/ipc`, which a test holds. */
+/** What the preload exposes on the window; `GatewayPortBridge` in `core/gateway-codec.ts` is the page's view of it. */
+interface GatewayPortBridge {
+  open(
+    request: Uint8Array,
+    receive: (reply: Uint8Array) => void,
+    failed: (error: string) => void,
+  ): {cancel(): void};
+}
+
+/** The channel main serves; it must equal `GATEWAY_CHANNEL` in `core/gateway-codec.ts`, which a test holds. */
 const GATEWAY_PRELOAD_CHANNEL = 'vibesys:gateway';
 
 /** The transferred channel, injectable without granting a preload more runtime imports. */

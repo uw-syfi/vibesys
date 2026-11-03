@@ -1,11 +1,5 @@
 /** `GatewayTransport` over the preload's gateway bridge: one MessagePort per call. */
 
-import {
-  decodeGatewayReply,
-  encodeGatewayRequest,
-  type GatewayPortBridge,
-  type GatewayRequest,
-} from '@vibesys/ipc';
 import * as Cause from 'effect/Cause';
 import * as Context from 'effect/Context';
 import * as Effect from 'effect/Effect';
@@ -13,6 +7,12 @@ import * as Layer from 'effect/Layer';
 import * as Queue from 'effect/Queue';
 import * as Stream from 'effect/Stream';
 import {CallEnded, NoBridge, StreamOverflow} from '../errors.js';
+import {
+  decodeGatewayReply,
+  encodeGatewayRequest,
+  type GatewayPortBridge,
+  type GatewayRequest,
+} from '../gateway-codec.js';
 import {type CallTarget, GatewayTransport} from './gateway-transport.js';
 
 /** The window's gateway handle, if it has one. */

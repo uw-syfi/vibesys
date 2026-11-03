@@ -6,7 +6,6 @@
  */
 
 export {CHAT_AGENT_KIND, isChatAgentKind} from './agent-kinds.js';
-export {CODE_IDS, declaredRoleName, roleName, wordsOfId} from './display-names.js';
 export {
   BackendClientError,
   type BackendErrorKind,

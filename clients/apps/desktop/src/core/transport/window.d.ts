@@ -1,4 +1,4 @@
-import type {GatewayPortBridge} from '@vibesys/ipc';
+import type {GatewayPortBridge} from '../gateway-codec.js';
 
 declare global {
   /** The preload's gateway (`vibesysGateway`); absent outside the app. */

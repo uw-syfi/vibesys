@@ -14,6 +14,15 @@ export {FAULT_KINDS, type Fault, type FaultKind} from './fault.js';
 export type {FeedStatus} from './feed.js';
 export {type Freshness, freshnessOf} from './freshness.js';
 export {
+  type HostId,
+  type HostKey,
+  HostValidationError,
+  hostFromKey,
+  hostKey,
+  hostLabel,
+  validAlias,
+} from './host.js';
+export {
   applyHostFrame,
   emptyHostModel,
   type HostFrame,

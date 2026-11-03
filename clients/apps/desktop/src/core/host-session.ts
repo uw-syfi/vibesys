@@ -4,11 +4,10 @@
  * submits a command.
  */
 
-import type {HostKey} from '@vibesys/hosts';
 import * as Effect from 'effect/Effect';
 import type * as Atom from 'effect/reactivity/Atom';
 import type * as Scope from 'effect/Scope';
-import type {HostModel} from '../state/index.js';
+import type {HostKey, HostModel} from '../state/index.js';
 import {type AgentView, makeAgentView} from './agent-view.js';
 import {type Commands, makeCommands} from './commands.js';
 import {type HostConnectionApi, makeHostConnection} from './connection.js';

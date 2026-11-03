@@ -12,7 +12,7 @@ const BIOME = join(
   '.bin',
   process.platform === 'win32' ? 'biome.cmd' : 'biome',
 );
-const CATALOG = join(WORKSPACE_ROOT, 'libs/contracts/src/generated/display-names.generated.ts');
+const CATALOG = join(WORKSPACE_ROOT, 'libs/display-names/src/generated/display-names.generated.ts');
 
 /** Every distinct name the catalog gives a role, read from the generated module's source text. */
 async function catalogTitles() {
@@ -23,7 +23,9 @@ async function catalogTitles() {
 
 // A fixture lives in a real package path so it meets the same Biome configuration as product code.
 async function roleWordDiagnostics(t, source) {
-  const fixture = await mkdtemp(join(WORKSPACE_ROOT, 'libs/contracts/src', 'role-words-fixture-'));
+  const fixture = await mkdtemp(
+    join(WORKSPACE_ROOT, 'libs/display-names/src', 'role-words-fixture-'),
+  );
   t.after(() => rm(fixture, {recursive: true, force: true}));
   const path = join(fixture, 'sample.ts');
   await writeFile(path, source);

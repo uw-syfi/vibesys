@@ -4,7 +4,7 @@
  */
 import {join} from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostKey} from '../state/host.js';
 
 /** The page every window shows, inside the built UI directory. */
 export const UI_PAGE = 'index.html';

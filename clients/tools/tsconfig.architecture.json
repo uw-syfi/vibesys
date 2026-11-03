@@ -12,6 +12,7 @@
       "@vibesys/desktop/preload": ["apps/desktop/src/preload/index.cts"],
       "@vibesys/desktop/state": ["apps/desktop/src/state/index.ts"],
       "@vibesys/desktop/ui": ["apps/desktop/src/ui/index.ts"],
+      "@vibesys/display-names": ["libs/display-names/src/index.ts"],
       "@vibesys/hosts": ["libs/hosts/src/index.ts"],
       "@vibesys/ipc": ["libs/ipc/src/index.ts"],
       "@vibesys/ipc/testing": ["libs/ipc/src/testing/index.ts"],

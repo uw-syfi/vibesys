@@ -21,7 +21,7 @@
     "update:screenshots": "bash scripts/linux-playwright.sh --update-snapshots"
   },
   "dependencies": {
-    "@vibesys/contracts": "workspace:*",
+    "@vibesys/display-names": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"

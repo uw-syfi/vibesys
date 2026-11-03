@@ -154,11 +154,11 @@ const RULE_CASES = [
     files: {'libs/connection/src/state/machine.ts': "import 'node:fs';\n"},
   },
   {
-    rule: 'desktop-only-connection-shell-opens-processes-and-sockets',
+    rule: 'desktop-main-opens-sockets-only-in-local-host-ts',
     files: {'apps/desktop/src/main/index.ts': "import 'node:net';\n"},
   },
   {
-    rule: 'desktop-only-connection-shell-opens-processes-and-sockets',
+    rule: 'desktop-main-starts-processes-only-in-process-ts',
     files: {'apps/desktop/src/main/index.ts': "import 'node:child_process';\n"},
   },
   {

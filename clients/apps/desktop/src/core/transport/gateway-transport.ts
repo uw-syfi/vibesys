@@ -1,9 +1,9 @@
 /** Bytes in, bytes out: how a call reaches a host. It knows no service, message or domain. */
 
-import type {HostKey} from '@vibesys/hosts';
 import * as Context from 'effect/Context';
 import type * as Effect from 'effect/Effect';
 import type * as Stream from 'effect/Stream';
+import type {HostKey} from '../../state/index.js';
 import type {CallEnded, NoBridge, StreamOverflow} from '../errors.js';
 
 /** One call: which host, which method (`/<service full name>/<method>`), and the request bytes. */

@@ -36,6 +36,8 @@ clients/
   libs/request-identity/ @vibesys/request-identity  UUID request identities across clients and restarts
   libs/contracts/   @vibesys/contracts        generated message types + the one runtime validator
   libs/proto/       @vibesys/proto            generated protocol bindings (store records, host API)
+  libs/display-names/ @vibesys/display-names  the names a person reads for roles, generated from the
+                                              one Python catalog (`vibesys.api.display_catalog`)
   libs/orchestrator-proto/ @vibesys/orchestrator-proto  generated orchestrator protocol bindings
   libs/ui/          @vibesys/ui               the design system: domain-free components + design tokens
   libs/store/       @vibesys/store            domain-free reducer kernel + fold model-test kit
@@ -520,6 +522,20 @@ rules below hold it.
 | `ui/` | `dom` | React screens | `core/`, `state/` | `desktop-ui-does-not-reach-main-or-preload`, and the existing `ui-no-*` rules |
 | `main/`, `preload/` | `node`, `preload` | Electron main, the sandboxed typed bridge | `core/`, `state/`; a preload loads only Electron | `desktop-main-and-preload-do-not-import-ui`, `desktop-main-does-not-import-the-preload`, `desktop-preload-loads-only-electron`, `preload-sandbox` |
 | `testing/` | `neutral` | Fakes at process, network, clock, id and filesystem boundaries | `core/`, `state/`; only tests import it | `desktop-production-code-does-not-import-testing` |
+
+**The main process shell.** `main/` is the only place the app starts a process or opens a socket
+(`desktop-main-starts-processes-only-in-process-ts`, `desktop-main-opens-sockets-only-in-local-host-ts`).
+It is Effect services over those two seams, in the order a call meets them: `ProcessSpawner` (every
+child is spawned in a scope and retired with a bounded signal ladder), `SshLink` (one OpenSSH master
+per host; every channel is an exec session with `BatchMode=yes`), `LinkPool`, `GatewayDialers`
+(the gateway on this machine, or over the host's ssh link; the gateway binary is uploaded when the
+host lacks the right one), `GatewayConnection` (one HTTP/2 gRPC session, its Hello check and the
+reconnect policy in `state/gateway-policy.ts`) and `GatewayCalls` (the window's calls). The window
+reaches them through `main/gateway.ts`, which serves one `MessagePort` per call; the wire form is
+`core/gateway-codec.ts` and the preload only moves its bytes. Every fake is in `testing/main/`
+(`fake-process.ts`, `fake-gateway.ts`, `fake-local-host.ts`), so the shell is tested with no real
+ssh, socket or child. An ssh host that wants a password or an unknown host key fails as `auth` with
+ssh's own words: the app never prompts, and the user fixes it in their terminal.
 
 The Biome rules (`tools/lint-rules/effect-*.grit`, wired in `biome.json`) hold the style:
 `effect-namespace-imports` (modules are imported as namespaces from their subpath, as in

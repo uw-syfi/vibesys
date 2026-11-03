@@ -1,5 +1,4 @@
 import {expect, it} from '@effect/vitest';
-import {gatewayEnd, gatewayReply, parseGatewayRequest} from '@vibesys/ipc';
 import * as Cause from 'effect/Cause';
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
@@ -10,6 +9,7 @@ import * as Schema from 'effect/Schema';
 import * as Stream from 'effect/Stream';
 import {quiescent, settle} from '../../testing/settle.js';
 import {type FakeBridge, makeFakeBridge, type OpenedPort} from '../../testing/transport/index.js';
+import {gatewayEnd, gatewayReply, parseGatewayRequest} from '../gateway-codec.js';
 import {GatewayTransport} from './gateway-transport.js';
 import {GatewayPorts, GatewayTransportLive} from './live.js';
 
