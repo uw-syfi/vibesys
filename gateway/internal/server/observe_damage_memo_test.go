@@ -10,10 +10,25 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	"google.golang.org/protobuf/proto"
 )
+
+// rewriteLog replaces the log's bytes in place and gives the file the modification time
+// generation seconds after the epoch. The observer tells one version of a file from another by
+// its inode, modification time and size, and a filesystem stamps an immediate rewrite with the
+// same tick (tmpfs always, NFS usually), so the test names each version's time itself.
+func rewriteLog(t *testing.T, path string, data []byte, generation int64) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, time.Unix(generation, 0), time.Unix(generation, 0)); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // test-isolation: the observation scan counter measures the retained-prefix work bound.
 func TestDamagedPrefixesScanOnceAndIdentityChangesRetry(t *testing.T) {
@@ -42,9 +57,7 @@ func TestDamagedPrefixesScanOnceAndIdentityChangesRetry(t *testing.T) {
 				head.CommittedSeq = proto.Uint64(head.GetCommittedSeq() + uint64(variant) + 1)
 			}
 			log := filepath.Join(dir, "run.log")
-			if err := os.WriteFile(log, damaged, 0600); err != nil {
-				t.Fatal(err)
-			}
+			rewriteLog(t, log, damaged, 1)
 			head.Objective.InputStated = false
 			head.Objective.InputValue = nil
 			publish(t, dir, head)
@@ -57,9 +70,7 @@ func TestDamagedPrefixesScanOnceAndIdentityChangesRetry(t *testing.T) {
 			if observer.scans != 1 {
 				t.Fatalf("%s variant %d: same damaged prefix scanned %d times, want 1", name, variant, observer.scans)
 			}
-			if err := os.WriteFile(log, original, 0600); err != nil {
-				t.Fatal(err)
-			}
+			rewriteLog(t, log, original, 2)
 			if err := proto.Unmarshal(stored, head); err != nil {
 				t.Fatal(err)
 			}
@@ -157,9 +168,7 @@ func TestSemanticProjectionDamageIsMemoizedAndRepairRetries(t *testing.T) {
 			}
 			dir := t.TempDir()
 			log := filepath.Join(dir, "run.log")
-			if err := os.WriteFile(log, damaged, 0600); err != nil {
-				t.Fatal(err)
-			}
+			rewriteLog(t, log, damaged, 1)
 			if err := os.WriteFile(filepath.Join(dir, "run.head"), stored, 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -172,9 +181,7 @@ func TestSemanticProjectionDamageIsMemoizedAndRepairRetries(t *testing.T) {
 			if observer.scans != 1 {
 				t.Fatalf("semantic damage scanned %d times", observer.scans)
 			}
-			if err := os.WriteFile(log, original, 0600); err != nil {
-				t.Fatal(err)
-			}
+			rewriteLog(t, log, original, 2)
 			if head, err := observer.read(dir); err != nil || !head.GetPerformanceStated() {
 				t.Fatalf("repair: %v, %v", head, err)
 			}
