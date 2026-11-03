@@ -32,7 +32,13 @@ if (version.error?.code === 'ENOENT') {
   for (const source of await sources(gateway)) digest.update(source);
   const fingerprint = digest.digest('hex');
   await mkdir(output, {recursive: true});
-  for (const target of ['linux-amd64', 'linux-arm64', 'darwin-arm64']) {
+  // A packaged build ships every target. A caller that runs the app on this machine only (the
+  // desktop path test) names the one it needs, so that it compiles one binary and not three.
+  const known = ['linux-amd64', 'linux-arm64', 'darwin-arm64'];
+  const targets = process.env.VIBESYS_GATEWAY_TARGETS?.split(',') ?? known;
+  const unknown = targets.filter(target => !known.includes(target));
+  if (unknown.length > 0) throw new Error(`VIBESYS_GATEWAY_TARGETS names unknown targets: ${unknown.join(', ')}`);
+  for (const target of targets) {
     const binary = join(output, `vibesysd-${target}`);
     const stamp = `${binary}.sha256`;
     let cached = false;

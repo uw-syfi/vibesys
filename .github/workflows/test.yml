@@ -598,14 +598,16 @@ jobs:
 
   # The deterministic end to end test of the desktop path (gateway/e2e): vibesysd, the orchestrator,
   # real sidecars over agentshim's scripted providers, the vibesys-cli daemon and git run a lead, two
-  # workers and a judge on a toy task. No model is called. Its own job, so it adds no time to the
-  # gateway, cli or orchestrator jobs; it builds vibesysd and vibesys-cli from the Go caches those
-  # jobs share. Runs on every push to main for the same reason as `gateway`.
+  # workers and a judge on a toy task. No model is called. The built Electron desktop app is then
+  # launched against that world and a Playwright journey checks the run list, each agent's harness
+  # and the lead's report on screen and presses Stop (VIBESYS_E2E_DESKTOP_UI=1). Its own job, so it
+  # adds no time to the gateway, cli or orchestrator jobs; it builds vibesysd and vibesys-cli from
+  # the Go caches those jobs share. Runs on every push to main for the same reason as `gateway`.
   desktop-path:
     needs: changes
     if: needs.changes.outputs.desktop_path == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 12
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -625,8 +627,22 @@ jobs:
           enable-cache: true
           cache-dependency-glob: orchestrator/sidecar/uv.lock
 
+      # Only what the built app needs: Node, pnpm, the Electron binary and the workspace. The sidecar
+      # environment above is the only uv and Python use, and Go is set up above.
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
+        with:
+          workspace-only: true
+
       - name: Run the desktop path end to end
-        run: ./support/repoctl/repoctl run-checks --group desktop_path_e2e
+        env:
+          VIBESYS_E2E_DESKTOP_UI: "1"
+          # Chromium's SUID sandbox helper cannot have the ownership it needs on a hosted runner. This
+          # opts the one Electron child the journey launches out of it; no production window changes.
+          VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
+        # Electron's native windows require a display; Ubuntu runners provide Xvfb. The wrapper owns
+        # the display for this one check group.
+        run: xvfb-run -a ./support/repoctl/repoctl run-checks --group desktop_path_e2e
 
   impact-tool:
     needs: changes

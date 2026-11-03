@@ -125,5 +125,7 @@ no model is called. It has two modes, chosen by `VIBESYS_E2E_SCRIPT`:
   is redacted) record what the agent was sent and how it was launched.
 
 `gateway/e2e/desktop_path_test.go` drives this through the desktop path (`desktop_path_e2e` check
-group, CI job `desktop-path`). The scripts are pure generators over a `Machine` protocol, so
+group, CI job `desktop-path`). With `VIBESYS_E2E_DESKTOP_UI=1` it also launches the built desktop
+app against the same world and checks the run list, each agent's harness and the lead's report on
+screen, then presses Stop (`clients/apps/desktop/e2e`). The scripts are pure generators over a `Machine` protocol, so
 `tests/test_e2e_scripts.py` runs them against a Fake without processes.

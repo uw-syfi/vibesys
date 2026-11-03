@@ -21,6 +21,9 @@
     },
     {
       "path": "./tsconfig.ui-test.json"
+    },
+    {
+      "path": "./tsconfig.e2e.json"
     }
   ]
 }

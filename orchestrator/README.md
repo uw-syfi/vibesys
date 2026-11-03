@@ -149,9 +149,10 @@ of the sessions it finds over when it starts (`Reattach`). A process id is only 
 process's command line carries the session's directory, so a number the system has given to another
 program is never killed.
 
-A snapshot holds runs and agents, not items. A watch opened after an agent replied does not show that
-reply; `run watch --after SEQUENCE` replays the log after a sequence, such as the one in a command's
-receipt.
+A snapshot holds runs and agents, and every turn and message of those runs, not items. A watch opened
+after an agent replied does not show that reply; `run watch --after SEQUENCE` replays the log after a
+sequence, such as the one in a command's receipt. A run with more turns than a timeline window holds
+shows its earliest in the snapshot.
 
 ## Running it
 
