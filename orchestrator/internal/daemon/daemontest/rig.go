@@ -41,6 +41,9 @@ type Rig struct {
 	Auth         daemon.Authority
 	Log          *slog.Logger
 	Limits       hub.Limits
+	// AgentCLI is the vibesys-cli the daemon tells its agents to run, read at each Restart. Empty
+	// names none.
+	AgentCLI string
 	// JobStall makes that many polls of the job source hang until their bound ends.
 	JobStall int
 	// ReattachErr is what the last restart's Reattach reported.
@@ -100,7 +103,7 @@ func (r *Rig) Restart(tb testing.TB) {
 				}
 			},
 		},
-		Sidecars: r.Sidecars, Jobs: gatedJobs{r}, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
+		Sidecars: r.Sidecars, Jobs: gatedJobs{r}, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket, AgentCLI: r.AgentCLI,
 		JobPollEvery: PollEvery,
 	})
 	if err != nil {

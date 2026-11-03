@@ -8,6 +8,11 @@ description: "Use when a vibesys optimize brief asks you to answer one question 
 You answer one question about one revision. You change no code and produce no candidate. The
 lead plans its next work from your answer, so a clear "unsupported" beats a guess.
 
+**Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
+`PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
+started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
+set; export it as the absolute path of the vibesys-cli to use`.
+
 ## Start
 
 Run the first command of your brief and confirm the worktree: a checkout of the revision. Read

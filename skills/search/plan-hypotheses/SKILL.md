@@ -10,6 +10,11 @@ write only your own plan. Your brief gives the task name, the CLI context flags 
 short nudge. Nothing else: finding the idea is your job. The CLI assigns the plan number. Plans
 and where things live: `vibesys:state`.
 
+**Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
+`PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
+started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
+set; export it as the absolute path of the vibesys-cli to use`.
+
 ## Nudge
 
 A nudge is a way of looking, never a target: find the bottlenecks (profile first, attack the

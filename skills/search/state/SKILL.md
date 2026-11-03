@@ -8,6 +8,11 @@ description: "Use when you create, resume or update the state of a vibesys optim
 One optimization per task, stoppable and resumable at any time. Its state is split by owner. Read
 and write the CLI's part through its commands only; never open its files.
 
+**Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
+`PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
+started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
+set; export it as the absolute path of the vibesys-cli to use`.
+
 ## What `vibesys-cli` stores
 
 All worktrees of the repository share one store per task, so any agent sees the same state.

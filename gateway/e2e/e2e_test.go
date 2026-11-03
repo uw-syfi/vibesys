@@ -52,6 +52,12 @@ func newRig(t *testing.T) *rig {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build vibesysd: %v\n%s", err, out)
 	}
+	cli := filepath.Join(dir, "vibesys-cli")
+	buildCLI := exec.Command("go", "build", "-o", cli, "./cmd/vibesys-cli")
+	buildCLI.Dir = "../../cli"
+	if out, err := buildCLI.CombinedOutput(); err != nil {
+		t.Fatalf("build vibesys-cli: %v\n%s", err, out)
+	}
 	sidecar, err := filepath.Abs("../../orchestrator/sidecar")
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +84,7 @@ func newRig(t *testing.T) *rig {
 		// The scripted sidecar imports its sibling modules as the package e2e of the sidecar project.
 		"PYTHONPATH="+sidecar,
 		"VIBESYS_ORCHESTRATOR_STATE_DIR="+r.state,
+		"VIBESYS_ORCHESTRATOR_CLI="+cli,
 		"VIBESYS_ORCHESTRATOR_SIDECAR=uv run --frozen --quiet --project "+sidecar+" python "+script,
 	)
 	for _, d := range []string{"rt", "xdg-state"} {
