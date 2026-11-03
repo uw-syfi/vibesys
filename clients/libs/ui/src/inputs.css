@@ -325,19 +325,32 @@ dl.vs-field {
 }
 
 .vs-path-input {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
 }
+/* The list floats over what follows and scrolls within eight rows, like a menu. */
 .vs-completions {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  left: 0;
+  right: 0;
+  z-index: 10;
   margin: 0;
-  padding: 0;
+  padding: var(--space-2);
   list-style: none;
   display: flex;
   flex-direction: column;
+  max-height: calc(var(--control) * 8);
+  overflow-y: auto;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--elevation-raised);
 }
 .vs-completion {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: var(--space-3);
   min-height: var(--control);

@@ -55,8 +55,8 @@ const TEXT_TONES: readonly TextTone[] = ['default', 'muted', 'ok', 'warn', 'err'
 const STATUS_TONES: readonly StatusTone[] = ['neutral', 'live', 'ok', 'warn', 'err'];
 const VARIANTS: readonly ButtonVariant[] = ['primary', 'secondary', 'quiet', 'danger'];
 const COMPLETIONS: readonly Completion[] = [
-  {value: '~/src/queue', detail: '0.1.1'},
-  {value: '~/work/queue', detail: '0.1.0'},
+  {value: '~/src/queue/', label: 'queue/', detail: '0.1.1'},
+  {value: '~/src/queue-old/', label: 'queue-old/', detail: '0.1.0'},
 ];
 
 function Box(props: {readonly label: string}): JSX.Element {
@@ -178,9 +178,15 @@ function LabelInsideDemo(): JSX.Element {
 function PathDemo(): JSX.Element {
   const [value, setValue] = useState('~/src/');
   return (
-    <Field label="Folder" help="Type a path, or take one of the completions.">
-      <PathInput value={value} change={setValue} completions={COMPLETIONS} />
-    </Field>
+    <Stack gap="space-3">
+      <Field label="Folder" help="Type a path, or take one of the completions.">
+        <PathInput value={value} change={setValue} completions={COMPLETIONS} />
+      </Field>
+      <Text tone="muted">
+        The completions float over what follows the field and scroll within eight rows, so a long
+        listing never moves the page. Each shows its label (a folder's name) and its detail.
+      </Text>
+    </Stack>
   );
 }
 

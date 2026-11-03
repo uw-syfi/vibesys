@@ -4,6 +4,8 @@ import {useFieldWiring} from './field.js';
 /** A value the input offers, with an optional detail shown beside it (a version, a size). */
 export interface Completion {
   readonly value: string;
+  /** The words the list shows for it (a folder's name), when not the value itself. */
+  readonly label?: string;
   readonly detail?: string;
 }
 
@@ -28,8 +30,9 @@ function step(state: ListState, key: string, count: number): ListState | null {
 
 /**
  * A mono text input inside a `Field` that offers `completions` in a list under it: the ARIA
- * combobox pattern. The arrows highlight a completion, Enter or a press takes it (`change` with its
- * value), and Esc hides the list until the next edit.
+ * combobox pattern. The list floats over what follows and scrolls within a few rows, so many
+ * completions never move the page. The arrows highlight a completion (kept in view), Enter or a
+ * press takes it (`change` with its value), and Esc hides the list until the next edit.
  */
 export function PathInput(props: {
   readonly value: string;
@@ -59,6 +62,10 @@ export function PathInput(props: {
     if (next === null) return;
     event.preventDefault();
     setState(next);
+    if (next.active !== null) {
+      // The list scrolls within its rows: keep the highlighted one in view.
+      document.getElementById(optionId(next.active))?.scrollIntoView({block: 'nearest'});
+    }
   };
   return (
     <div className="vs-path-input">
@@ -101,7 +108,7 @@ export function PathInput(props: {
                 if (event.key === 'Enter') take(completion);
               }}
             >
-              <span className="vs-completion-value">{completion.value}</span>
+              <span className="vs-completion-value">{completion.label ?? completion.value}</span>
               {completion.detail === undefined ? null : (
                 <span className="vs-completion-detail">{completion.detail}</span>
               )}
