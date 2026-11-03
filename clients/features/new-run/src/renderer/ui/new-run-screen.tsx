@@ -33,7 +33,7 @@ import {
 import {GoalPage} from './goal-page.js';
 import {type FolderCompletion, ProjectPage, TaskPage} from './project-pages.js';
 import {Nav, NextButton, Question} from './question.js';
-import {pageShowsProblem} from './read-failed.js';
+import {rowShowsProblem} from './read-failed.js';
 import {ProblemStatus, ReviewPage, StartButton} from './review-page.js';
 import {progressLine, type StepView, stepViews} from './steps.js';
 import {entriesIn, type MachineOption} from './view.js';
@@ -182,8 +182,8 @@ function blockedAt(context: NewRunContext, at: StepId): string | undefined {
 
 /**
  * The one action row every step ends with: Back and Start over at its start; at its end the
- * screen's problem (unless the page says it where it happened) and the way on (Continue, Looks
- * right on the goal, Start run on Review), always last.
+ * screen's problem (when it holds the run back and the page does not say it) and the way on
+ * (Continue, Looks right on the goal, Start run on Review), always last.
  */
 function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: boolean}): JSX.Element {
   const {snapshot, dispatch, at} = props;
@@ -195,9 +195,9 @@ function StepNav(props: ScreenProps & {readonly at: StepId; readonly first: bool
         ? {}
         : {startOver: {text: START_OVER_WORDS, press: () => dispatch({type: 'reset'})}})}
       status={
-        pageShowsProblem(context, at, examplesFailed(context, at)) ? null : (
+        rowShowsProblem(context, at, examplesFailed(context, at)) ? (
           <ProblemStatus context={context} dispatch={dispatch} showRuns={props.showRuns} />
-        )
+        ) : null
       }
       {...(props.first ? {} : {back: () => dispatch({type: 'back'})})}
       next={

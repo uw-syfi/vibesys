@@ -1,8 +1,7 @@
 /**
  * A read that failed, said where what it would have shown goes (the project's tasks, its task's
  * goal, the agents the machine runs): what could not be read, the machine's own words for why,
- * and the ways on.
- * The action row does not say it again (`pageShowsProblem`).
+ * and the ways on. The action row says only what holds the run back (`rowShowsProblem`).
  */
 import {Button, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
@@ -11,7 +10,7 @@ import {problemWords} from './problem-words.js';
 import {machineLabel} from './view.js';
 
 /** Whether the page at `at` words the screen's problem itself, in place of what it could not read. */
-export function pageShowsProblem(
+function pageShowsProblem(
   context: NewRunContext,
   at: StepId | null,
   examplesFailed: boolean,
@@ -28,6 +27,19 @@ export function pageShowsProblem(
     default:
       return false;
   }
+}
+
+/**
+ * Whether the action row shows the screen's problem: not when the page says it, and not for the
+ * goal, which is read to be shown on its page and holds back no step and no start.
+ */
+export function rowShowsProblem(
+  context: NewRunContext,
+  at: StepId | null,
+  examplesFailed: boolean,
+): boolean {
+  if (context.problem === null || context.problem.step === 'goal') return false;
+  return !pageShowsProblem(context, at, examplesFailed);
 }
 
 export function ReadFailed(props: {

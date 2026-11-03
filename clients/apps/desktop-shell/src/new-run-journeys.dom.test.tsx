@@ -354,6 +354,18 @@ test('regression: a project whose tasks cannot be read says why where they go, a
   expect(closed(button(main(shell), 'Continue', true))).toBe(true);
 });
 
+test('regression: a goal that cannot be read is said on its page, and holds back no start', async () => {
+  const seed = withNewRun({goals: {}});
+  const goal = await openAt(pageNamed('goal project'), seed);
+  await see(main(goal), `${PROJECT} has no task mpmc.`);
+  button(main(goal), 'Try again', true);
+  const review = await openAt(pageNamed('review project'), seed);
+  await until('Start run to open', () => !startClosed(review));
+  // Nothing on Review stands for the goal: no status that names no read, and no Try again.
+  notSee(main(review), 'Not read', true);
+  expect(all(main(review), {role: 'button', name: 'Try again'})).toHaveLength(0);
+});
+
 /** The rail: the app's one navigation. */
 const rail = (shell: OpenShell): HTMLElement =>
   one(shell.container, {role: 'navigation', name: 'VibeSys'});
