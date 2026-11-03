@@ -1,6 +1,6 @@
 # Repository component ownership, discovery, and change impact policy.
 default_base = "main"
-jobs = ["python", "clients", "examples", "dockerfiles", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli", "orchestrator"]
+jobs = ["python", "clients", "examples", "dockerfiles", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli", "orchestrator", "desktop_path"]
 
 ignored_roots = ["website", "third_party", ".agents", ".claude", ".claude-plugin", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
@@ -457,3 +457,13 @@ job = "orchestrator"
 # checks that the bindings are current.
 roots = ["orchestrator", "proto/vibesys/orchestrator"]
 files = ["buf.gen.orchestrator.yaml", "buf.gen.orchestrator-ts.yaml"]
+
+[[components]]
+id = "desktop_path"
+class = "manual"
+job = "desktop_path"
+# The desktop path end to end test (gateway/e2e) runs the gateway, the orchestrator and its sidecar,
+# the CLI and the skills plugin together, so a change to any of them selects it. The plugin
+# marketplace manifest is read from the repository root.
+roots = ["gateway", "cli", "orchestrator", "skills", "proto/vibesys/orchestrator"]
+files = [".claude-plugin/marketplace.json"]

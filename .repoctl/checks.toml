@@ -532,3 +532,17 @@ directory = "orchestrator"
 # CI runner (module download, vet and the tests); a warm one seconds.
 timeout_seconds = 240
 commands = [["./check.sh"]]
+
+[[check_groups]]
+name = "desktop_path_e2e"
+trigger_job = "desktop_path"
+include_in_test = true
+language = "go"
+directory = "gateway"
+# The desktop path end to end test (gateway/e2e, build tag e2e): vibesysd, the orchestrator, real
+# sidecars over agentshim's scripted providers, the vibesys-cli daemon and git, with a toy task. No
+# model is called. It builds vibesysd and vibesys-cli, so a cold Go cache costs about a minute on a
+# CI runner; the sidecar environment is a uv sync of the orchestrator's sidecar project. A warm run
+# takes about ten seconds of test time. The timeout guards against a hang only.
+timeout_seconds = 420
+commands = [["go", "test", "-tags", "e2e", "-count=1", "-timeout", "300s", "./e2e"]]
