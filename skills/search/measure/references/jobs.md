@@ -37,6 +37,10 @@ supervisor went away; the CLI never retries it, because a command may have had e
 
 A submit that exits non-zero created no job. A task the CLI cannot run is refused at the first
 submit, with a message that says why.
+A `check` or `measure` of a commit whose task files (everything under `.vibesys/tasks/<task>/`
+except generated files such as `__pycache__` and `*.pyc`) differ from the result branch head's is
+refused with a `conflict` failure that names the paths. Restore those files from the base; never
+adapt the task to the candidate.
 
 ## Commands that drive a service
 

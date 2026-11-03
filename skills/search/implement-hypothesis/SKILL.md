@@ -48,7 +48,23 @@ budget allows.
   raises a number without the program doing the work. Obey every rule in `OBJECTIVE.md`.
 - Report a number that `vibesys-cli` did not print.
 
-## Hand back
+## Finish
 
-Claim, commit SHA, job ids, the verdict (the `compare` output), what you learned, and the step you would
-take next. If you made no candidate: the blocker and the narrower step.
+Every turn ends the same way, in this order, and no turn ends any other way:
+
+1. **Measure.** If your brief grants a budget and you have a candidate commit,
+   `vibesys-cli submit measure <sha> --samples 5 --plan <n>`, wait for it, and run
+   `vibesys-cli compare <sha>` (`vibesys:measure`). A commit you did not measure is
+   `ready for measurement`, and your handoff says so. Prose about how fast it should be is not a
+   measurement.
+2. **Hand back**, in the format of [handoff.md](references/handoff.md): claim, commit SHA, job ids,
+   the verdict (the `compare` output), what you learned, and the step you would take next. If you
+   made no candidate: the blocker and the narrower step.
+3. **Deliver the handoff through the harness's handoff tool, as the last thing you do.** In a run
+   whose tools include `post_handoff`, call it with the handoff; your session closes when your
+   turn ends and no mail waits for you, so a summary written as plain text reaches nobody. Where
+   there is no such tool, the handoff is your final message.
+
+Never end a turn with a prose summary in place of the handoff, with a measurement still to take,
+or with the handoff written and not delivered. Before you stop, ask whether step 1 was done or
+excused in the handoff, and whether step 3 was done.
