@@ -57,7 +57,11 @@ const noReceipt = new InvalidMessage({
   detail: 'receipt is missing',
 });
 
-/** Waits for a Ready connection (a command is not sent into the void), then sends once. */
+/**
+ * Waits for a Ready connection (a command is not sent into the void), then sends once. A call
+ * that failed because of the link tells the connection, so a dropped link is noticed even when no
+ * feed is mounted to see it.
+ */
 const dispatchOnce = (parts: HostParts, command: Command) =>
   Effect.gen(function* () {
     const ready = yield* parts.connection.ready().pipe(Effect.result);
@@ -71,10 +75,14 @@ const dispatchOnce = (parts: HostParts, command: Command) =>
         fault: {kind: 'Unavailable', detail, retryable: false},
       } as const;
     }
+    const epoch = ready.success;
     const sent = yield* parts.client
       .dispatch({command}, {deadline: COMMAND_DEADLINE})
       .pipe(Effect.result);
-    if (sent._tag === 'Failure') return failedWith(command, sent.failure);
+    if (sent._tag === 'Failure') {
+      if (isRetryable(sent.failure)) yield* parts.connection.suspect(epoch, sent.failure);
+      return failedWith(command, sent.failure);
+    }
     const {receipt} = sent.success;
     return receipt === undefined ? failedWith(command, noReceipt) : answered(receipt);
   });
