@@ -24,6 +24,7 @@ import {CommandLine} from './command-line.js';
 import {CostView} from './cost-view.js';
 import {HandoffCards} from './handoff-cards.js';
 import {agentNames} from './names.js';
+import {SearchPanels} from './search-panels.js';
 import {TimelineView} from './timeline-view.js';
 import {agentWord, harnessWord, runWord} from './words.js';
 
@@ -87,6 +88,7 @@ export function RunScreen(props: {
   if (run === undefined) {
     return <Text tone="muted">This run is not on this host any more.</Text>;
   }
+  const search = props.state.searches[props.runId];
   const status = runWord(run.status);
   const stoppable = run.status === RunStatus.STARTING || run.status === RunStatus.RUNNING;
   const body =
@@ -129,6 +131,7 @@ export function RunScreen(props: {
         ) : null}
       </Row>
       <CommandLine progress={props.stopProgress} done="Stop" retry={props.retryStop} />
+      {search === undefined ? null : <SearchPanels search={search} nowMs={props.nowMs} />}
       <Split
         asideFirst
         asideSticky

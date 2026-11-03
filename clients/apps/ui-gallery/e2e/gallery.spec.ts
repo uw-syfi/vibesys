@@ -294,3 +294,30 @@ test('a scrubber steps with the arrow keys and goes back to live', async ({page}
   await expect(range).toHaveAttribute('aria-valuetext', 'Step 40 of 40');
   await expect(page.getByRole('button', {name: 'Back to live'})).toHaveCount(0);
 });
+
+test('disabled buttons keep their appearance when hovered', async ({page}) => {
+  await open(page, 'ink');
+  const buttons = page
+    .locator('[data-gallery-entry="Button"]')
+    .getByRole('button', {name: 'Disabled', exact: true});
+  await expect(buttons).toHaveCount(4);
+  for (const button of await buttons.all()) {
+    const appearance = () =>
+      button.evaluate(element => {
+        const style = getComputedStyle(element);
+        return {
+          color: style.color,
+          background: style.backgroundColor,
+          border: style.borderColor,
+          opacity: style.opacity,
+        };
+      });
+    await page.mouse.move(0, 0);
+    // Settle finite CSS transitions deterministically, as the gallery screenshots do.
+    await page.screenshot({animations: 'disabled'});
+    const idle = await appearance();
+    await button.hover();
+    await page.screenshot({animations: 'disabled'});
+    expect(await appearance()).toEqual(idle);
+  }
+});

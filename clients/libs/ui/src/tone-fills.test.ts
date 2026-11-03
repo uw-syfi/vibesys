@@ -19,7 +19,8 @@ const MAY_TINT: Readonly<Record<string, string>> = {
   '.vs-toast[data-tone="err"]': 'a toast is transient and sits top right',
   '.vs-overview-tile[data-attention]': 'an attention tile is one cell of a row of tiles',
   '.vs-new-below': 'a pill as wide as its label',
-  '.vs-button[data-variant="danger"]:hover': 'the hover state of a button',
+  '.vs-button[data-variant="danger"]:not([aria-disabled="true"]):hover':
+    'the hover state of a button',
   '@keyframes vs-pane-flash > from': 'a flash of a pane on arrival, gone in a moment',
 };
 

@@ -33,7 +33,7 @@ function HandoffCard(props: {
   const verdict = attempt ? verdictOf(props.state, message.fromAgentId) : null;
   const rows: KeyValueItem[] = [
     {key: 'Checks', value: handoff.checks},
-    {key: 'Measured', value: handoff.measurement},
+    {key: 'Measured (the agent’s words)', value: handoff.measurement},
     {key: 'Learned', value: handoff.learned},
     {key: 'Suggested next', value: handoff.next},
     {
@@ -97,7 +97,7 @@ export function HandoffCards(props: {
     );
   }
   return (
-    <Stack gap="space-4">
+    <Stack gap="space-4" align="start">
       {messages.map(message =>
         message.body.case === 'handoff' ? (
           <HandoffCard

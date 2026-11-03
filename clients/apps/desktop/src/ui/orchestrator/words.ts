@@ -92,7 +92,7 @@ export const jobWord = (outcome: JobOutcome): Word => JOB[outcome];
 const DELIVERY: Readonly<Record<Delivery, Word>> = {
   [Delivery.UNSPECIFIED]: {label: 'Not sent', tone: 'neutral'},
   [Delivery.QUEUED]: {label: 'Accepted, waiting for the agent\u2019s next turn', tone: 'neutral'},
-  [Delivery.STEERED]: {label: 'Sent, not yet confirmed', tone: 'live'},
+  [Delivery.STEERED]: {label: 'Sent; delivery to agent unconfirmed', tone: 'live'},
   [Delivery.NEW_TURN]: {label: 'Being handled in the agent\u2019s current turn', tone: 'live'},
   [Delivery.CONSUMED]: {label: 'Read by the agent', tone: 'ok'},
   [Delivery.REJECTED]: {label: 'Not delivered', tone: 'err'},

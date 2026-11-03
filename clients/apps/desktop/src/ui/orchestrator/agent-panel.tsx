@@ -36,6 +36,7 @@ import {
   agentWord,
   deliveryWord,
   describeArgs,
+  formatClock,
   formatDuration,
   harnessWord,
   refusalWord,
@@ -126,15 +127,7 @@ function capabilityLine(agent: Agent): string {
     caps?.steers === true
       ? 'A message reaches it in the middle of what it is doing.'
       : 'A message waits until it finishes its current step.';
-  const streams =
-    caps?.streamsText === true
-      ? 'Its words appear as it writes them.'
-      : 'Its words appear when each step ends.';
-  const resumes =
-    caps?.resumes === true
-      ? 'It can pick up again after finishing.'
-      : 'It cannot be resumed once finished.';
-  return `${harnessWord(agent.harness)}: ${takes} ${streams} ${resumes}`;
+  return `${harnessWord(agent.harness)}: ${takes}`;
 }
 
 /** What a stored message's delivery says now, with the reason when it was rejected. */
@@ -153,18 +146,23 @@ function receiptLine(receipt: Receipt): {label: string; tone: Word['tone']} {
 
 function SentMessage(props: {
   readonly text: string;
+  readonly atMs: number | null;
   readonly line: {readonly label: string; readonly tone: Word['tone']};
 }): JSX.Element {
   return (
     <Row gap="space-3" wrap>
       <Text tone="muted">{`You wrote: ${props.text}`}</Text>
       <Chip label={props.line.label} tone={props.line.tone} dot />
+      {props.atMs === null ? null : (
+        <Text variant="small">{`Sent at ${formatClock(props.atMs)}`}</Text>
+      )}
     </Row>
   );
 }
 
 /** The messages sent so far, each with where it stands now, and the last answer until the host reports it. */
 function SentMessages(props: {
+  readonly pendingAtMs: number | null;
   readonly sent: readonly Message[];
   readonly progress: CommandProgress | undefined;
 }): JSX.Element {
@@ -180,17 +178,23 @@ function SentMessages(props: {
         <SentMessage
           key={message.id}
           text={message.body.case === 'text' ? message.body.value : ''}
+          atMs={ms(message.at)}
           line={storedLine(message)}
         />
       ))}
       {pending === null ? null : (
-        <SentMessage text="your last message" line={receiptLine(pending)} />
+        <SentMessage
+          atMs={props.pendingAtMs}
+          text="your last message"
+          line={receiptLine(pending)}
+        />
       )}
     </>
   );
 }
 
 function MessageBox(props: {
+  readonly nowMs: number;
   readonly agent: Agent;
   /** What the last press of Send came to, or undefined before any. */
   readonly progress: CommandProgress | undefined;
@@ -200,6 +204,7 @@ function MessageBox(props: {
   readonly retry: () => void;
 }): JSX.Element {
   const [draft, setDraft] = useState('');
+  const [sentAtMs, setSentAtMs] = useState<number | null>(null);
   const [sentText, setSentText] = useState<string | null>(null);
   const {progress} = props;
   const sending = progress?._tag === 'Sending';
@@ -217,21 +222,24 @@ function MessageBox(props: {
             rows={2}
           />
         </Field>
-        <Button
-          text={sending ? 'Sending' : 'Send'}
-          label="Send message"
-          variant="primary"
-          press={() => {
-            setDraft(shown);
-            setSentText(shown);
-            props.send(shown);
-          }}
-          {...(shown.trim() === '' || sending
-            ? {disabledReason: sending ? 'Sending.' : 'Write a message first.', quietReason: true}
-            : {})}
-        />
+        <Row>
+          <Button
+            text={sending ? 'Sending' : 'Send'}
+            label="Send message"
+            variant="primary"
+            press={() => {
+              setDraft(shown);
+              setSentText(shown);
+              setSentAtMs(props.nowMs);
+              props.send(shown);
+            }}
+            {...(shown.trim() === '' || sending
+              ? {disabledReason: sending ? 'Sending.' : 'Write a message first.', quietReason: true}
+              : {})}
+          />
+        </Row>
         <CommandLine progress={progress} done="Send" retry={props.retry} />
-        <SentMessages sent={props.sent} progress={progress} />
+        <SentMessages pendingAtMs={sentAtMs} sent={props.sent} progress={progress} />
       </Stack>
     </Card>
   );
@@ -240,6 +248,7 @@ function MessageBox(props: {
 /** One agent: who it is, every turn it has taken (past and live in one list), and a message box. */
 export function AgentPanel(props: {
   readonly state: OrchestratorState;
+  readonly nowMs: number;
   readonly agent: Agent;
   readonly name: string;
   /** What the last press of Send to this agent came to, or undefined before any. */
@@ -260,7 +269,7 @@ export function AgentPanel(props: {
           <Chip label={harnessWord(agent.harness)} />
           <Chip label={agent.model} mono />
         </Row>
-        <Button text="Close" variant="quiet" size="sm" press={props.close} />
+        <Button text="Close agent view" variant="quiet" size="sm" press={props.close} />
       </Row>
       <KeyValue
         items={[
@@ -269,6 +278,7 @@ export function AgentPanel(props: {
         ]}
       />
       <MessageBox
+        nowMs={props.nowMs}
         agent={agent}
         progress={props.sendProgress}
         sent={messagesOf(state, agent.id).filter(

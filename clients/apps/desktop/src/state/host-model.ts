@@ -4,7 +4,13 @@
  * the cursor can only change together.
  */
 import type {WatchRunsResponse} from '@vibesys/orchestrator-proto';
-import {type AgentFrame, applyAgentFeed, applyEvent, applySnapshot} from './orchestrator/fold.js';
+import {
+  type AgentFrame,
+  applyAgentFeed,
+  applyEvent,
+  applySearch,
+  applySnapshot,
+} from './orchestrator/fold.js';
 import {emptyState, type OrchestratorState} from './orchestrator/state.js';
 
 export interface HostModel {
@@ -37,6 +43,8 @@ export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
   switch (body.case) {
     case 'snapshot':
       return {...model, data: applySnapshot(model.data, body.value)};
+    case 'search':
+      return {...model, data: applySearch(model.data, body.value)};
     case 'event':
       return {...model, data: applyEvent(model.data, body.value)};
     default:

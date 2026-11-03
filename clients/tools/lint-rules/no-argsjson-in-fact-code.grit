@@ -1,0 +1,16 @@
+// Search facts come from typed fields, never from tool arguments or parsed text.
+language js;
+
+or {
+  `$object.argsJson`,
+  `JSON.parse($args)`,
+  `new RegExp($args)`,
+  `/$pattern/`,
+  `/$pattern/$flags`
+} as $text where {
+  register_diagnostic(
+    span = $text,
+    message = "no-argsjson-in-fact-code: search facts must use generated fields, never tool text or text parsing.",
+    severity = "error"
+  )
+}

@@ -163,7 +163,7 @@ describe('a snapshot', () => {
         const at = 1 + (cut % total);
         const stale = new FakeDaemon(scenario, at - 1).snapshot();
         const held = fold(scenario.events.slice(0, at));
-        expect(applySnapshot(held, stale)).toBe(held);
+        expect(applySnapshot(held, stale)).toEqual({...held, searches: {}});
       }),
       {numRuns: 40},
     );

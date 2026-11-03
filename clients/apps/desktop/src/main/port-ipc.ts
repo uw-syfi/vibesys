@@ -1,10 +1,10 @@
-import {DesktopLinkProblem} from '@vibesys/proto';
 /**
  * One renderer port per call, for every channel that carries one. A call is authorized before
  * anything is provisioned or dialed, owns an abort signal that every way the caller can go away
  * ends (the port closing, a message on it, the sender destroyed, the page navigating), and is
  * answered with exactly one terminal reply, after which the port is closed.
  */
+import {DesktopLinkProblem} from '@vibesys/proto';
 import {gatewayEnd} from '../core/gateway-codec.js';
 import {GatewayFailed, GrpcFailed, grpcCodeOf, LinkFailed} from './errors.js';
 

@@ -1,4 +1,4 @@
-import {Button, Card, Field, Select, Stack, TextInput} from '@vibesys/ui';
+import {Button, Card, Field, Row, Select, Stack, TextInput} from '@vibesys/ui';
 import {type JSX, useState} from 'react';
 import type {CommandProgress} from '../../state/index.js';
 import {CommandLine} from './command-line.js';
@@ -99,16 +99,18 @@ export function StartRunForm(props: {
             rows={3}
           />
         </Field>
-        <Button
-          text="Start run"
-          label="Start run"
-          variant="primary"
-          press={() => {
-            if (host !== undefined && missing === null)
-              props.start(host.key, startRunRequest(draft));
-          }}
-          {...(reason === null ? {} : {disabledReason: reason, quietReason: sending})}
-        />
+        <Row>
+          <Button
+            text="Start run"
+            label="Start run"
+            variant="primary"
+            press={() => {
+              if (host !== undefined && missing === null)
+                props.start(host.key, startRunRequest(draft));
+            }}
+            {...(reason === null ? {} : {disabledReason: reason, quietReason: sending})}
+          />
+        </Row>
         <CommandLine progress={props.progress} done="Start" retry={props.retry} />
         {props.progress?._tag === 'Accepted' &&
         props.progress.receipt.runId !== '' &&

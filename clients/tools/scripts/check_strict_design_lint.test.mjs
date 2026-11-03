@@ -269,3 +269,30 @@ test('ui-no-raw-css-values leaves declarations that read the token table alone',
   );
   assert.deepEqual(diagnostics, []);
 });
+
+test('search fact code rejects tool arguments and text parsers, and permits typed reads', async t => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), 'search-fact-lint-')));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  await writeFile(
+    join(directory, 'biome.json'),
+    JSON.stringify({
+      linter: {rules: {recommended: false}},
+      plugins: [join(WORKSPACE_ROOT, 'tools/lint-rules/no-argsjson-in-fact-code.grit')],
+    }),
+  );
+  const path = join(directory, 'search-views.ts');
+  for (const source of [
+    'job.argsJson;',
+    'JSON.parse(text);',
+    'new RegExp(text);',
+    '/job/;',
+    '/job/gi;',
+  ]) {
+    await writeFile(path, source);
+    const diagnostics = pluginDiagnostics([path], directory);
+    assert.equal(diagnostics.length, 1, source);
+    assert.match(JSON.stringify(diagnostics), /no-argsjson-in-fact-code/);
+  }
+  await writeFile(path, 'search.jobs; search.judgments; search.head;');
+  assert.deepEqual(pluginDiagnostics([path], directory), []);
+});
