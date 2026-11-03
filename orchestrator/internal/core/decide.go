@@ -157,7 +157,7 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 		t.effect(ArmTimer{Kind: TimerRunDeadline, Run: run.ID, FireAt: run.Deadline})
 	}
 	t.launch(run, Agent{ID: run.Lead, Run: run.ID, Role: RoleLead, Spec: b.Lead})
-	r.Message = t.post(Message{Run: run.ID, To: run.Lead, Body: Brief{Text: b.Brief}}).ID
+	r.Message = t.post(Message{Run: run.ID, To: run.Lead, Body: LeadBrief{Task: b.Task, FanoutLimit: b.FanoutLimit, Steering: b.Brief}}).ID
 	return run.ID
 }
 

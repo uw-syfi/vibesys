@@ -86,7 +86,37 @@ def load_launch(path: Path, worktree: str | None) -> fx.LaunchSession:
     except protovalidate.ValidationError as error:
         msg = f"launch is invalid: {error}"
         raise LaunchError(msg) from error
+    check_plugin(launch)
     return launch
+
+
+def check_plugin(launch: fx.LaunchSession) -> None:
+    """Refuse a launch whose plugin is missing or is not in its marketplace, naming the field.
+
+    A session always loads the plugin and there is no default, so an absent one is an error here,
+    before an agent starts, and not a session that quietly runs without the skills.
+    """
+    if not launch.HasField("plugin"):
+        msg = "launch.plugin is missing: every session loads the vibesys plugin, and the daemon sets it"
+        raise LaunchError(msg)
+    manifest = Path(launch.plugin.marketplace) / ".claude-plugin" / "marketplace.json"
+    try:
+        data = json.loads(manifest.read_text())
+    except OSError as error:
+        msg = f"launch.plugin.marketplace {launch.plugin.marketplace} has no readable {manifest.name}: {error}"
+        raise LaunchError(msg) from error
+    except ValueError as error:
+        msg = f"launch.plugin.marketplace: {manifest} is not JSON: {error}"
+        raise LaunchError(msg) from error
+    entries = data.get("plugins") if isinstance(data, dict) else None
+    names = (
+        [entry.get("name") for entry in entries if isinstance(entry, dict)]
+        if isinstance(entries, list)
+        else []
+    )
+    if launch.plugin.name not in names:
+        msg = f"launch.plugin.name {launch.plugin.name!r} is not a plugin of {manifest}"
+        raise LaunchError(msg)
 
 
 def child_pids(proc: Path = Path("/proc")) -> list[int]:

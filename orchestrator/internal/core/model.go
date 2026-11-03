@@ -150,8 +150,15 @@ type MessageBody interface{ messageBody() }
 type (
 	// Text is free text from the operator or another agent.
 	Text struct{ Text string }
-	// Brief is an agent's first prompt, as data a template renders.
+	// Brief is a subagent's first prompt, as data a template renders.
 	Brief struct{ Text string }
+	// LeadBrief is a run's lead's first prompt, as data a template renders: the task, how many
+	// subagents may be live at once, and the operator's steering text, empty when there is none.
+	LeadBrief struct {
+		Task        string
+		FanoutLimit uint32
+		Steering    string
+	}
 	// Handoff is what a finished agent tells the lead.
 	Handoff struct {
 		PlanNumber   uint32
@@ -191,6 +198,7 @@ type (
 
 func (Text) messageBody()            {}
 func (Brief) messageBody()           {}
+func (LeadBrief) messageBody()       {}
 func (Handoff) messageBody()         {}
 func (Report) messageBody()          {}
 func (JobFinished) messageBody()     {}
@@ -216,7 +224,7 @@ type Message struct {
 // trigger says what kind of turn the message starts.
 func (m Message) trigger() TurnTrigger {
 	switch m.Body.(type) {
-	case Brief:
+	case Brief, LeadBrief:
 		return TriggerBrief
 	case Handoff:
 		return TriggerHandoff

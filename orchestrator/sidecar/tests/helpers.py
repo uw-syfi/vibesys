@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from agentshim import Agent, ApprovalPolicy, NativePermissions, TransportKind
@@ -22,11 +23,46 @@ from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from pathlib import Path
 
     from agentshim import RawFrame
     from google.protobuf.timestamp_pb2 import Timestamp
 
 REF = fx.SessionRef(agent_id="agent-1", session=1)
+
+#: Where this test's plugin marketplace and plugin home live; the autouse fixture in conftest sets it.
+_root: Path | None = None
+
+
+def use_plugin_root(root: Path | None) -> None:
+    """Make launches built from now on load a plugin from a marketplace written under *root*."""
+    global _root  # noqa: PLW0603 - the fixture's per-test directory; the builders below are plain functions
+    _root = root
+
+
+def write_marketplace(root: Path, name: str = "vibesys") -> Path:
+    """A local marketplace checkout under *root* with one skill-only plugin *name*; returns its root."""
+    manifest = root / ".claude-plugin" / "marketplace.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    (root / "skills").mkdir(exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "name": "vibesys",
+                "plugins": [{"name": name, "source": "./skills", "strict": False, "skills": []}],
+            }
+        )
+    )
+    return root
+
+
+def session_plugin(root: Path, *, name: str = "vibesys") -> fx.SessionPlugin:
+    """The plugin a launch names: a marketplace under *root* and a plugin home that does not exist."""
+    return fx.SessionPlugin(
+        marketplace=str(write_marketplace(root / "marketplace", name)),
+        name=name,
+        home=str(root / "plugin-home"),
+    )
 
 
 def launch(harness: int = orch.HARNESS_CODEX, **fields: Any) -> fx.LaunchSession:
@@ -39,6 +75,8 @@ def launch(harness: int = orch.HARNESS_CODEX, **fields: Any) -> fx.LaunchSession
         "harness": harness,
         "worktree": "/work",
     }
+    if _root is not None:
+        base["plugin"] = session_plugin(_root)
     base.update(fields)
     return fx.LaunchSession(**base)
 

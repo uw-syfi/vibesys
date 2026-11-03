@@ -138,21 +138,31 @@ receipt.
 ## Running it
 
 Set `VIBESYS_ORCHESTRATOR_STATE_DIR` to a local-disk directory and `VIBESYS_ORCHESTRATOR_SIDECAR`
-to an `orchestrator/sidecar` checkout (or the command that runs it); there is no default. Build with
+to an `orchestrator/sidecar` checkout (or the command that runs it), and `VIBESYS_ORCHESTRATOR_MARKETPLACE`
+to the checkout of the plugin marketplace (the repository root, which holds `.claude-plugin/marketplace.json`);
+there is no default for any of them. Every session, lead and subagent, on either harness, loads the
+`vibesys` plugin from that checkout and none of the operator's own plugins, skills or configuration.
+The plugin is installed once per agent into `STATE/sessions/AGENT/plugin-home`, which a resume reuses.
+A missing or wrong marketplace refuses every launch, naming the setting. Build with
 `go build -o ~/.local/bin/vibesysd ./gateway/cmd/vibesysd`, run `uv sync --frozen --project
 orchestrator/sidecar` once, then `vibesysd run start ...` starts a gateway if none serves. Each
 session's files, logs and socket are under `STATE/sessions/`.
 
-Live smoke run with Claude Code and Haiku 4.5 (it uses a real account, so an operator runs it):
+The lead's first message is rendered by the sidecar from the run's task, its `--fanout` and the
+optional `--brief`, the operator's steering text: it tells the lead to run `vibesys:optimize` for the
+task, so the repository must hold `.vibesys/tasks/TASK/`.
+
+Live smoke run with Claude Code and Haiku 4.5 (it uses a real account, so an operator runs it; the
+repository needs the task bundle named by `--task`):
 
 ```sh
-export VIBESYS_ORCHESTRATOR_STATE_DIR=/local/disk/vo-smoke VIBESYS_ORCHESTRATOR_SIDECAR=$PWD/orchestrator/sidecar
+export VIBESYS_ORCHESTRATOR_STATE_DIR=/local/disk/vo-smoke VIBESYS_ORCHESTRATOR_SIDECAR=$PWD/orchestrator/sidecar VIBESYS_ORCHESTRATOR_MARKETPLACE=$PWD
 go build -o ~/.local/bin/vibesysd ./gateway/cmd/vibesysd && uv sync --frozen --project orchestrator/sidecar
 git init -q /local/disk/smoke-repo && printf 'def add(a, b):\n    return a - b\n' > /local/disk/smoke-repo/calc.py
 git -C /local/disk/smoke-repo add -A && git -C /local/disk/smoke-repo commit -qm init
 vibesysd run start --repository /local/disk/smoke-repo --task fix-add --harness claude_code \
   --model claude-haiku-4-5 --fanout 2 \
-  --brief 'calc.py has a bug in add. Use your vibesys tools to spawn one worker to fix it and one judge to review the fix, wait for their handoffs, then report.'
+  --brief 'calc.py has a bug in add; keep the run to one worker and one judge.'
 vibesysd run watch --after 1 # in another shell; stop with `vibesysd run stop RUN` when the lead reports
 ```
 

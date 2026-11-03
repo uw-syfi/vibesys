@@ -37,17 +37,20 @@ import (
 const EnvSidecar = "VIBESYS_ORCHESTRATOR_SIDECAR"
 
 // SidecarsFor gives the sidecar launcher the environment names, or the launcher that refuses every
-// launch with the reason when the setting is missing. Sessions keep their files under root.
+// launch with the reason when a setting is missing or wrong. Sessions keep their files under root.
 func SidecarsFor(getenv func(string) string, root, executable string, log *slog.Logger) (daemon.Sidecars, error) {
 	argv, err := sidecarCommand(getenv(EnvSidecar))
-	if err != nil {
-		log.Warn("no sidecar launcher", "reason", err)
-		return refusedSidecars{reason: err.Error()}, nil
+	if err == nil {
+		var plugin Plugin
+		if plugin, err = PluginFor(getenv); err == nil {
+			if err = os.MkdirAll(root, 0o700); err != nil {
+				return nil, err
+			}
+			return &ProcessSidecars{Root: root, Command: argv, Plugin: plugin, Executable: executable, Log: log}, nil
+		}
 	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return nil, err
-	}
-	return &ProcessSidecars{Root: root, Command: argv, Executable: executable, Log: log}, nil
+	log.Warn("no sidecar launcher", "reason", err)
+	return refusedSidecars{reason: err.Error()}, nil
 }
 
 func sidecarCommand(setting string) ([]string, error) {
@@ -80,8 +83,11 @@ func (refusedSidecars) Attach(context.Context, core.Session) (daemon.Sidecar, er
 // that directory. When a sidecar is gone, the agent processes it left are killed through the
 // process groups it recorded in agent.pgids, before any new session of that agent starts.
 type ProcessSidecars struct {
-	Root       string
-	Command    []string
+	Root    string
+	Command []string
+	// Plugin is what every session loads. It has no default: a launcher without one is refused
+	// at SidecarsFor.
+	Plugin     Plugin
 	Executable string
 	Log        *slog.Logger
 
@@ -119,14 +125,9 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	launch, err := launchMessage(l)
+	launch, err := s.launchSpec(ctx, l)
 	if err != nil {
 		return nil, err
-	}
-	if launch.Worktree == "" {
-		if launch.Worktree, err = s.worktree(ctx, l); err != nil {
-			return nil, err
-		}
 	}
 	data, err := protojson.Marshal(launch)
 	if err != nil {
@@ -157,6 +158,28 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 		return nil, fmt.Errorf("start the sidecar with %s: %w: %s", strings.Join(s.Command, " "), err, strings.TrimSpace(out.String()))
 	}
 	return s.awaitReady(ctx, l.Session, dir)
+}
+
+// launchSpec is the launch file for a session: the effect's launch, the agent's worktree (made on
+// its first session), and the plugin the session loads. The plugin home is kept with the agent, not
+// the session, so a resume finds the one the first session installed into, which also holds the
+// provider's conversation.
+func (s *ProcessSidecars) launchSpec(ctx context.Context, l core.LaunchSession) (*pb.LaunchSession, error) {
+	launch, err := launchMessage(l)
+	if err != nil {
+		return nil, err
+	}
+	if launch.Worktree == "" {
+		if launch.Worktree, err = s.worktree(ctx, l); err != nil {
+			return nil, err
+		}
+	}
+	home := filepath.Join(s.agentDir(l.Session.Agent), "plugin-home")
+	if !filepath.IsAbs(home) {
+		return nil, fmt.Errorf("launch.plugin.home %s is not absolute: set VIBESYS_ORCHESTRATOR_STATE_DIR to an absolute path", home)
+	}
+	launch.Plugin = &pb.SessionPlugin{Marketplace: s.Plugin.Marketplace, Name: s.Plugin.Name, Home: home}
+	return launch, nil
 }
 
 // awaitReady waits, within ctx, for the sidecar to write its pid and answer on its socket.

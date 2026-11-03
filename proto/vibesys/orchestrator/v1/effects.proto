@@ -47,6 +47,37 @@ message LaunchSession {
   string resume_conversation_id = 8;
   // Set on a resume: the worktree the agent had.
   string worktree = 9;
+  // The plugin every session loads, and none of the operator's own plugins, skills or config.
+  // Absent from the stored effect: the daemon's sidecar launcher fills it from its configuration
+  // when it writes the launch file, and the sidecar refuses a launch file without it.
+  SessionPlugin plugin = 10;
+}
+
+// SessionPlugin is the published plugin a session loads, named by value so the sidecar never
+// guesses where its own checkout is.
+message SessionPlugin {
+  // The root of a local marketplace checkout: the directory holding .claude-plugin/marketplace.json.
+  string marketplace = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).cel = {
+      id: "plugin.marketplace.absolute"
+      message: "must be an absolute path"
+      expression: "this.startsWith('/')"
+    }
+  ];
+  // The plugin's name in that marketplace.
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+  // The session's plugin home: a fresh directory the first session of an agent installs the plugin
+  // into, and every later session of that agent reuses, because the provider keeps the
+  // conversation to resume there too. One per agent; never shared between agents.
+  string home = 3 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).cel = {
+      id: "plugin.home.absolute"
+      message: "must be an absolute path"
+      expression: "this.startsWith('/')"
+    }
+  ];
 }
 
 message StartTurn {
