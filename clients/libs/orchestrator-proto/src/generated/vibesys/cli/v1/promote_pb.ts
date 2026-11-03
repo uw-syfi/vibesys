@@ -10,7 +10,7 @@ import type { EnvironmentFingerprint } from "./environment_pb.js";
 import { file_vibesys_cli_v1_environment } from "./environment_pb.js";
 import type { Result } from "./result_pb.js";
 import { file_vibesys_cli_v1_result } from "./result_pb.js";
-import type { Verdict } from "./verdict_pb.js";
+import type { ObjectiveVerdict, Verdict } from "./verdict_pb.js";
 import { file_vibesys_cli_v1_verdict } from "./verdict_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/promote.proto.
  */
 export const file_vibesys_cli_v1_promote: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NsaS92MS9wcm9tb3RlLnByb3RvEg52aWJlc3lzLmNsaS52MSKzAQoUUHJvbW90ZVJlZnVzYWxSZWFzb24SMAoEa2luZBgBIAEoDjIiLnZpYmVzeXMuY2xpLnYxLlByb21vdGVSZWZ1c2FsS2luZBIPCgdtZXNzYWdlGAIgASgJEigKB3ZlcmRpY3QYAyABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0EhgKEG1lYXN1cmVkX2FnYWluc3QYBCABKAkSFAoMY3VycmVudF9oZWFkGAUgASgJIkcKDlByb21vdGVSZWZ1c2FsEjUKB3JlYXNvbnMYASADKAsyJC52aWJlc3lzLmNsaS52MS5Qcm9tb3RlUmVmdXNhbFJlYXNvbiLYAQoJUHJvbW90aW9uEg4KBmNvbW1pdBgBIAEoCRIVCg1wcmV2aW91c19oZWFkGAIgASgJEigKB3ZlcmRpY3QYAyABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0EjsKC2Vudmlyb25tZW50GAQgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBIVCg1yZXN1bHRfam9iX2lkGAUgASgJEiYKAmF0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJFCg1DdXJyZW50UmVzdWx0EgwKBGhlYWQYASABKAkSJgoGcmVzdWx0GAIgASgLMhYudmliZXN5cy5jbGkudjEuUmVzdWx0IlYKD05vQ3VycmVudFJlc3VsdBI1CgZyZWFzb24YASABKA4yJS52aWJlc3lzLmNsaS52MS5Ob0N1cnJlbnRSZXN1bHRSZWFzb24SDAoEaGVhZBgCIAEoCSrEAgoSUHJvbW90ZVJlZnVzYWxLaW5kEiQKIFBST01PVEVfUkVGVVNBTF9LSU5EX1VOU1BFQ0lGSUVEEAASIwofUFJPTU9URV9SRUZVU0FMX0tJTkRfVU5NRUFTVVJFRBABEiYKIlBST01PVEVfUkVGVVNBTF9LSU5EX0NIRUNLX01JU1NJTkcQAhIeChpQUk9NT1RFX1JFRlVTQUxfS0lORF9XT1JTRRADEiUKIVBST01PVEVfUkVGVVNBTF9LSU5EX1dJVEhJTl9OT0lTRRAEEiUKIVBST01PVEVfUkVGVVNBTF9LSU5EX0lOQ09OQ0xVU0lWRRAFEh4KGlBST01PVEVfUkVGVVNBTF9LSU5EX1NUQUxFEAYSLQopUFJPTU9URV9SRUZVU0FMX0tJTkRfRU5WSVJPTk1FTlRfTUlTTUFUQ0gQByqiAQoVTm9DdXJyZW50UmVzdWx0UmVhc29uEigKJE5PX0NVUlJFTlRfUkVTVUxUX1JFQVNPTl9VTlNQRUNJRklFRBAAEiQKIE5PX0NVUlJFTlRfUkVTVUxUX1JFQVNPTl9OT19IRUFEEAESOQo1Tk9fQ1VSUkVOVF9SRVNVTFRfUkVBU09OX05PVF9NRUFTVVJFRF9TSU5DRV9QUk9NT1RJT04QAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_vibesys_cli_v1_environment, file_vibesys_cli_v1_result, file_vibesys_cli_v1_verdict]);
+  fileDesc("Chx2aWJlc3lzL2NsaS92MS9wcm9tb3RlLnByb3RvEg52aWJlc3lzLmNsaS52MSLpAQoUUHJvbW90ZVJlZnVzYWxSZWFzb24SMAoEa2luZBgBIAEoDjIiLnZpYmVzeXMuY2xpLnYxLlByb21vdGVSZWZ1c2FsS2luZBIPCgdtZXNzYWdlGAIgASgJEigKB3ZlcmRpY3QYAyABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0EhgKEG1lYXN1cmVkX2FnYWluc3QYBCABKAkSFAoMY3VycmVudF9oZWFkGAUgASgJEjQKCm9iamVjdGl2ZXMYBiADKAsyIC52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVWZXJkaWN0IkcKDlByb21vdGVSZWZ1c2FsEjUKB3JlYXNvbnMYASADKAsyJC52aWJlc3lzLmNsaS52MS5Qcm9tb3RlUmVmdXNhbFJlYXNvbiKOAgoJUHJvbW90aW9uEg4KBmNvbW1pdBgBIAEoCRIVCg1wcmV2aW91c19oZWFkGAIgASgJEigKB3ZlcmRpY3QYAyABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0EjsKC2Vudmlyb25tZW50GAQgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBIVCg1yZXN1bHRfam9iX2lkGAUgASgJEiYKAmF0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0CgpvYmplY3RpdmVzGAcgAygLMiAudmliZXN5cy5jbGkudjEuT2JqZWN0aXZlVmVyZGljdCJFCg1DdXJyZW50UmVzdWx0EgwKBGhlYWQYASABKAkSJgoGcmVzdWx0GAIgASgLMhYudmliZXN5cy5jbGkudjEuUmVzdWx0IlYKD05vQ3VycmVudFJlc3VsdBI1CgZyZWFzb24YASABKA4yJS52aWJlc3lzLmNsaS52MS5Ob0N1cnJlbnRSZXN1bHRSZWFzb24SDAoEaGVhZBgCIAEoCSrnAgoSUHJvbW90ZVJlZnVzYWxLaW5kEiQKIFBST01PVEVfUkVGVVNBTF9LSU5EX1VOU1BFQ0lGSUVEEAASIwofUFJPTU9URV9SRUZVU0FMX0tJTkRfVU5NRUFTVVJFRBABEiYKIlBST01PVEVfUkVGVVNBTF9LSU5EX0NIRUNLX01JU1NJTkcQAhIeChpQUk9NT1RFX1JFRlVTQUxfS0lORF9XT1JTRRADEiUKIVBST01PVEVfUkVGVVNBTF9LSU5EX1dJVEhJTl9OT0lTRRAEEiUKIVBST01PVEVfUkVGVVNBTF9LSU5EX0lOQ09OQ0xVU0lWRRAFEh4KGlBST01PVEVfUkVGVVNBTF9LSU5EX1NUQUxFEAYSLQopUFJPTU9URV9SRUZVU0FMX0tJTkRfRU5WSVJPTk1FTlRfTUlTTUFUQ0gQBxIhCh1QUk9NT1RFX1JFRlVTQUxfS0lORF9UUkFERU9GRhAIKqIBChVOb0N1cnJlbnRSZXN1bHRSZWFzb24SKAokTk9fQ1VSUkVOVF9SRVNVTFRfUkVBU09OX1VOU1BFQ0lGSUVEEAASJAogTk9fQ1VSUkVOVF9SRVNVTFRfUkVBU09OX05PX0hFQUQQARI5CjVOT19DVVJSRU5UX1JFU1VMVF9SRUFTT05fTk9UX01FQVNVUkVEX1NJTkNFX1BST01PVElPThACQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_vibesys_cli_v1_environment, file_vibesys_cli_v1_result, file_vibesys_cli_v1_verdict]);
 
 /**
  * @generated from message vibesys.cli.v1.PromoteRefusalReason
@@ -37,7 +37,7 @@ export type PromoteRefusalReason = Message<"vibesys.cli.v1.PromoteRefusalReason"
   message: string;
 
   /**
-   * The verdict the refusal rests on. Set for WORSE, WITHIN_NOISE and INCONCLUSIVE.
+   * The verdict the refusal rests on. Set for WORSE, WITHIN_NOISE, INCONCLUSIVE and TRADEOFF.
    *
    * @generated from field: vibesys.cli.v1.Verdict verdict = 3;
    */
@@ -56,6 +56,13 @@ export type PromoteRefusalReason = Message<"vibesys.cli.v1.PromoteRefusalReason"
    * @generated from field: string current_head = 5;
    */
   currentHead: string;
+
+  /**
+   * The verdict on each objective, with `verdict`, for a multi-objective task.
+   *
+   * @generated from field: repeated vibesys.cli.v1.ObjectiveVerdict objectives = 6;
+   */
+  objectives: ObjectiveVerdict[];
 };
 
 /**
@@ -125,6 +132,13 @@ export type Promotion = Message<"vibesys.cli.v1.Promotion"> & {
    * @generated from field: google.protobuf.Timestamp at = 6;
    */
   at?: Timestamp | undefined;
+
+  /**
+   * The verdict on each objective, for a multi-objective task.
+   *
+   * @generated from field: repeated vibesys.cli.v1.ObjectiveVerdict objectives = 7;
+   */
+  objectives: ObjectiveVerdict[];
 };
 
 /**
@@ -237,6 +251,14 @@ export enum PromoteRefusalKind {
    * @generated from enum value: PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH = 7;
    */
   ENVIRONMENT_MISMATCH = 7,
+
+  /**
+   * A multi-objective commit is better than the result branch head on some objective and worse on
+   * another. `frontier add` keeps such a commit.
+   *
+   * @generated from enum value: PROMOTE_REFUSAL_KIND_TRADEOFF = 8;
+   */
+  TRADEOFF = 8,
 }
 
 /**
