@@ -1,0 +1,24 @@
+{
+  "search": {
+    "runId": "run-1",
+    "revision": "3",
+    "health": {
+      "unreadable": {
+        "reason": "UNREADABLE_REASON_CLI_NOT_INSTALLED",
+        "since": "2026-01-01T00:00:01Z",
+        "detail": "configured CLI is missing"
+      }
+    },
+    "jobs": [
+      {
+        "id": "j1"
+      }
+    ],
+    "results": [
+      {
+        "jobId": "j1",
+        "commit": "abc"
+      }
+    ]
+  }
+}

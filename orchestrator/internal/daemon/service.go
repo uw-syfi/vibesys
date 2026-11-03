@@ -171,6 +171,14 @@ func (s *Service) runOf(c core.Caller) core.RunID {
 func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, []*pb.WatchRunsResponse, error) {
 	run := s.runOf(caller)
 	_, scoped := caller.(core.AgentCaller)
+	seen := map[string]uint64{}
+	latest := func(search *pb.SearchState) (*pb.WatchRunsResponse, bool) {
+		if scoped && core.RunID(search.RunId) != run || search.Revision <= seen[search.RunId] {
+			return nil, false
+		}
+		seen[search.RunId] = search.Revision
+		return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Search{Search: search}}, true
+	}
 	w := &RunsWatch{
 		e: s.e, run: run,
 		snapshot: func(state core.State, last uint64) (*pb.WatchRunsResponse, error) {
@@ -180,6 +188,9 @@ func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, [
 					continue
 				}
 				snap.Runs = append(snap.Runs, wire.RunMessage(r))
+				search := s.e.searchState(r.ID)
+				snap.Searches = append(snap.Searches, search)
+				seen[search.RunId] = search.Revision
 				for _, a := range state.Agents(r.ID) {
 					snap.Agents = append(snap.Agents, wire.AgentMessage(a))
 				}
@@ -195,7 +206,17 @@ func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, [
 			}
 			return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Event{Event: ev}}, true
 		},
-		delta: func(*pb.Delta) (*pb.WatchRunsResponse, bool) { return nil, false },
+		delta:  func(*pb.Delta) (*pb.WatchRunsResponse, bool) { return nil, false },
+		latest: latest,
+		current: func(state core.State) []*pb.WatchRunsResponse {
+			var out []*pb.WatchRunsResponse
+			for _, r := range state.Runs() {
+				if msg, ok := latest(s.e.searchState(r.ID)); ok {
+					out = append(out, msg)
+				}
+			}
+			return out
+		},
 	}
 	first, err := w.open(hub.Interest{Everything: true}, after)
 	return w, first, err

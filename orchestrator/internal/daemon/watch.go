@@ -28,6 +28,8 @@ type watch[R any] struct {
 	snapshot func(state core.State, last uint64) (R, error)
 	event    func(*pb.Event) (R, bool)
 	delta    func(*pb.Delta) (R, bool)
+	latest   func(*pb.SearchState) (R, bool)
+	current  func(core.State) []R
 }
 
 // open starts the stream. With after zero the first response is a snapshot; otherwise the stream
@@ -81,6 +83,11 @@ func (w *watch[R]) open(interest hub.Interest, after uint64) ([]R, error) {
 	}
 	// A run-limited read skips the sequences of other runs, so the cursor may stop short of target.
 	w.sent = max(w.sent, target)
+	if w.current != nil {
+		if err := w.e.Cut(func(state core.State, _ uint64) error { first = append(first, w.current(state)...); return nil }); err != nil {
+			return nil, err
+		}
+	}
 	return first, nil
 }
 
@@ -123,6 +130,10 @@ func (w *watch[R]) Poll() ([]R, error) {
 			}
 			w.sent = seq
 			if r, ok := w.event(m.Stored.Event); ok {
+				out = append(out, r)
+			}
+		case m.Search != nil && w.latest != nil:
+			if r, ok := w.latest(m.Search); ok {
 				out = append(out, r)
 			}
 		case m.Delta != nil:
