@@ -45,7 +45,13 @@ func Cap(v View, s *pb.SearchState) *pb.SearchState {
 	s.Troubles = slices.DeleteFunc(s.Troubles, func(r *cli.JobTrouble) bool { return !kept[r.JobId] })
 	slices.SortFunc(s.Results, func(a, b *cli.Result) int { return cmp.Compare(a.JobId, b.JobId) })
 	slices.SortFunc(s.Troubles, func(a, b *cli.JobTrouble) int { return cmp.Compare(a.JobId, b.JobId) })
-	slices.SortFunc(s.Judgments, func(a, b *cli.Judgment) int { return cmp.Compare(a.Commit, b.Commit) })
+	_, commits := ages(v)
+	slices.SortFunc(s.Judgments, func(a, b *cli.Judgment) int {
+		if c := commits[a.Commit].Compare(commits[b.Commit]); c != 0 {
+			return -c
+		}
+		return cmp.Compare(a.Commit, b.Commit)
+	})
 	slices.SortFunc(s.Promotions, func(a, b *cli.PromotionRecord) int { return cmp.Compare(b.Seq, a.Seq) })
 	slices.SortFunc(s.Plans, func(a, b *cli.Plan) int { return cmp.Compare(b.Number, a.Number) })
 	s.Judgments = capList(s.Judgments, 100, &s.Truncated)
@@ -56,7 +62,7 @@ func Cap(v View, s *pb.SearchState) *pb.SearchState {
 }
 
 func capList[T any](xs []T, n int, truncated *bool) []T {
-	if len(xs) >= n {
+	if len(xs) > n {
 		*truncated = true
 	}
 	return xs[:min(len(xs), n)]

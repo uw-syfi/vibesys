@@ -115,7 +115,7 @@ func ages(v View) (map[string]time.Time, map[string]time.Time) {
 		if j := f.GetJob(); j != nil {
 			jobs[j.Id] = j.GetSubmittedAt().AsTime()
 		}
-		if r := f.GetResult(); r != nil {
+		if r := f.GetResult(); r != nil && r.GetMeasure() != nil {
 			at := r.GetRecordedAt().AsTime()
 			if previous, ok := commits[r.Commit]; !ok || at.After(previous) {
 				commits[r.Commit] = at

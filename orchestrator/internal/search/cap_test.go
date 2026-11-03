@@ -22,7 +22,7 @@ func TestCapKeepsNewestAndTheirFacts(t *testing.T) {
 		}
 		v := search.Fold(facts)
 		s := search.Cap(v, &pb.SearchState{})
-		if len(s.Jobs) != min(n, 500) || len(s.Results) != len(s.Jobs) || len(s.Troubles) != len(s.Jobs) || len(s.Judgments) != min(n, 100) || len(s.Plans) != min(n, 200) || len(s.Promotions) != min(n, 200) || s.Truncated != (n >= 100) {
+		if len(s.Jobs) != min(n, 500) || len(s.Results) != len(s.Jobs) || len(s.Troubles) != len(s.Jobs) || len(s.Judgments) != min(n, 100) || len(s.Plans) != min(n, 200) || len(s.Promotions) != min(n, 200) || s.Truncated != (n > 100) {
 			return false
 		}
 		for i, j := range s.Jobs {
@@ -34,5 +34,72 @@ func TestCapKeepsNewestAndTheirFacts(t *testing.T) {
 	}
 	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(1))}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestJudgmentCapKeepsNewestMeasurements(t *testing.T) {
+	property := func(extra uint8) bool {
+		n := 101 + int(extra)
+		var facts search.Facts
+		for i := 0; i < n; i++ {
+			id := fmt.Sprint(i)
+			commit := fmt.Sprintf("%040x", i)
+			at := &timestamppb.Timestamp{Seconds: int64(i)}
+			facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: id, SubmittedAt: at}}}, &cli.TaskFact{Fact: &cli.TaskFact_Result{Result: &cli.Result{JobId: id, Commit: commit, RecordedAt: at, Outcome: &cli.Result_Measure{Measure: &cli.MeasureResult{}}}}}, &cli.TaskFact{Fact: &cli.TaskFact_Judgment{Judgment: &cli.Judgment{Commit: commit}}})
+		}
+		s := search.Cap(search.Fold(facts), &pb.SearchState{})
+		if len(s.Judgments) != 100 || !s.Truncated {
+			return false
+		}
+		for i, j := range s.Judgments {
+			if j.Commit != fmt.Sprintf("%040x", n-1-i) {
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{Rand: rand.New(rand.NewSource(4))}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExactlyAtEachCapIsNotTruncated(t *testing.T) {
+	cases := map[string]struct {
+		cap   int
+		facts func(int) search.Facts
+	}{
+		"jobs": {500, func(i int) search.Facts {
+			return search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: fmt.Sprint(i)}}}}
+		}},
+		"results": {500, func(i int) search.Facts {
+			id := fmt.Sprint(i)
+			return search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: id}}}, {Fact: &cli.TaskFact_Result{Result: &cli.Result{JobId: id}}}}
+		}},
+		"troubles": {500, func(i int) search.Facts {
+			id := fmt.Sprint(i)
+			return search.Facts{{Fact: &cli.TaskFact_Job{Job: &cli.Job{Id: id}}}, {Fact: &cli.TaskFact_Trouble{Trouble: &cli.JobTrouble{JobId: id}}}}
+		}},
+		"judgments": {100, func(i int) search.Facts {
+			return search.Facts{{Fact: &cli.TaskFact_Judgment{Judgment: &cli.Judgment{Commit: fmt.Sprint(i)}}}}
+		}},
+		"plans": {200, func(i int) search.Facts {
+			return search.Facts{{Fact: &cli.TaskFact_Plan{Plan: &cli.Plan{Number: uint32(i + 1)}}}}
+		}},
+		"promotions": {200, func(i int) search.Facts {
+			return search.Facts{{Fact: &cli.TaskFact_Promotion{Promotion: &cli.PromotionRecord{Seq: uint64(i + 1)}}}}
+		}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			for _, n := range []int{tc.cap - 1, tc.cap, tc.cap + 1} {
+				var facts search.Facts
+				for i := 0; i < n; i++ {
+					facts = append(facts, tc.facts(i)...)
+				}
+				if s := search.Cap(search.Fold(facts), &pb.SearchState{}); s.Truncated != (n > tc.cap) {
+					t.Fatalf("%s count %d: truncated %v", name, n, s.Truncated)
+				}
+			}
+		})
 	}
 }
