@@ -1,4 +1,4 @@
-// Rule S3 of the desktop design system (docs/contributing/clients-architecture.md, "Design
+// The desktop design system (docs/contributing/clients-architecture.md, "Design
 // system enforcement"). Every feature and app builds its UI only from `@vibesys/ui`, so it renders
 // no interactive or styled intrinsic element and styles nothing
 // itself: no `style`, `className` or `dangerouslySetInnerHTML` prop on any element, and no

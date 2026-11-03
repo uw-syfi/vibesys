@@ -14,7 +14,7 @@ Agents invoke it through the client command `vibesys-cli`.
 ```text
   operator
      |
- [desktop app] --typed link--> [vibesys-host]            one per user per machine
+ [desktop app] --typed link--> [vibesys-host]            one per state directory
    (any machine)                   |  hosts
                               [orchestrator] ---typed link---> [vibesysd]   one per user per machine
                                    |                                ^
@@ -67,7 +67,7 @@ Rules for the whole picture:
 - The desktop app sees the whole system through generated types. Its protocol bindings come from the shared service contracts; display names come from the Python catalog.
 
 The orchestrator also projects deterministic search state for the app: jobs, results,
-judgments, promotions and plans come from the CLI daemon's contracts. This view is
+judgments and promotions come from the CLI daemon's contracts. Plans are not yet visible to the orchestrator. This view is
 ephemeral and bounded. It is replaced as a whole, with revisions meaningful only
 within one connection. A lost or incompatible daemon makes the view unreadable
 with a typed reason; it never becomes an apparently empty successful search.
@@ -107,7 +107,7 @@ Every such link follows the same rules, so a new link is a variation on a known 
    missing or incompatible daemon is a named state with a reason, never an empty answer.
 5. **A read is a stream that starts with the whole state.** Then come changes tagged with an epoch and a
    sequence number. The caller applies a full state at its end marker and keeps its resume token there. A daemon
-   that cannot honor a token sends the whole state again. Nobody polls a daemon for state.
+   that cannot honor a token sends the whole state again. Protocol 3 always starts with a reset. Nobody polls a daemon for state.
 6. **A write is one bounded command.** It carries an id the callee deduplicates, so repeating it is safe, and the
    caller gives it a deadline.
 7. **Identity travels in the message.** Run, task and agent are part of every call. A shell receives identity through its launch environment, with the carrier names declared once in the contract.
@@ -116,11 +116,20 @@ Every such link follows the same rules, so a new link is a variation on a known 
 9. **One Fake per service, beside the client.** A contract suite runs against the Fake and the real daemon. When the
    two live in different modules, a shared transcript corpus ties them without either importing the other.
 10. **Imports and capabilities hold the pattern.** An architecture check limits which packages may import a callee's
-    contract, build its client, start a process, dial a socket, or read another component's files.
+    contract, build its client, start a process, or read another component's files.
 
-How they are held: generated clients are regenerated and diffed in CI, the contract suites run both Fake and
-real daemon, and import and capability checks fail a link that breaks rule 1, 8 or 10. Whether a write is
-really safe to repeat, and who may start a given daemon, are design decisions that need a reviewer.
+Enforcement for these rules:
+
+1. Enforced by the `proto` check group and proto-copy check. Hand-written mirrors are unenforced because identifying them needs review.
+2. Enforced for the CLI daemon by runtime-directory and Locate checks. New daemon transport choices are unenforced because they need design review.
+3. Enforced for CLI discovery by golden checks and `fs-reads`. A golden for a new daemon is unenforced because no check requires one.
+4. Enforced for the CLI daemon by its contract suite and conformance corpus. The first call for a new link is unenforced because it needs review.
+5. Enforced by the transcript corpus and session property checks. Polling is unenforced because a check cannot distinguish it from other loops.
+6. Unenforced: idempotency and deadlines need review of the operation.
+7. Enforced by identity carrier golden and carrier checks.
+8. Enforced in the orchestrator by `exec-confined` for process starts. Ownership of starts and stops is unenforced because it needs design review.
+9. Enforced for the CLI daemon by corpus runners. Registration of every Fake is unenforced because it needs review.
+10. Enforced in the orchestrator by `cli-contract-importers`, `cli-stub`, `exec-confined` and `fs-reads`. Socket dialing is unenforced because no check restricts it.
 
 ### Where the sidecar link stands
 
@@ -131,18 +140,14 @@ listed exceptions; the rules admit no new one.
 
 ## State and recovery
 
-Each stateful process keeps its own state on local disk and nobody else writes to it: the orchestrator keeps a
-durable record of committed events and outstanding effects, `vibesysd` keeps the job store, each sidecar keeps its
-event log. A process that stops comes back by reading its own record, not by asking its peers what happened.
+Each stateful process owns its record: the orchestrator keeps committed events and outstanding effects on local disk, each sidecar keeps a local event log, and the `vibesysd` job store follows the repository, which may be on shared disk. A process that stops comes back by reading its own record, not by asking its peers what happened.
 Agent sessions outlive the process that started them, so restarting the host does not stop an agent. A step with
 no recorded result runs again, which is why every write carries an id. The Python engine's version of this,
 the log as the truth and a cache beside it, is in [run-recovery.md](run-recovery.md).
 
 ## Where the limits are
 
-- **One `vibesys-host` and one `vibesysd` per user per machine.** Everything for that user on the machine goes through
-  them, and a second copy would fight over the same sockets and stores. Several users or several machines mean several
-  of each, and the desktop app holds one connection per host.
+- **One orchestrator per state directory.** A store lock enforces this; distinct state directories can coexist. One `vibesysd` runs per user per machine. The desktop app holds one connection per host.
 - **Run summaries and detailed history have different bounds.** Run snapshots fit a byte budget and
   can omit older bundles or history. Agent items are paged separately. The core tracks multiple runs;
   their jobs still compete for the machine's resources.

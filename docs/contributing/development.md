@@ -6,6 +6,26 @@ Start with [Architecture](architecture.md) for process ownership, the
 runtime boundaries. Component READMEs hold build and command details; repository
 skills hold the workflow for making each kind of change.
 
+## Repository layout
+
+- `src/`: product and entrypoints; `libs/`: shared libraries.
+- `clients/`: desktop and shared client packages.
+- `examples/`: example inputs and repositories; `skills/`: bundled agent skills.
+- `third_party/`: vendored dependencies; `resources/`: shared resources.
+
+## Common commands
+
+```bash
+uv sync --dev
+pnpm --dir clients install --frozen-lockfile
+./support/repoctl/repoctl doctor
+./scripts/check_format.sh
+./scripts/check_lint.sh
+uv run pytest
+./support/repoctl/repoctl test
+./support/repoctl/repoctl test --checks-only
+```
+
 ## Before you change code
 
 Use the repository software-design skill for code changes and the testing skills
@@ -36,10 +56,10 @@ Use generic placeholders in examples and prose. Start the desktop through the
 repository development launcher so the app and host artifacts agree; see
 [Desktop app development](desktop-development.md).
 
-Submodules are opt-in. Fetch only what a task needs. Missing example checkouts
+Initialize submodules when needed with `git submodule update --init --recursive --checkout`. Submodules are opt-in. Fetch only what a task needs. Missing example checkouts
 do not prevent ordinary unit tests; dedicated example validation covers those
 contracts. Review and stage explicit paths so a local submodule checkout never
-silently changes the repository's pin.
+silently changes the repository's pin. Declare each intentional example pin change with an `Example-Bump: <path>` commit trailer; this also selects example validation in CI. Repair an accidental pin with `git checkout origin/main -- <path>`. Example native build tests are excluded by default; run them with `uv run pytest -m native_build tests/architecture tests/examples`.
 
 ## Verification tiers
 
@@ -93,7 +113,7 @@ Unowned changes fail selection. The local test command runs the groups selected
 for the change and reports groups that cannot run locally with their reasons.
 Inspect the plan when the selection is surprising rather than guessing a suite.
 
-The check registry owns command lists, selection rules and budgets. This guide
+The two-stage CI model runs selected checks on pull requests and the full stage in the merge queue and on main. The `test.yml` workflow and check registry own the stage budgets, command lists and selection rules. This guide
 does not duplicate them. The [tooling README](https://github.com/uw-syfi/vibesys/blob/main/support/repoctl/README.md)
 explains how to inspect and run the selection.
 

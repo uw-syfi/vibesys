@@ -1,4 +1,4 @@
-// Rules S4 and S8 of the desktop design system (docs/contributing/clients-architecture.md,
+// The desktop design system (docs/contributing/clients-architecture.md,
 // "Design system enforcement"). Features, apps, and `@vibesys/ui`'s own source outside its token
 // table (`src/tokens/`), name colors and lengths only through tokens: a string or template literal
 // holding a hex color, `rgb(`, `rgba(`, `hsl(`, `hsla(`, `oklch(`, `color-mix(`, or a CSS length
