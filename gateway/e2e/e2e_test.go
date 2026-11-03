@@ -69,7 +69,9 @@ func newRig(t *testing.T) *rig {
 	if out, err := exec.Command("uv", "sync", "--frozen", "--quiet", "--project", sidecar).CombinedOutput(); err != nil {
 		t.Fatalf("prepare the sidecar environment: %v\n%s", err, out)
 	}
-	r := &rig{t: t, binary: binary, dir: dir, root: filepath.Join(dir, "r"), state: filepath.Join(dir, "state")}
+	// The daemon's root is the .vibesys directory of a home of its own (dir). A client that finds
+	// the gateway by the user's home, as the desktop app does, reaches this one when its HOME is dir.
+	r := &rig{t: t, binary: binary, dir: dir, root: filepath.Join(dir, ".vibesys"), state: filepath.Join(dir, "state")}
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "XDG_RUNTIME_DIR=") && !strings.HasPrefix(kv, "XDG_STATE_HOME=") && !strings.HasPrefix(kv, "VIBESYS_") {
 			r.env = append(r.env, kv)
@@ -228,8 +230,23 @@ func (r *rig) killSidecars() {
 	if r.t.Failed() && os.Getenv("E2E_KEEP") != "" {
 		return
 	}
-	// The sidecars are detached, so the test stops them itself.
-	for _, pid := range r.sidecarPids() {
+	// The sidecars are detached, so the test stops them itself. Nothing of the world may outlive
+	// the test: no sidecar, and no process of the gateway binary (the daemon, which its own cleanup
+	// killed, and the tool servers the agents ran).
+	pids := r.sidecarPids()
+	for _, pid := range pids {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+	for _, pid := range untilNoneRunning(func() []int {
+		left := processesOf(r.binary)
+		for _, pid := range pids {
+			if running(pid) {
+				left = append(left, pid)
+			}
+		}
+		return left
+	}) {
+		r.t.Errorf("process %d of the world still runs after the test stopped it", pid)
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 }

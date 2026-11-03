@@ -39,6 +39,8 @@ clients/*/*/.vibesys-node-tests-*/
 # `tools/scripts/new_package.test.mjs` scaffolds into these and removes them when it finishes.
 clients/.vibesys-scaffold-test-*/
 clients/apps/ui-gallery/test-results/
+clients/apps/desktop-shell/test-results/
+clients/apps/desktop/test-results/
 # `tsc -b` build info for the check-only projects, and Turborepo's local cache and task logs.
 clients/**/.tsbuild/
 .turbo/

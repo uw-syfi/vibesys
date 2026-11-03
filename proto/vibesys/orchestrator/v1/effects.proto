@@ -51,6 +51,9 @@ message LaunchSession {
   // Absent from the stored effect: the daemon's sidecar launcher fills it from its configuration
   // when it writes the launch file, and the sidecar refuses a launch file without it.
   SessionPlugin plugin = 10;
+  // The run task and CLI location for the agent.
+  string task = 11 [(buf.validate.field).string.min_len = 1];
+  CliLocation cli_location = 12;
 }
 
 // SessionPlugin is the published plugin a session loads, named by value so the sidecar never

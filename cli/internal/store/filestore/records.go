@@ -1,6 +1,7 @@
 package filestore
 
 import (
+	"buf.build/go/protovalidate"
 	"fmt"
 	"slices"
 	"time"
@@ -15,14 +16,9 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
-// formatVersion is the version of every record and of the layout. A program reads records of
-// this version and refuses any other: a newer one is reported as newer, and an older one as one
-// this program does not migrate. A change to a record that an older program could not read raises
-// it.
-//
-// Version 1 was a hand-written JSON encoding. Version 2 is protojson of the messages in
-// proto/vibesys/cli/v1/store.proto, so the stored form is generated from the contract and not kept
-// by hand. A prerelease store of version 1 is thrown away and never converted.
+// formatVersion remains 2: submitters is additive and absent on historical jobs.
+// Old writers reject unknown fields in jobs containing submitters. Upgrade all writers;
+// never invent attribution for records written before submitters existed.
 const formatVersion = 2
 
 // The files of a store are the messages of store.proto in protojson: the proto field names, and
@@ -44,6 +40,9 @@ var (
 
 // encode writes a file's content: one JSON document and a newline.
 func encode(file proto.Message) ([]byte, error) {
+	if err := protovalidate.Validate(file); err != nil {
+		return nil, err
+	}
 	data, err := encoder.Marshal(file)
 	if err != nil {
 		return nil, err
@@ -72,6 +71,9 @@ func decode(name string, data []byte, file proto.Message) error {
 				"remove the store and let the daemon make it again", name, v, formatVersion)}
 	}
 	if err := recordReader.Unmarshal(data, file); err != nil {
+		return corrupt(name, "%v", err)
+	}
+	if err := protovalidate.Validate(file); err != nil {
 		return corrupt(name, "%v", err)
 	}
 	return nil
@@ -248,6 +250,12 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 		}
 		past.StartedAt, past.EndedAt = instant(a.GetStartedAt()), instant(a.GetEndedAt())
 		j.Attempts = append(j.Attempts, past)
+	}
+	for _, sub := range m.GetSubmitters() {
+		if err := sub.GetAt().CheckValid(); err != nil {
+			return fail(fmt.Errorf("submitter.at: %w", err))
+		}
+		j.Submitters = append(j.Submitters, wire.ToSubmitter(sub))
 	}
 	return j, nil
 }

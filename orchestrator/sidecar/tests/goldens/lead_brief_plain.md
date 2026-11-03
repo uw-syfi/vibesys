@@ -1,3 +1,3 @@
 Run the `vibesys:optimize` skill for the task `kv-store` with `--fanout 0`.
 
-This run is hosted by the VibeSys orchestrator: `VIBESYS_RUN_ID` is set in your environment, so follow the skill's orchestrator harness reference and start every subagent with the orchestrator's tools.
+This run is hosted by the VibeSys orchestrator: `VIBESYS_RUN` is set in your environment, so follow the skill's orchestrator harness reference and start every subagent with the orchestrator's tools.

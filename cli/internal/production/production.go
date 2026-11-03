@@ -43,10 +43,17 @@ type Process struct {
 	Home string
 }
 
+// RuntimePath is where the user's runtime directory is: under XDG_RUNTIME_DIR when it is an
+// absolute path, and otherwise a private directory under /tmp.
+func (p Process) RuntimePath() string { return runtimedir.Resolve(p.Getenv, p.UID) }
+
 // RuntimeDir opens the user's runtime directory.
 func (p Process) RuntimeDir() (runtimedir.Dir, error) {
-	return runtimedir.Open(runtimedir.Resolve(p.Getenv, p.UID), p.UID, runtimedir.System())
+	return runtimedir.Open(p.RuntimePath(), p.UID, runtimedir.System())
 }
+
+// IndexDir is where the task index is, which filestore decides from the environment and the home.
+func (p Process) IndexDir() string { return filestore.IndexDir(p.Getenv, p.Home) }
 
 // ClientOptions returns how a client reaches the daemon, starting it from this binary when none
 // runs.
@@ -70,7 +77,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
-	index, err := filestore.OpenIndex(filestore.IndexDir(p.Getenv, p.Home))
+	index, err := filestore.OpenIndex(p.IndexDir())
 	if err != nil {
 		return fmt.Errorf("opening the task index: %w", err)
 	}
@@ -96,7 +103,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			Stores: filestores.New(index, app.Rules(task.DefaultSamples), owner),
 			Supervisors: host.New(host.Config{
 				Root:    dir.Supervisors(),
-				Records: host.RecordsDir(filestore.IndexDir(p.Getenv, p.Home), machine, dir.Path()),
+				Records: host.RecordsDir(p.IndexDir(), machine, dir.Path()),
 				BootID:  runtimedir.BootID,
 				Command: func(runDir string) *exec.Cmd {
 					return exec.Command(p.Executable, "supervisor", "serve", "--run-dir", runDir)

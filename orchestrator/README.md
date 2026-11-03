@@ -149,9 +149,10 @@ of the sessions it finds over when it starts (`Reattach`). A process id is only 
 process's command line carries the session's directory, so a number the system has given to another
 program is never killed.
 
-A snapshot holds runs and agents, not items. A watch opened after an agent replied does not show that
-reply; `run watch --after SEQUENCE` replays the log after a sequence, such as the one in a command's
-receipt.
+A snapshot holds runs and agents, and every turn and message of those runs, not items. A watch opened
+after an agent replied does not show that reply; `run watch --after SEQUENCE` replays the log after a
+sequence, such as the one in a command's receipt. A run with more turns than a timeline window holds
+shows its earliest in the snapshot.
 
 ## Running it
 
@@ -170,19 +171,26 @@ The lead's first message is rendered by the sidecar from the run's task, its `--
 optional `--brief`, the operator's steering text: it tells the lead to run `vibesys:optimize` for the
 task, so the repository must hold `.vibesys/tasks/TASK/`.
 
-### Which `vibesys-cli` the agents run
+### Which `vibesys-cli` the agents run, and where it finds its daemon
 
 An agent's shell may be a login shell (Codex runs `bash -lc`), which reads the user's profile again
-and can put another `vibesys-cli` first on `PATH`. So the daemon picks one build when it starts and
-hands every session its absolute path as `VIBESYS_CLI`. The daemon picks, in order:
-`VIBESYS_ORCHESTRATOR_CLI` (an absolute path to an executable file; a relative path or a file that
-is not executable stops the orchestrator from starting, naming the setting, and no other build is
-substituted), a `vibesys-cli` beside the `vibesysd` binary, then the first `vibesys-cli` on the
-daemon's own `PATH`. With none of them the orchestrator does not start, because the skills have no
-`PATH` fallback: they run `"$VIBESYS_CLI"` and stop with a clear message when it is unset. Whatever
-was inherited under the name `VIBESYS_CLI` is dropped, so a stale value never reaches an agent. The
-variable is set in the sidecar process's environment, which is where the agent's commands run; the
-launch environment's token and identity stay in the tool server's.
+and can put another `vibesys-cli` first on `PATH`. So the daemon picks one build when it starts. It
+picks, in order: `VIBESYS_ORCHESTRATOR_CLI` (an absolute path to an executable file; a relative path
+or a file that is not executable stops the orchestrator from starting, naming the setting, and no
+other build is substituted), a `vibesys-cli` beside the `vibesysd` binary, then the first
+`vibesys-cli` on the daemon's own `PATH`. With none of them the orchestrator does not start, because
+the skills have no `PATH` fallback: they run `"$VIBESYS_CLI"` and stop with a clear message when it
+is unset.
+
+The choice is recorded, with the places that build reads its daemon and store from
+(`XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `HOME` of the daemon's own environment, each only if it is an
+absolute path), as the run's `CliLocation` when the run starts. Every session of the run, a resumed
+one after a daemon restart included, is launched with the run's recorded location and its task, so
+the agents of a run meet one daemon and one store. The sidecar puts them in the agent's environment
+with the run's identity (`VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_AGENT`,
+`VIBESYS_HARNESS`, `VIBESYS_SESSION`), as its README describes. The sidecar process's own
+environment carries none of it: agentshim builds a provider's environment from a login-shell probe,
+so only the environment the sidecar gives the `Agent` arrives.
 
 Live smoke run with Claude Code and Haiku 4.5 (it uses a real account, so an operator runs it; the
 repository needs the task bundle named by `--task`):

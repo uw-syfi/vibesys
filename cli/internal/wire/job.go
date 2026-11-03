@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"buf.build/go/protovalidate"
 	"fmt"
 	"maps"
 	"time"
@@ -72,6 +73,16 @@ func Note(n core.Note) *cliv1.Note {
 // ToNote returns the domain note for the contract's message.
 func ToNote(n *cliv1.Note) core.Note {
 	return core.Note{Text: n.GetText(), At: toTime(n.GetAt()), Agent: n.GetAgent()}
+}
+
+// Submitter returns the contract's message for a caller that submitted a job.
+func Submitter(s core.Submitter) *cliv1.Submitter {
+	return &cliv1.Submitter{RunId: string(s.Run), Agent: s.Agent, At: timestamppb.New(s.At)}
+}
+
+// ToSubmitter returns the domain submitter for the contract's message.
+func ToSubmitter(s *cliv1.Submitter) core.Submitter {
+	return core.Submitter{Run: core.RunID(s.GetRunId()), Agent: s.GetAgent(), At: toTime(s.GetAt())}
 }
 
 // ServiceSpec returns the contract's message for a service, or nil for none.
@@ -194,6 +205,9 @@ func Job(j core.Job) *cliv1.Job {
 	for _, a := range j.Attempts {
 		out.Attempts = append(out.Attempts, Attempt(a))
 	}
+	for _, sub := range j.Submitters {
+		out.Submitters = append(out.Submitters, Submitter(sub))
+	}
 	return out
 }
 
@@ -242,6 +256,9 @@ func Jobs(jobs []core.Job) []*cliv1.Job {
 
 // ToJob returns the domain job for the contract's message.
 func ToJob(j *cliv1.Job) (core.Job, error) {
+	if err := protovalidate.Validate(j); err != nil {
+		return core.Job{}, fmt.Errorf("job: %w", err)
+	}
 	spec, err := ToJobSpec("job.spec", j.GetSpec())
 	if err != nil {
 		return core.Job{}, err
@@ -281,6 +298,12 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 			return core.Job{}, err
 		}
 		out.Attempts = append(out.Attempts, past)
+	}
+	for _, sub := range j.GetSubmitters() {
+		if err := sub.GetAt().CheckValid(); err != nil {
+			return core.Job{}, fmt.Errorf("submitter.at: %w", err)
+		}
+		out.Submitters = append(out.Submitters, ToSubmitter(sub))
 	}
 	return out, nil
 }

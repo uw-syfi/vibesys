@@ -180,8 +180,8 @@ func (l *Ledger) Submit(sub core.Submission) (Change, core.SubmitOutcome, error)
 	return PutJob{Job: job}, core.SubmitOutcome{Job: Copy(job), Disposition: core.SubmitCreated}, nil
 }
 
-// landOn appends the submission's note and plan link to an existing job. A landing that adds
-// nothing yields a nil Change.
+// landOn appends the submission's note, plan link and caller to an existing job, in any state. A
+// landing that adds nothing yields a nil Change.
 func landOn(job core.Job, sub core.Submission, how core.SubmitDisposition) (Change, core.SubmitOutcome, error) {
 	job, changed := attach(job, sub)
 	out := core.SubmitOutcome{Job: Copy(job), Disposition: how}
@@ -191,11 +191,13 @@ func landOn(job core.Job, sub core.Submission, how core.SubmitDisposition) (Chan
 	return PutJob{Job: job}, out, nil
 }
 
-// attach appends the submission's note and plan link to a copy of the job, and says whether
-// that changed it. A plan the job already links to is not linked twice.
+// attach appends the submission's note, plan link and caller to a copy of the job, and says whether
+// that changed it. A plan the job already links to is not linked twice, and a caller that already
+// submitted the job (same run, same agent) is not added again.
 func attach(job core.Job, sub core.Submission) (core.Job, bool) {
 	job = Copy(job)
-	changed := false
+	var changed bool
+	job.Submitters, changed = core.WithSubmitter(job.Submitters, core.SubmitterOf(sub))
 	if sub.Note != nil {
 		job.Notes = append(job.Notes, *sub.Note)
 		changed = true

@@ -23,6 +23,9 @@ type EngineDeps struct {
 	Nonces Nonces
 	Hub    *hub.Hub
 	Log    *slog.Logger
+	// Location is where this daemon's agents find the vibesys-cli and its daemon and store. Each
+	// run that starts records it, so a session launched later for that run meets the same ones.
+	Location core.CliLocation
 	// OnCommit is called after every commit, with the engine's lock held, so it must not wait. The
 	// daemon's loop uses it to wake up.
 	OnCommit func()
@@ -51,7 +54,11 @@ func OpenEngine(d EngineDeps) (*Engine, error) {
 	if d.Log == nil {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Engine{EngineDeps: d, state: state, last: snap.Sequence}, nil
+	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence}
+	if err := e.upgradeLocations(); err != nil {
+		return nil, err
+	}
+	return e, nil
 }
 
 // Applied says what one input did.
@@ -72,7 +79,7 @@ func (e *Engine) Apply(body core.InputBody) (Applied, error) {
 }
 
 func (e *Engine) apply(body core.InputBody) (Applied, error) {
-	in := core.Input{At: e.Clock.Now(), Nonce: e.Nonces.Next(), Body: body}
+	in := core.Input{At: e.Clock.Now(), Nonce: e.Nonces.Next(), Location: e.Location, Body: body}
 	next, events, effects := core.Decide(e.state, in)
 	if len(events) == 0 && len(effects) == 0 {
 		// Decide records no reason for an input that changes nothing. Most are repeats a feed or a

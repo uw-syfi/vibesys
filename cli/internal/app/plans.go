@@ -73,7 +73,8 @@ func (a *App) ViewPlan(ctx context.Context, scope core.Scope, number core.PlanNu
 	if err != nil {
 		return core.PlanView{}, err
 	}
-	return core.PlanView{Plan: plan, Jobs: core.LinkedTo(number, jobs)}, nil
+	linked := core.LinkedTo(number, jobs)
+	return core.PlanView{Plan: plan, Jobs: linked, Verdicts: a.verdictsOf(ctx, taskStore{scope: scope, store: st}, linked)}, nil
 }
 
 // EditPlan changes a plan's title, body or status as one change. An edit that sets nothing is

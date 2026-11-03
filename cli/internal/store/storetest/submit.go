@@ -2,6 +2,7 @@ package storetest
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -132,6 +133,71 @@ func testSubmit(t *testing.T, newStore New) {
 		}
 		if !reflect.DeepEqual(joined2.Job, job) && len(e.jobs(core.JobFilter{})) != 1 {
 			t.Errorf("joining made another job")
+		}
+	})
+
+	t.Run("a job records every caller that submitted it, once for each run and agent", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		as := func(sub core.Submission, run core.RunID, agent string) core.Submission {
+			sub.Context = core.CallContext{Run: run, Agent: agent}
+			return sub
+		}
+		first := as(e.check(1, "key-a"), "run-1", "lead")
+		created := e.submit(first)
+		if want := []core.Submitter{{Run: "run-1", Agent: "lead", At: first.At}}; !reflect.DeepEqual(created.Job.Submitters, want) {
+			t.Fatalf("a created job's submitters = %+v, want %+v", created.Job.Submitters, want)
+		}
+		second := as(e.check(1, "key-a"), "run-2", "lead")
+		third := as(e.check(1, "key-a"), "run-1", "worker")
+		again := as(e.check(1, "key-a"), "run-1", "lead")
+		human := as(e.check(1, "key-a"), "", "")
+		for _, sub := range []core.Submission{second, third, again, human} {
+			if out := e.submit(sub); out.Disposition != core.SubmitJoined || out.Job.ID != created.Job.ID {
+				t.Fatalf("submission of %+v = %s on %s, want joined on %s", sub.Context, out.Disposition, out.Job.ID, created.Job.ID)
+			}
+		}
+		want := []core.Submitter{
+			{Run: "run-1", Agent: "lead", At: first.At}, {Run: "run-2", Agent: "lead", At: second.At},
+			{Run: "run-1", Agent: "worker", At: third.At}, {Run: "", Agent: "", At: human.At},
+		}
+		if got := e.job(created.Job.ID).Submitters; !reflect.DeepEqual(got, want) {
+			t.Errorf("submitters = %+v, want %+v: one for each distinct run and agent, oldest first, each at its first submission", got, want)
+		}
+	})
+
+	t.Run("a caller that reuses a finished job is added to it and the job is otherwise unchanged", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		saved := e.savedJob(e.measure(1, "key-a", 3), 1, 2, 3)
+		sub := e.measure(1, "key-a", 3)
+		sub.Context = core.CallContext{Run: "run-2", Agent: "lead"}
+		out := e.submit(sub)
+		if out.Disposition != core.SubmitReused || out.Job.ID != saved.ID {
+			t.Fatalf("submission = %s on %s, want reused on %s", out.Disposition, out.Job.ID, saved.ID)
+		}
+		want := saved
+		want.Submitters = append(slices.Clone(saved.Submitters), core.Submitter{Run: "run-2", Agent: "lead", At: sub.At})
+		if got := e.job(saved.ID); !reflect.DeepEqual(got, want) {
+			t.Errorf("job = %+v, want only the submitter added: %+v", got, want)
+		}
+		if n := len(e.jobs(core.JobFilter{})); n != 1 {
+			t.Errorf("%d jobs, want 1", n)
+		}
+		// The same caller again adds nothing.
+		again := e.measure(1, "key-a", 3)
+		again.Context = sub.Context
+		e.submit(again)
+		if got := e.job(saved.ID); !reflect.DeepEqual(got, want) {
+			t.Errorf("job after the same caller again = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("a command job has the one caller that submitted it", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		sub := e.command(1, "true")
+		sub.Context = core.CallContext{Run: "run-1", Agent: "worker"}
+		out := e.submit(sub)
+		if want := []core.Submitter{{Run: "run-1", Agent: "worker", At: sub.At}}; !reflect.DeepEqual(out.Job.Submitters, want) {
+			t.Errorf("submitters = %+v, want %+v", out.Job.Submitters, want)
 		}
 	})
 

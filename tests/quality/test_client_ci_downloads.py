@@ -164,3 +164,53 @@ def test_browser_download_attempts_are_bounded() -> None:
         run for run in runs if isinstance(run, str) and "playwright install chromium" in run
     )
     assert "timeout --kill-after=5s 60s pnpm" in install
+
+
+# What a `workspace-only` job keeps: Node, pnpm, the Electron binary and the workspace install. A
+# step not named here is skipped by it; a new step has to choose.
+_WORKSPACE_ONLY_KEEPS = (
+    "Set up Node.js",
+    "Pin client download locations",
+    "Cache the pnpm binary",
+    "Enable pnpm",
+    "Locate the pnpm store",
+    "Cache the pnpm store",
+    "Resolve the Electron version",
+    "Cache the Electron binary",
+    "Install client dependencies",
+    "Disable Turborepo telemetry",
+    "Resolve the Playwright version",
+    "Cache the Playwright browsers",
+    "Install Chromium for client end-to-end tests",
+)
+
+
+def test_workspace_only_keeps_exactly_the_node_pnpm_and_electron_steps() -> None:
+    kept: list[str] = []
+    for step in _steps(_load(SETUP_ACTION)):
+        name = step["name"]
+        assert isinstance(name, str)
+        if step.get("if") != "inputs.workspace-only != 'true'":
+            kept.append(name)
+    assert tuple(kept) == _WORKSPACE_ONLY_KEEPS
+
+
+def test_only_the_desktop_path_job_asks_setup_clients_for_workspace_only() -> None:
+    loaded = _load(REPO / ".github" / "workflows" / "test.yml")
+    assert isinstance(loaded, dict)
+    asking: list[str] = []
+    for name, job in _mapping(loaded["jobs"]).items():
+        steps = _mapping(job).get("steps") or []
+        assert isinstance(steps, list)
+        for step in steps:
+            body = _mapping(step)
+            uses = body.get("uses", "")
+            with_block = body.get("with")
+            if (
+                isinstance(uses, str)
+                and uses.endswith("setup-clients")
+                and isinstance(with_block, dict)
+                and with_block.get("workspace-only") is True
+            ):
+                asking.append(name)
+    assert asking == ["desktop-path"]

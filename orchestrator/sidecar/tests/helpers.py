@@ -16,13 +16,13 @@ from agentshim.testing import (
     SequentialIds,
 )
 
-from vs_sidecar.driver import AgentshimDriver, Driver, build_session
+from vs_sidecar.driver import AgentFactory, AgentshimDriver, Driver, Identity, build_session
 from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from agentshim import RawFrame
@@ -67,12 +67,46 @@ def session_plugin(root: Path, *, name: str = "vibesys") -> fx.SessionPlugin:
     )
 
 
+#: The environment a scripted session's identity is laid over, standing for the login shell's.
+BASE_ENV = {"PATH": "/usr/bin:/bin", "HOME": "/home/tester"}
+
+
+def scripted_agents(
+    provider: str,
+    executor: FakeExecutor,
+    base_env: Mapping[str, str] = BASE_ENV,
+    **options: Any,
+) -> AgentFactory:
+    """An ``AgentFactory`` whose agents run *provider* over *executor*, on a fixed clock.
+
+    Each agent's environment is the session's identity laid over *base_env*, as it is over the
+    login shell's in production.
+    """
+
+    def make(_provider: str, identity: Identity) -> Agent:
+        return Agent(
+            provider,
+            transport=TransportKind.STREAM,
+            model="fake-model",
+            executor=executor,
+            env=identity.over(base_env),
+            permissions=NativePermissions.bypass(),
+            approvals=ApprovalPolicy.DENY,
+            clock=FakeClock(),
+            ids=SequentialIds(),
+            **options,
+        )
+
+    return make
+
+
 def launch(harness: int = orch.HARNESS_CODEX, **fields: Any) -> fx.LaunchSession:
     """A valid ``LaunchSession``."""
     base: dict[str, Any] = {
         "session": REF,
         "run_id": "run-1",
         "repository": "repo",
+        "task": "task",
         "role": orch.AGENT_ROLE_WORKER,
         "harness": harness,
         "worktree": "/work",
@@ -159,23 +193,15 @@ def claude_replay_factory(
 def _factory(
     provider: str, executor: FakeExecutor, options: dict[str, Any]
 ) -> Callable[[Callable[[RawFrame], None]], Driver]:
-    agent = Agent(
-        provider,
-        transport=TransportKind.STREAM,
-        model="fake-model",
-        executor=executor,
-        env={"PATH": "/usr/bin:/bin", "HOME": "/home/tester"},
-        permissions=NativePermissions.bypass(),
-        approvals=ApprovalPolicy.DENY,
-        clock=FakeClock(),
-        ids=SequentialIds(),
-        **options,
-    )
+    agent = scripted_agents(provider, executor, **options)
 
     def make(raw_sink: Callable[[RawFrame], None]) -> Driver:
         return AgentshimDriver(
             lambda conversation_id: build_session(
-                launch(), agent=agent, raw_sink=raw_sink, new_conversation_id=conversation_id
+                launch(),
+                agent=agent,
+                raw_sink=raw_sink,
+                new_conversation_id=conversation_id,
             ),
             preferred_id="11111111-1111-4111-8111-111111111111",
         )

@@ -41,9 +41,9 @@ type Rig struct {
 	Auth         daemon.Authority
 	Log          *slog.Logger
 	Limits       hub.Limits
-	// AgentCLI is the vibesys-cli the daemon tells its agents to run, read at each Restart. Empty
-	// names none.
-	AgentCLI string
+	// Location is where the daemon says its agents find the vibesys-cli and its daemon and store,
+	// read at each Restart. A run records the one in force when it starts.
+	Location core.CliLocation
 	// JobStall makes that many polls of the job source hang until their bound ends.
 	JobStall int
 	// ReattachErr is what the last restart's Reattach reported.
@@ -95,7 +95,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	r.Sidecars.mu.Unlock()
 	d, err := daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log,
+			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Location: r.Location,
 			OnCommit: func() {
 				select {
 				case r.Wake <- struct{}{}:
@@ -103,7 +103,7 @@ func (r *Rig) Restart(tb testing.TB) {
 				}
 			},
 		},
-		Sidecars: r.Sidecars, Jobs: gatedJobs{r}, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket, AgentCLI: r.AgentCLI,
+		Sidecars: r.Sidecars, Jobs: gatedJobs{r}, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
 		JobPollEvery: PollEvery,
 	})
 	if err != nil {

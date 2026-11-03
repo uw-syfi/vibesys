@@ -1,8 +1,8 @@
 package store
 
-// schemaVersion is stored in meta. A file with another version is refused: a migration is its own
-// change.
-const schemaVersion = 2
+// schemaVersion is stored in meta. Version 2 upgrades queued identity payloads atomically;
+// other versions are refused.
+const schemaVersion = 3
 
 // The schema. It follows the draft in the design notes, with these deliberate differences:
 //

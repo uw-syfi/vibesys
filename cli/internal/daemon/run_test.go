@@ -254,9 +254,10 @@ func TestADaemonGivesUpItsStoresBeforeItLetsGoOfTheMachine(t *testing.T) {
 			defer r.Close()
 			rt := runtimeOf(t, survivors)
 			rt.Stores = watching
+			ctx := ctxFor(t)
 			done := make(chan error, 1)
 			go func() {
-				done <- daemon.Run(ctxFor(t), daemon.Config{
+				done <- daemon.Run(ctx, daemon.Config{
 					Dir: dir, Version: "test", Runtime: rt, Clock: clock.System{}, Timers: tc.timers, Ready: w,
 				})
 			}()
@@ -268,15 +269,22 @@ func TestADaemonGivesUpItsStoresBeforeItLetsGoOfTheMachine(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			// Run closes the stores synchronously. Join it before checking: selecting
+			// between done and seen can choose done even when both are ready.
+			var runErr error
+			select {
+			case runErr = <-done:
+			case <-ctx.Done():
+				t.Fatal("the daemon did not stop")
+			}
 			select {
 			case err := <-watching.seen:
 				if !errors.Is(err, runtimedir.ErrHeld) {
 					t.Fatalf("the stores closed with the instance lock free (taking it gave %v)", err)
 				}
-			case err := <-done:
-				t.Fatalf("Run ended (%v) and never closed the stores", err)
+			default:
+				t.Fatalf("Run ended (%v) and never closed the stores", runErr)
 			}
-			<-done
 		})
 	}
 }

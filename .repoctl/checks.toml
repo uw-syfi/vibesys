@@ -540,7 +540,9 @@ directory = "gateway"
 # The desktop path end to end test (gateway/e2e, build tag e2e): vibesysd, the orchestrator, real
 # sidecars over agentshim's scripted providers, the vibesys-cli daemon and git, with a toy task. No
 # model is called. It builds vibesysd and vibesys-cli, so a cold Go cache costs about a minute on a
-# CI runner; the sidecar environment is a uv sync of the orchestrator's sidecar project. A warm run
-# takes about ten seconds of test time. The timeout guards against a hang only.
-timeout_seconds = 420
-commands = [["go", "test", "-tags", "e2e", "-count=1", "-timeout", "300s", "./e2e"]]
+# CI runner; the sidecar environment is a uv sync of the orchestrator's sidecar project. With
+# VIBESYS_E2E_DESKTOP_UI=1, which CI sets under a virtual display, it then builds the desktop app and
+# runs its Playwright journey (clients/apps/desktop/e2e) against the same world. A warm run takes
+# about a minute of test time. The timeouts guard against a hang only.
+timeout_seconds = 660
+commands = [["go", "test", "-tags", "e2e", "-count=1", "-timeout", "600s", "./e2e"]]

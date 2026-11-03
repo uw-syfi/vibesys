@@ -77,7 +77,7 @@ const eventFileName = "state/runs/run-a/1.json"
 func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	t.Run("the layout", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put("state/format", []byte(`{"format":3}`))
+		mem.Put("state/format", []byte(`{"format":4}`))
 		_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		wantFailure(t, "newer format file", err, core.FailureIncompatible, "state/format")
 	})
@@ -85,7 +85,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	for _, name := range recordFiles {
 		t.Run(name, func(t *testing.T) {
 			mem := populated(t)
-			mem.Put(name, withVersion(file(t, mem, name), "3"))
+			mem.Put(name, withVersion(file(t, mem, name), "4"))
 			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 			wantFailure(t, "newer record", err, core.FailureIncompatible, name)
 		})
@@ -93,7 +93,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 
 	t.Run("an event, read when asked for", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "3"))
+		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "4"))
 		s, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -340,7 +340,12 @@ func TestEncodingIsPinned(t *testing.T) {
         "agent": "agent-a"
       }
     ],
-    "submitted_at": "2026-11-01T00:00:01Z"
+    "submitted_at": "2026-11-01T00:00:01Z",
+    "submitters": [
+      {
+        "at": "2026-11-01T00:00:01Z"
+      }
+    ]
   }
 }
 `
@@ -416,5 +421,21 @@ func TestLayoutOfAFinishedScript(t *testing.T) {
 	}
 	if got := slices.Sorted(maps.Keys(populated(t).Files())); !slices.Equal(got, want) {
 		t.Errorf("files =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// The callers of a job survive a crash and a reopen: the script has a second run join the job and a
+// third reuse its result, and the job read back from the files names all three, in order.
+func TestTheSubmittersOfAJobSurviveAReopen(t *testing.T) {
+	s := openOn(t, populated(t))
+	job, err := s.Job(t.Context(), "j1")
+	if err != nil {
+		t.Fatalf("Job: %v", err)
+	}
+	want := []core.Submitter{
+		{At: at(1)}, {Run: "run-b", Agent: "lead", At: at(2)}, {Run: "run-c", Agent: "lead", At: at(7)},
+	}
+	if !reflect.DeepEqual(job.Submitters, want) {
+		t.Errorf("submitters = %+v, want %+v", job.Submitters, want)
 	}
 }

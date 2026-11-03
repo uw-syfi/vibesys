@@ -98,10 +98,10 @@ class TestExposeAsTools:
         descriptor = expose_as_tools(
             name="vibesys-thing",
             entrypoint_module="vs_thing.mcp",
-            env={"VIBESYS_RUN_ID": "run-1"},
+            env={"VIBESYS_RUN": "run-1"},
         )
 
-        assert descriptor.env == (("VIBESYS_RUN_ID", "run-1"),)
+        assert descriptor.env == (("VIBESYS_RUN", "run-1"),)
 
     def test_omitted_env_defaults_to_empty_tuple(self) -> None:
         descriptor = expose_as_tools(name="vibesys-thing", entrypoint_module="vs_thing.mcp")

@@ -26,9 +26,6 @@ type Config struct {
 	Authority Authority
 	// Bounds limits every call the daemon makes outside itself. It is required.
 	Bounds Bounds
-	// AgentCLI is the absolute path of the vibesys-cli every agent is told to run, or empty when
-	// there is none to name.
-	AgentCLI string
 	// AgentSocket is the path of the agent-only socket, told to every session the daemon launches. The
 	// operator's socket is not known here, so no environment can carry it.
 	AgentSocket string
@@ -386,6 +383,10 @@ func effectSession(e core.Effect) core.Session {
 }
 
 func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
+	// Recovery may have migrated a pre-location run after its queued launch was written.
+	if run, ok := d.State().Run(l.Run); ok {
+		l.Location = run.Location
+	}
 	if l.Session.N > 1 {
 		// A resume replaces a session whose sidecar may still run: it ends before the new one starts.
 		prev := core.Session{Agent: l.Session.Agent, N: l.Session.N - 1}
@@ -396,9 +397,6 @@ func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
 	env := LaunchEnv{
 		EnvSocket: d.cfg.AgentSocket, EnvAgent: string(l.Session.Agent), EnvSession: fmt.Sprint(l.Session.N),
 		EnvToken: d.cfg.Authority.Token(l.Session), EnvRun: string(l.Run), EnvRole: string(l.Role),
-	}
-	if d.cfg.AgentCLI != "" {
-		env[EnvCLI] = d.cfg.AgentCLI
 	}
 	sc, err := bound(d.cfg.Bounds, ctx, func(c context.Context) (Sidecar, error) {
 		return d.cfg.Sidecars.Launch(c, l, env)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -17,6 +18,9 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
+
+// endOfTime is after every turn, for a read of all of a run's turns.
+var endOfTime = time.Date(9999, time.December, 31, 0, 0, 0, 0, time.UTC)
 
 // The metadata an agent's tools put on every call. Together they say which session is calling; the
 // daemon checks the token and never reads an agent id from a request body.
@@ -179,6 +183,9 @@ func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, [
 				for _, a := range state.Agents(r.ID) {
 					snap.Agents = append(snap.Agents, wire.AgentMessage(a))
 				}
+				if err := s.addHistory(snap, r.ID); err != nil {
+					return nil, err
+				}
 			}
 			return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Snapshot{Snapshot: snap}}, nil
 		},
@@ -192,6 +199,33 @@ func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, [
 	}
 	first, err := w.open(hub.Interest{Everything: true}, after)
 	return w, first, err
+}
+
+// addHistory adds a run's turns and messages to a snapshot, as the contract promises, so that a
+// client that connects after a report was sent still shows it. It reads inside the snapshot's Cut,
+// where nothing commits, so the rows it reads are those of the snapshot's sequence.
+func (s *Service) addHistory(snap *pb.RunsSnapshot, run core.RunID) error {
+	window, err := s.e.Store.Turns(run, time.Time{}, endOfTime, store.MaxWindowTurns)
+	if err != nil {
+		return fmt.Errorf("read the turns of %s: %w", run, err)
+	}
+	// A run with more turns than the window holds shows its earliest; the timeline pages the rest.
+	for _, t := range window.Turns {
+		snap.Turns = append(snap.Turns, wire.TurnMessage(t))
+	}
+	for after := uint64(0); ; {
+		page, err := s.e.Store.Messages(run, after, store.MaxPageMessages)
+		if err != nil {
+			return fmt.Errorf("read the messages of %s: %w", run, err)
+		}
+		for _, rec := range page {
+			snap.Messages = append(snap.Messages, wire.MailboxMessage(rec.Message))
+			after = rec.Seq
+		}
+		if len(page) < store.MaxPageMessages {
+			return nil
+		}
+	}
 }
 
 // WatchRuns streams a snapshot of runs and agents, then every event after it.

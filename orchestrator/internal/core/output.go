@@ -47,6 +47,8 @@ type (
 		Session        Session
 		Run            RunID
 		Repository     string
+		Task           string
+		Location       CliLocation
 		Role           AgentRole
 		Spec           AgentSpec
 		ConversationID string

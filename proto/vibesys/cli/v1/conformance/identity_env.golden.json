@@ -1,0 +1,83 @@
+{
+  "description": "The environment names an agent's processes and its tool servers get from the orchestrator, and what fills each. `from` names a field of the orchestrator's LaunchSession (cli_location.* is its CliLocation): repository, task, run_id, session.agent_id, session.session, harness (the enum name without its prefix, in lower case, with - for _), and cli_location.cli, .xdg_runtime_dir, .xdg_state_home and .home. `empty` says what an empty value does: `unset` removes the name from the environment (never sets it to the empty string), so the program resolves it as the orchestrator's own process would; `keep` leaves whatever the environment already holds, for HOME, which the provider's own CLI needs. `readers` lists the programs that read the name today: the vibesys-cli (cli) and the skills' shell commands (skills). The vibesys-cli reads exactly the names that list cli, through its one environment seam.",
+  "names": [
+    {
+      "name": "VIBESYS_REPO",
+      "from": "repository",
+      "empty": "unset",
+      "readers": [
+        "cli"
+      ]
+    },
+    {
+      "name": "VIBESYS_TASK",
+      "from": "task",
+      "empty": "unset",
+      "readers": [
+        "cli"
+      ]
+    },
+    {
+      "name": "VIBESYS_RUN",
+      "from": "run_id",
+      "empty": "unset",
+      "readers": [
+        "cli"
+      ]
+    },
+    {
+      "name": "VIBESYS_AGENT",
+      "from": "session.agent_id",
+      "empty": "unset",
+      "readers": [
+        "cli"
+      ]
+    },
+    {
+      "name": "VIBESYS_HARNESS",
+      "from": "harness",
+      "empty": "unset",
+      "readers": [
+        "cli"
+      ]
+    },
+    {
+      "name": "VIBESYS_SESSION",
+      "from": "session.session",
+      "empty": "unset",
+      "readers": []
+    },
+    {
+      "name": "VIBESYS_CLI",
+      "from": "cli_location.cli",
+      "empty": "unset",
+      "readers": [
+        "skills"
+      ]
+    },
+    {
+      "name": "XDG_RUNTIME_DIR",
+      "from": "cli_location.xdg_runtime_dir",
+      "empty": "unset",
+      "readers": [
+        "cli"
+      ]
+    },
+    {
+      "name": "XDG_STATE_HOME",
+      "from": "cli_location.xdg_state_home",
+      "empty": "unset",
+      "readers": [
+        "cli"
+      ]
+    },
+    {
+      "name": "HOME",
+      "from": "cli_location.home",
+      "empty": "keep",
+      "readers": [
+        "cli"
+      ]
+    }
+  ]
+}
