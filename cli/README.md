@@ -395,6 +395,11 @@ Recovery is the daemon's start, with no separate path:
   store gives up the runs of the jobs it has running: one that no run of can be found here is
   `lost`, at once with no run here and after its time limit with one this build cannot use. A run of
   it that the daemon does find is its own, and the job goes on.
+- A store of a version this build does not read, such as one a prerelease build wrote, is kept
+  known and refused in the same way, and every other repository works. The daemon logs why, and a
+  command on that store fails with `INCOMPATIBLE` naming the file; for the prerelease encoding it
+  names the store's directory and its index entry to remove, after which the next submission makes
+  the store again.
 - A repository that is gone for good is given up with `daemon forget`.
 
 Each task's store is a directory under `.vibesys-state/` in its repository. The daemon writes a

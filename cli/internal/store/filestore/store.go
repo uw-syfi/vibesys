@@ -88,7 +88,7 @@ func Open(root string, opts ...Option) (*Store, error) {
 		}
 	}
 	if err := initialize(c.fs, root); err != nil {
-		return nil, err
+		return nil, prerelease(err, root, c.entry)
 	}
 	b := newBackend(c.fs, root)
 	g, err := claim(b, c.owner)
@@ -106,7 +106,7 @@ func Open(root string, opts ...Option) (*Store, error) {
 	engine, err := ledger.NewEngine(b, c.rules)
 	if err != nil {
 		_ = g.release()
-		return nil, err
+		return nil, prerelease(err, root, c.entry)
 	}
 	return &Store{Engine: engine, guard: g}, nil
 }
@@ -128,6 +128,23 @@ func (s *Store) Reclaim(job core.JobID) error { return s.guard.reclaim(job) }
 // took it, its record is gone, or its disk does not answer. A store that failed it is given up and
 // opened again.
 func (s *Store) Owned() error { return s.guard.check() }
+
+// prerelease completes the refusal of a store of the prerelease encoding with what to remove: the
+// store's directory and, when the index records the store, its entry, without which the daemon
+// takes the missing directory for a disk that is not mounted. A daemon makes the store again on
+// the next submission. Any other error is returned as it is.
+func prerelease(err error, root, entry string) error {
+	var f *core.Failure
+	if !errors.Is(err, errPrerelease) || !errors.As(err, &f) {
+		return err
+	}
+	fix := fmt.Sprintf("remove the directory %s", root)
+	if entry != "" {
+		fix += fmt.Sprintf(" and the index entry %s", entry)
+	}
+	return &core.Failure{Kind: f.Kind, Message: strings.TrimSuffix(f.Message, prereleaseFix) + fix +
+		", and the next submission makes the store again; no other store is affected"}
+}
 
 // findStore fails unless the store that was made is there.
 func findStore(c config, root string) error {
