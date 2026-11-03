@@ -383,6 +383,10 @@ func effectSession(e core.Effect) core.Session {
 }
 
 func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
+	// Recovery may have migrated a pre-location run after its queued launch was written.
+	if run, ok := d.State().Run(l.Run); ok {
+		l.Location = run.Location
+	}
 	if l.Session.N > 1 {
 		// A resume replaces a session whose sidecar may still run: it ends before the new one starts.
 		prev := core.Session{Agent: l.Session.Agent, N: l.Session.N - 1}

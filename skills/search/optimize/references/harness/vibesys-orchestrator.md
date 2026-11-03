@@ -1,8 +1,8 @@
 # VibeSys orchestrator
 
-`VIBESYS_RUN_ID` is set, so VibeSys hosts the run: it starts every agent, gives
-each the tools below through the `vibesys-orchestrator` tool server, and sets `VIBESYS_AGENT_ID`,
-`VIBESYS_RUN_ID` and `VIBESYS_SESSION` for it. Use these tools for every subagent. Your own
+`VIBESYS_RUN` is set, so VibeSys hosts the run: it starts every agent, gives
+each the tools below through the `vibesys-orchestrator` tool server, and sets `VIBESYS_AGENT`,
+`VIBESYS_RUN` and `VIBESYS_SESSION` for it. Use these tools for every subagent. Your own
 harness's subagent tools would start agents the run cannot see, stop, or count.
 
 ## Dispatch a subagent with a fresh context

@@ -99,7 +99,7 @@ def _is_vendored(relative: Path, base: Path) -> bool:
 
 def check_skills(root: Path) -> list[Finding]:
     """Check every published skill; an empty result means all pass."""
-    findings: list[Finding] = []
+    findings: list[Finding] = check_identity_assets(root)
     skills = discover(root)
     findings.extend(_check_unique_names(skills))
     for skill in skills:
@@ -221,4 +221,30 @@ def _check_tool_names(folder: Path, root: Path) -> list[Finding]:
                 for tool in VIBESYS_TOOL_NAMES
                 if tool in line
             )
+    return findings
+
+
+def check_identity_assets(root: Path) -> list[Finding]:
+    """Reject only the retired identity names in published skills and sidecar prompt assets."""
+    findings: list[Finding] = []
+    for folder in (
+        "skills",
+        "orchestrator/sidecar/src/vs_sidecar/prompts",
+        "orchestrator/sidecar/tests/goldens",
+    ):
+        for path in sorted((root / folder).rglob("*")):
+            if not path.is_file() or path.suffix not in {".md", ".j2"}:
+                continue
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                for old, new in (
+                    ("VIBESYS_RUN_ID", "VIBESYS_RUN"),
+                    ("VIBESYS_AGENT_ID", "VIBESYS_AGENT"),
+                ):
+                    if re.search(rf"\b{old}\b", line):
+                        findings.append(
+                            Finding(
+                                f"{path.relative_to(root)}:{number}",
+                                f"replace retired {old} with {new}",
+                            )
+                        )
     return findings

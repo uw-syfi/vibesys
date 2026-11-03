@@ -299,6 +299,8 @@ class Identity:
         differ and a server cannot be told it is another agent.
         """
         merged = dict(env)
+        merged.pop("VIBESYS_RUN_ID", None)
+        merged.pop("VIBESYS_AGENT_ID", None)
         for name, value in self.values.items():
             if value:
                 merged[name] = value

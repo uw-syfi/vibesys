@@ -20,7 +20,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from tests import helpers as h
-from vs_sidecar.driver import AgentshimDriver, build_session
+from vs_sidecar.driver import AgentshimDriver, Identity, build_session
 from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 
@@ -177,7 +177,7 @@ def test_the_old_id_names_are_gone() -> None:
             "mcpServers"
         ]["vibesys"]["env"]
     )
-    assert not {n for n in names if n.startswith("VIBESYS_") and n.endswith("_ID")}
+    assert not names.intersection({"VIBESYS_RUN_ID", "VIBESYS_AGENT_ID"})
 
 
 @pytest.mark.parametrize("chosen", ["/chosen/vibesys-cli", ""])
@@ -192,3 +192,12 @@ def test_the_sidecar_processs_own_environment_is_not_the_carrier(
     env = executor.spawns[0].env
     assert env.get("VIBESYS_CLI") == (chosen or None)
     assert env["VIBESYS_RUN"] == launch.run_id
+
+
+def test_stale_identity_is_removed_without_removing_other_contracts() -> None:
+    env = Identity.of(h.launch(orch.HARNESS_CODEX)).over(
+        {"VIBESYS_RUN_ID": "old-run", "VIBESYS_AGENT_ID": "old-agent", "VIBESYS_EXEC_ID": "job"}
+    )
+    assert "VIBESYS_RUN_ID" not in env
+    assert "VIBESYS_AGENT_ID" not in env
+    assert env["VIBESYS_EXEC_ID"] == "job"

@@ -122,7 +122,7 @@ func (s *SQLite) open() (err error) {
 		('schema_version', ?), ('last_sequence', 0), ('checkpoint_sequence', 0), ('checkpoint_gen', 0), ('pruned_max', 0)`, schemaVersion); err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
-	if v, err := s.meta(s.w, "schema_version"); err != nil || v != schemaVersion {
+	if v, err := s.meta(s.w, "schema_version"); err != nil || (v != 2 && v != schemaVersion) {
 		return fmt.Errorf("store: %s has schema version %d, this build reads %d (%v)", s.path, v, schemaVersion, err)
 	}
 	if s.r, err = sql.Open("sqlite", s.dsn(true)); err != nil {
@@ -148,6 +148,9 @@ func (s *SQLite) open() (err error) {
 	}
 	if ckpt > s.last {
 		return corruptf("the checkpoint is at %d, past the end of the log at %d", ckpt, s.last)
+	}
+	if v, _ := s.meta(s.w, "schema_version"); v == 2 {
+		return s.upgradeIdentity()
 	}
 	return nil
 }

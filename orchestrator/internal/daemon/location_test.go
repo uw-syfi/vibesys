@@ -56,3 +56,29 @@ func TestARunStartedWithoutALocationRecordsNone(t *testing.T) {
 		t.Fatalf("the session was launched with %+v with none recorded", got)
 	}
 }
+
+func TestLegacyRunRecordsCurrentLocationOnceBeforeResuming(t *testing.T) {
+	r := daemontest.NewRig(t)
+	run, lead := beginRun(t, r)
+	r.Settle(t)
+	r.Sidecars.Session(core.Session{Agent: lead.ID, N: 1}).Die()
+	r.Location = locationA()
+	r.Restart(t)
+	r.Settle(t)
+	got, _ := r.Daemon.State().Run(run.ID)
+	if got.Location != locationA() {
+		t.Fatalf("migration recorded %+v", got.Location)
+	}
+	r.Location = locationB()
+	r.Restart(t)
+	r.Settle(t)
+	got, _ = r.Daemon.State().Run(run.ID)
+	if got.Location != locationA() {
+		t.Fatalf("migration repeated: %+v", got.Location)
+	}
+	for _, session := range r.Sidecars.Sessions() {
+		if session.Launch.Session.N > 1 && session.Launch.Location != locationA() {
+			t.Fatalf("resume location: %+v", session.Launch)
+		}
+	}
+}

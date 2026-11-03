@@ -54,7 +54,11 @@ func OpenEngine(d EngineDeps) (*Engine, error) {
 	if d.Log == nil {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
-	return &Engine{EngineDeps: d, state: state, last: snap.Sequence}, nil
+	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence}
+	if err := e.upgradeLocations(); err != nil {
+		return nil, err
+	}
+	return e, nil
 }
 
 // Applied says what one input did.
