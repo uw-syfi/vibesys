@@ -443,7 +443,7 @@ func (w *world) process(d *incarnation) {
 	if d.dead.Load() {
 		return
 	}
-	d.server = daemon.NewServer(d.app, version)
+	d.server = daemon.NewServer(d.app, version, daemon.Inherited{})
 	d.rpc = grpc.NewServer(grpc.ChainUnaryInterceptor(unaryActor), grpc.ChainStreamInterceptor(streamActor))
 	cliv1.RegisterDaemonServiceServer(d.rpc, d.server)
 	d.lis = newPipeListener()

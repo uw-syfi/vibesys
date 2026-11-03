@@ -317,6 +317,12 @@ func (s *State) observe(o Observed) {
 func (s State) sampled(r Ran) (State, Request) {
 	n := len(s.samples)
 	if v, ended := s.commandEnded(StageBenchmark, r); ended {
+		if why := s.reportedError(r); why != "" {
+			if stopped, ok := v.(Stopped); ok {
+				stopped.Reason += "; " + why
+				v = stopped
+			}
+		}
 		return s.end(v), nil
 	}
 	got, err := s.read(r)
@@ -328,6 +334,9 @@ func (s State) sampled(r Ran) (State, Request) {
 		}
 		return s.end(Rejected{Reason: why}), nil
 	}
+	if missing := s.missingObjective(got); missing != "" {
+		return s.end(Rejected{Reason: fmt.Sprintf("sample %d: the benchmark reported no value of the objective %q, and a multi-objective task judges every sample on every objective", n+1, missing)}), nil
+	}
 	s.samples = append(slices.Clip(s.samples), got.Value)
 	for _, o := range got.Others {
 		s.others = addObservation(s.others, o)
@@ -337,6 +346,34 @@ func (s State) sampled(r Ran) (State, Request) {
 	}
 	s.phase = phaseAfter
 	return s, Observe{}
+}
+
+// reportedError is what a benchmark that did not succeed said about it in its record stream: the
+// message of the error record it wrote, or empty when it wrote none or the plan reads no stream. A
+// stream that holds a result, or is not one the protocol allows, says nothing about the failure.
+func (s State) reportedError(r Ran) string {
+	if !s.plan.Result.Protocol2 || !r.Found || r.ReadError != "" {
+		return ""
+	}
+	var reported *reading.Reported
+	if _, err := reading.Protocol2(r.Output, s.plan.Metric.Name); errors.As(err, &reported) {
+		return reported.Error()
+	}
+	return ""
+}
+
+// missingObjective names an objective of a multi-objective plan that a reading has no value of, and
+// is empty when it has every one.
+func (s State) missingObjective(got reading.Reading) string {
+	for _, m := range s.plan.Objectives.Metrics {
+		if m.Name == s.plan.Metric.Name {
+			continue
+		}
+		if !slices.ContainsFunc(got.Others, func(o reading.Named) bool { return o.Name == m.Name }) {
+			return m.Name
+		}
+	}
+	return ""
 }
 
 // read applies the reader the plan names to what the run wrote.

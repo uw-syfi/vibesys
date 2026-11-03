@@ -13,6 +13,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/daemon"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
@@ -88,7 +89,7 @@ func (c *cli) run(args ...string) result {
 // after the kind of job, for submit).
 func withTask(args ...string) []string {
 	at := 1
-	if args[0] == "submit" {
+	if args[0] == "submit" || args[0] == "frontier" {
 		at = 2
 	}
 	return append(append(append([]string{}, args[:at]...), "--task", "kv"), args[at:]...)
@@ -492,9 +493,24 @@ func TestDaemonStatusStopRestart(t *testing.T) {
 	if c.starter.Calls() != 0 {
 		t.Fatal("status or stop started a daemon")
 	}
+	c.starter.Inherited = daemon.Inherited{
+		Environ:           []string{"PATH=/usr/bin", "VIBESYS_SPARK_HOST=host-a", "VIBESYS_API_TOKEN=t0ken", "AWS_SECRET=s3cret", "TMPDIR=/scratch"},
+		CheckoutDirectory: "/scratch",
+	}
 	c.submit("exit", "0")
-	if r := c.run("daemon", "status"); r.code != exitOK || !strings.HasPrefix(r.stdout, "running\t") {
+	r := c.run("daemon", "status")
+	if r.code != exitOK || !strings.HasPrefix(r.stdout, "running\t") {
 		t.Fatalf("status = %+v", r)
+	}
+	// What a job inherits: every name, and a value only where it is safe to show.
+	wantLines := "checkouts\t/scratch\nenv\tAWS_SECRET\nenv\tPATH=/usr/bin\nenv\tTMPDIR=/scratch\nenv\tVIBESYS_API_TOKEN\nenv\tVIBESYS_SPARK_HOST=host-a\n"
+	if _, rest, _ := strings.Cut(r.stdout, "\n"); rest != wantLines {
+		t.Errorf("status after its first line =\n%s\nwant\n%s", rest, wantLines)
+	}
+	j := c.run("daemon", "status", "--json")
+	if j.code != exitOK || !strings.Contains(j.stdout, `"checkout_directory":"/scratch"`) ||
+		!strings.Contains(j.stdout, `"VIBESYS_SPARK_HOST"`) || strings.Contains(j.stdout, "s3cret") || strings.Contains(j.stdout, "t0ken") {
+		t.Errorf("status --json = %+v", j)
 	}
 	if r := c.run("daemon", "restart"); r.code != exitOK || !strings.HasPrefix(r.stdout, "restarted\t") {
 		t.Fatalf("restart = %+v", r)

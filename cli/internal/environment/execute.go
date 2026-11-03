@@ -28,6 +28,10 @@ func Validate(x core.Execution) error {
 		return invalid("the scratch directory must be an absolute path, got %q", x.Scratch)
 	case x.Scratch != "" && overlap(x.Checkout.Dir, x.Scratch):
 		return invalid("the scratch directory %q and the checkout %q must be apart: neither may be inside the other", x.Scratch, x.Checkout.Dir)
+	case x.Artifacts != "" && x.Artifacts[0] != '/':
+		return invalid("the artifacts directory must be an absolute path, got %q", x.Artifacts)
+	case x.Artifacts != "" && (overlap(x.Checkout.Dir, x.Artifacts) || (x.Scratch != "" && overlap(x.Scratch, x.Artifacts))):
+		return invalid("the artifacts directory %q must be apart from the checkout and the scratch directory", x.Artifacts)
 	}
 	if s := x.Service; s != nil {
 		if len(s.Argv) == 0 || s.Argv[0] == "" {

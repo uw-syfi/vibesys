@@ -20,6 +20,7 @@ PLUGIN_SKILLS: Mapping[str, tuple[str, ...]] = MappingProxyType(
         # Tokio is cross-cutting: dial9-tokio is listed here and in vibesys-database on purpose.
         "vibesys-microservices": (
             "./domains/microservice-optimization",
+            "./domains/custom-rpc-optimization",
             "./domains/dial9-tokio",
         ),
         "vibesys-database": ("./domains/dial9-tokio",),

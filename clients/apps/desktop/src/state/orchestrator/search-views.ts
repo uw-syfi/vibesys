@@ -21,6 +21,7 @@ const verdictWords = {
   [VerdictKind.WORSE]: 'Worse',
   [VerdictKind.WITHIN_NOISE]: 'Within noise',
   [VerdictKind.INCONCLUSIVE]: 'Inconclusive',
+  [VerdictKind.TRADEOFF]: 'Tradeoff',
 } satisfies Record<VerdictKind, string>;
 
 /** Measurements and the daemon's verdict, only while it compares against the current head. */

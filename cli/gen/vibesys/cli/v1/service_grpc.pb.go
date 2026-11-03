@@ -35,6 +35,8 @@ const (
 	DaemonService_Compare_FullMethodName          = "/vibesys.cli.v1.DaemonService/Compare"
 	DaemonService_Promote_FullMethodName          = "/vibesys.cli.v1.DaemonService/Promote"
 	DaemonService_CurrentResult_FullMethodName    = "/vibesys.cli.v1.DaemonService/CurrentResult"
+	DaemonService_AddToFrontier_FullMethodName    = "/vibesys.cli.v1.DaemonService/AddToFrontier"
+	DaemonService_ListFrontier_FullMethodName     = "/vibesys.cli.v1.DaemonService/ListFrontier"
 	DaemonService_CreatePlan_FullMethodName       = "/vibesys.cli.v1.DaemonService/CreatePlan"
 	DaemonService_ListPlans_FullMethodName        = "/vibesys.cli.v1.DaemonService/ListPlans"
 	DaemonService_ViewPlan_FullMethodName         = "/vibesys.cli.v1.DaemonService/ViewPlan"
@@ -91,6 +93,11 @@ type DaemonServiceClient interface {
 	// normal response, not an error.
 	Promote(ctx context.Context, in *PromoteRequest, opts ...grpc.CallOption) (*PromoteResponse, error)
 	CurrentResult(ctx context.Context, in *CurrentResultRequest, opts ...grpc.CallOption) (*CurrentResultResponse, error)
+	// AddToFrontier admits a commit of a multi-objective task to the task's frontier, or refuses with
+	// typed reasons. A refusal is a normal response, not an error.
+	AddToFrontier(ctx context.Context, in *AddToFrontierRequest, opts ...grpc.CallOption) (*AddToFrontierResponse, error)
+	// ListFrontier lists the task's frontier with each member's headline number per objective.
+	ListFrontier(ctx context.Context, in *ListFrontierRequest, opts ...grpc.CallOption) (*ListFrontierResponse, error)
 	CreatePlan(ctx context.Context, in *CreatePlanRequest, opts ...grpc.CallOption) (*CreatePlanResponse, error)
 	ListPlans(ctx context.Context, in *ListPlansRequest, opts ...grpc.CallOption) (*ListPlansResponse, error)
 	ViewPlan(ctx context.Context, in *ViewPlanRequest, opts ...grpc.CallOption) (*ViewPlanResponse, error)
@@ -303,6 +310,26 @@ func (c *daemonServiceClient) CurrentResult(ctx context.Context, in *CurrentResu
 	return out, nil
 }
 
+func (c *daemonServiceClient) AddToFrontier(ctx context.Context, in *AddToFrontierRequest, opts ...grpc.CallOption) (*AddToFrontierResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddToFrontierResponse)
+	err := c.cc.Invoke(ctx, DaemonService_AddToFrontier_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *daemonServiceClient) ListFrontier(ctx context.Context, in *ListFrontierRequest, opts ...grpc.CallOption) (*ListFrontierResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListFrontierResponse)
+	err := c.cc.Invoke(ctx, DaemonService_ListFrontier_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonServiceClient) CreatePlan(ctx context.Context, in *CreatePlanRequest, opts ...grpc.CallOption) (*CreatePlanResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreatePlanResponse)
@@ -411,6 +438,11 @@ type DaemonServiceServer interface {
 	// normal response, not an error.
 	Promote(context.Context, *PromoteRequest) (*PromoteResponse, error)
 	CurrentResult(context.Context, *CurrentResultRequest) (*CurrentResultResponse, error)
+	// AddToFrontier admits a commit of a multi-objective task to the task's frontier, or refuses with
+	// typed reasons. A refusal is a normal response, not an error.
+	AddToFrontier(context.Context, *AddToFrontierRequest) (*AddToFrontierResponse, error)
+	// ListFrontier lists the task's frontier with each member's headline number per objective.
+	ListFrontier(context.Context, *ListFrontierRequest) (*ListFrontierResponse, error)
 	CreatePlan(context.Context, *CreatePlanRequest) (*CreatePlanResponse, error)
 	ListPlans(context.Context, *ListPlansRequest) (*ListPlansResponse, error)
 	ViewPlan(context.Context, *ViewPlanRequest) (*ViewPlanResponse, error)
@@ -474,6 +506,12 @@ func (UnimplementedDaemonServiceServer) Promote(context.Context, *PromoteRequest
 }
 func (UnimplementedDaemonServiceServer) CurrentResult(context.Context, *CurrentResultRequest) (*CurrentResultResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CurrentResult not implemented")
+}
+func (UnimplementedDaemonServiceServer) AddToFrontier(context.Context, *AddToFrontierRequest) (*AddToFrontierResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddToFrontier not implemented")
+}
+func (UnimplementedDaemonServiceServer) ListFrontier(context.Context, *ListFrontierRequest) (*ListFrontierResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListFrontier not implemented")
 }
 func (UnimplementedDaemonServiceServer) CreatePlan(context.Context, *CreatePlanRequest) (*CreatePlanResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreatePlan not implemented")
@@ -774,6 +812,42 @@ func _DaemonService_CurrentResult_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_AddToFrontier_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddToFrontierRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).AddToFrontier(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_AddToFrontier_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).AddToFrontier(ctx, req.(*AddToFrontierRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DaemonService_ListFrontier_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListFrontierRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).ListFrontier(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_ListFrontier_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).ListFrontier(ctx, req.(*ListFrontierRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonService_CreatePlan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreatePlanRequest)
 	if err := dec(in); err != nil {
@@ -936,6 +1010,14 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CurrentResult",
 			Handler:    _DaemonService_CurrentResult_Handler,
+		},
+		{
+			MethodName: "AddToFrontier",
+			Handler:    _DaemonService_AddToFrontier_Handler,
+		},
+		{
+			MethodName: "ListFrontier",
+			Handler:    _DaemonService_ListFrontier_Handler,
 		},
 		{
 			MethodName: "CreatePlan",

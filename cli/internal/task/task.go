@@ -81,7 +81,11 @@ type Task struct {
 	// Version names the task's files: results taken under another version are not comparable.
 	Version string
 	// Files are the files Version names, by path from the task's directory (VersionedFiles).
-	Files   map[string]string
+	Files map[string]string
+	// Context is the content of the same files when the task has a Dockerfile: its image's build
+	// context, which with Version pins the image the jobs run in. It is nil when HasDockerfile is
+	// false.
+	Context Tree
 	Backend core.BackendKind
 	// HasDockerfile says the task ships a Dockerfile, so its jobs run in docker.
 	HasDockerfile bool
@@ -102,8 +106,13 @@ type Task struct {
 	// Samples is how many benchmark samples a measurement takes when the submission does not say.
 	Samples uint32
 	// Others are the metrics a protocol 2 benchmark reports besides the scored one, and which way
-	// each improves. They are recorded beside the result and never scored.
+	// each improves. They are recorded beside the result, and scored only as Objectives.
 	Others []core.Metric
+	// Objectives is set for a multi-objective (Pareto) task: one whose objectives.toml has a
+	// [pareto] section and more than one objective. Its measurements are judged on every objective,
+	// in the order declared, under the [pareto] relative_noise. It is the zero value for any other
+	// task, which is judged on Metric alone.
+	Objectives core.Objectives
 }
 
 // Setup is what the task declares that decides where its jobs run.
@@ -148,10 +157,15 @@ func Read(fsys fs.FS, name string) (Task, error) {
 	case !errors.Is(err, fs.ErrNotExist):
 		return Task{}, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("task %q: reading %s: %v", name, path.Join(dir, dockerfile), err)}
 	}
-	if t.Files, err = VersionedFiles(fsys, dir); err != nil {
+	tree, err := versioned(fsys, dir)
+	if err != nil {
 		return Task{}, err
 	}
+	t.Files = fingerprints(tree)
 	t.Version = versionOf(t.Files)
+	if t.HasDockerfile {
+		t.Context = tree
+	}
 	return t, nil
 }
 
@@ -197,7 +211,16 @@ func Version(fsys fs.FS, dir string) (string, error) {
 // that is not Generated, by its path from dir, with a fingerprint of its executable bit and
 // content. Two trees have one version exactly when they have equal VersionedFiles.
 func VersionedFiles(fsys fs.FS, dir string) (map[string]string, error) {
-	files := map[string]string{}
+	tree, err := versioned(fsys, dir)
+	if err != nil {
+		return nil, err
+	}
+	return fingerprints(tree), nil
+}
+
+// versioned reads the files under dir that the task's version names.
+func versioned(fsys fs.FS, dir string) (Tree, error) {
+	files := Tree{}
 	err := fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -226,17 +249,26 @@ func VersionedFiles(fsys fs.FS, dir string) (map[string]string, error) {
 		if err != nil {
 			return err
 		}
-		exec := "-"
-		if info.Mode()&0o111 != 0 {
-			exec = "x"
-		}
-		files[rel] = fmt.Sprintf("%s %x", exec, sha256.Sum256(data))
+		files[rel] = File{Data: data, Executable: info.Mode()&0o111 != 0}
 		return nil
 	})
 	if err != nil {
 		return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading the files of %s: %v", dir, err)}
 	}
 	return files, nil
+}
+
+// fingerprints are the files' executable bits and content digests, as VersionedFiles names them.
+func fingerprints(tree Tree) map[string]string {
+	files := make(map[string]string, len(tree))
+	for p, f := range tree {
+		exec := "-"
+		if f.Executable {
+			exec = "x"
+		}
+		files[p] = fmt.Sprintf("%s %x", exec, sha256.Sum256(f.Data))
+	}
+	return files
 }
 
 func versionOf(files map[string]string) string {
@@ -426,6 +458,15 @@ func build(name string, m manifest, o objectivesFile) (Task, error) {
 	}
 	if err := resultOf(&t, bench, m.Metric, axes); err != nil {
 		return Task{}, err
+	}
+	if o.Pareto != nil && len(axes) > 1 {
+		if !t.Result.Protocol2 {
+			return Task{}, invalid("%s: a [pareto] task with %d objectives needs result_protocol = 2 in [benchmark], so every sample reports every objective; [benchmark.result] reads one field", ObjectiveName, len(axes))
+		}
+		t.Objectives.RelativeNoise = o.Pareto.RelativeNoise
+		for _, a := range axes {
+			t.Objectives.Metrics = append(t.Objectives.Metrics, core.Metric{Name: a.name, Direction: a.direction})
+		}
 	}
 	return t, nil
 }

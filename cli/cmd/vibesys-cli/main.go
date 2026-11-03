@@ -55,13 +55,15 @@ func realDeps(stdout, stderr io.Writer) deps { return depsFrom(stdout, stderr, o
 // depsFrom makes the real dependencies over getenv, which is the one way the binary reads its
 // environment: the context flags' defaults, the places of its daemon and store, and the home
 // directory. The names it reads are listed, with who sets them, in the identity golden
-// (proto/vibesys/cli/v1/conformance/identity_env.golden.json), which a test holds this to.
+// (proto/vibesys/cli/v1/conformance/identity_env.golden.json), which a test holds this to. The
+// daemon also takes the whole environment, through os.Environ, only to report what its jobs inherit;
+// it decides nothing by it.
 func depsFrom(stdout, stderr io.Writer, getenv func(string) string) deps {
 	cwd, _ := os.Getwd()
 	// The home directory is $HOME, as os.UserHomeDir finds it on Unix, read through getenv.
 	home := getenv("HOME")
 	exe, _ := os.Executable()
-	p := production.Process{Version: version, Executable: exe, Getenv: getenv, UID: os.Getuid(), GID: os.Getgid(), Home: home}
+	p := production.Process{Version: version, Executable: exe, Getenv: getenv, Environ: os.Environ, UID: os.Getuid(), GID: os.Getgid(), Home: home}
 	return deps{
 		stdout: stdout, stderr: stderr, getenv: getenv, cwd: cwd,
 		git: gitrepo.System{}, options: p.ClientOptions, process: p, upgrade: productionUpgrade,
@@ -81,6 +83,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"compare":    compareCommand,
 	"promote":    promoteCommand,
 	"result":     resultCommand,
+	"frontier":   frontierCommand,
 	"plan":       planCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
@@ -100,9 +103,11 @@ commands:
   jobs [--commit rev] [--state s] [--note-contains text]
   logs <job> [--follow]                          print a job's output
   show <commit>                                  results saved for a commit
-  compare <commit> [--against rev]               better, worse, within_noise or inconclusive
+  compare <commit> [--against rev]               better, worse, within_noise, tradeoff or inconclusive
   promote <commit>                               move the result branch, or say why not
   result                                         the head and a fresh final number
+  frontier add <commit>                          add a multi-objective commit to the frontier, or say why not
+  frontier list                                  the frontier, with each member's numbers
   plan create|list|view|edit|comment|close       store and find plans
   daemon status|stop|restart                     manage the daemon
   upgrade                                        replace this binary with the newest release

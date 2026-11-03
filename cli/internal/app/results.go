@@ -23,8 +23,9 @@ func (a *App) openTask(ctx context.Context, scope core.Scope) (taskStore, error)
 	return taskStore{scope: scope, store: st}, err
 }
 
-// noDeclaredNoise is the relative noise every task has in this build: tasks do not declare one
-// yet, so verdicts use the rule for a task that declares none.
+// noDeclaredNoise is the relative noise of a single-metric task in this build: such a task does
+// not declare one, so its verdicts use the rule for a task that declares none. A multi-objective
+// task's measurements carry their own floor, the [pareto] relative_noise, which core uses for them.
 const noDeclaredNoise = 0
 
 // Show returns every result saved for a commit, checks and measurements, oldest first. A commit
@@ -138,6 +139,11 @@ func (a *App) verdictsOf(ctx context.Context, t taskStore, jobs []core.Job) map[
 // commit that is not a descendant of the head, a branch that is missing and a failing repository
 // are failures.
 //
+// A multi-objective commit is better only when it is better on some objective and worse on none,
+// and one that is promoted is offered to the task's frontier too: the second answer is what the
+// frontier made of it, and it is nil for a refusal and for a single-metric task. The promotion
+// stands whatever the frontier says.
+//
 // The order is the crash-safe one. The decision is made first and changes nothing. A promotion is
 // then recorded in the store, and only after that is the branch fast-forwarded; core's
 // NextPromotionStep names each of those two effects from what is there, and carryOut does them.
@@ -145,17 +151,17 @@ func (a *App) verdictsOf(ctx context.Context, t taskStore, jobs []core.Job) map[
 // look at the branch completes (settledHead asks the same question), so the branch ends at the
 // promoted commit; a crash before the record leaves everything as it was, and the promotion can
 // be asked for again. The branch is never moved ahead of the record.
-func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commit) (core.PromotionDecision, error) {
+func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commit) (core.PromotionDecision, core.FrontierDecision, error) {
 	if !commit.Valid() {
-		return nil, invalid("commit: %q is not a full 40-digit commit id", commit)
+		return nil, nil, invalid("commit: %q is not a full 40-digit commit id", commit)
 	}
 	t, err := a.openTask(ctx, c.Scope)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	branch, err := a.branchOf(t)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// One promotion at a time: the decision rests on the head and the record, which another
@@ -164,42 +170,122 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 	defer a.branchMu.Unlock()
 	head, err := a.settledHead(ctx, t)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	results, err := resultsOf(ctx, t, commit, head)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	promotions, err := t.store.Promotions(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	decision, err := core.DecidePromotion(core.PromotionRequest{
 		Candidate: commit, Head: head, Results: results, Promotions: promotions, RelativeNoise: noDeclaredNoise, At: a.now(),
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	approved, promoted := decision.(core.Approved)
 	if !promoted {
-		return decision, nil
+		return decision, nil, nil
 	}
 
 	// A fast-forward is the only move the branch makes, so a commit that does not contain the head
 	// cannot be promoted. This is known before anything is recorded.
 	ahead, err := a.cfg.Branches.IsAncestor(ctx, string(t.scope.Repository()), head, commit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !ahead {
-		return nil, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf(
+		return nil, nil, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf(
 			"commit %s does not contain the result branch head %s, so the branch cannot fast-forward to it; merge or rebase onto the head and measure it again",
 			commit, head)}
 	}
+	// The frontier is offered the commit before the promotion is recorded. A member needs no
+	// promotion, so a crash between the two leaves a frontier that is right and a promotion that
+	// can be asked for again, which finds the commit a member already and changes nothing there.
+	var frontier core.FrontierDecision
+	if len(approved.Promotion().Objectives) > 0 {
+		if frontier, err = a.offerToFrontier(ctx, t, commit); err != nil {
+			return nil, nil, err
+		}
+	}
 	if err := a.carryOut(ctx, t, branch, approved); err != nil {
+		return nil, nil, err
+	}
+	return approved, frontier, nil
+}
+
+// AddToFrontier admits a commit of a multi-objective task to the task's frontier if core says no
+// member beats it or matches it, evicting the members it beats, and otherwise returns the refusal
+// with every reason. Both are normal answers. A commit measured on one metric is invalid input:
+// such a task has a result branch and no frontier.
+func (a *App) AddToFrontier(ctx context.Context, c core.CallContext, commit core.Commit) (core.FrontierDecision, error) {
+	if !commit.Valid() {
+		return nil, invalid("commit: %q is not a full 40-digit commit id", commit)
+	}
+	t, err := a.openTask(ctx, c.Scope)
+	if err != nil {
 		return nil, err
 	}
-	return approved, nil
+	// The frontier changes under branchMu, as a promotion offers it the commit it promotes.
+	a.branchMu.Lock()
+	defer a.branchMu.Unlock()
+	return a.offerToFrontier(ctx, t, commit)
+}
+
+// offerToFrontier decides whether the commit joins the task's frontier, against the members and
+// their measurements as the store holds them now, and keeps an admission that changes the
+// frontier. The caller holds branchMu.
+func (a *App) offerToFrontier(ctx context.Context, t taskStore, commit core.Commit) (core.FrontierDecision, error) {
+	frontier, err := t.store.Frontier(ctx)
+	if err != nil {
+		return nil, err
+	}
+	commits := []core.Commit{commit}
+	for _, m := range frontier.Members {
+		commits = append(commits, m.Commit)
+	}
+	results, err := resultsOf(ctx, t, commits...)
+	if err != nil {
+		return nil, err
+	}
+	decision, err := core.DecideFrontier(core.FrontierRequest{Candidate: commit, Frontier: frontier, Results: results, At: a.now()})
+	if err != nil {
+		return nil, err
+	}
+	if admission, ok := decision.(core.FrontierAdmission); ok && !admission.AlreadyMember() {
+		if _, err := t.store.UpdateFrontier(ctx, admission); err != nil {
+			return nil, err
+		}
+	}
+	return decision, nil
+}
+
+// Frontier returns the task's frontier, each member with its headline number per objective, in the
+// order the members were admitted. A task with no store has an empty frontier.
+func (a *App) Frontier(ctx context.Context, c core.CallContext) ([]core.FrontierEntry, error) {
+	t, err := a.openTask(ctx, c.Scope)
+	if errors.Is(err, store.ErrNoStore) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	frontier, err := t.store.Frontier(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var commits []core.Commit
+	for _, m := range frontier.Members {
+		commits = append(commits, m.Commit)
+	}
+	results, err := resultsOf(ctx, t, commits...)
+	if err != nil {
+		return nil, err
+	}
+	return core.FrontierEntries(frontier, results), nil
 }
 
 // maxPromotionSteps bounds carryOut. A promotion takes two effects, record and move, and one more

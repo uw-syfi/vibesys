@@ -90,11 +90,11 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | Path | Role |
 | --- | --- |
 | `cmd/vibesys-cli/` | Argument parsing and output. Nothing else. |
-| `internal/core/` | Pure domain types and rules (job keys, state machine, cache reuse, verdicts, promotion checks): no I/O, no clock, no goroutines. |
-| `internal/store/` | `Store`: the logical interface to results, events, logs, job state and plans. No paths, no formats. |
+| `internal/core/` | Pure domain types and rules (job keys, state machine, cache reuse, verdicts, promotion checks, frontier membership): no I/O, no clock, no goroutines. |
+| `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists; a store of another format version is refused and never migrated. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 is migrated to version 3 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
@@ -118,6 +118,11 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/environment/docker/dockercli/` | The `Engine` that drives the `docker` program. The only place that touches a real Docker. Its tests against a real daemon carry the `docker` build tag. |
 | `internal/environment/docker/dockerfake/` | An `Engine` that keeps a Docker daemon in memory and can fail or crash any call. Tests only. |
 | `internal/environment/docker/dockertest/` | The one contract suite every `Engine` passes. Tests only. |
+| `internal/environment/docker/machine/` | Where a docker engine's containers find a run's directories: `Local` (this machine's own directories, and its caches) and `Remote` (copies made with rsync on a machine reached over ssh, copied back when the command ends). |
+| `internal/environment/slurm/` | The Slurm placement: an `Allocator` that runs a container's first process and every image build under `srun`, and an `Engine` that removes a container and then cancels and confirms the end of its allocation, and sweeps the allocations a dead run left. Passes the environment contract suite over the fake engine. |
+| `internal/remote/` | Running programs on a machine and copying directories to and from it: this one, or another over ssh and rsync. An exit code that is ssh's own is never taken for the program's. |
+| `internal/backend/nvidia/` | The GPU facts of a machine (model, count, driver, the driver's CUDA version) for a fingerprint, read with `nvidia-smi`. |
+| `internal/operator/` | The operator config (`cli.toml`): where the Docker engine runs, which GPUs a container gets, and the read-only mounts. |
 | `internal/wire/` | Translation between `core` types and the generated contract types, the version handshake, and typed refusals. |
 | `internal/supervisor/` | The supervisor as a domain type: it owns one job's command and its output, and reports the outcome. |
 | `internal/supervisor/rpc/` | The supervisor's gRPC server and client, over the additive `supervisor.proto`. |
@@ -223,10 +228,12 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `note <job> <text>` | Add a note to a job in any state. |
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
-| `show <commit>` | Every result saved for a commit, checks and measurements, oldest first. A measurement's `value` is its headline number, the mean of its samples that `compare` uses, computed by the daemon. |
-| `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. Refuses to mix environments. |
-| `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. |
+| `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
+| `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. For a multi-objective task, also `tradeoff`, with a verdict on every objective (see "Multi-objective tasks" below). Refuses to mix environments. |
+| `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. A promoted multi-objective commit is also offered to the frontier. |
 | `result` | The head and a final number measured after the head last moved, or why there is none (exit `1`). |
+| `frontier add <commit>` | Add a measured, check-passed commit of a multi-objective task to the task's frontier, evicting the members it beats, or print every reason it was refused. A refusal exits `1` and is printed on stdout; a commit of a single-metric task is `INVALID_INPUT`. |
+| `frontier list` | The frontier's members in the order they were added, each with its headline number on every objective, computed by the daemon. |
 | `plan create --title t [--body text \| --body-file path]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. |
 | `plan list [--status s] [--search text]` | List the task's plans by number. With no `--status` every plan is listed. |
 | `plan view <n>` | Print a plan, its comments and the jobs linked to it (`submit --plan <n>` links one). |
@@ -234,7 +241,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `daemon ensure` | Make sure a compatible daemon answers, starting one if none runs (the start protocol below). It prints `ready`, the pid and the version, or the daemon's status with `--json`. It exits `0` when a daemon answers and `4` when none does, whatever the reason, and the message says why; only a malformed command exits `2`. A program that starts the daemon, such as the orchestrator, runs this and reads the exit code. |
-| `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon status` with no daemon prints `not running` (with `--json`, an `UNAVAILABLE` `Failure`) and exits `4`. `daemon install` is not available yet (exit `2`). |
+| `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon status` also says what every job inherits from the daemon: the directory clean checkouts are made in (`checkouts`, from the daemon's `TMPDIR`), and one `env` line per environment variable, sorted, with its value only for `PATH`, `HOME`, `TMPDIR` and a `VIBESYS_` variable whose name has none of `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` (with `--json`, `environment` and `checkout_directory`). Jobs see the environment the daemon was started with, so a variable set later reaches them only after `daemon restart` from a shell that has it. `daemon status` with no daemon prints `not running` (with `--json`, an `UNAVAILABLE` `Failure`) and exits `4`. `daemon install` is not available yet (exit `2`). |
 | `daemon forget <repository>` | Give up a repository that is gone for good, such as a store an older daemon made inside a removed linked worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. The answer comes after the supervisor directories of the repository's other jobs are removed, so none is listed after it but the ones reported left. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
 
 Plans belong to a task, are numbered 1, 2, ... by the daemon and never renumbered, and take one of
@@ -254,7 +261,7 @@ command's own yes or no, how a `wait` ended (a `WaitOutcomeKind`), or the kind o
 | Code | Meaning | Endings |
 | --- | --- | --- |
 | 0 | yes | success; `ALL_SUCCEEDED`, `FIRST_SUCCEEDED` |
-| 1 | the answer is no | `SOME_FAILED`, `FIRST_FAILED`; a refused promote; no current result; `CONFLICT`, `ENVIRONMENT_MISMATCH`, `NOT_MEASURED` |
+| 1 | the answer is no | `SOME_FAILED`, `FIRST_FAILED`; a refused promote or frontier add; no current result; `CONFLICT`, `ENVIRONMENT_MISMATCH`, `NOT_MEASURED` |
 | 2 | invalid input | usage errors; `INVALID_INPUT`, `NOT_FOUND` |
 | 3 | timed out | `TIMED_OUT` |
 | 4 | no answer | `UNAVAILABLE`, `INCOMPATIBLE`, `INTERNAL`, `UNSPECIFIED`; a kind or outcome this build does not know; a wait that could not learn how its jobs ended; no daemon for `daemon status` or `daemon ensure` |
@@ -271,8 +278,8 @@ because no daemon said the jobs were not done.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line. That is the response for `submit`, `cancel`,
-`note`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan`
-subcommands. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
+`note`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan` and
+`frontier` subcommands. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
 that decided it in `decided_by`, and every job's last state. An error that a command reports is a
 `Failure` on stderr: a refusal from the daemon, a missing argument, a job that does not exist, or a
 `wait` that gave up. The `Failure` the daemon sent is printed as it was sent, a kind this build does
@@ -393,7 +400,17 @@ Recovery is the daemon's start, with no separate path:
   store gives up the runs of the jobs it has running: one that no run of can be found here is
   `lost`, at once with no run here and after its time limit with one this build cannot use. A run of
   it that the daemon does find is its own, and the job goes on.
+- A store of a version this build does not read, such as one a prerelease build wrote, is kept
+  known and refused in the same way, and every other repository works. The daemon logs why, and a
+  command on that store fails with `INCOMPATIBLE` naming the file; for the prerelease encoding it
+  names the store's directory and its index entry to remove, after which the next submission makes
+  the store again.
 - A repository that is gone for good is given up with `daemon forget`.
+
+Each task's store is a directory under `.vibesys-state/` in its repository. The daemon writes a
+`.gitignore` of `*` into `.vibesys-state/` when it makes it, and into one an older build made when it
+next opens a store there, so `git add -A` in a repository or a candidate never commits a store. A
+`.gitignore` already there is left as it is.
 
 A store that goes away while the daemon runs stops no job: the supervisor's spool keeps the output,
 and the daemon records it when the store is back. A job whose store is away at its turn waits for
@@ -416,6 +433,12 @@ and are not linked into it) and runs them on the host, or in docker for a task t
   pass counts as a check result (`core.Result.PassKey`), so a later check is answered by the
   measure job. A measure for more samples than the cache holds takes only the
   missing ones, and links the saved check pass instead of checking again.
+
+Each command of a job gets its own artifacts directory, numbered in the order the commands ran
+(`01-check`, `02-benchmark`, ...), in the repository's state directory
+(`.vibesys-state/.artifacts/<task>/<job>/`); the job's output names it before the command runs. A
+command finds it in `VIBESYS_ARTIFACTS_DIR`. A benchmark that exits non-zero after writing an error
+record says the record's message in the job's reason.
 
 `--no-cache` runs the whole job again, with a fresh check. `--recheck` (measure) checks again but
 still takes only the missing samples. A cancelled job, a failed check, and a benchmark that wrote no
@@ -445,21 +468,58 @@ the submission says `--env host`. Nothing falls back: a machine with no reachabl
 fails the job with a message that says so, and a task that needs what the image cannot give is
 refused with the reason.
 
-- The image is built from the Dockerfile as the job's commit has it, with no build context, and is
-  cached by the Dockerfile's content. The first `submit` of a task builds the image before the job
-  is queued, so that submission takes as long as the build. The image digest is recorded with each
-  result and is part of what makes two results comparable, so results from different images are
-  never mixed.
-- A Dockerfile that copies files from the repository (`COPY` or `ADD` of a local path, or `RUN
-  --mount`) is refused: the image must be the same for every commit that has the same Dockerfile.
+- The image is built from the task's directory as the job's commit has it: the directory is the
+  build context, so the Dockerfile can `COPY` the task's scripts into the image, and the build sees
+  no file of the candidate. The image is tagged by a digest of those files, so it is built again
+  exactly when a file of the task changes. The first `submit` of a task builds the image before the
+  job is queued, so that submission takes as long as the build. The image digest is recorded with
+  each result and is part of what makes two results comparable, so results from different images
+  are never mixed.
 - Commands run in a container as the invoking user, in a clean checkout of the exact commit. The
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
-  no container runtime. A task for an accelerator backend is refused: containers get no GPU yet.
+  no container runtime. A task for the `cuda` backend runs when the operator config passes GPUs
+  (`gpus` in `[docker]`), and is refused otherwise; other accelerator backends are refused.
+- A container also gets the cache directory of the task's image at `/vibesys/cache`, kept across
+  commits and jobs, an empty `/vibesys/artifacts` that is kept with the job, and the operator's
+  read-only mounts at `/vibesys/mounts/<name>`. The variables `VIBESYS_CACHE_DIR`,
+  `VIBESYS_ARTIFACTS_DIR` and `VIBESYS_MOUNTS` name them. Why the task environment is shaped this
+  way is in [docs/contributing/cli-task-environment.md](../docs/contributing/cli-task-environment.md).
 - Every container is named and labelled for the daemon that started it. A cancelled or timed out
   job removes its container, and the next job removes any container an earlier job left, for
   instance when the supervisor was killed. Containers that other tools started are never touched.
-- The docker program must be on the `PATH` of the daemon, and the user must be allowed to use it.
+- The docker program must be on the `PATH` of the daemon, and the user must be allowed to use it,
+  on the machine the operator config places the engine on.
+
+### The operator config
+
+Settings about the machine belong to whoever runs the CLI, never to a task. They are read from
+`$XDG_CONFIG_HOME/vibesys/cli.toml` (`~/.config/vibesys/cli.toml`), or the file
+`VIBESYS_CLI_CONFIG` names, when the daemon and each supervisor start; `daemon restart` applies a
+change. Unknown keys are refused. With no file, docker runs on this machine with no GPU.
+
+| Key | Meaning |
+| --- | --- |
+| `[docker] placement` | `local` (default), `ssh` (docker runs on `[remote] host`, reached over ssh) or `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`). |
+| `[docker] gpus` | A `docker --gpus` value such as `all`; empty passes no GPU, and a `cuda` task is refused. |
+| `[docker] runtime` | `nvidia` passes the GPUs with `--runtime nvidia` and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
+| `[docker.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`. |
+| `[remote] host`, `ssh_command`, `rsync_command` | The ssh destination and the programs that reach it. |
+| `[remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). |
+| `[slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | What an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
+| `[slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
+
+On another machine, a run's checkout and scratch directory are copied to `remote_workspace_root`
+and mounted at their local paths; the scratch directory and the artifacts are copied back when the
+command ends, and a copy that fails makes the command's ending unknown. Under `slurm`, a container
+is removed and then its allocation is cancelled and confirmed ended, on every path, because the
+Docker daemon runs outside Slurm's cgroups; a run first cancels any allocation of its scope that a
+dead run left. The queue wait does not count against a command's timeout. The ssh host must be the
+node Docker runs on.
+
+A second daemon independent of the first takes its own `XDG_RUNTIME_DIR`, `XDG_STATE_HOME` and
+`VIBESYS_CLI_CONFIG`; its containers and Slurm jobs carry its own scope. Stores live in the
+repository, so it must use another clone of a repository the first one uses.
 
 ## The result branch
 
@@ -471,7 +531,7 @@ forward: the new head must contain the old one, which a commit that does not is 
 
 `promote` decides from the saved measurements alone (internal/core), in this order: it is refused
 with every reason that applies (`unmeasured`, `check_missing`, `worse`, `within_noise`,
-`inconclusive`, `stale`, `environment_mismatch`), or it approves, which is a `core.Approved` that
+`inconclusive`, `tradeoff`, `stale`, `environment_mismatch`), or it approves, which is a `core.Approved` that
 only that decision makes and that a store requires to record a promotion. The daemon records the
 promotion in the store and then moves the branch. The sequence is one pure function, `core.NextPromotionStep`: from the branch
 head and the record it names the next effect (record, move, done, or diverged), and the daemon does
@@ -483,10 +543,50 @@ before and after it took place, in core over a model and in the daemon over the 
 A branch someone moved by hand is diverged: nothing writes over it, it is the head the next
 commands use, and `result` reports no number for a head the last promotion did not set.
 
+## Multi-objective tasks
+
+A task is multi-objective (Pareto) when its `objectives.toml` has a `[pareto]` section and declares
+more than one objective. It must report its score with `result_protocol = 2`, so that every sample
+reports every objective; a sample that leaves one out ends the measure job `failed` and saves
+nothing. Each saved measurement records the objectives, so `compare`, `promote` and `frontier`
+decide from what was saved. Every other task is judged on its one metric, exactly as before.
+
+`compare` judges each objective with the same statistic as a single metric, under the `[pareto]`
+`relative_noise` as the noise floor (none declared is Welch's t test), and combines the verdicts:
+
+| Overall | When |
+| --- | --- |
+| `inconclusive` | Any objective is inconclusive; the reason is the first such objective's. |
+| `better` | Better on some objective and worse on none. |
+| `worse` | Worse on some objective and better on none. |
+| `tradeoff` | Better on one objective and worse on another. |
+| `within_noise` | Within noise on every objective. |
+
+With `--json`, `comparison.verdict` holds the overall `kind`, `reason` and sample counts, with its
+means, ratio and noise left at zero, and `comparison.objectives` holds one `{metric, verdict}` per
+objective in the order the task declares them, each verdict with its own numbers. `promote` moves
+the branch only on an overall `better`, and refuses a `tradeoff` with the reason `tradeoff`; its
+refusal reasons and its promotion carry the same `objectives`.
+
+The frontier is the set of the task's commits that no member beats. `frontier add` judges the
+commit against each member with the comparison `compare` makes: it evicts a member it is `better`
+than, keeps one it is a `tradeoff` against, and is refused with every reason that applies, each
+naming the `member` it is about: `unmeasured`, `check_missing`, `dominated` (the member is better),
+`within_noise`, `inconclusive`, `stale` (measured under another task version) and
+`environment_mismatch`. A commit that is a member already is answered `already_member` and nothing
+changes. The JSON answer is `decision.admitted` (`added`, `evicted`, `already_member`, `members`)
+or `decision.refused.reasons`. A successful `promote` of a multi-objective commit offers it to the
+frontier in the same way, and its answer's `frontier` field says what the frontier made of it; the
+promotion stands even when the frontier refuses the commit. The frontier takes the commit before
+the promotion is recorded, so a crash between the two leaves a frontier that is right, and the
+promotion can be asked for again. `frontier list` prints `members`, each a `member` (`commit`,
+`added_at`) and its `values`: per objective, the `metric`, the mean of every sample of the commit
+(`value`) and the number of `samples`.
+
 ## Contract
 
 The contract is `proto/vibesys/cli/v1/`: the daemon's gRPC service, the job, result, verdict,
-environment, event and plan messages, typed refusals, and the version handshake. The same messages
+environment, event, plan and frontier messages, typed refusals, and the version handshake. The same messages
 are the `--json` output of every command, in protobuf's canonical JSON form with the original field
 names. Generated Go lives in `gen/`.
 

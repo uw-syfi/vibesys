@@ -5,6 +5,7 @@ import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/failure.proto";
+import "vibesys/cli/v1/frontier.proto";
 import "vibesys/cli/v1/job.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/promote.proto";
@@ -60,6 +61,11 @@ service DaemonService {
   // normal response, not an error.
   rpc Promote(PromoteRequest) returns (PromoteResponse);
   rpc CurrentResult(CurrentResultRequest) returns (CurrentResultResponse);
+  // AddToFrontier admits a commit of a multi-objective task to the task's frontier, or refuses with
+  // typed reasons. A refusal is a normal response, not an error.
+  rpc AddToFrontier(AddToFrontierRequest) returns (AddToFrontierResponse);
+  // ListFrontier lists the task's frontier with each member's headline number per objective.
+  rpc ListFrontier(ListFrontierRequest) returns (ListFrontierResponse);
 
   rpc CreatePlan(CreatePlanRequest) returns (CreatePlanResponse);
   rpc ListPlans(ListPlansRequest) returns (ListPlansResponse);
@@ -102,6 +108,20 @@ message StatusResponse {
   google.protobuf.Timestamp started_at = 3;
   uint32 queued_jobs = 4;
   uint32 running_jobs = 5;
+  // The environment variables of the daemon, which every job inherits, sorted by name. Only the
+  // names are reported, but for the variables whose value is safe to show and says where a job
+  // runs: PATH, HOME, TMPDIR, and those whose names start with VIBESYS_ and do not look like a
+  // secret (contain KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL).
+  repeated InheritedVariable environment = 6;
+  // The directory clean checkouts of a job's commit are made in.
+  string checkout_directory = 7;
+}
+
+// InheritedVariable is one environment variable a job inherits from the daemon.
+message InheritedVariable {
+  string name = 1;
+  // Set only for a variable whose value the daemon shows.
+  optional string value = 2;
 }
 
 message StopRequest {}
@@ -253,7 +273,11 @@ message ShowRequest {
 }
 
 message ShowResponse {
+  // Every result saved for the commit, checks and measurements, oldest first.
   repeated Result results = 1;
+  // The commit's measurements pooled as compare pools them: one per environment, task version,
+  // metric and objectives, holding the samples of every measure job of that kind, oldest first.
+  repeated Measurement measurements = 2;
 }
 
 message CompareRequest {
@@ -277,6 +301,27 @@ message PromoteResponse {
     Promotion promoted = 1;
     PromoteRefusal refused = 2;
   }
+  // For a promotion of a multi-objective commit: what the frontier made of the promoted commit. The
+  // promotion stands whatever it says. Absent for a refusal and for a single-metric task.
+  FrontierDecision frontier = 3;
+}
+
+message AddToFrontierRequest {
+  CallContext context = 1;
+  string commit = 2;
+}
+
+message AddToFrontierResponse {
+  FrontierDecision decision = 1;
+}
+
+message ListFrontierRequest {
+  CallContext context = 1;
+}
+
+message ListFrontierResponse {
+  // The members in the order they were admitted.
+  repeated FrontierEntry members = 1;
 }
 
 message CurrentResultRequest {

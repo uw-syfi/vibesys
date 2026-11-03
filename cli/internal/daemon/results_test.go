@@ -64,7 +64,7 @@ func newResultsRig(t *testing.T) *resultsRig {
 	if err := a.Start(ctxFor(t)); err != nil {
 		t.Fatal(err)
 	}
-	srv := daemon.NewServer(a, "test")
+	srv := daemon.NewServer(a, "test", daemon.Inherited{})
 	listener := bufconn.Listen(1 << 20)
 	gs := grpc.NewServer()
 	cliv1.RegisterDaemonServiceServer(gs, srv)

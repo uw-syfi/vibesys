@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -141,6 +142,52 @@ func TestReadsAProtocol2TaskWithShortFormSections(t *testing.T) {
 	}
 	if got.Check.Timeout != task.DefaultCommandTimeout {
 		t.Errorf("default timeout %v", got.Check.Timeout)
+	}
+}
+
+// A task whose objectives.toml has [pareto] and more than one objective is judged on every
+// objective, in the order declared, under the [pareto] noise floor. Any other task, with [pareto]
+// and one objective or with several objectives and no [pareto], is judged on its one metric as
+// before.
+func TestAParetoTaskIsJudgedOnEveryObjective(t *testing.T) {
+	got, err := task.Read(repo(taskFiles("p", protocol2Manifest, objectives2)), "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := core.Objectives{
+		Metrics:       []core.Metric{{Name: "latency_ms", Direction: core.Minimize}, {Name: "throughput", Direction: core.Maximize}},
+		RelativeNoise: 0.02,
+	}
+	if !got.Objectives.Equal(want) || !got.Objectives.Pareto() {
+		t.Errorf("objectives %+v, want %+v", got.Objectives, want)
+	}
+
+	noPareto := strings.Replace(objectives2, "[pareto]\nrelative_noise = 0.02\n", "", 1)
+	onePareto := objectives + "[pareto]\nrelative_noise = 0.02\n"
+	for what, files := range map[string]map[string]string{
+		"several objectives and no [pareto]": taskFiles("p", protocol2Manifest, noPareto),
+		"[pareto] and one objective":         taskFiles("t", jsonManifest, onePareto),
+	} {
+		name := "p"
+		if strings.Contains(what, "one objective") {
+			name = "t"
+		}
+		got, err := task.Read(repo(files), name)
+		if err != nil {
+			t.Fatalf("%s: %v", what, err)
+		}
+		if len(got.Objectives.Metrics) != 0 || got.Objectives.RelativeNoise != 0 {
+			t.Errorf("%s: objectives %+v, want none", what, got.Objectives)
+		}
+	}
+}
+
+// A Pareto task reads every objective from each sample, which only an evaluator stream reports.
+func TestAParetoTaskNeedsAnEvaluatorStream(t *testing.T) {
+	jsonObjectives := strings.Replace(objectives2, `name = "latency_ms"`, `name = "ops_per_sec"`, 1)
+	_, err := task.Parse("t", []byte(jsonManifest), []byte(jsonObjectives))
+	if f := failureOf(t, err); f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "result_protocol = 2") {
+		t.Fatalf("%v, want invalid input that names result_protocol = 2", err)
 	}
 }
 
@@ -484,6 +531,10 @@ func FuzzParse(f *testing.F) {
 		}
 		if got.Samples == 0 || !got.Backend.Known() {
 			t.Fatalf("accepted %+v", got)
+		}
+		if o := got.Objectives; (len(o.Metrics) > 0 || o.RelativeNoise != 0) &&
+			(!o.Pareto() || !got.Result.Protocol2 || !slices.Contains(o.Metrics, got.Metric)) {
+			t.Fatalf("accepted objectives a measure cannot follow: %+v for %+v", o, got.Result)
 		}
 	})
 }

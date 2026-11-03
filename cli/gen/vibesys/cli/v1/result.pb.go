@@ -126,7 +126,7 @@ func (x *Metric) GetDirection() Direction {
 }
 
 // Observation is a named series of auxiliary readings, such as latency, kept beside the scored
-// metric. It is never part of a verdict.
+// metric. It is part of a verdict only when it is an objective of a multi-objective task.
 type Observation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -179,6 +179,64 @@ func (x *Observation) GetValues() []float64 {
 	return nil
 }
 
+// Objectives is what a measurement of a multi-objective (Pareto) task is judged on: a task whose
+// objectives.toml has a [pareto] section and more than one objective.
+type Objectives struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Every objective, in the order the task declares them. The scored metric is one of them; the
+	// samples of each other one are the observation of its name.
+	Metrics []*Metric `protobuf:"bytes,1,rep,name=metrics,proto3" json:"metrics,omitempty"`
+	// The task's [pareto] relative_noise, the noise floor every objective is compared under. Zero
+	// means none.
+	RelativeNoise float64 `protobuf:"fixed64,2,opt,name=relative_noise,json=relativeNoise,proto3" json:"relative_noise,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Objectives) Reset() {
+	*x = Objectives{}
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Objectives) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Objectives) ProtoMessage() {}
+
+func (x *Objectives) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Objectives.ProtoReflect.Descriptor instead.
+func (*Objectives) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Objectives) GetMetrics() []*Metric {
+	if x != nil {
+		return x.Metrics
+	}
+	return nil
+}
+
+func (x *Objectives) GetRelativeNoise() float64 {
+	if x != nil {
+		return x.RelativeNoise
+	}
+	return 0
+}
+
 // CheckResult is a passed correctness check. A failed check saves no result: its job is `failed`
 // and its output is in the job's logs.
 type CheckResult struct {
@@ -190,7 +248,7 @@ type CheckResult struct {
 
 func (x *CheckResult) Reset() {
 	*x = CheckResult{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[2]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -202,7 +260,7 @@ func (x *CheckResult) String() string {
 func (*CheckResult) ProtoMessage() {}
 
 func (x *CheckResult) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[2]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -215,7 +273,7 @@ func (x *CheckResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CheckResult.ProtoReflect.Descriptor instead.
 func (*CheckResult) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CheckResult) GetDuration() *durationpb.Duration {
@@ -236,14 +294,16 @@ type MeasureResult struct {
 	CheckJobId string `protobuf:"bytes,4,opt,name=check_job_id,json=checkJobId,proto3" json:"check_job_id,omitempty"`
 	// The headline number of the measurement: the aggregate of the samples that compare uses (their
 	// mean). The daemon computes it, so no reader recomputes it.
-	Value         float64 `protobuf:"fixed64,5,opt,name=value,proto3" json:"value,omitempty"`
+	Value float64 `protobuf:"fixed64,5,opt,name=value,proto3" json:"value,omitempty"`
+	// Set for a measurement of a multi-objective task, and absent otherwise.
+	Objectives    *Objectives `protobuf:"bytes,6,opt,name=objectives,proto3" json:"objectives,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *MeasureResult) Reset() {
 	*x = MeasureResult{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[3]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -255,7 +315,7 @@ func (x *MeasureResult) String() string {
 func (*MeasureResult) ProtoMessage() {}
 
 func (x *MeasureResult) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[3]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -268,7 +328,7 @@ func (x *MeasureResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MeasureResult.ProtoReflect.Descriptor instead.
 func (*MeasureResult) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *MeasureResult) GetMetric() *Metric {
@@ -306,6 +366,94 @@ func (x *MeasureResult) GetValue() float64 {
 	return 0
 }
 
+func (x *MeasureResult) GetObjectives() *Objectives {
+	if x != nil {
+		return x.Objectives
+	}
+	return nil
+}
+
+// Measurement is a commit's measurements of one kind pooled into one: a measure job that tops up
+// an earlier one adds its samples to the same measurement, as compare counts them.
+type Measurement struct {
+	state       protoimpl.MessageState  `protogen:"open.v1"`
+	Commit      string                  `protobuf:"bytes,1,opt,name=commit,proto3" json:"commit,omitempty"`
+	TaskVersion string                  `protobuf:"bytes,2,opt,name=task_version,json=taskVersion,proto3" json:"task_version,omitempty"`
+	Environment *EnvironmentFingerprint `protobuf:"bytes,3,opt,name=environment,proto3" json:"environment,omitempty"`
+	// The measure jobs pooled, oldest first.
+	JobIds []string `protobuf:"bytes,4,rep,name=job_ids,json=jobIds,proto3" json:"job_ids,omitempty"`
+	// Every job's samples and observations in the jobs' order, their headline value, and the
+	// newest job's check.
+	Measure       *MeasureResult `protobuf:"bytes,5,opt,name=measure,proto3" json:"measure,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Measurement) Reset() {
+	*x = Measurement{}
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Measurement) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Measurement) ProtoMessage() {}
+
+func (x *Measurement) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Measurement.ProtoReflect.Descriptor instead.
+func (*Measurement) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *Measurement) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *Measurement) GetTaskVersion() string {
+	if x != nil {
+		return x.TaskVersion
+	}
+	return ""
+}
+
+func (x *Measurement) GetEnvironment() *EnvironmentFingerprint {
+	if x != nil {
+		return x.Environment
+	}
+	return nil
+}
+
+func (x *Measurement) GetJobIds() []string {
+	if x != nil {
+		return x.JobIds
+	}
+	return nil
+}
+
+func (x *Measurement) GetMeasure() *MeasureResult {
+	if x != nil {
+		return x.Measure
+	}
+	return nil
+}
+
 // Result is one saved outcome of a job. A result is immutable once saved.
 type Result struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -333,7 +481,7 @@ type Result struct {
 
 func (x *Result) Reset() {
 	*x = Result{}
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -345,7 +493,7 @@ func (x *Result) String() string {
 func (*Result) ProtoMessage() {}
 
 func (x *Result) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_result_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_result_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -358,7 +506,7 @@ func (x *Result) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Result.ProtoReflect.Descriptor instead.
 func (*Result) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_cli_v1_result_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Result) GetJobId() string {
@@ -482,16 +630,29 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionR\tdirection\"9\n" +
 	"\vObservation\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06values\x18\x02 \x03(\x01R\x06values\"D\n" +
+	"\x06values\x18\x02 \x03(\x01R\x06values\"e\n" +
+	"\n" +
+	"Objectives\x120\n" +
+	"\ametrics\x18\x01 \x03(\v2\x16.vibesys.cli.v1.MetricR\ametrics\x12%\n" +
+	"\x0erelative_noise\x18\x02 \x01(\x01R\rrelativeNoise\"D\n" +
 	"\vCheckResult\x125\n" +
-	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\xd2\x01\n" +
+	"\bduration\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\bduration\"\x8e\x02\n" +
 	"\rMeasureResult\x12.\n" +
 	"\x06metric\x18\x01 \x01(\v2\x16.vibesys.cli.v1.MetricR\x06metric\x12\x18\n" +
 	"\asamples\x18\x02 \x03(\x01R\asamples\x12?\n" +
 	"\fobservations\x18\x03 \x03(\v2\x1b.vibesys.cli.v1.ObservationR\fobservations\x12 \n" +
 	"\fcheck_job_id\x18\x04 \x01(\tR\n" +
 	"checkJobId\x12\x14\n" +
-	"\x05value\x18\x05 \x01(\x01R\x05value\"\x92\x04\n" +
+	"\x05value\x18\x05 \x01(\x01R\x05value\x12:\n" +
+	"\n" +
+	"objectives\x18\x06 \x01(\v2\x1a.vibesys.cli.v1.ObjectivesR\n" +
+	"objectives\"\xe4\x01\n" +
+	"\vMeasurement\x12\x16\n" +
+	"\x06commit\x18\x01 \x01(\tR\x06commit\x12!\n" +
+	"\ftask_version\x18\x02 \x01(\tR\vtaskVersion\x12H\n" +
+	"\venvironment\x18\x03 \x01(\v2&.vibesys.cli.v1.EnvironmentFingerprintR\venvironment\x12\x17\n" +
+	"\ajob_ids\x18\x04 \x03(\tR\x06jobIds\x127\n" +
+	"\ameasure\x18\x05 \x01(\v2\x1d.vibesys.cli.v1.MeasureResultR\ameasure\"\x92\x04\n" +
 	"\x06Result\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x12\n" +
@@ -526,36 +687,42 @@ func file_vibesys_cli_v1_result_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_result_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_cli_v1_result_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_vibesys_cli_v1_result_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_vibesys_cli_v1_result_proto_goTypes = []any{
 	(Direction)(0),                 // 0: vibesys.cli.v1.Direction
 	(*Metric)(nil),                 // 1: vibesys.cli.v1.Metric
 	(*Observation)(nil),            // 2: vibesys.cli.v1.Observation
-	(*CheckResult)(nil),            // 3: vibesys.cli.v1.CheckResult
-	(*MeasureResult)(nil),          // 4: vibesys.cli.v1.MeasureResult
-	(*Result)(nil),                 // 5: vibesys.cli.v1.Result
-	(*durationpb.Duration)(nil),    // 6: google.protobuf.Duration
-	(*EnvironmentFingerprint)(nil), // 7: vibesys.cli.v1.EnvironmentFingerprint
-	(*MachineFacts)(nil),           // 8: vibesys.cli.v1.MachineFacts
-	(*MachineLoad)(nil),            // 9: vibesys.cli.v1.MachineLoad
-	(*timestamppb.Timestamp)(nil),  // 10: google.protobuf.Timestamp
+	(*Objectives)(nil),             // 3: vibesys.cli.v1.Objectives
+	(*CheckResult)(nil),            // 4: vibesys.cli.v1.CheckResult
+	(*MeasureResult)(nil),          // 5: vibesys.cli.v1.MeasureResult
+	(*Measurement)(nil),            // 6: vibesys.cli.v1.Measurement
+	(*Result)(nil),                 // 7: vibesys.cli.v1.Result
+	(*durationpb.Duration)(nil),    // 8: google.protobuf.Duration
+	(*EnvironmentFingerprint)(nil), // 9: vibesys.cli.v1.EnvironmentFingerprint
+	(*MachineFacts)(nil),           // 10: vibesys.cli.v1.MachineFacts
+	(*MachineLoad)(nil),            // 11: vibesys.cli.v1.MachineLoad
+	(*timestamppb.Timestamp)(nil),  // 12: google.protobuf.Timestamp
 }
 var file_vibesys_cli_v1_result_proto_depIdxs = []int32{
 	0,  // 0: vibesys.cli.v1.Metric.direction:type_name -> vibesys.cli.v1.Direction
-	6,  // 1: vibesys.cli.v1.CheckResult.duration:type_name -> google.protobuf.Duration
-	1,  // 2: vibesys.cli.v1.MeasureResult.metric:type_name -> vibesys.cli.v1.Metric
-	2,  // 3: vibesys.cli.v1.MeasureResult.observations:type_name -> vibesys.cli.v1.Observation
-	7,  // 4: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	8,  // 5: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
-	9,  // 6: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
-	10, // 7: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
-	3,  // 8: vibesys.cli.v1.Result.check:type_name -> vibesys.cli.v1.CheckResult
-	4,  // 9: vibesys.cli.v1.Result.measure:type_name -> vibesys.cli.v1.MeasureResult
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	1,  // 1: vibesys.cli.v1.Objectives.metrics:type_name -> vibesys.cli.v1.Metric
+	8,  // 2: vibesys.cli.v1.CheckResult.duration:type_name -> google.protobuf.Duration
+	1,  // 3: vibesys.cli.v1.MeasureResult.metric:type_name -> vibesys.cli.v1.Metric
+	2,  // 4: vibesys.cli.v1.MeasureResult.observations:type_name -> vibesys.cli.v1.Observation
+	3,  // 5: vibesys.cli.v1.MeasureResult.objectives:type_name -> vibesys.cli.v1.Objectives
+	9,  // 6: vibesys.cli.v1.Measurement.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	5,  // 7: vibesys.cli.v1.Measurement.measure:type_name -> vibesys.cli.v1.MeasureResult
+	9,  // 8: vibesys.cli.v1.Result.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	10, // 9: vibesys.cli.v1.Result.machine:type_name -> vibesys.cli.v1.MachineFacts
+	11, // 10: vibesys.cli.v1.Result.load:type_name -> vibesys.cli.v1.MachineLoad
+	12, // 11: vibesys.cli.v1.Result.recorded_at:type_name -> google.protobuf.Timestamp
+	4,  // 12: vibesys.cli.v1.Result.check:type_name -> vibesys.cli.v1.CheckResult
+	5,  // 13: vibesys.cli.v1.Result.measure:type_name -> vibesys.cli.v1.MeasureResult
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_result_proto_init() }
@@ -564,7 +731,7 @@ func file_vibesys_cli_v1_result_proto_init() {
 		return
 	}
 	file_vibesys_cli_v1_environment_proto_init()
-	file_vibesys_cli_v1_result_proto_msgTypes[4].OneofWrappers = []any{
+	file_vibesys_cli_v1_result_proto_msgTypes[6].OneofWrappers = []any{
 		(*Result_Check)(nil),
 		(*Result_Measure)(nil),
 	}
@@ -574,7 +741,7 @@ func file_vibesys_cli_v1_result_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_result_proto_rawDesc), len(file_vibesys_cli_v1_result_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

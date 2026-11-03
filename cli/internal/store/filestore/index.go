@@ -114,9 +114,13 @@ func (x *Index) Entry(t Task) (string, error) {
 	return "", unavailable(x.dir, err)
 }
 
-// Tasks returns every task recorded, by repository and then name. An entry this program cannot
-// read, such as one of a newer format, fails the call and names the file: a daemon that skipped
-// it would leave that task's jobs unrecovered without a word.
+// Tasks returns every task recorded, by repository and then name. An entry is only a pointer, so
+// one of a version this program does not read is still read for its task when it has the shape
+// of this version's entry and its name agrees with its content: the store it points to then
+// refuses on its own when it is opened, naming its files, and the daemon keeps it known and
+// refused while every other store works. An entry this program cannot read at all, damaged or
+// of another shape, fails the call and names the file: a daemon that skipped it would leave
+// that task's jobs unrecovered without a word.
 func (x *Index) Tasks() ([]Task, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -136,7 +140,10 @@ func (x *Index) Tasks() ([]Task, error) {
 		}
 		var file cliv1.TaskFile
 		if err := decode(name, data, &file); err != nil {
-			return nil, err
+			var f *core.Failure
+			if !errors.As(err, &f) || f.Kind != core.FailureIncompatible || recordReader.Unmarshal(data, &file) != nil {
+				return nil, err
+			}
 		}
 		t := Task{Repository: file.GetRepository(), Name: file.GetTask()}
 		if x.entry(t) != name {

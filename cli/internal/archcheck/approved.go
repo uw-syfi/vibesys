@@ -7,12 +7,19 @@ import (
 )
 
 // A promotion is recorded only with the proof that a decision approved it (core.Approved, whose
-// proof is a private field). core.AssumeApproved makes that proof without a decision, for tests of
-// stores that hold promotions no decision would make. Product code may not name it, so the proof
-// stays one only DecidePromotion makes.
+// proof is a private field), and a frontier changes only with the proof that a decision admitted a
+// commit (core.FrontierAdmission). core.AssumeApproved and core.AssumeAdmitted make those proofs
+// without a decision, for tests of stores that hold promotions and frontiers no decision would
+// make. Product code may not name them, so each proof stays one only its decision makes.
 
-// approvalMintAllowed says whether a file may name core.AssumeApproved: the package that defines
-// it, the contract suite for stores (imported by test files only), and any test file.
+// proofMints names each function that makes a proof without a decision, with what to use instead.
+var proofMints = map[string]string{
+	"AssumeApproved": "makes a promotion's approval without a decision and is for tests; record the Approved that DecidePromotion returned",
+	"AssumeAdmitted": "makes a frontier admission without a decision and is for tests; record the FrontierAdmission that DecideFrontier returned",
+}
+
+// approvalMintAllowed says whether a file may name a proof mint: the package that defines them,
+// the contract suite for stores (imported by test files only), and any test file.
 func approvalMintAllowed(name string) bool {
 	return strings.HasSuffix(name, "_test.go") ||
 		strings.HasPrefix(name, "cli/internal/core/") ||
@@ -29,8 +36,10 @@ func approvalMints(name, source string) []string {
 	}
 	var found []string
 	ast.Inspect(file, func(n ast.Node) bool {
-		if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "AssumeApproved" {
-			found = append(found, fmt.Sprintf("%s: names AssumeApproved, which makes a promotion's approval without a decision and is for tests; record the Approved that DecidePromotion returned", name))
+		if sel, ok := n.(*ast.SelectorExpr); ok {
+			if why, mint := proofMints[sel.Sel.Name]; mint {
+				found = append(found, fmt.Sprintf("%s: names %s, which %s", name, sel.Sel.Name, why))
+			}
 		}
 		return true
 	})

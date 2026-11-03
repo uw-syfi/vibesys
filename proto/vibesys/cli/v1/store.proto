@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.cli.v1;
 
 import "vibesys/cli/v1/event.proto";
+import "vibesys/cli/v1/frontier.proto";
 import "vibesys/cli/v1/job.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/promote.proto";
@@ -51,6 +52,14 @@ message PromotionFile {
   int32 format = 1;
   uint64 seq = 2;
   Promotion promotion = 3;
+}
+
+// FrontierFile is frontier/<n>.json: the task's frontier after its nth change, whole. The frontier is
+// the last of them, and a store with none has an empty frontier.
+message FrontierFile {
+  int32 format = 1;
+  uint64 seq = 2;
+  repeated FrontierMember members = 3;
 }
 
 // EventFile is runs/<run>/<n>.json: the nth event of a run.

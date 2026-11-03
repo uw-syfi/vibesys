@@ -70,6 +70,7 @@ func file(t *testing.T, mem *fsys.MemFS, name string) []byte {
 // The files of a store, by the part of the script that makes each.
 var recordFiles = []string{
 	"state/jobs/j1.json", "state/jobs/j3.json", "state/results/j1.json", "state/plans/1.json", "state/promotions/1.json", "state/promotions/2.json",
+	"state/frontier/1.json", "state/frontier/2.json",
 }
 
 const eventFileName = "state/runs/run-a/1.json"
@@ -318,11 +319,11 @@ func TestEncodingIsPinned(t *testing.T) {
 	if err := script()[0].run(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := unspaced(file(t, mem, "state/format")), `{"format":2}`; got != want {
+	if got, want := unspaced(file(t, mem, "state/format")), `{"format":3}`; got != want {
 		t.Errorf("format file = %q, want %q", got, want)
 	}
 	const wantJob = `{
-  "format": 2,
+  "format": 3,
   "job": {
     "id": "j1",
     "spec": {
@@ -360,7 +361,7 @@ func TestEncodingIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const wantPromotion = `{
-  "format": 2,
+  "format": 3,
   "seq": "1",
   "promotion": {
     "commit": "c1",
@@ -412,6 +413,7 @@ func TestAStoreOfThePrereleaseEncodingIsRefusedWithTheFileNamed(t *testing.T) {
 func TestLayoutOfAFinishedScript(t *testing.T) {
 	want := []string{
 		"state/.owner", "state/.owner.lock", "state/format",
+		"state/frontier/1.json", "state/frontier/2.json",
 		"state/jobs/j1.json", "state/jobs/j2.json", "state/jobs/j3.json",
 		"state/logs/j1/00000000000000000000", "state/logs/j1/00000000000000000006", "state/logs/j2/00000000000000000000",
 		"state/plans/1.json",

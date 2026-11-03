@@ -3,6 +3,8 @@
 package host_test
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,4 +57,22 @@ func TestHostPassesTheEnvironmentContract(t *testing.T) {
 			return envtest.SpawnProcess(t, x)
 		},
 	})
+}
+
+// A command on the host finds its artifacts directory in the variable a container's command does.
+func TestACommandOnTheHostIsToldItsArtifactsDirectory(t *testing.T) {
+	co := checkout(t, nil)
+	artifacts, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	a := newHost(clock.System{}).Run(ctx, core.Execution{
+		Checkout: co, Artifacts: artifacts, Argv: []string{"/bin/sh", "-c", `printf %s "$VIBESYS_ARTIFACTS_DIR"`}, Timeout: time.Hour,
+	}, &out)
+	if e, ok := a.(core.Ended); !ok || e.Exec.ExitCode != 0 || out.String() != artifacts {
+		t.Errorf("attempt %+v printed %q, want %q", a, out.String(), artifacts)
+	}
 }

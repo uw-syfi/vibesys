@@ -326,10 +326,11 @@ func TestABuildThatFailsSaysWhy(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
 	defer cancel()
 	marker := "marker-" + randomHex(6)
-	err := engine.Build(ctx, docker.BuildSpec{
-		Tag:        "vibesys-cli-contract-fail:" + randomHex(6),
-		Dockerfile: []byte("FROM " + baseImage + "\nRUN echo " + marker + " && exit 3\n"),
-	}, discard{})
+	buildContext, err := docker.Context(docker.Spec{Dockerfile: []byte("FROM " + baseImage + "\nRUN echo " + marker + " && exit 3\n")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = engine.Build(ctx, docker.BuildSpec{Tag: "vibesys-cli-contract-fail:" + randomHex(6), Context: buildContext}, discard{})
 	var f *core.Failure
 	if !errors.As(err, &f) {
 		t.Fatalf("Build of a failing Dockerfile: %v, want a failure", err)

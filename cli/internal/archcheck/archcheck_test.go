@@ -459,24 +459,29 @@ func TestASwitchOverAClosedSetLeavesNothingOut(t *testing.T) {
 	}
 }
 
-// Only a test, the contract suite for stores and core itself may make an approval without a
-// decision; product code anywhere else may not, however it is written.
+// Only a test, the contract suite for stores and core itself may make an approval or a frontier
+// admission without a decision; product code anywhere else may not, however it is written.
 func TestApprovalWithoutADecisionStaysInTests(t *testing.T) {
-	flagged := func(files map[string]string) bool {
+	flagged := func(files map[string]string, mint string) bool {
 		for _, line := range archcheck.Violations(files) {
-			if strings.Contains(line, "AssumeApproved") {
+			if strings.Contains(line, mint) {
 				return true
 			}
 		}
 		return false
 	}
-	property := func(pick uint8, arg string) bool {
+	mints := []struct{ name, call string }{
+		{"AssumeApproved", "core.AssumeApproved(core.Promotion{Commit: %q})"},
+		{"AssumeAdmitted", "core.AssumeAdmitted(1, []core.FrontierMember{{Commit: %q}})"},
+	}
+	property := func(pick, which uint8, arg string) bool {
 		packages := []string{"app", "daemon", "wire", "store/ledger", "store/memstore", "store/filestore"}
 		dir := "cli/internal/" + packages[int(pick)%len(packages)]
-		source := "package p\n\nimport \"github.com/uw-syfi/vibesys/cli/internal/core\"\n\nvar _ = core.AssumeApproved(core.Promotion{Commit: " + fmt.Sprintf("%q", arg) + "})\n"
-		return flagged(map[string]string{dir + "/a.go": source}) &&
-			!flagged(map[string]string{dir + "/a_test.go": source}) &&
-			!flagged(map[string]string{"cli/internal/store/storetest/a.go": source})
+		mint := mints[int(which)%len(mints)]
+		source := "package p\n\nimport \"github.com/uw-syfi/vibesys/cli/internal/core\"\n\nvar _ = " + fmt.Sprintf(mint.call, arg) + "\n"
+		return flagged(map[string]string{dir + "/a.go": source}, mint.name) &&
+			!flagged(map[string]string{dir + "/a_test.go": source}, mint.name) &&
+			!flagged(map[string]string{"cli/internal/store/storetest/a.go": source}, mint.name)
 	}
 	if err := quick.Check(property, nil); err != nil {
 		t.Fatal(err)

@@ -20,10 +20,21 @@ message Metric {
 }
 
 // Observation is a named series of auxiliary readings, such as latency, kept beside the scored
-// metric. It is never part of a verdict.
+// metric. It is part of a verdict only when it is an objective of a multi-objective task.
 message Observation {
   string name = 1;
   repeated double values = 2;
+}
+
+// Objectives is what a measurement of a multi-objective (Pareto) task is judged on: a task whose
+// objectives.toml has a [pareto] section and more than one objective.
+message Objectives {
+  // Every objective, in the order the task declares them. The scored metric is one of them; the
+  // samples of each other one are the observation of its name.
+  repeated Metric metrics = 1;
+  // The task's [pareto] relative_noise, the noise floor every objective is compared under. Zero
+  // means none.
+  double relative_noise = 2;
 }
 
 // CheckResult is a passed correctness check. A failed check saves no result: its job is `failed`
@@ -43,6 +54,21 @@ message MeasureResult {
   // The headline number of the measurement: the aggregate of the samples that compare uses (their
   // mean). The daemon computes it, so no reader recomputes it.
   double value = 5;
+  // Set for a measurement of a multi-objective task, and absent otherwise.
+  Objectives objectives = 6;
+}
+
+// Measurement is a commit's measurements of one kind pooled into one: a measure job that tops up
+// an earlier one adds its samples to the same measurement, as compare counts them.
+message Measurement {
+  string commit = 1;
+  string task_version = 2;
+  EnvironmentFingerprint environment = 3;
+  // The measure jobs pooled, oldest first.
+  repeated string job_ids = 4;
+  // Every job's samples and observations in the jobs' order, their headline value, and the
+  // newest job's check.
+  MeasureResult measure = 5;
 }
 
 // Result is one saved outcome of a job. A result is immutable once saved.

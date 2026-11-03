@@ -22,8 +22,12 @@
 //	results/<job>.json         the result a job saved, with its place in the order of saving
 //	plans/<number>.json        one plan, replaced whole on each change
 //	promotions/<n>.json        the nth promotion
+//	frontier/<n>.json          the frontier after its nth change, whole; the last one is the frontier
 //	runs/<run>/<n>.json        the nth event of a run
 //	logs/<job>/<offset>        the bytes appended to a job's log at that offset, as written
+//
+// OpenTask also keeps a .gitignore of "*" in <repository>/.vibesys-state, written when it is
+// missing and never replaced, so that git add -A never commits a store into the repository.
 //
 // A file is never appended to or edited in place. The spec's first sketch kept the events of a
 // run in one appended file; an append is not atomic on NFS, so each event is its own file.
@@ -94,10 +98,16 @@
 //
 // # Versions
 //
-// Open refuses a directory whose format file, or any record, has a version other than the one this
-// program reads, with an error of kind core.FailureIncompatible that names the file: a newer
-// version says to upgrade, and an older one, which is the hand-written encoding that came before
-// protojson, says the store is to be removed, because nothing migrates it and no release wrote it.
+// Open refuses a directory whose format file, or any record, has a version this program does not
+// read, with an error of kind core.FailureIncompatible that names the file: a newer version says to
+// upgrade, and version 1, the hand-written encoding that came before protojson, says the store is
+// to be removed, because nothing migrates it and no release wrote it. This program reads versions 2
+// and 3. The refusal of version 1 names the store's directory and, when the index records it, the
+// index entry to remove. The index reads an entry of another version for its task when it has this
+// version's shape, so such a store stays known and is refused alone. Version 3 only added to version 2 (the frontier directory, and fields of a measurement, a
+// promotion and a refusal), so Open migrates a store of version 2 under the owner's lock: it makes
+// the directories version 2 did not have, then writes the format file at version 3, which is the
+// migration's one commit point. A record keeps the version it was written with.
 // It refuses a record it cannot decode, one with a field it does not know, and one whose name and
 // content disagree, with an error of kind core.FailureInternal that names the file. It refuses a
 // directory that holds other files and no format file. The .owner file is a record like any other.

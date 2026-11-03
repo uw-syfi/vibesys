@@ -93,6 +93,60 @@ func TestRunsEachSampleWithItsOwnFileInTheScratchDirectory(t *testing.T) {
 	}
 }
 
+// Only a benchmark sample is measured: a check's timing is not its result, so an environment may
+// run it beside other work.
+func TestOnlyABenchmarkSampleIsMeasured(t *testing.T) {
+	r := newFakeRig(t).(*fakeRig)
+	if _, err := flowrun.Run(context.Background(), r.config(io.Discard), scenarios()[2].plan(false)); err != nil {
+		t.Fatal(err)
+	}
+	runs := r.env.Runs()
+	if len(runs) < 2 {
+		t.Fatalf("%d commands ran, want a check and samples", len(runs))
+	}
+	for i, x := range runs {
+		if want := i > 0; x.Measured != want {
+			t.Errorf("command %d (%q): measured %v, want %v", i, x.Argv, x.Measured, want)
+		}
+	}
+}
+
+// Every command of a job gets its own artifacts directory in the job's, made before it runs and
+// named in the order the commands ran; a job with no artifacts directory gives its commands none.
+func TestEachCommandGetsItsOwnArtifactsDirectoryInTheJobs(t *testing.T) {
+	for _, job := range []string{"", "/state/.artifacts/t/j7"} {
+		r := newFakeRig(t).(*fakeRig)
+		cfg := r.config(io.Discard)
+		cfg.Artifacts = job
+		if _, err := flowrun.Run(context.Background(), cfg, scenarios()[2].plan(false)); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, x := range r.env.Runs() {
+			got = append(got, x.Artifacts)
+		}
+		var want []string
+		if job != "" {
+			for i := range r.env.Runs() {
+				stage := "benchmark"
+				if i == 0 {
+					stage = "check"
+				}
+				want = append(want, fmt.Sprintf("%s/%02d-%s", job, i+1, stage))
+			}
+		} else {
+			want = make([]string, len(got))
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("job %q: artifacts %v, want %v", job, got, want)
+		}
+		made := r.files.Dirs()
+		if job == "" && len(made) != 0 || job != "" && strings.Join(made, ",") != strings.Join(want, ",") {
+			t.Errorf("job %q: made %v, want %v", job, made, want)
+		}
+	}
+}
+
 func TestACancelledContextRunsNothingAndMakesNothing(t *testing.T) {
 	r := newFakeRig(t).(*fakeRig)
 	ctx, cancel := context.WithCancel(context.Background())

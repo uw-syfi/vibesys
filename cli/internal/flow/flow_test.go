@@ -452,6 +452,37 @@ func TestACancelledContextEndsTheJobBeforeTheNextRequest(t *testing.T) {
 	}
 }
 
+// A measure job of a multi-objective task records its objectives with the result, and a sample that
+// leaves one of them out ends the job rejected, naming it: a commit must be judged on every
+// objective, so nothing is saved without one.
+func TestAMultiObjectiveMeasureRecordsItsObjectivesAndNeedsEveryOne(t *testing.T) {
+	objectives := core.Objectives{
+		Metrics:       []core.Metric{{Name: "ops", Direction: core.Maximize}, {Name: "p99", Direction: core.Minimize}},
+		RelativeNoise: 0.01,
+	}
+	p := shape{kind: core.JobMeasure, protocol2: true, samples: 2}.plan()
+	p.Objectives = objectives
+	w := &world{p: p, at: -1}
+	v, err := flow.Drive(context.Background(), p, w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := p.Record("j1", commit, passedOf(t, v), time.Unix(1, 0))
+	if got := r.Outcome.(core.MeasureOutcome).Objectives; !got.Equal(objectives) {
+		t.Errorf("the result records objectives %+v, want %+v", got, objectives)
+	}
+
+	p.Objectives.Metrics = append(p.Objectives.Metrics, core.Metric{Name: "ttft", Direction: core.Minimize})
+	w = &world{p: p, at: -1}
+	v, err = flow.Drive(context.Background(), p, w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected, ok := v.(flow.Rejected); !ok || !strings.Contains(rejected.Reason, `"ttft"`) || !strings.Contains(rejected.Reason, "sample 1") {
+		t.Errorf("a sample without an objective ended %+v, want rejected naming it", v)
+	}
+}
+
 func TestAnInvalidPlanNeverStarts(t *testing.T) {
 	good := shape{kind: core.JobMeasure, build: true, samples: 2}
 	for name, mutate := range map[string]func(*flow.Plan){
@@ -465,6 +496,17 @@ func TestAnInvalidPlanNeverStarts(t *testing.T) {
 		"no task":                         func(p *flow.Plan) { p.Task = "" },
 		"no key":                          func(p *flow.Plan) { p.Key = "" },
 		"another kind":                    func(p *flow.Plan) { p.Kind = core.JobCommand },
+		"objectives read from one field": func(p *flow.Plan) {
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric, {Name: "p99", Direction: core.Minimize}}}
+		},
+		"objectives without the scored metric": func(p *flow.Plan) {
+			p.Result = task.Result{Protocol2: true}
+			p.Objectives = core.Objectives{Metrics: []core.Metric{{Name: "a", Direction: core.Maximize}, {Name: "b", Direction: core.Minimize}}}
+		},
+		"one objective": func(p *flow.Plan) {
+			p.Result = task.Result{Protocol2: true}
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric}}
+		},
 	} {
 		p := good.plan()
 		mutate(&p)
@@ -631,4 +673,54 @@ func passedOf(t *testing.T, v flow.Verdict) flow.Findings {
 		t.Fatalf("the job did not pass: %+v", v)
 	}
 	return passed.Findings
+}
+
+// failingBench is a shell whose benchmark exits 1 after writing the stream it is given.
+type failingBench struct{ stream string }
+
+func (f failingBench) Do(_ context.Context, r flow.Request) flow.Event {
+	switch r := r.(type) {
+	case flow.Checkout:
+		return flow.CheckedOut{Dir: "/w", Scratch: "/s"}
+	case flow.Run:
+		if r.Stage == flow.StageBenchmark {
+			return flow.Ran{Exec: core.ExecOutcome{Kind: core.ExecExited, ExitCode: 1}, Output: []byte(f.stream), Found: f.stream != ""}
+		}
+		return flow.Ran{Exec: core.ExecOutcome{Kind: core.ExecExited}}
+	}
+	return flow.Observed{}
+}
+
+// A benchmark that fails and says why in an error record has its reason carried into the job's;
+// one that wrote no error record, or a stream that is not one, fails with the exit code alone.
+func TestAFailedSampleSaysWhatItsErrorRecordSays(t *testing.T) {
+	hello := `{"kind":"hello","protocol":2,"metrics":{"m":{"direction":"max","required":true}}}` + "\n"
+	cases := map[string]struct{ stream, want string }{
+		"an error record":        {hello + `{"kind":"error","message":"warmup did not finish within 60 s"}` + "\n", "warmup did not finish within 60 s"},
+		"a requirement not met":  {hello + `{"kind":"error","message":"no GPU","error_kind":"requirement_not_met","requirement":"gpu"}` + "\n", "requirement gpu is not met: no GPU"},
+		"no stream":              {"", ""},
+		"a stream with no error": {hello, ""},
+		"not a stream":           {"garbage\n", ""},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := shape{kind: core.JobMeasure, protocol2: true, samples: 1}.plan()
+			p.Metric = core.Metric{Name: "m", Direction: core.Maximize}
+			p.Objectives = core.Objectives{}
+			v, err := flow.Drive(context.Background(), p, failingBench{c.stream})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stopped, ok := v.(flow.Stopped)
+			if !ok || !strings.Contains(stopped.Reason, "exited with code 1") {
+				t.Fatalf("verdict %+v, want stopped by the exit code", v)
+			}
+			if c.want != "" && !strings.Contains(stopped.Reason, c.want) {
+				t.Errorf("reason %q does not carry %q", stopped.Reason, c.want)
+			}
+			if c.want == "" && strings.Contains(stopped.Reason, "reported") {
+				t.Errorf("reason %q claims a report the stream did not make", stopped.Reason)
+			}
+		})
+	}
 }

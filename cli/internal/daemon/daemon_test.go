@@ -2,6 +2,7 @@ package daemon_test
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -73,7 +74,7 @@ func newRig(t *testing.T) *rig {
 	if err := a.Start(ctxFor(t)); err != nil {
 		t.Fatal(err)
 	}
-	srv := daemon.NewServer(a, "test")
+	srv := daemon.NewServer(a, "test", daemon.Inherited{})
 	listener := bufconn.Listen(1 << 20)
 	gs := grpc.NewServer()
 	cliv1.RegisterDaemonServiceServer(gs, srv)
@@ -310,5 +311,45 @@ func TestASubmittedJobNamesTheRunAndAgentOfTheCall(t *testing.T) {
 	list, err := r.client.ListJobs(ctxFor(t), &cliv1.ListJobsRequest{Context: call})
 	if err != nil || len(list.GetJobs()) != 1 || len(list.GetJobs()[0].GetSubmitters()) != 1 {
 		t.Fatalf("ListJobs = %v, %v; want the job with its one submitter", list.GetJobs(), err)
+	}
+}
+
+// The status names every variable a job inherits, once each, sorted, and shows a value only for a
+// variable whose value is safe to show: PATH, HOME, TMPDIR, and a VIBESYS_ variable whose name does
+// not look like a secret. No other value ever appears.
+func TestStatusReportsWhatAJobInheritsAndHidesOtherValues(t *testing.T) {
+	a := app.New(app.Config{
+		Clock:  clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond),
+		Stores: memstores.New(app.Rules(5)),
+	})
+	t.Cleanup(a.Close)
+	names := []string{"PATH", "HOME", "TMPDIR", "VIBESYS_SPARK_HOST", "VIBESYS_API_KEY", "VIBESYS_TOKEN", "AWS_SECRET_ACCESS_KEY", "SSH_AUTH_SOCK", "LANG", "home"}
+	shown := map[string]bool{"PATH": true, "HOME": true, "TMPDIR": true, "VIBESYS_SPARK_HOST": true}
+	property := func(picks []uint8, values []string) bool {
+		var environ []string
+		last := map[string]string{}
+		for i, p := range picks {
+			name := names[int(p)%len(names)]
+			value := "v" + strings.ReplaceAll(strings.ReplaceAll(fmt.Sprint(i, values), "\n", ""), "\x00", "")
+			environ = append(environ, name+"="+value)
+			last[name] = value
+		}
+		st, err := daemon.NewServer(a, "test", daemon.Inherited{Environ: environ, CheckoutDirectory: "/scratch"}).Status(ctxFor(t), &cliv1.StatusRequest{})
+		if err != nil || st.GetCheckoutDirectory() != "/scratch" || len(st.GetEnvironment()) != len(last) {
+			return false
+		}
+		for i, v := range st.GetEnvironment() {
+			if i > 0 && st.GetEnvironment()[i-1].GetName() >= v.GetName() {
+				return false
+			}
+			want, ok := last[v.GetName()]
+			if !ok || (v.Value != nil) != shown[v.GetName()] || (v.Value != nil && v.GetValue() != want) {
+				return false
+			}
+		}
+		return true
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 300}); err != nil {
+		t.Fatal(err)
 	}
 }

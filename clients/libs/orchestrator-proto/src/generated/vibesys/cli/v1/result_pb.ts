@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/result.proto.
  */
 export const file_vibesys_cli_v1_result: GenFile = /*@__PURE__*/
-  fileDesc("Cht2aWJlc3lzL2NsaS92MS9yZXN1bHQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIkQKBk1ldHJpYxIMCgRuYW1lGAEgASgJEiwKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbiIrCgtPYnNlcnZhdGlvbhIMCgRuYW1lGAEgASgJEg4KBnZhbHVlcxgCIAMoASI6CgtDaGVja1Jlc3VsdBIrCghkdXJhdGlvbhgBIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiKgAQoNTWVhc3VyZVJlc3VsdBImCgZtZXRyaWMYASABKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSDwoHc2FtcGxlcxgCIAMoARIxCgxvYnNlcnZhdGlvbnMYAyADKAsyGy52aWJlc3lzLmNsaS52MS5PYnNlcnZhdGlvbhIUCgxjaGVja19qb2JfaWQYBCABKAkSDQoFdmFsdWUYBSABKAEipAMKBlJlc3VsdBIOCgZqb2JfaWQYASABKAkSCwoDa2V5GAIgASgJEgwKBHRhc2sYAyABKAkSFAoMdGFza192ZXJzaW9uGAQgASgJEg4KBmNvbW1pdBgFIAEoCRIWCg5zY2hlbWFfdmVyc2lvbhgGIAEoDRI7CgtlbnZpcm9ubWVudBgHIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSLQoHbWFjaGluZRgIIAEoCzIcLnZpYmVzeXMuY2xpLnYxLk1hY2hpbmVGYWN0cxIpCgRsb2FkGAkgASgLMhsudmliZXN5cy5jbGkudjEuTWFjaGluZUxvYWQSLwoLcmVjb3JkZWRfYXQYCiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiwKBWNoZWNrGAsgASgLMhsudmliZXN5cy5jbGkudjEuQ2hlY2tSZXN1bHRIABIwCgdtZWFzdXJlGAwgASgLMh0udmliZXN5cy5jbGkudjEuTWVhc3VyZVJlc3VsdEgAQgkKB291dGNvbWUqVgoJRGlyZWN0aW9uEhkKFURJUkVDVElPTl9VTlNQRUNJRklFRBAAEhYKEkRJUkVDVElPTl9NQVhJTUlaRRABEhYKEkRJUkVDVElPTl9NSU5JTUlaRRACQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
+  fileDesc("Cht2aWJlc3lzL2NsaS92MS9yZXN1bHQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIkQKBk1ldHJpYxIMCgRuYW1lGAEgASgJEiwKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbiIrCgtPYnNlcnZhdGlvbhIMCgRuYW1lGAEgASgJEg4KBnZhbHVlcxgCIAMoASJNCgpPYmplY3RpdmVzEicKB21ldHJpY3MYASADKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSFgoOcmVsYXRpdmVfbm9pc2UYAiABKAEiOgoLQ2hlY2tSZXN1bHQSKwoIZHVyYXRpb24YASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24i0AEKDU1lYXN1cmVSZXN1bHQSJgoGbWV0cmljGAEgASgLMhYudmliZXN5cy5jbGkudjEuTWV0cmljEg8KB3NhbXBsZXMYAiADKAESMQoMb2JzZXJ2YXRpb25zGAMgAygLMhsudmliZXN5cy5jbGkudjEuT2JzZXJ2YXRpb24SFAoMY2hlY2tfam9iX2lkGAQgASgJEg0KBXZhbHVlGAUgASgBEi4KCm9iamVjdGl2ZXMYBiABKAsyGi52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVzIrEBCgtNZWFzdXJlbWVudBIOCgZjb21taXQYASABKAkSFAoMdGFza192ZXJzaW9uGAIgASgJEjsKC2Vudmlyb25tZW50GAMgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBIPCgdqb2JfaWRzGAQgAygJEi4KB21lYXN1cmUYBSABKAsyHS52aWJlc3lzLmNsaS52MS5NZWFzdXJlUmVzdWx0IqQDCgZSZXN1bHQSDgoGam9iX2lkGAEgASgJEgsKA2tleRgCIAEoCRIMCgR0YXNrGAMgASgJEhQKDHRhc2tfdmVyc2lvbhgEIAEoCRIOCgZjb21taXQYBSABKAkSFgoOc2NoZW1hX3ZlcnNpb24YBiABKA0SOwoLZW52aXJvbm1lbnQYByABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50Ei0KB21hY2hpbmUYCCABKAsyHC52aWJlc3lzLmNsaS52MS5NYWNoaW5lRmFjdHMSKQoEbG9hZBgJIAEoCzIbLnZpYmVzeXMuY2xpLnYxLk1hY2hpbmVMb2FkEi8KC3JlY29yZGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIsCgVjaGVjaxgLIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNoZWNrUmVzdWx0SAASMAoHbWVhc3VyZRgMIAEoCzIdLnZpYmVzeXMuY2xpLnYxLk1lYXN1cmVSZXN1bHRIAEIJCgdvdXRjb21lKlYKCURpcmVjdGlvbhIZChVESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIWChJESVJFQ1RJT05fTUFYSU1JWkUQARIWChJESVJFQ1RJT05fTUlOSU1JWkUQAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
 
 /**
  * @generated from message vibesys.cli.v1.Metric
@@ -40,7 +40,7 @@ export const MetricSchema: GenMessage<Metric> = /*@__PURE__*/
 
 /**
  * Observation is a named series of auxiliary readings, such as latency, kept beside the scored
- * metric. It is never part of a verdict.
+ * metric. It is part of a verdict only when it is an objective of a multi-objective task.
  *
  * @generated from message vibesys.cli.v1.Observation
  */
@@ -64,6 +64,37 @@ export const ObservationSchema: GenMessage<Observation> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_result, 1);
 
 /**
+ * Objectives is what a measurement of a multi-objective (Pareto) task is judged on: a task whose
+ * objectives.toml has a [pareto] section and more than one objective.
+ *
+ * @generated from message vibesys.cli.v1.Objectives
+ */
+export type Objectives = Message<"vibesys.cli.v1.Objectives"> & {
+  /**
+   * Every objective, in the order the task declares them. The scored metric is one of them; the
+   * samples of each other one are the observation of its name.
+   *
+   * @generated from field: repeated vibesys.cli.v1.Metric metrics = 1;
+   */
+  metrics: Metric[];
+
+  /**
+   * The task's [pareto] relative_noise, the noise floor every objective is compared under. Zero
+   * means none.
+   *
+   * @generated from field: double relative_noise = 2;
+   */
+  relativeNoise: number;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.Objectives.
+ * Use `create(ObjectivesSchema)` to create a new message.
+ */
+export const ObjectivesSchema: GenMessage<Objectives> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_result, 2);
+
+/**
  * CheckResult is a passed correctness check. A failed check saves no result: its job is `failed`
  * and its output is in the job's logs.
  *
@@ -81,7 +112,7 @@ export type CheckResult = Message<"vibesys.cli.v1.CheckResult"> & {
  * Use `create(CheckResultSchema)` to create a new message.
  */
 export const CheckResultSchema: GenMessage<CheckResult> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_result, 2);
+  messageDesc(file_vibesys_cli_v1_result, 3);
 
 /**
  * MeasureResult is the official measurement of a commit.
@@ -120,6 +151,13 @@ export type MeasureResult = Message<"vibesys.cli.v1.MeasureResult"> & {
    * @generated from field: double value = 5;
    */
   value: number;
+
+  /**
+   * Set for a measurement of a multi-objective task, and absent otherwise.
+   *
+   * @generated from field: vibesys.cli.v1.Objectives objectives = 6;
+   */
+  objectives?: Objectives | undefined;
 };
 
 /**
@@ -127,7 +165,52 @@ export type MeasureResult = Message<"vibesys.cli.v1.MeasureResult"> & {
  * Use `create(MeasureResultSchema)` to create a new message.
  */
 export const MeasureResultSchema: GenMessage<MeasureResult> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_result, 3);
+  messageDesc(file_vibesys_cli_v1_result, 4);
+
+/**
+ * Measurement is a commit's measurements of one kind pooled into one: a measure job that tops up
+ * an earlier one adds its samples to the same measurement, as compare counts them.
+ *
+ * @generated from message vibesys.cli.v1.Measurement
+ */
+export type Measurement = Message<"vibesys.cli.v1.Measurement"> & {
+  /**
+   * @generated from field: string commit = 1;
+   */
+  commit: string;
+
+  /**
+   * @generated from field: string task_version = 2;
+   */
+  taskVersion: string;
+
+  /**
+   * @generated from field: vibesys.cli.v1.EnvironmentFingerprint environment = 3;
+   */
+  environment?: EnvironmentFingerprint | undefined;
+
+  /**
+   * The measure jobs pooled, oldest first.
+   *
+   * @generated from field: repeated string job_ids = 4;
+   */
+  jobIds: string[];
+
+  /**
+   * Every job's samples and observations in the jobs' order, their headline value, and the
+   * newest job's check.
+   *
+   * @generated from field: vibesys.cli.v1.MeasureResult measure = 5;
+   */
+  measure?: MeasureResult | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.Measurement.
+ * Use `create(MeasurementSchema)` to create a new message.
+ */
+export const MeasurementSchema: GenMessage<Measurement> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_result, 5);
 
 /**
  * Result is one saved outcome of a job. A result is immutable once saved.
@@ -214,7 +297,7 @@ export type Result = Message<"vibesys.cli.v1.Result"> & {
  * Use `create(ResultSchema)` to create a new message.
  */
 export const ResultSchema: GenMessage<Result> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_result, 4);
+  messageDesc(file_vibesys_cli_v1_result, 6);
 
 /**
  * Direction says which way a metric improves.

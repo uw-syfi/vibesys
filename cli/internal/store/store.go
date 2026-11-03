@@ -1,5 +1,5 @@
 // Package store declares Store, the logical interface to everything vibesys-cli keeps: job
-// state, results, events, job logs, plans and promotions.
+// state, results, events, job logs, plans, promotions and the frontier.
 //
 // A Store has no paths and no formats. Only internal/store/filestore knows the physical layout,
 // and internal/store/memstore is an in-memory implementation for tests. Both pass the one
@@ -52,6 +52,7 @@ type Store interface {
 	Snapshot(context.Context) (TaskSnapshot, error)
 	JobStore
 	ResultStore
+	FrontierStore
 	PlanStore
 	EventStore
 	LogStore
@@ -96,6 +97,21 @@ type ResultStore interface {
 
 	// Promotions returns every recorded promotion, oldest first.
 	Promotions(ctx context.Context) ([]core.Promotion, error)
+}
+
+// FrontierStore holds the frontier of a multi-objective task: its commits that no member beats.
+// Which commits are members is the decision of core.DecideFrontier; the store keeps the answer.
+type FrontierStore interface {
+	// Frontier returns the frontier: empty, at revision zero, until it first changes.
+	Frontier(ctx context.Context) (core.Frontier, error)
+
+	// UpdateFrontier makes an admission's members the frontier, as one change, and returns the
+	// frontier after it, one revision on. An admission no decision made (the zero
+	// FrontierAdmission) is refused as invalid input, and so is one whose members name a commit
+	// twice or not at all. One decided against another revision than the store's fails with
+	// FailureConflict and changes nothing, so a decision is never applied to a frontier it did
+	// not see. An admission of a commit that was a member already changes nothing.
+	UpdateFrontier(ctx context.Context, admission core.FrontierAdmission) (core.Frontier, error)
 }
 
 // PlanStore holds plans.

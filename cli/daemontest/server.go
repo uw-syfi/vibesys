@@ -32,7 +32,7 @@ func Server(t *testing.T) pb.DaemonServiceServer {
 		survivors.Close()
 		t.Fatal(err)
 	}
-	srv := daemon.NewServer(a, "test")
+	srv := daemon.NewServer(a, "test", daemon.Inherited{})
 	t.Cleanup(func() { srv.Shutdown(); a.Close(); survivors.Close() })
 	return srv
 }

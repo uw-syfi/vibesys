@@ -30,6 +30,9 @@ const (
 	VerdictKind_VERDICT_KIND_WORSE        VerdictKind = 2
 	VerdictKind_VERDICT_KIND_WITHIN_NOISE VerdictKind = 3
 	VerdictKind_VERDICT_KIND_INCONCLUSIVE VerdictKind = 4
+	// The overall verdict of a multi-objective comparison that is better on some objective and worse
+	// on another. A single metric is never a tradeoff.
+	VerdictKind_VERDICT_KIND_TRADEOFF VerdictKind = 5
 )
 
 // Enum value maps for VerdictKind.
@@ -40,6 +43,7 @@ var (
 		2: "VERDICT_KIND_WORSE",
 		3: "VERDICT_KIND_WITHIN_NOISE",
 		4: "VERDICT_KIND_INCONCLUSIVE",
+		5: "VERDICT_KIND_TRADEOFF",
 	}
 	VerdictKind_value = map[string]int32{
 		"VERDICT_KIND_UNSPECIFIED":  0,
@@ -47,6 +51,7 @@ var (
 		"VERDICT_KIND_WORSE":        2,
 		"VERDICT_KIND_WITHIN_NOISE": 3,
 		"VERDICT_KIND_INCONCLUSIVE": 4,
+		"VERDICT_KIND_TRADEOFF":     5,
 	}
 )
 
@@ -244,22 +249,85 @@ func (x *Verdict) GetNoise() float64 {
 	return 0
 }
 
+// ObjectiveVerdict is the verdict on one objective of a multi-objective comparison: the comparison of
+// that objective's samples alone, with its numbers.
+type ObjectiveVerdict struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Metric        *Metric                `protobuf:"bytes,1,opt,name=metric,proto3" json:"metric,omitempty"`
+	Verdict       *Verdict               `protobuf:"bytes,2,opt,name=verdict,proto3" json:"verdict,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ObjectiveVerdict) Reset() {
+	*x = ObjectiveVerdict{}
+	mi := &file_vibesys_cli_v1_verdict_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ObjectiveVerdict) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ObjectiveVerdict) ProtoMessage() {}
+
+func (x *ObjectiveVerdict) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_verdict_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ObjectiveVerdict.ProtoReflect.Descriptor instead.
+func (*ObjectiveVerdict) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_verdict_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ObjectiveVerdict) GetMetric() *Metric {
+	if x != nil {
+		return x.Metric
+	}
+	return nil
+}
+
+func (x *ObjectiveVerdict) GetVerdict() *Verdict {
+	if x != nil {
+		return x.Verdict
+	}
+	return nil
+}
+
 // Comparison is a verdict with what it compared.
 type Comparison struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Commit  string                 `protobuf:"bytes,1,opt,name=commit,proto3" json:"commit,omitempty"`
 	Against string                 `protobuf:"bytes,2,opt,name=against,proto3" json:"against,omitempty"`
-	Verdict *Verdict               `protobuf:"bytes,3,opt,name=verdict,proto3" json:"verdict,omitempty"`
+	// For a single-metric task, the verdict on its metric. For a multi-objective (Pareto) task, the
+	// overall verdict of `objectives`: BETTER when better on some objective and worse on none, WORSE
+	// when worse on some and better on none, TRADEOFF when better on one and worse on another,
+	// WITHIN_NOISE when within noise on all, and INCONCLUSIVE with the first inconclusive objective's
+	// reason when any is. Only its kind, reason and sample counts are set then: its means, ratio and
+	// noise are zero, and each objective's are in `objectives`.
+	Verdict *Verdict `protobuf:"bytes,3,opt,name=verdict,proto3" json:"verdict,omitempty"`
 	// The one environment both sides were measured in. A comparison across environments is refused,
 	// not given a verdict.
-	Environment   *EnvironmentFingerprint `protobuf:"bytes,4,opt,name=environment,proto3" json:"environment,omitempty"`
+	Environment *EnvironmentFingerprint `protobuf:"bytes,4,opt,name=environment,proto3" json:"environment,omitempty"`
+	// The verdict on each objective of a multi-objective task, in the order the task declares them.
+	// Empty for a single-metric task.
+	Objectives    []*ObjectiveVerdict `protobuf:"bytes,5,rep,name=objectives,proto3" json:"objectives,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Comparison) Reset() {
 	*x = Comparison{}
-	mi := &file_vibesys_cli_v1_verdict_proto_msgTypes[1]
+	mi := &file_vibesys_cli_v1_verdict_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -271,7 +339,7 @@ func (x *Comparison) String() string {
 func (*Comparison) ProtoMessage() {}
 
 func (x *Comparison) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_verdict_proto_msgTypes[1]
+	mi := &file_vibesys_cli_v1_verdict_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -284,7 +352,7 @@ func (x *Comparison) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Comparison.ProtoReflect.Descriptor instead.
 func (*Comparison) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_verdict_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_cli_v1_verdict_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *Comparison) GetCommit() string {
@@ -315,11 +383,18 @@ func (x *Comparison) GetEnvironment() *EnvironmentFingerprint {
 	return nil
 }
 
+func (x *Comparison) GetObjectives() []*ObjectiveVerdict {
+	if x != nil {
+		return x.Objectives
+	}
+	return nil
+}
+
 var File_vibesys_cli_v1_verdict_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_verdict_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/cli/v1/verdict.proto\x12\x0evibesys.cli.v1\x1a vibesys/cli/v1/environment.proto\"\xb6\x02\n" +
+	"\x1cvibesys/cli/v1/verdict.proto\x12\x0evibesys.cli.v1\x1a vibesys/cli/v1/environment.proto\x1a\x1bvibesys/cli/v1/result.proto\"\xb6\x02\n" +
 	"\aVerdict\x12/\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1b.vibesys.cli.v1.VerdictKindR\x04kind\x12:\n" +
 	"\x06reason\x18\x02 \x01(\x0e2\".vibesys.cli.v1.InconclusiveReasonR\x06reason\x12+\n" +
@@ -328,19 +403,26 @@ const file_vibesys_cli_v1_verdict_proto_rawDesc = "" +
 	"\x0ecandidate_mean\x18\x05 \x01(\x01R\rcandidateMean\x12\x1b\n" +
 	"\tbase_mean\x18\x06 \x01(\x01R\bbaseMean\x12\x14\n" +
 	"\x05ratio\x18\a \x01(\x01R\x05ratio\x12\x14\n" +
-	"\x05noise\x18\b \x01(\x01R\x05noise\"\xbb\x01\n" +
+	"\x05noise\x18\b \x01(\x01R\x05noise\"u\n" +
+	"\x10ObjectiveVerdict\x12.\n" +
+	"\x06metric\x18\x01 \x01(\v2\x16.vibesys.cli.v1.MetricR\x06metric\x121\n" +
+	"\averdict\x18\x02 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\"\xfd\x01\n" +
 	"\n" +
 	"Comparison\x12\x16\n" +
 	"\x06commit\x18\x01 \x01(\tR\x06commit\x12\x18\n" +
 	"\aagainst\x18\x02 \x01(\tR\aagainst\x121\n" +
 	"\averdict\x18\x03 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\x12H\n" +
-	"\venvironment\x18\x04 \x01(\v2&.vibesys.cli.v1.EnvironmentFingerprintR\venvironment*\x9a\x01\n" +
+	"\venvironment\x18\x04 \x01(\v2&.vibesys.cli.v1.EnvironmentFingerprintR\venvironment\x12@\n" +
+	"\n" +
+	"objectives\x18\x05 \x03(\v2 .vibesys.cli.v1.ObjectiveVerdictR\n" +
+	"objectives*\xb5\x01\n" +
 	"\vVerdictKind\x12\x1c\n" +
 	"\x18VERDICT_KIND_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13VERDICT_KIND_BETTER\x10\x01\x12\x16\n" +
 	"\x12VERDICT_KIND_WORSE\x10\x02\x12\x1d\n" +
 	"\x19VERDICT_KIND_WITHIN_NOISE\x10\x03\x12\x1d\n" +
-	"\x19VERDICT_KIND_INCONCLUSIVE\x10\x04*\xe4\x01\n" +
+	"\x19VERDICT_KIND_INCONCLUSIVE\x10\x04\x12\x19\n" +
+	"\x15VERDICT_KIND_TRADEOFF\x10\x05*\xe4\x01\n" +
 	"\x12InconclusiveReason\x12#\n" +
 	"\x1fINCONCLUSIVE_REASON_UNSPECIFIED\x10\x00\x12'\n" +
 	"#INCONCLUSIVE_REASON_TOO_FEW_SAMPLES\x10\x01\x12(\n" +
@@ -361,24 +443,29 @@ func file_vibesys_cli_v1_verdict_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_cli_v1_verdict_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_cli_v1_verdict_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_vibesys_cli_v1_verdict_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_vibesys_cli_v1_verdict_proto_goTypes = []any{
 	(VerdictKind)(0),               // 0: vibesys.cli.v1.VerdictKind
 	(InconclusiveReason)(0),        // 1: vibesys.cli.v1.InconclusiveReason
 	(*Verdict)(nil),                // 2: vibesys.cli.v1.Verdict
-	(*Comparison)(nil),             // 3: vibesys.cli.v1.Comparison
-	(*EnvironmentFingerprint)(nil), // 4: vibesys.cli.v1.EnvironmentFingerprint
+	(*ObjectiveVerdict)(nil),       // 3: vibesys.cli.v1.ObjectiveVerdict
+	(*Comparison)(nil),             // 4: vibesys.cli.v1.Comparison
+	(*Metric)(nil),                 // 5: vibesys.cli.v1.Metric
+	(*EnvironmentFingerprint)(nil), // 6: vibesys.cli.v1.EnvironmentFingerprint
 }
 var file_vibesys_cli_v1_verdict_proto_depIdxs = []int32{
 	0, // 0: vibesys.cli.v1.Verdict.kind:type_name -> vibesys.cli.v1.VerdictKind
 	1, // 1: vibesys.cli.v1.Verdict.reason:type_name -> vibesys.cli.v1.InconclusiveReason
-	2, // 2: vibesys.cli.v1.Comparison.verdict:type_name -> vibesys.cli.v1.Verdict
-	4, // 3: vibesys.cli.v1.Comparison.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 2: vibesys.cli.v1.ObjectiveVerdict.metric:type_name -> vibesys.cli.v1.Metric
+	2, // 3: vibesys.cli.v1.ObjectiveVerdict.verdict:type_name -> vibesys.cli.v1.Verdict
+	2, // 4: vibesys.cli.v1.Comparison.verdict:type_name -> vibesys.cli.v1.Verdict
+	6, // 5: vibesys.cli.v1.Comparison.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	3, // 6: vibesys.cli.v1.Comparison.objectives:type_name -> vibesys.cli.v1.ObjectiveVerdict
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_verdict_proto_init() }
@@ -387,13 +474,14 @@ func file_vibesys_cli_v1_verdict_proto_init() {
 		return
 	}
 	file_vibesys_cli_v1_environment_proto_init()
+	file_vibesys_cli_v1_result_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_verdict_proto_rawDesc), len(file_vibesys_cli_v1_verdict_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

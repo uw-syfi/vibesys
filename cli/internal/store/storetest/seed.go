@@ -40,6 +40,10 @@ type Measurement struct {
 	// CheckJob is the check pass the measurement rests on; the empty default is the measurement's
 	// own job, as when the check ran inside it.
 	CheckJob core.JobID
+	// Objectives makes it a measurement of a multi-objective task. Its first metric is the scored
+	// one, unless Metric names another, and Others holds the samples of every other objective.
+	Objectives core.Objectives
+	Others     []core.Observation
 }
 
 // SeedMeasurement saves a measurement of a commit through the store's own interface, by running a
@@ -53,6 +57,9 @@ func SeedMeasurement(t testing.TB, s store.Store, m Measurement) core.Result {
 	if m.TaskVersion == "" {
 		m.TaskVersion = "v1"
 	}
+	if m.Metric.Name == "" && m.Objectives.Pareto() {
+		m.Metric = m.Objectives.Metrics[0]
+	}
 	if m.Metric.Name == "" {
 		m.Metric = core.Metric{Name: "ops", Direction: core.Maximize}
 	}
@@ -62,7 +69,7 @@ func SeedMeasurement(t testing.TB, s store.Store, m Measurement) core.Result {
 			if check == "" {
 				check = job.ID
 			}
-			return core.MeasureOutcome{Metric: m.Metric, Samples: m.Samples, CheckJob: check}
+			return core.MeasureOutcome{Metric: m.Metric, Samples: m.Samples, CheckJob: check, Objectives: m.Objectives, Observations: m.Others}
 		})
 }
 

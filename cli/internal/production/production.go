@@ -11,6 +11,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/app/filestores"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
+	"github.com/uw-syfi/vibesys/cli/internal/backend/nvidia"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -18,10 +19,14 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockercli"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/machine"
 	hostenv "github.com/uw-syfi/vibesys/cli/internal/environment/host"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/slurm"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/gitwork"
 	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
+	"github.com/uw-syfi/vibesys/cli/internal/operator"
+	"github.com/uw-syfi/vibesys/cli/internal/remote"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
@@ -36,6 +41,8 @@ type Process struct {
 	// Executable is the path of the running binary, which starts the daemon and the supervisors.
 	Executable string
 	Getenv     func(string) string
+	// Environ returns the whole environment, which the daemon's jobs inherit.
+	Environ func() []string
 	// UID and GID are the user and group the process runs as. Docker jobs run as them, so the
 	// files a job writes are the user's.
 	UID  int
@@ -98,8 +105,11 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	return daemon.Run(ctx, daemon.Config{
 		Dir:     dir,
 		Version: p.Version,
-		Clock:   clk,
-		Ready:   ready,
+		// The supervisors are started with the daemon's environment and make the checkouts, so
+		// they make them where the daemon would.
+		Inherited: daemon.Inherited{Environ: p.Environ(), CheckoutDirectory: gitwork.Checkouts{}.Dir()},
+		Clock:     clk,
+		Ready:     ready,
 		Logf: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
 		},
@@ -139,38 +149,87 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 		return err
 	}
 	return host.Serve(ctx, runDir, host.Deps{
-		Environments:  environments,
-		Checkouts:     gitwork.Checkouts{},
-		Host:          supervisor.Host{Backend: cpu.New(cpu.Host(), clk), Files: hostfs.OS{}, Clock: clk},
+		Environments: environments,
+		Checkouts:    gitwork.Checkouts{},
+		Host: supervisor.Host{
+			Backend: cpu.New(cpu.Host(), clk), Files: hostfs.OS{}, Clock: clk, Artifacts: filestore.ArtifactsDir,
+		},
 		BinaryVersion: p.Version,
 	}, ready)
 }
 
-// machineEnvironments are the environments this machine has: the host, and docker over the docker
-// program on the user's PATH. Both are measured by the CPU backend. The daemon fingerprints them
-// and the supervisors run jobs in them, so both see the same.
+// machineEnvironments are the environments this machine has: the host, and docker, whose engine
+// the operator config places on this machine, on another one over ssh, or on another one inside
+// Slurm allocations. The daemon fingerprints them and the supervisors run jobs in them, so both see
+// the same.
 //
-// Making the docker environment does not touch Docker: a machine without it fails a docker job
-// with a message that says so, and host jobs are unaffected. The containers of the jobs of one
-// daemon are one scope, named by its runtime directory, because the daemon runs one job at a time.
+// Making the docker environment does not touch Docker or another machine: a machine without it
+// fails a docker job with a message that says so, and host jobs are unaffected. A config that cannot
+// be read stops the daemon, since a job run without what the operator asked for would mislead. The
+// containers of the jobs of one daemon are one scope, named by its runtime directory, because the
+// daemon runs one job at a time.
 func (p Process) machineEnvironments(clk clock.System, dir runtimedir.Dir) (environment.Environments, error) {
-	machine := cpu.New(cpu.Host(), clk)
-	engine, err := dockercli.New(dockercli.Config{Timers: clk})
+	op, err := operator.Load(operator.Path(p.Getenv, p.Home), p.Getenv(operator.EnvConfig) != "")
 	if err != nil {
 		return nil, err
 	}
-	containers, err := docker.New(docker.Config{
-		Engine: engine, Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Backend: machine, Timers: clk,
-		IDs: dockercli.RandomIDs{}, Scope: docker.ScopeFor(dir.Path()), User: docker.User{UID: p.UID, GID: p.GID},
-	})
+	scope := docker.ScopeFor(dir.Path())
+	local := cpu.New(cpu.Host(), clk)
+	cfg := docker.Config{
+		Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
+		User: docker.User{UID: p.UID, GID: p.GID}, GPUs: docker.GPUs{Devices: op.Docker.GPUs, Runtime: op.Docker.Runtime},
+		Mounts: op.Docker.Mounts,
+	}
+	engineCfg := dockercli.Config{Timers: clk}
+	switch op.Docker.Placement {
+	case operator.Local:
+		cfg.Backend = local
+		cfg.Machine = machine.Local{CacheRoot: p.cacheRoot(), As: cfg.User}
+		cfg.GPUFacts = &nvidia.GPUs{Shell: remote.Local{}, Timers: clk}
+	default:
+		r := op.Remote
+		ssh := remote.SSH{Host: r.Host, Program: r.SSHCommand}
+		engineCfg.Shell = ssh
+		cfg.Backend = cpu.New(&remote.CPU{Shell: ssh, Timers: clk, Timeout: machine.CallTimeout}, clk)
+		cfg.Machine = &machine.Remote{Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: r.RsyncCommand}, Root: r.WorkspaceRoot, Scope: scope, Timers: clk}
+		cfg.GPUFacts = &nvidia.GPUs{Shell: ssh, Timers: clk}
+		if s := op.Slurm; s != nil {
+			engineCfg.Allocator = slurm.Allocator{
+				Partition: s.Partition, Gres: s.Gres, SharedGres: s.SharedGres, Exclusive: s.Exclusive, CPUs: s.CPUs, Memory: s.Memory,
+				Arguments: s.SrunArguments, Builder: slurm.BuilderName(scope),
+			}
+			engineCfg.StartTimeout = s.QueueTimeout
+		}
+	}
+	engine, err := dockercli.New(engineCfg)
 	if err != nil {
 		return nil, err
 	}
-	onHost := hostenv.New(hostenv.Config{Backend: machine, Timers: clk})
+	cfg.Engine = engine
+	if s := op.Slurm; s != nil {
+		cfg.Engine = slurm.Engine{
+			Inner: engine, Scheduler: slurm.CLI{Shell: engineCfg.Shell, Timers: clk, Poll: s.PollInterval},
+			Builders: slurm.Buildx{Shell: engineCfg.Shell, Timers: clk, Name: slurm.BuilderName(scope)},
+		}
+	}
+	containers, err := docker.New(cfg)
+	if err != nil {
+		return nil, err
+	}
+	onHost := hostenv.New(hostenv.Config{Backend: local, Timers: clk})
 	return environment.Kinds{
 		core.EnvironmentHost:   func(environment.Target) (environment.Environment, error) { return onHost, nil },
 		core.EnvironmentDocker: containers.Environment,
 	}, nil
+}
+
+// cacheRoot is where docker jobs on this machine keep their caches: vibesys-cli in XDG_CACHE_HOME,
+// or in ~/.cache when that is not an absolute path.
+func (p Process) cacheRoot() string {
+	if dir := p.Getenv("XDG_CACHE_HOME"); filepath.IsAbs(dir) {
+		return filepath.Join(dir, "vibesys-cli")
+	}
+	return filepath.Join(p.Home, ".cache", "vibesys-cli")
 }
 
 // ErrAlreadyRunning is what RunDaemon returns when another daemon of the user runs.

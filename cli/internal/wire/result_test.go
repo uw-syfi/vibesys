@@ -16,7 +16,7 @@ func anyVerdict(r interface {
 	Float64() float64
 	IntN(int) int
 }) core.Verdict {
-	kinds := []core.VerdictKind{core.Better, core.Worse, core.WithinNoise, core.Inconclusive}
+	kinds := []core.VerdictKind{core.Better, core.Worse, core.WithinNoise, core.Inconclusive, core.Tradeoff}
 	v := core.Verdict{
 		Kind:             kinds[r.IntN(len(kinds))],
 		CandidateSamples: uint32(r.IntN(20)), BaseSamples: uint32(r.IntN(20)),
@@ -55,22 +55,23 @@ func TestVerdictCrossesTheWireUnrounded(t *testing.T) {
 func TestRefusalsCarryTheirReasonsAndEvidence(t *testing.T) {
 	kinds := []core.PromoteRefusalKind{
 		core.RefusalUnmeasured, core.RefusalCheckMissing, core.RefusalWorse, core.RefusalWithinNoise,
-		core.RefusalInconclusive, core.RefusalStale, core.RefusalEnvironmentMismatch,
+		core.RefusalInconclusive, core.RefusalStale, core.RefusalEnvironmentMismatch, core.RefusalTradeoff,
 	}
 	seen := map[cliv1.PromoteRefusalKind]bool{}
 	var refusal core.PromoteRefusal
 	for i, k := range kinds {
 		reason := core.PromoteRefusalReason{Kind: k, Message: "m" + string(k)}
 		switch k {
-		case core.RefusalWorse, core.RefusalWithinNoise, core.RefusalInconclusive:
+		case core.RefusalWorse, core.RefusalWithinNoise, core.RefusalInconclusive, core.RefusalTradeoff:
 			v := anyVerdict(newRand(uint64(i)))
 			reason.Verdict = &v
+			reason.Objectives = []core.ObjectiveVerdict{{Metric: core.Metric{Name: "ttft", Direction: core.Minimize}, Verdict: v}}
 		case core.RefusalStale:
 			reason.MeasuredAgainst, reason.CurrentHead = commitN(1), commitN(2)
 		}
 		refusal.Reasons = append(refusal.Reasons, reason)
 	}
-	got := wire.PromoteResponse(refusal).GetRefused()
+	got := wire.PromoteResponse(refusal, nil).GetRefused()
 	if len(got.GetReasons()) != len(kinds) {
 		t.Fatalf("%d reasons became %d", len(kinds), len(got.GetReasons()))
 	}
@@ -85,6 +86,9 @@ func TestRefusalsCarryTheirReasonsAndEvidence(t *testing.T) {
 		}
 		if (want.Verdict != nil) != (r.GetVerdict() != nil) || (want.Verdict != nil && r.GetVerdict().GetRatio() != want.Verdict.Ratio) {
 			t.Errorf("reason %d verdict = %+v, want %+v", i, r.GetVerdict(), want.Verdict)
+		}
+		if len(r.GetObjectives()) != len(want.Objectives) || (len(want.Objectives) > 0 && r.GetObjectives()[0].GetMetric().GetName() != "ttft") {
+			t.Errorf("reason %d objectives = %+v, want %+v", i, r.GetObjectives(), want.Objectives)
 		}
 	}
 
@@ -125,6 +129,9 @@ func TestResultsCrossTheWireWithEverythingTheyRecorded(t *testing.T) {
 		}
 		if m, ok := res.Outcome.(core.MeasureOutcome); ok {
 			g := got.GetMeasure()
+			if g.GetObjectives() != nil {
+				t.Fatalf("seed %d: a single-metric measurement went out with objectives %+v", seed, g.GetObjectives())
+			}
 			if g == nil || g.GetCheckJobId() != "j2" || g.GetMetric().GetDirection() != cliv1.Direction_DIRECTION_MINIMIZE || len(g.GetSamples()) != len(m.Samples) ||
 				len(g.GetObservations()) != 1 || g.GetObservations()[0].GetValues()[1] != 2.5 {
 				t.Fatalf("seed %d: measurement became %+v", seed, g)

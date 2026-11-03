@@ -13,7 +13,7 @@ import (
 // Restore rebuilds a Ledger from durable state, and fails with FailureInternal when the state
 // breaks an invariant a store keeps: job ids and plan numbers are consecutive from 1, a result
 // belongs to a job that succeeded and names it and a job that names a result has it, a plan link
-// names a plan that exists, and only a job has a log. A value that no store would hold is refused
+// names a plan that exists, the frontier names each member once, and only a job has a log. A value that no store would hold is refused
 // too, so a record edited by hand cannot get past what Submit would have refused.
 func Restore(rules store.Rules, snap Snapshot) (*Ledger, error) {
 	l := New(rules)
@@ -43,6 +43,17 @@ func Restore(rules store.Rules, snap Snapshot) (*Ledger, error) {
 		}
 		l.promotions = append(l.promotions, held)
 	}
+	frontier, err := Hold("frontier", snap.Frontier)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkMembers(frontier.Members); err != nil {
+		return nil, internal("the frontier at revision %d: %v", frontier.Revision, err)
+	}
+	if frontier.Revision == 0 && len(frontier.Members) > 0 {
+		return nil, internal("the frontier has members and never changed")
+	}
+	l.frontier = frontier
 	maps.Copy(l.events, snap.Events)
 	for id, length := range snap.Logs {
 		if _, ok := l.jobIndex[id]; !ok {

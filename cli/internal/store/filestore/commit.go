@@ -41,6 +41,8 @@ func (b *backend) Commit(change ledger.Change) error {
 		return b.publish(planPath(b.root, c.Plan.Number), &cliv1.PlanFile{Format: formatVersion, Plan: wire.Plan(c.Plan)})
 	case ledger.AddPromotion:
 		return b.publish(promotionPath(b.root, c.Seq), &cliv1.PromotionFile{Format: formatVersion, Seq: c.Seq, Promotion: wire.Promotion(c.Promotion)})
+	case ledger.SetFrontier:
+		return b.publish(frontierPath(b.root, c.Frontier.Revision), frontierToFile(c.Frontier))
 	case ledger.AddEvent:
 		event, err := eventToMessage(c.Event)
 		if err != nil {

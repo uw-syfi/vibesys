@@ -2,6 +2,7 @@ package flow
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -27,6 +28,9 @@ type Plan struct {
 	Benchmark task.Command
 	Result    task.Result
 	Metric    core.Metric
+	// Objectives is what a measure job of a multi-objective task is judged on: every sample must
+	// report each of them, and the result records them. It is the zero value for any other task.
+	Objectives core.Objectives
 
 	// Samples is how many benchmark runs this job takes now: what the cache lacks, not the count
 	// the submission asked for. It is zero for a check job.
@@ -63,6 +67,9 @@ func (p Plan) Validate() error {
 		if p.Metric.Name == "" || (p.Metric.Direction != core.Maximize && p.Metric.Direction != core.Minimize) {
 			return bad("a measure job has a metric with a direction")
 		}
+		if err := validObjectives(p.Metric, p.Result, p.Objectives); err != nil {
+			return bad("%v", err)
+		}
 	default:
 		return bad("kind %q is neither check nor measure", p.Kind)
 	}
@@ -83,6 +90,32 @@ func (p Plan) Validate() error {
 		if err := validCommand("build", *p.Build); err != nil {
 			return bad("%v", err)
 		}
+	}
+	return nil
+}
+
+// validObjectives says why a measure job's objectives cannot be followed: a multi-objective job
+// reads every objective from an evaluator stream, scores one of them, and names each once with a
+// direction. A job with no objectives is a single-metric one.
+func validObjectives(scored core.Metric, result task.Result, o core.Objectives) error {
+	if len(o.Metrics) == 0 && o.RelativeNoise == 0 {
+		return nil
+	}
+	if !o.Pareto() || !result.Protocol2 {
+		return fmt.Errorf("a multi-objective measure job has more than one objective, read from an evaluator result stream")
+	}
+	if o.RelativeNoise < 0 || o.RelativeNoise >= 1 {
+		return fmt.Errorf("the objectives' relative noise %v is not at least 0 and less than 1", o.RelativeNoise)
+	}
+	seen := map[string]bool{}
+	for _, m := range o.Metrics {
+		if m.Name == "" || seen[m.Name] || (m.Direction != core.Maximize && m.Direction != core.Minimize) {
+			return fmt.Errorf("the objective %q is unnamed, named twice or has no direction", m.Name)
+		}
+		seen[m.Name] = true
+	}
+	if !slices.Contains(o.Metrics, scored) {
+		return fmt.Errorf("the scored metric %q is not one of the objectives", scored.Name)
 	}
 	return nil
 }
@@ -138,6 +171,6 @@ func (p Plan) Record(job core.JobID, commit core.Commit, f Findings, at time.Tim
 	if p.RunsCheck() {
 		checkJob = job
 	}
-	r.Outcome = core.MeasureOutcome{Metric: p.Metric, Samples: f.Samples, Observations: f.Observations, CheckJob: checkJob}
+	r.Outcome = core.MeasureOutcome{Metric: p.Metric, Samples: f.Samples, Observations: f.Observations, CheckJob: checkJob, Objectives: p.Objectives}
 	return r
 }

@@ -88,7 +88,7 @@ func Open(root string, opts ...Option) (*Store, error) {
 		}
 	}
 	if err := initialize(c.fs, root); err != nil {
-		return nil, err
+		return nil, prerelease(err, root, c.entry)
 	}
 	b := newBackend(c.fs, root)
 	g, err := claim(b, c.owner)
@@ -99,10 +99,14 @@ func Open(root string, opts ...Option) (*Store, error) {
 		return nil, err
 	}
 	b.guard = g
+	if err := migrate(c.fs, root); err != nil {
+		_ = g.release()
+		return nil, err
+	}
 	engine, err := ledger.NewEngine(b, c.rules)
 	if err != nil {
 		_ = g.release()
-		return nil, err
+		return nil, prerelease(err, root, c.entry)
 	}
 	return &Store{Engine: engine, guard: g}, nil
 }
@@ -124,6 +128,23 @@ func (s *Store) Reclaim(job core.JobID) error { return s.guard.reclaim(job) }
 // took it, its record is gone, or its disk does not answer. A store that failed it is given up and
 // opened again.
 func (s *Store) Owned() error { return s.guard.check() }
+
+// prerelease completes the refusal of a store of the prerelease encoding with what to remove: the
+// store's directory and, when the index records the store, its entry, without which the daemon
+// takes the missing directory for a disk that is not mounted. A daemon makes the store again on
+// the next submission. Any other error is returned as it is.
+func prerelease(err error, root, entry string) error {
+	var f *core.Failure
+	if !errors.Is(err, errPrerelease) || !errors.As(err, &f) {
+		return err
+	}
+	fix := fmt.Sprintf("remove the directory %s", root)
+	if entry != "" {
+		fix += fmt.Sprintf(" and the index entry %s", entry)
+	}
+	return &core.Failure{Kind: f.Kind, Message: strings.TrimSuffix(f.Message, prereleaseFix) + fix +
+		", and the next submission makes the store again; no other store is affected"}
+}
 
 // findStore fails unless the store that was made is there.
 func findStore(c config, root string) error {
@@ -160,7 +181,45 @@ func OpenTask(repository, task string, opts ...Option) (*Store, error) {
 	} else if err != nil {
 		return nil, store.Mark(&core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the repository %s cannot be read: %v", repository, err)}, store.ErrAway)
 	}
-	return Open(taskDir(repository, task), opts...)
+	s, err := Open(taskDir(repository, task), opts...)
+	if err != nil {
+		return nil, err
+	}
+	if err := ignoreState(optionsOf(opts).fs, path.Join(path.Clean(repository), stateDirName), task); err != nil {
+		_ = s.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// ignoreState writes a .gitignore that ignores everything into the state directory of a
+// repository, unless one is there, so that no store file reaches a commit made with git add -A. A
+// state directory made before this is given one on its next open. A .gitignore the user wrote is
+// left as it is. The temporary file is named for the task, whose store this opener owns, so two
+// openers of different tasks never write the same one.
+func ignoreState(f fsys.FS, dir, task string) error {
+	name := path.Join(dir, gitignoreFile)
+	_, err := f.ReadFile(name)
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, fs.ErrNotExist):
+		return unavailable(dir, err)
+	}
+	b := newBackend(f, dir)
+	tmp := path.Join(dir, tempPrefix+gitignoreFile+"-"+task)
+	if err := b.writeFile(tmp, []byte(gitignoreContent)); err != nil {
+		_ = f.Remove(tmp)
+		return unavailable(dir, err)
+	}
+	if err := f.Rename(tmp, name); err != nil {
+		_ = f.Remove(tmp)
+		return unavailable(dir, err)
+	}
+	if err := f.SyncDir(dir); err != nil {
+		return unavailable(dir, err)
+	}
+	return nil
 }
 
 func unavailable(root string, err error) error {
@@ -229,6 +288,37 @@ func unmake(f fsys.FS, root string, made []string) {
 	for _, dir := range slices.Backward(made) {
 		_ = f.Remove(dir)
 	}
+}
+
+// migrate brings a store of an older version this program reads up to formatVersion, under the
+// owner's lock. Version 3 only added to version 2, so the migration makes the directories version 2
+// did not have and then writes the format file, which is its commit point: a crash before it
+// leaves a store of version 2 with an empty directory more, which the next Open migrates again.
+func migrate(f fsys.FS, root string) error {
+	name := path.Join(root, formatFile)
+	data, err := f.ReadFile(name)
+	if err != nil {
+		return unavailable(root, err)
+	}
+	var file cliv1.FormatFile
+	if err := decode(name, data, &file); err != nil {
+		return err
+	}
+	if file.GetFormat() == formatVersion {
+		return nil
+	}
+	for _, dir := range topDirs {
+		if err := f.Mkdir(path.Join(root, dir)); err != nil && !errors.Is(err, fs.ErrExist) {
+			return unavailable(root, err)
+		}
+	}
+	if err := f.SyncDir(root); err != nil {
+		return unavailable(root, err)
+	}
+	if err := newBackend(f, root).publish(name, &cliv1.FormatFile{Format: formatVersion}); err != nil {
+		return unavailable(root, err)
+	}
+	return nil
 }
 
 // initialize makes the directory root a store when it is empty, and otherwise checks that it is

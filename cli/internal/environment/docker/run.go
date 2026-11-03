@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
+	"strings"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -47,6 +50,7 @@ type run struct {
 	attempted bool   // Start was called, so the container may exist
 	container Container
 	stopLimit func()
+	staged    *Dirs // the run's directories on the engine's machine, once staged
 }
 
 // prepareAndExecute makes the container and runs the execution in it. Until a command starts in
@@ -75,25 +79,20 @@ func (r *run) prepareAndExecute() core.Attempt {
 	if err != nil {
 		return notStarted(err)
 	}
-	// The limit bounds the commands and their service, and not the preparation above: building
-	// an image takes as long as it takes. It is armed before anything runs in the container.
-	limit, stop := p.cfg.Timers.Timeout(r.ctx, r.x.Timeout)
-	r.stopLimit = stop
-
-	r.attempted = true
-	r.container, err = p.cfg.Engine.Start(r.ctx, ContainerSpec{
-		Name:   r.name,
-		Image:  img.ID,
-		Labels: runLabels(p.cfg.Scope, id),
-		User:   p.cfg.User,
-		Dir:    r.x.Checkout.Dir,
-		Mounts: r.mounts(),
-		// The user has no home in the image, and tools want one they can write to.
-		Env: map[string]string{"HOME": "/tmp"},
-	})
+	cs, err := r.containerSpec(id, img)
 	if err != nil {
 		return notStarted(err)
 	}
+	r.attempted = true
+	r.container, err = p.cfg.Engine.Start(r.ctx, cs)
+	if err != nil {
+		return notStarted(err)
+	}
+	// The limit bounds the commands and their service, and not the preparation above: building
+	// an image, or waiting for an allocation the container is placed in, takes as long as it
+	// takes. It is armed before anything runs in the container.
+	limit, stop := p.cfg.Timers.Timeout(r.ctx, r.x.Timeout)
+	r.stopLimit = stop
 	return environment.Execute(r.x, r.container, environment.Events{
 		Limit:     limit,
 		Cancelled: r.ctx.Done(),
@@ -101,14 +100,65 @@ func (r *run) prepareAndExecute() core.Attempt {
 	}, r.sink)
 }
 
+// containerSpec stages the run's directories on the engine's machine and says what the container
+// is made of.
+func (r *run) containerSpec(id string, img Image) (ContainerSpec, error) {
+	p := r.e.p
+	m := p.cfg.Machine
+	local := Dirs{Checkout: r.x.Checkout.Dir, Scratch: r.x.Scratch, Artifacts: r.x.Artifacts}
+	staged, err := m.Stage(r.ctx, local)
+	if err != nil {
+		return ContainerSpec{}, err
+	}
+	r.staged = &staged
+	user, err := m.User(r.ctx)
+	if err != nil {
+		return ContainerSpec{}, err
+	}
+	cache, err := m.Cache(r.ctx, cacheKey(r.e.target.Task, img.ID))
+	if err != nil {
+		return ContainerSpec{}, err
+	}
+	// The user has no home in the image, and tools want one they can write to.
+	env := map[string]string{"HOME": "/tmp"}
+	mounts := r.mounts(staged)
+	if cache != "" {
+		mounts = append(mounts, Mount{Host: cache, Container: CacheDir})
+		env[EnvCacheDir] = CacheDir
+	}
+	if staged.Artifacts != "" {
+		mounts = append(mounts, Mount{Host: staged.Artifacts, Container: ArtifactsDir})
+		env[EnvArtifactsDir] = ArtifactsDir
+	}
+	names := slices.Sorted(maps.Keys(p.cfg.Mounts))
+	for _, name := range names {
+		mounts = append(mounts, Mount{Host: p.cfg.Mounts[name], Container: MountsDir + "/" + name, ReadOnly: true})
+	}
+	if len(names) > 0 {
+		env[EnvMounts] = strings.Join(names, ",")
+	}
+	return ContainerSpec{
+		Name:     r.name,
+		Image:    img.ID,
+		Labels:   runLabels(p.cfg.Scope, id),
+		User:     user,
+		Dir:      r.x.Checkout.Dir,
+		Mounts:   mounts,
+		Env:      env,
+		GPUs:     p.cfg.GPUs,
+		Limit:    r.x.Timeout,
+		Measured: r.x.Measured,
+	}, nil
+}
+
 // mounts are the directories the commands see: the checkout, and the scratch directory when the
-// caller named one, each at its own path so that a path the caller hands a command means the same
-// inside the container. Both are writable: the checkout holds the build, and the scratch directory
-// holds what the caller reads after the command ends.
-func (r *run) mounts() []Mount {
-	mounts := []Mount{{Host: r.x.Checkout.Dir, Container: r.x.Checkout.Dir}}
+// caller named one, each at the caller's own path so that a path the caller hands a command means
+// the same inside the container. Both are writable: the checkout holds the build, and the scratch
+// directory holds what the caller reads after the command ends.
+func (r *run) mounts(staged Dirs) []Mount {
+	mounts := []Mount{{Host: staged.Checkout, Container: r.x.Checkout.Dir}}
 	if r.x.Scratch != "" {
-		mounts = append(mounts, Mount{Host: r.x.Scratch, Container: r.x.Scratch})
+		mounts = append(mounts, Mount{Host: staged.Scratch, Container: r.x.Scratch})
 	}
 	return mounts
 }
@@ -131,6 +181,12 @@ func (r *run) end() error {
 	}
 	if r.stopLimit != nil {
 		r.stopLimit()
+	}
+	if r.staged != nil {
+		local := Dirs{Checkout: r.x.Checkout.Dir, Scratch: r.x.Scratch, Artifacts: r.x.Artifacts}
+		if err := r.e.p.cfg.Machine.Collect(context.WithoutCancel(r.ctx), local, *r.staged); err != nil {
+			problems = append(problems, fmt.Errorf("what the command wrote was not brought back: %v", err))
+		}
 	}
 	if err := r.sink.Err(); err != nil {
 		problems = append(problems, fmt.Errorf("the output could not be kept: %v", err))

@@ -50,6 +50,9 @@ type AddPromotion struct {
 	Promotion core.Promotion
 }
 
+// SetFrontier replaces the frontier with its next revision.
+type SetFrontier struct{ Frontier core.Frontier }
+
 // AddEvent appends an event to its run's log.
 type AddEvent struct{ Event core.Event }
 
@@ -63,6 +66,7 @@ type AddLog struct {
 func (PutJob) change()       {}
 func (PutPlan) change()      {}
 func (AddPromotion) change() {}
+func (SetFrontier) change()  {}
 func (AddEvent) change()     {}
 func (AddLog) change()       {}
 
@@ -73,6 +77,8 @@ type Snapshot struct {
 	Results    []SavedResult
 	Plans      []core.Plan
 	Promotions []core.Promotion
+	// Frontier is the frontier at its last revision, the zero Frontier when it never changed.
+	Frontier core.Frontier
 	// Events is the number of events of each run.
 	Events map[core.RunID]uint64
 	// Logs is the length in bytes of each job's log.
@@ -89,6 +95,7 @@ type Ledger struct {
 	resultOf   map[core.JobID]int    // index into results
 	plans      []core.Plan           // plan number n is plans[n-1]
 	promotions []core.Promotion
+	frontier   core.Frontier
 	events     map[core.RunID]uint64
 	logs       map[core.JobID]uint64
 }
@@ -313,6 +320,45 @@ func (l *Ledger) RecordPromotion(approved core.Approved) (Change, error) {
 	return AddPromotion{Seq: uint64(len(l.promotions)) + 1, Promotion: p}, nil
 }
 
+// UpdateFrontier decides making an admission's members the next revision of the frontier. An
+// admission of a member, which changes nothing, yields a nil Change.
+func (l *Ledger) UpdateFrontier(admission core.FrontierAdmission) (Change, core.Frontier, error) {
+	var none core.Frontier
+	if !admission.Valid() {
+		return nil, none, invalid("frontier", "the admission was not made by a decision")
+	}
+	if admission.From() != l.frontier.Revision {
+		return nil, none, conflict("the frontier is at revision %d, and the admission was decided against revision %d", l.frontier.Revision, admission.From())
+	}
+	if admission.AlreadyMember() {
+		return nil, Copy(l.frontier), nil
+	}
+	members, err := Hold("frontier.Members", admission.Members())
+	if err != nil {
+		return nil, none, err
+	}
+	if err := checkMembers(members); err != nil {
+		return nil, none, err
+	}
+	next := core.Frontier{Revision: l.frontier.Revision + 1, Members: members}
+	return SetFrontier{Frontier: next}, Copy(next), nil
+}
+
+// checkMembers refuses members that name no commit or one commit twice.
+func checkMembers(members []core.FrontierMember) error {
+	seen := map[core.Commit]bool{}
+	for i, m := range members {
+		if m.Commit == "" {
+			return invalid(fmt.Sprintf("frontier.Members[%d].Commit", i), "is empty")
+		}
+		if seen[m.Commit] {
+			return invalid(fmt.Sprintf("frontier.Members[%d].Commit", i), fmt.Sprintf("%s is a member twice", m.Commit))
+		}
+		seen[m.Commit] = true
+	}
+	return nil
+}
+
 // CreatePlan decides storing a new open plan with the next number.
 func (l *Ledger) CreatePlan(np core.NewPlan) (Change, core.Plan, error) {
 	var none core.Plan
@@ -404,6 +450,8 @@ func (l *Ledger) Apply(c Change) {
 		}
 	case AddPromotion:
 		l.promotions = append(l.promotions, Copy(c.Promotion))
+	case SetFrontier:
+		l.frontier = Copy(c.Frontier)
 	case AddEvent:
 		l.events[c.Event.Run]++
 	case AddLog:
@@ -478,6 +526,9 @@ func (l *Ledger) Results(f core.ResultFilter) []core.Result {
 
 // Promotions returns every recorded promotion, oldest first.
 func (l *Ledger) Promotions() []core.Promotion { return Copy(l.promotions) }
+
+// Frontier returns the frontier.
+func (l *Ledger) Frontier() core.Frontier { return Copy(l.frontier) }
 
 // Plan returns one plan.
 func (l *Ledger) Plan(n core.PlanNumber) (core.Plan, error) {

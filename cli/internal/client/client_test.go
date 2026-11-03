@@ -16,7 +16,9 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon/daemontest"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
@@ -489,5 +491,75 @@ func TestStopEndsTheDaemonAndTheNextConnectStartsAnother(t *testing.T) {
 	s.connect(t)
 	if got := s.starter.Calls(); got != 2 {
 		t.Fatalf("starts = %d, want 2", got)
+	}
+}
+
+// checkRequest submits a check job of the commit, which the daemon keys by the environment's
+// fingerprint before it answers.
+func checkRequest(s *setup, noCache bool) *cliv1.SubmitRequest {
+	s.world.Tasks.Put("/repo", commit, tasktest.Files("task"))
+	return &cliv1.SubmitRequest{Context: call, NoCache: noCache, Spec: wire.JobSpec(core.JobSpec{
+		Commit: commit, Environment: core.EnvironmentHost, Settings: core.CheckSettings{}})}
+}
+
+// submitHeld submits while the environment holds its fingerprint, as a docker task's image
+// build does, and restarts the daemon while the submission waits for it.
+func submitHeld(t *testing.T, s *setup, c *client.Client, req *cliv1.SubmitRequest) (*cliv1.SubmitResponse, error) {
+	t.Helper()
+	s.world.Env.HoldFingerprint("image")
+	type answer struct {
+		resp *cliv1.SubmitResponse
+		err  error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		resp, err := c.Submit(ctxFor(t), req)
+		done <- answer{resp, err}
+	}()
+	if !s.world.Gates.Reached(ctxFor(t), fakeenv.FingerprintMark) {
+		t.Fatal("the submission never reached the fingerprint")
+	}
+	c2, err := client.Restart(ctxFor(t), s.options(true))
+	if err != nil {
+		t.Fatalf("Restart: %v", err)
+	}
+	t.Cleanup(func() { c2.Close() })
+	s.world.Gates.Release("image")
+	a := <-done
+	return a.resp, a.err
+}
+
+// F21: a daemon restart while a submission waits for the environment (an image build) used to
+// fail the submission with "context canceled" and record nothing. The client now sends it again
+// to the next daemon, which records exactly one job.
+func TestASubmissionOutlivesARestartOfTheDaemon(t *testing.T) {
+	s := newSetup(t)
+	c := s.connect(t)
+	resp, err := submitHeld(t, s, c, checkRequest(s, false))
+	if err != nil || resp.GetJob().GetId() == "" {
+		t.Fatalf("Submit across a restart = %v, %v; want the job", resp, err)
+	}
+	c3 := s.connect(t)
+	jobs, err := c3.ListJobs(ctxFor(t), &cliv1.ListJobsRequest{Context: call})
+	if err != nil || len(jobs.GetJobs()) != 1 || jobs.GetJobs()[0].GetId() != resp.GetJob().GetId() {
+		t.Fatalf("jobs after the restart = %v, %v; want exactly the submitted one", jobs.GetJobs(), err)
+	}
+	if _, err := c3.Wait(ctxFor(t), call, []string{resp.GetJob().GetId()}, client.WaitOptions{}); err != nil {
+		t.Fatalf("waiting for the job: %v", err)
+	}
+}
+
+// A submission that asks for a new job is not sent twice: the restart's answer says the
+// submission may not be recorded.
+func TestANoCacheSubmissionIsNotSentAgain(t *testing.T) {
+	s := newSetup(t)
+	c := s.connect(t)
+	_, err := submitHeld(t, s, c, checkRequest(s, true))
+	if !errors.Is(err, client.ErrSubmissionUnknown) {
+		t.Fatalf("Submit with no_cache across a restart = %v, want ErrSubmissionUnknown (fingerprinted %d)", err, s.world.Env.Fingerprinted())
+	}
+	jobs, err := s.connect(t).ListJobs(ctxFor(t), &cliv1.ListJobsRequest{Context: call})
+	if err != nil || len(jobs.GetJobs()) != 0 {
+		t.Fatalf("jobs = %v, %v; want none", jobs.GetJobs(), err)
 	}
 }

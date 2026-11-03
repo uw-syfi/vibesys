@@ -9,6 +9,9 @@ const (
 	Worse        VerdictKind = "worse"
 	WithinNoise  VerdictKind = "within_noise"
 	Inconclusive VerdictKind = "inconclusive"
+	// Tradeoff is the overall verdict of a multi-objective comparison that is better on some
+	// objective and worse on another. A single metric is never a tradeoff.
+	Tradeoff VerdictKind = "tradeoff"
 )
 
 // InconclusiveReason says why a comparison reached no verdict.
@@ -47,7 +50,14 @@ type Verdict struct {
 type Comparison struct {
 	Commit  Commit
 	Against Commit
+	// Verdict is the one verdict of a single-metric task. For a multi-objective (Pareto) task it
+	// is the overall verdict of Objectives (see CombineObjectives): its kind, its reason and the
+	// sample counts are set, and its means, ratio and noise are zero, since no one number stands
+	// for every objective.
 	Verdict Verdict
+	// Objectives is the verdict on each objective of a multi-objective task, in the order the task
+	// declares them. It is empty for a single-metric task.
+	Objectives []ObjectiveVerdict
 	// Environment is the one both sides were measured in.
 	Environment Fingerprint
 }

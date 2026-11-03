@@ -1,6 +1,6 @@
 // Package storetest is the one contract suite every store.Store passes. It covers each sentence
 // of the Store documentation: joining and reuse, notes and plan links, conflicts, a result saved
-// with its state, numbering, gapless event positions, log offsets, the failure kinds and a
+// with its state, the frontier's revisions, numbering, gapless event positions, log offsets, the failure kinds and a
 // cancelled context.
 //
 // An implementation runs it from a test with Run. The suite never skips a case for an
@@ -38,6 +38,7 @@ func Run(t *testing.T, newStore New) {
 		{"notes", testNotes},
 		{"jobs", testJobs},
 		{"results", testResults},
+		{"frontier", testFrontier},
 		{"plans", testPlans},
 		{"events", testEvents},
 		{"logs", testLogs},
@@ -268,6 +269,7 @@ type state struct {
 	Jobs       []core.Job
 	Results    []core.Result
 	Promotions []core.Promotion
+	Frontier   core.Frontier
 	Plans      []core.Plan
 	Events     map[core.RunID][]core.Event
 	Logs       map[core.JobID][]byte
@@ -288,6 +290,9 @@ func snapshot(t *testing.T, s store.Store, runs ...core.RunID) state {
 	}
 	if st.Promotions, err = s.Promotions(ctx); err != nil {
 		t.Fatalf("Promotions: %v", err)
+	}
+	if st.Frontier, err = s.Frontier(ctx); err != nil {
+		t.Fatalf("Frontier: %v", err)
 	}
 	if st.Plans, err = s.Plans(ctx, core.PlanFilter{}); err != nil {
 		t.Fatalf("Plans: %v", err)
@@ -317,7 +322,7 @@ func unchanged(t *testing.T, what string, s store.Store, before state, runs ...c
 	}
 }
 
-// Observe reads everything a Store shows: its jobs, results, promotions and plans, the logs of its
+// Observe reads everything a Store shows: its jobs, results, promotions, frontier and plans, the logs of its
 // jobs, and the events of the runs listed. Two Observations are equal exactly when a caller
 // could not tell the stores apart, which is how a test compares a store with itself after a
 // restart or a crash. Compare them with reflect.DeepEqual.
