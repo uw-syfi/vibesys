@@ -141,7 +141,7 @@ Unenforced: product decisions through allowed imports still need human review.
 ## Talking to daemons
 
 A **daemon** here is a long-lived local process that owns some state and that
-another process (the caller) reads and commands over a socket: the CLI daemon
+another process (the caller) reads and commands over a socket: the CLI daemon, `vibesysd`,
 that owns each task's job store, and the sidecar that owns an agent session.
 The host daemon `vibesys-host` is the caller of both. Every link from a caller to a
 daemon follows the ten rules below, so that a new link is a variation on a

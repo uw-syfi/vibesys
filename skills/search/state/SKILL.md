@@ -23,7 +23,7 @@ All worktrees of the repository share one store per task, so any agent sees the 
 | Saved results: check passes and samples, per commit | `vibesys-cli show <sha> --json` |
 | The head of the result branch and its fresh number | `vibesys-cli result --json` |
 | Plans, their status and comments, and the jobs linked to them | `vibesys-cli plan list\|view` |
-| The daemon that runs it all | `vibesys-cli daemon status` |
+| `vibesysd`, the CLI's daemon that runs it all | `vibesys-cli daemon status` |
 
 ## What lives in git and on disk
 
