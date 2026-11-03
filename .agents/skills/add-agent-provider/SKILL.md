@@ -65,7 +65,7 @@ shows the temporary override for an unreleased agentshim commit.
    hold it.
 5. **Install the CLI in the agent image**, the Docker layer built over the
    task image from the `vibesys-agent` Dev Container Feature (see
-   [devcontainer-features.md](../../../docs/contributing/devcontainer-features.md)).
+   [change-container-images](../change-container-images/SKILL.md)).
    It installs every CLI with its own `npm` line and ignores agentshim's
    `ProviderProfile.container_install`, whose pins lag. Add a
    `<provider>_version` option (default = the pin) to the Feature manifest, a
@@ -147,4 +147,4 @@ shows the temporary override for an unreleased agentshim commit.
 - The agentshim range in `pyproject.toml`, and Ruff's `TID251` ban on
   importing agentshim outside vs-agent.
 - [agent-drivers.md](../../../docs/contributing/agent-drivers.md) and
-  [devcontainer-features.md](../../../docs/contributing/devcontainer-features.md).
+  [change-container-images](../change-container-images/SKILL.md).
