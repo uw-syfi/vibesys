@@ -5,7 +5,7 @@ import {faultWord, refusalWord} from './words.js';
 
 type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
 
-export interface CommandWords {
+interface CommandWords {
   readonly label: string;
   readonly tone: Tone;
   /** What the host or the transport said, shown verbatim to the one who can fix it. */
@@ -15,7 +15,7 @@ export interface CommandWords {
 }
 
 /** How a command stands, in words. `done` names what was asked ("Stop", "Start"). */
-export function commandWords(progress: CommandProgress, done: string): CommandWords {
+function commandWords(progress: CommandProgress, done: string): CommandWords {
   switch (progress._tag) {
     case 'Sending':
       return {label: `${done}: sending.`, tone: 'live', details: null, canRetry: false};

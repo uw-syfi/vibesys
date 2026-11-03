@@ -28,7 +28,7 @@ interface Say {
 }
 
 /** What to tell the person, or null when the connection is working and nothing needs saying. */
-export function sayAbout(note: ConnectionNote): Say | null {
+function sayAbout(note: ConnectionNote): Say | null {
   const {connection, feed, hasData, what} = note;
   const staleTail = hasData
     ? 'What is shown may be out of date.'
