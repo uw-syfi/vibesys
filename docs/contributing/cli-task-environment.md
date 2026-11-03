@@ -243,7 +243,12 @@ environment passes that to the engine, and only the Slurm allocator reads it. A
 task cannot ask for an exclusive check: the manifest stays free of machines,
 and a check that is slow beside other work only takes longer. The CPU list
 comes from the allocation itself (`Cpus_allowed_list` of the srun step), so it
-is the set Slurm's cgroup gives the step, not a guess.
+is the set Slurm's cgroup gives the step, not a guess. A program that sizes its
+thread pool by the machine's CPUs instead of its affinity oversubscribes that
+share: llama.cpp counts `/sys/devices/system/cpu`, and 20 spinning threads on
+8 CPUs made the example's CPU reference miss its checker's timeouts. The task
+sizes such a pool from `sched_getaffinity` (the example's `step.py` sets
+`LLAMA_ARG_THREADS` when it has less than the whole node).
 
 Builds cannot be confined the obvious ways. The Docker daemon runs outside
 Slurm's cgroups, so the build's CPU use is not the `srun` step's; BuildKit,
