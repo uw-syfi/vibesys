@@ -129,6 +129,108 @@ runtime journals and replays). It follows [flows.md](flows.md): the `ctx` vocabu
 workspaces, evaluation, groups), the rule for flow code, how core ends the run from the winner
 the flow chose, and how to test it.
 
+## Talking to daemons
+
+A **daemon** here is a long-lived local process that owns some state and that
+another process (the caller) reads and commands over a socket: the CLI daemon
+that owns each task's job store, and the sidecar that owns an agent session.
+The host daemon `vibesysd` is the caller of both. Every link from a caller to a
+daemon follows the ten rules below, so that a new link is a variation on a
+known one and not a new protocol. "Callee" is the daemon and "caller" is the
+process that dials it.
+
+Each rule names its enforcement. "Unenforced" gives the reason. "Added in the
+CLI link PR" and "added in the identity PR" mean the check is written in the
+stack that links `vibesysd` to the CLI daemon and does not exist on `main`
+yet; drop the phrase when the check lands.
+
+1. **The callee owns the contract.** The contract is a `.proto` under
+   `proto/vibesys/<callee>/v<N>/`. The caller generates its stubs from it and
+   writes no mirror of a message. A Go module generates a given proto package
+   once, and no build links two copies, because two copies of one package
+   panic at registration.
+   Enforced: stubs and messages are regenerated and diffed by the `proto`
+   check group; the one-copy rule by the proto-copy check, added in the CLI
+   link PR. Unenforced: a hand-written mirror of a callee's message cannot be
+   told from a new message without a reader.
+2. **Transport is gRPC over a Unix socket in a private directory.** The
+   directory is a real directory (not a link) owned by the user with mode
+   `0700`, not on a network file system, and the socket path is at most 100
+   bytes. The caller checks the directory before it dials, so a directory
+   someone else created in advance cannot answer as the daemon.
+   Enforced: for the CLI daemon, by the tests of its runtime-directory package;
+   for the caller's check, by the `Locate` tests added in the CLI link PR.
+   Unenforced: for a new daemon, the choice of transport is a design decision.
+3. **Discovery is a documented rule.** The callee's README says how a caller
+   finds the socket, and a golden file pins the rule: the callee and every
+   caller read the same golden in their tests. A caller never guesses, scans
+   for sockets, or reads pid files.
+   Enforced: by the golden tests added in the CLI link PR for the CLI daemon.
+   Unenforced: a pid-file read is not told apart from any other file read
+   until the file-read rule below lands; and for a new daemon nothing requires
+   a golden.
+4. **The first call is `Hello`.** It carries the caller's component and the
+   protocol versions, and the answer is `COMPATIBLE`, `CLIENT_TOO_OLD` or
+   `DAEMON_TOO_OLD`. A missing, incompatible or failed daemon is an unreadable
+   state with a typed reason, never an empty list.
+   Enforced: for the CLI daemon, by its contract suite and the conformance
+   scenarios added in the CLI link PR. Unenforced: across daemons, which call
+   is a link's first call is not visible to a check.
+5. **A read is a stream that starts with a reset.** The reset is the whole
+   state. Keyed facts follow, each tagged `(epoch, sequence)`. The caller
+   buffers a reset and applies it whole at its end marker, and records its
+   resume token there and never earlier. A daemon that cannot honor a resume
+   token sends a reset. A daemon whose state is a log may let the caller
+   resume by offset. Nobody polls a daemon for state.
+   Enforced: the reset and resume behavior by the shared transcript corpus and
+   the property tests of the caller's session type, added in the CLI link PR.
+   Unenforced: "nobody polls" needs a reader, because a loop that polls is not
+   told apart from any other loop.
+6. **A write is a bounded unary command.** It carries an id the callee
+   deduplicates, so repeating it is safe, and the caller sets a deadline.
+   Unenforced: whether an operation is idempotent needs a reader; the
+   `software-design` skill's boundary rules cover it.
+7. **Identity travels in the message.** The caller's repository, task, run and
+   agent travel in `CallContext`. Environment variables carry identity only
+   into a process that cannot take a message (an agent's shell), and each name
+   is declared once, in a golden in the callee's contract.
+   Enforced: the golden, and the tests that the carrier sets exactly its names
+   and that the reader reads exactly them, added in the identity PR.
+8. **Lifetime has one owner.** A process starts and stops the daemons it owns.
+   A shared daemon is started only by the callee's own start command, when
+   dialing finds none or an old one, and the caller never stops it.
+   Enforced: that only listed files may start a process, by the `exec-confined`
+   rule added in the CLI link PR. Unenforced: who may start or stop a given
+   daemon is a design decision.
+9. **One Fake per service, beside the client.** One contract suite runs
+   against the Fake and the real daemon. When the Fake and the daemon live in
+   different modules, a shared transcript corpus ties them without either
+   importing the other.
+   Enforced: for the CLI daemon, by the corpus runners added in the CLI link
+   PR. Unenforced: that every Fake is registered in a contract suite needs a
+   reader; the `testing` skill states the rule.
+10. **Import and capability rules hold the pattern.** The orchestrator's
+    `archcheck` limits which packages may import a callee's generated
+    contract, which may build its client, which may run a process or dial a
+    socket, and which may read another component's files.
+    Enforced: the process limit by `confinement`; the import and client rules
+    (`cli-contract-importers`, `cli-stub`), the process list (`exec-confined`)
+    and the file-read rule (`fs-reads`), added in the CLI link PR.
+
+Where the sidecar link stands today: it follows rules 1, 2, 5 (its output is a
+log read by offset) and 6, and it departs from rules 3, 4, 8 and 9. Its layout
+is documented only in code, there is no `Hello`, `vibesysd` reads the
+sidecar's pid file, process-group file and log, and it polls for readiness
+every 50 milliseconds, and no contract suite runs both a Fake and a real
+sidecar. Those reads stay in `fs-reads` as listed entries with reasons, and the
+rule admits no new one. Unenforced until `fs-reads` lands: a new read of
+another component's files.
+
+A free-text field must not carry a fact. A fact that a caller acts on is a
+typed field, and text such as a handoff's prose is shown to a person and never
+parsed. Unenforced: it needs a reader that can tell a fact from prose; the
+typed-field checks above are the part a check can hold.
+
 [//]: # (tach-graph:start)
 ## Architecture overview
 
