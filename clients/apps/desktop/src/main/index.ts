@@ -25,6 +25,7 @@ import {NodeLocalHost} from './local-host.js';
 import {isOwnWindow, type PortEvent} from './port-ipc.js';
 import {NodeProcessSpawner} from './process.js';
 import {savedHosts} from './saved-hosts.js';
+import {trackWindow} from './window-lifetime.js';
 import {hostsFromArgv, isAppPage, startupHosts, windowUrl} from './window-policy.js';
 
 /** `dist/renderer`: the built page, beside `dist/main`. */
@@ -146,8 +147,7 @@ async function start(): Promise<void> {
   });
   app.on('web-contents-created', (_event, contents) => confine(contents));
   const window = openWindow(startupHosts(asked, [...saved]));
-  windows.add(window.webContents.id);
-  window.on('closed', () => windows.delete(window.webContents.id));
+  trackWindow(windows, window);
   app.on('window-all-closed', () => app.quit());
   let releasing = false;
   app.on('will-quit', event => {

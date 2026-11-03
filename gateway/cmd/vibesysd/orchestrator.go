@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/uw-syfi/vibesys/gateway/internal/connect"
@@ -57,6 +56,13 @@ func holdWhileLive(ctx context.Context, live <-chan bool, monitor *lifecycle.Mon
 	}
 }
 
+// gatewayRoot is the root every verb of this process dials or serves: the --root flag, else the one
+// derived from the orchestrator state directory, else ~/.vibesys (hosted.GatewayRoot).
+func gatewayRoot(flag string) (string, error) {
+	getenv, home := hosted.Environ()
+	return hosted.GatewayRoot(flag, getenv, home)
+}
+
 // orchestratorVerb says whether args name an orchestrator verb, after an optional leading
 // `--root PATH` that names the gateway the client verbs reach.
 func orchestratorVerb(args []string) (bool, string, []string) {
@@ -74,9 +80,10 @@ func orchestratorVerb(args []string) (bool, string, []string) {
 // socket, starting a gateway when none serves, as connect does; with --host they run
 // `ssh HOST vibesysd connect`, so the remote vibesysd must be on that host's PATH.
 func orchestratorCommand(ctx context.Context, root string, args []string) int {
-	if root == "" {
-		home, _ := os.UserHomeDir()
-		root = filepath.Join(home, ".vibesys")
+	root, err := gatewayRoot(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 	local := func(ctx context.Context) (net.Conn, error) {
 		binary, err := os.Executable()

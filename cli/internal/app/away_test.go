@@ -719,7 +719,11 @@ func (h heldCancel) Cancel(ctx context.Context, reason string) error {
 		return nil
 	}
 	close(h.gate.entered)
-	<-h.gate.release
+	select {
+	case <-h.gate.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	return h.Handle.Cancel(ctx, reason)
 }
 
@@ -792,6 +796,9 @@ func TestForgettingARepositoryEndsItsCommandsBeforeTheNextJobStarts(t *testing.T
 	a := o.start(heldCancels{Supervisors: w.supervisors(), gate: cancel})
 	job := submitAs(t, a, callA, "hold", "g", ";", "exit", "0")
 	o.awaitIn(t, a, scopeA, job.ID, "running", func(j core.Job) bool { return j.State == core.JobRunning })
+	// The store records running before Start. Removing it while the supervisor is still
+	// parked lets the machine safely admit the other job, since no command runs yet.
+	awaitActive(t, w)
 	other := submitAs(t, a, callB, "print", "other", ";", "exit", "0")
 	o.remove(repoA)
 	done := make(chan error, 1)

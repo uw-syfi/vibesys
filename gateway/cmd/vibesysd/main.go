@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -71,14 +70,7 @@ func run(ctx context.Context, args []string) error {
 	if timeout <= 0 {
 		return errors.New("timeout must be positive")
 	}
-	if *root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return err
-		}
-		*root = filepath.Join(home, ".vibesys")
-	}
-	directory, err := filepath.Abs(*root)
+	directory, err := gatewayRoot(*root)
 	if err != nil {
 		return err
 	}

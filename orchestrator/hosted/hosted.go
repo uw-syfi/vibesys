@@ -55,7 +55,12 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	if err != nil {
 		return x.unavailable(o.Log, err.Error())
 	}
-	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Plans: production.NoPlans{}, Version: o.Version}, o.Log)
+	cli, err := production.ResolveCLI(o.Getenv, o.Executable, production.OSFiles{})
+	if err != nil {
+		return x.unavailable(o.Log, err.Error())
+	}
+	o.Log.Info("agents are told to run this vibesys-cli", "path", cli)
+	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Plans: production.NoPlans{}, Version: o.Version, AgentCLI: cli}, o.Log)
 	if err != nil {
 		return x.unavailable(o.Log, "the orchestrator is not served by this process: "+err.Error())
 	}
@@ -136,6 +141,13 @@ func registerUnavailable(server grpc.ServiceRegistrar, reason string) {
 		desc.Streams[i].Handler = func(any, grpc.ServerStream) error { return err }
 	}
 	server.RegisterService(&desc, pb.UnimplementedOrchestratorServiceServer{})
+}
+
+// GatewayRoot is the host .vibesys directory a gateway serves from and its clients dial, so that a
+// gateway belongs to exactly one orchestrator state directory: the --root flag, else a subdirectory
+// of $VIBESYS_ORCHESTRATOR_STATE_DIR, else ~/.vibesys. See production.GatewayRoot.
+func GatewayRoot(flag string, getenv func(string) string, home string) (string, error) {
+	return production.GatewayRoot(flag, getenv, home)
 }
 
 // Environ is the process environment, for Options.Getenv.

@@ -18,8 +18,9 @@ go build -o /tmp/vibesysd ./cmd/vibesysd
 /tmp/vibesysd serve
 ```
 
-Both commands accept `--root PATH`, the host's `.vibesys` directory, which
-normally defaults to `~/.vibesys`. `serve --idle-timeout 10m` sets the period
+Both commands accept `--root PATH`, the host's `.vibesys` directory. Without it the root is
+`$VIBESYS_ORCHESTRATOR_STATE_DIR/host` when that variable is set (an absolute path, else an error),
+so a gateway belongs to one orchestrator state directory, and `~/.vibesys` otherwise. `serve --idle-timeout 10m` sets the period
 with no open transport connections before shutdown. Open connections, even
 without active RPCs, keep it alive, and keepalive (a ping after 30 s of
 silence, then 10 s for its acknowledgement) ends one that has gone half-open.

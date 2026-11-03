@@ -1,5 +1,6 @@
 """Unchanged damaged prefixes cost one scan; new identities are read again."""
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,6 +15,12 @@ from vs_runlog.api import HeadObserver, RunLogDamagedError
 CORPUS = Path(__file__).resolve().parents[3] / "proto/testdata/retained"
 CASES = sorted(path.name for path in CORPUS.iterdir() if path.is_dir())
 FIRST = CASES[0]
+
+
+def rewrite_log(path: Path, data: bytes, version: int) -> None:
+    """Give each in-place rewrite a distinct identity independent of filesystem timing."""
+    path.write_bytes(data)
+    os.utime(path, (version, version))
 
 
 def pinned_for_other_cases(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
@@ -64,14 +71,14 @@ def test_damaged_prefix_scan_bound_and_repair(
     observer = HeadObserver()
     with TemporaryDirectory() as temporary:
         log = Path(temporary) / "run.log"
-        log.write_bytes(damaged)
+        rewrite_log(log, damaged, 1)
         log.with_name("run.head").write_bytes(head.to_binary())
         for reader in reads:
             observe = observer.read if reader == "head" else observer.current_epoch
             with pytest.raises(RunLogDamagedError):
                 observe(log)
         assert observer.scans == 1
-        log.write_bytes(original)
+        rewrite_log(log, original, 2)
         log.with_name("run.head").write_bytes((CORPUS / case / "run.head").read_bytes())
         assert observer.read(log).epoch == 1
         epoch = observer.current_epoch(log)

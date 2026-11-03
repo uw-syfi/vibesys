@@ -10,6 +10,11 @@ report a number that `vibesys-cli` did not print. The CLI decides what a check, 
 and a promotion are; this skill says how to use it and how to read what comes back. The lead
 installs and checks the CLI (`vibesys:optimize`).
 
+**Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
+`PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
+started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
+set; export it as the absolute path of the vibesys-cli to use`.
+
 Every call takes the context flags your brief names: `--task`, `--run`, `--harness` and `--agent`.
 All worktrees of the repository share one store per task, so a call from your worktree sees the
 jobs and results of every other agent. The examples leave them out. Add `--json` wherever you parse the output. Detail on jobs,

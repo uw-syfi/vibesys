@@ -94,6 +94,12 @@ listed, with its statfs number. There is no override: the error says to point th
 path, and a default on a network filesystem is refused and never replaced by another place. An empty
 home directory is an error, not a default relative to the working directory.
 
+The gateway that hosts the orchestrator is found through its root, and the root follows the state
+directory: without `--root`, `vibesysd serve`, `connect` and the client verbs (`run`, `send`, `mcp`)
+use `$VIBESYS_ORCHESTRATOR_STATE_DIR/host` when the variable is set, and `~/.vibesys` when it is not.
+So `run start` with the variable set reaches, or starts, the gateway of that state directory and
+never one that serves another; `--root` overrides both. The rule is `hosted.GatewayRoot`.
+
 Writes never block reads, and the long ones never block the writer for long. `Verify` and the
 read-heavy part of `Compact` run on a snapshot beside the writer. `Compact` writes in steps of at
 most `StepRows` rows (1000 by default), each its own short transaction, and a crash between steps
@@ -163,6 +169,20 @@ session's files, logs and socket are under `STATE/sessions/`.
 The lead's first message is rendered by the sidecar from the run's task, its `--fanout` and the
 optional `--brief`, the operator's steering text: it tells the lead to run `vibesys:optimize` for the
 task, so the repository must hold `.vibesys/tasks/TASK/`.
+
+### Which `vibesys-cli` the agents run
+
+An agent's shell may be a login shell (Codex runs `bash -lc`), which reads the user's profile again
+and can put another `vibesys-cli` first on `PATH`. So the daemon picks one build when it starts and
+hands every session its absolute path as `VIBESYS_CLI`. The daemon picks, in order:
+`VIBESYS_ORCHESTRATOR_CLI` (an absolute path to an executable file; a relative path or a file that
+is not executable stops the orchestrator from starting, naming the setting, and no other build is
+substituted), a `vibesys-cli` beside the `vibesysd` binary, then the first `vibesys-cli` on the
+daemon's own `PATH`. With none of them the orchestrator does not start, because the skills have no
+`PATH` fallback: they run `"$VIBESYS_CLI"` and stop with a clear message when it is unset. Whatever
+was inherited under the name `VIBESYS_CLI` is dropped, so a stale value never reaches an agent. The
+variable is set in the sidecar process's environment, which is where the agent's commands run; the
+launch environment's token and identity stay in the tool server's.
 
 Live smoke run with Claude Code and Haiku 4.5 (it uses a real account, so an operator runs it; the
 repository needs the task bundle named by `--task`):
