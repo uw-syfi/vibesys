@@ -98,7 +98,7 @@ func withTask(args ...string) []string {
 // submit queues a command job and returns its id.
 func (c *cli) submit(argv ...string) string {
 	c.t.Helper()
-	r := c.run(append(withTask("submit", "command", "HEAD", "--"), argv...)...)
+	r := c.run(append(withTask("submit", "command", "HEAD", "--env", "host", "--"), argv...)...)
 	if r.code != exitOK {
 		c.t.Fatalf("submit: exit %d: %s", r.code, r.stderr)
 	}
@@ -161,6 +161,8 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 		{"measure with no commit", withTask("submit", "measure"), "one commit"},
 		{"measure with too many samples", withTask("submit", "measure", "HEAD", "--samples", "99999999999"), "--samples"},
 		{"measure with a bad env", withTask("submit", "measure", "HEAD", "--env", "vm"), "--env"},
+		{"command on the host with a placement", withTask("submit", "command", "HEAD", "--env", "host", "--placement", "local", "--", "true"), "--placement"},
+		{"check on the host with a placement", withTask("submit", "check", "HEAD", "--placement=local", "--env", "host"), "--placement"},
 		{"probe without service", withTask("submit", "command", "HEAD", "--probe", "ok", "--", "true"), "--probe"},
 		{"negative timeout", withTask("submit", "command", "HEAD", "--timeout=-1s", "--", "true"), "--timeout"},
 		{"bad flag", withTask("submit", "command", "HEAD", "--nope", "--", "true"), "nope"},
@@ -244,11 +246,11 @@ func TestWaitTimeoutIsExitThreeAndTheJobGoesOn(t *testing.T) {
 
 func TestSubmitWaitBlocksAndExitsLikeWait(t *testing.T) {
 	c := newCLI(t)
-	r := c.run(withTask("submit", "command", "HEAD", "--wait", "--", "print", "x", ";", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--wait", "--", "print", "x", ";", "exit", "0")...)
 	if r.code != exitOK || strings.Count(r.stdout, "\n") != 2 || !strings.Contains(r.stdout, "succeeded") {
 		t.Fatalf("submit --wait = %+v, want the queued line and the final line", r)
 	}
-	r = c.run(withTask("submit", "command", "HEAD", "--wait", "--", "exit", "4")...)
+	r = c.run(withTask("submit", "command", "HEAD", "--env", "host", "--wait", "--", "exit", "4")...)
 	if r.code != exitFailed {
 		t.Fatalf("submit --wait of a failing command: exit %d, want 1", r.code)
 	}
@@ -302,7 +304,7 @@ func TestNoteAndJobsFilters(t *testing.T) {
 // --json is one JSON message per line, in the contract's field names, on every command.
 func TestJSONOutput(t *testing.T) {
 	c := newCLI(t)
-	r := c.run(withTask("submit", "command", "HEAD", "--json", "--", "print", "j", ";", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--json", "--", "print", "j", ";", "exit", "0")...)
 	var submitted struct {
 		Job struct {
 			ID string `json:"id"`
@@ -476,9 +478,20 @@ func TestEnvironmentVariablesFillTheCallContext(t *testing.T) {
 	c.env["VIBESYS_TASK"] = "kv"
 	c.env["VIBESYS_RUN"] = "run-7"
 	c.env["VIBESYS_AGENT"] = "agent-3"
-	r := c.run("submit", "command", "HEAD", "--note", "n", "--", "exit", "0")
+	r := c.run("submit", "command", "HEAD", "--env", "host", "--note", "n", "--", "exit", "0")
 	if r.code != exitOK {
 		t.Fatalf("submit = %+v", r)
+	}
+}
+
+// A placement inherited from VIBESYS_PLACEMENT is every submit's default for its docker jobs, so a
+// host job is not refused for it, and records none.
+func TestAHostJobIgnoresTheInheritedPlacement(t *testing.T) {
+	c := newCLI(t)
+	c.env["VIBESYS_PLACEMENT"] = "local"
+	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--json", "--", "exit", "0")...)
+	if r.code != exitOK || strings.Contains(r.stdout, `"placement"`) {
+		t.Fatalf("submit = %+v; want a host job with no placement", r)
 	}
 }
 

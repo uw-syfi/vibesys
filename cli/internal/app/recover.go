@@ -165,14 +165,24 @@ func (a *App) admittedOf(ref lifecycle.Ref, job core.Job) lifecycle.Admitted {
 // environment it runs in, and the run that submitted it first, whose use of the machine it counts
 // as.
 func (a *App) workOf(job core.Job) lifecycle.Work {
-	if job.Spec.Environment == core.EnvironmentAuto {
-		job.Spec.Environment = a.cfg.DefaultEnvironment
-	}
+	job.Spec.Environment = queuedEnvironment(job.Spec)
 	w := lifecycle.Work{Claims: a.cfg.Scheduler.Demand.Claims(job), Kind: job.Spec.Settings.Kind()}
 	if len(job.Submitters) > 0 {
 		w.Run = job.Submitters[0].Run
 	}
 	return w
+}
+
+// queuedEnvironment is the environment a queued job runs in. A submission decides it before the job
+// is queued (keyFlow, placeFlow), so only a command job queued by an older daemon, which left it
+// unspecified, has none. Such a job runs on the host, as it would have then. It is decided here
+// alone, so the claims a job is scheduled by (workOf) and the environment it is launched in
+// (prepare) are the same.
+func queuedEnvironment(spec core.JobSpec) core.EnvironmentKind {
+	if spec.Environment == core.EnvironmentAuto {
+		return core.EnvironmentHost
+	}
+	return spec.Environment
 }
 
 func storeIDOf(s core.Scope) lifecycle.StoreID {

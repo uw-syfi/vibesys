@@ -68,10 +68,6 @@ type Config struct {
 	// what its task needs (core.ChoosePlacement). Empty leaves a job's request as it is.
 	Placements []core.PlacementOffer
 
-	// DefaultEnvironment is the kind a command job runs in when its submission leaves the
-	// environment unspecified. A check or a measure job's environment is decided by its task
-	// (core.ChooseEnvironment).
-	DefaultEnvironment core.EnvironmentKind
 	// DefaultTimeout is the time limit of a command that sets none.
 	DefaultTimeout time.Duration
 	// MaxNoteBytes bounds the text of a note.
@@ -114,9 +110,6 @@ const (
 var DefaultRetry = Retry{Attempts: 8, First: 500 * time.Millisecond, Longest: 30 * time.Second}
 
 func (c Config) withDefaults() Config {
-	if c.DefaultEnvironment == core.EnvironmentAuto {
-		c.DefaultEnvironment = core.EnvironmentHost
-	}
 	if c.DefaultTimeout <= 0 {
 		c.DefaultTimeout = DefaultCommandTimeout
 	}

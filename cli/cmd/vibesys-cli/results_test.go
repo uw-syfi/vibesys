@@ -416,7 +416,7 @@ func TestTwoWorktreesOfARepositoryShareItsStore(t *testing.T) {
 	c.measured(0, level)
 	c.measured(1, win)
 	inMain := c.submit("exit", "0")
-	r := c.run(withTask("submit", "command", "HEAD", "--repo", "/worktrees/feature/sub", "--", "exit", "0")...)
+	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--repo", "/worktrees/feature/sub", "--", "exit", "0")...)
 	mustExit(t, r, exitOK, "submit in the linked worktree")
 	inLinked := strings.Fields(r.stdout)[0]
 	for _, repo := range []string{"/repo", "/worktrees/feature"} {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"math"
 	"time"
@@ -71,6 +72,9 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 		return fail(d, asJSON, usagef("--samples: %d is too many", *samples))
 	}
 	envKind, err := environmentKind(*env)
+	if err == nil {
+		err = refuseHostPlacement(fs, *env)
+	}
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
@@ -123,6 +127,9 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 		return fail(d, asJSON, usagef("--timeout: %v is negative", *timeout))
 	}
 	kind, err := environmentKind(*env)
+	if err == nil {
+		err = refuseHostPlacement(fs, *env)
+	}
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
@@ -183,6 +190,23 @@ func send(ctx context.Context, d deps, asJSON, wait bool, req *cliv1.SubmitReque
 		return exitOK
 	}
 	return waitFor(ctx, d, cl, req.GetContext(), []string{resp.GetJob().GetId()}, client.WaitOptions{}, asJSON)
+}
+
+// refuseHostPlacement refuses a --placement given on the command line beside --env host: a host job
+// runs on this machine and claims no placement, so it could not run where the flag says. A
+// placement that only comes from VIBESYS_PLACEMENT is not refused, since it is the default every
+// submit inherits for its docker jobs, and the daemon records no placement for a host job.
+func refuseHostPlacement(fs *flag.FlagSet, env string) error {
+	if env != "host" {
+		return nil
+	}
+	var err error
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "placement" && f.Value.String() != "" {
+			err = usagef("--placement: a host job (--env host) runs on this machine and claims no placement; drop --placement or use --env docker")
+		}
+	})
+	return err
 }
 
 func environmentKind(name string) (cliv1.EnvironmentKind, error) {

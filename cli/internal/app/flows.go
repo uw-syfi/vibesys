@@ -51,22 +51,27 @@ func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec
 	return spec, key, err
 }
 
-// placeFlow decides where a command job runs, so that scheduling claims the placement it runs on:
-// a docker job's placement, from what it asked for and what its task needs. A command job has no
-// key, so its environment stays as submitted, and only the placement is recorded.
+// placeFlow decides where a command job runs, so that scheduling claims what it runs on. A command
+// that leaves its environment to the task runs where the task's check and measure run
+// (core.ChooseEnvironment), so on a task with a Dockerfile it is a docker job in the task's image
+// and waits behind a measure of its placement like any other docker job there. A docker job is
+// given its placement from what it asked for and what its task needs, and a host job has none,
+// whatever was asked, as for a check or a measure (placementOf). The spec records both. A command
+// job has no key, so nothing is fingerprinted, and a host one names no task to read.
 func (a *App) placeFlow(ctx context.Context, c core.CallContext, spec core.JobSpec) (core.JobSpec, error) {
-	kind := spec.Environment
-	if kind == core.EnvironmentAuto {
-		kind = a.cfg.DefaultEnvironment
+	var needs []core.ResourceKind
+	if spec.Environment == core.EnvironmentAuto || spec.Environment == core.EnvironmentDocker && len(a.cfg.Placements) > 0 {
+		t, err := a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
+		if err != nil {
+			return spec, err
+		}
+		if spec.Environment, err = core.ChooseEnvironment(t.Setup(), spec.Environment); err != nil {
+			return spec, err
+		}
+		needs = t.Needs
 	}
-	if kind != core.EnvironmentDocker || len(a.cfg.Placements) == 0 {
-		return spec, nil
-	}
-	t, err := a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
-	if err != nil {
-		return spec, err
-	}
-	spec.Placement, err = a.placementOf(kind, t.Needs, spec.Placement)
+	var err error
+	spec.Placement, err = a.placementOf(spec.Environment, needs, spec.Placement)
 	return spec, err
 }
 
@@ -150,7 +155,7 @@ func (a *App) planFlow(ctx context.Context, st store.Store, scope core.Scope, jo
 // a check or a measure job, and says so instead of guessing at the task.
 func (a *App) taskAt(ctx context.Context, repository string, commit core.Commit, name string) (task.Task, error) {
 	if a.cfg.Tasks == nil {
-		return task.Task{}, &core.Failure{Kind: core.FailureUnavailable, Message: "this daemon has no source of tasks, so it cannot run check or measure jobs"}
+		return task.Task{}, &core.Failure{Kind: core.FailureUnavailable, Message: "this daemon has no source of tasks, so it cannot run check or measure jobs, nor a command job that leaves its environment to the task"}
 	}
 	return a.cfg.Tasks.Task(ctx, repository, commit, name)
 }

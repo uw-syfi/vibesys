@@ -223,7 +223,9 @@ default to the environment variables shown:
 Each `submit` also takes `--placement`, which defaults to `VIBESYS_PLACEMENT`: the placement of the
 operator config a docker job runs on (see "The operator config"). Unset, the job runs on the one
 placement that gives every resource its task needs, and is refused, naming them, when none or
-several do. A host job has no placement.
+several do. A host job has no placement: one inherited from `VIBESYS_PLACEMENT` is dropped, and
+`--placement` given beside `--env host` is refused, naming the flag. Without `--env`, every job runs
+where the task's check and measure run (see "Running in docker"), a command job too.
 
 ### Environment
 
@@ -586,8 +588,8 @@ saved by any means.
 
 ### Running in docker
 
-A task with a `Dockerfile` next to its manifest runs its jobs in the image that file builds, unless
-the submission says `--env host`. Nothing falls back: a machine with no reachable Docker daemon
+A task with a `Dockerfile` next to its manifest runs its jobs, command jobs included, in the image
+that file builds, unless the submission says `--env host`. Nothing falls back: a machine with no reachable Docker daemon
 fails the job with a message that says so, and a task that needs what the image cannot give is
 refused with the reason.
 
