@@ -94,8 +94,10 @@ type entry struct {
 	// was never told the work of claims the whole machine.
 	work Work
 	// placed is the option the scheduler started the job on, which it holds until its end is
-	// recorded. It is nil for a job the scheduler has not started since it was last queued.
-	placed *schedule.Option
+	// recorded, when isPlaced; a job the scheduler has not started since it was last queued has
+	// none. It is a value, not a pointer, so that a copy of the State shares nothing with it.
+	placed   schedule.Option
+	isPlaced bool
 	// wait is why the scheduler did not start the job at the last step, when it is queued or parked
 	// and did not start, and refused says its claims can never be granted.
 	wait    schedule.WaitReason
@@ -889,7 +891,7 @@ func (s *State) place(e Recovered, kept entry, phase Phase) {
 			kept.work = f.Work
 		}
 	}
-	kept.phase, kept.waiting, kept.holds, kept.parked, kept.placed = phase, false, false, false, nil
+	kept.phase, kept.waiting, kept.holds, kept.parked, kept.placed, kept.isPlaced = phase, false, false, false, schedule.Option{}, false
 	// No retry is owed to a job placed afresh, so one refused a lease tries again in its turn.
 	kept.leased = nil
 	if phase != PhaseInDoubt {
@@ -1027,7 +1029,7 @@ func (s *State) discarded(e Discarded) []Request {
 	if i < 0 || s.entries[i].phase != PhaseDiscarding {
 		return nil
 	}
-	s.entries[i].phase, s.entries[i].placed = PhaseQueued, nil
+	s.entries[i].phase, s.entries[i].placed, s.entries[i].isPlaced = PhaseQueued, schedule.Option{}, false
 	if s.entries[i].cancelAsked {
 		return s.cancelQueuedJob(e.Ref, e.At)
 	}
@@ -1092,7 +1094,7 @@ func (s *State) leaseRefused(e LeaseRefused) []Request {
 	if cur.cancelAsked {
 		return s.settle(e.Ref, cancelQueued(e.Ref.Job, cur.cancelReason, e.At))
 	}
-	cur.phase, cur.placed = PhaseQueued, nil
+	cur.phase, cur.placed, cur.isPlaced = PhaseQueued, schedule.Option{}, false
 	cur.leased = &schedule.LeasedOut{Resource: e.Resource, Holder: e.Holder, Detail: e.Detail}
 	return s.awaitRetry(i)
 }
@@ -1311,7 +1313,7 @@ func (s *State) schedule() []Request {
 		switch d := d.(type) {
 		case schedule.Start:
 			placed := d.Option
-			cur.placed = &placed
+			cur.placed, cur.isPlaced = placed, true
 			s.recent = schedule.Remember(s.recent, schedule.Grant{Run: cur.work.Run, Claims: placed.Claims})
 			if cur.parked {
 				reqs = append(reqs, s.adopt(i))
@@ -1373,7 +1375,7 @@ func (s *State) optionsOf(e entry) []schedule.Option {
 // might, as a restart found it), the claims of every place it may run, which is the one it started
 // on for a job whose store says where.
 func (s *State) heldClaims(e entry) []schedule.Claim {
-	if e.placed != nil {
+	if e.isPlaced {
 		return e.placed.Claims
 	}
 	options := s.optionsOf(e)
