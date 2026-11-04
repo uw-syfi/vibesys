@@ -66,25 +66,13 @@ const (
 	// ArtifactsDir is the run's artifacts directory, empty when the run starts and kept with the
 	// job after it.
 	ArtifactsDir = "/vibesys/artifacts"
-	// MountsDir holds the operator's read-only mounts, one directory per name.
-	MountsDir = "/vibesys/mounts"
 
 	EnvCacheDir     = "VIBESYS_CACHE_DIR"
 	EnvArtifactsDir = "VIBESYS_ARTIFACTS_DIR"
-	// EnvMounts lists the names of the operator's mounts, separated by commas.
-	EnvMounts = "VIBESYS_MOUNTS"
+
+	// FactPlacement is the fingerprint fact that names the placement.
+	FactPlacement = "placement"
 )
-
-// mountName is the form of an operator mount's name: a path element and part of a variable name.
-var mountName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
-
-// CheckMountName refuses a name an operator mount cannot have.
-func CheckMountName(name string) error {
-	if !mountName.MatchString(name) {
-		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: %q is not a mount name (lower-case letters, digits, '_' and '-', starting with a letter or digit)", name)}
-	}
-	return nil
-}
 
 // cacheKey names the cache directory of a task's image: the task and the image, so the cache is
 // shared by every commit that runs in the image and a new image starts with an empty one.
@@ -115,18 +103,22 @@ func backendOf(spec Spec) core.BackendKind {
 	return spec.Backend
 }
 
-// refusal says why a container of this build cannot run the task, or returns nil. It is what
-// "refuse clearly" means: the task asks for something the container cannot give, and the error
-// names it and what to do instead, before anything is built or started.
-func refusal(spec Spec, gpus GPUs) error {
+// refusal says why a container of this build on the placement cannot run the task, or returns
+// nil. It is what "refuse clearly" means: the task asks for something the container cannot give,
+// and the error names it and what to do instead, before anything is built or started.
+func refusal(spec Spec, placement core.PlacementOffer) error {
 	unavailable := func(format string, args ...any) error {
 		return &core.Failure{Kind: core.FailureUnavailable, Message: "docker: " + fmt.Sprintf(format, args...)}
 	}
+	if lack := placement.Lacks(spec.Needs); lack != "" {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"placement %q has no resource %q, which the task needs; give it one in the operator config, or run the job on a placement that has one with --placement", placement.Name, lack)}
+	}
 	switch backend := backendOf(spec); {
-	case backend == core.BackendCUDA && gpus.Devices == "":
-		return unavailable("the task targets the cuda backend, and the operator config passes no GPU into a container; set gpus in the [docker] section of the operator config, or run it on the host with --env host")
+	case backend == core.BackendCUDA && placement.Lacks([]core.ResourceKind{core.ResourceGPU}) != "":
+		return unavailable("the task targets the cuda backend, and the placement %q passes no GPU into a container; give it a gpu resource in the operator config, or run it on the host with --env host", placement.Name)
 	case backend != core.BackendCPU && backend != core.BackendCUDA:
-		return unavailable("the task targets the %q backend, and a container of this build gets only NVIDIA GPUs; run it on the host with --env host", backend)
+		return unavailable("the task targets the %q backend, and a container of this build gets GPUs only for the cuda backend; run it on the host with --env host", backend)
 	case spec.NestedDocker:
 		return unavailable("the task starts containers of its own (docker_in_docker = true), and a container of this build has no container runtime in it; run it on the host with --env host")
 	}
@@ -134,21 +126,19 @@ func refusal(spec Spec, gpus GPUs) error {
 }
 
 // facts are the fingerprint facts that identify the machine the container runs on, the platform
-// of its image, and the GPUs it gets. Results taken in the same image on machines with the same
-// operating system, architecture, CPU model and CPU count, and the same GPUs and driver, are
-// comparable; the machine's name and memory do not count.
-func facts(m core.MachineFacts, img Image, gpu map[string]string) map[string]string {
-	out := map[string]string{
+// of its image, and the placement. Results taken in the same image, on the same placement, on
+// machines with the same operating system, architecture, CPU model and CPU count, and with the
+// same resources (which add their own facts), are comparable; the machine's name and memory do not
+// count.
+func facts(m core.MachineFacts, img Image, placement string) map[string]string {
+	return map[string]string{
 		"os":             m.OS,
 		"arch":           m.Arch,
 		"cpu_model":      m.CPUModel,
 		"logical_cpus":   strconv.FormatUint(uint64(m.LogicalCPUs), 10),
 		"image_platform": img.Platform,
+		FactPlacement:    placement,
 	}
-	for k, v := range gpu {
-		out[k] = v
-	}
-	return out
 }
 
 // checkRunID refuses an id that cannot be part of a container name or a label.

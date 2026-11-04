@@ -131,6 +131,65 @@ func (BackendKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{1}
 }
 
+// ResourceKind is something a placement can give a job's container, and a task can need. It is
+// closed: a new kind is a contract change. A task names one in vibesys.input.toml as the value's
+// name without its prefix, in lower case ([environment] needs = ["kubernetes"]).
+type ResourceKind int32
+
+const (
+	ResourceKind_RESOURCE_KIND_UNSPECIFIED ResourceKind = 0
+	// GPUs passed into the container.
+	ResourceKind_RESOURCE_KIND_GPU ResourceKind = 1
+	// Access to a Kubernetes cluster: its kubeconfig, the network that reaches it, and the addresses
+	// of the registry and image builder it pulls from.
+	ResourceKind_RESOURCE_KIND_KUBERNETES ResourceKind = 2
+	// Read-only directories of the engine's machine.
+	ResourceKind_RESOURCE_KIND_MOUNTS ResourceKind = 3
+)
+
+// Enum value maps for ResourceKind.
+var (
+	ResourceKind_name = map[int32]string{
+		0: "RESOURCE_KIND_UNSPECIFIED",
+		1: "RESOURCE_KIND_GPU",
+		2: "RESOURCE_KIND_KUBERNETES",
+		3: "RESOURCE_KIND_MOUNTS",
+	}
+	ResourceKind_value = map[string]int32{
+		"RESOURCE_KIND_UNSPECIFIED": 0,
+		"RESOURCE_KIND_GPU":         1,
+		"RESOURCE_KIND_KUBERNETES":  2,
+		"RESOURCE_KIND_MOUNTS":      3,
+	}
+)
+
+func (x ResourceKind) Enum() *ResourceKind {
+	p := new(ResourceKind)
+	*p = x
+	return p
+}
+
+func (x ResourceKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ResourceKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_environment_proto_enumTypes[2].Descriptor()
+}
+
+func (ResourceKind) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_environment_proto_enumTypes[2]
+}
+
+func (x ResourceKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ResourceKind.Descriptor instead.
+func (ResourceKind) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_environment_proto_rawDescGZIP(), []int{2}
+}
+
 // EnvironmentFingerprint identifies the environment a result was taken in. Two results are
 // comparable, and a check pass is reusable, only when their fingerprints are equal. It is part of
 // the cache key.
@@ -142,6 +201,9 @@ type EnvironmentFingerprint struct {
 	ImageDigest string `protobuf:"bytes,3,opt,name=image_digest,json=imageDigest,proto3" json:"image_digest,omitempty"`
 	// Facts the environment pinned, by name: operating system, architecture, toolchain versions.
 	// Equality is over the whole map, so the names an environment reports are part of its contract.
+	// A docker environment also pins the placement its containers run on ("placement") and what
+	// identifies each resource attached to them (such as "gpu_model" or "kubernetes_server"), so
+	// results from different placements or resources are never compared or reused.
 	Facts         map[string]string `protobuf:"bytes,4,rep,name=facts,proto3" json:"facts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -398,7 +460,12 @@ const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\x11BACKEND_KIND_CUDA\x10\x02\x12\x15\n" +
 	"\x11BACKEND_KIND_ROCM\x10\x03\x12\x16\n" +
 	"\x12BACKEND_KIND_METAL\x10\x04\x12\x19\n" +
-	"\x15BACKEND_KIND_TRAINIUM\x10\x05B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\x15BACKEND_KIND_TRAINIUM\x10\x05*|\n" +
+	"\fResourceKind\x12\x1d\n" +
+	"\x19RESOURCE_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
+	"\x11RESOURCE_KIND_GPU\x10\x01\x12\x1c\n" +
+	"\x18RESOURCE_KIND_KUBERNETES\x10\x02\x12\x18\n" +
+	"\x14RESOURCE_KIND_MOUNTS\x10\x03B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_environment_proto_rawDescOnce sync.Once
@@ -412,22 +479,23 @@ func file_vibesys_cli_v1_environment_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_environment_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_environment_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_vibesys_cli_v1_environment_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_vibesys_cli_v1_environment_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_vibesys_cli_v1_environment_proto_goTypes = []any{
 	(EnvironmentKind)(0),           // 0: vibesys.cli.v1.EnvironmentKind
 	(BackendKind)(0),               // 1: vibesys.cli.v1.BackendKind
-	(*EnvironmentFingerprint)(nil), // 2: vibesys.cli.v1.EnvironmentFingerprint
-	(*MachineFacts)(nil),           // 3: vibesys.cli.v1.MachineFacts
-	(*MachineLoad)(nil),            // 4: vibesys.cli.v1.MachineLoad
-	nil,                            // 5: vibesys.cli.v1.EnvironmentFingerprint.FactsEntry
-	(*timestamppb.Timestamp)(nil),  // 6: google.protobuf.Timestamp
+	(ResourceKind)(0),              // 2: vibesys.cli.v1.ResourceKind
+	(*EnvironmentFingerprint)(nil), // 3: vibesys.cli.v1.EnvironmentFingerprint
+	(*MachineFacts)(nil),           // 4: vibesys.cli.v1.MachineFacts
+	(*MachineLoad)(nil),            // 5: vibesys.cli.v1.MachineLoad
+	nil,                            // 6: vibesys.cli.v1.EnvironmentFingerprint.FactsEntry
+	(*timestamppb.Timestamp)(nil),  // 7: google.protobuf.Timestamp
 }
 var file_vibesys_cli_v1_environment_proto_depIdxs = []int32{
 	0, // 0: vibesys.cli.v1.EnvironmentFingerprint.kind:type_name -> vibesys.cli.v1.EnvironmentKind
 	1, // 1: vibesys.cli.v1.EnvironmentFingerprint.backend:type_name -> vibesys.cli.v1.BackendKind
-	5, // 2: vibesys.cli.v1.EnvironmentFingerprint.facts:type_name -> vibesys.cli.v1.EnvironmentFingerprint.FactsEntry
-	6, // 3: vibesys.cli.v1.MachineLoad.sampled_at:type_name -> google.protobuf.Timestamp
+	6, // 2: vibesys.cli.v1.EnvironmentFingerprint.facts:type_name -> vibesys.cli.v1.EnvironmentFingerprint.FactsEntry
+	7, // 3: vibesys.cli.v1.MachineLoad.sampled_at:type_name -> google.protobuf.Timestamp
 	4, // [4:4] is the sub-list for method output_type
 	4, // [4:4] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name
@@ -445,7 +513,7 @@ func file_vibesys_cli_v1_environment_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_environment_proto_rawDesc), len(file_vibesys_cli_v1_environment_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      3,
 			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,

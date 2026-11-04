@@ -64,6 +64,10 @@ message JobSpec {
   string commit = 1;
   // The environment the caller asks for. Unspecified lets the task choose.
   EnvironmentKind environment = 2;
+  // The placement of the operator config a docker job runs on: where its container runs. Empty in
+  // a submission lets the task's needed resources choose; a queued check or measure job holds the
+  // one chosen. A host job has none.
+  string placement = 3 [(buf.validate.field).string.pattern = "^([a-z0-9][a-z0-9_-]{0,62})?$"];
   oneof settings {
     CheckSettings check = 10;
     CommandSettings command = 11;

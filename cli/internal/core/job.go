@@ -99,7 +99,11 @@ type JobSpec struct {
 	Commit Commit
 	// Environment is the one the caller asks for. EnvironmentAuto lets the task choose.
 	Environment EnvironmentKind
-	Settings    Settings
+	// Placement is the placement of the operator config a docker job runs on. Empty in a
+	// submission lets the task's needs choose (ChoosePlacement); a queued check or measure job
+	// holds the one chosen. A host job has none.
+	Placement string
+	Settings  Settings
 }
 
 // KeyInputs is everything a cache key is made of. Notes, plans and the caller never are. The

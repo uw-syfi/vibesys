@@ -14,6 +14,7 @@ import (
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/owned"
@@ -35,7 +36,9 @@ type Runtime struct {
 	Stores       app.Stores
 	Supervisors  supervisor.Supervisors
 	Environments environment.Environments
-	Branches     gitrepo.Branches
+	// Placements are the placements a docker job can run on (app.Config.Placements).
+	Placements []core.PlacementOffer
+	Branches   gitrepo.Branches
 	// Repositories resolves a caller's directory to the repository its store is keyed by.
 	Repositories gitrepo.Resolver
 	// Tasks reads the task of a check or a measure job as its commit has it. Without it those
@@ -121,6 +124,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		LogBatchDelay: cfg.LogBatchDelay,
 		Stores:        cfg.Runtime.Stores,
 		Environments:  cfg.Runtime.Environments,
+		Placements:    cfg.Runtime.Placements,
 		Supervisors:   cfg.Runtime.Supervisors,
 		Branches:      cfg.Runtime.Branches,
 		Repositories:  cfg.Runtime.Repositories,

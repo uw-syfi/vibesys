@@ -18,6 +18,8 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockerfake"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv/fakeworld"
+	"github.com/uw-syfi/vibesys/cli/internal/resource"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/fakeresource"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
@@ -176,7 +178,7 @@ func TestWhatAContainerCannotGiveIsRefusedBeforeAnythingStarts(t *testing.T) {
 		want string
 		kind core.FailureKind
 	}{
-		"cuda with no GPU passed":   {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendCUDA}}, "gpus", core.FailureUnavailable},
+		"cuda with no GPU passed":   {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendCUDA}}, "gpu resource", core.FailureUnavailable},
 		"an accelerator not NVIDIA": {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendROCm}, configure: withGPUs}, "--env host", core.FailureUnavailable},
 		"nested docker":             {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), NestedDocker: true}}, "docker_in_docker", core.FailureUnavailable},
 		"no Dockerfile":             {options{spec: docker.Spec{Dockerfile: []byte{}, Files: task.Tree{"run.sh": {Data: []byte("true")}}}}, "Dockerfile", core.FailureInvalidInput},
@@ -210,7 +212,7 @@ func TestAnErrorOfTheSourceStopsTheRunBeforeAnythingStarts(t *testing.T) {
 	p, err := docker.New(docker.Config{
 		Engine:  d.Connect(),
 		Source:  dockerfake.Source(func(context.Context, environment.Target) (docker.Spec, error) { return docker.Spec{}, missing }),
-		Backend: cpuBackend(), Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: "test",
+		Backend: cpuBackend(), Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: "test", Placement: "default",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -231,19 +233,23 @@ func TestConfigIsValidated(t *testing.T) {
 	w := fakeworld.New()
 	good := docker.Config{
 		Engine: dockerfake.NewDaemon(w.MemoryGates).Connect(), Source: dockerfake.Fixed(docker.Spec{}), Backend: cpuBackend(),
-		Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: "test",
+		Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: "test", Placement: "default",
 	}
 	if _, err := docker.New(good); err != nil {
 		t.Fatal(err)
 	}
 	cases := map[string]func(*docker.Config){
-		"Engine":  func(c *docker.Config) { c.Engine = nil },
-		"Source":  func(c *docker.Config) { c.Source = nil },
-		"Backend": func(c *docker.Config) { c.Backend = nil },
-		"Timers":  func(c *docker.Config) { c.Timers = nil },
-		"IDs":     func(c *docker.Config) { c.IDs = nil },
-		"scope":   func(c *docker.Config) { c.Scope = "has space" },
-		"user":    func(c *docker.Config) { c.User = docker.User{UID: -1} },
+		"Engine":    func(c *docker.Config) { c.Engine = nil },
+		"Source":    func(c *docker.Config) { c.Source = nil },
+		"Backend":   func(c *docker.Config) { c.Backend = nil },
+		"Timers":    func(c *docker.Config) { c.Timers = nil },
+		"IDs":       func(c *docker.Config) { c.IDs = nil },
+		"scope":     func(c *docker.Config) { c.Scope = "has space" },
+		"user":      func(c *docker.Config) { c.User = docker.User{UID: -1} },
+		"placement": func(c *docker.Config) { c.Placement = "" },
+		"resource": func(c *docker.Config) {
+			c.Resources = []resource.Resource{&fakeresource.Fake{Of: core.ResourceGPU}, &fakeresource.Fake{Of: core.ResourceGPU}}
+		},
 	}
 	for name, mutate := range cases {
 		c := good
@@ -392,7 +398,7 @@ func TestTwoRunsThatShareAnIDAreNotBothAllowed(t *testing.T) {
 	d := dockerfake.NewDaemon(w.MemoryGates)
 	p, err := docker.New(docker.Config{
 		Engine: d.Connect(), Source: dockerfake.Fixed(docker.Spec{Dockerfile: []byte(simpleDockerfile)}), Backend: cpuBackend(),
-		Timers: envtest.NewTimers(), IDs: sameID{}, Scope: "test",
+		Timers: envtest.NewTimers(), IDs: sameID{}, Scope: "test", Placement: "default",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -433,7 +439,7 @@ func TestARunIDThatCannotNameAContainerIsRefused(t *testing.T) {
 		d := dockerfake.NewDaemon(w.MemoryGates)
 		p, _ := docker.New(docker.Config{
 			Engine: d.Connect(), Source: dockerfake.Fixed(docker.Spec{Dockerfile: []byte(simpleDockerfile)}), Backend: cpuBackend(),
-			Timers: envtest.NewTimers(), IDs: fixedID(id), Scope: "test",
+			Timers: envtest.NewTimers(), IDs: fixedID(id), Scope: "test", Placement: "default",
 		})
 		e, _ := p.Environment(environment.Target{Task: "t"})
 		a := e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)

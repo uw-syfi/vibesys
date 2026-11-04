@@ -52,10 +52,20 @@ var rules = map[string][]string{
 	"internal/backend/nvidia":      {"internal/clock", "internal/core", "internal/remote"},
 	// Reaching a machine to run programs on: this one, or another over ssh and rsync.
 	"internal/remote": {"internal/backend/cpu", "internal/clock", "internal/core"},
-	// The operator's settings of the machine, which never come from a task.
-	"internal/operator":            {"internal/core", "internal/environment/docker"},
-	"internal/environment":         {"internal/core"},
-	"internal/environment/fakeenv": {"internal/clock", "internal/core", "internal/environment"},
+	// The operator's settings of the machine, which never come from a task: the outer structure of
+	// the file, decoded into the contract's message. What each placement or resource kind's section
+	// means is that kind's package's business, which only production names.
+	"internal/operator": {"gen/", "internal/core"},
+	// What a placement gives a container. Each kind imports the interface and core (and what it
+	// reads a machine with), never another kind; only production names a concrete kind.
+	"internal/resource":              {"internal/core"},
+	"internal/resource/resourcetest": {"internal/core", "internal/resource"},
+	"internal/resource/fakeresource": {"internal/core", "internal/resource"},
+	"internal/resource/gpu":          {"internal/core", "internal/resource"},
+	"internal/resource/mounts":       {"internal/core", "internal/resource"},
+	"internal/resource/kubernetes":   {"internal/clock", "internal/core", "internal/remote", "internal/resource"},
+	"internal/environment":           {"internal/core"},
+	"internal/environment/fakeenv":   {"internal/clock", "internal/core", "internal/environment"},
 	// The fake machine's world for the contract suite. Only tests reach it.
 	"internal/environment/fakeenv/fakeworld": {"internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/environment/envtest":           {"internal/clock", "internal/core", "internal/environment"},
@@ -64,7 +74,7 @@ var rules = map[string][]string{
 	// The docker environment decides what to run and how it ends; an engine is the only thing that
 	// talks to Docker. The real engine drives the docker program, the fake keeps a daemon in
 	// memory, and one contract suite holds both to the same behavior.
-	"internal/environment/docker":           {"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/task"},
+	"internal/environment/docker":           {"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/resource", "internal/task"},
 	"internal/environment/docker/dockercli": {"internal/clock", "internal/core", "internal/environment", "internal/environment/docker", "internal/remote"},
 	// Where a docker engine's containers find a run's directories: this machine, or copies on one
 	// reached over ssh.
@@ -145,7 +155,8 @@ var rules = map[string][]string{
 		"internal/supervisor", "internal/supervisor/host", "internal/task",
 		"internal/backend/nvidia", "internal/environment/docker/machine", "internal/environment/slurm",
 		"internal/operator", "internal/remote", "internal/schedule", "internal/schedule/policy/fairshare",
-		"internal/schedule/policy/fifo",
+		"internal/schedule/policy/fifo", "gen/", "internal/resource", "internal/resource/gpu",
+		"internal/resource/kubernetes", "internal/resource/mounts",
 	},
 
 	// Replacing the running binary with a newer release.
@@ -177,14 +188,19 @@ var testRules = map[string][]string{
 	},
 	"internal/environment/docker/machine": {"internal/environment/envtest"},
 	"internal/remote":                     {"internal/environment/envtest"},
+	"internal/resource/gpu":               {"internal/resource/resourcetest"},
+	"internal/resource/mounts":            {"internal/resource/resourcetest"},
+	"internal/resource/kubernetes":        {"internal/resource/resourcetest"},
+	"internal/resource/fakeresource":      {"internal/resource/resourcetest"},
 	"internal/environment/docker": {
+		"internal/resource/fakeresource",
 		"internal/backend/cpu", "internal/clock", "internal/environment/docker/dockerfake",
 		"internal/environment/docker/dockertest", "internal/environment/envtest", "internal/environment/fakeenv",
 		"internal/environment/fakeenv/fakeworld", "internal/task", "internal/task/tasktest",
 	},
 	"internal/environment/docker/dockercli": {
 		"internal/backend", "internal/backend/cpu", "internal/clock", "internal/environment/docker/dockertest",
-		"internal/environment/envtest",
+		"internal/environment/envtest", "internal/resource", "internal/resource/fakeresource",
 	},
 	"internal/environment/docker/dockerfake": {
 		"internal/environment/docker/dockertest", "internal/environment/envtest", "internal/environment/fakeenv/fakeworld",
@@ -259,6 +275,7 @@ func Violations(files map[string]string) []string {
 			found = append(found, approvalMints(name, source)...)
 			found = append(found, sweepViolations(name, source)...)
 			found = append(found, scopeMints(name, source)...)
+			found = append(found, spellings(name, source)...)
 		case strings.HasSuffix(name, ".proto") && strings.HasPrefix(name, "proto/vibesys/cli/"):
 			found = append(found, layout(name, source)...)
 		}

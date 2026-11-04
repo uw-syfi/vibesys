@@ -22,6 +22,20 @@ enum BackendKind {
   BACKEND_KIND_TRAINIUM = 5;
 }
 
+// ResourceKind is something a placement can give a job's container, and a task can need. It is
+// closed: a new kind is a contract change. A task names one in vibesys.input.toml as the value's
+// name without its prefix, in lower case ([environment] needs = ["kubernetes"]).
+enum ResourceKind {
+  RESOURCE_KIND_UNSPECIFIED = 0;
+  // GPUs passed into the container.
+  RESOURCE_KIND_GPU = 1;
+  // Access to a Kubernetes cluster: its kubeconfig, the network that reaches it, and the addresses
+  // of the registry and image builder it pulls from.
+  RESOURCE_KIND_KUBERNETES = 2;
+  // Read-only directories of the engine's machine.
+  RESOURCE_KIND_MOUNTS = 3;
+}
+
 // EnvironmentFingerprint identifies the environment a result was taken in. Two results are
 // comparable, and a check pass is reusable, only when their fingerprints are equal. It is part of
 // the cache key.
@@ -32,6 +46,9 @@ message EnvironmentFingerprint {
   string image_digest = 3;
   // Facts the environment pinned, by name: operating system, architecture, toolchain versions.
   // Equality is over the whole map, so the names an environment reports are part of its contract.
+  // A docker environment also pins the placement its containers run on ("placement") and what
+  // identifies each resource attached to them (such as "gpu_model" or "kubernetes_server"), so
+  // results from different placements or resources are never compared or reused.
   map<string, string> facts = 4;
 }
 

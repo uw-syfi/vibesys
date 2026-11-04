@@ -130,6 +130,9 @@ type ContainerSpec struct {
 	Env map[string]string
 	// GPUs are the GPUs the container gets. The zero value gives it none.
 	GPUs GPUs
+	// Network is the container's network mode (docker run --network). Empty leaves the engine's
+	// default.
+	Network string
 	// Limit is the longest the container's commands may run. An engine that places the container
 	// in an allocation with a time limit of its own bounds the allocation by it; zero means the
 	// caller gave none.
@@ -145,6 +148,7 @@ var (
 	envNamePattern       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	gpuDevicesPattern    = regexp.MustCompile(`^[A-Za-z0-9=,:._-]*$`)
 	runtimePattern       = regexp.MustCompile(`^[a-z0-9._-]*$`)
+	networkPattern       = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_.-]*)?$`)
 )
 
 // Validate refuses a spec an engine would have to refuse or misread, with a *core.Failure of kind
@@ -168,6 +172,8 @@ func (s ContainerSpec) Validate() error {
 		return invalid("%q is not a container runtime name", s.GPUs.Runtime)
 	case s.GPUs.Runtime != "" && s.GPUs.Devices == "":
 		return invalid("the runtime %q is for GPUs, and no GPU is given", s.GPUs.Runtime)
+	case !networkPattern.MatchString(s.Network):
+		return invalid("%q is not a network mode", s.Network)
 	case s.Limit < 0:
 		return invalid("the limit %v is negative", s.Limit)
 	}
@@ -228,6 +234,8 @@ type Spec struct {
 	Backend core.BackendKind
 	// NestedDocker says the task starts containers of its own, which a container does not give.
 	NestedDocker bool
+	// Needs are the kinds of resource the task needs its placement to give the container.
+	Needs []core.ResourceKind
 }
 
 // IDs makes the ids that name runs. Two calls never return the same id, in this process or

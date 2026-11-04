@@ -131,7 +131,7 @@ func (g *gen) settings() core.Settings {
 func (g *gen) note() core.Note { return core.Note{Text: g.text(), At: g.instant(), Agent: g.text()} }
 
 func (g *gen) spec() core.JobSpec {
-	return core.JobSpec{Commit: core.Commit(g.text()), Environment: g.fingerprint().Kind, Settings: g.settings()}
+	return core.JobSpec{Commit: core.Commit(g.text()), Environment: g.fingerprint().Kind, Placement: g.name(), Settings: g.settings()}
 }
 
 func (g *gen) machine() core.MachineFacts {

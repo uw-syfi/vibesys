@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/operator"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
@@ -22,20 +23,35 @@ func TestTheSchedulerIsTheOneTheConfigNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := schedulerOf(c.Scheduler)
+	s, err := schedulerOf(c)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := s.Policy.(fifo.Policy); !ok || len(s.Resources) != 1 || s.Resources[0] != (schedule.Resource{ID: schedule.DefaultPlacement, Capacity: 1}) {
 		t.Fatalf("the default scheduler is %+v", s)
 	}
-	s, err = schedulerOf(operator.Scheduler{Policy: "fair-share", MaxJobs: 4})
+	s, err = schedulerOf(parse(t, "[scheduler]\npolicy = \"fair-share\"\nmax_jobs = 4\n"))
 	if _, ok := s.Policy.(fairshare.Policy); err != nil || !ok || s.Resources[0].Capacity != 4 {
 		t.Fatalf("fair-share with 4 jobs is %+v, %v", s, err)
 	}
-	_, err = schedulerOf(operator.Scheduler{Policy: "lottery", MaxJobs: 1})
+	// Until the demand claims the placement each job runs on, the jobs of several placements share
+	// one slot.
+	s, err = schedulerOf(parse(t, "[placements.a]\nkind = \"local\"\nmax_jobs = 4\n[placements.b]\nkind = \"local\"\nmax_jobs = 2\n"))
+	if err != nil || s.Resources[0].Capacity != 1 {
+		t.Fatalf("two placements: %+v, %v", s, err)
+	}
+	_, err = schedulerOf(parse(t, "[scheduler]\npolicy = \"lottery\"\n"))
 	var f *core.Failure
 	if !errors.As(err, &f) || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "scheduler.policy") || !strings.Contains(f.Message, "fair-share, fifo") {
 		t.Fatalf("an unknown policy: %v", err)
 	}
+}
+
+func parse(t *testing.T, text string) *cliv1.OperatorConfig {
+	t.Helper()
+	c, err := operator.Parse([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }

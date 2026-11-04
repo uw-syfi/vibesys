@@ -16,20 +16,22 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockerfake"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
+	"github.com/uw-syfi/vibesys/cli/internal/resource"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/fakeresource"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
-// gpuFacts are the facts a fake machine's GPUs report.
-type gpuFacts map[string]string
+// someGPU are the facts a fake machine's GPUs report.
+var someGPU = map[string]string{"gpu_model": "NVIDIA GB10", "gpu_count": "1", "gpu_driver": "580.159.03", "cuda_driver": "13.0"}
 
-func (g gpuFacts) GPUFacts(context.Context) (map[string]string, error) { return maps.Clone(g), nil }
-
-var someGPU = gpuFacts{"gpu_model": "NVIDIA GB10", "gpu_count": "1", "gpu_driver": "580.159.03", "cuda_driver": "13.0"}
-
-func withGPUs(c *docker.Config) {
-	c.GPUs = docker.GPUs{Devices: "all"}
-	c.GPUFacts = someGPU
+func gpuOf(facts map[string]string) *fakeresource.Fake {
+	return &fakeresource.Fake{
+		Of: core.ResourceGPU, Facts: facts, Attached: resource.Attachment{GPUs: resource.GPUs{Devices: "all"}},
+		Claimed: []core.Claim{{Resource: "gpu:local/all", Amount: 1}},
+	}
 }
+
+func withGPUs(c *docker.Config) { c.Resources = append(c.Resources, gpuOf(someGPU)) }
 
 // remoteMachine is a Machine whose directories live under another root, as a machine reached
 // over ssh has them, and that records what it was asked.
@@ -125,8 +127,7 @@ func TestAGPUFactThatChangesChangesTheFingerprint(t *testing.T) {
 		changed := maps.Clone(someGPU)
 		changed[name] += "-other"
 		s := newScene(t, options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendCUDA}, configure: func(c *docker.Config) {
-			withGPUs(c)
-			c.GPUFacts = changed
+			c.Resources = []resource.Resource{gpuOf(changed)}
 		}})
 		after, err := s.env.Fingerprint(context.Background())
 		if err != nil {
@@ -138,11 +139,25 @@ func TestAGPUFactThatChangesChangesTheFingerprint(t *testing.T) {
 	}
 }
 
+// mountsOf is a resource that mounts the directories the way the mounts resource does.
+func mountsOf() *fakeresource.Fake {
+	return &fakeresource.Fake{
+		Of: core.ResourceMounts, Facts: map[string]string{"mounts": "hf-cache,models"},
+		Attached: resource.Attachment{
+			Mounts: []resource.Mount{
+				{Host: "/data/hf", Container: "/vibesys/mounts/hf-cache", ReadOnly: true},
+				{Host: "/data/models", Container: "/vibesys/mounts/models", ReadOnly: true},
+			},
+			Env: map[string]string{"VIBESYS_MOUNTS": "hf-cache,models"},
+		},
+	}
+}
+
 func TestARunSeesItsDirectoriesTheCacheAndTheMountsAtFixedPlaces(t *testing.T) {
 	m := &remoteMachine{}
 	s := newScene(t, options{configure: func(c *docker.Config) {
 		c.Machine = m
-		c.Mounts = map[string]string{"hf-cache": "/data/hf", "models": "/data/models"}
+		c.Resources = []resource.Resource{mountsOf()}
 	}})
 	s.daemon.SetFaults(func(c dockerfake.Call) *dockerfake.Fault {
 		if c.Op == dockerfake.OpRemove {
@@ -159,8 +174,8 @@ func TestARunSeesItsDirectoriesTheCacheAndTheMountsAtFixedPlaces(t *testing.T) {
 		{Host: "/far/scratch/s1", Container: "/scratch/s1"},
 		{Host: "/far/cache/" + m.caches[0], Container: docker.CacheDir},
 		{Host: "/far/art/01-check", Container: docker.ArtifactsDir},
-		{Host: "/data/hf", Container: docker.MountsDir + "/hf-cache", ReadOnly: true},
-		{Host: "/data/models", Container: docker.MountsDir + "/models", ReadOnly: true},
+		{Host: "/data/hf", Container: "/vibesys/mounts/hf-cache", ReadOnly: true},
+		{Host: "/data/models", Container: "/vibesys/mounts/models", ReadOnly: true},
 	}
 	if !slices.Equal(spec.Mounts, want) {
 		t.Errorf("mounts\n%+v\nwant\n%+v", spec.Mounts, want)
@@ -169,7 +184,7 @@ func TestARunSeesItsDirectoriesTheCacheAndTheMountsAtFixedPlaces(t *testing.T) {
 		t.Errorf("dir %q user %+v: want the caller's checkout path and the machine's user", spec.Dir, spec.User)
 	}
 	wantEnv := map[string]string{
-		"HOME": "/tmp", docker.EnvCacheDir: docker.CacheDir, docker.EnvArtifactsDir: docker.ArtifactsDir, docker.EnvMounts: "hf-cache,models",
+		"HOME": "/tmp", docker.EnvCacheDir: docker.CacheDir, docker.EnvArtifactsDir: docker.ArtifactsDir, "VIBESYS_MOUNTS": "hf-cache,models",
 	}
 	if !maps.Equal(spec.Env, wantEnv) {
 		t.Errorf("env %v, want %v", spec.Env, wantEnv)

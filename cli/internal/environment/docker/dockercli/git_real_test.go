@@ -77,7 +77,7 @@ func providerOver(t *testing.T, scope string, engine docker.Engine) *docker.Prov
 	t.Helper()
 	p, err := docker.New(docker.Config{
 		Engine: engine, Source: gitSource{t}, Backend: cpuBackend(), Timers: clock.System{},
-		IDs: dockercli.RandomIDs{}, Scope: scope, User: docker.User{UID: os.Getuid(), GID: os.Getgid()},
+		IDs: dockercli.RandomIDs{}, Scope: scope, Placement: "default", User: docker.User{UID: os.Getuid(), GID: os.Getgid()},
 	})
 	if err != nil {
 		t.Fatal(err)

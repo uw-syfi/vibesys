@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
@@ -356,12 +358,22 @@ func TestAnUnavailableEnvironmentFailsTheJobAndRunsNothingElsewhere(t *testing.T
 // targetRecorder is an Environments that remembers the target of every request.
 type targetRecorder struct {
 	environment.Environments
+	mu      sync.Mutex
 	targets []environment.Target
 }
 
 func (r *targetRecorder) Environment(kind core.EnvironmentKind, target environment.Target) (environment.Environment, error) {
+	r.mu.Lock()
 	r.targets = append(r.targets, target)
+	r.mu.Unlock()
 	return r.Environments.Environment(kind, target)
+}
+
+// asked returns the targets the environments were asked for, in order.
+func (r *targetRecorder) asked() []environment.Target {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.targets)
 }
 
 // The daemon asks for the environment of the job's repository, task and commit when it takes the
@@ -374,8 +386,8 @@ func TestTheFingerprintIsTakenForTheJobsTarget(t *testing.T) {
 	job := submit(t, a, "print", "x")
 	awaitFinal(t, a, job.ID)
 	want := environment.Target{Repository: string(scope.Repository()), Commit: commit, Task: string(scope.Task())}
-	if len(envs.targets) == 0 || envs.targets[0] != want {
-		t.Fatalf("the environment was first asked for %+v, want %+v", envs.targets, want)
+	if got := envs.asked(); len(got) == 0 || got[0] != want {
+		t.Fatalf("the environment was first asked for %+v, want %+v", got, want)
 	}
 }
 

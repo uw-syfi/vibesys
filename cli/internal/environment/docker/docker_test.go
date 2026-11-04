@@ -60,7 +60,7 @@ func newRig(t testing.TB, daemon *dockerfake.Daemon, o options) *rig {
 	ids := dockerfake.NewIDs(o.process)
 	cfg := docker.Config{
 		Engine: client, Source: dockerfake.Fixed(o.spec), Backend: o.backend, Timers: o.timers,
-		IDs: ids, Scope: "test", User: docker.User{UID: 1000, GID: 1000},
+		IDs: ids, Scope: "test", Placement: "default", User: docker.User{UID: 1000, GID: 1000},
 	}
 	if o.configure != nil {
 		o.configure(&cfg)

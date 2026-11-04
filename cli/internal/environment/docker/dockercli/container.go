@@ -47,16 +47,18 @@ func runArgs(spec docker.ContainerSpec) []string {
 		}
 		args = append(args, "--mount", mount)
 	}
-	env := make([]string, 0, len(spec.Env)+1)
+	if spec.Network != "" {
+		args = append(args, "--network", spec.Network)
+	}
+	env := make([]string, 0, len(spec.Env))
 	for k, v := range spec.Env {
 		env = append(env, k+"="+v)
 	}
 	switch g := spec.GPUs; {
 	case g.Devices == "":
 	case g.Runtime != "":
-		// The runtime's own hook passes the devices the variable names; CDI is not used.
+		// The runtime reads the devices from a variable the GPU resource sets in Env.
 		args = append(args, "--runtime", g.Runtime)
-		env = append(env, "NVIDIA_VISIBLE_DEVICES="+strings.TrimPrefix(g.Devices, "device="))
 	default:
 		args = append(args, "--gpus", g.Devices)
 	}

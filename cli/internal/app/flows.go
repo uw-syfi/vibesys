@@ -30,7 +30,12 @@ func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec
 	if err != nil {
 		return spec, "", err
 	}
-	fingerprint, err := a.fingerprintOf(ctx, kind, environment.Target{Repository: string(c.Scope.Repository()), Commit: spec.Commit, Task: string(c.Scope.Task())})
+	placement, err := a.placementOf(kind, t.Needs, spec.Placement)
+	if err != nil {
+		return spec, "", err
+	}
+	spec.Placement = placement
+	fingerprint, err := a.fingerprintOf(ctx, kind, environment.Target{Repository: string(c.Scope.Repository()), Commit: spec.Commit, Task: string(c.Scope.Task()), Placement: placement})
 	if err != nil {
 		return spec, "", err
 	}
@@ -129,6 +134,20 @@ func (a *App) taskAt(ctx context.Context, repository string, commit core.Commit,
 		return task.Task{}, &core.Failure{Kind: core.FailureUnavailable, Message: "this daemon has no source of tasks, so it cannot run check or measure jobs"}
 	}
 	return a.cfg.Tasks.Task(ctx, repository, commit, name)
+}
+
+// placementOf decides the placement a job of the kind runs on, from what the caller asked for and
+// what the task needs (core.ChoosePlacement). Only a docker job has one: a host job runs on this
+// machine, whatever was asked. A daemon configured with no placements, as a test's may be, leaves
+// the request as it is, and the environment refuses a placement it does not have.
+func (a *App) placementOf(kind core.EnvironmentKind, needs []core.ResourceKind, requested string) (string, error) {
+	if kind != core.EnvironmentDocker {
+		return "", nil
+	}
+	if len(a.cfg.Placements) == 0 {
+		return requested, nil
+	}
+	return core.ChoosePlacement(a.cfg.Placements, needs, requested)
 }
 
 // fingerprintOf fingerprints the environment of a kind for the target the job runs. The kind is

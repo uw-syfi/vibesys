@@ -78,7 +78,7 @@ const eventFileName = "state/runs/run-a/1.json"
 func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	t.Run("the layout", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put("state/format", []byte(`{"format":4}`))
+		mem.Put("state/format", []byte(`{"format":5}`))
 		_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		wantFailure(t, "newer format file", err, core.FailureIncompatible, "state/format")
 	})
@@ -86,7 +86,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 	for _, name := range recordFiles {
 		t.Run(name, func(t *testing.T) {
 			mem := populated(t)
-			mem.Put(name, withVersion(file(t, mem, name), "4"))
+			mem.Put(name, withVersion(file(t, mem, name), "5"))
 			_, err := filestore.Open(stateDir, filestore.WithFS(mem))
 			wantFailure(t, "newer record", err, core.FailureIncompatible, name)
 		})
@@ -94,7 +94,7 @@ func TestNewerFormatIsRefusedWithTheFileNamed(t *testing.T) {
 
 	t.Run("an event, read when asked for", func(t *testing.T) {
 		mem := populated(t)
-		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "4"))
+		mem.Put(eventFileName, withVersion(file(t, mem, eventFileName), "5"))
 		s, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err != nil {
 			t.Fatalf("Open: %v", err)
@@ -319,11 +319,11 @@ func TestEncodingIsPinned(t *testing.T) {
 	if err := script()[0].run(t.Context(), s); err != nil {
 		t.Fatal(err)
 	}
-	if got, want := unspaced(file(t, mem, "state/format")), `{"format":3}`; got != want {
+	if got, want := unspaced(file(t, mem, "state/format")), `{"format":4}`; got != want {
 		t.Errorf("format file = %q, want %q", got, want)
 	}
 	const wantJob = `{
-  "format": 3,
+  "format": 4,
   "job": {
     "id": "j1",
     "spec": {
@@ -361,7 +361,7 @@ func TestEncodingIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	const wantPromotion = `{
-  "format": 3,
+  "format": 4,
   "seq": "1",
   "promotion": {
     "commit": "c1",

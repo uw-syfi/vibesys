@@ -656,3 +656,50 @@ func TestGeneratedNamesWhatATaskDirectoryHoldsButATaskDoesNotUse(t *testing.T) {
 		}
 	}
 }
+
+// Any list of distinct resource kinds, in any order, is read as written; a list that names a kind
+// twice, or a name that is not a kind, is refused, naming the key, and never read as fewer needs.
+func TestNeedsAreReadAsWrittenAndRefusedWhenNotKinds(t *testing.T) {
+	read := func(section string) (task.Task, error) {
+		return task.Parse("t", []byte(strings.Replace(jsonManifest, "[catalogue]", section+"[catalogue]", 1)), []byte(objectives))
+	}
+	quote := func(names []string) string {
+		q := make([]string, len(names))
+		for i, n := range names {
+			q[i] = fmt.Sprintf("%q", n)
+		}
+		return "[environment]\nneeds = [" + strings.Join(q, ", ") + "]\n"
+	}
+	r := rand.New(rand.NewPCG(1, 2))
+	for range 200 {
+		kinds := core.ResourceKinds()
+		r.Shuffle(len(kinds), func(i, j int) { kinds[i], kinds[j] = kinds[j], kinds[i] })
+		kinds = kinds[:r.IntN(len(kinds)+1)]
+		names := make([]string, len(kinds))
+		for i, k := range kinds {
+			names[i] = string(k)
+		}
+		got, err := read(quote(names))
+		if err != nil || !slices.Equal(got.Needs, kinds) {
+			t.Fatalf("%v: Needs = %v, %v", names, got.Needs, err)
+		}
+		if len(names) > 0 {
+			twice := append(slices.Clone(names), names[r.IntN(len(names))])
+			if _, err := read(quote(twice)); failureOf(t, err).Kind != core.FailureInvalidInput || !strings.Contains(err.Error(), "needs") {
+				t.Fatalf("%v: %v, want a refusal naming needs", twice, err)
+			}
+		}
+		bad := append(slices.Clone(names), []string{"GPU", "k8s", "", "gpus"}[r.IntN(4)])
+		if _, err := read(quote(bad)); failureOf(t, err).Kind != core.FailureInvalidInput || !strings.Contains(err.Error(), "needs[") {
+			t.Fatalf("%v: %v, want a refusal naming the entry", bad, err)
+		}
+	}
+	for _, section := range []string{"[environment]\nneeds = \"gpu\"\n", "[environment]\nneeds = [1]\n"} {
+		if _, err := read(section); failureOf(t, err).Kind != core.FailureInvalidInput {
+			t.Errorf("%q: %v, want invalid input", section, err)
+		}
+	}
+	if got, err := read(""); err != nil || got.Needs != nil {
+		t.Errorf("no needs: %v, %v", got.Needs, err)
+	}
+}

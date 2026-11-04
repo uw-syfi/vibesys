@@ -11,6 +11,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
 
 // Config configures New. Every field but ProbePause is required.
@@ -39,20 +40,13 @@ type Config struct {
 	// Machine is where the engine's containers run, as a run's files see it. Nil means Shared,
 	// as User: the engine runs on this machine and mounts the caller's directories.
 	Machine Machine
-	// GPUs are the GPUs every container gets. The zero value gives none, and a task for an
-	// accelerator is refused.
-	GPUs GPUs
-	// GPUFacts reads the GPUs for the fingerprint. It is required when GPUs gives any.
-	GPUFacts GPUFacts
-	// Mounts are the operator's read-only mounts: by name, a directory on the engine's machine,
-	// which every container sees at MountsDir/<name>.
-	Mounts map[string]string
-}
-
-// GPUFacts reads what identifies the GPUs of the engine's machine: their model, count, driver and
-// the driver's CUDA version, as fingerprint facts.
-type GPUFacts interface {
-	GPUFacts(ctx context.Context) (map[string]string, error)
+	// Placement names the placement of the operator config these containers run on. It is part
+	// of every fingerprint, so results from two placements are never compared. It is required.
+	Placement string
+	// Resources are what the placement gives every container, at most one of each kind: GPUs,
+	// a cluster, read-only directories. A task that needs a kind the placement does not give is
+	// refused, and so is a task for an accelerator without GPUs.
+	Resources []resource.Resource
 }
 
 // Provider makes the docker environments of one process. They share what must be one per
@@ -90,16 +84,15 @@ func New(cfg Config) (*Provider, error) {
 	if err := checkScope(cfg.Scope); err != nil {
 		return nil, err
 	}
-	if cfg.GPUs.Devices != "" && cfg.GPUFacts == nil {
-		return nil, missing("GPUFacts, which a config that passes GPUs needs")
+	if err := core.ValidPlacementName(cfg.Placement); err != nil {
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "docker: " + core.AsFailure(err).Message}
 	}
-	for name, dir := range cfg.Mounts {
-		if err := CheckMountName(name); err != nil {
-			return nil, err
+	seen := map[core.ResourceKind]bool{}
+	for _, r := range cfg.Resources {
+		if r == nil || seen[r.Kind()] {
+			return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: the placement %q has a resource that is missing, or two of one kind", cfg.Placement)}
 		}
-		if err := checkPath("mount "+name, dir); err != nil {
-			return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "docker: " + err.Error()}
-		}
+		seen[r.Kind()] = true
 	}
 	if cfg.Machine == nil {
 		cfg.Machine = Shared{As: cfg.User}
@@ -133,15 +126,34 @@ func (e *env) spec(ctx context.Context) (Spec, error) {
 	if err != nil {
 		return Spec{}, err
 	}
-	if err := refusal(spec, e.p.cfg.GPUs); err != nil {
+	if err := refusal(spec, e.p.Offer()); err != nil {
 		return Spec{}, err
 	}
 	return spec, nil
 }
 
+// Offer returns the placement as choosing one for a job sees it: its name and the kinds of
+// resource it gives a container.
+func (p *Provider) Offer() core.PlacementOffer {
+	o := core.PlacementOffer{Name: p.cfg.Placement}
+	for _, r := range p.cfg.Resources {
+		o.Resources = append(o.Resources, r.Kind())
+	}
+	return o
+}
+
+// Claims returns what a job on the placement holds of its resources while it runs.
+func (p *Provider) Claims() []core.Claim {
+	var out []core.Claim
+	for _, r := range p.cfg.Resources {
+		out = append(out, r.Claims()...)
+	}
+	return out
+}
+
 // Fingerprint implements environment.Environment. It pins the exact image the task's files
-// build, which it builds first if the engine does not have it, the machine the image runs on, and
-// the GPUs its containers get.
+// build, which it builds first if the engine does not have it, the machine the image runs on, the
+// placement, and what identifies each resource its containers get.
 func (e *env) Fingerprint(ctx context.Context) (core.Fingerprint, error) {
 	spec, err := e.spec(ctx)
 	if err != nil {
@@ -155,17 +167,24 @@ func (e *env) Fingerprint(ctx context.Context) (core.Fingerprint, error) {
 	if err != nil {
 		return core.Fingerprint{}, err
 	}
-	var gpu map[string]string
-	if e.p.cfg.GPUs.Devices != "" {
-		if gpu, err = e.p.cfg.GPUFacts.GPUFacts(ctx); err != nil {
+	all := facts(m, img, e.p.cfg.Placement)
+	for _, r := range e.p.cfg.Resources {
+		got, err := r.Fingerprint(ctx)
+		if err != nil {
 			return core.Fingerprint{}, err
+		}
+		for name, value := range got {
+			if _, taken := all[name]; taken {
+				return core.Fingerprint{}, &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: the %s resource reports the fact %q, which another part of the fingerprint has", r.Kind(), name)}
+			}
+			all[name] = value
 		}
 	}
 	return core.Fingerprint{
 		Kind:        core.EnvironmentDocker,
 		Backend:     backendOf(spec),
 		ImageDigest: img.ID,
-		Facts:       facts(m, img, gpu),
+		Facts:       all,
 	}, nil
 }
 

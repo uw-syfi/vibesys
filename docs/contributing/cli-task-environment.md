@@ -67,11 +67,19 @@ what it reads from a mount).
 ## The operator config
 
 Settings about the machine belong to whoever runs the CLI, never to a task: the
-host, the Slurm partition and GRES, Slurm options, GPU passthrough and
-machine-local mounts. They live in `$XDG_CONFIG_HOME/vibesys/cli.toml`
-(`~/.config/vibesys/cli.toml` by default; `VIBESYS_CLI_CONFIG` names another
-file). Unknown keys are refused with the key's name. With no file, docker jobs
-run on this machine with no GPU, as before. The keys follow `vs-slurm`'s
+host, the Slurm partition and GRES, Slurm options, GPU passthrough, a
+Kubernetes cluster and machine-local mounts. They live in
+`$XDG_CONFIG_HOME/vibesys/cli.toml` (`~/.config/vibesys/cli.toml` by default;
+`VIBESYS_CLI_CONFIG` names another file), whose schema is `OperatorConfig` in
+`proto/vibesys/cli/v1/operator.proto`. Unknown keys are refused with the key's
+name. With no file, docker jobs run on this machine with no GPU, as before.
+
+A file names placements, where a docker job's container runs, and the
+resources each gives a container. A task names the resources its jobs need
+(`[environment] needs = ["kubernetes"]`), and a job runs on the placement
+`--placement` or `VIBESYS_PLACEMENT` names, or on the only one that gives every
+need. The [CLI README](https://github.com/uw-syfi/vibesys/blob/main/cli/README.md#the-operator-config) lists every key.
+A file of the earlier shape below is read as the one placement `default`. The keys follow `vs-slurm`'s
 operator config where they mean the same thing (`host`, `ssh_command`,
 `rsync_command`, `remote_workspace_root`, `poll_interval_seconds`,
 `queue_timeout_seconds`).
@@ -138,12 +146,14 @@ candidate's build is not repeated: it lives in the cache directory.
 
 A 26 GB model in the Spark's Hugging Face cache must not be copied into an
 image or through ssh. The operator declares it as a read-only mount by name in
-`[docker.mounts]`; every container gets it at `/vibesys/mounts/<name>`, and
+the `mounts` resource of a placement (`[placements.<name>.resources.mounts]`,
+`[docker.mounts]` in the earlier shape); every container gets it at `/vibesys/mounts/<name>`, and
 `VIBESYS_MOUNTS` lists the names. The manifest does not declare it: whether a
 machine has the file is a fact of the machine, like its GPU, and the task
 already checks the digest of what it reads, so a wrong or missing file fails
-the check with the task's own message. Mounts are not part of the fingerprint
-for the same reason: the content is verified, the path is not.
+the check with the task's own message. A mount's directory is not part of the
+fingerprint for the same reason: the content is verified, the path is not. The
+names are, since they are what a task reads.
 
 ### A benchmark without `result_protocol` stays allowed
 

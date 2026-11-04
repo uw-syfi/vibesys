@@ -1,122 +1,42 @@
-// Package operator reads the operator config: the settings of the machine that runs vibesys-cli's
-// jobs, which belong to whoever runs the CLI and never to a task. They say where the Docker engine
-// is (this machine, another one over ssh, or another one inside a Slurm allocation), which GPUs a
-// container gets, and which of the machine's directories every container sees read-only.
+// Package operator reads the operator config: the settings of the machines that run vibesys-cli's
+// jobs, which belong to whoever runs the CLI and never to a task. The schema is OperatorConfig in
+// proto/vibesys/cli/v1/operator.proto, validated by its protovalidate rules: the file names
+// placements (where a docker job's container runs: this machine, another one over ssh, or another
+// one inside a Slurm allocation), and what each gives a container, by resource kind.
 //
-// The file is TOML. Unknown keys and sections a placement does not use are refused, naming the key,
-// so a typo is never a setting silently left out. No file is the default: docker jobs run on this
-// machine with no GPU.
+// This package keeps only the outer structure: it decodes the TOML into the message, refuses what
+// the message has no field for, naming the key, reads a file of the earlier shape as the one
+// placement "default", and checks that each placement has the sections its kind uses and no
+// other. What a kind's settings mean is the business of the package that implements the kind,
+// which the binary's wiring hands its section to. No file is the default: one local placement with
+// no resource.
 package operator
 
 import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
-	"regexp"
-	"sort"
-	"time"
+	"slices"
+	"strings"
 
+	"buf.build/go/protovalidate"
 	"github.com/BurntSushi/toml"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
-	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 )
 
 // EnvConfig names the variable that points at another operator config file.
 const EnvConfig = "VIBESYS_CLI_CONFIG"
 
-// Placement is where the Docker engine runs containers.
-type Placement string
-
-// The placements.
-const (
-	// Local is the Docker engine of this machine.
-	Local Placement = "local"
-	// SSH is the Docker engine of another machine, reached by running docker over ssh.
-	SSH Placement = "ssh"
-	// Slurm is SSH with every container, and every image build, inside an allocation of the
-	// machine's Slurm.
-	Slurm Placement = "slurm"
-)
-
-// Defaults for what the config leaves out.
-const (
-	DefaultPollInterval = 5 * time.Second
-	DefaultQueueTimeout = 24 * time.Hour
-	// DefaultCPUs is how many CPUs a build or an unmeasured container asks for.
-	DefaultCPUs = 8
-)
-
-// Config is the operator config.
-type Config struct {
-	Scheduler Scheduler
-	Docker    Docker
-	// Remote is set for the ssh and slurm placements.
-	Remote *Remote
-	// Slurm is set for the slurm placement.
-	Slurm *SlurmConfig
-}
-
-// Scheduler is how the daemon shares the machine between jobs.
-type Scheduler struct {
-	// Policy names the policy that orders the jobs that wait. The daemon's wiring knows the names.
-	Policy string
-	// MaxJobs is how many jobs run at once on the placement. A measure job runs alone.
-	MaxJobs int
-}
-
-// Defaults of the scheduler: one job at a time, the oldest first.
-const (
-	DefaultPolicy  = "fifo"
-	DefaultMaxJobs = 1
-)
-
-// Docker is how containers are given what the machine has.
-type Docker struct {
-	Placement Placement
-	// GPUs is a docker --gpus value; empty passes none.
-	GPUs string
-	// Runtime, when set, passes the GPUs with --runtime and NVIDIA_VISIBLE_DEVICES instead.
-	Runtime string
-	// Mounts are read-only directories of the engine's machine, by name.
-	Mounts map[string]string
-}
-
-// Remote is the machine the engine runs on, for the ssh and slurm placements.
-type Remote struct {
-	// Host is an ssh destination or an alias of the user's ssh config.
-	Host string
-	// SSHCommand and RsyncCommand are the programs, with arguments, that reach it.
-	SSHCommand   []string
-	RsyncCommand []string
-	// WorkspaceRoot is an absolute directory there that holds the copies of runs' directories and
-	// the caches.
-	WorkspaceRoot string
-}
-
-// SlurmConfig is how an allocation is asked for.
-type SlurmConfig struct {
-	Partition string
-	// Gres is what a measured container asks for; a build asks for no GRES.
-	Gres string
-	// SharedGres, when set, is what an unmeasured container asks for instead of Gres, such as a
-	// shard of a GPU.
-	SharedGres string
-	// Exclusive gives a measured container, a benchmark sample, the whole node.
-	Exclusive bool
-	// CPUs is how many CPUs a build or an unmeasured container asks for.
-	CPUs int
-	// Memory, when set, is the memory a build or an unmeasured container asks for, a Slurm size.
-	Memory string
-	// SrunArguments are passed to srun as they are, after the ones above.
-	SrunArguments []string
-	// PollInterval is the pause between two reads of a job's state.
-	PollInterval time.Duration
-	// QueueTimeout bounds the wait for an allocation.
-	QueueTimeout time.Duration
-}
+// DefaultPlacement is the name of the one placement of a file of the earlier shape, and of no
+// file.
+const DefaultPlacement = "default"
 
 // Path is the operator config file: VIBESYS_CLI_CONFIG when set, otherwise vibesys/cli.toml in
 // XDG_CONFIG_HOME, or in ~/.config when that is not an absolute path.
@@ -132,199 +52,157 @@ func Path(getenv func(string) string, home string) string {
 
 // Load reads the config at the path. A file that is not there is the default config, unless the
 // path was named by VIBESYS_CLI_CONFIG: then it must be there.
-func Load(file string, named bool) (Config, error) {
+func Load(file string, named bool) (*cliv1.OperatorConfig, error) {
 	data, err := os.ReadFile(file)
 	switch {
 	case err == nil:
 		c, err := Parse(data)
 		if err != nil {
-			return Config{}, fmt.Errorf("the operator config %s: %w", file, err)
+			return nil, fmt.Errorf("the operator config %s: %w", file, err)
 		}
 		return c, nil
 	case errors.Is(err, fs.ErrNotExist) && !named:
-		return defaults(), nil
+		return Parse(nil)
 	}
-	return Config{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("reading the operator config: %v", err)}
+	return nil, invalid("reading the operator config: %v", err)
 }
-
-// defaults is the config of no file.
-func defaults() Config {
-	return Config{Scheduler: Scheduler{Policy: DefaultPolicy, MaxJobs: DefaultMaxJobs}, Docker: Docker{Placement: Local}}
-}
-
-// file is the TOML file.
-type file struct {
-	Scheduler *struct {
-		Policy  *string `toml:"policy"`
-		MaxJobs *int    `toml:"max_jobs"`
-	} `toml:"scheduler"`
-	Docker *struct {
-		Placement string            `toml:"placement"`
-		GPUs      string            `toml:"gpus"`
-		Runtime   string            `toml:"runtime"`
-		Mounts    map[string]string `toml:"mounts"`
-	} `toml:"docker"`
-	Remote *struct {
-		Host                string   `toml:"host"`
-		SSHCommand          []string `toml:"ssh_command"`
-		RsyncCommand        []string `toml:"rsync_command"`
-		RemoteWorkspaceRoot string   `toml:"remote_workspace_root"`
-	} `toml:"remote"`
-	Slurm *struct {
-		Partition           string   `toml:"partition"`
-		Gres                string   `toml:"gres"`
-		SharedGres          string   `toml:"shared_gres"`
-		Exclusive           *bool    `toml:"exclusive"`
-		CPUs                *int     `toml:"cpus"`
-		Memory              string   `toml:"memory"`
-		SrunArguments       []string `toml:"srun_arguments"`
-		PollIntervalSeconds float64  `toml:"poll_interval_seconds"`
-		QueueTimeoutSeconds float64  `toml:"queue_timeout_seconds"`
-	} `toml:"slurm"`
-}
-
-var (
-	hostPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.@-]*$`)
-	valuePattern = regexp.MustCompile(`^[A-Za-z0-9=,:._/+-]*$`)
-	runtimeName  = regexp.MustCompile(`^[a-z0-9._-]*$`)
-	// memoryPattern is a size both Slurm (--mem) and Docker (memory=) read the same way.
-	memoryPattern = regexp.MustCompile(`^[1-9][0-9]*[KMGT]$`)
-)
 
 func invalid(format string, args ...any) error {
 	return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(format, args...)}
 }
 
-// Parse reads and checks an operator config.
-func Parse(data []byte) (Config, error) {
-	var f file
-	meta, err := toml.Decode(string(data), &f)
-	if err != nil {
-		return Config{}, invalid("%v", err)
+// Parse reads and checks an operator config. The result names its placements only: one of the
+// earlier shape is the placement "default", and every placement's max_jobs is at least one. Its
+// scheduler names a policy, and no max_jobs: the earlier shape's scheduler.max_jobs is the max_jobs
+// of the placement "default".
+func Parse(data []byte) (*cliv1.OperatorConfig, error) {
+	c := &cliv1.OperatorConfig{}
+	if err := decode(data, c); err != nil {
+		return nil, err
 	}
-	if undecoded := meta.Undecoded(); len(undecoded) > 0 {
-		keys := make([]string, len(undecoded))
-		for i, k := range undecoded {
-			keys[i] = k.String()
-		}
-		sort.Strings(keys)
-		return Config{}, invalid("unknown key %q", keys[0])
+	if err := protovalidate.Validate(c); err != nil {
+		return nil, invalid("%s", strings.TrimPrefix(strings.ReplaceAll(err.Error(), "\n", " "), "validation error: "))
 	}
-	c := defaults()
-	if sc := f.Scheduler; sc != nil {
-		if sc.Policy != nil {
-			if *sc.Policy == "" {
-				return Config{}, invalid("scheduler.policy: name a policy, or leave the key out for %q", DefaultPolicy)
-			}
-			c.Scheduler.Policy = *sc.Policy
-		}
-		if sc.MaxJobs != nil {
-			if *sc.MaxJobs < 1 {
-				return Config{}, invalid("scheduler.max_jobs: %d is not a number of jobs; it is at least 1", *sc.MaxJobs)
-			}
-			c.Scheduler.MaxJobs = *sc.MaxJobs
-		}
+	sched := c.GetScheduler()
+	if sched == nil {
+		sched = &cliv1.Scheduler{}
 	}
-	if d := f.Docker; d != nil {
-		if d.Placement != "" {
-			c.Docker.Placement = Placement(d.Placement)
-		}
-		c.Docker.GPUs, c.Docker.Runtime, c.Docker.Mounts = d.GPUs, d.Runtime, d.Mounts
-	}
-	switch c.Docker.Placement {
-	case Local, SSH, Slurm:
-	default:
-		return Config{}, invalid("docker.placement: %q is none of %q, %q and %q", c.Docker.Placement, Local, SSH, Slurm)
-	}
-	if !valuePattern.MatchString(c.Docker.GPUs) {
-		return Config{}, invalid("docker.gpus: %q is not a --gpus value", c.Docker.GPUs)
-	}
-	if !runtimeName.MatchString(c.Docker.Runtime) || (c.Docker.Runtime != "" && c.Docker.GPUs == "") {
-		return Config{}, invalid("docker.runtime: %q must be a runtime name, and passes GPUs only when docker.gpus names them", c.Docker.Runtime)
-	}
-	for name, dir := range c.Docker.Mounts {
-		if err := docker.CheckMountName(name); err != nil {
-			return Config{}, invalid("docker.mounts.%s: %v", name, err)
-		}
-		if !path.IsAbs(dir) {
-			return Config{}, invalid("docker.mounts.%s: %q must be an absolute path on the engine's machine", name, dir)
-		}
-	}
-	remote := c.Docker.Placement != Local
+	legacy := c.GetDocker() != nil || c.GetRemote() != nil || c.GetSlurm() != nil
+	named := len(c.GetPlacements()) > 0
 	switch {
-	case remote && c.Scheduler.MaxJobs > 1:
-		// A remote placement stages each job's directories and sweeps its Slurm allocations as the
-		// one job of the daemon, so a second one beside it would be swept away.
-		return Config{}, invalid("scheduler.max_jobs: docker.placement %q runs one job at a time; more than 1 needs docker.placement \"local\"", c.Docker.Placement)
-	case remote && f.Remote == nil:
-		return Config{}, invalid("docker.placement %q needs a [remote] section with the host", c.Docker.Placement)
-	case !remote && f.Remote != nil:
-		return Config{}, invalid("[remote] is set, and docker.placement %q does not use it", c.Docker.Placement)
-	case c.Docker.Placement == Slurm && f.Slurm == nil:
-		return Config{}, invalid("docker.placement \"slurm\" needs a [slurm] section")
-	case c.Docker.Placement != Slurm && f.Slurm != nil:
-		return Config{}, invalid("[slurm] is set, and docker.placement %q does not use it", c.Docker.Placement)
+	case legacy && named:
+		return nil, invalid("the config has [placements.*] and the earlier [docker], [remote] or [slurm] sections; name every placement under [placements.<name>]")
+	case named && sched.MaxJobs != nil:
+		return nil, invalid("scheduler.max_jobs: the config has [placements.*]; set max_jobs on each placement instead")
+	case legacy:
+		p, err := fromLegacy(c)
+		if err != nil {
+			return nil, err
+		}
+		c = &cliv1.OperatorConfig{Placements: map[string]*cliv1.Placement{DefaultPlacement: p}}
+	case !named:
+		c.Placements = map[string]*cliv1.Placement{DefaultPlacement: {Kind: cliv1.PlacementKind_PLACEMENT_KIND_LOCAL}}
 	}
-	if r := f.Remote; r != nil {
-		c.Remote = &Remote{
-			Host: r.Host, SSHCommand: r.SSHCommand, RsyncCommand: r.RsyncCommand, WorkspaceRoot: r.RemoteWorkspaceRoot,
-		}
-		if !hostPattern.MatchString(r.Host) {
-			return Config{}, invalid("remote.host: %q must be an ssh host or alias, without options or whitespace", r.Host)
-		}
-		if c.Remote.SSHCommand == nil {
-			c.Remote.SSHCommand = []string{"ssh"}
-		}
-		if c.Remote.RsyncCommand == nil {
-			c.Remote.RsyncCommand = []string{"rsync"}
-		}
-		for key, argv := range map[string][]string{"ssh_command": c.Remote.SSHCommand, "rsync_command": c.Remote.RsyncCommand} {
-			if len(argv) == 0 || argv[0] == "" {
-				return Config{}, invalid("remote.%s: needs a program", key)
-			}
-		}
-		if !path.IsAbs(r.RemoteWorkspaceRoot) || path.Clean(r.RemoteWorkspaceRoot) == "/" {
-			return Config{}, invalid("remote.remote_workspace_root: %q must be an absolute directory on the host, not /", r.RemoteWorkspaceRoot)
-		}
+	if sched.MaxJobs != nil {
+		c.GetPlacements()[DefaultPlacement].MaxJobs = sched.GetMaxJobs()
 	}
-	if s := f.Slurm; s != nil {
-		c.Slurm = &SlurmConfig{
-			Partition: s.Partition, Gres: s.Gres, SharedGres: s.SharedGres, Exclusive: true, CPUs: DefaultCPUs, Memory: s.Memory, SrunArguments: s.SrunArguments,
-			PollInterval: DefaultPollInterval, QueueTimeout: DefaultQueueTimeout,
+	c.Scheduler = &cliv1.Scheduler{Policy: proto.String(DefaultPolicy)}
+	if sched.Policy != nil {
+		c.Scheduler.Policy = sched.Policy
+	}
+	for _, name := range slices.Sorted(maps.Keys(c.GetPlacements())) {
+		p := c.GetPlacements()[name]
+		if p.GetMaxJobs() == 0 {
+			p.MaxJobs = 1
 		}
-		if s.Exclusive != nil {
-			c.Slurm.Exclusive = *s.Exclusive
+		names := sectionNames{
+			kind: "placements." + name + ".kind", remote: "[placements." + name + ".remote]", slurm: "[placements." + name + ".slurm]",
+			maxJobs: "placements." + name + ".max_jobs",
 		}
-		if s.CPUs != nil {
-			if *s.CPUs < 1 {
-				return Config{}, invalid("slurm.cpus: %d is not a number of CPUs", *s.CPUs)
-			}
-			c.Slurm.CPUs = *s.CPUs
+		if legacy || (!named && sched.MaxJobs != nil) {
+			names = legacyNames
 		}
-		if s.Memory != "" && !memoryPattern.MatchString(s.Memory) {
-			return Config{}, invalid("slurm.memory: %q is not a Slurm size such as 32G", s.Memory)
-		}
-		for key, v := range map[string]string{"partition": s.Partition, "gres": s.Gres, "shared_gres": s.SharedGres} {
-			if !valuePattern.MatchString(v) {
-				return Config{}, invalid("slurm.%s: %q is not a Slurm value", key, v)
-			}
-		}
-		for i, a := range s.SrunArguments {
-			if a == "" || a[0] != '-' {
-				return Config{}, invalid("slurm.srun_arguments[%d]: %q is not an option", i, a)
-			}
-		}
-		for key, seconds := range map[string]float64{"poll_interval_seconds": s.PollIntervalSeconds, "queue_timeout_seconds": s.QueueTimeoutSeconds} {
-			if seconds < 0 {
-				return Config{}, invalid("slurm.%s: %v is negative", key, seconds)
-			}
-		}
-		if s.PollIntervalSeconds > 0 {
-			c.Slurm.PollInterval = time.Duration(s.PollIntervalSeconds * float64(time.Second))
-		}
-		if s.QueueTimeoutSeconds > 0 {
-			c.Slurm.QueueTimeout = time.Duration(s.QueueTimeoutSeconds * float64(time.Second))
+		if err := sections(p, names); err != nil {
+			return nil, err
 		}
 	}
 	return c, nil
+}
+
+// DefaultPolicy is the scheduling policy of a config that names none: the oldest job first.
+const DefaultPolicy = "fifo"
+
+// fromLegacy is the placement a file of the earlier shape describes.
+func fromLegacy(c *cliv1.OperatorConfig) (*cliv1.Placement, error) {
+	d := c.GetDocker()
+	p := &cliv1.Placement{Kind: d.GetPlacement(), Remote: c.GetRemote(), Slurm: c.GetSlurm(), MaxJobs: 1}
+	if p.Kind == cliv1.PlacementKind_PLACEMENT_KIND_UNSPECIFIED {
+		p.Kind = cliv1.PlacementKind_PLACEMENT_KIND_LOCAL
+	}
+	if d.GetRuntime() != "" && d.GetGpus() == "" {
+		return nil, invalid("docker.runtime: %q passes GPUs only when docker.gpus names them", d.GetRuntime())
+	}
+	if d.GetGpus() != "" || len(d.GetMounts()) > 0 {
+		p.Resources = &cliv1.Resources{Mounts: d.GetMounts()}
+		if d.GetGpus() != "" {
+			p.Resources.Gpu = &cliv1.GpuResource{Devices: d.GetGpus(), Runtime: d.GetRuntime()}
+		}
+	}
+	return p, nil
+}
+
+// sectionNames are how a placement's settings are spelled in the file, for its errors.
+type sectionNames struct{ kind, remote, slurm, maxJobs string }
+
+// legacyNames are how the earlier shape spells its one placement's settings.
+var legacyNames = sectionNames{kind: "docker.placement", remote: "[remote]", slurm: "[slurm]", maxJobs: "scheduler.max_jobs"}
+
+// sections refuses a placement without a section its kind needs, or with one its kind does not
+// use: a setting quietly left out would run jobs somewhere the operator did not mean.
+func sections(p *cliv1.Placement, n sectionNames) error {
+	kind := kindName(p.GetKind())
+	remote := p.GetKind() != cliv1.PlacementKind_PLACEMENT_KIND_LOCAL
+	slurm := p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_SLURM
+	switch {
+	case remote && p.GetRemote() == nil:
+		return invalid("%s %q needs a %s section with the host", n.kind, kind, n.remote)
+	case !remote && p.GetRemote() != nil:
+		return invalid("%s is set, and %s %q does not use it", n.remote, n.kind, kind)
+	case slurm && p.GetSlurm() == nil:
+		return invalid("%s %q needs a %s section", n.kind, kind, n.slurm)
+	case !slurm && p.GetSlurm() != nil:
+		return invalid("%s is set, and %s %q does not use it", n.slurm, n.kind, kind)
+	case remote && p.GetMaxJobs() > 1:
+		// A remote placement stages each job's directories and sweeps its Slurm allocations as the
+		// one job of its scope, so a second one beside it would be swept away.
+		return invalid("%s: %s %q runs one job at a time; more than 1 needs %s \"local\"", n.maxJobs, n.kind, kind, n.kind)
+	}
+	return nil
+}
+
+// kindName is how the file spells a placement kind.
+func kindName(k cliv1.PlacementKind) string {
+	return strings.ToLower(strings.TrimPrefix(k.String(), "PLACEMENT_KIND_"))
+}
+
+// decode decodes TOML into m by m's field names, refusing a key m has no field for and a value of
+// the wrong type, naming the key. An enum value is written as its name without the enum's prefix,
+// in lower case.
+func decode(data []byte, m proto.Message) error {
+	var raw map[string]any
+	if _, err := toml.Decode(string(data), &raw); err != nil {
+		return invalid("%v", err)
+	}
+	j, err := message(raw, m.ProtoReflect().Descriptor(), "")
+	if err != nil {
+		return err
+	}
+	text, err := jsonOf(j)
+	if err != nil {
+		return invalid("%v", err)
+	}
+	if err := protojson.Unmarshal(text, m); err != nil {
+		return invalid("%v", err)
+	}
+	return nil
 }

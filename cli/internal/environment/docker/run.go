@@ -7,10 +7,10 @@ import (
 	"io"
 	"maps"
 	"slices"
-	"strings"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
 
 // Run implements environment.Environment: it runs the execution in a container of the task's
@@ -130,12 +130,25 @@ func (r *run) containerSpec(id string, img Image) (ContainerSpec, error) {
 		mounts = append(mounts, Mount{Host: staged.Artifacts, Container: ArtifactsDir})
 		env[EnvArtifactsDir] = ArtifactsDir
 	}
-	names := slices.Sorted(maps.Keys(p.cfg.Mounts))
-	for _, name := range names {
-		mounts = append(mounts, Mount{Host: p.cfg.Mounts[name], Container: MountsDir + "/" + name, ReadOnly: true})
+	given, err := r.attachments()
+	if err != nil {
+		return ContainerSpec{}, err
 	}
-	if len(names) > 0 {
-		env[EnvMounts] = strings.Join(names, ",")
+	taken := map[string]bool{}
+	for _, m := range mounts {
+		taken[m.Container] = true
+	}
+	for _, m := range given.Mounts {
+		if taken[m.Container] || m.Container == r.x.Checkout.Dir {
+			return ContainerSpec{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: a resource of the placement %q mounts %s, where the run has a directory of its own", p.cfg.Placement, m.Container)}
+		}
+		mounts = append(mounts, Mount{Host: m.Host, Container: m.Container, ReadOnly: m.ReadOnly})
+	}
+	for _, k := range slices.Sorted(maps.Keys(given.Env)) {
+		if _, own := env[k]; own {
+			return ContainerSpec{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: a resource of the placement %q sets %s, which the run sets itself", p.cfg.Placement, k)}
+		}
+		env[k] = given.Env[k]
 	}
 	return ContainerSpec{
 		Name:     r.name,
@@ -145,10 +158,24 @@ func (r *run) containerSpec(id string, img Image) (ContainerSpec, error) {
 		Dir:      r.x.Checkout.Dir,
 		Mounts:   mounts,
 		Env:      env,
-		GPUs:     p.cfg.GPUs,
+		GPUs:     GPUs{Devices: given.GPUs.Devices, Runtime: given.GPUs.Runtime},
+		Network:  given.Network,
 		Limit:    r.x.Timeout,
 		Measured: r.x.Measured,
 	}, nil
+}
+
+// attachments are what the placement's resources give the container, joined into one.
+func (r *run) attachments() (resource.Attachment, error) {
+	var all []resource.Attachment
+	for _, res := range r.e.p.cfg.Resources {
+		a, err := res.Attach(r.ctx)
+		if err != nil {
+			return resource.Attachment{}, err
+		}
+		all = append(all, a)
+	}
+	return resource.Combine(all)
 }
 
 // mounts are the directories the commands see: the checkout, and the scratch directory when the

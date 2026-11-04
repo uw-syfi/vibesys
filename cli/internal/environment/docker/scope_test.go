@@ -27,7 +27,7 @@ func TestAScopeFromAKeyIsStableDistinctAndAcceptedByTheProvider(t *testing.T) {
 		seen[scope] = key
 		_, err := docker.New(docker.Config{
 			Engine: dockerfake.NewDaemon(w.MemoryGates).Connect(), Source: dockerfake.Fixed(docker.Spec{}), Backend: cpuBackend(),
-			Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: scope,
+			Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: scope, Placement: "default",
 		})
 		if err != nil {
 			t.Fatalf("the provider refused the scope %q of %q: %v", scope, key, err)

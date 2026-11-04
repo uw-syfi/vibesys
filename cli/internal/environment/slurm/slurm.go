@@ -57,6 +57,14 @@ type Scheduler interface {
 // DefaultCPUs is how many CPUs an allocation that does not hold the whole node asks for.
 const DefaultCPUs = 8
 
+// Defaults of the waits the operator config may leave out.
+const (
+	// DefaultPollInterval is the pause between two reads of a job's state.
+	DefaultPollInterval = 5 * time.Second
+	// DefaultQueueTimeout bounds the wait for an allocation.
+	DefaultQueueTimeout = 24 * time.Hour
+)
+
 // Allocator is the dockercli.Allocator that runs a command under srun in a new allocation, sized
 // by what the command is:
 //
