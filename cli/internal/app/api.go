@@ -31,7 +31,7 @@ func invalid(format string, args ...any) *core.Failure {
 //
 // A check or a measure job is keyed first: the task is read as the submission's commit has it,
 // the environment is decided and fingerprinted, and the job's cache key is made (keyFlow). A
-// command job has no key.
+// command job has no key; a docker one is given its placement (placeFlow).
 func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome, error) {
 	if req.Spec.Settings == nil {
 		return core.SubmitOutcome{}, invalid("spec: no job settings")
@@ -52,11 +52,14 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	// A submission that cannot be keyed, such as one for a task its commit does not have, makes no
 	// store. Only a submission that can be queued does.
 	spec, key := req.Spec, core.JobKey("")
+	var err error
 	if spec.Settings.Kind() != core.JobCommand {
-		var err error
-		if spec, key, err = a.keyFlow(ctx, req.Context, spec); err != nil {
-			return core.SubmitOutcome{}, err
-		}
+		spec, key, err = a.keyFlow(ctx, req.Context, spec)
+	} else {
+		spec, err = a.placeFlow(ctx, req.Context, spec)
+	}
+	if err != nil {
+		return core.SubmitOutcome{}, err
 	}
 	ctx = a.generationContext(ctx, storeIDOf(scope))
 	st, err := a.createStore(ctx, scope)
