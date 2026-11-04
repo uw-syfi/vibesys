@@ -10,31 +10,6 @@
 - **2026-10-08** — [VibeSys on AMD MI300A](https://syfi.cs.washington.edu/blog/2026-10-08-qwen35-mi300a/): an agent-built Qwen3.5-397B engine achieves 2.3× the goodput of tuned SGLang.
 - **2026-05-12** — [Introducing VibeServe](https://syfi.cs.washington.edu/blog/2026-05-12-introducing-vibeserve/): let AI agents write your serving stack. [Paper](https://arxiv.org/abs/2605.06068).
 
-## Getting started
-
-### Install skills for your coding agent
-
-Start with our [Agent Skills](resources/skills/README.md) to give your coding
-agent knowledge of serving systems, hardware, and performance optimization.
-With [Node.js](https://nodejs.org/) installed, run this in your project directory:
-
-```bash
-npx skills add https://github.com/uw-syfi/vibesys/tree/main/resources/skills
-```
-
-Choose the skills and coding agent you want to use in the installer. For LLM
-serving, start with [`serving-systems`](resources/skills/serving-systems/README.md).
-Then ask your agent to optimize your system for your model, workload, and hardware,
-with explicit correctness checks and a performance benchmark.
-
-### Run the VibeSys optimization loop
-
-To have VibeSys coordinate implementation, correctness checks, and benchmarking,
-[install VibeSys and run your first task](#quickstart). Complete task definitions
-are available in [`examples/`](examples/), and the
-[running guide](docs/running-vibesys.md) covers setup and execution in detail.
-VibeSys includes the bundled skills for its agents.
-
 ## About VibeSys
 
 One of VibeSys's first initiatives is **VibeServe**, which asks whether AI agents
@@ -95,65 +70,31 @@ accuracy and performance results.
 
 ## Quickstart
 
-Install Python 3.12+, Git, and [uv](https://docs.astral.sh/uv/). Agents run in
-a local Docker container, so Docker Engine must be reachable without `sudo` (add
-your user to the `docker` group). Tasks whose candidate is a container topology,
-such as the `microservices` examples, declare `docker_in_docker = true`: their
-container gets a Docker daemon of its own and needs the
-[Sysbox](https://github.com/nestybox/sysbox) runtime installed. The `slurm` environment
-with `[vibesys.agent_gpu]` also needs `bubblewrap` on Linux and on the compute nodes (see the
-[CLI reference](docs/cli-flags.md)): it confines the GPU jobs its agent starts there.
-Then install VibeSys:
+Install the optimization loop and a domain plugin from our top-level
+[`skills/`](skills/README.md) directory. In Claude Code, for example:
 
 ```bash
-uv tool install vibesys
+claude plugin marketplace add uw-syfi/vibesys
+claude plugin install vibesys@vibesys
+claude plugin install vibesys-llm-serving@vibesys
 ```
 
-Install and authenticate a supported coding-agent CLI. For Codex CLI, run
-`codex login`; see the [CLI reference](docs/cli-flags.md) for other supported
-agents.
-
-From the root of the project you want to optimize, add a named task under
-`.vibesys/tasks/`:
-
-- `.vibesys/tasks/<task>/OBJECTIVE.md` describes what to optimize and the
-  constraints the result must preserve.
-- `.vibesys/tasks/<task>/vibesys.input.toml` identifies the problem domain and
-  the programs that check correctness and benchmark performance.
-- `agent.toml` optionally selects the coding agent, model, and hardware backend.
-  Keep it untracked.
-
-For example:
-
-```toml
-[model]
-name = "gpt-5.6-sol"  # optional: each provider has a default model
-
-[agent]
-backend = "cli"
-cli_provider = "codex"
-
-```
-
-See [`examples/`](examples/) for complete objectives and manifests across data
-structures, model serving, and microservices. New examples are registered in
-[`examples/registry.toml`](examples/registry.toml); see
-[Adding an example](docs/contributing/examples.md).
-
-Run from the project root:
+Install the measurement CLI used by the skills:
 
 ```bash
-cd /path/to/my-project
-vibesys validate --task my-task
-vibesys --task my-task --max-rounds 4
+curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/cli/install.sh | sh
 ```
 
-The directory must be its Git repository root, or outside Git so VibeSys can
-initialize a repository. An existing repository needs a baseline commit and a
-clean worktree. See [Running VibeSys](docs/running-vibesys.md) for copied
-projects, examples, Docker, Modal, remote repositories, resume, and
-alternate search loops. The [CLI reference](docs/cli-flags.md) documents every
-flag. Contributor setup belongs in [`docs/contributing/development.md`](docs/contributing/development.md).
+Then ask your agent to create a task describing your system, workload, hardware,
+correctness checks, and performance benchmark, and start the optimization:
+
+```text
+/vibesys:create-task
+/vibesys:optimize <task>
+```
+
+See the [skills installation guide](skills/README.md#install) for Codex,
+`npx skills`, and domain plugins for databases, microservices, and kernels.
 
 ## Citation
 
