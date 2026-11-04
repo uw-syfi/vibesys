@@ -98,7 +98,7 @@ func (p Plan) Validate() error {
 // reads every objective from an evaluator stream, scores one of them, and names each once with a
 // direction. A job with no objectives is a single-metric one.
 func validObjectives(scored core.Metric, result task.Result, o core.Objectives) error {
-	if len(o.Metrics) == 0 && o.RelativeNoise == 0 {
+	if len(o.Metrics) == 0 && o.RelativeNoise == 0 && len(o.Noise) == 0 {
 		return nil
 	}
 	if !o.Pareto() || !result.Protocol2 {
@@ -116,6 +116,16 @@ func validObjectives(scored core.Metric, result task.Result, o core.Objectives) 
 	}
 	if !slices.Contains(o.Metrics, scored) {
 		return fmt.Errorf("the scored metric %q is not one of the objectives", scored.Name)
+	}
+	declared := map[string]bool{}
+	for _, n := range o.Noise {
+		if !seen[n.Name] || declared[n.Name] {
+			return fmt.Errorf("the noise floor of %q names no objective, or names one twice", n.Name)
+		}
+		declared[n.Name] = true
+		if !(n.RelativeNoise >= 0 && n.RelativeNoise < 1) { // false for NaN
+			return fmt.Errorf("the relative noise %v of the objective %q is not at least 0 and less than 1", n.RelativeNoise, n.Name)
+		}
 	}
 	return nil
 }

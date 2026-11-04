@@ -54,6 +54,9 @@ func anyFlowPlan(r *rand.Rand) flow.Plan {
 				Metrics:       []core.Metric{p.Metric, {Name: "ttft", Direction: pick(r, core.Maximize, core.Minimize)}},
 				RelativeNoise: pick(r, 0, 0.02),
 			}
+			if r.IntN(2) == 0 {
+				p.Objectives.Noise = []core.ObjectiveNoise{{Name: "ttft", RelativeNoise: pick(r, 0, 0.15)}}
+			}
 		}
 	} else {
 		p.Result = task.Result{JSONArgument: "--out", Field: pick(r, "ops", "ü")}

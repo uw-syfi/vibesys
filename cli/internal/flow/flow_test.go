@@ -503,6 +503,18 @@ func TestAnInvalidPlanNeverStarts(t *testing.T) {
 			p.Result = task.Result{Protocol2: true}
 			p.Objectives = core.Objectives{Metrics: []core.Metric{{Name: "a", Direction: core.Maximize}, {Name: "b", Direction: core.Minimize}}}
 		},
+		"a floor for an objective the task does not have": func(p *flow.Plan) {
+			p.Result = task.Result{Protocol2: true}
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric, {Name: "p99", Direction: core.Minimize}}, Noise: []core.ObjectiveNoise{{Name: "ttft", RelativeNoise: 0.1}}}
+		},
+		"a floor of an objective twice": func(p *flow.Plan) {
+			p.Result = task.Result{Protocol2: true}
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric, {Name: "p99", Direction: core.Minimize}}, Noise: []core.ObjectiveNoise{{Name: "p99", RelativeNoise: 0.1}, {Name: "p99", RelativeNoise: 0.1}}}
+		},
+		"a negative floor for an objective": func(p *flow.Plan) {
+			p.Result = task.Result{Protocol2: true}
+			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric, {Name: "p99", Direction: core.Minimize}}, Noise: []core.ObjectiveNoise{{Name: "p99", RelativeNoise: -0.1}}}
+		},
 		"one objective": func(p *flow.Plan) {
 			p.Result = task.Result{Protocol2: true}
 			p.Objectives = core.Objectives{Metrics: []core.Metric{p.Metric}}

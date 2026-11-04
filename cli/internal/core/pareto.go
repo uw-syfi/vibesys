@@ -20,6 +20,28 @@ type Objectives struct {
 	// RelativeNoise is the task's [pareto] relative_noise: the noise floor every objective is
 	// compared under. Zero means the task declares none, and Welch's t test decides.
 	RelativeNoise float64
+	// Noise are the objectives that declare a floor of their own, in the order the task declares
+	// them, each naming one of Metrics once. An objective not listed is compared under
+	// RelativeNoise.
+	Noise []ObjectiveNoise
+}
+
+// ObjectiveNoise is the noise floor one objective declares, overriding the task's [pareto]
+// relative_noise for it. Zero declares none for that objective.
+type ObjectiveNoise struct {
+	Name          string
+	RelativeNoise float64
+}
+
+// NoiseFor is the noise floor the named objective is compared under: its own when it declares
+// one, otherwise the task's [pareto] relative_noise.
+func (o Objectives) NoiseFor(name string) float64 {
+	for _, n := range o.Noise {
+		if n.Name == name {
+			return n.RelativeNoise
+		}
+	}
+	return o.RelativeNoise
 }
 
 // Pareto reports whether the objectives make the measurement multi-objective.
@@ -27,7 +49,7 @@ func (o Objectives) Pareto() bool { return len(o.Metrics) > 1 }
 
 // Equal reports whether two measurements were judged on the same objectives.
 func (o Objectives) Equal(p Objectives) bool {
-	return slices.Equal(o.Metrics, p.Metrics) && o.RelativeNoise == p.RelativeNoise
+	return slices.Equal(o.Metrics, p.Metrics) && o.RelativeNoise == p.RelativeNoise && slices.Equal(o.Noise, p.Noise)
 }
 
 // ObjectiveVerdict is the verdict on one objective of a multi-objective comparison.
@@ -67,7 +89,7 @@ func CombineObjectives(verdicts []ObjectiveVerdict) (VerdictKind, InconclusiveRe
 }
 
 // compareObjectives compares two non-empty sets of measurements that were all judged on the same
-// objectives, objective by objective, with Compare and the objectives' noise floor.
+// objectives, objective by objective, with Compare and each objective's noise floor.
 func compareObjectives(candidate, base []Result, o Objectives) (Verdict, []ObjectiveVerdict, error) {
 	scored := metricOf(candidate[0])
 	verdicts := make([]ObjectiveVerdict, 0, len(o.Metrics))
@@ -80,7 +102,7 @@ func compareObjectives(candidate, base []Result, o Objectives) (Verdict, []Objec
 		if err != nil {
 			return Verdict{}, nil, err
 		}
-		v, err := Compare(CompareInput{Direction: m.Direction, Candidate: c, Base: b, RelativeNoise: o.RelativeNoise})
+		v, err := Compare(CompareInput{Direction: m.Direction, Candidate: c, Base: b, RelativeNoise: o.NoiseFor(m.Name)})
 		if err != nil {
 			var f *Failure
 			if errors.As(err, &f) {

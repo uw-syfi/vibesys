@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"path"
 	"slices"
 	"sort"
@@ -383,8 +384,9 @@ type resultSection struct {
 // objectivesFile is objectives.toml.
 type objectivesFile struct {
 	Objective []struct {
-		Name      string `toml:"name"`
-		Direction string `toml:"direction"`
+		Name          string   `toml:"name"`
+		Direction     string   `toml:"direction"`
+		RelativeNoise *float64 `toml:"relative_noise"`
 	} `toml:"objective"`
 	Pareto *struct {
 		RelativeNoise float64 `toml:"relative_noise"`
@@ -503,6 +505,9 @@ func build(name string, m manifest, o objectivesFile) (Task, error) {
 		t.Objectives.RelativeNoise = o.Pareto.RelativeNoise
 		for _, a := range axes {
 			t.Objectives.Metrics = append(t.Objectives.Metrics, core.Metric{Name: a.name, Direction: a.direction})
+			if a.noise != nil {
+				t.Objectives.Noise = append(t.Objectives.Noise, core.ObjectiveNoise{Name: a.name, RelativeNoise: *a.noise})
+			}
 		}
 	}
 	return t, nil
@@ -603,6 +608,7 @@ func checkPlaceholders(c Command) error {
 type axis struct {
 	name      string
 	direction core.Direction
+	noise     *float64 // the objective's own relative_noise, nil when it declares none
 }
 
 func objectives(o objectivesFile) ([]axis, error) {
@@ -625,7 +631,15 @@ func objectives(o objectivesFile) ([]axis, error) {
 		default:
 			return nil, invalid("%s: objective %q: direction must be \"max\" or \"min\", got %q", ObjectiveName, obj.Name, obj.Direction)
 		}
-		axes = append(axes, axis{obj.Name, d})
+		if n := obj.RelativeNoise; n != nil {
+			if math.IsNaN(*n) || *n < 0 || *n >= 1 {
+				return nil, invalid("%s: objective %q: relative_noise must be at least 0 and less than 1, got %v", ObjectiveName, obj.Name, *n)
+			}
+			if o.Pareto == nil || len(o.Objective) < 2 {
+				return nil, invalid("%s: objective %q: relative_noise needs a [pareto] section and more than one objective", ObjectiveName, obj.Name)
+			}
+		}
+		axes = append(axes, axis{name: obj.Name, direction: d, noise: obj.RelativeNoise})
 	}
 	if o.Pareto != nil && (o.Pareto.RelativeNoise < 0 || o.Pareto.RelativeNoise >= 1) {
 		return nil, invalid("%s: [pareto] relative_noise must be at least 0 and less than 1, got %v", ObjectiveName, o.Pareto.RelativeNoise)

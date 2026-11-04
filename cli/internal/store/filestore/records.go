@@ -369,6 +369,9 @@ func objectivesFromMessage(field string, o *cliv1.Objectives) (core.Objectives, 
 		return core.Objectives{}, nil
 	}
 	out := core.Objectives{RelativeNoise: o.GetRelativeNoise()}
+	for _, n := range o.GetNoise() {
+		out.Noise = append(out.Noise, core.ObjectiveNoise{Name: n.GetName(), RelativeNoise: n.GetRelativeNoise()})
+	}
 	for i, m := range o.GetMetrics() {
 		d, err := wire.ToDirection(fmt.Sprintf("%s.metrics[%d].direction", field, i), m.GetDirection())
 		if err != nil {

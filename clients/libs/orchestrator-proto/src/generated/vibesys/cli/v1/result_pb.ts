@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/result.proto.
  */
 export const file_vibesys_cli_v1_result: GenFile = /*@__PURE__*/
-  fileDesc("Cht2aWJlc3lzL2NsaS92MS9yZXN1bHQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIkQKBk1ldHJpYxIMCgRuYW1lGAEgASgJEiwKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbiIrCgtPYnNlcnZhdGlvbhIMCgRuYW1lGAEgASgJEg4KBnZhbHVlcxgCIAMoASJNCgpPYmplY3RpdmVzEicKB21ldHJpY3MYASADKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSFgoOcmVsYXRpdmVfbm9pc2UYAiABKAEiOgoLQ2hlY2tSZXN1bHQSKwoIZHVyYXRpb24YASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24i0AEKDU1lYXN1cmVSZXN1bHQSJgoGbWV0cmljGAEgASgLMhYudmliZXN5cy5jbGkudjEuTWV0cmljEg8KB3NhbXBsZXMYAiADKAESMQoMb2JzZXJ2YXRpb25zGAMgAygLMhsudmliZXN5cy5jbGkudjEuT2JzZXJ2YXRpb24SFAoMY2hlY2tfam9iX2lkGAQgASgJEg0KBXZhbHVlGAUgASgBEi4KCm9iamVjdGl2ZXMYBiABKAsyGi52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVzIrEBCgtNZWFzdXJlbWVudBIOCgZjb21taXQYASABKAkSFAoMdGFza192ZXJzaW9uGAIgASgJEjsKC2Vudmlyb25tZW50GAMgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBIPCgdqb2JfaWRzGAQgAygJEi4KB21lYXN1cmUYBSABKAsyHS52aWJlc3lzLmNsaS52MS5NZWFzdXJlUmVzdWx0IqQDCgZSZXN1bHQSDgoGam9iX2lkGAEgASgJEgsKA2tleRgCIAEoCRIMCgR0YXNrGAMgASgJEhQKDHRhc2tfdmVyc2lvbhgEIAEoCRIOCgZjb21taXQYBSABKAkSFgoOc2NoZW1hX3ZlcnNpb24YBiABKA0SOwoLZW52aXJvbm1lbnQYByABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50Ei0KB21hY2hpbmUYCCABKAsyHC52aWJlc3lzLmNsaS52MS5NYWNoaW5lRmFjdHMSKQoEbG9hZBgJIAEoCzIbLnZpYmVzeXMuY2xpLnYxLk1hY2hpbmVMb2FkEi8KC3JlY29yZGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIsCgVjaGVjaxgLIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNoZWNrUmVzdWx0SAASMAoHbWVhc3VyZRgMIAEoCzIdLnZpYmVzeXMuY2xpLnYxLk1lYXN1cmVSZXN1bHRIAEIJCgdvdXRjb21lKlYKCURpcmVjdGlvbhIZChVESVJFQ1RJT05fVU5TUEVDSUZJRUQQABIWChJESVJFQ1RJT05fTUFYSU1JWkUQARIWChJESVJFQ1RJT05fTUlOSU1JWkUQAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
+  fileDesc("Cht2aWJlc3lzL2NsaS92MS9yZXN1bHQucHJvdG8SDnZpYmVzeXMuY2xpLnYxIkQKBk1ldHJpYxIMCgRuYW1lGAEgASgJEiwKCWRpcmVjdGlvbhgCIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkRpcmVjdGlvbiIrCgtPYnNlcnZhdGlvbhIMCgRuYW1lGAEgASgJEg4KBnZhbHVlcxgCIAMoASJ8CgpPYmplY3RpdmVzEicKB21ldHJpY3MYASADKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSFgoOcmVsYXRpdmVfbm9pc2UYAiABKAESLQoFbm9pc2UYAyADKAsyHi52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVOb2lzZSI2Cg5PYmplY3RpdmVOb2lzZRIMCgRuYW1lGAEgASgJEhYKDnJlbGF0aXZlX25vaXNlGAIgASgBIjoKC0NoZWNrUmVzdWx0EisKCGR1cmF0aW9uGAEgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uItABCg1NZWFzdXJlUmVzdWx0EiYKBm1ldHJpYxgBIAEoCzIWLnZpYmVzeXMuY2xpLnYxLk1ldHJpYxIPCgdzYW1wbGVzGAIgAygBEjEKDG9ic2VydmF0aW9ucxgDIAMoCzIbLnZpYmVzeXMuY2xpLnYxLk9ic2VydmF0aW9uEhQKDGNoZWNrX2pvYl9pZBgEIAEoCRINCgV2YWx1ZRgFIAEoARIuCgpvYmplY3RpdmVzGAYgASgLMhoudmliZXN5cy5jbGkudjEuT2JqZWN0aXZlcyKxAQoLTWVhc3VyZW1lbnQSDgoGY29tbWl0GAEgASgJEhQKDHRhc2tfdmVyc2lvbhgCIAEoCRI7CgtlbnZpcm9ubWVudBgDIAEoCzImLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50RmluZ2VycHJpbnQSDwoHam9iX2lkcxgEIAMoCRIuCgdtZWFzdXJlGAUgASgLMh0udmliZXN5cy5jbGkudjEuTWVhc3VyZVJlc3VsdCKkAwoGUmVzdWx0Eg4KBmpvYl9pZBgBIAEoCRILCgNrZXkYAiABKAkSDAoEdGFzaxgDIAEoCRIUCgx0YXNrX3ZlcnNpb24YBCABKAkSDgoGY29tbWl0GAUgASgJEhYKDnNjaGVtYV92ZXJzaW9uGAYgASgNEjsKC2Vudmlyb25tZW50GAcgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBItCgdtYWNoaW5lGAggASgLMhwudmliZXN5cy5jbGkudjEuTWFjaGluZUZhY3RzEikKBGxvYWQYCSABKAsyGy52aWJlc3lzLmNsaS52MS5NYWNoaW5lTG9hZBIvCgtyZWNvcmRlZF9hdBgKIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoFY2hlY2sYCyABKAsyGy52aWJlc3lzLmNsaS52MS5DaGVja1Jlc3VsdEgAEjAKB21lYXN1cmUYDCABKAsyHS52aWJlc3lzLmNsaS52MS5NZWFzdXJlUmVzdWx0SABCCQoHb3V0Y29tZSpWCglEaXJlY3Rpb24SGQoVRElSRUNUSU9OX1VOU1BFQ0lGSUVEEAASFgoSRElSRUNUSU9OX01BWElNSVpFEAESFgoSRElSRUNUSU9OX01JTklNSVpFEAJCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
 
 /**
  * @generated from message vibesys.cli.v1.Metric
@@ -85,6 +85,15 @@ export type Objectives = Message<"vibesys.cli.v1.Objectives"> & {
    * @generated from field: double relative_noise = 2;
    */
   relativeNoise: number;
+
+  /**
+   * The objectives that declare a relative_noise of their own, which overrides the one above for
+   * that objective (zero is a floor of none). An objective absent here uses relative_noise. Each
+   * names an objective of metrics, once.
+   *
+   * @generated from field: repeated vibesys.cli.v1.ObjectiveNoise noise = 3;
+   */
+  noise: ObjectiveNoise[];
 };
 
 /**
@@ -93,6 +102,31 @@ export type Objectives = Message<"vibesys.cli.v1.Objectives"> & {
  */
 export const ObjectivesSchema: GenMessage<Objectives> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_result, 2);
+
+/**
+ * ObjectiveNoise is the noise floor one objective is compared under, set in the task's
+ * objectives.toml as that objective's relative_noise.
+ *
+ * @generated from message vibesys.cli.v1.ObjectiveNoise
+ */
+export type ObjectiveNoise = Message<"vibesys.cli.v1.ObjectiveNoise"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: double relative_noise = 2;
+   */
+  relativeNoise: number;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.ObjectiveNoise.
+ * Use `create(ObjectiveNoiseSchema)` to create a new message.
+ */
+export const ObjectiveNoiseSchema: GenMessage<ObjectiveNoise> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_result, 3);
 
 /**
  * CheckResult is a passed correctness check. A failed check saves no result: its job is `failed`
@@ -112,7 +146,7 @@ export type CheckResult = Message<"vibesys.cli.v1.CheckResult"> & {
  * Use `create(CheckResultSchema)` to create a new message.
  */
 export const CheckResultSchema: GenMessage<CheckResult> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_result, 3);
+  messageDesc(file_vibesys_cli_v1_result, 4);
 
 /**
  * MeasureResult is the official measurement of a commit.
@@ -165,7 +199,7 @@ export type MeasureResult = Message<"vibesys.cli.v1.MeasureResult"> & {
  * Use `create(MeasureResultSchema)` to create a new message.
  */
 export const MeasureResultSchema: GenMessage<MeasureResult> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_result, 4);
+  messageDesc(file_vibesys_cli_v1_result, 5);
 
 /**
  * Measurement is a commit's measurements of one kind pooled into one: a measure job that tops up
@@ -210,7 +244,7 @@ export type Measurement = Message<"vibesys.cli.v1.Measurement"> & {
  * Use `create(MeasurementSchema)` to create a new message.
  */
 export const MeasurementSchema: GenMessage<Measurement> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_result, 5);
+  messageDesc(file_vibesys_cli_v1_result, 6);
 
 /**
  * Result is one saved outcome of a job. A result is immutable once saved.
@@ -297,7 +331,7 @@ export type Result = Message<"vibesys.cli.v1.Result"> & {
  * Use `create(ResultSchema)` to create a new message.
  */
 export const ResultSchema: GenMessage<Result> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_result, 6);
+  messageDesc(file_vibesys_cli_v1_result, 7);
 
 /**
  * Direction says which way a metric improves.
