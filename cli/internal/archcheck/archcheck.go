@@ -269,8 +269,8 @@ var testRules = map[string][]string{
 
 	// The leases' contract suite, and the places a test of one compares it with.
 	"internal/lease/fakelease":  {"internal/lease/leasetest"},
-	"internal/lease/locallease": {"internal/lease/leasetest"},
-	"internal/lease/hostlease":  {"internal/lease/leasetest", "internal/lease/locallease"},
+	"internal/lease/locallease": {"internal/lease/leasetest", "internal/runtimedir"},
+	"internal/lease/hostlease":  {"internal/lease/leasetest", "internal/lease/locallease", "internal/runtimedir"},
 	"internal/lease/kubelease":  {"internal/lease/kubelease/kubefake", "internal/lease/leasetest"},
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lease"
 	"github.com/uw-syfi/vibesys/cli/internal/lease/leasetest"
+	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 )
 
 // world is a directory of leases. Each daemon opens its own lock files, as a daemon of its own
@@ -94,6 +95,7 @@ func TestABadKeyIsRefused(t *testing.T) {
 const (
 	roleVar = "VIBESYS_LOCALLEASE_TEST_ROLE"
 	dirVar  = "VIBESYS_LOCALLEASE_TEST_DIR"
+	keyVar  = "VIBESYS_LOCALLEASE_TEST_KEY"
 )
 
 func TestMain(m *testing.M) {
@@ -104,7 +106,7 @@ func TestMain(m *testing.M) {
 }
 
 func holdForTest() int {
-	l, err := Dir{Path: os.Getenv(dirVar)}.Acquire(context.Background(), "machine", core.LeaseHolder{
+	l, err := Dir{Path: os.Getenv(dirVar)}.Acquire(context.Background(), lease.Key(os.Getenv(keyVar)), core.LeaseHolder{
 		User: "other", Host: "host-b", PID: os.Getpid(), Job: "their-measure", Since: time.Unix(1_800_000_000, 0),
 	})
 	if err != nil {
@@ -126,12 +128,12 @@ type holderProc struct {
 }
 
 // startHolder starts another process that takes the lease, and returns once it holds it.
-func startHolder(t *testing.T, dir string) holderProc {
+func startHolder(t *testing.T, dir string, key lease.Key) holderProc {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	t.Cleanup(cancel)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^$")
-	cmd.Env = append(os.Environ(), roleVar+"=holder", dirVar+"="+dir)
+	cmd.Env = append(os.Environ(), roleVar+"=holder", dirVar+"="+dir, keyVar+"="+string(key))
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -155,12 +157,37 @@ func startHolder(t *testing.T, dir string) holderProc {
 // told the first's name and pid, while the first holds it, and takes it once the first gives it
 // back or is killed without a word.
 func TestTwoProcessesTakeTurns(t *testing.T) {
+	takeTurns(t, Dir{Path: filepath.Join(t.TempDir(), "leases")}, "machine")
+}
+
+// TestTwoProcessesTakeTurnsInThisMachinesLeases has two processes of this build contend in the
+// directory of leases this machine's daemons resolve, which is on local disk, for a key of the
+// test's own.
+func TestTwoProcessesTakeTurnsInThisMachinesLeases(t *testing.T) {
+	path, err := runtimedir.ResolveLeases(runtimedir.System())
+	if err != nil {
+		t.Fatalf("this machine has no directory of leases: %v", err)
+	}
+	if network, err := runtimedir.System().IsNetwork(filepath.Dir(path)); err != nil || network {
+		t.Fatalf("the directory of leases %s is on a network file system (%v, %v)", path, network, err)
+	}
+	key := lease.Key("test-" + strconv.Itoa(os.Getpid()))
+	dir := Dir{Path: path}
+	t.Cleanup(func() { _ = os.Remove(dir.file(key)) })
+	t.Logf("contending in %s", path)
+	takeTurns(t, dir, key)
+}
+
+// takeTurns has two real processes contend for one lease: the second is refused, told the first's
+// name and pid, while the first holds it, and takes it once the first gives it back or is killed
+// without a word.
+func takeTurns(t *testing.T, dir Dir, key lease.Key) {
+	t.Helper()
 	for _, end := range []string{"released", "killed"} {
 		t.Run(end, func(t *testing.T) {
-			dir := Dir{Path: filepath.Join(t.TempDir(), "leases")}
-			other := startHolder(t, dir.Path)
+			other := startHolder(t, dir.Path, key)
 			me := core.LeaseHolder{User: "me", Host: "host-a", PID: os.Getpid(), Job: "my-measure"}
-			_, err := dir.Acquire(context.Background(), "machine", me)
+			_, err := dir.Acquire(context.Background(), key, me)
 			var held *lease.HeldError
 			if !errors.As(err, &held) {
 				t.Fatalf("the lease another process holds was not refused: %v", err)
@@ -180,14 +207,14 @@ func TestTwoProcessesTakeTurns(t *testing.T) {
 				}
 				_ = other.cmd.Wait()
 			}
-			l, err := dir.Acquire(context.Background(), "machine", me)
+			l, err := dir.Acquire(context.Background(), key, me)
 			if err != nil {
 				t.Fatalf("the lease was not given back when the other process was %s: %v", end, err)
 			}
 			defer l.Release(context.Background())
 			// The other process may take it again only once this one gives it back.
 			cmd := exec.Command(os.Args[0], "-test.run=^$")
-			cmd.Env = append(os.Environ(), roleVar+"=holder", dirVar+"="+dir.Path)
+			cmd.Env = append(os.Environ(), roleVar+"=holder", dirVar+"="+dir.Path, keyVar+"="+string(key))
 			out, _ := cmd.Output()
 			if !strings.HasPrefix(string(out), "refused:") || !strings.Contains(string(out), "pid "+strconv.Itoa(os.Getpid())) {
 				t.Fatalf("another process was not refused the lease this one holds: %q", out)

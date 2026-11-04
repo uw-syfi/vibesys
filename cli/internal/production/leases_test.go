@@ -1,6 +1,7 @@
 package production
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,11 +12,15 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/lease/kubelease"
 	"github.com/uw-syfi/vibesys/cli/internal/lease/locallease"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
+	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 )
 
 // test-isolation: leasingOf is the wiring from the operator config to where the daemon leases what
 // its jobs hold alone, which RunDaemon reaches only with a real runtime directory and index.
+
+// leasesDir is this machine's directory of leases, as RunDaemon resolves it.
+const leasesDir = "/run/lock/vibesys-leases"
 
 // configs are operator configs of every placement kind, alone and together, with and without the
 // resources a placement gives.
@@ -60,7 +65,7 @@ func TestEveryResourceAMeasureHoldsAloneIsLeasedWhereItIs(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		book := p.leasingOf(op, claims, clock.System{}, nil).Book
+		book := p.leasingOf(op, leasesDir, claims, clock.System{}, nil).Book
 		measure := func(env core.EnvironmentKind, placement string) []schedule.Claim {
 			return s.Demand.Claims(core.Job{Spec: core.JobSpec{Environment: env, Placement: placement, Settings: core.MeasureSettings{}}})
 		}
@@ -81,7 +86,7 @@ func TestEveryResourceAMeasureHoldsAloneIsLeasedWhereItIs(t *testing.T) {
 			}
 		}
 	}
-	if h := p.leasingOf(parse(t, ""), nil, clock.System{}, nil).Holder; h.PID <= 0 || h.User == "" {
+	if h := p.leasingOf(parse(t, ""), leasesDir, nil, clock.System{}, nil).Holder; h.PID <= 0 || h.User == "" {
 		t.Fatalf("the daemon is named %+v", h)
 	}
 }
@@ -89,8 +94,10 @@ func TestEveryResourceAMeasureHoldsAloneIsLeasedWhereItIs(t *testing.T) {
 // wantPlace is where a resource of a config of the table is leased, said by hand.
 func wantPlace(t *testing.T, text, resource string) (lease.Place, bool) {
 	t.Helper()
-	here := lease.Place{Leases: locallease.Dir{Path: locallease.DefaultDir}, Key: "machine"}
-	hostB := lease.Place{Leases: hostlease.Host{Shell: remote.SSH{Host: "host-b", Program: []string{"ssh"}}, Dir: locallease.DefaultDir}, Key: "machine"}
+	here := lease.Place{Leases: locallease.Dir{Path: leasesDir}, Key: "machine"}
+	hostB := lease.Place{Leases: hostlease.Host{
+		Shell: remote.SSH{Host: "host-b", Program: []string{"ssh"}}, Parents: runtimedir.LeaseParents, DirName: "vibesys-leases", NetworkTypes: runtimedir.NetworkMagics(),
+	}, Key: "machine"}
 	switch {
 	case resource == string(hostResource), strings.Contains(text, "kind = \"local\"") && strings.HasPrefix(resource, "placement:a"),
 		resource == "placement:default", text == configs[3] && resource == "placement:b":
@@ -117,7 +124,8 @@ func samePlace(a, b lease.Place) bool {
 		return ok && x == y
 	case hostlease.Host:
 		y, ok := b.Leases.(hostlease.Host)
-		return ok && x.Dir == y.Dir && x.Shell.(remote.SSH).Host == y.Shell.(remote.SSH).Host
+		return ok && x.Dir == y.Dir && x.Shell.(remote.SSH).Host == y.Shell.(remote.SSH).Host && x.DirName == y.DirName &&
+			slices.Equal(x.Parents, y.Parents) && slices.Equal(x.NetworkTypes, y.NetworkTypes)
 	case kubelease.Cluster:
 		y, ok := b.Leases.(kubelease.Cluster)
 		kx, ky := x.API.(kubelease.Kubectl), y.API.(kubelease.Kubectl)

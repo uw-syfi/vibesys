@@ -137,7 +137,7 @@ message HeldLease {
   string task = 2;
   // The resource the job holds alone, such as placement:default.
   string resource = 3 [(buf.validate.field).string.min_len = 1];
-  // The lease's name where it is kept, and that place, such as "this machine (/var/tmp/vibesys-leases)".
+  // The lease's name where it is kept, and that place, such as "this machine (/run/lock/vibesys-leases)".
   string key = 4 [(buf.validate.field).string.min_len = 1];
   string where = 5;
   google.protobuf.Timestamp since = 6;

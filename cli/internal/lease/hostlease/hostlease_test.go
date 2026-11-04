@@ -2,8 +2,12 @@ package hostlease_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -12,6 +16,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/lease/leasetest"
 	"github.com/uw-syfi/vibesys/cli/internal/lease/locallease"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
+	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 )
 
 // world reaches this machine through the local shell, which runs the same script ssh would run on
@@ -80,5 +85,69 @@ func TestALinkIsNeverWrittenThrough(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(victim); string(b) != "keep me" {
 		t.Fatalf("the file a link pointed at was written: %q", b)
+	}
+}
+
+// fsType is the statfs type of the file system a path is on, as stat -f prints it on the machine.
+func fsType(t *testing.T, path string) uint32 {
+	t.Helper()
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		t.Fatal(err)
+	}
+	return uint32(st.Type)
+}
+
+// A machine reached over ssh finds its directory of leases as its own daemons do: in the first
+// parent that is sticky, writable by everyone and on local disk, and none on a file system of the
+// network types.
+func TestTheHostFindsItsLeasesAsItsDaemonsDo(t *testing.T) {
+	root := t.TempDir()
+	missing, private, shared := filepath.Join(root, "missing"), filepath.Join(root, "private"), filepath.Join(root, "shared")
+	for p, mode := range map[string]os.FileMode{private: 0o755, shared: os.ModeSticky | 0o777} {
+		if err := os.Mkdir(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(p, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	host := hostlease.Host{Shell: remote.Local{}, Parents: []string{missing, private, shared}, DirName: "vibesys-leases"}
+	l, err := host.Acquire(context.Background(), "machine", core.LeaseHolder{User: "guest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release(context.Background())
+	_, err = locallease.Dir{Path: filepath.Join(shared, "vibesys-leases")}.Acquire(context.Background(), "machine", core.LeaseHolder{User: "machine"})
+	var held *lease.HeldError
+	if !errors.As(err, &held) || held.Holder.User != "guest" {
+		t.Fatalf("the host's daemon was not refused the lease the guest holds in %s: %v", shared, err)
+	}
+
+	host.NetworkTypes = []uint32{0x6969, fsType(t, shared)}
+	_, err = host.Acquire(context.Background(), "other", core.LeaseHolder{User: "guest"})
+	if err == nil || !strings.Contains(err.Error(), shared+" is on a network file system") || !strings.Contains(err.Error(), private+" is not there, or not sticky") {
+		t.Fatalf("a host whose only shared parent is on a network file system gave %v", err)
+	}
+}
+
+// The machine's daemons and its guests over ssh find the same directory of leases on this machine.
+func TestThisMachineAndItsGuestsFindTheSameLeases(t *testing.T) {
+	path, err := runtimedir.ResolveLeases(runtimedir.System())
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := lease.Key("test-" + strconv.Itoa(os.Getpid()))
+	t.Cleanup(func() { _ = os.Remove(filepath.Join(path, string(key)+".lock")) })
+	guest := hostlease.Host{Shell: remote.Local{}, Parents: runtimedir.LeaseParents, DirName: runtimedir.LeaseDirName, NetworkTypes: runtimedir.NetworkMagics()}
+	l, err := guest.Acquire(context.Background(), key, core.LeaseHolder{User: "guest"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Release(context.Background())
+	_, err = locallease.Dir{Path: path}.Acquire(context.Background(), key, core.LeaseHolder{User: "machine"})
+	var held *lease.HeldError
+	if !errors.As(err, &held) || held.Holder.User != "guest" {
+		t.Fatalf("this machine's daemon was not refused, in %s, the lease its guest holds: %v", path, err)
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/lease/locallease"
 	"github.com/uw-syfi/vibesys/cli/internal/neighbors"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
+	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 )
 
@@ -33,14 +34,15 @@ import (
 // no lease of their own: they are a machine's, whose lease a job that holds them alone takes. A
 // Slurm placement leases nothing, since Slurm's exclusive allocation arbitrates its nodes.
 //
-// claims are what the resources of each placement claim, by placement name, as the scheduler has
-// them.
-func (p Process) leasingOf(op *cliv1.OperatorConfig, claims map[string][]core.Claim, clk clock.System, logf func(string, ...any)) app.Leasing {
+// leasesDir is this machine's directory of leases (runtimedir.ResolveLeases); a machine reached over
+// ssh finds its own in the same order. claims are what the resources of each placement claim, by
+// placement name, as the scheduler has them.
+func (p Process) leasingOf(op *cliv1.OperatorConfig, leasesDir string, claims map[string][]core.Claim, clk clock.System, logf func(string, ...any)) app.Leasing {
 	holder := core.LeaseHolder{User: userName(p.UID), PID: os.Getpid()}
 	if host, err := os.Hostname(); err == nil {
 		holder.Host = host
 	}
-	here := locallease.Dir{Path: locallease.DefaultDir}
+	here := locallease.Dir{Path: leasesDir}
 	book := lease.Map{string(hostResource): {Leases: here, Key: machineKey}}
 	for _, name := range slices.Sorted(maps.Keys(op.GetPlacements())) {
 		pl := op.GetPlacements()[name]
@@ -52,7 +54,7 @@ func (p Process) leasingOf(op *cliv1.OperatorConfig, claims map[string][]core.Cl
 		case cliv1.PlacementKind_PLACEMENT_KIND_SSH:
 			r := pl.GetRemote()
 			ssh := remote.SSH{Host: r.GetHost(), Program: orDefault(r.GetSshCommand(), "ssh")}
-			shell, machine = ssh, hostlease.Host{Shell: ssh, Dir: locallease.DefaultDir}
+			shell, machine = ssh, remoteLeases(ssh)
 		case cliv1.PlacementKind_PLACEMENT_KIND_SLURM, cliv1.PlacementKind_PLACEMENT_KIND_UNSPECIFIED:
 			continue
 		}
@@ -71,6 +73,14 @@ func (p Process) leasingOf(op *cliv1.OperatorConfig, claims map[string][]core.Cl
 		}
 	}
 	return app.Leasing{Book: book, Holder: holder}
+}
+
+// remoteLeases are the leases of a machine reached over ssh, in the directory its own daemons
+// resolve: the same parents in the same order, judged by the same network file system types.
+func remoteLeases(shell remote.Shell) hostlease.Host {
+	return hostlease.Host{
+		Shell: shell, Parents: runtimedir.LeaseParents, DirName: runtimedir.LeaseDirName, NetworkTypes: runtimedir.NetworkMagics(),
+	}
 }
 
 // machineKey and clusterKey are the names of the leases of a machine and of a Kubernetes cluster.

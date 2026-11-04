@@ -571,7 +571,7 @@ type HeldLease struct {
 	Task  string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
 	// The resource the job holds alone, such as placement:default.
 	Resource string `protobuf:"bytes,3,opt,name=resource,proto3" json:"resource,omitempty"`
-	// The lease's name where it is kept, and that place, such as "this machine (/var/tmp/vibesys-leases)".
+	// The lease's name where it is kept, and that place, such as "this machine (/run/lock/vibesys-leases)".
 	Key           string                 `protobuf:"bytes,4,opt,name=key,proto3" json:"key,omitempty"`
 	Where         string                 `protobuf:"bytes,5,opt,name=where,proto3" json:"where,omitempty"`
 	Since         *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=since,proto3" json:"since,omitempty"`
