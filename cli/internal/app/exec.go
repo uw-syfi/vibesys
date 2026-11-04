@@ -346,9 +346,7 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 		return nil, true, nil
 	}
 	spec := job.Spec
-	if spec.Environment == core.EnvironmentAuto {
-		spec.Environment = a.cfg.DefaultEnvironment
-	}
+	spec.Environment = queuedEnvironment(spec)
 	if c, ok := spec.Settings.(core.CommandSettings); ok && c.Timeout <= 0 {
 		c.Timeout = a.cfg.DefaultTimeout
 		spec.Settings = c

@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -183,5 +184,102 @@ func TestAMeasureHoldsItsPlacementAndClusterAloneWhileOtherPlacementsRun(t *test
 	}{{beside, "c1"}, {onB, "b2"}, {onA, "a2"}} {
 		w.gates.Release(j.gate)
 		awaitState(t, a, j.job.ID, core.JobSucceeded)
+	}
+}
+
+// withDockerfile gives the task a Dockerfile, so its check and measure run in docker
+// (core.ChooseEnvironment).
+func (w *world) withDockerfile(check, bench []string) {
+	tree := tasktest.Scripted("task", check, bench)
+	tree[task.TasksDir+"/task/Dockerfile"] = task.File{Data: []byte("FROM scratch\n")}
+	w.tasks.Put(string(call.Scope.Repository()), commit, tree)
+}
+
+// A command job that leaves its environment to the task runs where the task's check and measure
+// run, so on a task with a Dockerfile it is a docker job on its placement, and it waits behind a
+// measure that holds that placement alone like any other job there. Before, it ran on the host,
+// without the task's image, and claimed only the host's slot, so it started beside the measure
+// and its load fell into the measure's samples.
+func TestACommandOfNoEnvironmentRunsWhereItsTaskRunsAndWaitsBehindAMeasure(t *testing.T) {
+	w := newWorld(t)
+	w.withDockerfile(passes, []string{"mark", "benching", ";", "hold", "bench", ";", "emit", `{"ops": 7.5}`})
+	w.scheduler = app.Scheduler{
+		Resources: []schedule.Resource{{ID: schedule.PlacementOf("local"), Capacity: 2}, {ID: "host", Capacity: 2}},
+		Demand:    schedule.PlacementDemand{Host: "host"},
+	}
+	docker := fakeenv.New(core.EnvironmentDocker, w.gates, fakeenv.WithFiles(w.files))
+	envs := &targetRecorder{Environments: fakeenv.Environments{core.EnvironmentDocker: docker, core.EnvironmentHost: w.env}}
+	a := newPlacementApp(w, []core.PlacementOffer{{Name: "local"}}, envs)
+	ctx := ctxFor(t)
+
+	measured, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: commit, Placement: "local", Settings: core.MeasureSettings{Samples: 1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !w.gates.Reached(ctx, "benching") {
+		t.Fatal("the measure did not start")
+	}
+	out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: commit, Placement: "local", Settings: core.CommandSettings{
+		Argv: []string{"mark", "started", ";", "exit", "0"},
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := out.Job
+	if cmd.Spec.Environment != core.EnvironmentDocker || cmd.Spec.Placement != "local" {
+		t.Fatalf("the command was queued in %q on %q; want docker on local, where the task's measure runs", cmd.Spec.Environment, cmd.Spec.Placement)
+	}
+	if wait := a.Waits(scope, []core.JobID{cmd.ID})[cmd.ID]; wait.Kind != core.WaitHeldExclusively || len(wait.Holders) != 1 || wait.Holders[0].Job != measured.Job.ID {
+		t.Fatalf("the command waits as %+v; want behind the measure that holds local alone", wait)
+	}
+	w.gates.Release("bench")
+	awaitState(t, a, measured.Job.ID, core.JobSucceeded)
+	if got := awaitFinal(t, a, cmd.ID); got.State != core.JobSucceeded {
+		t.Fatalf("the command ended %s", got.State)
+	}
+	if n := w.ran("started"); n != 0 {
+		t.Errorf("the command ran %d times on the host", n)
+	}
+}
+
+// For every task setup and every environment a submission can ask for, a command job is queued in
+// the environment and on the placement a check of the same submission is: a command never runs
+// somewhere the task's own jobs do not. A host job records no placement, whatever was asked.
+func TestACommandJobIsPlacedAsACheckOfTheSameSubmissionIs(t *testing.T) {
+	for _, dockerfile := range []bool{false, true} {
+		for _, requested := range []core.EnvironmentKind{core.EnvironmentAuto, core.EnvironmentHost, core.EnvironmentDocker} {
+			for _, placement := range []string{"", "local"} {
+				t.Run(fmt.Sprintf("dockerfile=%t/env=%q/placement=%q", dockerfile, requested, placement), func(t *testing.T) {
+					w := newWorld(t)
+					if dockerfile {
+						w.withDockerfile(passes, scores)
+					} else {
+						w.withTask(passes, scores)
+					}
+					envs := &targetRecorder{Environments: fakeenv.Environments{
+						core.EnvironmentDocker: fakeenv.New(core.EnvironmentDocker, w.gates), core.EnvironmentHost: w.env,
+					}}
+					a := newPlacementApp(w, []core.PlacementOffer{{Name: "local"}}, envs)
+					spec := func(settings core.Settings) core.JobSpec {
+						return core.JobSpec{Commit: commit, Environment: requested, Placement: placement, Settings: settings}
+					}
+					check, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec(core.CheckSettings{})})
+					if err != nil {
+						t.Fatal(err)
+					}
+					cmd, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: spec(core.CommandSettings{Argv: []string{"exit", "0"}})})
+					if err != nil {
+						t.Fatal(err)
+					}
+					want, got := check.Job.Spec, cmd.Job.Spec
+					if got.Environment != want.Environment || got.Placement != want.Placement {
+						t.Errorf("the command is queued in %q on %q, the check in %q on %q", got.Environment, got.Placement, want.Environment, want.Placement)
+					}
+					if got.Environment == core.EnvironmentHost && got.Placement != "" {
+						t.Errorf("a host command records the placement %q", got.Placement)
+					}
+				})
+			}
+		}
 	}
 }
