@@ -11,7 +11,7 @@ import type { Failure } from "./failure_pb.js";
 import { file_vibesys_cli_v1_failure } from "./failure_pb.js";
 import type { FrontierDecision, FrontierEntry } from "./frontier_pb.js";
 import { file_vibesys_cli_v1_frontier } from "./frontier_pb.js";
-import type { Job, JobKind, JobSpec, JobState, JobWait } from "./job_pb.js";
+import type { Job, JobKind, JobSpec, JobState, JobWait, LeaseHolder } from "./job_pb.js";
 import { file_vibesys_cli_v1_job } from "./job_pb.js";
 import type { MachineDaemon } from "./machine_pb.js";
 import { file_vibesys_cli_v1_machine } from "./machine_pb.js";
@@ -31,7 +31,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/service.proto.
  */
 export const file_vibesys_cli_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NsaS92MS9zZXJ2aWNlLnByb3RvEg52aWJlc3lzLmNsaS52MSJfCgtDYWxsQ29udGV4dBISCgpyZXBvc2l0b3J5GAEgASgJEgwKBHRhc2sYAiABKAkSDgoGcnVuX2lkGAMgASgJEg8KB2hhcm5lc3MYBCABKAkSDQoFYWdlbnQYBSABKAkibQoMSGVsbG9SZXF1ZXN0EiwKCWNvbXBvbmVudBgBIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkNvbXBvbmVudBIvCgh2ZXJzaW9ucxgCIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkJ1aWxkVmVyc2lvbnMidgoNSGVsbG9SZXNwb25zZRIvCgh2ZXJzaW9ucxgBIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkJ1aWxkVmVyc2lvbnMSNAoNY29tcGF0aWJpbGl0eRgCIAEoDjIdLnZpYmVzeXMuY2xpLnYxLkNvbXBhdGliaWxpdHkiDwoNU3RhdHVzUmVxdWVzdCLAAgoOU3RhdHVzUmVzcG9uc2USLwoIdmVyc2lvbnMYASABKAsyHS52aWJlc3lzLmNsaS52MS5CdWlsZFZlcnNpb25zEgsKA3BpZBgCIAEoDRIuCgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgtxdWV1ZWRfam9icxgEIAEoDRIUCgxydW5uaW5nX2pvYnMYBSABKA0SNgoLZW52aXJvbm1lbnQYBiADKAsyIS52aWJlc3lzLmNsaS52MS5Jbmhlcml0ZWRWYXJpYWJsZRIaChJjaGVja291dF9kaXJlY3RvcnkYByABKAkSDwoHc2FuZGJveBgIIAEoCBIwCglzYW5kYm94ZXMYCSADKAsyHS52aWJlc3lzLmNsaS52MS5NYWNoaW5lRGFlbW9uIj8KEUluaGVyaXRlZFZhcmlhYmxlEgwKBG5hbWUYASABKAkSEgoFdmFsdWUYAiABKAlIAIgBAUIICgZfdmFsdWUiDQoLU3RvcFJlcXVlc3QiDgoMU3RvcFJlc3BvbnNlIi0KF0ZvcmdldFJlcG9zaXRvcnlSZXF1ZXN0EhIKCnJlcG9zaXRvcnkYASABKAkiNwoYRm9yZ2V0UmVwb3NpdG9yeVJlc3BvbnNlEg0KBXRhc2tzGAEgAygJEgwKBGxlZnQYAiADKAkikgEKDVN1Ym1pdFJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0EiUKBHNwZWMYAiABKAsyFy52aWJlc3lzLmNsaS52MS5Kb2JTcGVjEhAKCG5vX2NhY2hlGAMgASgIEgwKBG5vdGUYBCABKAkSDAoEcGxhbhgFIAEoDSJqCg5TdWJtaXRSZXNwb25zZRIgCgNqb2IYASABKAsyEy52aWJlc3lzLmNsaS52MS5Kb2ISNgoLZGlzcG9zaXRpb24YAiABKA4yIS52aWJlc3lzLmNsaS52MS5TdWJtaXREaXNwb3NpdGlvbiJNCgxXYXRjaFJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg8KB2pvYl9pZHMYAiADKAkiMQoNV2F0Y2hSZXNwb25zZRIgCgNqb2IYASABKAsyEy52aWJlc3lzLmNsaS52MS5Kb2IihQEKC1dhaXRSZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIPCgdqb2JfaWRzGAIgAygJEgsKA2FueRgDIAEoCBIqCgd0aW1lb3V0GAQgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uImsKDFdhaXRSZXNwb25zZRIiCgNqb2IYASABKAsyEy52aWJlc3lzLmNsaS52MS5Kb2JIABIuCgdvdXRjb21lGAIgASgLMhsudmliZXN5cy5jbGkudjEuV2FpdE91dGNvbWVIAEIHCgVldmVudCJzCgtXYWl0T3V0Y29tZRItCgRraW5kGAEgASgOMh8udmliZXN5cy5jbGkudjEuV2FpdE91dGNvbWVLaW5kEhIKCmRlY2lkZWRfYnkYAiABKAkSIQoEam9icxgDIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYiJdCg1DYW5jZWxSZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZqb2JfaWQYAiABKAkSDgoGcmVhc29uGAMgASgJIjIKDkNhbmNlbFJlc3BvbnNlEiAKA2pvYhgBIAEoCzITLnZpYmVzeXMuY2xpLnYxLkpvYiJcCg5BZGROb3RlUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSDgoGam9iX2lkGAIgASgJEgwKBHRleHQYAyABKAkiMwoPQWRkTm90ZVJlc3BvbnNlEiAKA2pvYhgBIAEoCzITLnZpYmVzeXMuY2xpLnYxLkpvYiK3AQoPTGlzdEpvYnNSZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZjb21taXQYAiABKAkSKAoGc3RhdGVzGAMgAygOMhgudmliZXN5cy5jbGkudjEuSm9iU3RhdGUSJQoEa2luZBgEIAEoDjIXLnZpYmVzeXMuY2xpLnYxLkpvYktpbmQSFQoNbm90ZV9jb250YWlucxgFIAEoCSJdChBMaXN0Sm9ic1Jlc3BvbnNlEiEKBGpvYnMYASADKAsyEy52aWJlc3lzLmNsaS52MS5Kb2ISJgoFd2FpdHMYAiADKAsyFy52aWJlc3lzLmNsaS52MS5Kb2JXYWl0Im8KD1JlYWRMb2dzUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSDgoGam9iX2lkGAIgASgJEg4KBm9mZnNldBgDIAEoBBIOCgZmb2xsb3cYBCABKAgiNQoQUmVhZExvZ3NSZXNwb25zZRIMCgRkYXRhGAEgASgMEhMKC25leHRfb2Zmc2V0GAIgASgEIksKC1Nob3dSZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZjb21taXQYAiABKAkiagoMU2hvd1Jlc3BvbnNlEicKB3Jlc3VsdHMYASADKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHQSMQoMbWVhc3VyZW1lbnRzGAIgAygLMhsudmliZXN5cy5jbGkudjEuTWVhc3VyZW1lbnQiXwoOQ29tcGFyZVJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg4KBmNvbW1pdBgCIAEoCRIPCgdhZ2FpbnN0GAMgASgJIkEKD0NvbXBhcmVSZXNwb25zZRIuCgpjb21wYXJpc29uGAEgASgLMhoudmliZXN5cy5jbGkudjEuQ29tcGFyaXNvbiJOCg5Qcm9tb3RlUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSDgoGY29tbWl0GAIgASgJIrIBCg9Qcm9tb3RlUmVzcG9uc2USLQoIcHJvbW90ZWQYASABKAsyGS52aWJlc3lzLmNsaS52MS5Qcm9tb3Rpb25IABIxCgdyZWZ1c2VkGAIgASgLMh4udmliZXN5cy5jbGkudjEuUHJvbW90ZVJlZnVzYWxIABIyCghmcm9udGllchgDIAEoCzIgLnZpYmVzeXMuY2xpLnYxLkZyb250aWVyRGVjaXNpb25CCQoHb3V0Y29tZSJUChRBZGRUb0Zyb250aWVyUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSDgoGY29tbWl0GAIgASgJIksKFUFkZFRvRnJvbnRpZXJSZXNwb25zZRIyCghkZWNpc2lvbhgBIAEoCzIgLnZpYmVzeXMuY2xpLnYxLkZyb250aWVyRGVjaXNpb24iQwoTTGlzdEZyb250aWVyUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQiRgoUTGlzdEZyb250aWVyUmVzcG9uc2USLgoHbWVtYmVycxgBIAMoCzIdLnZpYmVzeXMuY2xpLnYxLkZyb250aWVyRW50cnkiRAoUQ3VycmVudFJlc3VsdFJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0IoMBChVDdXJyZW50UmVzdWx0UmVzcG9uc2USMAoHY3VycmVudBgBIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkN1cnJlbnRSZXN1bHRIABIvCgRub25lGAIgASgLMh8udmliZXN5cy5jbGkudjEuTm9DdXJyZW50UmVzdWx0SABCBwoFc3RhdGUiXgoRQ3JlYXRlUGxhblJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg0KBXRpdGxlGAIgASgJEgwKBGJvZHkYAyABKAkiOAoSQ3JlYXRlUGxhblJlc3BvbnNlEiIKBHBsYW4YASABKAsyFC52aWJlc3lzLmNsaS52MS5QbGFuInwKEExpc3RQbGFuc1JlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0EiwKCHN0YXR1c2VzGAIgAygOMhoudmliZXN5cy5jbGkudjEuUGxhblN0YXR1cxIMCgR0ZXh0GAMgASgJIjgKEUxpc3RQbGFuc1Jlc3BvbnNlEiMKBXBsYW5zGAEgAygLMhQudmliZXN5cy5jbGkudjEuUGxhbiJPCg9WaWV3UGxhblJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg4KBm51bWJlchgCIAEoDSI6ChBWaWV3UGxhblJlc3BvbnNlEiYKBHZpZXcYASABKAsyGC52aWJlc3lzLmNsaS52MS5QbGFuVmlldyLFAQoPRWRpdFBsYW5SZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZudW1iZXIYAiABKA0SEgoFdGl0bGUYAyABKAlIAIgBARIRCgRib2R5GAQgASgJSAGIAQESLwoGc3RhdHVzGAUgASgOMhoudmliZXN5cy5jbGkudjEuUGxhblN0YXR1c0gCiAEBQggKBl90aXRsZUIHCgVfYm9keUIJCgdfc3RhdHVzIjYKEEVkaXRQbGFuUmVzcG9uc2USIgoEcGxhbhgBIAEoCzIULnZpYmVzeXMuY2xpLnYxLlBsYW4iYAoSQ29tbWVudFBsYW5SZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZudW1iZXIYAiABKA0SDAoEdGV4dBgDIAEoCSI5ChNDb21tZW50UGxhblJlc3BvbnNlEiIKBHBsYW4YASABKAsyFC52aWJlc3lzLmNsaS52MS5QbGFuIo0BChBDbG9zZVBsYW5SZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZudW1iZXIYAiABKA0SKgoGc3RhdHVzGAMgASgOMhoudmliZXN5cy5jbGkudjEuUGxhblN0YXR1cxIPCgdjb21tZW50GAQgASgJIjcKEUNsb3NlUGxhblJlc3BvbnNlEiIKBHBsYW4YASABKAsyFC52aWJlc3lzLmNsaS52MS5QbGFuIpABChBXYXRjaFRhc2tSZXF1ZXN0EjQKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dEIGukgDyAEBEg0KBWVwb2NoGAIgASgJEhYKDmFmdGVyX3NlcXVlbmNlGAMgASgEEh8KDmp1ZGdlZF9jb21taXRzGAQgASgNQge6SAQqAhhkItgBChFXYXRjaFRhc2tSZXNwb25zZRIWCgVlcG9jaBgBIAEoCUIHukgEcgIQARIZCghzZXF1ZW5jZRgCIAEoBEIHukgEMgIgABImCgVyZXNldBgDIAEoCzIVLnZpYmVzeXMuY2xpLnYxLlJlc2V0SAASKgoFZmFjdHMYBCABKAsyGS52aWJlc3lzLmNsaS52MS5UYXNrRmFjdHNIABItCgljYXVnaHRfdXAYBSABKAsyGC52aWJlc3lzLmNsaS52MS5DYXVnaHRVcEgAQg0KBGJvZHkSBbpIAggBIgcKBVJlc2V0IgoKCENhdWdodFVwIkEKCVRhc2tGYWN0cxI0CgVmYWN0cxgBIAMoCzIYLnZpYmVzeXMuY2xpLnYxLlRhc2tGYWN0Qgu6SAiSAQUIARD0AyL1AgoIVGFza0ZhY3QSIgoDam9iGAEgASgLMhMudmliZXN5cy5jbGkudjEuSm9iSAASKAoGcmVzdWx0GAIgASgLMhYudmliZXN5cy5jbGkudjEuUmVzdWx0SAASLAoIanVkZ21lbnQYAyABKAsyGC52aWJlc3lzLmNsaS52MS5KdWRnbWVudEgAEjQKCXByb21vdGlvbhgEIAEoCzIfLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvblJlY29yZEgAEiQKBHBsYW4YBSABKAsyFC52aWJlc3lzLmNsaS52MS5QbGFuSAASJAoEaGVhZBgGIAEoCzIULnZpYmVzeXMuY2xpLnYxLkhlYWRIABItCgZoZWFsdGgYByABKAsyGy52aWJlc3lzLmNsaS52MS5TdG9yZUhlYWx0aEgAEi0KB3Ryb3VibGUYCCABKAsyGi52aWJlc3lzLmNsaS52MS5Kb2JUcm91YmxlSABCDQoEZmFjdBIFukgCCAEiyQEKCEp1ZGdtZW50EiUKBmNvbW1pdBgBIAEoCUIVukgSchAyDl5bMC05YS1mXXs0MH0kEiYKB2FnYWluc3QYAiABKAlCFbpIEnIQMg5eWzAtOWEtZl17NDB9JBIwCgpjb21wYXJpc29uGAMgASgLMhoudmliZXN5cy5jbGkudjEuQ29tcGFyaXNvbkgAEioKB3JlZnVzZWQYBCABKAsyFy52aWJlc3lzLmNsaS52MS5GYWlsdXJlSABCEAoHb3V0Y29tZRIFukgCCAEiXQoPUHJvbW90aW9uUmVjb3JkEhQKA3NlcRgBIAEoBEIHukgEMgIgABI0Cglwcm9tb3Rpb24YAiABKAsyGS52aWJlc3lzLmNsaS52MS5Qcm9tb3Rpb25CBrpIA8gBASJXCgpKb2JUcm91YmxlEhcKBmpvYl9pZBgBIAEoCUIHukgEcgIQARIwCgdmYWlsdXJlGAIgASgLMhcudmliZXN5cy5jbGkudjEuRmFpbHVyZUIGukgDyAEBInkKBEhlYWQSMAoHY3VycmVudBgBIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkN1cnJlbnRSZXN1bHRIABIvCgRub25lGAIgASgLMh8udmliZXN5cy5jbGkudjEuTm9DdXJyZW50UmVzdWx0SABCDgoFc3RhdGUSBbpIAggBImkKC1N0b3JlSGVhbHRoEiQKBGxpdmUYASABKAsyFC52aWJlc3lzLmNsaS52MS5MaXZlSAASJAoEYXdheRgCIAEoCzIULnZpYmVzeXMuY2xpLnYxLkF3YXlIAEIOCgVzdGF0ZRIFukgCCAEiBgoETGl2ZSJwCgRBd2F5EjYKBnJlYXNvbhgBIAEoDjIaLnZpYmVzeXMuY2xpLnYxLkF3YXlSZWFzb25CCrpIB4IBBBABIAASMAoHZmFpbHVyZRgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkZhaWx1cmVCBrpIA8gBASqVAQoRU3VibWl0RGlzcG9zaXRpb24SIgoeU1VCTUlUX0RJU1BPU0lUSU9OX1VOU1BFQ0lGSUVEEAASHgoaU1VCTUlUX0RJU1BPU0lUSU9OX0NSRUFURUQQARIdChlTVUJNSVRfRElTUE9TSVRJT05fSk9JTkVEEAISHQoZU1VCTUlUX0RJU1BPU0lUSU9OX1JFVVNFRBADKugBCg9XYWl0T3V0Y29tZUtpbmQSIQodV0FJVF9PVVRDT01FX0tJTkRfVU5TUEVDSUZJRUQQABIjCh9XQUlUX09VVENPTUVfS0lORF9BTExfU1VDQ0VFREVEEAESIQodV0FJVF9PVVRDT01FX0tJTkRfU09NRV9GQUlMRUQQAhIlCiFXQUlUX09VVENPTUVfS0lORF9GSVJTVF9TVUNDRUVERUQQAxIiCh5XQUlUX09VVENPTUVfS0lORF9GSVJTVF9GQUlMRUQQBBIfChtXQUlUX09VVENPTUVfS0lORF9USU1FRF9PVVQQBSpnCgpBd2F5UmVhc29uEhsKF0FXQVlfUkVBU09OX1VOU1BFQ0lGSUVEEAASHwobQVdBWV9SRUFTT05fT1dORURfRUxTRVdIRVJFEAESGwoXQVdBWV9SRUFTT05fVU5BVkFJTEFCTEUQAjKIDwoNRGFlbW9uU2VydmljZRJECgVIZWxsbxIcLnZpYmVzeXMuY2xpLnYxLkhlbGxvUmVxdWVzdBodLnZpYmVzeXMuY2xpLnYxLkhlbGxvUmVzcG9uc2USRwoGU3RhdHVzEh0udmliZXN5cy5jbGkudjEuU3RhdHVzUmVxdWVzdBoeLnZpYmVzeXMuY2xpLnYxLlN0YXR1c1Jlc3BvbnNlEkEKBFN0b3ASGy52aWJlc3lzLmNsaS52MS5TdG9wUmVxdWVzdBocLnZpYmVzeXMuY2xpLnYxLlN0b3BSZXNwb25zZRJHCgZTdWJtaXQSHS52aWJlc3lzLmNsaS52MS5TdWJtaXRSZXF1ZXN0Gh4udmliZXN5cy5jbGkudjEuU3VibWl0UmVzcG9uc2USRgoFV2F0Y2gSHC52aWJlc3lzLmNsaS52MS5XYXRjaFJlcXVlc3QaHS52aWJlc3lzLmNsaS52MS5XYXRjaFJlc3BvbnNlMAESQwoEV2FpdBIbLnZpYmVzeXMuY2xpLnYxLldhaXRSZXF1ZXN0GhwudmliZXN5cy5jbGkudjEuV2FpdFJlc3BvbnNlMAESUgoJV2F0Y2hUYXNrEiAudmliZXN5cy5jbGkudjEuV2F0Y2hUYXNrUmVxdWVzdBohLnZpYmVzeXMuY2xpLnYxLldhdGNoVGFza1Jlc3BvbnNlMAESRwoGQ2FuY2VsEh0udmliZXN5cy5jbGkudjEuQ2FuY2VsUmVxdWVzdBoeLnZpYmVzeXMuY2xpLnYxLkNhbmNlbFJlc3BvbnNlEkoKB0FkZE5vdGUSHi52aWJlc3lzLmNsaS52MS5BZGROb3RlUmVxdWVzdBofLnZpYmVzeXMuY2xpLnYxLkFkZE5vdGVSZXNwb25zZRJNCghMaXN0Sm9icxIfLnZpYmVzeXMuY2xpLnYxLkxpc3RKb2JzUmVxdWVzdBogLnZpYmVzeXMuY2xpLnYxLkxpc3RKb2JzUmVzcG9uc2USZQoQRm9yZ2V0UmVwb3NpdG9yeRInLnZpYmVzeXMuY2xpLnYxLkZvcmdldFJlcG9zaXRvcnlSZXF1ZXN0GigudmliZXN5cy5jbGkudjEuRm9yZ2V0UmVwb3NpdG9yeVJlc3BvbnNlEk8KCFJlYWRMb2dzEh8udmliZXN5cy5jbGkudjEuUmVhZExvZ3NSZXF1ZXN0GiAudmliZXN5cy5jbGkudjEuUmVhZExvZ3NSZXNwb25zZTABEkEKBFNob3cSGy52aWJlc3lzLmNsaS52MS5TaG93UmVxdWVzdBocLnZpYmVzeXMuY2xpLnYxLlNob3dSZXNwb25zZRJKCgdDb21wYXJlEh4udmliZXN5cy5jbGkudjEuQ29tcGFyZVJlcXVlc3QaHy52aWJlc3lzLmNsaS52MS5Db21wYXJlUmVzcG9uc2USSgoHUHJvbW90ZRIeLnZpYmVzeXMuY2xpLnYxLlByb21vdGVSZXF1ZXN0Gh8udmliZXN5cy5jbGkudjEuUHJvbW90ZVJlc3BvbnNlElwKDUN1cnJlbnRSZXN1bHQSJC52aWJlc3lzLmNsaS52MS5DdXJyZW50UmVzdWx0UmVxdWVzdBolLnZpYmVzeXMuY2xpLnYxLkN1cnJlbnRSZXN1bHRSZXNwb25zZRJcCg1BZGRUb0Zyb250aWVyEiQudmliZXN5cy5jbGkudjEuQWRkVG9Gcm9udGllclJlcXVlc3QaJS52aWJlc3lzLmNsaS52MS5BZGRUb0Zyb250aWVyUmVzcG9uc2USWQoMTGlzdEZyb250aWVyEiMudmliZXN5cy5jbGkudjEuTGlzdEZyb250aWVyUmVxdWVzdBokLnZpYmVzeXMuY2xpLnYxLkxpc3RGcm9udGllclJlc3BvbnNlElMKCkNyZWF0ZVBsYW4SIS52aWJlc3lzLmNsaS52MS5DcmVhdGVQbGFuUmVxdWVzdBoiLnZpYmVzeXMuY2xpLnYxLkNyZWF0ZVBsYW5SZXNwb25zZRJQCglMaXN0UGxhbnMSIC52aWJlc3lzLmNsaS52MS5MaXN0UGxhbnNSZXF1ZXN0GiEudmliZXN5cy5jbGkudjEuTGlzdFBsYW5zUmVzcG9uc2USTQoIVmlld1BsYW4SHy52aWJlc3lzLmNsaS52MS5WaWV3UGxhblJlcXVlc3QaIC52aWJlc3lzLmNsaS52MS5WaWV3UGxhblJlc3BvbnNlEk0KCEVkaXRQbGFuEh8udmliZXN5cy5jbGkudjEuRWRpdFBsYW5SZXF1ZXN0GiAudmliZXN5cy5jbGkudjEuRWRpdFBsYW5SZXNwb25zZRJWCgtDb21tZW50UGxhbhIiLnZpYmVzeXMuY2xpLnYxLkNvbW1lbnRQbGFuUmVxdWVzdBojLnZpYmVzeXMuY2xpLnYxLkNvbW1lbnRQbGFuUmVzcG9uc2USUAoJQ2xvc2VQbGFuEiAudmliZXN5cy5jbGkudjEuQ2xvc2VQbGFuUmVxdWVzdBohLnZpYmVzeXMuY2xpLnYxLkNsb3NlUGxhblJlc3BvbnNlQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_failure, file_vibesys_cli_v1_frontier, file_vibesys_cli_v1_job, file_vibesys_cli_v1_machine, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_promote, file_vibesys_cli_v1_result, file_vibesys_cli_v1_verdict, file_vibesys_cli_v1_version]);
+  fileDesc("Chx2aWJlc3lzL2NsaS92MS9zZXJ2aWNlLnByb3RvEg52aWJlc3lzLmNsaS52MSJfCgtDYWxsQ29udGV4dBISCgpyZXBvc2l0b3J5GAEgASgJEgwKBHRhc2sYAiABKAkSDgoGcnVuX2lkGAMgASgJEg8KB2hhcm5lc3MYBCABKAkSDQoFYWdlbnQYBSABKAkibQoMSGVsbG9SZXF1ZXN0EiwKCWNvbXBvbmVudBgBIAEoDjIZLnZpYmVzeXMuY2xpLnYxLkNvbXBvbmVudBIvCgh2ZXJzaW9ucxgCIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkJ1aWxkVmVyc2lvbnMidgoNSGVsbG9SZXNwb25zZRIvCgh2ZXJzaW9ucxgBIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkJ1aWxkVmVyc2lvbnMSNAoNY29tcGF0aWJpbGl0eRgCIAEoDjIdLnZpYmVzeXMuY2xpLnYxLkNvbXBhdGliaWxpdHkiDwoNU3RhdHVzUmVxdWVzdCLZAwoOU3RhdHVzUmVzcG9uc2USLwoIdmVyc2lvbnMYASABKAsyHS52aWJlc3lzLmNsaS52MS5CdWlsZFZlcnNpb25zEgsKA3BpZBgCIAEoDRIuCgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgtxdWV1ZWRfam9icxgEIAEoDRIUCgxydW5uaW5nX2pvYnMYBSABKA0SNgoLZW52aXJvbm1lbnQYBiADKAsyIS52aWJlc3lzLmNsaS52MS5Jbmhlcml0ZWRWYXJpYWJsZRIaChJjaGVja291dF9kaXJlY3RvcnkYByABKAkSDwoHc2FuZGJveBgIIAEoCBIwCglzYW5kYm94ZXMYCSADKAsyHS52aWJlc3lzLmNsaS52MS5NYWNoaW5lRGFlbW9uEikKBmxlYXNlcxgKIAMoCzIZLnZpYmVzeXMuY2xpLnYxLkhlbGRMZWFzZRI2Cg9sZWFzZV9jb25mbGljdHMYCyADKAsyHS52aWJlc3lzLmNsaS52MS5MZWFzZUNvbmZsaWN0EjQKDW90aGVyX2RhZW1vbnMYDCADKAsyHS52aWJlc3lzLmNsaS52MS5EYWVtb25Qcm9jZXNzIp0BCglIZWxkTGVhc2USFwoGam9iX2lkGAEgASgJQge6SARyAhABEgwKBHRhc2sYAiABKAkSGQoIcmVzb3VyY2UYAyABKAlCB7pIBHICEAESFAoDa2V5GAQgASgJQge6SARyAhABEg0KBXdoZXJlGAUgASgJEikKBXNpbmNlGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCKAAQoNTGVhc2VDb25mbGljdBIXCgZqb2JfaWQYASABKAlCB7pIBHICEAESGQoIcmVzb3VyY2UYAiABKAlCB7pIBHICEAESKwoGaG9sZGVyGAMgASgLMhsudmliZXN5cy5jbGkudjEuTGVhc2VIb2xkZXISDgoGZGV0YWlsGAQgASgJIjMKDURhZW1vblByb2Nlc3MSFAoDcGlkGAEgASgNQge6SAQqAiAAEgwKBHVzZXIYAiABKAkiPwoRSW5oZXJpdGVkVmFyaWFibGUSDAoEbmFtZRgBIAEoCRISCgV2YWx1ZRgCIAEoCUgAiAEBQggKBl92YWx1ZSINCgtTdG9wUmVxdWVzdCIOCgxTdG9wUmVzcG9uc2UiLQoXRm9yZ2V0UmVwb3NpdG9yeVJlcXVlc3QSEgoKcmVwb3NpdG9yeRgBIAEoCSI3ChhGb3JnZXRSZXBvc2l0b3J5UmVzcG9uc2USDQoFdGFza3MYASADKAkSDAoEbGVmdBgCIAMoCSKSAQoNU3VibWl0UmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSJQoEc3BlYxgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkpvYlNwZWMSEAoIbm9fY2FjaGUYAyABKAgSDAoEbm90ZRgEIAEoCRIMCgRwbGFuGAUgASgNImoKDlN1Ym1pdFJlc3BvbnNlEiAKA2pvYhgBIAEoCzITLnZpYmVzeXMuY2xpLnYxLkpvYhI2CgtkaXNwb3NpdGlvbhgCIAEoDjIhLnZpYmVzeXMuY2xpLnYxLlN1Ym1pdERpc3Bvc2l0aW9uIk0KDFdhdGNoUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSDwoHam9iX2lkcxgCIAMoCSIxCg1XYXRjaFJlc3BvbnNlEiAKA2pvYhgBIAEoCzITLnZpYmVzeXMuY2xpLnYxLkpvYiKFAQoLV2FpdFJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg8KB2pvYl9pZHMYAiADKAkSCwoDYW55GAMgASgIEioKB3RpbWVvdXQYBCABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iawoMV2FpdFJlc3BvbnNlEiIKA2pvYhgBIAEoCzITLnZpYmVzeXMuY2xpLnYxLkpvYkgAEi4KB291dGNvbWUYAiABKAsyGy52aWJlc3lzLmNsaS52MS5XYWl0T3V0Y29tZUgAQgcKBWV2ZW50InMKC1dhaXRPdXRjb21lEi0KBGtpbmQYASABKA4yHy52aWJlc3lzLmNsaS52MS5XYWl0T3V0Y29tZUtpbmQSEgoKZGVjaWRlZF9ieRgCIAEoCRIhCgRqb2JzGAMgAygLMhMudmliZXN5cy5jbGkudjEuSm9iIl0KDUNhbmNlbFJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg4KBmpvYl9pZBgCIAEoCRIOCgZyZWFzb24YAyABKAkiMgoOQ2FuY2VsUmVzcG9uc2USIAoDam9iGAEgASgLMhMudmliZXN5cy5jbGkudjEuSm9iIlwKDkFkZE5vdGVSZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZqb2JfaWQYAiABKAkSDAoEdGV4dBgDIAEoCSIzCg9BZGROb3RlUmVzcG9uc2USIAoDam9iGAEgASgLMhMudmliZXN5cy5jbGkudjEuSm9iIrcBCg9MaXN0Sm9ic1JlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg4KBmNvbW1pdBgCIAEoCRIoCgZzdGF0ZXMYAyADKA4yGC52aWJlc3lzLmNsaS52MS5Kb2JTdGF0ZRIlCgRraW5kGAQgASgOMhcudmliZXN5cy5jbGkudjEuSm9iS2luZBIVCg1ub3RlX2NvbnRhaW5zGAUgASgJIl0KEExpc3RKb2JzUmVzcG9uc2USIQoEam9icxgBIAMoCzITLnZpYmVzeXMuY2xpLnYxLkpvYhImCgV3YWl0cxgCIAMoCzIXLnZpYmVzeXMuY2xpLnYxLkpvYldhaXQibwoPUmVhZExvZ3NSZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZqb2JfaWQYAiABKAkSDgoGb2Zmc2V0GAMgASgEEg4KBmZvbGxvdxgEIAEoCCI1ChBSZWFkTG9nc1Jlc3BvbnNlEgwKBGRhdGEYASABKAwSEwoLbmV4dF9vZmZzZXQYAiABKAQiSwoLU2hvd1JlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg4KBmNvbW1pdBgCIAEoCSJqCgxTaG93UmVzcG9uc2USJwoHcmVzdWx0cxgBIAMoCzIWLnZpYmVzeXMuY2xpLnYxLlJlc3VsdBIxCgxtZWFzdXJlbWVudHMYAiADKAsyGy52aWJlc3lzLmNsaS52MS5NZWFzdXJlbWVudCJfCg5Db21wYXJlUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSDgoGY29tbWl0GAIgASgJEg8KB2FnYWluc3QYAyABKAkiQQoPQ29tcGFyZVJlc3BvbnNlEi4KCmNvbXBhcmlzb24YASABKAsyGi52aWJlc3lzLmNsaS52MS5Db21wYXJpc29uIk4KDlByb21vdGVSZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZjb21taXQYAiABKAkisgEKD1Byb21vdGVSZXNwb25zZRItCghwcm9tb3RlZBgBIAEoCzIZLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvbkgAEjEKB3JlZnVzZWQYAiABKAsyHi52aWJlc3lzLmNsaS52MS5Qcm9tb3RlUmVmdXNhbEgAEjIKCGZyb250aWVyGAMgASgLMiAudmliZXN5cy5jbGkudjEuRnJvbnRpZXJEZWNpc2lvbkIJCgdvdXRjb21lIlQKFEFkZFRvRnJvbnRpZXJSZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dBIOCgZjb21taXQYAiABKAkiSwoVQWRkVG9Gcm9udGllclJlc3BvbnNlEjIKCGRlY2lzaW9uGAEgASgLMiAudmliZXN5cy5jbGkudjEuRnJvbnRpZXJEZWNpc2lvbiJDChNMaXN0RnJvbnRpZXJSZXF1ZXN0EiwKB2NvbnRleHQYASABKAsyGy52aWJlc3lzLmNsaS52MS5DYWxsQ29udGV4dCJGChRMaXN0RnJvbnRpZXJSZXNwb25zZRIuCgdtZW1iZXJzGAEgAygLMh0udmliZXN5cy5jbGkudjEuRnJvbnRpZXJFbnRyeSJEChRDdXJyZW50UmVzdWx0UmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQigwEKFUN1cnJlbnRSZXN1bHRSZXNwb25zZRIwCgdjdXJyZW50GAEgASgLMh0udmliZXN5cy5jbGkudjEuQ3VycmVudFJlc3VsdEgAEi8KBG5vbmUYAiABKAsyHy52aWJlc3lzLmNsaS52MS5Ob0N1cnJlbnRSZXN1bHRIAEIHCgVzdGF0ZSJeChFDcmVhdGVQbGFuUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSDQoFdGl0bGUYAiABKAkSDAoEYm9keRgDIAEoCSI4ChJDcmVhdGVQbGFuUmVzcG9uc2USIgoEcGxhbhgBIAEoCzIULnZpYmVzeXMuY2xpLnYxLlBsYW4ifAoQTGlzdFBsYW5zUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSLAoIc3RhdHVzZXMYAiADKA4yGi52aWJlc3lzLmNsaS52MS5QbGFuU3RhdHVzEgwKBHRleHQYAyABKAkiOAoRTGlzdFBsYW5zUmVzcG9uc2USIwoFcGxhbnMYASADKAsyFC52aWJlc3lzLmNsaS52MS5QbGFuIk8KD1ZpZXdQbGFuUmVxdWVzdBIsCgdjb250ZXh0GAEgASgLMhsudmliZXN5cy5jbGkudjEuQ2FsbENvbnRleHQSDgoGbnVtYmVyGAIgASgNIjoKEFZpZXdQbGFuUmVzcG9uc2USJgoEdmlldxgBIAEoCzIYLnZpYmVzeXMuY2xpLnYxLlBsYW5WaWV3IsUBCg9FZGl0UGxhblJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg4KBm51bWJlchgCIAEoDRISCgV0aXRsZRgDIAEoCUgAiAEBEhEKBGJvZHkYBCABKAlIAYgBARIvCgZzdGF0dXMYBSABKA4yGi52aWJlc3lzLmNsaS52MS5QbGFuU3RhdHVzSAKIAQFCCAoGX3RpdGxlQgcKBV9ib2R5QgkKB19zdGF0dXMiNgoQRWRpdFBsYW5SZXNwb25zZRIiCgRwbGFuGAEgASgLMhQudmliZXN5cy5jbGkudjEuUGxhbiJgChJDb21tZW50UGxhblJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg4KBm51bWJlchgCIAEoDRIMCgR0ZXh0GAMgASgJIjkKE0NvbW1lbnRQbGFuUmVzcG9uc2USIgoEcGxhbhgBIAEoCzIULnZpYmVzeXMuY2xpLnYxLlBsYW4ijQEKEENsb3NlUGxhblJlcXVlc3QSLAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Eg4KBm51bWJlchgCIAEoDRIqCgZzdGF0dXMYAyABKA4yGi52aWJlc3lzLmNsaS52MS5QbGFuU3RhdHVzEg8KB2NvbW1lbnQYBCABKAkiNwoRQ2xvc2VQbGFuUmVzcG9uc2USIgoEcGxhbhgBIAEoCzIULnZpYmVzeXMuY2xpLnYxLlBsYW4ikAEKEFdhdGNoVGFza1JlcXVlc3QSNAoHY29udGV4dBgBIAEoCzIbLnZpYmVzeXMuY2xpLnYxLkNhbGxDb250ZXh0Qga6SAPIAQESDQoFZXBvY2gYAiABKAkSFgoOYWZ0ZXJfc2VxdWVuY2UYAyABKAQSHwoOanVkZ2VkX2NvbW1pdHMYBCABKA1CB7pIBCoCGGQi2AEKEVdhdGNoVGFza1Jlc3BvbnNlEhYKBWVwb2NoGAEgASgJQge6SARyAhABEhkKCHNlcXVlbmNlGAIgASgEQge6SAQyAiAAEiYKBXJlc2V0GAMgASgLMhUudmliZXN5cy5jbGkudjEuUmVzZXRIABIqCgVmYWN0cxgEIAEoCzIZLnZpYmVzeXMuY2xpLnYxLlRhc2tGYWN0c0gAEi0KCWNhdWdodF91cBgFIAEoCzIYLnZpYmVzeXMuY2xpLnYxLkNhdWdodFVwSABCDQoEYm9keRIFukgCCAEiBwoFUmVzZXQiCgoIQ2F1Z2h0VXAiQQoJVGFza0ZhY3RzEjQKBWZhY3RzGAEgAygLMhgudmliZXN5cy5jbGkudjEuVGFza0ZhY3RCC7pICJIBBQgBEPQDIvUCCghUYXNrRmFjdBIiCgNqb2IYASABKAsyEy52aWJlc3lzLmNsaS52MS5Kb2JIABIoCgZyZXN1bHQYAiABKAsyFi52aWJlc3lzLmNsaS52MS5SZXN1bHRIABIsCghqdWRnbWVudBgDIAEoCzIYLnZpYmVzeXMuY2xpLnYxLkp1ZGdtZW50SAASNAoJcHJvbW90aW9uGAQgASgLMh8udmliZXN5cy5jbGkudjEuUHJvbW90aW9uUmVjb3JkSAASJAoEcGxhbhgFIAEoCzIULnZpYmVzeXMuY2xpLnYxLlBsYW5IABIkCgRoZWFkGAYgASgLMhQudmliZXN5cy5jbGkudjEuSGVhZEgAEi0KBmhlYWx0aBgHIAEoCzIbLnZpYmVzeXMuY2xpLnYxLlN0b3JlSGVhbHRoSAASLQoHdHJvdWJsZRgIIAEoCzIaLnZpYmVzeXMuY2xpLnYxLkpvYlRyb3VibGVIAEINCgRmYWN0EgW6SAIIASLJAQoISnVkZ21lbnQSJQoGY29tbWl0GAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezQwfSQSJgoHYWdhaW5zdBgCIAEoCUIVukgSchAyDl5bMC05YS1mXXs0MH0kEjAKCmNvbXBhcmlzb24YAyABKAsyGi52aWJlc3lzLmNsaS52MS5Db21wYXJpc29uSAASKgoHcmVmdXNlZBgEIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkZhaWx1cmVIAEIQCgdvdXRjb21lEgW6SAIIASJdCg9Qcm9tb3Rpb25SZWNvcmQSFAoDc2VxGAEgASgEQge6SAQyAiAAEjQKCXByb21vdGlvbhgCIAEoCzIZLnZpYmVzeXMuY2xpLnYxLlByb21vdGlvbkIGukgDyAEBIlcKCkpvYlRyb3VibGUSFwoGam9iX2lkGAEgASgJQge6SARyAhABEjAKB2ZhaWx1cmUYAiABKAsyFy52aWJlc3lzLmNsaS52MS5GYWlsdXJlQga6SAPIAQEieQoESGVhZBIwCgdjdXJyZW50GAEgASgLMh0udmliZXN5cy5jbGkudjEuQ3VycmVudFJlc3VsdEgAEi8KBG5vbmUYAiABKAsyHy52aWJlc3lzLmNsaS52MS5Ob0N1cnJlbnRSZXN1bHRIAEIOCgVzdGF0ZRIFukgCCAEiaQoLU3RvcmVIZWFsdGgSJAoEbGl2ZRgBIAEoCzIULnZpYmVzeXMuY2xpLnYxLkxpdmVIABIkCgRhd2F5GAIgASgLMhQudmliZXN5cy5jbGkudjEuQXdheUgAQg4KBXN0YXRlEgW6SAIIASIGCgRMaXZlInAKBEF3YXkSNgoGcmVhc29uGAEgASgOMhoudmliZXN5cy5jbGkudjEuQXdheVJlYXNvbkIKukgHggEEEAEgABIwCgdmYWlsdXJlGAIgASgLMhcudmliZXN5cy5jbGkudjEuRmFpbHVyZUIGukgDyAEBKpUBChFTdWJtaXREaXNwb3NpdGlvbhIiCh5TVUJNSVRfRElTUE9TSVRJT05fVU5TUEVDSUZJRUQQABIeChpTVUJNSVRfRElTUE9TSVRJT05fQ1JFQVRFRBABEh0KGVNVQk1JVF9ESVNQT1NJVElPTl9KT0lORUQQAhIdChlTVUJNSVRfRElTUE9TSVRJT05fUkVVU0VEEAMq6AEKD1dhaXRPdXRjb21lS2luZBIhCh1XQUlUX09VVENPTUVfS0lORF9VTlNQRUNJRklFRBAAEiMKH1dBSVRfT1VUQ09NRV9LSU5EX0FMTF9TVUNDRUVERUQQARIhCh1XQUlUX09VVENPTUVfS0lORF9TT01FX0ZBSUxFRBACEiUKIVdBSVRfT1VUQ09NRV9LSU5EX0ZJUlNUX1NVQ0NFRURFRBADEiIKHldBSVRfT1VUQ09NRV9LSU5EX0ZJUlNUX0ZBSUxFRBAEEh8KG1dBSVRfT1VUQ09NRV9LSU5EX1RJTUVEX09VVBAFKmcKCkF3YXlSZWFzb24SGwoXQVdBWV9SRUFTT05fVU5TUEVDSUZJRUQQABIfChtBV0FZX1JFQVNPTl9PV05FRF9FTFNFV0hFUkUQARIbChdBV0FZX1JFQVNPTl9VTkFWQUlMQUJMRRACMogPCg1EYWVtb25TZXJ2aWNlEkQKBUhlbGxvEhwudmliZXN5cy5jbGkudjEuSGVsbG9SZXF1ZXN0Gh0udmliZXN5cy5jbGkudjEuSGVsbG9SZXNwb25zZRJHCgZTdGF0dXMSHS52aWJlc3lzLmNsaS52MS5TdGF0dXNSZXF1ZXN0Gh4udmliZXN5cy5jbGkudjEuU3RhdHVzUmVzcG9uc2USQQoEU3RvcBIbLnZpYmVzeXMuY2xpLnYxLlN0b3BSZXF1ZXN0GhwudmliZXN5cy5jbGkudjEuU3RvcFJlc3BvbnNlEkcKBlN1Ym1pdBIdLnZpYmVzeXMuY2xpLnYxLlN1Ym1pdFJlcXVlc3QaHi52aWJlc3lzLmNsaS52MS5TdWJtaXRSZXNwb25zZRJGCgVXYXRjaBIcLnZpYmVzeXMuY2xpLnYxLldhdGNoUmVxdWVzdBodLnZpYmVzeXMuY2xpLnYxLldhdGNoUmVzcG9uc2UwARJDCgRXYWl0EhsudmliZXN5cy5jbGkudjEuV2FpdFJlcXVlc3QaHC52aWJlc3lzLmNsaS52MS5XYWl0UmVzcG9uc2UwARJSCglXYXRjaFRhc2sSIC52aWJlc3lzLmNsaS52MS5XYXRjaFRhc2tSZXF1ZXN0GiEudmliZXN5cy5jbGkudjEuV2F0Y2hUYXNrUmVzcG9uc2UwARJHCgZDYW5jZWwSHS52aWJlc3lzLmNsaS52MS5DYW5jZWxSZXF1ZXN0Gh4udmliZXN5cy5jbGkudjEuQ2FuY2VsUmVzcG9uc2USSgoHQWRkTm90ZRIeLnZpYmVzeXMuY2xpLnYxLkFkZE5vdGVSZXF1ZXN0Gh8udmliZXN5cy5jbGkudjEuQWRkTm90ZVJlc3BvbnNlEk0KCExpc3RKb2JzEh8udmliZXN5cy5jbGkudjEuTGlzdEpvYnNSZXF1ZXN0GiAudmliZXN5cy5jbGkudjEuTGlzdEpvYnNSZXNwb25zZRJlChBGb3JnZXRSZXBvc2l0b3J5EicudmliZXN5cy5jbGkudjEuRm9yZ2V0UmVwb3NpdG9yeVJlcXVlc3QaKC52aWJlc3lzLmNsaS52MS5Gb3JnZXRSZXBvc2l0b3J5UmVzcG9uc2USTwoIUmVhZExvZ3MSHy52aWJlc3lzLmNsaS52MS5SZWFkTG9nc1JlcXVlc3QaIC52aWJlc3lzLmNsaS52MS5SZWFkTG9nc1Jlc3BvbnNlMAESQQoEU2hvdxIbLnZpYmVzeXMuY2xpLnYxLlNob3dSZXF1ZXN0GhwudmliZXN5cy5jbGkudjEuU2hvd1Jlc3BvbnNlEkoKB0NvbXBhcmUSHi52aWJlc3lzLmNsaS52MS5Db21wYXJlUmVxdWVzdBofLnZpYmVzeXMuY2xpLnYxLkNvbXBhcmVSZXNwb25zZRJKCgdQcm9tb3RlEh4udmliZXN5cy5jbGkudjEuUHJvbW90ZVJlcXVlc3QaHy52aWJlc3lzLmNsaS52MS5Qcm9tb3RlUmVzcG9uc2USXAoNQ3VycmVudFJlc3VsdBIkLnZpYmVzeXMuY2xpLnYxLkN1cnJlbnRSZXN1bHRSZXF1ZXN0GiUudmliZXN5cy5jbGkudjEuQ3VycmVudFJlc3VsdFJlc3BvbnNlElwKDUFkZFRvRnJvbnRpZXISJC52aWJlc3lzLmNsaS52MS5BZGRUb0Zyb250aWVyUmVxdWVzdBolLnZpYmVzeXMuY2xpLnYxLkFkZFRvRnJvbnRpZXJSZXNwb25zZRJZCgxMaXN0RnJvbnRpZXISIy52aWJlc3lzLmNsaS52MS5MaXN0RnJvbnRpZXJSZXF1ZXN0GiQudmliZXN5cy5jbGkudjEuTGlzdEZyb250aWVyUmVzcG9uc2USUwoKQ3JlYXRlUGxhbhIhLnZpYmVzeXMuY2xpLnYxLkNyZWF0ZVBsYW5SZXF1ZXN0GiIudmliZXN5cy5jbGkudjEuQ3JlYXRlUGxhblJlc3BvbnNlElAKCUxpc3RQbGFucxIgLnZpYmVzeXMuY2xpLnYxLkxpc3RQbGFuc1JlcXVlc3QaIS52aWJlc3lzLmNsaS52MS5MaXN0UGxhbnNSZXNwb25zZRJNCghWaWV3UGxhbhIfLnZpYmVzeXMuY2xpLnYxLlZpZXdQbGFuUmVxdWVzdBogLnZpYmVzeXMuY2xpLnYxLlZpZXdQbGFuUmVzcG9uc2USTQoIRWRpdFBsYW4SHy52aWJlc3lzLmNsaS52MS5FZGl0UGxhblJlcXVlc3QaIC52aWJlc3lzLmNsaS52MS5FZGl0UGxhblJlc3BvbnNlElYKC0NvbW1lbnRQbGFuEiIudmliZXN5cy5jbGkudjEuQ29tbWVudFBsYW5SZXF1ZXN0GiMudmliZXN5cy5jbGkudjEuQ29tbWVudFBsYW5SZXNwb25zZRJQCglDbG9zZVBsYW4SIC52aWJlc3lzLmNsaS52MS5DbG9zZVBsYW5SZXF1ZXN0GiEudmliZXN5cy5jbGkudjEuQ2xvc2VQbGFuUmVzcG9uc2VCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_failure, file_vibesys_cli_v1_frontier, file_vibesys_cli_v1_job, file_vibesys_cli_v1_machine, file_vibesys_cli_v1_plan, file_vibesys_cli_v1_promote, file_vibesys_cli_v1_result, file_vibesys_cli_v1_verdict, file_vibesys_cli_v1_version]);
 
 /**
  * CallContext identifies who is calling and about what. The daemon serves many repositories and
@@ -198,6 +198,29 @@ export type StatusResponse = Message<"vibesys.cli.v1.StatusResponse"> & {
    * @generated from field: repeated vibesys.cli.v1.MachineDaemon sandboxes = 9;
    */
   sandboxes: MachineDaemon[];
+
+  /**
+   * The leases this daemon's jobs hold, so that the daemons of other users and machines that
+   * share a resource do not run beside them, oldest first.
+   *
+   * @generated from field: repeated vibesys.cli.v1.HeldLease leases = 10;
+   */
+  leases: HeldLease[];
+
+  /**
+   * The leases of jobs that run already and could not take them, such as after a restart that
+   * found another daemon holding one.
+   *
+   * @generated from field: repeated vibesys.cli.v1.LeaseConflict lease_conflicts = 11;
+   */
+  leaseConflicts: LeaseConflict[];
+
+  /**
+   * The other vibesysd processes of this machine, of any user.
+   *
+   * @generated from field: repeated vibesys.cli.v1.DaemonProcess other_daemons = 12;
+   */
+  otherDaemons: DaemonProcess[];
 };
 
 /**
@@ -206,6 +229,116 @@ export type StatusResponse = Message<"vibesys.cli.v1.StatusResponse"> & {
  */
 export const StatusResponseSchema: GenMessage<StatusResponse> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_service, 4);
+
+/**
+ * HeldLease is a lease a job of the daemon holds.
+ *
+ * @generated from message vibesys.cli.v1.HeldLease
+ */
+export type HeldLease = Message<"vibesys.cli.v1.HeldLease"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string task = 2;
+   */
+  task: string;
+
+  /**
+   * The resource the job holds alone, such as placement:default.
+   *
+   * @generated from field: string resource = 3;
+   */
+  resource: string;
+
+  /**
+   * The lease's name where it is kept, and that place, such as "this machine (/var/tmp/vibesys-leases)".
+   *
+   * @generated from field: string key = 4;
+   */
+  key: string;
+
+  /**
+   * @generated from field: string where = 5;
+   */
+  where: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp since = 6;
+   */
+  since?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.HeldLease.
+ * Use `create(HeldLeaseSchema)` to create a new message.
+ */
+export const HeldLeaseSchema: GenMessage<HeldLease> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_service, 5);
+
+/**
+ * LeaseConflict is a lease a job that runs could not take.
+ *
+ * @generated from message vibesys.cli.v1.LeaseConflict
+ */
+export type LeaseConflict = Message<"vibesys.cli.v1.LeaseConflict"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: string resource = 2;
+   */
+  resource: string;
+
+  /**
+   * Who holds it, or, when the lease could not be read, why.
+   *
+   * @generated from field: vibesys.cli.v1.LeaseHolder holder = 3;
+   */
+  holder?: LeaseHolder | undefined;
+
+  /**
+   * @generated from field: string detail = 4;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.LeaseConflict.
+ * Use `create(LeaseConflictSchema)` to create a new message.
+ */
+export const LeaseConflictSchema: GenMessage<LeaseConflict> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_service, 6);
+
+/**
+ * DaemonProcess is a vibesysd process of the machine.
+ *
+ * @generated from message vibesys.cli.v1.DaemonProcess
+ */
+export type DaemonProcess = Message<"vibesys.cli.v1.DaemonProcess"> & {
+  /**
+   * @generated from field: uint32 pid = 1;
+   */
+  pid: number;
+
+  /**
+   * The user it runs as, by name, or by number when the name is not known.
+   *
+   * @generated from field: string user = 2;
+   */
+  user: string;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.DaemonProcess.
+ * Use `create(DaemonProcessSchema)` to create a new message.
+ */
+export const DaemonProcessSchema: GenMessage<DaemonProcess> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_service, 7);
 
 /**
  * InheritedVariable is one environment variable a job inherits from the daemon.
@@ -231,7 +364,7 @@ export type InheritedVariable = Message<"vibesys.cli.v1.InheritedVariable"> & {
  * Use `create(InheritedVariableSchema)` to create a new message.
  */
 export const InheritedVariableSchema: GenMessage<InheritedVariable> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 5);
+  messageDesc(file_vibesys_cli_v1_service, 8);
 
 /**
  * @generated from message vibesys.cli.v1.StopRequest
@@ -244,7 +377,7 @@ export type StopRequest = Message<"vibesys.cli.v1.StopRequest"> & {
  * Use `create(StopRequestSchema)` to create a new message.
  */
 export const StopRequestSchema: GenMessage<StopRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 6);
+  messageDesc(file_vibesys_cli_v1_service, 9);
 
 /**
  * @generated from message vibesys.cli.v1.StopResponse
@@ -257,7 +390,7 @@ export type StopResponse = Message<"vibesys.cli.v1.StopResponse"> & {
  * Use `create(StopResponseSchema)` to create a new message.
  */
 export const StopResponseSchema: GenMessage<StopResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 7);
+  messageDesc(file_vibesys_cli_v1_service, 10);
 
 /**
  * @generated from message vibesys.cli.v1.ForgetRepositoryRequest
@@ -276,7 +409,7 @@ export type ForgetRepositoryRequest = Message<"vibesys.cli.v1.ForgetRepositoryRe
  * Use `create(ForgetRepositoryRequestSchema)` to create a new message.
  */
 export const ForgetRepositoryRequestSchema: GenMessage<ForgetRepositoryRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 8);
+  messageDesc(file_vibesys_cli_v1_service, 11);
 
 /**
  * @generated from message vibesys.cli.v1.ForgetRepositoryResponse
@@ -302,7 +435,7 @@ export type ForgetRepositoryResponse = Message<"vibesys.cli.v1.ForgetRepositoryR
  * Use `create(ForgetRepositoryResponseSchema)` to create a new message.
  */
 export const ForgetRepositoryResponseSchema: GenMessage<ForgetRepositoryResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 9);
+  messageDesc(file_vibesys_cli_v1_service, 12);
 
 /**
  * @generated from message vibesys.cli.v1.SubmitRequest
@@ -345,7 +478,7 @@ export type SubmitRequest = Message<"vibesys.cli.v1.SubmitRequest"> & {
  * Use `create(SubmitRequestSchema)` to create a new message.
  */
 export const SubmitRequestSchema: GenMessage<SubmitRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 10);
+  messageDesc(file_vibesys_cli_v1_service, 13);
 
 /**
  * @generated from message vibesys.cli.v1.SubmitResponse
@@ -367,7 +500,7 @@ export type SubmitResponse = Message<"vibesys.cli.v1.SubmitResponse"> & {
  * Use `create(SubmitResponseSchema)` to create a new message.
  */
 export const SubmitResponseSchema: GenMessage<SubmitResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 11);
+  messageDesc(file_vibesys_cli_v1_service, 14);
 
 /**
  * @generated from message vibesys.cli.v1.WatchRequest
@@ -389,7 +522,7 @@ export type WatchRequest = Message<"vibesys.cli.v1.WatchRequest"> & {
  * Use `create(WatchRequestSchema)` to create a new message.
  */
 export const WatchRequestSchema: GenMessage<WatchRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 12);
+  messageDesc(file_vibesys_cli_v1_service, 15);
 
 /**
  * @generated from message vibesys.cli.v1.WatchResponse
@@ -406,7 +539,7 @@ export type WatchResponse = Message<"vibesys.cli.v1.WatchResponse"> & {
  * Use `create(WatchResponseSchema)` to create a new message.
  */
 export const WatchResponseSchema: GenMessage<WatchResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 13);
+  messageDesc(file_vibesys_cli_v1_service, 16);
 
 /**
  * @generated from message vibesys.cli.v1.WaitRequest
@@ -442,7 +575,7 @@ export type WaitRequest = Message<"vibesys.cli.v1.WaitRequest"> & {
  * Use `create(WaitRequestSchema)` to create a new message.
  */
 export const WaitRequestSchema: GenMessage<WaitRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 14);
+  messageDesc(file_vibesys_cli_v1_service, 17);
 
 /**
  * @generated from message vibesys.cli.v1.WaitResponse
@@ -476,7 +609,7 @@ export type WaitResponse = Message<"vibesys.cli.v1.WaitResponse"> & {
  * Use `create(WaitResponseSchema)` to create a new message.
  */
 export const WaitResponseSchema: GenMessage<WaitResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 15);
+  messageDesc(file_vibesys_cli_v1_service, 18);
 
 /**
  * WaitOutcome is how a wait ended, as the daemon decided it. It is the `--json` output of `wait`.
@@ -510,7 +643,7 @@ export type WaitOutcome = Message<"vibesys.cli.v1.WaitOutcome"> & {
  * Use `create(WaitOutcomeSchema)` to create a new message.
  */
 export const WaitOutcomeSchema: GenMessage<WaitOutcome> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 16);
+  messageDesc(file_vibesys_cli_v1_service, 19);
 
 /**
  * @generated from message vibesys.cli.v1.CancelRequest
@@ -537,7 +670,7 @@ export type CancelRequest = Message<"vibesys.cli.v1.CancelRequest"> & {
  * Use `create(CancelRequestSchema)` to create a new message.
  */
 export const CancelRequestSchema: GenMessage<CancelRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 17);
+  messageDesc(file_vibesys_cli_v1_service, 20);
 
 /**
  * @generated from message vibesys.cli.v1.CancelResponse
@@ -554,7 +687,7 @@ export type CancelResponse = Message<"vibesys.cli.v1.CancelResponse"> & {
  * Use `create(CancelResponseSchema)` to create a new message.
  */
 export const CancelResponseSchema: GenMessage<CancelResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 18);
+  messageDesc(file_vibesys_cli_v1_service, 21);
 
 /**
  * @generated from message vibesys.cli.v1.AddNoteRequest
@@ -581,7 +714,7 @@ export type AddNoteRequest = Message<"vibesys.cli.v1.AddNoteRequest"> & {
  * Use `create(AddNoteRequestSchema)` to create a new message.
  */
 export const AddNoteRequestSchema: GenMessage<AddNoteRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 19);
+  messageDesc(file_vibesys_cli_v1_service, 22);
 
 /**
  * @generated from message vibesys.cli.v1.AddNoteResponse
@@ -598,7 +731,7 @@ export type AddNoteResponse = Message<"vibesys.cli.v1.AddNoteResponse"> & {
  * Use `create(AddNoteResponseSchema)` to create a new message.
  */
 export const AddNoteResponseSchema: GenMessage<AddNoteResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 20);
+  messageDesc(file_vibesys_cli_v1_service, 23);
 
 /**
  * @generated from message vibesys.cli.v1.ListJobsRequest
@@ -637,7 +770,7 @@ export type ListJobsRequest = Message<"vibesys.cli.v1.ListJobsRequest"> & {
  * Use `create(ListJobsRequestSchema)` to create a new message.
  */
 export const ListJobsRequestSchema: GenMessage<ListJobsRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 21);
+  messageDesc(file_vibesys_cli_v1_service, 24);
 
 /**
  * @generated from message vibesys.cli.v1.ListJobsResponse
@@ -662,7 +795,7 @@ export type ListJobsResponse = Message<"vibesys.cli.v1.ListJobsResponse"> & {
  * Use `create(ListJobsResponseSchema)` to create a new message.
  */
 export const ListJobsResponseSchema: GenMessage<ListJobsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 22);
+  messageDesc(file_vibesys_cli_v1_service, 25);
 
 /**
  * @generated from message vibesys.cli.v1.ReadLogsRequest
@@ -694,7 +827,7 @@ export type ReadLogsRequest = Message<"vibesys.cli.v1.ReadLogsRequest"> & {
  * Use `create(ReadLogsRequestSchema)` to create a new message.
  */
 export const ReadLogsRequestSchema: GenMessage<ReadLogsRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 23);
+  messageDesc(file_vibesys_cli_v1_service, 26);
 
 /**
  * @generated from message vibesys.cli.v1.ReadLogsResponse
@@ -718,7 +851,7 @@ export type ReadLogsResponse = Message<"vibesys.cli.v1.ReadLogsResponse"> & {
  * Use `create(ReadLogsResponseSchema)` to create a new message.
  */
 export const ReadLogsResponseSchema: GenMessage<ReadLogsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 24);
+  messageDesc(file_vibesys_cli_v1_service, 27);
 
 /**
  * @generated from message vibesys.cli.v1.ShowRequest
@@ -740,7 +873,7 @@ export type ShowRequest = Message<"vibesys.cli.v1.ShowRequest"> & {
  * Use `create(ShowRequestSchema)` to create a new message.
  */
 export const ShowRequestSchema: GenMessage<ShowRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 25);
+  messageDesc(file_vibesys_cli_v1_service, 28);
 
 /**
  * @generated from message vibesys.cli.v1.ShowResponse
@@ -767,7 +900,7 @@ export type ShowResponse = Message<"vibesys.cli.v1.ShowResponse"> & {
  * Use `create(ShowResponseSchema)` to create a new message.
  */
 export const ShowResponseSchema: GenMessage<ShowResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 26);
+  messageDesc(file_vibesys_cli_v1_service, 29);
 
 /**
  * @generated from message vibesys.cli.v1.CompareRequest
@@ -796,7 +929,7 @@ export type CompareRequest = Message<"vibesys.cli.v1.CompareRequest"> & {
  * Use `create(CompareRequestSchema)` to create a new message.
  */
 export const CompareRequestSchema: GenMessage<CompareRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 27);
+  messageDesc(file_vibesys_cli_v1_service, 30);
 
 /**
  * @generated from message vibesys.cli.v1.CompareResponse
@@ -813,7 +946,7 @@ export type CompareResponse = Message<"vibesys.cli.v1.CompareResponse"> & {
  * Use `create(CompareResponseSchema)` to create a new message.
  */
 export const CompareResponseSchema: GenMessage<CompareResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 28);
+  messageDesc(file_vibesys_cli_v1_service, 31);
 
 /**
  * @generated from message vibesys.cli.v1.PromoteRequest
@@ -835,7 +968,7 @@ export type PromoteRequest = Message<"vibesys.cli.v1.PromoteRequest"> & {
  * Use `create(PromoteRequestSchema)` to create a new message.
  */
 export const PromoteRequestSchema: GenMessage<PromoteRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 29);
+  messageDesc(file_vibesys_cli_v1_service, 32);
 
 /**
  * @generated from message vibesys.cli.v1.PromoteResponse
@@ -872,7 +1005,7 @@ export type PromoteResponse = Message<"vibesys.cli.v1.PromoteResponse"> & {
  * Use `create(PromoteResponseSchema)` to create a new message.
  */
 export const PromoteResponseSchema: GenMessage<PromoteResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 30);
+  messageDesc(file_vibesys_cli_v1_service, 33);
 
 /**
  * @generated from message vibesys.cli.v1.AddToFrontierRequest
@@ -894,7 +1027,7 @@ export type AddToFrontierRequest = Message<"vibesys.cli.v1.AddToFrontierRequest"
  * Use `create(AddToFrontierRequestSchema)` to create a new message.
  */
 export const AddToFrontierRequestSchema: GenMessage<AddToFrontierRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 31);
+  messageDesc(file_vibesys_cli_v1_service, 34);
 
 /**
  * @generated from message vibesys.cli.v1.AddToFrontierResponse
@@ -911,7 +1044,7 @@ export type AddToFrontierResponse = Message<"vibesys.cli.v1.AddToFrontierRespons
  * Use `create(AddToFrontierResponseSchema)` to create a new message.
  */
 export const AddToFrontierResponseSchema: GenMessage<AddToFrontierResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 32);
+  messageDesc(file_vibesys_cli_v1_service, 35);
 
 /**
  * @generated from message vibesys.cli.v1.ListFrontierRequest
@@ -928,7 +1061,7 @@ export type ListFrontierRequest = Message<"vibesys.cli.v1.ListFrontierRequest"> 
  * Use `create(ListFrontierRequestSchema)` to create a new message.
  */
 export const ListFrontierRequestSchema: GenMessage<ListFrontierRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 33);
+  messageDesc(file_vibesys_cli_v1_service, 36);
 
 /**
  * @generated from message vibesys.cli.v1.ListFrontierResponse
@@ -947,7 +1080,7 @@ export type ListFrontierResponse = Message<"vibesys.cli.v1.ListFrontierResponse"
  * Use `create(ListFrontierResponseSchema)` to create a new message.
  */
 export const ListFrontierResponseSchema: GenMessage<ListFrontierResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 34);
+  messageDesc(file_vibesys_cli_v1_service, 37);
 
 /**
  * @generated from message vibesys.cli.v1.CurrentResultRequest
@@ -964,7 +1097,7 @@ export type CurrentResultRequest = Message<"vibesys.cli.v1.CurrentResultRequest"
  * Use `create(CurrentResultRequestSchema)` to create a new message.
  */
 export const CurrentResultRequestSchema: GenMessage<CurrentResultRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 35);
+  messageDesc(file_vibesys_cli_v1_service, 38);
 
 /**
  * @generated from message vibesys.cli.v1.CurrentResultResponse
@@ -993,7 +1126,7 @@ export type CurrentResultResponse = Message<"vibesys.cli.v1.CurrentResultRespons
  * Use `create(CurrentResultResponseSchema)` to create a new message.
  */
 export const CurrentResultResponseSchema: GenMessage<CurrentResultResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 36);
+  messageDesc(file_vibesys_cli_v1_service, 39);
 
 /**
  * @generated from message vibesys.cli.v1.CreatePlanRequest
@@ -1020,7 +1153,7 @@ export type CreatePlanRequest = Message<"vibesys.cli.v1.CreatePlanRequest"> & {
  * Use `create(CreatePlanRequestSchema)` to create a new message.
  */
 export const CreatePlanRequestSchema: GenMessage<CreatePlanRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 37);
+  messageDesc(file_vibesys_cli_v1_service, 40);
 
 /**
  * @generated from message vibesys.cli.v1.CreatePlanResponse
@@ -1037,7 +1170,7 @@ export type CreatePlanResponse = Message<"vibesys.cli.v1.CreatePlanResponse"> & 
  * Use `create(CreatePlanResponseSchema)` to create a new message.
  */
 export const CreatePlanResponseSchema: GenMessage<CreatePlanResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 38);
+  messageDesc(file_vibesys_cli_v1_service, 41);
 
 /**
  * @generated from message vibesys.cli.v1.ListPlansRequest
@@ -1066,7 +1199,7 @@ export type ListPlansRequest = Message<"vibesys.cli.v1.ListPlansRequest"> & {
  * Use `create(ListPlansRequestSchema)` to create a new message.
  */
 export const ListPlansRequestSchema: GenMessage<ListPlansRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 39);
+  messageDesc(file_vibesys_cli_v1_service, 42);
 
 /**
  * @generated from message vibesys.cli.v1.ListPlansResponse
@@ -1083,7 +1216,7 @@ export type ListPlansResponse = Message<"vibesys.cli.v1.ListPlansResponse"> & {
  * Use `create(ListPlansResponseSchema)` to create a new message.
  */
 export const ListPlansResponseSchema: GenMessage<ListPlansResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 40);
+  messageDesc(file_vibesys_cli_v1_service, 43);
 
 /**
  * @generated from message vibesys.cli.v1.ViewPlanRequest
@@ -1105,7 +1238,7 @@ export type ViewPlanRequest = Message<"vibesys.cli.v1.ViewPlanRequest"> & {
  * Use `create(ViewPlanRequestSchema)` to create a new message.
  */
 export const ViewPlanRequestSchema: GenMessage<ViewPlanRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 41);
+  messageDesc(file_vibesys_cli_v1_service, 44);
 
 /**
  * @generated from message vibesys.cli.v1.ViewPlanResponse
@@ -1122,7 +1255,7 @@ export type ViewPlanResponse = Message<"vibesys.cli.v1.ViewPlanResponse"> & {
  * Use `create(ViewPlanResponseSchema)` to create a new message.
  */
 export const ViewPlanResponseSchema: GenMessage<ViewPlanResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 42);
+  messageDesc(file_vibesys_cli_v1_service, 45);
 
 /**
  * @generated from message vibesys.cli.v1.EditPlanRequest
@@ -1161,7 +1294,7 @@ export type EditPlanRequest = Message<"vibesys.cli.v1.EditPlanRequest"> & {
  * Use `create(EditPlanRequestSchema)` to create a new message.
  */
 export const EditPlanRequestSchema: GenMessage<EditPlanRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 43);
+  messageDesc(file_vibesys_cli_v1_service, 46);
 
 /**
  * @generated from message vibesys.cli.v1.EditPlanResponse
@@ -1178,7 +1311,7 @@ export type EditPlanResponse = Message<"vibesys.cli.v1.EditPlanResponse"> & {
  * Use `create(EditPlanResponseSchema)` to create a new message.
  */
 export const EditPlanResponseSchema: GenMessage<EditPlanResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 44);
+  messageDesc(file_vibesys_cli_v1_service, 47);
 
 /**
  * @generated from message vibesys.cli.v1.CommentPlanRequest
@@ -1205,7 +1338,7 @@ export type CommentPlanRequest = Message<"vibesys.cli.v1.CommentPlanRequest"> & 
  * Use `create(CommentPlanRequestSchema)` to create a new message.
  */
 export const CommentPlanRequestSchema: GenMessage<CommentPlanRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 45);
+  messageDesc(file_vibesys_cli_v1_service, 48);
 
 /**
  * @generated from message vibesys.cli.v1.CommentPlanResponse
@@ -1222,7 +1355,7 @@ export type CommentPlanResponse = Message<"vibesys.cli.v1.CommentPlanResponse"> 
  * Use `create(CommentPlanResponseSchema)` to create a new message.
  */
 export const CommentPlanResponseSchema: GenMessage<CommentPlanResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 46);
+  messageDesc(file_vibesys_cli_v1_service, 49);
 
 /**
  * ClosePlan sets a status and adds a comment as one change. Any status but OPEN closes.
@@ -1256,7 +1389,7 @@ export type ClosePlanRequest = Message<"vibesys.cli.v1.ClosePlanRequest"> & {
  * Use `create(ClosePlanRequestSchema)` to create a new message.
  */
 export const ClosePlanRequestSchema: GenMessage<ClosePlanRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 47);
+  messageDesc(file_vibesys_cli_v1_service, 50);
 
 /**
  * @generated from message vibesys.cli.v1.ClosePlanResponse
@@ -1273,7 +1406,7 @@ export type ClosePlanResponse = Message<"vibesys.cli.v1.ClosePlanResponse"> & {
  * Use `create(ClosePlanResponseSchema)` to create a new message.
  */
 export const ClosePlanResponseSchema: GenMessage<ClosePlanResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 48);
+  messageDesc(file_vibesys_cli_v1_service, 51);
 
 /**
  * @generated from message vibesys.cli.v1.WatchTaskRequest
@@ -1313,7 +1446,7 @@ export type WatchTaskRequest = Message<"vibesys.cli.v1.WatchTaskRequest"> & {
  * Use `create(WatchTaskRequestSchema)` to create a new message.
  */
 export const WatchTaskRequestSchema: GenMessage<WatchTaskRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 49);
+  messageDesc(file_vibesys_cli_v1_service, 52);
 
 /**
  * @generated from message vibesys.cli.v1.WatchTaskResponse
@@ -1362,7 +1495,7 @@ export type WatchTaskResponse = Message<"vibesys.cli.v1.WatchTaskResponse"> & {
  * Use `create(WatchTaskResponseSchema)` to create a new message.
  */
 export const WatchTaskResponseSchema: GenMessage<WatchTaskResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 50);
+  messageDesc(file_vibesys_cli_v1_service, 53);
 
 /**
  * Reset says the facts that follow, up to CaughtUp, are the whole state: a client holds them aside
@@ -1379,7 +1512,7 @@ export type Reset = Message<"vibesys.cli.v1.Reset"> & {
  * Use `create(ResetSchema)` to create a new message.
  */
 export const ResetSchema: GenMessage<Reset> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 51);
+  messageDesc(file_vibesys_cli_v1_service, 54);
 
 /**
  * CaughtUp ends a Reset. Its epoch and sequence are the client's resume token.
@@ -1394,7 +1527,7 @@ export type CaughtUp = Message<"vibesys.cli.v1.CaughtUp"> & {
  * Use `create(CaughtUpSchema)` to create a new message.
  */
 export const CaughtUpSchema: GenMessage<CaughtUp> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 52);
+  messageDesc(file_vibesys_cli_v1_service, 55);
 
 /**
  * TaskFacts is 1 to 500 facts, each replacing the fact with the same key.
@@ -1413,7 +1546,7 @@ export type TaskFacts = Message<"vibesys.cli.v1.TaskFacts"> & {
  * Use `create(TaskFactsSchema)` to create a new message.
  */
 export const TaskFactsSchema: GenMessage<TaskFacts> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 53);
+  messageDesc(file_vibesys_cli_v1_service, 56);
 
 /**
  * A fact is keyed by job.id, result.job_id, judgment.commit, promotion.seq, plan.number or
@@ -1483,7 +1616,7 @@ export type TaskFact = Message<"vibesys.cli.v1.TaskFact"> & {
  * Use `create(TaskFactSchema)` to create a new message.
  */
 export const TaskFactSchema: GenMessage<TaskFact> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 54);
+  messageDesc(file_vibesys_cli_v1_service, 57);
 
 /**
  * Judgment is how a measured commit compares with the head at `against`, or why it cannot be.
@@ -1524,7 +1657,7 @@ export type Judgment = Message<"vibesys.cli.v1.Judgment"> & {
  * Use `create(JudgmentSchema)` to create a new message.
  */
 export const JudgmentSchema: GenMessage<Judgment> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 55);
+  messageDesc(file_vibesys_cli_v1_service, 58);
 
 /**
  * PromotionRecord is a promotion with its place in the task's record, 1 for the first.
@@ -1548,7 +1681,7 @@ export type PromotionRecord = Message<"vibesys.cli.v1.PromotionRecord"> & {
  * Use `create(PromotionRecordSchema)` to create a new message.
  */
 export const PromotionRecordSchema: GenMessage<PromotionRecord> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 56);
+  messageDesc(file_vibesys_cli_v1_service, 59);
 
 /**
  * JobTrouble is why a job that is not final is not being worked on, the failure Wait would end
@@ -1573,7 +1706,7 @@ export type JobTrouble = Message<"vibesys.cli.v1.JobTrouble"> & {
  * Use `create(JobTroubleSchema)` to create a new message.
  */
 export const JobTroubleSchema: GenMessage<JobTrouble> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 57);
+  messageDesc(file_vibesys_cli_v1_service, 60);
 
 /**
  * @generated from message vibesys.cli.v1.Head
@@ -1602,7 +1735,7 @@ export type Head = Message<"vibesys.cli.v1.Head"> & {
  * Use `create(HeadSchema)` to create a new message.
  */
 export const HeadSchema: GenMessage<Head> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 58);
+  messageDesc(file_vibesys_cli_v1_service, 61);
 
 /**
  * @generated from message vibesys.cli.v1.StoreHealth
@@ -1631,7 +1764,7 @@ export type StoreHealth = Message<"vibesys.cli.v1.StoreHealth"> & {
  * Use `create(StoreHealthSchema)` to create a new message.
  */
 export const StoreHealthSchema: GenMessage<StoreHealth> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 59);
+  messageDesc(file_vibesys_cli_v1_service, 62);
 
 /**
  * Live says the task's store was read.
@@ -1646,7 +1779,7 @@ export type Live = Message<"vibesys.cli.v1.Live"> & {
  * Use `create(LiveSchema)` to create a new message.
  */
 export const LiveSchema: GenMessage<Live> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 60);
+  messageDesc(file_vibesys_cli_v1_service, 63);
 
 /**
  * Away says it could not be read now. The facts sent before stay as they were.
@@ -1670,7 +1803,7 @@ export type Away = Message<"vibesys.cli.v1.Away"> & {
  * Use `create(AwaySchema)` to create a new message.
  */
 export const AwaySchema: GenMessage<Away> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_service, 61);
+  messageDesc(file_vibesys_cli_v1_service, 64);
 
 /**
  * SubmitDisposition says what a submission turned into.

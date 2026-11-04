@@ -46,6 +46,7 @@ func properties(c Contract) map[string]func(TB, Contract) {
 		"the decisions are a function of the state":                       deterministic,
 		"every job starts once the holders end and nothing more arrives":  eventuallyStarts,
 		"a job that waits for a resource keeps its turn on it":            keepsTurn,
+		"a job refused a lease waits for it, naming its holder":           leasedWaits,
 	}
 	if c.Fair {
 		out["a run with work waiting starts within one turn of every run"] = boundedStarvation
@@ -169,10 +170,15 @@ func (g gen) state() schedule.State {
 }
 
 func (g gen) candidate(rs []schedule.Resource, i int) schedule.Candidate {
-	return schedule.Candidate{
+	c := schedule.Candidate{
 		ID: schedule.ID(fmt.Sprintf("w%d", i)), Claims: g.claims(rs), Run: runs[g.r.IntN(len(runs))],
 		Submitted: epoch.Add(time.Duration(g.r.IntN(4)) * time.Second), Seq: uint64(100 + i), First: g.r.IntN(8) == 0,
 	}
+	// Some were refused the lease of a claim by another daemon.
+	if g.r.IntN(10) == 0 {
+		c.Leased = &schedule.LeasedOut{Resource: c.Claims[0].Resource, Holder: core.LeaseHolder{User: "other", Host: "host-b", PID: 7}}
+	}
+	return c
 }
 
 // fitting keeps the holdings that fit beside those before them.
@@ -377,6 +383,12 @@ func checkReason(t TB, seed uint64, d schedule.Wait, known map[schedule.ID]bool)
 	if !slices.Contains(core.WaitKinds(), r.Kind) || r.Kind == core.WaitTrouble {
 		t.Fatalf("seed %d: %s waits for %q, which is not a reason the scheduler gives", seed, d.ID, r.Kind)
 	}
+	if r.Kind == core.WaitLeased {
+		if r.Resource == "" || r.Elsewhere == nil {
+			t.Fatalf("seed %d: %s waits for a lease with no resource or holder: %+v", seed, d.ID, r)
+		}
+		return
+	}
 	if r.Kind == core.WaitHeld {
 		if r.Detail == "" {
 			t.Fatalf("seed %d: %s is held with no reason", seed, d.ID)
@@ -416,6 +428,12 @@ func eventuallyStarts(t TB, c Contract) {
 		s.Holdings = fitting(s.Resources, s.Holdings)
 		waiting := len(s.Waiting)
 		for round := 0; len(s.Waiting) > 0; round++ {
+			if round > 0 {
+				// The other daemons give back the leases they held.
+				for i := range s.Waiting {
+					s.Waiting[i].Leased = nil
+				}
+			}
 			if round > 2*(waiting+len(s.Holdings))+2 {
 				t.Fatalf("seed %d: %d jobs still wait after %d rounds: %+v", seed, len(s.Waiting), round, c.Step(s, c.New()))
 			}
@@ -497,6 +515,27 @@ func boundedStarvation(t TB, c Contract) {
 
 // keepsTurn: once a job waits for a resource, no job considered after it in the same step starts on
 // that resource, so a stream of small jobs cannot starve a large or exclusive one.
+func leasedWaits(t TB, c Contract) {
+	each(t, func(t TB, seed uint64, s schedule.State) {
+		for _, d := range c.Step(s, c.New()) {
+			i := slices.IndexFunc(s.Waiting, func(c schedule.Candidate) bool { return c.ID == d.Target() })
+			l := s.Waiting[i].Leased
+			if l == nil {
+				continue
+			}
+			switch d := d.(type) {
+			case schedule.Start:
+				t.Fatalf("seed %d: %s started while %s holds the lease of %s", seed, d.ID, l.Holder, l.Resource)
+			case schedule.Wait:
+				if d.Reason.Kind == core.WaitLeased && (d.Reason.Elsewhere == nil || *d.Reason.Elsewhere != l.Holder) {
+					t.Fatalf("seed %d: %s waits for the lease of %s and names %v, want %s", seed, d.ID, l.Resource, d.Reason.Elsewhere, l.Holder)
+				}
+			case schedule.Refuse:
+			}
+		}
+	})
+}
+
 func keepsTurn(t TB, c Contract) {
 	each(t, func(t TB, seed uint64, s schedule.State) {
 		claimsOf := func(id schedule.ID) []schedule.Claim {

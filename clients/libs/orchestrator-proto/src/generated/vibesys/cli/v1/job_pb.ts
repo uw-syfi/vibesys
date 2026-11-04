@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/job.proto.
  */
 export const file_vibesys_cli_v1_job: GenFile = /*@__PURE__*/
-  fileDesc("Chh2aWJlc3lzL2NsaS92MS9qb2IucHJvdG8SDnZpYmVzeXMuY2xpLnYxIg8KDUNoZWNrU2V0dGluZ3MiKgoLU2VydmljZVNwZWMSDAoEYXJndhgBIAMoCRINCgVwcm9iZRgCIAMoCSJ5Cg9Db21tYW5kU2V0dGluZ3MSDAoEYXJndhgBIAMoCRIsCgdzZXJ2aWNlGAIgASgLMhsudmliZXN5cy5jbGkudjEuU2VydmljZVNwZWMSKgoHdGltZW91dBgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiIzCg9NZWFzdXJlU2V0dGluZ3MSDwoHc2FtcGxlcxgBIAEoDRIPCgdyZWNoZWNrGAIgASgIIqwCCgdKb2JTcGVjEg4KBmNvbW1pdBgBIAEoCRI0CgtlbnZpcm9ubWVudBgCIAEoDjIfLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50S2luZBI3CglwbGFjZW1lbnQYAyABKAlCJLpIIXIfMh1eKFthLXowLTldW2EtejAtOV8tXXswLDYyfSk/JBIuCgVjaGVjaxgKIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkNoZWNrU2V0dGluZ3NIABIyCgdjb21tYW5kGAsgASgLMh8udmliZXN5cy5jbGkudjEuQ29tbWFuZFNldHRpbmdzSAASMgoHbWVhc3VyZRgMIAEoCzIfLnZpYmVzeXMuY2xpLnYxLk1lYXN1cmVTZXR0aW5nc0gAQgoKCHNldHRpbmdzIksKBE5vdGUSDAoEdGV4dBgBIAEoCRImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFYWdlbnQYAyABKAkieQoJU3VibWl0dGVyEg4KBnJ1bl9pZBgBIAEoCRINCgVhZ2VudBgCIAEoCRJNCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCJbpIIsgBAbIBHCINCP+C0f+vBxD/k+vcAzILCICSuMOY/v///wEi2QEKB0F0dGVtcHQSLgoKc3RhcnRlZF9hdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjQKEGN1dF9iZWZvcmVfc3RhcnQYAyABKA4yGC52aWJlc3lzLmNsaS52MS5DdXRDYXVzZUgAEjMKD2N1dF9taWRfY29tbWFuZBgEIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkN1dENhdXNlSABCBQoDZW5kIsgECgNKb2ISCgoCaWQYASABKAkSJQoEc3BlYxgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkpvYlNwZWMSJwoFc3RhdGUYAyABKA4yGC52aWJlc3lzLmNsaS52MS5Kb2JTdGF0ZRILCgNrZXkYBCABKAkSOwoLZW52aXJvbm1lbnQYBSABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50EiMKBW5vdGVzGAYgAygLMhQudmliZXN5cy5jbGkudjEuTm90ZRINCgVwbGFucxgHIAMoDRIwCgxzdWJtaXR0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1jYW5jZWxfcmVhc29uGAsgASgJEhYKCWV4aXRfY29kZRgMIAEoBUgAiAEBEhUKDXJlc3VsdF9qb2JfaWQYDSABKAkSFAoMY2hlY2tfam9iX2lkGA4gASgJEhAKCG5vX2NhY2hlGA8gASgIEikKCGF0dGVtcHRzGBAgAygLMhcudmliZXN5cy5jbGkudjEuQXR0ZW1wdBItCgpzdWJtaXR0ZXJzGBEgAygLMhkudmliZXN5cy5jbGkudjEuU3VibWl0dGVyQgwKCl9leGl0X2NvZGUiagoKV2FpdEhvbGRlchIXCgZqb2JfaWQYASABKAlCB7pIBHICEAESDAoEdGFzaxgCIAEoCRIlCgRraW5kGAMgASgOMhcudmliZXN5cy5jbGkudjEuSm9iS2luZBIOCgZydW5faWQYBCABKAki8gIKCldhaXRSZWFzb24SMgoEa2luZBgBIAEoDjIYLnZpYmVzeXMuY2xpLnYxLldhaXRLaW5kQgq6SAeCAQQQASAAEhAKCHJlc291cmNlGAIgASgJEisKB2hvbGRlcnMYAyADKAsyGi52aWJlc3lzLmNsaS52MS5XYWl0SG9sZGVyEg4KBmRldGFpbBgEIAEoCTrgAbpI3AEa2QEKEXdhaXRfcmVhc29uLnNoYXBlElxhIHdhaXQgb24gYSByZXNvdXJjZSBuYW1lcyB0aGUgcmVzb3VyY2UgYW5kIGl0cyBob2xkZXJzLCBhbmQgYSBoZWxkIG9yIHRyb3VibGUgd2FpdCBzYXlzIHdoeRpmdGhpcy5raW5kID09IDUgfHwgdGhpcy5raW5kID09IDYgPyB0aGlzLmRldGFpbCAhPSAnJyA6ICh0aGlzLnJlc291cmNlICE9ICcnICYmIHNpemUodGhpcy5ob2xkZXJzKSA+IDApIlYKB0pvYldhaXQSFwoGam9iX2lkGAEgASgJQge6SARyAhABEjIKBnJlYXNvbhgCIAEoCzIaLnZpYmVzeXMuY2xpLnYxLldhaXRSZWFzb25CBrpIA8gBASpjCgdKb2JLaW5kEhgKFEpPQl9LSU5EX1VOU1BFQ0lGSUVEEAASEgoOSk9CX0tJTkRfQ0hFQ0sQARIUChBKT0JfS0lORF9DT01NQU5EEAISFAoQSk9CX0tJTkRfTUVBU1VSRRADKq4BCghKb2JTdGF0ZRIZChVKT0JfU1RBVEVfVU5TUEVDSUZJRUQQABIUChBKT0JfU1RBVEVfUVVFVUVEEAESFQoRSk9CX1NUQVRFX1JVTk5JTkcQAhIXChNKT0JfU1RBVEVfU1VDQ0VFREVEEAMSFAoQSk9CX1NUQVRFX0ZBSUxFRBAEEhcKE0pPQl9TVEFURV9DQU5DRUxMRUQQBRISCg5KT0JfU1RBVEVfTE9TVBAGKlwKCEN1dENhdXNlEhkKFUNVVF9DQVVTRV9VTlNQRUNJRklFRBAAEh0KGUNVVF9DQVVTRV9TVVBFUlZJU09SX0RJRUQQARIWChJDVVRfQ0FVU0VfUkVCT09URUQQAiqwAQoIV2FpdEtpbmQSGQoVV0FJVF9LSU5EX1VOU1BFQ0lGSUVEEAASEgoOV0FJVF9LSU5EX0ZVTEwQARIeChpXQUlUX0tJTkRfSEVMRF9FWENMVVNJVkVMWRACEhQKEFdBSVRfS0lORF9JTl9VU0UQAxIUChBXQUlUX0tJTkRfQkVISU5EEAQSEgoOV0FJVF9LSU5EX0hFTEQQBRIVChFXQUlUX0tJTkRfVFJPVUJMRRAGQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
+  fileDesc("Chh2aWJlc3lzL2NsaS92MS9qb2IucHJvdG8SDnZpYmVzeXMuY2xpLnYxIg8KDUNoZWNrU2V0dGluZ3MiKgoLU2VydmljZVNwZWMSDAoEYXJndhgBIAMoCRINCgVwcm9iZRgCIAMoCSJ5Cg9Db21tYW5kU2V0dGluZ3MSDAoEYXJndhgBIAMoCRIsCgdzZXJ2aWNlGAIgASgLMhsudmliZXN5cy5jbGkudjEuU2VydmljZVNwZWMSKgoHdGltZW91dBgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiIzCg9NZWFzdXJlU2V0dGluZ3MSDwoHc2FtcGxlcxgBIAEoDRIPCgdyZWNoZWNrGAIgASgIIqwCCgdKb2JTcGVjEg4KBmNvbW1pdBgBIAEoCRI0CgtlbnZpcm9ubWVudBgCIAEoDjIfLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50S2luZBI3CglwbGFjZW1lbnQYAyABKAlCJLpIIXIfMh1eKFthLXowLTldW2EtejAtOV8tXXswLDYyfSk/JBIuCgVjaGVjaxgKIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkNoZWNrU2V0dGluZ3NIABIyCgdjb21tYW5kGAsgASgLMh8udmliZXN5cy5jbGkudjEuQ29tbWFuZFNldHRpbmdzSAASMgoHbWVhc3VyZRgMIAEoCzIfLnZpYmVzeXMuY2xpLnYxLk1lYXN1cmVTZXR0aW5nc0gAQgoKCHNldHRpbmdzIksKBE5vdGUSDAoEdGV4dBgBIAEoCRImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFYWdlbnQYAyABKAkieQoJU3VibWl0dGVyEg4KBnJ1bl9pZBgBIAEoCRINCgVhZ2VudBgCIAEoCRJNCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCJbpIIsgBAbIBHCINCP+C0f+vBxD/k+vcAzILCICSuMOY/v///wEi2QEKB0F0dGVtcHQSLgoKc3RhcnRlZF9hdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjQKEGN1dF9iZWZvcmVfc3RhcnQYAyABKA4yGC52aWJlc3lzLmNsaS52MS5DdXRDYXVzZUgAEjMKD2N1dF9taWRfY29tbWFuZBgEIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkN1dENhdXNlSABCBQoDZW5kIsgECgNKb2ISCgoCaWQYASABKAkSJQoEc3BlYxgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkpvYlNwZWMSJwoFc3RhdGUYAyABKA4yGC52aWJlc3lzLmNsaS52MS5Kb2JTdGF0ZRILCgNrZXkYBCABKAkSOwoLZW52aXJvbm1lbnQYBSABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50EiMKBW5vdGVzGAYgAygLMhQudmliZXN5cy5jbGkudjEuTm90ZRINCgVwbGFucxgHIAMoDRIwCgxzdWJtaXR0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1jYW5jZWxfcmVhc29uGAsgASgJEhYKCWV4aXRfY29kZRgMIAEoBUgAiAEBEhUKDXJlc3VsdF9qb2JfaWQYDSABKAkSFAoMY2hlY2tfam9iX2lkGA4gASgJEhAKCG5vX2NhY2hlGA8gASgIEikKCGF0dGVtcHRzGBAgAygLMhcudmliZXN5cy5jbGkudjEuQXR0ZW1wdBItCgpzdWJtaXR0ZXJzGBEgAygLMhkudmliZXN5cy5jbGkudjEuU3VibWl0dGVyQgwKCl9leGl0X2NvZGUicQoLTGVhc2VIb2xkZXISDAoEdXNlchgBIAEoCRIMCgRob3N0GAIgASgJEgsKA3BpZBgDIAEoDRIOCgZqb2JfaWQYBCABKAkSKQoFc2luY2UYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wImoKCldhaXRIb2xkZXISFwoGam9iX2lkGAEgASgJQge6SARyAhABEgwKBHRhc2sYAiABKAkSJQoEa2luZBgDIAEoDjIXLnZpYmVzeXMuY2xpLnYxLkpvYktpbmQSDgoGcnVuX2lkGAQgASgJIrUECgpXYWl0UmVhc29uEjIKBGtpbmQYASABKA4yGC52aWJlc3lzLmNsaS52MS5XYWl0S2luZEIKukgHggEEEAEgABIQCghyZXNvdXJjZRgCIAEoCRIrCgdob2xkZXJzGAMgAygLMhoudmliZXN5cy5jbGkudjEuV2FpdEhvbGRlchIOCgZkZXRhaWwYBCABKAkSLgoJZWxzZXdoZXJlGAUgASgLMhsudmliZXN5cy5jbGkudjEuTGVhc2VIb2xkZXI68wK6SO8CGuwCChF3YWl0X3JlYXNvbi5zaGFwZRKUAWEgd2FpdCBvbiBhIHJlc291cmNlIG5hbWVzIHRoZSByZXNvdXJjZSBhbmQgaXRzIGhvbGRlcnMsIGEgaGVsZCBvciB0cm91YmxlIHdhaXQgc2F5cyB3aHksIGFuZCBhIGxlYXNlZCB3YWl0IG5hbWVzIHRoZSByZXNvdXJjZSBhbmQgaXRzIGhvbGRlciBvciB3aHkavwF0aGlzLmtpbmQgPT0gNSB8fCB0aGlzLmtpbmQgPT0gNiA/IHRoaXMuZGV0YWlsICE9ICcnIDogKHRoaXMua2luZCA9PSA3ID8gKHRoaXMucmVzb3VyY2UgIT0gJycgJiYgKGhhcyh0aGlzLmVsc2V3aGVyZSkgfHwgdGhpcy5kZXRhaWwgIT0gJycpKSA6ICh0aGlzLnJlc291cmNlICE9ICcnICYmIHNpemUodGhpcy5ob2xkZXJzKSA+IDApKSJWCgdKb2JXYWl0EhcKBmpvYl9pZBgBIAEoCUIHukgEcgIQARIyCgZyZWFzb24YAiABKAsyGi52aWJlc3lzLmNsaS52MS5XYWl0UmVhc29uQga6SAPIAQEqYwoHSm9iS2luZBIYChRKT0JfS0lORF9VTlNQRUNJRklFRBAAEhIKDkpPQl9LSU5EX0NIRUNLEAESFAoQSk9CX0tJTkRfQ09NTUFORBACEhQKEEpPQl9LSU5EX01FQVNVUkUQAyquAQoISm9iU3RhdGUSGQoVSk9CX1NUQVRFX1VOU1BFQ0lGSUVEEAASFAoQSk9CX1NUQVRFX1FVRVVFRBABEhUKEUpPQl9TVEFURV9SVU5OSU5HEAISFwoTSk9CX1NUQVRFX1NVQ0NFRURFRBADEhQKEEpPQl9TVEFURV9GQUlMRUQQBBIXChNKT0JfU1RBVEVfQ0FOQ0VMTEVEEAUSEgoOSk9CX1NUQVRFX0xPU1QQBipcCghDdXRDYXVzZRIZChVDVVRfQ0FVU0VfVU5TUEVDSUZJRUQQABIdChlDVVRfQ0FVU0VfU1VQRVJWSVNPUl9ESUVEEAESFgoSQ1VUX0NBVVNFX1JFQk9PVEVEEAIqxgEKCFdhaXRLaW5kEhkKFVdBSVRfS0lORF9VTlNQRUNJRklFRBAAEhIKDldBSVRfS0lORF9GVUxMEAESHgoaV0FJVF9LSU5EX0hFTERfRVhDTFVTSVZFTFkQAhIUChBXQUlUX0tJTkRfSU5fVVNFEAMSFAoQV0FJVF9LSU5EX0JFSElORBAEEhIKDldBSVRfS0lORF9IRUxEEAUSFQoRV0FJVF9LSU5EX1RST1VCTEUQBhIUChBXQUlUX0tJTkRfTEVBU0VEEAdCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
 
 /**
  * @generated from message vibesys.cli.v1.CheckSettings
@@ -409,6 +409,46 @@ export const JobSchema: GenMessage<Job> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_job, 8);
 
 /**
+ * LeaseHolder is who holds the lease of a resource: a daemon's user, machine and process, and the
+ * job it holds it for. Each field is empty or zero when the holder did not say.
+ *
+ * @generated from message vibesys.cli.v1.LeaseHolder
+ */
+export type LeaseHolder = Message<"vibesys.cli.v1.LeaseHolder"> & {
+  /**
+   * @generated from field: string user = 1;
+   */
+  user: string;
+
+  /**
+   * @generated from field: string host = 2;
+   */
+  host: string;
+
+  /**
+   * @generated from field: uint32 pid = 3;
+   */
+  pid: number;
+
+  /**
+   * @generated from field: string job_id = 4;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp since = 5;
+   */
+  since?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.LeaseHolder.
+ * Use `create(LeaseHolderSchema)` to create a new message.
+ */
+export const LeaseHolderSchema: GenMessage<LeaseHolder> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_job, 9);
+
+/**
  * WaitHolder is a job that stands in a queued job's way.
  *
  * @generated from message vibesys.cli.v1.WaitHolder
@@ -445,7 +485,7 @@ export type WaitHolder = Message<"vibesys.cli.v1.WaitHolder"> & {
  * Use `create(WaitHolderSchema)` to create a new message.
  */
 export const WaitHolderSchema: GenMessage<WaitHolder> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 9);
+  messageDesc(file_vibesys_cli_v1_job, 10);
 
 /**
  * WaitReason says why a queued job has not started, as the daemon's scheduler decided at its last
@@ -455,7 +495,7 @@ export const WaitHolderSchema: GenMessage<WaitHolder> = /*@__PURE__*/
  */
 export type WaitReason = Message<"vibesys.cli.v1.WaitReason"> & {
   /**
-   * 5 is HELD and 6 is TROUBLE in the rule above.
+   * 5 is HELD, 6 is TROUBLE and 7 is LEASED in the rule above.
    *
    * @generated from field: vibesys.cli.v1.WaitKind kind = 1;
    */
@@ -479,6 +519,13 @@ export type WaitReason = Message<"vibesys.cli.v1.WaitReason"> & {
    * @generated from field: string detail = 4;
    */
   detail: string;
+
+  /**
+   * Who holds the lease, for LEASED.
+   *
+   * @generated from field: vibesys.cli.v1.LeaseHolder elsewhere = 5;
+   */
+  elsewhere?: LeaseHolder | undefined;
 };
 
 /**
@@ -486,7 +533,7 @@ export type WaitReason = Message<"vibesys.cli.v1.WaitReason"> & {
  * Use `create(WaitReasonSchema)` to create a new message.
  */
 export const WaitReasonSchema: GenMessage<WaitReason> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 10);
+  messageDesc(file_vibesys_cli_v1_job, 11);
 
 /**
  * JobWait is why one queued job waits.
@@ -510,7 +557,7 @@ export type JobWait = Message<"vibesys.cli.v1.JobWait"> & {
  * Use `create(JobWaitSchema)` to create a new message.
  */
 export const JobWaitSchema: GenMessage<JobWait> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_job, 11);
+  messageDesc(file_vibesys_cli_v1_job, 12);
 
 /**
  * @generated from enum vibesys.cli.v1.JobKind
@@ -686,6 +733,14 @@ export enum WaitKind {
    * @generated from enum value: WAIT_KIND_TROUBLE = 6;
    */
   TROUBLE = 6,
+
+  /**
+   * Another daemon, or another job of this one, holds the lease of a resource the job claims
+   * alone; elsewhere names who, or, when the lease could not be read, the detail says why.
+   *
+   * @generated from enum value: WAIT_KIND_LEASED = 7;
+   */
+  LEASED = 7,
 }
 
 /**

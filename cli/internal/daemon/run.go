@@ -46,6 +46,18 @@ type Runtime struct {
 	Tasks task.Source
 	// Scheduler is how the machine is shared between jobs. The zero value runs one job at a time.
 	Scheduler app.Scheduler
+	// Leasing is how the resources jobs hold alone are shared with other daemons. The zero value
+	// leases nothing.
+	Leasing app.Leasing
+	// Neighbors lists the other daemons of the machine, of any user, for the status. Nil lists
+	// none.
+	Neighbors func() []Neighbor
+}
+
+// Neighbor is another daemon process of the machine, and the user it runs as.
+type Neighbor struct {
+	PID  int
+	User string
 }
 
 // Config is what Run needs.
@@ -143,6 +155,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Repositories:  cfg.Runtime.Repositories,
 		Tasks:         cfg.Runtime.Tasks,
 		Scheduler:     cfg.Runtime.Scheduler,
+		Leasing:       cfg.Runtime.Leasing,
 		Logf:          cfg.Logf,
 	})
 	defer a.Close()
@@ -160,7 +173,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		return fmt.Errorf("daemon: %w", err)
 	}
 
-	srv := NewServer(a, cfg.Version, cfg.Inherited).WithMachine(cfg.Machine)
+	srv := NewServer(a, cfg.Version, cfg.Inherited).WithMachine(cfg.Machine).WithNeighbors(cfg.Runtime.Neighbors)
 	server := grpc.NewServer()
 	cliv1.RegisterDaemonServiceServer(server, srv)
 	served := make(chan error, 1)

@@ -111,6 +111,12 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. Jobs hold claims on resources (`placement:<name>` and what its resources claim); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims: `PlacementDemand` from the operator config's placements. |
 | `internal/schedule/policy/fifo/`, `fairshare/` | The scheduling policies: `fifo` (oldest first) and `fair-share` (the run with the least recent use of what the job claims goes next). Only `production` names them. |
 | `internal/schedule/scheduletest/` | The one property-based contract suite every policy passes. Tests only. |
+| `internal/lease/` | `Leases`: where the daemons that share a resource take turns at holding it alone, and `Book`, where each resource is leased, which only `production` fills. |
+| `internal/lease/locallease/` | The leases of this machine: `flock` on files of a directory every user shares (`/var/tmp/vibesys-leases`). The kernel gives a lease back when its daemon dies. |
+| `internal/lease/hostlease/` | The leases of a machine reached over ssh: the same lock files there, held by a shell for as long as its connection lives. |
+| `internal/lease/kubelease/` | The leases of a Kubernetes cluster: `coordination.k8s.io` `Lease` objects, renewed every third of their duration and taken over once expired, through `kubectl`. `kubefake` is an API server in memory. |
+| `internal/lease/fakelease/`, `leasetest/` | A `Leases` in memory, and the one contract suite every `Leases` passes. Tests only. |
+| `internal/neighbors/` | The daemons of the machine, of every user, as `/proc` lists them, for `daemon status`. |
 | `internal/changed/` | Pure helpers for the "what changed" facts a job records. |
 | `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read or wait on time. A test supplies its own and fires timers itself. |
 | `internal/owned/` | `Group`, the one way the daemon's packages start a goroutine: the group starts it and `Wait` joins it, so nothing outlives what started it. |
@@ -170,7 +176,9 @@ Dependencies point one way: `cmd` and the shell packages, then interfaces, then 
   which convert at the boundary.
 - `gen` imports nothing from this module.
 - `lifecycle` imports `core`, `flow` and `schedule` only, so the machine stays pure. `schedule`
-  imports `core` only, and a policy `schedule` and `core` only. `app` imports no transport:
+  imports `core` only, and a policy `schedule` and `core` only. `lease` imports `core` only, and a
+  place of leases `lease`, `core` and what reaches it (`remote`, `clock`); only `production` names
+  one, and `app` takes them through a `lease.Book`. `app` imports no transport:
   `daemon` and `supervisor/rpc` are the shells around it, and neither imports the other's peer
   (`client` and `daemon` do not import each other, `app` does not import `daemon`).
 - Packages that exist for tests (`fakeenv`, `suptest`, `daemontest`, `storetest`) are imported by
@@ -425,6 +433,37 @@ queued jobs start from `schedule`:
 - With the defaults the daemon runs one job at a time, the oldest queued first, as before
   schedulers. A change of policy or `max_jobs` takes a `daemon restart` and nothing else: what the
   scheduler knows is derived from the jobs.
+
+The scheduler of one daemon keeps its own jobs apart. A lease keeps the jobs of every daemon apart:
+other users' daemons on the same machine, and daemons on other machines that share an ssh host.
+
+- Before a job that holds a resource alone starts, the daemon takes that resource's lease where
+  every daemon sharing it looks. Jobs claim `placement:default` today, which stands for the one
+  placement of a config of one, and its lease is the machine that placement runs containers on.
+  For a `local` placement, that is a `flock` on `/var/tmp/vibesys-leases/machine.lock`, a sticky
+  directory every user may add to. For an `ssh` placement, it is the same file on the engine's
+  machine, held by a shell there over ssh. A `slurm` placement takes none, since Slurm's exclusive
+  allocation arbitrates, and nor does a config of several placements, until jobs claim the
+  placement they run on. A claim that shares its resource takes no lease.
+- A lease another holds keeps the job queued, starting nothing. The job keeps its turn, so the
+  daemon's shared jobs wait behind it and do not disturb the other's measure. `jobs` names the
+  holder: `waiting: needs placement:default alone, leased by bob on host-a (pid 4242), job 7f3a`.
+  The job tries again every slow period (30 seconds).
+- A job's leases are held exactly as long as it holds its claims, and are given back on every way
+  it ends: it succeeds, fails, is cancelled, cannot launch, or is given up. A daemon that stops
+  gives back its leases, and a daemon that dies loses them: the kernel closes its locks and its ssh
+  connections. The next daemon takes the leases of the jobs it adopts again.
+- A job's command outlives its daemon, but its lease does not. So a measure whose daemon dies runs
+  unleased until the next daemon adopts it. If another daemon took the lease in between, the
+  measure goes on, and `daemon status` reports the conflict until it ends.
+- `daemon status` lists the leases the daemon's jobs hold, the conflicts, and the other `vibesysd`
+  processes of the machine, of every user.
+
+A `Kubernetes` lease (`internal/lease/kubelease`) is a `Lease` object in the cluster, renewed by
+its holder and taken over once it expires, so a holder that died blocks the cluster for at most a
+duration (60 seconds). The daemons judge expiry by their own clocks, which must agree to well within
+the duration. Wiring it to a placement's Kubernetes resource follows the placements of the operator
+config.
 
 `jobs` prints why each queued job waits, under its line:
 
@@ -783,8 +822,20 @@ How the daemon is checked:
   than one slot, generated event sequences and restarts check every job's claims after each event.
 - `internal/schedule/scheduletest` holds every policy, by property over generated states, to the
   scheduler's rules: capacity, exclusivity, a decision and a true reason for every job, determinism,
-  every job starting once the holders end, a waiting job keeping its turn, and for `fair-share` no
-  run starved. A test feeds it broken schedulers and checks that each rule catches its own.
+  every job starting once the holders end, a waiting job keeping its turn, a job refused a lease
+  waiting for it, and for `fair-share` no run starved. A test feeds it broken schedulers and checks
+  that each rule catches its own.
+- `internal/lease/leasetest` holds every place of leases to one holder at a time, the holder named
+  to whoever is refused, keys apart, a release on every path that never gives back a later holder's
+  lease, a crashed holder's lease given back, a lost lease saying so, and a random model of three
+  daemons. The fake, this machine's flock, the ssh host's shell (run over the local shell) and the
+  cluster's `Lease` (over a fake API server) pass it, and a test feeds it broken leases. Two real
+  processes take turns at a flock, one killed with `SIGKILL`. With `-tags kind` and
+  `VIBESYS_KIND_KUBECONFIG` (and `VIBESYS_KIND_CONTEXT`) naming a cluster, such as a kind one, the
+  `Lease` objects pass it against a real API server.
+- `internal/sim/leases_test.go` runs two users' daemons on one machine through crashes and restarts,
+  sharing only the machine's lease, and checks that their measures never run at once, except where
+  the daemon of one died while it ran; a test with the lease not shared sees them meet.
 - The decoders in `internal/wire` have fuzz targets (`FuzzDecodeJob` and the others in
   `fuzz_test.go`). `go test` runs their seed inputs; to search for new failures run one for a while,
   for example `go test -run '^$' -fuzz '^FuzzDecodeJob$' -fuzztime 1m ./internal/wire`, and commit the

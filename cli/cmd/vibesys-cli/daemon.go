@@ -98,7 +98,30 @@ func daemonStatus(ctx context.Context, d deps, args []string) int {
 			fmt.Fprintf(d.stdout, "env\t%s\n", v.GetName())
 		}
 	}
+	printLeases(d, st)
 	return exitOK
+}
+
+// printLeases says what the daemon's jobs hold alone against other daemons, what they could not
+// take, and which other daemons the machine runs: one line each.
+func printLeases(d deps, st *cliv1.StatusResponse) {
+	for _, l := range st.GetLeases() {
+		job := "job " + l.GetJobId()
+		if l.GetTask() != "" {
+			job += " of task " + l.GetTask()
+		}
+		fmt.Fprintf(d.stdout, "lease\t%s\t%s on %s\t%s\n", l.GetResource(), l.GetKey(), l.GetWhere(), job)
+	}
+	for _, c := range st.GetLeaseConflicts() {
+		why := c.GetDetail()
+		if c.GetHolder() != nil {
+			why = "held by " + describeLeaseHolder(c.GetHolder())
+		}
+		fmt.Fprintf(d.stdout, "conflict\t%s\tjob %s runs without its lease: %s\n", c.GetResource(), c.GetJobId(), why)
+	}
+	for _, o := range st.GetOtherDaemons() {
+		fmt.Fprintf(d.stdout, "daemon\tpid %d\tuser %s\n", o.GetPid(), o.GetUser())
+	}
 }
 
 // daemonEnsure is the one way to have a daemon that this build can use. It does what every

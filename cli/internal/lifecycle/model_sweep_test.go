@@ -632,6 +632,13 @@ func (s search) answers(m *model, at int, r lifecycle.Request, add func(rank, bo
 				take(m)
 				s.feed(m, lifecycle.LaunchFailed{Ref: ref, Cause: lifecycle.CauseRefused, Failure: modelStop, At: m.at()})
 			})
+			if len(r.Leases) > 0 {
+				// Another daemon holds a lease the job needs: nothing was taken or started.
+				add(answer, true, name+" lease held elsewhere", func(m *model) {
+					take(m)
+					s.feed(m, lifecycle.LeaseRefused{Ref: ref, Resource: r.Leases[0], Holder: core.LeaseHolder{User: "other"}, At: m.at()})
+				})
+			}
 			add(answer, true, name+" supervisor never came up", func(m *model) {
 				take(m)
 				m.runs[i] = run{phase: lifecycle.RunParked, dead: true}

@@ -22,6 +22,8 @@ type Server struct {
 	binary    string
 	inherited Inherited
 	machine   Machine
+	// neighbors lists the other daemons of the machine for the status; nil lists none.
+	neighbors func() []Neighbor
 
 	// ctx is cancelled when the daemon is asked to stop. Every call is bound to it, so a call
 	// that waits for a job does not hold the daemon's shutdown.
@@ -57,6 +59,13 @@ type Machine interface {
 // sandbox daemons that run. Nil reports neither.
 func (s *Server) WithMachine(m Machine) *Server {
 	s.machine = m
+	return s
+}
+
+// WithNeighbors has the status list the other daemons of the machine as f finds them. A nil f
+// lists none.
+func (s *Server) WithNeighbors(f func() []Neighbor) *Server {
+	s.neighbors = f
 	return s
 }
 
@@ -138,6 +147,9 @@ func (s *Server) Status(context.Context, *cliv1.StatusRequest) (*cliv1.StatusRes
 		RunningJobs:       uint32(st.Running),
 		Environment:       inheritedVariables(s.inherited.Environ),
 		CheckoutDirectory: s.inherited.CheckoutDirectory,
+		Leases:            heldLeases(st.Leases),
+		LeaseConflicts:    leaseConflicts(st.Conflicts),
+		OtherDaemons:      s.otherDaemons(),
 	}
 	if s.machine != nil {
 		out.Sandbox = s.machine.Sandbox()
@@ -148,6 +160,19 @@ func (s *Server) Status(context.Context, *cliv1.StatusRequest) (*cliv1.StatusRes
 		out.Sandboxes = sandboxes
 	}
 	return out, nil
+}
+
+func (s *Server) otherDaemons() []*cliv1.DaemonProcess {
+	if s.neighbors == nil {
+		return nil
+	}
+	var out []*cliv1.DaemonProcess
+	for _, n := range s.neighbors() {
+		if n.PID > 0 {
+			out = append(out, &cliv1.DaemonProcess{Pid: uint32(n.PID), User: n.User})
+		}
+	}
+	return out
 }
 
 // Stop implements cliv1.DaemonServiceServer. Jobs that run have supervisors of their own and go
@@ -299,4 +324,30 @@ func (s *Server) ReadLogs(req *cliv1.ReadLogsRequest, stream cliv1.DaemonService
 		return stream.Send(wire.LogChunk(c))
 	})
 	return wire.Error(err)
+}
+
+// heldLeases returns the contract's messages for the leases a daemon's jobs hold.
+func heldLeases(ls []app.HeldLease) []*cliv1.HeldLease {
+	var out []*cliv1.HeldLease
+	for _, l := range ls {
+		m := &cliv1.HeldLease{JobId: string(l.Job), Task: string(l.Task), Resource: string(l.Resource), Key: string(l.Key), Where: l.Where}
+		if !l.Since.IsZero() {
+			m.Since = timestamppb.New(l.Since)
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// leaseConflicts returns the contract's messages for the leases jobs that run could not take.
+func leaseConflicts(cs []app.LeaseConflict) []*cliv1.LeaseConflict {
+	var out []*cliv1.LeaseConflict
+	for _, c := range cs {
+		m := &cliv1.LeaseConflict{JobId: string(c.Job), Resource: string(c.Resource), Detail: c.Detail}
+		if c.Holder != (core.LeaseHolder{}) {
+			m.Holder = wire.LeaseHolder(c.Holder)
+		}
+		out = append(out, m)
+	}
+	return out
 }

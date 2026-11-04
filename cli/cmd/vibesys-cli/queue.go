@@ -33,6 +33,11 @@ func describeWait(w *cliv1.WaitReason, task string) string {
 		return fmt.Sprintf("behind %s, which waits for %s", holders, w.GetResource())
 	case cliv1.WaitKind_WAIT_KIND_HELD, cliv1.WaitKind_WAIT_KIND_TROUBLE:
 		return w.GetDetail()
+	case cliv1.WaitKind_WAIT_KIND_LEASED:
+		if w.GetElsewhere() != nil {
+			return fmt.Sprintf("needs %s alone, leased by %s", w.GetResource(), describeLeaseHolder(w.GetElsewhere()))
+		}
+		return fmt.Sprintf("needs %s alone: %s", w.GetResource(), w.GetDetail())
 	case cliv1.WaitKind_WAIT_KIND_UNSPECIFIED:
 	}
 	// A kind a newer daemon added: say what is known of it.
@@ -63,4 +68,23 @@ func describeHolder(h *cliv1.WaitHolder, task string) string {
 		name += " (" + strings.Join(facts, ", ") + ")"
 	}
 	return name
+}
+
+// describeLeaseHolder names who holds a lease: "bob on host-b (pid 4242), job 7f3a", leaving out
+// what it did not say.
+func describeLeaseHolder(h *cliv1.LeaseHolder) string {
+	who := h.GetUser()
+	if who == "" {
+		who = "another daemon"
+	}
+	if h.GetHost() != "" {
+		who += " on " + h.GetHost()
+	}
+	if h.GetPid() > 0 {
+		who += fmt.Sprintf(" (pid %d)", h.GetPid())
+	}
+	if h.GetJobId() != "" {
+		who += ", job " + h.GetJobId()
+	}
+	return who
 }

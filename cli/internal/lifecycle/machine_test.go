@@ -10,6 +10,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 )
 
 // Every test here draws from a seeded generator, so a failure repeats exactly from its seed, and
@@ -113,7 +114,9 @@ func (w *world) checkRequest(req lifecycle.Request) {
 			w.fail("launch of %v, which is %q in its store", req.Ref, got)
 		}
 		w.launches = append(w.launches, req.Ref)
+		w.checkLeases(req.Ref, req.Leases)
 	case lifecycle.Adopt:
+		w.checkLeases(req.Ref, req.Leases)
 		if got := w.store[req.Ref]; got != core.JobRunning {
 			w.fail("adopt of %v, which is %q in its store", req.Ref, got)
 		}
@@ -175,6 +178,31 @@ func (w *world) userCancel() {
 	w.feed(lifecycle.CancelAsked{Ref: ref, Reason: fmt.Sprintf("reason %d", w.r.IntN(3)), At: w.tick()})
 }
 
+// checkLeases holds a request's leases to the resources the job's work claims alone.
+func (w *world) checkLeases(ref lifecycle.Ref, leases []schedule.ResourceID) {
+	w.t.Helper()
+	var want []schedule.ResourceID
+	claims := w.work[ref].Claims
+	if len(claims) == 0 {
+		resources := w.scheduling.Resources
+		if !w.scheduled {
+			resources = lifecycle.OneAtATime().Resources
+		}
+		for _, r := range resources {
+			claims = append(claims, schedule.Claim{Resource: r.ID, Amount: 1, Exclusive: true})
+		}
+	}
+	for _, c := range claims {
+		if c.Exclusive && !slices.Contains(want, c.Resource) {
+			want = append(want, c.Resource)
+		}
+	}
+	slices.Sort(want)
+	if !slices.Equal(leases, want) {
+		w.fail("the request for %v takes the leases %v, want %v, what it claims alone", ref, leases, want)
+	}
+}
+
 // answer gives one pending request the answer the shell may give it.
 func (w *world) answer(healthy bool) bool {
 	if len(w.pending) == 0 {
@@ -185,6 +213,11 @@ func (w *world) answer(healthy bool) bool {
 	w.pending = slices.Delete(w.pending, i, i+1)
 	switch req := req.(type) {
 	case lifecycle.LaunchRequest:
+		if len(req.Leases) > 0 && w.r.IntN(6) == 0 {
+			// Another daemon holds a lease the job needs; the shell took and started nothing.
+			w.feed(lifecycle.LeaseRefused{Ref: req.Ref, Resource: req.Leases[0], Holder: core.LeaseHolder{User: "other", PID: 9}, At: w.tick()})
+			return true
+		}
 		if !healthy && w.r.IntN(4) == 0 {
 			w.feed(lifecycle.LaunchFailed{Ref: req.Ref, Cause: lifecycle.CauseRefused, Failure: core.Failure{Kind: core.FailureUnavailable, Message: "no environment"}, At: w.tick()})
 			return true
@@ -219,6 +252,9 @@ func (w *world) answer(healthy bool) bool {
 			delete(w.dirs, req.Ref)
 		}
 		w.feed(lifecycle.Closed{Ref: req.Ref})
+	case lifecycle.ArmRetry:
+		// The slow period passes.
+		w.feed(lifecycle.RetryDue{Ref: req.Ref})
 	case lifecycle.Discard:
 		delete(w.sup, req.Ref)
 		delete(w.dirs, req.Ref)
@@ -532,7 +568,7 @@ func TestAStoreNotReadStartsNothingAndHoldsNothingElse(t *testing.T) {
 	}
 	next := lifecycle.Ref{Store: other, Job: "b"}
 	s, reqs = lifecycle.Step(s, lifecycle.Admitted{Ref: next, SubmittedAt: time.Unix(2, 0)})
-	if want := []lifecycle.Request{lifecycle.LaunchRequest{Ref: next}}; !reflect.DeepEqual(reqs, want) {
+	if want := []lifecycle.Request{lifecycle.LaunchRequest{Ref: next, Leases: []schedule.ResourceID{schedule.DefaultPlacement}}}; !reflect.DeepEqual(reqs, want) {
 		t.Fatalf("requests = %+v, want %+v", reqs, want)
 	}
 	_, reqs = lifecycle.Step(s, lifecycle.StoreRead{Store: away})

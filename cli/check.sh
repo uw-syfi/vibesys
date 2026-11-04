@@ -16,6 +16,9 @@ fi
 # The docker tag adds the tests that drive a real Docker daemon. They are vetted everywhere, so they
 # always compile, and run below where a daemon is reachable.
 go vet -tags docker ./...
+# The kind tag adds the test of the Kubernetes leases against a real API server, which runs only
+# where a cluster is named (see internal/lease/kubelease); it is vetted here so it always compiles.
+go vet -tags kind ./internal/lease/kubelease/
 
 # Compile every package's tests for each release target, so a symbol missing on
 # another OS fails here and not only in CI. This runs before the tests because the

@@ -37,6 +37,8 @@ type App struct {
 	inbox       chan message
 	view        atomic.Pointer[view]
 	generations storeGenerations
+	// leases are the leases the jobs hold. The loop keeps and lets go of them.
+	leases leaseBook
 
 	// branchMu is held while a result branch is read for a decision or moved, so promotions go
 	// one at a time and nothing reads the branch between a recorded promotion and its move.
@@ -81,6 +83,9 @@ type message struct {
 	done chan struct{}
 	// changed says a job changed in its store, so whoever waits looks again.
 	changed bool
+	// taken, when set, is what an effect took for a job, such as its leases, for the loop to keep
+	// while the machine holds the job. A message may carry it with no event.
+	taken *taken
 }
 
 // view is what the loop publishes for calls to read.
@@ -174,6 +179,9 @@ func (a *App) loop() {
 		for _, h := range handles {
 			h.Close()
 		}
+		// A daemon that stops gives back its leases, as its death would: a job it leaves running
+		// is adopted by the next daemon, which takes them again.
+		a.giveBack(a.leases.all())
 	}()
 	for {
 		var m message
@@ -186,6 +194,9 @@ func (a *App) loop() {
 			if m.handle != nil {
 				m.handle.Close()
 			}
+			if m.taken != nil {
+				a.giveBack(m.taken.leases)
+			}
 			if m.done != nil {
 				close(m.done)
 			}
@@ -193,6 +204,16 @@ func (a *App) loop() {
 		}
 		if m.scope != nil {
 			scopes[storeIDOf(*m.scope)] = *m.scope
+		}
+		if m.taken != nil {
+			a.leases.keep(m.taken.ref, *m.taken)
+		}
+		if m.event == nil {
+			a.letGoLeases(state)
+			if m.done != nil {
+				close(m.done)
+			}
+			continue
 		}
 		var reqs []lifecycle.Request
 		before := state
@@ -208,6 +229,7 @@ func (a *App) loop() {
 		// Before any effect starts: whoever sees an effect's work in a store finds the counts
 		// already past it.
 		a.publish(state, scopes, m.changed)
+		a.letGoLeases(state)
 		keepHandle(handles, m, reqs, state)
 		dropLetGo(handles, before, state, reqs)
 		if e, ok := m.event.(lifecycle.StoreForgotten); ok {
@@ -238,6 +260,13 @@ func (a *App) loop() {
 		if m.done != nil {
 			close(m.done)
 		}
+	}
+}
+
+// letGoLeases releases, beside the loop, the leases of the jobs the machine does not hold any more.
+func (a *App) letGoLeases(state lifecycle.State) {
+	if gone := a.leases.letGo(state.Holds); len(gone) > 0 {
+		a.group.Go(func() { a.giveBack(gone) })
 	}
 }
 
@@ -381,7 +410,7 @@ func (a *App) Waits(scope core.Scope, ids []core.JobID) map[core.JobID]core.JobW
 		if !ok {
 			continue
 		}
-		w := core.JobWait{Kind: q.Reason.Kind, Resource: string(q.Reason.Resource), Detail: q.Reason.Detail}
+		w := core.JobWait{Kind: q.Reason.Kind, Resource: string(q.Reason.Resource), Detail: q.Reason.Detail, Elsewhere: q.Reason.Elsewhere}
 		for _, b := range q.Blockers {
 			w.Holders = append(w.Holders, core.WaitHolder{Job: b.Ref.Job, Task: v.tasks[b.Ref.Store], Kind: b.Work.Kind, Run: b.Work.Run})
 		}
@@ -408,15 +437,19 @@ func failureOf(err error) core.Failure {
 	return core.Failure{Kind: core.FailureInternal, Message: err.Error()}
 }
 
-// Status is what the daemon reports about its work.
+// Status is what the daemon reports about its work: its counts, the leases its jobs hold, and the
+// leases jobs that run already could not take.
 type Status struct {
 	StartedAt time.Time
 	Queued    int
 	Running   int
+	Leases    []HeldLease
+	Conflicts []LeaseConflict
 }
 
-// Status returns the machine's counts.
+// Status returns the machine's counts and leases.
 func (a *App) Status() Status {
 	v := a.view.Load()
-	return Status{StartedAt: a.startedAt, Queued: v.queued, Running: v.running}
+	held, conflicts := a.leases.snapshot(v.tasks)
+	return Status{StartedAt: a.startedAt, Queued: v.queued, Running: v.running, Leases: held, Conflicts: conflicts}
 }

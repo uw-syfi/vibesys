@@ -128,7 +128,8 @@ var rules = map[string][]string{
 	// client speaks the contract's messages only, so it does not import the domain.
 	"internal/app": {
 		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow", "internal/gitrepo",
-		"internal/lifecycle", "internal/owned", "internal/schedule", "internal/store", "internal/supervisor", "internal/task",
+		"internal/lease", "internal/lifecycle", "internal/owned", "internal/schedule", "internal/store", "internal/supervisor",
+		"internal/task",
 	},
 	"internal/app/filestores": {"internal/app", "internal/core", "internal/store", "internal/store/filestore"},
 	"internal/app/memstores":  {"internal/app", "internal/core", "internal/store", "internal/store/memstore"},
@@ -156,7 +157,8 @@ var rules = map[string][]string{
 		"internal/backend/nvidia", "internal/environment/docker/machine", "internal/environment/slurm",
 		"internal/operator", "internal/remote", "internal/schedule", "internal/schedule/policy/fairshare",
 		"internal/schedule/policy/fifo", "gen/", "internal/resource", "internal/resource/gpu",
-		"internal/resource/kubernetes", "internal/resource/mounts",
+		"internal/resource/kubernetes", "internal/resource/mounts", "internal/lease", "internal/lease/hostlease",
+		"internal/lease/locallease", "internal/neighbors",
 	},
 
 	// Replacing the running binary with a newer release.
@@ -169,6 +171,19 @@ var rules = map[string][]string{
 	"internal/schedule/scheduletest":     {"internal/core", "internal/schedule"},
 	"internal/schedule/policy/fifo":      {"internal/schedule"},
 	"internal/schedule/policy/fairshare": {"internal/core", "internal/schedule"},
+
+	// Leases: how the daemons that share a resource take turns at it. Each place a lease is kept
+	// is a package of its own, which only production names, and passes the contract in leasetest.
+	"internal/lease":                    {"internal/core"},
+	"internal/lease/leasetest":          {"internal/core", "internal/lease"},
+	"internal/lease/fakelease":          {"internal/core", "internal/lease"},
+	"internal/lease/locallease":         {"internal/core", "internal/lease"},
+	"internal/lease/hostlease":          {"internal/core", "internal/lease", "internal/remote"},
+	"internal/lease/kubelease":          {"internal/clock", "internal/core", "internal/lease", "internal/remote"},
+	"internal/lease/kubelease/kubefake": {"internal/lease/kubelease"},
+
+	// The daemons of the machine, as its proc file system lists them.
+	"internal/neighbors": {},
 
 	"internal/archcheck": {},
 }
@@ -220,9 +235,13 @@ var testRules = map[string][]string{
 	"internal/app": {
 		"internal/app/filestores", "internal/app/memstores", "internal/backend/cpu", "internal/environment/fakeenv",
 		"internal/hostfs", "internal/store/filestore", "internal/store/filestore/fsys", "internal/store/storetest", "internal/task/tasktest",
+		"internal/lease/fakelease",
 	},
 	"internal/app/filestores": {"internal/core"},
-	"internal/daemon":         {"internal/store", "internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest"},
+	"internal/daemon": {
+		"internal/store", "internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest",
+		"internal/lease", "internal/lease/fakelease", "internal/schedule",
+	},
 	"internal/client": {
 		"internal/app", "internal/app/memstores", "internal/core", "internal/daemon", "internal/daemon/daemontest",
 		"internal/environment/fakeenv", "internal/supervisor", "internal/task/tasktest",
@@ -232,7 +251,7 @@ var testRules = map[string][]string{
 		"gen/", "internal/app", "internal/app/memstores", "internal/client", "internal/clock", "internal/core",
 		"internal/daemon", "internal/environment/fakeenv", "internal/gitrepo", "internal/lifecycle", "internal/owned",
 		"internal/runtimedir", "internal/schedule", "internal/schedule/policy/fairshare", "internal/schedule/policy/fifo",
-		"internal/store", "internal/supervisor",
+		"internal/store", "internal/supervisor", "internal/lease", "internal/lease/fakelease",
 	},
 	"cmd/vibesys-cli": {
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
@@ -247,6 +266,12 @@ var testRules = map[string][]string{
 	"internal/schedule":                  {"internal/schedule/policy/fifo", "internal/schedule/scheduletest"},
 	"internal/schedule/policy/fifo":      {"internal/schedule/scheduletest"},
 	"internal/schedule/policy/fairshare": {"internal/schedule/scheduletest"},
+
+	// The leases' contract suite, and the places a test of one compares it with.
+	"internal/lease/fakelease":  {"internal/lease/leasetest"},
+	"internal/lease/locallease": {"internal/lease/leasetest"},
+	"internal/lease/hostlease":  {"internal/lease/leasetest", "internal/lease/locallease"},
+	"internal/lease/kubelease":  {"internal/lease/kubelease/kubefake", "internal/lease/leasetest"},
 }
 
 // layoutNames are spellings that only the on-disk layout may use: the state directory, the event
