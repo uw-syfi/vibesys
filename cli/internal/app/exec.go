@@ -311,7 +311,7 @@ func (a *App) launch(ctx context.Context, r lifecycle.LaunchRequest, scope core.
 		return
 	}
 	t := &taken{ref: ref, leases: held}
-	h, gone, err := a.prepare(ctx, ref, scope)
+	h, gone, err := a.prepare(ctx, ref, r.Placement, scope)
 	posted := false
 	switch {
 	case ctx.Err() != nil:
@@ -330,10 +330,11 @@ func (a *App) launch(ctx context.Context, r lifecycle.LaunchRequest, scope core.
 	}
 }
 
-// prepare does the steps of a launch up to and including recording the job as running. gone says
-// the job is not queued any more, so there is nothing to launch. A failure can leave a parked
-// supervisor, which the handle reaches and the job's end releases.
-func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) (h supervisor.Handle, gone bool, err error) {
+// prepare does the steps of a launch up to and including recording the job as running, on the
+// placement the scheduler started it on. gone says the job is not queued any more, so there is
+// nothing to launch. A failure can leave a parked supervisor, which the handle reaches and the job's
+// end releases.
+func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, placement string, scope core.Scope) (h supervisor.Handle, gone bool, err error) {
 	st, err := a.findStore(ctx, scope)
 	if err != nil {
 		return nil, false, storeError{err}
@@ -351,19 +352,12 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 		c.Timeout = a.cfg.DefaultTimeout
 		spec.Settings = c
 	}
-	// A job holds the placement it was submitted with, which is decided again here so that one the
-	// operator config no longer has is refused, and one of a job queued before placements were
-	// recorded is decided now.
-	var needs []core.ResourceKind
-	if spec.Environment == core.EnvironmentDocker && len(a.cfg.Placements) > 0 {
-		t, err := a.taskAt(ctx, string(scope.Repository()), spec.Commit, string(scope.Task()))
-		if err != nil {
-			return nil, false, err
-		}
-		needs = t.Needs
-	}
-	if spec.Placement, err = a.placementOf(spec.Environment, needs, spec.Placement); err != nil {
-		return nil, false, err
+	// The job runs where the scheduler started it, one of the placements that give what its task
+	// needs (schedule.PlacementDemand). The launch names it, so the supervisor decides nothing. A
+	// daemon whose scheduler names no placement, as a test's may not, runs it on the one it was
+	// restricted to.
+	if placement != "" {
+		spec.Placement = placement
 	}
 	env, err := a.cfg.Environments.Environment(spec.Environment, environment.Target{
 		Repository: string(scope.Repository()), Commit: spec.Commit, Task: string(scope.Task()), Placement: spec.Placement,
@@ -400,9 +394,12 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 	if err != nil {
 		return nil, false, spawnError{err}
 	}
-	err = a.record(ctx, st, core.Transition{
-		Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: a.now(), Environment: &fingerprint,
-	})
+	start := core.Transition{Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: a.now(), Environment: &fingerprint}
+	if launch.Plan != nil && launch.Plan.Key != job.Key {
+		// It starts in another environment than it was keyed in, and runs under that one's key.
+		start.Key = launch.Plan.Key
+	}
+	err = a.record(ctx, st, start)
 	if err != nil {
 		return h, false, storeError{err}
 	}

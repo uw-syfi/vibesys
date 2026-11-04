@@ -217,3 +217,32 @@ func ToCutCause(field string, c cliv1.CutCause) (core.CutCause, error) {
 	}
 	return "", invalid("%s: %s is not a cut cause", field, c)
 }
+
+var resourceKinds = []struct {
+	domain core.ResourceKind
+	wire   cliv1.ResourceKind
+}{
+	{core.ResourceGPU, cliv1.ResourceKind_RESOURCE_KIND_GPU},
+	{core.ResourceKubernetes, cliv1.ResourceKind_RESOURCE_KIND_KUBERNETES},
+	{core.ResourceMounts, cliv1.ResourceKind_RESOURCE_KIND_MOUNTS},
+}
+
+// ResourceKind returns the contract's value for a resource kind.
+func ResourceKind(k core.ResourceKind) cliv1.ResourceKind {
+	for _, p := range resourceKinds {
+		if p.domain == k {
+			return p.wire
+		}
+	}
+	return cliv1.ResourceKind_RESOURCE_KIND_UNSPECIFIED
+}
+
+// ToResourceKind returns the domain kind for the contract's value, or invalid_input naming field.
+func ToResourceKind(field string, k cliv1.ResourceKind) (core.ResourceKind, error) {
+	for _, p := range resourceKinds {
+		if p.wire == k {
+			return p.domain, nil
+		}
+	}
+	return "", invalid("%s: %s is not a resource kind", field, k)
+}

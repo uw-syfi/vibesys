@@ -99,9 +99,10 @@ type JobSpec struct {
 	Commit Commit
 	// Environment is the one the caller asks for. EnvironmentAuto lets the task choose.
 	Environment EnvironmentKind
-	// Placement is the placement of the operator config a docker job runs on. Empty in a
-	// submission lets the task's needs choose (ChoosePlacement); a queued check or measure job
-	// holds the one chosen. A host job has none.
+	// Placement restricts a docker job to one placement of the operator config. Empty lets it run
+	// on any placement that gives what its task needs (EligiblePlacements), which the scheduler
+	// chooses when the job starts; the placement it ran on is in its pinned environment
+	// (Fingerprint.Placement). A host job has none.
 	Placement string
 	Settings  Settings
 }
@@ -139,8 +140,17 @@ type Job struct {
 	ID    JobID
 	Spec  JobSpec
 	State JobState
-	// Key is empty for command jobs.
+	// Key is empty for command jobs. A job that starts in an environment other than the one it was
+	// keyed in, such as a placement whose engine built the task's image to another digest, runs
+	// under the key of the environment it starts in (Transition.Key).
 	Key JobKey
+	// Needs are the resources the task at the job's commit needs of the placement a docker job runs
+	// on, decided when it was submitted. Only a placement that gives them all runs it.
+	Needs []ResourceKind
+	// TaskVersion is the version of the task a check or measure job was submitted for, which it
+	// runs only if the task is still at it when the job starts. It is empty for a command job, and
+	// for a job of a store of version 4 or older, which runs the task as it is then.
+	TaskVersion string
 	// NoCache is the submission's choice to run the whole job fresh: it neither joined nor reused
 	// a job, and when it starts it reuses no saved samples and no saved check pass. It is kept on
 	// the job because the job may start long after, in another daemon.
@@ -256,8 +266,12 @@ type Submission struct {
 	Context CallContext
 	Spec    JobSpec
 	// Key is the job's cache key, empty for a command job.
-	Key     JobKey
-	NoCache bool
+	Key JobKey
+	// Needs are the resources the job's task needs of a placement (Job.Needs).
+	Needs []ResourceKind
+	// TaskVersion is the version of the task a check or measure job is for (Job.TaskVersion).
+	TaskVersion string
+	NoCache     bool
 	// Note is attached to the job a submission lands on, including a joined or reused one.
 	Note *Note
 	Plan PlanNumber
@@ -309,6 +323,10 @@ type Transition struct {
 	At   time.Time
 	// Environment is set on the move to running.
 	Environment *Fingerprint
+	// Key, set only on the move to running of a check or measure job, is the key the job runs
+	// under from then on: that of the environment it pinned. Empty keeps the key it was queued
+	// under.
+	Key JobKey
 	// Result is saved with a move to succeeded and is nil otherwise.
 	Result       *Result
 	ExitCode     *int

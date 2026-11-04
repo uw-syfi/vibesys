@@ -76,9 +76,11 @@ name. With no file, docker jobs run on this machine with no GPU, as before.
 
 A file names placements, where a docker job's container runs, and the
 resources each gives a container. A task names the resources its jobs need
-(`[environment] needs = ["kubernetes"]`), and a job runs on the placement
-`--placement` or `VIBESYS_PLACEMENT` names, or on the only one that gives every
-need. The [CLI README](https://github.com/uw-syfi/vibesys/blob/main/cli/README.md#the-operator-config) lists every key.
+(`[environment] needs = ["kubernetes"]`), and a job may run on any placement
+that gives every need, which the scheduler chooses when the job starts, or only
+on the one `--placement` or `VIBESYS_PLACEMENT` restricts it to. Placements are
+interchangeable: where a result was taken is recorded with it and does not
+decide which results are compared or reused. The [CLI README](https://github.com/uw-syfi/vibesys/blob/main/cli/README.md#the-operator-config) lists every key.
 A file of the earlier shape below is read as the one placement `default`. The keys follow `vs-slurm`'s
 operator config where they mean the same thing (`host`, `ssh_command`,
 `rsync_command`, `remote_workspace_root`, `poll_interval_seconds`,
@@ -116,7 +118,8 @@ A job's environment kind is what contains it (`host` or `docker`); it is part
 of the job and of every saved fingerprint. Where the engine runs is not a new
 kind: local Docker, Docker over ssh and Docker in a Slurm allocation run the
 same image the same way, and the fingerprint's machine facts already say which
-machine a result came from. Adding `slurm` as a kind would have changed the
+machine a result came from (for diagnosis; they do not split a docker
+environment's results). Adding `slurm` as a kind would have changed the
 contract (`EnvironmentKind` in `environment.proto`) and split results that are
 comparable. Each placement is still its own package behind
 `environment.Environment`, chosen by name from the operator config, and every

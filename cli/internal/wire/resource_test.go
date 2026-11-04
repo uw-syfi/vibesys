@@ -7,6 +7,7 @@ import (
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // The resource kinds the domain knows are exactly the contract's, in its order, named as a task
@@ -27,5 +28,17 @@ func TestTheResourceKindsAreTheContracts(t *testing.T) {
 		if got, err := core.ParseResourceKind(string(k)); err != nil || got != k {
 			t.Errorf("ParseResourceKind(%q) = %q, %v", k, got, err)
 		}
+	}
+}
+
+// Each resource kind is its contract value and back, and only a kind the contract names is one.
+func TestAResourceKindIsItsContractValueAndBack(t *testing.T) {
+	for _, k := range core.ResourceKinds() {
+		if got, err := wire.ToResourceKind("k", wire.ResourceKind(k)); err != nil || got != k {
+			t.Errorf("%q came back as %q, %v", k, got, err)
+		}
+	}
+	if _, err := wire.ToResourceKind("needs[0]", cliv1.ResourceKind_RESOURCE_KIND_UNSPECIFIED); err == nil || !strings.Contains(err.Error(), "needs[0]") {
+		t.Errorf("an unspecified kind: %v, want a refusal naming the field", err)
 	}
 }

@@ -1,5 +1,6 @@
-// Package scheduletest is the contract every schedule.Policy passes: properties of schedule.Step
-// with the policy, over generated states. Each policy's package runs it on itself.
+// Package scheduletest is the contract every schedule.Policy and schedule.Placer passes: properties
+// of schedule.Step with the policy and the placer, over generated states. Each policy's package
+// runs it on itself.
 package scheduletest
 
 import (
@@ -21,9 +22,16 @@ type Contract struct {
 	// Fair says the policy shares resources between runs: a run that keeps work waiting gets a
 	// start within one turn of every other run, whatever the others submit.
 	Fair bool
+	// Placer returns the placer under test. It defaults to schedule.LeastLoaded.
+	Placer func() schedule.Placer
 	// Step is the scheduler the policy runs in. It defaults to schedule.Step, and a test of the
 	// contract itself passes a broken one to see the contract catch it.
-	Step func(schedule.State, schedule.Policy, ...schedule.Filter) []schedule.Decision
+	Step func(schedule.State, schedule.Rules) []schedule.Decision
+}
+
+// rules are the contract's policy and placer, new.
+func (c Contract) rules() schedule.Rules {
+	return schedule.Rules{Policy: c.New(), Placer: c.Placer()}
 }
 
 // Cases is how many generated states each property is checked on.
@@ -39,14 +47,15 @@ type TB interface {
 // properties are the contract's properties, by name.
 func properties(c Contract) map[string]func(TB, Contract) {
 	out := map[string]func(TB, Contract){
-		"the policy orders the jobs it is given, each once":               orderIsPermutation,
-		"no resource is given past its capacity":                          neverOverCapacity,
-		"an exclusive claim shares its resource with no other":            exclusiveIsAlone,
-		"every waiting job starts, waits for a true reason or is refused": everyJobDecided,
-		"the decisions are a function of the state":                       deterministic,
-		"every job starts once the holders end and nothing more arrives":  eventuallyStarts,
-		"a job that waits for a resource keeps its turn on it":            keepsTurn,
-		"a job refused a lease waits for it, naming its holder":           leasedWaits,
+		"the policy orders the jobs it is given, each once":                orderIsPermutation,
+		"no resource is given past its capacity":                           neverOverCapacity,
+		"an exclusive claim shares its resource with no other":             exclusiveIsAlone,
+		"every waiting job starts, waits for a true reason or is refused":  everyJobDecided,
+		"the decisions are a function of the state":                        deterministic,
+		"every job starts once the holders end and nothing more arrives":   eventuallyStarts,
+		"a job that waits for a resource keeps its turn on it":             keepsTurn,
+		"a job refused a lease waits for it, naming its holder":            leasedWaits,
+		"a job starts on one of its options, and never one it cannot hold": startsOnItsOwnOption,
 	}
 	if c.Fair {
 		out["a run with work waiting starts within one turn of every run"] = boundedStarvation
@@ -57,6 +66,9 @@ func properties(c Contract) map[string]func(TB, Contract) {
 func (c Contract) withDefaults() Contract {
 	if c.Step == nil {
 		c.Step = schedule.Step
+	}
+	if c.Placer == nil {
+		c.Placer = func() schedule.Placer { return schedule.LeastLoaded{} }
 	}
 	return c
 }
@@ -109,7 +121,8 @@ func (r *recorder) Failed() bool { return r.msg != "" }
 
 // gen makes states from a seed: a few resources of small capacity, holdings that mostly fit and
 // sometimes do not (a daemon restarted with less capacity adopts what runs), and waiting jobs with
-// ties in time, unknown resources, claims past capacity, exclusive claims and First jobs.
+// ties in time, unknown resources, claims past capacity, exclusive claims and First jobs, each of
+// which may run on one to three placements, or rarely on none.
 type gen struct{ r *rand.Rand }
 
 func newGen(seed uint64) gen { return gen{rand.New(rand.NewPCG(seed, 0x5eed))} }
@@ -164,21 +177,53 @@ func (g gen) state() schedule.State {
 		s.Waiting = append(s.Waiting, g.candidate(s.Resources, i))
 	}
 	for range g.r.IntN(schedule.RecentGrants + 4) {
-		s.Recent = schedule.Remember(s.Recent, g.candidate(s.Resources, 0))
+		s.Recent = schedule.Remember(s.Recent, schedule.Grant{Run: runs[g.r.IntN(len(runs))], Claims: g.claims(s.Resources)})
 	}
 	return s
 }
 
+// placements are the names generated options run on.
+var placements = []string{"", "pa", "pb", "pc"}
+
 func (g gen) candidate(rs []schedule.Resource, i int) schedule.Candidate {
 	c := schedule.Candidate{
-		ID: schedule.ID(fmt.Sprintf("w%d", i)), Claims: g.claims(rs), Run: runs[g.r.IntN(len(runs))],
+		ID: schedule.ID(fmt.Sprintf("w%d", i)), Run: runs[g.r.IntN(len(runs))],
 		Submitted: epoch.Add(time.Duration(g.r.IntN(4)) * time.Second), Seq: uint64(100 + i), First: g.r.IntN(8) == 0,
 	}
+	n := 1
+	switch g.r.IntN(12) {
+	case 0:
+		n = 0
+	case 1, 2, 3, 4:
+		n = 2 + g.r.IntN(2)
+	}
+	for _, at := range g.r.Perm(len(placements))[:n] {
+		c.Options = append(c.Options, schedule.Option{Placement: placements[at], Claims: g.claims(rs)})
+	}
 	// Some were refused the lease of a claim by another daemon.
-	if g.r.IntN(10) == 0 {
-		c.Leased = &schedule.LeasedOut{Resource: c.Claims[0].Resource, Holder: core.LeaseHolder{User: "other", Host: "host-b", PID: 7}}
+	if n > 0 && g.r.IntN(10) == 0 {
+		o := c.Options[g.r.IntN(n)]
+		c.Leased = &schedule.LeasedOut{Resource: o.Claims[0].Resource, Holder: core.LeaseHolder{User: "other", Host: "host-b", PID: 7}}
 	}
 	return c
+}
+
+// grantable says whether the claims could ever be granted.
+func grantable(rs []schedule.Resource, claims []schedule.Claim) bool {
+	capacity := map[schedule.ResourceID]int{}
+	for _, r := range rs {
+		capacity[r.ID] = r.Capacity
+	}
+	total := map[schedule.ResourceID]int{}
+	for _, cl := range claims {
+		total[cl.Resource] += max(cl.Amount, 1)
+	}
+	for r, n := range total {
+		if cp, ok := capacity[r]; !ok || n > cp {
+			return false
+		}
+	}
+	return true
 }
 
 // fitting keeps the holdings that fit beside those before them.
@@ -241,7 +286,7 @@ func started(s schedule.State, ds []schedule.Decision) []schedule.Holding {
 	for _, d := range ds {
 		if st, ok := d.(schedule.Start); ok {
 			i := slices.IndexFunc(s.Waiting, func(c schedule.Candidate) bool { return c.ID == st.ID })
-			out = append(out, schedule.Holding{ID: st.ID, Claims: s.Waiting[i].Claims, Run: s.Waiting[i].Run})
+			out = append(out, schedule.Holding{ID: st.ID, Claims: st.Option.Claims, Run: s.Waiting[i].Run})
 		}
 	}
 	return out
@@ -279,7 +324,7 @@ func newViolations(s schedule.State, ds []schedule.Decision) []string {
 
 func neverOverCapacity(t TB, c Contract) {
 	each(t, func(t TB, seed uint64, s schedule.State) {
-		for _, v := range newViolations(s, c.Step(s, c.New())) {
+		for _, v := range newViolations(s, c.Step(s, c.rules())) {
 			if !containsWord(v, "exclusively") {
 				t.Fatalf("seed %d: %s", seed, v)
 			}
@@ -289,13 +334,13 @@ func neverOverCapacity(t TB, c Contract) {
 
 func exclusiveIsAlone(t TB, c Contract) {
 	each(t, func(t TB, seed uint64, s schedule.State) {
-		for _, v := range newViolations(s, c.Step(s, c.New())) {
+		for _, v := range newViolations(s, c.Step(s, c.rules())) {
 			if containsWord(v, "exclusively") {
 				t.Fatalf("seed %d: %s", seed, v)
 			}
 		}
 		// A resource held exclusively and shared already is given to no one more.
-		ds := c.Step(s, c.New())
+		ds := c.Step(s, c.rules())
 		for _, h := range started(s, ds) {
 			for _, claim := range h.Claims {
 				for _, other := range s.Holdings {
@@ -321,7 +366,7 @@ func containsWord(s, w string) bool {
 
 func everyJobDecided(t TB, c Contract) {
 	each(t, func(t TB, seed uint64, s schedule.State) {
-		ds := c.Step(s, c.New())
+		ds := c.Step(s, c.rules())
 		seen := map[schedule.ID]int{}
 		for _, d := range ds {
 			seen[d.Target()]++
@@ -348,30 +393,38 @@ func everyJobDecided(t TB, c Contract) {
 		for _, d := range ds {
 			i := slices.IndexFunc(s.Waiting, func(c schedule.Candidate) bool { return c.ID == d.Target() })
 			cand := s.Waiting[i]
-			possible := true
-			total := map[schedule.ResourceID]int{}
-			for _, cl := range cand.Claims {
-				total[cl.Resource] += max(cl.Amount, 1)
-			}
-			for r, n := range total {
-				if cp, ok := capacity[r]; !ok || n > cp {
-					possible = false
-				}
-			}
+			possible := slices.ContainsFunc(cand.Options, func(o schedule.Option) bool { return grantable(s.Resources, o.Claims) })
 			switch d := d.(type) {
 			case schedule.Refuse:
 				if possible || d.Detail == "" {
-					t.Fatalf("seed %d: refused %s, whose claims %v fit %v, saying %q", seed, d.ID, cand.Claims, s.Resources, d.Detail)
+					t.Fatalf("seed %d: refused %s, whose options %v fit %v, saying %q", seed, d.ID, cand.Options, s.Resources, d.Detail)
 				}
 			case schedule.Wait:
 				if !possible {
-					t.Fatalf("seed %d: %s waits for claims %v that can never be granted", seed, d.ID, cand.Claims)
+					t.Fatalf("seed %d: %s waits for options %v that can never be granted", seed, d.ID, cand.Options)
 				}
 				checkReason(t, seed, d, known)
 			case schedule.Start:
-				if !possible {
-					t.Fatalf("seed %d: started %s, whose claims %v exceed %v", seed, d.ID, cand.Claims, s.Resources)
+				if !grantable(s.Resources, d.Option.Claims) {
+					t.Fatalf("seed %d: started %s on %v, which exceeds %v", seed, d.ID, d.Option, s.Resources)
 				}
+			}
+		}
+	})
+}
+
+// startsOnItsOwnOption: a job starts on one of the options it has, as it has it, and only on one
+// whose claims fit; with a placer that ranks them in any order, safety holds.
+func startsOnItsOwnOption(t TB, c Contract) {
+	each(t, func(t TB, seed uint64, s schedule.State) {
+		for _, d := range c.Step(s, c.rules()) {
+			st, ok := d.(schedule.Start)
+			if !ok {
+				continue
+			}
+			i := slices.IndexFunc(s.Waiting, func(c schedule.Candidate) bool { return c.ID == st.ID })
+			if !slices.ContainsFunc(s.Waiting[i].Options, func(o schedule.Option) bool { return reflect.DeepEqual(o, st.Option) }) {
+				t.Fatalf("seed %d: %s started on %+v, which is none of its options %+v", seed, st.ID, st.Option, s.Waiting[i].Options)
 			}
 		}
 	})
@@ -407,13 +460,13 @@ func checkReason(t TB, seed uint64, d schedule.Wait, known map[schedule.ID]bool)
 
 func deterministic(t TB, c Contract) {
 	each(t, func(t TB, seed uint64, s schedule.State) {
-		first := c.Step(s, c.New())
-		again := c.Step(s, c.New())
+		first := c.Step(s, c.rules())
+		again := c.Step(s, c.rules())
 		shuffled := s
 		shuffled.Waiting = slices.Clone(s.Waiting)
 		r := rand.New(rand.NewPCG(seed, 1))
 		r.Shuffle(len(shuffled.Waiting), func(i, j int) { shuffled.Waiting[i], shuffled.Waiting[j] = shuffled.Waiting[j], shuffled.Waiting[i] })
-		other := c.Step(shuffled, c.New())
+		other := c.Step(shuffled, c.rules())
 		if !reflect.DeepEqual(first, again) || !reflect.DeepEqual(first, other) {
 			t.Fatalf("seed %d: the same state decided\n%+v\n%+v\n%+v", seed, first, again, other)
 		}
@@ -435,17 +488,18 @@ func eventuallyStarts(t TB, c Contract) {
 				}
 			}
 			if round > 2*(waiting+len(s.Holdings))+2 {
-				t.Fatalf("seed %d: %d jobs still wait after %d rounds: %+v", seed, len(s.Waiting), round, c.Step(s, c.New()))
+				t.Fatalf("seed %d: %d jobs still wait after %d rounds: %+v", seed, len(s.Waiting), round, c.Step(s, c.rules()))
 			}
-			ds := c.Step(s, c.New())
+			ds := c.Step(s, c.rules())
 			began := len(started(s, ds))
 			for _, d := range ds {
 				switch d := d.(type) {
 				case schedule.Start, schedule.Refuse:
 					i := slices.IndexFunc(s.Waiting, func(c schedule.Candidate) bool { return c.ID == d.Target() })
 					if _, ok := d.(schedule.Start); ok {
-						s.Holdings = append(s.Holdings, schedule.Holding{ID: d.Target(), Claims: s.Waiting[i].Claims, Run: s.Waiting[i].Run})
-						s.Recent = schedule.Remember(s.Recent, s.Waiting[i])
+						claims := d.(schedule.Start).Option.Claims
+						s.Holdings = append(s.Holdings, schedule.Holding{ID: d.Target(), Claims: claims, Run: s.Waiting[i].Run})
+						s.Recent = schedule.Remember(s.Recent, schedule.Grant{Run: s.Waiting[i].Run, Claims: claims})
 					}
 					s.Waiting = slices.Delete(s.Waiting, i, i+1)
 				case schedule.Wait:
@@ -475,7 +529,7 @@ func boundedStarvation(t TB, c Contract) {
 			seq++
 			s.Waiting = append(s.Waiting, schedule.Candidate{
 				ID: schedule.ID(fmt.Sprintf("j%d", seq)), Run: run, Submitted: at, Seq: seq,
-				Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: r.IntN(3) == 0}},
+				Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: r.IntN(3) == 0}),
 			})
 		}
 		// The flooding run submitted a long queue first.
@@ -497,10 +551,10 @@ func boundedStarvation(t TB, c Contract) {
 					last[run] = round
 				}
 			}
-			ds := c.Step(s, c.New())
+			ds := c.Step(s, c.rules())
 			s.Holdings = nil
 			for _, h := range started(s, ds) {
-				s.Recent = schedule.Remember(s.Recent, schedule.Candidate{Run: h.Run, Claims: h.Claims})
+				s.Recent = schedule.Remember(s.Recent, schedule.Grant{Run: h.Run, Claims: h.Claims})
 				last[h.Run] = round
 				s.Waiting = slices.DeleteFunc(s.Waiting, func(c schedule.Candidate) bool { return c.ID == h.ID })
 			}
@@ -517,7 +571,7 @@ func boundedStarvation(t TB, c Contract) {
 // that resource, so a stream of small jobs cannot starve a large or exclusive one.
 func leasedWaits(t TB, c Contract) {
 	each(t, func(t TB, seed uint64, s schedule.State) {
-		for _, d := range c.Step(s, c.New()) {
+		for _, d := range c.Step(s, c.rules()) {
 			i := slices.IndexFunc(s.Waiting, func(c schedule.Candidate) bool { return c.ID == d.Target() })
 			l := s.Waiting[i].Leased
 			if l == nil {
@@ -525,7 +579,9 @@ func leasedWaits(t TB, c Contract) {
 			}
 			switch d := d.(type) {
 			case schedule.Start:
-				t.Fatalf("seed %d: %s started while %s holds the lease of %s", seed, d.ID, l.Holder, l.Resource)
+				if slices.ContainsFunc(d.Option.Claims, func(cl schedule.Claim) bool { return cl.Resource == l.Resource }) {
+					t.Fatalf("seed %d: %s started on %s while %s holds the lease of %s", seed, d.ID, d.Option.Placement, l.Holder, l.Resource)
+				}
 			case schedule.Wait:
 				if d.Reason.Kind == core.WaitLeased && (d.Reason.Elsewhere == nil || *d.Reason.Elsewhere != l.Holder) {
 					t.Fatalf("seed %d: %s waits for the lease of %s and names %v, want %s", seed, d.ID, l.Resource, d.Reason.Elsewhere, l.Holder)
@@ -538,12 +594,19 @@ func leasedWaits(t TB, c Contract) {
 
 func keepsTurn(t TB, c Contract) {
 	each(t, func(t TB, seed uint64, s schedule.State) {
+		// A job waits on every option it could ever hold.
 		claimsOf := func(id schedule.ID) []schedule.Claim {
 			i := slices.IndexFunc(s.Waiting, func(c schedule.Candidate) bool { return c.ID == id })
-			return s.Waiting[i].Claims
+			var out []schedule.Claim
+			for _, o := range s.Waiting[i].Options {
+				if grantable(s.Resources, o.Claims) {
+					out = append(out, o.Claims...)
+				}
+			}
+			return out
 		}
 		reserved := map[schedule.ResourceID]schedule.ID{}
-		for _, d := range c.Step(s, c.New()) {
+		for _, d := range c.Step(s, c.rules()) {
 			switch d := d.(type) {
 			case schedule.Wait:
 				if d.Reason.Kind == core.WaitHeld {
@@ -555,7 +618,7 @@ func keepsTurn(t TB, c Contract) {
 					}
 				}
 			case schedule.Start:
-				for _, cl := range claimsOf(d.ID) {
+				for _, cl := range d.Option.Claims {
 					if w, ok := reserved[cl.Resource]; ok {
 						t.Fatalf("seed %d: %s started on %s, which %s waits for", seed, d.ID, cl.Resource, w)
 					}

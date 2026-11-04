@@ -4,8 +4,9 @@
 //
 // Each kind is a package of its own under this one, and they import this package and core, never
 // each other; only the binary's wiring names a concrete kind. The docker environment applies what
-// a resource attaches without knowing which kind it is, and pins what the resource's fingerprint
-// says, so a result taken with one resource is never compared with one taken with another. Every
+// a resource attaches without knowing which kind it is, and records what the resource's fingerprint
+// says with each result, to tell where it was taken; that takes no part in which results are
+// compared, since placements, and the resources they give, are interchangeable. Every
 // implementation passes the contract in resourcetest.
 package resource
 
@@ -31,7 +32,7 @@ type Resource interface {
 	// the same id. It does no I/O and returns the same claims on every call.
 	Claims() []core.Claim
 
-	// Fingerprint returns what identifies the resource for a result's comparability, as facts by
+	// Fingerprint returns what identifies the resource, recorded with each result, as facts by
 	// name, such as the GPU model or the cluster's server and version. The names are FactName and
 	// are the resource's contract: they never collide with another kind's. It fails with a
 	// *core.Failure of kind FailureUnavailable when the resource cannot be read.

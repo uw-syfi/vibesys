@@ -82,29 +82,33 @@ func (p PlacementOffer) Lacks(needs []ResourceKind) ResourceKind {
 	return ""
 }
 
-// ChoosePlacement decides which placement a docker job runs on. A requested placement must be one
-// of the offers and give every needed resource. With none requested, the one placement that gives
-// every needed resource is chosen; when none does, or more than one does, the job is refused,
-// naming them, since a guess would put a job's numbers on a machine the caller did not mean. It
-// fails with FailureInvalidInput and never returns the empty name.
-func ChoosePlacement(offers []PlacementOffer, needs []ResourceKind, requested string) (string, error) {
+// EligiblePlacements returns the placements a docker job may run on, by name: every offer that
+// gives each needed resource, or, when the job is restricted to one placement, that one. Placements
+// are interchangeable, so which of them a job runs on is the scheduler's choice when it starts
+// (schedule.PlacementDemand), and every one of them is eligible as long as it gives what the task
+// needs.
+//
+// It fails with FailureInvalidInput, naming the placements there are, for a restriction that is not
+// a placement of the offers or that lacks a need, and when no offer gives every need. It never
+// returns an empty list without an error.
+func EligiblePlacements(offers []PlacementOffer, needs []ResourceKind, restriction string) ([]string, error) {
 	names := make([]string, len(offers))
 	for i, o := range offers {
 		names[i] = o.Name
 	}
 	slices.Sort(names)
-	if requested != "" {
-		if err := ValidPlacementName(requested); err != nil {
-			return "", err
+	if restriction != "" {
+		if err := ValidPlacementName(restriction); err != nil {
+			return nil, err
 		}
-		i := slices.IndexFunc(offers, func(o PlacementOffer) bool { return o.Name == requested })
+		i := slices.IndexFunc(offers, func(o PlacementOffer) bool { return o.Name == restriction })
 		if i < 0 {
-			return "", failf(FailureInvalidInput, "placement %q is not in the operator config (its placements: %s)", requested, strings.Join(names, ", "))
+			return nil, failf(FailureInvalidInput, "placement %q is not in the operator config (its placements: %s)", restriction, strings.Join(names, ", "))
 		}
 		if lack := offers[i].Lacks(needs); lack != "" {
-			return "", failf(FailureInvalidInput, "placement %q has no resource %q, which the task needs", requested, lack)
+			return nil, failf(FailureInvalidInput, "placement %q has no resource %q, which the task needs", restriction, lack)
 		}
-		return requested, nil
+		return []string{restriction}, nil
 	}
 	var fit []string
 	for _, o := range offers {
@@ -112,16 +116,13 @@ func ChoosePlacement(offers []PlacementOffer, needs []ResourceKind, requested st
 			fit = append(fit, o.Name)
 		}
 	}
+	if len(fit) == 0 {
+		what := "the task needs no resource"
+		if len(needs) > 0 {
+			what = "the task needs " + kindList(needs)
+		}
+		return nil, failf(FailureInvalidInput, "no placement of the operator config gives what it needs (%s; its placements: %s)", what, strings.Join(names, ", "))
+	}
 	slices.Sort(fit)
-	what := "the task needs no resource"
-	if len(needs) > 0 {
-		what = "the task needs " + kindList(needs)
-	}
-	switch len(fit) {
-	case 1:
-		return fit[0], nil
-	case 0:
-		return "", failf(FailureInvalidInput, "no placement of the operator config gives what it needs (%s; its placements: %s)", what, strings.Join(names, ", "))
-	}
-	return "", failf(FailureInvalidInput, "the placements %s each give what it needs (%s); choose one with --placement or VIBESYS_PLACEMENT", strings.Join(fit, ", "), what)
+	return slices.Compact(fit), nil
 }

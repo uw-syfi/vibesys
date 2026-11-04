@@ -64,9 +64,10 @@ message JobSpec {
   string commit = 1;
   // The environment the caller asks for. Unspecified lets the task choose.
   EnvironmentKind environment = 2;
-  // The placement of the operator config a docker job runs on: where its container runs. Empty in
-  // a submission lets the task's needed resources choose; a queued check or measure job holds the
-  // one chosen. A host job has none.
+  // The one placement of the operator config a docker job may run on, where its container runs.
+  // Empty lets it run on any placement that gives every resource its task needs, which the
+  // scheduler chooses when the job starts; the placement it ran on is a fact of its environment. A
+  // host job has none.
   string placement = 3 [(buf.validate.field).string.pattern = "^([a-z0-9][a-z0-9_-]{0,62})?$"];
   oneof settings {
     CheckSettings check = 10;
@@ -130,7 +131,9 @@ message Job {
   string id = 1;
   JobSpec spec = 2;
   JobState state = 3;
-  // The cache key. Empty for command jobs, which are never cached.
+  // The cache key. Empty for command jobs, which are never cached. A job that starts in another
+  // environment than it was keyed in, such as on a placement whose engine built the task's image to
+  // another digest, takes the key of the environment it starts in.
   string key = 4;
   // The environment the job runs in, pinned when it starts. Unset while queued.
   EnvironmentFingerprint environment = 5;
@@ -158,6 +161,21 @@ message Job {
   // submission that joins a job or is answered from it adds its caller here, also when the job is
   // final, and changes nothing else.
   repeated Submitter submitters = 17;
+  // The resources the task at the job's commit needs of the placement a docker job runs on,
+  // decided when it was submitted, each once. Only a placement that gives them all runs it.
+  repeated ResourceKind needs = 18 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  // The version of the task a check or measure job was submitted for. The job runs only if the
+  // task is still at it when the job starts. Empty for a command job, and for a job saved before
+  // this field was, which runs the task as it is when it starts.
+  string task_version = 19 [(buf.validate.field).string.max_len = 256];
 }
 
 // WaitKind is why a queued job has not started.

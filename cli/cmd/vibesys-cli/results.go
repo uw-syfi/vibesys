@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -65,8 +66,12 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 				fmt.Fprintln(d.stdout, describeResult(r))
 			}
 		}
+		placed := map[string]string{}
+		for _, r := range resp.GetResults() {
+			placed[r.GetJobId()] = placementOf(r.GetEnvironment())
+		}
 		for _, m := range resp.GetMeasurements() {
-			fmt.Fprintln(d.stdout, describeMeasurement(m))
+			fmt.Fprintln(d.stdout, describeMeasurement(m, placed))
 		}
 		return exitOK
 	})
@@ -320,16 +325,42 @@ func environmentName(e *cliv1.EnvironmentFingerprint) string {
 	return name
 }
 
-// describeMeasurement is a commit's pooled measurement in a line, with its numbers rounded: the
-// jobs it pools, then what describeResult says of a measurement.
-func describeMeasurement(m *cliv1.Measurement) string {
-	return describeResult(&cliv1.Result{
-		JobId: strings.Join(m.GetJobIds(), ","), Commit: m.GetCommit(), Environment: m.GetEnvironment(),
-		Outcome: &cliv1.Result_Measure{Measure: m.GetMeasure()},
-	})
+// factPlacement is the fact of a docker environment that names the placement its container ran on
+// (EnvironmentFingerprint.facts).
+const factPlacement = "placement"
+
+// placementOf is the placement a docker environment ran on, and empty for any other.
+func placementOf(e *cliv1.EnvironmentFingerprint) string {
+	if e.GetKind() != cliv1.EnvironmentKind_ENVIRONMENT_KIND_DOCKER {
+		return ""
+	}
+	return e.GetFacts()[factPlacement]
 }
 
-// describeResult is one saved result in a line, with its numbers rounded.
+// describeMeasurement is a commit's pooled measurement in a line, with its numbers rounded: the
+// jobs it pools, then what describeResult says of a measurement, and the placements its jobs ran
+// on, each once in the jobs' order, from placed (by job id).
+func describeMeasurement(m *cliv1.Measurement, placed map[string]string) string {
+	env := m.GetEnvironment()
+	line := describeResult(&cliv1.Result{
+		JobId: strings.Join(m.GetJobIds(), ","), Commit: m.GetCommit(),
+		Environment: &cliv1.EnvironmentFingerprint{Kind: env.GetKind(), Backend: env.GetBackend(), ImageDigest: env.GetImageDigest()},
+		Outcome:     &cliv1.Result_Measure{Measure: m.GetMeasure()},
+	})
+	var on []string
+	for _, id := range m.GetJobIds() {
+		if p := placed[id]; p != "" && !slices.Contains(on, p) {
+			on = append(on, p)
+		}
+	}
+	if len(on) > 0 {
+		line += "\ton " + strings.Join(on, ", ")
+	}
+	return line
+}
+
+// describeResult is one saved result in a line, with its numbers rounded, and the placement it was
+// taken on, for telling where a number came from.
 func describeResult(r *cliv1.Result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\t", r.GetJobId())
@@ -340,5 +371,8 @@ func describeResult(r *cliv1.Result) string {
 		b.WriteString("check\tpassed")
 	}
 	fmt.Fprintf(&b, "\t%s\t%s", environmentName(r.GetEnvironment()), shortCommit(r.GetCommit()))
+	if p := placementOf(r.GetEnvironment()); p != "" {
+		fmt.Fprintf(&b, "\ton %s", p)
+	}
 	return b.String()
 }

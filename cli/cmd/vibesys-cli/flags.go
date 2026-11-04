@@ -21,7 +21,10 @@ func (e usageError) Error() string { return e.message }
 
 func usagef(format string, args ...any) error { return usageError{fmt.Sprintf(format, args...)} }
 
-// common holds the flags every command that talks about a task takes.
+// common holds the flags every command that talks about a task takes. They are the context of a
+// call, each read from its environment variable by default, so a caller sets them once for every
+// command; a command that has no use for one, such as --placement outside submit, takes and
+// ignores it.
 type common struct {
 	json    bool
 	repo    string
@@ -29,6 +32,8 @@ type common struct {
 	run     string
 	harness string
 	agent   string
+	// placement restricts a docker job a submit queues to one placement of the operator config.
+	placement string
 }
 
 // newFlags makes the flag set of a command, with the common flags in it. Flag errors are
@@ -46,6 +51,7 @@ func newFlags(name string, d deps) (*flag.FlagSet, *common) {
 	fs.StringVar(&c.run, "run", d.getenv("VIBESYS_RUN"), "the id of the optimization run")
 	fs.StringVar(&c.harness, "harness", d.getenv("VIBESYS_HARNESS"), "the agent harness, such as claude-code")
 	fs.StringVar(&c.agent, "agent", d.getenv("VIBESYS_AGENT"), "the agent making the call")
+	fs.StringVar(&c.placement, "placement", d.getenv("VIBESYS_PLACEMENT"), "submit: the one placement of the operator config a docker job may run on (default: any that gives what the task needs, chosen when it starts)")
 	return fs, c
 }
 

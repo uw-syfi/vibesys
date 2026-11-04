@@ -39,7 +39,21 @@ import (
 // Version 4 adds the placement of a job's spec, which a version 3 program would refuse as unknown.
 // It only adds, so this program reads versions 2 to 4 and migrates a store of 2 or 3 the same way,
 // writing the format file at version 4 last.
-const formatVersion = 4
+//
+// Version 5 adds a job's needs and the task version it was submitted for, which a version 4
+// program would refuse as unknown, and comes with a
+// new rule for the cache key: a docker environment's facts, among them the placement it ran on, are
+// no longer part of it (core.Fingerprint.Equal), since placements are interchangeable. A result of a
+// record of version 4 or older was keyed under the old rule, so its key is derived again when it is
+// read (rekeyed), and so is the key of the job that saved it; the record itself is not rewritten,
+// and keeps the version it was written with. Results of one image taken on two placements, which
+// had two keys, then answer the same key. The migration of a store of 2 to 4 is the one before,
+// writing the format file at version 5 last.
+const formatVersion = 5
+
+// rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
+// record older than it is rekeyed when it is read.
+const rekeyedBefore = 5
 
 // oldestFormat is the oldest version this program reads, and migrates a store of.
 const oldestFormat = 2
@@ -287,7 +301,37 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 		}
 		j.Submitters = append(j.Submitters, wire.ToSubmitter(sub))
 	}
+	for i, k := range m.GetNeeds() {
+		kind, err := wire.ToResourceKind(fmt.Sprintf("needs[%d]", i), k)
+		if err != nil {
+			return fail(err)
+		}
+		j.Needs = append(j.Needs, kind)
+	}
+	j.TaskVersion = m.GetTaskVersion()
 	return j, nil
+}
+
+// rekeyed is a result of a record older than rekeyedBefore with the key the current rule gives it:
+// that of its kind, commit, task version, environment and schema version, the same inputs it was
+// keyed by when it was saved. Only a docker result's key changes, as the rule leaves its
+// environment's facts out now; any other keeps its own. A result whose key the rule cannot give, such as
+// one of an environment that is not pinned, keeps the key it has.
+func rekeyed(r core.Result) core.Result {
+	if r.Environment.Kind != core.EnvironmentDocker {
+		return r
+	}
+	kind, settings := core.JobKind(core.JobCheck), core.Settings(core.CheckSettings{})
+	if _, ok := r.Outcome.(core.MeasureOutcome); ok {
+		kind, settings = core.JobMeasure, core.MeasureSettings{}
+	}
+	key, err := core.NewJobKey(core.KeyInputs{
+		Kind: kind, Commit: r.Commit, TaskVersion: r.TaskVersion, Environment: r.Environment, Settings: settings, SchemaVersion: r.SchemaVersion,
+	})
+	if err == nil {
+		r.Key = key
+	}
+	return r
 }
 
 func resultFromMessage(m *cliv1.Result) (core.Result, error) {

@@ -33,9 +33,16 @@ type Starting struct {
 //     version and environment, unless the job is no-cache or rechecks, and runs the check itself
 //     when there is none.
 //
-// It fails with FailureEnvironmentMismatch when the key the job was queued under is not the key
-// of the commit, task version and environment it would run in now: the task or the environment
-// changed while the job waited, and a result saved under the old key would be a lie.
+// It fails with FailureEnvironmentMismatch when the task is not at the version the job was
+// submitted for: the task changed while the job waited, and the submitter asked for a result of the
+// task as it was. A job of an older store, which records no version, runs the task as it is.
+//
+// The plan's key is the key of the commit, task version and environment the job runs in now. It is
+// the key the job was queued under unless the environment changed while it waited: a job may start
+// on any placement that gives what its task needs, and the engine there may build the task's image
+// to another digest. The job then runs, and saves its result, under the key of the environment it
+// runs in, which the store records with its start (core.Transition.Key), so that nothing is saved
+// under a key it was not taken in.
 func Prepare(in Starting) (Plan, error) {
 	job := in.Job
 	if job.Spec.Settings == nil {
@@ -44,6 +51,10 @@ func Prepare(in Starting) (Plan, error) {
 	kind := job.Spec.Settings.Kind()
 	if kind != core.JobCheck && kind != core.JobMeasure {
 		return Plan{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("job: a %s job has no plan", kind)}
+	}
+	if job.TaskVersion != "" && job.TaskVersion != in.Task.Version {
+		return Plan{}, &core.Failure{Kind: core.FailureEnvironmentMismatch, Message: fmt.Sprintf(
+			"the task changed while job %s waited: it was submitted for task version %s and is now at %s", job.ID, job.TaskVersion, in.Task.Version)}
 	}
 	keyOf := func(kind core.JobKind, settings core.Settings) (core.JobKey, error) {
 		return core.NewJobKey(core.KeyInputs{
@@ -54,10 +65,6 @@ func Prepare(in Starting) (Plan, error) {
 	key, err := keyOf(kind, job.Spec.Settings)
 	if err != nil {
 		return Plan{}, err
-	}
-	if key != job.Key {
-		return Plan{}, &core.Failure{Kind: core.FailureEnvironmentMismatch, Message: fmt.Sprintf(
-			"the task or the environment changed while job %s waited: it was queued under key %s and would now run under %s", job.ID, job.Key, key)}
 	}
 
 	t := in.Task

@@ -90,10 +90,10 @@ func (h *neighborhood) start(d *neighbor) {
 // aloneDemand gives a command whose first word starts with "alone" the machine to itself.
 type aloneDemand struct{}
 
-func (aloneDemand) Claims(job core.Job) []schedule.Claim {
+func (aloneDemand) Options(job core.Job) []schedule.Option {
 	c, _ := job.Spec.Settings.(core.CommandSettings)
 	alone := len(c.Argv) > 1 && strings.HasPrefix(c.Argv[1], "alone")
-	return []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: alone}}
+	return schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: alone})
 }
 
 func newNeighborhood(seed uint64, apart bool) *neighborhood {

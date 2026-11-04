@@ -11,11 +11,20 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
-// goldenKey is the key of goldenInputs, computed by a separate implementation of the encoding
-// documented on NewJobKey (a Python script, not this package). If this test fails the key's encoding changed, which
-// retires every cached result in every user's state directory. Change it only on purpose, and
-// raise core.SchemaVersion in the same change so the retirement is named.
-const goldenKey = "ad1a15d70ca0a42efa8cbc487a8571a0b6aeea68fb96b2d6526f54482d938285"
+// goldenKey is the key of goldenInputs, and goldenHostKey of the same inputs in a host environment
+// with the same facts, each computed by a separate implementation of the encoding documented on
+// NewJobKey (a Python script, not this package). If this test fails the key's encoding changed,
+// which retires every cached result in every user's state directory. Change it only on purpose,
+// and raise core.SchemaVersion in the same change so the retirement is named, or migrate the
+// stored keys as the file store's format 5 did when a docker environment's facts left the key.
+//
+// The docker key encodes no facts (an empty map): a docker environment's facts say where its
+// container ran, which is no part of the key. The key of goldenInputs was
+// ad1a15d70ca0a42efa8cbc487a8571a0b6aeea68fb96b2d6526f54482d938285 while they were.
+const (
+	goldenKey     = "0366664245eba4033c8f483af0444adf20f53a72e65fd8612490156d23daf65d"
+	goldenHostKey = "3e4c52809f72fb218b8c9120be0f1f52af44ea5af80d4f9827c04e170fdf84dd"
+)
 
 func goldenInputs() core.KeyInputs {
 	return core.KeyInputs{
@@ -40,6 +49,30 @@ func TestKeyIsPinnedByAGolden(t *testing.T) {
 	}
 	if string(key) != goldenKey {
 		t.Fatalf("key %s, want %s: the key encoding changed, see the comment on goldenKey", key, goldenKey)
+	}
+	host := goldenInputs()
+	host.Environment.Kind, host.Environment.ImageDigest = core.EnvironmentHost, ""
+	if key := keyOf(t, host); string(key) != goldenHostKey {
+		t.Fatalf("host key %s, want %s: the key encoding changed, see the comment on goldenKey", key, goldenHostKey)
+	}
+}
+
+// A docker environment is its image digest and backend wherever its container ran: no fact of the
+// placement, the machine or a resource changes its key or what it equals, while every fact of the
+// host does.
+func TestADockerEnvironmentsFactsTakeNoPartInItsKeyOrEquality(t *testing.T) {
+	r := newRand(14)
+	for range properties {
+		in := randomKeyInputs(r)
+		moved := in
+		moved.Environment.Facts = withFact(in.Environment.Facts, core.FactPlacement, fmt.Sprintf("p%d", r.IntN(9)))
+		moved.Environment.Facts["gpu_model"] = pieces[r.IntN(len(pieces))]
+		sameKey := keyOf(t, moved) == keyOf(t, in)
+		equal := moved.Environment.Equal(in.Environment)
+		docker := in.Environment.Kind == core.EnvironmentDocker
+		if sameKey != docker || equal != docker {
+			t.Fatalf("a %s environment moved to %v: same key %v, equal %v; want both %v", in.Environment.Kind, moved.Environment.Facts, sameKey, equal, docker)
+		}
 	}
 }
 
@@ -187,6 +220,9 @@ func TestEveryKeyInputChangesTheKey(t *testing.T) {
 		for name, change := range changes {
 			if name == "image digest" && in.Environment.Kind != core.EnvironmentDocker {
 				continue // a host environment has no image digest to change
+			}
+			if strings.HasPrefix(name, "a fact") && in.Environment.Kind == core.EnvironmentDocker {
+				continue // a docker environment's facts say where it ran (see the test below)
 			}
 			changed := in
 			changed.Environment.Facts = maps.Clone(in.Environment.Facts)

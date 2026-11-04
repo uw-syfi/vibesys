@@ -20,9 +20,9 @@ func leaseState(t *testing.T) lifecycle.State {
 }
 
 var (
-	measureWork = lifecycle.Work{Kind: core.JobMeasure, Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true}}}
-	commandWork = lifecycle.Work{Kind: core.JobCommand, Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1}}}
-	gpuWork     = lifecycle.Work{Kind: core.JobCommand, Claims: []schedule.Claim{{Resource: gpu, Amount: 1, Exclusive: true}}}
+	measureWork = lifecycle.Work{Kind: core.JobMeasure, Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true})}
+	commandWork = lifecycle.Work{Kind: core.JobCommand, Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1})}
+	gpuWork     = lifecycle.Work{Kind: core.JobCommand, Options: schedule.Only(schedule.Claim{Resource: gpu, Amount: 1, Exclusive: true})}
 	other       = core.LeaseHolder{User: "bob", Host: "host-b", PID: 4242, Job: "their-measure"}
 )
 

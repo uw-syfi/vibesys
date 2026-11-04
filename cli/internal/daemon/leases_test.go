@@ -23,8 +23,8 @@ import (
 // everyCommandAlone has every command hold the machine alone, as a measure does.
 type everyCommandAlone struct{}
 
-func (everyCommandAlone) Claims(core.Job) []schedule.Claim {
-	return []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true}}
+func (everyCommandAlone) Options(core.Job) []schedule.Option {
+	return schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true})
 }
 
 // TestStatusListsTheLeasesAndTheOtherDaemons has a job hold the machine's lease: the status names

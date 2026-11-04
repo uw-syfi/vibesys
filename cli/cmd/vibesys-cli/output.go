@@ -55,6 +55,9 @@ func describe(j *cliv1.Job) string {
 	case spec.GetMeasure() != nil:
 		fmt.Fprintf(&b, "\tmeasure (%d samples)", spec.GetMeasure().GetSamples())
 	}
+	if p := placementOf(j.GetEnvironment()); p != "" {
+		fmt.Fprintf(&b, "\ton %s", p)
+	}
 	for _, n := range j.GetNotes() {
 		fmt.Fprintf(&b, "\n\t  note: %s", n.GetText())
 	}

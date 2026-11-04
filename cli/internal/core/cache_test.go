@@ -274,7 +274,10 @@ func TestAMeasurementThatRanItsCheckAnswersAChecksCacheQuery(t *testing.T) {
 		"task version":   func(in core.KeyInputs) core.KeyInputs { in.TaskVersion += "x"; return in },
 		"schema version": func(in core.KeyInputs) core.KeyInputs { in.SchemaVersion++; return in },
 		"environment": func(in core.KeyInputs) core.KeyInputs {
-			in.Environment.Facts = withFact(in.Environment.Facts, "one more fact", "x")
+			in.Environment.Backend = map[core.BackendKind]core.BackendKind{core.BackendCPU: core.BackendCUDA}[in.Environment.Backend]
+			if in.Environment.Backend == "" {
+				in.Environment.Backend = core.BackendCPU
+			}
 			return in
 		},
 	}

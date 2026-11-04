@@ -40,24 +40,53 @@ func (b BackendKind) Known() bool {
 }
 
 // Fingerprint identifies the environment a result was taken in. Two results are comparable, and a
-// check pass reusable, only when their fingerprints are equal.
+// check pass reusable, only when their fingerprints are equal (Equal), and a fingerprint takes part
+// in the cache key by what Equal compares.
+//
+// What identifies an environment depends on its kind. A docker environment is its exact image
+// digest and backend: the image pins every program the job runs, so where its container ran (the
+// machine, the placement, what the placement's resources gave it) is recorded in Facts for
+// diagnosis and compared by nothing, which is what lets a job run on any placement that gives its
+// task what it needs. The host has no image, so its Facts (the operating system, the architecture,
+// the toolchains) are what identify it.
 type Fingerprint struct {
 	Kind    EnvironmentKind
 	Backend BackendKind
 	// ImageDigest is the exact image digest for the docker environment and empty for host.
 	ImageDigest string
 	// Facts are what the environment pinned, by name: operating system, architecture, toolchains.
+	// A docker environment's facts also name the placement it ran on (FactPlacement) and what
+	// identifies each resource its container was given.
 	Facts map[string]string
 }
+
+// FactPlacement is the fact of a docker fingerprint that names the placement of the operator config
+// its container ran on.
+const FactPlacement = "placement"
+
+// Placement is the placement the environment ran on, or "" for one that names none, such as the
+// host.
+func (f Fingerprint) Placement() string { return f.Facts[FactPlacement] }
 
 // imageDigest is an exact image digest: a tag names an image that can change, a digest cannot.
 var imageDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 
-// Equal reports whether two fingerprints name the same environment. Facts are compared as a
-// whole, and a nil map equals an empty one.
+// identity is the part of the fingerprint that identifies the environment: all of it for the host,
+// and for docker everything but its facts.
+func (f Fingerprint) identity() Fingerprint {
+	if f.Kind == EnvironmentDocker {
+		f.Facts = nil
+	}
+	return f
+}
+
+// Equal reports whether two fingerprints name the same environment: the same kind, backend and
+// image digest, and for the host the same facts, compared as a whole, where a nil map equals an
+// empty one. A docker environment's facts say where it ran, and do not count.
 func (f Fingerprint) Equal(other Fingerprint) bool {
-	return f.Kind == other.Kind && f.Backend == other.Backend && f.ImageDigest == other.ImageDigest &&
-		maps.Equal(f.Facts, other.Facts)
+	a, b := f.identity(), other.identity()
+	return a.Kind == b.Kind && a.Backend == b.Backend && a.ImageDigest == b.ImageDigest &&
+		maps.Equal(a.Facts, b.Facts)
 }
 
 // String names the environment for display: its kind, backend, image digest and facts.

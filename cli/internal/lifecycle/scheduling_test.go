@@ -21,9 +21,10 @@ import (
 
 const gpu schedule.ResourceID = "gpu:0"
 
-// newScheduledWorld is a world whose machine has slots of the default placement and one GPU, and
-// whose jobs are checks (a shared slot), commands (a shared slot, sometimes the GPU) and measures
-// (the placement alone), from three runs.
+// newScheduledWorld is a world whose machine has slots of the default placement, of two more
+// placements and one GPU, and whose jobs are checks (a shared slot), commands (a shared slot,
+// sometimes the GPU) and measures (the placement alone), from three runs. Some may run on either
+// of the two placements, and the scheduler chooses which when it starts them.
 func newScheduledWorld(t *testing.T, seed uint64, stores int) *world {
 	w := newWorld(t, seed, stores)
 	policy := fifo.New()
@@ -32,8 +33,11 @@ func newScheduledWorld(t *testing.T, seed uint64, stores int) *world {
 	}
 	w.scheduled = true
 	w.scheduling = lifecycle.Scheduling{
-		Resources: []schedule.Resource{{ID: schedule.DefaultPlacement, Capacity: 1 + int(seed%4)}, {ID: gpu, Capacity: 1}},
-		Policy:    policy,
+		Resources: []schedule.Resource{
+			{ID: schedule.DefaultPlacement, Capacity: 1 + int(seed%4)}, {ID: gpu, Capacity: 1},
+			{ID: schedule.PlacementOf("pa"), Capacity: 1 + int(seed%2)}, {ID: schedule.PlacementOf("pb"), Capacity: 1},
+		},
+		Policy: policy,
 	}
 	w.work = map[lifecycle.Ref]lifecycle.Work{}
 	w.workOf = randomWork
@@ -43,15 +47,29 @@ func newScheduledWorld(t *testing.T, seed uint64, stores int) *world {
 
 func randomWork(r *rand.Rand) lifecycle.Work {
 	run := core.RunID(fmt.Sprintf("run-%c", 'a'+r.IntN(3)))
+	if r.IntN(3) == 0 {
+		// A docker job that either placement fits.
+		kind := []core.JobKind{core.JobCheck, core.JobMeasure, core.JobCommand}[r.IntN(3)]
+		measure := kind == core.JobMeasure
+		var options []schedule.Option
+		for _, p := range []string{"pa", "pb"} {
+			claims := []schedule.Claim{{Resource: schedule.PlacementOf(p), Amount: 1, Exclusive: measure}}
+			if kind == core.JobCommand && r.IntN(2) == 0 {
+				claims = append(claims, schedule.Claim{Resource: gpu, Amount: 1})
+			}
+			options = append(options, schedule.Option{Placement: p, Claims: claims})
+		}
+		return lifecycle.Work{Kind: kind, Run: run, Options: options}
+	}
 	switch r.IntN(4) {
 	case 0:
-		return lifecycle.Work{Kind: core.JobMeasure, Run: run, Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true}}}
+		return lifecycle.Work{Kind: core.JobMeasure, Run: run, Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true})}
 	case 1:
-		return lifecycle.Work{Kind: core.JobCommand, Run: run, Claims: []schedule.Claim{
-			{Resource: schedule.DefaultPlacement, Amount: 1}, {Resource: gpu, Amount: 1},
-		}}
+		return lifecycle.Work{Kind: core.JobCommand, Run: run, Options: schedule.Only(
+			schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1}, schedule.Claim{Resource: gpu, Amount: 1},
+		)}
 	}
-	return lifecycle.Work{Kind: core.JobCheck, Run: run, Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1}}}
+	return lifecycle.Work{Kind: core.JobCheck, Run: run, Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1})}
 }
 
 // overClaimed says how the jobs that hold the machine break a resource's capacity or an exclusive
@@ -69,13 +87,7 @@ func (w *world) overClaimed(active []lifecycle.Ref) string {
 	holders := map[schedule.ResourceID][]lifecycle.Ref{}
 	alone := map[schedule.ResourceID]bool{}
 	for _, ref := range active {
-		claims := w.work[ref].Claims
-		if len(claims) == 0 {
-			for _, r := range resources {
-				claims = append(claims, schedule.Claim{Resource: r.ID, Amount: 1, Exclusive: true})
-			}
-		}
-		for _, c := range claims {
+		for _, c := range w.heldBy(ref) {
 			used[c.Resource] += c.Amount
 			holders[c.Resource] = append(holders[c.Resource], ref)
 			alone[c.Resource] = alone[c.Resource] || c.Exclusive
@@ -90,6 +102,44 @@ func (w *world) overClaimed(active []lifecycle.Ref) string {
 		}
 	}
 	return ""
+}
+
+// heldBy is what a job holds while it holds the machine, as the model knows it: the claims of the
+// placement the machine launched it on, or of the one place it may run, or every resource alone
+// for a job with no work. A job of several places that the machine holds without having launched it
+// holds the most any of them claims of each resource.
+func (w *world) heldBy(ref lifecycle.Ref) []schedule.Claim {
+	work := w.work[ref]
+	if len(work.Options) == 0 {
+		resources := w.scheduling.Resources
+		if !w.scheduled {
+			resources = lifecycle.OneAtATime().Resources
+		}
+		var claims []schedule.Claim
+		for _, r := range resources {
+			claims = append(claims, schedule.Claim{Resource: r.ID, Amount: 1, Exclusive: true})
+		}
+		return claims
+	}
+	if p, ok := w.on[ref]; ok {
+		i := slices.IndexFunc(work.Options, func(o schedule.Option) bool { return o.Placement == p })
+		return work.Options[i].Claims
+	}
+	if len(work.Options) == 1 {
+		return work.Options[0].Claims
+	}
+	var out []schedule.Claim
+	for _, o := range work.Options {
+		for _, c := range o.Claims {
+			i := slices.IndexFunc(out, func(h schedule.Claim) bool { return h.Resource == c.Resource })
+			if i < 0 {
+				out = append(out, c)
+				continue
+			}
+			out[i].Amount, out[i].Exclusive = max(out[i].Amount, c.Amount), out[i].Exclusive || c.Exclusive
+		}
+	}
+	return out
 }
 
 func TestWithSeveralSlotsEveryEventSequenceKeepsTheClaimsAndMakesProgress(t *testing.T) {
@@ -150,9 +200,9 @@ func TestAMeasureWaitsForThePlacementAndKeepsItsTurn(t *testing.T) {
 	store := lifecycle.StoreIDOf("/repo", "task")
 	ref := func(n int) lifecycle.Ref { return lifecycle.Ref{Store: store, Job: core.JobID(fmt.Sprintf("j%d", n))} }
 	check := func(run core.RunID) lifecycle.Work {
-		return lifecycle.Work{Kind: core.JobCheck, Run: run, Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1}}}
+		return lifecycle.Work{Kind: core.JobCheck, Run: run, Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1})}
 	}
-	measure := lifecycle.Work{Kind: core.JobMeasure, Run: "run-b", Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true}}}
+	measure := lifecycle.Work{Kind: core.JobMeasure, Run: "run-b", Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true})}
 	var launched []lifecycle.Ref
 	feed := func(e lifecycle.Event) {
 		t.Helper()
@@ -223,8 +273,8 @@ func TestRecoveryAdoptsRunningJobsWithTheirClaims(t *testing.T) {
 	sc := lifecycle.Scheduling{Resources: []schedule.Resource{{ID: schedule.DefaultPlacement, Capacity: 2}}}
 	store := lifecycle.StoreIDOf("/repo", "task")
 	ref := func(n int) lifecycle.Ref { return lifecycle.Ref{Store: store, Job: core.JobID(fmt.Sprintf("j%d", n))} }
-	shared := lifecycle.Work{Kind: core.JobCheck, Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1}}}
-	alone := lifecycle.Work{Kind: core.JobMeasure, Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true}}}
+	shared := lifecycle.Work{Kind: core.JobCheck, Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1})}
+	alone := lifecycle.Work{Kind: core.JobMeasure, Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: true})}
 	alive := lifecycle.RunAlive{Phase: lifecycle.RunRunning, Limit: time.Hour}
 
 	for name, tc := range map[string]struct {
@@ -242,7 +292,7 @@ func TestRecoveryAdoptsRunningJobsWithTheirClaims(t *testing.T) {
 			for i, w := range tc.running {
 				finding := lifecycle.Finding(lifecycle.JobIn{State: core.JobRunning, SubmittedAt: epoch, Work: w})
 				presence := lifecycle.Presence(alive)
-				if len(w.Claims) == 0 {
+				if len(w.Options) == 0 {
 					finding, presence = lifecycle.StoreAway{}, lifecycle.RunUnknown{Limit: time.Hour}
 				}
 				s, _ = lifecycle.Step(s, lifecycle.Recovered{Ref: ref(i + 1), Finding: finding, Supervisor: presence, At: epoch})
@@ -268,7 +318,7 @@ func TestAJobThatCanNeverStartSaysSo(t *testing.T) {
 	store := lifecycle.StoreIDOf("/repo", "task")
 	never := lifecycle.Ref{Store: store, Job: "j1"}
 	fine := lifecycle.Ref{Store: store, Job: "j2"}
-	s, reqs := lifecycle.Step(s, lifecycle.Admitted{Ref: never, SubmittedAt: epoch, Work: lifecycle.Work{Claims: []schedule.Claim{{Resource: gpu, Amount: 1}}}})
+	s, reqs := lifecycle.Step(s, lifecycle.Admitted{Ref: never, SubmittedAt: epoch, Work: lifecycle.Work{Options: schedule.Only(schedule.Claim{Resource: gpu, Amount: 1})}})
 	if len(reqs) != 0 {
 		t.Fatalf("a job claiming a resource there is none of asked for %+v", reqs)
 	}

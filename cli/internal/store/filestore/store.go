@@ -291,10 +291,11 @@ func unmake(f fsys.FS, root string, made []string) {
 }
 
 // migrate brings a store of an older version this program reads up to formatVersion, under the
-// owner's lock. Versions 3 and 4 only added to version 2, so the migration makes the directories
+// owner's lock. Versions 3 to 5 only added to version 2, so the migration makes the directories
 // version 2 did not have and then writes the format file, which is its commit point: a crash before
 // it leaves a store of the older version with an empty directory more, which the next Open migrates
-// again.
+// again. The keys of the results of version 4 and older are derived again whenever they are read
+// (rekeyed), so no record is rewritten.
 func migrate(f fsys.FS, root string) error {
 	name := path.Join(root, formatFile)
 	data, err := f.ReadFile(name)

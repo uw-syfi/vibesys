@@ -30,7 +30,7 @@ func TestWithOneSlotTheOldestJobStartsAlone(t *testing.T) {
 		for i := range 1 + r.IntN(8) {
 			c := schedule.Candidate{
 				ID: schedule.ID(fmt.Sprintf("j%d", i)), Submitted: epoch.Add(time.Duration(r.IntN(3)) * time.Second), Seq: uint64(r.IntN(1000)*10 + i),
-				Claims: []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: r.IntN(2) == 0}},
+				Options: schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: r.IntN(2) == 0}),
 			}
 			s.Waiting = append(s.Waiting, c)
 			if oldest < 0 || c.Submitted.Before(s.Waiting[oldest].Submitted) || (c.Submitted.Equal(s.Waiting[oldest].Submitted) && c.Seq < s.Waiting[oldest].Seq) {
@@ -38,7 +38,7 @@ func TestWithOneSlotTheOldestJobStartsAlone(t *testing.T) {
 			}
 		}
 		var starts []schedule.ID
-		for _, d := range schedule.Step(s, fifo.New()) {
+		for _, d := range schedule.Step(s, schedule.Rules{Policy: fifo.New()}) {
 			if st, ok := d.(schedule.Start); ok {
 				starts = append(starts, st.ID)
 			}

@@ -38,6 +38,17 @@ func (b *backend) Recover() (ledger.Snapshot, error) {
 	if snap.Results, err = b.loadResults(jobs); err != nil {
 		return snap, err
 	}
+	// A result an older version saved has its key derived again (rekeyed), and the job that saved
+	// it runs under the same key.
+	keys := make(map[core.JobID]core.JobKey, len(snap.Results))
+	for _, r := range snap.Results {
+		keys[r.Result.Job] = r.Result.Key
+	}
+	for i, job := range snap.Jobs {
+		if key, ok := keys[job.ID]; ok && job.ResultJob == job.ID {
+			snap.Jobs[i].Key = key
+		}
+	}
 	if snap.Plans, err = b.loadPlans(); err != nil {
 		return snap, err
 	}
@@ -163,6 +174,9 @@ func (b *backend) loadResults(jobs []core.Job) ([]ledger.SavedResult, error) {
 		result, err := resultFromMessage(file.GetResult())
 		if err != nil {
 			return nil, corrupt(full, "%v", err)
+		}
+		if file.GetFormat() < rekeyedBefore {
+			result = rekeyed(result)
 		}
 		if string(result.Job) != base || file.GetSeq() == 0 {
 			return nil, corrupt(full, "it holds the result of job %s, number %d", result.Job, file.GetSeq())

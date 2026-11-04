@@ -213,6 +213,10 @@ func Job(j core.Job) *cliv1.Job {
 	for _, sub := range j.Submitters {
 		out.Submitters = append(out.Submitters, Submitter(sub))
 	}
+	for _, k := range j.Needs {
+		out.Needs = append(out.Needs, ResourceKind(k))
+	}
+	out.TaskVersion = j.TaskVersion
 	return out
 }
 
@@ -310,6 +314,14 @@ func ToJob(j *cliv1.Job) (core.Job, error) {
 		}
 		out.Submitters = append(out.Submitters, ToSubmitter(sub))
 	}
+	for i, k := range j.GetNeeds() {
+		kind, err := ToResourceKind(fmt.Sprintf("job.needs[%d]", i), k)
+		if err != nil {
+			return core.Job{}, err
+		}
+		out.Needs = append(out.Needs, kind)
+	}
+	out.TaskVersion = j.GetTaskVersion()
 	return out, nil
 }
 

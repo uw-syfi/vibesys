@@ -1,6 +1,7 @@
 package storetest
 
 import (
+	"cmp"
 	"math"
 	"reflect"
 	"testing"
@@ -29,7 +30,7 @@ func testValues(t *testing.T, newStore New) {
 			g := newGen(seed)
 			e := newEnv(t, newStore)
 			measure := g.pick(2) == 0
-			sub := core.Submission{Spec: g.spec(), Key: core.JobKey(g.name()), Note: ptr(g.note()), At: g.instant()}
+			sub := core.Submission{Spec: g.spec(), Key: core.JobKey(g.name()), Needs: g.needs(), TaskVersion: g.name(), Note: ptr(g.note()), At: g.instant()}
 			sub.Spec.Settings = core.CheckSettings{}
 			if measure {
 				sub.Spec.Settings = core.MeasureSettings{Samples: 1 + g.r.Uint32(), Recheck: g.pick(2) == 0}
@@ -42,16 +43,24 @@ func testValues(t *testing.T, newStore New) {
 			if got := e.submit(command).Job; !reflect.DeepEqual(got.Spec, command.Spec) || got.Key != "" {
 				t.Fatalf("seed %d: the submitted command job = %+v, want what was asked for in %+v", seed, got, command)
 			}
-			if !reflect.DeepEqual(job.Spec, sub.Spec) || !job.SubmittedAt.Equal(sub.At) || job.Notes[0] != *sub.Note {
+			if !reflect.DeepEqual(job.Spec, sub.Spec) || !job.SubmittedAt.Equal(sub.At) || job.Notes[0] != *sub.Note || !reflect.DeepEqual(job.Needs, sub.Needs) || job.TaskVersion != sub.TaskVersion {
 				t.Fatalf("seed %d: the submitted job = %+v, want what was asked for in %+v", seed, job, sub)
 			}
 
 			env := g.pinned()
 			code := int(g.r.Int32())
 			startedAt := g.instant()
-			running, err := e.s.Transition(e.ctx, core.Transition{Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: startedAt, Environment: &env})
+			start := core.Transition{Job: job.ID, From: core.JobQueued, To: core.JobRunning, At: startedAt, Environment: &env}
+			if g.pick(2) == 0 {
+				// It started in another environment than it was keyed in, and runs under its key.
+				start.Key = core.JobKey(g.name())
+			}
+			running, err := e.s.Transition(e.ctx, start)
 			if err != nil {
 				t.Fatalf("seed %d: %v", seed, err)
+			}
+			if want := cmp.Or(start.Key, sub.Key); running.Key != want || e.job(job.ID).Key != want {
+				t.Fatalf("seed %d: the started job has the key %q, want %q", seed, running.Key, want)
 			}
 			res := g.acceptedResult(running, measure)
 			finish := core.Transition{Job: job.ID, From: core.JobRunning, To: core.JobSucceeded, At: g.instant(), ExitCode: &code, Result: &res}

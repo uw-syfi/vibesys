@@ -16,28 +16,38 @@ import (
 // keyFlow resolves a check or a measure submission before it is queued: it reads the task as the
 // submission's commit has it, decides the environment the job runs in and fingerprints it, and
 // puts the sample count a measure asks for into the spec, so the job and its key say what will
-// run. The key is the job's cache key. Everything is decided here and not by the store or the
-// supervisor, which only keep what they are given.
-func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec) (core.JobSpec, core.JobKey, error) {
+// run. It gives the submission the job's cache key, what its task needs of a placement, and the
+// task version it is for. Everything is decided here and not by the store or the supervisor, which
+// only keep what they are given.
+//
+// A docker job may run on any placement that gives what its task needs, and where it runs is no
+// part of its key, so it is fingerprinted on the first of them by name. The scheduler chooses where
+// it runs when it starts, and an engine there that builds the image to another digest gives the job
+// the key of that digest then (flow.Prepare). A host job runs on this machine, whatever placement
+// it was restricted to, so it is restricted to none.
+func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission, error) {
+	c, spec := sub.Context, sub.Spec
 	t, err := a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
 	if err != nil {
-		return spec, "", err
+		return sub, err
 	}
 	if err := a.refuseChangedTask(ctx, c.Scope, spec.Commit, t); err != nil {
-		return spec, "", err
+		return sub, err
 	}
 	kind, err := core.ChooseEnvironment(t.Setup(), spec.Environment)
 	if err != nil {
-		return spec, "", err
+		return sub, err
 	}
-	placement, err := a.placementOf(kind, t.Needs, spec.Placement)
+	eligible, err := a.eligibleOf(kind, t.Needs, spec.Placement)
 	if err != nil {
-		return spec, "", err
+		return sub, err
 	}
-	spec.Placement = placement
-	fingerprint, err := a.fingerprintOf(ctx, kind, environment.Target{Repository: string(c.Scope.Repository()), Commit: spec.Commit, Task: string(c.Scope.Task()), Placement: placement})
+	if kind != core.EnvironmentDocker {
+		spec.Placement = ""
+	}
+	fingerprint, err := a.fingerprintOf(ctx, kind, environment.Target{Repository: string(c.Scope.Repository()), Commit: spec.Commit, Task: string(c.Scope.Task()), Placement: eligible[0]})
 	if err != nil {
-		return spec, "", err
+		return sub, err
 	}
 	if m, ok := spec.Settings.(core.MeasureSettings); ok && m.Samples == 0 {
 		m.Samples = t.Samples
@@ -48,31 +58,49 @@ func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec
 		Kind: spec.Settings.Kind(), Commit: spec.Commit, TaskVersion: t.Version,
 		Environment: fingerprint, Settings: spec.Settings, SchemaVersion: core.SchemaVersion,
 	})
-	return spec, key, err
+	sub.Spec, sub.Key, sub.Needs, sub.TaskVersion = spec, key, needsOf(kind, t.Needs), t.Version
+	return sub, err
 }
 
-// placeFlow decides where a command job runs, so that scheduling claims what it runs on. A command
-// that leaves its environment to the task runs where the task's check and measure run
+// placeFlow decides where a command job may run, so that scheduling claims what it runs on. A
+// command that leaves its environment to the task runs where the task's check and measure run
 // (core.ChooseEnvironment), so on a task with a Dockerfile it is a docker job in the task's image
-// and waits behind a measure of its placement like any other docker job there. A docker job is
-// given its placement from what it asked for and what its task needs, and a host job has none,
-// whatever was asked, as for a check or a measure (placementOf). The spec records both. A command
-// job has no key, so nothing is fingerprinted, and a host one names no task to read.
-func (a *App) placeFlow(ctx context.Context, c core.CallContext, spec core.JobSpec) (core.JobSpec, error) {
+// and waits behind a measure of its placement like any other docker job there. A docker job may
+// run on any placement that gives what its task needs, or on the one it is restricted to, and is
+// refused when none does; it records the needs, which the scheduler starts it on a placement by. A
+// host job runs on no placement, whatever was asked, as for a check or a measure. The submission
+// records the environment, the restriction and the needs. A command job has no key, so nothing is
+// fingerprinted, and a host one names no task to read.
+func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submission, error) {
+	c, spec := sub.Context, sub.Spec
 	var needs []core.ResourceKind
 	if spec.Environment == core.EnvironmentAuto || spec.Environment == core.EnvironmentDocker && len(a.cfg.Placements) > 0 {
 		t, err := a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
 		if err != nil {
-			return spec, err
+			return sub, err
 		}
 		if spec.Environment, err = core.ChooseEnvironment(t.Setup(), spec.Environment); err != nil {
-			return spec, err
+			return sub, err
 		}
 		needs = t.Needs
 	}
-	var err error
-	spec.Placement, err = a.placementOf(spec.Environment, needs, spec.Placement)
-	return spec, err
+	if _, err := a.eligibleOf(spec.Environment, needs, spec.Placement); err != nil {
+		return sub, err
+	}
+	if spec.Environment != core.EnvironmentDocker {
+		spec.Placement = ""
+	}
+	sub.Spec, sub.Needs = spec, needsOf(spec.Environment, needs)
+	return sub, nil
+}
+
+// needsOf is what a job of the kind needs of a placement: what its task needs, for a docker job,
+// and nothing for a host job, which runs on no placement.
+func needsOf(kind core.EnvironmentKind, needs []core.ResourceKind) []core.ResourceKind {
+	if kind != core.EnvironmentDocker {
+		return nil
+	}
+	return needs
 }
 
 // maxNamedChanges bounds how many changed paths a refusal names.
@@ -160,18 +188,19 @@ func (a *App) taskAt(ctx context.Context, repository string, commit core.Commit,
 	return a.cfg.Tasks.Task(ctx, repository, commit, name)
 }
 
-// placementOf decides the placement a job of the kind runs on, from what the caller asked for and
-// what the task needs (core.ChoosePlacement). Only a docker job has one: a host job runs on this
-// machine, whatever was asked. A daemon configured with no placements, as a test's may be, leaves
-// the request as it is, and the environment refuses a placement it does not have.
-func (a *App) placementOf(kind core.EnvironmentKind, needs []core.ResourceKind, requested string) (string, error) {
+// eligibleOf is the placements a job of the kind may run on, by name, from the placement it is
+// restricted to and what its task needs (core.EligiblePlacements), and never empty. Only a docker
+// job runs on one: a host job runs on this machine, whatever it is restricted to, which is the
+// placement "". A daemon configured with no placements, as a test's may be, leaves the restriction
+// as it is, and the environment refuses a placement it does not have.
+func (a *App) eligibleOf(kind core.EnvironmentKind, needs []core.ResourceKind, restriction string) ([]string, error) {
 	if kind != core.EnvironmentDocker {
-		return "", nil
+		return []string{""}, nil
 	}
 	if len(a.cfg.Placements) == 0 {
-		return requested, nil
+		return []string{restriction}, nil
 	}
-	return core.ChoosePlacement(a.cfg.Placements, needs, requested)
+	return core.EligiblePlacements(a.cfg.Placements, needs, restriction)
 }
 
 // fingerprintOf fingerprints the environment of a kind for the target the job runs. The kind is

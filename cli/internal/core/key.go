@@ -21,7 +21,9 @@ const keyDomain = "vibesys-cli/job-key"
 // different inputs encode alike. A golden test pins the digest of one input.
 //
 // What is in the key is what the result is a result of: the job kind, the exact commit, the task
-// version, the environment fingerprint and the schema version. Settings take part through their
+// version, the environment as Fingerprint.Equal compares it and the schema version. A docker
+// environment's facts say where its container ran and are left out, so a result is reused on any
+// placement. Settings take part through their
 // kind and the fields that change what is computed, and there are none yet. MeasureSettings
 // leaves out both of its fields on purpose. Samples is a quantity the cache tops up (PlanCache),
 // so results taken for different counts must share a key; Recheck changes how a check is
@@ -41,7 +43,7 @@ func NewJobKey(in KeyInputs) (JobKey, error) {
 	e.string(string(in.Kind))
 	e.string(string(in.Commit))
 	e.string(in.TaskVersion)
-	e.fingerprint(in.Environment)
+	e.fingerprint(in.Environment.identity())
 	e.string(string(in.Settings.Kind()))
 	// Key-relevant settings fields would follow here. See the doc comment above for why none do.
 	sum := sha256.Sum256(e.bytes)
