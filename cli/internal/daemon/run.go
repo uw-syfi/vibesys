@@ -69,6 +69,9 @@ type Config struct {
 	LogBatchDelay time.Duration
 	// Logf receives the daemon's diagnostics. It may be nil.
 	Logf func(format string, args ...any)
+	// Machine is how the daemon takes this machine for its user. Nil takes nothing: a daemon of a
+	// test, in a directory of its own, in-process.
+	Machine Machine
 	// Ready receives one runtimedir.ReadyByte once the daemon serves, and is closed. A daemon that fails
 	// first closes it without a byte, so the client that started it learns of the failure from
 	// the pipe and not from a clock. It may be nil.
@@ -103,6 +106,16 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		return fmt.Errorf("daemon: the instance lock: %w", err)
 	}
 	defer lock.Unlock()
+	// The machine is taken with the runtime directory's lock held, so a second daemon of the same
+	// runtime directory is told the first runs (ErrAlreadyRunning), and one of another runtime
+	// directory is refused, naming the daemon that holds the machine.
+	if cfg.Machine != nil {
+		release, err := cfg.Machine.Claim(ctx)
+		if err != nil {
+			return fmt.Errorf("daemon: %w", err)
+		}
+		defer release()
+	}
 	// The stores go before the lock: a client takes a free lock to mean the daemon is gone, and the
 	// next daemon must find its stores free. Run on after this point holds neither.
 	defer func() {
@@ -147,7 +160,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		return fmt.Errorf("daemon: %w", err)
 	}
 
-	srv := NewServer(a, cfg.Version, cfg.Inherited)
+	srv := NewServer(a, cfg.Version, cfg.Inherited).WithMachine(cfg.Machine)
 	server := grpc.NewServer()
 	cliv1.RegisterDaemonServiceServer(server, srv)
 	served := make(chan error, 1)

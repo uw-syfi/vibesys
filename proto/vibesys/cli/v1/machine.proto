@@ -1,0 +1,24 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// MachineDaemon is a vibesys-cli daemon of a user on a machine. One daemon of each user holds the
+// machine: it writes this message into the machine lock file, in a directory whose path comes from
+// the user id alone, and a second daemon that finds the lock held is refused, naming the holder.
+// A sandbox daemon, which a user starts on purpose beside it in a runtime directory of its own,
+// holds no machine lock: it writes this message into a registration file of its own, so that the
+// daemon's status lists it. Each file is read as protojson, and the operating system lets go of
+// its lock when the daemon ends, however it ends.
+message MachineDaemon {
+  // The daemon's process id.
+  uint32 pid = 1 [(buf.validate.field).uint32.gt = 0];
+  // The daemon's runtime directory: where its socket and its own lock are.
+  string runtime_dir = 2 [(buf.validate.field).string.pattern = "^/"];
+  // The daemon's release version.
+  string version = 3;
+  // Whether it is a sandbox daemon.
+  bool sandbox = 4;
+}

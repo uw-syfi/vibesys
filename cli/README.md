@@ -230,6 +230,7 @@ sidecar's tests both read; a name that is empty there is left unset in the agent
 | `VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_HARNESS`, `VIBESYS_AGENT` | The defaults of the context flags above. |
 | `VIBESYS_PLACEMENT` | The default of `--placement`. |
 | `XDG_RUNTIME_DIR` | Where the runtime directory is (see "The daemon and the supervisors"). Ignored unless it is an absolute path. |
+| `VIBESYS_CLI_SANDBOX` | `1` makes the daemon a sandbox daemon, beside the one that holds the machine, in the runtime directory of `XDG_RUNTIME_DIR`, which it needs (see "The daemon and the supervisors"). Any other value is refused. |
 | `XDG_STATE_HOME` | Where the task index is: `$XDG_STATE_HOME/vibesys`, else `~/.local/state/vibesys`. Ignored unless it is an absolute path. |
 | `HOME` | The home directory the index falls back to. |
 
@@ -341,6 +342,24 @@ sockets and locks are not reliable there. The directory holds:
 | `start.lock` | Held by a client while it starts a daemon, so clients that find none at once start one. |
 | `daemon.log` | The diagnostics of a daemon a client started. |
 | `sup/` | One directory per running job, with its supervisor's socket and output spool. |
+
+The runtime directory moves with `XDG_RUNTIME_DIR`, so its lock alone cannot keep one daemon per
+user per machine. The daemon also holds `machine.lock` in the user's machine directory, which
+comes from the user id and the machine and from no variable: `/var/tmp/vibesys-cli-<uid>` when
+`/var/tmp` is on local disk, and otherwise `/run/user/<uid>/vibesys-cli-machine`, the user's
+memory-backed directory, as on a machine whose root is on a network file system (one with neither
+refuses to start a daemon). It is private (`0700`) and on local disk, as the runtime directory is. The lock file says which daemon holds it:
+its pid, runtime directory and version. A daemon of another runtime directory is refused, naming
+that one, so `daemon ensure` and every command that starts a daemon fail with the holder in the
+message. The operating system drops the lock when the daemon dies, however it dies.
+
+A sandbox daemon is the one way to run a second daemon on purpose, for a test or a second checkout:
+set `VIBESYS_CLI_SANDBOX=1` and an `XDG_RUNTIME_DIR` of its own (not the one of the daemon that holds
+the machine, whose socket its commands would reach). It holds no machine lock; it records itself
+under `sandboxes/` in the machine directory for as long as it runs, and `daemon status` of every
+daemon lists the sandbox daemons that run (`sandbox  pid  runtime  version`), with `role  sandbox`
+on the sandbox's own. Its containers and Slurm jobs carry the scope of its own runtime directory. A
+test that starts a daemon in-process holds no machine lock either.
 
 A command that needs the daemon connects and, if none runs, starts one and waits for its readiness
 signal. A daemon that fails to start closes the signal without it, so the client reports the failure
@@ -622,9 +641,9 @@ node Docker runs on.
 A docker fingerprint holds the placement and its resources' facts, so a docker result saved by a
 build before placements is not compared with, or reused for, one of this build.
 
-A second daemon independent of the first takes its own `XDG_RUNTIME_DIR`, `XDG_STATE_HOME` and
-`VIBESYS_CLI_CONFIG`; its containers and Slurm jobs carry its own scope. Stores live in the
-repository, so it must use another clone of a repository the first one uses.
+A sandbox daemon (see "The daemon and the supervisors") also takes its own `XDG_STATE_HOME` and
+`VIBESYS_CLI_CONFIG` when it should not share the first daemon's index or operator config. Stores
+live in the repository, so it must use another clone of a repository the first one uses.
 
 ## The result branch
 

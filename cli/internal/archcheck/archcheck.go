@@ -97,7 +97,7 @@ var rules = map[string][]string{
 		"internal/clock", "internal/core", "internal/environment", "internal/flow", "internal/hostfs",
 		"internal/reading",
 	},
-	"internal/runtimedir": {"internal/core"},
+	"internal/runtimedir": {"gen/", "internal/clock", "internal/core"},
 
 	// Storage.
 	"internal/store":           {"internal/core"},

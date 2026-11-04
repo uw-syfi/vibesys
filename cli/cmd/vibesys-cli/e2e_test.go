@@ -50,7 +50,10 @@ const (
 	runDirVar     = "VIBESYS_E2E_RUNDIR"
 	windowVar     = "VIBESYS_E2E_WINDOW"
 	quickRetryVar = "VIBESYS_E2E_QUICK_RETRY"
-	roleCLI       = "cli"
+	// machineVar is the machine directory of the test binary as the shipped tool, for a test of
+	// daemons that are not sandboxes: they hold a machine of the test's own, and never the user's.
+	machineVar = "VIBESYS_E2E_MACHINE"
+	roleCLI    = "cli"
 )
 
 // The windows of a launch a test can stop it in.
@@ -76,7 +79,12 @@ func TestMain(m *testing.M) {
 	case roleCLI:
 		// The test binary as the shipped tool: its daemon and supervisor processes are this binary
 		// again, composed by internal/production as the release is, over the real machine.
-		os.Exit(run(os.Args[1:], realDeps(os.Stdout, os.Stderr)))
+		d := realDeps(os.Stdout, os.Stderr)
+		if dir := os.Getenv(machineVar); dir != "" {
+			d.process.MachineDir = dir
+			d.options = d.process.ClientOptions
+		}
+		os.Exit(run(os.Args[1:], d))
 	}
 	os.Exit(m.Run())
 }
