@@ -80,8 +80,9 @@ def test_minimal_container_supplies_cache_sources_through_the_validated_pytest_o
 def test_registry_failures_do_not_silently_trigger_cold_installs() -> None:
     script = (REPO / "scripts/ci_registry_image_cache.sh").read_text()
     assert "manifest unknown" in script
-    assert 'cat "${log}" >&2\n            return 1' in script
-    assert "timeout --kill-after=5s 180s docker pull" in script
+    assert "cache registry outage" in script
+    assert "cache pull denied" in script
+    assert 'timeout --kill-after=5s "${pull_timeout_seconds}s" docker pull' in script
     assert "timeout --kill-after=5s 180s docker push" in script
     assert "org.opencontainers.image.source" in script
 

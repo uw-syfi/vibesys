@@ -112,6 +112,8 @@ commands = [
   ["uv", "run", "python", "-m", "scripts.published_skills"],
   ["uv", "run", "vibesys", "--headless", "--help"],
   ["uv", "run", "python", "scripts/check_lint_waivers.py"],
+  # Runs the cache restore script against a fake docker; selected with the image-cache files.
+  ["./scripts/tests/test_ci_registry_image_cache.sh"],
 ]
 # The pre-push gate runs the checks that fail most often and take seconds. The repository-wide
 # scans over git history or the whole tree (contract_sot, persisted_schema_compat, the
