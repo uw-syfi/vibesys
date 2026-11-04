@@ -701,6 +701,8 @@ func TestNeedsAreReadAsWrittenAndRefusedWhenNotKinds(t *testing.T) {
 	}
 	if got, err := read(""); err != nil || got.Needs != nil {
 		t.Errorf("no needs: %v, %v", got.Needs, err)
+	}
+}
 
 const noiseObjectives = `
 [[objective]]
