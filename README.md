@@ -12,16 +12,28 @@
 
 ## About VibeSys
 
-VibeSys explores a broader approach to systems development: use application
-requirements, workload characteristics, and hardware capabilities as the inputs
-to an agentic search process that creates a purpose-built system. Each target
-defines its own implementation contract, correctness checks, and performance
-benchmark, allowing VibeSys to work across domains rather than assuming a single
-runtime, programming language, or deployment shape.
+Today's systems software is built for generality. A serving engine, operating
+system, or database supports many workloads and hardware platforms, but its
+shared abstractions can leave opportunities in any one deployment unexploited.
+Specialization can recover large gains; building and maintaining a separate
+system for each deployment has rarely justified the engineering cost. Coding
+agents are beginning to change that calculation.
 
-One of VibeSys's first initiatives is [**VibeServe**](https://arxiv.org/abs/2605.06068), which asks whether AI agents
-can generate a bespoke LLM serving system for each model, workload, and hardware
-target. The figures, blog post, and paper below document that initiative.
+**VibeSys uses AI agents to build and optimize bespoke systems for a specific
+application, workload, and hardware target.** You provide the requirements,
+correctness checks, and performance benchmark. Agents explore system designs,
+implement candidates, and use measurements to guide the next change. Persistent
+search history and independent review let that process continue across many
+experiments, while domain skills supply the knowledge needed for serving
+engines, databases, microservices, and kernels. VibeSys can start from an existing
+codebase or build a system from scratch.
+
+[**VibeServe**](https://arxiv.org/abs/2605.06068) demonstrated this approach for
+LLM serving: agents generated complete serving systems that exploit deployment
+knowledge across scheduling, memory management, and kernels. On predicted-output
+code editing, a generated system achieved up to **5.95× the speed of vLLM's
+standard decoding**. VibeSys extends this approach to systems software more
+broadly, with each task defining what must remain correct and what to optimize.
 
 <p align="center">
   <img src="docs/figures/idea.png" width="85%" alt="Generic serving today vs. VibeServe's per-target bespoke systems">
