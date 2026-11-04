@@ -248,7 +248,13 @@ func (s *Server) ListJobs(ctx context.Context, req *cliv1.ListJobsRequest) (*cli
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	return &cliv1.ListJobsResponse{Jobs: wire.Jobs(jobs)}, nil
+	var queued []core.JobID
+	for _, j := range jobs {
+		if j.State == core.JobQueued {
+			queued = append(queued, j.ID)
+		}
+	}
+	return &cliv1.ListJobsResponse{Jobs: wire.Jobs(jobs), Waits: wire.JobWaits(jobs, s.app.Waits(call.Scope, queued))}, nil
 }
 
 // ReadLogs implements cliv1.DaemonServiceServer.

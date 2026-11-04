@@ -155,3 +155,58 @@ message Job {
   // final, and changes nothing else.
   repeated Submitter submitters = 17;
 }
+
+// WaitKind is why a queued job has not started.
+enum WaitKind {
+  WAIT_KIND_UNSPECIFIED = 0;
+  // A resource has no room left for the job's claim: its holders use all of it.
+  WAIT_KIND_FULL = 1;
+  // A holder claims the resource for itself alone.
+  WAIT_KIND_HELD_EXCLUSIVELY = 2;
+  // The job claims the resource for itself alone, and holders use it.
+  WAIT_KIND_IN_USE = 3;
+  // An earlier job waits for the resource and keeps its turn; the holders are those jobs.
+  WAIT_KIND_BEHIND = 4;
+  // A rule of the daemon's scheduler holds the job back; the detail says which.
+  WAIT_KIND_HELD = 5;
+  // The job waits for a job's or its store's trouble to pass, or can never start; the detail says
+  // why. A wait on the job ends with this as its failure.
+  WAIT_KIND_TROUBLE = 6;
+}
+
+// WaitHolder is a job that stands in a queued job's way.
+message WaitHolder {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  // The task whose store the job is in, which may be another task than the waiting job's. Empty
+  // when the daemon does not know it.
+  string task = 2;
+  JobKind kind = 3;
+  // The run that submitted the job first. Empty when it named none.
+  string run_id = 4;
+}
+
+// WaitReason says why a queued job has not started, as the daemon's scheduler decided at its last
+// change. The daemon derives it from what it holds; no store keeps it.
+message WaitReason {
+  option (buf.validate.message).cel = {
+    id: "wait_reason.shape"
+    message: "a wait on a resource names the resource and its holders, and a held or trouble wait says why"
+    expression: "this.kind == 5 || this.kind == 6 ? this.detail != '' : (this.resource != '' && size(this.holders) > 0)"
+  };
+  // 5 is HELD and 6 is TROUBLE in the rule above.
+  WaitKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The resource the job waits for, such as placement:default.
+  string resource = 2;
+  // The jobs that hold the resource, or for BEHIND the earlier jobs that wait for it.
+  repeated WaitHolder holders = 3;
+  string detail = 4;
+}
+
+// JobWait is why one queued job waits.
+message JobWait {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  WaitReason reason = 2 [(buf.validate.field).required = true];
+}

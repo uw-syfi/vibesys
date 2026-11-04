@@ -45,7 +45,7 @@ var rules = map[string][]string{
 	"internal/clock":               {},
 	"internal/changed":             {},
 	"internal/owned":               {},
-	"internal/lifecycle":           {"internal/core", "internal/flow"},
+	"internal/lifecycle":           {"internal/core", "internal/flow", "internal/schedule"},
 	"internal/backend":             {"internal/core"},
 	"internal/backend/cpu":         {"internal/backend", "internal/clock", "internal/core"},
 	"internal/backend/backendtest": {"internal/backend"},
@@ -118,7 +118,7 @@ var rules = map[string][]string{
 	// client speaks the contract's messages only, so it does not import the domain.
 	"internal/app": {
 		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow", "internal/gitrepo",
-		"internal/lifecycle", "internal/owned", "internal/store", "internal/supervisor", "internal/task",
+		"internal/lifecycle", "internal/owned", "internal/schedule", "internal/store", "internal/supervisor", "internal/task",
 	},
 	"internal/app/filestores": {"internal/app", "internal/core", "internal/store", "internal/store/filestore"},
 	"internal/app/memstores":  {"internal/app", "internal/core", "internal/store", "internal/store/memstore"},
@@ -144,7 +144,8 @@ var rules = map[string][]string{
 		"internal/gitwork", "internal/hostfs", "internal/runtimedir", "internal/store/filestore",
 		"internal/supervisor", "internal/supervisor/host", "internal/task",
 		"internal/backend/nvidia", "internal/environment/docker/machine", "internal/environment/slurm",
-		"internal/operator", "internal/remote",
+		"internal/operator", "internal/remote", "internal/schedule", "internal/schedule/policy/fairshare",
+		"internal/schedule/policy/fifo",
 	},
 
 	// Replacing the running binary with a newer release.
@@ -214,7 +215,8 @@ var testRules = map[string][]string{
 	"internal/sim": {
 		"gen/", "internal/app", "internal/app/memstores", "internal/client", "internal/clock", "internal/core",
 		"internal/daemon", "internal/environment/fakeenv", "internal/gitrepo", "internal/lifecycle", "internal/owned",
-		"internal/runtimedir", "internal/store", "internal/supervisor",
+		"internal/runtimedir", "internal/schedule", "internal/schedule/policy/fairshare", "internal/schedule/policy/fifo",
+		"internal/store", "internal/supervisor",
 	},
 	"cmd/vibesys-cli": {
 		"internal/app", "internal/app/filestores", "internal/clock", "internal/core", "internal/daemon",
@@ -224,7 +226,8 @@ var testRules = map[string][]string{
 		"internal/task", "internal/task/tasktest",
 	},
 
-	// The scheduler's contract suite, and the policies its own test runs it with.
+	// The scheduler's contract suite, and the policies a test of the lifecycle runs it with.
+	"internal/lifecycle":                 {"internal/schedule/policy/fairshare", "internal/schedule/policy/fifo"},
 	"internal/schedule":                  {"internal/schedule/policy/fifo", "internal/schedule/scheduletest"},
 	"internal/schedule/policy/fifo":      {"internal/schedule/scheduletest"},
 	"internal/schedule/policy/fairshare": {"internal/schedule/scheduletest"},

@@ -46,6 +46,12 @@ type world struct {
 	// stores is how many stores jobs are spread over, so FIFO is checked across stores.
 	stores int
 	next   map[lifecycle.StoreID]int
+	// scheduled says the machine shares itself as scheduling says, and workOf gives each job its
+	// work. Without it, jobs are admitted with no work, which the machine runs one at a time.
+	scheduled  bool
+	scheduling lifecycle.Scheduling
+	workOf     func(*rand.Rand) lifecycle.Work
+	work       map[lifecycle.Ref]lifecycle.Work
 }
 
 func newWorld(t *testing.T, seed uint64, stores int) *world {
@@ -81,14 +87,17 @@ func (w *world) feed(e lifecycle.Event) {
 
 func (w *world) checkState(after lifecycle.Event) {
 	w.t.Helper()
-	active := 0
+	var active []lifecycle.Ref
 	for _, h := range w.state.Held() {
 		if h.Phase == lifecycle.PhaseLaunching || h.Phase == lifecycle.PhaseRunning || h.Phase == lifecycle.PhaseSettling {
-			active++
+			active = append(active, h.Ref)
 		}
 	}
-	if active > 1 {
-		w.fail("after %#v: %d jobs hold the machine, want at most 1: %+v", after, active, w.state.Held())
+	if !w.scheduled && len(active) > 1 {
+		w.fail("after %#v: %d jobs hold the machine, want at most 1: %+v", after, len(active), w.state.Held())
+	}
+	if why := w.overClaimed(active); why != "" {
+		w.fail("after %#v: %s: %+v", after, why, w.state.Held())
 	}
 	if stranded := w.state.Stranded(w.tick()); len(stranded) > 0 {
 		w.fail("after %#v: queued jobs %v are stranded: nothing holds the machine and nothing will start them", after, stranded)
@@ -133,7 +142,12 @@ func (w *world) submit() {
 	w.store[ref] = core.JobQueued
 	w.at[ref] = w.tick()
 	w.order = append(w.order, ref)
-	w.feed(lifecycle.Admitted{Ref: ref, SubmittedAt: w.at[ref]})
+	var work lifecycle.Work
+	if w.workOf != nil {
+		work = w.workOf(w.r)
+		w.work[ref] = work
+	}
+	w.feed(lifecycle.Admitted{Ref: ref, SubmittedAt: w.at[ref], Work: work})
 }
 
 func (w *world) refs(pick func(lifecycle.Ref) bool) []lifecycle.Ref {
@@ -357,6 +371,9 @@ func TestACancelledQueuedJobNeverRuns(t *testing.T) {
 // supervisors and the run directories stay. Recovery feeds the machine what it finds.
 func (w *world) crash() {
 	w.state = lifecycle.Recovering()
+	if w.scheduled {
+		w.state = lifecycle.RecoveringWith(w.scheduling)
+	}
 	w.pending = nil
 }
 
@@ -377,7 +394,7 @@ func (w *world) recoverAll(upTo int) {
 		events++
 		var finding lifecycle.Finding = lifecycle.NoSuchJob{}
 		if state := w.store[ref]; state != "" {
-			finding = lifecycle.JobIn{State: state, SubmittedAt: w.at[ref]}
+			finding = lifecycle.JobIn{State: state, SubmittedAt: w.at[ref], Work: w.work[ref]}
 		}
 		w.feed(lifecycle.Recovered{Ref: ref, Finding: finding, Supervisor: presence, At: w.tick()})
 	}

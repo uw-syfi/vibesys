@@ -89,7 +89,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 		event = lifecycle.StoreUnread{Store: storeIDOf(scope), Failure: failureOf(recoveryErr)}
 	}
 	if out.Disposition != core.SubmitReused && out.Job.State == core.JobQueued {
-		event = admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job)
+		event = a.admittedOf(lifecycle.Ref{Store: storeIDOf(scope), Job: out.Job.ID}, out.Job)
 	}
 	// Settled, so a returned submission is in Status, even while recovery waits.
 	err = a.settleEffect(ctx, message{event: event, readiness: readiness, scope: &scope, changed: true})

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 )
 
 // Phase is where the machine has a job.
@@ -89,6 +90,40 @@ type entry struct {
 	attempts      int
 	policy        core.RerunPolicy
 	spawnFailures int
+	// work is what the job claims while it holds the machine, as its store says. A job the machine
+	// was never told the work of claims the whole machine.
+	work Work
+	// wait is why the scheduler did not start the job at the last step, when it is queued or parked
+	// and did not start, and refused says its claims can never be granted.
+	wait    schedule.WaitReason
+	waits   bool
+	refused string
+}
+
+// Work is what a job asks of the machine, as the shell read it from the job: the claims it holds
+// from its launch until its end is recorded, the run its use is counted for, and its kind, which
+// says what it is to whoever reads why another job waits. Work with no claims is work the machine
+// was not told, and claims every resource for the job alone.
+type Work struct {
+	Claims []schedule.Claim
+	Run    core.RunID
+	Kind   core.JobKind
+}
+
+func (w Work) told() bool { return len(w.Claims) > 0 }
+
+// Scheduling is how the machine is shared: the resources jobs claim, the policy that orders the
+// jobs that wait, and the filters that may hold one back. A nil policy is arrival order.
+type Scheduling struct {
+	Resources []schedule.Resource
+	Policy    schedule.Policy
+	Filters   []schedule.Filter
+}
+
+// OneAtATime is the scheduling of a daemon whose config says nothing: one slot of
+// schedule.DefaultPlacement, and the oldest job first.
+func OneAtATime() Scheduling {
+	return Scheduling{Resources: []schedule.Resource{{ID: schedule.DefaultPlacement, Capacity: 1}}}
 }
 
 // awayStore is a store the daemon could not read, whose jobs it has not all heard of.
@@ -108,12 +143,23 @@ type State struct {
 	// unread is the stores whose unfinished jobs the machine has not read. A job of such a store
 	// could be running in it, so none of its jobs starts until it is read. Other stores go on.
 	unread []awayStore
+	// scheduling is how the machine is shared, and recent the last starts it granted, which a fair
+	// policy shares the machine by.
+	scheduling Scheduling
+	recent     []schedule.Grant
 }
 
 // Recovering returns the state of a daemon that is starting: it launches nothing until it has
 // been told of every job and run left from before, and then RecoveryDone. A first start is the
-// same with nothing to be told.
-func Recovering() State { return State{recovering: true} }
+// same with nothing to be told. It runs one job at a time (OneAtATime).
+func Recovering() State { return RecoveringWith(OneAtATime()) }
+
+// RecoveringWith is Recovering, with the machine shared as the scheduling says.
+func RecoveringWith(sc Scheduling) State {
+	sc.Resources = slices.Clone(sc.Resources)
+	sc.Filters = slices.Clone(sc.Filters)
+	return State{recovering: true, scheduling: sc}
+}
 
 // RunPhase is where a supervisor is in its life, as it says itself.
 type RunPhase string
@@ -213,13 +259,15 @@ type NoSuchJob struct{}
 // JobIn says the store has the job, in State. GivenUp says the store has the job running and was
 // taken over after its owner record was removed, which is how a user says that the place that ran
 // the job is gone for good: then a run of it that cannot be found or used from here is no run.
-// Attempts is how many attempts at the job were cut off, and Policy is the job's rerun policy.
+// Attempts is how many attempts at the job were cut off, Policy is the job's rerun policy, and Work
+// what it claims.
 type JobIn struct {
 	State       core.JobState
 	SubmittedAt time.Time
 	GivenUp     bool
 	Attempts    int
 	Policy      core.RerunPolicy
+	Work        Work
 }
 
 func (StoreAway) finding() {}
@@ -252,12 +300,13 @@ type Event interface {
 
 // Admitted says a job is queued in its store and wants to run. A submission produces one. Telling
 // the machine of a job it has already is harmless. Attempts is how many attempts at the job were
-// cut off, and Policy is the job's rerun policy.
+// cut off, Policy is the job's rerun policy, and Work what it claims.
 type Admitted struct {
 	Ref         Ref
 	SubmittedAt time.Time
 	Attempts    int
 	Policy      core.RerunPolicy
+	Work        Work
 }
 
 // Recovered says what a look at one job found: what its store says and what is left of its
@@ -500,14 +549,20 @@ func (Discard) request()       {}
 // Step applies one event to the state and returns the new state and the requests the event
 // asks for, in the order to carry them out.
 //
-//   - The machine runs one job at a time, the oldest queued first (by the time it was submitted,
-//     then by when the machine heard of it): a free machine and a queued job make a launch.
+//   - The machine starts every job the scheduler admits (internal/schedule): each job claims
+//     resources from its launch until its settlement is recorded, no resource is given past its
+//     capacity, an exclusive claim shares its resource with nothing, and the policy picks among
+//     the rest. A job with a parked supervisor goes before every queued one. With OneAtATime, the
+//     default, the machine runs one job at a time, the oldest queued first (by the time it was
+//     submitted, then by when the machine heard of it). A job whose claims can never be granted
+//     stays queued, and waits on that as on trouble.
 //   - A cancel of a queued job moves it to cancelled at once. A cancel while a queued job's old run
 //     is cleared takes effect when that ends. A cancel during a launch waits for the launch to
 //     end: the supervisor is told before it may start, so the command never runs. A cancel of a
 //     running job asks its supervisor, once.
-//   - An outcome settles the job as Settle says and releases its supervisor. The job holds the
-//     machine until its settlement is recorded, so the next job starts after it, not beside it.
+//   - An outcome settles the job as Settle says and releases its supervisor. The job holds its
+//     claims until its settlement is recorded, so the next job that needs them starts after it,
+//     not beside it.
 //   - A supervisor proved gone cuts the job's attempt off, as CutOff says: the job is queued again,
 //     in its old place, when its command was never told to start or its kind is rerun after any
 //     proven death, and while it has had fewer than core.MaxAttempts; otherwise it is lost. The
@@ -520,9 +575,10 @@ func (Discard) request()       {}
 //     the queue whatever is left of an earlier launch, and a run no job needs is discarded. A job
 //     or a run the daemon cannot judge is touched by nothing and looked at again.
 //   - One repository's trouble is its own. A job in doubt holds back the jobs of its store, and it
-//     holds the machine only while a command of it can run: a supervisor that is parked, finished
-//     or dead holds nothing, and one that runs or cannot be judged holds it for at most the time
-//     limit of its command. A store that was not read starts none of its jobs.
+//     holds its claims only while a command of it can run: a supervisor that is parked, finished
+//     or dead holds nothing, and one that runs or cannot be judged holds them for at most the time
+//     limit of its command. A job whose work the machine was never told claims every resource
+//     alone. A store that was not read starts none of its jobs.
 //   - A store that is away never ends a job. A running job goes in doubt and is adopted where it
 //     left off when the store answers, as its supervisor keeps the output, and a launch that
 //     failed on it goes back to the queue the same way. A supervisor that does not answer, or a
@@ -536,7 +592,10 @@ func (Discard) request()       {}
 // A job the machine does not hold ignores a cancel, an outcome and a loss, so a duplicate or late
 // event changes nothing.
 func Step(s State, e Event) (State, []Request) {
-	out := State{entries: slices.Clone(s.entries), seq: s.seq, recovering: s.recovering, unread: slices.Clone(s.unread)}
+	out := State{
+		entries: slices.Clone(s.entries), seq: s.seq, recovering: s.recovering, unread: slices.Clone(s.unread),
+		scheduling: s.scheduling, recent: s.recent,
+	}
 	var reqs []Request
 	switch e := e.(type) {
 	case Admitted:
@@ -582,9 +641,7 @@ func Step(s State, e Event) (State, []Request) {
 	case Requeued:
 		reqs = out.requeued(e.Ref)
 	}
-	if r, ok := out.schedule(); ok {
-		reqs = append(reqs, r)
-	}
+	reqs = append(reqs, out.schedule()...)
 	return out, reqs
 }
 
@@ -609,7 +666,7 @@ func (s *State) forgotten(e StoreForgotten) []Request {
 			s.seq++
 			left.seq = s.seq
 		}
-		left = entry{ref: run.Ref, submittedAt: left.submittedAt, seq: left.seq, phase: PhaseLeft, holdUntil: left.holdUntil}
+		left = entry{ref: run.Ref, submittedAt: left.submittedAt, seq: left.seq, phase: PhaseLeft, holdUntil: left.holdUntil, work: left.work}
 		left.judgeHold(run.Supervisor, e.At)
 		if !left.holds {
 			continue
@@ -646,7 +703,7 @@ func (s *State) admit(e Admitted) {
 		return
 	}
 	s.seq++
-	s.entries = append(s.entries, entry{ref: e.Ref, submittedAt: e.SubmittedAt, seq: s.seq, phase: PhaseQueued, attempts: e.Attempts, policy: e.Policy})
+	s.entries = append(s.entries, entry{ref: e.Ref, submittedAt: e.SubmittedAt, seq: s.seq, phase: PhaseQueued, attempts: e.Attempts, policy: e.Policy, work: e.Work})
 }
 
 func (s *State) isUnread(id StoreID) bool {
@@ -793,6 +850,9 @@ func (s *State) place(e Recovered, kept entry, phase Phase) {
 	if f, ok := e.Finding.(JobIn); ok {
 		// The store keeps the attempts, so its word on them is the latest.
 		kept.attempts, kept.policy = f.Attempts, f.Policy
+		if f.Work.told() {
+			kept.work = f.Work
+		}
 	}
 	kept.phase, kept.waiting, kept.holds, kept.parked = phase, false, false, false
 	if phase != PhaseInDoubt {
@@ -1146,47 +1206,98 @@ func (s *State) settle(ref Ref, st Settlement) []Request {
 	return []Request{Move{Ref: ref, Settlement: st, Release: true}}
 }
 
-// adoptParked takes up the first job whose command waits in a parked supervisor, once the machine
-// is free. A cancel does not wait for that: it needs the supervisor only, and no command starts.
-func (s *State) adoptParked() (Request, bool) {
-	free := !s.busy() && !s.recovering
+// adoptCancelled takes up the jobs whose command waits in a parked supervisor and whose cancel was
+// asked for. A cancel does not wait for the job's turn: it needs the supervisor only, and no
+// command starts.
+func (s *State) adoptCancelled() []Request {
+	var reqs []Request
 	for i := range s.entries {
+		if cur := &s.entries[i]; cur.parked && cur.cancelAsked {
+			reqs = append(reqs, s.adopt(i))
+		}
+	}
+	return reqs
+}
+
+// adopt takes up the parked job at i.
+func (s *State) adopt(i int) Request {
+	cur := &s.entries[i]
+	cur.phase, cur.parked, cur.cancelSent, cur.holdUntil = PhaseRunning, false, cur.cancelAsked, time.Time{}
+	return Adopt{Ref: cur.ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}
+}
+
+// schedule starts what the scheduler admits: the jobs with a parked supervisor first, then the
+// queued jobs whose store does not hold them back. It notes why each of the others waits.
+func (s *State) schedule() []Request {
+	reqs := s.adoptCancelled()
+	for i := range s.entries {
+		s.entries[i].wait, s.entries[i].waits, s.entries[i].refused = schedule.WaitReason{}, false, ""
+	}
+	if s.recovering {
+		return reqs
+	}
+	st := schedule.State{Resources: s.resources(), Recent: s.recent}
+	for _, e := range s.entries {
+		switch {
+		case e.holdsMachine():
+			st.Holdings = append(st.Holdings, schedule.Holding{ID: idOf(e.ref), Claims: s.claimsOf(e), Run: e.work.Run})
+		case e.parked:
+			st.Waiting = append(st.Waiting, s.candidate(e, true))
+		case e.phase == PhaseQueued && !s.storeBlocked(e.ref.Store):
+			st.Waiting = append(st.Waiting, s.candidate(e, false))
+		}
+	}
+	for _, d := range schedule.Step(st, s.scheduling.Policy, s.scheduling.Filters...) {
+		i := slices.IndexFunc(s.entries, func(e entry) bool { return idOf(e.ref) == d.Target() })
 		cur := &s.entries[i]
-		if cur.parked && (free || cur.cancelAsked) {
-			cur.phase, cur.parked, cur.cancelSent, cur.holdUntil = PhaseRunning, false, cur.cancelAsked, time.Time{}
-			return Adopt{Ref: cur.ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}, true
+		switch d := d.(type) {
+		case schedule.Start:
+			s.recent = schedule.Remember(s.recent, s.candidate(*cur, cur.parked))
+			if cur.parked {
+				reqs = append(reqs, s.adopt(i))
+				continue
+			}
+			cur.phase = PhaseLaunching
+			reqs = append(reqs, LaunchRequest{Ref: cur.ref})
+		case schedule.Wait:
+			cur.wait, cur.waits = d.Reason, true
+		case schedule.Refuse:
+			cur.refused = d.Detail
 		}
 	}
-	return nil, false
+	return reqs
 }
 
-// schedule starts what is next when nothing else holds the machine: the first job with a parked
-// supervisor, and then the oldest queued job.
-func (s *State) schedule() (Request, bool) {
-	if r, ok := s.adoptParked(); ok {
-		return r, true
+// resources are what jobs claim. A state made without a Scheduling, the zero State included, runs
+// one job at a time.
+func (s *State) resources() []schedule.Resource {
+	if len(s.scheduling.Resources) == 0 {
+		return OneAtATime().Resources
 	}
-	best := -1
-	for i, e := range s.entries {
-		if e.phase != PhaseQueued || s.storeBlocked(e.ref.Store) {
-			continue
-		}
-		if best < 0 || e.submittedAt.Before(s.entries[best].submittedAt) ||
-			(e.submittedAt.Equal(s.entries[best].submittedAt) && e.seq < s.entries[best].seq) {
-			best = i
-		}
-	}
-	if best < 0 || s.busy() || s.recovering {
-		return nil, false
-	}
-	s.entries[best].phase = PhaseLaunching
-	return LaunchRequest{Ref: s.entries[best].ref}, true
+	return s.scheduling.Resources
 }
 
-// busy reports whether a job holds the machine: one whose command may run or whose end is on its
+func idOf(ref Ref) schedule.ID { return schedule.ID(ref.String()) }
+
+func (s *State) candidate(e entry, first bool) schedule.Candidate {
+	return schedule.Candidate{ID: idOf(e.ref), Claims: s.claimsOf(e), Run: e.work.Run, Submitted: e.submittedAt, Seq: e.seq, First: first}
+}
+
+// claimsOf is what a job claims: its work's claims, or, for a job whose work the machine was not
+// told, every resource for itself alone.
+func (s *State) claimsOf(e entry) []schedule.Claim {
+	if e.work.told() {
+		return e.work.Claims
+	}
+	out := make([]schedule.Claim, 0, len(s.scheduling.Resources))
+	for _, r := range s.resources() {
+		out = append(out, schedule.Claim{Resource: r.ID, Amount: 1, Exclusive: true})
+	}
+	return out
+}
+
+// holdsMachine reports whether a job holds its claims: its command may run, or its end is on its
 // way to the store.
-func (s *State) busy() bool { return slices.ContainsFunc(s.entries, entry.holdsMachine) }
-
 func (e entry) holdsMachine() bool {
 	switch e.phase {
 	case PhaseQueued, PhaseDiscarding, PhaseCancelling, PhaseUnrecorded:
@@ -1282,21 +1393,26 @@ func (s State) Unread() []StoreID {
 
 // Waiting returns the queued and parked jobs that wait on another job's or their own store's
 // trouble, and why. Each will start when that passes, and its waiter is told. A job that only
-// waits its turn behind a job that runs is not here.
+// waits its turn behind a job that runs is not here. Neither is a job that waits for one that is
+// here, when nothing else holds it back: what it waits for is in the daemon's hands. A job whose
+// claims can never be granted is here, as nothing the daemon does will start it.
 func (s State) Waiting() []Trouble {
 	var out []Trouble
+	troubles := map[schedule.ID]string{}
 	for _, e := range s.entries {
 		if e.phase != PhaseQueued && !e.parked {
 			continue
 		}
-		if why, ok := s.waitsOn(e); ok {
+		if why, ok := s.waitsOn(e, troubles); ok {
+			troubles[idOf(e.ref)] = why
 			out = append(out, Trouble{Ref: e.ref, Failure: core.Failure{Kind: core.FailureUnavailable, Message: why}})
 		}
 	}
 	return out
 }
 
-func (s State) waitsOn(e entry) (string, bool) {
+// waitsOn says what trouble a waiting job waits for. troubles are those of the jobs before it.
+func (s State) waitsOn(e entry, troubles map[schedule.ID]string) (string, bool) {
 	if i := slices.IndexFunc(s.unread, func(a awayStore) bool { return a.id == e.ref.Store }); i >= 0 {
 		return fmt.Sprintf("it stays queued until its store can be read: %s", s.unread[i].failure.Message), true
 	}
@@ -1305,18 +1421,78 @@ func (s State) waitsOn(e entry) (string, bool) {
 		o := s.entries[i]
 		return fmt.Sprintf("it stays queued until job %s of its store is settled: %s", o.ref.Job, o.trouble.Message), true
 	}
-	if slices.ContainsFunc(s.entries, func(o entry) bool { return o.holdsMachine() && o.phase != PhaseInDoubt }) {
+	if e.refused != "" {
+		return fmt.Sprintf("it can never start: %s", e.refused), true
+	}
+	if !e.waits {
 		return "", false
 	}
-	i = slices.IndexFunc(s.entries, entry.holdsMachine)
-	if i < 0 {
+	switch e.wait.Kind {
+	case core.WaitBehind:
+		// It waits for the job before it, whose trouble, if it has one, is its own.
+		for _, b := range e.wait.Blockers {
+			if why, ok := troubles[b]; ok {
+				return why, true
+			}
+		}
+		return "", false
+	case core.WaitFull, core.WaitHeldExclusively, core.WaitInUse:
+	default:
 		return "", false
 	}
-	o := s.entries[i]
+	// It waits for the jobs that hold what it needs. Only when each of them is in doubt is that
+	// trouble: anything else that holds it ends in the daemon's hands.
+	var first *entry
+	for _, b := range e.wait.Blockers {
+		j := slices.IndexFunc(s.entries, func(o entry) bool { return idOf(o.ref) == b })
+		if j < 0 || s.entries[j].phase != PhaseInDoubt {
+			return "", false
+		}
+		if first == nil {
+			first = &s.entries[j]
+		}
+	}
+	if first == nil {
+		return "", false
+	}
+	o := *first
 	if o.holdUntil.IsZero() {
 		return fmt.Sprintf("it stays queued while the daemon finds out about job %s: %s", o.ref, o.trouble.Message), true
 	}
 	return fmt.Sprintf("it stays queued until job %s ends, or until %s at the latest: %s", o.ref, o.holdUntil.UTC().Format(time.RFC3339), o.trouble.Message), true
+}
+
+// Blocker is a job that stands in another's way: Work says what it is.
+type Blocker struct {
+	Ref  Ref
+	Work Work
+}
+
+// Queued is why a queued or parked job did not start at the last step, as the scheduler said.
+type Queued struct {
+	Ref    Ref
+	Reason schedule.WaitReason
+	// Blockers are the jobs of Reason.Blockers that the machine holds.
+	Blockers []Blocker
+}
+
+// Queue returns why each queued or parked job that the scheduler held back waits, in the order the
+// machine heard of them. A job held back by trouble or by its store is not here: Waiting says why.
+func (s State) Queue() []Queued {
+	var out []Queued
+	for _, e := range s.entries {
+		if !e.waits {
+			continue
+		}
+		q := Queued{Ref: e.ref, Reason: e.wait}
+		for _, b := range e.wait.Blockers {
+			if j := slices.IndexFunc(s.entries, func(o entry) bool { return idOf(o.ref) == b }); j >= 0 {
+				q.Blockers = append(q.Blockers, Blocker{Ref: s.entries[j].ref, Work: s.entries[j].work})
+			}
+		}
+		out = append(out, q)
+	}
+	return out
 }
 
 // Stranded returns the queued jobs that nothing will ever start, as of a moment. It is empty unless

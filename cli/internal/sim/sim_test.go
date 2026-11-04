@@ -50,6 +50,22 @@ type profile struct {
 	// cutoffs makes supervisors die between their spawn and their start, often, and nothing else go
 	// wrong but the machine, so that jobs are queued again up to their bound.
 	cutoffs bool
+	// slots, when set, is how many jobs the daemon runs at once, with fair choosing the fair-share
+	// policy over fifo. Jobs come from several runs, and some claim the machine alone, as a measure
+	// does: the machine sees only claims, so such a command stands for one.
+	slots int
+	fair  bool
+}
+
+// scheduledOf is a profile of a daemon that runs several jobs at once, for several runs, with some
+// jobs that need the machine alone, through crashes, restarts and faults.
+func scheduledOf(r *rand.Rand) profile {
+	coin := func() bool { return r.IntN(2) == 0 }
+	return profile{
+		slots: 2 + r.IntN(3), fair: coin(),
+		storeWrites: coin(), supervisorFaults: coin(), crashes: coin(), machine: coin(),
+		attempts: 4 + r.IntN(5), faultPercent: r.IntN(6), chaosSteps: 120 + r.IntN(300), jobs: 4 + r.IntN(6),
+	}
 }
 
 // cutoffsOf is a profile of cut-offs: supervisors die between their spawn and their start, often,
@@ -169,11 +185,18 @@ func (w *world) callContext(s int) *cliv1.CallContext {
 	return &cliv1.CallContext{Repository: string(scopes[s].Repository()), Task: string(scopes[s].Task()), RunId: "run", Harness: "h", Agent: "a"}
 }
 
+// runs are the optimization runs that submit work to a daemon of several slots.
+var runs = []string{"run-a", "run-b", "run-c"}
+
 func (w *world) submit() {
 	w.opCount++
 	token := fmt.Sprintf("t%d", len(w.tokens)+1)
 	sc := &script{token: token, code: w.rng.IntN(2)}
 	lines := 2 + w.rng.IntN(3)
+	if w.profile.slots > 0 {
+		// Longer commands, which meet.
+		lines += 3
+	}
 	for i := range lines {
 		sc.lines = append(sc.lines, fmt.Sprintf("%s-%d", token, i+1))
 		if i < lines-1 {
@@ -184,6 +207,12 @@ func (w *world) submit() {
 	w.noteSubmit(token, false)
 	s := w.rng.IntN(len(scopes))
 	cc := w.callContext(s)
+	if w.profile.slots > 0 {
+		cc.RunId = runs[w.rng.IntN(len(runs))]
+		if w.rng.IntN(3) == 0 {
+			w.alone.Store(token, true)
+		}
+	}
 	w.start("submit", func(ctx context.Context) string {
 		c, err := client.Connect(ctx, w.options())
 		if err != nil {
@@ -374,8 +403,19 @@ func (w *world) actions() []option {
 	all := w.jobs()
 	if len(w.tokens) < w.profile.jobs {
 		add("submit", w.submit)
+		if w.profile.slots > 0 {
+			// Runs submit in bursts, so that more jobs wait than the machine has slots.
+			add("submit several", func() {
+				for range 1 + w.rng.IntN(w.profile.slots+1) {
+					if len(w.tokens) < w.profile.jobs {
+						w.submit()
+					}
+				}
+			})
+		}
 	}
-	if len(all) > 0 {
+	// A daemon of several slots gets fewer cancels, so that its jobs run long enough to meet.
+	if len(all) > 0 && (w.profile.slots == 0 || w.rng.IntN(4) == 0) {
 		l := all[w.rng.IntN(len(all))]
 		name := fmt.Sprintf("%s/%s", string(l.scope.Task()), l.job.ID)
 		add("cancel "+name, func() { w.cancel(l) })
@@ -626,15 +666,32 @@ func (w *world) check() {
 			w.checkEnd(ref, l)
 		}
 	}
-	// The machine runs one command at a time. A store can show more than the machine does, as a
-	// store that was away shows a job whose supervisor died meanwhile, but not more than one.
+	// The machine runs one command at a time, or as many as it has slots. A store can show more
+	// than the machine does, as a store that was away shows a job whose supervisor died meanwhile,
+	// but not more than that.
+	slots := max(1, w.profile.slots)
 	for _, scope := range scopes {
-		if running[scope] > 1 {
+		if running[scope] > slots {
 			w.violate("%d jobs of %s are running", running[scope], string(scope.Task()))
 		}
 	}
-	if n := w.env.Active(); n > 1 {
+	n := w.env.Active()
+	for {
+		most := mostAtOnce.Load()
+		if int64(n) <= most || mostAtOnce.CompareAndSwap(most, int64(n)) {
+			break
+		}
+	}
+	if n > slots {
 		w.violate("%d commands run at once", n)
+	}
+	// A command that claims the machine alone runs beside nothing.
+	if active := w.env.ActiveRuns(); len(active) > 1 {
+		for _, x := range active {
+			if len(x.Argv) > 1 && w.isAlone(strings.SplitN(x.Argv[1], "-", 2)[0]) {
+				w.violate("command %s, which needs the machine alone, runs beside %d others", x.Argv[1], len(active)-1)
+			}
+		}
 	}
 	// A command runs once, and again only for each attempt its job had cut off mid-command, which
 	// a command job never has.
@@ -796,6 +853,10 @@ func (w *world) finalCheck() {
 	byToken := map[string]located{}
 	for _, l := range all {
 		byToken[tokenOf(l.job)] = l
+	}
+	// A fair policy may start a later run's job first; fifo starts a store's jobs in order.
+	if w.profile.fair {
+		return
 	}
 	for _, s := range scopes {
 		var order []string
@@ -1041,6 +1102,20 @@ func TestSeedsOfCutOffsHoldTheInvariants(t *testing.T) {
 	count = min(count, defaultSeeds/3)
 	if requeued := runSeeds(t, first, count, cutoffsOf); requeued == 0 && count == defaultSeeds/3 {
 		t.Errorf("no seed of %d queued a job again", count)
+	}
+}
+
+// A daemon that runs several jobs at once, for several runs, with some that need the machine alone,
+// holds the same invariants through crashes and restarts: no more commands at once than slots, and
+// one that needs the machine alone beside nothing. The default range must run commands beside each
+// other, or the check of the slots holds of nothing.
+func TestSeedsOfSeveralSlotsHoldTheInvariants(t *testing.T) {
+	first, count := seedRange()
+	count = min(count, defaultSeeds/3)
+	runSeeds(t, first, count, scheduledOf)
+	t.Logf("at most %d commands ran at once", mostAtOnce.Load())
+	if count == defaultSeeds/3 && mostAtOnce.Load() < 2 {
+		t.Errorf("no seed of %d ran two commands at once", count)
 	}
 }
 

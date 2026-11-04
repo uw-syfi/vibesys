@@ -814,6 +814,7 @@ func (a *App) lookInStore(ctx context.Context, ref lifecycle.Ref, scope core.Sco
 func (a *App) jobIn(ctx context.Context, scope core.Scope, job core.Job, presence lifecycle.Presence, given []core.JobID) lifecycle.JobIn {
 	in := lifecycle.JobIn{
 		State: job.State, SubmittedAt: job.SubmittedAt, Attempts: len(job.Attempts), Policy: core.RerunPolicyOf(job.Spec.Settings.Kind()),
+		Work: a.workOf(job),
 	}
 	if job.State != core.JobRunning || !slices.Contains(given, job.ID) {
 		return in

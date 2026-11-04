@@ -41,6 +41,8 @@ type Runtime struct {
 	// Tasks reads the task of a check or a measure job as its commit has it. Without it those
 	// jobs are refused as unavailable.
 	Tasks task.Source
+	// Scheduler is how the machine is shared between jobs. The zero value runs one job at a time.
+	Scheduler app.Scheduler
 }
 
 // Config is what Run needs.
@@ -123,6 +125,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Branches:      cfg.Runtime.Branches,
 		Repositories:  cfg.Runtime.Repositories,
 		Tasks:         cfg.Runtime.Tasks,
+		Scheduler:     cfg.Runtime.Scheduler,
 		Logf:          cfg.Logf,
 	})
 	defer a.Close()

@@ -252,6 +252,9 @@ message ListJobsRequest {
 
 message ListJobsResponse {
   repeated Job jobs = 1;
+  // Why each listed queued job that has not started waits. A queued job that is about to start has
+  // none.
+  repeated JobWait waits = 2;
 }
 
 message ReadLogsRequest {

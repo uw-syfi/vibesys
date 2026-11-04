@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/app/filestores"
@@ -28,6 +31,9 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/operator"
 	"github.com/uw-syfi/vibesys/cli/internal/remote"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule/policy/fairshare"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule/policy/fifo"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/host"
@@ -98,7 +104,16 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	}
 	owner := filestore.Owner{Host: machine, Dir: dir.Path(), PID: os.Getpid()}
 	clk := clock.System{}
-	environments, err := p.machineEnvironments(clk, dir)
+	op, err := p.operator()
+	if err != nil {
+		return err
+	}
+	scheduler, err := schedulerOf(op.Scheduler)
+	if err != nil {
+		return err
+	}
+	// The daemon runs no container: it only fingerprints the environments.
+	environments, err := p.machineEnvironments(op, clk, dir, dir.Path())
 	if err != nil {
 		return err
 	}
@@ -129,8 +144,36 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			Branches:     gitrepo.System{},
 			Repositories: gitrepo.System{},
 			Tasks:        gitwork.Tasks{},
+			Scheduler:    scheduler,
 		},
 	})
+}
+
+// policies are the scheduling policies, by the name the operator config gives them. This is the
+// only place that names them.
+var policies = map[string]func() schedule.Policy{
+	fifo.Name:      fifo.New,
+	fairshare.Name: fairshare.New,
+}
+
+// schedulerOf is how the operator config shares the machine: max_jobs slots of the one placement,
+// which a measure job takes alone, and the named policy.
+func schedulerOf(s operator.Scheduler) (app.Scheduler, error) {
+	newPolicy, ok := policies[s.Policy]
+	if !ok {
+		names := slices.Sorted(maps.Keys(policies))
+		return app.Scheduler{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"the operator config: scheduler.policy: %q is not a policy (%s)", s.Policy, strings.Join(names, ", "))}
+	}
+	return app.Scheduler{
+		Resources: []schedule.Resource{{ID: schedule.DefaultPlacement, Capacity: s.MaxJobs}},
+		Policy:    newPolicy(),
+		Demand:    schedule.DefaultDemand{},
+	}, nil
+}
+
+func (p Process) operator() (operator.Config, error) {
+	return operator.Load(operator.Path(p.Getenv, p.Home), p.Getenv(operator.EnvConfig) != "")
 }
 
 // RunSupervisor is a supervisor process: `vibesys-cli supervisor serve`. ready is the readiness
@@ -144,7 +187,13 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 		return err
 	}
 	clk := clock.System{}
-	environments, err := p.machineEnvironments(clk, dir)
+	op, err := p.operator()
+	if err != nil {
+		return err
+	}
+	// The containers of this run are a scope of their own: the daemon may run other jobs beside it,
+	// and a run removes the containers of its scope that it does not own.
+	environments, err := p.machineEnvironments(op, clk, dir, runDir)
 	if err != nil {
 		return err
 	}
@@ -163,14 +212,15 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 //
 // Making the docker environment does not touch Docker or another machine: a machine without it
 // fails a docker job with a message that says so, and host jobs are unaffected. A config that cannot
-// be read stops the daemon, since a job run without what the operator asked for would mislead. The
-// containers of the jobs of one daemon are one scope, named by its runtime directory, because the
-// daemon runs one job at a time.
-func (p Process) machineEnvironments(clk clock.System, dir runtimedir.Dir) (environment.Environments, error) {
-	op, err := operator.Load(operator.Path(p.Getenv, p.Home), p.Getenv(operator.EnvConfig) != "")
-	if err != nil {
-		return nil, err
-	}
+// be read stops the daemon, since a job run without what the operator asked for would mislead.
+//
+// What one daemon stages and builds is one scope, named by its runtime directory. On this machine
+// the containers of one run are a scope of their own, named by containerKey, the run's directory,
+// because the daemon may run several jobs at once there: a run sweeps away the containers of its
+// scope it does not own, which are what an earlier attempt of the same job left. Another machine
+// runs one job of the daemon at a time (operator.Parse refuses more), so there the containers and
+// the Slurm allocations stay in the daemon's scope, which a run sweeps whole.
+func (p Process) machineEnvironments(op operator.Config, clk clock.System, dir runtimedir.Dir, containerKey string) (environment.Environments, error) {
 	scope := docker.ScopeFor(dir.Path())
 	local := cpu.New(cpu.Host(), clk)
 	cfg := docker.Config{
@@ -181,6 +231,7 @@ func (p Process) machineEnvironments(clk clock.System, dir runtimedir.Dir) (envi
 	engineCfg := dockercli.Config{Timers: clk}
 	switch op.Docker.Placement {
 	case operator.Local:
+		cfg.Scope = docker.ScopeFor(containerKey)
 		cfg.Backend = local
 		cfg.Machine = machine.Local{CacheRoot: p.cacheRoot(), As: cfg.User}
 		cfg.GPUFacts = &nvidia.GPUs{Shell: remote.Local{}, Timers: clk}

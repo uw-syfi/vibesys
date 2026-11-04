@@ -69,6 +69,25 @@ func TestNoConfigIsLocalDockerWithNoGPU(t *testing.T) {
 	}
 }
 
+// The scheduler runs one job at a time, the oldest first, unless the config says otherwise.
+func TestTheSchedulerDefaultsToOneJobAtATime(t *testing.T) {
+	for text, want := range map[string]operator.Scheduler{
+		"":              {Policy: "fifo", MaxJobs: 1},
+		slurmConfig:     {Policy: "fifo", MaxJobs: 1},
+		"[scheduler]\n": {Policy: "fifo", MaxJobs: 1},
+		"[scheduler]\nmax_jobs = 4\npolicy = \"fair-share\"\n": {Policy: "fair-share", MaxJobs: 4},
+	} {
+		c, err := operator.Parse([]byte(text))
+		if err != nil || c.Scheduler != want {
+			t.Errorf("%q: %+v, %v; want %+v", text, c.Scheduler, err, want)
+		}
+	}
+	c, err := operator.Load(filepath.Join(t.TempDir(), "absent.toml"), false)
+	if err != nil || c.Scheduler != (operator.Scheduler{Policy: "fifo", MaxJobs: 1}) {
+		t.Errorf("a missing default file: %+v, %v", c.Scheduler, err)
+	}
+}
+
 // Every mistake is refused, naming the key: a typo must never be a setting quietly left out.
 func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 	cases := map[string]string{
@@ -96,6 +115,10 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"no CPUs":                           strings.Replace(slurmConfig, "[slurm]", "[slurm]\ncpus = 0", 1),
 		"a memory with no unit":             strings.Replace(slurmConfig, "[slurm]", "[slurm]\nmemory = \"32\"", 1),
 		"a memory Docker reads another way": strings.Replace(slurmConfig, "[slurm]", "[slurm]\nmemory = \"32GB\"", 1),
+		"no jobs at once":                   "[scheduler]\nmax_jobs = 0\n",
+		"an empty policy":                   "[scheduler]\npolicy = \"\"\n",
+		"an unknown scheduler key":          "[scheduler]\nmax_job = 2\n",
+		"jobs at once on a remote engine":   "[scheduler]\nmax_jobs = 2\n" + slurmConfig,
 	}
 	for name, text := range cases {
 		_, err := operator.Parse([]byte(text))

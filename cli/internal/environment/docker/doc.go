@@ -35,8 +35,9 @@
 //     this process owns, which are what a caller that died left behind. If it cannot, it does not
 //     start: a leftover container running beside a job would be a lie in the job's numbers.
 //
-// The scope is the daemon's: one run at a time runs in a scope, which VibeSys' serial jobs
-// guarantee, so a container of the scope that this process does not own is a leftover.
+// One run at a time runs in a scope, which the caller guarantees: the daemon gives a scope to each
+// job's runs on a machine where it runs several jobs at once, and to itself on one where it runs
+// one at a time. So a container of the scope that this process does not own is a leftover.
 //
 // # Structure
 //

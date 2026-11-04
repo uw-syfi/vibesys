@@ -50,7 +50,9 @@ type world struct {
 	// branches is the repository's result branch, for a test of what the daemon holds a submission to.
 	// Without it the daemon cannot read the branch.
 	branches *gitrepo.FakeBranches
-	apps     []*app.App
+	// scheduler is how the daemons share the machine; the zero value runs one job at a time.
+	scheduler app.Scheduler
+	apps      []*app.App
 }
 
 func newWorld(t *testing.T) *world {
@@ -112,6 +114,7 @@ func (w *world) newApp() *app.App {
 		Supervisors:  w.supervisors(),
 		Tasks:        w.taskSource(),
 		Repositories: w.git,
+		Scheduler:    w.scheduler,
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
 	}))
 	w.apps = append(w.apps, a)

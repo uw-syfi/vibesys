@@ -28,6 +28,9 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/owned"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule/policy/fairshare"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule/policy/fifo"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
@@ -155,6 +158,9 @@ type world struct {
 	appendedAt             map[lifecycle.Ref]time.Duration
 	appends                map[lifecycle.Ref]int
 	violation              string
+
+	// alone are the tokens of the commands that claim the machine alone.
+	alone sync.Map
 
 	ops     []*op
 	opCount int
@@ -413,6 +419,7 @@ func (w *world) Start(ctx context.Context) error {
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
 		Supervisors:  gatedSupervisors{supervisor.NewInProcess(fakeenv.Environments{core.EnvironmentHost: w.env}, w.checkouts, w.survivors), w, d},
 		Repositories: simRepositories(),
+		Scheduler:    w.scheduler(),
 	})
 	w.group.Go(func() { w.process(d) })
 	select {
@@ -424,6 +431,37 @@ func (w *world) Start(ctx context.Context) error {
 		return ctx.Err()
 	}
 }
+
+// scheduler is how the daemon shares the machine: one job at a time, unless the profile has slots.
+func (w *world) scheduler() app.Scheduler {
+	if w.profile.slots == 0 {
+		return app.Scheduler{}
+	}
+	policy := fifo.New()
+	if w.profile.fair {
+		policy = fairshare.New()
+	}
+	return app.Scheduler{
+		Resources: []schedule.Resource{{ID: schedule.DefaultPlacement, Capacity: w.profile.slots}},
+		Policy:    policy, Demand: simDemand{w},
+	}
+}
+
+// simDemand gives every command a slot of the machine, and the whole machine to one that needs it
+// alone.
+type simDemand struct{ w *world }
+
+func (d simDemand) Claims(job core.Job) []schedule.Claim {
+	return []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: d.w.isAlone(tokenOf(job))}}
+}
+
+func (w *world) isAlone(token string) bool {
+	_, ok := w.alone.Load(token)
+	return ok
+}
+
+// mostAtOnce is the most commands any seed ran at once.
+var mostAtOnce atomic.Int64
 
 // process is the life of a daemon, as daemon.Run has it.
 func (w *world) process(d *incarnation) {

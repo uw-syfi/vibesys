@@ -51,12 +51,27 @@ const (
 
 // Config is the operator config.
 type Config struct {
-	Docker Docker
+	Scheduler Scheduler
+	Docker    Docker
 	// Remote is set for the ssh and slurm placements.
 	Remote *Remote
 	// Slurm is set for the slurm placement.
 	Slurm *SlurmConfig
 }
+
+// Scheduler is how the daemon shares the machine between jobs.
+type Scheduler struct {
+	// Policy names the policy that orders the jobs that wait. The daemon's wiring knows the names.
+	Policy string
+	// MaxJobs is how many jobs run at once on the placement. A measure job runs alone.
+	MaxJobs int
+}
+
+// Defaults of the scheduler: one job at a time, the oldest first.
+const (
+	DefaultPolicy  = "fifo"
+	DefaultMaxJobs = 1
+)
 
 // Docker is how containers are given what the machine has.
 type Docker struct {
@@ -127,13 +142,22 @@ func Load(file string, named bool) (Config, error) {
 		}
 		return c, nil
 	case errors.Is(err, fs.ErrNotExist) && !named:
-		return Config{Docker: Docker{Placement: Local}}, nil
+		return defaults(), nil
 	}
 	return Config{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("reading the operator config: %v", err)}
 }
 
+// defaults is the config of no file.
+func defaults() Config {
+	return Config{Scheduler: Scheduler{Policy: DefaultPolicy, MaxJobs: DefaultMaxJobs}, Docker: Docker{Placement: Local}}
+}
+
 // file is the TOML file.
 type file struct {
+	Scheduler *struct {
+		Policy  *string `toml:"policy"`
+		MaxJobs *int    `toml:"max_jobs"`
+	} `toml:"scheduler"`
 	Docker *struct {
 		Placement string            `toml:"placement"`
 		GPUs      string            `toml:"gpus"`
@@ -186,7 +210,21 @@ func Parse(data []byte) (Config, error) {
 		sort.Strings(keys)
 		return Config{}, invalid("unknown key %q", keys[0])
 	}
-	c := Config{Docker: Docker{Placement: Local}}
+	c := defaults()
+	if sc := f.Scheduler; sc != nil {
+		if sc.Policy != nil {
+			if *sc.Policy == "" {
+				return Config{}, invalid("scheduler.policy: name a policy, or leave the key out for %q", DefaultPolicy)
+			}
+			c.Scheduler.Policy = *sc.Policy
+		}
+		if sc.MaxJobs != nil {
+			if *sc.MaxJobs < 1 {
+				return Config{}, invalid("scheduler.max_jobs: %d is not a number of jobs; it is at least 1", *sc.MaxJobs)
+			}
+			c.Scheduler.MaxJobs = *sc.MaxJobs
+		}
+	}
 	if d := f.Docker; d != nil {
 		if d.Placement != "" {
 			c.Docker.Placement = Placement(d.Placement)
@@ -214,6 +252,10 @@ func Parse(data []byte) (Config, error) {
 	}
 	remote := c.Docker.Placement != Local
 	switch {
+	case remote && c.Scheduler.MaxJobs > 1:
+		// A remote placement stages each job's directories and sweeps its Slurm allocations as the
+		// one job of the daemon, so a second one beside it would be swept away.
+		return Config{}, invalid("scheduler.max_jobs: docker.placement %q runs one job at a time; more than 1 needs docker.placement \"local\"", c.Docker.Placement)
 	case remote && f.Remote == nil:
 		return Config{}, invalid("docker.placement %q needs a [remote] section with the host", c.Docker.Placement)
 	case !remote && f.Remote != nil:

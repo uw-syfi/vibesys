@@ -94,6 +94,10 @@ type view struct {
 	held map[lifecycle.Ref]bool
 	// unread is the stores whose jobs the machine has not read.
 	unread []core.Scope
+	// queue is why each queued job the scheduler held back waits, and tasks the task of each
+	// store the machine knows, to name the jobs in a wait's way.
+	queue map[lifecycle.Ref]lifecycle.Queued
+	tasks map[lifecycle.StoreID]core.TaskName
 }
 
 // New returns an App that is recovering: it launches nothing until Start has told it what the
@@ -163,7 +167,7 @@ func (a *App) settle(m message) error {
 
 // loop is the only place the machine steps.
 func (a *App) loop() {
-	state := lifecycle.Recovering()
+	state := lifecycle.RecoveringWith(a.cfg.Scheduler.machine())
 	scopes := map[lifecycle.StoreID]core.Scope{}
 	handles := map[lifecycle.Ref]supervisor.Handle{}
 	defer func() {
@@ -297,7 +301,16 @@ func refOf(e lifecycle.Event) (lifecycle.Ref, bool) {
 
 // publish makes the machine's state readable, and wakes whoever new trouble concerns.
 func (a *App) publish(s lifecycle.State, scopes map[lifecycle.StoreID]core.Scope, changed bool) {
-	next := &view{trouble: map[lifecycle.Ref]core.Failure{}, waits: map[lifecycle.Ref]core.Failure{}, held: map[lifecycle.Ref]bool{}}
+	next := &view{
+		trouble: map[lifecycle.Ref]core.Failure{}, waits: map[lifecycle.Ref]core.Failure{}, held: map[lifecycle.Ref]bool{},
+		queue: map[lifecycle.Ref]lifecycle.Queued{}, tasks: map[lifecycle.StoreID]core.TaskName{},
+	}
+	for _, q := range s.Queue() {
+		next.queue[q.Ref] = q
+	}
+	for id, scope := range scopes {
+		next.tasks[id] = scope.Task()
+	}
 	next.queued, next.running = s.Counts()
 	for _, t := range s.Troubled() {
 		next.trouble[t.Ref] = t.Failure
@@ -350,6 +363,31 @@ func (a *App) waitOf(ref lifecycle.Ref) (core.Failure, bool) {
 	}
 	f, ok := a.view.Load().waits[ref]
 	return f, ok
+}
+
+// Waits says why each of the jobs of a store that has not started waits, as the machine last
+// decided: the trouble it waits on, or what the scheduler holds it back for. A job that waits for
+// nothing, or that is not queued, is not in it.
+func (a *App) Waits(scope core.Scope, ids []core.JobID) map[core.JobID]core.JobWait {
+	v := a.view.Load()
+	out := map[core.JobID]core.JobWait{}
+	for _, id := range ids {
+		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: id}
+		if f, ok := a.waitOf(ref); ok {
+			out[id] = core.JobWait{Kind: core.WaitTrouble, Detail: f.Message}
+			continue
+		}
+		q, ok := v.queue[ref]
+		if !ok {
+			continue
+		}
+		w := core.JobWait{Kind: q.Reason.Kind, Resource: string(q.Reason.Resource), Detail: q.Reason.Detail}
+		for _, b := range q.Blockers {
+			w.Holders = append(w.Holders, core.WaitHolder{Job: b.Ref.Job, Task: v.tasks[b.Ref.Store], Kind: b.Work.Kind, Run: b.Work.Run})
+		}
+		out[id] = w
+	}
+	return out
 }
 
 func (a *App) now() time.Time { return a.cfg.Clock.Now() }
