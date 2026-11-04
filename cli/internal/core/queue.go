@@ -1,5 +1,10 @@
 package core
 
+import (
+	"fmt"
+	"time"
+)
+
 // WaitKind is why a queued job has not started. The set is closed.
 type WaitKind string
 
@@ -19,11 +24,14 @@ const (
 	// WaitTrouble is a job or a store whose trouble the job waits for to pass, which the detail
 	// names.
 	WaitTrouble WaitKind = "trouble"
+	// WaitLeased is a resource that a daemon other than this one, or another of this daemon's
+	// jobs, holds the lease of; Elsewhere names who.
+	WaitLeased WaitKind = "leased"
 )
 
 // WaitKinds lists every kind of wait.
 func WaitKinds() []WaitKind {
-	return []WaitKind{WaitFull, WaitHeldExclusively, WaitInUse, WaitBehind, WaitHeld, WaitTrouble}
+	return []WaitKind{WaitFull, WaitHeldExclusively, WaitInUse, WaitBehind, WaitHeld, WaitTrouble, WaitLeased}
 }
 
 // JobWait says why a queued job has not started, as the daemon's scheduler decided it at its last
@@ -37,6 +45,36 @@ type JobWait struct {
 	Holders []WaitHolder
 	// Detail is the rule or the trouble for WaitHeld and WaitTrouble, in words.
 	Detail string
+	// Elsewhere is who holds the lease for WaitLeased, and nil otherwise.
+	Elsewhere *LeaseHolder
+}
+
+// LeaseHolder is who holds the lease of a resource: the user and the machine a daemon runs as and
+// on, its process, the job it holds the lease for, and since when.
+type LeaseHolder struct {
+	User  string
+	Host  string
+	PID   int
+	Job   JobID
+	Since time.Time
+}
+
+// String names the holder in words, such as "alice on host-a (pid 41), job 7f3…".
+func (h LeaseHolder) String() string {
+	who := h.User
+	if who == "" {
+		who = "someone"
+	}
+	if h.Host != "" {
+		who += " on " + h.Host
+	}
+	if h.PID > 0 {
+		who += fmt.Sprintf(" (pid %d)", h.PID)
+	}
+	if h.Job != "" {
+		who += ", job " + string(h.Job)
+	}
+	return who
 }
 
 // WaitHolder is a job that stands in another's way. Task is the task whose store it is in, empty

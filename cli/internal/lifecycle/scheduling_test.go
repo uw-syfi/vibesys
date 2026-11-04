@@ -3,6 +3,7 @@ package lifecycle_test
 import (
 	"fmt"
 	"math/rand/v2"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -275,7 +276,7 @@ func TestAJobThatCanNeverStartSaysSo(t *testing.T) {
 		t.Fatalf("the job waits as %+v", w)
 	}
 	_, reqs = lifecycle.Step(s, lifecycle.Admitted{Ref: fine, SubmittedAt: epoch.Add(time.Second)})
-	if len(reqs) != 1 || reqs[0] != (lifecycle.LaunchRequest{Ref: fine}) {
+	if len(reqs) != 1 || !reflect.DeepEqual(reqs[0], lifecycle.LaunchRequest{Ref: fine, Leases: []schedule.ResourceID{schedule.DefaultPlacement}}) {
 		t.Fatalf("the job after it asked for %+v", reqs)
 	}
 }

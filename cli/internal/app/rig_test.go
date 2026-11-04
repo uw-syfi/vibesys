@@ -52,7 +52,13 @@ type world struct {
 	branches *gitrepo.FakeBranches
 	// scheduler is how the daemons share the machine; the zero value runs one job at a time.
 	scheduler app.Scheduler
-	apps      []*app.App
+	// leasing is how they share what they hold alone with other daemons; the zero value leases
+	// nothing.
+	leasing app.Leasing
+	// timers and slowPeriod, when set, replace the instant timers and the slow period of an hour.
+	timers     clock.Timers
+	slowPeriod time.Duration
+	apps       []*app.App
 }
 
 func newWorld(t *testing.T) *world {
@@ -106,7 +112,7 @@ func (w *world) newApp() *app.App {
 	if w.branches != nil {
 		branches = w.branches
 	}
-	a := app.New(instant(app.Config{
+	cfg := instant(app.Config{
 		Branches:     branches,
 		Clock:        w.clock,
 		Stores:       w.stores,
@@ -115,8 +121,16 @@ func (w *world) newApp() *app.App {
 		Tasks:        w.taskSource(),
 		Repositories: w.git,
 		Scheduler:    w.scheduler,
+		Leasing:      w.leasing,
 		Logf:         func(format string, args ...any) { w.t.Logf("daemon: "+format, args...) },
-	}))
+	})
+	if w.timers != nil {
+		cfg.Timers = w.timers
+	}
+	if w.slowPeriod > 0 {
+		cfg.SlowPeriod = w.slowPeriod
+	}
+	a := app.New(cfg)
 	w.apps = append(w.apps, a)
 	if err := a.Start(context.Background()); err != nil {
 		w.t.Fatalf("Start: %v", err)

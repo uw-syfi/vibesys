@@ -65,10 +65,19 @@ func (a *App) effectOf(r lifecycle.Request, scopes map[lifecycle.StoreID]core.Sc
 	switch r := r.(type) {
 	case lifecycle.LaunchRequest:
 		scope, known := scopes[r.Ref.Store]
-		return r.Ref, func(ctx context.Context) { a.launch(ctx, r.Ref, scope, known) }
+		return r.Ref, func(ctx context.Context) { a.launch(ctx, r, scope, known) }
 	case lifecycle.Adopt:
 		scope, h := scopes[r.Ref.Store], handles[r.Ref]
-		return r.Ref, func(ctx context.Context) { a.follow(ctx, r, scope, h) }
+		missing := a.leases.missing(r.Ref, r.Leases)
+		return r.Ref, func(ctx context.Context) {
+			if len(missing) > 0 {
+				t := a.adoptLeases(ctx, r.Ref, missing)
+				if !a.postEffect(ctx, message{taken: &t}) {
+					a.giveBack(t.leases)
+				}
+			}
+			a.follow(ctx, r, scope, h)
+		}
 	case lifecycle.SignalCancel:
 		h := handles[r.Ref]
 		return r.Ref, func(ctx context.Context) { a.signalCancel(ctx, r, h) }
@@ -284,23 +293,40 @@ func (a *App) record(ctx context.Context, st store.Store, t core.Transition) err
 // starts third, when the machine asks to follow it. A crash before the second step leaves a queued
 // job and a parked supervisor, which the next start discards; a crash after it leaves a running
 // job whose supervisor the next start adopts and starts.
-func (a *App) launch(ctx context.Context, ref lifecycle.Ref, scope core.Scope, known bool) {
+//
+// Before all of it, it takes the leases of the resources the job holds alone that other daemons
+// share. A lease held elsewhere ends the launch there, having started nothing. The leases travel
+// with the launch's answer, and the loop keeps them while the machine holds the job.
+func (a *App) launch(ctx context.Context, r lifecycle.LaunchRequest, scope core.Scope, known bool) {
+	ref := r.Ref
 	if !known {
 		a.answer(ctx, lifecycle.LaunchFailed{Ref: ref, Cause: lifecycle.CauseRefused, Failure: *errNoScope, At: a.now()})
 		return
 	}
+	held, refused := a.takeLeases(ctx, ref, r.Leases)
+	if refused != nil {
+		if ctx.Err() == nil {
+			a.answer(ctx, *refused)
+		}
+		return
+	}
+	t := &taken{ref: ref, leases: held}
 	h, gone, err := a.prepare(ctx, ref, scope)
+	posted := false
 	switch {
 	case ctx.Err() != nil:
 		// The App is closing, so the machine hears nothing. A supervisor that Spawn started stays
 		// for the next start to find, and Close gives up the connection to it: the App owns every
 		// connection a call returned (ownedSupervisors), whether or not this goroutine hands it on.
 	case gone:
-		a.answer(ctx, lifecycle.Closed{Ref: ref})
+		posted = a.postEffect(ctx, message{event: lifecycle.Closed{Ref: ref}, taken: t})
 	case err != nil:
-		a.postEffect(ctx, message{event: lifecycle.LaunchFailed{Ref: ref, Cause: launchCauseOf(err), Failure: failureOf(err), At: a.now()}, handle: h})
+		posted = a.postEffect(ctx, message{event: lifecycle.LaunchFailed{Ref: ref, Cause: launchCauseOf(err), Failure: failureOf(err), At: a.now()}, handle: h, taken: t})
 	default:
-		a.postEffect(ctx, message{event: lifecycle.Launched{Ref: ref}, handle: h, changed: true})
+		posted = a.postEffect(ctx, message{event: lifecycle.Launched{Ref: ref}, handle: h, changed: true, taken: t})
+	}
+	if !posted {
+		a.giveBack(held)
 	}
 }
 

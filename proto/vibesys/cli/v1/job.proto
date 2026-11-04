@@ -176,6 +176,19 @@ enum WaitKind {
   // The job waits for a job's or its store's trouble to pass, or can never start; the detail says
   // why. A wait on the job ends with this as its failure.
   WAIT_KIND_TROUBLE = 6;
+  // Another daemon, or another job of this one, holds the lease of a resource the job claims
+  // alone; elsewhere names who, or, when the lease could not be read, the detail says why.
+  WAIT_KIND_LEASED = 7;
+}
+
+// LeaseHolder is who holds the lease of a resource: a daemon's user, machine and process, and the
+// job it holds it for. Each field is empty or zero when the holder did not say.
+message LeaseHolder {
+  string user = 1;
+  string host = 2;
+  uint32 pid = 3;
+  string job_id = 4;
+  google.protobuf.Timestamp since = 5;
 }
 
 // WaitHolder is a job that stands in a queued job's way.
@@ -194,10 +207,10 @@ message WaitHolder {
 message WaitReason {
   option (buf.validate.message).cel = {
     id: "wait_reason.shape"
-    message: "a wait on a resource names the resource and its holders, and a held or trouble wait says why"
-    expression: "this.kind == 5 || this.kind == 6 ? this.detail != '' : (this.resource != '' && size(this.holders) > 0)"
+    message: "a wait on a resource names the resource and its holders, a held or trouble wait says why, and a leased wait names the resource and its holder or why"
+    expression: "this.kind == 5 || this.kind == 6 ? this.detail != '' : (this.kind == 7 ? (this.resource != '' && (has(this.elsewhere) || this.detail != '')) : (this.resource != '' && size(this.holders) > 0))"
   };
-  // 5 is HELD and 6 is TROUBLE in the rule above.
+  // 5 is HELD, 6 is TROUBLE and 7 is LEASED in the rule above.
   WaitKind kind = 1 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
@@ -207,6 +220,8 @@ message WaitReason {
   // The jobs that hold the resource, or for BEHIND the earlier jobs that wait for it.
   repeated WaitHolder holders = 3;
   string detail = 4;
+  // Who holds the lease, for LEASED.
+  LeaseHolder elsewhere = 5;
 }
 
 // JobWait is why one queued job waits.

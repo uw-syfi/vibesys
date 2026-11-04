@@ -66,6 +66,17 @@ func TestTheContractCatchesABrokenScheduler(t *testing.T) {
 			},
 			policy: fifo.New, property: "a job that waits for a resource keeps its turn on it",
 		},
+		// A job starts though another daemon holds the lease of its claim.
+		"ignores a lease held elsewhere": {
+			step: func(s schedule.State, p schedule.Policy, f ...schedule.Filter) []schedule.Decision {
+				s.Waiting = slices.Clone(s.Waiting)
+				for i := range s.Waiting {
+					s.Waiting[i].Leased = nil
+				}
+				return schedule.Step(s, p, f...)
+			},
+			policy: fifo.New, property: "a job refused a lease waits for it, naming its holder",
+		},
 		// A policy that always serves the run that came first starves the others.
 		"starves a run": {
 			policy: fifo.New, fair: true, property: "a run with work waiting starts within one turn of every run",

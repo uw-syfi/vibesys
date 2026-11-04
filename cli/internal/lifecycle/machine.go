@@ -98,6 +98,9 @@ type entry struct {
 	wait    schedule.WaitReason
 	waits   bool
 	refused string
+	// leased is the lease another holder had when the job last tried to take it. The job waits
+	// for a RetryDue to try again.
+	leased *schedule.LeasedOut
 }
 
 // Work is what a job asks of the machine, as the shell read it from the job: the claims it holds
@@ -394,6 +397,17 @@ type DiscardFailed struct {
 	Failure core.Failure
 }
 
+// LeaseRefused says a launch took nothing and started nothing, because another holder has the lease
+// of one of the job's resources, another daemon or another job of this one, or because the place
+// the lease is kept could not be reached, which Detail says.
+type LeaseRefused struct {
+	Ref      Ref
+	Resource schedule.ResourceID
+	Holder   core.LeaseHolder
+	Detail   string
+	At       time.Time
+}
+
 // RetryDue says it is time to try again what ArmRetry was asked for.
 type RetryDue struct{ Ref Ref }
 
@@ -446,6 +460,7 @@ func (MoveFailed) event()     {}
 func (DiscardFailed) event()  {}
 func (CancelFailed) event()   {}
 func (RetryDue) event()       {}
+func (LeaseRefused) event()   {}
 func (RecoveryDone) event()   {}
 func (StoreUnread) event()    {}
 func (StoreRead) event()      {}
@@ -462,16 +477,25 @@ type Request interface {
 }
 
 // LaunchRequest asks for a supervisor for the job, the store to record it running, and the
-// supervisor to start. The answer is Launched or LaunchFailed.
-type LaunchRequest struct{ Ref Ref }
+// supervisor to start. The answer is Launched or LaunchFailed. Leases are the resources the job
+// holds alone: before anything else the shell takes the lease of each that other daemons share,
+// and answers LeaseRefused, having started nothing, when another holds one.
+type LaunchRequest struct {
+	Ref    Ref
+	Leases []schedule.ResourceID
+}
 
 // Adopt asks the shell to attach to the job's supervisor, start it if it is still parked, and
 // follow it. With CancelFirst, the supervisor is told to cancel before it may start, so a command
 // whose cancel arrived in time never runs. The answer is Finished, SupervisorLost or FollowFailed.
+// Leases are the resources the job holds alone, as for LaunchRequest: the shell keeps their leases
+// for the job, taking any it does not hold yet, such as after a restart. A lease another holds by
+// then does not stop a job that was already started; the shell reports the conflict.
 type Adopt struct {
 	Ref          Ref
 	CancelFirst  bool
 	CancelReason string
+	Leases       []schedule.ResourceID
 }
 
 // SignalCancel asks the job's supervisor to end the job's process group. The outcome of the job
@@ -610,6 +634,8 @@ func Step(s State, e Event) (State, []Request) {
 		reqs = out.launched(e.Ref)
 	case LaunchFailed:
 		reqs = out.launchFailed(e)
+	case LeaseRefused:
+		reqs = out.leaseRefused(e)
 	case Finished:
 		reqs = out.finished(e)
 	case SupervisorLost:
@@ -768,7 +794,7 @@ func (s *State) recoverRunning(e Recovered, kept entry) []Request {
 		s.place(e, kept, PhaseRunning)
 		cur := &s.entries[s.find(e.Ref)]
 		cur.cancelSent = cur.cancelAsked
-		return []Request{Adopt{Ref: e.Ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}}
+		return []Request{Adopt{Ref: e.Ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason, Leases: s.leasesOf(*cur)}}
 	case RunDead:
 		if !p.Proof.Valid() {
 			return s.doubtUnlessGivenUp(e, kept)
@@ -855,6 +881,8 @@ func (s *State) place(e Recovered, kept entry, phase Phase) {
 		}
 	}
 	kept.phase, kept.waiting, kept.holds, kept.parked = phase, false, false, false
+	// No retry is owed to a job placed afresh, so one refused a lease tries again in its turn.
+	kept.leased = nil
 	if phase != PhaseInDoubt {
 		kept.holdUntil = time.Time{}
 	}
@@ -1005,7 +1033,7 @@ func (s *State) launched(ref Ref) []Request {
 	cur := &s.entries[i]
 	cur.phase = PhaseRunning
 	cur.cancelSent = cur.cancelAsked
-	return []Request{Adopt{Ref: ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}}
+	return []Request{Adopt{Ref: ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason, Leases: s.leasesOf(*cur)}}
 }
 
 func (s *State) launchFailed(e LaunchFailed) []Request {
@@ -1041,6 +1069,23 @@ func (s *State) launchFailed(e LaunchFailed) []Request {
 	case CauseRefused, CauseUnprepared:
 	}
 	return s.settle(e.Ref, failedToLaunch(e.Ref.Job, e.Failure, e.At))
+}
+
+// leaseRefused puts a job that could not take a lease back in the queue, where it waits, keeping
+// its turn, for a RetryDue to try again. Nothing of it ran, so a cancel that came in the meantime is
+// its end.
+func (s *State) leaseRefused(e LeaseRefused) []Request {
+	i := s.find(e.Ref)
+	if i < 0 || s.entries[i].phase != PhaseLaunching {
+		return nil
+	}
+	cur := &s.entries[i]
+	if cur.cancelAsked {
+		return s.settle(e.Ref, cancelQueued(e.Ref.Job, cur.cancelReason, e.At))
+	}
+	cur.phase = PhaseQueued
+	cur.leased = &schedule.LeasedOut{Resource: e.Resource, Holder: e.Holder, Detail: e.Detail}
+	return s.awaitRetry(i)
 }
 
 func (s *State) finished(e Finished) []Request {
@@ -1190,7 +1235,10 @@ func (s *State) retryDue(ref Ref) []Request {
 			cur.cancelSent = true
 			return []Request{SignalCancel{Ref: ref, Reason: cur.cancelReason}}
 		}
-	case PhaseQueued, PhaseLaunching, PhaseStopping, PhaseSettling, PhaseCancelling:
+	case PhaseQueued:
+		// A job refused a lease tries again: the scheduler considers it at the end of this step.
+		cur.leased = nil
+	case PhaseLaunching, PhaseStopping, PhaseSettling, PhaseCancelling:
 		// What it would repeat is in flight.
 	}
 	return nil
@@ -1223,7 +1271,7 @@ func (s *State) adoptCancelled() []Request {
 func (s *State) adopt(i int) Request {
 	cur := &s.entries[i]
 	cur.phase, cur.parked, cur.cancelSent, cur.holdUntil = PhaseRunning, false, cur.cancelAsked, time.Time{}
-	return Adopt{Ref: cur.ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason}
+	return Adopt{Ref: cur.ref, CancelFirst: cur.cancelAsked, CancelReason: cur.cancelReason, Leases: s.leasesOf(*cur)}
 }
 
 // schedule starts what the scheduler admits: the jobs with a parked supervisor first, then the
@@ -1258,7 +1306,7 @@ func (s *State) schedule() []Request {
 				continue
 			}
 			cur.phase = PhaseLaunching
-			reqs = append(reqs, LaunchRequest{Ref: cur.ref})
+			reqs = append(reqs, LaunchRequest{Ref: cur.ref, Leases: s.leasesOf(*cur)})
 		case schedule.Wait:
 			cur.wait, cur.waits = d.Reason, true
 		case schedule.Refuse:
@@ -1280,7 +1328,19 @@ func (s *State) resources() []schedule.Resource {
 func idOf(ref Ref) schedule.ID { return schedule.ID(ref.String()) }
 
 func (s *State) candidate(e entry, first bool) schedule.Candidate {
-	return schedule.Candidate{ID: idOf(e.ref), Claims: s.claimsOf(e), Run: e.work.Run, Submitted: e.submittedAt, Seq: e.seq, First: first}
+	return schedule.Candidate{ID: idOf(e.ref), Claims: s.claimsOf(e), Run: e.work.Run, Submitted: e.submittedAt, Seq: e.seq, First: first, Leased: e.leased}
+}
+
+// leasesOf is the resources a job holds alone, each once and in order: those whose leases it takes.
+func (s *State) leasesOf(e entry) []schedule.ResourceID {
+	var out []schedule.ResourceID
+	for _, c := range s.claimsOf(e) {
+		if c.Exclusive && !slices.Contains(out, c.Resource) {
+			out = append(out, c.Resource)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // claimsOf is what a job claims: its work's claims, or, for a job whose work the machine was not
@@ -1338,6 +1398,14 @@ func (s State) Held() []Held {
 		out = append(out, Held{Ref: e.ref, Phase: e.phase, CancelAsked: e.cancelAsked})
 	}
 	return out
+}
+
+// Holds says whether the machine holds a job's claims: from its launch until its end is recorded,
+// and for a job in doubt while its command can run. The shell keeps the job's leases exactly as
+// long.
+func (s State) Holds(ref Ref) bool {
+	i := s.find(ref)
+	return i >= 0 && s.entries[i].holdsMachine()
 }
 
 // Parked says the job waits for its turn with a parked supervisor, which it will need.
@@ -1499,11 +1567,14 @@ func (s State) Queue() []Queued {
 // a job waits for a free machine that nobody owes it: nothing holds the machine, or all that does
 // is a job in doubt past its bound, and the job's store does not hold it back. Every other job the
 // machine holds waits for an answer the shell owes it (a launch, a discard, a supervisor's outcome,
-// a look, a retry), so a state with no stranded job has no orphan wait.
+// a look, a retry), so a state with no stranded job has no orphan wait. A job that another holder's
+// lease keeps waiting is owed a retry.
 func (s State) Stranded(at time.Time) []Ref {
 	owed := func(e entry) bool {
 		bounded := e.phase == PhaseInDoubt || e.phase == PhaseLeft
-		return e.holdsMachine() && (!bounded || e.holdUntil.IsZero() || at.Before(e.holdUntil))
+		// A job refused a lease is owed a retry, which schedules it and those behind it again.
+		leaseRetry := e.phase == PhaseQueued && e.leased != nil && e.armed && e.waiting
+		return leaseRetry || (e.holdsMachine() && (!bounded || e.holdUntil.IsZero() || at.Before(e.holdUntil)))
 	}
 	if s.recovering || slices.ContainsFunc(s.entries, owed) {
 		return nil

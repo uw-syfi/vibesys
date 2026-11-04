@@ -15,6 +15,10 @@
 // a later job does not take a resource an earlier one waits for, so a job that needs a resource for
 // itself alone is not starved by a stream of jobs that share it.
 //
+// A job's exclusive claims may be leased too, so that the daemons that share a resource take turns
+// at it; the shell takes the leases. A job refused one waits, keeping its turn, naming the holder
+// (core.WaitLeased), until the shell says it may try again.
+//
 // Every waiting job gets one Decision: Start, Wait with the reason, or Refuse for claims that no
 // state of the resources can grant.
 package schedule
@@ -72,6 +76,18 @@ type Candidate struct {
 	// First says the job goes before every candidate that does not, whatever the policy says: it
 	// has started before, and its store has it running.
 	First bool
+	// Leased, when set, says a daemon other than this one, or another job, held the lease of one
+	// of the job's exclusive claims when the job last tried to take it. The job waits, keeping its
+	// turn, until the caller clears it to try again.
+	Leased *LeasedOut
+}
+
+// LeasedOut is a lease a job was refused: the resource, and who held its lease, or, when the place
+// the lease is kept could not be reached, why.
+type LeasedOut struct {
+	Resource ResourceID
+	Holder   core.LeaseHolder
+	Detail   string
 }
 
 // Grant is one start the scheduler decided, as the caller keeps it for Usage.
@@ -154,8 +170,11 @@ type WaitReason struct {
 	// Blockers are the holdings that stand in the way, or for core.WaitBehind the earlier waiting
 	// jobs, in the order Step met them.
 	Blockers []ID
-	// Detail is the filter's reason for core.WaitHeld, and why for a Refuse.
+	// Detail is the filter's reason for core.WaitHeld, why for a Refuse, and for core.WaitLeased
+	// why the lease could not be taken when nobody was found to hold it.
 	Detail string
+	// Elsewhere is who holds the lease for core.WaitLeased.
+	Elsewhere *core.LeaseHolder
 }
 
 // Decision is what Step decided for one waiting job. The set is closed.
@@ -337,6 +356,11 @@ func (b *book) decide(c Candidate, filters []Filter) Decision {
 			b.reserve(c.ID, ns)
 			return Wait{ID: c.ID, Reason: WaitReason{Kind: core.WaitBehind, Resource: n.resource, Blockers: slices.Clone(r)}}
 		}
+	}
+	if l := c.Leased; l != nil {
+		b.reserve(c.ID, ns)
+		holder := l.Holder
+		return Wait{ID: c.ID, Reason: WaitReason{Kind: core.WaitLeased, Resource: l.Resource, Elsewhere: &holder, Detail: l.Detail}}
 	}
 	for _, f := range filters {
 		if ok, why := f.Admit(c, slices.Clone(b.held)); !ok {

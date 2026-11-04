@@ -121,6 +121,42 @@ message StatusResponse {
   // The sandbox daemons of the user on this machine that run, this one included, by runtime
   // directory.
   repeated MachineDaemon sandboxes = 9;
+  // The leases this daemon's jobs hold, so that the daemons of other users and machines that
+  // share a resource do not run beside them, oldest first.
+  repeated HeldLease leases = 10;
+  // The leases of jobs that run already and could not take them, such as after a restart that
+  // found another daemon holding one.
+  repeated LeaseConflict lease_conflicts = 11;
+  // The other vibesysd processes of this machine, of any user.
+  repeated DaemonProcess other_daemons = 12;
+}
+
+// HeldLease is a lease a job of the daemon holds.
+message HeldLease {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string task = 2;
+  // The resource the job holds alone, such as placement:default.
+  string resource = 3 [(buf.validate.field).string.min_len = 1];
+  // The lease's name where it is kept, and that place, such as "this machine (/var/tmp/vibesys-leases)".
+  string key = 4 [(buf.validate.field).string.min_len = 1];
+  string where = 5;
+  google.protobuf.Timestamp since = 6;
+}
+
+// LeaseConflict is a lease a job that runs could not take.
+message LeaseConflict {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string resource = 2 [(buf.validate.field).string.min_len = 1];
+  // Who holds it, or, when the lease could not be read, why.
+  LeaseHolder holder = 3;
+  string detail = 4;
+}
+
+// DaemonProcess is a vibesysd process of the machine.
+message DaemonProcess {
+  uint32 pid = 1 [(buf.validate.field).uint32.gt = 0];
+  // The user it runs as, by name, or by number when the name is not known.
+  string user = 2;
 }
 
 // InheritedVariable is one environment variable a job inherits from the daemon.

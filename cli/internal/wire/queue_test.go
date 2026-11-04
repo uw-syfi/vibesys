@@ -22,6 +22,13 @@ func TestEveryWaitIsAValidMessage(t *testing.T) {
 		switch kind {
 		case core.WaitHeld, core.WaitTrouble:
 			w.Detail = fmt.Sprintf("why %d", i)
+		case core.WaitLeased:
+			w.Resource = "placement:default"
+			if r.IntN(3) == 0 {
+				w.Detail = "the lease could not be read"
+			} else {
+				w.Elsewhere = &core.LeaseHolder{User: []string{"", "bob"}[r.IntN(2)], PID: r.IntN(3), Job: "j1"}
+			}
 		default:
 			w.Resource = "placement:default"
 			for n := range 1 + r.IntN(3) {
@@ -36,5 +43,13 @@ func TestEveryWaitIsAValidMessage(t *testing.T) {
 		if err := protovalidate.Validate(out[0]); err != nil {
 			t.Fatalf("%+v: %v", w, err)
 		}
+	}
+}
+
+// A leased wait that names neither its holder nor why breaks the contract's rule.
+func TestALeasedWaitSaysWho(t *testing.T) {
+	out := wire.JobWaits([]core.Job{{ID: "j9"}}, map[core.JobID]core.JobWait{"j9": {Kind: core.WaitLeased, Resource: "placement:default"}})
+	if err := protovalidate.Validate(out[0]); err == nil {
+		t.Fatalf("a leased wait with no holder and no reason passed")
 	}
 }

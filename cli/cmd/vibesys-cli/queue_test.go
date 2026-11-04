@@ -23,8 +23,14 @@ func TestAWaitSaysWhatTheJobWaitsForAndWho(t *testing.T) {
 			Kind: cliv1.WaitKind_WAIT_KIND_BEHIND, Resource: "placement:default", Holders: []*cliv1.WaitHolder{measure},
 		},
 		"it stays queued until its store can be read: away": {Kind: cliv1.WaitKind_WAIT_KIND_TROUBLE, Detail: "it stays queued until its store can be read: away"},
-		"placement:x, j41 (measure, run B), new":            {Kind: cliv1.WaitKind(7), Resource: "placement:x", Holders: []*cliv1.WaitHolder{measure}, Detail: "new"},
-		"a filter":                                          {Kind: cliv1.WaitKind_WAIT_KIND_HELD, Detail: "a filter"},
+		"placement:x, j41 (measure, run B), new":            {Kind: cliv1.WaitKind(99), Resource: "placement:x", Holders: []*cliv1.WaitHolder{measure}, Detail: "new"},
+		"needs placement:default alone, leased by bob on host-b (pid 4242), job j7": {
+			Kind: cliv1.WaitKind_WAIT_KIND_LEASED, Resource: "placement:default", Elsewhere: &cliv1.LeaseHolder{User: "bob", Host: "host-b", Pid: 4242, JobId: "j7"},
+		},
+		"needs placement:default alone: the lease could not be taken": {
+			Kind: cliv1.WaitKind_WAIT_KIND_LEASED, Resource: "placement:default", Detail: "the lease could not be taken",
+		},
+		"a filter": {Kind: cliv1.WaitKind_WAIT_KIND_HELD, Detail: "a filter"},
 	} {
 		if got := describeWait(w, "t"); got != want {
 			t.Errorf("%v: %q, want %q", w, got, want)
