@@ -196,6 +196,75 @@ func (CutCause) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{2}
 }
 
+// WaitKind is why a queued job has not started.
+type WaitKind int32
+
+const (
+	WaitKind_WAIT_KIND_UNSPECIFIED WaitKind = 0
+	// A resource has no room left for the job's claim: its holders use all of it.
+	WaitKind_WAIT_KIND_FULL WaitKind = 1
+	// A holder claims the resource for itself alone.
+	WaitKind_WAIT_KIND_HELD_EXCLUSIVELY WaitKind = 2
+	// The job claims the resource for itself alone, and holders use it.
+	WaitKind_WAIT_KIND_IN_USE WaitKind = 3
+	// An earlier job waits for the resource and keeps its turn; the holders are those jobs.
+	WaitKind_WAIT_KIND_BEHIND WaitKind = 4
+	// A rule of the daemon's scheduler holds the job back; the detail says which.
+	WaitKind_WAIT_KIND_HELD WaitKind = 5
+	// The job waits for a job's or its store's trouble to pass, or can never start; the detail says
+	// why. A wait on the job ends with this as its failure.
+	WaitKind_WAIT_KIND_TROUBLE WaitKind = 6
+)
+
+// Enum value maps for WaitKind.
+var (
+	WaitKind_name = map[int32]string{
+		0: "WAIT_KIND_UNSPECIFIED",
+		1: "WAIT_KIND_FULL",
+		2: "WAIT_KIND_HELD_EXCLUSIVELY",
+		3: "WAIT_KIND_IN_USE",
+		4: "WAIT_KIND_BEHIND",
+		5: "WAIT_KIND_HELD",
+		6: "WAIT_KIND_TROUBLE",
+	}
+	WaitKind_value = map[string]int32{
+		"WAIT_KIND_UNSPECIFIED":      0,
+		"WAIT_KIND_FULL":             1,
+		"WAIT_KIND_HELD_EXCLUSIVELY": 2,
+		"WAIT_KIND_IN_USE":           3,
+		"WAIT_KIND_BEHIND":           4,
+		"WAIT_KIND_HELD":             5,
+		"WAIT_KIND_TROUBLE":          6,
+	}
+)
+
+func (x WaitKind) Enum() *WaitKind {
+	p := new(WaitKind)
+	*p = x
+	return p
+}
+
+func (x WaitKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (WaitKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_job_proto_enumTypes[3].Descriptor()
+}
+
+func (WaitKind) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_job_proto_enumTypes[3]
+}
+
+func (x WaitKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use WaitKind.Descriptor instead.
+func (WaitKind) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{3}
+}
+
 type CheckSettings struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -937,6 +1006,204 @@ func (x *Job) GetSubmitters() []*Submitter {
 	return nil
 }
 
+// WaitHolder is a job that stands in a queued job's way.
+type WaitHolder struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	JobId string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	// The task whose store the job is in, which may be another task than the waiting job's. Empty
+	// when the daemon does not know it.
+	Task string  `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
+	Kind JobKind `protobuf:"varint,3,opt,name=kind,proto3,enum=vibesys.cli.v1.JobKind" json:"kind,omitempty"`
+	// The run that submitted the job first. Empty when it named none.
+	RunId         string `protobuf:"bytes,4,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WaitHolder) Reset() {
+	*x = WaitHolder{}
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WaitHolder) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WaitHolder) ProtoMessage() {}
+
+func (x *WaitHolder) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WaitHolder.ProtoReflect.Descriptor instead.
+func (*WaitHolder) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *WaitHolder) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *WaitHolder) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
+func (x *WaitHolder) GetKind() JobKind {
+	if x != nil {
+		return x.Kind
+	}
+	return JobKind_JOB_KIND_UNSPECIFIED
+}
+
+func (x *WaitHolder) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+// WaitReason says why a queued job has not started, as the daemon's scheduler decided at its last
+// change. The daemon derives it from what it holds; no store keeps it.
+type WaitReason struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// 5 is HELD and 6 is TROUBLE in the rule above.
+	Kind WaitKind `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.cli.v1.WaitKind" json:"kind,omitempty"`
+	// The resource the job waits for, such as placement:default.
+	Resource string `protobuf:"bytes,2,opt,name=resource,proto3" json:"resource,omitempty"`
+	// The jobs that hold the resource, or for BEHIND the earlier jobs that wait for it.
+	Holders       []*WaitHolder `protobuf:"bytes,3,rep,name=holders,proto3" json:"holders,omitempty"`
+	Detail        string        `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WaitReason) Reset() {
+	*x = WaitReason{}
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WaitReason) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WaitReason) ProtoMessage() {}
+
+func (x *WaitReason) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WaitReason.ProtoReflect.Descriptor instead.
+func (*WaitReason) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *WaitReason) GetKind() WaitKind {
+	if x != nil {
+		return x.Kind
+	}
+	return WaitKind_WAIT_KIND_UNSPECIFIED
+}
+
+func (x *WaitReason) GetResource() string {
+	if x != nil {
+		return x.Resource
+	}
+	return ""
+}
+
+func (x *WaitReason) GetHolders() []*WaitHolder {
+	if x != nil {
+		return x.Holders
+	}
+	return nil
+}
+
+func (x *WaitReason) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+// JobWait is why one queued job waits.
+type JobWait struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	Reason        *WaitReason            `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JobWait) Reset() {
+	*x = JobWait{}
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobWait) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobWait) ProtoMessage() {}
+
+func (x *JobWait) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_job_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JobWait.ProtoReflect.Descriptor instead.
+func (*JobWait) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_job_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *JobWait) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
+func (x *JobWait) GetReason() *WaitReason {
+	if x != nil {
+		return x.Reason
+	}
+	return nil
+}
+
 var File_vibesys_cli_v1_job_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_job_proto_rawDesc = "" +
@@ -1002,7 +1269,24 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"submitters\x18\x11 \x03(\v2\x19.vibesys.cli.v1.SubmitterR\n" +
 	"submittersB\f\n" +
 	"\n" +
-	"_exit_code*c\n" +
+	"_exit_code\"\x84\x01\n" +
+	"\n" +
+	"WaitHolder\x12\x1e\n" +
+	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12\x12\n" +
+	"\x04task\x18\x02 \x01(\tR\x04task\x12+\n" +
+	"\x04kind\x18\x03 \x01(\x0e2\x17.vibesys.cli.v1.JobKindR\x04kind\x12\x15\n" +
+	"\x06run_id\x18\x04 \x01(\tR\x05runId\"\x93\x03\n" +
+	"\n" +
+	"WaitReason\x128\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\x18.vibesys.cli.v1.WaitKindB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1a\n" +
+	"\bresource\x18\x02 \x01(\tR\bresource\x124\n" +
+	"\aholders\x18\x03 \x03(\v2\x1a.vibesys.cli.v1.WaitHolderR\aholders\x12\x16\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail:\xe0\x01\xbaH\xdc\x01\x1a\xd9\x01\n" +
+	"\x11wait_reason.shape\x12\\a wait on a resource names the resource and its holders, and a held or trouble wait says why\x1afthis.kind == 5 || this.kind == 6 ? this.detail != '' : (this.resource != '' && size(this.holders) > 0)\"e\n" +
+	"\aJobWait\x12\x1e\n" +
+	"\x06job_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12:\n" +
+	"\x06reason\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.WaitReasonB\x06\xbaH\x03\xc8\x01\x01R\x06reason*c\n" +
 	"\aJobKind\x12\x18\n" +
 	"\x14JOB_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eJOB_KIND_CHECK\x10\x01\x12\x14\n" +
@@ -1019,7 +1303,15 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\bCutCause\x12\x19\n" +
 	"\x15CUT_CAUSE_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19CUT_CAUSE_SUPERVISOR_DIED\x10\x01\x12\x16\n" +
-	"\x12CUT_CAUSE_REBOOTED\x10\x02B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\x12CUT_CAUSE_REBOOTED\x10\x02*\xb0\x01\n" +
+	"\bWaitKind\x12\x19\n" +
+	"\x15WAIT_KIND_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eWAIT_KIND_FULL\x10\x01\x12\x1e\n" +
+	"\x1aWAIT_KIND_HELD_EXCLUSIVELY\x10\x02\x12\x14\n" +
+	"\x10WAIT_KIND_IN_USE\x10\x03\x12\x14\n" +
+	"\x10WAIT_KIND_BEHIND\x10\x04\x12\x12\n" +
+	"\x0eWAIT_KIND_HELD\x10\x05\x12\x15\n" +
+	"\x11WAIT_KIND_TROUBLE\x10\x06B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_job_proto_rawDescOnce sync.Once
@@ -1033,53 +1325,61 @@ func file_vibesys_cli_v1_job_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_job_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_vibesys_cli_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_vibesys_cli_v1_job_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_vibesys_cli_v1_job_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_vibesys_cli_v1_job_proto_goTypes = []any{
 	(JobKind)(0),                   // 0: vibesys.cli.v1.JobKind
 	(JobState)(0),                  // 1: vibesys.cli.v1.JobState
 	(CutCause)(0),                  // 2: vibesys.cli.v1.CutCause
-	(*CheckSettings)(nil),          // 3: vibesys.cli.v1.CheckSettings
-	(*ServiceSpec)(nil),            // 4: vibesys.cli.v1.ServiceSpec
-	(*CommandSettings)(nil),        // 5: vibesys.cli.v1.CommandSettings
-	(*MeasureSettings)(nil),        // 6: vibesys.cli.v1.MeasureSettings
-	(*JobSpec)(nil),                // 7: vibesys.cli.v1.JobSpec
-	(*Note)(nil),                   // 8: vibesys.cli.v1.Note
-	(*Submitter)(nil),              // 9: vibesys.cli.v1.Submitter
-	(*Attempt)(nil),                // 10: vibesys.cli.v1.Attempt
-	(*Job)(nil),                    // 11: vibesys.cli.v1.Job
-	(*durationpb.Duration)(nil),    // 12: google.protobuf.Duration
-	(EnvironmentKind)(0),           // 13: vibesys.cli.v1.EnvironmentKind
-	(*timestamppb.Timestamp)(nil),  // 14: google.protobuf.Timestamp
-	(*EnvironmentFingerprint)(nil), // 15: vibesys.cli.v1.EnvironmentFingerprint
+	(WaitKind)(0),                  // 3: vibesys.cli.v1.WaitKind
+	(*CheckSettings)(nil),          // 4: vibesys.cli.v1.CheckSettings
+	(*ServiceSpec)(nil),            // 5: vibesys.cli.v1.ServiceSpec
+	(*CommandSettings)(nil),        // 6: vibesys.cli.v1.CommandSettings
+	(*MeasureSettings)(nil),        // 7: vibesys.cli.v1.MeasureSettings
+	(*JobSpec)(nil),                // 8: vibesys.cli.v1.JobSpec
+	(*Note)(nil),                   // 9: vibesys.cli.v1.Note
+	(*Submitter)(nil),              // 10: vibesys.cli.v1.Submitter
+	(*Attempt)(nil),                // 11: vibesys.cli.v1.Attempt
+	(*Job)(nil),                    // 12: vibesys.cli.v1.Job
+	(*WaitHolder)(nil),             // 13: vibesys.cli.v1.WaitHolder
+	(*WaitReason)(nil),             // 14: vibesys.cli.v1.WaitReason
+	(*JobWait)(nil),                // 15: vibesys.cli.v1.JobWait
+	(*durationpb.Duration)(nil),    // 16: google.protobuf.Duration
+	(EnvironmentKind)(0),           // 17: vibesys.cli.v1.EnvironmentKind
+	(*timestamppb.Timestamp)(nil),  // 18: google.protobuf.Timestamp
+	(*EnvironmentFingerprint)(nil), // 19: vibesys.cli.v1.EnvironmentFingerprint
 }
 var file_vibesys_cli_v1_job_proto_depIdxs = []int32{
-	4,  // 0: vibesys.cli.v1.CommandSettings.service:type_name -> vibesys.cli.v1.ServiceSpec
-	12, // 1: vibesys.cli.v1.CommandSettings.timeout:type_name -> google.protobuf.Duration
-	13, // 2: vibesys.cli.v1.JobSpec.environment:type_name -> vibesys.cli.v1.EnvironmentKind
-	3,  // 3: vibesys.cli.v1.JobSpec.check:type_name -> vibesys.cli.v1.CheckSettings
-	5,  // 4: vibesys.cli.v1.JobSpec.command:type_name -> vibesys.cli.v1.CommandSettings
-	6,  // 5: vibesys.cli.v1.JobSpec.measure:type_name -> vibesys.cli.v1.MeasureSettings
-	14, // 6: vibesys.cli.v1.Note.at:type_name -> google.protobuf.Timestamp
-	14, // 7: vibesys.cli.v1.Submitter.at:type_name -> google.protobuf.Timestamp
-	14, // 8: vibesys.cli.v1.Attempt.started_at:type_name -> google.protobuf.Timestamp
-	14, // 9: vibesys.cli.v1.Attempt.ended_at:type_name -> google.protobuf.Timestamp
+	5,  // 0: vibesys.cli.v1.CommandSettings.service:type_name -> vibesys.cli.v1.ServiceSpec
+	16, // 1: vibesys.cli.v1.CommandSettings.timeout:type_name -> google.protobuf.Duration
+	17, // 2: vibesys.cli.v1.JobSpec.environment:type_name -> vibesys.cli.v1.EnvironmentKind
+	4,  // 3: vibesys.cli.v1.JobSpec.check:type_name -> vibesys.cli.v1.CheckSettings
+	6,  // 4: vibesys.cli.v1.JobSpec.command:type_name -> vibesys.cli.v1.CommandSettings
+	7,  // 5: vibesys.cli.v1.JobSpec.measure:type_name -> vibesys.cli.v1.MeasureSettings
+	18, // 6: vibesys.cli.v1.Note.at:type_name -> google.protobuf.Timestamp
+	18, // 7: vibesys.cli.v1.Submitter.at:type_name -> google.protobuf.Timestamp
+	18, // 8: vibesys.cli.v1.Attempt.started_at:type_name -> google.protobuf.Timestamp
+	18, // 9: vibesys.cli.v1.Attempt.ended_at:type_name -> google.protobuf.Timestamp
 	2,  // 10: vibesys.cli.v1.Attempt.cut_before_start:type_name -> vibesys.cli.v1.CutCause
 	2,  // 11: vibesys.cli.v1.Attempt.cut_mid_command:type_name -> vibesys.cli.v1.CutCause
-	7,  // 12: vibesys.cli.v1.Job.spec:type_name -> vibesys.cli.v1.JobSpec
+	8,  // 12: vibesys.cli.v1.Job.spec:type_name -> vibesys.cli.v1.JobSpec
 	1,  // 13: vibesys.cli.v1.Job.state:type_name -> vibesys.cli.v1.JobState
-	15, // 14: vibesys.cli.v1.Job.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
-	8,  // 15: vibesys.cli.v1.Job.notes:type_name -> vibesys.cli.v1.Note
-	14, // 16: vibesys.cli.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
-	14, // 17: vibesys.cli.v1.Job.started_at:type_name -> google.protobuf.Timestamp
-	14, // 18: vibesys.cli.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
-	10, // 19: vibesys.cli.v1.Job.attempts:type_name -> vibesys.cli.v1.Attempt
-	9,  // 20: vibesys.cli.v1.Job.submitters:type_name -> vibesys.cli.v1.Submitter
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	19, // 14: vibesys.cli.v1.Job.environment:type_name -> vibesys.cli.v1.EnvironmentFingerprint
+	9,  // 15: vibesys.cli.v1.Job.notes:type_name -> vibesys.cli.v1.Note
+	18, // 16: vibesys.cli.v1.Job.submitted_at:type_name -> google.protobuf.Timestamp
+	18, // 17: vibesys.cli.v1.Job.started_at:type_name -> google.protobuf.Timestamp
+	18, // 18: vibesys.cli.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
+	11, // 19: vibesys.cli.v1.Job.attempts:type_name -> vibesys.cli.v1.Attempt
+	10, // 20: vibesys.cli.v1.Job.submitters:type_name -> vibesys.cli.v1.Submitter
+	0,  // 21: vibesys.cli.v1.WaitHolder.kind:type_name -> vibesys.cli.v1.JobKind
+	3,  // 22: vibesys.cli.v1.WaitReason.kind:type_name -> vibesys.cli.v1.WaitKind
+	13, // 23: vibesys.cli.v1.WaitReason.holders:type_name -> vibesys.cli.v1.WaitHolder
+	14, // 24: vibesys.cli.v1.JobWait.reason:type_name -> vibesys.cli.v1.WaitReason
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_job_proto_init() }
@@ -1103,8 +1403,8 @@ func file_vibesys_cli_v1_job_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_job_proto_rawDesc), len(file_vibesys_cli_v1_job_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   9,
+			NumEnums:      4,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

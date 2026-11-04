@@ -7,6 +7,8 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
+	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
@@ -17,6 +19,21 @@ type Retry struct {
 	Attempts int
 	// First is the wait after the first failure. Each wait doubles, up to Longest.
 	First, Longest time.Duration
+}
+
+// Scheduler is how the daemon shares the machine between jobs: the resources jobs claim, the policy
+// that orders the jobs that wait, the filters that may hold one back, and the demand that says what
+// each job claims. With no resources the machine runs one job at a time (lifecycle.OneAtATime), and
+// with no demand each job claims as schedule.DefaultDemand says.
+type Scheduler struct {
+	Resources []schedule.Resource
+	Policy    schedule.Policy
+	Filters   []schedule.Filter
+	Demand    schedule.Demand
+}
+
+func (s Scheduler) machine() lifecycle.Scheduling {
+	return lifecycle.Scheduling{Resources: s.Resources, Policy: s.Policy, Filters: s.Filters}
 }
 
 // Config is what an App is made of. Clock, Stores, Environments and Supervisors are required, and
@@ -38,6 +55,10 @@ type Config struct {
 	// Tasks reads a task as a commit has it. It is required to run check and measure jobs, which
 	// are refused as unavailable without it; command jobs do not read a task.
 	Tasks task.Source
+
+	// Scheduler is how the machine is shared between jobs. The zero value runs one job at a time,
+	// the oldest first.
+	Scheduler Scheduler
 
 	// DefaultEnvironment is the kind a command job runs in when its submission leaves the
 	// environment unspecified. A check or a measure job's environment is decided by its task
@@ -93,6 +114,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxNoteBytes <= 0 {
 		c.MaxNoteBytes = DefaultMaxNoteBytes
+	}
+	if c.Scheduler.Demand == nil {
+		c.Scheduler.Demand = schedule.DefaultDemand{}
 	}
 	if c.Timers == nil {
 		c.Timers = clock.System{}

@@ -190,8 +190,16 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 		printJSON(d, resp)
 		return exitOK
 	}
+	waits := map[string]*cliv1.WaitReason{}
+	for _, w := range resp.GetWaits() {
+		waits[w.GetJobId()] = w.GetReason()
+	}
 	for _, j := range resp.GetJobs() {
-		fmt.Fprintln(d.stdout, describe(j))
+		line := describe(j)
+		if w, ok := waits[j.GetId()]; ok {
+			line += "\n\t  waiting: " + describeWait(w, callCtx.GetTask())
+		}
+		fmt.Fprintln(d.stdout, line)
 	}
 	return exitOK
 }

@@ -108,6 +108,9 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/hostfs/` | The file system a job reads results from, with the operating system's and an in-memory one. |
 | `internal/gitwork/` | The git program as a source of tasks (`git archive`) and of clean checkouts of a commit (`git clone`, then a detached checkout). The working tree of the repository is never read or touched. |
 | `internal/lifecycle/` | The job lifecycle as a pure machine: `Step(State, Event) (State, []Request)`. The daemon feeds it events and carries out the requests; recovery after a crash is the same events replayed. |
+| `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. Jobs hold claims on resources (`placement:default` today); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims. |
+| `internal/schedule/policy/fifo/`, `fairshare/` | The scheduling policies: `fifo` (oldest first) and `fair-share` (the run with the least recent use of what the job claims goes next). Only `production` names them. |
+| `internal/schedule/scheduletest/` | The one property-based contract suite every policy passes. Tests only. |
 | `internal/changed/` | Pure helpers for the "what changed" facts a job records. |
 | `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read or wait on time. A test supplies its own and fires timers itself. |
 | `internal/owned/` | `Group`, the one way the daemon's packages start a goroutine: the group starts it and `Wait` joins it, so nothing outlives what started it. |
@@ -162,7 +165,8 @@ Dependencies point one way: `cmd` and the shell packages, then interfaces, then 
   repository all come from the daemon. They still depend on `core` through `wire` and `gitrepo`,
   which convert at the boundary.
 - `gen` imports nothing from this module.
-- `lifecycle` imports `core` only, so the machine stays pure. `app` imports no transport:
+- `lifecycle` imports `core`, `flow` and `schedule` only, so the machine stays pure. `schedule`
+  imports `core` only, and a policy `schedule` and `core` only. `app` imports no transport:
   `daemon` and `supervisor/rpc` are the shells around it, and neither imports the other's peer
   (`client` and `daemon` do not import each other, `app` does not import `daemon`).
 - Packages that exist for tests (`fakeenv`, `suptest`, `daemontest`, `storetest`) are imported by
@@ -226,7 +230,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. The daemon decides how the wait ended and keeps the timeout. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
 | `note <job> <text>` | Add a note to a job in any state. |
-| `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first. |
+| `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first, with why each queued job waits. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
 | `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
 | `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. For a multi-objective task, also `tradeoff`, with a verdict on every objective (see "Multi-objective tasks" below). Refuses to mix environments. |
@@ -363,8 +367,35 @@ transcripts of `WatchTask`. This module replays them against the real server, so
 cannot drift from it.
 
 Each running job has its own supervisor process. It owns the job's process group and keeps the
-job's output, so it outlives the daemon. The queue is first in, first out; the daemon runs one job
-at a time and takes each decision from `lifecycle`.
+job's output, so it outlives the daemon. The daemon takes each decision from `lifecycle`, and which
+queued jobs start from `schedule`:
+
+- A job holds claims from its launch until its end is recorded: by default a slot of
+  `placement:default`, and a measure job the whole placement, so a benchmark sample never runs
+  beside another job. The placement has `[scheduler] max_jobs` slots (1 by default).
+- No resource is given past its capacity and an exclusive claim shares its resource with nothing,
+  whatever the policy. The policy (`[scheduler] policy`) only orders the jobs that may start:
+  `fifo` takes the oldest first, and `fair-share` takes the next job of the run (the run that first
+  submitted it) that used least of what the job claims lately. A job that waits keeps its turn: a
+  later job does not take what an earlier one waits for, so a measure is not starved by checks.
+- A job whose supervisor is parked goes first. A job in doubt holds its claims while its command
+  can run; one whose work the daemon could not read holds every resource. Recovery adopts running
+  jobs with their claims, even past a smaller capacity, and starts nothing beside them that does
+  not fit. A job whose claims can never be granted stays queued, and a wait on it ends with why.
+- With the defaults the daemon runs one job at a time, the oldest queued first, as before
+  schedulers. A change of policy or `max_jobs` takes a `daemon restart` and nothing else: what the
+  scheduler knows is derived from the jobs.
+
+`jobs` prints why each queued job waits, under its line:
+
+```text
+j7	queued	0123456789ab	measure (0 samples)
+	  waiting: needs placement:default alone, in use by j5 (check, run run-a), j6 (check, run run-b)
+j8	queued	0123456789ab	check
+	  waiting: behind j7 (measure, run run-b), which waits for placement:default
+```
+
+A job of another task is named with its task, and with `--json` the reasons are in `waits`.
 
 Recovery is the daemon's start, with no separate path:
 
@@ -500,6 +531,8 @@ change. Unknown keys are refused. With no file, docker runs on this machine with
 
 | Key | Meaning |
 | --- | --- |
+| `[scheduler] max_jobs` | How many jobs run at once (1 by default). A measure job always runs alone. More than 1 needs `[docker] placement = "local"`, since another machine stages and sweeps one job at a time. |
+| `[scheduler] policy` | Which job starts next: `fifo` (default) or `fair-share`. |
 | `[docker] placement` | `local` (default), `ssh` (docker runs on `[remote] host`, reached over ssh) or `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`). |
 | `[docker] gpus` | A `docker --gpus` value such as `all`; empty passes no GPU, and a `cuda` task is refused. |
 | `[docker] runtime` | `nvidia` passes the GPUs with `--runtime nvidia` and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
@@ -631,10 +664,18 @@ How the daemon is checked:
   to run just that seed. `VIBESYS_SIM_SEEDS=<count>` widens the default range. Its faults include
   repositories that go away while the daemon runs, every repository at once, a store that never
   answers, and a repository gone for good with a job running, and it checks that every job ends or
-  its waiters are told why, and that no repository going away fails a job.
+  its waiters are told why, and that no repository going away fails a job. A profile of several slots
+  runs jobs of several runs beside each other, some needing the machine alone as a measure does,
+  through crashes and restarts, and checks that no more commands run than slots and that one
+  needing the machine alone runs beside nothing.
 - `internal/lifecycle/model_test.go` checks the machine exhaustively for two jobs: every order of
   events up to a depth, for safety (one command at a time, nothing started beside a job its store
-  shows running), the cancel a user asked for, and that a healthy world ends every job.
+  shows running), the cancel a user asked for, and that a healthy world ends every job. With more
+  than one slot, generated event sequences and restarts check every job's claims after each event.
+- `internal/schedule/scheduletest` holds every policy, by property over generated states, to the
+  scheduler's rules: capacity, exclusivity, a decision and a true reason for every job, determinism,
+  every job starting once the holders end, a waiting job keeping its turn, and for `fair-share` no
+  run starved. A test feeds it broken schedulers and checks that each rule catches its own.
 - The decoders in `internal/wire` have fuzz targets (`FuzzDecodeJob` and the others in
   `fuzz_test.go`). `go test` runs their seed inputs; to search for new failures run one for a while,
   for example `go test -run '^$' -fuzz '^FuzzDecodeJob$' -fuzztime 1m ./internal/wire`, and commit the

@@ -1473,8 +1473,11 @@ func (x *ListJobsRequest) GetNoteContains() string {
 }
 
 type ListJobsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Jobs          []*Job                 `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Jobs  []*Job                 `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty"`
+	// Why each listed queued job that has not started waits. A queued job that is about to start has
+	// none.
+	Waits         []*JobWait `protobuf:"bytes,2,rep,name=waits,proto3" json:"waits,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1512,6 +1515,13 @@ func (*ListJobsResponse) Descriptor() ([]byte, []int) {
 func (x *ListJobsResponse) GetJobs() []*Job {
 	if x != nil {
 		return x.Jobs
+	}
+	return nil
+}
+
+func (x *ListJobsResponse) GetWaits() []*JobWait {
+	if x != nil {
+		return x.Waits
 	}
 	return nil
 }
@@ -3987,9 +3997,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x06commit\x18\x02 \x01(\tR\x06commit\x120\n" +
 	"\x06states\x18\x03 \x03(\x0e2\x18.vibesys.cli.v1.JobStateR\x06states\x12+\n" +
 	"\x04kind\x18\x04 \x01(\x0e2\x17.vibesys.cli.v1.JobKindR\x04kind\x12#\n" +
-	"\rnote_contains\x18\x05 \x01(\tR\fnoteContains\";\n" +
+	"\rnote_contains\x18\x05 \x01(\tR\fnoteContains\"j\n" +
 	"\x10ListJobsResponse\x12'\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x13.vibesys.cli.v1.JobR\x04jobs\"\x8f\x01\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x13.vibesys.cli.v1.JobR\x04jobs\x12-\n" +
+	"\x05waits\x18\x02 \x03(\v2\x17.vibesys.cli.v1.JobWaitR\x05waits\"\x8f\x01\n" +
 	"\x0fReadLogsRequest\x125\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x15\n" +
 	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x12\x16\n" +
@@ -4265,19 +4276,20 @@ var file_vibesys_cli_v1_service_proto_goTypes = []any{
 	(*durationpb.Duration)(nil),      // 71: google.protobuf.Duration
 	(JobState)(0),                    // 72: vibesys.cli.v1.JobState
 	(JobKind)(0),                     // 73: vibesys.cli.v1.JobKind
-	(*Result)(nil),                   // 74: vibesys.cli.v1.Result
-	(*Measurement)(nil),              // 75: vibesys.cli.v1.Measurement
-	(*Comparison)(nil),               // 76: vibesys.cli.v1.Comparison
-	(*Promotion)(nil),                // 77: vibesys.cli.v1.Promotion
-	(*PromoteRefusal)(nil),           // 78: vibesys.cli.v1.PromoteRefusal
-	(*FrontierDecision)(nil),         // 79: vibesys.cli.v1.FrontierDecision
-	(*FrontierEntry)(nil),            // 80: vibesys.cli.v1.FrontierEntry
-	(*CurrentResult)(nil),            // 81: vibesys.cli.v1.CurrentResult
-	(*NoCurrentResult)(nil),          // 82: vibesys.cli.v1.NoCurrentResult
-	(*Plan)(nil),                     // 83: vibesys.cli.v1.Plan
-	(PlanStatus)(0),                  // 84: vibesys.cli.v1.PlanStatus
-	(*PlanView)(nil),                 // 85: vibesys.cli.v1.PlanView
-	(*Failure)(nil),                  // 86: vibesys.cli.v1.Failure
+	(*JobWait)(nil),                  // 74: vibesys.cli.v1.JobWait
+	(*Result)(nil),                   // 75: vibesys.cli.v1.Result
+	(*Measurement)(nil),              // 76: vibesys.cli.v1.Measurement
+	(*Comparison)(nil),               // 77: vibesys.cli.v1.Comparison
+	(*Promotion)(nil),                // 78: vibesys.cli.v1.Promotion
+	(*PromoteRefusal)(nil),           // 79: vibesys.cli.v1.PromoteRefusal
+	(*FrontierDecision)(nil),         // 80: vibesys.cli.v1.FrontierDecision
+	(*FrontierEntry)(nil),            // 81: vibesys.cli.v1.FrontierEntry
+	(*CurrentResult)(nil),            // 82: vibesys.cli.v1.CurrentResult
+	(*NoCurrentResult)(nil),          // 83: vibesys.cli.v1.NoCurrentResult
+	(*Plan)(nil),                     // 84: vibesys.cli.v1.Plan
+	(PlanStatus)(0),                  // 85: vibesys.cli.v1.PlanStatus
+	(*PlanView)(nil),                 // 86: vibesys.cli.v1.PlanView
+	(*Failure)(nil),                  // 87: vibesys.cli.v1.Failure
 }
 var file_vibesys_cli_v1_service_proto_depIdxs = []int32{
 	65,  // 0: vibesys.cli.v1.HelloRequest.component:type_name -> vibesys.cli.v1.Component
@@ -4307,114 +4319,115 @@ var file_vibesys_cli_v1_service_proto_depIdxs = []int32{
 	72,  // 24: vibesys.cli.v1.ListJobsRequest.states:type_name -> vibesys.cli.v1.JobState
 	73,  // 25: vibesys.cli.v1.ListJobsRequest.kind:type_name -> vibesys.cli.v1.JobKind
 	70,  // 26: vibesys.cli.v1.ListJobsResponse.jobs:type_name -> vibesys.cli.v1.Job
-	3,   // 27: vibesys.cli.v1.ReadLogsRequest.context:type_name -> vibesys.cli.v1.CallContext
-	3,   // 28: vibesys.cli.v1.ShowRequest.context:type_name -> vibesys.cli.v1.CallContext
-	74,  // 29: vibesys.cli.v1.ShowResponse.results:type_name -> vibesys.cli.v1.Result
-	75,  // 30: vibesys.cli.v1.ShowResponse.measurements:type_name -> vibesys.cli.v1.Measurement
-	3,   // 31: vibesys.cli.v1.CompareRequest.context:type_name -> vibesys.cli.v1.CallContext
-	76,  // 32: vibesys.cli.v1.CompareResponse.comparison:type_name -> vibesys.cli.v1.Comparison
-	3,   // 33: vibesys.cli.v1.PromoteRequest.context:type_name -> vibesys.cli.v1.CallContext
-	77,  // 34: vibesys.cli.v1.PromoteResponse.promoted:type_name -> vibesys.cli.v1.Promotion
-	78,  // 35: vibesys.cli.v1.PromoteResponse.refused:type_name -> vibesys.cli.v1.PromoteRefusal
-	79,  // 36: vibesys.cli.v1.PromoteResponse.frontier:type_name -> vibesys.cli.v1.FrontierDecision
-	3,   // 37: vibesys.cli.v1.AddToFrontierRequest.context:type_name -> vibesys.cli.v1.CallContext
-	79,  // 38: vibesys.cli.v1.AddToFrontierResponse.decision:type_name -> vibesys.cli.v1.FrontierDecision
-	3,   // 39: vibesys.cli.v1.ListFrontierRequest.context:type_name -> vibesys.cli.v1.CallContext
-	80,  // 40: vibesys.cli.v1.ListFrontierResponse.members:type_name -> vibesys.cli.v1.FrontierEntry
-	3,   // 41: vibesys.cli.v1.CurrentResultRequest.context:type_name -> vibesys.cli.v1.CallContext
-	81,  // 42: vibesys.cli.v1.CurrentResultResponse.current:type_name -> vibesys.cli.v1.CurrentResult
-	82,  // 43: vibesys.cli.v1.CurrentResultResponse.none:type_name -> vibesys.cli.v1.NoCurrentResult
-	3,   // 44: vibesys.cli.v1.CreatePlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	83,  // 45: vibesys.cli.v1.CreatePlanResponse.plan:type_name -> vibesys.cli.v1.Plan
-	3,   // 46: vibesys.cli.v1.ListPlansRequest.context:type_name -> vibesys.cli.v1.CallContext
-	84,  // 47: vibesys.cli.v1.ListPlansRequest.statuses:type_name -> vibesys.cli.v1.PlanStatus
-	83,  // 48: vibesys.cli.v1.ListPlansResponse.plans:type_name -> vibesys.cli.v1.Plan
-	3,   // 49: vibesys.cli.v1.ViewPlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	85,  // 50: vibesys.cli.v1.ViewPlanResponse.view:type_name -> vibesys.cli.v1.PlanView
-	3,   // 51: vibesys.cli.v1.EditPlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	84,  // 52: vibesys.cli.v1.EditPlanRequest.status:type_name -> vibesys.cli.v1.PlanStatus
-	83,  // 53: vibesys.cli.v1.EditPlanResponse.plan:type_name -> vibesys.cli.v1.Plan
-	3,   // 54: vibesys.cli.v1.CommentPlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	83,  // 55: vibesys.cli.v1.CommentPlanResponse.plan:type_name -> vibesys.cli.v1.Plan
-	3,   // 56: vibesys.cli.v1.ClosePlanRequest.context:type_name -> vibesys.cli.v1.CallContext
-	84,  // 57: vibesys.cli.v1.ClosePlanRequest.status:type_name -> vibesys.cli.v1.PlanStatus
-	83,  // 58: vibesys.cli.v1.ClosePlanResponse.plan:type_name -> vibesys.cli.v1.Plan
-	3,   // 59: vibesys.cli.v1.WatchTaskRequest.context:type_name -> vibesys.cli.v1.CallContext
-	54,  // 60: vibesys.cli.v1.WatchTaskResponse.reset:type_name -> vibesys.cli.v1.Reset
-	56,  // 61: vibesys.cli.v1.WatchTaskResponse.facts:type_name -> vibesys.cli.v1.TaskFacts
-	55,  // 62: vibesys.cli.v1.WatchTaskResponse.caught_up:type_name -> vibesys.cli.v1.CaughtUp
-	57,  // 63: vibesys.cli.v1.TaskFacts.facts:type_name -> vibesys.cli.v1.TaskFact
-	70,  // 64: vibesys.cli.v1.TaskFact.job:type_name -> vibesys.cli.v1.Job
-	74,  // 65: vibesys.cli.v1.TaskFact.result:type_name -> vibesys.cli.v1.Result
-	58,  // 66: vibesys.cli.v1.TaskFact.judgment:type_name -> vibesys.cli.v1.Judgment
-	59,  // 67: vibesys.cli.v1.TaskFact.promotion:type_name -> vibesys.cli.v1.PromotionRecord
-	83,  // 68: vibesys.cli.v1.TaskFact.plan:type_name -> vibesys.cli.v1.Plan
-	61,  // 69: vibesys.cli.v1.TaskFact.head:type_name -> vibesys.cli.v1.Head
-	62,  // 70: vibesys.cli.v1.TaskFact.health:type_name -> vibesys.cli.v1.StoreHealth
-	60,  // 71: vibesys.cli.v1.TaskFact.trouble:type_name -> vibesys.cli.v1.JobTrouble
-	76,  // 72: vibesys.cli.v1.Judgment.comparison:type_name -> vibesys.cli.v1.Comparison
-	86,  // 73: vibesys.cli.v1.Judgment.refused:type_name -> vibesys.cli.v1.Failure
-	77,  // 74: vibesys.cli.v1.PromotionRecord.promotion:type_name -> vibesys.cli.v1.Promotion
-	86,  // 75: vibesys.cli.v1.JobTrouble.failure:type_name -> vibesys.cli.v1.Failure
-	81,  // 76: vibesys.cli.v1.Head.current:type_name -> vibesys.cli.v1.CurrentResult
-	82,  // 77: vibesys.cli.v1.Head.none:type_name -> vibesys.cli.v1.NoCurrentResult
-	63,  // 78: vibesys.cli.v1.StoreHealth.live:type_name -> vibesys.cli.v1.Live
-	64,  // 79: vibesys.cli.v1.StoreHealth.away:type_name -> vibesys.cli.v1.Away
-	2,   // 80: vibesys.cli.v1.Away.reason:type_name -> vibesys.cli.v1.AwayReason
-	86,  // 81: vibesys.cli.v1.Away.failure:type_name -> vibesys.cli.v1.Failure
-	4,   // 82: vibesys.cli.v1.DaemonService.Hello:input_type -> vibesys.cli.v1.HelloRequest
-	6,   // 83: vibesys.cli.v1.DaemonService.Status:input_type -> vibesys.cli.v1.StatusRequest
-	9,   // 84: vibesys.cli.v1.DaemonService.Stop:input_type -> vibesys.cli.v1.StopRequest
-	13,  // 85: vibesys.cli.v1.DaemonService.Submit:input_type -> vibesys.cli.v1.SubmitRequest
-	15,  // 86: vibesys.cli.v1.DaemonService.Watch:input_type -> vibesys.cli.v1.WatchRequest
-	17,  // 87: vibesys.cli.v1.DaemonService.Wait:input_type -> vibesys.cli.v1.WaitRequest
-	52,  // 88: vibesys.cli.v1.DaemonService.WatchTask:input_type -> vibesys.cli.v1.WatchTaskRequest
-	20,  // 89: vibesys.cli.v1.DaemonService.Cancel:input_type -> vibesys.cli.v1.CancelRequest
-	22,  // 90: vibesys.cli.v1.DaemonService.AddNote:input_type -> vibesys.cli.v1.AddNoteRequest
-	24,  // 91: vibesys.cli.v1.DaemonService.ListJobs:input_type -> vibesys.cli.v1.ListJobsRequest
-	11,  // 92: vibesys.cli.v1.DaemonService.ForgetRepository:input_type -> vibesys.cli.v1.ForgetRepositoryRequest
-	26,  // 93: vibesys.cli.v1.DaemonService.ReadLogs:input_type -> vibesys.cli.v1.ReadLogsRequest
-	28,  // 94: vibesys.cli.v1.DaemonService.Show:input_type -> vibesys.cli.v1.ShowRequest
-	30,  // 95: vibesys.cli.v1.DaemonService.Compare:input_type -> vibesys.cli.v1.CompareRequest
-	32,  // 96: vibesys.cli.v1.DaemonService.Promote:input_type -> vibesys.cli.v1.PromoteRequest
-	38,  // 97: vibesys.cli.v1.DaemonService.CurrentResult:input_type -> vibesys.cli.v1.CurrentResultRequest
-	34,  // 98: vibesys.cli.v1.DaemonService.AddToFrontier:input_type -> vibesys.cli.v1.AddToFrontierRequest
-	36,  // 99: vibesys.cli.v1.DaemonService.ListFrontier:input_type -> vibesys.cli.v1.ListFrontierRequest
-	40,  // 100: vibesys.cli.v1.DaemonService.CreatePlan:input_type -> vibesys.cli.v1.CreatePlanRequest
-	42,  // 101: vibesys.cli.v1.DaemonService.ListPlans:input_type -> vibesys.cli.v1.ListPlansRequest
-	44,  // 102: vibesys.cli.v1.DaemonService.ViewPlan:input_type -> vibesys.cli.v1.ViewPlanRequest
-	46,  // 103: vibesys.cli.v1.DaemonService.EditPlan:input_type -> vibesys.cli.v1.EditPlanRequest
-	48,  // 104: vibesys.cli.v1.DaemonService.CommentPlan:input_type -> vibesys.cli.v1.CommentPlanRequest
-	50,  // 105: vibesys.cli.v1.DaemonService.ClosePlan:input_type -> vibesys.cli.v1.ClosePlanRequest
-	5,   // 106: vibesys.cli.v1.DaemonService.Hello:output_type -> vibesys.cli.v1.HelloResponse
-	7,   // 107: vibesys.cli.v1.DaemonService.Status:output_type -> vibesys.cli.v1.StatusResponse
-	10,  // 108: vibesys.cli.v1.DaemonService.Stop:output_type -> vibesys.cli.v1.StopResponse
-	14,  // 109: vibesys.cli.v1.DaemonService.Submit:output_type -> vibesys.cli.v1.SubmitResponse
-	16,  // 110: vibesys.cli.v1.DaemonService.Watch:output_type -> vibesys.cli.v1.WatchResponse
-	18,  // 111: vibesys.cli.v1.DaemonService.Wait:output_type -> vibesys.cli.v1.WaitResponse
-	53,  // 112: vibesys.cli.v1.DaemonService.WatchTask:output_type -> vibesys.cli.v1.WatchTaskResponse
-	21,  // 113: vibesys.cli.v1.DaemonService.Cancel:output_type -> vibesys.cli.v1.CancelResponse
-	23,  // 114: vibesys.cli.v1.DaemonService.AddNote:output_type -> vibesys.cli.v1.AddNoteResponse
-	25,  // 115: vibesys.cli.v1.DaemonService.ListJobs:output_type -> vibesys.cli.v1.ListJobsResponse
-	12,  // 116: vibesys.cli.v1.DaemonService.ForgetRepository:output_type -> vibesys.cli.v1.ForgetRepositoryResponse
-	27,  // 117: vibesys.cli.v1.DaemonService.ReadLogs:output_type -> vibesys.cli.v1.ReadLogsResponse
-	29,  // 118: vibesys.cli.v1.DaemonService.Show:output_type -> vibesys.cli.v1.ShowResponse
-	31,  // 119: vibesys.cli.v1.DaemonService.Compare:output_type -> vibesys.cli.v1.CompareResponse
-	33,  // 120: vibesys.cli.v1.DaemonService.Promote:output_type -> vibesys.cli.v1.PromoteResponse
-	39,  // 121: vibesys.cli.v1.DaemonService.CurrentResult:output_type -> vibesys.cli.v1.CurrentResultResponse
-	35,  // 122: vibesys.cli.v1.DaemonService.AddToFrontier:output_type -> vibesys.cli.v1.AddToFrontierResponse
-	37,  // 123: vibesys.cli.v1.DaemonService.ListFrontier:output_type -> vibesys.cli.v1.ListFrontierResponse
-	41,  // 124: vibesys.cli.v1.DaemonService.CreatePlan:output_type -> vibesys.cli.v1.CreatePlanResponse
-	43,  // 125: vibesys.cli.v1.DaemonService.ListPlans:output_type -> vibesys.cli.v1.ListPlansResponse
-	45,  // 126: vibesys.cli.v1.DaemonService.ViewPlan:output_type -> vibesys.cli.v1.ViewPlanResponse
-	47,  // 127: vibesys.cli.v1.DaemonService.EditPlan:output_type -> vibesys.cli.v1.EditPlanResponse
-	49,  // 128: vibesys.cli.v1.DaemonService.CommentPlan:output_type -> vibesys.cli.v1.CommentPlanResponse
-	51,  // 129: vibesys.cli.v1.DaemonService.ClosePlan:output_type -> vibesys.cli.v1.ClosePlanResponse
-	106, // [106:130] is the sub-list for method output_type
-	82,  // [82:106] is the sub-list for method input_type
-	82,  // [82:82] is the sub-list for extension type_name
-	82,  // [82:82] is the sub-list for extension extendee
-	0,   // [0:82] is the sub-list for field type_name
+	74,  // 27: vibesys.cli.v1.ListJobsResponse.waits:type_name -> vibesys.cli.v1.JobWait
+	3,   // 28: vibesys.cli.v1.ReadLogsRequest.context:type_name -> vibesys.cli.v1.CallContext
+	3,   // 29: vibesys.cli.v1.ShowRequest.context:type_name -> vibesys.cli.v1.CallContext
+	75,  // 30: vibesys.cli.v1.ShowResponse.results:type_name -> vibesys.cli.v1.Result
+	76,  // 31: vibesys.cli.v1.ShowResponse.measurements:type_name -> vibesys.cli.v1.Measurement
+	3,   // 32: vibesys.cli.v1.CompareRequest.context:type_name -> vibesys.cli.v1.CallContext
+	77,  // 33: vibesys.cli.v1.CompareResponse.comparison:type_name -> vibesys.cli.v1.Comparison
+	3,   // 34: vibesys.cli.v1.PromoteRequest.context:type_name -> vibesys.cli.v1.CallContext
+	78,  // 35: vibesys.cli.v1.PromoteResponse.promoted:type_name -> vibesys.cli.v1.Promotion
+	79,  // 36: vibesys.cli.v1.PromoteResponse.refused:type_name -> vibesys.cli.v1.PromoteRefusal
+	80,  // 37: vibesys.cli.v1.PromoteResponse.frontier:type_name -> vibesys.cli.v1.FrontierDecision
+	3,   // 38: vibesys.cli.v1.AddToFrontierRequest.context:type_name -> vibesys.cli.v1.CallContext
+	80,  // 39: vibesys.cli.v1.AddToFrontierResponse.decision:type_name -> vibesys.cli.v1.FrontierDecision
+	3,   // 40: vibesys.cli.v1.ListFrontierRequest.context:type_name -> vibesys.cli.v1.CallContext
+	81,  // 41: vibesys.cli.v1.ListFrontierResponse.members:type_name -> vibesys.cli.v1.FrontierEntry
+	3,   // 42: vibesys.cli.v1.CurrentResultRequest.context:type_name -> vibesys.cli.v1.CallContext
+	82,  // 43: vibesys.cli.v1.CurrentResultResponse.current:type_name -> vibesys.cli.v1.CurrentResult
+	83,  // 44: vibesys.cli.v1.CurrentResultResponse.none:type_name -> vibesys.cli.v1.NoCurrentResult
+	3,   // 45: vibesys.cli.v1.CreatePlanRequest.context:type_name -> vibesys.cli.v1.CallContext
+	84,  // 46: vibesys.cli.v1.CreatePlanResponse.plan:type_name -> vibesys.cli.v1.Plan
+	3,   // 47: vibesys.cli.v1.ListPlansRequest.context:type_name -> vibesys.cli.v1.CallContext
+	85,  // 48: vibesys.cli.v1.ListPlansRequest.statuses:type_name -> vibesys.cli.v1.PlanStatus
+	84,  // 49: vibesys.cli.v1.ListPlansResponse.plans:type_name -> vibesys.cli.v1.Plan
+	3,   // 50: vibesys.cli.v1.ViewPlanRequest.context:type_name -> vibesys.cli.v1.CallContext
+	86,  // 51: vibesys.cli.v1.ViewPlanResponse.view:type_name -> vibesys.cli.v1.PlanView
+	3,   // 52: vibesys.cli.v1.EditPlanRequest.context:type_name -> vibesys.cli.v1.CallContext
+	85,  // 53: vibesys.cli.v1.EditPlanRequest.status:type_name -> vibesys.cli.v1.PlanStatus
+	84,  // 54: vibesys.cli.v1.EditPlanResponse.plan:type_name -> vibesys.cli.v1.Plan
+	3,   // 55: vibesys.cli.v1.CommentPlanRequest.context:type_name -> vibesys.cli.v1.CallContext
+	84,  // 56: vibesys.cli.v1.CommentPlanResponse.plan:type_name -> vibesys.cli.v1.Plan
+	3,   // 57: vibesys.cli.v1.ClosePlanRequest.context:type_name -> vibesys.cli.v1.CallContext
+	85,  // 58: vibesys.cli.v1.ClosePlanRequest.status:type_name -> vibesys.cli.v1.PlanStatus
+	84,  // 59: vibesys.cli.v1.ClosePlanResponse.plan:type_name -> vibesys.cli.v1.Plan
+	3,   // 60: vibesys.cli.v1.WatchTaskRequest.context:type_name -> vibesys.cli.v1.CallContext
+	54,  // 61: vibesys.cli.v1.WatchTaskResponse.reset:type_name -> vibesys.cli.v1.Reset
+	56,  // 62: vibesys.cli.v1.WatchTaskResponse.facts:type_name -> vibesys.cli.v1.TaskFacts
+	55,  // 63: vibesys.cli.v1.WatchTaskResponse.caught_up:type_name -> vibesys.cli.v1.CaughtUp
+	57,  // 64: vibesys.cli.v1.TaskFacts.facts:type_name -> vibesys.cli.v1.TaskFact
+	70,  // 65: vibesys.cli.v1.TaskFact.job:type_name -> vibesys.cli.v1.Job
+	75,  // 66: vibesys.cli.v1.TaskFact.result:type_name -> vibesys.cli.v1.Result
+	58,  // 67: vibesys.cli.v1.TaskFact.judgment:type_name -> vibesys.cli.v1.Judgment
+	59,  // 68: vibesys.cli.v1.TaskFact.promotion:type_name -> vibesys.cli.v1.PromotionRecord
+	84,  // 69: vibesys.cli.v1.TaskFact.plan:type_name -> vibesys.cli.v1.Plan
+	61,  // 70: vibesys.cli.v1.TaskFact.head:type_name -> vibesys.cli.v1.Head
+	62,  // 71: vibesys.cli.v1.TaskFact.health:type_name -> vibesys.cli.v1.StoreHealth
+	60,  // 72: vibesys.cli.v1.TaskFact.trouble:type_name -> vibesys.cli.v1.JobTrouble
+	77,  // 73: vibesys.cli.v1.Judgment.comparison:type_name -> vibesys.cli.v1.Comparison
+	87,  // 74: vibesys.cli.v1.Judgment.refused:type_name -> vibesys.cli.v1.Failure
+	78,  // 75: vibesys.cli.v1.PromotionRecord.promotion:type_name -> vibesys.cli.v1.Promotion
+	87,  // 76: vibesys.cli.v1.JobTrouble.failure:type_name -> vibesys.cli.v1.Failure
+	82,  // 77: vibesys.cli.v1.Head.current:type_name -> vibesys.cli.v1.CurrentResult
+	83,  // 78: vibesys.cli.v1.Head.none:type_name -> vibesys.cli.v1.NoCurrentResult
+	63,  // 79: vibesys.cli.v1.StoreHealth.live:type_name -> vibesys.cli.v1.Live
+	64,  // 80: vibesys.cli.v1.StoreHealth.away:type_name -> vibesys.cli.v1.Away
+	2,   // 81: vibesys.cli.v1.Away.reason:type_name -> vibesys.cli.v1.AwayReason
+	87,  // 82: vibesys.cli.v1.Away.failure:type_name -> vibesys.cli.v1.Failure
+	4,   // 83: vibesys.cli.v1.DaemonService.Hello:input_type -> vibesys.cli.v1.HelloRequest
+	6,   // 84: vibesys.cli.v1.DaemonService.Status:input_type -> vibesys.cli.v1.StatusRequest
+	9,   // 85: vibesys.cli.v1.DaemonService.Stop:input_type -> vibesys.cli.v1.StopRequest
+	13,  // 86: vibesys.cli.v1.DaemonService.Submit:input_type -> vibesys.cli.v1.SubmitRequest
+	15,  // 87: vibesys.cli.v1.DaemonService.Watch:input_type -> vibesys.cli.v1.WatchRequest
+	17,  // 88: vibesys.cli.v1.DaemonService.Wait:input_type -> vibesys.cli.v1.WaitRequest
+	52,  // 89: vibesys.cli.v1.DaemonService.WatchTask:input_type -> vibesys.cli.v1.WatchTaskRequest
+	20,  // 90: vibesys.cli.v1.DaemonService.Cancel:input_type -> vibesys.cli.v1.CancelRequest
+	22,  // 91: vibesys.cli.v1.DaemonService.AddNote:input_type -> vibesys.cli.v1.AddNoteRequest
+	24,  // 92: vibesys.cli.v1.DaemonService.ListJobs:input_type -> vibesys.cli.v1.ListJobsRequest
+	11,  // 93: vibesys.cli.v1.DaemonService.ForgetRepository:input_type -> vibesys.cli.v1.ForgetRepositoryRequest
+	26,  // 94: vibesys.cli.v1.DaemonService.ReadLogs:input_type -> vibesys.cli.v1.ReadLogsRequest
+	28,  // 95: vibesys.cli.v1.DaemonService.Show:input_type -> vibesys.cli.v1.ShowRequest
+	30,  // 96: vibesys.cli.v1.DaemonService.Compare:input_type -> vibesys.cli.v1.CompareRequest
+	32,  // 97: vibesys.cli.v1.DaemonService.Promote:input_type -> vibesys.cli.v1.PromoteRequest
+	38,  // 98: vibesys.cli.v1.DaemonService.CurrentResult:input_type -> vibesys.cli.v1.CurrentResultRequest
+	34,  // 99: vibesys.cli.v1.DaemonService.AddToFrontier:input_type -> vibesys.cli.v1.AddToFrontierRequest
+	36,  // 100: vibesys.cli.v1.DaemonService.ListFrontier:input_type -> vibesys.cli.v1.ListFrontierRequest
+	40,  // 101: vibesys.cli.v1.DaemonService.CreatePlan:input_type -> vibesys.cli.v1.CreatePlanRequest
+	42,  // 102: vibesys.cli.v1.DaemonService.ListPlans:input_type -> vibesys.cli.v1.ListPlansRequest
+	44,  // 103: vibesys.cli.v1.DaemonService.ViewPlan:input_type -> vibesys.cli.v1.ViewPlanRequest
+	46,  // 104: vibesys.cli.v1.DaemonService.EditPlan:input_type -> vibesys.cli.v1.EditPlanRequest
+	48,  // 105: vibesys.cli.v1.DaemonService.CommentPlan:input_type -> vibesys.cli.v1.CommentPlanRequest
+	50,  // 106: vibesys.cli.v1.DaemonService.ClosePlan:input_type -> vibesys.cli.v1.ClosePlanRequest
+	5,   // 107: vibesys.cli.v1.DaemonService.Hello:output_type -> vibesys.cli.v1.HelloResponse
+	7,   // 108: vibesys.cli.v1.DaemonService.Status:output_type -> vibesys.cli.v1.StatusResponse
+	10,  // 109: vibesys.cli.v1.DaemonService.Stop:output_type -> vibesys.cli.v1.StopResponse
+	14,  // 110: vibesys.cli.v1.DaemonService.Submit:output_type -> vibesys.cli.v1.SubmitResponse
+	16,  // 111: vibesys.cli.v1.DaemonService.Watch:output_type -> vibesys.cli.v1.WatchResponse
+	18,  // 112: vibesys.cli.v1.DaemonService.Wait:output_type -> vibesys.cli.v1.WaitResponse
+	53,  // 113: vibesys.cli.v1.DaemonService.WatchTask:output_type -> vibesys.cli.v1.WatchTaskResponse
+	21,  // 114: vibesys.cli.v1.DaemonService.Cancel:output_type -> vibesys.cli.v1.CancelResponse
+	23,  // 115: vibesys.cli.v1.DaemonService.AddNote:output_type -> vibesys.cli.v1.AddNoteResponse
+	25,  // 116: vibesys.cli.v1.DaemonService.ListJobs:output_type -> vibesys.cli.v1.ListJobsResponse
+	12,  // 117: vibesys.cli.v1.DaemonService.ForgetRepository:output_type -> vibesys.cli.v1.ForgetRepositoryResponse
+	27,  // 118: vibesys.cli.v1.DaemonService.ReadLogs:output_type -> vibesys.cli.v1.ReadLogsResponse
+	29,  // 119: vibesys.cli.v1.DaemonService.Show:output_type -> vibesys.cli.v1.ShowResponse
+	31,  // 120: vibesys.cli.v1.DaemonService.Compare:output_type -> vibesys.cli.v1.CompareResponse
+	33,  // 121: vibesys.cli.v1.DaemonService.Promote:output_type -> vibesys.cli.v1.PromoteResponse
+	39,  // 122: vibesys.cli.v1.DaemonService.CurrentResult:output_type -> vibesys.cli.v1.CurrentResultResponse
+	35,  // 123: vibesys.cli.v1.DaemonService.AddToFrontier:output_type -> vibesys.cli.v1.AddToFrontierResponse
+	37,  // 124: vibesys.cli.v1.DaemonService.ListFrontier:output_type -> vibesys.cli.v1.ListFrontierResponse
+	41,  // 125: vibesys.cli.v1.DaemonService.CreatePlan:output_type -> vibesys.cli.v1.CreatePlanResponse
+	43,  // 126: vibesys.cli.v1.DaemonService.ListPlans:output_type -> vibesys.cli.v1.ListPlansResponse
+	45,  // 127: vibesys.cli.v1.DaemonService.ViewPlan:output_type -> vibesys.cli.v1.ViewPlanResponse
+	47,  // 128: vibesys.cli.v1.DaemonService.EditPlan:output_type -> vibesys.cli.v1.EditPlanResponse
+	49,  // 129: vibesys.cli.v1.DaemonService.CommentPlan:output_type -> vibesys.cli.v1.CommentPlanResponse
+	51,  // 130: vibesys.cli.v1.DaemonService.ClosePlan:output_type -> vibesys.cli.v1.ClosePlanResponse
+	107, // [107:131] is the sub-list for method output_type
+	83,  // [83:107] is the sub-list for method input_type
+	83,  // [83:83] is the sub-list for extension type_name
+	83,  // [83:83] is the sub-list for extension extendee
+	0,   // [0:83] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_service_proto_init() }

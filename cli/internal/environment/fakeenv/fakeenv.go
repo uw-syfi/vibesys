@@ -3,6 +3,7 @@ package fakeenv
 import (
 	"context"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +50,7 @@ type Environment struct {
 	mu       sync.Mutex
 	runs     []core.Execution
 	active   int
+	running  []*core.Execution
 	finger   error
 	fingered int
 	// hold, when set, is the gate Fingerprint waits at, as a real environment waits for an
@@ -182,6 +184,18 @@ func (e *Environment) Active() int {
 	return e.active
 }
 
+// ActiveRuns returns the executions of the runs that have started and not returned, in the order
+// they started.
+func (e *Environment) ActiveRuns() []core.Execution {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := make([]core.Execution, 0, len(e.running))
+	for _, x := range e.running {
+		out = append(out, *x)
+	}
+	return out
+}
+
 func cloneFacts(m map[string]string) map[string]string {
 	if m == nil {
 		return nil
@@ -213,10 +227,12 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	e.mu.Lock()
 	e.runs = append(e.runs, x)
 	e.active++
+	e.running = append(e.running, &x)
 	e.mu.Unlock()
 	defer func() {
 		e.mu.Lock()
 		e.active--
+		e.running = slices.DeleteFunc(e.running, func(r *core.Execution) bool { return r == &x })
 		e.mu.Unlock()
 	}()
 

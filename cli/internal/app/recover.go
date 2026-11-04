@@ -154,8 +154,21 @@ func (a *App) recoverScope(ctx context.Context, scope core.Scope, runOf func(lif
 func ownerLeaving(err error) bool { return errors.Is(err, store.ErrOwnerLeaving) }
 
 // admittedOf is the event that a queued job wants to run.
-func admittedOf(ref lifecycle.Ref, job core.Job) lifecycle.Admitted {
-	return lifecycle.Admitted{Ref: ref, SubmittedAt: job.SubmittedAt, Attempts: len(job.Attempts), Policy: core.RerunPolicyOf(job.Spec.Settings.Kind())}
+func (a *App) admittedOf(ref lifecycle.Ref, job core.Job) lifecycle.Admitted {
+	return lifecycle.Admitted{
+		Ref: ref, SubmittedAt: job.SubmittedAt, Attempts: len(job.Attempts), Policy: core.RerunPolicyOf(job.Spec.Settings.Kind()),
+		Work: a.workOf(job),
+	}
+}
+
+// workOf is what a job asks of the machine: its claims, as the demand says, and the run that
+// submitted it first, whose use of the machine it counts as.
+func (a *App) workOf(job core.Job) lifecycle.Work {
+	w := lifecycle.Work{Claims: a.cfg.Scheduler.Demand.Claims(job), Kind: job.Spec.Settings.Kind()}
+	if len(job.Submitters) > 0 {
+		w.Run = job.Submitters[0].Run
+	}
+	return w
 }
 
 func storeIDOf(s core.Scope) lifecycle.StoreID {
@@ -227,7 +240,7 @@ func (a *App) sweepStore(ctx context.Context, scope core.Scope) {
 		ref := lifecycle.Ref{Store: storeIDOf(scope), Job: job.ID}
 		switch {
 		case job.State == core.JobQueued:
-			a.postEffect(ctx, message{event: admittedOf(ref, job), scope: &scope})
+			a.postEffect(ctx, message{event: a.admittedOf(ref, job), scope: &scope})
 		case !held[ref]:
 			run := a.look(ctx, ref)
 			presence := a.presenceOf(run)
