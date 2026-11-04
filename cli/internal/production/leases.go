@@ -1,6 +1,8 @@
 package production
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"maps"
 	"os"
 	"os/user"
@@ -34,15 +36,14 @@ import (
 // no lease of their own: they are a machine's, whose lease a job that holds them alone takes. A
 // Slurm placement leases nothing, since Slurm's exclusive allocation arbitrates its nodes.
 //
-// leasesDir is this machine's directory of leases (runtimedir.ResolveLeases); a machine reached over
-// ssh finds its own in the same order. claims are what the resources of each placement claim, by
+// scope says where each kind of lease is kept, so that a sandbox daemon's are its own. claims are what the resources of each placement claim, by
 // placement name, as the scheduler has them.
-func (p Process) leasingOf(op *cliv1.OperatorConfig, leasesDir string, claims map[string][]core.Claim, clk clock.System, logf func(string, ...any)) app.Leasing {
+func (p Process) leasingOf(op *cliv1.OperatorConfig, scope leaseScope, claims map[string][]core.Claim, clk clock.System, logf func(string, ...any)) app.Leasing {
 	holder := core.LeaseHolder{User: userName(p.UID), PID: os.Getpid()}
 	if host, err := os.Hostname(); err == nil {
 		holder.Host = host
 	}
-	here := locallease.Dir{Path: leasesDir}
+	here := locallease.Dir{Path: scope.local}
 	book := lease.Map{string(hostResource): {Leases: here, Key: machineKey}}
 	for _, name := range slices.Sorted(maps.Keys(op.GetPlacements())) {
 		pl := op.GetPlacements()[name]
@@ -54,7 +55,7 @@ func (p Process) leasingOf(op *cliv1.OperatorConfig, leasesDir string, claims ma
 		case cliv1.PlacementKind_PLACEMENT_KIND_SSH:
 			r := pl.GetRemote()
 			ssh := remote.SSH{Host: r.GetHost(), Program: orDefault(r.GetSshCommand(), "ssh")}
-			shell, machine = ssh, remoteLeases(ssh)
+			shell, machine = ssh, scope.remote(ssh)
 		case cliv1.PlacementKind_PLACEMENT_KIND_SLURM, cliv1.PlacementKind_PLACEMENT_KIND_UNSPECIFIED:
 			continue
 		}
@@ -66,8 +67,8 @@ func (p Process) leasingOf(op *cliv1.OperatorConfig, leasesDir string, claims ma
 		for _, c := range claims[name] {
 			if strings.HasPrefix(c.Resource, string(core.ResourceKubernetes)+":") {
 				book[c.Resource] = lease.Place{Key: clusterKey, Leases: kubelease.Cluster{
-					API:   kubelease.Kubectl{Shell: shell, Kubeconfig: k.GetKubeconfig(), Timers: clk},
-					Clock: clk, Timers: clk, Logf: logf,
+					API:    kubelease.Kubectl{Shell: shell, Kubeconfig: k.GetKubeconfig(), Timers: clk},
+					Prefix: scope.clusterPrefix, Clock: clk, Timers: clk, Logf: logf,
 				}}
 			}
 		}
@@ -75,11 +76,45 @@ func (p Process) leasingOf(op *cliv1.OperatorConfig, leasesDir string, claims ma
 	return app.Leasing{Book: book, Holder: holder}
 }
 
-// remoteLeases are the leases of a machine reached over ssh, in the directory its own daemons
-// resolve: the same parents in the same order, judged by the same network file system types.
-func remoteLeases(shell remote.Shell) hostlease.Host {
+// leaseScope is where a daemon keeps each kind of lease. A production daemon's are shared by every
+// daemon that can see the machine, the machines it reaches over ssh and the cluster; a sandbox
+// daemon's are its own, so that a test's job never waits for the real benchmark's lease and the
+// real one never waits for a test's.
+type leaseScope struct {
+	// local is the directory of this machine's leases.
+	local string
+	// remoteName is the name of the directory of leases on a machine reached over ssh, in the
+	// first of the parents its own daemons use.
+	remoteName string
+	// clusterPrefix is what comes before a key in the name of a cluster's Lease object.
+	clusterPrefix string
+}
+
+// leaseScopeOf is the scope of the daemon of dir. A sandbox daemon's is named by its runtime
+// directory alone, and never asks where the machine's leases are; no variable moves a production
+// daemon's, which is where resolve finds the machine's.
+func leaseScopeOf(sandbox bool, dir runtimedir.Dir, resolve func() (string, error)) (leaseScope, error) {
+	if sandbox {
+		sum := sha256.Sum256([]byte(dir.Path()))
+		id := hex.EncodeToString(sum[:8])
+		return leaseScope{
+			local:         dir.Leases(),
+			remoteName:    runtimedir.LeaseDirName + "-sandbox-" + id,
+			clusterPrefix: "vibesys-sandbox-" + id + "-",
+		}, nil
+	}
+	local, err := resolve()
+	if err != nil {
+		return leaseScope{}, err
+	}
+	return leaseScope{local: local, remoteName: runtimedir.LeaseDirName}, nil
+}
+
+// remote are the leases of a machine reached over ssh, in the directory its own daemons resolve:
+// the same parents in the same order, judged by the same network file system types.
+func (s leaseScope) remote(shell remote.Shell) hostlease.Host {
 	return hostlease.Host{
-		Shell: shell, Parents: runtimedir.LeaseParents, DirName: runtimedir.LeaseDirName, NetworkTypes: runtimedir.NetworkMagics(),
+		Shell: shell, Parents: runtimedir.LeaseParents, DirName: s.remoteName, NetworkTypes: runtimedir.NetworkMagics(),
 	}
 }
 

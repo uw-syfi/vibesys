@@ -126,5 +126,9 @@ func (d Dir) Log() string { return filepath.Join(d.path, "daemon.log") }
 // that find no daemon at once start one.
 func (d Dir) StartLock() string { return filepath.Join(d.path, "start.lock") }
 
+// Leases is the directory of the leases of a sandbox daemon, which takes none that another daemon
+// can see: the machine-wide directory (ResolveLeases) is the production daemon's.
+func (d Dir) Leases() string { return filepath.Join(d.path, "leases") }
+
 // Supervisors is the directory of the supervisors' run directories.
 func (d Dir) Supervisors() string { return filepath.Join(d.path, "sup") }

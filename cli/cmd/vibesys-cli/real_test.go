@@ -2,14 +2,19 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
@@ -43,9 +48,68 @@ func newMachine(t *testing.T) *machine {
 	}
 	t.Cleanup(func() {
 		m.cli("daemon", "stop")
+		// Whatever the stop did not end, a wedged daemon or a supervisor of a job it left running,
+		// ends here, so that no daemon outlives the test.
+		m.sweep()
 		os.RemoveAll(root)
 	})
 	return m
+}
+
+// sweep kills every process of this machine's root, the daemons, supervisors and clients of every
+// runtime directory under it, and returns once they are gone. A process is of the root when its
+// XDG_RUNTIME_DIR is under it, which the processes the tool starts inherit.
+func (m *machine) sweep() {
+	m.t.Helper()
+	pids := processesUnder(m.root)
+	for _, pid := range pids {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+	}
+	// Bounded only against a process the kernel will not end.
+	ctx, cancel := context.WithTimeout(context.Background(), hangBound)
+	defer cancel()
+	for _, pid := range pids {
+		for alive(pid) {
+			if !clock.Sleep(ctx, clock.System{}, 10*time.Millisecond) {
+				m.t.Errorf("process %d of %s is still there after SIGKILL", pid, m.root)
+				return
+			}
+		}
+	}
+}
+
+// alive says whether the process runs: one that ended and is waiting to be reaped does not.
+func alive(pid int) bool {
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	// The state follows the command name, which is in parentheses and may hold anything.
+	i := bytes.LastIndexByte(stat, ')')
+	return i < 0 || i+2 >= len(stat) || stat[i+2] != 'Z'
+}
+
+// processesUnder are the processes other than this one whose XDG_RUNTIME_DIR is root or under it.
+func processesUnder(root string) []int {
+	entries, _ := os.ReadDir("/proc")
+	var out []int
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil || pid == os.Getpid() {
+			continue
+		}
+		env, err := os.ReadFile("/proc/" + e.Name() + "/environ")
+		if err != nil {
+			continue
+		}
+		for _, kv := range bytes.Split(env, []byte{0}) {
+			if v, ok := strings.CutPrefix(string(kv), "XDG_RUNTIME_DIR="); ok && (v == root || strings.HasPrefix(v, root+"/")) {
+				out = append(out, pid)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func (m *machine) git(args ...string) string {
@@ -114,7 +178,10 @@ func (m *machine) cliWith(env []string, args ...string) outcome {
 	if err != nil {
 		m.t.Fatal(err)
 	}
-	cmd := exec.Command(self, args...)
+	// A command that outlasts hangBound is a hang, and is killed, so no client outlives the test.
+	ctx, cancel := context.WithTimeout(context.Background(), hangBound)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, self, args...)
 	cmd.Dir = m.repo
 	// The runtime files and the index are under the test's own directories, so the tool touches
 	// nothing of the user running the test, and its daemon is a sandbox daemon, which holds no
@@ -169,6 +236,13 @@ func TestRealMeasureOfARealRepositoryIsCachedAndTopsUp(t *testing.T) {
 	r = m.cli("submit", "measure", "HEAD", "--samples", "5", "--wait")
 	if r.code != exitOK || !strings.Contains(r.stdout, "succeeded") || m.samples() != 5 {
 		t.Fatalf("submit measure --samples 5 = %+v, %d samples taken in all, want 5", r, m.samples())
+	}
+
+	// The sandbox daemon took the lease of its measure in its own runtime directory, and the
+	// machine's lease directory, which the daemon of the user and of every other user share, is
+	// not the one it took it in.
+	if _, err := os.Stat(filepath.Join(m.root, "rt", "vibesys-cli", "leases", "machine.lock")); err != nil {
+		t.Fatalf("the sandbox daemon's measure did not lease in its own runtime directory: %v", err)
 	}
 
 	// One the cache holds runs nothing.

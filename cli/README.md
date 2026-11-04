@@ -368,7 +368,10 @@ set `VIBESYS_CLI_SANDBOX=1` and an `XDG_RUNTIME_DIR` of its own (not the one of 
 the machine, whose socket its commands would reach). It holds no machine lock; it records itself
 under `sandboxes/` in the machine directory for as long as it runs, and `daemon status` of every
 daemon lists the sandbox daemons that run (`sandbox  pid  runtime  version`), with `role  sandbox`
-on the sandbox's own. Its containers and Slurm jobs carry the scope of its own runtime directory. A
+on the sandbox's own. Its containers and Slurm jobs carry the scope of its own runtime directory, and
+so do its leases: it takes them in `leases/` of its runtime directory, in a directory and under a
+Lease name prefix named for that runtime directory on an ssh machine and in a cluster, and never in
+the machine's directory of leases below, so a test's measure never waits for a real one. A
 test that starts a daemon in-process holds no machine lock either.
 
 A command that needs the daemon connects and, if none runs, starts one and waits for its readiness
