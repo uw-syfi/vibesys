@@ -151,6 +151,13 @@ var rules = map[string][]string{
 	"internal/upgrade":             {"internal/upgrade/upgradetest"},
 	"internal/upgrade/upgradetest": {"internal/upgrade"},
 
+	// Which waiting jobs start: a pure core that owns capacity and exclusivity, and the policies
+	// that order the jobs, which only production names.
+	"internal/schedule":                  {"internal/core"},
+	"internal/schedule/scheduletest":     {"internal/core", "internal/schedule"},
+	"internal/schedule/policy/fifo":      {"internal/schedule"},
+	"internal/schedule/policy/fairshare": {"internal/core", "internal/schedule"},
+
 	"internal/archcheck": {},
 }
 
@@ -216,6 +223,11 @@ var testRules = map[string][]string{
 		"internal/store/storetest", "internal/supervisor", "internal/supervisor/host",
 		"internal/task", "internal/task/tasktest",
 	},
+
+	// The scheduler's contract suite, and the policies its own test runs it with.
+	"internal/schedule":                  {"internal/schedule/policy/fifo", "internal/schedule/scheduletest"},
+	"internal/schedule/policy/fifo":      {"internal/schedule/scheduletest"},
+	"internal/schedule/policy/fairshare": {"internal/schedule/scheduletest"},
 }
 
 // layoutNames are spellings that only the on-disk layout may use: the state directory, the event
