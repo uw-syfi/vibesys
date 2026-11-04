@@ -327,8 +327,9 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, scope core.Scope) 
 		c.Timeout = a.cfg.DefaultTimeout
 		spec.Settings = c
 	}
-	// A check or a measure job holds the placement it was keyed under, which is decided again here
-	// so that one the operator config no longer has is refused; a command job's is decided now.
+	// A job holds the placement it was submitted with, which is decided again here so that one the
+	// operator config no longer has is refused, and one of a job queued before placements were
+	// recorded is decided now.
 	var needs []core.ResourceKind
 	if spec.Environment == core.EnvironmentDocker && len(a.cfg.Placements) > 0 {
 		t, err := a.taskAt(ctx, string(scope.Repository()), spec.Commit, string(scope.Task()))

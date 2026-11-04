@@ -108,7 +108,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/hostfs/` | The file system a job reads results from, with the operating system's and an in-memory one. |
 | `internal/gitwork/` | The git program as a source of tasks (`git archive`) and of clean checkouts of a commit (`git clone`, then a detached checkout). The working tree of the repository is never read or touched. |
 | `internal/lifecycle/` | The job lifecycle as a pure machine: `Step(State, Event) (State, []Request)`. The daemon feeds it events and carries out the requests; recovery after a crash is the same events replayed. |
-| `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. Jobs hold claims on resources (`placement:default` today); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims. |
+| `internal/schedule/` | Which waiting jobs start: `Step(State, Policy, ...Filter) []Decision`, pure. Jobs hold claims on resources (`placement:<name>` and what its resources claim); the core keeps every resource within its capacity and an exclusive claim alone, so a policy only orders. A `Demand` says what a job claims: `PlacementDemand` from the operator config's placements. |
 | `internal/schedule/policy/fifo/`, `fairshare/` | The scheduling policies: `fifo` (oldest first) and `fair-share` (the run with the least recent use of what the job claims goes next). Only `production` names them. |
 | `internal/schedule/scheduletest/` | The one property-based contract suite every policy passes. Tests only. |
 | `internal/changed/` | Pure helpers for the "what changed" facts a job records. |
@@ -385,10 +385,15 @@ Each running job has its own supervisor process. It owns the job's process group
 job's output, so it outlives the daemon. The daemon takes each decision from `lifecycle`, and which
 queued jobs start from `schedule`:
 
-- A job holds claims from its launch until its end is recorded: by default a slot of
-  `placement:default`, and a measure job the whole placement, so a benchmark sample never runs
-  beside another job. It has the `max_jobs` slots of the operator config's one placement (1 by
-  default); a config of several placements gives it one.
+- A job holds claims from its launch until its end is recorded. A docker job claims a slot of
+  `placement:<name>`, the placement it runs on, which has the placement's `max_jobs` slots, and
+  what the placement's resources claim: `kubernetes:<machine><kubeconfig>` for a cluster and
+  `gpu:<machine>/<devices>` for GPUs, which every placement that gives the same one shares. A host
+  job claims a slot of `placement:default` when that placement is local, and otherwise of `host`,
+  one slot of its own. A measure job claims each of them whole, so a benchmark sample never runs
+  beside another job of its placement or of another placement on its cluster or GPUs, while the
+  jobs of other placements run. A command job's placement is decided when it is submitted, as a
+  check's is.
 - No resource is given past its capacity and an exclusive claim shares its resource with nothing,
   whatever the policy. The policy (`[scheduler] policy`) only orders the jobs that may start:
   `fifo` takes the oldest first, and `fair-share` takes the next job of the run (the run that first
@@ -592,7 +597,7 @@ devices = "all"
 | `[scheduler] policy` | Which job starts next: `fifo` (default) or `fair-share`. |
 | `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
 | `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh) or `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`). A name is lower-case letters, digits, `_` and `-`. |
-| `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job always runs alone. More than 1 needs kind `local`, since another machine stages and sweeps one job at a time. Until the scheduler claims the placement each job runs on, a config of several placements runs one job at a time across them. |
+| `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it. More than 1 needs kind `local`, since another machine stages and sweeps one job at a time. |
 | `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh` and `slurm`: the ssh destination and the programs that reach it. |
 | `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). |
 | `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |

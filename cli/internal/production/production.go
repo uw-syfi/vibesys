@@ -100,12 +100,12 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
-	scheduler, err := schedulerOf(op)
+	// The daemon runs no container: it only fingerprints the environments.
+	machines, err := p.machineEnvironments(op, clk, dir, dir.Path())
 	if err != nil {
 		return err
 	}
-	// The daemon runs no container: it only fingerprints the environments.
-	machines, err := p.machineEnvironments(op, clk, dir, dir.Path())
+	scheduler, err := schedulerOf(op, machines.claims)
 	if err != nil {
 		return err
 	}
@@ -149,11 +149,16 @@ var policies = map[string]func() schedule.Policy{
 	fairshare.Name: fairshare.New,
 }
 
-// schedulerOf is how the operator config shares the machine: the named policy, and slots of the
-// one placement resource DefaultDemand claims, which a measure job takes alone. A config of one
-// placement gives it that placement's max_jobs. A config of several gives it one, so their jobs run
-// one at a time between them, until the demand claims the placement each job runs on.
-func schedulerOf(op *cliv1.OperatorConfig) (app.Scheduler, error) {
+// hostResource is the resource host jobs claim when no local placement is the default one.
+const hostResource schedule.ResourceID = "host"
+
+// schedulerOf is how the operator config shares the machines: the named policy, a resource of
+// max_jobs slots for each placement, and one for each resource the placements' resources claim,
+// with room for every job of the placements that claim it, so that it bounds nothing but a measure,
+// which takes it whole. A host job runs on this machine beside the jobs of the local placement
+// "default" of the earlier shape, so it claims a slot of that placement; without one, host jobs
+// have a resource of one slot of their own.
+func schedulerOf(op *cliv1.OperatorConfig, claims map[string][]core.Claim) (app.Scheduler, error) {
 	policy := op.GetScheduler().GetPolicy()
 	newPolicy, ok := policies[policy]
 	if !ok {
@@ -161,17 +166,28 @@ func schedulerOf(op *cliv1.OperatorConfig) (app.Scheduler, error) {
 		return app.Scheduler{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
 			"the operator config: scheduler.policy: %q is not a policy (%s)", policy, strings.Join(names, ", "))}
 	}
-	slots := 1
-	if placements := op.GetPlacements(); len(placements) == 1 {
-		for _, pl := range placements {
-			slots = int(pl.GetMaxJobs())
+	demand := schedule.PlacementDemand{Placements: map[string][]schedule.Claim{}}
+	var resources []schedule.Resource
+	shared := map[schedule.ResourceID]int{}
+	for _, name := range slices.Sorted(maps.Keys(op.GetPlacements())) {
+		slots := int(op.GetPlacements()[name].GetMaxJobs())
+		resources = append(resources, schedule.Resource{ID: schedule.PlacementOf(name), Capacity: slots})
+		for _, c := range claims[name] {
+			id := schedule.ResourceID(c.Resource)
+			demand.Placements[name] = append(demand.Placements[name], schedule.Claim{Resource: id, Amount: c.Amount, Exclusive: c.Exclusive})
+			shared[id] += slots * max(c.Amount, 1)
 		}
 	}
-	return app.Scheduler{
-		Resources: []schedule.Resource{{ID: schedule.DefaultPlacement, Capacity: slots}},
-		Policy:    newPolicy(),
-		Demand:    schedule.DefaultDemand{},
-	}, nil
+	for _, id := range slices.Sorted(maps.Keys(shared)) {
+		resources = append(resources, schedule.Resource{ID: id, Capacity: shared[id]})
+	}
+	demand.Host = hostResource
+	if d := op.GetPlacements()[operator.DefaultPlacement]; d.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_LOCAL {
+		demand.Host = schedule.PlacementOf(operator.DefaultPlacement)
+	} else {
+		resources = append(resources, schedule.Resource{ID: hostResource, Capacity: 1})
+	}
+	return app.Scheduler{Resources: resources, Policy: newPolicy(), Demand: demand}, nil
 }
 
 func (p Process) operator() (*cliv1.OperatorConfig, error) {

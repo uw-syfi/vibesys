@@ -33,6 +33,8 @@ import (
 type machines struct {
 	environments environment.Environments
 	offers       []core.PlacementOffer
+	// claims are what the resources of each placement claim for a job that runs on it.
+	claims map[string][]core.Claim
 }
 
 // machineEnvironments are the environments this machine has: the host, and docker on each
@@ -53,7 +55,7 @@ type machines struct {
 func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System, dir runtimedir.Dir, containerKey string) (machines, error) {
 	local := cpu.New(cpu.Host(), clk)
 	providers := map[string]*docker.Provider{}
-	var out machines
+	out := machines{claims: map[string][]core.Claim{}}
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
 	for _, name := range names {
 		provider, err := p.placement(clk, dir, containerKey, local, name, op.GetPlacements()[name])
@@ -62,6 +64,7 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 		}
 		providers[name] = provider
 		out.offers = append(out.offers, provider.Offer())
+		out.claims[name] = provider.Claims()
 	}
 	onHost := hostenv.New(hostenv.Config{Backend: local, Timers: clk})
 	out.environments = environment.Kinds{

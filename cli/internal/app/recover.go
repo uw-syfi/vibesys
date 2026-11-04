@@ -161,9 +161,13 @@ func (a *App) admittedOf(ref lifecycle.Ref, job core.Job) lifecycle.Admitted {
 	}
 }
 
-// workOf is what a job asks of the machine: its claims, as the demand says, and the run that
-// submitted it first, whose use of the machine it counts as.
+// workOf is what a job asks of the machine: its claims, as the demand says of the job in the
+// environment it runs in, and the run that submitted it first, whose use of the machine it counts
+// as.
 func (a *App) workOf(job core.Job) lifecycle.Work {
+	if job.Spec.Environment == core.EnvironmentAuto {
+		job.Spec.Environment = a.cfg.DefaultEnvironment
+	}
 	w := lifecycle.Work{Claims: a.cfg.Scheduler.Demand.Claims(job), Kind: job.Spec.Settings.Kind()}
 	if len(job.Submitters) > 0 {
 		w.Run = job.Submitters[0].Run

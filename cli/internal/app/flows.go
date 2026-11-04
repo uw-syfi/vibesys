@@ -51,6 +51,25 @@ func (a *App) keyFlow(ctx context.Context, c core.CallContext, spec core.JobSpec
 	return spec, key, err
 }
 
+// placeFlow decides where a command job runs, so that scheduling claims the placement it runs on:
+// a docker job's placement, from what it asked for and what its task needs. A command job has no
+// key, so its environment stays as submitted, and only the placement is recorded.
+func (a *App) placeFlow(ctx context.Context, c core.CallContext, spec core.JobSpec) (core.JobSpec, error) {
+	kind := spec.Environment
+	if kind == core.EnvironmentAuto {
+		kind = a.cfg.DefaultEnvironment
+	}
+	if kind != core.EnvironmentDocker || len(a.cfg.Placements) == 0 {
+		return spec, nil
+	}
+	t, err := a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
+	if err != nil {
+		return spec, err
+	}
+	spec.Placement, err = a.placementOf(kind, t.Needs, spec.Placement)
+	return spec, err
+}
+
 // maxNamedChanges bounds how many changed paths a refusal names.
 const maxNamedChanges = 5
 
