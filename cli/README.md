@@ -120,7 +120,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/changed/` | Pure helpers for the "what changed" facts a job records. |
 | `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read or wait on time. A test supplies its own and fires timers itself. |
 | `internal/owned/` | `Group`, the one way the daemon's packages start a goroutine: the group starts it and `Wait` joins it, so nothing outlives what started it. |
-| `internal/gitrepo/` | `Git`: a revision resolved to a full commit id, in the caller's checkout. `Resolver`: the repository a directory belongs to, through the common git directory, so every linked worktree of a repository resolves to one path. |
+| `internal/gitrepo/` | `Git`: a revision resolved to a full commit id, in the caller's checkout; `CallerCommit` decides which worktree that is. `Resolver`: the repository a directory belongs to, through the common git directory, so every linked worktree of a repository resolves to one path. |
 | `internal/runtimedir/` | The per-user runtime directory (socket, locks, supervisor directories), its safety checks, the advisory file locks, and where the machine's directory of leases is (`ResolveLeases`). |
 | `internal/environment/fakeenv/` | A `Fake` `Environment`, a real implementation that runs scripted commands in memory. Tests only. |
 | `internal/environment/docker/` | The `docker` `Environment`: builds the task's Dockerfile into an image cached by content, runs a job's commands in one container over a clean checkout as the invoking user, and removes the container on every path. It decides over an `Engine`, the narrow interface to Docker. |
@@ -214,7 +214,7 @@ default to the environment variables shown:
 
 | Flag | Environment | Meaning |
 | --- | --- | --- |
-| `--repo` | `VIBESYS_REPO` | A directory in the git repository. Defaults to the current directory. The daemon resolves it, so every linked worktree of a repository, and every directory in one, reaches the same stores. |
+| `--repo` | `VIBESYS_REPO` | A directory in the git repository. Defaults to the current directory. The daemon resolves it, so every linked worktree of a repository, and every directory in one, reaches the same stores. A revision given to a command, such as `HEAD` or `HEAD~1`, is read in the worktree the command runs in when that is a worktree of this repository, and in this directory otherwise. |
 | `--task` | `VIBESYS_TASK` | The task the jobs belong to. Required. |
 | `--run` | `VIBESYS_RUN` | The id of the optimization run. |
 | `--harness` | `VIBESYS_HARNESS` | The agent harness, such as `claude-code`. |

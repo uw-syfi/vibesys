@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 )
 
 // usageError is a mistake in the arguments: the exit code is 2 and the message names it.
@@ -89,6 +91,15 @@ func (c *common) callContext(d deps) (*cliv1.CallContext, error) {
 		dir = filepath.Join(d.cwd, dir)
 	}
 	return &cliv1.CallContext{Repository: filepath.Clean(dir), Task: c.task, RunId: c.run, Harness: c.harness, Agent: c.agent}, nil
+}
+
+// commit returns the full commit that revision names for this command: read in the worktree the
+// command runs in when that is a worktree of the context's repository, so that HEAD is the caller's
+// own HEAD, and in the context's repository otherwise (gitrepo.CallerCommit). Every command that
+// takes a commit resolves it here, and sends the full commit id it returns.
+func (d deps) commit(ctx context.Context, callCtx *cliv1.CallContext, revision string) (string, error) {
+	commit, err := gitrepo.CallerCommit(ctx, d.git, callCtx.GetRepository(), d.cwd, revision)
+	return string(commit), err
 }
 
 // enumNames maps the names a user writes to a contract enum's values: each value's name, lower

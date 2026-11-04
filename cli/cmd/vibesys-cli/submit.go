@@ -82,11 +82,11 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
-	commit, err := d.git.Commit(ctx, callCtx.GetRepository(), positional[0])
+	commit, err := d.commit(ctx, callCtx, positional[0])
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
-	spec := &cliv1.JobSpec{Commit: string(commit), Environment: envKind, Placement: *place}
+	spec := &cliv1.JobSpec{Commit: commit, Environment: envKind, Placement: *place}
 	if kind == "check" {
 		spec.Settings = &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}
 	} else {
@@ -137,7 +137,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
-	commit, err := d.git.Commit(ctx, callCtx.GetRepository(), positional[0])
+	commit, err := d.commit(ctx, callCtx, positional[0])
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
@@ -163,7 +163,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{
 		Context: callCtx,
 		Spec: &cliv1.JobSpec{
-			Commit: string(commit), Environment: kind, Placement: *place,
+			Commit: commit, Environment: kind, Placement: *place,
 			Settings: &cliv1.JobSpec_Command{Command: settings},
 		},
 		NoCache: *noCache, Note: *note, Plan: uint32(*plan),

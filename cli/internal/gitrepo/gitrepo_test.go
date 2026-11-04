@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -137,7 +138,7 @@ func TestFakeResolvesLikeGit(t *testing.T) {
 	g := gitrepo.NewFake()
 	g.AddRepo("/work/repo", map[string]core.Commit{"HEAD": full})
 	ctx := context.Background()
-	g.AddWorktree("/work/linked", "/work/repo")
+	g.AddWorktree("/work/linked", "/work/repo", nil)
 	for _, dir := range []string{"/work/repo", "/work/repo/sub/dir", "/work/linked", "/work/linked/x"} {
 		if got, err := g.Resolve(ctx, dir); err != nil || got != "/work/repo" {
 			t.Fatalf("Resolve(%s) = %q, %v", dir, got, err)
@@ -156,4 +157,92 @@ func TestFakeResolvesLikeGit(t *testing.T) {
 	if _, err := g.Commit(ctx, "/work/repo", "nope"); err == nil {
 		t.Fatal("an unknown revision resolved")
 	}
+}
+
+// callerCase is one revision a caller names and the commit it must resolve to.
+type callerCase struct {
+	cwd, revision string
+	want          core.Commit
+}
+
+// checkCallerCommits holds CallerCommit, with repository naming the main checkout, to cases.
+func checkCallerCommits(t *testing.T, g gitrepo.Revisions, repository string, cases []callerCase) {
+	t.Helper()
+	for _, c := range cases {
+		got, err := gitrepo.CallerCommit(context.Background(), g, repository, c.cwd, c.revision)
+		if err != nil || got != c.want {
+			t.Errorf("CallerCommit(%s, cwd %s, %q) = %q, %v; want %q", repository, c.cwd, c.revision, got, err, c.want)
+		}
+	}
+}
+
+// A caller in a linked worktree of the repository it names reads HEAD and what is relative to it
+// as that worktree has them, from any directory in it; a full commit and a branch read the same
+// anywhere; and a caller outside the repository reads the repository's own checkout.
+func TestSystemCallerCommitReadsHEADInTheCallersWorktree(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(base, "main")
+	if err := os.Mkdir(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo, "init", "-q", "-b", "main")
+	gitIn(t, repo, "commit", "-q", "--allow-empty", "-m", "first")
+	first := core.Commit(gitIn(t, repo, "rev-parse", "HEAD")[:40])
+	gitIn(t, repo, "commit", "-q", "--allow-empty", "-m", "main second")
+	mainHead := core.Commit(gitIn(t, repo, "rev-parse", "HEAD")[:40])
+	linked := filepath.Join(base, "linked")
+	gitIn(t, repo, "worktree", "add", "-q", "-b", "feature", linked, string(first))
+	gitIn(t, linked, "commit", "-q", "--allow-empty", "-m", "feature second")
+	linkedHead := core.Commit(gitIn(t, linked, "rev-parse", "HEAD")[:40])
+	nested := filepath.Join(linked, "deep")
+	if err := os.Mkdir(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	other := filepath.Join(base, "other")
+	if err := os.Mkdir(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, other, "init", "-q", "-b", "main")
+	gitIn(t, other, "commit", "-q", "--allow-empty", "-m", "unrelated")
+	outside := t.TempDir()
+
+	checkCallerCommits(t, gitrepo.System{}, repo, []callerCase{
+		{linked, "HEAD", linkedHead},
+		{nested, "HEAD", linkedHead},
+		{linked, "@", linkedHead},
+		{linked, "HEAD~1", first},
+		{linked, string(mainHead), mainHead},
+		{linked, "main", mainHead},
+		{linked, "feature", linkedHead},
+		{repo, "HEAD", mainHead},
+		{repo, "HEAD~1", first},
+		{outside, "HEAD", mainHead},
+		{other, "HEAD", mainHead},
+		{"", "HEAD", mainHead},
+	})
+}
+
+// The Fake reads a caller's revisions as git does, given a worktree's own HEAD.
+func TestFakeCallerCommitReadsHEADInTheCallersWorktree(t *testing.T) {
+	first, mainHead, linkedHead := core.Commit(strings.Repeat("1", 40)), core.Commit(strings.Repeat("2", 40)), core.Commit(strings.Repeat("3", 40))
+	g := gitrepo.NewFake()
+	g.AddRepo("/work/repo", map[string]core.Commit{"HEAD": mainHead, "@": mainHead, "HEAD~1": first, "main": mainHead, "feature": linkedHead})
+	g.AddWorktree("/work/linked", "/work/repo", map[string]core.Commit{"HEAD": linkedHead, "@": linkedHead, "HEAD~1": first})
+	g.AddRepo("/work/other", map[string]core.Commit{"HEAD": first})
+	checkCallerCommits(t, g, "/work/repo", []callerCase{
+		{"/work/linked", "HEAD", linkedHead},
+		{"/work/linked/deep", "HEAD", linkedHead},
+		{"/work/linked", "@", linkedHead},
+		{"/work/linked", "HEAD~1", first},
+		{"/work/linked", string(mainHead), mainHead},
+		{"/work/linked", "main", mainHead},
+		{"/work/linked", "feature", linkedHead},
+		{"/work/repo", "HEAD", mainHead},
+		{"/elsewhere", "HEAD", mainHead},
+		{"/work/other", "HEAD", mainHead},
+		{"", "HEAD", mainHead},
+	})
 }

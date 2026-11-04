@@ -1,6 +1,6 @@
 // Package gitrepo answers what is asked of git outside a job. The command line asks which full
 // commit a revision names: the daemon takes full commits only, so that resolving happens in the
-// caller's checkout, where the revision means something. The daemon asks which repository a
+// caller's checkout, where the revision means something (CallerCommit). The daemon asks which repository a
 // caller's directory belongs to (Resolver), and reads and moves result branches (Branches).
 package gitrepo
 
@@ -35,13 +35,40 @@ type Resolver interface {
 	Resolve(ctx context.Context, dir string) (core.Repository, error)
 }
 
+// Revisions is what CallerCommit asks: which commit a revision names in a work tree, and which
+// repository a directory belongs to.
+type Revisions interface {
+	Git
+	Resolver
+}
+
+// CallerCommit returns the full commit that revision names for a caller who runs in cwd and names
+// repository, as the command line's --repo does. It is the one place that decides which work tree
+// reads a caller's revisions.
+//
+// HEAD, and every revision relative to it, is each work tree's own, while branches and commits are
+// shared by every linked worktree of a repository. So a revision is read in the work tree that
+// contains cwd when that is a worktree of repository (both resolve to one repository), and in
+// repository otherwise. An agent working in its own linked worktree, with repository naming the
+// main checkout, so names its own HEAD and not the main checkout's. When cwd is in no repository,
+// or in another one, the revision is read in repository, as it would be without cwd.
+func CallerCommit(ctx context.Context, g Revisions, repository, cwd, revision string) (core.Commit, error) {
+	dir := repository
+	if cwd != "" && cwd != repository {
+		ofRepository, err := g.Resolve(ctx, repository)
+		if err == nil {
+			if ofCwd, err := g.Resolve(ctx, cwd); err == nil && ofCwd == ofRepository {
+				dir = cwd
+			}
+		}
+	}
+	return g.Commit(ctx, dir, revision)
+}
+
 // System is Git, Resolver and Branches over the git program on the path.
 type System struct{}
 
-var (
-	_ Git      = System{}
-	_ Resolver = System{}
-)
+var _ Revisions = System{}
 
 // Resolve implements Resolver through the common git directory, which every linked worktree
 // shares. A common directory called .git is the main worktree's, and the repository is the

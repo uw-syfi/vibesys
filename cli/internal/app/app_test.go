@@ -202,7 +202,7 @@ func TestCancelsFromManyCallersAllSeeTheOneEnd(t *testing.T) {
 func TestACallerResolvesToItsRepositoryFromAnyWorktree(t *testing.T) {
 	w := newWorld(t)
 	w.git.AddRepo("/src/kv", nil)
-	w.git.AddWorktree("/work/kv-feature", "/src/kv")
+	w.git.AddWorktree("/work/kv-feature", "/src/kv", nil)
 	a := w.newApp()
 	want := scopeAt("/src/kv", "task")
 	for _, dir := range []string{"/src/kv", "/src/kv/sub/dir", "/work/kv-feature", "/work/kv-feature/sub", "/work/kv-feature/../kv-feature/"} {
