@@ -186,3 +186,24 @@ func TestRealADaemonThatFailsHasSaidWhyWhenItsPipeCloses(t *testing.T) {
 	}
 	_ = cmd.Wait()
 }
+
+// A daemon that no longer answers, which a stop cannot end, is gone once the test's machine is swept,
+// as the cleanup of every test of a machine does, with the supervisors and clients of its root.
+func TestRealSweepEndsADaemonThatNoLongerAnswers(t *testing.T) {
+	m := newMachine(t)
+	env := m.daemonAt("rt-wedged", true)
+	if r := m.cliWith(env, "daemon", "ensure"); r.code != exitOK {
+		t.Fatalf("the daemon: %+v", r)
+	}
+	pid := m.pidOf(env)
+	if err := syscall.Kill(pid, syscall.SIGSTOP); err != nil {
+		t.Fatal(err)
+	}
+	if !alive(pid) {
+		t.Fatalf("the daemon %d is not there to be swept", pid)
+	}
+	m.sweep()
+	if alive(pid) {
+		t.Fatalf("daemon %d outlived the sweep of its machine", pid)
+	}
+}
