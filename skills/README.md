@@ -39,9 +39,10 @@ holds developer skills in `.agents/skills/` that `npx skills add uw-syfi/vibesys
 `--list` shows what a command would install.
 
 The optimize loop needs a harness with subagents and background commands, git, and `vibesys-cli`,
-the standalone binary that measures, compares and promotes commits and stores the plans. Install
-it with `curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/cli/install.sh | sh`;
-the `optimize` skill stops with that instruction when `vibesys-cli --version` fails. The `commit`
+the standalone binary that measures, compares and promotes commits and stores the plans.
+The `create-task` and `optimize` skills reuse an existing CLI or ask your permission to
+install it from the official GitHub releases, verify it, and continue. They select an absolute
+`VIBESYS_CLI` path for the session without editing your shell profile. The `commit`
 skill's message checker also needs Python 3.10 or newer. Nothing needs the VibeSys Python package.
 
 | Harness | Domain skills | `optimize` loop |
