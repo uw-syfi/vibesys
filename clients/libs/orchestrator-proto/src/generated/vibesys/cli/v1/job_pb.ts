@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/job.proto.
  */
 export const file_vibesys_cli_v1_job: GenFile = /*@__PURE__*/
-  fileDesc("Chh2aWJlc3lzL2NsaS92MS9qb2IucHJvdG8SDnZpYmVzeXMuY2xpLnYxIg8KDUNoZWNrU2V0dGluZ3MiKgoLU2VydmljZVNwZWMSDAoEYXJndhgBIAMoCRINCgVwcm9iZRgCIAMoCSJ5Cg9Db21tYW5kU2V0dGluZ3MSDAoEYXJndhgBIAMoCRIsCgdzZXJ2aWNlGAIgASgLMhsudmliZXN5cy5jbGkudjEuU2VydmljZVNwZWMSKgoHdGltZW91dBgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiIzCg9NZWFzdXJlU2V0dGluZ3MSDwoHc2FtcGxlcxgBIAEoDRIPCgdyZWNoZWNrGAIgASgIIvMBCgdKb2JTcGVjEg4KBmNvbW1pdBgBIAEoCRI0CgtlbnZpcm9ubWVudBgCIAEoDjIfLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50S2luZBIuCgVjaGVjaxgKIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkNoZWNrU2V0dGluZ3NIABIyCgdjb21tYW5kGAsgASgLMh8udmliZXN5cy5jbGkudjEuQ29tbWFuZFNldHRpbmdzSAASMgoHbWVhc3VyZRgMIAEoCzIfLnZpYmVzeXMuY2xpLnYxLk1lYXN1cmVTZXR0aW5nc0gAQgoKCHNldHRpbmdzIksKBE5vdGUSDAoEdGV4dBgBIAEoCRImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFYWdlbnQYAyABKAkieQoJU3VibWl0dGVyEg4KBnJ1bl9pZBgBIAEoCRINCgVhZ2VudBgCIAEoCRJNCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCJbpIIsgBAbIBHCINCP+C0f+vBxD/k+vcAzILCICSuMOY/v///wEi2QEKB0F0dGVtcHQSLgoKc3RhcnRlZF9hdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjQKEGN1dF9iZWZvcmVfc3RhcnQYAyABKA4yGC52aWJlc3lzLmNsaS52MS5DdXRDYXVzZUgAEjMKD2N1dF9taWRfY29tbWFuZBgEIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkN1dENhdXNlSABCBQoDZW5kIsgECgNKb2ISCgoCaWQYASABKAkSJQoEc3BlYxgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkpvYlNwZWMSJwoFc3RhdGUYAyABKA4yGC52aWJlc3lzLmNsaS52MS5Kb2JTdGF0ZRILCgNrZXkYBCABKAkSOwoLZW52aXJvbm1lbnQYBSABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50EiMKBW5vdGVzGAYgAygLMhQudmliZXN5cy5jbGkudjEuTm90ZRINCgVwbGFucxgHIAMoDRIwCgxzdWJtaXR0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1jYW5jZWxfcmVhc29uGAsgASgJEhYKCWV4aXRfY29kZRgMIAEoBUgAiAEBEhUKDXJlc3VsdF9qb2JfaWQYDSABKAkSFAoMY2hlY2tfam9iX2lkGA4gASgJEhAKCG5vX2NhY2hlGA8gASgIEikKCGF0dGVtcHRzGBAgAygLMhcudmliZXN5cy5jbGkudjEuQXR0ZW1wdBItCgpzdWJtaXR0ZXJzGBEgAygLMhkudmliZXN5cy5jbGkudjEuU3VibWl0dGVyQgwKCl9leGl0X2NvZGUqYwoHSm9iS2luZBIYChRKT0JfS0lORF9VTlNQRUNJRklFRBAAEhIKDkpPQl9LSU5EX0NIRUNLEAESFAoQSk9CX0tJTkRfQ09NTUFORBACEhQKEEpPQl9LSU5EX01FQVNVUkUQAyquAQoISm9iU3RhdGUSGQoVSk9CX1NUQVRFX1VOU1BFQ0lGSUVEEAASFAoQSk9CX1NUQVRFX1FVRVVFRBABEhUKEUpPQl9TVEFURV9SVU5OSU5HEAISFwoTSk9CX1NUQVRFX1NVQ0NFRURFRBADEhQKEEpPQl9TVEFURV9GQUlMRUQQBBIXChNKT0JfU1RBVEVfQ0FOQ0VMTEVEEAUSEgoOSk9CX1NUQVRFX0xPU1QQBipcCghDdXRDYXVzZRIZChVDVVRfQ0FVU0VfVU5TUEVDSUZJRUQQABIdChlDVVRfQ0FVU0VfU1VQRVJWSVNPUl9ESUVEEAESFgoSQ1VUX0NBVVNFX1JFQk9PVEVEEAJCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
+  fileDesc("Chh2aWJlc3lzL2NsaS92MS9qb2IucHJvdG8SDnZpYmVzeXMuY2xpLnYxIg8KDUNoZWNrU2V0dGluZ3MiKgoLU2VydmljZVNwZWMSDAoEYXJndhgBIAMoCRINCgVwcm9iZRgCIAMoCSJ5Cg9Db21tYW5kU2V0dGluZ3MSDAoEYXJndhgBIAMoCRIsCgdzZXJ2aWNlGAIgASgLMhsudmliZXN5cy5jbGkudjEuU2VydmljZVNwZWMSKgoHdGltZW91dBgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiIzCg9NZWFzdXJlU2V0dGluZ3MSDwoHc2FtcGxlcxgBIAEoDRIPCgdyZWNoZWNrGAIgASgIIvMBCgdKb2JTcGVjEg4KBmNvbW1pdBgBIAEoCRI0CgtlbnZpcm9ubWVudBgCIAEoDjIfLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50S2luZBIuCgVjaGVjaxgKIAEoCzIdLnZpYmVzeXMuY2xpLnYxLkNoZWNrU2V0dGluZ3NIABIyCgdjb21tYW5kGAsgASgLMh8udmliZXN5cy5jbGkudjEuQ29tbWFuZFNldHRpbmdzSAASMgoHbWVhc3VyZRgMIAEoCzIfLnZpYmVzeXMuY2xpLnYxLk1lYXN1cmVTZXR0aW5nc0gAQgoKCHNldHRpbmdzIksKBE5vdGUSDAoEdGV4dBgBIAEoCRImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFYWdlbnQYAyABKAkieQoJU3VibWl0dGVyEg4KBnJ1bl9pZBgBIAEoCRINCgVhZ2VudBgCIAEoCRJNCgJhdBgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCJbpIIsgBAbIBHCINCP+C0f+vBxD/k+vcAzILCICSuMOY/v///wEi2QEKB0F0dGVtcHQSLgoKc3RhcnRlZF9hdBgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjQKEGN1dF9iZWZvcmVfc3RhcnQYAyABKA4yGC52aWJlc3lzLmNsaS52MS5DdXRDYXVzZUgAEjMKD2N1dF9taWRfY29tbWFuZBgEIAEoDjIYLnZpYmVzeXMuY2xpLnYxLkN1dENhdXNlSABCBQoDZW5kIsgECgNKb2ISCgoCaWQYASABKAkSJQoEc3BlYxgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLkpvYlNwZWMSJwoFc3RhdGUYAyABKA4yGC52aWJlc3lzLmNsaS52MS5Kb2JTdGF0ZRILCgNrZXkYBCABKAkSOwoLZW52aXJvbm1lbnQYBSABKAsyJi52aWJlc3lzLmNsaS52MS5FbnZpcm9ubWVudEZpbmdlcnByaW50EiMKBW5vdGVzGAYgAygLMhQudmliZXN5cy5jbGkudjEuTm90ZRINCgVwbGFucxgHIAMoDRIwCgxzdWJtaXR0ZWRfYXQYCCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnN0YXJ0ZWRfYXQYCSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi8KC2ZpbmlzaGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIVCg1jYW5jZWxfcmVhc29uGAsgASgJEhYKCWV4aXRfY29kZRgMIAEoBUgAiAEBEhUKDXJlc3VsdF9qb2JfaWQYDSABKAkSFAoMY2hlY2tfam9iX2lkGA4gASgJEhAKCG5vX2NhY2hlGA8gASgIEikKCGF0dGVtcHRzGBAgAygLMhcudmliZXN5cy5jbGkudjEuQXR0ZW1wdBItCgpzdWJtaXR0ZXJzGBEgAygLMhkudmliZXN5cy5jbGkudjEuU3VibWl0dGVyQgwKCl9leGl0X2NvZGUiagoKV2FpdEhvbGRlchIXCgZqb2JfaWQYASABKAlCB7pIBHICEAESDAoEdGFzaxgCIAEoCRIlCgRraW5kGAMgASgOMhcudmliZXN5cy5jbGkudjEuSm9iS2luZBIOCgZydW5faWQYBCABKAki8gIKCldhaXRSZWFzb24SMgoEa2luZBgBIAEoDjIYLnZpYmVzeXMuY2xpLnYxLldhaXRLaW5kQgq6SAeCAQQQASAAEhAKCHJlc291cmNlGAIgASgJEisKB2hvbGRlcnMYAyADKAsyGi52aWJlc3lzLmNsaS52MS5XYWl0SG9sZGVyEg4KBmRldGFpbBgEIAEoCTrgAbpI3AEa2QEKEXdhaXRfcmVhc29uLnNoYXBlElxhIHdhaXQgb24gYSByZXNvdXJjZSBuYW1lcyB0aGUgcmVzb3VyY2UgYW5kIGl0cyBob2xkZXJzLCBhbmQgYSBoZWxkIG9yIHRyb3VibGUgd2FpdCBzYXlzIHdoeRpmdGhpcy5raW5kID09IDUgfHwgdGhpcy5raW5kID09IDYgPyB0aGlzLmRldGFpbCAhPSAnJyA6ICh0aGlzLnJlc291cmNlICE9ICcnICYmIHNpemUodGhpcy5ob2xkZXJzKSA+IDApIlYKB0pvYldhaXQSFwoGam9iX2lkGAEgASgJQge6SARyAhABEjIKBnJlYXNvbhgCIAEoCzIaLnZpYmVzeXMuY2xpLnYxLldhaXRSZWFzb25CBrpIA8gBASpjCgdKb2JLaW5kEhgKFEpPQl9LSU5EX1VOU1BFQ0lGSUVEEAASEgoOSk9CX0tJTkRfQ0hFQ0sQARIUChBKT0JfS0lORF9DT01NQU5EEAISFAoQSk9CX0tJTkRfTUVBU1VSRRADKq4BCghKb2JTdGF0ZRIZChVKT0JfU1RBVEVfVU5TUEVDSUZJRUQQABIUChBKT0JfU1RBVEVfUVVFVUVEEAESFQoRSk9CX1NUQVRFX1JVTk5JTkcQAhIXChNKT0JfU1RBVEVfU1VDQ0VFREVEEAMSFAoQSk9CX1NUQVRFX0ZBSUxFRBAEEhcKE0pPQl9TVEFURV9DQU5DRUxMRUQQBRISCg5KT0JfU1RBVEVfTE9TVBAGKlwKCEN1dENhdXNlEhkKFUNVVF9DQVVTRV9VTlNQRUNJRklFRBAAEh0KGUNVVF9DQVVTRV9TVVBFUlZJU09SX0RJRUQQARIWChJDVVRfQ0FVU0VfUkVCT09URUQQAiqwAQoIV2FpdEtpbmQSGQoVV0FJVF9LSU5EX1VOU1BFQ0lGSUVEEAASEgoOV0FJVF9LSU5EX0ZVTEwQARIeChpXQUlUX0tJTkRfSEVMRF9FWENMVVNJVkVMWRACEhQKEFdBSVRfS0lORF9JTl9VU0UQAxIUChBXQUlUX0tJTkRfQkVISU5EEAQSEgoOV0FJVF9LSU5EX0hFTEQQBRIVChFXQUlUX0tJTkRfVFJPVUJMRRAGQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_duration, file_google_protobuf_timestamp, file_vibesys_cli_v1_environment]);
 
 /**
  * @generated from message vibesys.cli.v1.CheckSettings
@@ -400,6 +400,110 @@ export const JobSchema: GenMessage<Job> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_job, 8);
 
 /**
+ * WaitHolder is a job that stands in a queued job's way.
+ *
+ * @generated from message vibesys.cli.v1.WaitHolder
+ */
+export type WaitHolder = Message<"vibesys.cli.v1.WaitHolder"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * The task whose store the job is in, which may be another task than the waiting job's. Empty
+   * when the daemon does not know it.
+   *
+   * @generated from field: string task = 2;
+   */
+  task: string;
+
+  /**
+   * @generated from field: vibesys.cli.v1.JobKind kind = 3;
+   */
+  kind: JobKind;
+
+  /**
+   * The run that submitted the job first. Empty when it named none.
+   *
+   * @generated from field: string run_id = 4;
+   */
+  runId: string;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.WaitHolder.
+ * Use `create(WaitHolderSchema)` to create a new message.
+ */
+export const WaitHolderSchema: GenMessage<WaitHolder> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_job, 9);
+
+/**
+ * WaitReason says why a queued job has not started, as the daemon's scheduler decided at its last
+ * change. The daemon derives it from what it holds; no store keeps it.
+ *
+ * @generated from message vibesys.cli.v1.WaitReason
+ */
+export type WaitReason = Message<"vibesys.cli.v1.WaitReason"> & {
+  /**
+   * 5 is HELD and 6 is TROUBLE in the rule above.
+   *
+   * @generated from field: vibesys.cli.v1.WaitKind kind = 1;
+   */
+  kind: WaitKind;
+
+  /**
+   * The resource the job waits for, such as placement:default.
+   *
+   * @generated from field: string resource = 2;
+   */
+  resource: string;
+
+  /**
+   * The jobs that hold the resource, or for BEHIND the earlier jobs that wait for it.
+   *
+   * @generated from field: repeated vibesys.cli.v1.WaitHolder holders = 3;
+   */
+  holders: WaitHolder[];
+
+  /**
+   * @generated from field: string detail = 4;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.WaitReason.
+ * Use `create(WaitReasonSchema)` to create a new message.
+ */
+export const WaitReasonSchema: GenMessage<WaitReason> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_job, 10);
+
+/**
+ * JobWait is why one queued job waits.
+ *
+ * @generated from message vibesys.cli.v1.JobWait
+ */
+export type JobWait = Message<"vibesys.cli.v1.JobWait"> & {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId: string;
+
+  /**
+   * @generated from field: vibesys.cli.v1.WaitReason reason = 2;
+   */
+  reason?: WaitReason | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.JobWait.
+ * Use `create(JobWaitSchema)` to create a new message.
+ */
+export const JobWaitSchema: GenMessage<JobWait> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_job, 11);
+
+/**
  * @generated from enum vibesys.cli.v1.JobKind
  */
 export enum JobKind {
@@ -519,4 +623,65 @@ export enum CutCause {
  */
 export const CutCauseSchema: GenEnum<CutCause> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_job, 2);
+
+/**
+ * WaitKind is why a queued job has not started.
+ *
+ * @generated from enum vibesys.cli.v1.WaitKind
+ */
+export enum WaitKind {
+  /**
+   * @generated from enum value: WAIT_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * A resource has no room left for the job's claim: its holders use all of it.
+   *
+   * @generated from enum value: WAIT_KIND_FULL = 1;
+   */
+  FULL = 1,
+
+  /**
+   * A holder claims the resource for itself alone.
+   *
+   * @generated from enum value: WAIT_KIND_HELD_EXCLUSIVELY = 2;
+   */
+  HELD_EXCLUSIVELY = 2,
+
+  /**
+   * The job claims the resource for itself alone, and holders use it.
+   *
+   * @generated from enum value: WAIT_KIND_IN_USE = 3;
+   */
+  IN_USE = 3,
+
+  /**
+   * An earlier job waits for the resource and keeps its turn; the holders are those jobs.
+   *
+   * @generated from enum value: WAIT_KIND_BEHIND = 4;
+   */
+  BEHIND = 4,
+
+  /**
+   * A rule of the daemon's scheduler holds the job back; the detail says which.
+   *
+   * @generated from enum value: WAIT_KIND_HELD = 5;
+   */
+  HELD = 5,
+
+  /**
+   * The job waits for a job's or its store's trouble to pass, or can never start; the detail says
+   * why. A wait on the job ends with this as its failure.
+   *
+   * @generated from enum value: WAIT_KIND_TROUBLE = 6;
+   */
+  TROUBLE = 6,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.WaitKind.
+ */
+export const WaitKindSchema: GenEnum<WaitKind> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_job, 3);
 
