@@ -107,8 +107,9 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
   (`current.result.measure.value`), never one you computed from samples. If `result` exits 1, there
   is none: submit `vibesys-cli submit measure <head SHA> --no-cache` and report after that lands.
   Before the first promotion the headline is the `measure.value` of `vibesys-cli show <base> --json`.
-- Workers may submit their own jobs. The daemon may run several at once, but a measure job holds
-  its placement alone, so measures still queue behind each other and behind running checks.
+- Workers may submit their own jobs. The daemon runs as many at once as its capacity allows, and
+  a measure job runs alone where it lands, so a measure may queue behind other measures and
+  running checks when capacity is short.
   `vibesys-cli jobs` says under each queued job why it waits; a queued job with a reason is
   waiting its turn, not stuck. Give each brief a budget in samples and jobs, and look at
   `vibesys-cli jobs` before you fund more.
