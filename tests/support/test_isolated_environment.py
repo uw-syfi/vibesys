@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from tests.support import sharding
+from tests.support import run_test_command, sharding
 from tests.support.child_pytest import BARE_PYTEST, child_pythonpath, root_conftest_plugins
 
 pytest_plugins = ["pytester"]
@@ -226,3 +226,37 @@ def test_another_item(tmp_path_factory):
         assert all(not Path(value).exists() for value in values)
     assert list(shared.iterdir()) == [sentinel]
     assert sentinel.read_text(encoding="utf-8") == "unchanged"
+
+
+@pytest.mark.parametrize("private_home", [False, True], ids=["suite-home", "test-home"])
+def test_git_a_test_starts_runs_no_background_maintenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, private_home: bool
+) -> None:
+    """A test's commit starts no maintenance that could prune its next worktree mid-add.
+
+    Detached maintenance after ``git commit`` deleted ``.git/worktrees/<name>``
+    while a test's ``git worktree add`` was still creating it.
+    """
+    if private_home:
+        (tmp_path / "home").mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    trace = tmp_path / "git-trace2.json"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    repository = tmp_path / "repository"
+    run_test_command(["git", "init", "-q", str(repository)], check=True)
+    identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
+    for message in ("first", "second"):
+        run_test_command(
+            ["git", *identity, "commit", "-q", "--allow-empty", "-m", message],
+            cwd=repository,
+            check=True,
+        )
+    run_test_command(
+        ["git", "worktree", "add", "-q", "--detach", str(tmp_path / "worktree")],
+        cwd=repository,
+        check=True,
+    )
+
+    events = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    children = [event["argv"] for event in events if event.get("event") == "child_start"]
+    assert [argv for argv in children if {"maintenance", "gc"} & set(argv)] == []

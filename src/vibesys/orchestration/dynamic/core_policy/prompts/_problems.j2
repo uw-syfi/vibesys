@@ -30,7 +30,7 @@ a continued hypothesis builds on its own candidate; use null
 {%- elif item.code.value == 'revision-not-offered' -%}
 {{ quoted(item.revision) }} is not an offered revision of {{ quoted(item.subject) }}; usable options: {{ alternatives(item.usable) }}
 {%- elif item.code.value == 'parent-not-buildable' -%}
-{{ quoted(item.subject) }} is not a buildable candidate; name one listed under buildable candidates, or use null for the base revision
+{{ quoted(item.subject) }} is not a buildable candidate; name one listed under buildable candidates (for a merge, its latest verified candidate), or use null for the main revision
 {%- elif item.code.value == 'profile-not-offered' -%}
 this run cannot produce trusted profile evidence; schedule only implement workstreams
 {%- elif item.code.value == 'profile-fields-unsupported' -%}
@@ -45,6 +45,32 @@ duplicate strategy update for hypothesis {{ quoted(item.subject) }}
 strategy update names unknown hypothesis {{ quoted(item.subject) }}
 {%- elif item.code.value == 'update-incomplete' -%}
 cannot update incomplete hypothesis {{ quoted(item.subject) }}
+{%- elif item.code.value == 'outside-plan' -%}
+{{ quoted(item.subject) }} is not a failed step of the task's plan; until every step is done, continue only failed steps
+{%- elif item.code.value == 'merge-id-used' -%}
+merge ID {{ quoted(item.subject) }} was already used; choose a new ID
+{%- elif item.code.value == 'merge-in-flight' -%}
+another merge is running or scheduled; schedule one merge at a time, after the running one finishes
+{%- elif item.code.value == 'merge-candidate-repeated' -%}
+{{ quoted(item.subject) }} is listed twice in this merge; list each candidate once
+{%- elif item.code.value == 'merge-candidate-is-main' -%}
+{{ quoted(item.subject) }} is a merged main, already part of main; merge only candidates listed as mergeable
+{%- elif item.code.value == 'merge-candidate-merged' -%}
+the latest candidate of {{ quoted(item.subject) }} is already merged into main; merge only candidates listed as mergeable
+{%- elif item.code.value == 'merge-candidate-not-better' -%}
+the latest candidate of {{ quoted(item.subject) }} does not beat main's latest measurement; merge only candidates listed as mergeable
+{%- elif item.code.value == 'merge-baseline-pending' -%}
+the input's measurement has not landed, so main has no measurement the latest candidate of {{ quoted(item.subject) }} could be shown to beat; schedule no merge until it lands
+{%- elif item.code.value == 'merge-uncheckable' -%}
+this task has no trusted accuracy check, so a merged commit could never become main; schedule no merge
+{%- elif item.code.value == 'combine-parent-repeated' -%}
+{{ quoted(item.subject) }} is named twice in this combine; name each part's hypothesis once, at one exact offered revision
+{%- elif item.code.value == 'expectation-unknown' -%}
+{{ quoted(item.subject) }} is not a workstream of this reply; name only workstreams this reply schedules
+{%- elif item.code.value == 'ranking-unknown' -%}
+{{ quoted(item.subject) }} is not a hypothesis or profile of this run; rank only IDs from the history or this reply
+{%- elif item.code.value == 'ranking-duplicate' -%}
+{{ quoted(item.subject) }} is ranked twice; list each ID once
 {%- else -%}
 {{ item.code.value }}
 {%- endif %}

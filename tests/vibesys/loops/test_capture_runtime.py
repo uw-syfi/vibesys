@@ -42,8 +42,7 @@ from tests.vibesys.loops.profiler_process_world import (
     serves,
 )
 
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -80,7 +79,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
 # its tests use. This file needs only a private instance under a name nothing else claims.
 cr = _load_module("_test_capture_runtime_standalone", _MODULE_PATH)
 
-_THREADS = OsThreads()
+_THREADS = SimThreads()
 
 TARGET = "serve-forever"
 READY = "check-ready"

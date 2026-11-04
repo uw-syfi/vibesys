@@ -20,6 +20,7 @@ a backend.
 
 from __future__ import annotations
 
+import shlex
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -35,14 +36,15 @@ from vs_agent.host_resource_declarations import (
     prepare_provider_state,
 )
 from vs_agent.provider_policy import SHIPPED_PROVIDERS
+from vs_agent.provider_profiles import launch_shell_environment
 from vs_agent.session_environment import (
     dropped_launcher_names,
     session_environment,
     validate_env_names,
 )
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
-from vs_sandbox.api import build_host_sandbox
-from vs_sim.api import OsThreads
+from vs_sandbox.api import STEP_TAG_ENV, build_host_sandbox, step_shell_argv
+from vs_sim.api import CloseOnce, NothingLeft, Released
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -82,16 +84,26 @@ of seconds to attach, and a false negative here ends the run (see
 the host one.
 """
 
-TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = (30.0, 60.0, 120.0, 240.0, 480.0)
+TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = ()
 """Waits in seconds before each retry of a turn that failed on a transient provider error.
 
 agentshim classifies the failure (``agentshim.FailureKind.TRANSIENT``: an
 overload, a rate limit, or a server error) and its ``Session`` waits these
-delays (``agentshim.RetryPolicy``). The provider CLI has already retried inside
-the turn before it exits, so by then the outage has lasted minutes; these waits
-add about fifteen more before the error reaches the run, which otherwise ends
-on the first one.
+delays (``agentshim.RetryPolicy``). None: the provider CLI has already retried
+inside the turn before it exits, and the failure then reaches the client as a
+capacity limit (``QuotaCondition.UNAVAILABLE`` or ``RATE_LIMITED``) after that one
+attempt. The run's capacity gate waits out an outage with its own backoff, whose
+first wait (60 s) replaces the retry here. Only the gate's waits are reported to
+core and kept off the turn's limit, so every retry here hides a whole CLI attempt
+(3 to 4 min on S179) from it, and a turn whose outage starts with less own time
+left than that is cut before the gate can hold it (S179: five retries hid about
+fifteen minutes of every send; one 30 s retry still hid two attempts). A client no
+run holds resends a transient stop once at the client instead, through its own gate
+(:mod:`vs_agent.ungated_retry`), which a run's gate replaces.
 """
+
+LAUNCH_SHELL_ENVIRONMENT: Callable[[], Mapping[str, str]] = launch_shell_environment
+"""The interactive login shell's environment, which agentshim reads once per process."""
 
 
 def supported_providers() -> list[str]:
@@ -151,11 +163,16 @@ class _ConfinableSandbox(Protocol):
         ...
 
 
+_LEADER_SHELL = "/bin/sh"
+"""The shell that leads a marked host command, as ``LocalShellRunner`` leads a stage command."""
+
+
 def confine_to_sandbox(
     executor: agentshim.CommandExecutor,
     sandbox: _ConfinableSandbox,
     *,
     find_binary: Callable[[str, Mapping[str, str]], str] | None = None,
+    leads_group: bool = False,
 ) -> agentshim.CommandExecutor:
     """Return *executor* with every command rewritten through *sandbox*.
 
@@ -172,10 +189,25 @@ def confine_to_sandbox(
     sandbox's ``env`` carries the *container's* ``PATH``, which resolves to
     nothing on this host, so its caller passes an override that trusts the
     bare name to the far side of ``docker exec`` instead.
+
+    A step's turn carries the step's mark in its environment (``STEP_TAG_ENV``). With
+    *leads_group* the host process that launches the sandboxed command also carries the mark
+    as an argument, led by a shell that waits for it (``step_shell_argv``), because macOS
+    shows another process's arguments and not its environment. A command that runs in a
+    container needs no leader: the container's own processes are searched there.
     """
 
     def transform(request: agentshim.CommandRequest) -> agentshim.CommandRequest:
-        return replace(request, argv=sandbox.wrap(list(request.argv), request.cwd))
+        argv = list(request.argv)
+        tag = request.env.get(STEP_TAG_ENV)
+        if tag is not None:
+            # The sandbox starts the program with its own environment, so the step's marker
+            # is set by ``env`` inside it: the process then carries the tag from exec on.
+            argv = ["env", f"{STEP_TAG_ENV}={tag}", *argv]
+        wrapped = sandbox.wrap(argv, request.cwd)
+        if tag is not None and leads_group:
+            wrapped = list(step_shell_argv(_LEADER_SHELL, shlex.join(wrapped), request.env))
+        return replace(request, argv=wrapped)
 
     return agentshim.TransformingExecutor(executor, transform, find_binary=find_binary)
 
@@ -303,11 +335,11 @@ class ConfinedSessionLauncher:
         transient_retry_delays: Sequence[float] = TRANSIENT_RETRY_DELAYS_S,
         agent_homes: Path | None = None,
         env_passthrough: Sequence[str] = (),
-        launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
+        launcher_env: Callable[[], Mapping[str, str]] = LAUNCH_SHELL_ENVIRONMENT,
         transport: agentshim.TransportKind | None = None,
-        clock: agentshim.Clock | None = None,
+        clock: agentshim.Clock,
         ids: agentshim.IdAllocator | None = None,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
 
@@ -347,9 +379,11 @@ class ConfinedSessionLauncher:
         mode's budget: a container check crosses a ``docker exec`` and is given
         four times as long as a host one.
 
-        ``clock`` and ``ids`` replace agentshim's wall clock and random turn ids,
-        so a test measures turn timeouts and retry waits on a fake clock and
-        names turns reproducibly; production leaves them ``None``.
+        ``clock`` is the time agentshim measures turn timeouts and retry waits
+        on (:class:`~vs_agent.shim_clock.ThreadsClock` over the run's threads
+        in production, a fake in a test). ``ids`` replaces agentshim's random
+        turn ids so a test names turns reproducibly; production leaves it
+        ``None``.
 
         ``transient_retry_delays`` are the waits before each retry of a turn
         that failed on a transient provider error; see
@@ -379,14 +413,14 @@ class ConfinedSessionLauncher:
         self._agent_homes = agent_homes
         self._env_passthrough = validate_env_names(env_passthrough)
         self._dropped_names_logged = False
-        self._threads = threads or OsThreads()
+        self._threads = threads
         self._dropped_names_lock = self._threads.lock()
         self._launcher_env = launcher_env
         self._transport = transport
         self._clock = clock
         self._ids = ids
         self._sessions: WeakSet[LaunchedSession] = WeakSet()
-        self._closed = False
+        self._close = CloseOnce()
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -448,7 +482,7 @@ class ConfinedSessionLauncher:
         this role, confine a fresh executor to it, and hand the library the
         sandbox's own environment.
         """
-        if self._closed:
+        if self._close.started:
             message = "session launcher is closed"
             raise RuntimeError(message)
         if spec.provider != self._provider:
@@ -485,7 +519,9 @@ class ConfinedSessionLauncher:
 
         executor: agentshim.CommandExecutor = self._executor_factory()
         if sandbox is not None:
-            executor = confine_to_sandbox(executor, sandbox, find_binary=find_binary)
+            executor = confine_to_sandbox(
+                executor, sandbox, find_binary=find_binary, leads_group=not in_container
+            )
         env = sandbox.env if sandbox is not None else host_env
         return _Launch(
             executor=executor,
@@ -685,10 +721,21 @@ class ConfinedSessionLauncher:
         return sandbox
 
     def close(self) -> None:
-        """Close every session opened by this launcher, idempotently."""
-        if self._closed:
-            return
-        self._closed = True
-        for session in self._sessions:
-            session.close()
-        self._sessions.clear()
+        """Close every session opened by this launcher; a failed close is retried next call."""
+        self._close.run(self._close_sessions)
+
+    def _close_sessions(self) -> Released:
+        first_error: Exception | None = None
+        for session in tuple(self._sessions):
+            try:
+                session.close()
+            except Exception as error:  # noqa: BLE001  # LW-010569 [BLE001]; every session gets its close before the first failure is raised.
+                # > Stopping at the first failure would leave the later sessions running; a
+                # > narrower type would let an unexpected one skip them the same way.
+                if first_error is None:
+                    first_error = error
+            else:
+                self._sessions.discard(session)
+        if first_error is not None:
+            raise first_error
+        return Released.shown_by(NothingLeft(self._sessions, "launched sessions"))

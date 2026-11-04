@@ -27,11 +27,18 @@ from tests.support import run_test_command
 
 from vs_agent.api.images import agent_image
 from vs_runtime.api.infrastructure import image_features
-from vs_sandbox.api import AGENT_HOME, CONTAINER_RUNTIME_TOOLCHAIN, DockerSandbox
+from vs_sandbox.api import (
+    AGENT_HOME,
+    CONTAINER_RUNTIME_TOOLCHAIN,
+    DockerSandbox,
+    SubprocessDockerCli,
+)
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     import subprocess
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 pytestmark = pytest.mark.e2e
 
@@ -90,8 +97,14 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
             _BASE_IMAGE,
             features=image_features({CONTAINER_RUNTIME_TOOLCHAIN}),
             timeout=_BUILD_TIMEOUT_S,
+            clock=MonotonicClock(),
+            output=DISCARD,
         ),
         docker_in_docker=True,
+        docker=SubprocessDockerCli(
+            processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+        ),
+        threads=OsThreads(),
     )
 
     def inside(command: str) -> subprocess.CompletedProcess[str]:
@@ -102,7 +115,7 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
             timeout=_EXEC_TIMEOUT_S,
         )
 
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     try:
         assert (
             inside(

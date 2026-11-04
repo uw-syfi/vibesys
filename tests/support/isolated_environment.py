@@ -15,6 +15,34 @@ from pathlib import Path
 import pytest
 from tests.support.posix_tools import install_posix_tool_shims
 
+GIT_IDENTITY = {
+    "GIT_AUTHOR_NAME": "VibeSys Test",
+    "GIT_AUTHOR_EMAIL": "test@example.invalid",
+    "GIT_COMMITTER_NAME": "VibeSys Test",
+    "GIT_COMMITTER_EMAIL": "test@example.invalid",
+}
+"""The author and committer every test-started Git commit gets."""
+
+HERMETIC_GIT_VARIABLES = (
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_TERMINAL_PROMPT",
+    *GIT_IDENTITY,
+)
+"""The variables that make test Git ignore the operator's config; no test may reset them."""
+
+
+def hermetic_git_environment(directory: Path) -> dict[str, str]:
+    """Create an empty global Git config in ``directory`` and return the variables that select it."""
+    empty_config = directory / "empty-gitconfig"
+    empty_config.write_text("", encoding="utf-8")
+    return {
+        "GIT_CONFIG_GLOBAL": str(empty_config),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        **GIT_IDENTITY,
+    }
+
 
 class _SuiteEnvironment:
     def __init__(self) -> None:
@@ -38,6 +66,24 @@ class _SuiteEnvironment:
         # portable to macOS, so every test sees the strict tools first.
         shims = install_posix_tool_shims(root / "posix-bin")
         self.environment.setenv("PATH", f"{shims}{os.pathsep}{os.environ['PATH']}")
+        # A Git commit starts auto maintenance, detached from Git 2.47 on, and
+        # that maintenance prunes any worktree whose admin directory has no
+        # gitdir file yet. A test's next ``git worktree add`` is in exactly that
+        # state between creating ``.git/worktrees/<name>`` and locking it, so the
+        # background prune can delete it mid-command. ``Git`` already
+        # disables maintenance for product Git; this covers every Git a test
+        # starts itself. Command-line config survives tests that replace HOME.
+        for index, (key, value) in enumerate((("maintenance.auto", "false"), ("gc.auto", "0"))):
+            self.environment.setenv(f"GIT_CONFIG_KEY_{index}", key)
+            self.environment.setenv(f"GIT_CONFIG_VALUE_{index}", value)
+        self.environment.setenv("GIT_CONFIG_COUNT", "2")
+        # The developer's global and system Git config (failing hooks, forced commit
+        # signing, another default branch) must not change a test's result. Point Git at
+        # an empty global file, ignore the system file, and fix the identity so no test
+        # depends on ``user.name`` being configured. The variables are inherited by every
+        # child, and survive tests that replace HOME.
+        for variable, value in hermetic_git_environment(root).items():
+            self.environment.setenv(variable, value)
         for variable, name in (
             ("HOME", "home"),
             ("VIBESYS_STATE_HOME", "state"),

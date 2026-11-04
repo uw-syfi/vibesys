@@ -10,8 +10,8 @@ import zipfile
 from typing import TYPE_CHECKING
 
 import pytest
+from bun_targets import TARGETS
 from fetch_bun import BunFetchError, _download, fetch_bun
-from wheel_targets import TARGETS
 
 from vs_sim.api.testing import join_or_fail
 
@@ -31,7 +31,7 @@ def test_fetch_bun_uses_versioned_official_url_and_verifies_before_extraction(
     tmp_path: Path,
 ) -> None:
     target = TARGETS["linux-x86_64"]
-    payload = _bun_archive(target.bun_asset)
+    payload = _bun_archive(target.asset)
     seen_urls: list[str] = []
 
     def download(url: str) -> bytes:
@@ -40,7 +40,7 @@ def test_fetch_bun_uses_versioned_official_url_and_verifies_before_extraction(
 
     output = tmp_path / "bin" / "bun"
     result = fetch_bun(
-        target.key,
+        "linux-x86_64",
         output,
         downloader=download,
         expected_sha256=hashlib.sha256(payload).hexdigest(),

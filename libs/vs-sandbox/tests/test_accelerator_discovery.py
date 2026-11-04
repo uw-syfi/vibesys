@@ -12,6 +12,7 @@ from vs_sandbox.api import (
     SystemAcceleratorDiscovery,
 )
 from vs_sandbox.api.testing import FakeAcceleratorDiscovery
+from vs_sim.api import SubprocessProbe
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,6 +44,7 @@ def _system_inventory(tmp_path: Path) -> tuple[SystemAcceleratorDiscovery, Accel
     discovery = SystemAcceleratorDiscovery(
         device_root=device_root,
         executable_search_path=str(rocm_smi.parent),
+        probe=SubprocessProbe(),
     )
     expected_rocm = AcceleratorInventory(
         device_nodes=(
@@ -75,6 +77,7 @@ def test_rocm_requires_kfd_even_when_render_nodes_exist(tmp_path: Path) -> None:
     discovery = SystemAcceleratorDiscovery(
         device_root=tmp_path / "dev",
         executable_search_path="",
+        probe=SubprocessProbe(),
     )
 
     assert discovery.discover_rocm() == AcceleratorInventory()
@@ -96,6 +99,7 @@ def test_rocm_utility_failures_are_nonfatal(tmp_path: Path, body: str) -> None:
     discovery = SystemAcceleratorDiscovery(
         device_root=tmp_path / "dev",
         executable_search_path=str(rocm_smi.parent),
+        probe=SubprocessProbe(),
     )
 
     inventory = discovery.discover_rocm()

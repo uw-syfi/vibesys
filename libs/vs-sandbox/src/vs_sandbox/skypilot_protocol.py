@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_sandbox.skypilot_states import JobStatus
 
 PROTOCOL_VERSION = 2
@@ -25,6 +26,12 @@ class EvaluationRequest(_Message):
     invocation_id: Annotated[str, Field(pattern=r"^[a-f0-9]{32}$")]
     arguments: tuple[str, ...] = ()
     artifacts: tuple[str, ...] = ()
+    step_tag: Annotated[str, Field(min_length=1, max_length=512)] | None = None
+    """The step whose agent turn asked for this evaluation, from the mark its process carries.
+
+    A step that is run again cancels the jobs its earlier attempt left by this tag. It is not
+    part of the request's identity: a retried invocation of another attempt is the same request.
+    """
 
 
 class OutputFrame(_Message):
@@ -86,19 +93,62 @@ def encode_message(message: _Message) -> bytes:
     return message.model_dump_json().encode() + b"\n"
 
 
+MAX_FRAME_BYTES = 16 * 1024 * 1024
+"""The largest protocol line decoded; framing limits in the bridge are tighter."""
+_STRICT = ValidationOptions(strict=True)
+
+
+class FrameDecodeError(ValueError):
+    """A protocol line that is not a valid frame; names the problems, never the input."""
+
+    def __init__(self, unreadable: Unreadable) -> None:
+        """Describe the unreadable line."""
+        super().__init__(str(unreadable))
+
+
 def decode_request(payload: bytes) -> EvaluationRequest:
-    """Decode and strictly validate one request line."""
-    return EvaluationRequest.model_validate_json(payload, strict=True)
+    """Decode and strictly validate one request line; ``FrameDecodeError`` if it is not one."""
+    return _decoded(
+        decode_json(
+            payload,
+            EvaluationRequest,
+            source="bridge request",
+            max_bytes=MAX_FRAME_BYTES,
+            options=_STRICT,
+        )
+    )
 
 
 def decode_ack(payload: bytes) -> AckRequest:
-    """Decode and strictly validate a terminal acknowledgement."""
-    return AckRequest.model_validate_json(payload, strict=True)
+    """Decode and strictly validate a terminal acknowledgement; ``FrameDecodeError`` if not one."""
+    return _decoded(
+        decode_json(
+            payload,
+            AckRequest,
+            source="bridge acknowledgement",
+            max_bytes=MAX_FRAME_BYTES,
+            options=_STRICT,
+        )
+    )
 
 
 def decode_response(payload: bytes) -> ResponseFrame:
-    """Decode and strictly validate one response line."""
-    return _RESPONSE_ADAPTER.validate_json(payload, strict=True)
+    """Decode and strictly validate one response line; ``FrameDecodeError`` if it is not one."""
+    return _decoded(
+        decode_json(
+            payload,
+            _RESPONSE_ADAPTER,
+            source="bridge response",
+            max_bytes=MAX_FRAME_BYTES,
+            options=_STRICT,
+        )
+    )
+
+
+def _decoded[FrameT](frame: FrameT | Unreadable) -> FrameT:
+    if isinstance(frame, Unreadable):
+        raise FrameDecodeError(frame)
+    return frame
 
 
 def compact_json(value: object) -> str:

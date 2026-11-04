@@ -30,10 +30,9 @@ from vs_core.api import (
     ResourceId,
 )
 from vs_project.api import Project
-from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, ReceiptStore
-from vs_runtime.api.executor_contexts import RevocableLease
+from vs_runtime.api.core import ExecutionResult, JournalRunInvocations, KeyedDocuments
 from vs_runtime.api.observation_contracts import assert_core_accepts
-from vs_sim.api.testing import examples, wait_until_started
+from vs_sim.api.testing import SimThreads, examples, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -50,20 +49,23 @@ class World:
         self._project = Project.open(base / "project")
         self.host: SessionHost = open_host(base / "workspace")
 
-    def store(self, *, dies_before_seal: bool = False) -> ReceiptStore:
+    def store(self, *, dies_before_seal: bool = False) -> KeyedDocuments:
         namespace = self._project.state.state_store_namespace("run")
-        return CrashOnReplace(namespace) if dies_before_seal else ReceiptStore(namespace)
+        return (
+            CrashOnReplace(namespace, threads=SimThreads())
+            if dies_before_seal
+            else KeyedDocuments(namespace, threads=SimThreads())
+        )
 
     async def execute(
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease | None = None,
         now_at: float | None = None,
         dies_before_seal: bool = False,
     ) -> ExecutionResult:
         return await self.host.run(
-            request, self.store(dies_before_seal=dies_before_seal), lease=lease, now_at=now_at
+            request, self.store(dies_before_seal=dies_before_seal), now_at=now_at
         )
 
 
@@ -364,17 +366,6 @@ async def test_only_a_settled_turn_proves_the_run_writer_ended() -> None:
         assert proof.unproven(run_snapshot("inv-9")) is not None  # never dispatched
 
 
-@pytest.mark.asyncio
-async def test_stale_host_dispatches_nothing() -> None:
-    async with world() as w:
-        await w.execute(ensure_request())
-        lost = RevocableLease()
-        lost.valid = False
-        result = await w.execute(dispatch_request(), lease=lost)
-        assert status(result) is ObservationStatus.UNKNOWN
-        assert w.host.turns == []
-
-
 @settings(max_examples=examples(pr=5, nightly=25), deadline=None)
 @given(
     steps=st.lists(
@@ -414,7 +405,7 @@ async def test_cancelling_a_dispatch_cancels_the_hung_provider_turn_exactly_once
         (base / "workspace").mkdir()
         project = Project.open(base / "project")
         host = open_host(base / "workspace", hang_until_cancelled=True)
-        store = ReceiptStore(project.state.state_store_namespace("run"))
+        store = KeyedDocuments(project.state.state_store_namespace("run"), threads=SimThreads())
         await host.run(ensure_request(), store)
         dispatch = asyncio.ensure_future(host.run(dispatch_request(), store))
         # The turn is running in the provider and would never return on its own.

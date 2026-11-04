@@ -1,7 +1,5 @@
 packages:
-  - "tui"
   - "libs/*"
-  - "features/*"
   - "apps/*"
 
 injectWorkspacePackages: true

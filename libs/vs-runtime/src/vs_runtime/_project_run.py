@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable, Iterable
-from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, Protocol, TextIO
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from vs_project.api import (
     GitTracker,
@@ -19,20 +19,63 @@ from vs_project.api import (
     RunEnvironmentRecord,
     RunExecutionRecord,
     RunLogger,
+    StateNamespace,
 )
 from vs_runtime import _boot_trace as boot_trace
 from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._project_materialization import copy_support_directories
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_state import RunState
 from vs_runtime.contracts import OrchestrationResumeDecision
+from vs_sandbox.api import CaptureExecutionIdentity
+from vs_sim.api import CloseOnce, ReleaseStack, utc_datetime
 
 if TYPE_CHECKING:
-    from vs_project.api import GitRepository, GitRepositoryFactory, StateStoreFactory
+    from vs_project.api import GitRepositoryFactory
+    from vs_runtime._environment_system import EnvironmentSystem
     from vs_runtime._project_materialization import ProjectMaterializer
+    from vs_sim.api import Clock
 
 type LogEmitter = Callable[[str, TextIO], None]
 type LogReady = Callable[[Path], None]
 type ResumeResolver = Callable[[OrchestrationRunManifest], OrchestrationResumeDecision]
+_UNSETTLED_CANDIDATES = "unsettled-candidates"
+_ROOT_CAPTURE_WORKSPACE = "root"
+
+
+class CaptureExecutionRecovery(Protocol):
+    """Run-scoped owner that reconciles one exact workspace execution identity."""
+
+    def reconcile(self, workspace: Path, execution: CaptureExecutionIdentity) -> bool:
+        """Return true only after *execution* is validated and confirmed settled."""
+        ...
+
+
+class CaptureRecoverySource(Protocol):
+    """Environment role that provides restart recovery without opening a session."""
+
+    def capture_recovery(
+        self, run_id: str, *, system: EnvironmentSystem
+    ) -> CaptureExecutionRecovery | None: ...
+
+
+class NoCaptureRecovery:
+    """Default environment role for captures with no independently recoverable owner."""
+
+    def capture_recovery(
+        self, run_id: str, *, system: EnvironmentSystem
+    ) -> CaptureExecutionRecovery | None:
+        del run_id, system
+        return None
+
+
+class CaptureIntent(BaseModel):
+    """Durable identity of a capture that may have reached its run environment."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    workspace_id: str = Field(min_length=1)
+    execution: CaptureExecutionIdentity
 
 
 class ProjectRunMismatchKind(StrEnum):
@@ -45,6 +88,16 @@ class ProjectRunMismatchKind(StrEnum):
 
 class ProjectRunError(RuntimeError):
     """Base class for rejected project-run resource construction."""
+
+
+class ProjectRunUnsettledCandidateError(ProjectRunError):
+    """A prior host could not prove a command stopped using this candidate."""
+
+    def __init__(self, workspace_id: str) -> None:
+        super().__init__(
+            f"candidate workspace {workspace_id!r} is retained because its command stop "
+            "could not be confirmed"
+        )
 
 
 class ProjectRunBaselineMissingError(ProjectRunError):
@@ -124,22 +177,17 @@ class ProjectRunEffects:
     git_events: GitTrackerEvents
     log_emit: LogEmitter
     on_log_ready: LogReady
-    git_repository: GitRepositoryFactory | None = None
+    clock: Clock
+    """Seconds since the epoch: names log files and stamps new project and run manifests."""
+    git_repository: GitRepositoryFactory
     """Builds the ``GitRepository`` of the project root and of every candidate worktree.
 
-    ``None`` runs the Git CLI; tests pass a Fake so a run needs no Git process.
+    Production passes ``git_repositories(git)``; tests pass a Fake so a run needs no Git process.
     """
-    state_stores: StateStoreFactory | None = None
-    """Opens each run's ``StateStore``; ``None`` uses the project's crash-atomic local one."""
     resume_recovery: Callable[[], None] | None = None
     """Recover product resources after taking the run-host lock, before Git or state recovery."""
-
-
-def _repository(effects: ProjectRunEffects, root: Path) -> GitRepository | None:
-    """The injected ``GitRepository`` for ``root``, or ``None`` for the default CLI one."""
-    if effects.git_repository is None:
-        return None
-    return effects.git_repository(root, effects.git_events)
+    capture_recovery: CaptureExecutionRecovery | None = None
+    """Reconcile retained capture identities without opening a replacement workspace session."""
 
 
 @dataclass(slots=True)
@@ -156,11 +204,17 @@ class ProjectRunResources:
     logger: RunLogger
     state: RunState
     objective_document: Path | None
-    _teardown_stack: ExitStack
+    _teardown_stack: ReleaseStack
     _request: ProjectRunRequest
     _effects: ProjectRunEffects
-    _provisional_ownership: ExitStack
-    _closed: bool = field(init=False, default=False)
+    _provisional_ownership: ReleaseStack
+    root_edits_on_resume: tuple[str, ...] = ()
+    _close: CloseOnce = field(init=False, default_factory=CloseOnce)
+
+    @property
+    def resuming(self) -> bool:
+        """Whether the operator reopened this run, rather than recovering its writer."""
+        return self._request.existing
 
     def mark_ready(self) -> None:
         """Preserve a provisioned project after all run resources are ready."""
@@ -172,18 +226,76 @@ class ProjectRunResources:
         A leftover directory from a stopped process is replaced by a fresh
         worktree of *revision*.
         """
+        self._require_settled_candidate(workspace_id)
         return self._open_candidate(workspace_id, revision, reattach=False)
 
     def reattach_candidate(
         self, workspace_id: str, revision: str
     ) -> _ProjectWorkspaceResources | None:
         """Reopen an existing candidate worktree with its content, or return ``None``."""
+        self._require_settled_candidate(workspace_id)
         workspace = self.project.state.candidate_worktree_directory(
             self._request.run_id, workspace_id
         )
         if not workspace.exists():
             return None
         return self._open_candidate(workspace_id, revision, reattach=True)
+
+    def leftover_candidates(self) -> tuple[str, ...]:
+        """The workspace IDs of this run's candidate worktrees on disk, in name order."""
+        worktrees = self.project.state.candidate_worktrees_directory(self._request.run_id)
+        if not worktrees.is_dir():
+            return ()
+        return tuple(
+            sorted(entry.name for entry in worktrees.iterdir() if (entry / "workspace").exists())
+        )
+
+    def record_capture_intent(self, workspace_id: str, execution: CaptureExecutionIdentity) -> None:
+        """Durably record the external identity before a capture may be submitted."""
+        namespace = self.state.local("runtime")
+        relative = f"{_UNSETTLED_CANDIDATES}/{workspace_id}"
+        if namespace.load_optional(relative, CaptureIntent) is not None:
+            raise ProjectRunUnsettledCandidateError(workspace_id)
+        namespace.save(
+            relative,
+            CaptureIntent(workspace_id=workspace_id, execution=execution),
+        )
+
+    def clear_capture_intent(self, workspace_id: str) -> None:
+        """Remove a capture intent only after its execution is confirmed settled."""
+        self.state.local("runtime").delete(f"{_UNSETTLED_CANDIDATES}/{workspace_id}")
+
+    def capture_intents(self) -> tuple[CaptureIntent, ...]:
+        """Load all capture intents, rejecting malformed durable state."""
+        return _load_capture_intents(self.state.local("runtime"))
+
+    def reconcile_capture_intents(self) -> frozenset[str]:
+        """Settle this run's durable captures through its startup recovery owner."""
+        return _reconcile_capture_intents(
+            self.project,
+            self._request.run_id,
+            self.state.local("runtime"),
+            self._effects.capture_recovery,
+        )
+
+    def unsettled_candidates(self) -> frozenset[str]:
+        """Return candidates whose remote command may still be using their files."""
+        return frozenset(
+            intent.workspace_id
+            for intent in self.capture_intents()
+            if intent.workspace_id != _ROOT_CAPTURE_WORKSPACE
+        )
+
+    def _require_settled_candidate(self, workspace_id: str) -> None:
+        if workspace_id in self.unsettled_candidates():
+            raise ProjectRunUnsettledCandidateError(workspace_id)
+
+    def remove_leftover(self, workspace_id: str) -> None:
+        """Unregister and delete a candidate worktree that no live resource owns."""
+        self._require_settled_candidate(workspace_id)
+        self.git.remove_worktree(
+            self.project.state.candidate_worktree_directory(self._request.run_id, workspace_id)
+        )
 
     def _open_candidate(
         self, workspace_id: str, revision: str, *, reattach: bool
@@ -198,27 +310,28 @@ class ProjectRunResources:
             # so a directory already here was left by a process that stopped
             # before discarding it.
             self.git.remove_worktree(workspace)
-        teardown_stack = ExitStack()
+        teardown_stack = ReleaseStack()
         try:
             teardown_stack.callback(self.git.remove_worktree, workspace)
             if not reattach:
                 self.git.add_worktree(workspace, revision)
-            for name in sorted(self._request.candidate_support_dirs):
-                source = self._request.project_root / name
-                if source.is_dir() and not reattach:
-                    shutil.copytree(
-                        source,
-                        workspace / name,
-                        symlinks=True,
-                        ignore=shutil.ignore_patterns("__pycache__"),
-                    )
-            logger = RunLogger(log_dir, tee_stderr=False, emit=self._effects.log_emit)
+            if not reattach:
+                copy_support_directories(
+                    self._request.project_root, workspace, self._request.candidate_support_dirs
+                )
+            logger = RunLogger(
+                log_dir, clock=self._effects.clock, tee_stderr=False, emit=self._effects.log_emit
+            )
             teardown_stack.callback(logger.close)
+            # The agent can rewrite the workspace's ``.git``; host Git follows the
+            # parent repository's registration instead.
+            repository = self._effects.git_repository(workspace, self._effects.git_events)
+            repository.pin(self.git.linked_worktree_location(workspace))
             git = GitTracker(
                 workspace,
                 run_id=self._request.run_id,
                 events=self._effects.git_events,
-                repository=_repository(self._effects, workspace),
+                repository=repository,
                 excluded_dirs=self._request.excluded_dirs,
                 excluded_files=self._request.excluded_files,
                 trusted_input_paths=self._request.trusted_input_paths,
@@ -239,11 +352,8 @@ class ProjectRunResources:
             raise
 
     def close(self) -> None:
-        """Release owned resources once, in reverse construction order."""
-        if self._closed:
-            return
-        self._closed = True
-        self._teardown_stack.close()
+        """Release owned resources in reverse construction order; a failed step runs again next call."""
+        self._close.run(self._teardown_stack.close)
 
     def __enter__(self) -> ProjectRunResources:
         return self
@@ -262,19 +372,26 @@ class _ProjectWorkspaceResources:
     logger: RunLogger
     parent_git: GitTracker
     state: RunState
-    teardown_stack: ExitStack
-    _closed: bool = field(init=False, default=False)
+    teardown_stack: ReleaseStack
+    _close: CloseOnce = field(init=False, default_factory=CloseOnce)
 
     def retain(self, revision: str, reference: str | None = None) -> None:
         """Keep a candidate revision reachable after its worktree closes."""
         self.parent_git.retain_candidate(reference or self.workspace_id, revision)
 
     def close(self) -> None:
-        """Release the logger and linked worktree exactly once."""
-        if self._closed:
-            return
-        self._closed = True
-        self.teardown_stack.close()
+        """Release the logger and linked worktree; a failed step runs again on the next call."""
+        self._close.run(self.teardown_stack.close)
+
+    def detach(self) -> None:
+        """Release the logger and keep the linked worktree, its content included, on disk.
+
+        A host that stops while core still holds this candidate leaves it where
+        ``reattach_candidate`` reopens it; only ``close`` (a discard) removes it.
+        """
+        logger = ReleaseStack()
+        logger.callback(self.logger.close)
+        self._close.run(logger.close)
 
     def __enter__(self) -> _ProjectWorkspaceResources:
         return self
@@ -297,7 +414,7 @@ def open_project_run_resources(
     may replace the recorded descriptor. Runtime applies that decision and
     owns all persistence, Git snapshots, recovery, logging, and cleanup.
     """
-    teardown_stack = ExitStack()
+    teardown_stack = ReleaseStack()
     try:
         return _assemble_project_run_resources(
             request,
@@ -317,25 +434,32 @@ def _assemble_project_run_resources(
     effects: ProjectRunEffects,
     buffered_logs: Iterable[str],
     resolve_resume: ResumeResolver,
-    teardown_stack: ExitStack,
+    teardown_stack: ReleaseStack,
 ) -> ProjectRunResources:
-    provisional_ownership = ExitStack()
+    provisional_ownership = ReleaseStack()
     teardown_stack.callback(provisional_ownership.close)
     if request.provisional_project is not None:
         provisional_ownership.callback(request.provisional_project.discard_project)
 
     with boot_trace.span("project_open"):
-        project = Project.open(request.project_root, state_stores=effects.state_stores)
+        project = Project.open(request.project_root)
         project_state = project.state
         teardown_stack.enter_context(project_state.exclusive_run_host(request.run_id))
         if request.existing and effects.resume_recovery is not None:
             effects.resume_recovery()
+        if request.existing:
+            _reconcile_capture_intents(
+                project,
+                request.run_id,
+                project_state.local_namespace(request.run_id, "runtime"),
+                effects.capture_recovery,
+            )
         log_dir = project_state.log_directory(request.run_id)
         log_dir.mkdir(parents=True, exist_ok=True)
 
     with boot_trace.span("log_bootstrap"):
         effects.on_log_ready(log_dir)
-        logger = RunLogger(log_dir, emit=effects.log_emit)
+        logger = RunLogger(log_dir, clock=effects.clock, emit=effects.log_emit)
         teardown_stack.callback(logger.close)
         for message in buffered_logs:
             logger.lprint(message)
@@ -345,7 +469,7 @@ def _assemble_project_run_resources(
             project.root,
             run_id=request.run_id,
             events=effects.git_events,
-            repository=_repository(effects, project.root),
+            repository=effects.git_repository(project.root, effects.git_events),
             excluded_dirs=request.excluded_dirs,
             excluded_files=request.excluded_files,
             trusted_input_paths=request.trusted_input_paths,
@@ -364,7 +488,8 @@ def _assemble_project_run_resources(
             _apply_resume_decision(request.run_id, project, git, decision)
             project_state.set_current_run(request.run_id)
         else:
-            project_state.create_project(project.root.name)
+            created_at = utc_datetime(effects.clock)
+            project_state.create_project(project.root.name, now=created_at)
             trusted_input_baseline = git.trusted_input_baseline
             if trusted_input_baseline is None:
                 raise ProjectRunBaselineMissingError
@@ -378,6 +503,7 @@ def _assemble_project_run_resources(
                 execution=request.execution,
                 orchestration=request.orchestration,
                 trusted_input_baseline=trusted_input_baseline,
+                now=created_at,
             )
             project_state.create_run(run_manifest)
             git.snapshot_with_framework_metadata(
@@ -397,7 +523,45 @@ def _assemble_project_run_resources(
         request,
         effects,
         provisional_ownership,
+        root_edits_on_resume=tuple(git.pending_changes()) if request.existing else (),
     )
+
+
+def _load_capture_intents(namespace: StateNamespace) -> tuple[CaptureIntent, ...]:
+    """Load the strictly typed intent set from one runtime state namespace."""
+    intents: list[CaptureIntent] = []
+    for entry in namespace.entries(_UNSETTLED_CANDIDATES):
+        intent = namespace.load(f"{_UNSETTLED_CANDIDATES}/{entry}", CaptureIntent)
+        if intent.workspace_id != entry:
+            message = f"capture intent entry {entry!r} names workspace {intent.workspace_id!r}"
+            raise ProjectRunError(message)
+        intents.append(intent)
+    return tuple(intents)
+
+
+def _reconcile_capture_intents(
+    project: Project,
+    run_id: str,
+    namespace: StateNamespace,
+    recovery: CaptureExecutionRecovery | None,
+) -> frozenset[str]:
+    """Reconcile durable ownership, retaining every unvalidated or unknown identity."""
+    unresolved: set[str] = set()
+    for intent in _load_capture_intents(namespace):
+        workspace = (
+            project.root
+            if intent.workspace_id == _ROOT_CAPTURE_WORKSPACE
+            else project.state.candidate_worktree_directory(run_id, intent.workspace_id)
+        )
+        try:
+            settled = recovery is not None and recovery.reconcile(workspace, intent.execution)
+        except BaseException:  # noqa: BLE001  # lint-waiver: LW-213425 [BLE001]; startup recovery must preserve durable ownership after any external-boundary or host-cancellation failure.
+            settled = False
+        if settled is True:
+            namespace.delete(f"{_UNSETTLED_CANDIDATES}/{intent.workspace_id}")
+        else:
+            unresolved.add(intent.workspace_id)
+    return frozenset(unresolved)
 
 
 def _record_effective_objective(
@@ -487,7 +651,7 @@ def _apply_resume_decision(
     if decision.descriptor is None:
         return
     if decision.requires_clean_workspace:
-        pending = git.pending_changes()
+        pending = git.baseline_changes()
         if pending:
             raise ProjectRunDirtyResumeError(pending)
     project.state.update_run_orchestration(run_id, decision.descriptor)
@@ -499,7 +663,7 @@ def _apply_resume_decision(
 
 
 def _close_after_construction_failure(
-    teardown_stack: ExitStack,
+    teardown_stack: ReleaseStack,
     construction_error: BaseException,
 ) -> None:
     try:

@@ -19,12 +19,13 @@ from typing import Self
 from vibesys.candidates.api import space_of, workspace_mode_for
 from vibesys.hypothesis import Continue, Finished, NewHypothesis, rounds
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse, PreRoundDecision
-from vibesys.orchestration.multi.search._attempt import MultiAttempt, Next, planned_reason
+from vibesys.orchestration.multi.search._attempt import MultiAttempt, Next
 from vibesys.orchestration.multi.search._config import MultiConfig
 from vibesys.orchestration.multi.search._operations import VALIDATE_LOCAL_KIND
 from vibesys.orchestration.multi.search._prompts import PreRoundPrompt, ProfilerPrompt
 from vibesys.orchestration.multi.search._roles import IMPLEMENTER, JUDGE, PROFILER, ROUTER
 from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.search_spans.api import turn_label
 from vibesys.serial_search import api as serial
 from vibesys.serial_search.api import LastProfile, RoundDone, RoundStart
 from vs_core.api.search import (
@@ -42,9 +43,6 @@ from vs_core.api.search import (
 
 DEFAULT_PROFILE_FOCUS = "general steady-state benchmark hotspots"
 """What the profiler looks at when the router wants a profile and names no focus."""
-
-PROFILE_DIRECTORY = "profile"
-"""Where the profiler writes its bounded evidence, below the run's root."""
 
 
 class MultiRound(RoundStart):
@@ -77,7 +75,12 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         case Finished():
             return RoundDone(number=start.number, ledger=start.ledger, counted=False)
         case Continue(hypothesis=hypothesis):
-            plan, base, feedback = hypothesis.plan, start.base, hypothesis.feedback
+            plan, feedback = hypothesis.plan, hypothesis.feedback
+            base = serial.continued_base(
+                start, hypothesis.parent_commit, input_revision=ctx.facts.baseline
+            )
+            # an earlier round's orchestrator designed it; this round's flow cannot name it
+            planned_by: tuple[str, ...] = ()
         case NewHypothesis():
             designed = await serial.design(
                 ctx,
@@ -99,6 +102,7 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
                 designed.base,
                 None,
             )
+            planned_by = (designed.planned_by,)
             ctx.publish(ledger.search)
     active = ledger.search.active_hypothesis
     attempt = MultiAttempt(
@@ -112,11 +116,10 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         validation_offered=any(
             item.kind == VALIDATE_LOCAL_KIND for item in ctx.capabilities.operations
         ),
-        planned_official_reason=planned_reason(config, ledger, plan, start.number),
         revalidation_required=active is not None and active.gate_revalidation_pending,
         feedback=feedback,
     )
-    settlement = await work(ctx, attempt)
+    settlement = await work(ctx, start, attempt, planned_by)
     closed = attempt.close(settlement)
     ctx.publish(closed.search)
     return serial.round_done(
@@ -124,7 +127,9 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         closed,
         hypothesis_id=plan.hypothesis_id,
         settlement=settlement,
+        passed=serial.round_passed(settlement, attempt),
         metrics=attempt.benchmark_metrics(),
+        measurement_noise=attempt.measurement_noise,
     )
 
 
@@ -137,8 +142,9 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
         evidence = serial.plan_evidence(
             hypotheses, ledger, rounds.planning(hypotheses, ledger, start.number), focus
         )
+        router = ctx.agents.session(ROUTER)
         routed = await route(
-            ctx.agents.session(ROUTER),
+            router,
             PreRoundPrompt(
                 round_number=start.number,
                 has_history=bool(evidence.history),
@@ -151,11 +157,10 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
         if routed is None or not routed.need_profile:
             return None
         return await profile(
-            ctx.agents.session(PROFILER),
+            ctx.agents.session(PROFILER, started_by=(router.agent,)),
             ProfilerPrompt(
                 round_number=start.number,
                 profile_focus=routed.profile_focus or DEFAULT_PROFILE_FOCUS,
-                evidence_directory=f"{PROFILE_DIRECTORY}/round-{start.number:04d}/",
             ),
         )
 
@@ -164,7 +169,7 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
 
 async def route(router: Session, prompt: PreRoundPrompt) -> PreRoundDecision | None:
     """Ask whether fresh profile evidence is wanted; None when the router gave no answer."""
-    match await router.turn(prompt):
+    match await router.turn(prompt, label=turn_label(router)):
         case TurnFinished(reply=PreRoundDecision() as decision):
             return decision
         case Failed():
@@ -176,7 +181,7 @@ async def route(router: Session, prompt: PreRoundPrompt) -> PreRoundDecision | N
 
 async def profile(profiler: Session, prompt: ProfilerPrompt) -> LastProfile | None:
     """Ask for a profile; None when the profiler gave no answer."""
-    match await profiler.turn(prompt):
+    match await profiler.turn(prompt, label=turn_label(profiler)):
         case TurnFinished(reply=ProfilerSummary() as findings):
             return LastProfile(
                 source="profiler",
@@ -185,7 +190,6 @@ async def profile(profiler: Session, prompt: ProfilerPrompt) -> LastProfile | No
                 suggestions=findings.suggestions,
                 perf_metric=findings.perf_metric,
                 perf_unit=findings.perf_unit,
-                evidence_directory=prompt.evidence_directory,
             )
         case Failed():
             return None
@@ -194,39 +198,64 @@ async def profile(profiler: Session, prompt: ProfilerPrompt) -> LastProfile | No
             raise TypeError(message)
 
 
-async def work(ctx: Flow, attempt: MultiAttempt) -> Settlement | None:
-    """Open the round's workspace, let the implementer work in it, settle it; core's settlement."""
+async def work(
+    ctx: Flow, start: RoundStart, attempt: MultiAttempt, planned_by: tuple[str, ...] = ()
+) -> Settlement | None:
+    """Open the round's workspace, let the implementer work in it, settle it; core's settlement.
+
+    ``planned_by`` names the orchestrator whose plan the implementer works on.
+    """
 
     async def turn(session: Session, ws: Workspace) -> str | None:
         step = await take_turn(ctx, attempt, session, ws)
+        if step is not Next.AGAIN or attempt.turns >= attempt.config.max_retries_per_round:
+            await measure_evaluated(ctx, attempt, ws)
         if step is Next.AGAIN:
             return attempt.feedback or attempt.no_valid_reply or ""
         return None
 
     return await serial.work(
         ctx,
+        start,
         attempt,
-        implementer=IMPLEMENTER,
         room=serial.Room(
+            implementer=IMPLEMENTER,
             mode=workspace_mode_for(isolated_candidates=not attempt.config.exclusive_root),
             paid_turns=attempt.config.max_retries_per_round,
+            started_by=planned_by,
         ),
         turn=turn,
     )
+
+
+async def measure_evaluated(ctx: Flow, attempt: MultiAttempt, ws: Workspace) -> None:
+    """Have the trusted gates read the revision the agent evaluated, when the attempt is over.
+
+    A round whose implementer was blocked or failed, or never replied, produces no checkpoint
+    and so reaches no gate. The evaluations it took through the trusted tool are still the
+    only measurement of its work, and the designer must not lose it.
+    """
+    if not attempt.owes_evaluated_measurement():
+        return
+    revision = ctx.evaluation.last_evaluated(ws)
+    if revision is not None:
+        attempt.evaluated_gated(
+            revision, await serial.measure_gates(ctx, ws, revision, attempt.baseline)
+        )
 
 
 async def take_turn(ctx: Flow, attempt: MultiAttempt, session: Session, ws: Workspace) -> Next:
     """One paid turn: the reply, then the review, the validation and the gates it leads to."""
     prompt = attempt.prompt()
     attempt.turns += 1
-    match await session.turn(prompt):
+    match await session.turn(prompt, label=turn_label(session)):
         case TurnFinished(reply=ImplementerResponse() as reply, checkpoint=checkpoint):
             if isinstance(checkpoint, Declined):
                 return attempt.failed(
                     f"implementer checkpoint declined ({checkpoint.reason.value})"
                 )
             step = attempt.replied(reply, getattr(checkpoint, "revision", None))
-            return await _onward(ctx, attempt, ws, step)
+            return await _onward(ctx, attempt, ws, step, session.agent)
         case (
             Failed(
                 reason=FailureReason.INVALID_REPLY
@@ -244,23 +273,28 @@ async def take_turn(ctx: Flow, attempt: MultiAttempt, session: Session, ws: Work
             raise TypeError(message)
 
 
-async def _onward(ctx: Flow, attempt: MultiAttempt, ws: Workspace, step: Next) -> Next:
+async def _onward(
+    ctx: Flow, attempt: MultiAttempt, ws: Workspace, step: Next, implementer: str
+) -> Next:
     """Carry a reply through the review, the validation recipes and the trusted gates it owes."""
     if step is Next.REVIEW:
-        step = await review(ctx, attempt, ws)
+        step = await review(ctx, attempt, ws, implementer)
     if step is Next.VALIDATE:
         step = await validate(ctx, attempt, ws)
     if step is Next.GATES and attempt.candidate is not None:
-        step = attempt.gated(await serial.measure_gates(ctx, ws, attempt.candidate))
+        step = attempt.gated(
+            await serial.measure_gates(ctx, ws, attempt.candidate, attempt.baseline)
+        )
     return step
 
 
-async def review(ctx: Flow, attempt: MultiAttempt, ws: Workspace) -> Next:
+async def review(ctx: Flow, attempt: MultiAttempt, ws: Workspace, implementer: str) -> Next:
     """Have a fresh judge read the exact retained candidate and the evaluations taken of it."""
     revision = attempt.candidate or attempt.base
     cited = () if attempt.candidate is None else ctx.evaluation.taken(ws, revision)
-    judge = ctx.agents.session(JUDGE, workspace=ws, revision=revision)
-    match await judge.turn(attempt.judge_prompt(cited), revision=revision):
+    # the implementer's reply asked for the review: its work started the judge
+    judge = ctx.agents.session(JUDGE, workspace=ws, revision=revision, started_by=(implementer,))
+    match await judge.turn(attempt.judge_prompt(cited), revision=revision, label=turn_label(judge)):
         case TurnFinished(reply=JudgeResponse() as verdict, invocation=invocation):
             return attempt.judged(verdict, invocation)
         case Failed():

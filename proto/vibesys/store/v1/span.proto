@@ -1,0 +1,198 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+import "vibesys/store/v1/replay.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+enum Change {
+  CHANGE_UNSPECIFIED = 0;
+  CHANGE_STARTED = 1;
+  CHANGE_UPDATED = 2;
+  CHANGE_ENDED = 3;
+}
+
+enum RuntimeType {
+  RUNTIME_TYPE_UNSPECIFIED = 0;
+  RUNTIME_TYPE_FLOW = 1;
+  RUNTIME_TYPE_OPERATION = 2;
+}
+
+enum SpanStatus {
+  SPAN_STATUS_UNSPECIFIED = 0;
+  SPAN_STATUS_RUNNING = 1;
+  SPAN_STATUS_WAITING = 2;
+  SPAN_STATUS_PENDING = 3;
+  SPAN_STATUS_DONE = 4;
+  SPAN_STATUS_FAILED = 5;
+  SPAN_STATUS_STOPPED = 6;
+}
+
+enum WaitKind {
+  WAIT_KIND_UNSPECIFIED = 0;
+  WAIT_KIND_OPERATION = 1;
+  WAIT_KIND_SLOT = 2;
+  WAIT_KIND_TIME = 3;
+  WAIT_KIND_STOP = 4;
+}
+
+enum AttemptOutcome {
+  ATTEMPT_OUTCOME_UNSPECIFIED = 0;
+  ATTEMPT_OUTCOME_DONE = 1;
+  ATTEMPT_OUTCOME_AGAIN = 2;
+  ATTEMPT_OUTCOME_GAVE_UP = 3;
+}
+
+enum SpanFailureKind {
+  SPAN_FAILURE_KIND_UNSPECIFIED = 0;
+  SPAN_FAILURE_KIND_OUTCOME = 1;
+  SPAN_FAILURE_KIND_INTERRUPTION = 2;
+}
+
+// The whole span replaces its previous version by id. UPDATED can replace an
+// ended span, for example when comparison samples change. There are no deltas.
+message SpanRecord {
+  option (buf.validate.message).cel = {
+    id: "span_record.change"
+    message: "ended requires ended_at and started requires an open span; updated replaces either"
+    expression: "has(this.span) && (this.change != 3 || has(this.span.ended_at)) && (this.change != 1 || !has(this.span.ended_at))"
+  };
+  Change change = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  Span span = 2 [(buf.validate.field).required = true];
+}
+
+// Times are seconds on the monotone run clock, which freezes while parked.
+message Span {
+  option (buf.validate.message).cel = {
+    id: "span.ended_at"
+    message: "ended_at must follow started_at and be present exactly for terminal status"
+    expression: "has(this.ended_at) == (this.status >= 4) && (!has(this.ended_at) || this.ended_at >= this.started_at)"
+  };
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string parent = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  RuntimeType runtime_type = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string name = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  SpanStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  repeated WaitingOn waiting_on = 6;
+  repeated Attempt attempts = 7;
+  double started_at = 8 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  optional double ended_at = 9 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  optional Failure failure = 10;
+  optional Stop stop = 11;
+  optional Label label = 12;
+  optional OperationReplay replay = 13;
+  optional ReplayObservation replay_observation = 14;
+  optional ReplayPhysical replay_physical = 15;
+}
+
+message WaitingOn {
+  WaitKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string ref = 2 [(buf.validate.field).string.max_bytes = 65536];
+  double since = 3 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+}
+
+message Attempt {
+  option (buf.validate.message).cel = {
+    id: "attempt.n"
+    message: "n must be at most of"
+    expression: "this.n <= this.of"
+  };
+  option (buf.validate.message).cel = {
+    id: "attempt.ended_at"
+    message: "ended_at must follow started_at"
+    expression: "!has(this.ended_at) || this.ended_at >= this.started_at"
+  };
+  uint32 n = 1 [(buf.validate.field).uint32.gt = 0];
+  uint32 of = 2 [(buf.validate.field).uint32.gt = 0];
+  double started_at = 3 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  optional double ended_at = 4 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  optional AttemptOutcome outcome = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string reason = 6 [(buf.validate.field).string.max_bytes = 65536];
+}
+
+message Failure {
+  SpanFailureKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string message = 2 [(buf.validate.field).string.max_bytes = 65536];
+}
+
+message Stop {
+  double requested_at = 1 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  bool landed = 2;
+}
+
+// Resolve attrs_type from the declaration current at the span start. The read
+// boundary unpacks and validates attrs with that descriptor; Any is extensible.
+message Label {
+  string kind = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string title = 2 [(buf.validate.field).string.max_bytes = 65536];
+  optional string verdict = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string reason = 4 [(buf.validate.field).string.max_bytes = 65536];
+  repeated SpanLink links = 5;
+  google.protobuf.Any attrs = 6 [(buf.validate.field).required = true];
+}
+
+// A link may target a span or an intent control_id (delivery of a steer).
+message SpanLink {
+  string rel = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string to = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}

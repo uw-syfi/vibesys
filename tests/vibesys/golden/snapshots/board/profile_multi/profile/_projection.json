@@ -29,7 +29,7 @@
         "first_round": 1,
         "hypothesis_id": "H-01",
         "judge_verdict": "pass",
-        "kept": null,
+        "best": null,
         "last_experiment_revision": 2,
         "last_round": 1,
         "parent_commit": "fake-revision-3",

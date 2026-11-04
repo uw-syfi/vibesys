@@ -153,3 +153,100 @@ func TestPolicySnapshotAllowsMissingComponentPaths(t *testing.T) {
 		t.Fatalf("readPolicy() = %v; want a historical snapshot to load", err)
 	}
 }
+
+// An entry of roots or files may be a table that lists a path without selecting from it. The
+// derived replays use this to key their set on libraries a change to which should not run the
+// client jobs; one list carries both tiers.
+func appendComponent(t *testing.T, root, component string) {
+	t.Helper()
+	path := filepath.Join(root, "repoctl.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(data, component...), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAKeyOnlyEntryIsListedButSelectsNothing(t *testing.T) {
+	root := fixtureRepo(t)
+	for _, dir := range []string{"live", "keyed"} {
+		if err := os.Mkdir(filepath.Join(root, dir), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []string{"live.txt", "keyed.txt"} {
+		if err := os.WriteFile(filepath.Join(root, file), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendComponent(t, root, `
+[[components]]
+id = "two_tiers"
+class = "manual"
+job = "web"
+roots = ["live", { path = "keyed", selects = false }]
+files = ["live.txt", { path = "keyed.txt", selects = false }]
+`)
+	g, err := readCurrentPolicy(root, "repoctl.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := g.Components["two_tiers"]
+	if !reflect.DeepEqual(c.Roots, []string{"live"}) || !reflect.DeepEqual(c.KeyOnlyRoots, []string{"keyed"}) {
+		t.Fatalf("roots = %v, key-only roots = %v", c.Roots, c.KeyOnlyRoots)
+	}
+	if !reflect.DeepEqual(c.Files, []string{"live.txt"}) || !reflect.DeepEqual(c.KeyOnlyFiles, []string{"keyed.txt"}) {
+		t.Fatalf("files = %v, key-only files = %v", c.Files, c.KeyOnlyFiles)
+	}
+	for _, path := range []string{"live/a.py", "live.txt"} {
+		p, err := g.selectPaths([]string{path})
+		if err != nil || !p.Jobs["web"] {
+			t.Errorf("a change to %s selects web = %v (error %v), want true", path, p.Jobs["web"], err)
+		}
+	}
+	// A path only a key-only entry names is owned by no component, so it selects nothing.
+	for _, path := range []string{"keyed/a.py", "keyed.txt"} {
+		if owners := g.owners(path); len(owners) != 0 {
+			t.Errorf("%s is owned by %v, want no owner", path, owners)
+		}
+	}
+}
+
+func TestAKeyOnlyEntryMustStillExist(t *testing.T) {
+	root := fixtureRepo(t)
+	appendComponent(t, root, "\n[[components]]\nid = \"stale\"\nroots = [{ path = \"gone/path\", selects = false }]\n")
+	_, err := readCurrentPolicy(root, "repoctl.toml")
+	want := `component "stale" key-only roots: path "gone/path" does not exist`
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("readCurrentPolicy() error = %v; want %q", err, want)
+	}
+}
+
+func TestAKeyOnlyEntryCannotRepeatASelectingOne(t *testing.T) {
+	root := fixtureRepo(t)
+	appendComponent(t, root, "\n[[components]]\nid = \"twice\"\nroots = [\"a\", { path = \"a\", selects = false }]\n")
+	_, err := readPolicy(root, "repoctl.toml")
+	if err == nil || !strings.Contains(err.Error(), "twice.roots") {
+		t.Fatalf("readPolicy() error = %v; want a duplicate rejected in twice.roots", err)
+	}
+}
+
+func TestAnEntryTableRejectsWhatItDoesNotUnderstand(t *testing.T) {
+	for entry, want := range map[string]string{
+		`{ path = "x", select = false }`: `unknown key "select"`,
+		`{ selects = false }`:            "needs a string path",
+		`{ path = "x", selects = "no" }`: "selects must be true or false",
+		`42`:                             "must be a string or a table",
+	} {
+		t.Run(entry, func(t *testing.T) {
+			root := fixtureRepo(t)
+			appendComponent(t, root, "\n[[components]]\nid = \"bad\"\nroots = ["+entry+"]\n")
+			_, err := readPolicy(root, "repoctl.toml")
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("readPolicy() error = %v; want %q", err, want)
+			}
+		})
+	}
+}

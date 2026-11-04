@@ -127,6 +127,8 @@ class ChildStart(Value):
     slot: int = Field(gt=0)
     generation: int = Field(ge=0)
     """The search generation of the child; 0 for a cold start."""
+    round: int = Field(default=1, gt=0)
+    """The round that runs the child: one cold start or one generation, counted from 1."""
     proposal: SlotProposal | None = None
     base: RevisionRef
     prompt: MutatePrompt

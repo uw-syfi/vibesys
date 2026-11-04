@@ -9,6 +9,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from resources.profilers._common import capture_runtime
 from resources.profilers.ncu.server import build_server
+from resources.profilers.ncu_flashinfer.server import TIMELINE_PREFIX
+from resources.profilers.ncu_flashinfer.server import build_server as build_ncu_flashinfer
 from resources.profilers.rocprof.server import build_server as build_rocprof
 
 from vibesys.orchestration.profilers import (
@@ -25,6 +27,17 @@ if TYPE_CHECKING:
 _KINDS = st.sampled_from(sorted(ACTIVE_PROFILER_KINDS, key=str))
 _NCU_DRIVER_TOOLS = {"query_metrics"}
 _NCU_ALL_TOOLS = {"capabilities", "list_sections_and_sets", "query_metrics", "read_report"}
+_TIMELINE_TOOLS = {
+    TIMELINE_PREFIX + name
+    for name in (
+        "capabilities",
+        "summary",
+        "tracks",
+        "event_skew",
+        "track_window",
+        "export_chrome_trace",
+    )
+}
 
 
 def _tool_names(withheld: frozenset[str]) -> set[str]:
@@ -55,6 +68,16 @@ def test_ncu_server_lists_driver_tools_iff_the_editor_has_a_gpu(*, editor_has_gp
     names = _tool_names(frozenset(offer.withheld))
     assert names == (_NCU_ALL_TOOLS if editor_has_gpu else _NCU_ALL_TOOLS - _NCU_DRIVER_TOOLS)
     assert not (names & set(offer.withheld))
+
+
+@settings(max_examples=examples(pr=4, nightly=50))
+@given(editor_has_gpu=st.booleans())
+def test_ncu_flashinfer_server_offers_both_parts_minus_withheld(*, editor_has_gpu: bool) -> None:
+    offer = profiler_tool_offer(ProfilerKind.NCU_FLASHINFER, editor_has_gpu=editor_has_gpu)
+    server = build_ncu_flashinfer(withheld=frozenset(offer.withheld))
+    names = {tool.name for tool in asyncio.run(server.list_tools())}
+    ncu = _NCU_ALL_TOOLS if editor_has_gpu else _NCU_ALL_TOOLS - _NCU_DRIVER_TOOLS
+    assert names == ncu | _TIMELINE_TOOLS
 
 
 def test_ncu_declares_query_metrics_as_its_driver_tool() -> None:

@@ -502,6 +502,27 @@ def test_private_import_rule_applies_only_to_library_tests() -> None:
     assert scan.counts == {("libs/vs-x/tests/test_a.py", "private_import"): 4}
 
 
+def test_a_declared_second_public_module_is_not_a_private_import() -> None:
+    source = """
+        from vs_logs.api import LogStore
+        from vs_logs.read import LogReader
+        from vs_logs.read.sub import thing
+        from vs_logs._store import private
+        from vs_logs.reader import private_too
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        make_repo(
+            root,
+            {
+                "libs/vs-logs/src/vs_logs/__init__.py": "",
+                "libs/vs-logs/tests/test_a.py": source,
+            },
+        )
+        scan = measure(root, ["libs/*/tests"])
+    assert scan.counts == {("libs/vs-logs/tests/test_a.py", "private_import"): 2}
+
+
 def test_fixtures_and_pycache_directories_are_skipped() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)

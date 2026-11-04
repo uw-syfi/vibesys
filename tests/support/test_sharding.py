@@ -11,11 +11,14 @@ import pytest
 import yaml
 from hypothesis import given
 from hypothesis import strategies as st
+from scripts.refresh_shard_durations import main as refresh_main
 from tests.support.child_pytest import BARE_PYTEST
 from tests.support.sharding import (
     DEFAULT_DURATIONS,
     HEAVY_SHARE,
     SHARD_BUDGET_SECONDS,
+    SMOOTHING_WEIGHT,
+    WORKERS_PER_SHARD,
     assign_heavy_items,
     assign_shards,
     discover_test_files,
@@ -28,10 +31,12 @@ from tests.support.sharding import (
     parse_durations,
     parse_shard,
     projected_shard_seconds,
+    projection_lines,
     read_durations,
     record_durations,
     shard_loads,
     slowest_files,
+    smooth_durations,
 )
 
 pytest_plugins = ["pytester"]
@@ -190,13 +195,121 @@ def test_merging_shard_records_keeps_every_file_and_adds_its_seconds(
         )
 
 
+_SECONDS = st.floats(min_value=0, max_value=500)
+
+
+@given(
+    previous=st.dictionaries(_NAMES, _SECONDS, max_size=10),
+    measured=st.dictionaries(_NAMES, _SECONDS, max_size=10),
+    weight=st.floats(min_value=0, max_value=1),
+)
+def test_a_run_moves_each_measured_file_part_of_the_way_and_drops_the_files_it_did_not_run(
+    previous: dict[str, float], measured: dict[str, float], weight: float
+) -> None:
+    smoothed = smooth_durations(previous, measured, weight)
+
+    assert set(smoothed) == set(measured)
+    for name, seconds in smoothed.items():
+        low, high = sorted((measured[name], previous.get(name, measured[name])))
+        assert low - 0.01 <= seconds <= high + 0.01
+
+
+@given(previous=st.dictionaries(_NAMES, _SECONDS, max_size=10), measured=_DURATIONS)
+def test_a_weight_of_one_is_the_last_run_and_a_weight_of_zero_is_the_old_record(
+    previous: dict[str, float], measured: dict[str, float]
+) -> None:
+    assert smooth_durations(previous, measured, 1.0) == {
+        name: round(seconds, 2) for name, seconds in sorted(measured.items())
+    }
+    assert smooth_durations(previous, measured, 0.0) == {
+        name: round(previous.get(name, seconds), 2) for name, seconds in sorted(measured.items())
+    }
+
+
+@given(
+    seconds=st.floats(min_value=1, max_value=500),
+    start=st.floats(min_value=1, max_value=500),
+    runs=st.integers(1, 12),
+)
+def test_a_file_that_keeps_taking_the_same_seconds_is_recorded_ever_closer_to_them(
+    seconds: float, start: float, runs: int
+) -> None:
+    record = {"f.py": start}
+    for _ in range(runs):
+        record = smooth_durations(record, {"f.py": seconds})
+
+    assert (
+        abs(record["f.py"] - seconds)
+        <= abs(start - seconds) * (1 - SMOOTHING_WEIGHT) ** runs + 0.01 * runs
+    )
+
+
+def test_a_file_that_swings_between_runs_is_recorded_between_its_swings() -> None:
+    """The case behind the weight: 102 s then 48 s then 100 s, the last run alone moved 54 s each time."""
+    record = {"smoke.py": 100.0}
+    seen = []
+    for seconds in (48.0, 100.0, 48.0, 100.0):
+        record = smooth_durations(record, {"smoke.py": seconds})
+        seen.append(record["smoke.py"])
+
+    assert max(seen) - min(seen) < 100.0 - 48.0
+    assert all(48.0 < value < 100.0 for value in seen)
+
+
+@given(
+    weight=st.one_of(st.floats(max_value=-0.001), st.floats(min_value=1.001))
+    | st.just(float("nan"))
+)
+def test_a_weight_outside_zero_to_one_is_refused(weight: float) -> None:
+    with pytest.raises(ValueError, match="smoothing weight"):
+        smooth_durations({}, {}, weight)
+
+
+def _artifact(directory: Path, name: str, record: dict[str, float]) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / name).write_text(json.dumps(record), encoding="utf-8")
+
+
+def test_the_refresh_averages_the_runs_seconds_into_the_previous_record(tmp_path: Path) -> None:
+    artifacts, output = tmp_path / "artifacts", tmp_path / "out" / "record.json"
+    _artifact(artifacts, "shard-durations-1.json", {"a.py": 40.0, "split.py": 10.0})
+    _artifact(artifacts, "shard-durations-2.json", {"split.py": 30.0})
+    previous = tmp_path / "previous.json"
+    previous.write_text(json.dumps({"a.py": 100.0, "split.py": 40.0, "gone.py": 9.0}))
+
+    assert refresh_main([str(artifacts), "--previous", str(previous), "--output", str(output)]) == 0
+
+    assert json.loads(output.read_text()) == {"a.py": 70.0, "split.py": 40.0}
+
+
+@pytest.mark.parametrize("previous", [None, "missing", "not json", '{"a.py": -1}', "[]"])
+def test_the_refresh_takes_this_runs_seconds_when_there_is_no_usable_previous_record(
+    tmp_path: Path, previous: str | None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    artifacts, output = tmp_path / "artifacts", tmp_path / "record.json"
+    _artifact(artifacts, "shard-durations-1.json", {"a.py": 40.0})
+    arguments = [str(artifacts), "--output", str(output)]
+    if previous is not None:
+        path = tmp_path / "previous.json"
+        if previous != "missing":
+            path.write_text(previous)
+        arguments += ["--previous", str(path)]
+
+    assert refresh_main(arguments) == 0
+
+    assert json.loads(output.read_text()) == {"a.py": 40.0}
+    assert ("ignoring the previous record" in capsys.readouterr().err) is (
+        previous not in (None, "missing")
+    )
+
+
 def test_a_file_missing_from_the_record_or_far_over_it_is_reported_as_stale() -> None:
     seconds, stale = drift_report(
         {"new.py": 600.0, "old.py": 100.0, "close.py": 50.0, "tiny.py": 20.0},
         {"old.py": 90.0, "close.py": 30.0, "tiny.py": 1.0},
     )
 
-    assert seconds == pytest.approx(385.0)
+    assert seconds == pytest.approx(770.0 / WORKERS_PER_SHARD)
     assert [line.split(":")[0] for line in stale] == ["new.py"]
 
 
@@ -229,6 +342,23 @@ def test_the_checked_in_record_keeps_every_ci_shard_within_its_budget() -> None:
     assert max(projected) <= SHARD_BUDGET_SECONDS, (
         f"projected slowest shard {max(projected):.0f}s exceeds {SHARD_BUDGET_SECONDS:.0f}s: "
         "add shards in .github/workflows/test.yml or refresh tests/support/shard_durations.json"
+    )
+
+
+def test_the_checked_in_record_names_nearly_every_test_file() -> None:
+    # The cold-start record and the floor under every cache entry. It had decayed to 920 of
+    # 1,432 files and a quarter of the suite's seconds, so the budget check above passed on
+    # a record that did not describe the suite. A new file is not an error; a quarter of the
+    # suite missing is a record nobody refreshed.
+    durations = json.loads(DEFAULT_DURATIONS.read_text())
+    options = tomllib.loads((_REPO / "pyproject.toml").read_text())["tool"]["pytest"]["ini_options"]
+    files = discover_test_files(_REPO, options["testpaths"], ["test_*.py", "*_test.py"])
+
+    missing = [name for name in files if name not in durations]
+
+    assert len(missing) <= len(files) // 20, (
+        f"{len(missing)} of {len(files)} test files have no recorded seconds, e.g. {missing[:3]}: "
+        "refresh tests/support/shard_durations.json (scripts/refresh_shard_durations.py)"
     )
 
 
@@ -333,6 +463,74 @@ def test_a_shard_that_owns_no_test_under_the_given_path_passes(
 
 
 @given(
+    durations=st.dictionaries(
+        _NAMES, st.floats(min_value=0, max_value=900), min_size=1, max_size=25
+    ),
+    extra=st.sets(_NAMES.map(lambda name: f"new/{name}"), max_size=5),
+    count=st.integers(min_value=1, max_value=5),
+    data=st.data(),
+)
+def test_the_projection_names_the_shards_cost_its_heaviest_files_and_what_the_record_lacks(
+    durations: dict[str, float], extra: set[str], count: int, data: st.DataObject
+) -> None:
+    files = sorted({*durations, *extra})
+    index = data.draw(st.integers(min_value=1, max_value=count))
+
+    lines = projection_lines(index, count, files, durations)
+
+    seconds = projected_shard_seconds(files, durations, count)[index - 1]
+    assert lines[0].startswith(f"shard {index}/{count}: projected {seconds:.0f}s of tests")
+    assert f"{len(extra)} of {len(files)} test files have no recorded seconds" in lines[0]
+    owned = assign_shards(files, durations, count)
+    named = [
+        part.rsplit(" ", 1)[0]
+        for part in lines[1].removeprefix("shard heaviest whole files: ").split(", ")
+        if part != "none"
+    ]
+    assert len(named) <= 3
+    assert all(owned[name] == index for name in named)
+    assert [line.startswith("::warning::") for line in lines[2:]] == [True] * (
+        seconds > SHARD_BUDGET_SECONDS
+    )
+
+
+def test_a_projection_over_the_budget_is_a_warning_at_the_top_of_the_log() -> None:
+    durations = {
+        f"test_{i}.py": float(2 * SHARD_BUDGET_SECONDS * WORKERS_PER_SHARD) for i in range(3)
+    }
+
+    (summary, heaviest, warning) = projection_lines(1, 3, durations, durations)
+
+    assert "projected" in summary
+    assert heaviest.startswith("shard heaviest whole files: test_")
+    assert warning.startswith("::warning::shard 1/3 is projected at")
+
+
+def test_a_sharded_session_prints_its_projection_before_any_test(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYTEST_ADDOPTS", "")
+    pytester.makepyfile(test_only="def test_only(): pass")
+    durations = pytester.path / "durations.json"
+    durations.write_text(json.dumps({"test_only.py": 1.0}))
+
+    result = pytester.runpytest(
+        *BARE_PYTEST,
+        "-p",
+        "tests.support.sharding",
+        "--shard",
+        "1/2",
+        "--shard-durations",
+        str(durations),
+        "test_only.py",
+    )
+
+    text = result.stdout.str()
+    assert text.index("shard 1/2: projected") < text.index("test_only.py")
+    assert "shard heaviest whole files:" in text
+
+
+@given(
     known=st.dictionaries(_NAMES, st.floats(min_value=0, max_value=500), min_size=1, max_size=30),
     new=st.dictionaries(
         _NAMES.map(lambda name: f"new/{name}"),
@@ -376,7 +574,7 @@ def test_files_new_to_the_record_never_overload_a_shard(
 def test_a_crash_replay_file_missing_from_the_cache_is_spread_over_every_shard() -> None:
     """Regression: 24 tests of 60-77 s landed in one shard (shard 7 took 1005 s)."""
     durations = {f"tests/f{index}.py": 20.0 for index in range(30)}
-    crash = "tests/system/crash/test_crash_convergence.py"
+    crash = "tests/system/crash/test_never_stuck.py"
     whole, loads = shard_loads([*durations, crash], durations, 8)
     spread, _ = assign_heavy_items({crash: 24}, durations, loads)
 

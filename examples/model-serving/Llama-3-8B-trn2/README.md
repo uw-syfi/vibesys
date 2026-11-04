@@ -14,7 +14,10 @@ vibesys --runs-dir /work/vibesys-runs --local \
   --backend trainium
 ```
 
-The Neuron DLC container selects the `neuron-explorer` profiler automatically.
+The task runs on the native TorchNeuron DLC (`torch-neuronx` 2.14, Neuron SDK
+2.33). Its `Dockerfile` moves TorchNeuron's editable install out of
+`/workspace`, where VibeSys mounts the candidate; copy it into any new trainium
+task. The `neuron-explorer` profiler is selected automatically.
 
 The model weights (`meta-llama/Llama-3.1-8B-Instruct`) are downloaded from the
 `model_id` in `reference/meta.json` on first run.

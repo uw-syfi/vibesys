@@ -120,18 +120,22 @@ def test_a_passing_candidate_is_shown_by_its_metric_and_not_as_a_partial(
 
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(context=PLANNER_PROMPTS)
-def test_a_workstream_that_names_no_parent_is_told_it_starts_from_the_input(
+def test_a_workstream_that_names_no_parent_is_told_it_starts_from_main(
     context: PlannerPrompt,
 ) -> None:
-    # A new workstream starts from the run's input, never from the best candidate so far: the
-    # best candidate is reachable only as an explicitly named parent.
+    # A new workstream starts from the run's main (the input until a merge moves it), never from
+    # the best candidate so far: any other candidate is reachable only as a named parent.
     text = " ".join(render(PromptTemplate.PORTFOLIO, context).split())
 
-    assert "a new workstream that names no parent starts from it): " in text
+    assert "Main revision (a new workstream that names no parent starts from it): " in text
     assert f"`{context.base_revision.revision_id.root}`" in text
+    if context.main_revision == context.base_revision:
+        assert "the base revision; no merge has moved it yet" in text
+    else:
+        assert f"`{context.main_revision.revision_id.root}`" in text
     assert "root or the best trusted candidate" not in text
     if context.buildable:
-        assert "selects the base revision" in text
+        assert "selects the main revision" in text
         assert "never silently starts from base" in text
     else:
         assert "leave `parent_hypothesis_id` null" in text
@@ -158,7 +162,12 @@ def violation_facts(
             }
         case ViolationCode.PROFILE_FIELDS_UNSUPPORTED:
             named |= {"fields": (f"{word}f",), "supplied": (f"{word}g",)}
-        case ViolationCode.CONTINUATION_HAS_PARENT | ViolationCode.PROFILE_NOT_OFFERED:
+        case (
+            ViolationCode.CONTINUATION_HAS_PARENT
+            | ViolationCode.PROFILE_NOT_OFFERED
+            | ViolationCode.MERGE_IN_FLIGHT
+            | ViolationCode.MERGE_UNCHECKABLE
+        ):
             pass
         case _:
             named["subject"] = f"{word}s"
@@ -176,7 +185,12 @@ def facts_named(code: ViolationCode, word: str) -> list[str]:
             return [f"'{word}v'", f"'{word}s'", f"('{word}h', '{word}r')"]
         case ViolationCode.PROFILE_FIELDS_UNSUPPORTED:
             return [f"{word}f", f"{word}g"]
-        case ViolationCode.CONTINUATION_HAS_PARENT | ViolationCode.PROFILE_NOT_OFFERED:
+        case (
+            ViolationCode.CONTINUATION_HAS_PARENT
+            | ViolationCode.PROFILE_NOT_OFFERED
+            | ViolationCode.MERGE_IN_FLIGHT
+            | ViolationCode.MERGE_UNCHECKABLE
+        ):
             return []
         case _:
             return [f"'{word}s'"]

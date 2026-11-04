@@ -6,7 +6,6 @@ calls. It is keyed by tool name only and knows nothing of what a tool does.
 
 from __future__ import annotations
 
-import threading
 from collections import Counter
 from typing import TYPE_CHECKING, cast
 
@@ -14,6 +13,8 @@ from vs_faults.plan import Boundary, FaultPlan, ToolFault
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
+
+    from vs_sim.api import Threads
 
 
 class ToolCallFailedError(RuntimeError):
@@ -32,12 +33,15 @@ type Dispatch = Callable[[str, Mapping[str, object]], dict[str, object]]
 class FaultyToolDispatch:
     """Deliver tool calls through ``dispatch``, faulting the ones the plan schedules."""
 
-    def __init__(self, dispatch: Dispatch, plan: FaultPlan) -> None:
-        """Wrap ``dispatch(name, arguments)``; with no tool rules it is a pass-through."""
+    def __init__(self, dispatch: Dispatch, plan: FaultPlan, *, threads: Threads) -> None:
+        """Wrap ``dispatch(name, arguments)``; with no tool rules it is a pass-through.
+
+        ``threads`` makes the lock that orders concurrent calls' counts.
+        """
         self._dispatch = dispatch
         self._plan = plan
         self._counts: Counter[str] = Counter()
-        self._lock = threading.Lock()
+        self._lock = threads.lock()
         self.injected: list[tuple[str, int, ToolFault]] = []
 
     def __call__(self, name: str, arguments: Mapping[str, object]) -> dict[str, object]:

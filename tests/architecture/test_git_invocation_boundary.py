@@ -1,4 +1,4 @@
-"""Architecture contract: VibeSys starts Git only through ``vs_project``'s ``run_git``.
+"""Architecture contract: VibeSys starts Git only through ``vs_project``'s ``Git``.
 
 Git runs auto maintenance after commits and, from Git 2.47, detaches it. The
 detached process races whoever removes or moves the repository next. The
@@ -11,7 +11,7 @@ The scan is syntactic and flags, outside the helper module:
   Git executable (``git``), or ``shutil.which("git")``;
 * any other argv list that starts with those, unless it is the direct argument
   of a ``.run(...)`` call (``GitTracker.run`` reaches the helper) or its module
-  imports ``run_git`` or ``git_environment``, so the argv is handed to code that
+  imports ``Git`` or ``git_environment``, so the argv is handed to code that
   builds its environment with the helper.
 """
 
@@ -27,7 +27,7 @@ pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _HELPER = Path("libs/vs-project/src/vs_project/_git_process.py")
 _SUBPROCESS_CALLS = frozenset({"run", "Popen", "call", "check_call", "check_output"})
-_HELPER_NAMES = frozenset({"run_git", "git_environment"})
+_HELPER_NAMES = frozenset({"Git", "git_environment"})
 _GIT_NAMES = frozenset({"git", "git_bin", "git_exe", "git_executable"})
 
 
@@ -113,7 +113,7 @@ def test_every_git_subprocess_goes_through_the_project_helper(repo_root: Path) -
         for line in git_invocation_sites(path.read_text(encoding="utf-8"))
     ]
     assert violations == [], (
-        "Start Git through vs_project.api.run_git so background maintenance stays off:\n"
+        "Start Git through vs_project.api.Git so background maintenance stays off:\n"
         + "\n".join(violations)
     )
 
@@ -126,7 +126,7 @@ def test_every_git_subprocess_goes_through_the_project_helper(repo_root: Path) -
         'import shutil, subprocess\ngit = shutil.which("git") or "git"\nsubprocess.run([git, *a])\n',
         'import subprocess\nsubprocess.Popen([shutil.which("git"), "x"])\n',
         'runner(["git", "push"])\n',
-        'from vs_project.api import run_git\nimport subprocess\nsubprocess.run(["git", "x"])\n',
+        'from vs_project.api import Git\nimport subprocess\nsubprocess.run(["git", "x"])\n',
     ],
 )
 def test_scan_flags_direct_git_argv(source: str) -> None:
@@ -137,7 +137,7 @@ def test_scan_flags_direct_git_argv(source: str) -> None:
     "source",
     [
         'tracker.run(["git", "status"])\n',
-        'from vs_project.api import run_git\ncmd = ["git", "add"]\ntracker.run(cmd)\n',
+        'from vs_project.api import Git\ncmd = ["git", "add"]\ntracker.run(cmd)\n',
         'import subprocess\nsubprocess.run(["ls", "-l"])\n',
         "import subprocess\nsubprocess.run(cmd)\n",
     ],

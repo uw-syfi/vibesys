@@ -51,7 +51,6 @@ def roundtrip(
         return state
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,
@@ -62,6 +61,19 @@ def roundtrip(
     return codec.decode_envelope(
         core.RunEnvelope[core.StrategyState], codec.encode_envelope(envelope)
     ).core
+
+
+_last_reload: list[tuple[core.CoreState, core.OperationRegistry | None, core.CoreState]] = []
+"""The state last reloaded, its codec and its reloaded copy: a run's next step starts from it."""
+
+
+def _reloaded(state: core.CoreState, codec: core.OperationRegistry | None) -> core.CoreState:
+    """``roundtrip(state)``, once for a state that a step's check and the next step both reload."""
+    if _last_reload and _last_reload[0][0] is state and _last_reload[0][1] is codec:
+        return _last_reload[0][2]
+    again = roundtrip(state, codec=codec)
+    _last_reload[:] = [(state, codec, again)]
+    return again
 
 
 def transition(
@@ -75,8 +87,8 @@ def transition(
         return core.step(state, event, reducers=reducers)
     before = state.model_dump_json()
     result = core.step(state, event, reducers=reducers)
-    assert result == core.step(roundtrip(state, codec=codec), event, reducers=reducers)
-    assert roundtrip(result.state, codec=codec) == result.state
+    assert result == core.step(_reloaded(state, codec), event, reducers=reducers)
+    assert _reloaded(result.state, codec) == result.state
     assert state.model_dump_json() == before
     assert result.state.scheduling == state.scheduling
     assert result.state.sessions == state.sessions
@@ -627,19 +639,15 @@ def _step_job_polls(statuses: list[core.ObservationStatus]) -> core.CoreState:
         state = step.state
         assert state.evaluation.jobs[0].observation == polled
         assert not [r for r in step.requests if isinstance(r, core.ObserveOwnedJob)]
-        # Each poll of a live job comes due once, and an ended job is never polled again.
-        # The submission request stays open in the ledger (job observations never reach it),
-        # so the run loop also wakes at that request's limit.
-        job_due = None if terminal else state.evaluation.jobs[0].pacing.next_at
-        limits = [
-            row.until.at
-            for row in state.records.records
-            if row.phase in (core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED)
-        ]
-        wakes = [due for due in (job_due, *limits) if due is not None]
-        assert core.project(state).next_observe_at == min(wakes)
+        # Each poll of a live job comes due once, and an ended job is never polled again. The
+        # submission request stays open in the ledger (job observations never reach it); its
+        # limit is the runner loop's to wake at (`decide`), not a time core asks the clock for.
+        job_wait = state.evaluation.jobs[0].wait
+        job_due = None if job_wait is None else job_wait.timer
+        wakes = [] if job_due is None else [job_due]
+        assert core.project(state).next_observe_at == min(wakes, default=None)
         if terminal:
-            assert state.evaluation.jobs[0].pacing.next_at is None
+            assert state.evaluation.jobs[0].wait is None
         if not terminal:
             state = _tick_to_next_poll(state, resource)
         stale = core.step(

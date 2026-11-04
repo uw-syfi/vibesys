@@ -87,6 +87,30 @@ def test_project_path_resources_lower_read_only_and_hidden_overlays(tmp_path: Pa
     assert resources[3].access is HostResourceAccess.READ_ONLY
 
 
+def test_every_hidden_directory_gets_its_own_empty_mask(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    (workspace / ".state" / "local").mkdir(parents=True)
+    store = workspace / ".state" / "runs" / "run-1" / "core-store"
+    store.mkdir(parents=True)
+    (store / "store.json").write_text("{}\n")
+    mask_root = tmp_path / "operator-state" / "hidden"
+
+    resources = docker_project_path_resources(
+        ProjectPathPolicy(hidden_paths=(".state/local", ".state/runs")),
+        workspace,
+        mask_root=mask_root,
+    )
+
+    masks = {resource.agent_path: resource.path for resource in resources}
+    assert set(masks) == {"/workspace/.state/local", "/workspace/.state/runs"}
+    assert len(set(masks.values())) == 2
+    # The container sees an empty directory at each hidden path, so the record is
+    # not there to read, and a write lands in the operator-owned mask.
+    assert all(path.is_dir() and not any(path.iterdir()) for path in masks.values())
+    assert all(resource.access is HostResourceAccess.READ_ONLY for resource in resources)
+    assert (store / "store.json").read_text() == "{}\n"
+
+
 def test_project_path_resources_are_idempotent(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     (workspace / "hidden-directory").mkdir(parents=True)

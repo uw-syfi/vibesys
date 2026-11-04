@@ -55,6 +55,7 @@ def request_facts(draw: st.DrawFn) -> tuple[core.InspectRequest, core.RequestRec
         lifecycle=core.LifecycleClass.QUERY,
         phase=core.RequestPhase.COMPLETED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
 
 

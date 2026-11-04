@@ -82,6 +82,10 @@ EXPECTED_TARGET = {
                 "steer_received",
                 "interrupt_requested",
                 "session_input_received",
+                "input_withdraw_requested",
+                "input_offered_mid_turn",
+                "input_mid_turn_released",
+                "input_taken_mid_turn",
                 "input_reservation_requested",
                 "input_acceptance_observed",
                 "input_reservation_released",
@@ -97,12 +101,14 @@ EXPECTED_TARGET = {
                 "agent_measurement_requested",
                 "job_observed",
                 "observations_due",
+                "job_wait_lapsed",
                 "job_termination_requested",
                 "jobs_drain_requested",
                 "run_jobs_cancel_requested",
                 "measurement_submission_observed",
             ),
         ),
+        ("vs_core._measurements.submission_ended", ("measurement_submission_ended",)),
         (
             "vs_core._continuations.advance",
             (
@@ -124,7 +130,10 @@ EXPECTED_TARGET = {
         ),
         ("vs_core._session_stalls.advance_stalled_checkpoint_waits", ("checkpoint_stalled",)),
         ("vs_core._session_stalls.advance_stalled_acquisitions", ("acquisition_stalled",)),
+        ("vs_core._session_stalls.advance_lapsed_session_waits", ("session_wait_lapsed",)),
+        ("vs_core._session_checkpoints.advance", ("invocation_checkpoint_pending",)),
         ("vs_core.records._observation", ("request_observed",)),
+        ("vs_core._turn_holds.held", ("turn_held",)),
         (
             "vs_core._settlement.advance",
             (
@@ -146,10 +155,6 @@ EXPECTED_TARGET = {
             ),
         ),
         (
-            "vs_core._request_recovery.advance",
-            ("recovery_started", "recovery_ready", "reconciliation_deadline"),
-        ),
-        (
             "vs_core.scheduling.schedule",
             (
                 "attempt_requested",
@@ -161,6 +166,7 @@ EXPECTED_TARGET = {
                 "clock_advanced",
                 "admission_control",
                 "adoption_fence_lifted",
+                "parallel_limit_changed",
             ),
         ),
     )

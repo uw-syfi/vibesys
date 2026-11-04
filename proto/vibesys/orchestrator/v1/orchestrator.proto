@@ -1,0 +1,383 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// RunStatus is where a run is. ENDED and FAILED are final.
+enum RunStatus {
+  RUN_STATUS_UNSPECIFIED = 0;
+  // The lead's session is opening.
+  RUN_STATUS_STARTING = 1;
+  RUN_STATUS_RUNNING = 2;
+  // The run was told to stop and its agents are closing. stop_reason says why.
+  RUN_STATUS_STOPPING = 3;
+  RUN_STATUS_ENDED = 4;
+  RUN_STATUS_FAILED = 5;
+}
+
+// RunStopReason says why a run left RUNNING. The final status follows from it.
+enum RunStopReason {
+  RUN_STOP_REASON_UNSPECIFIED = 0;
+  RUN_STOP_REASON_OPERATOR = 1;
+  RUN_STOP_REASON_DEADLINE = 2;
+  // The lead failed or was lost and could not be resumed. Ends the run as FAILED.
+  RUN_STOP_REASON_LEAD_GONE = 3;
+}
+
+enum AgentRole {
+  AGENT_ROLE_UNSPECIFIED = 0;
+  AGENT_ROLE_LEAD = 1;
+  AGENT_ROLE_PLANNER = 2;
+  AGENT_ROLE_WORKER = 3;
+  AGENT_ROLE_JUDGE = 4;
+  AGENT_ROLE_COMBINER = 5;
+  AGENT_ROLE_PROFILER = 6;
+}
+
+// AgentStatus is where an agent's session is. ENDED, FAILED and LOST are final for the session;
+// an agent whose capabilities allow it can be resumed into a new session.
+enum AgentStatus {
+  AGENT_STATUS_UNSPECIFIED = 0;
+  // The session is opening, for the first time or to resume.
+  AGENT_STATUS_LAUNCHING = 1;
+  // A turn is running.
+  AGENT_STATUS_ACTIVE = 2;
+  // No turn is running and subagents of this agent are live, so a wake is expected.
+  AGENT_STATUS_WAITING = 3;
+  // No turn is running and nothing is expected.
+  AGENT_STATUS_IDLE = 4;
+  // The session closed.
+  AGENT_STATUS_ENDED = 5;
+  // The session reported a failure.
+  AGENT_STATUS_FAILED = 6;
+  // The session's sidecar went away, or never answered a close.
+  AGENT_STATUS_LOST = 7;
+}
+
+// AgentStopStage is how far an agent's stop has come. An agent's status keeps saying what its
+// session is doing while this says what is being done about it.
+enum AgentStopStage {
+  AGENT_STOP_STAGE_UNSPECIFIED = 0;
+  AGENT_STOP_STAGE_NONE = 1;
+  // An interrupt was asked for. The session closes when the turn ends.
+  AGENT_STOP_STAGE_INTERRUPTING = 2;
+  // A close was asked for and is not confirmed yet.
+  AGENT_STOP_STAGE_CLOSING = 3;
+}
+
+// TurnTrigger is what started a turn.
+enum TurnTrigger {
+  TURN_TRIGGER_UNSPECIFIED = 0;
+  TURN_TRIGGER_BRIEF = 1;
+  TURN_TRIGGER_OPERATOR = 2;
+  TURN_TRIGGER_HANDOFF = 3;
+  TURN_TRIGGER_JOB_FINISHED = 4;
+  // Reserved for scheduled wakeups. Nothing starts such a turn yet.
+  TURN_TRIGGER_SCHEDULE = 5;
+  // A message from another agent.
+  TURN_TRIGGER_MESSAGE = 6;
+  // A subagent settled without a handoff.
+  TURN_TRIGGER_SUBAGENT_SETTLED = 7;
+}
+
+// TurnStatus is where a turn is. All but RUNNING are final.
+enum TurnStatus {
+  TURN_STATUS_UNSPECIFIED = 0;
+  TURN_STATUS_RUNNING = 1;
+  TURN_STATUS_COMPLETED = 2;
+  TURN_STATUS_INTERRUPTED = 3;
+  TURN_STATUS_FAILED = 4;
+}
+
+// ItemStatus is where an item is. FINISHED and FAILED are final.
+enum ItemStatus {
+  ITEM_STATUS_UNSPECIFIED = 0;
+  ITEM_STATUS_RUNNING = 1;
+  ITEM_STATUS_FINISHED = 2;
+  ITEM_STATUS_FAILED = 3;
+}
+
+// Harness is the agent CLI behind a session. Only the sidecar maps it to a provider name.
+enum Harness {
+  HARNESS_UNSPECIFIED = 0;
+  HARNESS_CLAUDE_CODE = 1;
+  HARNESS_CODEX = 2;
+}
+
+// Delivery is where a message is. CONSUMED and REJECTED are final.
+enum Delivery {
+  DELIVERY_UNSPECIFIED = 0;
+  // Accepted, and waiting for the agent's next turn.
+  DELIVERY_QUEUED = 1;
+  // Sent into a running turn, and the sidecar has not said whether it landed.
+  DELIVERY_STEERED = 2;
+  // The trigger of a turn that is running.
+  DELIVERY_NEW_TURN = 3;
+  // The agent has it: its steer landed, or its turn completed. A message to the operator is
+  // consumed when recorded.
+  DELIVERY_CONSUMED = 4;
+  // It will not be delivered: rejection says why.
+  DELIVERY_REJECTED = 5;
+}
+
+// Rejection says why a message was not delivered.
+enum Rejection {
+  REJECTION_UNSPECIFIED = 0;
+  // The agent's session is over and it cannot be resumed.
+  REJECTION_AGENT_GONE = 1;
+  // Resuming the agent would go over the run's fan-out limit.
+  REJECTION_FANOUT_LIMIT = 2;
+  // The agent is being stopped.
+  REJECTION_AGENT_STOPPING = 3;
+  // The run is stopping or over.
+  REJECTION_RUN_STOPPING = 4;
+  // Every delivery attempt ended in an interrupted or failed turn.
+  REJECTION_ATTEMPTS_EXHAUSTED = 5;
+}
+
+// JobOutcome is how a vibesys-cli job finished.
+enum JobOutcome {
+  JOB_OUTCOME_UNSPECIFIED = 0;
+  JOB_OUTCOME_SUCCEEDED = 1;
+  JOB_OUTCOME_FAILED = 2;
+  JOB_OUTCOME_CANCELLED = 3;
+  JOB_OUTCOME_LOST = 4;
+}
+
+message Run {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string repository = 2 [(buf.validate.field).string.min_len = 1];
+  string task = 3 [(buf.validate.field).string.min_len = 1];
+  RunStatus status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string lead_agent_id = 5 [(buf.validate.field).string.min_len = 1];
+  // How many non-lead agents may be live at once.
+  uint32 fanout_limit = 6;
+  // Absent when the run has no deadline.
+  google.protobuf.Timestamp deadline = 7;
+  google.protobuf.Timestamp created_at = 8 [(buf.validate.field).required = true];
+  // Set when the run left RUNNING.
+  RunStopReason stop_reason = 9 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Timestamp ended_at = 10;
+  // Where this run's agents find the vibesys-cli and the daemon and store it talks to. Recorded
+  // when the run starts and never changed, so a relaunch of any of its sessions meets the same
+  // ones. Empty for a run that started before it was recorded.
+  CliLocation cli_location = 11;
+}
+
+// CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
+// store from. Each value is an absolute path, or empty for "not set": an empty value is unset in
+// the agent's environment, not set to the empty string. The environment names each one becomes are
+// in vibesys/cli/v1/conformance/identity_env.golden.json.
+message CliLocation {
+  // The vibesys-cli the orchestrator chose for its agents.
+  string cli = 1 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
+  string xdg_runtime_dir = 2 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
+  string xdg_state_home = 3 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
+  string home = 4 [(buf.validate.field).string.pattern = "^(/[^\\x00]*)?$"];
+}
+
+message Agent {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
+  // Empty for the lead.
+  string parent_agent_id = 3;
+  AgentRole role = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  Harness harness = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string model = 6;
+  string reasoning_effort = 7;
+  // Zero when not tied to a plan.
+  uint32 plan_number = 8;
+  // Empty until the session opened.
+  string worktree = 9;
+  AgentStatus status = 10 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // A reference only; never our identity. Empty until the session opened.
+  string provider_conversation_id = 11;
+  // Absent until the session opened.
+  Capabilities capabilities = 12;
+  google.protobuf.Timestamp started_at = 13 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp ended_at = 14;
+  // Counts this agent's sessions and fences them: a fact from an earlier session is dropped.
+  uint32 session = 15 [(buf.validate.field).uint32.gt = 0];
+  AgentStopStage stop_stage = 16 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // A handoff was posted and no turn has started since, so the agent owes the lead nothing.
+  bool handed_off = 17;
+  // Sessions in a row that this agent lost or failed without completing a turn.
+  uint32 session_failures = 18;
+  // Why the current session ended, when it was lost or failed: the launch error, for one that never
+  // started. Empty while the session is live.
+  string end_detail = 19 [(buf.validate.field).string.max_len = 1000];
+}
+
+// Capabilities are what a session can do. The sidecar reports them when the session opens, so
+// that the orchestrator never branches on a harness.
+message Capabilities {
+  bool streams_text = 1;
+  bool steers = 2;
+  bool resumes = 3;
+}
+
+// Usage is what a turn has cost. Fields a provider does not report are absent, never zero.
+message Usage {
+  optional uint64 input_tokens = 1;
+  optional uint64 cache_read_tokens = 2;
+  optional uint64 cache_creation_tokens = 3;
+  optional uint64 output_tokens = 4;
+  optional uint64 reasoning_tokens = 5;
+  optional double cost_usd = 6 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+}
+
+message Turn {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string agent_id = 2 [(buf.validate.field).string.min_len = 1];
+  // Starts at 1 for each agent and has no gaps.
+  uint32 ordinal = 3 [(buf.validate.field).uint32.gt = 0];
+  TurnTrigger trigger = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string trigger_message_id = 5 [(buf.validate.field).string.min_len = 1];
+  TurnStatus status = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  Usage usage = 7;
+  google.protobuf.Timestamp started_at = 8 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp ended_at = 9;
+}
+
+message Item {
+  // The sidecar mints it, and repeats it for each update of the item.
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string turn_id = 2 [(buf.validate.field).string.min_len = 1];
+  string agent_id = 3 [(buf.validate.field).string.min_len = 1];
+  // Starts at 1 for each agent and has no gaps. The orchestrator assigns it on first sight.
+  uint32 ordinal = 4 [(buf.validate.field).uint32.gt = 0];
+  ItemStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  google.protobuf.Timestamp at = 6 [(buf.validate.field).required = true];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    Text assistant = 10;
+    Text reasoning = 11;
+    Text prompt = 12;
+    ToolCall tool = 13;
+  }
+}
+
+message Text {
+  string text = 1;
+}
+
+message ToolCall {
+  string tool = 1 [(buf.validate.field).string.min_len = 1];
+  string provider_call_id = 2;
+  string args_json = 3;
+  string output = 4;
+  optional int32 exit_code = 5;
+  bool is_error = 6;
+}
+
+message Handoff {
+  uint32 plan_number = 1;
+  bool has_candidate = 2;
+  string claim = 3;
+  string commit = 4;
+  string parent_commit = 5;
+  string branch = 6;
+  string checks = 7;
+  string measurement = 8;
+  string learned = 9;
+  string next = 10;
+  string open_items = 11;
+}
+
+message Report {
+  string headline = 1 [(buf.validate.field).string.min_len = 1];
+  string changed = 2;
+  string in_flight = 3;
+  string decisions = 4;
+  string open_for_user = 5;
+}
+
+message JobFinished {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  JobOutcome outcome = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The agent that submitted the job, when the job says so.
+  string submitted_by_agent_id = 3;
+  string detail = 4;
+}
+
+// SubagentSettled tells the lead that a subagent stopped working without a handoff: it went idle,
+// ended, failed or was lost. Without it the lead would wait for a handoff that never comes.
+message SubagentSettled {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  AgentStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 3;
+}
+
+message Message {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string run_id = 2 [(buf.validate.field).string.min_len = 1];
+  // Empty for the operator or the orchestrator.
+  string from_agent_id = 3;
+  // Empty for the operator.
+  string to_agent_id = 4;
+  Delivery delivery = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  google.protobuf.Timestamp at = 6 [(buf.validate.field).required = true];
+  // Set when delivery is REJECTED.
+  Rejection rejection = 7 [(buf.validate.field).enum.defined_only = true];
+  // Turns started to deliver this message.
+  uint32 attempts = 8;
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    string text = 10;
+    Handoff handoff = 11;
+    Report report = 12;
+    JobFinished job_finished = 13;
+    SubagentSettled subagent_settled = 14;
+    // The first prompt of an agent. It carries data; a template renders it for the agent.
+    string brief = 15;
+    // The first prompt of a run's lead: the task, how many subagents may be live, and the
+    // operator's steering text. Templates word it; the lead is not told the run's internals.
+    LeadBrief lead_brief = 16;
+  }
+}
+
+message LeadBrief {
+  string task = 1 [(buf.validate.field).string.min_len = 1];
+  uint32 fanout_limit = 2;
+  // Empty when the operator gave none.
+  string steering = 3;
+}

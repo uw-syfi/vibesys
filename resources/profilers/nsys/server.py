@@ -15,14 +15,15 @@ Launch (typically spawned by the agent runner via ``MCPServerSpec``):
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
-
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from mcp.server.fastmcp import FastMCP
 
 _HERE = Path(__file__).resolve().parent
 
@@ -38,13 +39,23 @@ def _capture(fn: Callable[..., None], **kwargs: object) -> str:
     return analyze_nsys.capture_runtime.run_analysis(fn, **kwargs)
 
 
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "strict_arguments.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
+
+
 def build_server() -> FastMCP:
     """Construct the FastMCP instance with nsys analysis tools.
 
     Exposed separately so unit tests can introspect registered tools
     without spawning a stdio loop.
     """
-    mcp = FastMCP("vibesys-nsys-profiler")
+    mcp = StrictFastMCP("vibesys-nsys-profiler")
     _register_report_tools(mcp)
     _register_timing_tools(mcp)
     _register_detail_tools(mcp)

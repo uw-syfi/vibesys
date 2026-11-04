@@ -1,0 +1,68 @@
+{
+  "name": "a_restart_settles_what_the_crash_left",
+  "doc": "The sidecar dies mid-turn with a tool call still running. The restarted one fails the open turn after settling its running item, reports the session lost, and keeps the history.",
+  "provider": [
+    [
+      {
+        "tool_left_running": "sleep 1",
+        "id": "c1"
+      },
+      {
+        "say": "partial",
+        "item": "a1"
+      },
+      {
+        "crash": true
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "send": {
+        "effectId": "e1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "item": "a1"
+      }
+    },
+    {
+      "restart": true
+    },
+    {
+      "await": {
+        "failed": true
+      }
+    }
+  ],
+  "checks": [
+    "opened_first",
+    "offsets_increase",
+    "one_end_per_turn",
+    "items_precede_end",
+    "no_running_item_after_end",
+    "session_lost_after_restart",
+    "follow_resumes"
+  ],
+  "expect": {
+    "failed_turns": [
+      "t1"
+    ]
+  }
+}

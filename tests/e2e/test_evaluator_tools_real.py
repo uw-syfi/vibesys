@@ -27,8 +27,6 @@ from vs_sandbox.api.evaluator_tools import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    import pytest
-
 
 def _spec() -> CargoGitToolSpec:
     return CargoGitToolSpec(
@@ -223,33 +221,6 @@ def test_target_install_isolates_cargo_from_candidate_configuration(tmp_path: Pa
     )
 
     assert result.returncode == 0, result.stderr
-    _assert_isolated_cargo_context(context_log, candidate, rustup)
-
-
-def test_host_install_isolates_cargo_from_candidate_configuration(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    executable_dir, call_log = _fake_cargo(tmp_path)
-    candidate = tmp_path / "candidate"
-    (candidate / ".cargo").mkdir(parents=True)
-    (candidate / ".cargo" / "config.toml").write_text(
-        '[build]\nrustc-wrapper = "./poison"\n',
-        encoding="utf-8",
-    )
-    context_log = tmp_path / "cargo-context.json"
-    rustup = tmp_path / "trusted-rustup"
-    monkeypatch.chdir(candidate)
-    monkeypatch.setenv("PATH", f"{executable_dir}{os.pathsep}{os.environ['PATH']}")
-    monkeypatch.setenv("FAKE_CARGO_CALL_LOG", str(call_log))
-    monkeypatch.setenv("FAKE_CARGO_CONTEXT_LOG", str(context_log))
-    monkeypatch.setenv("CARGO_BUILD_RUSTC_WRAPPER", "./candidate-wrapper")
-    monkeypatch.setenv("RUSTFLAGS", "--cfg candidate")
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
-    monkeypatch.setenv("RUSTUP_HOME", str(rustup))
-
-    prepare_evaluator_tools({"example": _spec()}, tmp_path / "tools")
-
     _assert_isolated_cargo_context(context_log, candidate, rustup)
 
 

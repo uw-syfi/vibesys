@@ -12,8 +12,9 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentRequest,
     materialize_objective_document,
 )
-from vs_runtime.api.testing import unconfined_host_environment
+from vs_runtime.api.testing import idle_environment_system, unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 def test_materializes_exact_objective_at_the_selected_destination(tmp_path: Path) -> None:
@@ -108,17 +109,21 @@ def test_candidate_objective_verification_uses_run_root_and_requires_exact_text(
             workspace=workspace,
             git_history_root=root,
             ref_dir=None,
-            backend=FakeComputeBackend(),
+            backend=FakeComputeBackend(threads=SimThreads()),
             agent_backend="stub",
             cli_provider=None,
             run_id="objective-contract",
             framework_root=root,
             objective=objective,
             objective_document=document,
+            clock=ManualClock(),
+            system=idle_environment_system(),
         )
         presentation = RunEnvironmentPresentation(prompt_notes="")
         with unconfined_host_environment().prepare(request).open(presentation) as session:
-            assert session.view.paths.objective == str(document)
+            # A host agent reads a copy outside the project, not the committed document.
+            assert session.view.paths.objective == str(root / "effective-objective.md")
+            assert Path(session.view.paths.objective).read_text() == objective
 
         document.write_text(objective + "modified")
         with pytest.raises(ValueError, match="does not match its committed document"):

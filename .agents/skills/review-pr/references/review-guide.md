@@ -9,7 +9,7 @@ matching the changed surfaces.
 - [Correctness, Failure, And Lifecycle](#correctness-failure-and-lifecycle)
 - [Contracts And Compatibility](#contracts-and-compatibility)
 - [Python 3.12](#python-312)
-- [TypeScript TUI](#typescript-tui)
+- [TypeScript clients](#typescript-clients)
 - [Go, Rust, C, And C++ Evaluators](#go-rust-c-and-c-evaluators)
 - [Configuration, Features, And Generated Files](#configuration-features-and-generated-files)
 - [Prompts, Templates, And Agent Skills](#prompts-templates-and-agent-skills)
@@ -18,9 +18,9 @@ matching the changed surfaces.
 
 ## Repository Ownership And Architecture
 
-- Keep framework behavior under `src/vibesys/` and behavior owned by a loop,
-  domain, backend, renderer, or agent in that package.
-- Put reusable standalone Python capabilities under `libs/` with a focused
+- Keep framework behavior in the `vibesys` product package, and behavior owned
+  by a flow, domain, backend, renderer, or agent in that package.
+- Put reusable standalone Python capabilities in a library package with a focused
   public interface and their own tests. Prefer the canonical existing module
   when behavior has one owner; do not create a package solely to split a small
   function or anticipate reuse.
@@ -28,10 +28,10 @@ matching the changed surfaces.
   in its standard example bundle. Do not move one workload's policy into the
   framework or create shared infrastructure merely to set up an example.
 - Keep strategy and domain prompt assets in their owning packages; keep only
-  shared rendering and templates in `src/vibesys/prompts/`. Follow the
-  [package placement rule](../../../../docs/contributing/architecture.md).
-- Keep long-form serving knowledge under `resources/skills/`. Follow
-  `resources/skills/serving-systems/CLAUDE.md` for that subtree.
+  shared rendering and templates in the prompt-rendering package. Follow the
+  [package placement rule](../../../../docs/contributing/python-module-graph.md).
+- Keep long-form serving knowledge in the bundled product skills. Follow the
+  authoring guide (`CLAUDE.md`) in the serving-systems skill's directory.
 - Preserve unidirectional data flow: stable interfaces and typed values feed
   implementations, which emit semantic results for consumers. Core behavior
   must not reach back into concrete sandboxes, renderers, clients, or
@@ -97,7 +97,7 @@ Ask of new abstractions:
   the producer. Backend events remain semantic; clients own presentation,
   formatting, truncation, colors, and layout.
 - Put nontrivial candidate-facing APIs, ABIs, ownership rules, and service
-  protocols in `CANDIDATE_CONTRACT.md`; keep evaluator internals and trust-model
+  protocols in the candidate contract document; keep evaluator internals and trust-model
   rationale in design docs.
 
 ## Python 3.12
@@ -118,11 +118,11 @@ Ask of new abstractions:
   structure. When relevant, run focused tests, `./scripts/check_format.sh`,
   `./scripts/check_lint.sh`, and `./scripts/check_types.sh` for affected typed packages.
 
-## TypeScript TUI
+## TypeScript clients
 
 - Preserve the Python event/schema models as the protocol source of truth;
   regenerate client schema and types instead of hand-editing generated files.
-- Keep protocol data semantic and rendering/UI state in `clients/tui/`.
+- Keep protocol data semantic and rendering/UI state in the desktop client.
   Validate missing, duplicate, out-of-order, reconnect, and terminal events in
   session state transitions.
 - Protocol-defined closed sets (run status, event kinds, verdicts) must reach
@@ -132,9 +132,8 @@ Ask of new abstractions:
   unchecked indexed access, exhaustive control flow, and unused checks. Do not
   use assertions or `any` to bypass uncertain protocol states.
 - Check listener/timer/subscription teardown, asynchronous races, stale render
-  state, terminal width and Unicode handling, and non-interactive/headless use.
-- Run root Biome checks plus `pnpm --dir clients/tui run check` and focused
-  Vitest tests when the diff touches the client.
+  state, window size and Unicode handling, and non-interactive/headless use.
+- Run root Biome checks plus focused package checks and tests when the diff touches a client.
 
 ## Go, Rust, C, And C++ Evaluators
 
@@ -159,22 +158,22 @@ Ask of new abstractions:
 
 - For TOML/YAML/JSON/manifests, test a representative valid value and unknown,
   malformed, missing, or conflicting values. Check defaults and precedence.
-- Add `FeatureFlag` enum members and `FeatureDefinition` registrations together;
-  keep typed flag use at call sites and update `docs/contributing/feature-flags.md`.
 - Check package and distribution boundaries when adding templates, data, CLI
   entry points, workspace libraries, or client outputs. A source-tree test can
   pass while a built package omits the new file.
 - Locate the generator before accepting generated-looking diffs. Reproduce the
   output, inspect the semantic diff, and prevent hand-edited drift.
-- For Agent Skills, keep `SKILL.md` frontmatter to `name` and `description`,
-  keep router content concise, move depth to direct references, and put VibeSys
-  routing rules in `.vibesys.toml` sidecars.
+- For bundled product skills, keep `SKILL.md` frontmatter to
+  `name` and `description`, keep router content concise, move depth to direct
+  references, and put VibeSys routing rules in `.vibesys.toml` sidecars. Agent
+  skills under `.agents/skills/` follow the `write-skills` skill instead, and
+  `check_skills` checks that convention.
 
 ## Prompts, Templates, And Agent Skills
 
 Treat every prompt change as a behavior change that needs an explicit audit:
 
-1. Confirm that prompt assets use the public `vibesys.prompts` rendering API and
+1. Confirm that prompt assets use the public prompt-rendering API and
    remain in their central loop, domain, or backend owner. Find all render sites
    and compare the fully rendered before/after prompt, not only the Jinja or
    Markdown source diff.
@@ -204,9 +203,8 @@ that prevent domain prose from leaking into neutral or unrelated prompts.
 For skill changes, also verify that the frontmatter description triggers on the
 intended requests without being overly broad, instructions are imperative and
 actionable, and references are discoverable directly from `SKILL.md`. For
-skills under `resources/skills/`, also run
-`uv run pytest tests/entrypoints/test_skills_wiring.py`, which runs
-`validate_skill_tree`.
+bundled product skills, also run the skills-wiring test, which runs the
+product skill-tree validator.
 
 ## Documentation And Example Drift
 
@@ -214,9 +212,9 @@ Search for every user-visible name, command, field, default, and path changed by
 the PR. Typical coupled documentation includes:
 
 - `README.md`, package READMEs, installation/setup commands, and examples;
-- `docs/cli-flags.md` for CLI flags and `docs/contributing/feature-flags.md` for flags;
-- `CANDIDATE_CONTRACT.md`, protocol/design docs, and evaluator READMEs;
-- example `OBJECTIVE.md`, `vibesys.input.toml`, checker, benchmark, reference,
+- `docs/cli-flags.md` for CLI flags;
+- the candidate contract document, protocol/design docs, and evaluator READMEs;
+- example objective files, input configs, checker, benchmark, reference,
   requirements, and run commands;
 - schema outputs and generated TypeScript protocol types;
 - prompt snapshots and skill references.
@@ -232,10 +230,7 @@ take the wrong action. Do not require prose churn for a purely internal change.
 - For a bug fix, require a regression test that fails at the merge base at
   the lowest layer that reproduces the reported symptom. Reject a test that
   passes unchanged on the pre-fix code or that restates the fix's constants
-  in the test body. For TUI symptoms stated in terminal geometry, the layer
-  is the OpenTUI test renderer (`createTestRenderer`); a pure-function test
-  over a formatter is not evidence. See the regression-test table in
-  `docs/contributing/tui-architecture.md`.
+  in the test body.
 - Test application configuration and implementation separately, then add a
   focused wiring test when their connection changes.
 - Require one contract suite per I/O interface, shipped by its owning library

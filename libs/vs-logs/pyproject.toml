@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=70.1", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vs-logs"
+version = "0.1.0"
+description = "Durable, capped, offset-addressed log streams for humans, with a separate read side"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2", "vs-decode", "vs-sim"]
+
+[tool.uv.sources]
+vs-decode = { workspace = true }
+vs-sim = { workspace = true }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vs_logs = ["py.typed"]

@@ -12,14 +12,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
-from hypothesis import given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
-from vs_sim.api.testing import examples
 
-from .test_measurements import submitted
-from .test_silent_executor_deadline import BOUND, _silent
+from .test_silent_executor_deadline import _silent
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -47,8 +44,12 @@ def _record(
     *,
     accepted: bool,
     named: bool,
+    answered: bool = True,
 ) -> core.CoreState:
-    """A run with one open record whose executor answered without a conclusion and went silent."""
+    """A run with one open record whose executor answered without a conclusion and went silent.
+
+    Unless ``answered`` is false: then the executor never answered at all (a slow submission).
+    """
     phase, status = answer
     state = _silent(phase, status, terminal=False)
     [record] = state.records.records
@@ -59,7 +60,13 @@ def _record(
             "resource_id": core.ResourceId(root="held") if named else None,
         }
     )
-    held = record.model_copy(update={"lifecycle": lifecycle, "observation": observation})
+    held = record.model_copy(
+        update={
+            "lifecycle": lifecycle,
+            "observation": observation if answered else None,
+            "phase": phase if answered else core.RequestPhase.DISPATCHED,
+        }
+    )
     return state.model_copy(
         update={"records": state.records.model_copy(update={"records": (held,)})}
     )
@@ -109,49 +116,6 @@ def _settle(
     return state
 
 
-def _close_after(
-    state: core.CoreState, *, restart: bool, late_by: float, stop_first: bool
-) -> core.CoreState:
-    """Close the run around a record that goes blocked, as the shell would drive it."""
-    late = BOUND + late_by
-    if stop_first:
-        state = core.step(state, _STOP).state
-    result = (
-        core.step(state, core.RecoveryStarted(epoch=2, now_at=late))
-        if restart
-        else core.step(state, core.ClockAdvanced(now_at=late))
-    )
-    state = _settle(result.state, result.requests, late)
-    record = _original(state)
-    if restart:
-        result = core.step(
-            state, core.ReconciliationDeadline(request_id=record.request_id, now_at=late)
-        )
-        state = _settle(result.state, result.requests, late)
-    if not stop_first:
-        result = core.step(state, _STOP)
-        state = _settle(result.state, result.requests, late)
-    for tick in (late + 1.0, late + 100.0):
-        result = core.step(state, core.ClockAdvanced(now_at=tick))
-        state = _settle(result.state, result.requests, tick)
-    return state
-
-
-def test_a_closing_run_ends_the_blocked_record_it_waits_on() -> None:
-    """The reported stall: the record is accepted but names nothing, so no cancellation exists."""
-    state = _record(
-        core.LifecycleClass.IDEMPOTENT_WRITE, _SILENT_ANSWERS[0], accepted=True, named=False
-    )
-    closed = _close_after(state, restart=False, late_by=1.0, stop_first=True)
-    assert closed.run.status == core.RunStatus.TERMINAL
-    record = _original(closed)
-    assert record.phase == core.RequestPhase.COMPLETED
-    assert record.observation is not None
-    assert record.observation.status == core.ObservationStatus.FAILED
-    assert record.observation.terminal
-    assert "closed while this request was blocked" in record.observation.diagnostic
-
-
 class _Case(NamedTuple):
     """One generated world: a record kind and answer, a host restart, and how late it is."""
 
@@ -176,91 +140,58 @@ _CASES = st.builds(
 )
 
 
-@given(case=_CASES)
-def test_a_closing_run_never_waits_on_a_blocked_record_nothing_can_end(case: _Case) -> None:
-    """Every open record is a counted wait with a producer, and a closing run terminates."""
-    lifecycle, accepted, named = case.lifecycle, case.accepted, case.named
-    state = _record(lifecycle, case.answer, accepted=accepted, named=named)
-    closed = _close_after(
-        state, restart=case.restart, late_by=case.late_by, stop_first=case.stop_first
-    )
-    assert core.orphan_waits(closed) == ()
-    if lifecycle in _ENDS_WITH_RECORD or not (accepted or named):
-        assert closed.run.status == core.RunStatus.TERMINAL
-    record = _original(closed)
-    assert (
-        closed.run.status == core.RunStatus.TERMINAL
-        or record.phase != core.RequestPhase.BLOCKED
-        or any(wait.waiter == core.WaitKind.BLOCKED_RECORD for wait in core.waits(closed))
-    )
-
-
-def test_a_blocked_record_outside_a_close_is_left_to_the_strategy() -> None:
-    """Only a close waits on the record: a running run keeps it blocked and counts no wait."""
-    state = _record(
-        core.LifecycleClass.IDEMPOTENT_WRITE, _SILENT_ANSWERS[0], accepted=True, named=False
-    )
-    result = core.step(state, core.ClockAdvanced(now_at=BOUND + 1.0))
-    blocked = _settle(result.state, result.requests, BOUND + 1.0)
-    assert blocked.run.status == core.RunStatus.RUNNING
-    assert _original(blocked).phase == core.RequestPhase.BLOCKED
-    assert core.waits(blocked) == ()
-
-
 @pytest.mark.parametrize("kind", list(core.WaitKind))
 def test_every_wait_kind_has_a_resolution(kind: core.WaitKind) -> None:
     assert kind in core.RESOLUTIONS
 
 
-def _poll_blocked_by_late_restart(down_for: float) -> core.CoreState:
-    """A paced job whose poll was in flight when the host died and came back ``down_for`` late."""
-    state, _ = submitted()
-    [job] = state.evaluation.jobs
-    assert job.pacing.next_at is not None
-    polled = core.step(state, core.ClockAdvanced(now_at=job.pacing.next_at))
-    state = polled.state
-    for request in polled.requests:
-        assert request.request_id is not None
-        state = core.step(state, core.DispatchAuthorized(request_id=request.request_id)).state
-    poll = next(row for row in state.records.records if row.request.kind == "observe_owned_job")
-    restart = poll.until.at + down_for
-    state = core.step(state, core.RecoveryStarted(epoch=2, now_at=restart)).state
-    # The restart inspects the poll first; its passed limit ends it once that inspection's own
-    # bound passes with no answer.
-    late = restart + state.run.limits.reconciliation_bound
-    result = core.step(state, core.ReconciliationDeadline(request_id=poll.request_id, now_at=late))
-    return _settle_blocks(result.state, result.requests, late)
+_DID_NOT_SUCCEED = {
+    core.ObservationStatus.FAILED,
+    core.ObservationStatus.REJECTED,
+    core.ObservationStatus.CANCELLED,
+}
 
 
-def _settle_blocks(
-    state: core.CoreState, requests: Iterable[core.Request], now_at: float
-) -> core.CoreState:
-    for request in requests:
-        if isinstance(request, core.BlockRequest) and request.request_id is not None:
-            state = core.step(state, core.DispatchAuthorized(request_id=request.request_id)).state
-            answer = _answer(request, now_at).model_copy(
-                update={"admission_id": request.admission_id}
-            )
-            state = core.step(state, core.RequestObserved(observation=answer)).state
-    return state
+class _Later(NamedTuple):
+    """What a later host's executor says about a record the close already ended."""
+
+    status: core.ObservationStatus
+    accepted: bool
+    released: bool
+    children_complete: bool
+    terminal: bool
 
 
-@settings(max_examples=examples(pr=4, nightly=100))
-@given(down_for=st.floats(min_value=0.0, max_value=10_000.0))
-def test_a_job_whose_poll_blocked_while_the_host_was_down_is_polled_again(down_for: float) -> None:
-    """Downtime past any reconciliation bound leaves the job a producer, never an orphan."""
-    state = _poll_blocked_by_late_restart(down_for)
-    assert any(row.phase == core.RequestPhase.BLOCKED for row in state.records.records)
-    now_at = state.run.now_at + 1.0
-    requests: list[core.Request] = []
-    for tick in (now_at, now_at + 1.0):
-        result = core.step(state, core.ClockAdvanced(now_at=tick))
-        state = result.state
-        requests.extend(result.requests)
-    assert any(request.kind == "observe_owned_job" for request in requests) or any(
-        row.request.kind == "observe_owned_job" and row.phase != core.RequestPhase.BLOCKED
-        for row in state.records.records
+_LATER_ANSWERS = st.builds(
+    _Later,
+    status=st.sampled_from(list(core.ObservationStatus)),
+    accepted=st.booleans(),
+    released=st.booleans(),
+    children_complete=st.booleans(),
+    terminal=st.booleans(),
+)
+
+
+def _judged(run: core.CoreState, answer: core.Observation) -> tuple[object, ...]:
+    """What core makes of ``answer``: the typed contradiction, a refusal, or the record it leaves.
+
+    The record is read without the answer's own name and number, which differ by construction.
+    """
+    try:
+        after = core.step(run, core.RequestObserved(observation=answer)).state
+    except core.ClosedRecordContradictionError:
+        return ("contradiction",)
+    except core.ContractError as error:
+        return ("refused", error.path, error.detail)
+    record = _original(after)
+    seen = record.observation
+    assert seen is not None
+    return (
+        record.phase,
+        seen.status,
+        seen.accepted,
+        seen.resource_id,
+        seen.released,
+        seen.children_complete,
+        seen.diagnostic,
     )
-    assert [
-        wait for wait in core.orphan_waits(state) if wait.waiter == core.WaitKind.OWNED_JOB
-    ] == []

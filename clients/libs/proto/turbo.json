@@ -1,0 +1,11 @@
+{
+  "$schema": "https://turborepo.com/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      // The shared validation corpus lives in proto/testdata, outside the workspace inputs
+      // Turborepo hashes. Run it every time so corpus-only changes cannot replay a stale pass.
+      "cache": false
+    }
+  }
+}

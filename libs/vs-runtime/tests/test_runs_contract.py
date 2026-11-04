@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, rule
 from pydantic import BaseModel, ConfigDict
 
+from vs_core.api import StopMode
 from vs_runtime.api.testing import FakeRuns
 from vs_runtime.api.wiring import InProcessRuns, TaskRunHandle
 from vs_sim.api.testing import arrival, examples
@@ -44,6 +45,7 @@ class FakeExecution:
     start_failure: BaseException | None = None
     starts: int = 0
     stops: int = 0
+    stop_modes: list[StopMode] = field(default_factory=list)
     closes: int = 0
 
     def start(self) -> None:
@@ -60,8 +62,9 @@ class FakeExecution:
         self.sink(2)
         return 42
 
-    def stop(self) -> None:
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
         self.stops += 1
+        self.stop_modes.append(mode)
         self.release.set()
 
     def close(self) -> None:
@@ -198,9 +201,9 @@ async def test_start_executes_without_result_or_subscriber(launch: Launch) -> No
     assert execution.starts == 1
     assert runs.attach("one") is handle
     assert runs.list_active() == (handle,)
-    handle.stop()
+    handle.stop(StopMode.CANCEL)
     assert await handle.result() == 42
-    assert execution.stops == 1
+    assert execution.stop_modes == [StopMode.CANCEL]
     assert execution.closes == 1
     assert runs.list_active() == ()
     assert runs.attach("one") is handle
@@ -440,7 +443,8 @@ def test_event_loop_shutdown_drains_async_execution_cleanup(
                 observations.append("execution-released")
             return 42
 
-        def stop(self) -> None:
+        def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+            del mode
             self.release.set()
 
         def close(self) -> None:

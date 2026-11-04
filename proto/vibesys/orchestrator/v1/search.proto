@@ -1,0 +1,58 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/plan.proto";
+import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/service.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// SearchState is a whole, ephemeral view. Revisions are comparable only within
+// one WatchRuns stream; a new stream starts a new revision scope.
+message SearchState {
+  string run_id = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
+  uint64 revision = 2 [(buf.validate.field).uint64.gt = 0];
+  SearchHealth health = 3 [(buf.validate.field).required = true];
+  repeated vibesys.cli.v1.Job jobs = 4 [(buf.validate.field).repeated.max_items = 500];
+  repeated vibesys.cli.v1.Result results = 5 [(buf.validate.field).repeated.max_items = 500];
+  repeated vibesys.cli.v1.Judgment judgments = 6 [(buf.validate.field).repeated.max_items = 100];
+  repeated vibesys.cli.v1.PromotionRecord promotions = 7 [(buf.validate.field).repeated.max_items = 200];
+  repeated vibesys.cli.v1.Plan plans = 8 [(buf.validate.field).repeated.max_items = 200];
+  vibesys.cli.v1.Head head = 9;
+  repeated vibesys.cli.v1.JobTrouble troubles = 10 [(buf.validate.field).repeated.max_items = 500];
+  uint32 unattributed_jobs = 11;
+  bool truncated = 12;
+}
+
+message SearchHealth {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    google.protobuf.Timestamp live_since = 1;
+    Unreadable unreadable = 2;
+  }
+}
+
+message Unreadable {
+  UnreadableReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  google.protobuf.Timestamp since = 2 [(buf.validate.field).required = true];
+  // Display only.
+  string detail = 3 [(buf.validate.field).string.max_bytes = 4096];
+}
+
+enum UnreadableReason {
+  UNREADABLE_REASON_UNSPECIFIED = 0;
+  UNREADABLE_REASON_NO_DAEMON = 1;
+  UNREADABLE_REASON_START_FAILED = 2;
+  UNREADABLE_REASON_CLI_NOT_INSTALLED = 3;
+  UNREADABLE_REASON_CLIENT_TOO_OLD = 4;
+  UNREADABLE_REASON_DAEMON_TOO_OLD = 5;
+  UNREADABLE_REASON_STORE_OWNED_ELSEWHERE = 6;
+  UNREADABLE_REASON_STORE_AWAY = 7;
+  UNREADABLE_REASON_STREAM_LOST = 8;
+}

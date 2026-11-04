@@ -5,7 +5,9 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
+
+from vs_core._generated.vibesys.core.v1.contracts_cv import AdoptionPublication, CheckoutUpdate
 
 from .common import (
     AssessmentKind,
@@ -21,7 +23,9 @@ from .common import (
     SchemaRef,
     SettlementId,
     Value,
+    unset,
 )
+from .evaluation import EvidenceRef
 
 
 class AssessmentProposal(Value):
@@ -111,17 +115,27 @@ class RunResultProposal(Value):
     outcome: Literal["success", "failure", "blocked", "cancelled"]
     reason: str = Field(min_length=1)
     selection: Selection | None = None
+    uncompared: bool = Field(default=False, exclude_if=unset)
+    """The selection is a candidate never compared with the input: the input had no reading to
+    compare it with, so it was judged on the task's gates alone. It holds however the run ended."""
+
+    @model_validator(mode="after")
+    def _uncompared_only_of_a_candidate(self) -> RunResultProposal:
+        if self.uncompared and not isinstance(self.selection, RetainedCandidate):
+            message = "uncompared is set only when the selection is a retained candidate"
+            raise ValueError(message)
+        return self
 
 
 class AdoptionFailureReason(StrEnum):
     """Why an adoption ended without a verified result."""
 
     ADOPT_FAILED = "adopt-failed"
-    """The restore request was rejected, cancelled or failed for good."""
+    """The publication request was rejected, cancelled or failed for good."""
     VERIFY_FAILED = "verify-failed"
-    """The verification request failed for good, so the root was not proven."""
+    """A legacy publication inspection failed for good."""
     CONTENT_MISMATCH = "content-mismatch"
-    """A verification succeeded but named another revision, or none."""
+    """A successful publication observation named another source revision, or none."""
     RETRIES_EXHAUSTED = "retries-exhausted"
     """Every allowed round ended unproven (``Limits.max_adoption_rounds`` rounds)."""
 
@@ -132,6 +146,8 @@ class Adoption(Value):
     selection: Selection
     observation: Observation | None = None
     verified: bool = False
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
     failure: AdoptionFailureReason | None = None
     """Set once, when the adoption fails for good; the fence is released then."""
 
@@ -204,6 +220,8 @@ class AdoptionObserved(Value):
     kind: Literal["adoption_observed"] = "adoption_observed"
     observation: Observation
     revision: RevisionRef | None
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
 
 
 class AdoptionFailed(Value):
@@ -233,6 +251,8 @@ class AdoptionResult(Value):
     kind: Literal["adoption_result"] = "adoption_result"
     selection: Selection
     observation: Observation
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
 
 
 class AdoptRevision(RequestBase):
@@ -240,6 +260,13 @@ class AdoptRevision(RequestBase):
 
     kind: Literal["adopt_revision"] = "adopt_revision"
     selection: Selection
+    evidence: tuple[EvidenceRef, ...] = ()
+    """The selected revision's trusted measurements, by value, from core's evidence ledger.
+
+    They let the executor say what the adopted revision measured where it records the
+    adoption (see ``EvaluationState.measurements_of``). They decide nothing: adoption is
+    proven against the revision alone.
+    """
 
 
 class VerifyAdoption(RequestBase):

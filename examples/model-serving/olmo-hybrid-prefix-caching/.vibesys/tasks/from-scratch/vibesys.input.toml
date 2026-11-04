@@ -1,4 +1,5 @@
 version = 1
+backends = ["cuda"]
 
 [agent]
 domain = "llm-serving"
@@ -14,3 +15,15 @@ timeout_seconds = 300
 [benchmark.result]
 json_argument = "--output-json"
 metric = "aggregate_throughput_tok_per_sec"
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "NVIDIA L4"
+count = 1
+vendor = "nvidia"
+
+[catalogue.model]
+name = "Olmo Hybrid 7B"
+maker = "ai2"

@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal, assert_never
+from typing import TYPE_CHECKING, Annotated, Literal, Self, assert_never
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 from pydantic import BaseModel, Field, SerializeAsAny, ValidationInfo, model_validator
 
+from vs_core._generated.vibesys.core.v1.contracts_cv import AdoptionPublication, CheckoutUpdate
 from vs_core._outcomes import OutcomeCodecError, OutcomeValue, bind_outcome
 
 from .attempts import (
@@ -19,18 +23,24 @@ from .attempts import (
     WorkspaceRequest,
 )
 from .common import (
+    ClosePolicy,
     ContractValidationError,
     Count,
+    EndPolicy,
     ExecuteRegisteredOperation,
+    InterruptPolicy,
+    InvocationId,
     LifecycleClass,
     Observation,
     ObservationStatus,
+    OperationDescriptor,
     OperationId,
     OperationRef,
     OperationSchemaRef,
     RequestBase,
     RequestId,
     ResourceId,
+    RevisionAuthority,
     RevisionRef,
     SchemaRef,
     Scope,
@@ -38,6 +48,7 @@ from .common import (
     Seconds,
     SetupFailureKind,
     Value,
+    unset,
     validate_setup_failure,
 )
 from .evaluation import (
@@ -54,6 +65,7 @@ from .evaluation import (
 from .evaluation_history import EvaluationTerminalFacts
 from .job_observations import JobProgress, MeasurementFailure
 from .sessions import (
+    Access,
     CancelTurn,
     CloseSession,
     DispatchTurn,
@@ -96,6 +108,10 @@ type RegisteredOperationRequest = ExecuteRegisteredOperation
 type ReconciliationRequest = Annotated[
     InspectRequest | CancelOwnedResource | BlockRequest, Field(discriminator="kind")
 ]
+COMMAND_KINDS: frozenset[type[Request]] = frozenset(
+    {InspectRequest, CancelOwnedResource, BlockRequest}
+)
+"""The commands of reconciliation. Every other kind is a canonical request: a step ``decide`` runs."""
 type Request = Annotated[
     WorkspaceRequest
     | SessionRequest
@@ -107,16 +123,32 @@ type Request = Annotated[
 ]
 
 
+class Attribution(StrEnum):
+    """Where a request core creates takes its ``decision_id`` and ``admission_id`` from."""
+
+    CAUSE = "cause"
+    """The step that creates it: an unset field is filled from the decision and admission
+    of the signal being handled, for a request that is that decision's own work."""
+    OWN = "own"
+    """The request itself, as the reducer built it; an unset ``decision_id`` stays unset.
+
+    For a request whose id names what it belongs to (a job's poll or cancel, a submission
+    core allocates for an agent's call or a base run): any signal in a step may ask for
+    it, so filling it from the asker would give one id a payload per asker."""
+
+
 class Outbound(Value):
     """A request together with how long it may take: the one way core creates a request.
 
     ``until`` is a ``Within`` (a duration from now, plus watches) or ``Inherited`` (the
     same ``Until`` as the decision that caused the request). Requests carry no deadline;
     core stores the resolved ``Until`` on the ``RequestRecord`` when it registers this.
+    ``attribution`` says whether the step's cause may fill the request's decision.
     """
 
     request: Request
     until: Within | Inherited | Until | FromDispatch
+    attribution: Attribution = Attribution.CAUSE
 
 
 def within(request: Request, limit: float, *watches: Watch) -> Outbound:
@@ -136,6 +168,71 @@ class Scheduled(Value):
     until: Until
     limit_from_dispatch: Seconds | None = None
     """The seconds the work may take once dispatched, when ``until`` is only a placeholder."""
+
+
+class CapacityHold(Value):
+    """The time a turn spent held at the run's capacity gate, as the gate last reported it.
+
+    The gate holds a turn its provider stopped (an outage, a spent quota) inside the turn's own
+    call, so that time is the provider's, not the turn's work, and it is never charged to the
+    turn's limit (``_turn_holds``). A report is cumulative: the latest replaces every earlier
+    one. A hold runs from the turn's first capacity stop to the release after its last one, so
+    the sends between its waits count too; only a send that ends the hold is the turn's.
+
+    ``credit`` is the time of the turn's holds that ended; the gate bounds each of them (by its
+    policy, or by the operator who resumed the run), so core credits it whole. ``since`` is
+    when the hold the turn is in began (None when it is in none), and ``released_at`` when
+    the gate last let the turn go: the end of the current hold's latest wait, or with no
+    current hold the end of the hold that ended last (None while it waits, or if never held).
+    A ``parked`` hold waits for the operator or a timed resume with the run paused, not for a
+    backoff. ``budget`` is the most the current hold is credited: the outage budget the gate
+    applies.
+
+    ``resend_grace`` is the least time the send after a release has before core ends the
+    turn, whatever own time the turn had left: the gate sizes it to one failing send, so a
+    turn near its limit is not cut while its resend is still failing (an outage that started
+    late in the turn), and the next stop reopens the hold before the grace runs out.
+    """
+
+    credit: Seconds = 0.0
+    since: Seconds | None = None
+    released_at: Seconds | None = None
+    parked: bool = False
+    budget: Seconds
+    resend_grace: Seconds = 0.0
+
+    @model_validator(mode="after")
+    def consistent(self) -> Self:
+        """A park belongs to a hold, and a parked hold is not released."""
+        if self.since is None and self.parked:
+            raise ContractValidationError("since", "a parked hold names its start")
+        if (
+            self.released_at is not None
+            and self.since is not None
+            and self.released_at < self.since
+        ):
+            raise ContractValidationError("released_at", "a hold is released after it began")
+        if self.parked and self.released_at is not None:
+            raise ContractValidationError("parked", "a parked hold waits; it is not released")
+        return self
+
+    @property
+    def holding(self) -> bool:
+        """Whether the gate holds the turn now: it waits, for a backoff or parked."""
+        return self.since is not None and self.released_at is None
+
+
+class TurnHeld(Value):
+    """The run's capacity gate reports how long it has held the turn ``invocation_id``.
+
+    The host's control bridge turns the gate's latest report into this event. Core keeps it on
+    the turn's open dispatch record, whose limit it extends (``_turn_holds``); a report for a
+    turn with no open dispatch record changes nothing.
+    """
+
+    kind: Literal["turn_held"] = "turn_held"
+    invocation_id: InvocationId
+    hold: CapacityHold
 
 
 class RequestPhase(StrEnum):
@@ -175,7 +272,11 @@ class RequestRecord(OutcomeValue):
     retry_at: Seconds | None = None
     """Core time at which the request goes out again after a retryable failure, else None."""
     until: Until
-    """When core ends this record if it is still open, and the watches that end it sooner."""
+    """When core ends this record if it is still open, and the watches that end it sooner.
+
+    A record that started a job has no limit while the job is queued, and each queued
+    interval moves ``at`` later by its length, so its limit counts from the job's start
+    (``_wait_clock``)."""
     failure: Failed | None = None
     """Why core ended it without a result (limit passed, watch fired), else None."""
     limit_from_dispatch: Seconds | None = None
@@ -187,6 +288,20 @@ class RequestRecord(OutcomeValue):
     """
     dispatched_at: Seconds | None = None
     """When the shell first dispatched a request whose limit counts from then, else None."""
+    capacity_hold: CapacityHold | None = Field(default=None, exclude_if=unset)
+    """For a turn's dispatch: the latest hold the run's capacity gate reported for the turn,
+    which extends its limit (``_turn_holds``), else None."""
+    dispatched_in: Count | None = None
+    """The host epoch whose dispatch is the request's latest, else None (never dispatched).
+
+    A request a dead host dispatched has no executor call of this epoch behind it: only an
+    inspection or a re-send of this epoch can still answer it (``_waits._open``).
+    """
+    addressed_by: tuple[RequestId, ...]
+    """The reconciliation commands (inspections, cancels, blocks) sent about this record.
+
+    Each is added when it is registered, so a blocked record names what can still end it.
+    """
 
     @property
     def retry_wait_until(self) -> float | None:
@@ -218,148 +333,137 @@ class RequestRecord(OutcomeValue):
         return bind_outcome(self, info)
 
 
-class ChildObservationWatermark(Value):
-    """Highest accepted observation from one child-discovery source.
+def phase_open(phase: RequestPhase) -> bool:
+    """Whether a record in this phase has not ended: it waits on its executor for a result.
 
-    The full immutable observation carries sequence and equality proof. Records
-    B rejects an older sequence or conflicting facts at the same sequence before
-    changing aggregate ownership, even when another source supplies that proof.
+    The one definition of open work, for every kind of record. A blocked record ended at its limit
+    and nothing sends it again, so it is not open: it may still hold a release, which
+    ``unreleased_records`` names. A new phase raises here until someone says which it is.
     """
-
-    source_request: RequestId
-    observation: Observation
-
-    @model_validator(mode="after")
-    def exact_source(self) -> ChildObservationWatermark:
-        """A watermark belongs only to its observation's canonical source."""
-        if self.source_request != self.observation.request_id:
-            raise ContractValidationError("source_request", "differs from observation request")
-        return self
+    match phase:
+        case RequestPhase.PREPARED | RequestPhase.DISPATCHED | RequestPhase.RECONCILING:
+            return True
+        case RequestPhase.COMPLETED | RequestPhase.BLOCKED:
+            return False
+        case _:
+            assert_never(phase)
 
 
-class ChildLease(Value):
-    """Discovered descendant ownership, distinct from its ancestor's record.
-
-    Source requests and parent resources are unique, canonically ordered proofs.
-    Conflicting scope or ancestry rejects; transfer to a typed owner is atomic.
-    Records B maintains watermarks independently of aggregate observation.
-    Incomplete historical watermarks cannot authorize release or transfer;
-    reconcile every source before marking the history complete.
-    Retained source claims conservatively retain independent ownership: run
-    finality requires conclusive release from every source and preserves every
-    retained source's descendant manifest. The aggregate observation cannot
-    erase those claims. No alternative-reporter authority is offered.
-    """
-
-    resource_id: ResourceId
-    scope: Scope
-    source_requests: tuple[RequestId, ...] = Field(min_length=1)
-    parent_resources: tuple[ResourceId, ...] = ()
-    observation: Observation | None = None
-    observation_watermarks: tuple[ChildObservationWatermark, ...] = ()
-    watermark_history_complete: bool = False
-
-    @model_validator(mode="after")
-    def ownership_proofs(self) -> ChildLease:
-        """Reject duplicate or noncanonical proof and resource correspondence."""
-        for name, values in (
-            ("source_requests", self.source_requests),
-            ("parent_resources", self.parent_resources),
-        ):
-            roots = tuple(value.root for value in values)
-            if roots != tuple(sorted(set(roots))):
-                raise ContractValidationError(
-                    name, "unique canonically ordered identities required"
-                )
-        if self.observation is not None and (
-            self.observation.scope != self.scope or self.observation.resource_id != self.resource_id
-        ):
-            raise ContractValidationError(
-                "observation", "child scope and resource_id must match its lease"
-            )
-        self._validate_watermarks()
-        return self
-
-    def _validate_watermarks(self) -> None:
-        """Incomplete migrated history grants no stale-source release authority."""
-        sources = tuple(mark.source_request.root for mark in self.observation_watermarks)
-        if sources != tuple(sorted(set(sources))):
-            raise ContractValidationError(
-                "observation_watermarks", "unique canonically ordered sources required"
-            )
-        for mark in self.observation_watermarks:
-            if (
-                mark.source_request not in self.source_requests
-                or mark.observation.scope != self.scope
-                or mark.observation.resource_id != self.resource_id
-            ):
-                raise ContractValidationError(
-                    "observation_watermarks", "source, scope and child resource must match lease"
-                )
-        if self.watermark_history_complete:
-            if set(sources) != {source.root for source in self.source_requests}:
-                raise ContractValidationError(
-                    "watermark_history_complete", "every source requires its watermark"
-                )
-            if self.observation is not None and not any(
-                mark.observation == self.observation for mark in self.observation_watermarks
-            ):
-                raise ContractValidationError(
-                    "observation", "aggregate proof must match an accepted source watermark"
-                )
+def _canonical(record: RequestRecord) -> bool:
+    return type(record.request) not in COMMAND_KINDS
 
 
-class RecoveryPhase(StrEnum):
-    """Recovery gates admission independently of the run's pause state."""
-
-    REQUIRED = "required"
-    RECOVERING = "recovering"
-    READY = "ready"
-    BLOCKED = "blocked"
+def is_step(record: RequestRecord) -> bool:
+    """A canonical request, which the recovery rule runs: not a command of reconciliation."""
+    return _canonical(record)
 
 
-class RecoveryCheck(Value):
-    """Original target resolved by inspection, never command success alone."""
-
-    target: RequestId
-    inspection: RequestId | None = None
-    resolution: Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"] = "pending"
+def is_open(record: RequestRecord) -> bool:
+    """A canonical record that has not ended: core owes it a result by its ``until``."""
+    return _canonical(record) and phase_open(record.phase)
 
 
-class RecoveryBarrier(Value):
-    """Fence-epoch barrier persisted before ordinary admission or dispatch.
+def command_open(record: RequestRecord) -> bool:
+    """An inspection, cancel or block that has not ended: its limit ends it if nothing else."""
+    return not _canonical(record) and phase_open(record.phase)
 
-    READY requires every target safe to dispatch, positively reattached, or
-    conclusively terminal. BLOCKED still permits bounded inspection and cleanup.
-    Live jobs may remain owned when recovery finishes. Stale epochs cannot
-    resolve checks from a newer startup.
-    """
 
-    epoch: Count = 0
-    phase: RecoveryPhase = RecoveryPhase.REQUIRED
-    checks: tuple[RecoveryCheck, ...] = ()
+_LEDGER_INDEXES = ("_by_resource", "_inspections", "_positions")
+"""The slots of `RecordsState` that hold its ledger indexes.
 
-    @model_validator(mode="after")
-    def ready_proofs(self) -> RecoveryBarrier:
-        """No original target is checked twice or admitted without resolution."""
-        targets = tuple(check.target for check in self.checks)
-        if len(set(targets)) != len(targets):
-            raise ContractValidationError("checks", "duplicate recovery target")
-        if self.phase == RecoveryPhase.READY and any(
-            check.resolution in ("pending", "blocked") for check in self.checks
-        ):
-            raise ContractValidationError(
-                "checks", "READY requires safe-prepared, reattached or terminal proof"
-            )
-        return self
+Named here, once, so that `RecordsState.model_copy` reads this tuple instead of the class's
+``__slots__``, a dunder the purity ratchet keeps core from reading.
+"""
 
 
 class RecordsState(Value):
     """Records state lifecycle contract."""
 
+    # The indexes from request identity, from the resource a request names, and from the request
+    # an inspection inspects, to positions in ``records``, each built on its first lookup. A
+    # state never changes, so neither do its indexes. Like `Value`'s slots they stay out of
+    # equality and serialization; a copy that keeps the same ``records`` tuple keeps them too
+    # (see `model_copy`).
+    __slots__ = _LEDGER_INDEXES
+
     records: tuple[RequestRecord, ...] = ()
-    children: tuple[ChildLease, ...] = ()
-    recovery: RecoveryBarrier = RecoveryBarrier()
+    epoch: Count = 0
+    """The host epoch the log is in: it advances when a later epoch of the log opens
+    (``_step_attempts.epoch_opened``), and ``RequestRecord.dispatched_in`` and ``RunPark.epoch``
+    are read against it."""
+
+    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
+        """A copy that keeps the ledger indexes when it keeps the very same ``records`` tuple.
+
+        The indexes are positions in ``records`` and nothing else, so they hold for any copy
+        whose ``records`` is the same object. Without this, each copy that changed only
+        ``epoch`` rebuilt the index on its next lookup, which cost the square of the ledger when
+        a state is copied once per record.
+        """
+        copy = super().model_copy(update=update, deep=deep)
+        if copy.records is self.records:
+            for slot in _LEDGER_INDEXES:
+                try:
+                    object.__setattr__(copy, slot, object.__getattribute__(self, slot))
+                except AttributeError:
+                    continue
+        return copy
+
+    def positions(self, request_id: RequestId | None) -> tuple[int, ...]:
+        """Where the records of ``request_id`` sit in ``records``: one place, or none.
+
+        More than one is a corrupt ledger, which the callers that need a unique record reject.
+        A lookup costs a dictionary read instead of comparing the identity with every record.
+        """
+        try:
+            index: dict[RequestId, tuple[int, ...]] = object.__getattribute__(self, "_positions")
+        except AttributeError:
+            index = {}
+            for position, record in enumerate(self.records):
+                index[record.request_id] = (*index.get(record.request_id, ()), position)
+            object.__setattr__(self, "_positions", index)
+        return () if request_id is None else index.get(request_id, ())
+
+    def about_resource(self, resource_id: ResourceId) -> tuple[RequestRecord, ...]:
+        """The records whose request names ``resource_id`` (a poll, inspection or cancel of it).
+
+        In ledger order. A lookup costs a dictionary read instead of a scan of every record.
+        """
+        try:
+            index: dict[ResourceId, tuple[int, ...]] = object.__getattribute__(self, "_by_resource")
+        except AttributeError:
+            index = {}
+            for position, record in enumerate(self.records):
+                named = getattr(record.request, "resource_id", None)
+                if named is not None:
+                    index[named] = (*index.get(named, ()), position)
+            object.__setattr__(self, "_by_resource", index)
+        return tuple(self.records[position] for position in index.get(resource_id, ()))
+
+    def inspections_of(self, target: RequestId) -> tuple[RequestRecord, ...]:
+        """The records of the inspections of ``target``, in ledger order.
+
+        A lookup costs a dictionary read instead of a scan of every record.
+        """
+        try:
+            index: dict[RequestId, tuple[int, ...]] = object.__getattribute__(self, "_inspections")
+        except AttributeError:
+            index = {}
+            for position, record in enumerate(self.records):
+                if isinstance(record.request, InspectRequest):
+                    named = record.request.target
+                    index[named] = (*index.get(named, ()), position)
+            object.__setattr__(self, "_inspections", index)
+        return tuple(self.records[position] for position in index.get(target, ()))
+
+    def find(self, request_id: RequestId | None) -> tuple[RequestRecord, ...]:
+        """The records of ``request_id``, in ledger order (see `positions`)."""
+        return tuple(self.records[position] for position in self.positions(request_id))
+
+    def record(self, request_id: RequestId | None) -> RequestRecord | None:
+        """The first record of ``request_id``, as a scan of ``records`` would find it."""
+        positions = self.positions(request_id)
+        return self.records[positions[0]] if positions else None
 
 
 class OperationView(Value):
@@ -443,6 +547,10 @@ class TargetObservation(OutcomeValue):
     """What a rejected turn reply got wrong, field by field, for the correction that follows."""
     outcome: SerializeAsAny[BaseModel] | None = Field(default=None, exclude=True)
     operation_schema: OperationSchemaRef | None = None
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    """Where an adoption published the winner, when it did."""
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
+    """What an adoption did to the operator's checkout, when it touched it."""
     reissue: ReissueProof | None = None
     """Why core may send the inspected request out again, when the executor can prove it."""
 
@@ -530,6 +638,10 @@ class RequestObserved(OutcomeValue):
     evidence: tuple[EvidenceRef, ...] = ()
     revision: RevisionRef | None = None
     operation_schema: OperationSchemaRef | None = None
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    """Where an adoption published the winner, when it did."""
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
+    """What an adoption did to the operator's checkout, when it touched it."""
 
     @model_validator(mode="after")
     def registered_outcome(self, info: ValidationInfo) -> RequestObserved:
@@ -538,31 +650,6 @@ class RequestObserved(OutcomeValue):
         if self.evaluation_result is not None:
             self.evaluation_result.validate_observation(self.observation)
         return bind_outcome(self, info)
-
-
-class RecoveryStarted(Value):
-    """Recovery started lifecycle contract."""
-
-    kind: Literal["recovery_started"] = "recovery_started"
-    epoch: Count
-    now_at: Seconds
-
-
-class RecoveryReady(Value):
-    """Current-epoch recovery completion wakes scheduling without unpausing."""
-
-    kind: Literal["recovery_ready"] = "recovery_ready"
-    epoch: Count
-
-
-class ReconciliationDeadline(Value):
-    """Reconciliation deadline lifecycle contract."""
-
-    kind: Literal["reconciliation_deadline"] = "reconciliation_deadline"
-    request_id: RequestId
-    now_at: Seconds
-    reason: FailureReason = FailureReason.TIMED_OUT
-    """TIMED_OUT when the record's limit passed, else the reason of the watch that fired."""
 
 
 class RetryDue(Value):
@@ -637,15 +724,227 @@ type RecordsEvent = Annotated[
     RequestPrepared
     | DispatchAuthorized
     | RequestObserved
-    | RecoveryStarted
-    | RecoveryReady
-    | ReconciliationDeadline
     | RetryDue
     | RequestUndispatchable
     | BlockedRecordStalled
-    | OperationRetireRequested,
+    | OperationRetireRequested
+    | TurnHeld,
     Field(discriminator="kind"),
 ]
+
+
+def success_without_reply(observation: Observation) -> bool:
+    """Whether a turn observation proves a success whose reply only its owner event carries."""
+    return (
+        observation.terminal
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+    )
+
+
+def reply_owed(
+    observation: Observation, facts: RequestObserved | TargetObservation | RequestRecord
+) -> bool:
+    """Whether a plain turn's observation proves a success whose reply only its owner event carries.
+
+    *facts* is the answer or the record that stored it: both hold the same suspension and output.
+    """
+    return (
+        success_without_reply(observation)
+        and facts.suspension is None
+        and facts.outcome_json is None
+    )
+
+
+def request_interrupt_policy(request: Request) -> InterruptPolicy:
+    """What an interrupted attempt of the step means, as its asker declared it.
+
+    Only a turn can ask to be cancelled: its ``TurnSpec`` or, for a registered turn, its
+    operation's schema reference says so. Every other step is run again.
+    """
+    match request:
+        case DispatchTurn() | ResumeSessionTurn():
+            return request.turn.on_interrupt
+        case ExecuteRegisteredOperation():
+            return request.operation.schema_ref.on_interrupt
+        case _:
+            return InterruptPolicy.RERUN
+
+
+class StepEffect(StrEnum):
+    """What a step does to the files of its scope's workspace, for ordering steps of one scope."""
+
+    WRITES = "writes"
+    """It may change the files: an agent turn that can write, a workspace set up or reset, an
+    operation not known to leave the tree alone."""
+
+    SNAPSHOTS = "snapshots"
+    """It reads the files to retain them, so no writer may run beside it or before it ends."""
+
+    CLOSES = "closes"
+    """It closes the scope, so no other step of the scope may run beside it or after it began."""
+
+    NEITHER = "neither"
+    """It leaves the files of the scope alone."""
+
+
+def request_effect(request: Request, registry: tuple[OperationDescriptor, ...]) -> StepEffect:
+    """Classify the canonical request by what it does to its scope's files.
+
+    The recovery rule runs a snapshot only when every writer of its scope has a result, and starts
+    no writer while a snapshot runs. A registered operation is judged by its descriptor in
+    ``registry``: a revision authority of snapshot or retain snapshots, a restore writes, and
+    any other operation that is not a query is a writer, because a descriptor does not yet
+    declare whether it touches the tree. An operation with no descriptor is a writer.
+    """
+    match request:
+        case ExecuteRegisteredOperation():
+            return _operation_effect(request, registry)
+        case DispatchTurn() | ResumeSessionTurn():
+            read_only = request.turn.session.access == Access.READ_ONLY
+            return StepEffect.NEITHER if read_only else StepEffect.WRITES
+        case EnsureWorkspace() | RestoreRevision():
+            return StepEffect.WRITES
+        case SnapshotAndRetain() | SnapshotAndRetainRun() | RetainRevision():
+            return StepEffect.SNAPSHOTS
+        case CloseAttemptScope():
+            return StepEffect.CLOSES
+        case (
+            SubmitMeasurement()
+            | InspectTurn()
+            | ObserveOwnedJob()
+            | InspectOwnedJob()
+            | CollectEvidence()
+            | InspectRequest()
+            | VerifyAdoption()
+            | DiscardWorkspace()
+            | EnsureSession()
+            | CancelTurn()
+            | CloseSession()
+            | CancelOwnedJob()
+            | AdoptRevision()
+            | CancelOwnedResource()
+            | BlockRequest()
+        ):
+            return StepEffect.NEITHER
+        case _:
+            assert_never(request)
+
+
+def _operation_effect(
+    request: ExecuteRegisteredOperation, registry: tuple[OperationDescriptor, ...]
+) -> StepEffect:
+    kind = request.operation.schema_ref.kind
+    descriptor = next((row for row in registry if row.kind == kind), None)
+    if descriptor is None:
+        return StepEffect.WRITES
+    if descriptor.revision_authority in (RevisionAuthority.SNAPSHOT, RevisionAuthority.RETAIN):
+        return StepEffect.SNAPSHOTS
+    if descriptor.revision_authority == RevisionAuthority.DISCARD:
+        return StepEffect.NEITHER
+    if descriptor.lifecycle == LifecycleClass.QUERY:
+        return StepEffect.NEITHER
+    return StepEffect.WRITES
+
+
+def request_close_policy(
+    request: Request, registry: tuple[OperationDescriptor, ...]
+) -> ClosePolicy:
+    """What a scope that is closing does with this open step of its own, as its kind declares.
+
+    A step whose result only its own scope reads is withdrawn: a measurement job, whose evidence
+    nothing outside the closing attempt waits for. Everything else is waited for, and so is a
+    registered operation unless its descriptor in ``registry`` says it is withdrawn: the cleanup
+    the close depends on (a workspace discard, a snapshot, the close itself), the turns whose
+    workspace the snapshot reads, and every operation nobody declared. The match is exhaustive,
+    so a new kind of step has to take a side here.
+    """
+    match request:
+        case ExecuteRegisteredOperation():
+            kind = request.operation.schema_ref.kind
+            descriptor = next((row for row in registry if row.kind == kind), None)
+            return ClosePolicy.WAIT if descriptor is None else descriptor.on_close
+        case SubmitMeasurement():
+            return ClosePolicy.WITHDRAW
+        case (
+            DispatchTurn()
+            | ResumeSessionTurn()
+            | EnsureWorkspace()
+            | RestoreRevision()
+            | SnapshotAndRetain()
+            | SnapshotAndRetainRun()
+            | RetainRevision()
+            | CloseAttemptScope()
+            | InspectTurn()
+            | ObserveOwnedJob()
+            | InspectOwnedJob()
+            | CollectEvidence()
+            | InspectRequest()
+            | VerifyAdoption()
+            | DiscardWorkspace()
+            | EnsureSession()
+            | CancelTurn()
+            | CloseSession()
+            | CancelOwnedJob()
+            | AdoptRevision()
+            | CancelOwnedResource()
+            | BlockRequest()
+        ):
+            return ClosePolicy.WAIT
+        case _:
+            assert_never(request)
+
+
+def request_end_policy(request: Request, registry: tuple[OperationDescriptor, ...]) -> EndPolicy:
+    """What a run that ends by a cancel does with this open step, as its kind declares.
+
+    A cancel withdraws the work: the turns, the jobs, the setup and the reads. It does not
+    withdraw what frees the resources the run holds, because the run has not ended while a
+    session, a workspace, a job or a scope is still held: the closes, the discards and the
+    cancels of a turn or a job run on to their own result. A registered operation releases when
+    its descriptor says it discards a workspace (``RevisionAuthority.DISCARD``). The match is
+    exhaustive, so a new kind of step has to take a side here.
+    """
+    match request:
+        case ExecuteRegisteredOperation():
+            kind = request.operation.schema_ref.kind
+            descriptor = next((row for row in registry if row.kind == kind), None)
+            discards = (
+                descriptor is not None
+                and descriptor.revision_authority is RevisionAuthority.DISCARD
+            )
+            return EndPolicy.RELEASE if discards else EndPolicy.CANCEL
+        case (
+            CloseSession()
+            | CancelTurn()
+            | DiscardWorkspace()
+            | CloseAttemptScope()
+            | CancelOwnedJob()
+        ):
+            return EndPolicy.RELEASE
+        case (
+            DispatchTurn()
+            | ResumeSessionTurn()
+            | SubmitMeasurement()
+            | EnsureWorkspace()
+            | RestoreRevision()
+            | SnapshotAndRetain()
+            | SnapshotAndRetainRun()
+            | RetainRevision()
+            | InspectTurn()
+            | ObserveOwnedJob()
+            | InspectOwnedJob()
+            | CollectEvidence()
+            | InspectRequest()
+            | VerifyAdoption()
+            | EnsureSession()
+            | AdoptRevision()
+            | CancelOwnedResource()
+            | BlockRequest()
+        ):
+            return EndPolicy.CANCEL
+        case _:
+            assert_never(request)
 
 
 def request_lifecycle(request: Request) -> LifecycleClass:

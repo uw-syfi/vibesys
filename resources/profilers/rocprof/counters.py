@@ -71,7 +71,6 @@ from __future__ import annotations
 import argparse
 import csv
 import importlib
-import json
 import math
 import re
 import shlex
@@ -575,28 +574,31 @@ def _iter_csv_rows(path: Path) -> list[CounterRow]:
 
 
 def _walk_json_records(node: object) -> list[dict[str, Any]]:
-    """Recursively find dicts that look like a counter row.
+    """Find dicts that look like a counter row, in document order.
 
     Tolerates rocprofv3's nested ``{"rocprofiler-sdk-tool": {"counter_collection":
-    [...]}}`` JSON shape as well as a flat list of CSV-equivalent row dicts.
+    [...]}}`` JSON shape as well as a flat list of CSV-equivalent row dicts. It walks
+    with its own stack, so a report nested past Python's recursion limit is read, not a
+    ``RecursionError``.
     """
     found: list[dict[str, Any]] = []
-    if isinstance(node, dict):
-        has_name = any(k in node for k in ("Counter_Name", "counter_name"))
-        has_value = any(k in node for k in ("Counter_Value", "counter_value"))
-        if has_name and has_value:
-            found.append(node)
-        else:
-            for value in node.values():
-                found.extend(_walk_json_records(value))
-    elif isinstance(node, list):
-        for item in node:
-            found.extend(_walk_json_records(item))
+    pending: list[object] = [node]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, dict):
+            has_name = any(k in current for k in ("Counter_Name", "counter_name"))
+            has_value = any(k in current for k in ("Counter_Value", "counter_value"))
+            if has_name and has_value:
+                found.append(current)
+            else:
+                pending.extend(reversed(list(current.values())))
+        elif isinstance(current, list):
+            pending.extend(reversed(current))
     return found
 
 
 def _iter_json_rows(path: Path) -> list[CounterRow]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = capture_runtime.read_json_file(path)
     rows = [_row_from_mapping(r) for r in _walk_json_records(data)]
     return [r for r in rows if r is not None]
 

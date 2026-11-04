@@ -310,3 +310,22 @@ func TestExecuteRequestAccountsForEveryInvocationInLogicalOperation(t *testing.T
 		t.Fatalf("statuses or cleanup were not preserved: observation=%+v finished=%d", observation, application.finished)
 	}
 }
+
+func TestEngineTailLatencyObjectiveReadsThatPercentile(t *testing.T) {
+	for metric, pick := range map[string]func(Distribution) *float64{
+		"latency_ms.p95": func(d Distribution) *float64 { return d.P95 },
+		"latency_ms.p99": func(d Distribution) *float64 { return d.P99 },
+	} {
+		configured := workload(50, 0.2, 4, 1)
+		configured.Objective.Metric = metric
+		run, err := newTestEngine(t, time.Millisecond).Run(context.Background(), configured)
+		if err != nil {
+			t.Fatal(err)
+		}
+		trial := run.Summary.Trials[0]
+		want := pick(trial.LatencyMS)
+		if trial.PrimaryValue == nil || want == nil || *trial.PrimaryValue != *want {
+			t.Fatalf("%s: primary %v, trial percentile %v", metric, trial.PrimaryValue, want)
+		}
+	}
+}

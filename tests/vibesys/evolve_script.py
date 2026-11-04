@@ -56,6 +56,8 @@ class _Bounds:
     cancellation_bound_seconds = 60.0
     cleanup_bound_seconds = 60.0
     reconciliation_bound_seconds = 5000.0
+    queue_wait_budget_seconds = 43_200.0
+    queue_notice_interval_seconds = 600.0
 
 
 def config(**overrides: object) -> EvolveConfig:

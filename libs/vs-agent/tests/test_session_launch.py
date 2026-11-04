@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack, cast
 import agentshim
 import pytest
 from agentshim.testing import (
+    FakeClock,
     FakeExecutor,
     FakeProcess,
     FakeRun,
@@ -39,26 +40,36 @@ from agentshim.testing import (
 )
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import BaseModel
 
 from vibesys.events import CommandResultPayload
 from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent import session_launch as subject
+
+# test-isolation: timeout translation is the boundary this launcher test exercises
+from vs_agent import shim_translation, shim_turns
 from vs_agent.api import (
     CONTAINER_PYTHON,
+    MAX_WHITESPACE_RUN,
     NULL_AGENT_EVENT_SINK,
     AgentClient,
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
+    AgentQuotaError,
     AgentSessionKey,
+    AgentTurnResult,
     AgentTurnTimeoutError,
+    AgentUsage,
     MCPServerSpec,
+    QuotaCondition,
     SessionResumeError,
     SessionScope,
     container_import_roots,
 )
+from vs_agent.api.testing import FakeProvider
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.contracts import (
@@ -67,9 +78,15 @@ from vs_agent.contracts import (
     AgentSkillUse,
     AgentTurnRequest,
 )
-from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
+from vs_sandbox.api import (
+    STEP_TAG_ENV,
+    DockerSandbox,
+    HostResource,
+    ProjectPathPolicy,
+    step_tag_env,
+)
 from vs_sandbox.api.testing import FakeDockerConfinement
-from vs_sim.api.testing import HANG_GUARD_S, start_thread
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimThreads, start_thread
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -111,6 +128,7 @@ class _LauncherOptions(TypedDict, total=False):
     docker_sandboxes: dict[str, Any] | None
     check_timeout: float | None
     transient_retry_delays: Sequence[float]
+    threads: SimThreads
 
 
 @dataclass
@@ -203,6 +221,8 @@ def _launcher(
         transport=agentshim.TransportKind.ONE_SHOT,
         # Zero waits keep the retry tests instant; the schedule is the knob.
         transient_retry_delays=options.get("transient_retry_delays", (0.0, 0.0)),
+        clock=FakeClock(),
+        threads=options.get("threads") or SimThreads(),
     )
     return launcher, fake
 
@@ -555,6 +575,85 @@ def test_confine_to_sandbox_rewrites_argv_through_any_workspace_sandbox(
         assert argv[argv.index("-w") + 1] == "/workspace"
     else:
         assert argv[0] == "/usr/bin/stub-sandbox"
+
+
+@pytest.mark.parametrize("sandbox_kind", ["host", "docker"])
+def test_confine_to_sandbox_starts_a_step_s_program_with_its_tag_in_the_environment(
+    tmp_path: Path,
+    sandbox_kind: str,
+) -> None:
+    """The marker is set by ``env`` inside the sandbox, which starts the program on its own."""
+    sandbox = (
+        _FakeHostSandbox() if sandbox_kind == "host" else FakeDockerConfinement(workspace=tmp_path)
+    )
+    fake = FakeExecutor([FakeRun(), FakeRun()])
+    executor = subject.confine_to_sandbox(fake, sandbox)
+    request = agentshim.CommandRequest(
+        argv=["claude", "-p"], stdin=None, cwd=str(tmp_path), env={}, timeout=None
+    )
+
+    executor.run(request, agentshim.NullSink())
+    executor.run(replace(request, env=step_tag_env("step-a")), agentshim.NullSink())
+
+    plain, tagged = (list(sent.argv) for sent in fake.requests)
+    assert plain[-2:] == ["claude", "-p"]
+    assert tagged[-4:] == ["env", f"{STEP_TAG_ENV}=step-a", "claude", "-p"]
+    assert tagged[:-4] == plain[:-2]
+
+
+@pytest.mark.parametrize("leads_group", [True, False])
+def test_a_host_command_is_led_by_a_process_that_carries_the_mark_as_an_argument(
+    tmp_path: Path, *, leads_group: bool
+) -> None:
+    """macOS shows another process's arguments, not its environment, so the leader carries it."""
+    fake = FakeExecutor([FakeRun()])
+    executor = subject.confine_to_sandbox(fake, _FakeHostSandbox(), leads_group=leads_group)
+    request = agentshim.CommandRequest(
+        argv=["claude", "-p"],
+        stdin=None,
+        cwd=str(tmp_path),
+        env=step_tag_env("run-a:step-a"),
+        timeout=None,
+    )
+
+    executor.run(request, agentshim.NullSink())
+
+    argv = list(fake.requests[-1].argv)
+    if leads_group:
+        assert argv[0] == "/bin/sh"
+        assert f"{STEP_TAG_ENV}=run-a:step-a" in argv
+        assert argv[-1].endswith(f"env {STEP_TAG_ENV}=run-a:step-a claude -p")
+    else:
+        assert argv[0] == "/usr/bin/stub-sandbox"
+        assert argv[-4:] == ["env", f"{STEP_TAG_ENV}=run-a:step-a", "claude", "-p"]
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_turn_marks_its_provider_process_with_the_step_that_asked_for_it(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+
+    session.run_turn(AgentTurnRequest(message="Do it", step_tag="step-a"))
+
+    assert fake.requests[-1].env[STEP_TAG_ENV] == "step-a"
+
+
+@pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
+def test_a_turn_no_step_asked_for_carries_no_tag(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    del sandbox_builds
+    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+
+    session.run_turn(AgentTurnRequest(message="Do it"))
+
+    assert STEP_TAG_ENV not in fake.requests[-1].env
 
 
 def test_host_binary_lookup_resolves_symlinks_before_sandbox_launch(tmp_path: Path) -> None:
@@ -1243,9 +1342,10 @@ def test_a_fresh_turn_that_fails_is_not_retried(
     del sandbox_builds
     session, fake = _session(tmp_path, provider, FakeRun(returncode=1, stderr=["boom\n"]))
 
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(agentshim.CliExitError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
+    assert not isinstance(excinfo.value, AgentQuotaError)
     assert len(fake.requests) == 1
 
 
@@ -1327,10 +1427,13 @@ def test_a_transient_error_that_outlasts_every_delay_propagates(
         transient_retry_delays=delays,
     )
 
-    with pytest.raises(agentshim.CliExitError) as excinfo:
+    with pytest.raises(AgentQuotaError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
-    assert excinfo.value.kind is _TRANSIENT
+    # It reaches the caller as an outage, for the run's capacity gate to wait out.
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert isinstance(excinfo.value.__cause__, agentshim.CliExitError)
+    assert excinfo.value.__cause__.kind is _TRANSIENT
     # The first attempt and one retry per delay.
     assert len(fake.requests) == 1 + len(delays)
 
@@ -1381,7 +1484,7 @@ def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
         transient_retry_delays=(),
     )
     session.run_turn(AgentTurnRequest(message="one"))
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(AgentQuotaError):
         session.run_turn(AgentTurnRequest(message="two"))
 
     result = session.run_turn(AgentTurnRequest(message="three"))
@@ -1390,13 +1493,47 @@ def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
     assert "s-1" in fake.requests[2].argv
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
+def test_a_sustained_outage_reaches_the_caller_after_one_attempt(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+    provider: str,
+) -> None:
+    """The production schedule hides no retry of a send from the capacity gate.
+
+    Before (S179), five retries hid about fifteen minutes of every send, which the gate could
+    neither see nor keep off the turn's limit; one 30 s retry still hid a second CLI attempt
+    (review of #3283, weak spot 1).
+    """
+    del sandbox_builds
+    session, fake = _session(
+        tmp_path,
+        provider,
+        lambda _request: scripted_failure(provider, _TRANSIENT),
+        transient_retry_delays=subject.TRANSIENT_RETRY_DELAYS_S,
+    )
+
+    with pytest.raises(AgentQuotaError) as excinfo:
+        session.run_turn(AgentTurnRequest(message="one"))
+
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
+    assert len(fake.requests) == 1
+    assert subject.TRANSIENT_RETRY_DELAYS_S == ()
+
+
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
 def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
     provider: str,
 ) -> None:
-    """A cancelled turn raises the provider error instead of retrying it."""
+    """A cancelled turn ends instead of retrying, with the capacity type of its failure.
+
+    Before (S179), a cancel made the failure a plain provider error, so a turn that core
+    cancelled while its provider was down was reported lost by its transport. The client
+    never sends a cancelled turn to its gate, so nothing waits for a turn nobody wants.
+    """
     del sandbox_builds
     sessions: list[LaunchedSession] = []
 
@@ -1415,9 +1552,10 @@ def test_cancel_stops_a_turn_waiting_out_a_transient_error(
     )
     sessions.append(session)
 
-    with pytest.raises(agentshim.CliExitError):
+    with pytest.raises(AgentQuotaError) as excinfo:
         session.run_turn(AgentTurnRequest(message="one"))
 
+    assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
     assert len(fake.requests) == 1
 
 
@@ -1496,7 +1634,13 @@ def test_an_agent_client_keeps_the_conversation_through_a_schema_failure(
     workspace = tmp_path / "ws"
     workspace.mkdir()
     key = AgentSessionKey(SessionScope.MEMBER, "planner:p")
-    with AgentClient(launcher, provider="claude", event_sink=NULL_AGENT_EVENT_SINK) as client:
+    with AgentClient(
+        launcher,
+        provider="claude",
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    ) as client:
 
         def turn(prompt: str) -> str:
             return client.invoke_text(
@@ -1532,6 +1676,143 @@ def test_a_turn_that_times_out_is_reported_as_a_launcher_timeout(
 
     assert raised.value.timeout_seconds == 45
     assert isinstance(raised.value.__cause__, agentshim.CliTimeoutError)
+
+
+def test_timeout_translation_preserves_usage_parsed_before_the_deadline() -> None:
+    """A partial provider reply is billed even though the turn has no answer."""
+    error = agentshim.CliTimeoutError(("claude",), 45)
+    error.partial = agentshim.ParsedTurn(
+        text="unfinished",
+        usage=agentshim.ProviderUsage(
+            tokens=TokenUsage(
+                input_tokens=1200,
+                output_tokens=30,
+                cached_input_tokens=1000,
+            )
+        ),
+        cost_usd=0.01,
+    )
+
+    translated = shim_translation.timeout_error_from(error)
+
+    assert translated.usage is not None
+    assert translated.usage.input_tokens == 1200
+    assert translated.usage.cache_read_input_tokens == 1000
+    assert translated.usage.output_tokens == 30
+    assert translated.usage.total_cost_usd == 0.01
+
+
+class _StructuredReply(BaseModel):
+    answer: str
+
+
+def test_a_completed_turn_rejected_by_the_reply_guard_records_all_terminal_accounting(
+    sandbox_builds: list[dict[str, Any]],
+    tmp_path: Path,
+) -> None:
+    """A locally rejected result retains every provider-reported accounting field."""
+    del sandbox_builds
+    launcher, _fake = _launcher(
+        "claude",
+        scripted_turn(
+            "claude",
+            structured_output={"answer": " " * (MAX_WHITESPACE_RUN + 1)},
+            usage=TokenUsage(input_tokens=80, output_tokens=20),
+            skills_offered=["serving-systems", "profiling"],
+            skills_invoked=["profiling"],
+        ),
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    client = AgentClient(
+        launcher,
+        provider="claude",
+        log_dir=log_dir,
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+
+    with pytest.raises(AgentOutputSchemaError) as raised:
+        client.invoke(
+            kind="implementer",
+            workspace=workspace,
+            system_prompt="system",
+            user_prompt="work",
+            response_cls=_StructuredReply,
+            round_label="round-1",
+        )
+
+    expected = {
+        "input_tokens": 80,
+        "output_tokens": 20,
+        "total_cost_usd": 0.01,
+    }
+    assert raised.value.usage is not None
+    assert {field: getattr(raised.value.usage, field) for field in expected} == expected
+    assert raised.value.usage.duration_ms is not None
+    record = json.loads((log_dir / "usage.jsonl").read_text())
+    assert {field: record[field] for field in expected} == expected
+    assert record["duration_ms"] == raised.value.usage.duration_ms
+    assert record["skills_offered"] == 2
+    assert record["skills_invoked"] == ["profiling"]
+    assert record["skill_uses"] == 1
+
+
+def test_a_completed_interrupted_turn_records_all_terminal_accounting(
+    tmp_path: Path,
+) -> None:
+    """Cancellation keeps its public error while retaining completed accounting."""
+    terminal = AgentTurnResult(
+        text="partial",
+        usage=AgentUsage(
+            input_tokens=1200,
+            output_tokens=30,
+            total_cost_usd=0.25,
+            duration_ms=321,
+        ),
+        skills=AgentSkillUse(
+            offered=("serving-systems", "profiling"),
+            invoked=("profiling",),
+        ),
+    )
+
+    def cancel(_request: AgentTurnRequest) -> None:
+        error = agentshim.TurnCancelledError("turn interrupted")
+        # The provider turn completed with terminal evidence before the
+        # cancellation was surfaced. Production attaches the same carrier.
+        vars(error)["_vibesys_terminal_turn_result"] = terminal
+        raise error
+
+    client = AgentClient(
+        FakeProvider(on_turn=cancel, threads=SimThreads()),
+        provider="claude",
+        log_dir=tmp_path,
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+
+    with pytest.raises(agentshim.TurnCancelledError) as raised:
+        client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="work",
+            round_label="round-1",
+        )
+
+    assert type(raised.value) is agentshim.TurnCancelledError
+    record = json.loads((tmp_path / "usage.jsonl").read_text())
+    assert record["input_tokens"] == 1200
+    assert record["output_tokens"] == 30
+    assert record["total_cost_usd"] == 0.25
+    assert record["duration_ms"] == 321
+    assert record["skills_offered"] == 2
+    assert record["skills_invoked"] == ["profiling"]
+    assert record["skill_uses"] == 1
 
 
 def test_the_codex_thread_budget_retires_a_conversation(
@@ -1719,7 +2000,7 @@ def test_a_cancelled_resumed_turn_raises_and_keeps_its_conversation(
             return FakeRun(returncode=-15)
         return scripted_turn("codex", text="ok", session_id="thread-1")
 
-    session, fake = _session(tmp_path, "codex", run)
+    session, fake = _session(tmp_path, "codex", run, threads=threads)
     holder.append(fake)
     cancelled: list[agentshim.TurnCancelledError] = []
 
@@ -1741,6 +2022,7 @@ def test_a_cancelled_resumed_turn_raises_and_keeps_its_conversation(
     threads.run(scenario)
 
     assert len(cancelled) == 1
+    assert shim_turns.terminal_result_from(cancelled[0]) is not None
     assert threads.errors == []
     assert "thread-1" in fake.requests[2].argv
 
@@ -1759,7 +2041,9 @@ def test_cancel_stops_the_running_provider_process(
 ) -> None:
     del sandbox_builds
     threads = sim.threads()
-    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+    session, fake = _session(
+        tmp_path, provider, scripted_turn(provider, text="ok"), threads=threads
+    )
     reached = threads.event()
 
     class _HoldingObserver:
@@ -1815,7 +2099,7 @@ def test_independent_sessions_run_concurrently(
         release_optimizer.wait(HANG_GUARD_S)
         return scripted_turn(provider, text="optimizer result")
 
-    launcher, _fake = _launcher(provider, run)
+    launcher, _fake = _launcher(provider, run, threads=threads)
     optimizer = launcher.launch(_spec(tmp_path, provider=provider, role="implementer"))
     chat = launcher.launch(
         _spec(
@@ -1882,7 +2166,9 @@ def test_the_shipped_providers_are_the_ones_the_launcher_accepts() -> None:
 
 def test_an_unknown_provider_is_rejected_by_name() -> None:
     with pytest.raises(ValueError, match="nonesuch"):
-        subject.ConfinedSessionLauncher(provider="nonesuch")
+        subject.ConfinedSessionLauncher(
+            provider="nonesuch", clock=FakeClock(), threads=SimThreads()
+        )
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -2092,7 +2378,12 @@ def test_a_session_finds_the_run_skills_where_its_provider_looks(
     logs: list[str] = []
     launcher, _fake = _launcher(provider, run, log=logs.append)
     client = AgentClient(
-        launcher, provider=provider, skills=[tmp_path / "skills"], event_sink=NULL_AGENT_EVENT_SINK
+        launcher,
+        provider=provider,
+        skills=[tmp_path / "skills"],
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
     )
     with client:
         client.invoke_text(
@@ -2230,6 +2521,8 @@ def test_a_container_launcher_reports_no_config_isolation_even_with_a_run_home(
         provider="codex",
         docker_sandboxes=sandboxes,
         agent_homes=tmp_path / "agent-homes",
+        clock=FakeClock(),
+        threads=SimThreads(),
     )
 
     assert launcher.capabilities.config_isolation is False
@@ -2281,8 +2574,16 @@ def test_process_spawn_os_errors_are_retryable_typed_faults(
             docker_sandboxes={"worker": cast("DockerSandbox", FakeDockerConfinement(tmp_path))},
             executor_factory=lambda: executor,
             launcher_env=dict,
+            clock=FakeClock(),
+            threads=SimThreads(),
         )
-        client = AgentClient(launcher, provider="claude", containerized=True)
+        client = AgentClient(
+            launcher,
+            provider="claude",
+            containerized=True,
+            clock=ManualClock(),
+            threads=SimThreads(),
+        )
         try:
             with pytest.raises(RuntimeError, match="could not start") as raised:
                 client.invoke_text(

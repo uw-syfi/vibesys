@@ -11,17 +11,22 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from tests.support.real_git import REAL_GIT
+
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_project.api import (
+    Git,
     NullGitTrackerEvents,
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
+    git_repositories,
 )
 from vs_project.api.testing import FakeGitRepositories, GitKind, run_execution_record
 from vs_runtime.api.infrastructure import (
     AgentPaths,
     BlockingOperations,
+    EnvironmentSystem,
     ProjectRunEffects,
     ProjectRunRequest,
     RunEnvironmentRequest,
@@ -33,8 +38,11 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
+from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api import OsThreads, ThreadBlockingRunner
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -52,19 +60,44 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
         AgentExecutionConfiguration,
         RunEnvironmentSession,
+        WorkspaceResourceEventSink,
         WorkspaceResourceProvider,
     )
     from vs_sandbox.api import CommandRunner, ComputeBackendImpl
+    from vs_sim.api import BlockingRunner, Threads
 
 RUN_ID = "workspace-requests"
+
+
+@dataclass(frozen=True)
+class ExecutionTopology:
+    """The threads and blocking boundary one system-test world shares.
+
+    Keeping the pair together prevents a simulated world from sending work to a real
+    executor, where a simulator-backed lock could be used by unrelated worker threads.
+    """
+
+    threads: Threads
+    blocking: BlockingRunner
+
+    @classmethod
+    def production(cls) -> ExecutionTopology:
+        """Use the production thread and blocking implementations."""
+        return cls(threads=OsThreads(), blocking=ThreadBlockingRunner())
 
 
 @dataclass
 class _Session:
     sandbox: CommandRunner = field(default_factory=FakeCommandRunner)
     view: RunEnvironmentView = field(
-        default_factory=lambda: RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True)
+        default_factory=lambda: RunEnvironmentView(
+            paths=AgentPaths(), workspace_git_writable=True, cli_sandboxed=True
+        )
     )
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -97,14 +130,22 @@ class WorkspaceEnv:
 
     project: Project
     factory: WorkspaceResourceProvider
+    execution: ExecutionTopology
     hosts: list[RuntimeWorkspaces] = field(default_factory=list)
-    git_disk: FakeGitRepositories | None = None
-    """The in-memory repositories of a world on ``GitKind.FAKE``; ``None`` on real Git."""
+    git_disk: FakeGitRepositories | Git = REAL_GIT
+    """The in-memory repositories of a world on ``GitKind.FAKE``; ``REAL_GIT`` on real Git."""
 
-    def start_host(self) -> RuntimeWorkspaces:
-        """Start another host over the same disk state, as after a process restart."""
+    def start_host(self, runner: BlockingRunner | None = None) -> RuntimeWorkspaces:
+        """Start another host over the same disk state, as after a process restart.
+
+        *runner* overrides the world's blocking boundary for this host.
+        """
         runtime = create_workspace_runtime(
-            workspace_resources=self.factory, blocking=BlockingOperations()
+            workspace_resources=self.factory,
+            blocking=BlockingOperations(
+                self.execution.blocking if runner is None else runner, self.execution.threads
+            ),
+            validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
         return runtime.workspaces
@@ -115,10 +156,10 @@ class WorkspaceEnv:
 
 
 def _git_factory(
-    disk: FakeGitRepositories | None, wrap: Callable[[GitRepository], GitRepository] | None
-) -> GitRepositoryFactory | None:
-    if disk is None:
-        return None
+    disk: FakeGitRepositories | Git, wrap: Callable[[GitRepository], GitRepository] | None
+) -> GitRepositoryFactory:
+    if isinstance(disk, Git):
+        return git_repositories(disk)
     if wrap is None:
         return disk.repository
     return lambda root, faults: wrap(disk.repository(root, faults))
@@ -134,6 +175,10 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     owns_candidate_worktrees: bool = False,
     memory_paths: tuple[str, ...] = (),
     wrap_git: Callable[[GitRepository], GitRepository] | None = None,
+    events: WorkspaceResourceEventSink | None = None,
+    system: EnvironmentSystem | None = None,
+    unread_paths: tuple[str, ...] = (),
+    execution: ExecutionTopology | None = None,
 ) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
@@ -144,8 +189,15 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     the run's candidate worktrees directory in the request's ``run_owned_roots``, as a
     product run does. ``wrap_git`` wraps every Fake repository (not with real Git), so a
     case can stand between the run and Git, for example to kill the host at a Git step.
+    ``events`` observes workspace resource events (for example a reported baseline drift);
+    the default discards them. ``system`` is the host the environments run on; the default
+    starts nothing (:func:`~vs_runtime.api.testing.idle_environment_system`). ``unread_paths``
+    are the workspace paths the task's evaluation never reads (``[workspace] unread``).
+    ``execution`` keeps threads and blocking operations on one scheduler; production
+    implementations are used by default.
     """
-    disk = FakeGitRepositories() if git is GitKind.FAKE else None
+    active_execution = execution if execution is not None else ExecutionTopology.production()
+    disk = FakeGitRepositories() if git is GitKind.FAKE else REAL_GIT
     root = tmp_path / "project"
     root.mkdir()
     (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
@@ -170,6 +222,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
         log_emit=_emit,
         on_log_ready=lambda _path: None,
         git_repository=_git_factory(disk, wrap_git),
+        clock=ManualClock(),
     )
     with open_project_run_resources(
         request, effects=effects, resolve_resume=unexpected_resume
@@ -179,7 +232,9 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=backend if backend is not None else FakeComputeBackend(),
+                backend=backend
+                if backend is not None
+                else FakeComputeBackend(threads=SimThreads()),
                 agent_backend="stub",
                 cli_provider="codex",
                 run_id=RUN_ID,
@@ -191,20 +246,30 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                     if owns_candidate_worktrees
                     else ()
                 ),
+                clock=ManualClock(),
+                system=idle_environment_system() if system is None else system,
             ),
             open_session if open_session is not None else lambda _request: _Session(),
+            clock=ManualClock(),
         )
         with closing(environment):
             factory = WorkspaceResourceFactory(
                 project,
                 environment,
-                evaluation_plan=TrustedEvaluationPlan(),
+                evaluation_plan=TrustedEvaluationPlan(unread_paths=unread_paths),
                 memory_paths=memory_paths,
                 skill_source_dirs=(),
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
-                events=lambda _event: None,
+                events=events or (lambda _event: None),
+                threads=active_execution.threads,
+                blocking=active_execution.blocking,
             )
-            env = WorkspaceEnv(project.project, factory, git_disk=disk)
+            env = WorkspaceEnv(
+                project.project,
+                factory,
+                execution=active_execution,
+                git_disk=disk,
+            )
             env.start_host()
             yield env

@@ -24,8 +24,14 @@ from vs_sandbox.api import (
     SandboxKind,
     create_compute_backend,
 )
-from vs_sandbox.api.testing import FakeAcceleratorDiscovery
-from vs_sim.api.testing import examples
+from vs_sandbox.api.testing import FakeAcceleratorDiscovery, ScriptedDockerCli
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ManualClock,
+    ScriptedProbe,
+    SimThreads,
+    examples,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -48,13 +54,24 @@ def _make_backend(
         accelerator_discovery=FakeAcceleratorDiscovery(
             rocm=AcceleratorInventory(tuple(devices), reported_device_count=1)
         ),
-        docker=docker,
+        docker=ScriptedDockerCli() if docker is None else docker,
+        clock=ManualClock(),
+        threads=SimThreads(),
+        launcher=FakePipedProcessLauncher(),
     )
 
 
 class TestRocmRegistry:
     def test_rocm_in_registry(self, tmp_path: Path) -> None:
-        impl = create_compute_backend(ComputeBackend.ROCM, log_dir=tmp_path)
+        impl = create_compute_backend(
+            ComputeBackend.ROCM,
+            log_dir=tmp_path,
+            clock=ManualClock(),
+            docker=ScriptedDockerCli(),
+            threads=SimThreads(),
+            launcher=FakePipedProcessLauncher(),
+            probe=ScriptedProbe(lambda _argv: None),
+        )
         assert isinstance(impl, RocmBackend)
         assert impl.name is ComputeBackend.ROCM
         # rocprofv3 / rocprof-compute is the dedicated system- and

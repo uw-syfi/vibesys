@@ -6,6 +6,9 @@ from dataclasses import replace
 from typing import Literal
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+from pydantic import ValidationError
 from tests.support import make_orchestrator_plan
 
 from vibesys.hypothesis import (
@@ -13,6 +16,7 @@ from vibesys.hypothesis import (
     HypothesisConfig,
     HypothesisOutcome,
     HypothesisSearch,
+    ImplementerStatus,
     RoundRecord,
 )
 from vibesys.hypothesis import cadence as _cadence
@@ -20,7 +24,6 @@ from vibesys.hypothesis.transitions import (
     detect_plateau,
     pareto_archive_dominators,
     pareto_frontier_records,
-    provisional_candidates_since_official,
     select_final_candidate,
     trusted_candidate_records,
 )
@@ -88,26 +91,6 @@ def terminal_workspace_notice(records: list[RoundRecord]) -> str | None:
     )
 
 
-def _official_evaluation_reason(  # noqa: PLR0913  # LW-040136 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
-    *,
-    records: list[RoundRecord],
-    round_number: int,
-    max_rounds: int,
-    official_eval_every: int,
-    requested: bool,
-    candidate_ready: bool,
-) -> str | None:
-    search = HypothesisSearch(
-        HypothesisConfig(max_rounds=max_rounds, official_eval_every=official_eval_every)
-    )
-    return search.official_due(
-        records=records,
-        round_number=round_number,
-        requested=requested,
-        candidate_ready=candidate_ready,
-    )
-
-
 def _review_due(
     *,
     round_number: int,
@@ -141,7 +124,6 @@ def test_orchestration_descriptor_contains_only_policy_settings() -> None:
         max_rounds=7,
         max_retries_per_round=4,
         judge_every=2,
-        official_eval_every=5,
         operator_constraints=("Preserve ordering",),
         metric_space=MetricSpace(),
     )
@@ -157,13 +139,19 @@ def test_orchestration_descriptor_contains_only_policy_settings() -> None:
         "max_rounds": 7,
         "max_retries_per_round": 4,
         "judge_every": 2,
-        "official_eval_every": 5,
         "modality": "messages",
         "operator_constraints": ["Preserve ordering"],
         "metric_space": MetricSpace().model_dump(mode="json"),
         "profile_guided": None,
         "turn_drop_backoff_seconds": 5.0,
     }
+
+
+def test_the_removed_evaluation_budget_option_is_rejected_by_name() -> None:
+    with pytest.raises(ValidationError, match="evaluation_budget"):
+        AgentOrchestrationOptions.model_validate(
+            {"max_rounds": 3, "max_retries_per_round": 1, "judge_every": 1, "evaluation_budget": 2}
+        )
 
 
 def test_validation_recipe_rejects_non_workspace_inputs() -> None:
@@ -197,38 +185,23 @@ def test_pre_round_decision_accepts_booleans() -> None:
     assert d.profile_focus == "decode kernels"
 
 
-def test_orchestrator_plan_revert_round_optional() -> None:
+def test_orchestrator_plan_base_round_optional() -> None:
     p = make_orchestrator_plan(
         task="redo",
         criteria="passes tests",
-        revert_to_round=3,
+        base_round=3,
         reasoning="step back",
     )
-    assert p.revert_to_round == 3
+    assert p.base_round == 3
+    assert make_orchestrator_plan(task="redo", criteria="x", reasoning="r").base_round is None
 
 
-def test_official_evaluation_cadence_counts_candidate_checkpoints_not_rounds() -> None:
-    records = [
-        RoundRecord(
-            1, "a", None, None, passed=False, reviewed=False, hypothesis_outcome="continue"
-        ),
-        RoundRecord(2, "b", None, None, passed=True, reviewed=True, hypothesis_outcome="proven"),
-        RoundRecord(3, "c", None, None, passed=False, reviewed=True, hypothesis_outcome="rejected"),
-        RoundRecord(4, "d", None, None, passed=True, reviewed=True, hypothesis_outcome="proven"),
-    ]
+@given(candidate_ready=st.booleans())
+def test_every_reviewed_candidate_is_measured(*, candidate_ready: bool) -> None:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=20))
+    reason = search.official_due(candidate_ready=candidate_ready)
 
-    assert provisional_candidates_since_official(records) == 2
-    assert (
-        _official_evaluation_reason(
-            records=records,
-            round_number=5,
-            max_rounds=20,
-            official_eval_every=3,
-            requested=False,
-            candidate_ready=True,
-        )
-        == "cadence"
-    )
+    assert (reason is not None) is candidate_ready
 
 
 def test_frontier_candidate_forces_review_outside_sparse_cadence() -> None:
@@ -267,7 +240,7 @@ def test_reused_candidate_evidence_does_not_bypass_sparse_review() -> None:
     implementation = ImplementerResponse(
         summary="Rebuilt derived reports without running a benchmark.",
         expected_behavior="The retained raw row is unchanged.",
-        hypothesis_outcome=HypothesisOutcome.INCONCLUSIVE,
+        status=ImplementerStatus.IMPLEMENTATION_FAILED,
         candidate_disposition=CandidateDisposition.PREREQUISITE,
         candidate_metrics=metrics,
         candidate_evaluation_artifact="h37-round77-controller-raw.json",
@@ -304,25 +277,6 @@ def test_changed_candidate_row_is_fresh_even_when_artifact_name_is_reused() -> N
     )
 
     assert _candidate_evidence_is_fresh(implementation, [record])
-
-
-def test_official_evaluation_cadence_counts_reviewed_frontier_tradeoff() -> None:
-    records = [
-        RoundRecord(
-            2,
-            "b",
-            None,
-            None,
-            passed=True,
-            reviewed=True,
-            hypothesis_outcome="disproven",
-            candidate_disposition=CandidateDisposition.PARETO_FRONTIER.value,
-            candidate_metrics={"throughput": 120.0, "latency": 90.0},
-            candidate_retained=True,
-        )
-    ]
-
-    assert provisional_candidates_since_official(records) == 1
 
 
 def test_typed_unknown_retention_is_not_trusted_as_pareto_state() -> None:
@@ -689,36 +643,6 @@ def test_final_pareto_candidate_requires_canonical_official_metrics() -> None:
     assert select_final_candidate([official, provisional], _THROUGHPUT_LATENCY) is official
 
 
-def test_official_evaluation_cadence_resets_at_verified_checkpoint() -> None:
-    records = [
-        RoundRecord(
-            1,
-            "a",
-            10.0,
-            "tok/s",
-            passed=True,
-            reviewed=True,
-            hypothesis_outcome="proven",
-            official_evaluation=True,
-            official_evaluation_reason="orchestrator_request",
-        ),
-        RoundRecord(2, "b", None, None, passed=True, reviewed=True, hypothesis_outcome="proven"),
-    ]
-
-    assert provisional_candidates_since_official(records) == 1
-    assert (
-        _official_evaluation_reason(
-            records=records,
-            round_number=3,
-            max_rounds=20,
-            official_eval_every=3,
-            requested=False,
-            candidate_ready=True,
-        )
-        is None
-    )
-
-
 def test_terminal_workspace_notice_points_designer_to_hypothesis_parent() -> None:
     records = [
         RoundRecord(28, "a" * 40, None, None, passed=False),
@@ -750,7 +674,7 @@ def test_terminal_workspace_notice_points_designer_to_hypothesis_parent() -> Non
     assert notice is not None
     assert "workspace edits are still present" in notice
     assert "recorded pre-hypothesis parent is round 28" in notice
-    assert "revert_to_round=28" in notice
+    assert "base_round=28" in notice
 
 
 def test_terminal_workspace_notice_preserves_pareto_tradeoff_commit() -> None:
@@ -865,7 +789,7 @@ def test_terminal_workspace_notice_keeps_original_parent_after_same_id_reproposa
 
     assert notice is not None
     assert "recorded pre-hypothesis parent is round 60" in notice
-    assert "revert_to_round=60" in notice
+    assert "base_round=60" in notice
     assert "recorded pre-hypothesis parent is round 62" not in notice
 
 

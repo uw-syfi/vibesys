@@ -4,7 +4,6 @@ import importlib.util
 import json
 import shutil
 import sys
-import time
 import tomllib
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -12,6 +11,8 @@ from types import ModuleType, SimpleNamespace
 import pytest
 from tests.examples.example_task import load_example_task, task_root
 from tests.support import run_test_command
+
+from vs_sim.api import MonotonicClock
 
 _REPO = Path(__file__).resolve().parents[2]
 _PROJECT = _REPO / "examples" / "database" / "differential-dataflow"
@@ -208,7 +209,8 @@ def test_crash_injection_times_out_when_candidate_emits_no_output(
     )
     monkeypatch.setattr(crash_gate, "_CRASH_INJECTION_TIMEOUT_S", 0.05)
 
-    started = time.monotonic()
+    clock = MonotonicClock()
+    started = clock.now()
     # Invoke this focused fault-injection seam directly so the test does not
     # build the example engine or run the entire multi-gate CLI.
     crashed, ok, message = crash_gate._crash_then_restart(  # noqa: SLF001  # lint-waiver: LW-008508 [SLF001]; exercise timeout recovery without building the external engine or running unrelated CLI gates.
@@ -218,7 +220,7 @@ def test_crash_injection_times_out_when_candidate_emits_no_output(
         1,
     )
 
-    assert time.monotonic() - started < 2
+    assert clock.now() - started < 2
     assert crashed is False
     assert ok is True
     assert "no stdout" in message

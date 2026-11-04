@@ -62,6 +62,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+from vs_decode.api import Unreadable, decode_json
+
 if TYPE_CHECKING:
     from pathlib import Path
 # ``linux/landlock.h``. Bits 0-12 are ABI 1; REFER is ABI 2, TRUNCATE ABI 3.
@@ -172,6 +174,10 @@ class LandlockRule(BaseModel):
 
     path: str
     access: RuleAccess
+
+
+_MAX_POLICY_BYTES = 1024 * 1024
+"""The largest ``--policy`` document read."""
 
 
 class LandlockPolicy(BaseModel):
@@ -404,7 +410,12 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("no command given after '--'\n")
         return 2
 
-    policy = LandlockPolicy.model_validate_json(options.policy)
+    policy = decode_json(
+        options.policy, LandlockPolicy, source="--policy", max_bytes=_MAX_POLICY_BYTES
+    )
+    if isinstance(policy, Unreadable):
+        sys.stderr.write(f"invalid --policy: {policy.details()}\n")
+        return 2
     if policy.chdir is not None:
         os.chdir(policy.chdir)
     try:

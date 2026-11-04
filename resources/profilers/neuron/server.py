@@ -14,15 +14,16 @@ Launch (typically spawned by the agent runner via ``MCPServerSpec``):
 from __future__ import annotations
 
 import argparse
+import importlib
 import sys
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from mcp.server.fastmcp import FastMCP
-
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from mcp.server.fastmcp import FastMCP
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 # lint-waiver: LW-008017 [E402]; This standalone bundle adds a sibling module directory to sys.path before importing its modules.
@@ -34,26 +35,48 @@ def _capture(fn: Callable[..., None], **kwargs: object) -> str:
     return analyze_neuron.capture_runtime.run_analysis(fn, **kwargs)
 
 
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "strict_arguments.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
+
+
 def build_server() -> FastMCP:
     """Build the profiler MCP server."""
-    mcp = FastMCP("vibesys-neuron-profiler")
+    mcp = StrictFastMCP("vibesys-neuron-profiler")
 
     @mcp.tool()
     def capture(
         workload: str,
         out_dir: str = str(Path(tempfile.gettempdir()) / "neuronprof"),
         timeout: int = 1800,
+        *,
+        device_profile: bool = True,
     ) -> str:
-        """Run a workload under ``neuron-explorer inspect`` and capture profiles.
+        """Run a workload under ``neuron-explorer inspect`` with session device profiling.
 
         Args:
-            workload: Shell command that launches/exercises the Neuron model
-                (e.g. a benchmark driver against an already-running server).
+            workload: Shell command that itself loads and runs the Neuron model
+                (e.g. a script running a few compiled steps). A client driving a
+                separately started server records nothing; profile the server
+                process with the ``NEURON_RT_INSPECT_*`` variables instead.
             out_dir: Directory to write the NTFF/NEFF profiles into.
             timeout: Max seconds to let the workload run.
+            device_profile: False captures the system profile only, which reserves no
+                HBM; session device profiling reserves about 4.75 GiB per trn2 logical
+                core, so a workload that needs more than ~18.7 GiB per core fails to load
+                under it.
         """
         return _capture(
-            analyze_neuron.cmd_capture, out_dir=out_dir, workload=workload, timeout=timeout
+            analyze_neuron.cmd_capture,
+            out_dir=out_dir,
+            workload=workload,
+            timeout=timeout,
+            device_profile=device_profile,
         )
 
     @mcp.tool()

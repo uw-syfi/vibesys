@@ -1,9 +1,9 @@
-"""Assumption A4 of the strategy port design: a designer's roadmap lives in the run root.
+"""A run-scoped turn's artifact directory lives in the run root and outlives restores.
 
-The `single` and `multi` designer is a run-scoped `WRITE_ARTIFACTS` turn that writes
-`roadmap/` in the run root and expects to read it again at its next turn. That needs (1) the
-turn's writes under the configured artifact directory to be kept and anything else reverted,
-and (2) the file to be there when the next designer turn starts, whatever workspace work
+A run-scoped `WRITE_ARTIFACTS` turn (a role that a plugin lets write below a configured
+directory, `profile/` here) writes in the run root and a later turn reads what it wrote. That
+needs (1) the turn's writes under the configured artifact directory to be kept and anything else
+reverted, and (2) the file to be there when the next turn starts, whatever workspace work
 happened between the two turns.
 """
 
@@ -23,29 +23,29 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-ROADMAP = "roadmap/plan.md"
+EVIDENCE = "profile/plan.md"
 
 
-async def _designer_turn(world: AccessWorld, request_id: str, invocation: str) -> None:
+async def _run_scoped_turn(world: AccessWorld, request_id: str, invocation: str) -> None:
     result = await world.execute(dispatch_request(request_id, invocation))
     assert status(result) is ObservationStatus.SUCCEEDED
 
 
-def test_the_roadmap_written_by_one_designer_turn_is_there_at_the_next(tmp_path: Path) -> None:
+def test_the_artifact_written_by_one_run_scoped_turn_is_there_at_the_next(tmp_path: Path) -> None:
     async def run(world: AccessWorld) -> None:
         world.host.resolver.access = Access.WRITE_ARTIFACTS
-        world.host.resolver.grant_paths = ("roadmap",)
-        world.host.resolver.grant_directories = ("roadmap",)
-        world.writes = {ROADMAP: "step 1\n", "elsewhere.txt": "not allowed\n"}
+        world.host.resolver.grant_paths = ("profile",)
+        world.host.resolver.grant_directories = ("profile",)
+        world.writes = {EVIDENCE: "step 1\n", "elsewhere.txt": "not allowed\n"}
         await world.execute(ensure_request())
         first = await world.execute(dispatch_request("req-1", "inv-1"))
         assert status(first) is ObservationStatus.FAILED  # the write outside the grant
-        world.writes = {ROADMAP: "step 1\n"}
-        await _designer_turn(world, "req-2", "inv-2")
+        world.writes = {EVIDENCE: "step 1\n"}
+        await _run_scoped_turn(world, "req-2", "inv-2")
         world.writes = {}
-        await _designer_turn(world, "req-3", "inv-3")
-        assert world.probe.seen[-1][ROADMAP] == tree(world.root.path)[ROADMAP]
-        assert (world.root.path / ROADMAP).read_text(encoding="utf-8") == "step 1\n"
+        await _run_scoped_turn(world, "req-3", "inv-3")
+        assert world.probe.seen[-1][EVIDENCE] == tree(world.root.path)[EVIDENCE]
+        assert (world.root.path / EVIDENCE).read_text(encoding="utf-8") == "step 1\n"
         assert "elsewhere.txt" not in tree(world.root.path)
 
     with open_workspace_env(tmp_path) as env:
@@ -55,22 +55,22 @@ def test_the_roadmap_written_by_one_designer_turn_is_there_at_the_next(tmp_path:
             asyncio.run(workspaces.close())
 
 
-def test_the_roadmap_survives_a_restore_of_the_root_between_two_designer_turns(
+def test_the_artifact_survives_a_restore_of_the_root_between_two_run_scoped_turns(
     tmp_path: Path,
 ) -> None:
     async def run(world: AccessWorld) -> None:
         world.host.resolver.access = Access.WRITE_ARTIFACTS
-        world.host.resolver.grant_paths = ("roadmap",)
-        world.host.resolver.grant_directories = ("roadmap",)
-        world.writes = {ROADMAP: "step 1\n"}
+        world.host.resolver.grant_paths = ("profile",)
+        world.host.resolver.grant_directories = ("profile",)
+        world.writes = {EVIDENCE: "step 1\n"}
         await world.execute(ensure_request())
-        await _designer_turn(world, "req-1", "inv-1")
+        await _run_scoped_turn(world, "req-1", "inv-1")
         baseline = world.root.trusted_input_baseline
         assert baseline is not None
         await world.root.restore(baseline)
-        assert (world.root.path / ROADMAP).read_text(encoding="utf-8") == "step 1\n"
+        assert (world.root.path / EVIDENCE).read_text(encoding="utf-8") == "step 1\n"
 
-    with open_workspace_env(tmp_path, memory_paths=("roadmap",)) as env:
+    with open_workspace_env(tmp_path, memory_paths=("profile",)) as env:
         world = AccessWorld(env)
         asyncio.run(run(world))
         for workspaces in env.hosts:

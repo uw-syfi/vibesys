@@ -29,7 +29,6 @@ import csv
 import importlib.util
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -37,6 +36,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api import MonotonicClock
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -450,11 +450,12 @@ def test_run_with_timeout_returns_nonzero_on_failure(compute):  # noqa: ANN001, 
 
 
 def test_run_with_timeout_kills_a_stuck_child_and_its_subtree(compute):  # noqa: ANN001, ANN201  # LW-920246; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
-    start = time.monotonic()
+    clock = MonotonicClock()
+    start = clock.now()
     rc, out = compute.run_with_timeout(
         [sys.executable, "-c", "import time; time.sleep(30)"], timeout=0.2
     )
-    elapsed = time.monotonic() - start
+    elapsed = clock.now() - start
 
     assert rc == 124
     assert "TIMEOUT" in out

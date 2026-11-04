@@ -1,0 +1,16 @@
+@import './frame.css';
+@import './controls.css';
+@import './navigation.css';
+@import './rail.css';
+@import './overview-tiles.css';
+@import './chat.css';
+@import './base.css';
+@import './inputs.css';
+@import './surfaces.css';
+@import './documents.css';
+@import './threads.css';
+/*
+ * The styles of the design system's components (the `.` entry). Every value is a token variable
+ * from `tokens.css`; no color or length is written here. Import after `tokens.css` and `fonts.css`.
+ * Class names are `vs-` prefixed so they never meet the legacy primitives' global selectors.
+ */

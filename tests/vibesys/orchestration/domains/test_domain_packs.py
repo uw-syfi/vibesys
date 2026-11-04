@@ -150,6 +150,7 @@ def test_render_llm_serving_has_content() -> None:
         DomainRole.IMPLEMENTER,
         modality="text_generation",
         reference_path="/ref",
+        profiler_id="none",
         workspace_sources=(),
     )
     assert impl  # non-empty
@@ -331,8 +332,12 @@ def test_database_provides_in_place_orchestrator_method() -> None:
 def test_llm_serving_profiler_branches_on_remote_execution_not_provider() -> None:
     domain = resolve_domain(DomainName.LLM_SERVING)
 
-    local = render_domain_section(domain, DomainRole.PROFILER, profile_execution="local")
-    remote = render_domain_section(domain, DomainRole.PROFILER, profile_execution="remote")
+    local = render_domain_section(
+        domain, DomainRole.PROFILER, profile_execution="local", profiler_id="none"
+    )
+    remote = render_domain_section(
+        domain, DomainRole.PROFILER, profile_execution="remote", profiler_id="none"
+    )
 
     assert "Run jobs for the same deployment" not in local
     assert "bounded remote controller/profile command" not in local
@@ -347,6 +352,7 @@ def test_render_database_profiler_has_content() -> None:
         resolve_domain(DomainName.DATABASE),
         DomainRole.PROFILER,
         profile_execution="local",
+        profiler_id="none",
     )
     assert "Engine profile capture" in section
     # locate the hot path without displacing the scored metric
@@ -362,6 +368,7 @@ def _serving_profiler(profile_execution: str) -> str:
         DomainRole.PROFILER,
         modality="text_generation",
         profile_execution=profile_execution,
+        profiler_id="none",
     )
 
 
@@ -383,6 +390,7 @@ def test_torch_profiler_remote_capture_is_provider_neutral() -> None:
         **common,
         domain_profiler=_serving_profiler("local"),
         profile_execution="local",
+        profiler_id="none",
     )
     remote = render_template(
         "profilers/torch.j2",
@@ -391,6 +399,7 @@ def test_torch_profiler_remote_capture_is_provider_neutral() -> None:
         **common,
         domain_profiler=_serving_profiler("remote"),
         profile_execution="remote",
+        profiler_id="none",
     )
 
     assert "`profile_ops`: generic in-process capture" in local
@@ -401,3 +410,41 @@ def test_torch_profiler_remote_capture_is_provider_neutral() -> None:
     assert "Report visibility limits" in remote
     assert "Modal" not in local
     assert "Modal" not in remote
+
+
+@pytest.mark.parametrize("role", [DomainRole.IMPLEMENTER, DomainRole.PROFILER])
+@pytest.mark.parametrize("profiler_id", ["nsys", "rocprof", "torch", "linux_cpu", "none"])
+def test_llm_serving_names_nvtx_only_for_the_nsys_profiler(
+    role: DomainRole, profiler_id: str
+) -> None:
+    section = render_domain_section(
+        resolve_domain(DomainName.LLM_SERVING),
+        role,
+        modality="text_generation",
+        interface="service",
+        profile_execution="local",
+        profiler_id=profiler_id,
+        reference_path=".",
+        workspace_sources=(),
+    )
+
+    assert ("NVTX" in section) is (profiler_id == "nsys")
+    assert "nsys" not in section or profiler_id == "nsys"
+
+
+@pytest.mark.parametrize("interface", ["inprocess", "service"])
+def test_llm_serving_names_the_import_adapter_only_for_an_inprocess_candidate(
+    interface: str,
+) -> None:
+    section = render_domain_section(
+        resolve_domain(DomainName.LLM_SERVING),
+        DomainRole.IMPLEMENTER,
+        modality="text_generation",
+        interface=interface,
+        profile_execution="local",
+        profiler_id="none",
+        reference_path=".",
+        workspace_sources=(),
+    )
+
+    assert ("VibeServeModel" in section) is (interface == "inprocess")

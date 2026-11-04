@@ -29,6 +29,7 @@ from vs_core._registry import OperationRegistration, OperationRegistry
 from vs_core.types.agents import ProtocolContext
 from vs_core.types.common import (
     ArtifactRef,
+    InvocationRef,
     LifecycleClass,
     OperationDescriptor,
     OperationSchemaRef,
@@ -90,6 +91,10 @@ class RenderRoleArtifactsBase[C: Value](OperationRequest):
     subject: str = Field(min_length=1)
     ordinal: int = Field(ge=0)
     context: C | ProtocolContext
+    continuation_of: InvocationRef | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """The admitted logical turn this correction or resume preparation continues."""
 
 
 class ParentVerification(Value):

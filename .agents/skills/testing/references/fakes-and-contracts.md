@@ -64,8 +64,9 @@ interface when implementations are not substitutable. See the
 [functional core rule](../../software-design/references/functional-core.md).
 
 The Fake run is part of the normal test run. Production runs requiring real
-services are opt-in with `VIBESYS_REAL_CONTRACTS=1`, triggered manually for now,
-not by CI. A cluster smoke test is the manual form of this run. This gates the whole run, not individual contract cases. Run the
+services are opt-in through one switch (an environment variable), so they
+need not run in every CI run. The switch gates the whole run, not individual
+contract cases. Run the
 suite for every affected implementation when you change the interface, a
 production implementation, or its Fake. Report the results and any unavailable
 environments in the PR's Verification section. The per-language reference

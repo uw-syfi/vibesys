@@ -9,15 +9,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, assert_never
 
 from ._adoption import fences_root_mutation
+from ._operator_actions import parallel_limit
 from ._proofs import (
     Proven,
     accepted_receipt_for,
     admission_remaining,
     committed_stop,
-    draining,
+    stop_draining,
+    stop_mode,
 )
 from ._request_ledger import due_retries
-from ._request_recovery import overdue_reconciliations
 from .types.attempts import AttemptPhase, RetireRequested
 from .types.common import (
     AttemptRef,
@@ -28,11 +29,11 @@ from .types.common import (
     RejectionCode,
     RequestId,
     RunStatus,
+    StopMode,
     WorkspaceMode,
 )
 from .types.evaluation import ObservationsDue, RunJobsCancelRequested
 from .types.kernel import AreaChange
-from .types.records import RecoveryPhase
 from .types.scheduling import (
     AdmissionControl,
     AdmitAttempt,
@@ -43,6 +44,7 @@ from .types.scheduling import (
     AttemptRequest,
     AttemptRequested,
     ClockAdvanced,
+    ParallelLimitChanged,
     QueueEntryRetired,
     RegisterAttempt,
     RunDrained,
@@ -156,18 +158,18 @@ def _accepting(context: SchedulingContext) -> bool:
     # admission_closed fences intake. Execution inhibition belongs to the run's
     # durable status, so closing intake cannot strand its already accepted FIFO.
     open_run = context.run.status == RunStatus.RUNNING and context.run.result is None
-    return (
-        (open_run or draining(context.run))
-        and context.run.now_at < context.run.deadline_at
-        and context.records.recovery.phase == RecoveryPhase.READY
-    )
+    return (open_run or stop_draining(context.run)) and context.run.now_at < context.run.deadline_at
 
 
 def _deadline_retirements(state: SchedulingState, context: SchedulingContext) -> tuple[Signal, ...]:
-    """Expired queued episodes retain ownership until Attempts proves retirement."""
+    """Expired queued episodes retain ownership until Attempts proves retirement.
+
+    A run draining an operator's pause (``RunStatus.DRAINING``) keeps its queue for the resume,
+    which retires what expired meanwhile: this check runs again then, and the entries hold no slot.
+    """
     live_run = context.run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
     if context.run.now_at < context.run.deadline_at or not (
-        (live_run and context.run.result is None) or draining(context.run)
+        (live_run and context.run.result is None) or stop_draining(context.run)
     ):
         return ()
     return tuple(
@@ -192,7 +194,7 @@ def _fits(state: SchedulingState, context: SchedulingContext, request: Admission
     """
     if any(slot.attempt.attempt_id == _target(request).attempt_id for slot in state.slots):
         return False
-    if len(state.slots) >= context.run.limits.max_parallel:
+    if len(state.slots) >= parallel_limit(context.run):
         return False
     if any(set(request.pools).intersection(slot.pools) for slot in state.slots):
         return False
@@ -512,8 +514,9 @@ def _cancel(state: SchedulingState, context: SchedulingContext) -> tuple[Signal,
     if context.run.status != RunStatus.CLOSING:
         return None
     decision = _first_stop(context)
-    # Reordered controls cannot change the first committed stop disposition.
-    if decision is None or decision.mode != "cancel":
+    # The first committed Finish keeps its authority; a later cancel control escalates only
+    # its mode (``stop_mode``), and a later drain never weakens a cancel.
+    if decision is None or stop_mode(context.run) is not StopMode.CANCEL:
         return None
     # A parked closure fences its old episode, not a queued reopening. Cancel
     # the carried new admission identity unless that exact episode is closing.
@@ -658,14 +661,13 @@ def schedule(
                         *filled.signals,
                         ObservationsDue(now_at=context.run.now_at),
                         *due_retries(context.records, context.run.now_at),
-                        *overdue_reconciliations(context.records, context.run.now_at),
                     )
                 }
             )
         case AdmissionControl():
             return _control(state, context, event)
-        case AdoptionFenceLifted():
-            # The fence is part of `_fits`; this only retries admission.
+        case AdoptionFenceLifted() | ParallelLimitChanged():
+            # The fence and the limit are part of `_fits`; this only retries admission.
             change = _fill(state, context)
         case _:
             assert_never(event)

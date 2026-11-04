@@ -31,16 +31,28 @@ from tests.support.session_world import (
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_agent.api.testing import FakeAgentSessions
-from vs_core.api import ContinuationId, ObservationStatus, SessionObserved, TurnObserved
+from vs_core.api import (
+    Continuation,
+    ContinuationId,
+    ContinuationPhase,
+    DispatchTurn,
+    InvocationId,
+    InvocationRef,
+    ObservationStatus,
+    ResourceId,
+    SessionObserved,
+    TurnObserved,
+)
 from vs_project.api import Project
 from vs_runtime.api.core import (
     ExecutionResult,
     JournalRunInvocations,
-    ReceiptStore,
+    KeyedDocuments,
     ReleasedRunInvocations,
 )
-from vs_runtime.api.executor_contexts import RevocableLease, context_for
+from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import examples, wait_until_started
 
 if TYPE_CHECKING:
@@ -58,19 +70,19 @@ class World:
         (base / "workspace").mkdir()
         self._project = Project.open(base / "project")
         sessions = self._project.state.state_store_namespace("sessions")
-        self.checkpoints = DurableSessionStore(sessions.slot("sessions.json", AgentSessionState))
+        self.checkpoints = DurableSessionStore(
+            sessions.slot("sessions.json", AgentSessionState), threads=OsThreads()
+        )
         self.sessions: FakeAgentSessions | None = None
         self.host: SessionHost = open_lifecycle_host(
             base / "workspace", self.checkpoints, gate=gate
         )
 
-    def store(self) -> ReceiptStore:
-        return ReceiptStore(self._project.state.state_store_namespace("run"))
+    def store(self) -> KeyedDocuments:
+        return KeyedDocuments(self._project.state.state_store_namespace("run"), threads=OsThreads())
 
-    async def execute(
-        self, request: RequestBase, *, lease: RevocableLease | None = None
-    ) -> ExecutionResult:
-        context = context_for(request, lease=lease)
+    async def execute(self, request: RequestBase) -> ExecutionResult:
+        context = context_for(request)
         outcome = await lifecycle_executor(self.host, self.store(), self.sessions).execute(
             cast("Any", request), context
         )
@@ -132,7 +144,9 @@ async def test_cancel_of_an_interrupted_turn_releases_it_without_dispatching_aga
 async def test_cancel_of_a_running_turn_is_unknown_until_it_ends() -> None:
     gate = TurnGate()
     async with world(gate) as w:
-        w.sessions = FakeAgentSessions(w.host.client, w.host.journal)  # one live process
+        w.sessions = FakeAgentSessions(
+            w.host.client, w.host.journal, threads=OsThreads()
+        )  # one live process
         assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
         running = asyncio.create_task(w.execute(dispatch_request()))
         await wait_until_started(gate.started, running)
@@ -156,7 +170,7 @@ async def test_a_restarted_host_cannot_claim_a_cancelled_turn_it_never_ran() -> 
     gate = TurnGate()
     async with world(gate) as w:
         assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
-        w.sessions = FakeAgentSessions(w.host.client, w.host.journal)
+        w.sessions = FakeAgentSessions(w.host.client, w.host.journal, threads=OsThreads())
         running = asyncio.create_task(w.execute(dispatch_request()))
         await wait_until_started(gate.started, running)
         w.sessions = None  # the next call starts a new host over the same journal
@@ -193,15 +207,36 @@ async def test_a_turn_refused_before_the_provider_call_is_cancelled_and_frees_th
 
 
 @pytest.mark.asyncio
-async def test_cancel_of_an_undispatched_invocation_or_unknown_session_is_rejected() -> None:
+async def test_cancel_of_an_undispatched_invocation_or_unknown_session_proves_nothing_held() -> (
+    None
+):
+    """Core ends a cancelling turn only on a proven release; a bare rejection strands it."""
     async with world() as w:
         never_ensured = await w.execute(cancel_request("req-a"))
         assert status(never_ensured) is ObservationStatus.REJECTED
+        assert holds_nothing(never_ensured)
         await w.execute(ensure_request())
         undispatched = await w.execute(cancel_request("req-b", invocation="inv-9"))
         assert status(undispatched) is ObservationStatus.REJECTED
         assert undispatched.observation.observation.terminal
+        assert holds_nothing(undispatched)
         assert cancelled_keys(w.host) == 0
+
+
+_STEPS = ("ensure", "cancel", "dispatch")
+
+
+@pytest.mark.asyncio
+async def test_cancels_of_an_undispatched_invocation_under_two_identities_both_hold_nothing() -> (
+    None
+):
+    """The first cancellation fences the invocation; a second one finds the fence and agrees."""
+    async with world() as w:
+        await w.execute(ensure_request())
+        first = await w.execute(cancel_request("req-c1", invocation="inv-9"))
+        second = await w.execute(cancel_request("req-c2", invocation="inv-9"))
+        assert holds_nothing(first)
+        assert holds_nothing(second)
 
 
 # CloseSession
@@ -233,6 +268,17 @@ async def test_close_of_a_session_that_was_never_ensured_is_rejected() -> None:
         assert status(closed) is ObservationStatus.REJECTED
         assert closed.observation.observation.terminal
         assert released_keys(w.host) == 0
+        # Proof that nothing is held: a closing session in core ends on it instead of waiting.
+        assert holds_nothing(closed)
+
+
+_CLOSE_STEPS = ("ensure", "close")
+
+
+def holds_nothing(result: ExecutionResult) -> bool:
+    """The answer proves release of an identity under which nothing was ever ensured."""
+    observed = result.observation.observation
+    return observed.released and observed.children_complete and not observed.accepted
 
 
 def in_episode[R: RequestBase](request: R, generation: int) -> R:
@@ -275,6 +321,54 @@ async def test_resume_continues_the_retained_conversation_with_exact_identity() 
         assert event.observation.children_complete
         assert len(w.host.turns) == 2, "a repeat replays instead of dispatching"
         assert_core_accepts([first, again], expect_retry=False)
+
+
+class _Waits:
+    """The yield source of a host whose agent always asks to wait for one evaluation job."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    def yielded(self, request: DispatchTurn) -> Continuation:
+        self.asked.append(request.turn.invocation_id.root)
+        here = InvocationRef(
+            session_id=request.turn.session.session_id,
+            invocation_id=request.turn.invocation_id,
+            generation=request.scope.generation,
+        )
+        return Continuation(
+            continuation_id=ContinuationId(root=f"{request.turn.invocation_id.root}/evaluation"),
+            invocation=here,
+            next_invocation=here.model_copy(
+                update={"invocation_id": InvocationId(root=f"{here.invocation_id.root}/resume")}
+            ),
+            jobs=(ResourceId(root="job"),),
+            deadline_at=100.0,
+            phase=ContinuationPhase.WAITING,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_resumed_turn_that_waits_again_is_observed_with_its_new_suspension() -> None:
+    """Resuming a turn does not end its right to wait: its observation carries the new wait.
+
+    An implementer that sees a measurement and changes its candidate asks for another one in
+    the same turn. Dropping the suspension of the resumed dispatch left that wait unrecorded.
+    """
+    waits = _Waits()
+    async with world() as w:
+        await w.started()
+        request = resume_request()
+        result = await lifecycle_executor(w.host, w.store(), w.sessions, yields=waits).execute(
+            cast("Any", request), context_for(request)
+        )
+        assert isinstance(result, ExecutionResult)
+        (event,) = result.owner_events
+        assert isinstance(event, TurnObserved)
+        assert event.suspension is not None
+        assert event.suspension.invocation.invocation_id == request.turn.invocation_id
+        assert event.suspension.jobs == (ResourceId(root="job"),)
+        assert waits.asked == [request.turn.invocation_id.root]
 
 
 @pytest.mark.asyncio
@@ -353,6 +447,26 @@ async def test_a_continuation_has_one_successor() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_resume_refused_before_dispatch_releases_the_turn_and_never_the_session() -> None:
+    """The refusal proves this turn holds nothing; the session it would continue stays held.
+
+    So the answer names no resource: core reads a released answer that names the session's
+    resource as that session's release.
+    """
+    async with world() as w:
+        await w.execute(ensure_request())
+        nothing_to_resume = await w.execute(resume_request("req-a"))
+        await w.started()
+        assert status(await w.execute(resume_request("req-b"))) is ObservationStatus.SUCCEEDED
+        second_successor = await w.execute(resume_request("req-c", invocation="inv-3"))
+        for refused in (nothing_to_resume, second_successor):
+            observed = refused.observation.observation
+            assert observed.status is ObservationStatus.REJECTED
+            assert holds_nothing(refused)
+            assert observed.resource_id is None, observed.diagnostic
+
+
+@pytest.mark.asyncio
 async def test_resume_without_a_retained_turn_or_session_is_rejected() -> None:
     async with world() as w:
         missing = await w.execute(resume_request("req-a"))
@@ -380,44 +494,6 @@ async def test_resume_needs_charge_class_resume_and_a_matching_continuation() ->
 
 
 # the shared contract
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["cancel", "close", "resume"])
-async def test_a_stale_host_performs_nothing_and_a_later_host_completes(kind: str) -> None:
-    async with world() as w:
-        await w.started()
-        request = {"cancel": cancel_request, "close": close_request, "resume": resume_request}[
-            kind
-        ]()
-        lost = RevocableLease()
-        lost.valid = False
-        stale = await w.execute(request, lease=lost)
-        assert status(stale) is ObservationStatus.UNKNOWN
-        assert not stale.observation.observation.terminal
-        assert len(w.host.turns) == 1
-        assert released_keys(w.host) == cancelled_keys(w.host) == 0
-        later = await w.execute(request)
-        assert later.observation.observation.terminal
-        assert_core_accepts([stale, later], expect_retry=True)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["cancel", "close", "resume"])
-async def test_another_payload_under_one_request_identity_is_rejected(kind: str) -> None:
-    async with world() as w:
-        await w.started()
-        request = {"cancel": cancel_request, "close": close_request, "resume": resume_request}[
-            kind
-        ]()
-        first = await w.execute(request)
-        turns = len(w.host.turns)
-        context = context_for(request).model_copy(update={"payload_digest": "another-payload"})
-        outcome = await lifecycle_executor(w.host, w.store()).execute(cast("Any", request), context)
-        assert isinstance(outcome, ExecutionResult)
-        assert status(outcome) is ObservationStatus.REJECTED
-        assert len(w.host.turns) == turns
-        assert_core_accepts([first, outcome], expect_retry=False)
 
 
 @settings(
@@ -466,7 +542,7 @@ async def test_run_snapshot_proof_accepts_a_released_turn_but_not_a_recovered_on
     gate = TurnGate()
     async with world(gate) as w:
         assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
-        sessions = FakeAgentSessions(w.host.client, w.host.journal)
+        sessions = FakeAgentSessions(w.host.client, w.host.journal, threads=OsThreads())
         proof = ReleasedRunInvocations(
             JournalRunInvocations(sessions, w.store()), sessions, w.store()
         )
@@ -482,7 +558,7 @@ async def test_run_snapshot_proof_accepts_a_released_turn_but_not_a_recovered_on
         await w.execute(ensure_request())
         w.host.faults.down = True
         await w.execute(dispatch_request())
-        sessions = FakeAgentSessions(w.host.client, w.host.journal)
+        sessions = FakeAgentSessions(w.host.client, w.host.journal, threads=OsThreads())
         proof = ReleasedRunInvocations(
             JournalRunInvocations(sessions, w.store()), sessions, w.store()
         )

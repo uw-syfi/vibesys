@@ -17,7 +17,6 @@ from tests.vibesys.orchestration.dynamic._host import (
     INPUT_THROUGHPUT,
     PLANNER_LABEL,
     Host,
-    assert_flow_closed,
     begin,
     config,
 )
@@ -28,6 +27,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     profile,
     reviewed,
 )
+from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ProfilerResult, ReviewResult
@@ -408,9 +408,11 @@ def test_an_input_that_cannot_be_measured_is_told_to_the_planner_not_hidden(
 @MODES
 def test_a_measured_input_is_shown_to_the_planner_as_its_baseline(*, restarting: bool) -> None:
     host = begin(config(), restarting=restarting, baseline="measured")
-    host.drain_until_turn(PLANNER_LABEL)
+    # The first ask went out before the measurement landed; the planner's next turn shows it.
+    host.run.fail(host.run.expect_turn(role=PLANNER_LABEL), FailureReason.TIMED_OUT)
 
     context = host.run.expect_turn(role=PLANNER_LABEL).context
     assert isinstance(context, PlannerPrompt)
+    assert not context.baseline_pending
     assert context.input_failure is None
     assert context.baseline != ()

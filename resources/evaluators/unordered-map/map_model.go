@@ -1,6 +1,7 @@
 package main
 
 import (
+	"hash/fnv"
 	"sort"
 	"time"
 
@@ -89,6 +90,17 @@ func mapModel() porcupine.Model {
 			default:
 				return false, state
 			}
+		},
+		Hash: func(state any) uint64 {
+			current := state.(register)
+			hash := fnv.New64a()
+			if current.present {
+				_, _ = hash.Write([]byte{1})
+			} else {
+				_, _ = hash.Write([]byte{0})
+			}
+			_, _ = hash.Write([]byte(current.value))
+			return hash.Sum64()
 		},
 		Equal: func(state1, state2 any) bool {
 			return state1.(register) == state2.(register)

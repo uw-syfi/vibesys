@@ -15,6 +15,7 @@ from vs_evaluation.agent_models import (
     RECEIPT_LINE,
     AdditionalProfileCaptureReason,
     AgentEvaluationCall,
+    EvaluationComparison,
     EvaluationStageOutcome,
     RunStoppingReply,
     SocketFailure,
@@ -27,6 +28,7 @@ from vs_evaluation.agent_models import (
 from vs_evaluation.coordinator import (
     EvaluationCoordinator,
     EvaluationLifecycleError,
+    loop_evaluation_deadline,
     stable_handle_id,
 )
 from vs_evaluation.failure_signature import (
@@ -71,11 +73,14 @@ from vs_evaluation.ports import (
     ExecutorRejectedError,
     ExecutorSubmissionError,
     PollingEvaluationExecutor,
+    RecoverableEvaluationExecutor,
 )
 from vs_evaluation.semantic_stage import (
     EvidenceResultIdentity,
     SemanticEvaluationStage,
+    evaluation_work_digest,
     evidence_identity,
+    same_work,
 )
 from vs_evaluation.state_namespace import (
     EvaluationStateNamespace,
@@ -95,6 +100,7 @@ __all__ = [
     "ContentDigest",
     "CostClass",
     "EvaluationCanceled",
+    "EvaluationComparison",
     "EvaluationCompleted",
     "EvaluationCoordinator",
     "EvaluationFailed",
@@ -126,6 +132,7 @@ __all__ = [
     "PollPhase",
     "PollingEvaluationExecutor",
     "ProfileField",
+    "RecoverableEvaluationExecutor",
     "ResourceRequirements",
     "ReuseStatus",
     "RunStoppingReply",
@@ -140,10 +147,13 @@ __all__ = [
     "TrustedEvidence",
     "WaitCall",
     "WaitReply",
+    "evaluation_work_digest",
     "evidence_identity",
     "failure_signature",
     "is_finished",
     "join_observation",
+    "loop_evaluation_deadline",
+    "same_work",
     "stable_handle_id",
     "state_rank",
 ]

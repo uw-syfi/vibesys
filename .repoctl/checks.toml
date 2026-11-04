@@ -9,6 +9,56 @@ rust = [
   ["cargo", "test", "--locked"],
 ]
 
+# Scripts the changes, doc-checks and history-checks jobs run on every pull request.
+# No trigger job: a change that selects nothing still runs them. The workflow
+# invokes the same programs; TestAlwaysOnCommandsAreWhatCIRunsOnEveryChange
+# fails if this list and that workflow disagree.
+[[check_groups]]
+name = "always_on"
+include_in_checks = true
+language = "python"
+directory = "."
+timeout_seconds = 180
+commands = [
+  ["./support/repoctl/repoctl", "validate"],
+  ["./support/repoctl/repoctl", "verify-policy", "--cases", "tests/repoctl/cases.toml"],
+  ["python3", "scripts/check_stale_revert.py", "--base-ref", "origin/main"],
+  ["python3", "scripts/check_stray_files.py"],
+  ["python3", "-m", "scripts.check_example_pointers", "--base-ref", "origin/main"],
+  ["python3", "scripts/check_doc_links.py"],
+  ["python3", "-m", "scripts.check_doc_citations"],
+  ["python3", "-m", "scripts.check_architecture_conceptual"],
+  ["python3", "-m", "scripts.check_skills"],
+  ["python3", "-m", "scripts.published_skills"],
+]
+# Every command here takes under a second or two, so the pre-push gate runs them all.
+gate_commands = [
+  ["./support/repoctl/repoctl", "validate"],
+  ["./support/repoctl/repoctl", "verify-policy", "--cases", "tests/repoctl/cases.toml"],
+  ["python3", "scripts/check_stale_revert.py", "--base-ref", "origin/main"],
+  ["python3", "scripts/check_stray_files.py"],
+  ["python3", "-m", "scripts.check_example_pointers", "--base-ref", "origin/main"],
+  ["python3", "scripts/check_doc_links.py"],
+  ["python3", "-m", "scripts.check_doc_citations"],
+  ["python3", "-m", "scripts.check_architecture_conceptual"],
+  ["python3", "-m", "scripts.check_skills"],
+  ["python3", "-m", "scripts.published_skills"],
+]
+
+[[check_groups]]
+name = "stitch_checks"
+trigger_job = "stitch"
+include_in_test = true
+language = "rust"
+directory = "experimental/stitch"
+timeout_seconds = 600
+commands = [
+  ["cargo", "fmt", "--all", "--check"],
+  ["cargo", "clippy", "--locked", "--workspace", "--all-targets", "--", "-W", "clippy::pedantic", "-W", "clippy::redundant_clone", "-D", "warnings"],
+  ["cargo", "strata", "check", "--strict"],
+  ["cargo", "test", "--locked", "--workspace"],
+]
+
 [[check_groups]]
 name = "python_tests"
 trigger_job = "python"
@@ -16,10 +66,28 @@ include_in_test = true
 language = "python"
 directory = "."
 timeout_seconds = 1800
-commands = [["uv", "run", "python", "-m", "pytest", "-q"]]
+# Local only (CI runs `python_ci_tests_shard`). The suite is about 1,100 CPU-seconds of tests, so
+# four workers without coverage finish it in a few minutes, where serial pytest with the `--cov`
+# default took 19+. Four, not `auto`: `repoctl test` often runs under a 4-CPU cap.
+commands = [["uv", "run", "python", "-m", "pytest", "-q", "-n", "4", "--no-cov"]]
+
+# The Python tests a change can reach through imports, within a time budget (scripts/impacted_tests.py).
+# CI's pull-request commit stage runs this group; the full suite runs in the merge queue. The pre-push
+# gate runs the same selection with a smaller budget. Neither runs under a plain `repoctl test`,
+# which already runs the whole suite as `python_tests`.
+[[check_groups]]
+name = "python_impact_tests"
+trigger_job = "python"
+language = "python"
+directory = "."
+timeout_seconds = 600
+commands = [["uv", "run", "--no-sync", "python", "scripts/impacted_tests.py", "run", "--base-ref", "origin/main", "--budget-seconds", "100", "--workers", "4"]]
+gate_commands = [["uv", "run", "python", "scripts/impacted_tests.py", "run", "--base-ref", "origin/main", "--budget-seconds", "30", "--workers", "4", "--maxfail", "3"]]
 
 [[check_groups]]
 name = "python_quality"
+trigger_job = "python"
+include_in_checks = true
 language = "python"
 directory = "."
 timeout_seconds = 600
@@ -30,35 +98,85 @@ commands = [
   ["uv", "run", "python", "-m", "scripts.check_purity", "--base-ref", "origin/main"],
   ["uv", "run", "python", "scripts/check_test_isolation.py"],
   ["uv", "run", "python", "-m", "scripts.check_contract_sot", "--base-ref", "origin/main"],
+  ["uv", "run", "python", "-m", "scripts.check_persisted_schema_compat", "--base-ref", "origin/main"],
   ["uv", "run", "python", "scripts/check_tach.py"],
   ["uv", "run", "python", "scripts/check_member_dependencies.py"],
   ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
   ["uv", "run", "python", "scripts/check_doc_links.py"],
   ["uv", "run", "python", "-m", "scripts.check_doc_citations"],
+  # Also in test.yml's always-on `doc-checks` job: components.toml ignores `.agents/`, so a
+  # skills-only change selects no Python job and would otherwise skip this check.
+  ["uv", "run", "python", "-m", "scripts.check_skills"],
+  # Also in test.yml's always-on `doc-checks` job: `.claude-plugin/` is not a component root, so a
+  # manifest-only change selects no Python job.
+  ["uv", "run", "python", "-m", "scripts.published_skills"],
   ["uv", "run", "vibesys", "--headless", "--help"],
+  ["uv", "run", "python", "scripts/check_lint_waivers.py"],
+  # Runs the cache restore script against a fake docker; selected with the image-cache files.
+  ["./scripts/tests/test_ci_registry_image_cache.sh"],
+]
+# The pre-push gate runs the checks that fail most often and take seconds. The repository-wide
+# scans over git history or the whole tree (contract_sot, persisted_schema_compat, the
+# `vibesys --headless --help` smoke) are left to CI.
+gate_commands = [
+  ["./scripts/check_format.sh"],
+  ["./scripts/check_lint.sh"],
+  ["uv", "run", "python", "scripts/check_file_length.py"],
+  ["uv", "run", "python", "-m", "scripts.check_purity", "--base-ref", "origin/main"],
+  ["uv", "run", "python", "scripts/check_test_isolation.py"],
+  ["uv", "run", "python", "scripts/check_tach.py"],
+  ["uv", "run", "python", "scripts/check_member_dependencies.py"],
+  ["uv", "run", "python", "scripts/check_tach_graph.py", "--check"],
   ["uv", "run", "python", "scripts/check_lint_waivers.py"],
 ]
 
 # The fast repo-policy guards (real-API ratchet, isolation baseline, wait bans, CI wall-time, ...).
 # CI also runs them inside the sharded suite; this group runs them on their own, in the quality job
-# that runs beside the shards, so `scripts/check_ci.sh` catches a ratchet failure before the PR.
+# that runs beside the shards.
 [[check_groups]]
 name = "python_guards"
+trigger_job = "python"
+include_in_checks = true
 language = "python"
 directory = "."
 timeout_seconds = 600
 commands = [["uv", "run", "python", "-m", "pytest", "-q", "-n", "auto", "--dist", "loadgroup", "--no-cov", "tests/quality", "tests/ci"]]
 
+# Local only: CI already runs these scans exactly once inside its Python shards.
+# Keep runtime tests and native builds out of the static-scan selection.
+[[check_groups]]
+name = "python_architecture"
+trigger_job = "python"
+include_in_checks = true
+language = "python"
+directory = "."
+# A hang guard, not a budget. One serial pytest process over about 930 tests: 69 s of test time
+# measured on 8 cores with a warm environment, so a 60 s limit failed a healthy run.
+timeout_seconds = 180
+commands = [[
+  "uv", "run", "python", "-m", "pytest", "-q", "-n", "0", "--no-cov", "tests/architecture",
+  "--ignore=tests/architecture/test_stack_evaluator.py",
+  "--ignore=tests/architecture/test_ordered_map_evaluator.py",
+  "--ignore=tests/architecture/test_unordered_map_evaluator.py",
+  "--ignore=tests/architecture/test_unix_socket.py",
+  "--ignore=tests/architecture/test_delegated_merge.py",
+  "--ignore=tests/architecture/test_distribution_packaging.py",
+  "--ignore=tests/architecture/test_prompt_resource_contract.py",
+]]
+
 [[check_groups]]
 name = "python_types"
+trigger_job = "python"
+include_in_checks = true
 language = "python"
 directory = "."
 timeout_seconds = 600
 commands = [["./scripts/check_types.sh"]]
+gate_commands = [["./scripts/check_types.sh"]]
 
 [[check_groups]]
-name = "tui_tests"
-trigger_job = "tui"
+name = "clients_tests"
+trigger_job = "clients"
 include_in_test = true
 language = "typescript"
 directory = "clients"
@@ -71,15 +189,19 @@ timeout_seconds = 1200
 # package runs through the same task graph, so it gets that preparation too.
 commands = [["pnpm", "turbo", "run", "test"]]
 package_commands = [["pnpm", "turbo", "run", "test", "--filter", "{package}"]]
+# Gate: one Turborepo run over the packages changed since main and the packages that depend on them,
+# in parallel, which takes a third of the time of one run per selected package.
+gate_commands = [["pnpm", "turbo", "run", "test", "--filter=...[origin/main]"]]
 always_commands = [
   ["pnpm", "test:ts-architecture"],
-  ["pnpm", "test:conformance"],
   ["pnpm", "test:bun-runner"],
   ["pnpm", "test:node-runner"],
 ]
 
 [[check_groups]]
-name = "tui_quality"
+name = "clients_quality"
+trigger_job = "clients"
+include_in_checks = true
 language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
@@ -88,35 +210,54 @@ commands = [
   ["pnpm", "check:ts"],
   ["pnpm", "check:ts-architecture"],
   ["pnpm", "check:knip"],
-  ["pnpm", "--dir", "libs/contracts", "generate:protocol"],
-  ["git", "diff", "--exit-code", "--", "libs/contracts/src/generated/"],
+  ["pnpm", "--dir", "libs/display-names", "generate"],
+  ["git", "diff", "--exit-code", "--", "libs/display-names/src/generated/"],
+  ["pnpm", "--dir", "libs/ui", "check:tokens"],
+  ["pnpm", "check:clients"],
+]
+# Gate: lint and format, the package-graph and architecture checks, unused code, and each package's
+# own checks (Turborepo skips what its cache holds). Protocol-binding regeneration is left to CI.
+gate_commands = [
+  ["pnpm", "check:ts"],
+  ["pnpm", "check:ts-architecture"],
+  ["pnpm", "check:knip"],
   ["pnpm", "check:clients"],
 ]
 
+# The gallery's screenshot compare in the Linux image CI uses, plus the check that a baseline update
+# is deterministic. CI runs the compare natively inside `clients_e2e`; this group is the local leg that
+# `scripts/check_clients.sh` adds, so a baseline mismatch shows up before the push. Needs Docker.
 [[check_groups]]
-name = "tui_build"
+name = "ui_gallery_linux"
+language = "typescript"
+directory = "clients"
+timeout_seconds = 1800
+commands = [
+  ["pnpm", "--filter", "@vibesys/app-ui-gallery", "test:e2e:linux"],
+  ["pnpm", "--filter", "@vibesys/app-ui-gallery", "check:deterministic"],
+]
+
+[[check_groups]]
+name = "clients_build"
+trigger_job = "clients"
+include_in_checks = true
 language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
 commands = [["pnpm", "build:clients"]]
 
 [[check_groups]]
-name = "tui_e2e"
+name = "clients_e2e"
+trigger_job = "clients"
+# Playwright needs a display and a browser install. The local command names
+# this group and leaves it to CI.
+local_skip = "needs a display"
 language = "typescript"
 directory = "clients"
 timeout_seconds = 1200
 commands = [
-  ["pnpm", "--filter", "@vibesys/app-web", "test:e2e"],
-  ["pnpm", "--filter", "@vibesys/app-desktop-renderer", "test:e2e"],
-  ["pnpm", "--filter", "@vibesys/app-desktop-main", "test:e2e"],
+  ["pnpm", "--filter", "@vibesys/app-ui-gallery", "test:e2e"],
 ]
-
-[[check_groups]]
-name = "tui_package_smoke"
-language = "typescript"
-directory = "clients"
-timeout_seconds = 600
-commands = [["bash", "tools/scripts/check_package_smoke.sh"]]
 
 [[check_groups]]
 name = "examples_tests"
@@ -141,11 +282,18 @@ commands = [
 # The example evaluators' build-and-run tests (cargo, make and go compile native code, then the
 # real Go evaluator judges it): tests that request a native build fixture carry the
 # `native_build` marker (root conftest.py), which the Python shards deselect. They run here, on
-# the examples path, whenever an example, the evaluator SDK or the queue evaluator changes.
+# the examples path, whenever an example, the evaluator SDK, or a reusable evaluator changes.
 [[check_groups]]
 name = "examples_native_evaluator_tests"
 trigger_job = "examples"
 include_in_test = true
+# Locally this runs only when a change touches what it builds and runs: the examples, and the
+# roots and files of the `native_evaluator_examples` component in components.toml (the evaluator
+# SDK and packages, and the code and tests the examples import). That list is declared once, in
+# components.toml, where CI also selects on it; `local_components` reads it from there.
+# CI runs it whenever the `examples` job is selected.
+local_paths = ["examples"]
+local_components = ["native_evaluator_examples"]
 language = "python"
 directory = "."
 timeout_seconds = 1800
@@ -157,6 +305,8 @@ commands = [
     "tests/architecture/test_unordered_map_evaluator.py",
     "tests/examples/test_prioqueue_evaluator.py",
     "tests/examples/test_queue_evaluator.py",
+    "tests/e2e/test_bundled_go_evaluator_offline.py",
+    "tests/e2e/test_kvstore_default_gate_e2e.py",
   ],
 ]
 
@@ -164,12 +314,30 @@ commands = [
 name = "examples_cpu_check_shard"
 trigger_job = "examples"
 include_in_test = true
+# The check runs in its own uv project and reads only this example, so locally it runs only when
+# the example changes. Unsharded it takes ~250 s of server starts and hit its timeout under a
+# 4-CPU cap. CI shards it six ways whenever the `examples` job is selected.
+local_paths = ["examples/model-serving/qwen3.5-9b-mi210"]
 language = "python"
 directory = "."
 timeout_seconds = 1200
 commands = [
   ["uv", "run", "--locked", "--directory", "examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default", "--project", "cpu_check", "python", "-m", "pytest", "cpu_check", "-v", "--durations=0"],
 ]
+
+# Builds the example Dockerfiles a change selects (the `dockerfile_contexts` collection), one build per
+# directory and nothing else: no benchmark, no secret, no GPU. CI runs one matrix leg per directory
+# (`example-dockerfiles` in test.yml); locally the builds take minutes each and need Docker.
+[[check_groups]]
+name = "example_dockerfile_builds"
+trigger_job = "dockerfiles"
+local_skip = "needs Docker; each build takes minutes"
+language = "docker"
+directory = "."
+collection = "dockerfile_contexts"
+timeout_seconds = 600
+commands = [["docker", "info", "--format", "{{.ServerVersion}}"]]
+package_commands = [["docker", "build", "--tag", "vibesys-example-dockerfile-check", "{package}"]]
 
 [[check_groups]]
 name = "agent_image_tests"
@@ -184,13 +352,14 @@ commands = [
   ["uv", "run", "pytest", "tests/e2e/test_agent_image_e2e.py", "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "tests/e2e/test_credential_sharing_e2e.py", "-v", "-s", "--no-cov"],
 ]
 
-# The real-system tiers. They need Docker and are opt-in locally, so neither is
-# in `repoctl test`; CI runs each in its own `real-tiers-*` job (test.yml) and
-# the Nightly workflow runs both on main. VIBESYS_SLURM_CLUSTER_DIR and
+# The real-system tiers. They need Docker, so `repoctl test` skips them and
+# `--dry-run` prints local_skip. CI runs each in its own `real-tiers-*` job
+# (test.yml) and the Nightly workflow runs both on main. VIBESYS_SLURM_CLUSTER_DIR and
 # VIBESYS_MINIMAL_CONTAINER_DIR come from the job (local disk the daemon can mount).
 [[check_groups]]
 name = "slurm_cluster_tests"
 trigger_job = "real_tiers"
+local_skip = "needs Docker"
 language = "python"
 directory = "."
 timeout_seconds = 1200
@@ -204,6 +373,7 @@ commands = [
 [[check_groups]]
 name = "minimal_container_tests"
 trigger_job = "real_tiers"
+local_skip = "needs Docker"
 language = "python"
 directory = "."
 timeout_seconds = 1200
@@ -225,6 +395,12 @@ commands = [
   ["go", "test", "-run=^$", "-fuzz=^FuzzGraphSelection$", "-fuzztime=20000x", "-parallel=2", "."],
   ["go", "test", "-run=^$", "-fuzz=^FuzzParseNameStatusZ$", "-fuzztime=20000x", "-parallel=2", "."],
 ]
+# The tests and vet, without the fuzz runs: a change to repoctl or its policy is checked by them,
+# and a policy change can break a test that reads the workflow or the policy.
+gate_commands = [
+  ["go", "test", "./..."],
+  ["go", "vet", "./..."],
+]
 
 [[check_groups]]
 name = "sandbox_tests"
@@ -232,7 +408,9 @@ language = "python"
 directory = "."
 timeout_seconds = 900
 env = { VIBESYS_REQUIRE_SANDBOX_TESTS = "1" }
-commands = [["uv", "run", "python", "-m", "pytest", "libs/vs-agent/tests/test_hostsandbox.py", "-v"]]
+# The vs-sim files are the host's own process waiting (waitid on Linux, kqueue on macOS): the
+# macOS job is the only CI run of the kqueue waiter and of the contracts' macOS-only cases.
+commands = [["uv", "run", "python", "-m", "pytest", "libs/vs-agent/tests/test_hostsandbox.py", "libs/vs-sim/tests/test_exit_wait.py", "libs/vs-sim/tests/test_piped_process_launcher.py", "libs/vs-sim/tests/test_piped_process_contract.py", "-v"]]
 
 [[check_groups]]
 name = "microservice_workload_checks"
@@ -276,15 +454,23 @@ commands = [
     "bash", "-c",
     'uv run --no-sync coverage report --fail-under=75 & a=$!; uv run --no-sync coverage xml & b=$!; uv run --no-sync coverage json & c=$!; s=0; for p in $a $b $c; do wait $p || s=1; done; exit $s',
   ],
-  ["uv", "run", "--no-sync", "python", "scripts/check_coverage_floor.py", "coverage.json"],
+  ["./support/repoctl/repoctl", "run-checks", "--group", "python_coverage_floor"],
 ]
+
+# Shared by the combined CI report and repoctl's touched-test coverage mode.
+[[check_groups]]
+name = "python_coverage_floor"
+language = "python"
+directory = "."
+timeout_seconds = 60
+commands = [["uv", "run", "--no-sync", "python", "scripts/check_coverage_floor.py", "coverage.json"]]
 
 [[check_groups]]
 name = "patch_coverage"
 language = "python"
 directory = "."
 timeout_seconds = 300
-commands = [["uv", "run", "diff-cover", "coverage.xml", "--compare-branch=origin/main", "--fail-under=80"]]
+commands = [["uv", "run", "--no-sync", "diff-cover", "coverage.xml", "--compare-branch=origin/main", "--fail-under=80"]]
 
 [[native_check_overrides]]
 root = "sdk/vs-evaluator/vseval"
@@ -293,3 +479,73 @@ assertions = [{ file = "go.mod", line_prefix = "module ", equals = "github.com/u
 [[native_check_overrides]]
 root = "resources/evaluators/microservice"
 env = { VIBESYS_REQUIRE_MANAGED_CANDIDATE_TESTS = "1" }
+
+[[check_groups]]
+# Contract lint and regeneration are required even for --checks-only.
+name = "proto"
+trigger_job = "proto"
+include_in_checks = true
+language = "python"
+directory = "."
+# A hang guard, not a budget. The script prints each stage's cost. Measured on a CI runner for a PR
+# that changes a .proto file: lint 1 s, generate 29 s (77 s of CPU), then breaking 8 s, hashes 31 s
+# and conversion about 31 s side by side; with no proto change, hashes take about 7 s and conversion
+# about 16 s. The script ran past 60 s with every stage passing, and every new proto makes
+# generation heavier, so the value sits at about twice the measured worst case.
+timeout_seconds = 180
+commands = [["./scripts/check_proto.sh"]]
+
+[[check_groups]]
+name = "gateway_checks"
+trigger_job = "gateway"
+include_in_test = true
+language = "go"
+directory = "gateway"
+# A cold Go cache costs about 3 minutes on a CI runner: module download, then vet and test of the
+# host (about 90 s) and a vet per other release target. vibesys-host links the orchestrator's store,
+# so every target compiles modernc.org/sqlite: measured cold on 4 cores, 28 to 41 s per target
+# vet against about 20 s without it. A warm cache, the usual case, costs a few seconds; a change to
+# gateway/go.sum starts cold.
+timeout_seconds = 300
+commands = [["./check.sh"]]
+
+[[check_groups]]
+name = "cli_checks"
+trigger_job = "cli"
+include_in_test = true
+language = "go"
+directory = "cli"
+# Same shape as gateway_checks: a cold Go cache costs about 70 s on a CI runner (module download,
+# then vet and test of the host and a vet per other release target); a warm one a few seconds. The
+# race run of every package adds a race-instrumented build of the standard library and of each
+# package, the seeded simulation takes about a minute under the detector, and the tests build the
+# four release binaries and run install.sh. Measured on 4 cores with a cold cache: about 3 minutes.
+timeout_seconds = 600
+commands = [["./check.sh"]]
+
+[[check_groups]]
+name = "orchestrator_checks"
+trigger_job = "orchestrator"
+include_in_test = true
+language = "go"
+directory = "orchestrator"
+# Same shape as cli_checks without the cross-compilation: a cold Go cache costs about a minute on a
+# CI runner (module download, vet and the tests); a warm one seconds.
+timeout_seconds = 240
+commands = [["./check.sh"]]
+
+[[check_groups]]
+name = "desktop_path_e2e"
+trigger_job = "desktop_path"
+include_in_test = true
+language = "go"
+directory = "gateway"
+# The desktop path end to end test (gateway/e2e, build tag e2e): vibesys-host, the orchestrator, real
+# sidecars over agentshim's scripted providers, the vibesys-cli daemon and git, with a toy task. No
+# model is called. It builds vibesys-host and vibesys-cli, so a cold Go cache costs about a minute on a
+# CI runner; the sidecar environment is a uv sync of the orchestrator's sidecar project. With
+# VIBESYS_E2E_DESKTOP_UI=1, which CI sets under a virtual display, it then builds the desktop app and
+# runs its Playwright journey (clients/apps/desktop/e2e) against the same world. A warm run takes
+# about a minute of test time. The timeouts guard against a hang only.
+timeout_seconds = 660
+commands = [["go", "test", "-tags", "e2e", "-count=1", "-timeout", "600s", "./e2e"]]

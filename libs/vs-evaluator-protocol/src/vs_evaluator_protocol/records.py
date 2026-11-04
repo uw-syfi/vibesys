@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-import json
 from enum import StrEnum
 from typing import Annotated, Literal, NoReturn
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, model_validator
 
+from vs_decode.api import Unreadable, UnreadableKind, decode_json
 from vs_evaluator_protocol.errors import ReasonCode, reject
+
+# The target for a record line before its `kind` picks the record model.
+_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+MAX_RECORD_LINE_BYTES = 4 * 1024 * 1024
+"""The largest record line an evaluator may write."""
 
 PROTOCOL_VERSION: int = 2
 
@@ -19,6 +24,21 @@ class ProfileField(StrEnum):
     HIP_API_TIMING = "hip_api_timing"
     PREFILL_TIMING = "prefill_timing"
     DECODE_TIMING = "decode_timing"
+
+
+class ErrorKind(StrEnum):
+    """Why an evaluator produced no row: the one authoritative closed set of error kinds.
+
+    `TRANSIENT` is the protocol's backward-compatible default: an `error` record
+    that names no kind (every record written before kinds existed) says nothing
+    about whether measuring again could help, so a reader treats it as it always
+    did. `REQUIREMENT_NOT_MET` says the measured revision lacks a capability the
+    task requires, so the failure is deterministic and measuring it again cannot
+    help; the record names the requirement in `requirement`.
+    """
+
+    TRANSIENT = "transient"
+    REQUIREMENT_NOT_MET = "requirement_not_met"
 
 
 class _StrictRecord(BaseModel):
@@ -105,12 +125,24 @@ class ErrorRecord(_StrictRecord):
     """Terminating record reporting that the evaluator produced no row.
 
     `partial` is what the run measured before it failed, when it measured
-    anything; absent means nothing was measured.
+    anything; absent means nothing was measured. `error_kind` says whether
+    measuring again could help (see `ErrorKind`; absent means `TRANSIENT`), and
+    `requirement` names the capability a `REQUIREMENT_NOT_MET` failure lacks:
+    present exactly for that kind.
     """
 
     kind: Literal["error"] = "error"
     message: str = Field(min_length=1)
     partial: PartialMeasurement | None = None
+    error_kind: ErrorKind = ErrorKind.TRANSIENT
+    requirement: _Name | None = None
+
+    @model_validator(mode="after")
+    def _requirement_exactly_when_not_met(self) -> ErrorRecord:
+        if (self.error_kind is ErrorKind.REQUIREMENT_NOT_MET) != (self.requirement is not None):
+            message = "key 'requirement' is required by, and only allowed with, key 'error_kind' = 'requirement_not_met'"
+            raise ValueError(message)
+        return self
 
 
 Record = Hello | Result | ErrorRecord
@@ -142,31 +174,44 @@ def parse_records(text: str) -> list[Record]:
 
 
 def _parse_line(line: str, number: int) -> Record:
-    """Parse one non-blank line into the record its `kind` names."""
-    try:
-        payload = json.loads(line)
-    except json.JSONDecodeError:
+    """Parse one non-blank line into the record its `kind` names.
+
+    The line comes from the evaluator, so ``vs_decode`` parses it: bounded in size,
+    with nesting bounded by pydantic's parser, where ``json.loads`` recursed per level
+    and raised ``RecursionError`` past every caller's handler.
+    """
+    payload = decode_json(line, _JSON, source=f"line {number}", max_bytes=MAX_RECORD_LINE_BYTES)
+    if isinstance(payload, Unreadable):
+        if payload.kind is UnreadableKind.TOO_LARGE:
+            reject(
+                ReasonCode.MALFORMED_LINE,
+                f"line {number} is larger than {MAX_RECORD_LINE_BYTES} bytes",
+            )
         reject(ReasonCode.MALFORMED_LINE, f"line {number} is not valid JSON")
     if not isinstance(payload, dict):
         reject(ReasonCode.MALFORMED_LINE, f"line {number} is not a JSON object")
     kind = payload.get("kind")
     if not isinstance(kind, str) or kind not in _RECORD_TYPES:
         reject(ReasonCode.UNKNOWN_KIND, f"line {number} has unknown record kind {kind!r}")
-    try:
-        return _RECORD_TYPES[kind].model_validate_json(line)
-    except ValidationError as error:
-        _reject_invalid_record(error, line=number, kind=kind)
+    record = decode_json(
+        line, _RECORD_TYPES[kind], source=f"line {number}", max_bytes=MAX_RECORD_LINE_BYTES
+    )
+    if isinstance(record, Unreadable):
+        _reject_invalid_record(record, line=number, kind=kind)
+    return record
 
 
-def _reject_invalid_record(error: ValidationError, *, line: int, kind: str) -> NoReturn:
-    """Translate a pydantic failure into the reason code the protocol names."""
-    details = error.errors()
-    unknown_key = next((detail for detail in details if detail["type"] == "extra_forbidden"), None)
-    detail = unknown_key or details[0]
-    key = ".".join(str(part) for part in detail["loc"])
+def _reject_invalid_record(record: Unreadable, *, line: int, kind: str) -> NoReturn:
+    """Translate a validation failure into the reason code the protocol names."""
+    problems = record.problems
+    unknown_key = next((p for p in problems if p.error_type == "extra_forbidden"), None)
+    problem = unknown_key or problems[0]
     if unknown_key is not None:
-        reject(ReasonCode.UNKNOWN_KEY, f"line {line}: {kind} record has unknown key {key!r}")
+        reject(
+            ReasonCode.UNKNOWN_KEY,
+            f"line {line}: {kind} record has unknown key {problem.key_path!r}",
+        )
     reject(
         ReasonCode.INVALID_RECORD,
-        f"line {line}: {kind} record has invalid key {key!r}: {detail['msg']}",
+        f"line {line}: {kind} record has invalid key {problem.key_path!r}: {problem.message}",
     )

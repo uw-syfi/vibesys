@@ -1,0 +1,5 @@
+{# Context: `stage_output` (str), `service_log` (str | None, already capped). A stage failure as an agent reads it: the shared service log tail first, the stage's own output last, so a reader that keeps the end of the text keeps the stage's verdict. No trailing newline. #}
+{% if service_log %}--- server log tail (repeated lines collapsed) ---
+{{ service_log }}
+--- stage output ---
+{% endif %}{{ stage_output }}

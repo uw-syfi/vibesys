@@ -1,0 +1,18 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+  },
+  "include": ["src/**/*.test.ts", "src/testing/**/*.ts"],
+  "exclude": ["src/ui/**"],
+  "references": [
+    {"path": "../../libs/orchestrator-proto/tsconfig.lib.json"},
+    {"path": "../../libs/proto/tsconfig.lib.json"},
+    {"path": "./tsconfig.core.json"},
+    {"path": "./tsconfig.main.json"},
+    {"path": "./tsconfig.state.json"}
+  ]
+}

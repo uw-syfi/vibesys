@@ -1,0 +1,39 @@
+version = 1
+backends = ["rocm"]
+
+[agent]
+domain = "llm-serving"
+interface = "service"
+
+[evaluator]
+name = "vibesys-evaluator-agentx"
+version = "0.1.0"
+
+[accuracy]
+command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
+timeout_seconds = 300
+
+[benchmark]
+entrypoint = "agentx-v1"
+args = ["--mode", "full", "--model", "Qwen/Qwen3.5-9B", "--tokenizer", "Qwen/Qwen3.5-9B", "--tokenizer-revision", "c202236235762e1c871ad0ccb60c8ee5ba337b9a", "--concurrency", "4", "--max-context-length", "262144"]
+timeout_seconds = 3600
+result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "AMD MI210"
+count = 1
+vendor = "amd"
+
+[catalogue.model]
+name = "Qwen3.5 9B"
+maker = "qwen"
+
+[[comparison]]
+name = "vllm"
+label = "vLLM"
+image = "docker://vllm/vllm-openai-rocm@sha256:14f6a575e1fb0a580b0f633c09e06f648709d60405b85f6a7ff3f80d49f39905"
+serve = ["vllm", "serve", "Qwen/Qwen3.5-9B", "--dtype", "bfloat16", "--max-model-len", "262144", "--gpu-memory-utilization", "0.95", "--max-num-seqs", "32", "--max-num-batched-tokens", "8192", "--attention-backend", "TRITON_ATTN", "--async-scheduling", "--enable-prefix-caching", "--enable-prompt-tokens-details", "--port", "${PORT}"]
+ready_timeout_seconds = 3600

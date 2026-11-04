@@ -9,8 +9,10 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, built_in_orchestrations, create_session
 from vibesys.api import (
     ComputeBackend,
@@ -27,6 +29,7 @@ from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.launch import EvolveLaunch
+from vibesys.orchestration.input_check import PLUGIN as INPUT_CHECK_PLUGIN
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vibesys.orchestration.multi import (
@@ -53,6 +56,8 @@ from vs_runtime.api import (
     AgentRole,
     OrchestrationResumeDecision,
 )
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import FakePipedProcessLauncher
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -63,11 +68,19 @@ def _discard_event(event: CoreEvent) -> None:
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 _SETTINGS = LaunchSettings(
-    backend_factory=host_container_backend, agent_client_factory=_resumable_client
+    blocking=ThreadBlockingRunner(),
+    network=UnixNetwork(),
+    timing=production_timing(),
+    processes=REAL_PROCESSES,
+    piped_processes=FakePipedProcessLauncher(),
+    backend_factory=host_container_backend,
+    agent_client_factory=_resumable_client,
 )
 
 
@@ -159,6 +172,7 @@ def test_registry_rejects_ids_outside_descriptor_envelope(invalid_id: str) -> No
 def test_builtin_catalog_selects_only_plugins() -> None:
     registry = built_in_orchestrations()
     expected = {
+        "check-input": INPUT_CHECK_PLUGIN,
         "dynamic": DYNAMIC_PLUGIN,
         "multi-agent": MULTI_PLUGIN,
         "single-agent": SINGLE_PLUGIN,
@@ -185,7 +199,6 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
                     "interface": "inprocess",
                     "max_rounds": 1,
                     "max_retries_per_round": 1,
-                    "official_eval_every": 1,
                 },
             )
         }
@@ -193,7 +206,14 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
     session = create_session(
         request,
         sink=_discard_event,
-        settings=LaunchSettings(backend_factory=host_container_backend),
+        settings=LaunchSettings(
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
+            backend_factory=host_container_backend,
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+        ),
     )
 
     # A core strategy runs durable, resumable sessions; the stub backend offers none, so the
@@ -208,7 +228,6 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
         "interface": "service",
         "max_rounds": 4,
         "max_retries_per_round": 2,
-        "official_eval_every": 3,
     }
     # Only the multi search has a judge to ask every so often.
     multi_options: dict[str, JsonValue] = {**single_options, "judge_every": 1}
@@ -216,16 +235,17 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
         (
             OrchestrationDescriptor(id="single-agent", config_version=1, options=single_options),
             SingleLaunch,
-            ("roadmap",),
+            (),
         ),
         (
             OrchestrationDescriptor(id="multi-agent", config_version=1, options=multi_options),
             MultiLaunch,
-            ("roadmap", "profile"),
+            (),
         ),
     )
-    # A core strategy declares only the artifact directories its run-scoped turns write, and
-    # resumes with exact options (no round-budget variant until core can extend limits, #2013).
+    # A core strategy declares only the artifact directories its run-scoped turns write (the
+    # serial strategies write none: the roadmap is run state behind the roadmap operations and
+    # the profiler's findings travel in its reply), and resumes with exact options (no round-budget variant until core can extend limits, #2013).
     for descriptor, launch, paths in cases:
         registration = registry.resolve(descriptor.id)
         options = registration.parse_options(descriptor)
@@ -269,7 +289,6 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
                 "max_rounds": 2,
                 "max_retries_per_round": 2,
                 "judge_every": 1,
-                "official_eval_every": 3,
                 "operator_constraints": ["Preserve ordering"],
                 "metric_space": {
                     "objectives": [{"name": "throughput", "direction": "max"}],
@@ -532,6 +551,9 @@ class _OwnProjector:
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         del namespace, state, run_id
         return None
+
+    def steer_targets(self, project: Project, run_id: str) -> None:
+        del project, run_id
 
 
 def test_plugin_registers_its_own_projector() -> None:

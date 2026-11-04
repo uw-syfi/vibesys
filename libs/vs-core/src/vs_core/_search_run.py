@@ -16,9 +16,9 @@ from typing import TYPE_CHECKING, Protocol
 
 from ._registry import ContractError
 from ._search_events import run_view, translate
+from ._validation import admits_command
 from .types.common import THIS_RUN, RunStatus, Scope
 from .types.kernel import ProposalSubmitted
-from .types.records import RecoveryPhase
 from .types.strategy import Finish, Wait, WakeAt
 from .types.until import Within
 
@@ -33,6 +33,23 @@ if TYPE_CHECKING:
 
 type CoreStep = Callable[[CoreState, CoreEvent], Transition]
 """The core step the shell uses (production or a fake of it)."""
+
+
+def deferred(core: CoreState, decision: Decision) -> bool:
+    """Whether core cannot take ``decision`` yet but will later, so the shell holds it.
+
+    While the operator has the run paused core takes only what a paused run accepts
+    (``admits_command``): the rest waits for the resume instead of reaching the search as a
+    refusal, which would end the search's work.
+    """
+    if isinstance(decision, WakeAt):
+        return False  # the shell waits on a wake; it is never submitted
+    command = decision.request if isinstance(decision, Wait) else decision
+    return core.run.status in (
+        RunStatus.PAUSED,
+        RunStatus.DRAINING,
+        RunStatus.PARKED,
+    ) and not admits_command(core, command)
 
 
 def check_decisions(decisions: object) -> tuple[Decision, ...]:
@@ -96,10 +113,32 @@ class SearchDriver[S: StrategyState, C](Protocol):
         """Deliver one event."""
         ...
 
+    def awaits(self, state: S, decision: Decision) -> bool:
+        """Whether the search in ``state`` still waits for the answer to ``decision``.
+
+        False for a decision of an incarnation of the search that a restart replaced: it asks
+        again for what it needs, so the old decision, held or not, no longer stands.
+        """
+        ...
+
+    def changes(self, before: S, after: S) -> bytes | None:
+        """What ``after`` adds to ``before``, for the log; None when it does not continue it."""
+        ...
+
+    def extend(self, state: S, changes: bytes) -> S:
+        """``state`` with ``changes`` applied, as a process that reads the log builds it."""
+        ...
+
+    def resume(self, state: S) -> S:
+        """``state`` as the process that logged it left it, rebuilding what the log does not keep."""
+        ...
+
 
 @dataclass(frozen=True)
 class Inbox:
     """What waits for the search: events to deliver, and decisions core could not take yet.
+
+    A held decision is one core could not take when the search made it (``deferred``).
 
     ``discarded`` are events core already kept from the search (see ``translate``); they
     are passed on in ``Advanced.discarded`` so the shell logs everything in one place.
@@ -114,8 +153,9 @@ class Inbox:
 class Advanced[S: StrategyState]:
     """What one call changed: the search state, core, the events core published, the wakes.
 
-    ``held`` are decisions the search made while core could not take them (recovery is not
-    ready); the shell keeps them and passes them back in the next ``Inbox``.
+    ``held`` are decisions the search made while core could not take them (``deferred``:
+    recovery is not ready, or the run is paused); the shell keeps them and passes them back
+    in the next ``Inbox``.
     """
 
     state: S
@@ -148,13 +188,14 @@ class _Pass:
     discarded: list[Discarded] = field(default_factory=list)
 
     def submit(self, decisions: tuple[Decision, ...], core: CoreState) -> CoreState:
-        """Send the decisions to core, or hold them until recovery is ready."""
+        """Send the decisions to core, holding those core cannot take yet (``deferred``)."""
         self.wakes.extend(d.time for d in decisions if isinstance(d, WakeAt))
         work = tuple(d for d in decisions if isinstance(d, Wait | Finish))
         if not work or core.run.status == RunStatus.TERMINAL:
             return core
-        if core.records.recovery.phase != RecoveryPhase.READY:
-            self.held.extend(work)
+        self.held.extend(d for d in work if deferred(core, d))
+        work = tuple(d for d in work if not deferred(core, d))
+        if not work:
             return core
         own = Scope(owner=core.run.run_id, generation=core.run.generation)
         submissions = tuple(self.host.registry.validate_submission(_in_scope(d, own)) for d in work)

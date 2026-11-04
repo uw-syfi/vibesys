@@ -1,0 +1,72 @@
+{#- The handoff file of one planning call: what its planner left for the planners after it.
+    Every value is the planner's own reply, as `WriteHandoff` carries it. -#}
+# Planning call {{ call }}: handoff
+
+## What was planned and why
+{{ reasoning }}
+
+## Workstreams scheduled
+{% for item in scheduled %}
+{% if item.kind.value == "merge" %}
+- merge `{{ item.work_id }}` of {% for candidate in item.candidates %}`{{ candidate }}`{% if not loop.last %}, {% endif %}{% endfor %} into main
+  Instructions: {{ item.instructions }}
+  Watch for: {{ item.watch_for }}
+{% elif item.kind.value == "profile" %}
+- profile `{{ item.work_id }}` of {% if item.parent_hypothesis_id %}hypothesis `{{ item.parent_hypothesis_id }}`{% else %}the base revision{% endif %}: {{ item.question }}
+  Decision impact: {{ item.decision_impact }}
+{% elif item.combine %}
+- combine `{{ item.work_id }}` "{{ item.title }}" of {% for part in item.combine %}`{{ part.hypothesis_id }}` at `{{ part.revision }}`{% if not loop.last %}, {% endif %}{% endfor %}, applied in that order onto main
+
+  Claim: {{ item.hypothesis }}
+  Instructions: {{ item.task }}
+  Watch for: {{ item.watch_for }}
+  Pass criteria: {{ item.pass_criteria }}
+{% else %}
+- `{{ item.work_id }}` "{{ item.title }}"{% if item.continue_hypothesis %} (continued){% endif %}{% if item.parent_hypothesis_id %}, from hypothesis `{{ item.parent_hypothesis_id }}`{% if item.parent_revision %} at `{{ item.parent_revision }}`{% endif %}{% endif %}
+
+  Claim: {{ item.hypothesis }}
+  Task: {{ item.task }}
+  Pass criteria: {{ item.pass_criteria }}
+{% endif %}
+{% else %}
+none
+{% endfor %}
+{% if updates %}
+
+## Directions retired
+{% for item in updates %}
+- `{{ item.hypothesis_id }}` {{ item.disposition.value }} ({{ item.reason_kind.value }}): {{ item.reason }}
+{% endfor %}
+{% endif %}
+
+## Expectations and next steps
+{% for item in handoff.expectations %}
+- `{{ item.work_id }}`
+  Expected: {{ item.expected }}
+  If it succeeds: {{ item.if_it_succeeds }}
+  If it fails: {{ item.if_it_fails }}
+{% else %}
+none recorded
+{% endfor %}
+
+{% if handoff.dropped %}
+Expectations left out, because these workstreams were not scheduled: {% for work_id in handoff.dropped %}`{{ work_id }}`{% if not loop.last %}, {% endif %}{% endfor %}.
+
+{% endif %}
+## Open doubts
+{% for doubt in handoff.doubts %}
+- {{ doubt }}
+{% else %}
+none recorded
+{% endfor %}
+{% if merges %}
+
+## Merges so far
+{% for item in merges %}
+- merge `{{ item.merge_id }}` of {% for source in item.candidates %}`{{ source.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %}: {{ item.outcome.value }}{% if item.failure %} ({{ item.failure.kind.value }}){% endif %}{% if item.revision %}, commit `{{ item.revision.revision_id.root }}`{% endif %}{% if item.summary %}: {{ item.summary }}{% endif %}
+
+{% if item.reason %}
+  Why the merger refused: {{ item.reason }}
+{% endif %}
+{% endfor %}
+{% endif %}

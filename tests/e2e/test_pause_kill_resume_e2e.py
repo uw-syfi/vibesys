@@ -1,0 +1,418 @@
+"""Real-process proof that a scripted run survives a pause or a kill, and resumes.
+
+What only a real process shows is here: the operator's ``vibesys control`` reaching a run through
+its inbox, a real SIGKILL whose lock the kernel drops, and the processes and cluster jobs a
+dead or paused run leaves. Where in a run an interruption lands, and that every step finishes
+once, is `vs-dst`'s sweep of every commit and every effect on the production step loop
+(`tests/system/crash/test_never_stuck.py`, `libs/vs-dst/tests`).
+
+The run is a real process (``tests.e2e._interruptible_run``, forked from a fork server that
+imports the product once): the production host composition over the product's on-disk
+``.vibesys``, scripted agents, and the executing Fake Slurm cluster as real files. Nothing is
+simulated about the interruption. A pause is the operator's ``vibesys control RUN pause`` (or
+``pause-now``) written to the run's control inbox; a kill is a real SIGKILL of the run's
+process; a resume is a new process that relaunches the saved run as a new epoch, as
+``vibesys --resume`` does.
+
+The interruption lands inside a step the run process itself announces it holds (an agent turn
+at work, an evaluation job pending on the cluster), so no test sleeps to place it. Every case then resumes and must end as an uninterrupted run of the
+same script ends: completed, the same winner selection, the same adopted project file, and
+nothing left running (no process in the run's group, no job on the cluster).
+"""
+
+from __future__ import annotations
+
+import contextlib
+import multiprocessing
+import os
+import queue
+import signal
+import tempfile
+import threading
+import uuid
+from dataclasses import dataclass, field
+from io import StringIO
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+from tests.e2e._interruptible_run import TURN, RunSpec, run_process
+from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput
+from tests.e2e.scripted_value_run import SEED
+from tests.support.scratch_tree import remove_scratch_tree
+
+from entrypoints.control import control_main, time_ordered_id
+from vibesys.events import CoreEventType
+from vibesys.orchestration.dynamic.scripted.api import IMPLEMENTER_KIND
+from vs_project.api import Project
+from vs_runlog.api import read_current_epoch
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import HANG_GUARD_S
+from vs_slurm.fake_connector import active_jobs, pending_jobs, release_jobs
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterator
+    from multiprocessing.connection import Connection
+    from multiprocessing.process import BaseProcess
+
+pytestmark = pytest.mark.xdist_group("pause-kill-resume")
+"""The file's cases share one worker: one fork server, and one run of the uninterrupted script."""
+
+_FORK_SERVER = multiprocessing.get_context("forkserver")
+_FORK_SERVER.set_forkserver_preload(["tests.e2e._interruptible_run"])
+"""Imports the product once; every run process below is a fork of that image."""
+
+_Line = dict[str, object]
+
+SILENCE_GUARD_S = 20.0
+"""How long a run may report nothing before it counts as stuck.
+
+A running scripted run reports many events a second, and a held step is waited for only
+until it announces itself, so a third of the hang guard is far above any healthy gap.
+"""
+RESUMED_EPOCH = 2
+_PARKED = "parked"
+_COMPLETED = "completed"
+
+
+@dataclass
+class RunProcess:
+    """One run process: its reports so far, and the means to hold, release, signal and wait."""
+
+    base: Path
+    process: BaseProcess
+    pid: int
+    reports: Connection
+    releases: Connection
+    errors: Path
+    seen: list[_Line] = field(default_factory=list)
+    lines: queue.Queue[_Line | None] = field(default_factory=queue.Queue)
+
+    @classmethod
+    def start(cls, base: Path, *, resume: str | None = None, hold: str | None = None) -> RunProcess:
+        # > A real process in its own session: the test signals it, and checks nothing of its
+        # > process group outlives it.
+        errors = base / f"run-{uuid.uuid4().hex[:6]}.err"
+        reports_in, reports_out = _FORK_SERVER.Pipe(duplex=False)
+        releases_in, releases_out = _FORK_SERVER.Pipe(duplex=False)
+        process = _FORK_SERVER.Process(
+            target=run_process,
+            args=(
+                RunSpec(str(base), resume, hold, str(errors), dict(os.environ), str(Path.cwd())),
+                reports_out,
+                releases_in,
+            ),
+            daemon=True,
+        )
+        process.start()
+        reports_out.close()
+        releases_in.close()
+        assert process.pid is not None
+        started = cls(base, process, process.pid, reports_in, releases_out, errors)
+        threading.Thread(target=started._read, daemon=True).start()
+        return started
+
+    def _read(self) -> None:
+        while True:
+            try:
+                self.lines.put(self.reports.recv())
+            except (EOFError, OSError):
+                break
+        self.lines.put(None)
+
+    def wait_for(self, matches: Callable[[_Line], bool]) -> _Line:
+        """Read reports until one matches; fail if the process ends or stalls first."""
+        while True:
+            try:
+                # test-isolation: only guards a hang; a run that reports nothing for the guard is stuck, and no event can say so.
+                line = self.lines.get(timeout=SILENCE_GUARD_S)
+            except queue.Empty:
+                message = (
+                    f"the run reported nothing for {SILENCE_GUARD_S:g} s; seen {self.seen[-5:]}; "
+                    f"where it waits: {self._stacks()}"
+                )
+                raise AssertionError(message) from None
+            if line is None:
+                message = (
+                    f"the run process ended; seen {self.seen[-5:]}; "
+                    f"stderr tail: {self.errors.read_text()[-2000:]}"
+                )
+                raise AssertionError(message)
+            self.seen.append(line)
+            if matches(line):
+                return line
+
+    def _stacks(self) -> str:
+        """Every thread's stack of the silent run, from the process itself (its stderr file).
+
+        Asked for only as the test fails: the run writes the stacks on ``SIGUSR1`` and the report
+        waits for the next line or two seconds of the run's own reports, which the stacks do not
+        affect.
+        """
+        os.kill(self.pid, signal.SIGUSR1)
+        with contextlib.suppress(queue.Empty):
+            # test-isolation: only lets the run write its stacks before the report; a failure is already certain.
+            self.lines.get(timeout=2.0)
+        return self.errors.read_text()[-6000:]
+
+    @property
+    def run_id(self) -> str:
+        return str(self.wait_for_seen(lambda line: "run_id" in line)["run_id"])
+
+    def wait_for_seen(self, matches: Callable[[_Line], bool]) -> _Line:
+        for line in self.seen:
+            if matches(line):
+                return line
+        return self.wait_for(matches)
+
+    def release(self) -> None:
+        """Let the held turn go on."""
+        self.releases.send(None)
+
+    def kill(self) -> None:
+        """SIGKILL the run's process alone, as an out-of-memory kill or a lost host does."""
+        self.process.kill()
+        self.process.join(HANG_GUARD_S)
+
+    def finish(self) -> _Line:
+        """Wait for the process to end on its own; its outcome report."""
+        outcome = self.wait_for(lambda line: "outcome" in line)
+        self.process.join(HANG_GUARD_S)
+        assert self.process.exitcode == 0, self.seen[-5:]
+        outcome_fields = outcome["outcome"]
+        assert isinstance(outcome_fields, dict)
+        return outcome_fields
+
+    def group_is_empty(self) -> bool:
+        try:
+            os.killpg(self.pid, 0)
+        except ProcessLookupError:
+            return True
+        return False
+
+    def reap_group(self) -> None:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(self.pid, signal.SIGKILL)
+        if self.process.is_alive():
+            self.process.kill()
+        self.process.join(HANG_GUARD_S)
+
+
+class Scenario:
+    """One scripted project and every run process started over it."""
+
+    def __init__(self, base: Path) -> None:
+        self.base = base
+        self.loop_input = LoopInput.create(
+            base,
+            poll_interval_s=0.05,
+            agent_config=f"{_AGENT_CONFIG}[agent]\nscripted_seed = {SEED}\n",
+        )
+        self.processes: list[RunProcess] = []
+
+    def start(self, *, resume: str | None = None, hold: str | None = None) -> RunProcess:
+        started = RunProcess.start(self.base, resume=resume, hold=hold)
+        self.processes.append(started)
+        return started
+
+    def hold(self, at: str, kind: str) -> RunProcess:
+        return self.start(hold=f"{at}:{kind}")
+
+    def resume(self, run_id: str, *, hold: str | None = None) -> RunProcess:
+        return self.start(resume=run_id, hold=hold)
+
+    def post(self, run_id: str, action: str, out: StringIO, err: StringIO) -> int:
+        """``vibesys control RUN ACTION`` against this project's run."""
+        return control_main(
+            [run_id, "--project", str(self.loop_input.root), action],
+            cwd=self.loop_input.root,
+            new_control_id=lambda: time_ordered_id(OsThreads().now(), uuid.uuid4().hex[:8]),
+            out=out,
+            err=err,
+        )
+
+    def adopted_project_file(self) -> str:
+        return (self.loop_input.root / "queue.py").read_text(encoding="utf-8")
+
+    def hold_evaluations(self) -> None:
+        """Leave every job submitted from now on pending until released."""
+        self.loop_input.hold_jobs()
+
+    def release_evaluations(self) -> None:
+        release_jobs(self.loop_input.cluster)
+
+    def wait_for_pending_job(self) -> None:
+        """Wait, bounded, until an evaluation job is pending on the cluster."""
+        threads = OsThreads()
+        deadline = threads.now() + HANG_GUARD_S
+        while not pending_jobs(self.loop_input.cluster):
+            assert threads.now() < deadline, "no evaluation job reached the cluster"
+            threads.sleep(0.02)
+
+    def leftovers(self) -> list[str]:
+        """What still runs after every run process ended: group members and cluster jobs."""
+        found = [f"process group of pid {p.pid}" for p in self.processes if not p.group_is_empty()]
+        return [*found, *(f"cluster job {job}" for job in active_jobs(self.loop_input.cluster))]
+
+    def close(self) -> None:
+        for each in self.processes:
+            each.reap_group()
+
+
+@pytest.fixture(scope="module")
+def cases_root(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
+    """Where every scenario of this file keeps its files: in memory where the host has it.
+
+    A run makes about 5,000 ``fsync`` calls, 2 ms each on a disk and most of the run's wall time,
+    and a disk is what they are for: surviving the loss of the machine. Every interruption here is
+    the death or the pause of a process, and the files a dead process wrote are in the kernel
+    whether or not they were synced, so a memory filesystem changes nothing these cases observe.
+    """
+    try:
+        root = Path(tempfile.mkdtemp(prefix="pause-kill-resume-", dir="/dev/shm"))
+    except OSError:
+        yield tmp_path_factory.mktemp("cases")
+        return
+    try:
+        yield root
+    finally:
+        remove_scratch_tree(root)
+
+
+@pytest.fixture
+def scenario(cases_root: Path) -> Iterator[Scenario]:
+    created = Scenario(Path(tempfile.mkdtemp(prefix="case-", dir=cases_root)))
+    try:
+        yield created
+    finally:
+        created.close()
+        remove_scratch_tree(created.base)
+
+
+@pytest.fixture(scope="module")
+def uninterrupted(cases_root: Path) -> dict[str, object]:
+    """What the script ends as when nothing interrupts it."""
+    reference = Scenario(Path(tempfile.mkdtemp(prefix="uninterrupted-", dir=cases_root)))
+    try:
+        outcome = reference.start().finish()
+        assert outcome["status"] == _COMPLETED, outcome
+        return {**without_run_id(outcome), "adopted": reference.adopted_project_file()}
+    finally:
+        reference.close()
+        remove_scratch_tree(reference.base)
+
+
+def without_run_id(outcome: dict[str, object]) -> dict[str, object]:
+    return {name: value for name, value in outcome.items() if name != "run_id"}
+
+
+def _event(kind: CoreEventType) -> Callable[[_Line], bool]:
+    return lambda line: line.get("event") == kind.value
+
+
+def _assert_ends_as_uninterrupted(
+    scenario: Scenario, outcome: dict[str, object], uninterrupted: dict[str, object]
+) -> None:
+    assert outcome["failure"] is None, outcome
+    assert {**without_run_id(outcome), "adopted": scenario.adopted_project_file()} == uninterrupted
+    assert scenario.leftovers() == []
+
+
+def _wait_until_only_evaluations_remain(scenario: Scenario, run: RunProcess) -> None:
+    """Wait until the judge's step has ended and an evaluation job is pending on the held cluster.
+
+    The input's measurement is submitted as the run starts, in parallel with the planner, so a
+    pending job alone says nothing about what else is mid-step. The judge is the last agent
+    turn of the one round, and its step is over once the run records it ended (its turn's
+    report comes earlier), so after that the only steps left are the held evaluations.
+    """
+    run.wait_for(
+        lambda line: (
+            line.get("event") == "span_ended" and str(line.get("span", "")).endswith("/judge.1")
+        )
+    )
+    scenario.wait_for_pending_job()
+
+
+def _assert_epoch_opened_at_once(scenario: Scenario, resumed: RunProcess, run_id: str) -> None:
+    """The resumed process holds the run's lock and has recorded its epoch by its first report.
+
+    The run's lock is the only fence: the kernel dropped the killed writer's, so nothing waits
+    for a lease to lapse. The record is what is asserted, not the seconds.
+    """
+    resumed.wait_for(lambda line: "event" in line)
+    log = Project.run_log_path_for(scenario.loop_input.root, run_id)
+    epoch = read_current_epoch(log)
+    assert epoch is not None
+    assert epoch.number == RESUMED_EPOCH
+
+
+def _pause(scenario: Scenario, run: RunProcess) -> None:
+    """Post ``vibesys control RUN pause`` while the run holds its step, and wait until it lands."""
+    out, err = StringIO(), StringIO()
+    assert scenario.post(run.run_id, "pause", out, err) == 0, err.getvalue()
+    run.wait_for(_event(CoreEventType.PARK_REQUESTED))
+
+
+def test_a_run_paused_in_an_agent_turn_resumes_to_the_uninterrupted_result(
+    scenario: Scenario, uninterrupted: dict[str, object]
+) -> None:
+    first = scenario.hold(TURN, IMPLEMENTER_KIND)
+    first.wait_for(lambda line: line.get("held") == f"{TURN}:{IMPLEMENTER_KIND}")
+    _pause(scenario, first)
+    first.release()
+    assert first.finish()["status"] == _PARKED
+
+    resumed = scenario.resume(first.run_id)
+
+    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
+
+
+def test_a_run_paused_in_an_evaluation_resumes_to_the_uninterrupted_result(
+    scenario: Scenario, uninterrupted: dict[str, object]
+) -> None:
+    scenario.hold_evaluations()
+    first = scenario.start()
+    _wait_until_only_evaluations_remain(scenario, first)
+    _pause(scenario, first)
+    scenario.release_evaluations()
+    assert first.finish()["status"] == _PARKED
+
+    resumed = scenario.resume(first.run_id)
+
+    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
+
+
+def test_a_run_killed_in_an_agent_turn_resumes_to_the_uninterrupted_result(
+    scenario: Scenario, uninterrupted: dict[str, object]
+) -> None:
+    first = scenario.hold(TURN, IMPLEMENTER_KIND)
+    first.wait_for(lambda line: line.get("held") == f"{TURN}:{IMPLEMENTER_KIND}")
+    first.kill()
+
+    resumed = scenario.resume(first.run_id)
+    _assert_epoch_opened_at_once(scenario, resumed, first.run_id)
+
+    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)
+
+
+def test_a_run_killed_as_its_evaluation_is_pending_resumes_to_the_uninterrupted_result(
+    scenario: Scenario, uninterrupted: dict[str, object]
+) -> None:
+    """The kill lands with only the held evaluations left, and the job ends after the resume.
+
+    The kill is placed by the run's own report that its judge's step ended, never by the first
+    pending job: the input's measurement is pending as the run starts, so that job alone puts
+    the kill anywhere from the planner's turn to the judge's, and each place is a different
+    recovery. The job is still on the cluster when the next process starts, which must find it
+    and leave none behind.
+    """
+    scenario.hold_evaluations()
+    first = scenario.start()
+    _wait_until_only_evaluations_remain(scenario, first)
+    first.kill()
+
+    resumed = scenario.resume(first.run_id)
+    scenario.release_evaluations()
+
+    _assert_ends_as_uninterrupted(scenario, resumed.finish(), uninterrupted)

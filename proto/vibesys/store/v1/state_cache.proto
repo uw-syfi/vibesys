@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// StateCache is state.pb: core's state after the first through_seq records of run.log, written
+// at pause, at end and every so often by the one writer of the run, with a temporary file, an
+// fsync and a rename (docs/contributing/run-recovery.md). It is a cache of the fold of the log
+// and never authoritative. A start that finds it unreadable, ahead of the log or not the fold of
+// the log's own prefix folds the whole log, and the result is the same.
+message StateCache {
+  // Version of this message's meaning; a reader of another version ignores the cache.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.const = 1];
+  // The number of records of run.log the state folds, which are the first through_seq.
+  uint64 through_seq = 2 [(buf.validate.field).uint64.gte = 1];
+  // The SHA-256 of the encoded records the state folds, in order. A cache whose digest is not
+  // that of the log's own first through_seq records belongs to another log, or to a log that
+  // lost records after the cache was written.
+  bytes digest = 3 [(buf.validate.field).bytes.len = 32];
+  // The writer's encoding of core's fold: its state and what the search still has to hear.
+  bytes state = 4 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 268435456
+  }];
+}

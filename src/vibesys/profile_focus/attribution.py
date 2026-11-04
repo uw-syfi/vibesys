@@ -12,6 +12,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.profile_focus.state import ProfileBottleneck
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
+
+MAX_RESULT_BYTES = 16 * 1024 * 1024
+"""The largest framed result a profiler run may print."""
 
 _BEGIN = "__VIBESYS_ATTRIBUTION_BEGIN__"
 _END = "__VIBESYS_ATTRIBUTION_END__"
@@ -67,10 +71,15 @@ def parse_attribution(output: str) -> tuple[ProfileBottleneck, ...]:
     payload = framed_payload(output)
     if payload is None:
         raise ProfileAttributionError.missing_result()
-    try:
-        parsed = _ProfileResultV1.model_validate_json(payload, strict=True)
-    except ValueError as error:
-        raise ProfileAttributionError.invalid_result(error) from error
+    parsed = decode_json(
+        payload,
+        _ProfileResultV1,
+        source="profile result",
+        max_bytes=MAX_RESULT_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if isinstance(parsed, Unreadable):
+        raise ProfileAttributionError.invalid_result(ValueError(parsed.details("result")))
     names = [component.name for component in parsed.components]
     if len(names) != len(set(names)):
         raise ProfileAttributionError.duplicate_components()

@@ -45,6 +45,12 @@ def test_the_catalog_project_is_well_formed() -> None:
     assert feature_project_problems(TOOLCHAIN_FEATURES_PROJECT) == []
 
 
+def test_every_toolchain_has_a_feature_folder_and_every_folder_a_toolchain() -> None:
+    selected = {feature.directory for feature in toolchain_features(KNOWN_TOOLCHAINS)}
+    folders = {path for path in (TOOLCHAIN_FEATURES_PROJECT / "src").iterdir() if path.is_dir()}
+    assert selected == folders
+
+
 @given(toolchains=_toolchains, data=st.data())
 def test_selection_ignores_order_and_repeats(toolchains: list[str], data: st.DataObject) -> None:
     shuffled = data.draw(st.permutations([*toolchains, *toolchains]))

@@ -1,0 +1,295 @@
+[
+  {
+    "seq": "1",
+    "at": "1970-01-01T00:00:01Z",
+    "epoch": 1,
+    "epochStarted": {
+      "runId": "run-fixture",
+      "epoch": 1,
+      "treeHash": "tree-fixture",
+      "apiSchemaHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "storeSchemaHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "vibesysVersion": "test",
+      "run": {
+        "strategy": "example",
+        "input": "input-fixture",
+        "objective": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mediaType": "text/plain"
+        },
+        "objectives": [
+          {
+            "series": "score",
+            "direction": "DIRECTION_MAX"
+          }
+        ]
+      },
+      "series": [
+        {
+          "name": "score",
+          "direction": "DIRECTION_MAX",
+          "role": "SERIES_ROLE_OBJECTIVE"
+        }
+      ]
+    }
+  },
+  {
+    "seq": "2",
+    "at": "1970-01-01T00:00:02Z",
+    "epoch": 1,
+    "lifecycle": {
+      "running": {}
+    }
+  },
+  {
+    "seq": "3",
+    "at": "1970-01-01T00:00:03Z",
+    "epoch": 1,
+    "span": {
+      "change": "CHANGE_STARTED",
+      "span": {
+        "id": "work",
+        "runtimeType": "RUNTIME_TYPE_FLOW",
+        "name": "work",
+        "status": "SPAN_STATUS_RUNNING"
+      }
+    }
+  },
+  {
+    "seq": "4",
+    "at": "1970-01-01T00:00:04Z",
+    "epoch": 1,
+    "metric": {
+      "series": "score",
+      "value": 2
+    }
+  },
+  {
+    "seq": "5",
+    "at": "1970-01-01T00:00:05Z",
+    "epoch": 1,
+    "stream": {
+      "id": "log",
+      "kind": "STREAM_KIND_LOG",
+      "state": "STREAM_STATE_OPENED"
+    }
+  },
+  {
+    "seq": "6",
+    "at": "1970-01-01T00:00:06Z",
+    "epoch": 1,
+    "metric": {
+      "series": "score",
+      "span": "work",
+      "value": 4,
+      "clock": 5
+    }
+  },
+  {
+    "seq": "7",
+    "at": "1970-01-01T00:00:07Z",
+    "epoch": 1,
+    "span": {
+      "change": "CHANGE_ENDED",
+      "span": {
+        "id": "work",
+        "runtimeType": "RUNTIME_TYPE_FLOW",
+        "name": "work",
+        "status": "SPAN_STATUS_DONE",
+        "endedAt": 5
+      }
+    }
+  },
+  {
+    "seq": "8",
+    "at": "1970-01-01T00:00:08Z",
+    "epoch": 1,
+    "stream": {
+      "id": "log",
+      "kind": "STREAM_KIND_LOG",
+      "state": "STREAM_STATE_ENDED",
+      "length": "100"
+    }
+  },
+  {
+    "seq": "9",
+    "at": "1970-01-01T00:00:09Z",
+    "epoch": 1,
+    "legacyEvent": {
+      "json": "{\"ignored\":true}"
+    }
+  },
+  {
+    "seq": "10",
+    "at": "1970-01-01T00:00:10Z",
+    "epoch": 1,
+    "clock": 5,
+    "lifecycle": {
+      "ended": {
+        "outcome": "OUTCOME_INTERRUPTED",
+        "resumable": true
+      }
+    }
+  },
+  {
+    "seq": "11",
+    "at": "1970-01-01T00:01:40Z",
+    "epoch": 2,
+    "clock": 5,
+    "epochStarted": {
+      "runId": "run-fixture",
+      "epoch": 2,
+      "treeHash": "tree-fixture",
+      "apiSchemaHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "storeSchemaHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "vibesysVersion": "test",
+      "run": {
+        "strategy": "example",
+        "input": "input-fixture",
+        "objective": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mediaType": "text/plain"
+        },
+        "objectives": [
+          {
+            "series": "score",
+            "direction": "DIRECTION_MAX"
+          }
+        ]
+      },
+      "series": [
+        {
+          "name": "score",
+          "direction": "DIRECTION_MAX",
+          "role": "SERIES_ROLE_OBJECTIVE"
+        }
+      ]
+    }
+  },
+  {
+    "seq": "12",
+    "at": "1970-01-01T00:01:41Z",
+    "epoch": 2,
+    "clock": 6,
+    "lifecycle": {
+      "running": {}
+    }
+  },
+  {
+    "seq": "13",
+    "at": "1970-01-01T00:01:53Z",
+    "epoch": 2,
+    "declarationAmended": {
+      "runId": "run-fixture",
+      "epoch": 2,
+      "treeHash": "tree-fixture",
+      "apiSchemaHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "storeSchemaHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "vibesysVersion": "test",
+      "run": {
+        "strategy": "example",
+        "input": "input-fixture",
+        "objective": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mediaType": "text/plain"
+        },
+        "objectives": [
+          {
+            "series": "score",
+            "direction": "DIRECTION_MAX"
+          }
+        ]
+      },
+      "series": [
+        {
+          "name": "score",
+          "direction": "DIRECTION_MAX",
+          "role": "SERIES_ROLE_OBJECTIVE"
+        },
+        {
+          "name": "cost",
+          "direction": "DIRECTION_NONE",
+          "role": "SERIES_ROLE_REFERENCE"
+        }
+      ]
+    }
+  },
+  {
+    "seq": "14",
+    "at": "1970-01-01T00:01:54Z",
+    "epoch": 2,
+    "epochStarted": {
+      "runId": "run-fixture",
+      "epoch": 2,
+      "treeHash": "tree-fixture",
+      "apiSchemaHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "storeSchemaHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "vibesysVersion": "test",
+      "run": {
+        "strategy": "example",
+        "input": "input-fixture",
+        "objective": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mediaType": "text/plain"
+        },
+        "objectives": [
+          {
+            "series": "score",
+            "direction": "DIRECTION_MAX"
+          }
+        ]
+      },
+      "series": [
+        {
+          "name": "score",
+          "direction": "DIRECTION_MAX",
+          "role": "SERIES_ROLE_OBJECTIVE"
+        },
+        {
+          "name": "cost",
+          "direction": "DIRECTION_NONE",
+          "role": "SERIES_ROLE_REFERENCE"
+        }
+      ]
+    }
+  },
+  {
+    "seq": "15",
+    "at": "1970-01-01T00:02:00Z",
+    "epoch": 3,
+    "epochStarted": {
+      "runId": "run-fixture",
+      "epoch": 3,
+      "treeHash": "tree-fixture",
+      "apiSchemaHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "storeSchemaHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "vibesysVersion": "test",
+      "run": {
+        "strategy": "example",
+        "input": "input-fixture",
+        "objective": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mediaType": "text/plain"
+        },
+        "objectives": [
+          {
+            "series": "score",
+            "direction": "DIRECTION_MAX"
+          }
+        ]
+      },
+      "series": [
+        {
+          "name": "score",
+          "direction": "DIRECTION_MAX",
+          "role": "SERIES_ROLE_OBJECTIVE"
+        },
+        {
+          "name": "cost",
+          "direction": "DIRECTION_NONE",
+          "role": "SERIES_ROLE_REFERENCE"
+        }
+      ]
+    }
+  }
+]

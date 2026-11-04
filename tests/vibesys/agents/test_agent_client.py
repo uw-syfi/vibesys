@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import io
 import json
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from vibesys.api import CoreAgentEventSink
 from vibesys.events import (
@@ -27,6 +27,7 @@ from vs_agent.api import (
     AgentEventKind,
     AgentOutputSchemaError,
     AgentSessionKey,
+    AgentTurnTimeoutError,
     AgentUsage,
     SessionResumeError,
     SessionScope,
@@ -42,11 +43,21 @@ from vs_agent.contracts import (
     MCPServerSpec,
 )
 from vs_mcp.api import StdioServerDescriptor
-from vs_sim.api import Event, OsThreads
-from vs_sim.api.testing import examples, wait_or_fail, wait_until_started_sync
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    ManualClock,
+    SimThreads,
+    examples,
+    wait_or_fail,
+)
+
+if TYPE_CHECKING:
+    from vs_sim.api import Event, Threads
 
 
 class _Response(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     answer: str
 
 
@@ -63,9 +74,11 @@ class _FakeSession(HandSession):
     cancel_error: BaseException | None = None
     started: Event | None = None
     release: Event | None = None
+    threads: Threads = field(default_factory=SimThreads)
+    """The threads the client runs on: the session's locks are taken on its turn thread."""
 
     def __post_init__(self) -> None:
-        HandSession.__init__(self)
+        HandSession.__init__(self, threads=self.threads)
 
     def run_turn(
         self,
@@ -145,7 +158,9 @@ def test_keyed_turns_reuse_a_session() -> None:
         results=[AgentTurnResult("first"), AgentTurnResult("second")],
     )
     launcher = _FakeLauncher([session])
-    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        launcher, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock(), threads=SimThreads()
+    )
 
     assert (
         client.run(
@@ -169,7 +184,12 @@ def test_session_setup_materializes_skills_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _FakeSession(results=[AgentTurnResult("first"), AgentTurnResult("second")])
-    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     skill = tmp_path / "source-skill"
     calls: list[tuple[Path, list[Path]]] = []
     monkeypatch.setattr(
@@ -184,10 +204,47 @@ def test_session_setup_materializes_skills_once(
     assert calls == [(tmp_path, [skill])]
 
 
+def test_a_session_launch_never_follows_a_symlink_the_agent_planted(tmp_path: Path) -> None:
+    """Regression: launch-time skill setup replaced ``host-data/alpha`` through a link."""
+    client = AgentClient(
+        _FakeLauncher([_FakeSession(results=[AgentTurnResult("done")])]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+    skill = tmp_path / "source" / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# alpha\n")
+    outside = tmp_path / "host-data"
+    (outside / "alpha").mkdir(parents=True)
+    (outside / "alpha" / "keep.txt").write_text("host file\n")
+    workspace = tmp_path / "workspace"
+    (workspace / ".claude").mkdir(parents=True)
+    (workspace / ".claude" / "skills").symlink_to(outside, target_is_directory=True)
+
+    client.run(
+        session_spec=_spec(workspace=workspace, skills=(skill,)),
+        turn=AgentTurnRequest("one"),
+        session_key=_key("impl"),
+    )
+
+    assert sorted(p.relative_to(outside).as_posix() for p in outside.rglob("*")) == [
+        "alpha",
+        "alpha/keep.txt",
+    ]
+    assert (outside / "alpha" / "keep.txt").read_text() == "host file\n"
+    assert (workspace / "alpha" / "SKILL.md").read_text() == "# alpha\n"
+
+
 def test_client_forwards_turn_events_to_caller_observer() -> None:
     event = AgentEvent(AgentEventKind.TEXT, text="chunk")
     session = _FakeSession(results=[AgentTurnResult("done")], emitted=[event])
-    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
 
     @dataclass
     class Observer:
@@ -217,7 +274,9 @@ def test_invoke_preserves_streamed_text_deltas_and_paragraphs(tmp_path: Path) ->
     client = AgentClient(
         _FakeLauncher([session]),
         run_log_file=log,
-        event_sink=CoreAgentEventSink(seen.append),
+        event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
     )
     client.invoke_text(
         kind="implementer",
@@ -259,7 +318,12 @@ def test_invoke_threads_typed_tool_result_payload_to_sink(tmp_path: Path) -> Non
         ],
     )
     seen = []
-    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -292,7 +356,12 @@ def test_invoke_closes_text_before_tool_event(tmp_path: Path) -> None:
         ],
     )
     seen = []
-    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -342,7 +411,12 @@ def test_a_streamed_answer_is_rendered_once_and_stays_attributed(tmp_path: Path)
         ],
     )
     seen: list = []
-    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     answer = client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -362,7 +436,12 @@ def test_an_unstreamed_answer_is_rendered_once_and_stays_attributed(tmp_path: Pa
     """A provider that streams nothing still gets its answer rendered, once."""
     session = _FakeSession(results=[AgentTurnResult("Hello world")])
     seen: list = []
-    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -395,7 +474,12 @@ def test_a_structured_turn_streams_nothing_on_the_assistant_channel(tmp_path: Pa
         ],
     )
     seen: list = []
-    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     response = client.invoke(
         kind="judge",
         workspace=tmp_path,
@@ -423,7 +507,12 @@ def test_thinking_payload_channel_routes_to_the_diagnostic_channel(tmp_path: Pat
         ],
     )
     seen = []
-    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -456,7 +545,11 @@ def test_invoke_closes_streamed_text_before_reporting_error(tmp_path: Path) -> N
     )
     log = io.StringIO()
     client = AgentClient(
-        _FakeLauncher([session]), run_log_file=log, event_sink=NULL_AGENT_EVENT_SINK
+        _FakeLauncher([session]),
+        run_log_file=log,
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
     )
 
     with pytest.raises(ValueError, match="failed"):
@@ -478,7 +571,12 @@ def test_invoke_preserves_terminal_newline_on_cancellation(tmp_path: Path) -> No
         emitted=[AgentEvent(AgentEventKind.TEXT, text="partial output\n")],
     )
     seen = []
-    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     with pytest.raises(KeyboardInterrupt):
         client.invoke_text(
             kind="implementer",
@@ -503,7 +601,9 @@ def test_changed_session_spec_closes_and_replaces_cached_session() -> None:
     old = _FakeSession(results=[AgentTurnResult("old")])
     new = _FakeSession(results=[AgentTurnResult("new")])
     launcher = _FakeLauncher([old, new])
-    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        launcher, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock(), threads=SimThreads()
+    )
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
     result = client.run(
@@ -519,7 +619,12 @@ def test_changed_session_spec_closes_and_replaces_cached_session() -> None:
 
 def test_unkeyed_turn_always_closes_ephemeral_session() -> None:
     session = _FakeSession(results=[AgentTurnResult("done")])
-    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
 
     result = client.run(session_spec=_spec(), turn=AgentTurnRequest("one"))
 
@@ -535,7 +640,9 @@ def test_restarted_turn_evicts_session(result: AgentTurnResult) -> None:
     first = _FakeSession(results=[result])
     second = _FakeSession(results=[AgentTurnResult("recovered")])
     launcher = _FakeLauncher([first, second])
-    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        launcher, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock(), threads=SimThreads()
+    )
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
     client.run(session_spec=_spec(), turn=AgentTurnRequest("two"), session_key=_key("impl"))
@@ -567,7 +674,9 @@ def test_checkpoint_required_turn_refuses_missing_identity_and_actual_reset(
 
     launcher = _DurableLauncher([session])
     key = _key("impl")
-    with AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK) as client:
+    with AgentClient(
+        launcher, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock(), threads=SimThreads()
+    ) as client:
         with pytest.raises(SessionResumeError, match="provider reset or replaced"):
             client.run(
                 session_spec=_spec(),
@@ -582,7 +691,9 @@ def test_checkpoint_required_turn_refuses_missing_identity_and_actual_reset(
 def test_checkpoint_required_turn_refuses_nonresumable_provider_before_dispatch() -> None:
     session = _FakeSession(results=[AgentTurnResult("accepted", provider_session_id="thread-1")])
     launcher = _FakeLauncher([session])
-    with AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK) as client:
+    with AgentClient(
+        launcher, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock(), threads=SimThreads()
+    ) as client:
         with pytest.raises(SessionResumeError, match="provider cannot resume"):
             client.run(
                 session_spec=_spec(),
@@ -597,7 +708,9 @@ def test_turn_exception_evicts_session() -> None:
     failed = _FakeSession(results=[], error=ValueError("failed"))
     recovered = _FakeSession(results=[AgentTurnResult("ok")])
     launcher = _FakeLauncher([failed, recovered])
-    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        launcher, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock(), threads=SimThreads()
+    )
 
     with pytest.raises(ValueError, match="failed"):
         client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
@@ -612,7 +725,9 @@ def test_turn_exception_evicts_session() -> None:
 def test_close_is_idempotent_and_rejects_future_turns() -> None:
     session = _FakeSession(results=[AgentTurnResult("ok")])
     launcher = _FakeLauncher([session])
-    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        launcher, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock(), threads=SimThreads()
+    )
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
 
     client.close()
@@ -626,7 +741,12 @@ def test_close_is_idempotent_and_rejects_future_turns() -> None:
 
 def test_evicting_a_session_cancels_its_turn_before_closing_it() -> None:
     session = _FakeSession(results=[AgentTurnResult("ok")])
-    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
 
     client.close()
@@ -637,21 +757,34 @@ def test_evicting_a_session_cancels_its_turn_before_closing_it() -> None:
 
 
 def test_cancel_stops_an_active_session_without_closing_it() -> None:
-    started = OsThreads().event()
-    release = OsThreads().event()
-    session = _FakeSession(results=[AgentTurnResult("ok")], started=started, release=release)
-    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        turn = pool.submit(
-            client.run,
-            session_spec=_spec(),
-            turn=AgentTurnRequest("one"),
-            session_key=_key("impl"),
-        )
-        wait_until_started_sync(started, turn)
-        client.cancel()
-        assert turn.result().text == "ok"
+    threads = SimThreads()
+    started = threads.event()
+    release = threads.event()
+    session = _FakeSession(
+        results=[AgentTurnResult("ok")], started=started, release=release, threads=threads
+    )
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=threads,
+    )
+    results: list[AgentTurnResult] = []
 
+    def turn() -> None:
+        results.append(
+            client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
+        )
+
+    def cancel_while_the_turn_runs() -> None:
+        worker = threads.spawn(turn, name="turn", daemon=False)
+        wait_or_fail(started, "the turn to start")
+        client.cancel()
+        worker.join(HANG_GUARD_S)
+
+    threads.run(cancel_while_the_turn_runs)
+
+    assert [result.text for result in results] == ["ok"]
     assert session.lifecycle_calls == ["cancel"]
     with pytest.raises(RuntimeError, match="cancelled"):
         client.run(session_spec=_spec(), turn=AgentTurnRequest("two"))
@@ -659,7 +792,12 @@ def test_cancel_stops_an_active_session_without_closing_it() -> None:
 
 def test_a_failing_cancel_still_closes_the_session() -> None:
     session = _FakeSession(results=[AgentTurnResult("ok")], cancel_error=ValueError("no hook"))
-    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=_key("impl"))
 
     with pytest.raises(ValueError, match="no hook"):
@@ -683,6 +821,8 @@ def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Pa
         role_models={"judge": "gpt-judge"},
         role_reasoning_efforts={"judge": "high"},
         event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
     )
 
     response = client.invoke(
@@ -719,13 +859,51 @@ def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Pa
     assert {key: record[key] for key in expected} == expected
 
 
+def test_a_timed_out_turn_records_usage_received_before_the_deadline(tmp_path: Path) -> None:
+    usage = AgentUsage(input_tokens=12, output_tokens=4, total_cost_usd=0.02)
+    timeout = AgentTurnTimeoutError(45)
+    # The session boundary has already attached provider evidence to this typed failure.
+    timeout.usage = usage
+    session = _FakeSession(
+        results=[],
+        error=timeout,
+    )
+    client = AgentClient(
+        _FakeLauncher([session]),
+        provider="codex",
+        log_dir=tmp_path,
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+
+    with pytest.raises(AgentTurnTimeoutError):
+        client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="work",
+            round_label="round-1",
+        )
+
+    record = json.loads((tmp_path / "usage.jsonl").read_text())
+    assert record["input_tokens"] == 12
+    assert record["output_tokens"] == 4
+    assert record["total_cost_usd"] == 0.02
+
+
 def test_a_skill_load_is_rendered_on_the_diagnostic_channel(tmp_path: Path) -> None:
     session = _FakeSession(
         results=[AgentTurnResult("Done")],
         emitted=[AgentEvent(AgentEventKind.SKILL, text="serving-systems")],
     )
     seen = []
-    client = AgentClient(_FakeLauncher([session]), event_sink=CoreAgentEventSink(seen.append))
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=CoreAgentEventSink(seen.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     client.invoke_text(
         kind="implementer",
         workspace=tmp_path,
@@ -761,7 +939,11 @@ def test_the_usage_record_carries_the_turns_skill_use(
 ) -> None:
     session = _FakeSession(results=[AgentTurnResult("done", skills=skills)])
     client = AgentClient(
-        _FakeLauncher([session]), log_dir=tmp_path, event_sink=NULL_AGENT_EVENT_SINK
+        _FakeLauncher([session]),
+        log_dir=tmp_path,
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
     )
 
     client.invoke_text(
@@ -784,6 +966,8 @@ def test_runtime_accessors_expose_configured_provider_and_model() -> None:
         model_name="claude-base",
         role_models={"judge": "claude-judge"},
         event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
     )
 
     assert client.provider == "claude"
@@ -792,7 +976,12 @@ def test_runtime_accessors_expose_configured_provider_and_model() -> None:
 
 
 def test_runtime_accessors_default_to_none_or_codex_when_unconfigured() -> None:
-    client = AgentClient(_FakeLauncher([]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
 
     assert client.provider == "codex"
     assert client.model_for_kind("implementer") is None
@@ -803,7 +992,12 @@ def test_invoke_reports_an_invalid_reply_as_a_schema_error_naming_its_fields(
 ) -> None:
     """The caller's correction needs the field-named errors, not a synthesized response."""
     session = _FakeSession(results=[AgentTurnResult('{"answer": 3}')])
-    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
 
     with pytest.raises(AgentOutputSchemaError) as raised:
         client.invoke(
@@ -819,13 +1013,20 @@ def test_invoke_reports_an_invalid_reply_as_a_schema_error_naming_its_fields(
 
 
 class _Plan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(max_length=8)
     count: int
 
 
 def _invoke_plan(reply: str, workspace: Path) -> _Plan:
     session = _FakeSession(results=[AgentTurnResult(reply)])
-    client = AgentClient(_FakeLauncher([session]), event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        _FakeLauncher([session]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
     return client.invoke(
         kind="planner",
         workspace=workspace,
@@ -873,7 +1074,9 @@ def test_invoke_says_when_a_reply_has_no_json_object(tmp_path: Path, reply: str)
 def test_invoke_translates_generic_tool_server_for_the_launcher(tmp_path: Path) -> None:
     session = _FakeSession(results=[AgentTurnResult('{"answer":"done"}')])
     launcher = _FakeLauncher([session])
-    client = AgentClient(launcher, event_sink=NULL_AGENT_EVENT_SINK)
+    client = AgentClient(
+        launcher, event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock(), threads=SimThreads()
+    )
     descriptor = StdioServerDescriptor(
         name="issues",
         command="python",

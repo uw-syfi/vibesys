@@ -72,6 +72,7 @@ _NEUTRAL_CONTEXT: dict[str, object] = {
     "objective": "OBJECTIVE: maximize operations per second for the queue benchmark.",
     "roadmap_text": "- major-1: todo - identify the next data-structure bottleneck.",
     "profile_execution": "local",
+    "profiler_id": "none",
 }
 
 
@@ -84,6 +85,7 @@ def _domain_context(context: dict[str, object]) -> dict[str, object]:
         "accuracy_command": context["accuracy_command"],
         "runtime_notes": context["runtime_notes"],
         "profile_execution": context["profile_execution"],
+        "profiler_id": context["profiler_id"],
         "workspace_sources": (),
     }
 

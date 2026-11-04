@@ -1,6 +1,8 @@
 ---
 name: triage-prs
 description: Triage the open pull requests of the VibeSys repository. Inventory them, classify each by readiness (CI, merge conflicts, draft state, review state, stack position, PR template compliance, staleness), decide whether the author or a reviewer acts next, optionally apply routine labels such as bug, and report a prioritized maintainer queue. Use when a user asks to triage, prioritize, sort, summarize, or check the status of open PRs, find what is ready to merge or review, what is stale or blocked, what needs author action, or to label open PRs.
+metadata:
+  kind: workflow
 ---
 
 # Triage PRs

@@ -1,0 +1,16 @@
+{
+  "protocol_version": 1,
+  "type": "workspace_root_probe",
+  "sequence": 47,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "status": "active",
+  "data": {
+    "kind": "workspace_root_probe",
+    "state": "queued",
+    "job_id": "5000",
+    "pending_reason": "Resources",
+    "waited_seconds": 600.0,
+    "queue_timeout_seconds": 1800.0
+  }
+}

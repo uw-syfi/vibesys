@@ -1,0 +1,4 @@
++-o AGXAcceleratorG15X  <class AGXAcceleratorG15X>
+      "PerformanceStatistics" = {"In use system memory (driver)"=0,"Alloc system memory"=4177330176,"Tiler Utilization %"=28,"recoveryCount"=0,"lastRecoveryTime"=0,"Renderer Utilization %"=28,"TiledSceneBytes"=1343488,"Device Utilization %"=28,"SplitSceneCount"=0,"Allocated PB Size"=120324096,"In use system memory"=1001029632}
+      "model" = "Apple M3 Pro"
+}

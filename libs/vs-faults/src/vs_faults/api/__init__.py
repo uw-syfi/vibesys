@@ -17,7 +17,7 @@ from vs_faults.connector import (
 from vs_faults.connector import (
     handle_with as handle_cluster_request_with,
 )
-from vs_faults.host import Crossing, FaultGate, HostCrashError
+from vs_faults.host import Crossing, FaultGate, HostCrashError, InjectedIOError
 from vs_faults.plan import (
     AgentFault,
     Boundary,
@@ -46,6 +46,7 @@ __all__ = [
     "FaultyToolDispatch",
     "HostCrashError",
     "HostFault",
+    "InjectedIOError",
     "ProcessFault",
     "ReplyGenerator",
     "ToolCallFailedError",

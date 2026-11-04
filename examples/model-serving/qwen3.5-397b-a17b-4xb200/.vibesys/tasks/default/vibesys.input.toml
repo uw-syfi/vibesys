@@ -1,4 +1,5 @@
 version = 1
+backends = ["cuda"]
 
 [agent]
 domain = "llm-serving"
@@ -24,3 +25,15 @@ args = [
 ]
 timeout_seconds = 1200
 result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "NVIDIA B200"
+count = 4
+vendor = "nvidia"
+
+[catalogue.model]
+name = "Qwen3.5 397B A17B"
+maker = "qwen"

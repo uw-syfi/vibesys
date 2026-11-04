@@ -7,13 +7,21 @@ through today's agentshim API. Such an invocation is never blindly replayed.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from vs_agent.contracts import (
     AgentOutputSchemaError,
@@ -21,10 +29,12 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     AgentTurnResult,
     SchemaViolation,
+    SteerOutcome,
     session_spec_fingerprint,
 )
 from vs_agent.runner import parse_typed_response
 from vs_agent.session_errors import (
+    AgentExecutionCancelledError,
     InvocationConflictError,
     SessionConfigurationError,
     SessionPersistenceError,
@@ -33,14 +43,40 @@ from vs_agent.session_errors import (
 from vs_agent.session_key import AgentSessionKey
 from vs_project.api import ProjectError
 from vs_prompts.api import RenderedPrompt
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from contextlib import AbstractContextManager
 
+    from pydantic import GetCoreSchemaHandler
+    from pydantic_core import core_schema
+
     from vs_agent.contracts import AgentCapabilities, AgentObserver
     from vs_sim.api import Threads
+
+
+class _EveryFieldStored:
+    """Decode a stored dataclass only if it names every field, defaulted ones included.
+
+    The result type gives its later fields defaults so a provider can omit them, but a stored
+    result was written by this version, which writes every field. Without this, a stored
+    result missing ``refused_steers`` would decode as "nothing refused" and a restarted host
+    would settle a refused steer as consumed. The defaults are dropped from a copy of the
+    decoding schema only, so construction in code and strict JSON decoding are unchanged.
+    """
+
+    def __get_pydantic_core_schema__(
+        self, source: type[object], handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        schema = copy.deepcopy(handler.resolve_ref_schema(handler(source)))
+        if schema["type"] != "dataclass" or schema["schema"]["type"] != "dataclass-args":
+            message = f"{source!r} is not decoded as a dataclass"
+            raise TypeError(message)
+        schema.pop("ref", None)
+        for stored in schema["schema"]["fields"]:
+            if stored["schema"]["type"] == "default":
+                stored["schema"] = stored["schema"]["schema"]
+        return schema
 
 
 class _SessionObservation(BaseModel):
@@ -83,7 +119,7 @@ class Completed(_InvocationObservation):
     kind: Literal["completed"] = "completed"
     session_key: str
     invocation_id: str = Field(min_length=1)
-    result: AgentTurnResult
+    result: Annotated[AgentTurnResult, _EveryFieldStored()]
     checkpoint: AgentSessionCheckpoint
 
     def parse[T: BaseModel](self, response_cls: type[T]) -> T:
@@ -163,7 +199,21 @@ class AgentSessions(Protocol):
         """Ask the provider to stop *invocation_id* if this instance is running it.
 
         A request, not a proof: only a later ``inspect`` that is not ``Pending``
-        shows the turn ended. Any other invocation is left alone.
+        shows the turn ended. An invocation with no record yet is stopped from starting:
+        its start raises ``AgentExecutionCancelledError`` before any provider call.
+        Any other invocation is left alone.
+        """
+        ...
+
+    def steer(
+        self, key: AgentSessionKey, invocation_id: str, text: str, *, steer_id: str
+    ) -> SteerOutcome:
+        """Offer *text* to *invocation_id*'s turn if this instance is running it.
+
+        ``NO_RUNNING_TURN`` when it is not. ``DELIVERED`` says the provider took the
+        message; the turn's result settles it exactly once, whether the turn returns or
+        raises and however often a capacity stop resends it: consumed, or named by
+        *steer_id* in ``AgentTurnResult.refused_steers`` of the completed invocation.
         """
         ...
 
@@ -178,14 +228,37 @@ class AgentSessions(Protocol):
         """Release key ownership after the caller drains an explicit interruption."""
         ...
 
+    def forget_unfinished(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Forget an invocation that ended without an answer, so asking again dispatches it.
+
+        The caller proves the attempt is over (its processes are ended) before calling.
+        Only a record with no answer is dropped (``Pending`` or ``Unknown``); an answered one
+        (``Completed``, ``InvalidResponse``) stays and is replayed. Idempotent. Raises
+        InvocationConflictError while the invocation is active or when it belongs to another key.
+        """
+        ...
+
     def checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint:
         """Return conversation identity or raise SessionResumeError."""
         ...
 
     def resume(
-        self, key: AgentSessionKey, message: RenderedPrompt, invocation_id: str
+        self,
+        key: AgentSessionKey,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        standalone: bool = False,
     ) -> InvocationOutcome:
-        """Dispatch once, continuing the checkpointed conversation."""
+        """Dispatch once, continuing the checkpointed conversation.
+
+        A *standalone* message carries the role's whole prompt, so it may run in a fresh
+        conversation instead: when the checkpointed one is near its model's context window,
+        or once after the provider refused it for context overflow. The completed outcome's
+        checkpoint then names the fresh conversation, which later turns continue. Until the
+        fresh turn completes, the checkpoint still names the old conversation, so a fresh turn
+        that fails or is interrupted leaves the key resumable.
+        """
         ...
 
     def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
@@ -203,12 +276,40 @@ class AgentInvocationRecord(BaseModel):
     sequence: int = Field(default=0, ge=0)
 
 
+_UPGRADED_FROM = 2
+"""The ledger version read as the current one: it differs only by fields that default to unknown."""
+
+
 class AgentInvocationState(BaseModel):
     """Strict machine-local invocation ledger, stored through Project's StateSlot."""
 
     model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1] = 1
+    schema_version: Literal[3] = 3
+    """3: a completed turn's usage stores its cost basis and per-model rows. 2: a completed turn's
+    result stores ``refused_steers``, and every result field is required."""
     invocations: dict[str, AgentInvocationRecord] = Field(default_factory=dict)
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def _this_version(cls, value: object) -> object:
+        """Read the current version, upgrade the previous one on load, refuse any other.
+
+        Version 2 stored the same shape without the two usage fields, which default to unknown, so
+        a ledger it wrote is exactly a version 3 ledger and the next save writes it as such. A
+        run paused across the upgrade resumes. Delete this upgrade 92 days after it merged, with
+        ``legacy_basis`` (#3531): by then no run that was paused under version 2 is resumed.
+        """
+        current = cls.model_fields["schema_version"].default
+        if value == _UPGRADED_FROM:
+            return current
+        if isinstance(value, int) and not isinstance(value, bool) and value != current:
+            message = (
+                f"the ledger is version {value} and this VibeSys reads only version "
+                f"{current} (and upgrades version {_UPGRADED_FROM}); a run whose agent ledger "
+                "another version wrote cannot resume here: start a new run"
+            )
+            raise ValueError(message)
+        return value
 
     def record(self, record: AgentInvocationRecord) -> None:
         """Preserve dispatch order independently of JSON object key ordering.
@@ -329,6 +430,14 @@ class AgentTurnExecutor(Protocol):
         """Ask the keyed conversation's in-flight turn to stop, keeping its checkpoint."""
         ...
 
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
+        """Offer *text* to the keyed conversation's in-flight turn, queuing nothing.
+
+        A ``DELIVERED`` message the provider does not keep is named by *steer_id* in the
+        turn's ``AgentTurnResult.refused_steers``.
+        """
+        ...
+
     def release_session(self, key: AgentSessionKey) -> None:
         """Release the keyed conversation's live resources, keeping its checkpoint."""
         ...
@@ -358,7 +467,7 @@ class ClientAgentSessions:
         client: AgentTurnExecutor,
         slot: AgentInvocationStore,
         *,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Preflight durable-resume capability and bind the exclusively owned ledger."""
         if not client.capabilities.provider_session_resume:
@@ -368,9 +477,10 @@ class ClientAgentSessions:
         self._slot = slot
         self._bindings: dict[AgentSessionKey, tuple[AgentSessionSpec, AgentTurnRequest]] = {}
         self._active: set[str] = set()
+        self._cancelled_before_start: set[str] = set()
         self._schema_rejections: set[str] = set()
         self._active_keys: set[AgentSessionKey] = set()
-        self._lock = (threads or OsThreads()).rlock()
+        self._lock = threads.rlock()
 
     @contextmanager
     def invocation_transaction(self) -> Iterator[AgentInvocationStore]:
@@ -403,12 +513,31 @@ class ClientAgentSessions:
             self._bindings[key] = (spec, turn)
 
     def cancel(self, key: AgentSessionKey, invocation_id: str) -> None:
-        """Ask the provider to stop *invocation_id* if this instance is running it."""
+        """Ask the provider to stop *invocation_id*, or stop it from starting.
+
+        An invocation this instance runs is cancelled at the provider. One with no record yet
+        has not begun, so its start is refused (``AgentExecutionCancelledError``, before any
+        provider call) however late the start arrives: a cancel that raced ahead of its turn is
+        not lost. The refusal is used up by that start, or dropped by ``forget_unfinished``.
+        """
         self._validate_invocation(key, invocation_id)
         with self._lock:
             running = invocation_id in self._active
+            if not running and invocation_id not in self._load().invocations:
+                self._cancelled_before_start.add(invocation_id)
         if running:
             self._client.cancel_session(key)
+
+    def steer(
+        self, key: AgentSessionKey, invocation_id: str, text: str, *, steer_id: str
+    ) -> SteerOutcome:
+        """Offer *text* to *invocation_id*'s turn if this instance is running it."""
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            running = invocation_id in self._active
+        if not running:
+            return SteerOutcome.NO_RUNNING_TURN
+        return self._client.steer_session(key, text, steer_id=steer_id)
 
     def release(self, key: AgentSessionKey) -> None:
         """Release the key's live provider resources, keeping its durable checkpoint."""
@@ -462,6 +591,34 @@ class ClientAgentSessions:
                 detail = f"cannot release interrupted invocation {invocation_id}: {error}"
                 raise SessionPersistenceError.because(detail) from error
 
+    def forget_unfinished(self, key: AgentSessionKey, invocation_id: str) -> None:
+        """Drop the unanswered record of *invocation_id* and of its correction."""
+        self._validate_invocation(key, invocation_id)
+        with self._lock:
+            if {invocation_id, f"{invocation_id}/correction"} & self._active:
+                detail = "cannot forget an active invocation"
+                raise InvocationConflictError.because(detail)
+            self._cancelled_before_start.discard(invocation_id)
+            state = self._load()
+            dropped = False
+            for identity in (invocation_id, f"{invocation_id}/correction"):
+                recorded = state.invocations.get(identity)
+                if recorded is None:
+                    continue
+                if recorded.outcome.session_key != str(key):
+                    detail = "unfinished invocation belongs to another key"
+                    raise InvocationConflictError.because(detail)
+                if not isinstance(recorded.outcome, Completed | InvalidResponse):
+                    del state.invocations[identity]
+                    dropped = True
+            if not dropped:
+                return
+            try:
+                self._slot.save(state)
+            except (ProjectError, OSError, ValidationError) as error:
+                detail = f"cannot forget unfinished invocation {invocation_id}: {error}"
+                raise SessionPersistenceError.because(detail) from error
+
     def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
         """Read acknowledgement evidence without submitting another turn."""
         self._validate_invocation(key, invocation_id)
@@ -486,9 +643,18 @@ class ClientAgentSessions:
             return record.outcome
 
     def resume(
-        self, key: AgentSessionKey, message: RenderedPrompt, invocation_id: str
+        self,
+        key: AgentSessionKey,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        standalone: bool = False,
     ) -> InvocationOutcome:
-        """Persist dispatch intent before continuing exactly the bound conversation."""
+        """Persist dispatch intent before continuing the bound conversation.
+
+        A *standalone* message may continue in a fresh conversation (see ``AgentSessions``);
+        the binding then follows the fresh conversation.
+        """
         if not isinstance(message, RenderedPrompt):
             detail = "resume message must be a RenderedPrompt"
             raise SessionConfigurationError.because(detail)
@@ -496,7 +662,7 @@ class ClientAgentSessions:
         return self._dispatch(
             key,
             spec,
-            replace(template, message=message, invocation_id=invocation_id),
+            replace(template, message=message, invocation_id=invocation_id, renewable=standalone),
             initial=False,
         )
 
@@ -512,6 +678,16 @@ class ClientAgentSessions:
             detail = "initial turn must not require an existing provider conversation"
             raise SessionConfigurationError.because(detail)
         return self._dispatch(key, spec, turn, initial=True)
+
+    def _refuse_if_cancelled(self, invocation_id: str) -> None:
+        """Raise ``AgentExecutionCancelledError`` once, if a cancel reached the invocation first.
+
+        Called with the lock held, before the invocation is journaled or marked active.
+        """
+        if invocation_id in self._cancelled_before_start:
+            self._cancelled_before_start.discard(invocation_id)
+            message = f"invocation {invocation_id} was cancelled before it began"
+            raise AgentExecutionCancelledError(message)
 
     def _dispatch(
         self,
@@ -533,6 +709,7 @@ class ClientAgentSessions:
                     detail = f"invocation {invocation_id} payload changed"
                     raise InvocationConflictError.because(detail)
                 return self.inspect(key, invocation_id)
+            self._refuse_if_cancelled(invocation_id)
             if key in self._active_keys:
                 detail = f"session {key} already has an active invocation"
                 raise InvocationConflictError.because(detail)
@@ -551,6 +728,7 @@ class ClientAgentSessions:
             detail="dispatch interrupted before acknowledgement",
             checkpoint=checkpoint,
         )
+        interrupted = False
         try:
             result = self._client.run(
                 session_spec=spec,
@@ -565,14 +743,27 @@ class ClientAgentSessions:
                 ),
                 session_key=key,
             )
-            if checkpoint is None:
+            if checkpoint is None or (
+                template.renewable and result.provider_session_id != checkpoint.provider_session_id
+            ):
+                # A first turn, or a standalone turn the client ran in a fresh conversation.
                 checkpoint = self.checkpoint(key)
+                self._follow(key, checkpoint)
             outcome = Completed(
                 session_key=str(key),
                 invocation_id=invocation_id,
                 result=result,
                 checkpoint=checkpoint,
             )
+        except AgentExecutionCancelledError as error:
+            outcome = Unknown(
+                session_key=str(key),
+                invocation_id=invocation_id,
+                detail=str(error),
+                checkpoint=checkpoint,
+            )
+            interrupted = True
+            raise
         except AgentOutputSchemaError as error:
             outcome = self._schema_failure(pending, error, initial=initial)
         except BaseException as error:
@@ -590,11 +781,25 @@ class ClientAgentSessions:
         finally:
             with self._lock:
                 try:
-                    self._record(self._load(), invocation_id, digest, outcome)
+                    self._record(
+                        self._load(), invocation_id, digest, outcome, interrupted=interrupted
+                    )
                 finally:
                     self._active.discard(invocation_id)
                     self._active_keys.discard(key)
         return outcome
+
+    def _follow(self, key: AgentSessionKey, checkpoint: AgentSessionCheckpoint) -> None:
+        """Bind the key's later turns to the conversation it continues now."""
+        with self._lock:
+            bound = self._bindings.get(key)
+            if bound is None or bound[1].expected_provider_session_id is None:
+                return
+            spec, template = bound
+            self._bindings[key] = (
+                spec,
+                replace(template, expected_provider_session_id=checkpoint.provider_session_id),
+            )
 
     def _initial_checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint | None:
         identity = self._client.provider_session_id(key)
@@ -698,8 +903,12 @@ class ClientAgentSessions:
         invocation_id: str,
         digest: str,
         outcome: InvocationOutcome,
+        *,
+        interrupted: bool = False,
     ) -> None:
-        state.record(AgentInvocationRecord(payload_digest=digest, outcome=outcome))
+        state.record(
+            AgentInvocationRecord(payload_digest=digest, outcome=outcome, interrupted=interrupted)
+        )
         try:
             self._slot.save(state)
         except (ProjectError, OSError, ValidationError) as error:

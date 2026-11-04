@@ -10,7 +10,7 @@ from vs_core.types.common import (
     StrategyId,
 )
 from vs_core.types.kernel import CoreState, RunState
-from vs_core.types.records import RecordsState, RecoveryBarrier, RecoveryPhase
+from vs_core.types.records import RecordsState
 from vs_core.types.strategy import SearchDeclaration
 
 
@@ -34,6 +34,8 @@ def sample_limits(**overrides: object) -> Limits:
         "reconciliation_bound": 60.0,
         "observe_interval": 10.0,
         "observe_backoff_cap": 120.0,
+        "queue_wait_budget": 43_200.0,
+        "queue_notice_interval": 600.0,
     }
     return Limits.model_validate({**values, **overrides})
 
@@ -41,7 +43,7 @@ def sample_limits(**overrides: object) -> Limits:
 def initial_state() -> CoreState:
     """Build a capability-disabled run; all identities and times are supplied."""
     return CoreState(
-        records=RecordsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
+        records=RecordsState(),
         run=RunState(
             limits=sample_limits(),
             run_id=RunId(root="run"),

@@ -174,6 +174,10 @@ def test_refs_hold_commits_and_report_what_they_reach(sandbox: ContractProject) 
     assert not repo.has_ref_containing(first, prefix)
     repo.update_ref(f"{prefix}cand-1", second)
 
+    assert not repo.has_ref_pointing_at(first, prefix)
+    assert repo.has_ref_pointing_at(second, prefix)
+    assert not repo.has_ref_pointing_at(second, "refs/vibesys/other/")
+    assert not repo.has_ref_pointing_at("0" * 40, prefix)
     assert repo.has_ref_containing(first, prefix)
     assert repo.has_ref_containing(second, prefix)
     assert not repo.has_ref_containing(third, prefix)
@@ -250,3 +254,48 @@ def test_detached_head_has_no_branch(sandbox: ContractProject, tmp_path: Path) -
     sandbox.repo.add_worktree(destination, head)
 
     assert sandbox.factory(destination).current_branch() is None
+
+
+def test_branches_lists_one_hierarchy_sorted_and_nothing_else(sandbox: ContractProject) -> None:
+    head = sandbox.start({"a.txt": "a\n"})
+    for name in ("vibesys-runs/b", "vibesys-runs/a", "vibesys-runs-x", "feature/vibesys-runs/c"):
+        sandbox.repo.switch_branch(name, create=True)
+    sandbox.repo.update_ref("refs/vibesys/vibesys-runs/d", head)
+
+    assert sandbox.repo.branches("vibesys-runs/") == ("vibesys-runs/a", "vibesys-runs/b")
+    assert sandbox.repo.branches("other/") == ()
+    assert sandbox.repo.branches("") == (
+        "feature/vibesys-runs/c",
+        "main",
+        "vibesys-runs-x",
+        "vibesys-runs/a",
+        "vibesys-runs/b",
+    )
+
+
+@pytest.mark.parametrize("prefix", ["vibesys-runs", "vibesys-runs/*", "-x/", "a..b/", "/"])
+def test_branches_refuses_a_prefix_that_is_not_a_hierarchy(
+    sandbox: ContractProject, prefix: str
+) -> None:
+    sandbox.start()
+    with pytest.raises(ValueError, match="branch hierarchy"):
+        sandbox.repo.branches(prefix)
+
+
+def test_branches_outside_a_repository_is_empty(sandbox: ContractProject) -> None:
+    assert sandbox.repo.branches("vibesys-runs/") == ()
+
+
+def test_tree_files_lists_regular_files_below_a_directory_in_a_revision(
+    sandbox: ContractProject,
+) -> None:
+    first = sandbox.start({"d/a.txt": "a\n", "d/e/b.txt": "b\n", "dx/c.txt": "c\n", "top": "t\n"})
+    sandbox.write("d/later.txt", "l\n")
+    sandbox.repo.switch_branch("next", create=True)
+    second = sandbox.commit_all("later")
+
+    assert sandbox.repo.tree_files(first, "d") == ("d/a.txt", "d/e/b.txt")
+    assert sandbox.repo.tree_files(second, "d") == ("d/a.txt", "d/e/b.txt", "d/later.txt")
+    assert sandbox.repo.tree_files("main", "d/e") == ("d/e/b.txt",)
+    assert sandbox.repo.tree_files(second, "missing") == ()
+    assert sandbox.repo.tree_files("0" * 40, "d") == ()

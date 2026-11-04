@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 
 from vs_evaluation.api import EvaluationState
 from vs_evaluation.api.testing import FakeEvaluationExecutor, wait_until_executor_started
+from vs_sim.api import yield_now
 from vs_sim.api.testing import (
     ManualClock,
     arrival,
@@ -41,7 +42,7 @@ def _run(ending: _Ending, *, yields: int) -> None:
 
     async def operation() -> None:
         for _ in range(yields):
-            await asyncio.sleep(0)
+            await yield_now()
         if ending is _Ending.RAISES:
             raise _FailureError
         if ending is _Ending.STARTS_THEN_HOLDS:
@@ -111,7 +112,7 @@ def _executor_run(state: EvaluationState, *, yields: int, starts: bool) -> None:
 
         async def evaluation_moves_on() -> None:
             for _ in range(yields):
-                await asyncio.sleep(0)
+                await yield_now()
             executor.set_state(
                 "h", state, failure="failed" if state is EvaluationState.FAILED else None
             )
@@ -155,7 +156,7 @@ def test_an_arrival_wait_ends_with_the_producers_outcome(
 
         async def producer() -> None:
             for _ in range(yields):
-                await asyncio.sleep(0)
+                await yield_now()
             if ending is _Ending.RAISES:
                 raise _FailureError
             if ending is _Ending.STARTS_THEN_HOLDS:

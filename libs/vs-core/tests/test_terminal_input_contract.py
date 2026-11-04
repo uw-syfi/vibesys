@@ -203,6 +203,7 @@ def test_terminal_finalization_rejects_invalid_outputs(flaw: str, now_at: float)
                         ),
                         authority=core.RequestId(root="interrupt"),
                         refund=0,
+                        wait=None,
                     ),
                 )
             },

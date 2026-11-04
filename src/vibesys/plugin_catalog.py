@@ -10,6 +10,7 @@ from vibesys.plugin_registration import (
     OrchestrationProjector,
     OrchestrationRegistration,
     project_run,
+    project_steer_targets,
 )
 from vs_project.api import OrchestrationDescriptor
 
@@ -62,4 +63,5 @@ __all__ = [
     "OrchestrationRegistration",
     "OrchestrationRegistry",
     "project_run",
+    "project_steer_targets",
 ]

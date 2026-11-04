@@ -10,7 +10,7 @@ change:
   public-API tests, Fakes instead of mocks, property-based tests, no flakiness.
 - [`AGENTS.md`](https://github.com/uw-syfi/vibesys/blob/main/AGENTS.md): the
   short always-true rules. The Python module graph is in
-  [architecture.md](architecture.md).
+  [python-module-graph.md](python-module-graph.md).
 
 This page keeps what has no better home: placement, task-triggered rules,
 size limits, lint waivers, and doc links.
@@ -20,7 +20,7 @@ size limits, lint waivers, and doc links.
 - Process composition (CLI parsing, `RunRequest` building, mode entries) lives
   in `src/entrypoints/`, not `libs/`. Prompt, loop, and domain behavior lives
   in the package that owns that surface.
-- Long-form serving knowledge lives under `resources/skills/`, not in framework
+- Long-form serving knowledge lives under `skills/domains/`, not in framework
   code or prompt skeletons.
 - Reusable targets live in their candidate repository under
   `.vibesys/tasks/<name>/`: `OBJECTIVE.md`, `vibesys.input.toml`, optional
@@ -29,7 +29,11 @@ size limits, lint waivers, and doc links.
   execution environment only; its build context is the task directory, and
   VibeSys mounts the candidate repository at runtime. Evaluator commands run
   from the repository root. Reusable evaluator implementations belong in
-  versioned packages, not copied task directories.
+  versioned packages, not copied task directories. CI builds every example
+  Dockerfile when it or its directory changes, or the Dockerfile is listed with
+  a reason under `excluded_roots` in `.repoctl/components.toml` (`repoctl
+  validate` fails otherwise); see "CI gates" in
+  [development.md](development.md).
 - Nontrivial candidate-facing APIs, ABIs, ownership rules, and service
   protocols go in `CANDIDATE_CONTRACT.md`; evaluator internals and trust-model
   discussion go in a separate design document.
@@ -56,6 +60,23 @@ significant, put it behind a focused Python interface. One-off calls stay local.
 
 - Test serialized contracts at the boundary: round-trip representative payloads
   and exercise each consumer, not only the producer.
+- Parse untrusted JSON (from a peer, an agent, an evaluator, or a file another
+  process may have torn) with `vs_decode.api`: `decode_json` for bytes or text,
+  `read_json` for a file. Both take a required `max_bytes` cap, decode into a
+  model (or `TypeAdapter`) that forbids unknown keys at every depth, and return
+  the value or an `Unreadable` naming the source and the offending key paths;
+  they never raise for bad input. `read_json` reads at most one byte past the
+  cap and refuses anything but a regular file, so a FIFO cannot hang it.
+  Calling pydantic's `validate_json`, `model_validate_json` or
+  `pydantic_core.from_json` directly is allowed only in the modules listed in
+  `PARSE_EDGE_MODULES`
+  (`tests/quality/test_real_apis_confined.py::test_product_code_parses_json_only_through_vs_decode`).
+  `json.loads` raises `RecursionError` and, on bytes, `UnicodeDecodeError`,
+  which escape a handler that catches decoding errors; code that runs with the
+  standard library only bounds its input size and catches
+  `(ValueError, RecursionError)`. Add each decoder of untrusted JSON as a row of
+  `tests/system/test_hostile_json.py`, which runs it against the shared corpus
+  `vs_sim.api.testing.hostile_json_frames`.
 
 ## Prompts, Templates, And Skills
 
@@ -92,7 +113,7 @@ grows and then names unrelated code.
 - Write a citation as one inline code span, `<path>:<symbol>`
   (`unix_jsonl.py:_write_message`). The path may be the full repo-relative one
   or any unambiguous suffix of it, and the symbol may be qualified by its owner
-  (`unix_jsonl.py:_RequestHandler.handle`).
+  (`unix_jsonl.py:_ClientSession.handle`).
 - `scripts/check_doc_citations.py` enforces that the symbol is still defined in
   the cited file, and rejects a line-number citation outright. It gates the docs
   listed in its `GATED_DOCS`; add a doc there once its citations are swept.
@@ -104,14 +125,41 @@ grows and then names unrelated code.
 Run the narrowest relevant test first, then broaden when the change crosses
 module boundaries.
 
-Before opening or updating a PR, run the one command that runs CI's Python
-checks (`python_quality` and `python_types` in `.repoctl/checks.toml`, through
-`support/repoctl`, which needs Go). It stops at the first failing command and
-names it. It does not run the full test suite.
+CI runs the full check suite on every PR, so you need not run it locally before
+opening one. To run the checks CI would select for your change (including uncommitted
+files), use repoctl, which needs Go:
 
 ```bash
-./scripts/check_ci.sh
+./support/repoctl/repoctl test --dry-run                 # list the CI checks for this change
+./support/repoctl/repoctl test                           # run them
+./support/repoctl/repoctl test --checks-only --dry-run   # quality groups and always-on scripts
+./support/repoctl/repoctl test --checks-only             # run that shorter selection
+./support/repoctl/repoctl run-checks --group python_quality   # one CI group
 ```
+
+`--dry-run` also names groups the change would select in CI but that cannot
+run locally (they set `local_skip` in `.repoctl/checks.toml`). `--checks-only`
+leaves out test groups such as `python_tests` and `clients_tests`.
+
+For cheap per-module and patch coverage checks before push, supply the touched
+Python modules' own test files explicitly (repeat `--coverage-test` as needed):
+
+```bash
+./support/repoctl/repoctl test --coverage-only --base origin/main --coverage-test tests/entrypoints/test_launcher.py
+```
+
+This mode runs only those files with one worker, then reports coverage for
+changed source files, including uncommitted changes. It uses the same branch
+coverage configuration as CI, with separate local artifacts. Both gates reuse
+CI's `python_coverage_floor` and `patch_coverage` groups, including the patch
+comparison branch and threshold. `--dry-run` lists the commands. Missing tests
+or a source file absent from the report fail explicitly; deleted source files
+are ignored.
+Choose all relevant own test files: coverage from a subset can be lower than
+CI's combined shards, so this is a partial-suite floor check, not a prediction
+of CI's full-suite result. The local patch gate also measures only coverage
+from the selected tests. Real-tier files and native builds do not run in this
+mode. CI remains responsible for aggregate coverage and the combined result.
 
 Faster commands for iterating:
 
@@ -125,6 +173,18 @@ uv run python scripts/check_doc_links.py
 python3 -m scripts.check_doc_citations
 uv run pytest path/to/test.py
 ```
+
+`./scripts/check_types.sh` type-checks against Linux, the platform CI's Linux jobs run,
+and against macOS, which the product also runs on (the desktop app's local host). typeshed
+marks each standard-library name a platform lacks, so an API such as `os.waitid` or
+`os.pidfd_open` used directly in product code fails the macOS pass. That pass covers the
+source roots a macOS host loads (`src`, `libs/*/src`, `sdk/*/src`), not the tests. It sees
+names, not behavior: the `sandbox-macos` job runs the `sandbox_tests` group on a macOS
+runner, including the vs-sim process-wait tests, which cover behavior. A capability both
+hosts need goes behind an interface in one module that probes for it (`vs_sim.exit_wait`
+waits for a child's exit with `waitid` where `os` has it and a kqueue watch where `select`
+has it); a capability only one host has fails with a typed refusal, as `vs_sim.signals`
+does for pidfds on macOS.
 
 The test-isolation ratchet scans owned Python tests and
 `clients/**/*.test.ts`, excluding dependency, generated, build, and vendor
@@ -149,6 +209,8 @@ and the waiver becomes an error once it is no longer needed.
 | Function length | ruff `PLR0915`, max 50 statements | biome `complexity/noExcessiveLinesPerFunction`, 80 lines, blanks skipped |
 | Parameters | ruff `PLR0913`, max 5 | biome `complexity/useMaxParams`, max 6 |
 | File length | `scripts/check_file_length.py`, 2,000 lines | biome `style/noExcessiveLinesPerFile`, warn at 1,500 and fail at 2,000 production lines; fail at 10,000 test lines |
+
+Generated output directories declared in `tool.vibesys.file_length.generated` are excluded; the `proto` regenerate-and-diff check guards the generated contracts instead.
 
 Python test files are exempt from the two length rules. TypeScript test files are
 exempt from function length and use the higher file cap above. Tests are still

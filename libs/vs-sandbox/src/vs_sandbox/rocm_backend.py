@@ -36,28 +36,30 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vs_sandbox.accelerator_discovery import AcceleratorDiscovery, SystemAcceleratorDiscovery
 from vs_sandbox.compute_backends import (
     ComputeBackend,
     ContentionMonitor,
     SandboxKind,
     make_local_shell_sandbox,
 )
+from vs_sandbox.container_memory import ContainerMemoryCap
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from vs_sandbox.accelerator_discovery import AcceleratorDiscovery
     from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sim.api import Clock, PipedProcessLauncher, Threads
 
 # ROCm PyTorch image. Carries the ROCm runtime + a matching torch build.
 # Pinned rather than ``:latest`` for reproducibility and because the
 # container's ROCm must stay compatible with the host kernel driver —
 # a floating tag is the one most likely to drift past it. Override with
 # ``--docker-image`` when the host ROCm version differs.
-_DEFAULT_IMAGE = "rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0"
+DEFAULT_IMAGE = "rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0"
 
 # PyTorch wheel index matching the image's ROCm. The agent is instructed to
 # use ``uv add torch`` in a fresh venv, which is isolated from the image's
@@ -83,24 +85,36 @@ class RocmBackend:
 
     name = ComputeBackend.ROCM
 
-    def __init__(
+    # lint-waiver: LW-731407 [PLR0913]; the registry's shared construction keywords plus discovery.
+    # > Grouping them would only rename the keywords create_compute_backend passes every
+    # > registered backend; dropping clock would make the registry branch on a backend.
+    def __init__(  # noqa: PLR0913
         self,
         log_dir: Path,
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
-        accelerator_discovery: AcceleratorDiscovery | None = None,
-        docker: DockerCli | None = None,
+        accelerator_discovery: AcceleratorDiscovery,
+        docker: DockerCli,
+        threads: Threads,
+        launcher: PipedProcessLauncher,
+        clock: Clock,
+        events: object | None = None,
     ) -> None:
         """Configure ROCm execution with its log directory and image override."""
+        del clock  # nothing this backend records carries a timestamp
+        del events  # ROCm contention monitoring is not implemented yet
         self.log_dir = Path(log_dir)
         self._lprint = log or print
-        self.image = image or _DEFAULT_IMAGE
+        self.image = image or DEFAULT_IMAGE
         self._docker = docker
+        self._memory = ContainerMemoryCap(docker)
+        self._threads = threads
+        self._launcher = launcher
         # No per-device auto-selection yet; pinning is via HIP_VISIBLE_DEVICES.
         # Kept for ComputeBackendImpl parity.
         self.selected_device = None
-        discovery = accelerator_discovery or SystemAcceleratorDiscovery()
+        discovery = accelerator_discovery
         inventory = discovery.discover_rocm()
         self._devices = inventory.device_nodes
 
@@ -154,11 +168,15 @@ class RocmBackend:
                 host_workspace=host_workspace,
                 env=env,
                 lifecycle_hooks=lifecycle_hooks,
+                threads=self._threads,
+                launcher=self._launcher,
             )
 
         if kind is SandboxKind.DOCKER:
             devices = list(self._devices) if attach_accelerator else []
             return docker_sandbox(
+                # A runaway process dies inside its container, not the host.
+                memory_limit=self._memory.limit(),
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=None,  # ROCm uses --device, not --gpus
@@ -176,6 +194,7 @@ class RocmBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
                 docker=self._docker,
+                threads=self._threads,
                 docker_in_docker=docker_in_docker,
                 same_path_workspace=same_path_workspace,
                 run_id=run_id,
@@ -183,6 +202,14 @@ class RocmBackend:
 
         message = f"Unknown sandbox kind: {kind!r}"
         raise ValueError(message)
+
+    def ensure_accelerator_available(self) -> None:
+        """No-op: a missing ``/dev/kfd`` is already logged at construction, not raised.
+
+        Unlike CUDA's late ``docker run --gpus`` failure, a ROCm sandbox without
+        device nodes still starts (CPU-only); see the constructor's warning.
+        """
+        return
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Return no monitor until ROCm contention handling is available."""

@@ -22,9 +22,10 @@ from vs_runtime.api.infrastructure import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Sequence
+    from collections.abc import Callable, Iterable
 
     from vibesys.inputs import WorkspaceSource
+    from vs_project.api import Git
     from vs_runtime.api.infrastructure import RunEnvironment
     from vs_sandbox.api import ComputeBackendImpl
 
@@ -101,7 +102,7 @@ def create_project_materializer(
     environment: RunEnvironment,
     backend: ComputeBackendImpl,
     log: Callable[[str], None],
-    git_runner: Callable[[Sequence[str], Path], str] | None = None,
+    git: Git,
 ) -> ProjectMaterializer:
     """Compose the runtime mechanism with VibeSys-owned environment effects."""
     return ProjectMaterializer(
@@ -117,7 +118,7 @@ def create_project_materializer(
             ),
         ),
         excluded_dirs=EXCLUDED_WORKSPACE_DIRS,
-        git_runner=git_runner,
+        git=git,
     )
 
 

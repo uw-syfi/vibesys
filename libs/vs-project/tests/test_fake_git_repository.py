@@ -11,8 +11,9 @@ from pathlib import Path
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.real_git import REAL_GIT
 
-from vs_project.api import GitCommandError, NullGitTrackerEvents, run_git
+from vs_project.api import GitCommandError, NullGitTrackerEvents
 from vs_project.api.testing import FakeGitRepositories, RepositoryCensus
 from vs_sim.api.testing import examples
 
@@ -121,7 +122,7 @@ def test_tree_ids_are_the_ids_real_git_computes(files: dict[str, bytes]) -> None
         fake.stage_all(["."])
         fake.commit("tree")
         for args in (["init", "-q", "-b", "main"], ["add", "-A"]):
-            assert run_git(args, cwd=theirs).returncode == 0
-        written = run_git(["write-tree"], cwd=theirs).stdout.decode().strip()
+            assert REAL_GIT.run(args, cwd=theirs).returncode == 0
+        written = REAL_GIT.run(["write-tree"], cwd=theirs).stdout.decode().strip()
 
         assert fake.tree_of("HEAD") == written

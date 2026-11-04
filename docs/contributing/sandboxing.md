@@ -13,7 +13,8 @@ whichever is wrong in the same PR.
 | command runner | A handle that executes one shell command and returns a bounded result. It isolates nothing. | `CommandRunner`, `CommandResult`, `LocalShellRunner`, `DockerSandbox.execute` in `vs_sandbox` |
 | agent confinement | Restricting the agent CLI process: which paths it can read and write, and which it cannot see. "Sandbox" is reserved for this. | `WorkspaceSandbox` and `HostSandbox`, `LandlockSandbox`, `SeatbeltSandbox`, `DockerSandbox.wrap` |
 | candidate isolation | Per-workstream evaluation isolation: each candidate is evaluated in its own worktree or workspace so candidates cannot affect each other's results. | `_project_run.py`, `_trusted_evaluation.py` in `vs_runtime` |
-| trust boundary | The protections that keep the evaluator and its inputs out of the candidate's reach: read-only and hidden project paths, plus the accuracy gate that diffs protected paths against a trusted baseline. | `ProjectPathPolicy` |
+| trust boundary | The protections that keep the evaluator, its inputs and the run's own state out of the agent's reach: read-only and hidden project paths, plus the accuracy gate that diffs protected paths against a trusted baseline. | `ProjectPathPolicy` |
+| candidate build | A task's `[build]`: candidate code the framework runs before the trusted check and measure, confined like the agent, in a fresh checkout of the measured commit. Its declared outputs are verified and recorded outside every workspace. | `TrustedBuild`, `RuntimeWorkspaceEvaluation.build`, `_build_outputs.py` in `vs_runtime` |
 
 A class name containing "Sandbox" must be a confinement type;
 `tests/architecture/test_sandbox_naming.py` enforces it.
@@ -64,7 +65,13 @@ Never rely on a provider flag for isolation. See
    builder also uses `attach_accelerator=False`.
 3. **Project path policy.** `ProjectPathPolicy` lists read-only and hidden
    workspace-relative paths. It is validated once, then lowered by each
-   confinement backend.
+   confinement backend. `build_project_path_policy` (`src/vibesys/run/project_policy.py`)
+   builds it; the framework state's part comes from `Project.state.sandbox_paths()`,
+   which owns the layout. Every hidden path must exist in the workspace it is applied
+   to, so `open_run_environment` first prepares the hidden state directories in a
+   linked candidate worktree (`prepare_hidden_directories`) and creates an empty
+   file for any other hidden path that worktree did not check out (`agent.toml`
+   and root `.env*`). The placeholder is empty; the operator's file is not copied.
 4. **Agent session.** `AgentExecutionPolicy` carries the policy,
    `host_resources`, and `require_enforcement` into the session launcher. Run
    entrypoints set `require_enforcement = not use_docker`: a host (Metal) run
@@ -101,6 +108,47 @@ allowlist (`session_env_allowlist`).
 | Host-only backend (Metal), macOS | `SeatbeltSandbox` | enforced | enforced |
 | `--run-environment slurm-gpu` (deprecated alias of `slurm` with `[vibesys.agent_gpu]`) | as `slurm` with `[vibesys.agent_gpu]` | enforced in the container; per host for jobs | enforced in the container; per host for jobs |
 
+### Run state is part of the trust boundary
+
+Run state is the framework's, not the agent's. Below `.vibesys/state/`:
+
+| Path | Agent confinement | Why |
+| --- | --- | --- |
+| `runs/` | hidden | The run's record: the core store (every role's turns, the judge's reviews, trusted measurements, controls and the adoption record), publications, artifacts, the roadmap and the objective document. Reading it breaks the barriers between roles and the trust boundary around evaluation; writing it could poison a resume. |
+| `local/` | hidden | Machine-local state: credentials, caches and candidate worktrees. |
+| `agent-visible/` | read-only (part of `.vibesys`) | Documents the framework writes for an agent to read by path. Today only the dynamic planner's handoff notes (`agent-visible/<run-id>/orchestrator-handoff/calls/`). |
+| `project.json`, `.gitignore` | read-only | The project's identity and a fixed ignore contract; neither names a run. |
+
+Everything an agent needs of the run reaches it through typed operations and prompts
+(the roadmap, evidence, the history in the prompt), never through a path into `runs/`.
+A role whose prompt names a path puts that document in `agent-visible/`, opened
+through `Project.state.agent_visible_namespace`. The host environment gives the agent a
+copy of the effective objective beside the run's logs, as a container gets it as a
+mount, because the committed document lives in `runs/`.
+
+A tool that must read run state therefore runs on the host, and the agent's container only
+forwards to it. The run Chat agent's `vibesys-run` tools are the example: `launch.agents` serves
+them with `vs_evaluation`'s `ToolRelayService` on a unix socket in the run's private socket
+directory (the one directory every agent container mounts, beside the evaluation and queue
+status sockets), and the agent's tool server (`vs_evaluation.tool_relay_mcp`) imports only the
+container interpreter's packages and relays each call. The relay's token is issued to that one
+conversation, so another agent of the run, which shares the directory, is refused. Before the
+conversation's first turn in a container, `vs_runtime` runs the server's `--check` there (the
+same interpreter and import roots) and reports a server that cannot start as an error tool
+result naming it and the cause, which the client shows in the Chat panel.
+
+`ProjectSandboxPaths.hidden_paths` is the set the policy hides, so adding a hidden state
+directory is one entry there. The framework's own reads and writes of run state, the
+isolation check (`GitTracker`), state commits and resume run outside the confinement and
+see the real directories. Inside it, `git status` lists the hidden record as deleted:
+the framework, not the agent, commits it.
+
+A run that began before the handoff files moved kept them in `runs/`. On first use, the
+handoff owner copies them to `agent-visible/`, so a resumed run lists them where its planner
+can read them. For the first planning call after such a resume, the prompt still cites the
+earlier paths (the run's record stores them), which the agent cannot read; the call's own
+handoff then lists the new ones.
+
 Reads are not uniformly hidden. Bubblewrap and Landlock deny all reads outside
 the project and declared resources. Seatbelt allows broad reads and denies the
 project's ancestor trees and all writes outside the project; use the default Docker run environment on
@@ -131,12 +179,53 @@ macOS when full read confinement matters.
   unenforced tier is logged at startup. Evaluator-input integrity is detected
   rather than prevented: the accuracy gate diffs protected paths against a
   trusted baseline and fails the round. Credentials in the project directory
-  (`agent.toml`, `.env*`, `.vibesys/state/local`) stay readable. A project under
+  (`agent.toml`, `.env*`, `.vibesys/state/local`) and the run's record
+  (`.vibesys/state/runs`) stay readable and writable: the unenforced hidden tier lists
+  both at startup. The operator's control inbox (`vibesys control`) is machine-local
+  state outside the project, so the project's write grant does not reach it. A project under
   a tree Landlock must grant, such as `/tmp`, is refused.
+- **Control targets are predictable.** Role ids are the session role ids in a run's events
+  (for example `dynamic-judge`), and attempt and item ids appear in the run's events too, so
+  whoever can submit a control can aim it at one role, attempt or item. A steer is guidance
+  only. The operator actions `cancel_attempt` and `cancel_item` do change selection: a
+  cancelled attempt is never judged, so it cannot win. `set_max_parallel` only lowers how
+  much runs at once. No control field carries a measurement command, a checker or a trust
+  rule. The machine-local inbox is outside the project's write grant; the run reads it
+  through `vs_project.api.ControlInbox`. See [Run recovery](run-recovery.md) for control
+  delivery and replay.
+- **Operator runtime root.** The confinement library still protects the per-user runtime
+  root (`vs_project.api.user_runtime_root`: `$XDG_RUNTIME_DIR/vibesys`, else
+  `/tmp/vibesys-<uid>`). Bubblewrap, Landlock and Docker refuse a grant or mount that
+  contains the root or lies inside it, checked each time a view is compiled. Seatbelt
+  denies the root after every allow. `libs/vs-sandbox/tests/test_operator_root.py` covers
+  these checks and the backends' declared boundaries without a real confinement.
+  Landlock grants `/tmp`, so it needs `XDG_RUNTIME_DIR` outside that grant or refuses to
+  start.
+
+  Runtime-root protection does not isolate the host network. Landlock does not restrict
+  connections to pathname Unix sockets; Seatbelt allows `network*`. Bubblewrap hides
+  pathname sockets but shares the host network namespace, so abstract Unix sockets and
+  services on host loopback remain reachable. Docker has a separate network namespace.
+  A reachable user bus or Docker daemon can let an agent run unconfined commands. Use
+  the Docker run environment where such a listener may exist and the host must be
+  protected. Runtime-root protection alone does not authenticate daemon connections.
 - **Seatbelt** reads are broader than bubblewrap (above).
 - **Hidden-path design.** The planning issue for prebuilt agent images (#674,
   closed) proposed "no explicit hidden access: deny what is not listed". The
   implementation kept project-level hidden paths and lowers them to mask mounts
   in containers, as described above. This page and
   [CLI flags](../cli-flags.md#runtime-environment) describe the implementation.
+- **Candidate builds run under agent confinement, not as trusted commands.**
+  The build stage executes the task's `[build]` argv through the candidate
+  checkout's agent confinement (`WorkspaceResource.agent_sandbox()`; the
+  candidate's `DockerSandbox` in the Docker run environment), never through the
+  trusted command runner, so it gets the read-only and hidden project paths and
+  none of the trusted evaluator environment (the prepared Go module cache and
+  its offline policy). It fails closed where the run environment has no such
+  confinement (the host environment) and does not run on the Slurm executor yet
+  (#2968). Evaluator-owned files are checked before and after the build, as for
+  the check. The outputs it produces are candidate bytes: the runtime only
+  guarantees that check and measure load exactly what the measured commit's
+  build produced (verified by path, regular-file type and digest), which the
+  candidate controls anyway, since the evaluator loads candidate code.
 - **Network** is open in every mode so the agent can reach its model provider.

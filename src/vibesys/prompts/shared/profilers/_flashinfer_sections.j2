@@ -1,0 +1,29 @@
+{#- FlashInfer timeline capture and analysis guidance; `prefix` is the timeline tools' name prefix. -#}
+{% macro timeline_capture_and_analysis(prefix='') -%}
+## What this profiler sees
+
+A kernel instrumented with FlashInfer's profiler macros (`include/flashinfer/profiler.cuh`: `PROFILER_INIT`, `PROFILER_EVENT_START`, `PROFILER_EVENT_END`, `PROFILER_EVENT_INSTANT`) writes a begin and an end timestamp per thread block (and per warp group) for each named phase into a `uint64` buffer. The macros compile to nothing unless `FLASHINFER_ENABLE_PROFILER` is defined, so the scored build carries no cost. The timeline answers what kernel-level counters cannot: which phase of a persistent or multi-phase kernel takes the time, how far blocks drift apart, which block every grid-wide dependency waits for, and whether that block changes from one occurrence to the next.
+
+## Collect one timeline
+
+Read the task's run and correctness contract first. Look in the candidate for profiler probes: the macros above, or code that writes the same buffer layout. Then run the capture through your shell in the candidate's execution environment. The `{{ profiler_mcp_name }}` server only reads saved timelines; it does not execute candidate code.
+
+1. Build a profiling copy of the candidate outside the workspace, in the writable profile artifact directory supplied by this run, with `FLASHINFER_ENABLE_PROFILER` defined. Do not edit candidate source.
+2. Allocate a zeroed `torch.uint64` buffer of `1 + num_blocks * num_groups * events_per_writer` words, where `events_per_writer` counts the begin and end records one block or group writes, and pass it to the launch the way the candidate's profiling path expects.
+3. Warm the kernel, then run one representative scored input once. Save the buffer raw with `buffer.cpu().numpy().tofile("<profile-output-dir>/timeline.u64")`, and write down the event names in the order of their indices in the kernel.
+
+If the candidate has no probes, report that as an observability gap, name the phase boundaries where probes would separate the cost (each grid-wide synchronization, each weight or KV load, each reduction), and stop. If the task already writes a Chrome trace-event `.json` per block, analyze that file instead.
+
+## Analyze the timeline
+
+Call `{{ profiler_mcp_name }}` tools as needed:
+
+- `{{ prefix }}capabilities` for accepted inputs and limits.
+- `{{ prefix }}summary(path, event_names, track_filter, top)` for the cost of each phase over all blocks.
+- `{{ prefix }}tracks(path, event_names, track_filter, top)` for per-block busy and idle time; the latest-finishing blocks come first.
+- `{{ prefix }}event_skew(path, event, event_names, track_filter, top)` for one phase aligned across blocks: its wall time from first begin to last end, the spread of begins, the slowest and mean block duration, and the tally of blocks that finished last.
+- `{{ prefix }}track_window(path, track, start_us, end_us, event_names)` for one block's sequence of phases.
+- `{{ prefix }}export_chrome_trace(path, output, event_names)` to leave a `.json` a reviewer can open in `ui.perfetto.dev`.
+
+Read the columns together. A slowest block well above the mean is load imbalance across blocks; wall time well above the slowest block is start skew or a slow release after a synchronization; idle time on early blocks is waiting. One block that is persistently last points at its share of the work; a last block that moves around points at contention or synchronization cost instead. Report the phase and the blocks behind your finding with their numbers.
+{%- endmacro %}

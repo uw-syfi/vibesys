@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -76,7 +77,10 @@ def test_authored_models_win_and_are_mounted_read_only(tmp_path: Path) -> None:
     draft_model.mkdir()
     (reference / "meta.json").write_text(json.dumps({"model_id": "org/remote-model"}))
     runtime_artifacts = tmp_path / "runtime-artifacts"
-    (runtime_artifacts / "model").mkdir(parents=True)
+    runtime_artifacts.mkdir()
+    stale = tmp_path / "stale-download"
+    stale.mkdir()
+    (runtime_artifacts / "model").symlink_to(stale)
     fake = _FakeModelDownloader(tmp_path / "downloads")
 
     prepared = prepare_model_artifacts(
@@ -94,10 +98,73 @@ def test_authored_models_win_and_are_mounted_read_only(tmp_path: Path) -> None:
     assert prepared == PreparedModelArtifacts(
         copy_excludes=frozenset({"model", "draft_model"}),
         bind_mounts=(
-            EnvironmentBindMount(model, "/model", read_only=True),
-            EnvironmentBindMount(draft_model, "/draft_model", read_only=True),
+            EnvironmentBindMount(runtime_artifacts / "model", "/model", read_only=True),
+            EnvironmentBindMount(runtime_artifacts / "draft_model", "/draft_model", read_only=True),
         ),
     )
+    assert [mount.host_path.resolve() for mount in prepared.bind_mounts] == [
+        model.resolve(),
+        draft_model.resolve(),
+    ]
+
+
+@pytest.mark.parametrize("isolated", [False, True])
+@pytest.mark.parametrize("names", [("model",), ("model", "draft_model")])
+@pytest.mark.parametrize("with_metadata", [False, True])
+def test_a_later_launch_without_the_authored_reference_mounts_what_the_first_recorded(
+    tmp_path: Path,
+    *,
+    isolated: bool,
+    names: tuple[str, ...],
+    with_metadata: bool,
+) -> None:
+    # A resumed run's project copy has no external weights (a marker or nothing
+    # in their place); the run's model record keeps the mounts identical.
+    authored = tmp_path / "authored"
+    authored.mkdir()
+    copied = tmp_path / "copied"
+    copied.mkdir()
+    for reference in (authored, copied):
+        if with_metadata:
+            (reference / "meta.json").write_text(json.dumps({"model_id": "org/model"}))
+    for name in names:
+        weights = tmp_path / f"{name}-weights"
+        weights.mkdir()
+        (authored / name).symlink_to(weights)
+    runtime_artifacts = tmp_path / "runtime-artifacts"
+    fake = _FakeModelDownloader(tmp_path / "downloads")
+
+    def launch(reference: Path) -> PreparedModelArtifacts:
+        return prepare_model_artifacts(
+            _request(tmp_path, reference, runtime_artifact_dir=runtime_artifacts),
+            isolated=isolated,
+            materialize_local_weights=True,
+            downloader=fake,
+        )
+
+    fresh = launch(authored)
+    resumed = launch(copied)
+
+    assert fake.downloads == []
+    assert resumed == fresh
+    assert [mount.host_path.resolve() for mount in resumed.bind_mounts] == [
+        (tmp_path / f"{name}-weights").resolve() for name in names
+    ]
+
+
+def test_a_directory_in_the_run_model_record_is_refused_not_replaced(tmp_path: Path) -> None:
+    reference = tmp_path / "reference"
+    (reference / "model").mkdir(parents=True)
+    runtime_artifacts = tmp_path / "runtime-artifacts"
+    (runtime_artifacts / "model").mkdir(parents=True)
+
+    with pytest.raises(FileExistsError, match="holds files, not a link"):
+        prepare_model_artifacts(
+            _request(tmp_path, reference, runtime_artifact_dir=runtime_artifacts),
+            isolated=True,
+            materialize_local_weights=True,
+        )
+    assert (runtime_artifacts / "model").is_dir()
 
 
 def test_nonisolated_runs_keep_model_artifacts_in_workspace_copy(tmp_path: Path) -> None:
@@ -273,6 +340,25 @@ def test_model_metadata_must_be_a_json_object(tmp_path: Path) -> None:
     (reference / "meta.json").write_text(json.dumps([{"model_id": "org/model"}]))
 
     with pytest.raises(TypeError, match="must contain a JSON object"):
+        prepare_model_artifacts(
+            _request(tmp_path, reference),
+            isolated=True,
+            materialize_local_weights=True,
+            downloader=_FakeModelDownloader(tmp_path / "downloads"),
+        )
+
+
+@pytest.mark.parametrize("kind", ["fifo", "oversized"])
+def test_model_metadata_that_cannot_be_read_whole_is_refused(tmp_path: Path, kind: str) -> None:
+    # A FIFO blocks a plain read until a writer appears; a huge file would be read whole.
+    reference = tmp_path / "reference"
+    reference.mkdir()
+    if kind == "fifo":
+        os.mkfifo(reference / "meta.json")
+    else:
+        (reference / "meta.json").write_text(json.dumps({"model_id": "m" * 2 * 1024 * 1024}))
+
+    with pytest.raises(ValueError, match=r"meta\.json"):
         prepare_model_artifacts(
             _request(tmp_path, reference),
             isolated=True,

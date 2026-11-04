@@ -13,8 +13,10 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentView,
     open_run_environment_resources,
 )
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,7 +40,7 @@ class _Monitor:
 
 class _Backend(FakeComputeBackend):
     def __init__(self, monitor: _Monitor) -> None:
-        super().__init__()
+        super().__init__(threads=SimThreads())
         self.monitor = monitor
         self._monitor = monitor
         self.reselection_count = 0
@@ -57,6 +59,10 @@ class _Session:
     view: RunEnvironmentView
     events: list[str]
     close_error: BaseException | None = None
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         self.events.append("session:enter")
@@ -83,13 +89,15 @@ def _request(tmp_path: Path, backend: _Backend) -> RunEnvironmentRequest:
         run_id="run-1",
         framework_root=tmp_path,
         project_path_policy=ProjectPathPolicy(),
+        clock=ManualClock(),
+        system=idle_environment_system(),
     )
 
 
 def _session(events: list[str]) -> _Session:
     return _Session(
         FakeCommandRunner(),
-        RunEnvironmentView(paths=AgentPaths()),
+        RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True),
         events,
     )
 
@@ -100,7 +108,7 @@ def test_root_resources_close_device_before_session_and_reselect(tmp_path: Path)
     session = _session(events)
 
     resources = open_run_environment_resources(
-        _request(tmp_path, backend), lambda _request: session
+        _request(tmp_path, backend), lambda _request: session, clock=ManualClock()
     )
     resources.reselect_device()
     resources.close()
@@ -114,8 +122,7 @@ def test_workspace_resources_borrow_device_without_closing_it(tmp_path: Path) ->
     events: list[str] = []
     backend = _Backend(_Monitor(events))
     root = open_run_environment_resources(
-        _request(tmp_path, backend),
-        lambda _request: _session(events),
+        _request(tmp_path, backend), lambda _request: _session(events), clock=ManualClock()
     )
     workspace_request = _request(tmp_path, backend)
     workspace = root.open_workspace(workspace_request)
@@ -139,8 +146,7 @@ def test_monitor_start_failure_preserves_error_and_closes_session(tmp_path: Path
 
     with pytest.raises(RuntimeError, match="monitor failed") as raised:
         open_run_environment_resources(
-            _request(tmp_path, backend),
-            lambda _request: session,
+            _request(tmp_path, backend), lambda _request: session, clock=ManualClock()
         )
 
     assert raised.value is failure

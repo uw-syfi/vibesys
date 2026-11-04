@@ -17,6 +17,7 @@ from vibesys.orchestration.single.models import SingleAgentRoundResponse
 from vibesys.orchestration.single.search._attempt import Next, SingleAttempt
 from vibesys.orchestration.single.search._config import SingleConfig
 from vibesys.orchestration.single.search._roles import IMPLEMENTER
+from vibesys.search_spans.api import turn_label
 from vibesys.serial_search import api as serial
 from vibesys.serial_search.api import RoundDone, RoundStart
 from vs_core.api.search import (
@@ -63,7 +64,12 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
         case Finished():
             return RoundDone(number=start.number, ledger=start.ledger, counted=False)
         case Continue(hypothesis=hypothesis):
-            plan, base, feedback = hypothesis.plan, start.base, hypothesis.feedback
+            plan, feedback = hypothesis.plan, hypothesis.feedback
+            base = serial.continued_base(
+                start, hypothesis.parent_commit, input_revision=ctx.facts.baseline
+            )
+            # an earlier round's orchestrator designed it; this round's flow cannot name it
+            planned_by: tuple[str, ...] = ()
         case NewHypothesis():
             designed = await serial.design(
                 ctx, start, hypotheses=config.hypotheses, attribution=config.attribution
@@ -81,6 +87,7 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
                 designed.base,
                 None,
             )
+            planned_by = (designed.planned_by,)
             ctx.publish(ledger.search)
     attempt = SingleAttempt(
         config=config,
@@ -92,7 +99,7 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
         ledger=ledger,
         feedback=feedback,
     )
-    settlement = await work(ctx, attempt)
+    settlement = await work(ctx, start, attempt, planned_by)
     closed = attempt.close(settlement)
     ctx.publish(closed.search)
     return serial.round_done(
@@ -100,13 +107,20 @@ async def _play(ctx: Flow, start: SingleRound) -> RoundDone:
         closed,
         hypothesis_id=plan.hypothesis_id,
         settlement=settlement,
+        passed=serial.round_passed(settlement, attempt),
         metrics=attempt.benchmark_metrics(),
         last_profile=attempt.last_profile(),
+        measurement_noise=attempt.measurement_noise,
     )
 
 
-async def work(ctx: Flow, attempt: SingleAttempt) -> Settlement | None:
-    """Open the round's workspace, let the implementer work in it, settle it; core's settlement."""
+async def work(
+    ctx: Flow, start: RoundStart, attempt: SingleAttempt, planned_by: tuple[str, ...] = ()
+) -> Settlement | None:
+    """Open the round's workspace, let the implementer work in it, settle it; core's settlement.
+
+    ``planned_by`` names the orchestrator whose plan the implementer works on.
+    """
 
     async def turn(session: Session, ws: Workspace) -> str | None:
         step = await take_turn(ctx, attempt, session, ws)
@@ -116,11 +130,13 @@ async def work(ctx: Flow, attempt: SingleAttempt) -> Settlement | None:
 
     return await serial.work(
         ctx,
+        start,
         attempt,
-        implementer=IMPLEMENTER,
         room=serial.Room(
+            implementer=IMPLEMENTER,
             mode=workspace_mode_for(isolated_candidates=not attempt.config.exclusive_root),
             paid_turns=attempt.config.max_retries_per_round,
+            started_by=planned_by,
         ),
         turn=turn,
     )
@@ -130,7 +146,7 @@ async def take_turn(ctx: Flow, attempt: SingleAttempt, session: Session, ws: Wor
     """One paid turn: the reply judged, and the trusted gates when it passes and they are due."""
     prompt = attempt.prompt()
     attempt.turns += 1
-    match await session.turn(prompt):
+    match await session.turn(prompt, label=turn_label(session)):
         case TurnFinished(reply=SingleAgentRoundResponse() as reply, checkpoint=checkpoint):
             if isinstance(checkpoint, Declined):
                 return attempt.failed(
@@ -139,7 +155,9 @@ async def take_turn(ctx: Flow, attempt: SingleAttempt, session: Session, ws: Wor
             step = attempt.replied(reply, getattr(checkpoint, "revision", None))
             candidate = attempt.candidate
             if step is Next.GATES and candidate is not None:
-                return attempt.gated(await serial.measure_gates(ctx, ws, candidate))
+                return attempt.gated(
+                    await serial.measure_gates(ctx, ws, candidate, attempt.baseline)
+                )
             return step
         case (
             Failed(

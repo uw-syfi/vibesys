@@ -7,6 +7,7 @@ role is given.
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -23,19 +24,21 @@ from vs_runtime.api.core import (
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
     AgentEvaluationRecords,
+    KeyedDocuments,
     OwedSubmissions,
-    ReceiptStore,
     ScopeWorkspaces,
     StoreWorkspaceReceipts,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
+from vs_sim.api import OsThreads, UnixNetwork
+from vs_sim.api.testing import ManualClock, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from vs_runtime.api import AgentRole
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
 
 
-def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
+def _bridge(tmp_path: Path, socket: Path | None = None) -> AgentEvaluationBridge:
     root = tmp_path / "project"
     write_project(root)
     namespace = Project.open(root).state.state_store_namespace("offer")
@@ -50,13 +53,17 @@ def _bridge(tmp_path: Path) -> AgentEvaluationBridge:
         accuracy_gated=(),
     )
     return AgentEvaluationBridge(
-        tmp_path / "evaluation.sock",
+        socket or tmp_path / "evaluation.sock",
         policy,
         ScopeWorkspaces(
             cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))),
-            StoreWorkspaceReceipts(ReceiptStore(namespace)),
+            StoreWorkspaceReceipts(KeyedDocuments(namespace, threads=OsThreads())),
         ),
-        AgentEvaluationRecords(OwedSubmissions(ReceiptStore(namespace)), SynthesizedEvidence()),
+        AgentEvaluationRecords(
+            OwedSubmissions(KeyedDocuments(namespace, threads=OsThreads())), SynthesizedEvidence()
+        ),
+        network=UnixNetwork(),
+        threads=OsThreads(),
     )
 
 
@@ -74,6 +81,29 @@ def test_a_dynamic_role_is_offered_the_evaluation_tool_exactly_when_it_measures(
         (descriptor,) = servers
         env = dict(descriptor.runtime_env)
         tools = build_core_evaluation_tools(
-            socket_path=tmp_path / "evaluation.sock", token=env["VS_EVALUATION_TOKEN"]
+            socket_path=tmp_path / "evaluation.sock",
+            token=env["VS_EVALUATION_TOKEN"],
+            network=SimNetwork(SimThreads()),
+            clock=ManualClock(),
         )
         assert {tool.name for tool in tools} == {SUBMIT_TOOL, VALIDATE_WAIT_TOOL}
+
+
+async def test_the_bridge_never_creates_its_sockets_directory(tmp_path: Path) -> None:
+    """Serving refuses a missing directory instead of creating one where the socket is.
+
+    ``serve`` once ran ``mkdir(parents=True, exist_ok=True)``, which also accepts a
+    directory or symlink another user planted at the shared temporary path, and
+    then served inside it. The directory is the caller's to create, through
+    ``prepare_evaluation_socket``'s ownership and mode check.
+    """
+    # A unix socket path is limited (104 bytes on macOS, where pytest's tmp_path is longer), and
+    # bind reports a path over the limit before it reports a missing directory. The system
+    # temporary directory is short on every platform.
+    with tempfile.TemporaryDirectory() as short:
+        missing = Path(short) / "absent"
+        bridge = _bridge(tmp_path, missing / "evaluation.sock")
+
+        with pytest.raises(FileNotFoundError):
+            await bridge.serve()
+        assert not missing.exists()

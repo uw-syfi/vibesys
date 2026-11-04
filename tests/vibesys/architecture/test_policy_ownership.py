@@ -18,7 +18,7 @@ _SKILL_POLICY = {
     "resolve_skill_source_paths",
 }
 _SKILL_ADAPTERS = {"resolve_skill_source_dirs", "validate_skill_tree"}
-_PROFILER_ADAPTERS = {"native_profiler_preflight", "resolve_run_profiler"}
+_PROFILER_ADAPTERS = {"NativeProfilerPreflight", "resolve_run_profiler"}
 
 
 def _top_level_definitions(path: Path) -> set[str]:

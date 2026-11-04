@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.real_git import real_git_tracker
 
 from vibesys.run.project_policy import trusted_project_input_paths
 from vs_project.api import (
@@ -43,7 +45,7 @@ def _git(root: Path, *args: str, check: bool = True) -> str:
 
 
 def _tracker(root: Path, run_id: str = "test-run") -> GitTracker:
-    return GitTracker(
+    return real_git_tracker(
         root,
         run_id=run_id,
         events=NullGitTrackerEvents(),
@@ -60,7 +62,7 @@ def _initialized_tracker(root: Path, run_id: str = "test-run") -> GitTracker:
 
 def _project(root: Path, tracker: GitTracker, run_id: str = "test-run") -> Project:
     project = Project.open(root)
-    project.state.create_project("Git tracker test")
+    project.state.create_project("Git tracker test", now=datetime(2026, 1, 1, tzinfo=UTC))
     assert tracker.project_branch is not None
     assert tracker.trusted_input_baseline is not None
     project.state.create_run(
@@ -73,6 +75,7 @@ def _project(root: Path, tracker: GitTracker, run_id: str = "test-run") -> Proje
             run_environment=RunEnvironmentRecord(name="docker"),
             execution=run_execution_record(),
             orchestration=OrchestrationDescriptor(id="plain", config_version=1, options={}),
+            now=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
     tracker.snapshot_with_framework_metadata(
@@ -179,7 +182,8 @@ def test_resume_selects_existing_run_branch_and_baseline(tmp_path: Path) -> None
     resumed = _tracker(tmp_path)
     resumed.init(existing=True, trusted_input_baseline=baseline)
 
-    assert _git(tmp_path, "branch", "--show-current") == "vibesys-runs/test-run"
+    assert _git(tmp_path, "branch", "--show-current") == "main"
+    assert resumed.project_branch == "vibesys-runs/test-run"
     assert resumed.current_sha() == expected
     assert resumed.trusted_input_baseline == baseline
 
@@ -490,7 +494,7 @@ def test_repository_tasks_are_trusted_but_generated_state_is_not(tmp_path: Path)
     objective.write_text("original\n", encoding="utf-8")
     (task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
     (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
-    tracker = GitTracker(
+    tracker = real_git_tracker(
         tmp_path,
         run_id="repository-task",
         events=NullGitTrackerEvents(),
@@ -576,7 +580,7 @@ class _RecordingEvents(NullGitTrackerEvents):
 def _recording_tracker(root: Path) -> tuple[GitTracker, _RecordingEvents]:
     (root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     events = _RecordingEvents()
-    tracker = GitTracker(root, run_id="test-run", events=events, excluded_dirs=())
+    tracker = real_git_tracker(root, run_id="test-run", events=events, excluded_dirs=())
     tracker.init(existing=False)
     return tracker, events
 

@@ -13,6 +13,12 @@ from ._proofs import (
     invocation_for,
     request_matches,
 )
+from ._session_inputs import standing_guidance
+from ._session_rows import awaiting as _awaiting
+from ._session_rows import invocation_row as _invocation
+from ._session_rows import replace_invocation as _replace_invocation
+from ._session_rows import replace_session as _replace_session
+from ._session_rows import session_row as _session
 from ._session_scope import (
     attempt_for,
     encode_identity,
@@ -23,13 +29,10 @@ from ._session_state import (
     _current_invocation,
     _ensure,
     _episode,
-    _invocation,
     _record,
-    _replace_invocation,
-    _replace_session,
     _run_reusable,
-    _session,
 )
+from ._turn_holds import lost_without_debit
 from ._turn_outcomes import (
     acceptance_unresolved,
     is_terminal,
@@ -57,7 +60,7 @@ from .types.kernel import AreaChange
 from .types.records import (
     ExecuteRegisteredOperation,
     Outbound,
-    RequestPhase,
+    phase_open,
 )
 from .types.sessions import (
     Access,
@@ -75,11 +78,12 @@ from .types.sessions import (
 )
 from .types.strategy import Accepted, Operation, Rejected, RequestTurn
 from .types.until import FromDispatch, Until
+from .types.waits import WaitKind, WaitOn, WaitSubject
 
 if TYPE_CHECKING:
     from .types.evaluation_history import EvaluationHistoryCursor
     from .types.kernel import SessionsContext, Signal
-    from .types.records import Request
+    from .types.records import RecordsState, Request
     from .types.sessions import TurnSpec
 
 
@@ -165,6 +169,7 @@ def _validate_resume(
 
 def _validate_correction(
     state: SessionsState,
+    records: RecordsState,
     predecessor: Invocation | None,
     turn: TurnSpec,
     scope: Scope,
@@ -180,13 +185,16 @@ def _validate_correction(
         raise ContractValidationError(
             "turn.predecessor", "correction requires a terminal predecessor"
         )
+    # A re-ask after a turn lost to its provider is no link: the gate bounds an outage.
     chain = predecessor
-    depth = 1
+    links = 1
+    depth = 0 if lost_without_debit(records, predecessor) else 1
     while chain.turn.charge_class == "correction":
-        depth += 1
+        links += 1
         previous = _invocation(state, chain.turn.predecessor) if chain.turn.predecessor else None
-        if previous is None or depth > len(state.invocations):
+        if previous is None or links > len(state.invocations):
             raise ContractValidationError("turn.predecessor", "invalid correction chain")
+        depth += 0 if lost_without_debit(records, previous) else 1
         chain = previous
     if depth > MAX_REASK_CHAIN:
         raise ContractValidationError("turn.predecessor", "correction retry bound exhausted")
@@ -236,7 +244,7 @@ def _validate_successor(
     if turn.continuation_id is not None:
         raise ContractValidationError("turn.continuation_id", "only resume may name a continuation")
     if turn.charge_class == "correction":
-        _validate_correction(state, predecessor, turn, scope)
+        _validate_correction(state, context.records, predecessor, turn, scope)
     elif turn.predecessor is not None:
         if (
             predecessor is None
@@ -429,10 +437,7 @@ def _turn_requested(
         return AreaChange(state=state)
     if isinstance(event, RegisteredTurnRequested):
         canonical = _record(context, event.request.request_id)
-        if canonical is not None and canonical.phase in (
-            RequestPhase.COMPLETED,
-            RequestPhase.BLOCKED,
-        ):
+        if canonical is not None and not phase_open(canonical.phase):
             raise ContractValidationError(
                 "registered_operation", "canonical turn record is already final"
             )
@@ -454,6 +459,11 @@ def _turn_requested(
         evaluation_prefix=_evaluation_prefix(state, context, scope, turn),
         until=event.until,
         limit=from_dispatch(context.run, event.until).limit,
+        # The session's acquisition, or its reservation and dispatch once it holds the
+        # lease, carries the turn on; an idle session already holding it does so this step.
+        wait=WaitOn(
+            subjects=(WaitSubject(kind=WaitKind.SESSION, identity=turn.session.session_id.root),)
+        ),
     )
     state = _replace_invocation(state, invocation)
     signals: list[Signal] = []
@@ -476,7 +486,9 @@ def _turn_requested(
             invocation=turn.invocation_id,
         )
         ensure = _ensure(session, context)
-        session = session.model_copy(update={"pending_records": (ensure.request_id,)})
+        session = _awaiting(
+            session.model_copy(update={"pending_records": (ensure.request_id,)}), context, ensure
+        )
         requests = (Outbound(request=ensure, until=_from_dispatch(invocation)),)
     else:
         session = session.model_copy(
@@ -546,7 +558,7 @@ def _registered_dispatch(context: SessionsContext, invocation: Invocation) -> Re
     if (
         record is None
         or not isinstance(record.request, ExecuteRegisteredOperation)
-        or record.phase in (RequestPhase.COMPLETED, RequestPhase.BLOCKED)
+        or not phase_open(record.phase)
     ):
         raise ContractValidationError(
             "registered_operation", "missing unfinished canonical registered request"
@@ -592,6 +604,7 @@ def _dispatch_reserved(
             "input_ids", "manifest differs from exact reserved occurrences"
         )
     inputs = tuple(row.input for row in records)
+    guidance = standing_guidance(state, context, invocation)
     request: Request
     if invocation.registered_operation is not None:
         request = _registered_dispatch(context, invocation)
@@ -615,6 +628,7 @@ def _dispatch_reserved(
             admission_id=_episode(context, invocation.scope),
             turn=invocation.turn,
             inputs=inputs,
+            guidance=guidance,
             continuation_id=invocation.turn.continuation_id,
             publication=_publication(context, invocation.turn.continuation_id),
         )
@@ -625,20 +639,26 @@ def _dispatch_reserved(
             admission_id=_episode(context, invocation.scope),
             turn=invocation.turn,
             inputs=inputs,
+            guidance=guidance,
         )
     invocation = invocation.model_copy(
         update={
             "phase": SessionPhase.EXECUTING,
             "input_ids": event.input_ids,
+            "guidance_ids": tuple(item.input_id for item in guidance),
             "reserved_inputs": tuple(item.artifact for item in inputs),
         }
     )
-    session = session.model_copy(
-        update={
-            "phase": SessionPhase.EXECUTING,
-            "pending_records": (*session.pending_records, request.request_id),
-            "continuation_id": invocation.turn.continuation_id,
-        }
+    session = _awaiting(
+        session.model_copy(
+            update={
+                "phase": SessionPhase.EXECUTING,
+                "pending_records": (*session.pending_records, request.request_id),
+                "continuation_id": invocation.turn.continuation_id,
+            }
+        ),
+        context,
+        request,
     )
     state = _replace_session(_replace_invocation(state, invocation), session)
     return AreaChange(

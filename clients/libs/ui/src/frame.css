@@ -1,0 +1,2001 @@
+/* The frame: a screen that never scrolls, its panes, lists and time axes. Imported by components.css. */
+
+/* --- frame: a screen that never scrolls, panes that do ------------------------------------------ */
+/* The one exception is a window too short for what sits above the panes: the screen's body scrolls
+   so the panes keep --panes-floor, enough for their controls and a few rows, instead of being
+   squeezed to nothing. The screen's header stays where it is. */
+
+.vs-screen {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--space-5) var(--space-6) var(--space-5);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-screen * {
+  box-sizing: border-box;
+}
+.vs-screen-header {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  container: screen-header / inline-size;
+}
+.vs-screen-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.vs-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+.vs-crumb-figure {
+  color: var(--ok);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+}
+.vs-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-crumbs li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.vs-crumb-sep {
+  display: flex;
+  color: var(--muted);
+  opacity: 0.5;
+  user-select: none;
+  pointer-events: none;
+}
+.vs-crumb {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+button.vs-crumb {
+  cursor: pointer;
+}
+button.vs-crumb > .vs-icon {
+  width: var(--text-small-size);
+  height: var(--text-small-size);
+  margin-inline-end: var(--space-1);
+  vertical-align: text-bottom;
+}
+button.vs-crumb:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+button.vs-crumb:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-crumb[aria-current] {
+  color: var(--text);
+  font-weight: var(--text-body-strong-weight);
+}
+
+.vs-panes {
+  flex: 1 1 auto;
+  min-height: var(--panes-floor);
+  display: flex;
+  gap: var(--space-4);
+  container-type: inline-size;
+}
+/* A group set apart is a step further from its neighbours than they are from each other. */
+.vs-flex[data-apart] {
+  margin-block: var(--space-3);
+}
+/* Panes that hold a list in columns keep the height of its rows: the screen's body scrolls to them. */
+.vs-panes:has(.vs-columnlist) {
+  /* A list in columns takes the height the screen leaves it and scrolls its rows inside, under its
+     header; the screen's body scrolls only when what sits above leaves less than nine rows. */
+  min-height: calc(var(--row) * 9 + var(--space-8) * 2);
+}
+/* A body scrolled to such a list stays where the reader put it when the list's rows change height:
+   the browser's own anchoring would move the page by the difference, and the charts with it. */
+.vs-screen-body:has(.vs-columnlist) {
+  overflow-anchor: none;
+}
+/* Too narrow for a list and the idea it opened side by side (the detail would wrap words and clip
+   its tabs): the opened pane takes the row, and its close button brings the list back. */
+@container (max-width: 640px) {
+  /* The Ideas list also carries the running ideas; keep it readable when Now cannot fit beside it. */
+  .vs-panes > .vs-pane[data-width="master"] + .vs-pane[data-width="list"] {
+    display: none;
+  }
+  .vs-panes > .vs-pane[data-width="master"]:has(+ .vs-pane[data-width="fill"]) {
+    display: none;
+  }
+  .vs-panes > .vs-pane[data-width="master"]:not(:has(+ .vs-pane[data-width="fill"])) {
+    flex: 1 1 auto;
+  }
+}
+.vs-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  overflow: hidden;
+}
+.vs-pane[data-width="fill"] {
+  flex: 1 1 var(--column-main);
+}
+.vs-pane[data-width="list"] {
+  flex: 0 1 var(--pane-list);
+}
+.vs-pane[data-width="master"] {
+  /* A share of the row, bounded, and never shrunk: the list is the same width before and after
+     an idea opens beside it, and wide enough for a title when the window is. */
+  flex: 0 0 clamp(var(--pane-outline), 42%, var(--pane-master));
+}
+/* The list beside what one of its rows opened (the steps of an idea, a turn's transcript): rows are
+   short, so the opened pane gets the room. */
+/* What sits beside a master list takes the rest of the row, whatever the window's width. */
+.vs-pane[data-width="master"] + .vs-pane[data-width="list"] {
+  flex: 1 1 var(--pane-list);
+}
+/* A list with nothing beside it is the whole row, not a card with dead space after it. */
+.vs-pane[data-width="master"]:only-child {
+  flex: 1 1 auto;
+}
+.vs-pane[data-width="outline"] {
+  flex: 0 1 var(--pane-outline);
+}
+.vs-pane[data-width="inspector"] {
+  flex: 1 1 var(--column-main);
+}
+.vs-pane[data-width="rail"] {
+  flex: 0 0 var(--column-tile);
+}
+.vs-pane-header {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.vs-pane[data-entering] {
+  animation: vs-pane-enter var(--duration-base) var(--easing);
+}
+.vs-pane[data-entering] > .vs-pane-header {
+  animation: vs-pane-flash calc(var(--duration-base) * 6) var(--easing);
+}
+@keyframes vs-pane-enter {
+  from {
+    opacity: 0;
+    transform: translateX(var(--space-6));
+  }
+}
+@keyframes vs-pane-flash {
+  from {
+    background: var(--chip-accent-bg);
+  }
+}
+.vs-pane-titles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-pane-title {
+  margin: 0;
+  font-family: var(--text-heading-family);
+  font-size: var(--text-heading-size);
+  line-height: var(--text-heading-line);
+  font-weight: var(--text-heading-weight);
+}
+.vs-pane-title[data-mono],
+.vs-screen[data-density="compact"] .vs-pane-title[data-mono],
+.vs-crumb[data-mono] {
+  font-family: var(--text-code-family);
+}
+/* The heading takes the focus when its pane opens, so readers hear what changed; the header's
+   flash shows it, so no ring. */
+.vs-pane-title:focus {
+  outline: none;
+}
+.vs-pane-meta {
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.vs-pane-actions {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+}
+.vs-pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  overflow-y: auto;
+}
+/* A body whose view scrolls its own list: the tabs, chips and search above the list stay put. */
+.vs-pane-body[data-fixed] {
+  overflow-y: hidden;
+}
+.vs-log[data-size="fill"],
+.vs-thread[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.vs-log[data-size="fill"] > .vs-log-pane,
+.vs-thread[data-size="fill"] > .vs-thread-pane {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.vs-picklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  container-type: inline-size;
+}
+/* A narrow list gives the bar's width back to the names: the figure still says the same. */
+@container (max-width: 480px) {
+  .vs-pickrow-bar,
+  .vs-listheader-col[data-bar] {
+    display: none;
+  }
+}
+/* A whole line of tokens is the first column a narrow list gives up: the pane says it again. */
+@container (max-width: 560px) {
+  .vs-pickrow-measure[data-size="line"],
+  .vs-listheader-col[data-fixed="measure-line"] {
+    display: none;
+  }
+}
+/* A chip with a short form shows it in a narrow list; its tooltip keeps the whole. */
+.vs-pickrow-badge {
+  display: inline-flex;
+  flex: none;
+}
+.vs-pickrow-badge > [data-form="short"] {
+  display: none;
+}
+@container (max-width: 520px) {
+  .vs-pickrow-badge > [data-form="full"] {
+    display: none;
+  }
+  .vs-pickrow-badge > [data-form="short"] {
+    display: inline-flex;
+  }
+}
+/* So does the name of where a row came from: it is the idea's own pane that says it. */
+@container (max-width: 480px) {
+  .vs-pickrow-trail:not([data-short]),
+  .vs-listheader-col[data-fixed="trail"] {
+    display: none;
+  }
+}
+/* A tree row's indentation takes the width: below this, its names win over their descriptions. */
+@container (max-width: 640px) {
+  .vs-pickrow-fold ~ .vs-pickrow-text > .vs-text + .vs-text {
+    display: none;
+  }
+}
+.vs-picklist-rows {
+  max-height: var(--thread);
+  overflow-y: auto;
+}
+.vs-picklist[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.vs-picklist[data-size="fill"] > .vs-picklist-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+.vs-picklist-rows:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-pickrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row);
+  padding: var(--space-3) var(--space-3);
+  border: var(--hairline) solid transparent;
+  border-left: var(--focus-ring) solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-pickrow:hover {
+  background: var(--panel-2);
+}
+.vs-pickrow:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-pickrow[aria-selected="true"] {
+  background: var(--selection);
+  border-color: var(--chip-accent-border);
+  border-left-color: var(--accent);
+}
+.vs-pickrow[data-fresh] {
+  animation: vs-pane-flash calc(var(--duration-base) * 8) var(--easing);
+  border-color: var(--chip-accent-border);
+}
+.vs-pickrow-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.vs-pickrow-text > .vs-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Ideas keep their title whole and their outcome on a second line, so neither depends on a tooltip
+   or on how wide the window is. */
+.vs-picklist[data-wrap-summary] .vs-pickrow-text > .vs-text:last-child:not(:first-child),
+.vs-picklist[data-wrap-summary] .vs-pickrow-text > .vs-text:first-child {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.vs-guide {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  width: var(--space-5);
+  margin: calc(-1 * var(--space-3)) 0;
+}
+.vs-guide[data-guide="pipe"]::before,
+.vs-guide[data-guide="tee"]::before,
+.vs-guide[data-guide="elbow"]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: var(--hairline) solid var(--muted);
+}
+.vs-guide[data-guide="elbow"]::before {
+  bottom: 50%;
+}
+/* Levels left out of a deep row: a dotted line, so the row still reads as deep. */
+.vs-guide[data-guide="gap"]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: var(--hairline) dotted var(--muted);
+}
+.vs-guide[data-guide="tee"]::after,
+.vs-guide[data-guide="elbow"]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  right: 0;
+  top: 50%;
+  border-top: var(--hairline) solid var(--muted);
+}
+.vs-pickrow-bar {
+  flex: none;
+  width: var(--column-swatch);
+}
+.vs-pickrow-fold {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  margin-right: calc(-1 * var(--space-2));
+  color: var(--muted);
+}
+.vs-pickrow-fold[data-fold] {
+  cursor: pointer;
+}
+.vs-pickrow-fold[data-fold]:hover {
+  color: var(--text);
+}
+.vs-pickrow-lead {
+  flex: none;
+  min-width: calc(var(--space-8) + var(--space-5));
+}
+.vs-pickrow[data-stripe] {
+  border-left-color: var(--accent);
+}
+.vs-pickrow-figure {
+  /* A long reading (a failure's reason) gives way at half the row, cut with its full text on hover. */
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  color: var(--text);
+}
+.vs-pickrow-figure[data-tone="ok"] {
+  color: var(--ok);
+}
+.vs-pickrow-figure[data-tone="err"] {
+  color: var(--err);
+}
+.vs-pickrow-figure[data-tone="muted"] {
+  color: var(--muted);
+}
+.vs-picklist[data-wrap-summary] .vs-pickrow-figure {
+  flex: none;
+  width: var(--gantt-figure);
+  max-width: none;
+  text-align: right;
+}
+
+.vs-meter {
+  display: block;
+  width: 100%;
+  height: var(--dot);
+  border-radius: var(--radius-full);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.vs-meter[data-inline] {
+  flex: none;
+  width: calc(var(--space-8) + var(--space-6));
+}
+.vs-meter-fill {
+  display: block;
+  width: var(--meter-share);
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--meter-color, var(--accent));
+}
+.vs-meter-indeterminate {
+  width: 35%;
+  animation: vs-meter-sweep calc(var(--duration-base) * 8) var(--easing) infinite alternate;
+}
+@keyframes vs-meter-sweep {
+  from { transform: translateX(0); }
+  to { transform: translateX(185%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vs-meter-indeterminate { animation: none; }
+}
+.vs-meter[data-tone="ok"] .vs-meter-fill {
+  background: var(--ok);
+}
+.vs-meter[data-tone="warn"] .vs-meter-fill {
+  background: var(--warn);
+}
+.vs-meter[data-tone="muted"] .vs-meter-fill {
+  background: var(--muted);
+}
+
+.vs-gauge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--text-small-line);
+  white-space: nowrap;
+}
+.vs-meter[data-dim],
+.vs-gauge[data-dim] .vs-meter {
+  opacity: 0.45;
+}
+/* The room of the widest figure, set in the small face so `ch` is the face's own, and in tabular
+   numerals so a digit takes the room of any other. */
+.vs-gauge-figure {
+  display: inline-block;
+  min-width: var(--gauge-figure-width);
+  text-align: end;
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vs-readings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-5);
+  min-height: var(--text-small-line);
+}
+
+.vs-new-below {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: var(--hairline) solid var(--chip-accent-border);
+  border-radius: var(--radius-full);
+  background: var(--chip-accent-bg);
+  color: var(--text);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  cursor: pointer;
+}
+
+/* --- frame density: compact (dense rows, one-line pane headers, a slim time bar) ---------------- */
+
+.vs-screen[data-density="compact"] {
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5) var(--space-4);
+}
+.vs-screen[data-density="compact"] .vs-screen-header {
+  gap: var(--space-2);
+}
+.vs-screen[data-density="compact"] .vs-screen-body,
+.vs-screen[data-density="compact"] .vs-panes {
+  gap: var(--space-3);
+}
+.vs-screen[data-density="compact"] .vs-pane-header {
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+}
+/* Too narrow for an idea's name beside its pane's actions: the actions go under the name instead
+   of the name wrapping to make room. */
+@media (max-width: 1100px) {
+  .vs-panes:has(> .vs-pane[data-width="master"]) > .vs-pane[data-width="fill"] > .vs-pane-header {
+    flex-wrap: wrap;
+  }
+}
+.vs-screen[data-density="compact"] .vs-pane-titles {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-3);
+}
+/* An idea's name has the pane's width to itself, under the kicker and the actions, and its facts
+   under that: its header is as tall for a short name as for a long one, whatever the actions are. */
+.vs-screen[data-density="compact"] .vs-pane-header:has(.vs-pane-title[data-mono]) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  row-gap: var(--space-1);
+}
+.vs-screen[data-density="compact"] .vs-pane-header:has(.vs-pane-title[data-mono]) .vs-pane-titles {
+  display: contents;
+}
+.vs-screen[data-density="compact"] .vs-pane-header:has(.vs-pane-title[data-mono]) .vs-pane-titles > :first-child {
+  grid-area: 1 / 1;
+}
+.vs-screen[data-density="compact"] .vs-pane-header:has(.vs-pane-title[data-mono]) .vs-pane-title {
+  grid-area: 2 / 1 / 3 / -1;
+}
+.vs-screen[data-density="compact"] .vs-pane-header:has(.vs-pane-title[data-mono]) .vs-pane-meta {
+  grid-area: 3 / 1 / 4 / -1;
+}
+.vs-screen[data-density="compact"] .vs-pane-header:has(.vs-pane-title[data-mono]) .vs-pane-actions {
+  grid-area: 1 / 2;
+}
+.vs-screen[data-density="compact"] .vs-pane-title {
+  font-family: var(--text-body-strong-family);
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-screen[data-density="compact"] .vs-pane[data-bare] > .vs-pane-body {
+  /* No header above the body: its own controls start close to the pane's edge. */
+  padding-top: var(--space-1);
+}
+.vs-screen[data-density="compact"] .vs-pane-body {
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
+}
+.vs-screen[data-density="compact"] .vs-picklist {
+  gap: 0;
+}
+.vs-screen[data-density="compact"] .vs-pickrow {
+  min-height: var(--row-dense);
+  padding: var(--space-1) var(--space-3);
+}
+.vs-screen[data-density="compact"] .vs-pickrow-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+/* A stacked row keeps both lines: the name over what it does, each cut only at the row's edge. */
+.vs-screen[data-density="compact"] .vs-pickrow[data-stacked] {
+  padding-block: var(--space-2);
+}
+.vs-screen[data-density="compact"] .vs-pickrow[data-stacked] .vs-pickrow-text {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.vs-screen[data-density="compact"] .vs-pickrow[data-stacked] .vs-pickrow-text > .vs-text {
+  flex: 0 0 auto;
+}
+/* The name keeps its room; the line after it gives way first. */
+.vs-screen[data-density="compact"] .vs-pickrow-text > .vs-text {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.vs-screen[data-density="compact"] .vs-pickrow-text > .vs-text:first-child {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+.vs-screen[data-density="compact"] .vs-pickrow-lead {
+  min-width: calc(var(--space-8) * 2 + var(--space-3));
+}
+/* A depth number in a list that folds is a couple of digits, not a column. */
+.vs-screen .vs-pickrow-fold ~ .vs-pickrow-lead {
+  min-width: 0;
+}
+.vs-screen[data-density="compact"] .vs-guide {
+  margin: calc(-1 * var(--space-1)) 0;
+}
+/* The time bar on one line: the position and state, then the range with its ticks under it. The
+   row's gap keeps the range's focus ring clear of the tick labels under it. */
+.vs-screen[data-density="compact"] .vs-scrubber {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-4);
+  row-gap: var(--space-2);
+  align-items: center;
+}
+.vs-screen[data-density="compact"] .vs-scrubber-head {
+  grid-row: span 2;
+  /* One height whether the head holds a chip or a chip and a button, so scrubbing moves nothing. */
+  min-height: var(--control-sm);
+  flex-wrap: nowrap;
+}
+/* The position, the state and the action share one height and one top edge. */
+.vs-screen[data-density="compact"] .vs-scrubber-head > * {
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--control-sm);
+}
+.vs-screen[data-density="compact"] .vs-scrubber-ticks {
+  grid-column: 2;
+}
+/* A narrow window gives the track the whole width, under the position, so no call is left unlabelled. */
+@media (max-width: 800px) {
+  .vs-screen[data-density="compact"] .vs-scrubber {
+    grid-template-columns: 1fr;
+  }
+  .vs-screen[data-density="compact"] .vs-scrubber-head {
+    grid-row: auto;
+  }
+  .vs-screen[data-density="compact"] .vs-scrubber-ticks {
+    grid-column: 1;
+  }
+}
+
+/* --- gantt: rows of bars on one time axis -------------------------------------------------------- */
+
+.vs-gantt {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.vs-gantt-zoom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+.vs-gantt-rows {
+  max-height: var(--thread);
+  overflow-y: auto;
+}
+.vs-gantt[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.vs-gantt[data-size="fill"] > .vs-gantt-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+.vs-gantt-zoom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+.vs-gantt-rows {
+  max-height: var(--thread);
+  overflow-y: auto;
+}
+.vs-gantt[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.vs-gantt[data-size="fill"] > .vs-gantt-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+.vs-gantt-row {
+  display: grid;
+  grid-template-columns: clamp(var(--gantt-label), 36%, var(--gantt-label-max)) 1fr var(--gantt-figure);
+  align-items: center;
+  column-gap: var(--space-3);
+  min-height: var(--row-dense);
+  padding: 0 var(--space-3);
+  border-left: var(--focus-ring) solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-gantt[data-strip] .vs-gantt-row {
+  grid-template-columns: 1fr var(--gantt-figure);
+  padding: 0;
+  cursor: default;
+}
+.vs-gantt-row[data-axis] {
+  min-height: var(--text-section-line);
+  cursor: default;
+}
+.vs-gantt-row:not([data-axis]):hover {
+  background: var(--panel-2);
+}
+.vs-gantt-row[aria-selected="true"] {
+  background: var(--selection);
+  border-left-color: var(--accent);
+}
+.vs-gantt-row[data-fresh] {
+  animation: vs-pane-flash calc(var(--duration-base) * 8) var(--easing);
+}
+.vs-gantt-row:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-gantt-name {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.vs-gantt-name .vs-guide {
+  margin: 0;
+}
+.vs-gantt-name > .vs-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-gantt-track {
+  position: relative;
+  overflow: hidden;
+  align-self: stretch;
+  min-height: var(--row-dense);
+}
+.vs-gantt-row[data-axis] .vs-gantt-track {
+  min-height: var(--text-section-line);
+}
+.vs-gantt-tick {
+  position: absolute;
+  left: var(--gantt-from);
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  line-height: var(--text-section-line);
+  white-space: nowrap;
+}
+.vs-gantt-tick:first-child {
+  transform: none;
+}
+/* A measured track places each label itself, inside the track and clear of its neighbours. */
+.vs-gantt-tick[data-placed] {
+  left: var(--tick-left);
+  transform: none;
+}
+.vs-gantt-bar {
+  position: absolute;
+  top: 50%;
+  left: var(--gantt-from);
+  width: var(--gantt-span);
+  height: var(--gantt-bar);
+  transform: translateY(-50%);
+  border-radius: var(--radius-sm);
+  border-right: var(--focus-ring) solid var(--muted);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.vs-gantt-bar[data-outcome="ok"] {
+  border-right-color: var(--ok);
+}
+.vs-gantt-bar[data-outcome="err"] {
+  border-right-color: var(--err);
+}
+.vs-gantt-bar[data-outcome="live"] {
+  border-right-color: var(--accent);
+  animation: vs-gantt-live calc(var(--duration-base) * 8) var(--easing) infinite alternate;
+}
+@keyframes vs-gantt-live {
+  to {
+    border-right-color: transparent;
+  }
+}
+.vs-gantt-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--seg-from);
+  width: var(--seg-span);
+  border-right: var(--hairline) solid var(--panel);
+  cursor: pointer;
+}
+.vs-gantt-seg[data-kind="solid"] {
+  background: var(--seg-color, var(--accent));
+}
+.vs-gantt-seg[data-kind="hatched"] {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--seg-color, var(--muted)) 0 var(--space-1),
+    var(--panel-2) var(--space-1) var(--space-3)
+  );
+}
+.vs-gantt-seg[data-kind="grey"] {
+  background: var(--muted);
+}
+.vs-gantt-seg:hover {
+  outline: var(--hairline) solid var(--text);
+}
+.vs-gantt-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--gantt-from);
+  border-left: var(--hairline) dashed var(--text);
+  pointer-events: none;
+}
+.vs-gantt-figure {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  text-align: right;
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.vs-gantt-figure[data-outcome="ok"] {
+  color: var(--ok);
+}
+.vs-gantt-figure[data-outcome="err"] {
+  color: var(--err);
+}
+
+.vs-chart-pick {
+  cursor: pointer;
+}
+.vs-chart-pick:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-chart-ring {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+/* The Pareto chart: a staircase for the frontier; marks by role (input, frontier, dominated, turned down). */
+.vs-pareto {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+/* Which way is better, in the corner of the frame: the one word in the chart that is not a value. */
+.vs-pareto-better {
+  fill: var(--ok);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  font-weight: var(--text-body-strong-weight);
+}
+/* The input's name beside its mark, over a halo of the panel so no line or dot cuts it. */
+.vs-pareto-input {
+  fill: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: var(--space-2);
+  stroke-linejoin: round;
+}
+.vs-pareto-frontier {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.vs-pareto-mark {
+  stroke-width: 2;
+}
+.vs-pareto-point[data-role="frontier"] .vs-pareto-mark {
+  fill: var(--accent);
+  stroke: var(--panel);
+}
+.vs-pareto-point[data-role="dominated"] .vs-pareto-mark {
+  fill: var(--muted);
+  stroke: none;
+  opacity: 0.55;
+}
+.vs-pareto-point[data-role="failed"] .vs-pareto-mark {
+  fill: var(--panel);
+  stroke: var(--muted);
+  stroke-width: 1.5;
+  opacity: 0.8;
+}
+.vs-pareto-point[data-role="input"] .vs-pareto-mark {
+  fill: var(--text);
+  stroke: var(--panel);
+}
+.vs-dotlegend-item[data-absent] {
+  visibility: hidden;
+}
+.vs-pareto-key {
+  flex: none;
+  width: var(--space-5);
+  height: var(--space-5);
+  /* The key's own fill is its mark's color, so the color a legend names is readable from it. */
+  fill: var(--muted);
+}
+.vs-pareto-key[data-role="frontier"] {
+  fill: var(--accent);
+}
+.vs-pareto-key[data-role="input"] {
+  fill: var(--text);
+}
+.vs-pareto-key[data-role="failed"] {
+  fill: var(--panel);
+}
+.vs-pareto-hover-box {
+  fill: var(--panel);
+  stroke: var(--line);
+}
+.vs-pareto-hover-text {
+  fill: var(--text);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vs-gantt-bar[data-outcome="live"] {
+    animation: none;
+  }
+}
+
+/* --- a list in columns: header that sorts, rows on one grid, a bar for the path to the selection --- */
+
+.vs-columnlist {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: 0;
+  container-type: inline-size;
+}
+.vs-columnlist-head,
+.vs-columnlist-row {
+  display: grid;
+  grid-template-columns: var(--columns);
+  align-items: center;
+  column-gap: var(--space-3);
+}
+.vs-columnlist-head {
+  padding: 0 var(--space-3) var(--space-1) calc(var(--space-3) + var(--focus-ring));
+  border-bottom: var(--hairline) solid var(--line);
+  color: var(--muted);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.vs-columnlist-headcell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-columnlist-headcell[data-align="end"],
+.vs-columnlist-cell[data-align="end"] {
+  text-align: right;
+}
+.vs-columnlist-marked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text);
+}
+.vs-columnlist-headcell button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.vs-columnlist-headcell[data-marked] button,
+.vs-columnlist-headcell button:hover {
+  color: var(--text);
+}
+.vs-columnlist-note {
+  margin-left: var(--space-1);
+  color: var(--muted);
+}
+/*
+ * The rows scroll inside the list, under the header, drawing only the rows near the visible part:
+ * at most sixteen rows tall, or, in a list that fills (`data-size`), the height it is given.
+ */
+.vs-columnlist-rows {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: calc(var(--row) * 16);
+  overflow-y: auto;
+}
+.vs-columnlist[data-size="fill"] > .vs-columnlist-rows {
+  flex: 1 1 0;
+  max-height: none;
+}
+.vs-columnlist-rows:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-columnlist-row {
+  min-height: var(--row);
+  padding: var(--space-3) var(--space-3);
+  border: var(--hairline) solid transparent;
+  border-left: var(--focus-ring) solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-columnlist-row:hover {
+  background: var(--panel-2);
+}
+/* A compact screen keeps a row to its text: nine rows and more show beside a screen's header. */
+.vs-screen[data-density="compact"] .vs-columnlist-row {
+  min-height: calc(var(--row) - var(--space-3));
+}
+.vs-columnlist-row:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-columnlist-row[data-lineage] {
+  border-left-color: var(--accent);
+}
+.vs-columnlist-row[aria-selected="true"] {
+  background: var(--selection);
+  border-left-color: var(--text);
+}
+.vs-columnlist-row[data-fresh] {
+  animation: vs-pane-flash calc(var(--duration-base) * 8) var(--easing);
+}
+/*
+ * A list without room for every column (`data-tier`, set from its measured width) drops its
+ * optional columns and the parts of a cell marked optional, and keeps the rest on one grid; a part
+ * marked `data-narrow-only` is drawn only then (a figure that a dropped column states while the
+ * list is wide).
+ */
+.vs-columnlist [data-narrow-only] {
+  display: none;
+}
+.vs-columnlist:not([data-tier="wide"]) .vs-columnlist-head,
+.vs-columnlist:not([data-tier="wide"]) .vs-columnlist-row {
+  grid-template-columns: var(--columns-narrow);
+  column-gap: var(--space-2);
+}
+.vs-columnlist:not([data-tier="wide"]) [data-optional] {
+  display: none;
+}
+.vs-columnlist:not([data-tier="wide"]) [data-narrow-only] {
+  display: inline;
+}
+/* A crowded list (a column for each of several objectives) in a pane a half row wide. */
+.vs-columnlist[data-tier="tight"] .vs-columnlist-head,
+.vs-columnlist[data-tier="tight"] .vs-columnlist-row {
+  grid-template-columns: var(--columns-tight);
+}
+.vs-columnlist[data-tier="tight"] [data-tight-hide],
+.vs-columnlist[data-tier="tight"] .vs-columnlist-lines > :not(:first-child) {
+  display: none;
+}
+/* A header over a column cut to its mark keeps its place and says nothing. */
+.vs-columnlist[data-tier="tight"] [data-tight-blank] > * {
+  visibility: hidden;
+}
+.vs-columnlist-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-columnlist-cell[data-wrap] {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.vs-columnlist-link {
+  color: var(--muted);
+  cursor: pointer;
+}
+.vs-columnlist-link[data-lit] {
+  color: var(--accent);
+}
+.vs-columnlist-link:hover {
+  text-decoration: underline;
+}
+.vs-columnlist-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 100%;
+  min-width: 0;
+}
+/* A name and its tag in a cell that wraps: the tag goes under the name when there is no room beside it. */
+.vs-columnlist-cell[data-wrap] .vs-columnlist-inline:not([data-nowrap]) {
+  flex-wrap: wrap;
+  row-gap: var(--space-1);
+}
+.vs-columnlist-inline[data-nowrap] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-columnlist-mark {
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+}
+.vs-columnlist-mark[data-on] {
+  background: var(--accent);
+}
+.vs-columnlist-lines {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* --- reading a tree: column header, dot tooltip, path to the root, dot legend ------------------- */
+
+.vs-listheader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-1) calc(var(--space-3) + var(--focus-ring));
+  color: var(--muted);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.vs-gantt-name.vs-listheader,
+.vs-gantt-figure.vs-listheader {
+  padding: 0;
+  justify-content: flex-start;
+}
+.vs-gantt-figure.vs-listheader {
+  justify-content: flex-end;
+}
+.vs-listheader-start {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-listheader-col {
+  flex: none;
+  text-align: right;
+}
+.vs-listheader-col[data-bar] {
+  width: var(--column-swatch);
+  text-align: left;
+}
+.vs-pickrow-dot {
+  position: relative;
+  display: inline-flex;
+}
+/* The state's word, beside its dot, under the pointer and on the row that has the focus. */
+.vs-pickrow-dot:hover::after,
+.vs-pickrow:focus-visible .vs-pickrow-dot::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + var(--space-2));
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  padding: var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  box-shadow: var(--elevation-overlay);
+  color: var(--text);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.vs-pickrow[data-path] .vs-guide::before,
+.vs-pickrow[data-path] .vs-guide::after {
+  border-color: var(--accent);
+}
+.vs-pickrow[data-path]:not([aria-selected="true"]) {
+  background: var(--hover);
+}
+.vs-dotlegend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* Chips that wrap are one group: their lines are closer than the groups around them. */
+  gap: var(--space-1) var(--space-4);
+}
+.vs-dotlegend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+.vs-serieslegend {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-series-swatch {
+  display: inline-block;
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-sm);
+  background: var(--seg-color, var(--accent));
+}
+.vs-series-swatch[data-hatched] {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--seg-color, var(--muted)) 0 var(--space-1),
+    var(--panel-2) var(--space-1) var(--space-3)
+  );
+}
+
+/* --- stacked bars: usage over time as columns of colored segments ------------------------------ */
+
+.vs-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  min-width: 0;
+}
+.vs-bars-plot {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+  height: calc(var(--space-8) * 2);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.vs-bars-bar {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  min-width: 0;
+  height: 100%;
+}
+.vs-bars-segment {
+  display: block;
+  min-height: var(--hairline);
+  background: var(--seg-color, var(--accent));
+}
+.vs-bars-segment[data-dim] {
+  opacity: 0.2;
+}
+.vs-area {
+  display: block;
+  width: 100%;
+  height: calc(var(--space-8) * 2);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.vs-area-layer {
+  fill: var(--seg-color, var(--accent));
+  opacity: 0.85;
+}
+.vs-area-layer[data-dim] {
+  opacity: 0.15;
+}
+.vs-area-slice {
+  fill: transparent;
+}
+.vs-bars-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* --- narrative: a turn as thinking, text and folded tool lines ----------------------------------- */
+
+/* The narrative fills its pane; only a paragraph is capped (below), never the column. */
+.vs-narrative-wrap {
+  position: relative;
+  min-width: 0;
+}
+.vs-narrative-wrap[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.vs-narrative {
+  box-sizing: border-box;
+  max-height: var(--thread);
+  min-height: 0;
+  overflow-y: auto;
+}
+.vs-narrative[data-size="fill"] {
+  flex: 1 1 auto;
+  max-height: none;
+}
+.vs-narrative-jump {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+}
+.vs-narrative > * + * {
+  margin-top: var(--space-2);
+}
+.vs-thought,
+.vs-said {
+  max-width: var(--measure);
+  margin: 0;
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-said {
+  color: var(--text);
+}
+/* The thinking: a muted line (a brain, "Thought" or "Thinking", a one-line preview) over italic text. */
+.vs-thought {
+  color: var(--muted);
+}
+.vs-thought .vs-collapsible {
+  gap: 0;
+}
+.vs-thought .vs-collapsible-head {
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+}
+.vs-thought .vs-collapsible-head:hover {
+  color: var(--text);
+}
+.vs-thought .vs-collapsible-summary {
+  font-style: italic;
+}
+.vs-thought .vs-collapsible-body {
+  gap: 0;
+  margin-left: var(--space-2);
+  padding-left: var(--space-3);
+  border-left: var(--hairline) solid var(--line);
+  font-style: italic;
+}
+.vs-thought-icon {
+  display: inline-flex;
+  flex: none;
+}
+@keyframes vs-live-pulse {
+  to {
+    opacity: 0.35;
+  }
+}
+.vs-toolgroup {
+  display: flex;
+  flex-direction: column;
+}
+.vs-toolgroup[data-open] {
+  padding-bottom: var(--space-1);
+  border-left: var(--hairline) solid var(--line);
+}
+.vs-toolgroup-head,
+.vs-toolgroup-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.vs-toolgroup-head:hover,
+.vs-toolgroup-row:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.vs-toolgroup-head:focus-visible,
+.vs-toolgroup-row:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(-1 * var(--focus-ring));
+}
+.vs-toolgroup-count {
+  flex: none;
+}
+.vs-toolgroup-line {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-toolgroup-row {
+  padding-left: calc(var(--space-2) + var(--space-5));
+}
+.vs-toolgroup-status {
+  display: inline-flex;
+  flex: none;
+}
+.vs-toolgroup-row[data-state="ok"] .vs-toolgroup-status {
+  color: var(--ok);
+}
+/* What is still going on pulses: the thought being written and the call waiting for its result. */
+.vs-thought[data-live] .vs-thought-icon,
+.vs-toolgroup-row[data-state="pending"] .vs-toolgroup-status {
+  animation: vs-live-pulse calc(var(--duration-base) * 5) var(--easing) infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vs-thought[data-live] .vs-thought-icon,
+  .vs-toolgroup-row[data-state="pending"] .vs-toolgroup-status {
+    animation: none;
+  }
+}
+.vs-toolgroup-name {
+  flex: none;
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--hover);
+  color: var(--text);
+}
+.vs-toolgroup-outcome {
+  flex: none;
+}
+.vs-toolgroup-time {
+  flex: none;
+  min-width: var(--space-8);
+  padding-left: var(--space-2);
+  color: var(--muted);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.vs-toolgroup-row[data-state="failed"],
+.vs-toolgroup-row[data-state="failed"] .vs-toolgroup-name {
+  color: var(--err);
+}
+.vs-toolgroup-row[aria-current="true"] {
+  background: var(--selection);
+  box-shadow: inset var(--focus-ring) 0 0 var(--accent);
+  color: var(--text);
+}
+
+/* The chain the reader points at: its dots are ringed in the accent, and no line joins them. */
+.vs-chart-lit {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.vs-chart-tip-box {
+  fill: var(--text);
+}
+.vs-chart-tip-text {
+  fill: var(--panel);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
+.vs-chart-legend {
+  gap: var(--space-5);
+}
+.vs-chart-legend .vs-dotlegend-item[data-reserved] {
+  visibility: hidden;
+}
+.vs-chart-legend-mark {
+  flex: none;
+  display: inline-block;
+}
+/* The key's marks, each drawn as the chart draws it: the line, a dot, a ring. */
+.vs-chart-legend-mark[data-mark="line"] {
+  width: var(--space-6);
+  height: var(--space-1);
+  background: var(--accent);
+}
+.vs-chart-legend-mark[data-mark="dot"] {
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+.vs-chart-legend-mark[data-mark="ring"] {
+  width: var(--space-4);
+  height: var(--space-4);
+  border: var(--focus-ring) solid var(--text);
+  border-radius: var(--radius-full);
+}
+.vs-chart-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-chart-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  column-gap: var(--space-3);
+}
+.vs-chart-panel-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-3);
+  min-width: 0;
+}
+/* A heading's words stay whole: when they do not fit side by side the figure goes under the name. */
+.vs-chart-panel-head .vs-text {
+  white-space: nowrap;
+}
+/* Charts side by side, as many as fit at a readable width, equally wide; the rest wrap below. */
+.vs-chart-columns {
+  display: grid;
+  gap: var(--space-6);
+  grid-template-columns: repeat(auto-fit, minmax(var(--chart-min), 1fr));
+}
+.vs-chart-columns[data-across] {
+  /* Side by side while each chart keeps the width it is read at; a narrower window wraps the last. */
+  grid-template-columns: repeat(
+    auto-fit,
+    minmax(
+      max(var(--chart-min-across), calc((100% - (var(--across) - 1) * var(--space-6)) / var(--across))),
+      1fr
+    )
+  );
+}
+/* A heading on one line: the note gives way, with an ellipsis, before the figure goes under the name. */
+.vs-chart-panel-head[data-one-line] {
+  flex-wrap: nowrap;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-panel-title {
+  flex-wrap: nowrap;
+  flex: 0 1 auto;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-panel-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vs-chart-panel-head[data-one-line] .vs-chart-figure {
+  flex: none;
+}
+
+/* --- flat lists: a trailing column ("from <parent>") -------------------------------------------- */
+
+.vs-pickrow-trail,
+.vs-listheader-col[data-fixed="trail"] {
+  flex: none;
+  width: var(--gantt-label);
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-pickrow-measure,
+.vs-listheader-col[data-fixed^="measure"] {
+  flex: none;
+  width: calc(var(--space-8) + var(--space-3));
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-pickrow-measure[data-size="note"],
+.vs-listheader-col[data-fixed="measure-note"] {
+  width: calc(var(--space-8) * 3);
+}
+.vs-pickrow-measure[data-size="line"],
+.vs-listheader-col[data-fixed="measure-line"] {
+  width: calc(var(--space-8) * 6);
+}
+/* The quiet second value sits after the figure in the same muted color, which already meets contrast. */
+.vs-pickrow-measure-note {
+  font-weight: 400;
+}
+.vs-pickrow-measure {
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+.vs-pickrow-trail[data-short],
+.vs-listheader-col[data-fixed="time"] {
+  width: var(--gantt-figure);
+  text-align: right;
+}
+.vs-listheader-col[data-fixed="figure"],
+.vs-pickrow:has(.vs-pickrow-trail) .vs-pickrow-figure {
+  min-width: var(--gantt-figure);
+  text-align: right;
+}
+.vs-pickrow-trail {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+button.vs-pickrow-trail {
+  cursor: pointer;
+}
+button.vs-pickrow-trail:hover {
+  background: none;
+  color: var(--text);
+  text-decoration: underline;
+}
+/* A narrow window: the trailing columns give their width back to the row's text, which is the
+   column a reader needs most (a 400 px list otherwise leaves it none). */
+@media (max-width: 1100px) {
+  .vs-pickrow-trail,
+  .vs-listheader-col[data-fixed="trail"] {
+    width: calc(var(--space-8) + var(--space-3));
+  }
+  .vs-pickrow-measure[data-size="plain"],
+  .vs-listheader-col[data-fixed="measure"] {
+    width: var(--space-8);
+  }
+  .vs-listheader-col[data-fixed="figure"],
+  .vs-pickrow:has(.vs-pickrow-trail) .vs-pickrow-figure {
+    min-width: var(--space-6);
+  }
+}
+
+/* Comparison tables keep their short summary readable beside the fixed numeric columns. */
+@container (max-width: 480px) {
+  .vs-picklist[data-wrap-summary] .vs-pickrow,
+  .vs-picklist[data-wrap-summary] .vs-listheader {
+    gap: var(--space-2);
+    padding-inline: var(--space-2);
+  }
+}
+
+/* --- filter chips and search ------------------------------------------------------------------- */
+
+button.vs-dotlegend-item {
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius-full);
+  background: none;
+  cursor: pointer;
+}
+button.vs-dotlegend-item[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--panel-2);
+}
+button.vs-dotlegend-item:disabled {
+  cursor: default;
+}
+button.vs-dotlegend-item:disabled .vs-text {
+  color: var(--muted);
+}
+/* The chip of the state the list is already in has nothing to change, and is the one in force: it keeps its words. */
+button.vs-dotlegend-item[aria-pressed="true"]:disabled .vs-text {
+  color: var(--text);
+}
+button.vs-dotlegend-item:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-searchbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+.vs-searchbox input {
+  width: var(--column-swatch);
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+}
+.vs-searchbox:focus-within {
+  border-color: var(--accent);
+}
+
+/* --- facts: one line that never wraps or overlaps ---------------------------------------------- */
+
+.vs-factline {
+  /* One line high in a column that runs out of height: the list below gives way, never this line. */
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.vs-factline[data-wrap] {
+  flex-wrap: wrap;
+}
+/* Its facts add nothing to the width of what holds it: the line fills that width and clips. */
+.vs-factline[data-fit="parent"] {
+  contain: inline-size;
+  width: 100%;
+}
+.vs-fact {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  white-space: nowrap;
+}
+/* It takes what the others leave, down to nothing; on a wrapping line it stays on the line while
+   a field's width is left and goes to a line of its own below that. */
+.vs-fact[data-shrink] {
+  flex: 1 1 var(--column-field);
+  min-width: 0;
+  max-width: 100%;
+}
+/* On a line that never wraps, what follows it stays next to it instead of going to the far edge. */
+.vs-factline:not([data-wrap]) > .vs-fact[data-shrink] {
+  flex: 0 1 auto;
+}
+.vs-fact[data-shrink] > * {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A label before the shrinking part keeps its width. */
+.vs-fact[data-shrink] > .vs-text {
+  flex: none;
+}
+.vs-fact[data-shrink] > .vs-button {
+  flex: 0 1 auto;
+}
+.vs-fact[data-shrink] .vs-button > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- metric tiles -------------------------------------------------------------------------------- */
+
+/* A dashboard row: tiles of one size on one grid, as wide as the tiles up to the container. The
+   width is a size, never a share of the parent, so what sits beside the row never moves. */
+.vs-tiles {
+  --tile-width: var(--column-metric);
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--column-field)), 1fr));
+  gap: var(--space-4);
+  width: calc(var(--tile-count) * var(--tile-width) + (var(--tile-count) - 1) * var(--space-4));
+  max-width: 100%;
+}
+.vs-tiles[data-stacked] {
+  grid-template-columns: 1fr;
+  width: var(--tile-width);
+}
+.vs-tiles[data-stacked] .vs-tile-trend {
+  display: none;
+}
+.vs-tile {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.vs-tile-figure {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+/* A value is one token: it never breaks inside itself (a `Text` breaks anywhere by default), and
+   the note beside it breaks only between words. */
+.vs-tile-figure > .vs-text {
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+.vs-tile-figure > .vs-text:not(:first-child) {
+  white-space: normal;
+}
+.vs-tile-detail {
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-tile-trend {
+  height: var(--space-7);
+  margin-top: auto;
+}
+.vs-spark {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.vs-spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.vs-spark-reference {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+
+/* --- area chart: overlaid areas over a tidy axis, a crosshair and a tooltip under the pointer --- */
+
+.vs-area-chart {
+  margin: 0;
+  min-width: 0;
+}
+.vs-area-chart-plot {
+  display: block;
+  max-width: 100%;
+}
+.vs-area-chart-fill {
+  fill: var(--seg-color, var(--accent));
+  opacity: 0.22;
+}
+.vs-area-chart-line {
+  fill: none;
+  stroke: var(--seg-color, var(--accent));
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+.vs-area-chart-hit {
+  fill: transparent;
+}
+.vs-area-chart-cross,
+.vs-area-chart-tip {
+  display: none;
+  pointer-events: none;
+}
+.vs-area-chart-cross {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.vs-area-chart-slice:hover .vs-area-chart-cross,
+.vs-area-chart-slice:hover .vs-area-chart-tip {
+  display: block;
+}
+.vs-area-chart-tip-box {
+  fill: var(--panel);
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.vs-area-chart-tip-row {
+  fill: var(--text);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
+
+/* --- share bar: one bar cut into labelled parts ------------------------------------------------------ */
+
+.vs-share {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  min-width: 0;
+}
+.vs-share-bar {
+  display: flex;
+  height: var(--space-3);
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--line);
+}
+.vs-share-segment {
+  flex-basis: 0;
+  min-width: var(--hairline);
+  background: var(--seg-color, var(--accent));
+}
+.vs-share-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-share-part {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.vs-share-swatch {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--seg-color, var(--accent));
+}

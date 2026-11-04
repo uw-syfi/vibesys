@@ -8,8 +8,10 @@ version = "0.1.0"
 description = "Agent sessions, drivers, skills and structured turns"
 requires-python = ">=3.12"
 dependencies = [
-    "agentshim>=0.15.7,<0.16",
+    "agentshim>=0.25.0,<0.26",
     "pydantic>=2",
+    "pydantic-core",
+    "vs-decode",
     "vs-faults",
     "vs-mcp",
     "vs-project",
@@ -25,6 +27,7 @@ where = ["src"]
 vs_agent = ["py.typed", "images/features/src/*/*", "images/features/test/*/*"]
 
 [tool.uv.sources]
+vs-decode = { workspace = true }
 vs-faults = { workspace = true }
 vs-mcp = { workspace = true }
 vs-project = { workspace = true }

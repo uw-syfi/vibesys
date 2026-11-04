@@ -1,4 +1,5 @@
 version = 1
+backends = ["rocm"]
 
 [agent]
 domain = "llm-serving"
@@ -22,3 +23,15 @@ timeout_seconds = 7200
 command = ["python3", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/run.py", "--repetitions", "1"]
 timeout_seconds = 9000
 result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "AMD MI300A"
+count = 4
+vendor = "amd"
+
+[catalogue.model]
+name = "Qwen3.5 397B A17B MXFP4"
+maker = "qwen"

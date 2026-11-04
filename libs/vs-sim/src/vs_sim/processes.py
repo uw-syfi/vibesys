@@ -10,36 +10,55 @@ import selectors
 import signal
 import subprocess
 import threading
-from collections.abc import Callable
+import time
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
+from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
+from vs_sim.output import Capture, OutputStream, tee
+
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, MutableMapping, Sequence
     from pathlib import Path
     from typing import IO
+
+    from vs_sim.exit_wait import ExitWaiter
+    from vs_sim.output import OutputSink
 
 
 # Preserve the established stdlib exception type while keeping the concrete
 # subprocess dependency behind the public process boundary.
 ProcessTimeoutError = subprocess.TimeoutExpired
-type PopenFactory = Callable[..., subprocess.Popen[bytes]]
+_CLEANUP_TIMEOUT_S = 5.0
+_PIPE_CHUNK_BYTES = 64 * 1024
+
+DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024
+"""The most a run keeps of each output stream unless its spec sets a cap: 256 MiB."""
 
 
 @dataclass(frozen=True)
 class ProcessSpec:
-    """What to run: the argument vector, its working directory and environment, its input."""
+    """What to run: the argument vector, its working directory and environment, its input.
+
+    ``max_output_bytes`` caps each captured stream. :meth:`Processes.run` stops a command
+    that writes more to either one and reports :class:`ProcessOutputTooLarge`.
+    """
 
     argv: tuple[str, ...]
     cwd: Path | None = None
     env: Mapping[str, str] | None = None
     input: bytes = b""
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
 
     def __post_init__(self) -> None:
-        """Reject an empty command."""
+        """Reject an empty command and a negative output cap."""
         if not self.argv:
             message = "a process needs a program: argv is empty"
+            raise ValueError(message)
+        if self.max_output_bytes < 0:
+            message = f"max_output_bytes must not be negative, got {self.max_output_bytes}"
             raise ValueError(message)
 
 
@@ -76,55 +95,290 @@ class ProcessLauncher(Protocol):
         ...
 
 
-class MergedOutputProcess(Protocol):
-    """A process-group leader whose stdout and stderr share one binary pipe."""
+@dataclass(frozen=True)
+class ProcessTimedOut:
+    """The command outlived its timeout; its whole group was then killed and reaped."""
 
-    def read(self, max_bytes: int) -> bytes:
-        """Read at most *max_bytes* from the merged output, or empty bytes at EOF."""
+    timeout: float
+    stdout: bytes
+    """What the command wrote to stdout before it was killed."""
+    stderr: bytes
+
+
+@dataclass(frozen=True)
+class ProcessGroupUnreaped:
+    """The command outlived its timeout and killing its group did not end it.
+
+    Either the leader did not exit within the cleanup bound after ``SIGKILL``, or a descendant
+    that left the group still holds an output pipe open. Something the command started may
+    still be running, so this is not a plain timeout.
+    """
+
+    timeout: float
+    pid: int
+    """The process ID of the group's leader."""
+    detail: str
+    """What failed, in words, for a log line or error message."""
+
+
+@dataclass(frozen=True)
+class ProcessOutputTooLarge:
+    """The command wrote more than ``limit`` bytes to ``stream``; its whole group was then killed.
+
+    The streams hold the first ``limit`` bytes of each. ``detail`` is empty when the kill
+    ended the group, and otherwise says what may still be running, as for
+    :class:`ProcessGroupUnreaped`.
+    """
+
+    limit: int
+    stream: OutputStream
+    stdout: bytes
+    stderr: bytes
+    detail: str = ""
+
+
+type ProcessRun = ProcessOutcome | ProcessTimedOut | ProcessGroupUnreaped | ProcessOutputTooLarge
+"""How a run ended: exited, timed out (cleaned up or left behind), or stopped for too much output."""
+
+
+def forward_output(run: ProcessRun, output: OutputSink) -> ProcessRun:
+    """Write what ``run`` kept of each stream to ``output``, and return ``run``.
+
+    For a :class:`Processes` whose command's output arrives all at once (a broker's reply, a
+    scripted answer) rather than chunk by chunk.
+    """
+    if not isinstance(run, ProcessGroupUnreaped):
+        output.write(OutputStream.STDOUT, run.stdout)
+        output.write(OutputStream.STDERR, run.stderr)
+    return run
+
+
+class Processes(Protocol):
+    """Runs a command to completion: the blocking counterpart of :class:`ProcessLauncher`.
+
+    The command runs without a shell in a process group of its own, with ``spec.input`` as its
+    stdin and both output streams captured, each up to ``spec.max_output_bytes``. Raises
+    ``OSError`` when the program cannot be started. A command that outlives ``timeout`` has
+    its whole group killed; the result says whether that ended everything
+    (:class:`ProcessTimedOut`) or not (:class:`ProcessGroupUnreaped`). A command that writes
+    past the cap has its whole group killed too (:class:`ProcessOutputTooLarge`).
+
+    Every chunk the command writes is also written to ``output`` as it is read, past the
+    cap too, before ``run`` returns; the result is the same whatever ``output`` is.
+    """
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        """Run ``spec`` until it exits or ``timeout`` seconds pass (``None``: no limit)."""
         ...
 
-    def wait(self) -> int:
-        """Wait for the group leader and return its ``subprocess`` status."""
-        ...
 
-    def terminate_group(self) -> None:
-        """Send SIGTERM to every process remaining in the owned group."""
-        ...
+class OsProcesses:
+    """Runs real operating-system processes, blocking the calling thread."""
 
-    def kill_group(self) -> None:
-        """Send SIGKILL to every process remaining in the owned group."""
-        ...
+    def __init__(self, *, cleanup_timeout: float = _CLEANUP_TIMEOUT_S) -> None:
+        """Wait at most ``cleanup_timeout`` seconds for a killed group to release its output."""
+        self._cleanup_timeout = cleanup_timeout
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        """Start ``spec`` as a group leader, feed its input, and collect and forward its output."""
+        if os.name != "posix":
+            message = "owned process groups require a POSIX host"
+            raise OSError(message)
+        process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-731024 [S603]; the real adapter runs a caller-assembled argv vector without a shell.
+            # > Validating argv here would duplicate each caller's command contract, and a
+            # > shell would add the quoting hazards this interface exists to avoid.
+            spec.argv,
+            cwd=spec.cwd,
+            env=None if spec.env is None else dict(spec.env),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            process_group=0,
+        )
+        group = _OwnedProcessGroup(process)
+        captured = Capture(spec.max_output_bytes)
+        pipes = _Pipes(spec.input, captured, tee(captured, output))
+        deadline = None if timeout is None else time.monotonic() + timeout
+        try:
+            end = _pump(process, deadline, pipes, feed=True)
+        except BaseException as failure:
+            if isinstance(detail := self._kill(process, group, pipes), str):
+                failure.add_note(detail)
+            raise
+        if end is _PumpEnd.DONE:
+            _close_pipes(process)
+            return ProcessOutcome(group.reap(timeout=None), captured.stdout, captured.stderr)
+        cleanup = self._kill(process, group, pipes)
+        stdout, stderr = captured.stdout, captured.stderr
+        if end is _PumpEnd.TIMEOUT:
+            if cleanup:
+                return ProcessGroupUnreaped(timeout or 0.0, process.pid, cleanup)
+            return ProcessTimedOut(timeout or 0.0, stdout, stderr)
+        stream = OutputStream.STDOUT if end is _PumpEnd.STDOUT_FULL else OutputStream.STDERR
+        return ProcessOutputTooLarge(spec.max_output_bytes, stream, stdout, stderr, cleanup)
+
+    def _kill(
+        self, process: subprocess.Popen[bytes], group: _OwnedProcessGroup, pipes: _Pipes
+    ) -> str:
+        """Kill the group and drain its output within the cleanup bound; say what failed, if anything.
+
+        A failed kill is reported even when the output then closes: the leader may have exited
+        on its own while other members of its group, which the kill did not reach, live on.
+        """
+        problems: list[str] = []
+        try:
+            group.send_signal(signal.SIGKILL)
+        except OSError as error:
+            problems.append(f"killing process group {process.pid} failed: {error}")
+        deadline = time.monotonic() + self._cleanup_timeout
+        if _pump(process, deadline, pipes, feed=False) is _PumpEnd.DONE:
+            _close_pipes(process)
+            try:
+                group.reap(timeout=self._cleanup_timeout)
+            except subprocess.TimeoutExpired:
+                problems.append(f"process {process.pid} was not reaped")
+            return "; ".join(problems)
+        problems.append(
+            f"the output of process group {process.pid} did not close within "
+            f"{self._cleanup_timeout:g} seconds of the kill"
+        )
+        _close_pipes(process)
+        try:
+            group.reap(timeout=self._cleanup_timeout)
+        except subprocess.TimeoutExpired:
+            problems.append(f"process {process.pid} was not reaped")
+        return "; ".join(problems)
 
 
-class MergedOutputProcessLauncher(Protocol):
-    """Start merged-binary-output commands as leaders of owned POSIX process groups."""
+class _PumpEnd(StrEnum):
+    DONE = "done"
+    TIMEOUT = "timeout"
+    STDOUT_FULL = "stdout_full"
+    STDERR_FULL = "stderr_full"
 
-    def start(
-        self,
-        argv: Sequence[str],
-        *,
-        cwd: Path | str | None,
-        env: Mapping[str, str],
-    ) -> MergedOutputProcess:
-        """Start *argv* with no input and one merged binary output pipe."""
-        ...
+
+class _Pipes:
+    """One run's input still to write and where its output goes: kept under the cap, and on."""
+
+    def __init__(self, data: bytes, captured: Capture, output: OutputSink) -> None:
+        self.data = data
+        self.captured = captured
+        self.output = output
+        self._input_offset = 0
+
+    def write_input(self, fd: int) -> bool:
+        """Write the next input chunk; ``True`` once all of it was written or the reader left."""
+        try:
+            self._input_offset += os.write(
+                fd, self.data[self._input_offset : self._input_offset + _PIPE_CHUNK_BYTES]
+            )
+        except BrokenPipeError:
+            return True
+        return self._input_offset >= len(self.data)
+
+    def pending_input(self) -> bytes:
+        """The input not yet written."""
+        return self.data[self._input_offset :]
+
+
+def _pump(
+    process: subprocess.Popen[bytes],
+    deadline: float | None,
+    pipes: _Pipes,
+    *,
+    feed: bool,
+) -> _PumpEnd:
+    """Read both outputs until they close, the deadline, or the cap; feed stdin when *feed*.
+
+    Every chunk read goes to the pipes' output. While feeding, the first stream past the
+    cap ends the pump; a drain after a kill (no *feed*) closes stdin and reads on past it.
+    """
+    with selectors.DefaultSelector() as selector:
+        open_outputs = _register(selector, process, pipes.pending_input() if feed else b"")
+        while open_outputs:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return _PumpEnd.TIMEOUT
+            for key, _events in selector.select(remaining):
+                if key.data is None:
+                    if pipes.write_input(key.fd):
+                        selector.unregister(key.fd)
+                        _close_quietly(process.stdin)
+                    continue
+                chunk = os.read(key.fd, _PIPE_CHUNK_BYTES)
+                if not chunk:
+                    selector.unregister(key.fd)
+                    open_outputs -= 1
+                else:
+                    pipes.output.write(key.data, chunk)
+                    if feed and pipes.captured.omitted(key.data):
+                        return _FULL[key.data]
+    return _PumpEnd.DONE
+
+
+_FULL = {OutputStream.STDOUT: _PumpEnd.STDOUT_FULL, OutputStream.STDERR: _PumpEnd.STDERR_FULL}
+
+
+def _register(
+    selector: selectors.BaseSelector, process: subprocess.Popen[bytes], data: bytes
+) -> int:
+    """Register the still-open pipes; return how many output pipes are open."""
+    stdin, stdout, stderr = process.stdin, process.stdout, process.stderr
+    if stdout is None or stderr is None:
+        message = "a captured process needs both output pipes"
+        raise RuntimeError(message)
+    if stdin is not None and not stdin.closed:
+        if data:
+            os.set_blocking(stdin.fileno(), False)
+            selector.register(stdin.fileno(), selectors.EVENT_WRITE, None)
+        else:
+            _close_quietly(stdin)
+    open_outputs = 0
+    for pipe, stream in ((stdout, OutputStream.STDOUT), (stderr, OutputStream.STDERR)):
+        if not pipe.closed:
+            selector.register(pipe.fileno(), selectors.EVENT_READ, stream)
+            open_outputs += 1
+    return open_outputs
+
+
+def _close_pipes(process: subprocess.Popen[bytes]) -> None:
+    for stream in (process.stdin, process.stdout, process.stderr):
+        _close_quietly(stream)
+
+
+def _close_quietly(stream: IO[bytes] | None) -> None:
+    if stream is not None:
+        with suppress(OSError):
+            stream.close()
 
 
 class PipedProcess(Protocol):
-    """A synchronous child that owns a POSIX process group and two text output pipes."""
+    """A synchronous child that owns a POSIX process group and two text output pipes.
+
+    Signals reach the group only while its leader is unreaped, so a group whose
+    numeric ID the kernel may already have reused is never signalled.
+    """
 
     @property
     def stdout(self) -> io.TextIOBase:
-        """The process's text stdout pipe."""
+        """The process's text stdout pipe (stdout and stderr when started merged).
+
+        ``readline`` returns one line; ``read(size)`` returns as soon as any
+        output is available, at most *size* characters, and ``""`` at EOF.
+        """
         ...
 
     @property
     def stderr(self) -> io.TextIOBase:
-        """The process's text stderr pipe."""
+        """The process's text stderr pipe, already at EOF when started merged."""
         ...
 
     def wait(self, timeout: float | None) -> int:
         """Wait for the group leader, raising :class:`ProcessTimeoutError` on timeout."""
+        ...
+
+    def terminate_group(self) -> None:
+        """Send SIGTERM to the leader and every descendant remaining in its group."""
         ...
 
     def kill_group(self) -> None:
@@ -139,55 +393,20 @@ class PipedProcess(Protocol):
 class PipedProcessLauncher(Protocol):
     """Start a synchronous command with piped text output in an owned process group."""
 
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
-        """Start *argv* without a shell, raising ``OSError`` when it cannot start."""
-        ...
-
-
-class CapturedTextProcess(Protocol):
-    """A synchronous UTF-8 child with captured streams and an owned process group.
-
-    A caller that sees :class:`ProcessTimeoutError` from :meth:`communicate`
-    still owns an unreaped group leader. It must call :meth:`kill_group` before
-    :meth:`wait`; that ordering keeps the leader's PID allocated while the
-    group is signalled, so the numeric process-group ID cannot be reused for an
-    unrelated process group.
-    """
-
-    @property
-    def returncode(self) -> int:
-        """Return the leader's status after successful communication or waiting."""
-        ...
-
-    def communicate(self, input_text: str | None, timeout: float) -> tuple[str, str]:
-        """Feed optional input and collect both streams, or raise on timeout."""
-        ...
-
-    def kill_group(self) -> None:
-        """Kill the leader and every descendant in its owned process group."""
-        ...
-
-    def wait(self, timeout: float) -> int:
-        """Reap the group leader within *timeout*, or raise on timeout."""
-        ...
-
-    def close(self) -> None:
-        """Attempt every pipe close, grouping multiple failures in stream order."""
-        ...
-
-
-class CapturedTextProcessLauncher(Protocol):
-    """Start a synchronous UTF-8 command in an owned POSIX process group."""
-
     def start(
         self,
         argv: tuple[str, ...],
         *,
-        pipe_stdin: bool,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
-    ) -> CapturedTextProcess:
-        """Start *argv*, raising ``OSError`` when it cannot be started."""
+        merge_stderr: bool = False,
+    ) -> PipedProcess:
+        """Start *argv* without a shell or input, raising ``OSError`` when it cannot start.
+
+        *env* replaces the caller's environment when given. With
+        *merge_stderr* the child's stderr shares its stdout pipe, so the two
+        interleave in the order the child wrote them.
+        """
         ...
 
 
@@ -198,9 +417,11 @@ class _StartedPipedProcess(Protocol):
     def stdout(self) -> IO[bytes]: ...
 
     @property
-    def stderr(self) -> IO[bytes]: ...
+    def stderr(self) -> IO[bytes] | None: ...
 
     def wait(self, timeout: float | None) -> int: ...
+
+    def terminate_group(self) -> None: ...
 
     def kill_group(self) -> None: ...
 
@@ -267,6 +488,24 @@ class _CancellableTextPipe(io.TextIOBase):
                 return line
             self._read_available()
 
+    def read(self, size: int | None = -1, /) -> str:
+        """Return what is available, at most *size* characters, waiting only for the first.
+
+        A negative or missing *size* reads to EOF. ``""`` means EOF (or a
+        cancelled read).
+        """
+        if self.closed:
+            raise _closed_pipe_error()
+        if size is None or size < 0:
+            while not self._eof:
+                self._read_available()
+            text, self._decoded = self._decoded, ""
+            return text
+        while size and not self._decoded and not self._eof:
+            self._read_available()
+        text, self._decoded = self._decoded[:size], self._decoded[size:]
+        return text
+
     def cancel(self) -> None:
         """Wake an active read without waiting for the child to close its pipe."""
         if self.closed or self._cancel_writer < 0:
@@ -306,6 +545,28 @@ class _CancellableTextPipe(io.TextIOBase):
         self._eof = True
 
 
+class _ExhaustedTextPipe(io.TextIOBase):
+    """The stderr of a merged-output process, which shares the stdout pipe: always at EOF."""
+
+    def readable(self) -> bool:
+        """Report the only operation this pipe supports."""
+        return True
+
+    def readline(self, size: int = -1, /) -> str:
+        """Return EOF."""
+        del size
+        if self.closed:
+            raise _closed_pipe_error()
+        return ""
+
+    def read(self, size: int | None = -1, /) -> str:
+        """Return EOF."""
+        return self.readline(-1 if size is None else size)
+
+    def cancel(self) -> None:
+        """Nothing can block on this pipe."""
+
+
 def _closed_pipe_error() -> ValueError:
     return ValueError("I/O operation on closed file")
 
@@ -328,8 +589,9 @@ def _close_pipe_resources(
 class _SubprocessGroup:
     """A just-started POSIX process group whose binary pipes still belong to its launcher."""
 
-    def __init__(self, process: subprocess.Popen[bytes]) -> None:
+    def __init__(self, process: subprocess.Popen[bytes], exit_waiter: ExitWaiter | None) -> None:
         self._process = process
+        self._group = _OwnedProcessGroup(process, exit_waiter)
 
     @property
     def stdout(self) -> IO[bytes]:
@@ -340,18 +602,20 @@ class _SubprocessGroup:
         return stream
 
     @property
-    def stderr(self) -> IO[bytes]:
-        stream = self._process.stderr
-        if stream is None:
-            message = "piped subprocess has no stderr stream"
-            raise RuntimeError(message)
-        return stream
+    def stderr(self) -> IO[bytes] | None:
+        return self._process.stderr
 
     def wait(self, timeout: float | None) -> int:
-        return self._process.wait(timeout=timeout)
+        returncode = self._group.wait(timeout)
+        if returncode is None:
+            raise ProcessTimeoutError(self._process.args, timeout or 0.0)
+        return returncode
+
+    def terminate_group(self) -> None:
+        self._group.send_signal(signal.SIGTERM)
 
     def kill_group(self) -> None:
-        _signal_process_group(self._process.pid, signal.SIGKILL)
+        self._group.send_signal(signal.SIGKILL)
 
 
 def _signal_process_group(pid: int, number: signal.Signals) -> None:
@@ -360,6 +624,31 @@ def _signal_process_group(pid: int, number: signal.Signals) -> None:
         os.killpg(pid, number)
     except ProcessLookupError:
         return
+
+
+def _host_exit_waiter() -> ExitWaiter:
+    """The host's exit waiter, loading ``vs_sim.exit_wait`` when a group first needs one."""
+    from vs_sim.exit_wait import (  # noqa: PLC0415  # lint-waiver: LW-731051 [PLC0415]; lightweight entrypoints import this module and the launcher test caps the modules launcher construction loads, so the waiter's module loads when a group first needs it; a top-level import adds a module to every launcher construction, and importlib would hide the declared dependency from tach.
+        host_exit_waiter,
+    )
+
+    return host_exit_waiter()
+
+
+def _group_has_live_member(pgid: int) -> bool:
+    """Whether the host's process table lists a live member in group ``pgid``.
+
+    Raises ``OSError`` when the table cannot be read.
+    """
+    from vs_sim.process_table import (  # noqa: PLC0415  # lint-waiver: LW-731052 [PLC0415]; the same hello-path module cap as the exit waiter's import: only a refused group signal reads the process table, so its module loads then.
+        ProcessTableUnavailableError,
+        group_running,
+    )
+
+    try:
+        return group_running(pgid)
+    except ProcessTableUnavailableError as unavailable:
+        raise OSError(str(unavailable)) from unavailable
 
 
 class _ProcessGroupLeader(Protocol):
@@ -374,51 +663,73 @@ class _ProcessGroupLeader(Protocol):
     def wait(self, timeout: float | None = None) -> int: ...
 
 
-class _CapturedTextPopen(_ProcessGroupLeader, Protocol):
-    """The ``Popen`` surface behind a captured text-process handle."""
+class _WatcherStoppedError(RuntimeError):
+    """The thread watching a process group's leader stopped before the leader exited."""
 
-    @property
-    def stdin(self) -> IO[str] | None: ...
-
-    @property
-    def stdout(self) -> IO[str] | None: ...
-
-    @property
-    def stderr(self) -> IO[str] | None: ...
-
-    def communicate(
-        self, input_text: str | None = None, /, timeout: float | None = None
-    ) -> tuple[str, str]: ...
-
-
-class _CapturedTextProcessFactory(Protocol):
-    """Construct the Popen-like resource owned by the public real adapter."""
-
-    def __call__(
-        self,
-        argv: tuple[str, ...],
-        *,
-        pipe_stdin: bool,
-        cwd: Path | None,
-        env: Mapping[str, str] | None,
-    ) -> _CapturedTextPopen: ...
+    def __init__(self) -> None:
+        """Say that the leader's exit was never observed."""
+        super().__init__("the exit watcher stopped before the process group's leader exited")
 
 
 class _OwnedProcessGroup:
     """Serialize process-group signals with leader reaping while its PGID is reserved."""
 
-    def __init__(self, process: _ProcessGroupLeader) -> None:
+    def __init__(self, process: _ProcessGroupLeader, exit_waiter: ExitWaiter | None = None) -> None:
+        """Own ``process``'s group; *exit_waiter* ``None`` chooses the host's when first needed."""
         self._process = process
+        self._exit_waiter = exit_waiter
         self._reap_lock = threading.Lock()
         self._returncode: int | None = None
+        self._exit_watch_lock = threading.Lock()
+        self._exited: threading.Event | None = None
+        self._watch_failure: Exception | None = None
 
-    def wait(self) -> int:
-        """Wait without reaping until a signal can no longer race PGID reuse."""
+    def wait(self, timeout: float | None) -> int | None:
+        """Wait without reaping until a signal can no longer race PGID reuse.
+
+        Returns ``None`` when the leader is still running after *timeout*
+        seconds. A concurrent signal is never held back by a wait in progress.
+        A watch that failed raises its failure here and is never reported as an
+        exit, which would block in the reap with the leader still running.
+        """
         with self._reap_lock:
             if self._returncode is not None:
                 return self._returncode
-        self._wait_until_exited_without_reaping()
+        if timeout is None:
+            self._wait_until_exited_without_reaping()
+        elif not self._exit_watch().wait(timeout):
+            return None
+        elif (failure := self._watch_failure) is not None:
+            raise failure
         return self.reap(timeout=None)
+
+    def _exit_watch(self) -> threading.Event:
+        """Return an event set once the leader exited, watched by one thread at most."""
+        with self._exit_watch_lock:
+            if self._exited is None:
+                exited = threading.Event()
+
+                def watch() -> None:
+                    # Anything but a normal return leaves a failure, so a watcher that
+                    # dies is never read as the leader's exit.
+                    failure: Exception | None = _WatcherStoppedError()
+                    try:
+                        self._wait_until_exited_without_reaping()
+                        failure = None
+                    except ChildProcessError:
+                        failure = None  # The leader is gone, so there is nothing to wait for.
+                    except OSError as error:
+                        failure = error
+                    except BaseException as error:
+                        failure.__cause__ = error  # The thread's excepthook prints it too.
+                        raise
+                    finally:
+                        self._watch_failure = failure
+                        exited.set()
+
+                threading.Thread(target=watch, name="vs-sim-group-exit", daemon=True).start()
+                self._exited = exited
+            return self._exited
 
     def reap(self, timeout: float | None) -> int:
         """Reap the leader once while excluding every process-group signal."""
@@ -440,67 +751,42 @@ class _OwnedProcessGroup:
             if observed_returncode is not None:
                 self._returncode = observed_returncode
                 return
-            _signal_process_group(self._process.pid, number)
+            try:
+                _signal_process_group(self._process.pid, number)
+            except PermissionError:
+                if not self._nothing_live_is_left():
+                    raise
+
+    def _nothing_live_is_left(self) -> bool:
+        """Whether a refused group signal was refused only because nothing live is left to signal.
+
+        macOS answers ``EPERM`` where Linux succeeds when every member of the group is an
+        unreaped zombie. A live member this user cannot signal (a setuid child) is refused the
+        same way and must still be reported, so the refusal is forgiven only when the leader
+        has exited and the host's process table lists no live member. If either cannot be
+        told, nothing is forgiven.
+        """
+        pid = self._process.pid
+        try:
+            return self._waiter().has_exited(pid) and not _group_has_live_member(pid)
+        except OSError:
+            return False
+
+    def _waiter(self) -> ExitWaiter:
+        """The exit waiter: the one given, else the host's, chosen on first use."""
+        waiter = self._exit_waiter
+        if waiter is None:
+            waiter = self._exit_waiter = _host_exit_waiter()
+        return waiter
 
     def _wait_until_exited_without_reaping(self) -> None:
         try:
-            os.waitid(os.P_PID, self._process.pid, os.WEXITED | os.WNOWAIT)
+            self._waiter().wait(self._process.pid)
         except ChildProcessError:
             with self._reap_lock:
                 if self._returncode is not None:
                     return
             raise
-
-
-class _SubprocessMergedOutputProcess:
-    """The real merged-output process-group handle."""
-
-    def __init__(self, process: subprocess.Popen[bytes]) -> None:
-        self._process = process
-        self._group = _OwnedProcessGroup(process)
-
-    def read(self, max_bytes: int) -> bytes:
-        stdout = self._process.stdout
-        if stdout is None:
-            message = "merged-output subprocess has no stdout stream"
-            raise RuntimeError(message)
-        return os.read(stdout.fileno(), max_bytes)
-
-    def wait(self) -> int:
-        return self._group.wait()
-
-    def terminate_group(self) -> None:
-        self._group.send_signal(signal.SIGTERM)
-
-    def kill_group(self) -> None:
-        self._group.send_signal(signal.SIGKILL)
-
-
-class SubprocessMergedOutputProcessLauncher:
-    """Launch real merged-output commands in process groups owned by the caller."""
-
-    def __init__(self, popen: PopenFactory | None = None) -> None:
-        """Use *popen* when supplied, preserving legacy process-factory injection."""
-        self._popen = popen or subprocess.Popen
-
-    def start(
-        self,
-        argv: Sequence[str],
-        *,
-        cwd: Path | str | None,
-        env: Mapping[str, str],
-    ) -> MergedOutputProcess:
-        """Start *argv* without a shell, isolated from the caller's terminal group."""
-        process = self._popen(
-            tuple(argv),
-            cwd=cwd,
-            env=dict(env),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            process_group=0,
-        )
-        return _SubprocessMergedOutputProcess(process)
 
 
 class _SubprocessPipedProcess:
@@ -516,7 +802,8 @@ class _SubprocessPipedProcess:
             stdout = open_output(process.stdout)
             ownership.callback(stdout.close)
             _require_cancellable(stdout)
-            stderr = open_output(process.stderr)
+            raw_stderr = process.stderr
+            stderr = _ExhaustedTextPipe() if raw_stderr is None else open_output(raw_stderr)
             ownership.callback(stderr.close)
             _require_cancellable(stderr)
         except BaseException as construction_error:
@@ -540,6 +827,9 @@ class _SubprocessPipedProcess:
     def wait(self, timeout: float | None) -> int:
         return self._process.wait(timeout=timeout)
 
+    def terminate_group(self) -> None:
+        self._process.terminate_group()
+
     def kill_group(self) -> None:
         self._process.kill_group()
 
@@ -558,19 +848,30 @@ def _require_cancellable(stream: io.TextIOBase) -> None:
 def _close_process_output(process: _StartedPipedProcess) -> None:
     """Close both raw pipes even when closing either one fails."""
     with ExitStack() as cleanup:
-        cleanup.callback(process.stderr.close)
+        stderr = process.stderr
+        if stderr is not None:
+            cleanup.callback(stderr.close)
         cleanup.callback(process.stdout.close)
 
 
-def _start_subprocess_group(argv: tuple[str, ...], cwd: Path | None) -> _StartedPipedProcess:
+def _start_subprocess_group(
+    argv: tuple[str, ...],
+    cwd: Path | None,
+    *,
+    env: Mapping[str, str] | None,
+    merge_stderr: bool,
+    exit_waiter: ExitWaiter | None,
+) -> _StartedPipedProcess:
     process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-994699 [S603]; execute the caller's argv directly with no shell at the process adapter boundary.
         argv,
         cwd=cwd,
+        env=None if env is None else dict(env),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
         process_group=0,
     )
-    return _SubprocessGroup(process)
+    return _SubprocessGroup(process, exit_waiter)
 
 
 _START_ROLLBACK_TIMEOUT_S = 5.0
@@ -579,103 +880,32 @@ _START_ROLLBACK_TIMEOUT_S = 5.0
 class SubprocessPipedProcessLauncher:
     """Start piped commands in owned groups on VibeSys's supported POSIX hosts."""
 
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
-        """Start *argv* in a new POSIX process group with UTF-8 text pipes."""
-        if os.name != "posix":
-            message = "piped process groups require a POSIX host"
-            raise OSError(message)
-        return _start_piped_process(argv, cwd, _start_subprocess_group, _CancellableTextPipe)
+    def __init__(self, *, exit_waiter: ExitWaiter | None = None) -> None:
+        """Wait for a leader's exit with *exit_waiter*, by default the host's own mechanism.
 
-
-class _SubprocessCapturedTextProcess:
-    """Own a ``Popen`` until its caller has settled the whole process group."""
-
-    def __init__(self, process: _CapturedTextPopen) -> None:
-        self._process = process
-        self._group = _OwnedProcessGroup(process)
-
-    @property
-    def returncode(self) -> int:
-        returncode = self._process.returncode
-        if returncode is None:
-            message = "captured process has not exited"
-            raise RuntimeError(message)
-        return returncode
-
-    def communicate(self, input_text: str | None, timeout: float) -> tuple[str, str]:
-        return self._process.communicate(input_text, timeout=timeout)
-
-    def kill_group(self) -> None:
-        self._group.send_signal(signal.SIGKILL)
-
-    def wait(self, timeout: float) -> int:
-        return self._group.reap(timeout)
-
-    def close(self) -> None:
-        failures: list[BaseException] = []
-        for stream in (self._process.stdin, self._process.stdout, self._process.stderr):
-            if stream is not None:
-                try:
-                    stream.close()
-                except BaseException as failure:  # noqa: BLE001  # lint-waiver: LW-195404 [BLE001]; all three owned pipes must be attempted even when cancellation or an injected stream failure interrupts an earlier close.
-                    # > Catching only I/O errors would let cancellation skip later
-                    # > resources; a context manager would likewise retain only
-                    # > its last failure instead of reporting the complete cleanup.
-                    failures.append(failure)
-        if len(failures) == 1:
-            raise failures[0]
-        if failures:
-            message = "captured process pipes could not be closed"
-            raise BaseExceptionGroup(message, failures)
-
-
-def _start_captured_text_process(
-    argv: tuple[str, ...],
-    *,
-    pipe_stdin: bool,
-    cwd: Path | None,
-    env: Mapping[str, str] | None,
-) -> _CapturedTextPopen:
-    """Start the real captured process behind its deterministic construction seam."""
-    return subprocess.Popen(  # noqa: S603  # lint-waiver: LW-195405 [S603]; this is the real adapter for a caller-owned argv vector, with no shell parsing.
-        argv,
-        cwd=cwd,
-        env=dict(env) if env is not None else None,
-        stdin=subprocess.PIPE if pipe_stdin else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        process_group=0,
-    )
-
-
-class SubprocessCapturedTextProcessLauncher:
-    """Start captured UTF-8 commands on VibeSys's supported POSIX hosts."""
-
-    def __init__(self, process_factory: _CapturedTextProcessFactory | None = None) -> None:
-        """Use the OS process factory unless a deterministic boundary is supplied."""
-        self._process_factory = process_factory or _start_captured_text_process
+        The default is chosen when a group first needs it, so building a launcher loads nothing.
+        """
+        self._exit_waiter = exit_waiter
 
     def start(
         self,
         argv: tuple[str, ...],
         *,
-        pipe_stdin: bool,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
-    ) -> CapturedTextProcess:
-        """Start *argv* with inherited cwd/env defaults and isolated descendants."""
+        merge_stderr: bool = False,
+    ) -> PipedProcess:
+        """Start *argv* in a new POSIX process group with UTF-8 text pipes."""
         if os.name != "posix":
-            message = "captured process groups require a POSIX host"
+            message = "piped process groups require a POSIX host"
             raise OSError(message)
-        process = self._process_factory(
-            argv,
-            pipe_stdin=pipe_stdin,
-            cwd=cwd,
+        start = partial(
+            _start_subprocess_group,
             env=env,
+            merge_stderr=merge_stderr,
+            exit_waiter=self._exit_waiter,
         )
-        return _SubprocessCapturedTextProcess(process)
+        return _start_piped_process(argv, cwd, start, _CancellableTextPipe)
 
 
 def _start_piped_process(
@@ -776,12 +1006,27 @@ class ForegroundLauncher(Protocol):
         ...
 
 
+LAUNCHER_LIFELINE_ENV = "VIBESYS_LAUNCHER_LIFELINE"
+"""Names the descriptor of a child's launcher lifeline, set by ``InheritedStdioLauncher``.
+
+The child holds the read end of a pipe whose only write end its launcher holds, so the
+read reaches end-of-file exactly when the launcher has exited, however it ended
+(``follow_launcher``)."""
+
+
 class _InheritedHandle:
-    def __init__(self, process: asyncio.subprocess.Process) -> None:
+    def __init__(self, process: asyncio.subprocess.Process, lifeline: int) -> None:
         self._process = process
+        self._lifeline: int | None = lifeline
 
     async def wait(self) -> int:
-        return await self._process.wait()
+        try:
+            return await self._process.wait()
+        finally:
+            # The child has ended; the lifeline has nobody left to tell.
+            if self._lifeline is not None:
+                os.close(self._lifeline)
+                self._lifeline = None
 
     def send_signal(self, number: signal.Signals) -> None:
         if self._process.returncode is None:
@@ -789,7 +1034,22 @@ class _InheritedHandle:
 
 
 class InheritedStdioLauncher:
-    """Starts real operating-system processes that use this process's terminal."""
+    """Starts real operating-system processes that use this process's terminal.
+
+    Each child leads a session of its own, with no controlling terminal, so the
+    terminal's job-control signals (interrupt, quit, suspend) reach only this process:
+    the parent decides what reaches the child, and a child never gets one keypress twice,
+    once from the terminal and once forwarded. The child still writes to the terminal
+    through the descriptors it inherits, and job control never stops it for that (under
+    ``stty tostop``) nor for setting the terminal's modes; the terminal is not its
+    controlling terminal. Nor can it or any process it starts open ``/dev/tty``: a program
+    that would prompt there (``ssh`` asking for a password or a host key) fails at once
+    instead of turning the terminal's echo off under the operator, or stopping the run.
+
+    Outside the terminal's session, the child no longer hears the terminal hang up. So
+    each child gets a lifeline (``LAUNCHER_LIFELINE_ENV``): a child that calls
+    ``follow_launcher`` hangs up when this process exits, by any means.
+    """
 
     async def start(
         self,
@@ -798,10 +1058,73 @@ class InheritedStdioLauncher:
         cwd: Path | None = None,
     ) -> ForegroundChild:
         """Start ``argv`` on the running event loop with inherited standard streams."""
-        process = await asyncio.create_subprocess_exec(
-            *argv, env=None if env is None else dict(env), cwd=cwd
-        )
-        return _InheritedHandle(process)
+        given, held = os.pipe()
+        environment = {**(os.environ if env is None else env), LAUNCHER_LIFELINE_ENV: str(given)}
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *argv, env=environment, cwd=cwd, start_new_session=True, pass_fds=(given,)
+            )
+        except BaseException:
+            os.close(held)
+            raise
+        finally:
+            os.close(given)
+        return _InheritedHandle(process, held)
+
+
+class LauncherLifelineError(ValueError):
+    """``LAUNCHER_LIFELINE_ENV`` does not name a file descriptor."""
+
+    def __init__(self, value: str) -> None:
+        """Name the variable and the value it held."""
+        super().__init__(f"{LAUNCHER_LIFELINE_ENV} must be a file descriptor number, not {value!r}")
+
+
+def follow_launcher(environ: MutableMapping[str, str]) -> None:
+    """Act on this process's launcher lifeline, if ``InheritedStdioLauncher`` gave it one.
+
+    Call once, early, on the main thread of a launched child; ``environ`` is the process
+    environment. Without a lifeline this does nothing. With one, it takes the lifeline out
+    of ``environ`` and closes it on every ``exec`` (so no process the child starts reads it
+    as its own, or holds it open), and hangs up when the launcher exits: once the lifeline
+    reaches end-of-file, or cannot be read at all, this process sends itself SIGHUP, the
+    signal a closed terminal sent before the child led its own session, so the child's own
+    SIGHUP handling (a stop that cancels the run's work) runs even after a SIGKILL, OOM
+    kill or crash of the launcher. A pipe works on every Unix; Linux's
+    ``PR_SET_PDEATHSIG`` would not, and it fires when the parent *thread* exits, not the
+    process.
+
+    Raises ``LauncherLifelineError`` when ``LAUNCHER_LIFELINE_ENV`` does not hold a
+    descriptor number.
+    """
+    value = environ.pop(LAUNCHER_LIFELINE_ENV, None)
+    if value is None:
+        return
+    if not value.isdigit():
+        raise LauncherLifelineError(value)
+    lifeline = int(value)
+    inheritable = False  # os.set_inheritable takes its flag by position only
+    with suppress(OSError):
+        # A descriptor that is not open is not read either: the watcher hangs up at once.
+        os.set_inheritable(lifeline, inheritable)
+    threading.Thread(
+        target=_hang_up_at_end, args=(lifeline,), name="launcher-lifeline", daemon=True
+    ).start()
+
+
+def _hang_up_at_end(lifeline: int) -> None:
+    """Block until the launcher exits, then hang this process up.
+
+    A lifeline that cannot be read (or closed) hangs up too: the launcher can no longer
+    be heard, and a run nobody can stop must not go on.
+    """
+    with suppress(OSError):
+        # The launcher never writes; the read returns only at end-of-file.
+        while os.read(lifeline, 1):
+            pass
+    with suppress(OSError):
+        os.close(lifeline)
+    os.kill(os.getpid(), signal.SIGHUP)
 
 
 async def run_foreground(

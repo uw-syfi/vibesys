@@ -9,7 +9,9 @@ import tempfile
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict
+
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
 
 if TYPE_CHECKING:
     from .config import SlurmConfig
@@ -32,6 +34,10 @@ class RemoteOperationError(RuntimeError):
     def invalid_evidence(cls) -> RemoteOperationError:
         """Describe malformed identity evidence without exposing its contents."""
         return cls("remote cluster operation evidence is missing or malformed")
+
+
+MAX_EVIDENCE_BYTES = 16 * 1024 * 1024
+"""The most evidence one operation's records may print; more is invalid evidence."""
 
 
 class RemoteOperationEvidence(BaseModel):
@@ -73,18 +79,29 @@ class RemoteOperations:
         self._scratch_root = scratch_root
 
     def claim(self, operation_id: str, intent: str) -> RemoteOperationClaim:
-        """Claim an operation atomically; an interrupted claim stays Unknown."""
+        """Claim an operation by atomically publishing its immutable intent."""
         base = self._root / operation_id
         directory = base / ".cluster-operation"
-        response = self._transport.exec(
-            f"mkdir -p {shlex.quote(base.as_posix())} && "
-            f"if mkdir {shlex.quote(directory.as_posix())} 2>/dev/null; then printf CREATED; else printf EXISTS; fi"
-        ).stdout.strip()
-        if response == "CREATED":
-            self._write(directory / "intent.json", intent)
-            self._sync_directory_chain(base)
-        elif response != "EXISTS":
-            raise RemoteOperationError.invalid_evidence()
+        self._transport.exec(f"mkdir -p {shlex.quote(directory.as_posix())}")
+        with tempfile.TemporaryDirectory(
+            prefix="vs-slurm-claim-", dir=self._scratch_root
+        ) as temporary:
+            local = Path(temporary) / "intent"
+            local.write_text(intent, encoding="utf-8")
+            pending = directory / ("intent.pending." + Path(temporary).name)
+            self._transport.put(local, pending)
+            published = directory / "intent.json"
+            pending_quoted = shlex.quote(pending.as_posix())
+            published_quoted = shlex.quote(published.as_posix())
+            sync_paths = (published, directory, base, *base.parents)
+            response = self._transport.exec(
+                f"if ln {pending_quoted} {published_quoted} 2>/dev/null; then "
+                f"rm {pending_quoted} && sync "
+                f"{shlex.join(path.as_posix() for path in sync_paths)} && printf CREATED; "
+                f"else rm -f {pending_quoted}; printf EXISTS; fi"
+            ).stdout.strip()
+            if response not in {"CREATED", "EXISTS"}:
+                raise RemoteOperationError.invalid_evidence()
         evidence = self.inspect(operation_id)
         kind = "created" if response == "CREATED" else "existing"
         if evidence.intent is None:
@@ -107,10 +124,16 @@ class RemoteOperations:
             f"printf '%s' ',\"cancelled\":'; if test -f {marker}; then printf true; else printf false; fi; printf '}}'"
         )
         response = self._transport.exec("; ".join(pieces)).stdout
-        try:
-            return RemoteOperationEvidence.model_validate_json(response, strict=True)
-        except ValidationError as exc:
-            raise RemoteOperationError.invalid_evidence() from exc
+        evidence = decode_json(
+            response,
+            RemoteOperationEvidence,
+            source="remote operation evidence",
+            max_bytes=MAX_EVIDENCE_BYTES,
+            options=ValidationOptions(strict=True),
+        )
+        if isinstance(evidence, Unreadable):
+            raise RemoteOperationError.invalid_evidence()
+        return evidence
 
     def accepted(self, operation_id: str, record: str) -> None:
         """Publish the accepted locator separately from cancellation intent."""

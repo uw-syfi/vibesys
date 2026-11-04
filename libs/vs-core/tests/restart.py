@@ -6,9 +6,46 @@ A rule's own test therefore steps live at pull-request depth and reloads between
 nightly depth, where the whole suite is a restart sweep.
 """
 
+from __future__ import annotations
+
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
 from vs_sim.api.testing import Depth, depth
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    from vs_core.api import RequestRecord
+
+_live = {"open": 0}
+"""How many ``live_steps`` blocks are open."""
 
 
 def restarts() -> bool:
     """Whether tests reload the state between steps (nightly depth)."""
-    return depth() is Depth.NIGHTLY
+    return depth() is Depth.NIGHTLY and not _live["open"]
+
+
+@contextmanager
+def live_steps() -> Iterator[None]:
+    """Step live even at nightly depth, for a property that generates its own reloads.
+
+    A reload after every step costs about three times the live step and grows with the
+    ledger, so a property that already reloads at a generated point (and checks the reloaded
+    state) takes its nightly search from more examples, not from reloading every step.
+    """
+    _live["open"] += 1
+    try:
+        yield
+    finally:
+        _live["open"] -= 1
+
+
+def unaddressed(record: RequestRecord) -> RequestRecord:
+    """*record* apart from the reconciliation commands sent about it (``addressed_by``).
+
+    Recovery sends inspections and cancels about the records it reconciles; a test of what it
+    does to a record's own facts compares the rest. The addressing is tested on its own.
+    """
+    return record.model_copy(update={"addressed_by": ()})

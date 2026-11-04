@@ -77,11 +77,16 @@ class TestLoadConfigErrors:
         with pytest.raises(ValueError, match=r"agent\.env_passthrough.*'BAD-NAME'"):
             load_config(cfg_file)
 
-    def test_missing_model_name(self, tmp_path: Path) -> None:
+    def test_unknown_model_key(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("[model]\nprovider = 'vertex-ai'\n")
-        with pytest.raises(ValueError, match="name"):
+        with pytest.raises(ValueError, match="provider"):
             load_config(cfg_file)
+
+    def test_omitted_model_name_leaves_the_provider_default(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("[repository]\nvisibility = 'public'\n")
+        assert load_config(cfg_file).model.name is None
 
     def test_missing_file(self) -> None:
         with pytest.raises(FileNotFoundError):
@@ -332,21 +337,13 @@ visibility = "internal"
             load_config(cfg_file)
 
 
-class TestLoadConfigPresentationBoundary:
-    def test_tui_section_is_not_part_of_core_config(self, tmp_path: Path) -> None:
+class TestLoadConfigUnsupportedSections:
+    def test_unknown_tui_section_is_rejected(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text('[model]\nname = "gpt-5.5"\n\n[tui]\ntheme = "dark"\n')
 
         with pytest.raises(ValueError, match="tui"):
             load_config(cfg_file)
-
-    def test_application_boundary_can_ignore_tui_section(self, tmp_path: Path) -> None:
-        cfg_file = tmp_path / "agent.toml"
-        cfg_file.write_text('[model]\nname = "gpt-5.5"\n\n[tui]\ntheme = "dark"\n')
-
-        config = load_config(cfg_file, ignored_sections=frozenset({"tui"}))
-
-        assert config.model.name == "gpt-5.5"
 
     def test_legacy_outer_role_section_is_rejected(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"

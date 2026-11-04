@@ -27,12 +27,22 @@ from vs_evaluation.api import (
     EvaluationState,
     EvaluationStep,
     PollPhase,
+    loop_evaluation_deadline,
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
-from vs_sim.api.testing import ManualClock, examples
+from vs_sim.api import Sleeper, yield_now
+from vs_sim.api.testing import (
+    NO_PROCESSES,
+    HostCrashedError,
+    InlineBlockingRunner,
+    ManualClock,
+    examples,
+    yield_until,
+)
 from vs_slurm.api import (
     ClusterCancelOutcome,
+    ClusterObservation,
     ClusterSubmitOutcome,
     ClusterTarget,
     FakeCluster,
@@ -45,6 +55,7 @@ from vs_slurm.api import (
 from vs_slurm.api import SlurmBatchStageResult as _StageResult
 
 _POLL_INTERVAL_S = 1.0
+_BLOCKING = InlineBlockingRunner()
 # The executor waits this long for a cancelled job to end before it leaves the
 # evaluation CANCELING. It exceeds the profile's longest COMPLETING time.
 _CONFIRMATION_S = 120.0
@@ -84,10 +95,15 @@ class _ScheduledCluster(FakeCluster):
         self.scancels = 0
         self.accepted = threading.Event()
 
-    def advance(self, seconds: float) -> None:
-        """Move the scheduler's clock; the executor's pacing calls this."""
+    @property
+    def manual_clock(self) -> ManualClock:
+        """The scheduler's clock; the executor's pacing sleeps on it."""
         assert isinstance(self.clock, ManualClock)
-        self.clock.advance(seconds)
+        return self.clock
+
+    def advance(self, seconds: float) -> None:
+        """Move the scheduler's clock."""
+        self.manual_clock.advance(seconds)
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
@@ -123,9 +139,15 @@ class _ScheduledCluster(FakeCluster):
         self.accepted.set()
         return outcome
 
-    def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
+    def cancel(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCancelOutcome:
         self.scancels += 1
-        return super().cancel(target, by_job_id=by_job_id)
+        return super().cancel(target, by_job_id=by_job_id, observed=observed)
 
 
 def _config() -> SlurmConfig:
@@ -153,7 +175,10 @@ def _request() -> EvaluationRequest:
 
 
 def _stack(
-    root: Path, cluster: _ScheduledCluster
+    root: Path,
+    cluster: _ScheduledCluster,
+    *,
+    sleeper: Sleeper | None = None,
 ) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator]:
     workspace = root / "workspace"
     workspace.mkdir()
@@ -166,11 +191,58 @@ def _stack(
         handle_root=root / "handles",
         cluster=cluster,
         # Pacing is the Fake's clock: waiting for the scheduler advances it.
-        pause=cluster.advance,
+        sleeper=cluster.manual_clock if sleeper is None else sleeper,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         cancel_confirmation_seconds=_CONFIRMATION_S,
+        clock=ManualClock(),
     )
     store = evaluation_testing.InMemoryEvaluationStore()
-    return executor, EvaluationCoordinator(executor, store, ManualClock())
+    return executor, EvaluationCoordinator(
+        executor, store, ManualClock(), deadline_factory=loop_evaluation_deadline
+    )
+
+
+class _FaultingSleeper:
+    """Raise one injected host failure, then pace later cleanup on a manual clock."""
+
+    def __init__(self, then: ManualClock) -> None:
+        self._then = then
+        self.faults = 0
+
+    async def sleep(self, seconds: float) -> None:
+        if self.faults == 0:
+            self.faults += 1
+            message = "injected polling-clock failure"
+            raise HostCrashedError(message)
+        await self._then.sleep(seconds)
+
+
+@pytest.mark.asyncio
+async def test_poll_pause_propagates_an_independent_sleeper_failure(tmp_path: Path) -> None:
+    """A failed pacing clock fails the evaluation instead of becoming an early wakeup."""
+    cluster = _ScheduledCluster(_Schedule(queue_wait_s=0, run_s=1, completing_s=0))
+    sleeper = _FaultingSleeper(cluster.manual_clock)
+    executor, coordinator = _stack(tmp_path, cluster, sleeper=sleeper)
+    handle = await coordinator.submit(_request())
+    try:
+        terminal = await yield_until(
+            lambda: coordinator.snapshot(handle.id),
+            lambda seen: (
+                seen.state
+                in {
+                    EvaluationState.SUCCEEDED,
+                    EvaluationState.FAILED,
+                    EvaluationState.CANCELED,
+                }
+            ),
+            "the Slurm evaluation to publish the sleeper failure",
+        )
+        assert terminal.state is EvaluationState.FAILED
+        assert terminal.failure == "HostCrashedError: injected polling-clock failure"
+        assert sleeper.faults == 1
+    finally:
+        await executor.close()
 
 
 _OPS = st.lists(st.sampled_from(("snapshot", "inspect_only", "poll", "wait")), max_size=40)
@@ -200,7 +272,7 @@ async def _publishes_monotonically(schedule: _Schedule, operations: list[str]) -
                     if polled.phase in _PHASE_RANK:
                         phases.append((polled.attempt, _PHASE_RANK[polled.phase]))
                 case _:
-                    await asyncio.sleep(0)
+                    await yield_now()
             return await coordinator.recorded_status(handle.id)
 
         for operation in operations:
@@ -234,9 +306,25 @@ def test_published_lifecycle_never_decreases_for_any_scheduler_timeline(
     )
 
 
+class _ParkFirstSleep:
+    """Parks the first sleep until ``release`` is set; later sleeps run on ``then``."""
+
+    def __init__(self, then: ManualClock) -> None:
+        self.idle = asyncio.Event()
+        self.release = asyncio.Event()
+        self._then = then
+
+    async def sleep(self, seconds: float) -> None:
+        if not self.idle.is_set():
+            self.idle.set()
+            await self.release.wait()
+        else:
+            await self._then.sleep(seconds)
+
+
 def _parked_submitter(
     cluster: _ScheduledCluster, root: Path
-) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator, threading.Event, threading.Event]:
+) -> tuple[SlurmEvaluationExecutor, EvaluationCoordinator, asyncio.Event, asyncio.Event]:
     """A stack whose submitter parks at its first wait, so a test alone acts on the job.
 
     Acting on ``cluster.accepted`` alone races the submitter's remaining acceptance
@@ -244,20 +332,7 @@ def _parked_submitter(
     the confirmation budget runs out. Parking leaves the batch accepted and its handle
     recorded. Every later pause (a cancel confirming) advances the cluster's clock.
     """
-    idle = threading.Event()
-    release = threading.Event()
-    lock = threading.Lock()
-    parked: list[bool] = []
-
-    def pause(seconds: float) -> None:
-        with lock:
-            first = not parked
-            parked.append(True)
-        if first:
-            idle.set()
-            release.wait()
-        else:
-            cluster.advance(seconds)
+    sleeper = _ParkFirstSleep(cluster.manual_clock)
 
     workspace = root / "workspace"
     workspace.mkdir()
@@ -269,11 +344,17 @@ def _parked_submitter(
         support_trees={},
         handle_root=root / "handles",
         cluster=cluster,
-        pause=pause,
+        sleeper=sleeper,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         cancel_confirmation_seconds=_CONFIRMATION_S,
+        clock=ManualClock(),
     )
     store = evaluation_testing.InMemoryEvaluationStore()
-    return executor, EvaluationCoordinator(executor, store, ManualClock()), idle, release
+    coordinator = EvaluationCoordinator(
+        executor, store, ManualClock(), deadline_factory=loop_evaluation_deadline
+    )
+    return executor, coordinator, sleeper.idle, sleeper.release
 
 
 async def _stopped_while_active(schedule: _Schedule) -> None:
@@ -348,7 +429,11 @@ async def test_recovery_of_a_stopped_job_ends_canceled_like_a_poll(tmp_path: Pat
         record = await coordinator.cancel(handle.id)
         assert record.state is EvaluationState.CANCELING
         cluster.advance(10**9)
-        polled = await executor.poll(handle.id)
+        polled = await yield_until(
+            lambda: executor.poll(handle.id),
+            lambda seen: seen.phase is PollPhase.ENDED,
+            "the live Slurm owner to settle its cancelled observation",
+        )
         assert polled.terminal is not None
         assert polled.terminal.state is EvaluationState.CANCELED
         observed = await executor.inspect(handle.id)

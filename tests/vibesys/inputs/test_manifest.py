@@ -18,6 +18,7 @@ from vibesys.inputs import (
     EvaluatorInput,
     InputCommand,
     InputManifest,
+    InputManifestParseError,
     WorkspaceSource,
     load_task,
     render_input_manifest,
@@ -233,6 +234,40 @@ def test_manifest_rejects_inconsistent_cross_references(
         InputManifest.model_validate(_manifest(overrides))
 
 
+_PLAIN_PATH = st.lists(
+    st.text(alphabet="abcXYZ019_-.", min_size=1, max_size=6).filter(
+        lambda part: part not in {".", ".."}
+    ),
+    min_size=1,
+    max_size=3,
+).map("/".join)
+
+
+@settings(max_examples=examples(pr=20, nightly=200))
+@given(
+    unread=st.lists(
+        st.tuples(_PLAIN_PATH, st.booleans()).map(lambda item: item[0] + ("/" if item[1] else "")),
+        min_size=1,
+        max_size=3,
+    ),
+    sources=st.booleans(),
+)
+def test_unread_workspace_paths_round_trip_through_manifest_toml(
+    *, unread: list[str], sources: bool
+) -> None:
+    workspace = {"unread": unread, "sources": [_source()] if sources else []}
+    manifest = InputManifest.model_validate(_manifest({"workspace": workspace}))
+    assert InputManifest.model_validate(tomllib.loads(render_input_manifest(manifest))) == manifest
+
+
+@pytest.mark.parametrize(
+    "path", ["", "/abs", "../up", "a/../b", "a//b", "./a", "notes/*", "a?", "[ab]", ":(top)a", "!a"]
+)
+def test_an_unread_path_that_is_not_plain_is_rejected_naming_it(path: str) -> None:
+    with pytest.raises(ValidationError, match=r"unread path .* must be a plain relative"):
+        InputManifest.model_validate(_manifest({"workspace": {"unread": [path]}}))
+
+
 _VALID_TOML = """version = 1
 [agent]
 domain = "generic"
@@ -268,6 +303,10 @@ def test_load_task_reports_missing_files_and_invalid_manifest(tmp_path: Path) ->
     (task / "vibesys.input.toml").write_text("version = 2\n")
     with pytest.raises(ValueError, match="Invalid input manifest"):
         load_task(tmp_path)
+    (task / "vibesys.input.toml").write_text("version = [\n")
+    with pytest.raises(InputManifestParseError, match="Invalid input manifest") as raised:
+        load_task(tmp_path)
+    assert raised.value.path == task / "vibesys.input.toml"
 
 
 _TASK_NAMES = st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=8)

@@ -1,0 +1,1210 @@
+[
+  {
+    "name": "HelloRequest valid",
+    "message": "HelloRequest",
+    "value": {
+      "apiSchemaHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "HelloResponse valid",
+    "message": "HelloResponse",
+    "value": {
+      "apiSchemaHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "gatewayVersion": "test"
+    }
+  },
+  {
+    "name": "TailRequest valid",
+    "message": "TailRequest",
+    "value": {
+      "runId": "run-1",
+      "sessionId": "",
+      "fromSeq": "0"
+    }
+  },
+  {
+    "name": "TailResponse valid",
+    "message": "TailResponse",
+    "value": {
+      "records": [
+        "CAE="
+      ],
+      "throughSeq": "0"
+    }
+  },
+  {
+    "name": "SkeletonRequest valid",
+    "message": "SkeletonRequest",
+    "value": {
+      "runId": "run-1"
+    }
+  },
+  {
+    "name": "SkeletonResponse valid",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true
+    }
+  },
+  {
+    "name": "GetBlobsRequest valid",
+    "message": "GetBlobsRequest",
+    "value": {
+      "runId": "run-1",
+      "sha256": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ]
+    }
+  },
+  {
+    "name": "GetBlobsResponse valid",
+    "message": "GetBlobsResponse",
+    "value": {
+      "blobs": [
+        {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    }
+  },
+  {
+    "name": "BlobResult valid",
+    "message": "BlobResult",
+    "value": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "TailStreamRequest valid",
+    "message": "TailStreamRequest",
+    "value": {
+      "runId": "run-1",
+      "streamId": "output"
+    }
+  },
+  {
+    "name": "TailStreamResponse valid",
+    "message": "TailStreamResponse",
+    "value": {
+      "data": "eA==",
+      "nextOffset": "1"
+    }
+  },
+  {
+    "name": "BlobResult variant 15",
+    "message": "BlobResult",
+    "value": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "errorCode": 5,
+      "errorMessage": "missing"
+    }
+  },
+  {
+    "name": "SkeletonResponse variant 16",
+    "message": "SkeletonResponse",
+    "value": {
+      "records": [
+        "CAE="
+      ],
+      "sessions": [
+        "default"
+      ]
+    }
+  },
+  {
+    "name": "HelloRequest.apiSchemaHash 17",
+    "message": "HelloRequest",
+    "value": {
+      "apiSchemaHash": "bad"
+    },
+    "field": "api_schema_hash"
+  },
+  {
+    "name": "HelloResponse.apiSchemaHash 18",
+    "message": "HelloResponse",
+    "value": {
+      "apiSchemaHash": "bad",
+      "gatewayVersion": "test"
+    },
+    "field": "api_schema_hash"
+  },
+  {
+    "name": "HelloResponse.gatewayVersion 19",
+    "message": "HelloResponse",
+    "value": {
+      "apiSchemaHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "gatewayVersion": ""
+    },
+    "field": "gateway_version"
+  },
+  {
+    "name": "HelloResponse.gatewayVersion 20",
+    "message": "HelloResponse",
+    "value": {
+      "apiSchemaHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "gatewayVersion": {
+        "$string": 257
+      }
+    },
+    "field": "gateway_version"
+  },
+  {
+    "name": "TailRequest.runId 21",
+    "message": "TailRequest",
+    "value": {
+      "runId": "../escape",
+      "sessionId": "",
+      "fromSeq": "0"
+    },
+    "field": "run_id"
+  },
+  {
+    "name": "SkeletonRequest.runId 22",
+    "message": "SkeletonRequest",
+    "value": {
+      "runId": "../escape"
+    },
+    "field": "run_id"
+  },
+  {
+    "name": "GetBlobsRequest.runId 23",
+    "message": "GetBlobsRequest",
+    "value": {
+      "runId": "../escape",
+      "sha256": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ]
+    },
+    "field": "run_id"
+  },
+  {
+    "name": "TailStreamRequest.runId 24",
+    "message": "TailStreamRequest",
+    "value": {
+      "runId": "../escape",
+      "streamId": "output"
+    },
+    "field": "run_id"
+  },
+  {
+    "name": "TailRequest.sessionId 25",
+    "message": "TailRequest",
+    "value": {
+      "runId": "run-1",
+      "sessionId": "../escape",
+      "fromSeq": "0"
+    },
+    "field": "session_id"
+  },
+  {
+    "name": "GetBlobsRequest.sessionId 26",
+    "message": "GetBlobsRequest",
+    "value": {
+      "runId": "run-1",
+      "sha256": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      ],
+      "sessionId": "../escape"
+    },
+    "field": "session_id"
+  },
+  {
+    "name": "TailRequest.fromSeq 27",
+    "message": "TailRequest",
+    "value": {
+      "runId": "run-1",
+      "sessionId": "",
+      "fromSeq": "9223372036854775808"
+    },
+    "field": "from_seq"
+  },
+  {
+    "name": "TailResponse.throughSeq 28",
+    "message": "TailResponse",
+    "value": {
+      "records": [
+        "CAE="
+      ],
+      "throughSeq": "9223372036854775808"
+    },
+    "field": "through_seq"
+  },
+  {
+    "name": "SkeletonResponse.committedSeq 29",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true,
+      "committedSeq": "9223372036854775808"
+    },
+    "field": "committed_seq"
+  },
+  {
+    "name": "SkeletonResponse.nextSeq 30",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "9223372036854775808",
+      "complete": true
+    },
+    "field": "next_seq"
+  },
+  {
+    "name": "TailStreamRequest.fromOffset 31",
+    "message": "TailStreamRequest",
+    "value": {
+      "runId": "run-1",
+      "streamId": "output",
+      "fromOffset": "9223372036854775808"
+    },
+    "field": "from_offset"
+  },
+  {
+    "name": "TailStreamResponse.nextOffset 32",
+    "message": "TailStreamResponse",
+    "value": {
+      "data": "eA==",
+      "nextOffset": "9223372036854775808"
+    },
+    "field": "next_offset"
+  },
+  {
+    "name": "TailResponse.records 33",
+    "message": "TailResponse",
+    "value": {
+      "records": [],
+      "throughSeq": "0"
+    },
+    "field": "records"
+  },
+  {
+    "name": "TailResponse.records 34",
+    "message": "TailResponse",
+    "value": {
+      "records": [
+        ""
+      ],
+      "throughSeq": "0"
+    },
+    "field": "records"
+  },
+  {
+    "name": "TailResponse.records 35",
+    "message": "TailResponse",
+    "value": {
+      "records": [
+        {
+          "$bytes": 1048577
+        }
+      ],
+      "throughSeq": "0"
+    },
+    "field": "records"
+  },
+  {
+    "name": "TailResponse.records 36",
+    "message": "TailResponse",
+    "value": {
+      "records": {
+        "$repeat": 1048577,
+        "value": "AA=="
+      },
+      "throughSeq": "0"
+    },
+    "field": "records"
+  },
+  {
+    "name": "SkeletonResponse.records 37",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true,
+      "records": [
+        ""
+      ]
+    },
+    "field": "records"
+  },
+  {
+    "name": "SkeletonResponse.records 38",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true,
+      "records": [
+        {
+          "$bytes": 1048577
+        }
+      ]
+    },
+    "field": "records"
+  },
+  {
+    "name": "SkeletonResponse.records 39",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true,
+      "records": {
+        "$repeat": 1048577,
+        "value": "AA=="
+      }
+    },
+    "field": "records"
+  },
+  {
+    "name": "SkeletonResponse.keyframe 40",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true,
+      "keyframe": ""
+    },
+    "field": "keyframe"
+  },
+  {
+    "name": "SkeletonResponse.keyframe 41",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true,
+      "keyframe": {
+        "$bytes": 1048577
+      }
+    },
+    "field": "keyframe"
+  },
+  {
+    "name": "SkeletonResponse.sessions 42",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true,
+      "sessions": [
+        "../escape"
+      ]
+    },
+    "field": "sessions"
+  },
+  {
+    "name": "SkeletonResponse.sessions 43",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true,
+      "sessions": [
+        "default",
+        "default"
+      ]
+    },
+    "field": "sessions"
+  },
+  {
+    "name": "SkeletonResponse.sessions 44",
+    "message": "SkeletonResponse",
+    "value": {
+      "nextSeq": "0",
+      "complete": true,
+      "sessions": {
+        "$repeat": 1048577,
+        "value": "default"
+      }
+    },
+    "field": "sessions"
+  },
+  {
+    "name": "GetBlobsRequest.sha256 49",
+    "message": "GetBlobsRequest",
+    "value": {
+      "runId": "run-1",
+      "sha256": [
+        "bad"
+      ]
+    },
+    "field": "sha256"
+  },
+  {
+    "name": "GetBlobsRequest.sha256 50",
+    "message": "GetBlobsRequest",
+    "value": {
+      "runId": "run-1",
+      "sha256": {
+        "$repeat": 257,
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "field": "sha256"
+  },
+  {
+    "name": "GetBlobsResponse.blobs 51",
+    "message": "GetBlobsResponse",
+    "value": {
+      "blobs": {
+        "$repeat": 257,
+        "value": {
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    "field": "blobs"
+  },
+  {
+    "name": "BlobResult.sha256 52",
+    "message": "BlobResult",
+    "value": {
+      "sha256": "bad"
+    },
+    "field": "sha256"
+  },
+  {
+    "name": "BlobResult.data 53",
+    "message": "BlobResult",
+    "value": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "data": {
+        "$bytes": 16777217
+      }
+    },
+    "field": "data"
+  },
+  {
+    "name": "BlobResult.errorCode 54",
+    "message": "BlobResult",
+    "value": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "errorCode": -1
+    },
+    "field": "error_code"
+  },
+  {
+    "name": "BlobResult.errorCode 55",
+    "message": "BlobResult",
+    "value": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "errorCode": 17
+    },
+    "field": "error_code"
+  },
+  {
+    "name": "BlobResult.errorMessage 56",
+    "message": "BlobResult",
+    "value": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "errorMessage": {
+        "$string": 65537
+      }
+    },
+    "field": "error_message"
+  },
+  {
+    "name": "BlobResult.errorMessage 57",
+    "message": "BlobResult",
+    "value": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "errorMessage": "unexpected"
+    },
+    "field": "blob_result.outcome"
+  },
+  {
+    "name": "BlobResult.errorCode 58",
+    "message": "BlobResult",
+    "value": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "errorCode": 5
+    },
+    "field": "blob_result.outcome"
+  },
+  {
+    "name": "TailStreamRequest.streamId 59",
+    "message": "TailStreamRequest",
+    "value": {
+      "runId": "run-1",
+      "streamId": "../escape"
+    },
+    "field": "stream_id"
+  },
+  {
+    "name": "TailStreamResponse.data 60",
+    "message": "TailStreamResponse",
+    "value": {
+      "data": "",
+      "nextOffset": "1"
+    },
+    "field": "data"
+  },
+  {
+    "name": "TailStreamResponse.data 61",
+    "message": "TailStreamResponse",
+    "value": {
+      "data": {
+        "$bytes": 65537
+      },
+      "nextOffset": "1"
+    },
+    "field": "data"
+  },
+  {
+    "name": "TailStreamResponse.nextOffset 62",
+    "message": "TailStreamResponse",
+    "value": {
+      "data": "eA==",
+      "nextOffset": "0"
+    },
+    "field": "tail_stream.offset"
+  },
+  {
+    "name": "TailRequest upper sequence boundary",
+    "message": "TailRequest",
+    "value": {
+      "runId": "run-1",
+      "fromSeq": "9223372036854775807"
+    }
+  },
+  {
+    "name": "TailStreamRequest upper offset boundary",
+    "message": "TailStreamRequest",
+    "value": {
+      "runId": "run-1",
+      "streamId": "output",
+      "fromOffset": "9223372036854775807"
+    }
+  },
+  {
+    "name": "TailResponse leaves room for continuation",
+    "message": "TailResponse",
+    "value": {
+      "records": [
+        "CAE="
+      ],
+      "throughSeq": "9223372036854775806"
+    }
+  },
+  {
+    "name": "TailResponse sequence cannot exhaust continuation domain",
+    "message": "TailResponse",
+    "value": {
+      "records": [
+        "CAE="
+      ],
+      "throughSeq": "9223372036854775807"
+    },
+    "field": "through_seq"
+  },
+  {
+    "name": "SkeletonResponse leaves room for continuation",
+    "message": "SkeletonResponse",
+    "value": {
+      "committedSeq": "9223372036854775806",
+      "nextSeq": "9223372036854775807",
+      "complete": true
+    }
+  },
+  {
+    "name": "SkeletonResponse sequence cannot exhaust continuation domain",
+    "message": "SkeletonResponse",
+    "value": {
+      "committedSeq": "9223372036854775807"
+    },
+    "field": "committed_seq"
+  },
+  {
+    "name": "SubscribeRequest machine stats",
+    "message": "SubscribeRequest",
+    "value": {
+      "machineStats": {}
+    }
+  },
+  {
+    "name": "SubscribeRequest without a topic",
+    "message": "SubscribeRequest",
+    "value": {},
+    "field": "topic"
+  },
+  {
+    "name": "SubscribeResponse entry",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse typed absences",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuUnavailable": {
+            "reason": "ABSENCE_REASON_TOOL_UNVERIFIED"
+          },
+          "memoryUnavailable": {
+            "reason": "ABSENCE_REASON_TOOL_UNVERIFIED"
+          },
+          "gpuUnavailable": {
+            "reason": "ABSENCE_REASON_TOOL_UNVERIFIED"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse no gpus",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {}
+        }
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse removed",
+    "message": "SubscribeResponse",
+    "value": {
+      "removed": "machine"
+    }
+  },
+  {
+    "name": "SubscribeResponse synced",
+    "message": "SubscribeResponse",
+    "value": {
+      "synced": {}
+    }
+  },
+  {
+    "name": "SubscribeResponse heartbeat",
+    "message": "SubscribeResponse",
+    "value": {
+      "heartbeat": {}
+    }
+  },
+  {
+    "name": "SubscribeResponse failed",
+    "message": "SubscribeResponse",
+    "value": {
+      "failed": {
+        "code": "TOPIC_FAILURE_CODE_UNSUPPORTED",
+        "detail": "no machine stats on plan9"
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse without a frame",
+    "message": "SubscribeResponse",
+    "value": {},
+    "field": "frame"
+  },
+  {
+    "name": "SubscribeResponse empty key",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "key"
+  },
+  {
+    "name": "SubscribeResponse long key",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": {
+          "$string": 129
+        },
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "key"
+  },
+  {
+    "name": "SubscribeResponse entry without a value",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine"
+      }
+    },
+    "field": "value"
+  },
+  {
+    "name": "SubscribeResponse empty removal",
+    "message": "SubscribeResponse",
+    "value": {
+      "removed": ""
+    },
+    "field": "removed"
+  },
+  {
+    "name": "SubscribeResponse unspecified failure",
+    "message": "SubscribeResponse",
+    "value": {
+      "failed": {}
+    },
+    "field": "code"
+  },
+  {
+    "name": "SubscribeResponse long failure detail",
+    "message": "SubscribeResponse",
+    "value": {
+      "failed": {
+        "code": "TOPIC_FAILURE_CODE_INTERNAL",
+        "detail": {
+          "$string": 4097
+        }
+      }
+    },
+    "field": "detail"
+  },
+  {
+    "name": "MachineStats without a time",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "sampled_at"
+  },
+  {
+    "name": "MachineStats without a cpu section",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "cpu"
+  },
+  {
+    "name": "MachineStats without a memory section",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "memory"
+  },
+  {
+    "name": "MachineStats without a gpu section",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          }
+        }
+      }
+    },
+    "field": "gpu"
+  },
+  {
+    "name": "MachineStats cpu over 100",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 100.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "utilization_percent"
+  },
+  {
+    "name": "MachineStats used over total",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "3",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "used"
+  },
+  {
+    "name": "MachineStats gpu without a name",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "utilizationPercent": 1,
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "name"
+  },
+  {
+    "name": "MachineStats gpu used over total",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "cpuStats": {
+            "utilizationPercent": 12.5
+          },
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "name": "gpu",
+                "memoryUsedBytes": "3",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "field": "used"
+  },
+  {
+    "name": "MachineStats unspecified absence",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "machine",
+        "machineStats": {
+          "sampledAt": "2026-01-01T00:00:00Z",
+          "memoryStats": {
+            "usedBytes": "1",
+            "totalBytes": "2"
+          },
+          "gpus": {
+            "gpus": [
+              {
+                "index": 0,
+                "name": "gpu",
+                "utilizationPercent": 100,
+                "memoryUsedBytes": "2",
+                "memoryTotalBytes": "2"
+              }
+            ]
+          },
+          "cpuUnavailable": {}
+        }
+      }
+    },
+    "field": "reason"
+  },
+  {
+    "name": "RunEntry without a head",
+    "message": "RunEntry",
+    "value": {}
+  },
+  {
+    "name": "RunEntry unknown liveness",
+    "message": "RunEntry",
+    "value": {
+      "liveness": "RUN_LIVENESS_UNSPECIFIED"
+    }
+  },
+  {
+    "name": "RunEntry liveness",
+    "message": "RunEntry",
+    "value": {
+      "liveness": "RUN_LIVENESS_ENDED"
+    }
+  },
+  {
+    "name": "RunEntry.liveness out of range",
+    "message": "RunEntry",
+    "value": {
+      "liveness": 99
+    },
+    "field": "liveness"
+  },
+  {
+    "name": "RunEntry native head",
+    "message": "RunEntry",
+    "value": {
+      "head": {
+        "lifecycle": {
+          "running": {}
+        },
+        "strategy": "test"
+      },
+      "liveness": "RUN_LIVENESS_ALIVE"
+    }
+  },
+  {
+    "name": "RunEntry native liveness required",
+    "message": "RunEntry",
+    "value": {
+      "head": {
+        "lifecycle": {
+          "running": {}
+        },
+        "strategy": "test"
+      }
+    },
+    "field": "run_entry.head_has_liveness"
+  },
+  {
+    "name": "RunEntry nested required lifecycle",
+    "message": "RunEntry",
+    "value": {
+      "head": {
+        "strategy": "test"
+      },
+      "liveness": "RUN_LIVENESS_ALIVE"
+    },
+    "field": "head.lifecycle"
+  },
+  {
+    "name": "RunEntry project root",
+    "message": "RunEntry",
+    "value": {
+      "projectRoot": "/home/user/project"
+    }
+  },
+  {
+    "name": "RunEntry.projectRoot empty",
+    "message": "RunEntry",
+    "value": {
+      "projectRoot": ""
+    },
+    "field": "project_root"
+  },
+  {
+    "name": "RunEntry.projectRoot relative",
+    "message": "RunEntry",
+    "value": {
+      "projectRoot": "project"
+    },
+    "field": "project_root"
+  },
+  {
+    "name": "SubscribeRequest runs",
+    "message": "SubscribeRequest",
+    "value": {
+      "runs": {}
+    }
+  },
+  {
+    "name": "SubscribeResponse runs entry",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "run-1",
+        "runs": {
+          "head": {
+            "lifecycle": {
+              "running": {}
+            },
+            "strategy": "test"
+          },
+          "liveness": "RUN_LIVENESS_ALIVE"
+        }
+      }
+    }
+  },
+  {
+    "name": "SubscribeResponse entry without a value",
+    "message": "SubscribeResponse",
+    "value": {
+      "entry": {
+        "key": "run-1"
+      }
+    },
+    "field": "value"
+  }
+]

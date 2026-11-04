@@ -19,6 +19,7 @@ from vs_runtime.api.infrastructure import (
     resolve_run_environment_spec,
     run_environment_record,
 )
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import (
     ComputeBackend,
     ProjectPathPolicy,
@@ -28,6 +29,7 @@ from vs_sandbox.api import (
     backend_is_host_only,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import ManualClock, SimThreads
 
 _BACKENDS = st.sampled_from(list(ComputeBackend))
 _PLATFORMS = st.sampled_from(["darwin", "linux", "win32", "freebsd14", "cygwin"])
@@ -78,13 +80,15 @@ def _request(tmp_path: Path) -> RunEnvironmentRequest:
         log_dir=tmp_path / "logs",
         workspace=tmp_path / "workspace",
         ref_dir=None,
-        backend=FakeComputeBackend(),
+        backend=FakeComputeBackend(threads=SimThreads()),
         agent_backend="stub",
         cli_provider="claude",
         run_id="run-1",
         framework_root=tmp_path,
         environment_bind_mounts=(),
         project_path_policy=ProjectPathPolicy(),
+        clock=ManualClock(),
+        system=idle_environment_system(),
     )
 
 
@@ -95,7 +99,9 @@ def test_only_host_only_backends_on_macos_select_the_host(
     logs: list[str] = []
     spec = RunEnvironmentSpec(name="docker", options={"image": "agent:1"})
 
-    resolved = resolve_run_environment_spec(spec, backend, platform=platform, log=logs.append)
+    resolved = resolve_run_environment_spec(
+        spec, backend, task_dockerfile=None, platform=platform, log=logs.append
+    )
 
     selects_host = platform == "darwin" and backend_is_host_only(backend)
     assert (resolved.name == "host") is selects_host
@@ -112,7 +118,9 @@ def test_only_host_only_backends_on_macos_select_the_host(
 def test_an_explicit_non_docker_environment_is_never_replaced(
     spec: RunEnvironmentSpec, backend: ComputeBackend, platform: str
 ) -> None:
-    resolved = resolve_run_environment_spec(spec, backend, platform=platform, log=lambda _: None)
+    resolved = resolve_run_environment_spec(
+        spec, backend, task_dockerfile=None, platform=platform, log=lambda _: None
+    )
 
     if spec.name != "docker":
         assert resolved == spec
@@ -123,7 +131,7 @@ def test_the_selected_host_requires_seatbelt_and_never_runs_unconfined(
     backend: ComputeBackend, platform: str, *, available: bool
 ) -> None:
     spec = resolve_run_environment_spec(
-        RunEnvironmentSpec(), backend, platform=platform, log=lambda _: None
+        RunEnvironmentSpec(), backend, task_dockerfile=None, platform=platform, log=lambda _: None
     )
     if spec.name != "host":
         return
@@ -151,7 +159,11 @@ def test_the_host_spec_builds_the_host_environment() -> None:
 
 def test_resuming_a_metal_run_keeps_the_host_environment() -> None:
     resolved = resolve_run_environment_spec(
-        RunEnvironmentSpec(), ComputeBackend.METAL, platform="darwin", log=lambda _: None
+        RunEnvironmentSpec(),
+        ComputeBackend.METAL,
+        task_dockerfile=None,
+        platform="darwin",
+        log=lambda _: None,
     )
     recorded = run_environment_record(resolved)
 
@@ -159,7 +171,11 @@ def test_resuming_a_metal_run_keeps_the_host_environment() -> None:
     assert migrate_recorded_run_environment(recorded) == recorded
     # The relaunch re-derives the same record, so the resume compatibility check passes.
     again = resolve_run_environment_spec(
-        RunEnvironmentSpec(), ComputeBackend.METAL, platform="darwin", log=lambda _: None
+        RunEnvironmentSpec(),
+        ComputeBackend.METAL,
+        task_dockerfile=None,
+        platform="darwin",
+        log=lambda _: None,
     )
     assert run_environment_record(again) == recorded
 
@@ -171,6 +187,10 @@ def test_a_host_record_is_not_migrated_to_docker_on_any_platform(platform: str) 
     assert migrate_recorded_run_environment(record) == record
     # On a host that cannot serve it, the relaunch derives Docker and the mismatch is visible.
     relaunch = resolve_run_environment_spec(
-        RunEnvironmentSpec(), ComputeBackend.METAL, platform=platform, log=lambda _: None
+        RunEnvironmentSpec(),
+        ComputeBackend.METAL,
+        task_dockerfile=None,
+        platform=platform,
+        log=lambda _: None,
     )
     assert (run_environment_record(relaunch) == record) is (platform == "darwin")

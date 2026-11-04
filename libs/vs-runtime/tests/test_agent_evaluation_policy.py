@@ -43,7 +43,7 @@ def test_the_agent_plan_is_the_recipes_plan(
         accuracy_gated=(EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK),
     )
     policy = AgentEvaluationPolicy.from_recipe(recipe)
-    assert policy.plan(CANDIDATE, now_at=now) == recipe.plan(
+    assert policy.plan(CANDIDATE, measured_input="sha256:in", now_at=now) == recipe.plan(
         CANDIDATE, purpose="local-validation", now_at=now
-    )
+    ).model_copy(update={"measured_input": "sha256:in"})
     assert policy.measurement == recipe

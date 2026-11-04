@@ -9,10 +9,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vibesys.hypothesis import OrchestratorPlan
-from vibesys.orchestration.dynamic.models import ImplementPortfolioPlan, PortfolioPlan
+from vibesys.orchestration.dynamic.models import (
+    ImplementPortfolioPlan,
+    PlannerHandoff,
+    PortfolioPlan,
+)
 from vibesys.orchestration.multi.models import PreRoundDecision
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -60,6 +65,7 @@ def _annotations(
                     "pass_criteria": "Tests pass.",
                 }
             ],
+            handoff=PlannerHandoff(expectations=(), doubts=()),
         ),
         ImplementPortfolioPlan(
             reasoning="Test batching.",
@@ -72,6 +78,7 @@ def _annotations(
                     "pass_criteria": "Tests pass.",
                 }
             ],
+            handoff=PlannerHandoff(expectations=(), doubts=()),
         ),
     ],
     ids=lambda response: type(response).__name__,
@@ -81,8 +88,10 @@ def test_planner_native_schema_preserves_field_annotations(
 ) -> None:
     payload = response.model_dump(mode="json")
     executor = FakeExecutor(scripted_turn(provider, structured_output=payload))
-    launcher = fake_agentshim_launcher(provider=provider, executor=executor)
-    with AgentClient(launcher, provider=provider) as client:
+    launcher = fake_agentshim_launcher(provider=provider, executor=executor, threads=SimThreads())
+    with AgentClient(
+        launcher, provider=provider, clock=ManualClock(), threads=SimThreads()
+    ) as client:
         result = client.invoke(
             kind="orchestrator",
             workspace=tmp_path,

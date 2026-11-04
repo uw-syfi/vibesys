@@ -128,6 +128,8 @@ class InvocationRecord(BaseModel):
     remote_read_offset: Annotated[int, Field(ge=0)] = 0
     client_delivered_offset: Annotated[int, Field(ge=0)] = 0
     result: InvocationResultRecord | None = None
+    step_tag: Annotated[str, Field(min_length=1, max_length=512)] | None = None
+    """The step whose agent turn asked for the evaluation (``EvaluationRequest.step_tag``)."""
 
     @model_validator(mode="after")
     def _consistent_phase(self) -> InvocationRecord:
@@ -178,8 +180,12 @@ class InvocationJournal:
         invocation_id: InvocationId,
         request_sha256: Sha256Digest,
         snapshot_sha256: Sha256Digest,
+        step_tag: str | None = None,
     ) -> InvocationRecord:
-        """Write PREPARED before any remote side effect, or restore an exact request."""
+        """Write PREPARED before any remote side effect, or restore an exact request.
+
+        *step_tag* names the step the invocation belongs to; the first preparation records it.
+        """
         existing = self.load(invocation_id)
         if existing is not None:
             if (
@@ -196,7 +202,16 @@ class InvocationJournal:
                 snapshot_sha256=snapshot_sha256,
                 job_name=deterministic_job_name(invocation_id, 1),
                 phase=InvocationPhase.PREPARED,
+                step_tag=step_tag,
             )
+        )
+
+    def records(self) -> tuple[InvocationRecord, ...]:
+        """Every invocation in the journal, in invocation id order."""
+        return tuple(
+            record
+            for name in self._namespace.entries("invocations")
+            if (record := self._slot(name.removesuffix(".json")).load_optional()) is not None
         )
 
     def submitting(

@@ -21,6 +21,7 @@ import pytest
 from tests.examples.example_task import task_root
 
 from vs_evaluator_protocol.api import (
+    ErrorKind,
     Measurement,
     PartialMeasurement,
     Progress,
@@ -89,3 +90,31 @@ def test_the_recorded_warmup_is_stopped_and_reported_as_the_rate_it_achieved(
         target=14343 / 180,
         progress=Progress(completed=9, required=72, unit="rounds"),
     )
+
+
+def test_a_preflight_refusal_reaches_the_reader_as_an_unmet_prefix_cache(
+    run: ModuleType, tmp_path: Path
+) -> None:
+    """The reference engine has no prefix cache, so its baseline fails the same way every time."""
+    stream = tmp_path / "result.jsonl"
+    error = run.warmup_failure("full", "error: prefix-cache preflight: cached_tokens=0")
+
+    run.ProtocolReport(stream).fail(str(error), error.partial, error.requirement)
+
+    measurement = read_measurement(parse_records(stream.read_text(encoding="utf-8")))
+    assert measurement.failed
+    assert measurement.error_kind is ErrorKind.REQUIREMENT_NOT_MET
+    assert measurement.requirement == "prefix_cache"
+
+
+def test_any_other_warmup_failure_reaches_the_reader_as_transient(
+    run: ModuleType, tmp_path: Path
+) -> None:
+    stream = tmp_path / "result.jsonl"
+    error = run.warmup_failure("full", "connection reset by peer")
+
+    run.ProtocolReport(stream).fail(str(error), error.partial, error.requirement)
+
+    measurement = read_measurement(parse_records(stream.read_text(encoding="utf-8")))
+    assert measurement.error_kind is ErrorKind.TRANSIENT
+    assert measurement.requirement is None

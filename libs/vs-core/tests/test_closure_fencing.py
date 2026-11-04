@@ -120,13 +120,9 @@ def test_registered_job_missing_identity_or_unknown_facts_retain_provisional_own
     assert close_run(state) == expected
 
 
-@given(
-    source=st.sampled_from(["stored", "observed"]),
-    child_released=st.booleans(),
-    matching_scope=st.booleans(),
-)
-def test_builtin_root_release_keeps_discovered_child_until_exact_child_release(
-    source: str, *, child_released: bool, matching_scope: bool
+@given(source=st.sampled_from(["stored", "observed", "none"]))
+def test_builtin_root_release_keeps_a_discovered_child_the_run_cannot_prove_released(
+    source: str,
 ) -> None:
     state = core.initial_state()
     scope = core.Scope(owner=state.run.run_id, generation=0)
@@ -158,30 +154,11 @@ def test_builtin_root_release_keeps_discovered_child_until_exact_child_release(
         terminal=True,
         released=True,
     )
-    child_scope = scope if matching_scope else core.Scope(owner=state.run.run_id, generation=1)
-    child_observation = released_observation(child_scope, child_id) if child_released else None
-    child = core.ChildLease(
-        resource_id=child_id,
-        scope=child_scope,
-        source_requests=(observation.request_id,),
-        observation=child_observation,
-        observation_watermarks=(
-            (
-                core.ChildObservationWatermark(
-                    source_request=child_observation.request_id, observation=child_observation
-                ),
-            )
-            if child_observation is not None
-            else ()
-        ),
-        watermark_history_complete=child_observation is not None,
-    )
     state = state.model_copy(
         update={
             "evaluation": core.EvaluationState(jobs=(job,)),
             "records": state.records.model_copy(
                 update={
-                    "children": (child,),
                     "records": (
                         canonical_source(
                             core.SubmitMeasurement(
@@ -197,9 +174,7 @@ def test_builtin_root_release_keeps_discovered_child_until_exact_child_release(
             ),
         }
     )
-    expected = (
-        core.RunStatus.TERMINAL if child_released and matching_scope else core.RunStatus.CLOSING
-    )
+    expected = core.RunStatus.TERMINAL if source == "none" else core.RunStatus.CLOSING
     assert close_run(state) == expected
 
 
@@ -232,10 +207,7 @@ def test_released_job_requires_exact_observation_correspondence(field: str) -> N
     assert close_run(state) == core.RunStatus.CLOSING
 
 
-@given(pending_child=st.booleans())
-def test_inspection_command_success_cannot_release_its_parent_targets_child(
-    *, pending_child: bool
-) -> None:
+def test_inspection_command_success_cannot_release_its_parent_targets_child() -> None:
     state = core.initial_state()
     scope = core.Scope(owner=state.run.run_id, generation=0)
     root, child = core.ResourceId(root="parent"), core.ResourceId(root="child")
@@ -274,17 +246,10 @@ def test_inspection_command_success_cannot_release_its_parent_targets_child(
     record = record.model_copy(
         update={"phase": core.RequestPhase.COMPLETED, "observation": command}
     )
-    children = (
-        (core.ChildLease(resource_id=child, scope=scope, source_requests=(job.request_id,)),)
-        if pending_child
-        else ()
-    )
     state = state.model_copy(
         update={
             "evaluation": core.EvaluationState(registered_jobs=(job,)),
-            "records": state.records.model_copy(
-                update={"records": (record,), "children": children}
-            ),
+            "records": state.records.model_copy(update={"records": (record,)}),
         }
     )
     assert close_run(state) == core.RunStatus.CLOSING
@@ -318,3 +283,50 @@ def test_a_blocked_record_holds_closure_only_while_a_cancellation_of_its_resourc
     ]
     assert bool(held) == (accepted or identified)
     assert all(wait.producer is None for wait in held)
+
+
+@given(named=st.booleans())
+def test_a_blocked_record_is_carried_only_by_the_commands_it_names(*, named: bool) -> None:
+    """A cancellation in flight carries the closing run's wait on a record only when named.
+
+    The record's ``addressed_by`` is written as each command about it is registered (#2428), so
+    a live cancellation the record does not name is nothing it waits on.
+    """
+    state = _silent(core.RequestPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
+    record = state.records.records[0]
+    assert record.observation is not None
+    observation = record.observation.model_copy(
+        update={"accepted": True, "resource_id": core.ResourceId(root="job")}
+    )
+    cancel_id = core.RequestId(root="cancel")
+    cancel = core.CancelOwnedResource(
+        request_id=cancel_id,
+        scope=record.request.scope,
+        admission_id=record.request.admission_id,
+        resource_id=core.ResourceId(root="job"),
+        target=record.request_id,
+    )
+    in_flight = record.model_copy(
+        update={
+            "request_id": cancel.request_id,
+            "request": cancel,
+            "phase": core.RequestPhase.DISPATCHED,
+            "observation": None,
+            "lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE,
+        }
+    )
+    held = record.model_copy(
+        update={
+            "observation": observation,
+            "addressed_by": (cancel.request_id,) if named else (),
+        }
+    )
+    state = state.model_copy(
+        update={
+            "records": state.records.model_copy(update={"records": (held, in_flight)}),
+        }
+    )
+    [wait] = [
+        wait for wait in core.waits(stopped(state)) if wait.waiter == core.WaitKind.BLOCKED_RECORD
+    ]
+    assert wait.producer == (core.Producer.PENDING_REQUEST if named else None)

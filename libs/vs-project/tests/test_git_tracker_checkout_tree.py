@@ -10,8 +10,9 @@ from pathlib import Path
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
+from tests.support.real_git import real_git_tracker
 
-from vs_project.api import GitTracker, NullGitTrackerEvents
+from vs_project.api import NullGitTrackerEvents
 from vs_sim.api.testing import examples
 
 # Each example runs real Git processes. A pull request draws a sample; the nightly depth
@@ -84,7 +85,7 @@ def test_checkout_tree_reproduces_source_tree_over_any_head(
         _git(root, "init", "-q", "-b", "main")
         source_commit = _commit(root, source)
         _commit(root, head)
-        tracker = GitTracker(root, run_id="checkout-tree", events=NullGitTrackerEvents())
+        tracker = real_git_tracker(root, run_id="checkout-tree", events=NullGitTrackerEvents())
 
         assert tracker.checkout_tree(source_commit, clean=clean)
 
@@ -96,7 +97,7 @@ def test_clean_checkout_keeps_nested_paths_absent_from_head(tmp_path: Path) -> N
     _git(tmp_path, "init", "-q", "-b", "main")
     source = _commit(tmp_path, {"a.txt": "1", "new/deep/file.txt": "2"})
     _commit(tmp_path, {"a.txt": "1"})
-    tracker = GitTracker(tmp_path, run_id="checkout-tree", events=NullGitTrackerEvents())
+    tracker = real_git_tracker(tmp_path, run_id="checkout-tree", events=NullGitTrackerEvents())
 
     assert tracker.checkout_tree(source, clean=True)
 
@@ -106,7 +107,7 @@ def test_clean_checkout_keeps_nested_paths_absent_from_head(tmp_path: Path) -> N
 def test_checkout_tree_removes_ignored_files_only_when_asked(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
     source = _commit(tmp_path, {".gitignore": "*.out\n", "a.txt": "1"})
-    tracker = GitTracker(tmp_path, run_id="checkout-tree", events=NullGitTrackerEvents())
+    tracker = real_git_tracker(tmp_path, run_id="checkout-tree", events=NullGitTrackerEvents())
     (tmp_path / "stale.out").write_text("x", encoding="utf-8")
 
     assert tracker.checkout_tree(source, clean=True)
@@ -127,7 +128,7 @@ def test_matches_tree_agrees_with_an_exact_checkout(
         (root / ".gitignore").write_text("*.out\n", encoding="utf-8")
         source_commit = _commit(root, {**source, ".gitignore": "*.out\n"})
         _commit(root, {**head, ".gitignore": "*.out\n"})
-        tracker = GitTracker(root, run_id="checkout-tree", events=NullGitTrackerEvents())
+        tracker = real_git_tracker(root, run_id="checkout-tree", events=NullGitTrackerEvents())
         (root / "stale.out").write_text("x", encoding="utf-8")
 
         assert tracker.checkout_tree(source_commit, clean=True, clean_ignored=True)

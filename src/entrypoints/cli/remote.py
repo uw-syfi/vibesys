@@ -8,11 +8,16 @@ from typing import TYPE_CHECKING
 from entrypoints.cli.errors import _configuration_error
 from vibesys.api.request import REPOSITORY_SLUG, experiment_origin_matches
 from vs_github.api import GitHubCLI, GitHubCLIError
-from vs_project.api import Project, ProjectStateError, run_git
+from vs_project.api import Git, Project, ProjectStateError
+from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
-    import subprocess
     from pathlib import Path
+
+    from vs_project.api import GitText
+
+_PROCESSES = OsProcesses()
+"""Starts the Git and GitHub CLI commands of remote-project resolution."""
 
 
 def _is_remote_project(value: str) -> bool:
@@ -38,7 +43,7 @@ def _clone_project(remote: str, runs_dir: Path) -> Path:
         return _reuse_cloned_project(remote, destination)
     if REPOSITORY_SLUG.fullmatch(remote):
         try:
-            GitHubCLI().clone_repository(remote, destination)
+            GitHubCLI(_PROCESSES).clone_repository(remote, destination)
         except GitHubCLIError as exc:
             _configuration_error(
                 f"Cannot clone project repository {remote!r}: {exc}",
@@ -84,7 +89,7 @@ def _reuse_cloned_project(remote: str, destination: Path) -> Path:
     expected_origin = remote.removesuffix(".git").rstrip("/")
     actual_origin = existing_origin.stdout.strip().removesuffix(".git").rstrip("/")
     origin_matches = existing_origin.returncode == 0 and (
-        experiment_origin_matches(destination, remote)
+        experiment_origin_matches(destination, remote, git=Git(_PROCESSES))
         if REPOSITORY_SLUG.fullmatch(remote)
         else actual_origin == expected_origin
     )
@@ -208,13 +213,13 @@ def _checkout_remote_run_branch(project_root: Path, selected: _RemoteRunBranch) 
     _require_resume_git(tracked, f"Cannot track VibeSys run branch {selected.remote_branch!r}")
 
 
-def _resume_git(project_root: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+def _resume_git(project_root: Path, *arguments: str) -> GitText:
     """Run a Git command during remote resume resolution."""
-    return run_git(arguments, cwd=project_root, text=True)
+    return Git(_PROCESSES).run_text(arguments, cwd=project_root)
 
 
 def _require_resume_git(
-    result: subprocess.CompletedProcess[str],
+    result: GitText,
     message: str,
 ) -> None:
     if result.returncode == 0:

@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 
 from vs_runtime.api import RunCleanupError
 from vs_runtime.api.infrastructure import release_all
+from vs_sim.api import yield_now
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -41,7 +42,7 @@ def _release(
         if step is _Step.CALLER_CANCELLED:
             caller.cancel()
         # Yield, so the cancellation lands while this release is mid-way.
-        await asyncio.sleep(0)
+        await yield_now()
         if step is _Step.FAILS:
             raise _ReleaseFailedError
         if step is _Step.ENDS_CANCELLED:

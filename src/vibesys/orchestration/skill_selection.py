@@ -20,7 +20,7 @@ SIDECAR_NAME = ".vibesys.toml"
 # different per platform and must never fall back to another's.
 PLATFORM_SKELETON: tuple[str, ...] = ("floor.md", "hardware.md", "profiler.md")
 
-_SOURCE_SKILL_CITATION = re.compile(r"(?<![\w./-])resources/skills/[\w./-]+")
+_SOURCE_SKILL_CITATION = re.compile(r"(?<![\w./-])skills/domains/[\w./-]+")
 
 
 def resolve_agent_resource_paths(
@@ -40,7 +40,7 @@ def resolve_agent_resource_paths(
 
     def resolve(match: re.Match[str]) -> str:
         citation = match.group().rstrip(".")
-        relative = Path(citation).relative_to("resources/skills")
+        relative = Path(citation).relative_to("skills/domains")
         source = sources.get(relative.parts[0])
         resource = Path(*relative.parts[1:])
         if source is None:

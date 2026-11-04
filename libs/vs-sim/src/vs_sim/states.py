@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
+from vs_sim.yields import yield_now
+
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
@@ -64,3 +66,29 @@ async def wait_for_async_state[T](
         if satisfied(value):
             return value
         await changes.changed(seen)
+
+
+HANG_GUARD_TURNS = 1_000_000
+"""Loop turns after which :func:`yield_until` calls its peer stuck; far above any passing run."""
+
+
+async def yield_until[T](
+    observe: Callable[[], Awaitable[T]],
+    satisfied: Callable[[T], bool],
+    what: str,
+    *,
+    turns: int = HANG_GUARD_TURNS,
+) -> T:
+    """Return the first observed state for which ``satisfied`` holds, yielding between looks.
+
+    For a peer that offers no change notification to wait on. Each look follows one
+    :func:`~vs_sim.yields.yield_now`, so no clock moves; the turn bound is a hang guard
+    that fails the test naming ``what``, never a synchronization tool.
+    """
+    for _ in range(turns):
+        value = await observe()
+        if satisfied(value):
+            return value
+        await yield_now()
+    message = f"{what} did not hold after {turns} loop turns"
+    raise AssertionError(message)

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from vs_decode.api import Unreadable, read_json
 from vs_sim.api.testing import fault_stream, match_rule
 
 if TYPE_CHECKING:
@@ -73,6 +74,10 @@ class ClusterFault(StrEnum):
     COMMAND_ERROR = "command_error"  # the Slurm command fails (controller timeout), nothing happens
     KILLED = "killed"  # sbatch: the job is submitted, then dies (OOM, preemption, node failure)
     WRONG_STATE = "wrong_state"  # squeue/sacct: the answer is garbage the parser has to reject
+    PENDING_FOREVER = "pending_forever"  # sbatch: the job is queued and never starts until scancel
+    ACCOUNTING_GAP = "accounting_gap"  # sacct: succeeds with no row (accounting lags or forgot it)
+    REQUEUED = "requeued"  # squeue/sacct: the job's node failed and Slurm requeued it
+    TRUNCATED = "truncated"  # the command succeeds, but its output is cut off mid-line
 
 
 class HostFault(StrEnum):
@@ -83,6 +88,8 @@ class HostFault(StrEnum):
     """
 
     CRASH_AFTER = "crash_after"  # the call completes and takes effect, then the host process dies
+    CRASH_BEFORE = "crash_before"  # the host process dies before the call takes effect
+    IO_ERROR = "io_error"  # the call fails with an OSError and takes no effect; the host lives
 
 
 class ProcessFault(StrEnum):
@@ -113,6 +120,9 @@ class ConversationFault(StrEnum):
 
 
 type Fault = AgentFault | ToolFault | ClusterFault | HostFault | ProcessFault | ConversationFault
+
+_MAX_PLAN_BYTES = 16 * 1024 * 1024
+"""The largest fault plan file read back."""
 
 _FAULT_TYPES: dict[Boundary, type[Fault]] = {
     Boundary.AGENT_TURN: AgentFault,
@@ -166,6 +176,15 @@ _CLUSTER_FAULTS: dict[ClusterFault, tuple[ClusterOperation, ...]] = {
     ),
     ClusterFault.KILLED: (ClusterOperation.SBATCH,),
     ClusterFault.WRONG_STATE: (ClusterOperation.SQUEUE, ClusterOperation.SACCT),
+    ClusterFault.PENDING_FOREVER: (ClusterOperation.SBATCH,),
+    ClusterFault.ACCOUNTING_GAP: (ClusterOperation.SACCT,),
+    ClusterFault.REQUEUED: (ClusterOperation.SQUEUE, ClusterOperation.SACCT),
+    ClusterFault.TRUNCATED: (
+        ClusterOperation.SBATCH,
+        ClusterOperation.SQUEUE,
+        ClusterOperation.SACCT,
+        ClusterOperation.EXEC,
+    ),
 }
 
 
@@ -192,8 +211,11 @@ class FaultPlan(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> FaultPlan:
-        """Read a plan written by :meth:`save`, rejecting unknown keys."""
-        return cls.model_validate_json(path.read_text(encoding="utf-8"))
+        """Read a plan written by :meth:`save`; ``ValueError`` if it is not a valid plan."""
+        plan = read_json(path, cls, max_bytes=_MAX_PLAN_BYTES)
+        if not isinstance(plan, Unreadable):
+            return plan
+        raise ValueError(str(plan))
 
     @classmethod
     def generate(

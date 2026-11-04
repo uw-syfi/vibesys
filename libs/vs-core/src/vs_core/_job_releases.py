@@ -1,8 +1,7 @@
 """Tell a closing attempt when one of its measurement jobs has been released.
 
 Closing an attempt records a ``job`` release dependency for every job of its scope that has
-not been released yet. Only a child lease (a sub-resource a job lists) is announced by the
-records area. A job without children is announced by nobody else, so without this module the
+not been released yet. Nobody else announces a job's release, so without this module the
 attempt keeps waiting for a release that already happened: retention and discard are withheld
 while a job dependency stands, so no other event revisits the attempt either.
 
@@ -36,8 +35,7 @@ def job_release_signals(
 ) -> tuple[Signal, ...]:
     """One ``ReleaseDependencyObserved`` per job that this change recorded as released.
 
-    Only a job whose attempt is waiting on exactly that ``job`` dependency is announced, which
-    is what the records area does for a child lease.
+    Only a job whose attempt is waiting on exactly that ``job`` dependency is announced.
     """
     already = _released_resources(before)
     jobs: tuple[OwnedJob | RegisteredOwnedJob, ...] = (*after.jobs, *after.registered_jobs)

@@ -1,16 +1,27 @@
 """Run logging: the per-run log file, ``lprint``, and the stderr tee."""
 
+import logging
 import re
 import sys
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO, cast
+
+from vs_sim.api import Clock, utc_datetime
 
 # Matches ANSI escape sequences (CSI colors, cursor control, and simple
 # single-character escapes) so the durable log stays plain text even when
 # subprocesses write colored diagnostics to stderr.
+LPRINT_LOGGER = "run"
+"""The ``logging`` logger every ``lprint`` line is also logged to, at ``INFO``.
+
+A process that configures logging (a detached run's narration stream) sees the run's
+progress lines there; one that does not drops them, since ``INFO`` is below the default.
+"""
+
+_LPRINT = logging.getLogger(LPRINT_LOGGER)
+
 _ANSI_ESCAPE_RE = re.compile(r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]|[@-Z\\-_])")
 
 
@@ -107,13 +118,15 @@ class RunLogger:
         self,
         log_dir: Path,
         *,
+        clock: Clock,
         tee_stderr: bool = True,
         emit: Callable[[str, TextIO], None] | None = None,
     ) -> None:
         self.log_dir = log_dir
+        self._clock = clock
         self._emit = emit if emit is not None else _default_emit
         self._lock = threading.RLock()
-        run_started = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        run_started = utc_datetime(clock).strftime("%Y%m%d-%H%M%S")
         self.path = log_dir / f"run-{run_started}.log"
         self.file = self.path.open("a", encoding="utf-8")
         self.writer = cast(
@@ -139,7 +152,9 @@ class RunLogger:
             return self.file.closed
 
     def lprint(self, text: str) -> None:
+        """Write ``text`` through ``emit`` and log it, ANSI-free, to :data:`LPRINT_LOGGER`."""
         self._emit(text, self.writer)
+        _LPRINT.info("%s", strip_ansi(text))
 
     def switch(self, label: int | str) -> TextIO:
         """Switch to a per-phase log file (``run-<datetime>-<label>.log``).
@@ -157,7 +172,7 @@ class RunLogger:
         with self._lock:
             previous_file = self.file
             previous_file.flush()
-            ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+            ts = utc_datetime(self._clock).strftime("%Y%m%d-%H%M%S")
             suffix = f"step{label}" if isinstance(label, int) else label
             new_path = self.log_dir / f"run-{ts}-{suffix}.log"
             new_file = new_path.open("a", encoding="utf-8")

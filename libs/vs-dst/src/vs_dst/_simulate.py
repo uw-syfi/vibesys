@@ -1,58 +1,48 @@
-"""Run a world's strategy to the end on the production shell, and from any crash of it."""
+"""Run a world's strategy to the end on the step loop, and from any crash of it."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from vs_core.api import RunStatus
 from vs_core.api.testing import Budget, liveness
+from vs_dst import _interrupt
 from vs_dst._crash_points import CrashKind, CrashPoint, crash_point_policy
-from vs_dst._effects import Effects, RecoverableExecutors
+from vs_dst._delivery import Delivery, OperatorRequest
+from vs_dst._effects import Effects
+from vs_dst._host import (
+    FIRST_HOST_STARTS_AT,
+    Hosted,
+    Hosting,
+    HostPlan,
+    has_ended,
+)
+from vs_dst._interrupt import Expectation
+from vs_dst._interruptions import Action, Interruption, Moment, choose
 from vs_dst._snapshots import (
     NondeterministicWorldError,
     OutsideWorld,
-    RecordingStore,
+    RecordingRecords,
     Snapshot,
     Snapshots,
 )
-from vs_dst._world import HostedWorld
-from vs_runtime.api.testing import (
-    LEASE,
-    FakePublicationDelivery,
-    HostOptions,
-    Run,
-    TranslatorFactory,
-    scripted_host,
-)
+from vs_dst._step_host import StepLoopHosting
+from vs_dst._stops import StopKind, Stopped, StopPoint, stop_points
+from vs_runtime.api.testing import HostOptions
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Sequence
 
-    from pydantic import BaseModel
-
-    from vs_core.api import (
-        CoreState,
-        Decision,
-        OperationRegistry,
-        Request,
-        RunResultProposal,
-        SchemaRef,
-        StrategyState,
-    )
+    from vs_core.api import CoreState, Decision, RunResultProposal, StrategyState
     from vs_core.api.testing import Journal, Violation
-    from vs_dst._world import Enact, World
-    from vs_runtime.api.core import (
-        CoreRuntime,
+    from vs_dst._interrupt import Interrupted
+    from vs_dst._world import World
+    from vs_proto.api import Record
+    from vs_runtime.api.step_runner import (
         DispatchCapExceededError,
-        ExecutionResult,
-        RunStalledError,
+        FoldStart,
+        StepLoopStalledError,
     )
-    from vs_runtime.api.testing import Script
-    from vs_sim.api.testing import VirtualClock
-
-FIRST_HOST_STARTS_AT = 1.0
-"""The virtual time the first host starts at."""
 
 
 @dataclass(frozen=True)
@@ -71,23 +61,24 @@ class SimulatedRun:
 
     def __init__(
         self,
-        run: Run,
+        hosted: Hosted,
         outside: OutsideWorld,
-        options: HostOptions,
+        plan: HostPlan,
         pristine: OutsideWorld,
         started: Start | None = None,
     ) -> None:
-        """Wrap a finished host's ``run`` over the ``outside`` world it left.
+        """Wrap a finished ``hosted`` run over the ``outside`` world it left.
 
         ``pristine`` is the outside world as this run's first host found it, which crash cases
         are taken from; ``started`` says where in the whole run that was.
         """
-        self._run = run
+        self._run = hosted.run()
         self._outside = outside
-        self._options = options
+        self._plan = plan
         self._pristine = pristine
         self._started = Start() if started is None else started
-        self._snapshots: dict[CrashPoint, Snapshot] = {}
+        self._duration = hosted.ended_at - self._started.clock_at
+        self._snapshots: dict[Interruption, Snapshot] = {}
 
     @property
     def core(self) -> CoreState:
@@ -110,7 +101,7 @@ class SimulatedRun:
 
     @property
     def state(self) -> StrategyState:
-        """The strategy state the shell last persisted."""
+        """The strategy state the run last logged."""
         return self._run.state
 
     @property
@@ -126,10 +117,10 @@ class SimulatedRun:
     @property
     def finished(self) -> bool:
         """Whether the run reached its terminal state."""
-        return self._run.core.run.status == RunStatus.TERMINAL
+        return has_ended(self._run.core)
 
     @property
-    def halted(self) -> DispatchCapExceededError | RunStalledError | None:
+    def halted(self) -> DispatchCapExceededError | StepLoopStalledError | None:
         """Why the loop gave up on the run (dispatch cap, stall), or None."""
         return self._run.halted
 
@@ -144,13 +135,24 @@ class SimulatedRun:
         return tuple(liveness(self._run.journal, self._run.core, budget))
 
     @property
-    def stopped(self) -> bool:
-        """Whether an operator stop interrupted the run."""
-        return self._run.stopped
+    def log_records(self) -> tuple[Record, ...]:
+        """The records of the run.log the run left, in order."""
+        store = self._outside.store
+        return tuple(store.records) if isinstance(store, RecordingRecords) else ()
+
+    @property
+    def cache_starts(self) -> tuple[FoldStart, ...]:
+        """How each host of the run got its fold, the first's included, in the order they started.
+
+        Each is `CacheUsed` (the host folded only the records after ``state.pb``) or the typed
+        reason it folded the whole log. A run that started from a crash carries its earlier hosts'.
+        """
+        store = self._outside.store
+        return tuple(store.starts) if isinstance(store, RecordingRecords) else ()
 
     @property
     def commits(self) -> int:
-        """How many commits the store was asked for, over all hosts of the run."""
+        """How many records the run.log was asked to append, over all hosts of the run."""
         return self._outside.store.commits
 
     @property
@@ -160,8 +162,13 @@ class SimulatedRun:
 
     def no_effect_ran_twice(self) -> bool:
         """Whether no request identity had its effect run more than once."""
+        return self.rerun_attempts == 0
+
+    @property
+    def rerun_attempts(self) -> int:
+        """How many times an effect began again for a request whose effect had begun before."""
         executed = self._outside.effects.executed
-        return len(executed) == len(set(executed))
+        return len(executed) - len(set(executed))
 
     def crash_points(self, kind: CrashKind | None = None) -> tuple[CrashPoint, ...]:
         """The places a host of this run can die that the suite's policy tries.
@@ -181,9 +188,9 @@ class SimulatedRun:
     def rerun_with_crash(self, point: CrashPoint) -> SimulatedRun:
         """The run that results when the host dies at ``point`` and a new host takes over.
 
-        The new host (a new `CoreRuntime` over a new strategy instance) starts on a copy of the
-        outside world as it stood at ``point``, after the dead host's lease has expired, and runs
-        to the end. The prefix of the run is not run again.
+        The new host (a new process over a new strategy instance) starts on a copy of the
+        outside world as it stood at ``point`` and runs to the end. The prefix of the run is not
+        run again.
 
         The first call runs the world once more from its start and copies the outside world at
         every point `crash_points()` offers (it raises `NondeterministicWorldError` if that run
@@ -196,111 +203,212 @@ class SimulatedRun:
         if not self._started.commits <= point.commit < self.commits:
             message = f"{point} is not a crash point of this run"
             raise ValueError(message)
-        if point not in self._snapshots:
-            offered = frozenset(self.crash_points()) if not self._snapshots else frozenset()
-            self._take_snapshots(self._pristine, offered | {point})
-        snapshot = self._snapshots[point]
+        kill = Interruption.kill(point)
+        snapshot = self._snapshot(kill, frozenset(map(Interruption.kill, self.crash_points())))
         outside = snapshot.outside.copy()
-        # The next host starts after the dead one's lease has expired, however far the dead
-        # host's clock had run by the crash (a run that waits out a limit runs it far ahead).
-        clock_at = max(self._started.clock_at + LEASE, snapshot.outside.store.lease_ends_at) + 1
-        run = _run_host(outside, self._options, clock_at, None)
+        clock_at = self._restart_at(snapshot)
+        hosted = self._plan.run(outside, clock_at)
         started = Start(
             clock_at=clock_at,
             commits=snapshot.outside.store.commits,
             decisions=(*self._started.decisions, *self._run.decisions[: snapshot.decisions]),
         )
-        return SimulatedRun(run, outside, self._options, snapshot.outside, started)
+        return SimulatedRun(hosted, outside, self._plan, snapshot.outside, started)
 
-    def _take_snapshots(self, pristine: OutsideWorld, wanted: frozenset[CrashPoint]) -> None:
-        """Run the world again from its start, copying the outside world at the ``wanted`` points."""
-        outside = pristine.copy()
-        snapshots = Snapshots(outside, wanted)
-        _run_host(outside, self._options, self._started.clock_at, snapshots)
+    def interruptions(
+        self, action: Action | None = None, moment: Moment | None = None
+    ) -> tuple[Interruption, ...]:
+        """The interruptions of this run that the suite's policy tries.
+
+        A kill, a pause or a stop, just before a commit, just after one, or while an effect is in
+        flight (`Moment`). A sample of each on pull requests, every one under ``--depth=nightly``.
+        ``action`` and ``moment`` keep one class of them. Only a run no interruption has touched
+        offers them: its numbering is the whole run's.
+        """
+        self._require_uninterrupted()
+        points = choose(crash_point_policy(), self.commits, len(self._outside.effects.executed))
+        return tuple(p for p in points if action in (None, p.action) and moment in (None, p.moment))
+
+    def interrupt(self, point: Interruption, then: Interruption | None = None) -> Interrupted:
+        """What becomes of the run when ``point`` interrupts it and the operator resumes it.
+
+        A kill starts from a copy of the outside world at ``point`` (the prefix is not run
+        again); a pause or a stop runs the world from its start with the operator's control
+        planted at ``point``, since the host that is paused or stopped is alive and must be there
+        to wind down. The operator then resumes the run, which lifts what the log holds: again if
+        that host does not end the run, or ended it because the operator stopped it, up to
+        `MAX_RESUMES` times. The result says how the run ended up (`Outcome`): never an
+        exception, whatever a resume raises.
+
+        The first kill runs the world once more from its start, copying the outside world at
+        every kill the policy offers, as `rerun_with_crash` does.
+
+        ``then`` stops the run again: the operator pauses or stops the host that resumed it at
+        that point (a kill is no second stop a resumed host can be given). Its index counts over
+        the whole run, the way ``point``'s does, so a point the resumed host never reaches stops
+        nothing.
+        """
+        self._require_uninterrupted()
+        if then is not None and then.action is Action.KILL:
+            message = f"a resumed host is stopped again by a pause or a stop, not by {then.kind}"
+            raise ValueError(message)
+        expected = Expectation(self.result, self._duration)
+        operator = _interrupt.Operator(self._plan, expected, then)
+        if point.action is not Action.KILL:
+            return _interrupt.operated(operator, self._pristine, self._started.clock_at, point)
+        snapshot = self._snapshot(point, frozenset(self.interruptions(Action.KILL)))
+        outside = snapshot.outside.copy()
+        return _interrupt.killed(operator, outside, self._restart_at(snapshot), point)
+
+    def interrupt_while_draining(self, first: Interruption, kill: Interruption) -> Interrupted:
+        """What becomes of the run paused or stopped at ``first``, killed while winding down, and resumed.
+
+        The operator pauses or stops the run at ``first``, the host dies at ``kill`` before it has
+        wound down, and the operator resumes it. The indices count over the whole run, as for
+        `interrupt`. A host that finishes winding down before it reaches ``kill`` was only paused
+        or stopped.
+        """
+        self._require_uninterrupted()
+        if first.action is Action.KILL or kill.action is not Action.KILL:
+            message = "a run is paused or stopped at a pause or a stop and killed at a kill, in that order"
+            raise ValueError(message)
+        expected = Expectation(self.result, self._duration)
+        operator = _interrupt.Operator(self._plan, expected)
+        return _interrupt.killed_while_draining(
+            operator, self._pristine, self._started.clock_at, first, kill
+        )
+
+    def interrupt_again(self, first: Interruption, kill: Interruption) -> Interrupted:
+        """What becomes of the run killed at ``first``, resumed, and killed again at ``kill``, then resumed.
+
+        ``first`` is a kill the run offers; ``kill`` lands in the host that took over, such as
+        inside its ``clear`` of a step (`Moment.IN_CLEAR`, whose index counts ``clear`` awaits
+        over the whole run). A host that ends before it reaches ``kill`` was only resumed.
+        """
+        self._require_uninterrupted()
+        if first.action is not Action.KILL or kill.action is not Action.KILL:
+            message = "a run is killed at a kill and killed again at a kill"
+            raise ValueError(message)
+        expected = Expectation(self.result, self._duration)
+        operator = _interrupt.Operator(self._plan, expected)
+        snapshot = self._snapshot(first, frozenset(self.interruptions(Action.KILL)))
+        outside = snapshot.outside.copy()
+        return _interrupt.killed_again(operator, outside, self._restart_at(snapshot), first, kill)
+
+    def operate(
+        self, requests: Sequence[OperatorRequest], kill: Interruption | None = None
+    ) -> Interrupted:
+        """What becomes of the run when the operator posts ``requests`` to its control inbox.
+
+        The world runs from its start with each request posted when the run reaches its point
+        (an index counts over the whole run, as for `interrupt`), through the host's production
+        `RunControlBridge`. The host dies at ``kill`` if given, and the operator resumes the
+        run as after any interruption. The result carries the inbox, so a suite can read what
+        became of each request.
+        """
+        self._require_uninterrupted()
+        if not requests:
+            message = "operate posts at least one request"
+            raise ValueError(message)
+        if kill is not None and kill.action is not Action.KILL:
+            message = f"the operator's requests are followed by a kill, not by {kill.kind}"
+            raise ValueError(message)
+        expected = Expectation(self.result, self._duration)
+        operator = _interrupt.Operator(self._plan, expected)
+        deliveries = [
+            (
+                Interruption(Action.PAUSE, sent.moment, sent.index),
+                Delivery.request(sent.moment, sent.index, sent.request),
+            )
+            for sent in requests
+        ]
+        return _interrupt.requested(
+            operator, self._pristine, self._started.clock_at, deliveries, kill
+        )
+
+    def stop_points(self) -> tuple[StopPoint, ...]:
+        """The places in this run the suite stops it: a sample on pull requests, all of them nightly.
+
+        A stop lands just before a commit, just after one, or as an effect begins, like an
+        interruption does. Only a run no interruption has touched offers them.
+        """
+        self._require_uninterrupted()
+        return stop_points(self.commits, len(self._outside.effects.executed))
+
+    def stop(self, point: StopPoint, kind: StopKind) -> Stopped:
+        """What becomes of the run when ``kind`` stops it at ``point``.
+
+        The world runs from its start with the stop delivered at ``point``, to the end of the
+        host that took it: the run ended, or the host gave up on it after the patience an
+        interrupted run is given (`Stopped` says which, and what it waits on if not). It is a
+        step-loop run (`StepLoopHosting`): the run.log records how the run ended.
+        """
+        self._require_uninterrupted()
+        outside = self._pristine.copy()
+        stopper = Delivery.stop(point.moment, point.index, kind)
+        patience = Expectation(self.result, self._duration).patience
+        hosted = self._plan.run(outside, self._started.clock_at, stopper, patience=patience)
+        store = outside.store
+        records = tuple(store.records) if isinstance(store, RecordingRecords) else ()
+        failure = hosted.ended if isinstance(hosted.ended, Exception) else None
+        halted = None if isinstance(hosted.ended, Exception) else hosted.ended.halted
+        return Stopped(
+            point=point,
+            kind=kind,
+            delivered_at=stopper.delivered_at,
+            ended_at=hosted.ended_at,
+            ended=hosted.finished,
+            core=hosted.core,
+            halted=halted,
+            failure=failure,
+            log_records=records,
+        )
+
+    def _require_uninterrupted(self) -> None:
+        if self._started.commits:
+            message = "only a run no interruption has touched offers interruptions"
+            raise ValueError(message)
+
+    def _restart_at(self, snapshot: Snapshot) -> float:
+        """When the host that takes over a dead one starts, as its hosting says."""
+        return self._plan.restart_at(self._started.clock_at, snapshot.outside.store)
+
+    def _snapshot(self, point: Interruption, offered: frozenset[Interruption]) -> Snapshot:
+        """The outside world at the kill ``point``.
+
+        The first call takes the copies of every ``offered`` kill with it.
+        """
+        if point not in self._snapshots:
+            self._take_snapshots(offered if not self._snapshots else frozenset(), point)
+        return self._snapshots[point]
+
+    def _take_snapshots(self, wanted: frozenset[Interruption], point: Interruption) -> None:
+        """Run the world again from its start, copying the outside world at the ``wanted`` kills."""
+        outside = self._pristine.copy()
+        snapshots = Snapshots(outside, wanted | {point})
+        self._plan.run(outside, self._started.clock_at, snapshots).run()
         if outside.store.commits != self.commits:
             raise NondeterministicWorldError(outside.world, self.commits, outside.store.commits)
         self._snapshots.update(snapshots.by_point)
 
 
-def simulate(world: World) -> SimulatedRun:
-    """Run ``world``'s strategy to the end of its run on the production shell and loop.
+def simulate(
+    world: World, hosting: Hosting | None = None, *, patience: float | None = None
+) -> SimulatedRun:
+    """Run ``world``'s strategy to the end of its run on a host, and keep the means to crash it.
 
-    The loop, the lease, the fence, the clock, the durable commit and the owner-event queue
-    are the real `vs_runtime` ones, on a virtual clock and an in-memory store. The run copies
-    nothing while it goes (it counts its commits), so a test that never crashes it pays one copy
-    of the initial world; `rerun_with_crash` runs the world once more to take the copies a crash
-    sweep needs. A world that cannot be deep-copied raises `WorldNotCopyableError`.
-
-    How the host is arranged (its concurrency, a run-control channel) is the world's
-    `RunSetup`; a `HostedWorld` also hears each host's shell and clock.
+    The host is the step loop over an in-memory run.log (`StepLoopHosting`) unless ``hosting``
+    says another. A host that has neither ended the run nor parked it after ``patience`` virtual
+    seconds is given up on, as the operator gives up on a resumed host (`SimulatedRun.finished` is then
+    false); without it the host is waited on for as long as it runs, which a run that waits on
+    something that never comes does without end. The run copies nothing while it goes (it counts its log records), so a test
+    that never crashes it pays one copy of the initial world; `rerun_with_crash` runs the world
+    once more to take the copies a crash sweep needs. A world that cannot be deep-copied raises
+    `WorldNotCopyableError`.
     """
-    setup = world.setup
-    options = HostOptions(max_concurrent=setup.max_concurrent, controlled=setup.controlled)
-    store = RecordingStore()
-    outside = OutsideWorld(store, FakePublicationDelivery(store), Effects(), world)
+    hosting = StepLoopHosting() if hosting is None else hosting
+    outside = OutsideWorld(hosting.new_store(), Effects(), world)
     pristine = outside.copy()  # also fails now, naming the world, if it cannot be copied
-    run = _run_host(outside, options, FIRST_HOST_STARTS_AT, None)
-    return SimulatedRun(run, outside, options, pristine)
-
-
-def _run_host(
-    outside: OutsideWorld, options: HostOptions, clock_at: float, snapshots: Snapshots | None
-) -> Run:
-    """A new host (shell, strategy instance, executors) over ``outside``, run to the end."""
-    world = outside.world
-    setup = world.setup
-    enactment = _Enactment(world)
-    host = scripted_host(
-        setup.new_launch(),
-        world,
-        setup.harness,
-        setup.schemas,
-        replace(
-            options, translator=_translator(outside.effects, enactment), attach=enactment.attach
-        ),
-        store=outside.store,
-        delivery=outside.delivery,
-        clock_at=clock_at,
-    )
-    if snapshots is not None:
-        snapshots.watch(outside.store, host.decisions)
-    return host.run()
-
-
-class _Enactment:
-    """How one host's executed requests are enacted: the world's say, once the host exists."""
-
-    def __init__(self, world: World) -> None:
-        self._world = world
-        self._enact: Enact | None = None
-
-    def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> None:
-        """Let a `HostedWorld` bind this host's shell and clock."""
-        if isinstance(self._world, HostedWorld):
-            self._enact = self._world.attach(shell, clock)
-
-    async def __call__(self, request: Request, result: ExecutionResult) -> ExecutionResult:
-        """The result the shell is told for ``request``."""
-        return result if self._enact is None else await self._enact(request, result)
-
-
-def _translator(effects: Effects, enactment: _Enactment) -> TranslatorFactory:
-    """Executors that record into, and answer inspections from, the shared ``effects`` ledger.
-
-    What each request does on the host (see `HostedWorld`) passes through ``enactment``.
-    """
-
-    def build(
-        script: Script,
-        core: Callable[[], CoreState],
-        registry: OperationRegistry,
-        schemas: Mapping[SchemaRef, type[BaseModel]],
-        journal: Journal,
-    ) -> RecoverableExecutors:
-        class HostExecutors(RecoverableExecutors):
-            async def _enacted(self, request: Request, result: ExecutionResult) -> ExecutionResult:
-                return await enactment(request, result)
-
-        return HostExecutors(script, core, registry, schemas, journal, effects)
-
-    return build
+    plan = HostPlan(hosting, HostOptions())
+    hosted = plan.run(outside, FIRST_HOST_STARTS_AT, patience=patience)
+    return SimulatedRun(hosted, outside, plan, pristine)

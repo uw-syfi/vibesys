@@ -10,22 +10,27 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict
 
 from vibesys.api.contracts import RunStatus
-from vibesys.plugin_catalog import project_run
+from vibesys.plugin_catalog import project_run, project_steer_targets
 from vs_project.api import (
+    GitRunHistory,
     GitTracker,
     NullGitTrackerEvents,
     ProjectStateError,
     is_project_state_path,
+    open_git_repository,
 )
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vibesys.api.contracts import RunView
     from vibesys.plugin_catalog import OrchestrationRegistration, OrchestrationRegistry
-    from vs_project.api import OrchestrationRunManifest, Project
+    from vs_project.api import Git, OrchestrationRunManifest, Project, RunHistory
+    from vs_runtime.api.infrastructure import SteerTargets
     from vs_sim.api import Threads
+
+
+_EFFECTIVE_OBJECTIVE = PurePosixPath("runtime/effective-objective.md")
 
 
 class WorkspaceChangeKind(StrEnum):
@@ -102,6 +107,14 @@ class RunRecord(Protocol):
         """Return immutable manifest and effective-objective facts."""
         ...
 
+    def steer_targets(self) -> SteerTargets | None:
+        """Return the roles, attempts and items a steer may name as of the last committed state.
+
+        Read each call, so it follows a run that is still working. None when the run has no
+        committed state to name anything in.
+        """
+        ...
+
     def history_documents(self) -> tuple[RunDocument, ...]:
         """Return policy-selected documents used for historical inspection."""
         ...
@@ -139,10 +152,18 @@ def _open_run_store(
     project: Project,
     *,
     registry: OrchestrationRegistry,
-    threads: Threads | None = None,
+    git: Git,
+    threads: Threads,
 ) -> RunStore:
     """Compose a product store over one canonical project."""
-    return _LocalRunStore(project, registry=registry, threads=threads or OsThreads())
+    return _LocalRunStore(project, registry=registry, git=git, threads=threads)
+
+
+def _run_history(project: Project, git: Git) -> RunHistory:
+    """Every run of ``project``, read from its run branches and its checkout."""
+    return GitRunHistory(
+        project, open_git_repository(project.root, git=git, faults=NullGitTrackerEvents())
+    )
 
 
 class _GitReadEvents(NullGitTrackerEvents):
@@ -167,17 +188,24 @@ class _LocalRunRecord:
         run_id: str,
         *,
         registry: OrchestrationRegistry,
+        git: Git,
         threads: Threads,
     ) -> None:
         self._threads = threads
         self._project = project
+        self._history = _run_history(project, git)
         self._run_id = run_id
         self._registry = registry
         self._identity = hashlib.sha256(f"{project.root.resolve()}\0{run_id}".encode()).hexdigest()[
             :16
         ]
         self._git_events = _GitReadEvents()
-        self._git = GitTracker(project.root, run_id=run_id, events=self._git_events)
+        self._git = GitTracker(
+            project.root,
+            run_id=run_id,
+            events=self._git_events,
+            repository=open_git_repository(project.root, git=git, faults=self._git_events),
+        )
         self._git_lock = threads.lock()
         registration = self._registration(self._manifest())
         self._framework_prefixes = (
@@ -203,6 +231,11 @@ class _LocalRunRecord:
             loop=manifest.orchestration.id,
         )
 
+    def steer_targets(self) -> SteerTargets | None:
+        return project_steer_targets(
+            self._registration(self._manifest()), self._project, run_id=self._run_id
+        )
+
     def facts(self) -> RunRecordFacts:
         manifest = self._manifest()
         return RunRecordFacts(
@@ -215,10 +248,9 @@ class _LocalRunRecord:
         return ()
 
     def portable_documents(self) -> tuple[RunDocument, ...]:
-        snapshot = self._project.state.portable_run_export(self._run_id)
         return tuple(
             RunDocument(relative_path=item.relative_path, contents=item.contents)
-            for item in snapshot.files
+            for item in self._history.documents(self._run_id)
         )
 
     def workspace_changes(self, base: str, head: str) -> tuple[WorkspaceChange, ...]:
@@ -231,7 +263,7 @@ class _LocalRunRecord:
         return self._git_read(self._git.diff_patch, base, head, paths)
 
     def _manifest(self) -> OrchestrationRunManifest:
-        return self._project.state.load_run(self._run_id)
+        return self._history.manifest(self._run_id)
 
     def _registration(self, manifest: OrchestrationRunManifest) -> OrchestrationRegistration | None:
         try:
@@ -241,13 +273,10 @@ class _LocalRunRecord:
 
     def _effective_objective(self) -> str | None:
         try:
-            document = (
-                self._project.state.portable_namespace(self._run_id, "runtime").external_directory()
-                / "effective-objective.md"
-            )
-            return document.read_text(encoding="utf-8") if document.is_file() else None
+            contents = self._history.document(self._run_id, _EFFECTIVE_OBJECTIVE)
         except (OSError, ProjectStateError):
             return None
+        return None if contents is None else contents.decode("utf-8", errors="replace")
 
     def _git_read(
         self,
@@ -279,17 +308,28 @@ class _LocalRunRecord:
 
 
 class _LocalRunStore:
-    """`RunStore` backed by one `vs_project.Project`'s persisted state."""
+    """`RunStore` backed by one `vs_project.Project`'s persisted state.
+
+    Runs are read through ``RunHistory``, so every run of the project lists and opens
+    whichever branch is checked out (each run commits its state on its own run branch).
+    """
 
     def __init__(
-        self, project: Project, *, registry: OrchestrationRegistry, threads: Threads
+        self,
+        project: Project,
+        *,
+        registry: OrchestrationRegistry,
+        git: Git,
+        threads: Threads,
     ) -> None:
         self._project = project
         self._registry = registry
+        self._git = git
         self._threads = threads
+        self._history = _run_history(project, git)
 
     def list_runs(self) -> Sequence[RunView]:
-        manifests = self._project.state.list_runs()
+        manifests = self._history.recorded().runs
         return [self.get_record(manifest.run_id).view() for manifest in reversed(manifests)]
 
     def get_run(self, run_id: str) -> RunView:
@@ -298,9 +338,9 @@ class _LocalRunStore:
     def get_record(self, run_id: str) -> RunRecord:
         # Load now so a missing or unsupported run fails at this boundary, not
         # on the record's first later use.
-        self._project.state.load_run(run_id)
+        self._history.manifest(run_id)
         return _LocalRunRecord(
-            self._project, run_id, registry=self._registry, threads=self._threads
+            self._project, run_id, registry=self._registry, git=self._git, threads=self._threads
         )
 
 

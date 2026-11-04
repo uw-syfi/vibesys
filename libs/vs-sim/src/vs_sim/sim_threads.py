@@ -28,25 +28,38 @@ simulated thread.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import heapq
 import itertools
 import threading
+import weakref
 from collections import deque
 from typing import TYPE_CHECKING, Self, cast
 
+from vs_sim.concurrency import OsThreadLocal, WorkerReservationStateError
 from vs_sim.randomness import SeededRandom
-from vs_sim.virtual import VirtualClock
+from vs_sim.virtual import (
+    SIM_MONOTONIC_ORIGIN,
+    VirtualClock,
+    VirtualTimeLimitError,
+    current_virtual_loop,
+    run_hosted,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
     from types import TracebackType
 
-    from vs_sim.concurrency import Lock
+    from vs_sim.concurrency import Lock, ThreadLocal, WorkerReservation
     from vs_sim.trace import EventTrace
 
 
 class SimDeadlockError(RuntimeError):
     """No thread can run and no timer is pending, yet some thread still waits."""
+
+
+class SimMisuseError(RuntimeError):
+    """A simulator was used in a way whose outcome would depend on the real scheduler."""
 
 
 class _Killed(BaseException):
@@ -60,6 +73,51 @@ class _OutsideThread:
 
 
 _OUTSIDE = _OutsideThread()
+
+_CREATED: list[weakref.ref[SimThreads]] = []
+"""Every simulator built since the last :func:`undriven_threads` call."""
+
+
+def undriven_threads() -> tuple[str, ...]:
+    """Names of threads spawned on simulators that nothing drove, since the last call.
+
+    A thread spawned on a simulator that no :meth:`SimThreads.run` or virtual loop drives
+    never runs, so a test that relies on it passes whatever the thread would have done.
+    The test harness calls this after each test; each such simulator is closed here.
+    """
+    made = [ref() for ref in _CREATED]
+    _CREATED.clear()
+    names: list[str] = []
+    for threads in made:
+        if threads is None:
+            continue
+        names.extend(threads.never_ran())
+        threads.close()
+    return tuple(names)
+
+
+def loop_threads() -> SimThreads:
+    """The simulated threads of the virtual loop the caller runs on, created on first use.
+
+    Code that runs on a loop started by :func:`~vs_sim.virtual.run_virtual` without a
+    ``driver`` can still hand blocking work to simulated threads: the loop adopts the
+    returned simulator as its driver, on the loop's clock, schedule seed and trace.
+    A simulator created here closes when the run ends; a borrowed simulator remains
+    with its synchronous owner. Every call on one loop returns the same object.
+
+    Raises:
+        RuntimeError: the caller is not on a virtual loop, or the loop's driver is not a
+            :class:`SimThreads`.
+    """
+    loop = current_virtual_loop()
+    if loop.driver is None:
+        loop.adopt(SimThreads(loop.clock, schedule_seed=loop.schedule_seed, trace=loop.trace))
+    if isinstance(loop.driver, _BorrowedThreads):
+        return loop.driver.primary
+    if not isinstance(loop.driver, SimThreads):
+        message = f"the virtual loop is driven by {type(loop.driver).__name__}, not SimThreads"
+        raise RuntimeError(message)  # noqa: TRY004  # LW-163851 [TRY004]; a missing precondition of the call, not a bad argument type.
+    return loop.driver
 
 
 class _SimThread:
@@ -76,6 +134,7 @@ class _SimThread:
         self.joiners: list[_SimThread] = []
         self.poison: BaseException | None = None
         self.waiting_in: list[_SimThread] | None = None
+        self.external = False
 
 
 class SimWorker:
@@ -103,6 +162,47 @@ class SimWorker:
         if self._thread.done:
             return
         sim.block(me, f"join of {self._thread.name}", self._thread.joiners, timeout)
+
+
+class _SimWorkerReservation:
+    """A simulated worker retained before the scheduler may run its target."""
+
+    def __init__(
+        self,
+        threads: SimThreads,
+        target: Callable[[], object],
+        *,
+        name: str,
+        daemon: bool,
+    ) -> None:
+        self._threads = threads
+        self._target = target
+        self._name = name
+        self._daemon = daemon
+        self._worker: SimWorker | None = None
+        self._attempted = False
+        self._settled = False
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def start(self) -> None:
+        if self._attempted or self._settled:
+            raise WorkerReservationStateError(self.name)
+        self._attempted = True
+        self._worker = self._threads.spawn(
+            self._target,
+            name=self._name,
+            daemon=self._daemon,
+        )
+
+    def settle(self) -> None:
+        if self._settled:
+            return
+        if self._worker is not None:
+            self._worker.join()
+        self._settled = True
 
 
 class SimLock:
@@ -147,7 +247,7 @@ class SimLock:
     def _hand_off(self) -> None:
         if self._waiters:
             waiter = self._waiters.pop(0)
-            self._owner, self._depth = waiter, 1
+            self._owner, self._depth = (_OUTSIDE if waiter.external else waiter), 1
             self.sim.wake(waiter)
         else:
             self._owner = None
@@ -323,16 +423,28 @@ class SimThreads:
         self._by_ident: dict[int, _SimThread] = {}
         self._yield_to_driver = threading.Semaphore(0)
         self._closed = False
+        self._driven = False
+        self._driving_external = False
+        self._outside_ident = threading.get_ident()
+        self._executor = _SimExecutor(self)
         self.errors: list[BaseException] = []
         """Exceptions that ended threads, in the order they happened."""
+        _CREATED.append(weakref.ref(self))
 
     # ----- the Threads interface -----
 
     def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> SimWorker:
         """Start ``target`` as a simulated thread; it first runs when the baton reaches it."""
+        me = self.caller()
         thread = self._spawn(target, name, daemon=daemon)
-        self.switch_point(self.caller())
+        self.switch_point(me)
         return SimWorker(self, thread)
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        """Retain a simulated worker before its target can enter the schedule."""
+        return _SimWorkerReservation(self, target, name=name, daemon=daemon)
 
     def _spawn(self, target: Callable[[], object], name: str, *, daemon: bool) -> _SimThread:
         thread = _SimThread(name, target, daemon=daemon)
@@ -363,6 +475,10 @@ class SimThreads:
         """A new, cleared event."""
         return SimEvent(self)
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        """A per-thread value; each simulated thread runs on an OS thread of its own."""
+        return OsThreadLocal(initial)
+
     def sleep(self, seconds: float) -> None:
         """Block the calling simulated thread for ``seconds`` of virtual time."""
         me = self.caller()
@@ -371,8 +487,34 @@ class SimThreads:
             self.block(me, f"sleep({seconds:g})", None, seconds)
 
     def now(self) -> float:
-        """Virtual seconds."""
-        return self.clock.now()
+        """Monotonic virtual seconds: the timeline plus ``SIM_MONOTONIC_ORIGIN``.
+
+        The offset keeps this reading apart from the timeline's own clock and from
+        ``WallClockView``, so code that compares a monotonic reading with a clock
+        reading is visibly wrong in simulation, as it is in production.
+        """
+        return SIM_MONOTONIC_ORIGIN + self.clock.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        """Run ``main`` to completion on an event loop on the calling simulated thread.
+
+        The loop's time is this simulation's timeline. While it has nothing to do, its
+        thread waits like any other simulated thread, so the others run and time advances
+        to the earliest timer, the loop's own or a thread's; a callback another simulated
+        thread schedules on it (``call_soon_threadsafe``, as ``SimBlockingRunner`` does)
+        wakes it.
+
+        Raises:
+            RuntimeError: the caller is not a simulated thread.
+        """
+        if isinstance(self.caller(), _OutsideThread):
+            message = "run_async must be called from a simulated thread"
+            raise RuntimeError(message)  # noqa: TRY004  # LW-222587 [TRY004]; a missing precondition of the call, not a bad argument type.
+            # > TypeError would say an argument has the wrong type; no argument is wrong here.
+        seed = None if self._rng is None else self._rng.randint(0, 2**32 - 1)
+        return run_hosted(
+            self.clock, main, host=_LoopWake(self), trace=self._trace, schedule_seed=seed
+        )
 
     # ----- driving -----
 
@@ -381,7 +523,10 @@ class SimThreads:
 
         Raises:
             SimDeadlockError: nothing can run and no timer is pending.
+            VirtualTimeLimitError: the next timer is past the clock's ``limit``, so the run is
+                stuck rather than slow.
         """
+        self._driven = True
         outcome: list[T] = []
         first = self._start_main(main, outcome)
         try:
@@ -392,6 +537,12 @@ class SimThreads:
                 due = self.next_timer()
                 if due is None:
                     raise SimDeadlockError(self.describe())
+                if self.clock.limit is not None and due > self.clock.limit:
+                    message = (
+                        f"virtual time passed its limit of {self.clock.limit:g} s; "
+                        f"{self._waiting()}"
+                    )
+                    raise VirtualTimeLimitError(message)
                 self.advance_to(due)
         finally:
             self.close()
@@ -425,8 +576,15 @@ class SimThreads:
             heapq.heappop(self._timers)
         return None
 
+    def advance(self, seconds: float) -> None:
+        """Move the clock ``seconds`` forward and wake every thread whose timer is due by then."""
+        self.advance_to(self.clock.now() + max(0.0, seconds))
+
     def advance_to(self, instant: float) -> None:
-        """Move the clock to ``instant`` and wake every thread whose timer is due by then."""
+        """Move the clock to ``instant`` and wake every thread whose timer is due by then.
+
+        ``instant`` is on the clock's timeline (``clock.now()``), not on ``now()``'s.
+        """
         if self._trace is not None and instant > self.clock.at:
             self._trace.advance(self.clock.at, instant)
         self.clock.at = max(self.clock.at, instant)
@@ -440,8 +598,12 @@ class SimThreads:
 
     def describe(self) -> str:
         """What every unfinished thread waits on, for a deadlock report."""
-        waiting = [f"{t.name}: {t.blocked_on or 'runnable'}" for t in self._threads if not t.done]
-        return "no thread can run and no timer is pending; " + "; ".join(waiting)
+        return "no thread can run and no timer is pending; " + self._waiting()
+
+    def _waiting(self) -> str:
+        return "; ".join(
+            f"{t.name}: {t.blocked_on or 'runnable'}" for t in self._threads if not t.done
+        )
 
     def close(self) -> None:
         """Unwind every thread still parked, so no operating-system thread outlives the run."""
@@ -457,8 +619,44 @@ class SimThreads:
     # ----- inside the scheduler -----
 
     def caller(self) -> _SimThread | _OutsideThread:
-        """The simulated thread running this code, or a stand-in for any other caller."""
-        return self._by_ident.get(threading.get_ident(), _OUTSIDE)
+        """The simulated thread running this code, or the one real thread that drives them.
+
+        Every caller that is not a simulated thread is the same stand-in, so only one real
+        thread may use a simulator: the one that built it (the test's, or the event loop's
+        that drives it). Two would share lock ownership and race on its state. The thread
+        is fixed at construction, so a worker that uses the simulator fails on every run,
+        not only on the runs where a pool happens to hand the work to a second worker.
+
+        Raises:
+            SimMisuseError: a real thread other than the one that built this simulator used it.
+        """
+        ident = threading.get_ident()
+        thread = self._by_ident.get(ident)
+        if thread is not None:
+            return thread
+        if ident != self._outside_ident:
+            message = (
+                f"real thread {threading.current_thread().name!r} used a SimThreads built on "
+                "another real thread; run the work as a simulated thread (spawn it from "
+                "SimThreads.run or Sim.run) instead of on a real one"
+            )
+            raise SimMisuseError(message)
+        return _OUTSIDE
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        """Runs each submitted call as a new simulated thread, in place of a real thread pool."""
+        return self._executor
+
+    def attach(self) -> None:
+        """Mark this simulator as driven by a virtual loop from now on."""
+        self._driven = True
+
+    def never_ran(self) -> tuple[str, ...]:
+        """Names of threads spawned on a simulator that nothing ever drove."""
+        if self._driven:
+            return ()
+        return tuple(thread.name for thread in self._threads)
 
     def _entry(self, thread: _SimThread) -> None:
         thread.go.acquire()
@@ -490,7 +688,12 @@ class SimThreads:
 
     def switch_point(self, me: _SimThread | _OutsideThread) -> None:
         """Let the seed hand the baton to another runnable thread."""
-        if self._rng is None or isinstance(me, _OutsideThread) or not self._runnable:
+        if isinstance(me, _OutsideThread):
+            if self._driven and not self._driving_external:
+                self.advance_to(self.clock.now())
+                self.run_until_blocked()
+            return
+        if self._rng is None or not self._runnable:
             return
         if self._rng.randint(0, len(self._runnable)) == 0:
             return
@@ -502,7 +705,8 @@ class SimThreads:
         thread.blocked_on = None
         thread.waiting_in = None
         thread.timer_token += 1
-        self._runnable.append(thread)
+        if not thread.external:
+            self._runnable.append(thread)
 
     def wake(self, thread: _SimThread) -> None:
         """Wake ``thread`` because what it waited for happened."""
@@ -517,8 +721,7 @@ class SimThreads:
     ) -> bool:
         """Park until woken (``True``) or until ``timeout`` virtual seconds pass (``False``)."""
         if me is _OUTSIDE:
-            message = f"a thread that is not simulated cannot block on {what}"
-            raise RuntimeError(message)
+            return self._block_external(what, waiters, timeout)
         me = cast("_SimThread", me)
         me.signalled = False
         me.timer_token += 1
@@ -533,6 +736,63 @@ class SimThreads:
         self._park(me, what)
         return me.signalled
 
+    def _block_external(
+        self, what: str, waiters: list[_SimThread] | None, timeout: float | None
+    ) -> bool:
+        """Drive a synchronous caller's wait without running its owning event loop."""
+        self._adopt_external()
+        waiter = _SimThread("<external wait>", lambda: None, daemon=True)
+        waiter.external = True
+        waiter.blocked_on = what
+        waiter.waiting_in = waiters
+        if waiters is not None:
+            waiters.append(waiter)
+        if timeout is not None:
+            heapq.heappush(
+                self._timers,
+                (self.clock.at + max(timeout, 0.0), next(self._sequence), waiter, 0),
+            )
+        self._driving_external = True
+        try:
+            while waiter.blocked_on is not None:
+                self.run_until_blocked()
+                if waiter.blocked_on is None:
+                    break
+                due = self.next_timer()
+                if due is None:
+                    raise SimDeadlockError(self.describe())
+                if self.clock.limit is not None and due > self.clock.limit:
+                    raise VirtualTimeLimitError(self.describe())
+                self.advance_to(due)
+        finally:
+            self._driving_external = False
+            if waiter.waiting_in is not None and waiter in waiter.waiting_in:
+                waiter.waiting_in.remove(waiter)
+            waiter.blocked_on = None
+            waiter.timer_token += 1
+        return waiter.signalled
+
+    def _adopt_external(self) -> None:
+        self._driven = True
+        try:
+            loop = current_virtual_loop()
+        except RuntimeError:
+            return
+        if loop.driver is self:
+            return
+        if loop.driver is None:
+            loop.adopt(_BorrowedThreads(self))
+        elif isinstance(loop.driver, _BorrowedThreads):
+            loop.driver.add(self)
+        elif isinstance(loop.driver, SimThreads):
+            driver = _BorrowedThreads(loop.driver, owned=loop.driver)
+            driver.add(self)
+            loop.adopt(driver)
+        else:
+            return
+        if not self._timers:
+            self.clock = loop.clock
+
     def _park(self, me: _SimThread, what: str) -> None:
         me.blocked_on = what
         self._yield_to_driver.release()
@@ -540,6 +800,110 @@ class SimThreads:
         me.blocked_on = None
         if me.poison is not None:
             raise me.poison
+
+
+class _BorrowedThreads:
+    """Drive borrowed schedulers alongside a pre-existing loop-owned scheduler.
+
+    Synchronous owners retain their workers after the loop shuts down; only a
+    pre-existing loop-owned scheduler closes here. Normal test teardown still
+    closes every simulator through ``undriven_threads``.
+    """
+
+    def __init__(self, threads: SimThreads, *, owned: SimThreads | None = None) -> None:
+        self._threads = [threads]
+        self._owned = owned
+
+    @property
+    def primary(self) -> SimThreads:
+        return self._threads[0]
+
+    def add(self, threads: SimThreads) -> None:
+        if threads not in self._threads:
+            self._threads.append(threads)
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        return self.primary.executor
+
+    def attach(self) -> None:
+        for threads in self._threads:
+            threads.attach()
+
+    def run_until_blocked(self) -> None:
+        for threads in self._threads:
+            threads.run_until_blocked()
+
+    def next_timer(self) -> float | None:
+        timers = [due for threads in self._threads if (due := threads.next_timer()) is not None]
+        return min(timers, default=None)
+
+    def advance_to(self, instant: float) -> None:
+        for threads in self._threads:
+            threads.advance_to(instant)
+
+    def describe(self) -> str:
+        return "; ".join(threads.describe() for threads in self._threads)
+
+    def close(self) -> None:
+        if self._owned is not None:
+            self._owned.close()
+
+
+class _LoopWake:
+    """Parks the thread of a loop started by ``run_async`` until a callback or a timer."""
+
+    def __init__(self, sim: SimThreads) -> None:
+        self._sim = sim
+        self._woken = sim.event()
+
+    def park(self, timeout: float | None) -> None:
+        self._woken.wait(timeout)
+        self._woken.clear()
+
+    def wake(self) -> None:
+        # Only a simulated thread can hand over the baton. A thread outside the simulation
+        # that schedules a callback would otherwise leave the loop asleep until its next
+        # timer, so it is refused loudly.
+        if isinstance(self._sim.caller(), _OutsideThread):
+            message = "a thread outside the simulation cannot wake a loop started by run_async"
+            raise RuntimeError(message)  # noqa: TRY004  # LW-988825 [TRY004]; the caller is outside the simulation, not an argument of the wrong type.
+            # > TypeError would say an argument has the wrong type; no argument is wrong here.
+        self._woken.set()
+
+    def now(self) -> float:
+        return self._sim.now()
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        return self._sim.executor
+
+
+class _SimExecutor(concurrent.futures.Executor):
+    """Runs each submitted call as a new simulated thread."""
+
+    def __init__(self, sim: SimThreads) -> None:
+        self._sim = sim
+        self._count = itertools.count()
+
+    def submit[T](
+        self, fn: Callable[..., T], /, *args: object, **kwargs: object
+    ) -> concurrent.futures.Future[T]:
+        future: concurrent.futures.Future[T] = concurrent.futures.Future()
+
+        def call() -> None:
+            if not future.set_running_or_notify_cancel():
+                return
+            try:
+                result = fn(*args, **kwargs)
+            except BaseException as error:  # noqa: BLE001  # LW-096717 [BLE001]; the future carries any failure back to its awaiter, as a thread pool's does.
+                # > Catching less would kill the simulated thread and leave the awaiter hanging.
+                future.set_exception(error)
+            else:
+                future.set_result(result)
+
+        self._sim.spawn(call, name=f"executor-{next(self._count)}")
+        return future
 
 
 class SimBlockingRunner:

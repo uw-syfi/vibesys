@@ -1,0 +1,7 @@
+{#- An earlier agent's free-text field, which is Markdown, as one list item that keeps its structure.
+    A one-line value follows its label; a longer one starts on the next line, indented under the
+    item, so its paragraphs, lists and fenced blocks stay inside it. The item has no trailing newline. -#}
+{% macro item(label, value) -%}
+{% set text = value.strip('\n') -%}
+- {{ label }}:{% if '\n' in text %}{{ '\n' }}{{ text | indent(2, first=True) }}{% else %} {{ text }}{% endif %}
+{%- endmacro %}

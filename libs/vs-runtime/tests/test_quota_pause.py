@@ -38,6 +38,7 @@ from vs_runtime.api.infrastructure import (
     install_capacity_gate,
 )
 from vs_runtime.api.testing import FakeCapacityTimer, FakeRunControlEventSink
+from vs_sim.api.testing import ManualClock, SimThreads
 
 ROLE = "worker"
 START = 1_000_000.0
@@ -55,12 +56,16 @@ class _RecordingSink(NullAgentEventSink):
     def quota_paused(self, error: AgentQuotaError, plan: QuotaPlan, where: Attribution) -> None:
         self.paused.append((error, plan, where.agent_kind))
 
-    def quota_resumed(self, provider: str, reason: str, where: Attribution) -> None:
-        del where
-        self.resumed.append((provider, reason))
+    def quota_resumed(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        del waited_seconds, where
+        self.resumed.append((error.provider, reason))
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
-        del where
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
+        del waited_seconds, where
         self.abandoned.append((error, reason))
 
     def provider_switched(self, switch: ProviderSwitch, where: Attribution) -> None:
@@ -77,6 +82,8 @@ class _Run:
     sink: _RecordingSink = field(default_factory=_RecordingSink)
     transitions: list[RunControlTransition] = field(default_factory=list)
     timer: FakeCapacityTimer | None = None
+    production_timer: bool = False
+    clock: ManualClock = field(default_factory=lambda: ManualClock(START))
     control: RunControlChannel | None = None
 
     def kinds(self) -> list[RunControlTransitionKind]:
@@ -95,11 +102,13 @@ class _Run:
             self.control.request_stop(StopMode.DRAIN)
 
     def play(self, client: FakeAgentClient, prompts: tuple[str, ...]) -> list[str]:
+        threads = client.threads
+        assert isinstance(threads, SimThreads)
         control = create_run_control_channel(
-            FakeRunControlEventSink(on_transition=self._on_transition)
+            FakeRunControlEventSink(on_transition=self._on_transition), threads=threads
         )
         self.control = control
-        if self.policy.action is QuotaAction.WAIT:
+        if self.policy.action is QuotaAction.WAIT and not self.production_timer:
             self.timer = FakeCapacityTimer(
                 control, start=START, operator_resumes_after=self.operator_resumes_after
             )
@@ -107,18 +116,21 @@ class _Run:
             client,
             control=control,
             events=self.sink,
-            handling=CapacityHandling(self.policy, self.timer),
+            handling=CapacityHandling.for_policy(self.policy, threads, self.timer),
+            clock=self.clock,
         )
-        return [
-            client.invoke_text(
-                kind=ROLE,
-                workspace=Path(),
-                system_prompt="Work.",
-                user_prompt=prompt,
-                round_label="round",
-            )
-            for prompt in prompts
-        ]
+        return threads.run(
+            lambda: [
+                client.invoke_text(
+                    kind=ROLE,
+                    workspace=Path(),
+                    system_prompt="Work.",
+                    user_prompt=prompt,
+                    round_label="round",
+                )
+                for prompt in prompts
+            ]
+        )
 
 
 def _quota(
@@ -128,7 +140,7 @@ def _quota(
 
 
 def _client(stops: int, error: AgentQuotaError) -> FakeAgentClient:
-    return FakeAgentClient().fail(ROLE, error, times=stops)
+    return FakeAgentClient(threads=SimThreads()).fail(ROLE, error, times=stops)
 
 
 def _prompts(client: FakeAgentClient) -> list[str]:
@@ -159,6 +171,17 @@ def test_a_quota_stop_pauses_the_run_and_the_turn_finishes_on_resume() -> None:
     assert run.sink.resumed == [("claude", "operator")]
 
 
+def test_the_production_timer_reads_the_clock_the_run_was_given() -> None:
+    """A wait is planned on the run's own timeline, never on the machine's wall clock."""
+    run = _Run(policy=QuotaPolicy(QuotaAction.WAIT), production_timer=True)
+
+    run.play(_client(1, _quota(resets_at=START + 600)), ("one",))
+
+    [(_, plan, _)] = run.sink.paused
+    assert plan.resumes_at is not None
+    assert START <= plan.resumes_at <= START + 10_000
+
+
 def test_a_stop_while_paused_on_quota_ends_the_turn_without_sending_it_again() -> None:
     run = _Run(operator="stop")
 
@@ -169,9 +192,14 @@ def test_a_stop_while_paused_on_quota_ends_the_turn_without_sending_it_again() -
     assert run.sink.resumed == []
 
 
+# An outage (``UNAVAILABLE``) names no limit and never pauses the run; test_provider_outage.py
+# covers it. Every condition that names a limit pauses.
+LIMITS = [condition for condition in QuotaCondition if condition is not QuotaCondition.UNAVAILABLE]
+
+
 @given(
     stops=st.integers(min_value=1, max_value=4),
-    condition=st.sampled_from(QuotaCondition),
+    condition=st.sampled_from(LIMITS),
     resets_at=st.none() | st.floats(min_value=1.0, max_value=4e9, allow_nan=False),
 )
 def test_any_run_of_quota_stops_pauses_once_each_and_loses_no_turn(

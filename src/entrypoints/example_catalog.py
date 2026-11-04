@@ -3,12 +3,7 @@
 A VibeSys source checkout keeps runnable examples under ``examples/<category>/``.
 Each is a project root whose tasks live in ``.vibesys/tasks/<task>/``, and each
 is declared once in ``examples/registry.toml``. This module owns that file's
-format (the one definition the CLI and the registry tests share) and turns it
-into an :class:`ExampleList`, the typed listing ``vibesys example list --json``
-prints and the desktop helper reads.
-
-Reading the catalog never imports the run engine: ``vibesys example`` is a light
-host command (``tests/architecture/test_light_entrypoints.py``).
+format and discovers the tasks of each registered example.
 """
 
 from __future__ import annotations
@@ -20,7 +15,11 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from vs_project.api import Project, ProjectError
+from vs_project.api import (
+    Project,
+    ProjectError,
+    TaskDirectory,
+)
 
 REGISTRY_RELATIVE = PurePosixPath("examples/registry.toml")
 """Where the registry lives in a checkout."""
@@ -34,6 +33,8 @@ class Check(StrEnum):
     VALIDATE = "validate"  # the `vibesys validate` contract
     PATH_REFS = "path-refs"  # `${PROJECT_ROOT}/...` paths in task commands exist
     TRUST_POLICY = "trust-policy"  # files the commands read are read-only for the agent
+    CANDIDATE_BUILD = "candidate-build"  # a task whose evaluator requires outputs declares a build
+    BACKEND = "backend"  # every task declares the compute backends it targets
 
 
 class KnownFailing(BaseModel):
@@ -121,32 +122,6 @@ class Registry(BaseModel):
         return self
 
 
-class ExampleSummary(BaseModel):
-    """One example in ``vibesys example list --json``."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str
-    """The value ``vibesys example new`` accepts, e.g. ``data-structures/stack``."""
-    category: str
-    """The ``examples/<category>/`` directory the example is catalogued under."""
-    tasks: tuple[str, ...]
-    """Task names, sorted; empty for an external repository that is not fetched."""
-    external_repo: bool
-    """Whether ``example new`` clones another repository instead of copying files."""
-
-
-class ExampleList(BaseModel):
-    """``vibesys example list --json``: every catalogued example, by category then name."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    version: Literal[1] = 1
-    checkout: str
-    """The resolved VibeSys checkout whose ``examples/`` the listing was read from."""
-    examples: tuple[ExampleSummary, ...]
-
-
 class CatalogError(Exception):
     """The catalog is missing, malformed, or does not name the requested example."""
 
@@ -171,8 +146,8 @@ def load_registry(checkout: Path) -> Registry:
         raise CatalogError(message) from exc
 
 
-def example_tasks(root: Path) -> tuple[str, ...]:
-    """Return the sorted task names under ``root/.vibesys/tasks``; empty when there are none.
+def _task_directories(root: Path) -> tuple[TaskDirectory, ...]:
+    """The tasks under ``root/.vibesys/tasks`` sorted by name; empty when there are none.
 
     An external repository that is not fetched has no directory yet, so no tasks.
     """
@@ -182,28 +157,15 @@ def example_tasks(root: Path) -> tuple[str, ...]:
         project = Project.open(root)
         if not project.is_initialized():
             return ()
-        return tuple(sorted(task.name.value for task in project.discover_tasks()))
+        return tuple(sorted(project.discover_tasks(), key=lambda task: task.name.value))
     except ProjectError as exc:
         message = f"{root}: {exc}"
         raise CatalogError(message) from exc
 
 
-def list_examples(checkout: Path) -> ExampleList:
-    """Describe every registered example of ``checkout``, sorted by category and name."""
-    root = checkout.expanduser().resolve()
-    entries = sorted(load_registry(root).example, key=lambda entry: (entry.category, entry.name))
-    return ExampleList(
-        checkout=str(root),
-        examples=tuple(
-            ExampleSummary(
-                name=entry.name,
-                category=entry.category,
-                tasks=example_tasks(root / entry.path),
-                external_repo=entry.external_repo,
-            )
-            for entry in entries
-        ),
-    )
+def example_tasks(root: Path) -> tuple[str, ...]:
+    """Return the sorted task names under ``root/.vibesys/tasks``; empty when there are none."""
+    return tuple(task.name.value for task in _task_directories(root))
 
 
 def find_example(registry: Registry, name: str) -> ExampleEntry:

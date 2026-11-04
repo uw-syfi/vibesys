@@ -17,6 +17,7 @@ async def run(handle: RunHandle, *, renderer: HeadlessRenderer | None = None) ->
     try:
         async for event in handle.events():
             renderer.handle(event)
+        renderer.finish()
         return await handle.result()
     except asyncio.CancelledError as cancellation:
         handle.stop()

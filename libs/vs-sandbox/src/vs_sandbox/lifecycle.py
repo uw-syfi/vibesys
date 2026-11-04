@@ -12,25 +12,31 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vs_sim.api import DISCARD, CloseOnce, ReleaseStack
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_sandbox.execution import CommandResult, CommandRunner
+    from vs_sim.api import OutputSink, Released
 
 
-def start_sandbox(sandbox: CommandRunner) -> None:
+def start_sandbox(sandbox: CommandRunner, *, output: OutputSink) -> None:
     """Start a sandbox that owns an execution environment.
 
     The base :class:`CommandRunner` contract intentionally has no lifecycle because
     host sandboxes have nothing to start. Callers that requested a container
     sandbox use this adapter and receive an immediate, named failure if the
     backend returned a sandbox without the required capability.
+
+    The sandbox's ``start(*, output)`` writes the output of the commands that
+    start its environment (``docker run``, an image pull) to *output* as they run.
     """
     start = getattr(sandbox, "start", None)
     if not callable(start):
         message = f"{type(sandbox).__name__} has no execution environment to start"
         raise TypeError(message)
-    start()
+    start(output=output)
 
 
 def execute_as_root(
@@ -38,6 +44,7 @@ def execute_as_root(
     command: str,
     *,
     timeout: int | None = None,
+    output: OutputSink,
 ) -> CommandResult:
     """Run *command* as root inside a started container sandbox.
 
@@ -45,13 +52,14 @@ def execute_as_root(
     :class:`CommandRunner` contract leaves out. A sandbox that cannot run
     commands as root (a host sandbox, where "root" would mean the operator's
     machine) fails immediately and by name instead of running the command as
-    the wrong user.
+    the wrong user. The command's output is written to *output* as it runs, as
+    :meth:`CommandRunner.execute` writes it.
     """
     run = getattr(sandbox, "execute_as_root", None)
     if not callable(run):
         message = f"{type(sandbox).__name__} cannot run commands as root"
         raise TypeError(message)
-    return run(command, timeout=timeout)
+    return run(command, timeout=timeout, output=output)
 
 
 def stop_sandbox(sandbox: CommandRunner) -> None:
@@ -84,7 +92,7 @@ class SandboxSession[ViewT]:
         self.sandbox = sandbox
         self.view = view
         self._stop_on_close = stop_on_close
-        self._closed = False
+        self._close = CloseOnce()
 
     @classmethod
     def borrowed(cls, sandbox: CommandRunner, view: ViewT) -> SandboxSession[ViewT]:
@@ -92,9 +100,15 @@ class SandboxSession[ViewT]:
         return cls(sandbox, view, stop_on_close=False)
 
     @classmethod
-    def start(cls, sandbox: CommandRunner, view: ViewT) -> SandboxSession[ViewT]:
-        """Start a sandbox and own its cleanup for the session lifetime."""
-        start_sandbox(sandbox)
+    def start(
+        cls, sandbox: CommandRunner, view: ViewT, *, output: OutputSink
+    ) -> SandboxSession[ViewT]:
+        """Start a sandbox and own its cleanup for the session lifetime.
+
+        *output* receives what the sandbox's start commands write, as
+        :func:`start_sandbox` describes.
+        """
+        start_sandbox(sandbox, output=output)
         return cls(sandbox, view, stop_on_close=True)
 
     def __enter__(self) -> SandboxSession[ViewT]:
@@ -106,19 +120,26 @@ class SandboxSession[ViewT]:
         self.close()
 
     def close(self) -> None:
-        """Stop an owned sandbox at most once."""
-        if self._closed:
-            return
-        self._closed = True
+        """Stop an owned sandbox until a stop returns; a failed stop runs again on the next call."""
         if self._stop_on_close:
-            stop_sandbox(self.sandbox)
+            self._close.run(self._stop)
+
+    def _stop(self) -> Released:
+        steps = ReleaseStack()
+        steps.callback(stop_sandbox, self.sandbox)
+        return steps.close()
 
 
 @dataclass(frozen=True)
 class BeforeReadyContext:
-    """Resources available while a sandbox is transitioning to ready."""
+    """Resources available while a sandbox is transitioning to ready.
+
+    ``output`` is where a hook's commands write their raw output as they run;
+    a lifecycle-driven start discards it.
+    """
 
     sandbox: CommandRunner
+    output: OutputSink
 
 
 class SandboxLifecycleHooks:
@@ -158,7 +179,7 @@ class SandboxLifecycle:
 
     def before_ready(self, sandbox: CommandRunner) -> None:
         """Run every provider's hook, stopping at the first failure."""
-        context = BeforeReadyContext(sandbox=sandbox)
+        context = BeforeReadyContext(sandbox=sandbox, output=DISCARD)
         for provider in self._hooks:
             try:
                 provider.before_ready(context)

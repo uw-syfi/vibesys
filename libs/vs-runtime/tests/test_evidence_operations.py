@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -19,8 +19,6 @@ from vs_core.api import (
     EvidenceKey,
     EvidenceKind,
     EvidenceRef,
-    HostFence,
-    HostId,
     InspectOwnedJob,
     LifecycleClass,
     Observation,
@@ -29,6 +27,7 @@ from vs_core.api import (
     OperationRegistration,
     OperationRequest,
     OperationSchemaRef,
+    Reading,
     RequestId,
     ResourceId,
     RevisionId,
@@ -40,6 +39,7 @@ from vs_core.api import (
     Value,
     validate_startup,
 )
+from vs_core.api.recovery import Finished
 from vs_evaluation.api import (
     ContentDigest,
     EvidenceFingerprints,
@@ -50,26 +50,27 @@ from vs_evaluation.api import (
 from vs_evaluation.api import EvidenceKind as StageKind
 from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
-from vs_runtime.api import ArtifactStore
+from vs_runtime.api import ArtifactStore, BenchmarkFailureKind
 from vs_runtime.api.core import (
     Applied,
     ExecutionContext,
-    ExecutionResult,
     InterpretEvidenceOwner,
+    KeyedDocuments,
     MeasurementRequests,
     NotApplied,
+    ObservationFactory,
     OperationPorts,
     OperationRole,
     ReceiptEvidenceLedger,
-    ReceiptStore,
     RetainRevisionOwner,
-    bind_operations,
     build_operation_catalog,
     commit_of,
     production_owners,
     revision_ref,
 )
+from vs_runtime.api.infrastructure import ProtocolBenchmarkContract
 from vs_runtime.api.operation_fixtures import execute_request
+from vs_runtime.api.operation_step_runner import OperationStepRunner
 from vs_runtime.api.slurm_evaluation_stack import (
     ADMISSION,
     SCOPE,
@@ -77,8 +78,14 @@ from vs_runtime.api.slurm_evaluation_stack import (
     build_stack,
     submission,
 )
-from vs_runtime.api.testing import FakeEvidenceLedger, FakeWorkspace, FakeWorkspaces
-from vs_sim.api.testing import examples
+from vs_runtime.api.step_runner import CancelSignal
+from vs_runtime.api.testing import (
+    FakeEvidenceLedger,
+    FakeWorkspace,
+    FakeWorkspaces,
+    MemoryValidationPasses,
+)
+from vs_sim.api.testing import SimThreads, VirtualClock, examples
 
 pytestmark = pytest.mark.asyncio
 
@@ -90,9 +97,11 @@ def _key(source: str, evidence_id: EvidenceId) -> EvidenceKey:
     return EvidenceKey(source_request=RequestId(root=source), evidence_id=evidence_id)
 
 
-def _store(root: Path) -> ReceiptStore:
+def _store(root: Path) -> KeyedDocuments:
     (root / "project").mkdir(exist_ok=True)
-    return ReceiptStore(Project.open(root / "project").state.state_store_namespace("run"))
+    return KeyedDocuments(
+        Project.open(root / "project").state.state_store_namespace("run"), threads=SimThreads()
+    )
 
 
 def _evidence(
@@ -180,6 +189,7 @@ class _Reading(Value):
     metrics: tuple[_Metric, ...] = ()
     partial: _Partial | None = None
     feedback: str = ""
+    unmet_requirement: str | None = None
 
 
 class _Readings(Value):
@@ -210,7 +220,6 @@ class _Retain(OperationRequest):
 
 def _context() -> ExecutionContext:
     return ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         now_at=1.0,
         payload_digest="d",
         until=Until(at=100.0),
@@ -364,6 +373,54 @@ async def test_the_crash_text_of_a_benchmark_killed_with_no_record_survives_into
         assert _CRASH_TAIL in benchmark["feedback"]  # type: ignore[index]
 
 
+# A benchmark whose evaluator states that the server lacks a capability the task requires.
+_UNMET = (
+    "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n"
+    '{"kind":"error","message":"no prefix-cache hits","error_kind":"requirement_not_met",'
+    '"requirement":"prefix_cache"}\n'
+    "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__"
+)
+
+
+async def test_an_unmet_requirement_the_evaluator_names_survives_into_its_reading() -> None:
+    """The input's failure names the requirement, so a frontend can say which one it lacks."""
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 1
+    cluster.benchmark_output = _UNMET
+    with tempfile.TemporaryDirectory() as raw:
+        base = Path(raw)
+        stack = await build_stack(
+            base / "stack", cluster, benchmark_contract=ProtocolBenchmarkContract()
+        )
+        try:
+            requests = MeasurementRequests(stack.executor, _store(base))
+            sub = submission("sub", candidate=stack.snapshot)
+            first = await requests.execute(sub, _eval_context(sub))
+            resource = first.observation.observation.resource_id
+            assert resource is not None
+            while resource.root not in cluster.submissions:
+                await stack.executor.wait_for_change(resource.root, 30.0)
+            inspect = _inspect(resource)
+            terminal = await requests.execute(inspect, _eval_context(inspect))
+            target = terminal.observation.target
+            assert target is not None
+            refs = target.evidence
+            named = {ref.kind: ref.unmet_requirement for ref in refs}
+            assert named == {EvidenceKind.CORRECTNESS: None, EvidenceKind.BENCHMARK: "prefix_cache"}
+        finally:
+            await stack.executor.close()
+        owner = InterpretEvidenceOwner(ReceiptEvidenceLedger(_store(base)))
+        outcome = await owner.execute(_Interpret(evidence=refs), _context())
+        readings = outcome["readings"]
+        assert isinstance(readings, tuple)
+        benchmark = next(r for r in readings if r["stage"] == "benchmark")  # type: ignore[index]
+        assert benchmark["passed"] is False  # type: ignore[index]
+        assert benchmark["unmet_requirement"] == "prefix_cache"  # type: ignore[index]
+        stored = {e.stage_name: e for e in _stored(base, refs)}["benchmark"]
+        assert stored.unmet_requirement == "prefix_cache"
+        assert stored.failure_kind is BenchmarkFailureKind.WORKLOAD
+
+
 def _stored(base: Path, refs: tuple[EvidenceRef, ...]) -> list[TrustedEvidence]:
     ledger = ReceiptEvidenceLedger(_store(base))
     found = [ledger.lookup(ref.key) for ref in refs]
@@ -391,12 +448,53 @@ class _Lease:
 
 def _eval_context(request: BaseModel) -> ExecutionContext:
     return ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         now_at=5.0,
         payload_digest=hashlib.sha256(request.model_dump_json().encode()).hexdigest(),
-        lease=_Lease(),
         until=Until(at=100.0),
     )
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=10, nightly=80), deadline=None)
+@given(
+    run=st.floats(min_value=1.0, max_value=1e4),
+    stated=st.one_of(st.none(), st.floats(min_value=1.0, max_value=1e4)),
+    metric=st.sampled_from(("throughput", "latency")),
+    secondary=st.floats(min_value=1.0, max_value=1e4),
+)
+@example(run=300.0, stated=275.0, metric="throughput", secondary=12.0)
+@example(run=300.0, stated=None, metric="throughput", secondary=12.0)
+@example(run=300.0, stated=275.0, metric="latency", secondary=275.0)
+async def test_the_headline_a_reader_decodes_is_the_one_cores_ledger_states(
+    run: float, stated: float | None, metric: str, secondary: float
+) -> None:
+    """An official record states the mean of its samples; ranking must read that, not one run.
+
+    The runtime's record holds the run's own value. Core's ledger reference states the headline
+    reading (for an official measurement, the comparison's candidate value), and the decoded
+    headline is that reading whenever it names the headline metric, else the run's value. A
+    record's other objectives are the answering run's own values, always: a sample holds only
+    the headline, so there is no mean of them to state (the rule `reading_mapping` documents).
+    """
+    ledger = FakeEvidenceLedger()
+    single = _evidence(0, value=run)
+    evidence = single.model_copy(
+        update={
+            "metrics": (
+                *single.metrics,
+                EvidenceMetric(name="latency", value=secondary, direction="min"),
+            )
+        }
+    )
+    ledger.record(RequestId(root=SOURCE), evidence, "official")
+    reading = None if stated is None else Reading(metric=metric, value=stated, direction="max")
+    ref = _ref(evidence).model_copy(update={"reading": reading})
+    outcome = await InterpretEvidenceOwner(ledger).execute(_Interpret(evidence=(ref,)), _context())
+    decoded = _Readings.model_validate(outcome)
+    headline, other = decoded.readings[0].metrics
+    named = stated is not None and metric == evidence.metrics[0].name
+    assert headline.value == (stated if named else run)
+    assert (other.name, other.value) == ("latency", secondary)
 
 
 @settings(max_examples=examples(pr=5, nightly=40), deadline=None)
@@ -580,7 +678,7 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
         base = Path(raw)
         (base / "project").mkdir()
         namespace = Project.open(base / "project").state.state_store_namespace("run")
-        evidence = ReceiptEvidenceLedger(ReceiptStore(namespace))
+        evidence = ReceiptEvidenceLedger(KeyedDocuments(namespace, threads=SimThreads()))
         recorded = _evidence(7, value=3.0)
         evidence.record(RequestId(root=SOURCE), recorded, "official")
         workspaces = FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))
@@ -592,17 +690,20 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
             evidence=evidence,
             commit_of=commit_of,
             retention_label="verified",
+            validation_passes=MemoryValidationPasses(),
         )
         catalog = build_operation_catalog(registrations, production_owners(registrations, ports))
         catalog.require_owned(declaration)
         assert {d.kind for d in catalog.offered_operations} == {"test.interpret", "test.retain"}
         validate_startup(declaration, Capabilities(operations=catalog.offered_operations))
-        bindings = bind_operations(declaration, catalog, namespace)
+        store = KeyedDocuments(namespace, threads=SimThreads())
+        runner = OperationStepRunner(catalog, ObservationFactory(store), clock=VirtualClock())
         request = execute_request(catalog, _Interpret(evidence=(_ref(recorded),)), "interpret")
-        result = await bindings.executors.operations.execute(request, _eval_context(request))
-        assert isinstance(result, ExecutionResult)
-        assert result.observation.observation.status is ObservationStatus.SUCCEEDED
-        outcome = result.observation.outcome
+        assert request.request_id is not None
+        result = await runner.run(request, request.request_id, 1, 600.0, CancelSignal())
+        assert isinstance(result, Finished)
+        assert result.observation.status is ObservationStatus.SUCCEEDED
+        outcome = result.report.outcome
         assert outcome is not None
         assert isinstance(outcome, _Readings)
         assert outcome.readings[0].stage == "benchmark"

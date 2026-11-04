@@ -8,19 +8,26 @@ bound so one long reply cannot crowd out the rest of a prompt.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
+from vibesys.candidates.api import again_after, failure, input_metrics
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
+    MergePrompt,
     ProfilePrompt,
     ReviewPrompt,
 )
 from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
 
 if TYPE_CHECKING:
-    from vibesys.candidates.api import ReviewEvaluation
-    from vibesys.orchestration.dynamic.search._values import RoundRecord, WorkPlan
+    from vibesys.candidates.api import Baseline, ReviewEvaluation
+    from vibesys.orchestration.dynamic.search._values import (
+        CombineSource,
+        MergeSource,
+        RoundRecord,
+        WorkPlan,
+    )
     from vs_core.api.search import RevisionRef
 
 CUT = " [cut]"
@@ -62,22 +69,51 @@ def _shown(blocker: Blocker) -> Blocker:
     )
 
 
-def implement_prompt(
-    plan: WorkPlan,
-    parent: RevisionRef,
-    prior: RoundRecord | None,
-    blockers: tuple[Blocker, ...],
-) -> ImplementPrompt:
-    """One isolated implementation request for a scheduled workstream.
+class ImplementStart(Protocol):
+    """What an implementation request reads of its scheduled workstream.
 
-    ``prior`` is the previous round of the same hypothesis, when this workstream continues it;
-    ``blockers`` are the turns of this workstream that ended without a measurable candidate.
+    It leaves out the input's measurement the workstream started with: the request is given the
+    input as known when the turn is asked, so a prompt has one baseline to read.
     """
+
+    @property
+    def plan(self) -> WorkPlan: ...
+    @property
+    def parent(self) -> RevisionRef: ...
+    @property
+    def prior(self) -> RoundRecord | None: ...
+    @property
+    def rebase_onto(self) -> RevisionRef | None: ...
+    @property
+    def combine(self) -> tuple[CombineSource, ...]: ...
+    @property
+    def parent_main(self) -> RevisionRef | None: ...
+
+
+_NOT_STUCK = frozenset({BlockerKind.REJECTED, BlockerKind.REPLY_REJECTED})
+"""Turns that made a candidate the review or the run refused: the implementer was not stuck."""
+
+
+def implement_prompt(
+    w: ImplementStart, blockers: tuple[Blocker, ...], *, baseline: Baseline | None
+) -> ImplementPrompt:
+    """One isolated implementation request for the scheduled workstream ``w``.
+
+    ``w.prior`` is the previous round of the same hypothesis, when this workstream continues it;
+    ``blockers`` are the turns of this workstream that ended without a measurable candidate;
+    ``baseline`` is the input's measurement as known now: None while it has not landed, and an
+    unmeasurable one is shown with why it failed.
+    ``w.rebase_onto`` is the run's main when it advanced past this hypothesis's work, and
+    ``w.parent_main`` where the work's own change starts (`RunRecord.main_base_at`), a revision
+    its tree and main both hold: the catch-up applies the change between.
+    ``w.combine`` are a combine's parts as scheduled; a part the plan named and scheduling left
+    out (no longer offered) is named as missing.
+    """
+    plan, parent, prior = w.plan, w.parent, w.prior
     latest = blockers[-1] if blockers else None
-    stuck = next(
-        (item for item in reversed(blockers) if item.kind is not BlockerKind.REJECTED), None
-    )
+    stuck = next((item for item in reversed(blockers) if item.kind not in _NOT_STUCK), None)
     prior_tail = "" if prior is None else tail(prior.failure_tail, FAILURE_CHARS)
+    why = None if baseline is None else failure(baseline)
     return ImplementPrompt(
         hypothesis_id=plan.work_id,
         hypothesis=plan.hypothesis,
@@ -93,9 +129,29 @@ def implement_prompt(
             else None
         ),
         prior_failure_tail=prior_tail,
+        baseline_pending=baseline is None,
+        input_failure=why,
+        input_at_fault=why is not None and not again_after(why),
+        input_compared=why is not None and bool(input_metrics(baseline)),
         prior_failure_fence=fence(prior_tail),
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),
+        reply_rejected=(
+            latest.stray if latest is not None and latest.kind is BlockerKind.REPLY_REJECTED else ()
+        ),
+        rebase_onto=w.rebase_onto,
+        rebase_from=None if w.rebase_onto is None else w.parent_main,
+        combine=w.combine,
+        combine_missing=tuple(
+            pick
+            for pick in plan.combine
+            if not any(
+                part.hypothesis_id == pick.hypothesis_id
+                and part.revision.revision_id.root == pick.revision
+                for part in w.combine
+            )
+        ),
+        watch_for=plan.watch_for if plan.combine else "",
     )
 
 
@@ -121,4 +177,17 @@ def profile_prompt(plan: WorkPlan, target: RevisionRef) -> ProfilePrompt:
     """Measurement-only request against the frozen target revision."""
     return ProfilePrompt(
         question=plan.question, required_fields=plan.required_fields, target=target
+    )
+
+
+def merge_prompt(
+    plan: WorkPlan, main: RevisionRef, candidates: tuple[MergeSource, ...]
+) -> MergePrompt:
+    """One merge of the scheduled candidates into ``main``, as the planner instructed it."""
+    return MergePrompt(
+        merge_id=plan.work_id,
+        main_revision=main,
+        candidates=candidates,
+        instructions=plan.instructions,
+        watch_for=plan.watch_for,
     )

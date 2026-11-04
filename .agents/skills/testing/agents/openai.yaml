@@ -1,4 +1,4 @@
 interface:
   display_name: "Testing"
-  short_description: "Write high-value, non-flaky VibeSys tests"
+  short_description: "Write high-value, non-flaky tests"
   default_prompt: "Use $testing to write or review tests for this change using public APIs, Fakes, and property-based tests."

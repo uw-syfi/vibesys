@@ -7,10 +7,13 @@ name = "vs-async-ops"
 version = "0.1.0"
 description = "Resource-neutral durable asynchronous operation lifecycle coordination"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2"]
+dependencies = ["pydantic>=2", "vs-sim"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 vs_async_ops = ["py.typed"]
+
+[tool.uv.sources]
+vs-sim = { workspace = true }

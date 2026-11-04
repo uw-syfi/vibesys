@@ -1,0 +1,377 @@
+"""Session process behavior over real files and simulated scheduling, with no model calls."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+from vibesys.api import (
+    AgentOutputChunkData,
+    CoreEvent,
+    CoreEventType,
+    JsonResultPayload,
+    ToolResultData,
+)
+from vibesys.api.chat import ChatRuntime, ChatSession, SessionAction, SessionLifecycle, run_head
+from vibesys.api.testing import FakeManagedAgent
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_project.api.testing import run_execution_record
+from vs_proto.api import (
+    RUN_LOG_MAGIC,
+    ChatMessageRequest,
+    ChatSessionCreated,
+    ChatSteerProposed,
+    EpochStarted,
+    Lifecycle,
+    Oneof,
+    Parked,
+    Record,
+    RunHead,
+    Running,
+    RunProcess,
+    SteerMode,
+    SteerTarget,
+    SteerTargetKind,
+    Timestamp,
+    validate,
+)
+from vs_runlog.api import RunLogReader, encode_frame
+from vs_sim.api.testing import SimThreads
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+
+@pytest.fixture
+def chat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ChatMessageRequest:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
+    return chat_project(tmp_path / "project")
+
+
+def chat_project(root: Path) -> ChatMessageRequest:
+    root.mkdir()
+    project = Project.open(root)
+    project.state.create_project("chat", now=datetime(2026, 1, 1, tzinfo=UTC))
+    manifest = project.state.new_run_manifest(
+        "chat",
+        branch="test",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="docker"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(
+            id="dynamic", config_version=1, options={"interface": "service", "max_rounds": 2}
+        ),
+        trusted_input_baseline="a" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    project.state.create_run(manifest)
+    with project.state.exclusive_run_host(manifest.run_id):
+        pass
+    request = ChatMessageRequest(
+        project_root=str(root),
+        run_id=manifest.run_id,
+        session_id="default",
+        request_id="q-1",
+        text="What happened?",
+    )
+    publish(request)
+    return request
+
+
+def publish(request: ChatMessageRequest, *, parked: bool = False, epoch: int = 1) -> None:
+    head = RunHead(
+        strategy="test",
+        lifecycle=Lifecycle(
+            state=Oneof("parked", Parked()) if parked else Oneof("running", Running())
+        ),
+        process=RunProcess(pid=1, epoch=epoch, started_at=Timestamp(seconds=1)),
+        committed_seq=2,
+        epoch=epoch,
+    )
+    validate(head)
+    path = Project.run_log_path_for(request.project_root, request.run_id).parent
+    path.mkdir(parents=True, exist_ok=True)
+    assert head.lifecycle is not None
+    (path / "run.log").write_bytes(
+        RUN_LOG_MAGIC
+        + encode_frame(
+            Record(
+                seq=1,
+                epoch=epoch,
+                at=Timestamp(seconds=1),
+                body=Oneof("epoch_started", EpochStarted(epoch=epoch)),
+            )
+        )
+        + encode_frame(
+            Record(
+                seq=2, epoch=epoch, at=Timestamp(seconds=1), body=Oneof("lifecycle", head.lifecycle)
+            )
+        )
+    )
+    (path / "run.head").write_bytes(head.to_binary())
+
+
+def post(request: ChatMessageRequest) -> None:
+    project = Project.open(request.project_root)
+    project.state.session_inbox(request.run_id, request.session_id).post(
+        request.request_id, request.to_binary(), ended=lambda: None
+    )
+
+
+def events(request: ChatMessageRequest) -> list:
+    path = (
+        Project.chat_session_directory_for(request.project_root, request.run_id, request.session_id)
+        / "session.log"
+    )
+    with path.open("rb") as stream:
+        records = list(RunLogReader(stream))
+    assert [r.seq for r in records] == list(range(1, len(records) + 1))
+    for record in records:
+        validate(record)
+    head = RunHead.from_binary((path.parent / "run.head").read_bytes())
+    assert head.committed_seq == len(records)
+    result = []
+    for record in records:
+        assert record.body is not None
+        assert record.body.field == "chat"
+        result.append(record.body.value.event)
+    return result
+
+
+def run(
+    request: ChatMessageRequest, respond: Callable[[str, str | None], str], *, idle: float = 0.2
+) -> FakeManagedAgent:
+    threads = SimThreads()
+    agent = FakeManagedAgent(respond)
+
+    def serve() -> None:
+        session = ChatSession(request, ChatRuntime(threads.clock, threads, idle_seconds=idle))
+        try:
+            session.serve(
+                ChatSessionCreated(id=request.session_id, provider="test", model="test"),
+                lambda: agent,
+            )
+        finally:
+            session.close()
+
+    threads.run(serve)
+    return agent
+
+
+def test_tokens_and_proposals_are_session_data_and_never_intents(chat: ChatMessageRequest) -> None:
+    threads = SimThreads()
+    post(chat)
+
+    def serve() -> None:
+        session = ChatSession(chat, ChatRuntime(threads.clock, threads, idle_seconds=0))
+
+        def answer(_text: str, _invocation: str | None) -> str:
+            session.token("hello ")
+            session.token("world")
+            session.propose(
+                ChatSteerProposed(
+                    id="proposal",
+                    text="try this",
+                    target=SteerTarget(kind=SteerTargetKind.RUN),
+                    mode=SteerMode.NEXT_TURN,
+                )
+            )
+            publish(chat, parked=True)
+            return "hello world"
+
+        try:
+            session.serve(
+                ChatSessionCreated(id="default", provider="test", model="test"),
+                lambda: FakeManagedAgent(answer),
+            )
+        finally:
+            session.close()
+
+    threads.run(serve)
+    observed = events(chat)
+    assert not observed[-1].value.failed, observed[-1].value
+    assert [event.field for event in observed] == [
+        "created",
+        "message",
+        "token",
+        "token",
+        "proposed_steer",
+        "message",
+    ]
+    assert observed[-2].value.request_id == chat.request_id
+    assert Project.open(chat.project_root).state.control_inbox(chat.run_id).pending() == ()
+
+
+def test_durable_answer_recovers_before_inbox_settlement(chat: ChatMessageRequest) -> None:
+    post(chat)
+    run(chat, lambda _text, _invocation: "answer")
+    # A retry after an uncertain acknowledgement cannot repeat an already durable turn.
+    post(chat)
+    again = run(chat, lambda _text, _invocation: "should not run")
+    assert again.messages == []
+    assert len(events(chat)) == 3
+
+
+@given(
+    now=st.floats(min_value=0, max_value=10000, allow_nan=False, allow_infinity=False),
+    pending=st.booleans(),
+    parked=st.booleans(),
+)
+def test_lifecycle_has_no_idle_race(now: float, *, pending: bool, parked: bool) -> None:
+    state = SessionLifecycle(0, 1, idle_seconds=10)
+    action = state.next(now, 1, parked=parked, pending=pending)
+    if parked:
+        assert action is SessionAction.EXIT
+    elif pending:
+        assert action is SessionAction.ANSWER
+    else:
+        assert action is (SessionAction.EXIT if now >= 10 else SessionAction.WAIT)
+    assert state.next(now, 2, parked=False, pending=pending) is SessionAction.EXIT
+
+
+def test_stream_callbacks_validate_proposals_and_keep_large_answers(
+    chat: ChatMessageRequest,
+) -> None:
+
+    threads = SimThreads()
+    post(chat)
+    answer = "evidence " * 10000
+
+    def serve() -> None:
+        session = ChatSession(chat, ChatRuntime(threads.clock, threads, idle_seconds=0))
+        session.token("unowned")
+
+        def respond(_text: str, invocation: str | None) -> str:
+            session.observe(
+                CoreEvent(
+                    type=CoreEventType.AGENT_OUTPUT_CHUNK,
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                    execution_id="previous-question",
+                    data=AgentOutputChunkData(channel="assistant", content="obsolete"),
+                )
+            )
+            session.observe(
+                CoreEvent(
+                    type=CoreEventType.AGENT_OUTPUT_CHUNK,
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                    execution_id=invocation,
+                    data=AgentOutputChunkData(channel="assistant", content="answer"),
+                )
+            )
+            for value in [
+                [],
+                {"kind": "steer_proposal"},
+                {
+                    "kind": "steer_proposal",
+                    "proposal": {"text": "compare", "target": {"kind": "run"}, "mode": "next_turn"},
+                    "note": "Operator decides.",
+                },
+            ]:
+                session.observe(
+                    CoreEvent(
+                        type=CoreEventType.TOOL_RESULT,
+                        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                        execution_id=invocation,
+                        data=ToolResultData(
+                            tool="propose_steer",
+                            call_id="tool-a",
+                            content="result",
+                            payload=JsonResultPayload(value=value),
+                        ),
+                    )
+                )
+            return answer
+
+        agent = FakeManagedAgent(respond)
+        try:
+            session.serve(
+                ChatSessionCreated(id="default", provider="test", model="test"), lambda: agent
+            )
+        finally:
+            session.close()
+
+    threads.run(serve)
+    observed = events(chat)
+    assert not observed[-1].value.failed, observed[-1].value
+    assert [event.field for event in observed] == [
+        "created",
+        "message",
+        "token",
+        "proposed_steer",
+        "message",
+    ]
+    blob = observed[-1].value.content.value
+    directory = Project.chat_session_directory_for(chat.project_root, chat.run_id, chat.session_id)
+    assert (directory / "blobs" / blob.sha256).read_text() == answer
+    # Restoration keeps complete bounded exchanges; a larger single turn is omitted whole.
+    second = ChatMessageRequest.from_binary(chat.to_binary())
+    second.request_id = "q-2"
+    post(second)
+    restored = run(second, lambda text, _invocation: text)
+    assert restored.messages[0][0] == chat.text
+
+
+def test_failed_turn_is_durable_and_does_not_repeat_on_retry(chat: ChatMessageRequest) -> None:
+    post(chat)
+
+    def failed(_text: str, _invocation: str | None) -> str:
+        message = "model unavailable"
+        raise RuntimeError(message)
+
+    run(chat, failed)
+    observed = events(chat)
+    assert observed[-1].value.failed
+    assert observed[-1].value.content.value == "model unavailable"
+    post(chat)
+    assert run(chat, failed).messages == []
+
+
+def test_invalid_inbox_routes_are_rejected_without_answering(chat: ChatMessageRequest) -> None:
+    inbox = Project.open(chat.project_root).state.session_inbox(chat.run_id, chat.session_id)
+    invalid = ChatMessageRequest.from_binary(chat.to_binary())
+    invalid.session_id = "other"
+    inbox.post(invalid.request_id, invalid.to_binary(), ended=lambda: None)
+    inbox.post("invalid", b"not protobuf", ended=lambda: None)
+    assert run(chat, lambda text, _invocation: text).messages == []
+    assert inbox.pending() == ()
+    status = inbox.status(invalid.request_id, ended=None)
+    assert status is not None
+    assert status.reason == "chat message routing does not match its inbox"
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("head_epoch", [0, 7])
+@pytest.mark.parametrize("process_epoch", [None, 1, 8])
+@pytest.mark.parametrize("parked", [False, True])
+def test_chat_epoch_comes_from_the_committed_log(
+    chat: ChatMessageRequest, head_epoch: int, process_epoch: int | None, *, parked: bool
+) -> None:
+    publish(chat, epoch=7, parked=parked)
+    path = Project.run_head_path_for(chat.project_root, chat.run_id)
+    head = RunHead.from_binary(path.read_bytes())
+    head.epoch = head_epoch
+    if process_epoch is None:
+        head.process = None
+    else:
+        assert head.process is not None
+        head.process.epoch = process_epoch
+    original = head.to_binary()
+    path.write_bytes(original)
+    assert run_head(path) == (7, parked)
+    assert path.read_bytes() == original
+
+
+@pytest.mark.regression
+def test_reading_an_unpublished_chat_epoch_is_refused(chat: ChatMessageRequest) -> None:
+    path = Project.run_head_path_for(chat.project_root, chat.run_id)
+    head = RunHead.from_binary(path.read_bytes())
+    head.committed_seq = 0
+    head.epoch = 0
+    path.write_bytes(head.to_binary())
+    with pytest.raises(ValueError, match="published epoch"):
+        run_head(path)

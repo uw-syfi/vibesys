@@ -29,9 +29,7 @@ A strategy imports `vs_core.api` and the product's shared policy packages; it ne
 constructs agent clients, sandboxes, worktrees, or run resources. Runtime libraries do not
 import VibeSys policy.
 [`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml) enforces the
-dependency direction. The design behind this contract, and the vocabulary (decision,
-attempt, settlement, operation, adoption, suspension), is in
-[Running single, multi, evolve and issue_queue on the vs-core lifecycle](../design/strategies-on-core.md).
+dependency direction.
 
 ## Plugin declaration
 
@@ -78,7 +76,15 @@ The dynamic search shows the layout. Everything about the search sits in
   The host adds only what it alone can in `src/vibesys/dynamic_roles.py` (system prompts, tools,
   capabilities).
 - `_config.py`: `DynamicConfig`, the search's own knobs: `max_rounds`, `max_in_flight`,
-  `judge_every`, `max_unmeasured_turns`, `max_continuation_rounds`, `profiling`.
+  `evaluation_slots`, `max_backlog`, `pick`, `input_wait_seconds`, `judge_every`,
+  `max_unmeasured_turns`, `max_continuation_rounds`, `profiling`.
+- `_queue.py` and `_reports.py`: the run's trusted evaluations. A workstream submits its
+  candidate on the `REPORTS` channel and parks (within `max_backlog`, its agent slot goes to new
+  work, as it does while an agent turn is suspended on its own evaluations, until the root
+  grants its resume a free slot on `RESUMES.of(...)`); the root's `EvaluationQueue` binds a free evaluation slot to the candidate the pick
+  policy chooses (the newest, or the orchestrator's `evaluation_order`) and answers each
+  workstream on its own `VERDICTS.of(key)` latch. A newer candidate of the same line drops the
+  waiting one as superseded.
 - `_budget.py`: `budget(config)`, what the run may spend, derived from the config in one place.
 - `_prompts.py`: the typed prompt contexts the search sends. The search never builds prompt
   text; templates are rendered from `core_policy/prompts/`.
@@ -116,6 +122,25 @@ helpers are pure. The board's operations belong to the tracker library: the sear
 `IssueQueueLaunch` (`issue_queue/launch.py`: `IssueQueueConfig` plus `modality` and `tracker`,
 unknown keys rejected).
 
+`single` and `multi` share their designer (`src/vibesys/serial_search/`), and with it the
+designer's planning state, the roadmap: Majors (directions) and the Minors that block them, each
+with a status (`todo`, `in_progress`, `done`, `parked`, `abandoned`). The roadmap sits behind the
+`Roadmap` interface of the tracker library (`vs_issue_tracker.api`), which exposes typed
+`RoadmapItem`s and never a storage layout:
+
+- The designer's role reads only. Its prompt shows the items, and its reply's `roadmap` field
+  lists the items to create or replace by id. The search checks the change with the pure
+  `roadmap_problem` (a refusal is corrected like a plan the ledger refuses) and then puts it.
+- The search reaches the roadmap only through the `ReadRoadmap` and `PutRoadmapItems`
+  operations, declared `owned=ROADMAP`. A put is idempotent, so a replay is safe.
+- The owner (`src/vibesys/serial_roadmap.py`) performs them over a `DocumentRoadmap` kept in the
+  run's portable state (namespace `roadmap`), opened through `Project`. It is per run, survives a
+  restart or a resume, and is untracked VibeSys state, so it never makes the project a dirty
+  baseline for the next run.
+- Another backend (GitHub or Linear issues, say) is a new `Roadmap` implementation that passes
+  `libs/vs-issue-tracker/tests/test_roadmap_contract.py` and is chosen in `roadmap_entries`; the
+  searches, the operations and the prompts stay as they are.
+
 To add a search, follow [flows.md](flows.md) and the steps under "Adding a plugin" below.
 
 ## What a strategy declares (state-machine form)
@@ -150,7 +175,7 @@ Keep code near the strategy that owns the decision:
 Every direct subfolder of `vibesys.orchestration` is one strategy package. Shared policy and
 resources live beside it under `vibesys`, including `hypothesis`, `metrics`,
 `profile_focus`, `steering`, `domains`, and shared `prompts`; these siblings never import
-orchestration. Follow the layout and placement rule in [architecture.md](architecture.md).
+orchestration. Follow the layout and placement rule in [python-module-graph.md](python-module-graph.md).
 Extract shared policy only when real callers need the same semantics.
 
 ## Adding a plugin
@@ -184,8 +209,8 @@ modules; `tests/architecture/test_flow_code_is_restricted.py` checks the flow co
 ## Testing a strategy (state-machine form)
 
 Drive the strategy as the shell does: build `CoreView`s, feed `StrategyEvent`s, and assert on
-the proposals. `vs_runtime.api.testing` offers the runtime shell kit (`ScriptedExecutors`,
-`drive_shell`, restart-at-boundary) for tests that run a strategy against scripted
-executors, and `tests/support/core_plugins.py` offers stub core plugins for tests of the
+the proposals. `vs_runtime.api.testing` offers scripted executors (`ScriptedExecutors`) and
+`vs_dst` hosts a strategy over them on the step loop, killing, pausing or stopping it at any
+boundary, for tests that run a strategy against scripted executors, and `tests/support/core_plugins.py` offers stub core plugins for tests of the
 wiring around a run (registration, launch, projection, resource lifetime) that need a plugin
 that composes and ends rather than one that searches.

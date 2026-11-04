@@ -17,6 +17,7 @@ from vibesys.orchestration.issue_queue.search._replies import (
     perf_record,
 )
 from vibesys.orchestration.issue_queue.search._roles import PERF_EVALUATOR
+from vibesys.orchestration.issue_queue.search._spans import evaluation_begun
 from vibesys.orchestration.issue_queue.search._tracker import write
 from vibesys.orchestration.issue_queue.search._values import (
     Failure,
@@ -26,6 +27,7 @@ from vibesys.orchestration.issue_queue.search._values import (
     PerfJob,
     failure_of,
 )
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import (
     Assessment,
     Failed,
@@ -42,6 +44,7 @@ from vs_core.api.search import (
 async def perf_job(ctx: Flow, job: PerfJob) -> PerfDone:
     """Run one evaluation to the settlement of its workspace."""
     ctx.checkpoint(job)  # restartable from its start: the issues it files are keyed
+    evaluation_begun(ctx, job)
     async with ctx.workspaces.open(
         attempt=job.attempt, item=job.item, plan=job.workspace, budget=job.budget
     ) as opened:
@@ -99,7 +102,7 @@ async def assess(ctx: Flow, job: PerfJob, ws: Workspace) -> IssuePerfEvalResult:
 
 async def ask(session: Session, prompt: PerformancePrompt | OverCapPrompt) -> IssuePerfEvalResult:
     """One evaluator turn, or the failure that ended the job."""
-    match await session.turn(prompt):
+    match await session.turn(prompt, label=turn_label(session)):
         case TurnFinished(reply=IssuePerfEvalResult() as reply):
             return reply
         case Failed() as failed:

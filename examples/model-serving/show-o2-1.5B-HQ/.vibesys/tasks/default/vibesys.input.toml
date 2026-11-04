@@ -1,4 +1,5 @@
 version = 1
+backends = ["cuda", "metal"]
 
 [agent]
 domain = "llm-serving"
@@ -10,3 +11,15 @@ timeout_seconds = 120
 [benchmark]
 command = ["uv", "run", "python", "${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py"]
 timeout_seconds = 300
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "NVIDIA GPU"
+count = 1
+vendor = "nvidia"
+
+[catalogue.model]
+name = "Show-o2 1.5B HQ"
+maker = "other"

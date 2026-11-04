@@ -8,7 +8,6 @@ job queued; it submitted the job, so nobody else could cancel it.
 from __future__ import annotations
 
 import json
-import subprocess
 import threading
 from typing import TYPE_CHECKING
 
@@ -16,7 +15,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api.testing import examples
+from vs_sim.api import OutputSink, ProcessOutcome, ProcessRun, ProcessSpec, ProcessTimedOut
+from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     SlurmConfig,
     SlurmConnectorTransport,
@@ -29,27 +29,26 @@ from vs_slurm.api import (
 from vs_slurm.fake_connector import JOB_ID, handle, recorded_commands
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
     from pathlib import Path
 
 # A transport process killed by SIGINT, as Ctrl-C kills an in-flight `ssh`.
 _KILLED_BY_SIGINT = 255
 
 
-def _killed_transport(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess(argv, _KILLED_BY_SIGINT, "", "")
+def _killed_transport() -> ProcessRun:
+    return ProcessOutcome(_KILLED_BY_SIGINT, b"", b"")
 
 
-def _timed_out_transport(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    raise subprocess.TimeoutExpired(list(argv), 1.0)
+def _timed_out_transport() -> ProcessRun:
+    return ProcessTimedOut(1.0, b"", b"")
 
 
-def _interrupted_transport(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    del argv
+def _interrupted_transport() -> ProcessRun:
     raise KeyboardInterrupt
 
 
-_FAILURES: dict[str, tuple[Callable[[Sequence[str]], object], type[BaseException]]] = {
+_FAILURES: dict[str, tuple[Callable[[], ProcessRun], type[BaseException]]] = {
     "killed": (_killed_transport, SlurmError),
     "timed-out": (_timed_out_transport, SlurmError),
     "interrupted": (_interrupted_transport, KeyboardInterrupt),
@@ -59,16 +58,16 @@ _FAILURES: dict[str, tuple[Callable[[Sequence[str]], object], type[BaseException
 class _Cluster:
     """The pending Fake cluster behind a connector that fails chosen commands."""
 
-    def __init__(self, state: Path, failure: Callable[[Sequence[str]], object]) -> None:
+    def __init__(self, state: Path, failure: Callable[[], ProcessRun]) -> None:
         self.state = state
         self._failure = failure
         self.polls_before_failure = 0
         self.fail_scancel = False
         self._down = False
 
-    def process(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
+        stdin = spec.input.decode() or None
         del timeout
         assert stdin is not None
         request = json.loads(stdin)
@@ -80,28 +79,14 @@ class _Cluster:
                 self.polls_before_failure -= 1
         # A transport failure takes the accounting read down with the queue read.
         if self._down and command.startswith(("squeue", "sacct")):
-            return self._failure(argv)  # ty: ignore[invalid-return-type]
+            return self._failure()
         if command.startswith("scancel") and self.fail_scancel:
             handle(self.state, request)
-            return _killed_transport(argv)
-        return subprocess.CompletedProcess(argv, 0, json.dumps(handle(self.state, request)))
+            return _killed_transport()
+        return ProcessOutcome(0, (json.dumps(handle(self.state, request))).encode(), b"")
 
 
-class _Clock:
-    """Time that advances only when the runner pauses."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-    def pause(self, seconds: float) -> None:
-        self.now += seconds
-
-
-def _runner(cluster: _Cluster, clock: _Clock | None = None) -> SlurmJobRunner:
-    clock = clock or _Clock()
+def _runner(cluster: _Cluster, clock: ManualClock) -> SlurmJobRunner:
     config = SlurmConfig(
         name="fake",
         remote_workspace_root="/remote/runs",
@@ -109,7 +94,7 @@ def _runner(cluster: _Cluster, clock: _Clock | None = None) -> SlurmJobRunner:
         poll_interval_seconds=10.0,
         job_timeout_seconds=60,
     )
-    return SlurmJobRunner(config, process=cluster.process, clock=clock, pause=clock.pause)
+    return SlurmJobRunner(config, processes=cluster, clock=clock)
 
 
 def _request(tmp_path: Path) -> SlurmJobRequest:
@@ -119,7 +104,8 @@ def _request(tmp_path: Path) -> SlurmJobRequest:
 
 
 def _run(tmp_path: Path, cluster: _Cluster) -> None:
-    _runner(cluster).run(_request(tmp_path))
+    clock = ManualClock()
+    _runner(cluster, clock).run(_request(tmp_path), pause=clock.advance)
 
 
 @settings(max_examples=examples(pr=5, nightly=12), deadline=None)
@@ -169,13 +155,14 @@ def test_a_cancelled_wait_cancels_the_job_and_reports_a_failed_cancel(
     cluster = _Cluster(tmp_path, _killed_transport)
     cluster.polls_before_failure = 1_000
     cluster.fail_scancel = scancel_fails
-    runner = _runner(cluster)
+    clock = ManualClock()
+    runner = _runner(cluster, clock)
     job = runner.submit(_request(tmp_path))
     cancel = threading.Event()
     cancel.set()
 
     with pytest.raises(SlurmError, match="was cancelled") as raised:
-        runner.wait(job, cancel_event=cancel)
+        runner.wait(job, cancel_event=cancel, pause=clock.advance)
 
     assert recorded_commands(tmp_path).count(f"scancel {JOB_ID}") == 1
     notes = getattr(raised.value, "__notes__", [])
@@ -184,10 +171,11 @@ def test_a_cancelled_wait_cancels_the_job_and_reports_a_failed_cancel(
 
 def test_a_failed_poll_without_a_cancel_leaves_wait_to_its_caller(tmp_path: Path) -> None:
     cluster = _Cluster(tmp_path, _killed_transport)
-    runner = _runner(cluster)
+    clock = ManualClock()
+    runner = _runner(cluster, clock)
     job = runner.submit(_request(tmp_path))
 
     with pytest.raises(SlurmError, match="failed with exit code"):
-        runner.wait(job)
+        runner.wait(job, pause=clock.advance)
 
     assert f"scancel {JOB_ID}" not in recorded_commands(tmp_path)

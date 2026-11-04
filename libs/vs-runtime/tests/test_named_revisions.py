@@ -10,6 +10,8 @@ malformed or belong to another workspace.
 from __future__ import annotations
 
 import tempfile
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -17,7 +19,8 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.support.skeleton_world import World, open_skeleton_world
+from tests.support.slurm_evaluation_world import slurm_evaluation
+from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
 
 from vs_core.api import (
     AttemptId,
@@ -36,7 +39,13 @@ from vs_core.api import (
 )
 from vs_project.api import GitCommandError, Project
 from vs_runtime.api import WorkspaceRestoreError
-from vs_runtime.api.core import ExecutionResult, MeasurementRequests, ReceiptStore
+from vs_runtime.api.core import (
+    ExecutionResult,
+    KeyedDocuments,
+    MeasurementRequests,
+    MeasurementServices,
+    core_executors,
+)
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_runtime.api.slurm_evaluation_stack import (
@@ -47,10 +56,10 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, SimThreads, examples, loop_threads
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from vs_core.api import RequestBase
     from vs_evaluation.api import (
@@ -62,7 +71,6 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
 
-pytestmark = pytest.mark.asyncio
 
 # Each example builds a run. A pull request draws a sample; the nightly depth searches deeper.
 _EXAMPLES = settings(
@@ -99,7 +107,38 @@ def _ref(revision: str) -> RevisionRef | None:
         return None
 
 
-async def _commits_of(world: World) -> tuple[str, ...]:
+@dataclass
+class _World:
+    """A run's real workspaces over in-memory Git, and the Fake Slurm cluster beside them."""
+
+    env: WorkspaceEnv
+    root: Path
+    cluster: ScenarioCluster
+
+    def evaluation(self) -> MeasurementRequests:
+        """The production evaluation executor of a process over this world."""
+        workspaces = self.env.start_host()
+        measurement = MeasurementServices(
+            slurm_evaluation(self.env, self.root, self.cluster, workspaces, clock=ManualClock())
+        )
+        bound = core_executors(
+            receipts=self.env.receipts_namespace(),
+            workspaces=workspaces,
+            measurement=measurement,
+            sessions=None,
+            threads=self.env.execution.threads,
+            blocking=self.env.execution.blocking,
+        )
+        return cast("MeasurementRequests", bound.executors.evaluation)
+
+
+@contextmanager
+def _open_world(root: Path) -> Iterator[_World]:
+    with open_workspace_env(root) as env:
+        yield _World(env, root / "project", ScenarioCluster())
+
+
+async def _commits_of(world: _World) -> tuple[str, ...]:
     """The commits the run's repository holds: its baseline and one another workspace made."""
     root = world.env.hosts[0].root
     baseline = root.trusted_input_baseline
@@ -120,7 +159,7 @@ async def test_a_candidate_is_opened_from_a_held_revision_and_refused_from_any_o
     data: st.DataObject, tmp_path: Path
 ) -> None:
     """The refusal is the contract's typed error, never the Git failure of the worktree add."""
-    with tempfile.TemporaryDirectory(dir=tmp_path) as raw, open_skeleton_world(Path(raw)) as world:
+    with tempfile.TemporaryDirectory(dir=tmp_path) as raw, _open_world(Path(raw)) as world:
         held = await _commits_of(world)
         revision = data.draw(_named_revision(held))
         workspaces = world.env.hosts[0]
@@ -155,13 +194,13 @@ async def test_a_measurement_of_a_named_revision_is_accepted_or_refused_and_the_
 ) -> None:
     """A revision the run holds is measured; any other is a typed refusal that launches nothing,
     lists no job at the close, and leaves the close able to release the scope."""
-    with tempfile.TemporaryDirectory(dir=tmp_path) as raw, open_skeleton_world(Path(raw)) as world:
+    with tempfile.TemporaryDirectory(dir=tmp_path) as raw, _open_world(Path(raw)) as world:
         held = await _commits_of(world)
         named = data.draw(_named_revision(held))
         ref = _ref(named)
         if ref is None:
             return
-        evaluation = cast("MeasurementRequests", world.bindings().executors.evaluation)
+        evaluation = world.evaluation()
         request = SubmitMeasurement(
             request_id=RequestId(root="sub"),
             scope=SCOPE,
@@ -268,7 +307,9 @@ _KINDS = (
 
 def _requests_over(base: Path, jobs: PollingEvaluationExecutor) -> MeasurementRequests:
     project = Project.open(base / "project")
-    return MeasurementRequests(jobs, ReceiptStore(project.state.state_store_namespace("run")))
+    return MeasurementRequests(
+        jobs, KeyedDocuments(project.state.state_store_namespace("run"), threads=SimThreads())
+    )
 
 
 def _request(
@@ -296,6 +337,7 @@ async def test_an_executor_that_raises_leaves_every_request_kind_with_a_typed_ou
     tmp_path: Path,
 ) -> None:
     """Whatever the executor raises, at whichever call, the request ends in an observation."""
+    loop_threads()
     with tempfile.TemporaryDirectory(dir=tmp_path) as raw:
         base = Path(raw)
         (base / "project").mkdir()
@@ -328,6 +370,7 @@ async def test_a_scope_closes_over_a_job_whose_launch_failed_however_its_cancel_
 ) -> None:
     """A job that never launched has nothing to cancel: the close reads the executor, not the
     failed cancel, so it releases instead of reporting a job it can never end."""
+    loop_threads()
     with tempfile.TemporaryDirectory(dir=tmp_path) as raw:
         base = Path(raw)
         (base / "project").mkdir()

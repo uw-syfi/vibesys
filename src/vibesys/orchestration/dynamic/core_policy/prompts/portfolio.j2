@@ -2,7 +2,7 @@
 {% from 'domain_section.j2' import domain_section %}
 {% from '_macros.j2' import metric, partial %}
 {% from '_problems.j2' import problem_text with context %}
-{% from '_failure.j2' import failure_text %}
+{% from '_failure.j2' import failure_text, input_failure_text %}
 Schedule at most {{ capacity }} new workstreams for free slots. {{ in_flight }} other
 workstreams are still running (their history rows show non-terminal phases), and the
 run may schedule {{ remaining }} more workstreams in total, including these. Each
@@ -13,11 +13,16 @@ workstream counts once, whether it starts a hypothesis or continues one.
 Assign work only where it can succeed: never assign edits to read-only inputs, and
 never plan work that needs target hardware outside trusted evaluation.
 
-Base revision (the run's input; a new workstream that names no parent starts from it): `{{ rev(base_revision) }}`
+Base revision (the run's input): `{{ rev(base_revision) }}`
 Exact base accuracy PASS status: {{ base_accuracy_passed }} (null means unknown).
+Main revision (a new workstream that names no parent starts from it): {% if main_revision == base_revision %}the base revision; no merge has moved it yet{% else %}`{{ rev(main_revision) }}`{% endif %}.
 Immutable parent offer {{ offer_snapshot }}.
 Your workspace holds the run's input, not candidate work: a workstream's files exist
 only at the revision in its history row (read them with git show REVISION:PATH).
+{% if main_measurement %}
+
+Main's latest trusted measurement (merge `{{ main_measurement.merge_id }}`): accuracy passed: {{ main_measurement.accuracy_passed }}, benchmark passed: {{ main_measurement.benchmark_passed }}{% for m in main_measurement.metrics %}; {{ metric(m) }}{% endfor %}.
+{% endif %}
 {% if baseline %}
 
 Input baseline (the root before any change, trusted benchmark):
@@ -26,18 +31,68 @@ Input baseline (the root before any change, trusted benchmark):
 {% endfor %}
 A candidate must beat it on the objectives to be adopted.
 {% endif %}
+{% if comparisons %}
+
+Comparison references (mature engines measured once with this same benchmark; none is a candidate and none can be adopted):
+{% for c in comparisons %}
+- {{ c.label }}: {{ c.value }}{% if c.unit %} {{ c.unit }}{% endif %}{% if c.direction %} (better: {{ c.direction }}){% endif %}
+
+{% endfor %}
+{% endif %}
+{% if baseline_pending %}
+
+Input baseline: still being measured (the trusted evaluation may wait in a queue). Plan
+from the task and the code now; the workstreams you schedule start now and their candidates
+are reviewed meanwhile; they are measured and compared with the input once its measurement
+lands. A later request shows its result.
+{% endif %}
+{% if input_overdue %}
+
+The input's measurement is overdue: a workstream has waited {% if input_overdue.waited_seconds is not none %}{{ input_overdue.waited_seconds }} seconds{% else %}longer{% endif %} for it (the run allows {{ input_overdue.limit_seconds }}). Candidates are still implemented and reviewed, but none is measured or settled until the input's measurement lands. Decide whether to keep scheduling work that needs it, schedule work that does not, or park directions that cannot go on without it.
+{% endif %}
+{% if evaluations %}
+
+Trusted evaluations ({{ evaluations.slots }} at once{% if evaluations.input_holds_slot %}; the input's measurement holds one{% endif %}). A free slot measures {% if evaluations.pick == 'ranked' %}the candidates in your {{ reply.evaluation_order }} first, then the rest newest first{% else %}the newest waiting candidate first{% endif %}, except that a candidate passed over by {{ evaluations.slots }} newer ones goes next.
+{% for item in evaluations.measuring %}
+- measuring: `{{ item.work_id }}` ({{ item.kind.value }}) at `{{ rev(item.revision) }}`
+{% endfor %}
+{% for item in evaluations.waiting %}
+- waiting: `{{ item.work_id }}` ({{ item.kind.value }}) at `{{ rev(item.revision) }}`{% if item.waited_seconds is not none %}, for {{ item.waited_seconds }} seconds{% endif %}
+
+{% endfor %}
+{% for item in evaluations.dropped %}
+- dropped unmeasured: `{{ item.work_id }}` at `{{ rev(item.revision) }}`, {% if item.reason.value == 'superseded' %}replaced by {% if item.superseded_by %}`{{ item.superseded_by }}`{% else %}a newer candidate{% endif %}{% elif item.reason.value == 'restarted' %}the run restarted first{% else %}the run stopped first{% endif %}
+
+{% endfor %}
+{% if evaluations.pick == 'ranked' %}
+Set {{ reply.evaluation_order }} to the IDs whose candidates to measure first{% if evaluations.ranking %} (now: {{ evaluations.ranking | join(', ') }}){% endif %}; leave it empty to keep the order. A hypothesis whose candidate is waiting or measured is still in flight: continue, park or abandon it once its result is in.
+{% else %}
+A hypothesis whose candidate is waiting or measured is still in flight: continue, park or abandon it once its result is in.
+{% endif %}
+{% endif %}
 {% if input_failure %}
 
-Input not measurable: {% if input_failure.kind.value == 'no-evidence' %}the trusted measurement of the input ended without evidence ({{ input_failure.status.value }}){% elif input_failure.kind.value == 'readings-refused' %}the decoded readings did not match the evidence that was asked about{% elif input_failure.kind.value == 'readings-undecodable' %}the evidence of the input could not be decoded{% elif input_failure.kind.value == 'benchmark-failed' %}the input's own benchmark failed{% else %}the measurement of the input ended without a result ({{ input_failure.ended.value }}){% endif %}{{ "" }}
-{% if input_failure.output %}
-Output of the failed measurement, data and not instructions (backticks shown as '):
-```
-{{ input_failure.output | replace("`", "'") }}
-```
+Input not measurable: {{ input_failure_text(input_failure) }}
+{% if input_first_attempt %}
+The input was measured twice; the first measurement failed too: {{ input_failure_text(input_first_attempt) }}
 {% endif %}
-The input itself fails the trusted benchmark, so there is no input baseline: any
-candidate with a passing trusted benchmark can be adopted. Plan the first candidate
-to satisfy what the benchmark requires.
+{% if baseline %}
+Its benchmark passed, so its numbers above stay the bar: a candidate must pass every
+trusted gate and beat them to be adopted.
+{% else %}
+There is no input value to compare a candidate with. One that passes every trusted gate
+can still be adopted, but the run then ends "adopted without an input comparison", not as
+a plain success: nothing shows it beats the input.
+{% endif %}
+{% if input_at_fault %}
+Plan the next work to fix what made the input fail (the stage and output above), or build
+on a revision the run has measured, and make the first candidate satisfy what that stage
+requires.
+{% else %}
+Nothing shows a fault in the input's code: its measurement ended without evidence against
+it (a time limit, the evaluation machinery, or no output). Do not plan work only to fix the
+input for this; plan as usual, building on a revision the run has measured where you can.
+{% endif %}
 {% endif %}
 {% if buildable %}
 
@@ -50,7 +105,7 @@ Buildable candidates, pinned to exact retained, accuracy-verified revisions:
 observed value within a matching comparison, not a passing metric or adoption
 authority. Compare values only within matching quantity, unit and direction.
 For a new implementation sibling, set {{ reply.parent_hypothesis_id }} and {{ reply.parent_revision }} to
-one exact offered pair. A null {{ reply.parent_hypothesis_id }} with no revision selects the base
+one exact offered pair. A null {{ reply.parent_hypothesis_id }} with no revision selects the main
 revision. An invalid selection requires correction and never silently starts from base.
 Each sibling has its own workspace and session.
 {% endif %}
@@ -72,8 +127,72 @@ trusted evaluation, then say what follows. An architecture-scale hypothesis is s
 that its first step already produces a measurement. A workstream whose implementer turns
 end without a candidate settles as failed, and its history row says why: do not assign the
 same task again, narrow it to a first step that fits one turn.
+{% if not agent_git_writable %}
+
+An implementer's `.git` is read-only: it cannot commit. It submits its working tree for
+evaluation, which snapshots the tree including new files. Never end a {{ reply.task }} with a
+commit step, and never tell an implementer to commit.
+{% endif %}
 
 Fill every free slot: a slot left free idles until a running workstream finishes.
+
+To combine candidates, choose a merge workstream: {{ reply.kind }} "merge", a new {{ reply.merge_id }},
+{{ reply.candidates }} (hypothesis IDs whose latest verified candidates to merge into main, in
+the order to apply them), {{ reply.instructions }} (how to combine them, and how to resolve
+conflicts), and {{ reply.watch_for }} (what the merger must check or be careful of). A new merger
+session applies them on a checkout of main and runs the tests; when its commit passes the
+trusted accuracy check and measures no worse than main (a headline metric no worse, and no
+benchmark check main passed now failing), main moves to it and its measurement is reported here.
+A merge may name only candidates listed as mergeable below. A merger that cannot follow the
+instructions refuses and main stays where it is. Only one merge runs at a
+time{% if merge_running %}, and merge `{{ merge_running }}` is running now: schedule no other
+merge until it finishes{% endif %}. A hypothesis that continues after main moved rebases onto
+main first.
+{% if mergeable %}
+Mergeable candidates (passed accuracy and beat main's latest measurement):
+{% for row in mergeable %}
+- hypothesis `{{ row.hypothesis_id }}`, revision `{{ rev(row.revision) }}`{% if row.metric %}; {{ metric(row.metric) }}{% endif %}
+
+{% endfor %}
+{% elif baseline_pending %}
+No candidate is mergeable yet: main has no measurement to beat until the input's measurement lands.
+{% else %}
+No candidate is mergeable now: none passed accuracy and beat main's latest measurement.
+{% endif %}
+{% if merges %}
+
+Merges so far, oldest first:
+{% for item in merges %}
+- merge `{{ item.merge_id }}` #{{ item.sequence }} of {% for source in item.candidates %}`{{ source.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %} onto `{{ rev(item.base) }}`: {{ item.outcome.value }}{% if item.revision %}, commit `{{ rev(item.revision) }}`{% endif %}{% if item.accuracy_passed is not none %}, accuracy passed: {{ item.accuracy_passed }}{% endif %}{% for m in item.metrics %}; {{ metric(m) }}{% endfor %}{% if item.summary %}: {{ item.summary }}{% endif %}
+
+{% if item.reason %}
+  Why the merger refused: {{ item.reason }}
+{% endif %}
+{% if item.failure and item.failure.kind.value == 'merge-regressed' %}
+  Main regressed with that merge, so main did not move: main measured{% for m in item.main_metrics %} {{ metric(m) }}{% else %} no headline metric{% endfor %}, benchmark passed: {{ item.main_benchmark_passed }}. Decide whether to fix the merge with another one or to build on a specific candidate instead.
+{% endif %}
+{% if item.failure %}
+  Why it ended: {{ failure_text(item.failure) }}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% if buildable | length >= 2 %}
+
+To build one new candidate out of several buildable candidates, choose a combine workstream:
+{{ reply.kind }} "combine", a new {{ reply.hypothesis_id }}, {{ reply.title }}, {{ reply.hypothesis }} (why the parts work
+better together than alone), {{ reply.parents }} (the parts in the order to apply them, each an
+exact offered pair of {{ reply.hypothesis_id }} and {{ reply.revision }} from the buildable list, each a different
+hypothesis), {{ reply.instructions }} (how to combine them, and which side wins a conflict),
+{{ reply.watch_for }} and {{ reply.pass_criteria }}. A new implementer applies each part's own change on a
+checkout of main, runs the tests and submits. The composite is a candidate of the new
+hypothesis, measured and judged like any other; it does not move main. Its history row shows
+its trusted result beside each part's, with a verdict against the best part, and a composite
+that beats main can then be merged.
+A part need not beat main or the input. Combine when parts were designed to work together and
+each lost or tied alone, when several candidates each measured within noise of the bar, or when
+a part's benefit depends on another (a design document naming parts that need each other).
+Each combine takes a slot: combine parts for such a reason, not every pair.
+{% endif %}
 {% if profiling %}
 For measurement-only work, choose a profile workstream: {{ reply.kind }} "profile", a new
 {{ reply.profile_id }}, {{ reply.target_hypothesis_id }} (a listed buildable candidate, or null for the base
@@ -87,7 +206,8 @@ capture supplies only {{ profile_fields | join(', ') }}: list nothing else.
 This run's capture supplies no named measurement field: leave {{ reply.required_fields }} empty.
 {% endif %}
 {% endif %}
-Choose workstreams that investigate distinct mechanisms or competing hypotheses. Do not
+Choose workstreams that investigate distinct mechanisms, competing hypotheses, or
+combinations of existing candidates. Do not
 split one implementation into parallel fragments and do not assign duplicate
 hypothesis IDs. New IDs must not occur in the history. A continued workstream must
 reuse its existing ID and set {{ reply.continue_hypothesis }}. Use {{ reply.hypothesis_updates }} to park
@@ -95,7 +215,7 @@ or abandon completed directions when evidence makes that decision clear; every u
 needs {{ reply.reason_kind }} and a nonempty {{ reply.reason }}.
 
 The framework provides isolated candidate workspaces, runs independent reviews, and
-owns trusted evaluation and winner adoption. Only evaluated, accepted candidates can
+owns trusted evaluation and winner adoption. Only evaluated, passed candidates can
 be adopted or offered as a parent.
 
 ## Compact workstream history
@@ -135,6 +255,17 @@ be adopted or offered as a parent.
 
 {% else %}
 - `{{ row.hypothesis_id }}` #{{ row.sequence }} "{{ row.title }}": {{ row.status }}, strategy {{ row.strategy }}{% if row.outcome %}, outcome {{ row.outcome }}{% endif %}{% if row.candidate %}, candidate `{{ rev(row.candidate) }}`{% endif %}{% if row.review_passed is not none %}, review passed: {{ row.review_passed }}{% endif %}{% if row.accuracy_passed is not none %}, accuracy passed: {{ row.accuracy_passed }}{% endif %}{% if row.benchmark_passed is not none %}, benchmark passed: {{ row.benchmark_passed }}{% endif %}{% for m in row.metrics %}; {{ metric(m) }}{% endfor %}{% if row.partial %}; partial {{ partial(row.partial) }}{% endif %}{% if row.summary %}: {{ row.summary }}{% endif %}
+{% if row.composite and row.composite.cancelled %}
+  This combine never started: when it was to start, {% if row.composite.parts %}only {% for part in row.composite.parts %}`{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}`{% endfor %} of its parts was{% else %}none of its parts were{% endif %} still buildable, and a combine needs two. Its slot was not spent.
+{% elif row.composite %}
+  This candidate was combined from {% for part in row.composite.parts %}`{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}` ({% if part.metric %}{{ metric(part.metric) }}{% else %}no trusted headline{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}; {% if row.composite.verdict.value == 'unknown' %}it is not comparable with its parts yet: a trusted headline is missing, or they measured different metrics{% else %}against the strongest part, `{{ row.composite.best_part }}`, it is {% if row.composite.relative_noise %}{% if row.composite.verdict.value == 'better' %}better beyond{% elif row.composite.verdict.value == 'worse' %}worse beyond{% else %}within{% endif %} the task's declared noise of {{ '%g' | format(row.composite.relative_noise * 100) }}%{% else %}{% if row.composite.verdict.value == 'better' %}better{% elif row.composite.verdict.value == 'worse' %}worse{% else %}equal{% endif %} in a strict comparison: the task declares no noise, so a small difference may be noise{% endif %}{% endif %}.
+{% for item in row.composite.unapplied %}
+  Not applied from `{{ item.hypothesis_id }}`: {{ item.part }} ({{ item.why }})
+{% endfor %}
+{% for item in row.composite.unattributed %}
+  Not attributed to a part: `{{ item.hypothesis_id }}`: {{ item.part }} ({{ item.why }})
+{% endfor %}
+{% endif %}
 {% if row.failure %}
   Why it ended: {{ failure_text(row.failure) }}
 {% endif %}
@@ -154,9 +285,29 @@ none yet
 Older hypothesis IDs (omitted above; reuse one only to continue it): {{ older_ids | join(', ') }}
 {% endif %}
 
+## Handoff notes of earlier planners
+Each planning call starts a new planner with no memory of the calls before it. Every call
+that scheduled a plan left a handoff file: its reasoning, the workstreams it scheduled, what it
+expected of each, what it meant to do next on each outcome, and its open doubts.
+{% if handoff_paths %}
+The files, newest first, as paths in your workspace. They are not shown here: read the ones
+you need yourself, at least the newest, before you plan.
+{% for path in handoff_paths %}
+- `{{ path }}`
+{% endfor %}
+Compare what they expected with what the history above shows happened.
+{% else %}
+None exists yet: this is the first plan of the run.
+{% endif %}
+Leave the same for the planner after you in {{ reply.handoff }}: in {{ reply.expectations }}, one entry
+per workstream of your reply with its {{ reply.work_id }}, what you expect it to show
+({{ reply.expected }}), and what you would plan next if it does ({{ reply.if_it_succeeds }}) and if it does not
+({{ reply.if_it_fails }}); in {{ reply.doubts }}, what you are unsure of and how a later plan could check it.
+
 Answer with the structured response, filling its top-level fields directly:
-{{ reply.reasoning }} (why this portfolio), {{ reply.workstreams }} (one entry per new workstream), and
-{{ reply.hypothesis_updates }} (parks and abandonments; empty when there are none). Do not wrap
+{{ reply.reasoning }} (why this portfolio), {{ reply.workstreams }} (one entry per new workstream),
+{{ reply.hypothesis_updates }} (parks and abandonments; empty when there are none), and {{ reply.handoff }}
+(your note to the next planner). Do not wrap
 the plan in another field or write it as JSON text inside a field. Each workstream entry
 carries every field listed above. This reply is valid; its values are placeholders, and your
 hypothesis IDs must not occur in the history:

@@ -7,11 +7,16 @@ is configured, never later. The operations are the persisted kind names the exec
 
 from __future__ import annotations
 
+import json
+from typing import Any, get_args
+
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.vibesys.inputs.test_plan import plans
 
+from vibesys.inputs import PlanStep, StepEvaluation, TaskPlan
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vibesys.orchestration.dynamic.search.api import (
     INTERPRET_KIND,
@@ -19,6 +24,8 @@ from vibesys.orchestration.dynamic.search.api import (
     RENDER_KIND,
     VERIFY_KIND,
     DynamicConfig,
+    Outline,
+    Step,
 )
 from vs_sim.api.testing import examples
 
@@ -30,6 +37,8 @@ BOUNDS = {
     "judge_every": (1, 1000),
     "max_unmeasured_turns": (1, 32),
     "max_continuation_rounds": (0, 1000),
+    "evaluation_slots": (1, 32),
+    "max_backlog": (0, 32),
 }
 
 
@@ -93,4 +102,50 @@ def test_profiling_is_never_a_launch_option_but_follows_the_plan(
 
     launch = DynamicLaunch.model_validate(LAUNCH)
 
-    assert launch.search_config(profiling=allowed).profiling is allowed
+    assert launch.search_config(profiling=allowed, evaluation_capacity=1).profiling is allowed
+
+
+# -- following the task's plan --------------------------------------------------------------------
+
+
+def _launch_json(**options: object) -> str:
+    return json.dumps({**LAUNCH, **options})
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(plan=st.none() | plans())
+def test_following_a_plan_is_refused_when_the_task_declares_none_naming_the_setting(
+    plan: dict[str, Any] | None,
+) -> None:
+    options = {"mode": "follow_plan"} if plan is None else {"mode": "follow_plan", "plan": plan}
+    if plan is None:
+        # as the launcher parses a run's options (strict JSON), and as the search reads its config
+        with pytest.raises(ValidationError, match=r"mode 'follow_plan'.*\[plan\]"):
+            DynamicLaunch.model_validate_json(_launch_json(**options), strict=True)
+        with pytest.raises(ValidationError, match=r"mode 'follow_plan'.*\[plan\]"):
+            DynamicConfig.model_validate({**VALID, **options})
+        return
+    launch = DynamicLaunch.model_validate_json(_launch_json(**options), strict=True)
+    config = launch.search_config(profiling=False, evaluation_capacity=1)
+    assert config.follows_plan
+    assert config.plan is not None
+    assert config.plan == Outline.model_validate_json(
+        TaskPlan.model_validate(plan).model_dump_json()
+    )
+    assert DynamicConfig.model_validate_json(config.model_dump_json()) == config
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(plan=plans())
+def test_an_exploring_run_is_not_given_the_task_plan(plan: dict[str, Any]) -> None:
+    for options in ({}, {"mode": "explore"}):
+        launch = DynamicLaunch.model_validate_json(_launch_json(plan=plan, **options), strict=True)
+        config = launch.search_config(profiling=False, evaluation_capacity=1)
+        assert config.mode == "explore"
+        assert config.plan is None
+
+
+def test_the_search_copy_of_a_plan_step_has_the_fields_of_the_task_table() -> None:
+    assert set(Step.model_fields) == set(PlanStep.model_fields)
+    assert set(Outline.model_fields) == set(TaskPlan.model_fields)
+    assert set(get_args(Step.model_fields["evaluate"].annotation)) == set(StepEvaluation)

@@ -54,7 +54,6 @@ def _checkpoint(generation: int = 0) -> core.RunInvocationCheckpoint:
 def _envelope(state: core.CoreState) -> core.RunEnvelope[core.StrategyState]:
     return core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,
@@ -221,7 +220,12 @@ def test_operator_stop_result_is_allowed_only_for_stop(action: str) -> None:
     event = core.RunControlEvent.model_validate({**payload, "result": result})
     assert TypeAdapter(core.CoreEvent).validate_json(event.model_dump_json()) == event
     payload["control"] = core.ControlInput.model_validate(
-        {"control_id": core.ControlId(root="other"), "action": action}
+        {
+            "control_id": core.ControlId(root="other"),
+            "action": action,
+            "owner": core.PauseOwner.OPERATOR if action == "pause" else None,
+            "when": "now" if action == "resume" else None,
+        }
     )
     with pytest.raises(ValidationError, match="result"):
         core.RunControlEvent.model_validate({**payload, "result": result})
@@ -283,6 +287,7 @@ def test_run_checkpoint_pending_request_preserves_record_in_public_codec(generat
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.PREPARED,
         until=core.Until(at=30.0),
+        addressed_by=(),
     )
     state = state.model_copy(
         update={"records": state.records.model_copy(update={"records": (record,)})}
@@ -378,6 +383,7 @@ def test_setup_classification_survives_root_target_and_canonical_record_codecs(
         setup_failure=failure,
         sequence=observation.sequence,
         until=core.Until(at=10.0),
+        addressed_by=(),
     )
     state = core.initial_state()
     state = state.model_copy(

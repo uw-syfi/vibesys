@@ -8,6 +8,7 @@ wherever it awaits.
 """
 
 from vibesys.orchestration.evolve.search._settlement import assertion
+from vibesys.orchestration.evolve.search._spans import child_begun, child_refused, child_settled
 from vibesys.orchestration.evolve.search._values import (
     STOPPED,
     ChildDone,
@@ -33,16 +34,19 @@ from vs_core.api.search import (
 async def child(ctx: Flow, start: ChildStart) -> ChildDone:
     """Run one scheduled child to the settlement of its workspace."""
     ctx.checkpoint(start)  # restartable from its start: nothing else is needed to redo it
+    child_begun(ctx, start)
     opened: Workspace | None = None
     try:
         unverified = await verify_parent(ctx, start)
         if unverified is not None:
+            child_refused(ctx, unverified)
             return ChildDone(start, refused=unverified)
         async with ctx.workspaces.open(
             attempt=start.attempt, item=start.item, plan=start.workspace, budget=start.budget
         ) as admitted:
             if isinstance(admitted, NotOpened):
                 refusal = Failure(kind=FailureKind.NOT_OPENED, ended=admitted.failed.reason)
+                child_refused(ctx, refusal)
                 return ChildDone(start, refused=refusal)
             opened = admitted
             closing = await work(ctx, start, admitted)
@@ -68,6 +72,7 @@ async def verify_parent(ctx: Flow, start: ChildStart) -> Failure | None:
 def keep(ctx: Flow, start: ChildStart, ws: Workspace, closing: Closing) -> None:
     """Assert what the child established for the workspace to settle with."""
     proposed = assertion(start, closing, ctx.task.terms)
+    child_settled(ctx, start, closing, retained=proposed.retention != "discard")
     kept = Assessment(
         outcome=proposed.outcome,
         assessments=proposed.assessments,

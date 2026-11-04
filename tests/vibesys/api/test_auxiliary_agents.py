@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
@@ -11,9 +12,11 @@ import pytest
 from pydantic import ValidationError
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import NO_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
 
-from launch import LaunchSettings, create_session, default_runs
+from entrypoints.production import production_timing
+from launch import LaunchSettings, built_in_orchestrations, create_session, default_runs
 from launch.agents import BuiltInSessionAgents
 from launch.testing import FakeSessionAgents
 from vibesys.api import (
@@ -33,8 +36,14 @@ from vs_agent.api import NULL_AGENT_EVENT_SINK, AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
-from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation
+from vs_runtime.api.infrastructure import (
+    HostEnvironmentFacts,
+    RunEnvironmentPresentation,
+    RunEnvironmentSessionRole,
+)
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -53,21 +62,27 @@ class _EnvironmentRequest:
     agent_backend: str | None = "stub"
     cli_provider: str | None = "codex"
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
+    session_role: RunEnvironmentSessionRole = RunEnvironmentSessionRole.ROOT
 
 
 class _EnvironmentSession:
-    def __init__(self, *, path_error: BaseException | None = None) -> None:
+    def __init__(self, *, path_error: BaseException | None = None, close_failures: int = 0) -> None:
         def agent_path(host: object) -> str:
             if path_error is not None:
                 raise path_error
             return _identity_path(host)
 
         self.sandbox = SimpleNamespace(agent_path=agent_path)
+        self.capture_commands = self.sandbox
         self.view = SimpleNamespace(cli_sandboxed=False, isolated=False)
         self.close_count = 0
+        self.close_failures = close_failures
 
     def close(self) -> None:
         self.close_count += 1
+        if self.close_count <= self.close_failures:
+            message = "docker rm -f was killed"
+            raise RuntimeError(message)
 
 
 def _identity_path(host: object) -> str:
@@ -77,8 +92,9 @@ def _identity_path(host: object) -> str:
 class _Environment:
     """Deterministic fake for the private run-environment resource."""
 
-    def __init__(self, *, path_error: BaseException | None = None) -> None:
+    def __init__(self, *, path_error: BaseException | None = None, close_failures: int = 0) -> None:
         self._path_error = path_error
+        self._close_failures = close_failures
         self.requests: list[_EnvironmentRequest] = []
         self.sessions: list[_EnvironmentSession] = []
 
@@ -87,7 +103,9 @@ class _Environment:
 
     def _open(self, request: _EnvironmentRequest) -> _EnvironmentSession:
         self.requests.append(request)
-        session = _EnvironmentSession(path_error=self._path_error)
+        session = _EnvironmentSession(
+            path_error=self._path_error, close_failures=self._close_failures
+        )
         self.sessions.append(session)
         return session
 
@@ -119,13 +137,30 @@ class _PreparedEnvironment:
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
 def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
+    network = UnixNetwork()
     return LaunchSettings(
-        agents=FakeSessionAgents() if request.param else None,
+        blocking=ThreadBlockingRunner(),
+        network=network,
+        timing=production_timing(),
+        processes=REAL_PROCESSES,
+        piped_processes=FakePipedProcessLauncher(),
+        agents=(
+            FakeSessionAgents(
+                OsThreads(),
+                network=network,
+                repository=NO_GIT,
+                registry=built_in_orchestrations(),
+            )
+            if request.param
+            else None
+        ),
         backend_factory=host_container_backend,
     )
 
@@ -161,7 +196,17 @@ def _session(tmp_path: Path, settings: LaunchSettings | None = None) -> _LocalRu
             request,
             sink=cast("EventSink", lambda _event: None),
             registry=registry,
-            settings=settings,
+            settings=(
+                LaunchSettings(
+                    timing=production_timing(),
+                    processes=REAL_PROCESSES,
+                    piped_processes=FakePipedProcessLauncher(),
+                    blocking=ThreadBlockingRunner(),
+                    network=UnixNetwork(),
+                )
+                if settings is None
+                else settings
+            ),
         ),
     )
 
@@ -175,7 +220,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
     project_root.mkdir()
     (project_root / "OBJECTIVE.md").write_text("Test the auxiliary API.\n", encoding="utf-8")
     project = Project.open(project_root)
-    project.state.create_project("test")
+    project.state.create_project("test", now=datetime(2026, 1, 1, tzinfo=UTC))
     project.state.create_run(
         project.state.new_run_manifest(
             "test",
@@ -186,6 +231,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
             execution=run_execution_record(),
             orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
             trusted_input_baseline="0" * 40,
+            now=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
     shared_session = _EnvironmentSession()
@@ -212,9 +258,12 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
                 "agent": {"backend": "stub", "cli_provider": "codex"},
             }
         ),
+        allow_unvetted_model=False,
         backend=ComputeBackend.CPU,
         skill_source_dirs=(),
         host_resources=(),
+        clock=ManualClock(),
+        threads=OsThreads(),
     )
 
 
@@ -247,6 +296,7 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
     assert observed == [
         RunReady(
             record=observed[0].record,
+            project_root=Project.open(tmp_path / "project").root,
             log_directory=tmp_path / "logs",
             frontend_state_directory=observed[0].frontend_state_directory,
             agent_provider="codex",
@@ -302,6 +352,29 @@ def test_managed_agent_hides_environment_and_owns_cleanup(
     assert environment.sessions[-1].close_count == 1
     with pytest.raises(RuntimeError, match="closed"):
         agent.turn("Another question")
+
+
+@pytest.mark.parametrize("failures", [1, 2])
+def test_an_environment_whose_close_failed_is_closed_again_on_the_next_session_close(
+    tmp_path: Path, agent_settings: LaunchSettings, failures: int
+) -> None:
+    """Regression: a failed close latched the session and its scope, so a retry closed nothing."""
+    environment = _Environment(close_failures=failures)
+    session = _session(tmp_path, agent_settings)
+    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948032 [SLF001]; exercise real product composition over deterministic resources.
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    session.create_auxiliary_agent(_launch(evidence))
+
+    for _ in range(failures):
+        with pytest.raises(RuntimeError, match="killed"):
+            session.close()
+        with pytest.raises(RuntimeError, match="closed"):
+            session.create_auxiliary_agent(_launch(evidence))
+    session.close()
+    session.close()
+
+    assert environment.sessions[-1].close_count == failures + 1
 
 
 def test_auxiliary_agent_creation_requires_readiness_and_existing_inputs(
@@ -367,10 +440,15 @@ def test_auxiliary_selection_rejected_before_environment_acquisition(
     launch = AuxiliaryAgentLaunch.model_validate(
         _launch(evidence).model_dump() | {"provider": provider}
     )
-    agents = agent_settings.agents or BuiltInSessionAgents()
+    agents = agent_settings.agents or BuiltInSessionAgents(
+        client_factory=_resumable_client,
+        network=agent_settings.network,
+        git=NO_GIT,
+        registry=built_in_orchestrations(),
+    )
 
     with pytest.raises(ValueError, match=provider):
-        agents.create_agent(launch, resources, NULL_AGENT_EVENT_SINK)
+        agents.create_agent(launch, resources.auxiliary(), NULL_AGENT_EVENT_SINK)
 
     assert environment.requests == []
     assert environment.sessions == []
@@ -396,6 +474,11 @@ def test_independent_auxiliary_scope_survives_session_close(
 
     async def execute() -> None:
         settings = LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             backend_factory=host_container_backend,
             agents=agent_settings.agents,

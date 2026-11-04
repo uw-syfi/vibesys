@@ -8,11 +8,18 @@ relying on prior uncommitted or untracked files.
 Your original task and pass criteria remain in force; this continuation does not start
 another attempt.
 
-{% if timed_out %}
+{% if ended_by is none %}
+Every evaluation you awaited is terminal.
+{% elif ended_by.value == 'queue_budget' %}
+Every other evaluation you awaited is terminal.
+{% else %}
 The suspension deadline expired. Evaluations may still be running; the timeout ends
 this suspension, not the evaluation job, and supplies no passing or failing result.
-{% else %}
-Every evaluation you awaited is terminal.
+{% endif %}
+{% if queue_budget_spent %}
+An evaluation was cancelled because it waited in the cluster queue past its queue
+budget; it never ran, so this says nothing about your candidate. Resubmit it if you
+still need the measurement.
 {% endif %}
 {% if evidence %}
 Accepted evidence for the original submitted candidate, not a measurement of later
@@ -20,11 +27,42 @@ workspace edits. These are the trusted results; report them as measured:
 
 {{ trusted_evaluations(evidence) }}
 {% endif %}
+{% if comparisons %}
+
+The framework compared each measured candidate with its base, from every run it holds of
+each. Listed are the candidates you awaited and any earlier candidate of yours whose verdict
+changed since your last resume. These are its numbers, not claims; report them as measured:
+{% for c in comparisons %}
+- `{{ rev(c.candidate) }}` against base `{{ rev(c.base) }}`: **{{ c.verdict.value | replace('_', ' ') }}**{% if c.candidate_input in settling %} (provisional: the framework is still running this comparison, so it may change){% endif %}. {{ c.metric }} {{ '%.6g' | format(c.candidate_value) }}{% if c.unit %} {{ c.unit }}{% endif %} over {{ c.candidate_samples }} run{{ '' if c.candidate_samples == 1 else 's' }}, base {{ '%.6g' | format(c.base_value) }}{% if c.unit %} {{ c.unit }}{% endif %} over {{ c.base_samples }} run{{ '' if c.base_samples == 1 else 's' }}; ratio {{ '%.4f' | format(c.ratio) }} with noise {{ '%.4f' | format(c.noise) }} (one standard error), where {{ 'higher' if c.direction == 'max' else 'lower' }} is better.
+{%- endfor %}
+
+{% if comparison_rule.noise_declared %}
+`better` and `worse` mean the difference exceeds {{ '%g' | format(comparison_rule.verdict_noises) }} noises in the metric's direction;
+`within noise` means this measurement cannot tell the candidate from its base.
+{% else %}
+This task declares no per-run noise, so the noise is estimated from the runs themselves:
+there is no verdict until the candidate and its base each have at least
+{{ comparison_rule.min_runs }} runs, and their runs do not all read alike. Until then the result is
+`inconclusive`: the ratio is not a gain and it is not noise, it is a number from too few runs
+to say either. Then `better` and `worse` mean the difference exceeds a critical number of
+noises (Welch's t test at 95%), larger the fewer runs there are; `within noise` means the
+runs held show a spread the difference does not exceed. While a result is inconclusive or
+within noise, the framework runs the candidate and its base again itself, up to
+{{ comparison_rule.min_runs }} runs each. If every run on both sides reads alike, no verdict is
+possible and no more runs are taken.
+{% endif %}
+Evaluating unchanged candidate content again starts no new run (only one the machinery
+failed is run again) and adds no sample: it returns the evaluation already made with its
+comparison as held now, so call it again to read a provisional comparison once the
+framework's runs have landed. A comparison describes the runs held now; once a candidate's
+official measurement is stored, the value stored then is the one it is ranked by, and later
+runs move the comparison, not that value.
+{% endif %}
 {% if repeated_failure %}
 
 Repeated failure: {% if repeated_failure.reason.value == 'repeated-traceback' %}the last {{ repeated_failure.consecutive_failures }} trusted evaluations of your submissions (limit {{ repeated_failure.limit }}) failed with the same traceback{% if repeated_failure.traceback_signature %} ({{ repeated_failure.traceback_signature }}){% endif %}{% else %}the last {{ repeated_failure.consecutive_failures }} trusted benchmarks of your submissions (limit {{ repeated_failure.limit }}) failed to reach the required result{% if repeated_failure.failed_benchmark %}; the latest measured partial rate {{ repeated_failure.failed_benchmark.partial_rate }}, within the comparison interval {{ repeated_failure.failed_benchmark.rate_lower }} to {{ repeated_failure.failed_benchmark.rate_upper }}{% endif %}{% endif %}.
 {% endif %}
 
-A failed or cancelled evaluation is an ordinary terminal outcome. Do not duplicate a
-trusted measurement for an unchanged candidate. Continue the original stage and return
+A failed or cancelled evaluation is an ordinary terminal outcome; evaluating its unchanged
+content again measures nothing new. Continue the original stage and return
 its schema-valid {% if agent == 'judge' %}review{% else %}implementation{% endif %} JSON.

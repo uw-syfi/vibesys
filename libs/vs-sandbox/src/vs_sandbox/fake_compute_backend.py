@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sim.api import Threads
 
 
 DEFAULT_FAKE_IMAGE = "fake-backend-image"
@@ -83,11 +84,13 @@ class FakeComputeBackend:
         self,
         log_dir: Path | None = None,
         *,
+        threads: Threads,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
     ) -> None:
-        """Accept the same construction shape as a real backend factory."""
+        """Accept the real factory's construction shape; ``threads`` is each sandbox's."""
         del log_dir, log
+        self._threads = threads
         self.image = image or DEFAULT_FAKE_IMAGE
         self.sandboxes: dict[str, FakeCommandRunner] = {}
         self._kind_sandboxes: dict[SandboxKind, FakeCommandRunner] = {}
@@ -151,10 +154,15 @@ class FakeComputeBackend:
         sandbox = self.sandboxes.get(key) or self._kind_sandboxes.get(kind)
         if sandbox is None:
             # A container sandbox has a lifecycle; a host one has nothing to start.
-            sandbox = FakeLifecycleRunner() if kind is SandboxKind.DOCKER else FakeCommandRunner()
+            runner = FakeLifecycleRunner if kind is SandboxKind.DOCKER else FakeCommandRunner
+            sandbox = runner(threads=self._threads)
             self.sandboxes[key] = sandbox
         SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
         return sandbox
+
+    def ensure_accelerator_available(self) -> None:
+        """No-op: scripted hosts are always capable unless a test raises itself."""
+        return
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Report no contention monitor."""

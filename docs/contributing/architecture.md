@@ -1,203 +1,161 @@
-# Architecture: Python module graph
+# Architecture
 
-[`tach.toml`](https://github.com/uw-syfi/vibesys/blob/main/tach.toml) freezes
-the Python module graph, and CI runs `uv run python scripts/check_tach.py`. An import between
-modules that is not a declared `depends_on` edge fails the check. Modules cover
-`src/` (`entrypoints`, `launch`, `headless`, `server.*`, `vibesys.*`) and every `libs/*/src`.
-Run it through the wrapper, not `tach check` directly: tach treats a library with
-its own `pyproject.toml` (a uv workspace member) as a separate package and stops
-checking its edges and interfaces, and the wrapper runs tach on a copy of the
-source roots without those files.
+VibeSys optimizes a program against a benchmark. Coding agents propose changes, measure them
+and keep the best. This page says which processes do that, what each one owns, how they talk
+and where the design stops scaling. Each component's README holds implementation
+and command details. The Python module graph is in
+[python-module-graph.md](python-module-graph.md).
 
-The graph below is generated from `tach.toml` by `tach show --mermaid`. CI
-fails when it is stale. To refresh after editing `tach.toml`:
+The host gateway is `vibesys-host`; deterministic jobs belong to the CLI daemon, `vibesysd`.
+Agents invoke it through the client command `vibesys-cli`.
 
-```bash
-uv run python scripts/check_tach_graph.py --write
+## The processes
+
+```text
+  operator
+     |
+ [desktop app] --typed link--> [vibesys-host]            one per state directory
+   (any machine)                   |  hosts
+                              [orchestrator] ---typed link---> [vibesysd]   one per user per machine
+                                   |                                ^
+                          typed link, one per agent                 | typed link
+                                   |                                |
+                              [sidecar]  x N                       [CLI] <--- skills
+                                   |                                          ^
+                              agent program  ---- runs in its shell ----------+
 ```
 
-A package-level overview with submodules collapsed to their top-level package.
-The graph is acyclic and `tach.toml` forbids cycles.
+| Process | Owns | Does not own |
+|---|---|---|
+| Desktop app | What the operator sees: screens, local settings, the connection to each host (local, or over ssh) | Any run state. It reads and commands through typed links |
+| `vibesys-host` | The front door of one machine: it accepts clients and hands each request to the typed service that answers it | Product logic. It only composes services and serves run records |
+| Orchestrator (inside `vibesys-host`) | The run: its agents, their messages, a durable record of every decision, and the work still owed to the outside world | Running jobs, and the agent processes themselves |
+| Sidecar | One agent session: it starts the agent program, keeps its conversation and writes down everything it does | Decisions about the run. It carries out commands |
+| `vibesysd` and the CLI | Every deterministic step: jobs (check, measure), their records, plans, promotions and the result | Judgment about what to try, and any agent |
+| Skills | Judgment: what to try next, when to stop. Agents load them as a plugin for the session | Anything that must give the same answer twice. That is the CLI's job |
 
-Every direct subfolder of `src/vibesys/orchestration/` is one orchestration
-strategy: `dynamic`, `evolve`, `issue_queue`, `multi`, or `single`. Shared
-policy and resources (`domains`, `hypothesis`, `profile_focus`,
-`prompts`, and `metrics`) live beside `orchestration` under `src/vibesys/` and
-never import it. Domain templates live in their domain package; strategy
-templates live in their strategy package. The shared `prompts` package owns
-only shared rendering and templates. A strategy may exclusively own a run shell
-when every source consumer of that shell belongs to the strategy. Shared run
-composition and peer strategies cannot import such a shell. Its downward policy
-interfaces and library dependencies remain declared in Tach. Top-level orchestration modules remain
-shared policy helpers; they are not strategy packages.
+Two splits explain most of the shape:
 
-A strategy written as a flow (today `dynamic`) has this layout inside its folder:
+- **Judgment versus determinism.** Skills and agents decide; the CLI and `vibesysd` measure, record and
+  compare. A number that gets compared or promoted always comes from `vibesysd`, never from an agent's
+  own account of it.
+- **Decision versus effect.** The orchestrator is a pure function from (state, input) to (new state, events,
+  effects), plus a thin shell that commits the events, then carries out the effects and feeds the outcomes
+  back as inputs. Because the decision step reads no clock and does no I/O, the same inputs always give the
+  same decisions, and tests replay a whole run in memory.
 
-- `search/`: the `@search` root flow, its `Role` declarations beside it, its config, prompt
-  contexts and the pure helpers its flows share. `search/api.py` is the only public surface;
-  other modules start with an underscore and nothing outside the package imports them. Code here
-  reaches `vs_core` only through `vs_core.api.search`.
-- `core_policy/`: host-side policy that reads the wider `vs_core.api` (evidence requirements,
-  prompt variables, the projection of the published `RunSnapshot`), with the prompt templates.
-- `launch.py` and `models.py`: the options an operator writes (the search config plus the
-  task's inputs) and the reply models.
+## The links
 
-What a task fixes (gates, metric space, stage limits) is `vs_core.api.TaskTerms` on the run's
-facts, not search config. The old `strategy/` state-machine package is gone for `dynamic`; the
-other strategies keep it until they are ported. See [orchestration-runtime.md](orchestration-runtime.md)
-and [flows.md](flows.md); `tests/architecture/test_search_packages.py` enforces the rules.
+Process boundaries use typed gRPC services defined by Protocol Buffers. The process that provides the service
+(the callee) owns the definition; the caller generates its client from it.
 
-`src/vibesys/` holds strategies, domain resources, prompts, and thin wiring.
-The generic pure lifecycle lives in `vs_core`, published only through
-`vs_core.api`: immutable state, events, requests, strategy contracts and projections.
-The `vs_runtime` async shell calls strategy decisions and core transitions
-separately, persists intent before I/O, and returns typed observations.
-`vs_core` has no I/O-library dependencies. Infrastructure mechanisms belong in
-`vs_runtime` and its libraries. Placement
-test: "Would another product built on vs_runtime need this mechanism, with no
-VibeSys policy in it? Then it belongs in a library, not src/vibesys."
+| Link | Carries | Shape |
+|---|---|---|
+| App to `vibesys-host` | The run as a snapshot, then live changes; commands from the operator. For runs of the older Python engine, a tail of their append-only log | Reads are streams, writes are single commands. Local or tunneled over ssh |
+| `vibesys-host` to orchestrator | The same services, in the same process | A direct call. It is still the typed service, so a client cannot tell |
+| Orchestrator to sidecar | Commands in; the sidecar's ordered event log out | Commands are single calls with ids. Events are read as a stream from the last offset the orchestrator committed |
+| Orchestrator to `vibesysd` | Watching jobs and results of a run | A stream that starts with the whole state, then changes |
+| CLI to `vibesysd` | One command from a skill: submit a job, read a measurement, promote a result | A short call, repeated safely |
+| Agent to orchestrator | Typed mail between agents (handoffs, reports, steering) | A small tool server the agent program starts, speaking the orchestrator's service |
 
-Design stateful systems as a pure core that emits requests and a thin async
-shell that calls I/O interfaces and returns typed outcomes as events. Each
-owning library declares its interface in its `.api` and holds interchangeable
-implementations inside it or in smaller libraries it depends on. The shell
-imports the core and owning libraries; the core imports no I/O library. Follow
-the software-design rule
-[Functional core, interfaces and implementations](https://github.com/uw-syfi/vibesys/blob/main/.agents/skills/software-design/references/functional-core.md)
-for durable intent, recovery, and tests.
+Rules for the whole picture:
 
-Execution environments, command runners, and agent confinement have separate
-owners; see [Sandboxing and confinement](sandboxing.md).
+- Nothing reads another process's files or output to learn a fact. If a caller needs a fact, the owner
+  serves it as a typed field. Text meant for people (logs, narration, a handoff's prose) is shown, never parsed.
+- The older Python engine publishes an append-only run log as a public contract. Each record carries a checksum
+  and follows the shared Protocol Buffers definition. `vibesys-host` tails it and does not interpret it.
+- The desktop app sees the whole system through generated types. Its protocol bindings come from the shared service contracts; display names come from the Python catalog.
 
-The TypeScript clients under `clients/` have their own package graph, layers, and
-build model; see [Clients architecture](clients-architecture.md).
+The orchestrator also projects deterministic search state for the app: jobs, results,
+judgments and promotions come from the CLI daemon's contracts. Plans are not yet visible to the orchestrator. This view is
+ephemeral and bounded. It is replaced as a whole, with revisions meaningful only
+within one connection. A lost or incompatible daemon makes the view unreadable
+with a typed reason; it never becomes an apparently empty successful search.
+The app displays that projection without rebuilding search policy locally.
 
-`vibesys.orchestration` owns built-in orchestration policy. Explicit plugins,
-including the issue queue, live under the singular
-`vibesys.orchestration.<plugin>` namespace; `launch` assembles their built-in
-catalog from individual registrations exposed by `vibesys.api.catalog`.
-`vibesys.plugin_catalog` retains the explicit registry contract.
-Agent roles, plan and reply schemas, prompts, and pure strategy decisions
-live with their owning orchestration; generic lifecycle and recovery decisions
-belong in the pure core. For example, the
-hypothesis planner's skill-selection and title rules are public through
-`vibesys.hypothesis`, not a top-level schema catch-all. Generic
-run roles live in `vibesys.api`: `Runs` starts and resumes independent
-`RunHandle` tasks, which publish semantic events, accept stop requests, and
-return results. `launch.default_runs` selects VibeSys implementations;
-`vs-runtime` owns the generic task and event-stream mechanism. Only
-entrypoints, tests and scripts import `launch`. Headless receives one started
-handle; the server receives `Runs`. The transitional `vibesys.api.session`
-contract retains queries, readiness and auxiliary-agent access;
-workspace, persistence, and sandbox mechanisms live in the runtime libraries.
-The `vibesys.api` package root is policy-neutral. Applications opt into a
-built-in policy through a named facade such as `vibesys.api.hypothesis` or
-`vibesys.api.evolve`; the generic facade does not re-export those contracts.
-Tach records each dependency. `vs_project` owns generic project layout and
-persistence operations. Hypothesis-search history and its serialization belong
-to `vibesys.hypothesis`; they are policy contracts, not generic lifecycle types.
-The v5 manifest separates policy-specific descriptor options from the generic
-`execution` record. The latter is derived from `RunRequest` and resolved host
-settings, including the concrete profiler. Resume checks it before setup.
-Trusted evaluator execution and package mechanics live in the runtime and
-sandbox libraries. Orchestration owns gate cadence and result interpretation.
+## One search, end to end
 
-Libraries are converted to uv workspace members bottom-up (a library converts
-once every library it imports is a member). A member's `pyproject.toml` declares
-exactly the third-party packages its `src/` imports, and reaches other members
-through `[tool.uv.sources] <name> = { workspace = true }`.
-`scripts/check_member_dependencies.py` fails CI on an undeclared or unused
-dependency, an undeclared member edge, or an import of a root-distribution
-package. The `vibesys` wheel still bundles every library's source, so each
-member dependency must also appear in the root `dependencies` with the same
-version constraint.
+1. The operator starts a run in the desktop app. `vibesys-host` passes it to the orchestrator, which commits it.
+2. The orchestrator starts a sidecar for the lead agent. The sidecar starts the agent program with the
+   skills plugin and tells the orchestrator what the agent does.
+3. The lead agent plans and asks for subagents. The orchestrator starts a sidecar for each, in its own worktree.
+4. An agent changes code and runs the CLI to check and measure it. The CLI asks `vibesysd`, which runs the job on the
+   machine and records the result. The agent's identity (run, agent) travels with the call.
+5. `vibesysd` reports a finished job. The orchestrator turns that into an input and wakes the agent that is waiting.
+6. The orchestrator streams every change to the app. If the host restarts, sidecars keep running and the
+   orchestrator re-attaches to each by reading from its last committed offset.
 
-The strategy and plugin contract is in
-[orchestration-runtime.md](orchestration-runtime.md).
+## Host composition
 
-A search is `@search(name, config=Model)` over a flow (straight-line `async` code that the
-runtime journals and replays). It follows [flows.md](flows.md): the `ctx` vocabulary (agents,
-workspaces, evaluation, groups), the rule for flow code, how core ends the run from the winner
-the flow chose, and how to test it.
+The host only composes typed services. Its entrypoint hands control to the composition layer;
+service owners hold behavior. Import and command-shape checks enforce this boundary.
+Product decisions hidden behind permitted imports still need review.
 
-[//]: # (tach-graph:start)
-## Architecture overview
+## Talking to daemons
 
-Submodules such as `vibesys.orchestration` and `server.api` are collapsed into their top-level package.
+A **daemon** here is a long-lived local process that owns some state and that another process (the
+caller) reads and commands. `vibesysd` and each sidecar are daemons; `vibesys-host` is the caller of both.
+Every such link follows the same rules, so a new link is a variation on a known one.
 
-```mermaid
-graph TD
-    entrypoints --> headless
-    entrypoints --> launch
-    entrypoints --> server
-    entrypoints --> vibesys
-    entrypoints --> vs_agent
-    entrypoints --> vs_github
-    entrypoints --> vs_issue_tracker
-    entrypoints --> vs_mcp
-    entrypoints --> vs_project
-    entrypoints --> vs_sandbox
-    entrypoints --> vs_sim
-    headless --> vibesys
-    launch --> vibesys
-    launch --> vs_agent
-    launch --> vs_evaluation
-    launch --> vs_mcp
-    launch --> vs_project
-    launch --> vs_runtime
-    launch --> vs_sandbox
-    launch --> vs_slurm
-    server --> vibesys
-    server --> vs_async_ops
-    server --> vs_project
-    server --> vs_prompts
-    server --> vs_sim
-    vibesys --> vs_agent
-    vibesys --> vs_core
-    vibesys --> vs_evaluation
-    vibesys --> vs_evaluator_protocol
-    vibesys --> vs_github
-    vibesys --> vs_issue_tracker
-    vibesys --> vs_mcp
-    vibesys --> vs_project
-    vibesys --> vs_prompts
-    vibesys --> vs_runtime
-    vibesys --> vs_sandbox
-    vibesys --> vs_sim
-    vibesys --> vs_slurm
-    vs_agent --> vs_faults
-    vs_agent --> vs_mcp
-    vs_agent --> vs_project
-    vs_agent --> vs_prompts
-    vs_agent --> vs_sandbox
-    vs_agent --> vs_sim
-    vs_dst --> vs_core
-    vs_dst --> vs_project
-    vs_dst --> vs_runtime
-    vs_dst --> vs_sim
-    vs_evaluation --> vs_evaluator_protocol
-    vs_evaluation --> vs_mcp
-    vs_evaluation --> vs_project
-    vs_evaluation --> vs_sim
-    vs_faults --> vs_sim
-    vs_issue_tracker --> vs_core
-    vs_issue_tracker --> vs_github
-    vs_runtime --> vs_agent
-    vs_runtime --> vs_async_ops
-    vs_runtime --> vs_core
-    vs_runtime --> vs_evaluation
-    vs_runtime --> vs_evaluator_protocol
-    vs_runtime --> vs_issue_tracker
-    vs_runtime --> vs_mcp
-    vs_runtime --> vs_project
-    vs_runtime --> vs_prompts
-    vs_runtime --> vs_sandbox
-    vs_runtime --> vs_sim
-    vs_runtime --> vs_slurm
-    vs_sandbox --> vs_evaluation
-    vs_sandbox --> vs_project
-    vs_sandbox --> vs_sim
-    vs_sandbox --> vs_slurm
-    vs_slurm --> vs_sim
-```
-[//]: # (tach-graph:end)
+1. **The callee owns the contract.** The caller generates its client from the callee's definition and never
+   writes a copy of a message.
+2. **Local transport in a private directory.** gRPC over a Unix socket in a directory only the user can
+   enter, on a local disk. The caller checks the directory before it dials.
+3. **Discovery is a written rule.** The callee documents how to find it, a golden file pins the rule and both
+   sides test against it. A caller never scans for sockets or reads process-id files.
+4. **The first call is a version handshake.** The answer is compatible, caller too old or daemon too old. A
+   missing or incompatible daemon is a named state with a reason, never an empty answer.
+5. **A read is a stream that starts with the whole state.** Then come changes tagged with an epoch and a
+   sequence number. The caller applies a full state at its end marker and keeps its resume token there. A daemon
+   that cannot honor a token sends the whole state again. Protocol 3 always starts with a reset. Nobody polls a daemon for state.
+6. **A write is one bounded command.** It carries an id the callee deduplicates, so repeating it is safe, and the
+   caller gives it a deadline.
+7. **Identity travels in the message.** Run, task and agent are part of every call. A shell receives identity through its launch environment, with the carrier names declared once in the contract.
+8. **Lifetime has one owner.** A process starts and stops the daemons it owns. A shared daemon is started only by its
+   own start command, when a dial finds none or an old one, and no caller ever stops it.
+9. **One Fake per service, beside the client.** A contract suite runs against the Fake and the real daemon. When the
+   two live in different modules, a shared transcript corpus ties them without either importing the other.
+10. **Imports and capabilities hold the pattern.** An architecture check limits which packages may import a callee's
+    contract, build its client, start a process, or read another component's files.
+
+Enforcement for these rules:
+
+1. Enforced by the `proto` check group and proto-copy check. Hand-written mirrors are unenforced because identifying them needs review.
+2. Enforced for the CLI daemon by runtime-directory and Locate checks. New daemon transport choices are unenforced because they need design review.
+3. Enforced for CLI discovery by golden checks and `fs-reads`. A golden for a new daemon is unenforced because no check requires one.
+4. Enforced for the CLI daemon by its contract suite and conformance corpus. The first call for a new link is unenforced because it needs review.
+5. Enforced by the transcript corpus and session property checks. Polling is unenforced because a check cannot distinguish it from other loops.
+6. Unenforced: idempotency and deadlines need review of the operation.
+7. Enforced by identity carrier golden and carrier checks.
+8. Enforced in the orchestrator by `exec-confined` for process starts. Ownership of starts and stops is unenforced because it needs design review.
+9. Enforced for the CLI daemon by corpus runners. Registration of every Fake is unenforced because it needs review.
+10. Enforced in the orchestrator by `cli-contract-importers`, `cli-stub`, `exec-confined` and `fs-reads`. Socket dialing is unenforced because no check restricts it.
+
+### Where the sidecar link stands
+
+The orchestrator-to-sidecar link follows the rules on ownership (1), transport (2), reading by offset (5) and
+repeatable commands (6). It departs from four: it has no version handshake (4), the orchestrator reads sidecar process metadata and output and polls for readiness (3, 5),
+stopping still uses process signals rather than the typed service (8), and no contract suite runs one Fake and a real sidecar (9). These are known,
+listed exceptions; the rules admit no new one.
+
+## State and recovery
+
+Each stateful process owns its record: the orchestrator keeps committed events and outstanding effects on local disk, each sidecar keeps a local event log, and the `vibesysd` job store follows the repository, which may be on shared disk. A process that stops comes back by reading its own record, not by asking its peers what happened.
+Agent sessions outlive the process that started them, so restarting the host does not stop an agent. A step with
+no recorded result runs again, which is why every write carries an id. The Python engine's version of this,
+the log as the truth and a cache beside it, is in [run-recovery.md](run-recovery.md).
+
+## Where the limits are
+
+- **One orchestrator per state directory.** A store lock enforces this; distinct state directories can coexist. One `vibesysd` runs per user per machine. The desktop app holds one connection per host.
+- **Run summaries and detailed history have different bounds.** Run snapshots fit a byte budget and
+  can omit older bundles or history. Agent items are paged separately. The core tracks multiple runs;
+  their jobs still compete for the machine's resources.
+- **One sidecar per agent session**, so the number of live agents is bounded by what one machine can run, and
+  every agent costs a process.
+
+## Not covered here
+
+The older Python run engine (the `vibesys` command and its libraries) has its own module graph; see [python-module-graph.md](python-module-graph.md). The TypeScript packages of the desktop app are in
+[clients-architecture.md](clients-architecture.md). Confinement of agents and jobs is in
+[sandboxing.md](sandboxing.md). How a search is written is in [flows.md](flows.md).

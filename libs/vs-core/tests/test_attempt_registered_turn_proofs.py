@@ -121,6 +121,7 @@ def registered_state(
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.DISPATCHED,
         until=core.Until(at=1000),
+        addressed_by=(),
     )
     if receipt_kind == "no-membership":
         receipt = receipt.model_copy(update={"request_ids": ()})
@@ -147,7 +148,6 @@ def registered_state(
 def restored(state: core.CoreState, codec: core.OperationRegistry) -> core.CoreState:
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=0),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,

@@ -119,7 +119,7 @@ func writeOutputs(path string, p plan) error {
 	return nil
 }
 
-func planAtRevisions(root, configPath string, headGraph graph, base, head, event string) (plan, error) {
+func planAtRevisions(root, configPath string, headGraph graph, base, head, event string, local bool) (plan, error) {
 	comparison, err := gitrepo.Compare(root, base, head, event)
 	if err != nil {
 		return plan{}, err
@@ -132,6 +132,9 @@ func planAtRevisions(root, configPath string, headGraph graph, base, head, event
 			return plan{}, err
 		}
 		defer cleanup()
+		if local {
+			baseGraph = baseGraph.forLocalTest()
+		}
 	}
 	return selectChangedRecords(baseGraph, headGraph, comparison.Changes)
 }
@@ -166,7 +169,34 @@ func snapshotConfigPath(root, snapshotRoot, configPath string) (string, error) {
 	return filepath.Join(snapshotRoot, rel), nil
 }
 
+// localChangePlan is what `repoctl test` and `repoctl gate` plan from: the committed changes
+// since the base plus the staged, unstaged and untracked ones. g must be the local view.
+func localChangePlan(root, configPath string, g graph, base, head, event string) (plan, error) {
+	p, err := planAtRevisions(root, configPath, g, base, head, event, true)
+	if err != nil {
+		return plan{}, err
+	}
+	localChanges, err := gitrepo.WorktreeChanges(root)
+	if err != nil || len(localChanges) == 0 {
+		return p, err
+	}
+	localBase, cleanup, err := policyGraphAtRevision(root, configPath, head)
+	if err != nil {
+		return plan{}, err
+	}
+	defer cleanup()
+	local, err := selectChangedRecords(localBase.forLocalTest(), g, localChanges)
+	if err != nil {
+		return plan{}, err
+	}
+	return mergePlans(p, local), nil
+}
+
 func cli(args []string) error {
+	return cliWithRunner(args, execution.OSRunner{})
+}
+
+func cliWithRunner(args []string, runner execution.Runner) error {
 	configPath := ".repoctl"
 	filtered := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -186,7 +216,7 @@ func cli(args []string) error {
 	}
 	args = filtered
 	if len(args) == 0 {
-		return fmt.Errorf("usage: repoctl {plan|test|run-checks|run-native|verify-policy|explain|validate}")
+		return fmt.Errorf("usage: repoctl {plan|test|gate|dev|doctor|run-checks|run-native|verify-policy|explain|validate}")
 	}
 	root, err := rootPath(configPath)
 	if err != nil {
@@ -196,7 +226,14 @@ func cli(args []string) error {
 	if err != nil {
 		return err
 	}
+	ensureHooks(root, os.Stderr)
 	switch args[0] {
+	case "gate":
+		return runGate(root, configPath, g, args[1:], os.Stdout)
+	case "dev":
+		return runDev(root, configPath, args[1:])
+	case "doctor":
+		return runDoctor(root, configPath, g, args[1:], os.Stdout)
 	case "verify-policy":
 		return runVerifyPolicy(root, g, args[1:])
 	case "run-checks":
@@ -217,43 +254,46 @@ func cli(args []string) error {
 		if collectionProvided && *collection == "" {
 			return fmt.Errorf("--collection-json must be a JSON array of strings")
 		}
-		return runCheckGroup(root, g, *group, *collection, *dryRun, execution.OSRunner{})
+		return runCheckGroup(root, g, *group, *collection, *dryRun, runner)
 	case "test":
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		base := fs.String("base", g.DefaultBase, "Base revision")
 		head := fs.String("head", "HEAD", "Head revision")
 		event := fs.String("event", "pull_request", "Event type")
 		dryRun := fs.Bool("dry-run", false, "Print selected commands without running them")
+		checksOnly := fs.Bool("checks-only", false, "Run quality checks and always-on scripts, not test groups")
+		coverageOnly := fs.Bool("coverage-only", false, "Check touched Python modules and patch coverage using only --coverage-test files")
+		var coverageTests []string
+		fs.Func("coverage-test", "Own test file to run for touched modules; repeat for multiple files", func(value string) error {
+			coverageTests = append(coverageTests, value)
+			return nil
+		})
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if fs.NArg() != 0 {
 			return fmt.Errorf("unexpected test arguments")
 		}
-		p, err := planAtRevisions(root, configPath, g, *base, *head, *event)
+		if (*coverageOnly && *checksOnly) || (len(coverageTests) > 0 && !*coverageOnly) {
+			return fmt.Errorf("--coverage-only cannot combine with --checks-only; --coverage-test requires --coverage-only")
+		}
+		g = g.forLocalTest()
+		p, err := localChangePlan(root, configPath, g, *base, *head, *event)
 		if err != nil {
 			return err
-		}
-		localChanges, err := gitrepo.WorktreeChanges(root)
-		if err != nil {
-			return err
-		}
-		if len(localChanges) > 0 {
-			localBase, cleanup, err := policyGraphAtRevision(root, configPath, *head)
-			if err != nil {
-				return err
-			}
-			defer cleanup()
-			localPlan, err := selectChangedRecords(localBase, g, localChanges)
-			if err != nil {
-				return err
-			}
-			p = mergePlans(p, localPlan)
 		}
 		if err := emit(p, false); err != nil {
 			return err
 		}
-		return runSelectedTests(root, g, p, *dryRun, execution.OSRunner{}, runNativeCommand)
+		if *coverageOnly {
+			checks, err := localCoverageChecks(root, g, p.ChangedPaths, coverageTests)
+			if err != nil {
+				return err
+			}
+			fmt.Println("Partial-suite coverage: only the supplied test files run; CI combines all shards.")
+			return runChecks(root, checks, *dryRun, runner)
+		}
+		return runSelectedTests(root, g, p, *dryRun, *checksOnly, runner, runNativeCommand)
 	case "run-native":
 		fs := flag.NewFlagSet("run-native", flag.ContinueOnError)
 		targets := fs.String("targets-json", "", "Selected native roots as a JSON array")
@@ -330,7 +370,7 @@ func cli(args []string) error {
 				return err
 			}
 		}
-		p, err := planAtRevisions(root, configPath, g, *base, *head, *event)
+		p, err := planAtRevisions(root, configPath, g, *base, *head, *event, false)
 		if err != nil {
 			return err
 		}

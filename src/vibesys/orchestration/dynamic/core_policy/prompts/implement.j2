@@ -1,6 +1,7 @@
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
-{% from '_macros.j2' import citations %}
+{% from '_macros.j2' import apply_change, apply_conflicts, citations, metric %}
+{% from '_failure.j2' import input_failure_text %}
 Own hypothesis `{{ hypothesis_id }}` in this isolated candidate workspace.
 
 {% include 'run_context.j2' %}
@@ -12,6 +13,58 @@ Parent revision: `{{ rev(parent_revision) }}`
 
 Evidence references:
 {{ citations(evidence) }}
+{% if combine or combine_missing %}
+
+This workstream combines retained candidates into one new candidate. Your workspace is a
+checkout of main at `{{ rev(parent_revision) }}`. Apply each part's own change (the diff from
+the revision the part was built on to the part), in this order:
+{% for part in combine %}
+{{ loop.index }}. hypothesis `{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}`{% if part.metric %}, which measured {{ metric(part.metric) }} alone{% endif %}: {{ apply_change('git diff ' ~ rev(part.built_on) ~ ' ' ~ rev(part.revision), agent_git_writable) }}
+{% endfor %}
+{% for pick in combine_missing %}
+- hypothesis `{{ pick.hypothesis_id }}` at `{{ pick.revision }}` is no longer buildable: leave it out.
+{% endfor %}
+{{ apply_conflicts(agent_git_writable) }} Combine the parts as the task says, without
+redesigning any of them.
+{% if watch_for %}
+Where the parts interact, watch for: {{ watch_for }}
+{% endif %}
+Then run the project's fast tests, fix what the combination broke, and submit the composite.
+In {{ reply.unapplied }}, list every part, or piece of one, that you could not apply, and why.
+{% endif %}
+{% if baseline_pending %}
+
+The input's own trusted measurement is still queued or running. Write and test your change
+now, including your own runs; the framework reviews your candidate as usual, and its
+trusted measurement and its comparison with the input wait until the input's measurement
+lands, possibly after this turn ends.
+{% endif %}
+{% if input_failure %}
+
+The input's own trusted measurement failed: {{ input_failure_text(input_failure) }}
+{% if input_compared %}
+Its benchmark passed, so your candidate must still pass the trusted evaluation and beat the
+input's benchmark numbers to be adopted.
+{% else %}
+There is no input value for your candidate to beat. It is still measured, and it can be
+adopted once it passes the trusted evaluation and review, but the run then ends "adopted
+without an input comparison", not as a plain success.
+{% endif %}
+{% if input_at_fault %}
+A candidate that fixes what made the input fail counts as well.
+{% else %}
+Nothing shows a fault in the input's code (a time limit, the evaluation machinery, or no
+output): do not spend this turn fixing the input for it.
+{% endif %}
+{% endif %}
+{% if rebase_onto %}
+
+The run's main revision moved to `{{ rev(rebase_onto) }}` since this hypothesis last ran: a
+merge combined other candidates into it. Before anything else, bring main's change into your
+tree: {{ apply_change('git diff ' ~ (rev(rebase_from) if rebase_from else '$(git merge-base HEAD ' ~ rev(rebase_onto) ~ ')') ~ ' ' ~ rev(rebase_onto), agent_git_writable) }}.
+{{ apply_conflicts(agent_git_writable) }} Keep both your change and main's behavior, and build
+this turn's candidate on that tree.
+{% endif %}
 {% if worktree_revision %}
 
 This continues your earlier work on this hypothesis. The worktree is at the
@@ -29,6 +82,14 @@ That is the revision your earlier attempt ended at.
 
 Feedback from the prior attempt:
 {{ rejection }}
+{% endif %}
+{% if reply_rejected %}
+
+The framework refused your last reply, so its candidate was not measured:
+{% for item in reply_rejected %}
+- {{ reply.unapplied }}[{{ item.index }}].hypothesis_id names `{{ item.hypothesis_id }}`, which is not a part of this {% if combine %}combine{% else %}workstream: it combines nothing{% endif %}.
+{% endfor %}
+{% if combine %}Name only this combine's parts there ({% for part in combine %}`{{ part.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %}){% else %}Leave {{ reply.unapplied }} empty{% endif %}, and submit your candidate again.
 {% endif %}
 {% if last_blocker %}
 
@@ -78,3 +139,11 @@ Return only schema-valid JSON with one {{ reply.reply }} object. In that object,
 review and framework gates), {{ reply.evidence }} and, when the outcome is
 `implementation_failed`, {{ reply.next_step }}.
 {% include 'agent_evaluation.j2' %}
+{% if agent_evaluation %}
+
+While an evaluation or GPU job you submitted is queued, do not end the turn only to wait: keep
+implementing the remaining work and validate it with tests that need no GPU. Do not poll with
+`sleep` loops; if a job has been queued for more than a few minutes, move to other work and
+check back later. End the turn with `waiting_for_evaluation` only when nothing useful remains
+to implement.
+{% endif %}

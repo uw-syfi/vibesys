@@ -20,7 +20,6 @@ def test_requirements_distinguish_official_correctness_benchmark_from_advisory_e
         required_assessments=(core.AssessmentKind.CORRECTNESS,),
     )
     assert requirements.required_evidence[0].kind != core.EvidenceKind.PROFILING
-    assert requirements.required_evidence[1].kind != core.EvidenceKind.LOCAL_VALIDATION
     assert (
         core.EvidenceRequirements.model_validate_json(requirements.model_dump_json())
         == requirements

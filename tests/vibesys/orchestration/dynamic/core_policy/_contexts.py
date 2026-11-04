@@ -22,10 +22,14 @@ from vibesys.orchestration.dynamic.core_policy.api import run_prompt_variables
 from vibesys.orchestration.dynamic.search.api import (
     IMPLEMENTER,
     JUDGE,
+    MERGER,
+    OUTLINER,
     PLANNER,
     PROFILER,
     EvidenceCitation,
     ImplementPrompt,
+    MergePrompt,
+    OutlinePrompt,
     PlannerCorrection,
     PlannerPrompt,
     ProfilePrompt,
@@ -34,8 +38,9 @@ from vibesys.orchestration.dynamic.search.api import (
     ReviewPrompt,
     dynamic,
 )
-from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
+from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate, core_protocol_variables
 from vs_core.api import (
+    ComparisonPolicy,
     EvidenceId,
     EvidenceKind,
     InvocationId,
@@ -44,6 +49,7 @@ from vs_core.api import (
     RevisionId,
     RevisionRef,
     SessionId,
+    WaitEnd,
 )
 from vs_core.api.search import (
     ReplyCorrection,
@@ -71,6 +77,8 @@ TEMPLATE_FILES: dict[Template, str] = {
     PromptTemplate.IMPLEMENT: IMPLEMENTER.prompt,
     PromptTemplate.REVIEW: JUDGE.prompt,
     PromptTemplate.PROFILE_REQUEST: PROFILER.prompt,
+    PromptTemplate.OUTLINE: OUTLINER.prompt,
+    PromptTemplate.MERGE: MERGER.prompt,
     CoreProtocolTemplate.RESUME: IMPLEMENTER.exchanges.resume or "",
     CoreProtocolTemplate.REPLY_CORRECTION: IMPLEMENTER.exchanges.correction or "",
     CoreProtocolTemplate.WAIT_UNRECORDED: IMPLEMENTER.exchanges.wait_unrecorded or "",
@@ -83,6 +91,7 @@ FRESH_TURNS = (
     PromptTemplate.IMPLEMENT,
     PromptTemplate.REVIEW,
     PromptTemplate.PROFILE_REQUEST,
+    PromptTemplate.OUTLINE,
 )
 """The templates that open a fresh agent turn."""
 
@@ -112,6 +121,29 @@ METRIC = st.builds(
     unit=st.none() | tokens("u"),
 )
 METRICS = st.lists(METRIC, max_size=2).map(tuple)
+PARTS = st.lists(
+    st.builds(
+        dict,
+        hypothesis_id=tokens("part"),
+        revision=REVISIONS,
+        built_on=REVISIONS,
+        metric=st.none() | METRIC,
+    ),
+    min_size=2,
+    max_size=3,
+).map(tuple)
+"""The parts of a combine, each with the revision its own change starts from."""
+COMPOSITES = st.builds(
+    dict,
+    parts=PARTS,
+    verdict=st.sampled_from(("better", "within_noise", "worse", "unknown")),
+    best_part=st.none() | tokens("part"),
+    relative_noise=st.sampled_from((0.0, 0.03, 0.125)),
+    cancelled=st.booleans(),
+    unapplied=st.lists(
+        st.builds(dict, hypothesis_id=tokens("part"), part=tokens("hunk"), why=TEXT), max_size=2
+    ).map(tuple),
+)
 
 
 @st.composite
@@ -128,6 +160,7 @@ def _history(draw: st.DrawFn) -> list[dict[str, object]]:
             "candidate": draw(st.none() | REVISIONS),
             "metrics": draw(METRICS),
             "failure_tail": draw(st.just("") | TEXT),
+            "composite": draw(st.none() | COMPOSITES),
         }
         for index in range(draw(st.integers(0, 3)))
     ]
@@ -164,6 +197,52 @@ def _buildable(draw: st.DrawFn) -> list[dict[str, object]]:
     ]
 
 
+INPUT_FAILURES = (
+    st.none()
+    | st.just({"kind": "benchmark-failed", "stage": "benchmark", "output": "bench-output"})
+    | st.just({"kind": "accuracy-failed", "stage": "correctness", "output": "hung past 1200 s"})
+    | st.just({"kind": "readings-undecodable"})
+)
+"""Why the input is unmeasurable, or None: kinds that name a failed stage and its output, and
+one that names neither."""
+
+
+SOURCES = st.lists(
+    st.builds(
+        dict, hypothesis_id=tokens("hid"), revision=REVISIONS, built_on=st.none() | REVISIONS
+    ),
+    max_size=2,
+).map(tuple)
+MAIN_MEASUREMENTS = st.builds(
+    dict,
+    revision=REVISIONS,
+    merge_id=tokens("m"),
+    accuracy_passed=st.none() | st.booleans(),
+    benchmark_passed=st.none() | st.booleans(),
+    metrics=METRICS,
+    previous=METRICS,
+)
+MERGEABLE = st.builds(
+    dict, hypothesis_id=tokens("hid"), revision=REVISIONS, metric=st.none() | METRIC
+)
+MERGES = st.builds(
+    dict,
+    merge_id=tokens("m"),
+    sequence=st.integers(1, 9),
+    candidates=SOURCES,
+    base=REVISIONS,
+    outcome=st.sampled_from(("merged", "refused", "failed")),
+    summary=st.just("") | tokens("sum"),
+    reason=st.just("") | tokens("why"),
+    revision=st.none() | REVISIONS,
+    accuracy_passed=st.none() | st.booleans(),
+    metrics=METRICS,
+    main_metrics=METRICS,
+    main_benchmark_passed=st.none() | st.booleans(),
+    failure=st.none() | st.sampled_from(({"kind": "merge-unsound"}, {"kind": "merge-regressed"})),
+)
+
+
 @st.composite
 def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, object]:
     """The fields a planning request and its correction share."""
@@ -181,13 +260,14 @@ def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, obje
         "history": draw(_history()),
         "older_ids": tuple(draw(st.lists(tokens("old"), max_size=2, unique=True))),
         "baseline": draw(METRICS),
-        "input_failure": draw(
-            st.none()
-            | st.just({"kind": "benchmark-failed", "output": "bench-output"})
-            | st.just({"kind": "readings-undecodable"})
-        ),
+        "input_failure": draw(INPUT_FAILURES),
         "profiling": draw(st.booleans()),
         "profile_fields": fields,
+        "main_revision": draw(REVISIONS),
+        "main_measurement": draw(st.none() | MAIN_MEASUREMENTS),
+        "merge_running": draw(st.none() | tokens("m")),
+        "mergeable": draw(st.lists(MERGEABLE, max_size=2)),
+        "merges": draw(st.lists(MERGES, max_size=2)),
         "problem": problem,
     }
 
@@ -247,6 +327,26 @@ IMPLEMENT_PROMPTS = st.builds(
     prior_failure_tail=st.just("") | tokens("tail"),
     last_blocker=st.none() | BLOCKERS,
     turns_without_candidate=st.integers(0, 3),
+    baseline_pending=st.booleans(),
+    input_failure=INPUT_FAILURES,
+    rebase_onto=st.none() | REVISIONS,
+    rebase_from=st.none() | REVISIONS,
+    reply_rejected=st.lists(
+        st.builds(dict, index=st.integers(0, 3), hypothesis_id=tokens("stray")), max_size=2
+    ).map(tuple),
+    combine=st.just(()) | PARTS,
+    combine_missing=st.lists(
+        st.builds(dict, hypothesis_id=tokens("gone"), revision=tokens("rev")), max_size=1
+    ).map(tuple),
+    watch_for=st.just("") | tokens("watch"),
+)
+MERGE_PROMPTS = st.builds(
+    lambda **fields: MergePrompt.model_validate(fields, strict=False),
+    merge_id=tokens("m"),
+    main_revision=REVISIONS,
+    candidates=SOURCES,
+    instructions=tokens("how"),
+    watch_for=tokens("watch"),
 )
 EVALUATIONS = st.lists(
     st.builds(
@@ -279,18 +379,42 @@ PROFILE_PROMPTS = st.builds(
     ),
     target=REVISIONS,
 )
-ROLES = ("implementer", "judge", "profiler")
+OUTLINE_PROMPTS = st.builds(
+    OutlinePrompt,
+    documents=st.lists(tokens("doc").map(lambda name: f"reference/{name}.md"), min_size=1).map(
+        tuple
+    ),
+)
+ROLES = ("implementer", "judge", "profiler", "merger")
 CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
     PromptTemplate.PORTFOLIO: PLANNER_PROMPTS,
     PromptTemplate.PORTFOLIO_CORRECTION: PLANNER_CORRECTIONS,
     PromptTemplate.IMPLEMENT: IMPLEMENT_PROMPTS,
     PromptTemplate.REVIEW: REVIEW_PROMPTS,
     PromptTemplate.PROFILE_REQUEST: PROFILE_PROMPTS,
-    CoreProtocolTemplate.RESUME: st.builds(
-        ResumeFacts,
-        agent=st.sampled_from(ROLES),
-        retained=st.none() | REVISIONS,
-        timed_out=st.booleans(),
+    PromptTemplate.OUTLINE: OUTLINE_PROMPTS,
+    PromptTemplate.MERGE: MERGE_PROMPTS,
+    CoreProtocolTemplate.RESUME: st.one_of(
+        st.builds(
+            ResumeFacts,
+            agent=st.sampled_from(ROLES),
+            retained=st.none() | REVISIONS,
+            ended_by=st.none(),
+        ),
+        st.builds(
+            ResumeFacts,
+            agent=st.sampled_from(ROLES),
+            retained=st.none() | REVISIONS,
+            ended_by=st.just(WaitEnd.QUEUE_BUDGET),
+            queue_budget_spent=st.sampled_from([True]),
+        ),
+        st.builds(
+            ResumeFacts,
+            agent=st.sampled_from(ROLES),
+            retained=st.none() | REVISIONS,
+            ended_by=st.sampled_from((WaitEnd.LIMIT, WaitEnd.RUN_END)),
+            queue_budget_spent=st.booleans(),
+        ),
     ),
     CoreProtocolTemplate.REPLY_CORRECTION: st.builds(
         ReplyCorrection,
@@ -310,15 +434,27 @@ CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
 
 
 def variables(
-    context: BaseModel, *, agent_evaluation: bool = False, notes: str = ""
+    context: BaseModel,
+    *,
+    agent_evaluation: bool = False,
+    notes: str = "",
+    agent_git_writable: bool = True,
+    noise_declared: bool = False,
 ) -> dict[str, object]:
-    """What the render owner passes the template: run-level variables, then the context's own."""
+    """What the render owner passes the template: run-level variables, then the context's own.
+
+    ``noise_declared`` is whether the run's task declares its per-run noise, which the core
+    protocol's comparison rule reads.
+    """
+    policy = ComparisonPolicy(noise_floor=0.02 if noise_declared else 0.0)
     return {
+        **core_protocol_variables(policy),
         **run_prompt_variables(
             domain_sections=EMPTY_DOMAIN_SECTIONS,
             objective=OBJECTIVE,
             environment_notes=notes,
             agent_evaluation=agent_evaluation,
+            agent_git_writable=agent_git_writable,
         ),
         **context_variables(context),
     }

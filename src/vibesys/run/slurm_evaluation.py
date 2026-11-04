@@ -12,9 +12,11 @@ if TYPE_CHECKING:
 
     from vs_evaluation.api import EvaluationStateNamespace
     from vs_runtime.api import Workspaces
-    from vs_runtime.api.infrastructure import TrustedEvaluationPlan
+    from vs_runtime.api.core import StageOutputOpener
+    from vs_runtime.api.infrastructure import RunControlChannel, TrustedEvaluationPlan
     from vs_sandbox.api.slurm import SharedSlurmAdmission, SlurmEvaluationPlan, SlurmExecutionPolicy
-    from vs_slurm.api import Cluster, SlurmConfig, SlurmProcess
+    from vs_sim.api import BlockingRunner, Clock, Processes, Sleeper
+    from vs_slurm.api import Cluster, SlurmConfig, WorkspaceRootProof
 
 
 class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
@@ -30,9 +32,16 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
         namespace: EvaluationStateNamespace,
         handle_root: Path,
         *,
+        clock: Clock,
+        sleeper: Sleeper,
+        blocking: BlockingRunner,
+        processes: Processes,
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
-        process: SlurmProcess | None = None,
+        ledger_identity: tuple[str, str] | None = None,
+        stage_output: StageOutputOpener | None = None,
+        root_proof: WorkspaceRootProof | None = None,
+        control: RunControlChannel | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state."""
         super().__init__(
@@ -44,9 +53,16 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
             namespace,
             handle_root,
             stage_failure_text=render_stage_failure,
+            clock=clock,
+            sleeper=sleeper,
+            blocking=blocking,
             admission=admission,
             cluster=cluster,
-            process=process,
+            processes=processes,
+            ledger_identity=ledger_identity,
+            stage_output=stage_output,
+            root_proof=root_proof,
+            control=control,
         )
 
 

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 
 from vibesys.config import Config
@@ -50,6 +51,7 @@ from vs_project.api import (
     NullGitTrackerEvents,
     OrchestrationDescriptor,
     RunEnvironmentRecord,
+    git_repositories,
 )
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api import BenchmarkFailureKind, PollingEvaluationExecutor
@@ -67,8 +69,10 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
+from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,7 +82,7 @@ if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest
     from vs_runtime.api import AgentRole, OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 _RUN_ID = "lost-stage"
 _HANDLE = "handle-1"
@@ -110,9 +114,10 @@ class _LosesStageCommands(FakeCommandRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         del cancel  # no stage of this test is cancelled
-        result = super().execute(command, timeout=timeout)
+        result = super().execute(command, timeout=timeout, output=output)
         if _ACCURACY in command or _BENCHMARK in command:
             return self.lost
         return result
@@ -126,10 +131,15 @@ class _Session:
     view: RunEnvironmentView = field(
         default_factory=lambda: RunEnvironmentView(
             paths=AgentPaths(accuracy_command=_ACCURACY, benchmark_command=_BENCHMARK),
+            workspace_git_writable=True,
             cli_sandboxed=True,
             env_kind="modal",
         )
     )
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -221,7 +231,13 @@ def _measure_with_lost_command(
     root = tmp_path / "project"
     _write_project(root)
     sandbox = _LosesStageCommands(lost)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=SimThreads(),
+        system=idle_environment_system(),
+    )
     request = ProjectRunRequest(
         project_root=root,
         run_id=_RUN_ID,
@@ -235,7 +251,11 @@ def _measure_with_lost_command(
         trusted_input_paths=(".vibesys/tasks",),
     )
     effects = ProjectRunEffects(
-        git_events=NullGitTrackerEvents(), log_emit=_emit, on_log_ready=lambda _path: None
+        git_events=NullGitTrackerEvents(),
+        log_emit=_emit,
+        on_log_ready=lambda _path: None,
+        clock=ManualClock(),
+        git_repository=git_repositories(REAL_GIT),
     )
     with (
         closing(integration),
@@ -248,15 +268,18 @@ def _measure_with_lost_command(
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=FakeComputeBackend(),
+                backend=FakeComputeBackend(threads=SimThreads()),
                 agent_backend="claude",
                 cli_provider="claude",
                 run_id=_RUN_ID,
                 framework_root=tmp_path,
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
+                clock=ManualClock(),
+                system=idle_environment_system(),
             ),
             lambda _request: _Session(sandbox),
+            clock=ManualClock(),
         )
         with closing(environment):
             factory = WorkspaceResourceFactory(
@@ -272,16 +295,22 @@ def _measure_with_lost_command(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
+                threads=SimThreads(),
+                blocking=InlineBlockingRunner(),
             )
             runtime = create_workspace_runtime(
-                workspace_resources=factory, blocking=BlockingOperations()
+                workspace_resources=factory,
+                blocking=BlockingOperations(runner=InlineBlockingRunner(), threads=SimThreads()),
+                validation_passes=MemoryValidationPasses(),
             )
             evaluation = create_evaluation(
                 _RUN_ID, _run_request(root), runtime, integration.events, lambda _line: None
             )
 
             async def exercise() -> ExecutorObservation:
-                executor = PollingEvaluationExecutor(evaluation, runtime.workspaces)
+                executor = PollingEvaluationExecutor(
+                    evaluation, runtime.workspaces, clock=ManualClock()
+                )
                 try:
                     snapshot = await runtime.workspaces.root.snapshot("candidate")
                     await executor.submit(_measurement(snapshot, kind), handle_id=_HANDLE)

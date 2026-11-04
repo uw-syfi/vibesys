@@ -226,3 +226,34 @@ def test_worktree_head_of_a_plain_directory_is_a_command_error(
 
     with pytest.raises(GitCommandError):
         sandbox.repo.worktree_head(plain)
+
+
+def test_a_linked_worktree_location_comes_from_the_parent_registration(
+    sandbox: ContractProject, tmp_path: Path
+) -> None:
+    base = sandbox.start({"a.txt": "1\n"})
+    destination = tmp_path / "linked"
+    sandbox.repo.add_worktree(destination, base)
+
+    location = sandbox.repo.linked_worktree_location(destination)
+    linked = sandbox.factory(destination)
+    linked.pin(location)
+    (destination / "a.txt").write_text("edited\n", encoding="utf-8")
+    linked.stage_all(["."])
+    linked.commit("candidate work")
+
+    assert location.work_tree == destination.resolve()
+    assert linked.head() == sandbox.repo.worktree_head(destination) != base
+
+
+def test_the_location_of_a_directory_that_is_no_linked_worktree_is_a_command_error(
+    sandbox: ContractProject, tmp_path: Path
+) -> None:
+    sandbox.start({"a.txt": "1\n"})
+    plain = tmp_path / "plain"
+    plain.mkdir()
+
+    with pytest.raises(GitCommandError):
+        sandbox.repo.linked_worktree_location(plain)
+    with pytest.raises(GitCommandError):
+        sandbox.repo.linked_worktree_location(sandbox.root)

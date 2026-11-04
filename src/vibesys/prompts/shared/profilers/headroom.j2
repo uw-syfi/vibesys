@@ -41,9 +41,8 @@ entry point in this order:
 2. An executable `benchmark/headroom_capture.sh` (or `.py`) in the workspace,
    invoked with one argument: the output JSON path.
 
-Write reports under `profile/` for the current round so later rounds
-can `compare` against them. Use only capture interfaces present when this turn
-started. If no capture entry point exists, do not fabricate a report or
+Write reports under `/tmp`, never in the workspace. Use only capture interfaces present when
+this turn started. If no capture entry point exists, do not fabricate a report or
 hand-write JSON; report the missing capability in {{ reply.analysis }} and name the
 smallest contract the implementer must add (a capture command producing the
 schema documented in `{{ profiler_support_name }}/analyze_headroom.py`).
@@ -77,9 +76,10 @@ tools directly. Otherwise, shell out to the same subcommand on
 | `compare(old, new, top=15)` | `... compare <old> <new>` | Bucket + per-kernel deltas between rounds. |
 | `summary(report, top=10)` | `... summary <report>` | All-in-one: waterfall + top + caveats. |
 
-Start with `waterfall`, then `top`. When a previous round's report exists under
-`profile/`, run `compare` to verify whether the last hypothesis moved
-its targeted bucket; that delta is the most valuable evidence you can return.
+Start with `waterfall`, then `top`. When you hold two reports of the same capture (for
+example one taken before and one after a change you were asked about), run `compare` to verify
+whether the change moved its targeted bucket; that delta is the most valuable evidence you can
+return.
 
 Respect the report's `caveats` and per-kernel `notes`: upper-bound fusion
 estimates, latency-bound kernels, and estimated bytes are flagged there.

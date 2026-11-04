@@ -10,6 +10,8 @@ import inspect
 from typing import TYPE_CHECKING, Annotated
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.tools import Tool
+from pydantic import ConfigDict
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -67,20 +69,39 @@ def _make_tool_function[T: BaseModel](spec: ToolSpec[T]) -> Callable[..., str]:
     return tool_function
 
 
-def register_tool[T: BaseModel](mcp: FastMCP, spec: ToolSpec[T]) -> None:
-    """Register one :class:`ToolSpec` on ``mcp`` with a flattened argument schema."""
-    mcp.add_tool(_make_tool_function(spec), name=spec.name, description=spec.description)
+def _tool[T: BaseModel](spec: ToolSpec[T]) -> Tool:
+    """The FastMCP tool for ``spec``, refusing any argument its schema does not declare.
+
+    FastMCP validates arguments with a model built from the function's
+    signature, and that model drops a key it does not know: an agent's
+    misspelled optional argument would run the tool with the default instead.
+    The tool here validates with a subclass of that model that forbids extra
+    keys, and offers a schema that says so (``additionalProperties: false``).
+    """
+    tool = Tool.from_function(
+        _make_tool_function(spec), name=spec.name, description=spec.description
+    )
+    loose = tool.fn_metadata.arg_model
+    # Pydantic merges a subclass's config into its parent's, so only ``extra`` changes.
+    strict = type(loose.__name__, (loose,), {"model_config": ConfigDict(extra="forbid")})
+    return tool.model_copy(
+        update={
+            "fn_metadata": tool.fn_metadata.model_copy(update={"arg_model": strict}),
+            "parameters": strict.model_json_schema(by_alias=True),
+        }
+    )
+
+
+def tool_server(tools: Sequence[ToolSpec[Any]], *, server_name: str = "vibesys") -> FastMCP:
+    """A :class:`FastMCP` server exposing ``tools`` with flattened argument schemas."""
+    return FastMCP(server_name, tools=[_tool(spec) for spec in tools])
 
 
 def serve_stdio(tools: Sequence[ToolSpec[Any]], *, server_name: str = "vibesys") -> None:
     """Run a stdio MCP server exposing ``tools``.
 
-    Builds a :class:`FastMCP` instance, registers each tool programmatically,
-    then serves over stdio until the client disconnects. Knows nothing about
-    what the tools do; the caller assembles ``tools`` with handlers already
-    bound to whatever backing state the subprocess opened for itself.
+    Serves over stdio until the client disconnects. Knows nothing about what
+    the tools do; the caller assembles ``tools`` with handlers already bound
+    to whatever backing state the subprocess opened for itself.
     """
-    mcp = FastMCP(server_name)
-    for spec in tools:
-        register_tool(mcp, spec)
-    mcp.run(transport="stdio")
+    tool_server(tools, server_name=server_name).run(transport="stdio")

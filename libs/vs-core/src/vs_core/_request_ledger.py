@@ -9,7 +9,7 @@ fact at an accepted sequence is a typed rejection.
 
 Unknown acceptance and retryable failures keep the record open for a later,
 higher-sequence observation; only a conclusive terminal observation closes it,
-exactly once. Recovery (``_request_recovery``) reads this ledger and never writes
+exactly once. Recovery (``decide``) reads this ledger and never writes
 its request fields.
 """
 
@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from ._deadlines import from_dispatch, started_until
 from ._dispatch_episode import episode_ended
+from ._failure_routing import hear_failure, refusal_of
 from ._outcomes import prove_outcome
 from ._proofs import (
     Mismatch,
@@ -32,9 +33,10 @@ from ._proofs import (
     observation_for,
     released_owner,
 )
-from ._registry import ContractError
-from ._request_forward import declaration, owner_signals, records_own, success_without_reply
+from ._registry import ClosedRecordContradictionError, ContractError
+from ._request_forward import declaration, owner_signals, records_own
 from ._session_scope import lost_turn_cancellation
+from ._turn_permit import cap_dispatch_until, facts_for
 from ._values import digest
 from .types.attempts import RevisionOperationRequested
 from .types.common import (
@@ -46,6 +48,7 @@ from .types.common import (
     Observation,
     ObservationStatus,
     OperationNormalizationKind,
+    RejectionCode,
     RequestId,
     RevisionAuthority,
     RunStatus,
@@ -63,7 +66,6 @@ from .types.records import (
     OperationRetireRequested,
     Outbound,
     RecordsState,
-    RecoveryPhase,
     ReissueProof,
     RequestObserved,
     RequestPhase,
@@ -72,7 +74,9 @@ from .types.records import (
     RequestUndispatchable,
     RetryDue,
     TargetObservation,
+    command_open,
     request_lifecycle,
+    success_without_reply,
     within,
 )
 from .types.sessions import (
@@ -88,9 +92,11 @@ from .types.strategy import Cancel, Withdraw
 if TYPE_CHECKING:
     from .types.attempts import AttemptsState
     from .types.common import DecisionId
+    from .types.evaluation import EvaluationState
     from .types.kernel import RecordsContext, RunState, Signal, StrategyEvent
     from .types.records import RecordsEvent, RecordsState, Request
     from .types.sessions import SessionsState
+    from .types.until import Until
 
     type Facts = RequestObserved | TargetObservation
 
@@ -134,20 +140,17 @@ def advance(
 
 
 def _unique(state: RecordsState, identity: RequestId) -> RequestRecord | None:
-    rows = tuple(row for row in state.records if row.request_id == identity)
+    rows = state.find(identity)
     if len(rows) > 1:
         raise ContractError(("request_id", identity.root), "ambiguous canonical request identity")
     return rows[0] if rows else None
 
 
 def _replace(state: RecordsState, record: RequestRecord) -> RecordsState:
-    return state.model_copy(
-        update={
-            "records": tuple(
-                record if row.request_id == record.request_id else row for row in state.records
-            )
-        }
-    )
+    records = list(state.records)
+    for position in state.positions(record.request_id):
+        records[position] = record
+    return state.model_copy(update={"records": tuple(records)})
 
 
 def _conclusive(observation: Observation | None) -> bool:
@@ -245,17 +248,28 @@ def _dispatched(
             pass
         case _:
             raise ContractError(("phase",), f"{record.phase.value} request cannot be dispatched")
-    updated = record.model_copy(update={"phase": RequestPhase.DISPATCHED})
+    updated = record.model_copy(
+        update={"phase": RequestPhase.DISPATCHED, "dispatched_in": state.epoch}
+    )
     if record.limit_from_dispatch is not None and record.dispatched_at is None:
-        updated = updated.model_copy(
-            update={
-                "until": started_until(
-                    context.run, record.limit_from_dispatch, record.until.watches
-                ),
-                "dispatched_at": context.run.now_at,
-            }
-        )
+        until = dispatch_until(context.run, context.sessions, state, context.evaluation, record)
+        updated = updated.model_copy(update={"until": until, "dispatched_at": context.run.now_at})
     return AreaChange(state=_replace(state, updated))
+
+
+def dispatch_until(
+    run: RunState,
+    sessions: SessionsState,
+    records: RecordsState,
+    evaluation: EvaluationState,
+    record: RequestRecord,
+) -> Until:
+    """The limit of a request whose limit counts from its dispatch, were it dispatched now."""
+    if record.limit_from_dispatch is None:
+        return record.until
+    until = started_until(run, record.limit_from_dispatch, record.until.watches)
+    facts = facts_for(run=run, sessions=sessions, records=records, evaluation=evaluation)
+    return until.model_copy(update={"at": cap_dispatch_until(facts, record.request, until.at)})
 
 
 # --- Observation ------------------------------------------------------------------
@@ -286,7 +300,7 @@ def _observed(
         # Another inspection already returned it to PREPARED (two epochs inspected it).
         return change
     if target.reissue is not None and _reissuable(original, target.reissue):
-        return _finish(change, _reissue(change.state, original))
+        return _finish(change, _reissue(change.state, original, context))
     change = _finish(change, _apply(change.state, context, original, target))
     if isinstance(root.request, InspectTurn) and not success_without_reply(target.observation):
         # An inspection that learned nothing new still ends: Sessions must hear that the
@@ -429,23 +443,39 @@ def _reissuable(record: RequestRecord, proof: ReissueProof) -> bool:
     )
 
 
-def _reissue(state: RecordsState, record: RequestRecord) -> AreaChange[RecordsState]:
-    """An open request the executor can account for goes out again, unchanged, from PREPARED.
+def resent(record: RequestRecord, now_at: float, reconciliation_bound: float) -> RequestRecord:
+    """An open record the executor can account for, back to PREPARED to go out again unchanged.
 
-    Never begun: no effect started, so the request is simply sent again. Begun without a
-    result: the effect may have run, so the request is sent again to resume, and its
-    executor inspects the external effect before repeating it. Either way the request is
-    neither observed nor reported to its owner: the owner never learns it was interrupted,
-    and the replay equals the straight run.
+    It is neither observed nor reported to its owner: the owner never learns it was
+    interrupted, and the replay equals the straight run. A command (an inspection, cancel or
+    block) is core's own and has no owner's limit: sent again, it gets a fresh reconciliation
+    bound from *now_at*, or a re-send that waited out its first bound would lapse before it is
+    answered.
     """
-    reissued = record.model_copy(
+    until = record.until
+    if command_open(record):
+        until = until.model_copy(update={"at": max(until.at, now_at + reconciliation_bound)})
+    return record.model_copy(
         update={
             "phase": RequestPhase.PREPARED,
             "observation": None,
             "sequence": None,
             "retry_at": None,
+            "until": until,
         }
     )
+
+
+def _reissue(
+    state: RecordsState, record: RequestRecord, context: RecordsContext
+) -> AreaChange[RecordsState]:
+    """An open request the executor can account for goes out again, unchanged, from PREPARED.
+
+    Never begun: no effect started, so the request is simply sent again. Begun without a
+    result: the effect may have run, so the request is sent again to resume, and its
+    executor inspects the external effect before repeating it (`resent`).
+    """
+    reissued = resent(record, context.run.now_at, context.run.limits.reconciliation_bound)
     return AreaChange(state=_replace(state, reissued))
 
 
@@ -466,6 +496,8 @@ def _apply(
             ("observation", "request_id"), "observation requires committed dispatch authorization"
         )
     previous = record.observation
+    if previous is not None and _ended_at_close(previous) and observation != previous:
+        return _answered_after_close(state, context, record, facts)
     fresh = fresh_observation(() if previous is None else (previous,), observation, complete=True)
     if isinstance(fresh, Mismatch) and fresh.field == ProofField.SEQUENCE:
         if previous is not None and observation.sequence < previous.sequence:
@@ -483,23 +515,109 @@ def _apply(
 def _refine(
     state: RecordsState, record: RequestRecord, observation: Observation
 ) -> AreaChange[RecordsState]:
-    """A closed record only gains release facts; it never changes disposition."""
+    """A closed record only gains evidence: release facts and children. Its disposition stands.
+
+    A later answer that agrees with the disposition (see `_agrees`) adds what it proves: a
+    request core failed when the run closed around it may later be inspected, and the executor's
+    "never started" proves it released. A record's release facts never go back. An answer that
+    contradicts the disposition is a typed `ClosedRecordContradictionError`.
+    """
     previous = record.observation
-    if (
-        previous is None
-        or not observation.terminal
-        or observation.status != previous.status
-        or observation.accepted != previous.accepted
-        or observation.resource_id != previous.resource_id
-        or (previous.released and not observation.released)
-        or (previous.children_complete and not observation.children_complete)
-        or not set(previous.children) <= set(observation.children)
-    ):
-        raise ContractError(("observation",), "terminal request cannot change its disposition")
-    updated = record.model_copy(
-        update={"observation": observation, "sequence": observation.sequence}
+    if previous is not None and _claims_nothing(previous, observation):
+        return AreaChange(state=state)
+    if previous is None or not _agrees(previous, observation):
+        raise ClosedRecordContradictionError(record.request_id, previous, observation)
+    added = tuple(child for child in observation.children if child not in previous.children)
+    released = observation.released and not previous.released
+    complete = observation.children_complete and not previous.children_complete
+    if not (added or released or complete):
+        # Owners hold the record's observation as their proof; an answer that proves
+        # nothing new leaves it, and them, as they are.
+        return AreaChange(state=state)
+    proven = previous.model_copy(
+        update={
+            "event_id": observation.event_id,
+            "sequence": observation.sequence,
+            "observed_at": observation.observed_at,
+            "released": previous.released or released,
+            "children": (*previous.children, *added),
+            "children_complete": previous.children_complete or complete,
+        }
     )
+    updated = record.model_copy(update={"observation": proven, "sequence": proven.sequence})
     return AreaChange(state=_replace(state, updated))
+
+
+def canonical(state: RecordsState, event: RequestObserved) -> RequestObserved:
+    """The answer as the ledger recorded it, for the owners that read it after the ledger.
+
+    A closed record keeps its disposition and records only what an answer proves
+    (`_refine`), so its recorded observation, not the executor's raw status, is the
+    canonical fact at that sequence.
+    """
+    target = event.target
+    if target is None:
+        recorded = _recorded(state, event.observation)
+        return event if recorded is None else event.model_copy(update={"observation": recorded})
+    recorded = None if target.target_resource is not None else _recorded(state, target.observation)
+    if recorded is None:
+        return event
+    return event.model_copy(update={"target": target.model_copy(update={"observation": recorded})})
+
+
+def _recorded(state: RecordsState, observation: Observation) -> Observation | None:
+    """The closed record's observation, when it differs from *observation*.
+
+    The ledger has already taken *observation* in (`_refine`): it either refined the stored
+    observation with what *observation* proves, or left it as it was because *observation*
+    proved nothing new. Either way the stored observation is the canonical fact, never the
+    executor's raw status.
+    """
+    record = _unique(state, observation.request_id)
+    stored = None if record is None else record.observation
+    if (
+        record is None
+        or stored is None
+        or record.phase != RequestPhase.COMPLETED
+        or stored == observation
+    ):
+        return None
+    return stored
+
+
+_DID_NOT_SUCCEED = frozenset(
+    {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
+)
+
+
+def _claims_nothing(closed: Observation, later: Observation) -> bool:
+    """Whether a later answer is an executor that cannot say, about a closed record.
+
+    An executor that cannot say reports itself unaccepted, even of a job it once took (it lost
+    its record of a submission that never reached the cluster). Such an answer claims nothing,
+    so it neither contradicts the disposition nor proves a release.
+    """
+    return later.status == ObservationStatus.UNKNOWN and later.accepted != closed.accepted
+
+
+def _agrees(closed: Observation, later: Observation) -> bool:
+    """Whether a later answer is consistent with the one that closed a record.
+
+    It must claim the same acceptance and resource. An unknown status claims no outcome, so
+    it agrees with any: a later host may know less than the one that closed the record. A
+    success agrees only with a success; an answer that says the request did not succeed
+    (failed, rejected, cancelled) agrees with any other such answer, since each only says
+    how it did not succeed. A pending answer says the request is still running, which no
+    closed record allows.
+    """
+    return (
+        later.accepted == closed.accepted
+        and later.resource_id == closed.resource_id
+        and (
+            later.status in {ObservationStatus.UNKNOWN, closed.status}
+            or {later.status, closed.status} <= _DID_NOT_SUCCEED
+        )
+    )
 
 
 def retry_delay(context: RecordsContext, retries: int) -> float:
@@ -507,11 +625,11 @@ def retry_delay(context: RecordsContext, retries: int) -> float:
     return context.run.limits.request_retries.delay(retries)
 
 
-def _retry_limit(context: RecordsContext, record: RequestRecord) -> int:
-    request = record.request
+def retry_limit(run: RunState, request: Request) -> int:
+    """The re-sends a request may have after its first attempt."""
     if isinstance(request, ExecuteRegisteredOperation):
         return request.retry_limit
-    return context.run.limits.request_retries.limit
+    return run.limits.request_retries.limit
 
 
 def _next_phase(record: RequestRecord, observation: Observation) -> tuple[RequestPhase, int]:
@@ -554,7 +672,9 @@ def _exhausted(context: RecordsContext, record: RequestRecord, facts: Facts) -> 
     up by one so a redelivery of the retryable answer stays inert.
     """
     observation = facts.observation
-    if not observation.retryable or record.retry_count + 1 <= _retry_limit(context, record):
+    if not observation.retryable or record.retry_count + 1 <= retry_limit(
+        context.run, record.request
+    ):
         return facts
     return TargetObservation(
         observation=observation.model_copy(
@@ -590,20 +710,12 @@ def next_retry_at(state: RecordsState) -> float | None:
 def _retry(
     state: RecordsState, context: RecordsContext, event: RetryDue
 ) -> AreaChange[RecordsState]:
-    """Send a retryably failed request out again, unchanged, once its backoff has passed.
-
-    Recovery owns every open request while it gates the run, so a retry waits for it.
-    """
+    """Send a retryably failed request out again, unchanged, once its backoff has passed."""
     record = _unique(state, event.request_id)
     due = None if record is None else record.retry_wait_until
-    if (
-        record is None
-        or due is None
-        or max(context.run.now_at, event.now_at) < due
-        or state.recovery.phase != RecoveryPhase.READY
-    ):
+    if record is None or due is None or max(context.run.now_at, event.now_at) < due:
         return AreaChange(state=state)
-    return _reissue(state, record)
+    return _reissue(state, record, context)
 
 
 @dataclass(frozen=True)
@@ -629,9 +741,47 @@ def _undispatchable(
     facts = _EpisodeFacts(
         run=context.run, attempts=context.attempts, sessions=context.sessions, records=state
     )
-    if not (dependency_failed(record.request, state) or episode_ended(facts, record.request)):
+    if dependency_failed(record.request, state):
+        return _cancel_prepared(state, context, (record,), RejectionCode.DEPENDENCY)
+    if episode_ended(facts, record.request):
+        return _cancel_prepared(state, context, (record,), RejectionCode.CLOSED_SCOPE)
+    return AreaChange(state=state)
+
+
+def _ended_at_close(observation: Observation) -> bool:
+    """Whether *observation* is core's own end of a blocked record a closing run waited on."""
+    return observation.event_id.root.startswith(_CLOSE_END)
+
+
+def _answered_after_close(
+    state: RecordsState, context: RecordsContext, record: RequestRecord, facts: Facts
+) -> AreaChange[RecordsState]:
+    """An executor's answer to a record core ended because a closing run waited on it.
+
+    Core ended the record on the premise that no answer would come (`_end_stalled_block`),
+    numbering its end right after the executor's last answer. The executor's next answer
+    carries that same number, so it is judged on what it says, never refused as a sequence
+    conflict; one numbered before the end is an answer the end already saw.
+
+    An answer that agrees with the end, or claims nothing, adds what it proves (`_refine`).
+    One that disagrees proves the premise wrong: while the run is still closing it is taken
+    as the blocked record the end replaced would take it, so what it names (a job a slow
+    submission started) is known to its owner, which ends it, and the passed bound ends the
+    record again. Once the run is terminal nothing can act on it: a disagreement is the typed
+    contradiction.
+    """
+    ended = record.observation
+    answer = facts.observation
+    if ended is None or answer.sequence < ended.sequence:
         return AreaChange(state=state)
-    return _cancel_prepared(state, context, (record,))
+    if (
+        context.run.status != RunStatus.CLOSING
+        or _claims_nothing(ended, answer)
+        or _agrees(ended, answer)
+    ):
+        return _refine(state, record, answer)
+    blocked = record.model_copy(update={"phase": RequestPhase.BLOCKED})
+    return _advance_phase(state, context, blocked, facts)
 
 
 def _end_stalled_block(
@@ -639,10 +789,11 @@ def _end_stalled_block(
 ) -> AreaChange[RecordsState]:
     """End the blocked record a closing run waits on, as a conclusive failure.
 
-    The record's bound passed and nothing addresses it, so no executor answer will come. The
+    The record's bound passed and nothing addresses it, so no executor answer is expected. The
     failure keeps what the executor reported (acceptance, resource, children, release), so
     the end never claims a release nobody proved: an owner whose release is unproven keeps
-    holding closure until its own cancellation proves it.
+    holding closure until its own cancellation proves it. An answer that comes anyway (one
+    already on its way when the bound passed) is judged by `_answered_after_close`.
     """
     record = _unique(state, event.request_id)
     if (
@@ -655,7 +806,7 @@ def _end_stalled_block(
     request = record.request
     ended = (
         Observation(
-            event_id=EventId(root=f"blocked-at-close:{record.request_id.root}"),
+            event_id=EventId(root=f"{_CLOSE_END}{record.request_id.root}"),
             request_id=record.request_id,
             scope=request.scope,
             sequence=0,
@@ -667,7 +818,7 @@ def _end_stalled_block(
         if previous is None
         else previous.model_copy(
             update={
-                "event_id": EventId(root=f"blocked-at-close:{record.request_id.root}"),
+                "event_id": EventId(root=f"{_CLOSE_END}{record.request_id.root}"),
                 "sequence": previous.sequence + 1,
                 "observed_at": context.run.now_at,
                 "status": ObservationStatus.FAILED,
@@ -679,6 +830,7 @@ def _end_stalled_block(
 
 
 _BLOCKED_AT_CLOSE = "the run closed while this request was blocked at its reconciliation bound"
+_CLOSE_END = "blocked-at-close:"
 
 
 def _record(
@@ -701,6 +853,12 @@ def _record(
             outcome_json=facts.outcome_json,
             outcome=facts.outcome,
         )
+        if facts.outcome_is_registered:
+            # The record carries the proof its decoded copy gets from the registry, so a
+            # host that keeps running decides as one that reloaded the record does.
+            return prove_outcome(
+                record.model_copy(update=update), facts.outcome, facts.operation_schema
+            )
     return record.model_copy(update=update)
 
 
@@ -829,8 +987,18 @@ def _unsent_cancellation(context: RecordsContext, record: RequestRecord) -> Targ
 
 
 def _cancel_prepared(
-    state: RecordsState, context: RecordsContext, doomed: tuple[RequestRecord, ...]
+    state: RecordsState,
+    context: RecordsContext,
+    doomed: tuple[RequestRecord, ...],
+    cause: RejectionCode | None,
 ) -> AreaChange[RecordsState]:
+    """Close never-sent requests as unsent cancellations; ``cause`` is why none will be sent.
+
+    Their owners hear of it. Most kinds are told by the area that owns them (from the closing
+    observation's signal). A registered operation has no outcome to tell its asker, so the asker
+    is told here, as ``Failed(REFUSED)`` naming ``cause``, exactly once per decision (see
+    ``_asker_unheard``). ``cause`` is ``None`` when the asker itself withdrew the request.
+    """
     change = AreaChange(state=state)
     for record in doomed:
         current = _unique(change.state, record.request_id)
@@ -838,7 +1006,29 @@ def _cancel_prepared(
             continue
         facts = _unsent_cancellation(context, current)
         change = _finish(change, _apply(change.state, context, current, facts, unsent=True))
+        if cause is not None and _asker_unheard(context, current):
+            ended = _unique(change.state, current.request_id)
+            if ended is not None:
+                records, heard = hear_failure(change.state, ended, refusal_of(ended, cause))
+                change = _finish(change, AreaChange(state=records, events=heard))
     return change
+
+
+def _asker_unheard(context: RecordsContext, record: RequestRecord) -> bool:
+    """Whether ending ``record`` unsent leaves its asker without an event.
+
+    Every registered operation, but the two whose owning area answers it from the closing
+    observation's signal: an agent turn (its session ends the turn) and a scope reopen (its
+    attempt answers the reopen). The other kinds' areas answer their own.
+    """
+    request = record.request
+    if not isinstance(request, ExecuteRegisteredOperation):
+        return False
+    descriptor = declaration(context, request)
+    return (
+        descriptor.lifecycle is not LifecycleClass.SESSION_TURN
+        and descriptor.normalization is not OperationNormalizationKind.SCOPE_REOPEN
+    )
 
 
 def _cancel_dependents(
@@ -850,7 +1040,7 @@ def _cancel_dependents(
         for row in state.records
         if row.phase == RequestPhase.PREPARED and failed.request_id in row.request.depends_on
     )
-    return _cancel_prepared(state, context, doomed)
+    return _cancel_prepared(state, context, doomed, RejectionCode.DEPENDENCY)
 
 
 def _retirement_decision(
@@ -889,7 +1079,7 @@ def _retire(
         else _completion_signal(context, withdraw, CompletionStatus.SUCCEEDED)
     )
     if record.phase == RequestPhase.PREPARED:
-        change = _cancel_prepared(state, context, (record,))
+        change = _cancel_prepared(state, context, (record,), None)
         return _finish(change, AreaChange(state=change.state, signals=done))
     observation = record.observation
     if record.phase == RequestPhase.COMPLETED and isinstance(

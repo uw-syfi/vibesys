@@ -8,14 +8,16 @@ and the plugin's one global, the session depth, is put back after every case.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import selectors
 import signal
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from vs_sim.api.testing import (
@@ -26,6 +28,7 @@ from vs_sim.api.testing import (
     VirtualDeadlockError,
     WorldRegistry,
     depth,
+    explore_seed,
     run_in_child,
     run_virtual,
     using_depth,
@@ -33,6 +36,7 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from types import FrameType
 
 pytest_plugins = ["pytester"]
 
@@ -177,6 +181,20 @@ def test_the_determinism_check_passes_a_deterministic_test(suite: pytest.Pyteste
     suite.runpytest_inprocess("--sim-determinism-check").assert_outcomes(passed=1)
 
 
+def test_the_determinism_check_preserves_named_tasks(suite: pytest.Pytester) -> None:
+    suite.makepyfile(
+        """
+        import asyncio
+
+        async def test_named_task(sim):
+            task = asyncio.create_task(sim.clock.sleep(1), name="worker")
+            assert task.get_name() == "worker"
+            await task
+        """
+    )
+    suite.runpytest_inprocess("--sim-determinism-check").assert_outcomes(passed=1)
+
+
 def test_the_determinism_check_catches_a_test_that_depends_on_something_outside_the_clock(
     suite: pytest.Pytester,
 ) -> None:
@@ -217,7 +235,10 @@ def test_worlds_registered_by_a_project_are_built_once_per_test(suite: pytest.Py
             def __init__(self, clock):
                 self.clock = clock
 
-        WORLDS.register("cluster", lambda sim: Cluster(sim.clock))
+        # WORLDS is process-wide, and every in-process run of this test (seed exploration
+        # repeats it) imports this conftest again; a project's conftest is imported once.
+        if "cluster" not in WORLDS.names:
+            WORLDS.register("cluster", lambda sim: Cluster(sim.clock))
         """
     )
     suite.makepyfile(
@@ -246,10 +267,23 @@ def test_the_header_names_the_seed_policy(suite: pytest.Pytester) -> None:
 
 
 def _alarm_during_a_worker_wait() -> str:
-    """What ``timeout_method = "signal"`` does: SIGALRM raises from its handler in the main thread."""
-    release = threading.Event()
+    """What ``timeout_method = "signal"`` does: SIGALRM raises from its handler in the main thread.
 
-    def on_alarm(_number: int, _frame: object) -> None:
+    The bound is meant to land while the run is stuck on its worker thread. A fixed timer
+    landed wherever a slow child happened to be (starting the loop, submitting the call,
+    importing), and an exception raised there left the loop unable to close: the child hung
+    for the 60 s hang guard in CI, or reported a deadlock. The handler raises only once the
+    worker is waiting and the main thread is blocked in the loop's selector, and otherwise
+    sets the timer again, so where it lands no longer depends on how fast the child runs.
+    """
+    release = threading.Event()
+    holding = threading.Event()
+
+    def on_alarm(_number: int, frame: FrameType | None) -> None:
+        blocked = frame is not None and frame.f_code.co_filename == selectors.__file__
+        if not (holding.is_set() and blocked):
+            signal.setitimer(signal.ITIMER_REAL, 0.01)
+            return
         message = "the test bound"
         raise TimeoutError(message)
 
@@ -257,6 +291,7 @@ def _alarm_during_a_worker_wait() -> str:
     signal.setitimer(signal.ITIMER_REAL, 0.05)
 
     def hold() -> None:
+        holding.set()
         release.wait(60)
 
     async def main() -> None:
@@ -393,11 +428,196 @@ def test_explore_deselects_real_tiers_and_other_tests_unless_repeated(
     )
 
 
-def test_explore_budget_stops_extra_runs_but_never_the_first(suite: pytest.Pytester) -> None:
+def test_a_spent_budget_cuts_even_a_tests_first_exploration_run(suite: pytest.Pytester) -> None:
     suite.makepyfile("async def test_sim():\n    pass\n")
-    result = suite.runpytest_inprocess("--sim-explore=50", "--sim-explore-budget=0")
+    result = suite.runpytest_inprocess(
+        "--sim-explore=50", "--sim-explore-budget=0", "--sim-explore-report=explored.jsonl", "-rs"
+    )
+    result.assert_outcomes(skipped=1)
+    result.stdout.fnmatch_lines(
+        [
+            "vs-sim exploration: 0 of 50 *",
+            "*not explored: the budget or an interrupt ended exploration first*",
+        ]
+    )
+    assert _explored(suite.path / "explored.jsonl") == {
+        "test_a_spent_budget_cuts_even_a_tests_first_exploration_run.py::test_sim": (
+            0,
+            50,
+            "not explored",
+        )
+    }
+
+
+COUNTING_SUITE = """
+from pathlib import Path
+
+def _run(name):
+    counter = Path({example!r}) / name
+    count = int(counter.read_text()) if counter.exists() else 0
+    if name == {interrupter!r} and count == {interrupt_run}:
+        raise KeyboardInterrupt
+    counter.write_text(str(count + 1))
+
+{tests}
+"""
+
+
+@settings(
+    max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+@given(
+    tests=st.integers(1, 4),
+    data=st.data(),
+    interrupt_run=st.integers(0, 3),
+    salt=st.text("0123456789abcdef", min_size=1, max_size=8),
+)
+def test_an_interrupt_leaves_every_test_explored_within_one_run_of_the_others(
+    suite: pytest.Pytester, tests: int, data: st.DataObject, interrupt_run: int, salt: str
+) -> None:
+    """Exploration runs in rounds, so a cut (budget or interrupt) never starves later tests."""
+    names = [f"test_{index}" for index in range(tests)]
+    interrupter = data.draw(st.sampled_from(names))
+    # A new module and counter directory per example: a rewritten module of the same size
+    # and second would otherwise load from its stale bytecode cache.
+    example = suite.mkdir(f"example_{len(list(suite.path.glob('example_*')))}")
+    module = example / "test_counting.py"
+    module.write_text(
+        COUNTING_SUITE.format(
+            example=str(example),
+            interrupter=interrupter,
+            interrupt_run=interrupt_run,
+            tests="\n".join(f"def {name}():\n    _run({name!r})\n" for name in names),
+        )
+    )
+    report = example / "explored.jsonl"
+    result = suite.runpytest_inprocess(
+        str(module),
+        "--sim-explore=1",
+        "--sim-repeat=5",
+        f"--sim-explore-salt={salt}",
+        f"--sim-explore-report={report}",
+    )
+
+    explored = {test.rpartition("::")[2]: row for test, row in _explored(report).items()}
+    runs = {name: row[0] for name, row in explored.items()}
+    counted = {
+        name: int((example / name).read_text()) if (example / name).exists() else 0
+        for name in names
+    }
+    assert runs == counted
+    assert {row[2] for row in explored.values() if row[0] == 0} <= {"not explored"}
+    assert {row[2] for row in explored.values() if row[0] > 0} <= {"passed"}
+    assert runs[interrupter] == interrupt_run
+    assert set(runs.values()) <= {interrupt_run, interrupt_run + 1}
+    ran = sum(1 for count in runs.values() if count)
+    result.assert_outcomes(passed=ran, skipped=tests - ran)
+    result.stdout.fnmatch_lines(["vs-sim exploration: * stopped by an interrupt)"])
+
+
+def test_the_salt_picks_the_exploration_seeds(suite: pytest.Pytester) -> None:
+    suite.makepyfile(
+        test_seeds="""
+        from pathlib import Path
+
+        async def test_sim(sim):
+            with Path("seeds").open("a") as out:
+                out.write(f"{sim.seed}\\n")
+        """
+    )
+
+    def seeds(*salt: str) -> list[int]:
+        (suite.path / "seeds").unlink(missing_ok=True)
+        suite.runpytest_inprocess("--sim-explore=3", *salt).assert_outcomes(passed=1)
+        return [int(line) for line in (suite.path / "seeds").read_text().split()]
+
+    unsalted = seeds()
+    assert unsalted == [explore_seed("test_seeds.py::test_sim", run) for run in range(3)]
+    salted = seeds("--sim-explore-salt=abc")
+    assert salted == seeds("--sim-explore-salt=abc")
+    assert len(set(salted)) == 3
+    fixed = 2  # the plugin's FIXED_EXPLORATION_RUNS, a documented part of --sim-explore-salt
+    # The first runs repeat under every salt, so a failing seed is retried on the next push;
+    # the later runs differ by salt.
+    assert salted[:fixed] == unsalted[:fixed] == seeds("--sim-explore-salt=abd")[:fixed]
+    assert not set(salted[fixed:]) & set(seeds("--sim-explore-salt=abd"))
+    assert not set(salted[fixed:]) & set(unsalted)
+
+
+def test_a_failure_found_under_one_salt_is_replayed_first_under_the_next(
+    suite: pytest.Pytester,
+) -> None:
+    suite.makepyfile(test_race=ORDER_DEPENDENT_SUITE)
+    found = suite.path / "found.jsonl"
+    suite.runpytest_inprocess(
+        "--sim-explore=24", "--sim-explore-salt=push-1", f"--sim-explore-report={found}"
+    ).assert_outcomes(failed=1)
+    [row] = [json.loads(line) for line in found.read_text().splitlines()]
+    assert row["outcome"] == "failed"
+    assert isinstance(row["seed"], int)
+    replays = suite.path / "replays.jsonl"
+    replays.write_text(json.dumps({"test": row["test"], "seed": row["seed"]}) + "\n")
+    again = suite.path / "again.jsonl"
+
+    # One run under a new salt is the replayed seed, so it fails the same way.
+    suite.runpytest_inprocess(
+        "--sim-explore=1",
+        "--sim-explore-salt=push-2",
+        f"--sim-explore-replay={replays}",
+        f"--sim-explore-report={again}",
+    ).assert_outcomes(failed=1)
+    [replayed] = [json.loads(line) for line in again.read_text().splitlines()]
+    assert (replayed["runs"], replayed["seed"]) == (1, row["seed"])
+
+
+def test_a_missing_replay_file_replays_nothing(suite: pytest.Pytester) -> None:
+    suite.makepyfile("async def test_sim(sim):\n    pass\n")
+    missing = suite.path / "missing.jsonl"
+
+    result = suite.runpytest_inprocess("--sim-explore=2", f"--sim-explore-replay={missing}")
+
     result.assert_outcomes(passed=1)
-    result.stdout.fnmatch_lines(["vs-sim exploration: 1 of 50 planned runs in *"])
+    assert "replay file ignored" not in result.stdout.str()
+
+
+_TWO_ROWS = (
+    '{"test": "test_x.py::test_sim", "seed": 1}\n{"test": "test_x.py::test_sim", "seed": 2}\n'
+)
+
+
+@pytest.mark.parametrize(
+    "cache",
+    [
+        pytest.param(_TWO_ROWS[:-10], id="cut-short-in-the-last-row"),
+        pytest.param(_TWO_ROWS[:20], id="cut-short-in-the-first-row"),
+        pytest.param('{"test": "test_x.py::test_sim", "seed": 1, "salt": "x"}\n', id="unknown-key"),
+        pytest.param('{"test": "test_x.py::test_sim", "seed": true}\n', id="seed-not-an-integer"),
+        pytest.param("[1, 2]\n", id="not-an-object"),
+        pytest.param("\x00\x00\n", id="garbage"),
+    ],
+)
+def test_an_unreadable_replay_file_is_ignored_with_a_note_so_the_run_rewrites_it(
+    suite: pytest.Pytester, cache: str
+) -> None:
+    suite.makepyfile("async def test_sim(sim):\n    pass\n")
+    bad = suite.path / "bad.jsonl"
+    bad.write_text(cache)
+    report = suite.path / "report.jsonl"
+
+    result = suite.runpytest_inprocess(
+        "--sim-explore=2", f"--sim-explore-replay={bad}", f"--sim-explore-report={report}"
+    )
+
+    result.assert_outcomes(passed=1)
+    result.stdout.fnmatch_lines([f"*replay file ignored, replaying nothing: {bad}:*"])
+    [row] = [json.loads(line) for line in report.read_text().splitlines()]
+    assert row["runs"] == 2
+
+
+def _explored(report: Path) -> dict[str, tuple[int, int, str]]:
+    """Each test's exploration runs, planned runs and outcome, from ``--sim-explore-report``."""
+    rows = [json.loads(line) for line in report.read_text().splitlines()]
+    return {row["test"]: (row["runs"], row["planned"], row["outcome"]) for row in rows}
 
 
 @pytest.mark.parametrize(
@@ -469,3 +689,88 @@ def test_slow_tests_run_at_nightly_depth_and_when_selected_by_marker(
     result = suite.runpytest_inprocess(*arguments)
 
     result.assert_outcomes(**outcomes)
+
+
+_SMOKE_SUITE = """
+import pytest
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "case",
+    [pytest.param("known", marks=pytest.mark.xfail(strict=True, reason="known")), "first", "second"],
+)
+def test_slow_sweep(case):
+    assert case != "known"
+
+@pytest.mark.slow
+def test_slow_single():
+    pass
+
+def test_fast():
+    pass
+"""
+
+
+def test_a_pull_request_runs_one_case_of_each_slow_test_in_a_smoke_directory(
+    suite: pytest.Pytester,
+) -> None:
+    suite.makeini(
+        "[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\n"
+        "markers = slow: s\nsim_smoke_slow =\n    smoke\n"
+    )
+    suite.makepyfile(**{"smoke/test_in": _SMOKE_SUITE, "elsewhere/test_out": _SMOKE_SUITE})
+
+    result = suite.runpytest_inprocess("-v")
+
+    ran = re.findall(r"^(\S+::\S+) PASSED", result.stdout.str(), re.MULTILINE)
+    assert sorted(ran) == [
+        "elsewhere/test_out.py::test_fast",
+        "smoke/test_in.py::test_fast",
+        "smoke/test_in.py::test_slow_single",
+        "smoke/test_in.py::test_slow_sweep[first]",
+    ]
+
+
+def test_the_nightly_depth_runs_every_case_of_a_smoke_directory(suite: pytest.Pytester) -> None:
+    suite.makeini(
+        "[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\n"
+        "markers = slow: s\nsim_smoke_slow =\n    smoke\n"
+    )
+    suite.makepyfile(**{"smoke/test_in": _SMOKE_SUITE})
+
+    suite.runpytest_inprocess("--depth=nightly").assert_outcomes(passed=4, xfailed=1)
+
+
+def test_a_test_whose_product_code_swallows_a_refused_process_start_still_fails(
+    suite: pytest.Pytester,
+) -> None:
+    suite.makepyfile(
+        """
+        from pathlib import Path
+
+        from vs_sim.api import DISCARD, ProcessSpec
+        from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher
+
+        def best_effort_cleanup(run):
+            try:
+                run()
+            except Exception:
+                return "cleanup skipped"
+            return "cleaned"
+
+        def test_swallowed_run_refusal():
+            spec = ProcessSpec(argv=("docker", "rm", "x"))
+            assert best_effort_cleanup(lambda: NO_PROCESSES.run(spec, timeout=None, output=DISCARD)) == "cleanup skipped"
+
+        def test_swallowed_piped_refusal():
+            launcher = FakePipedProcessLauncher()
+            assert best_effort_cleanup(lambda: launcher.start(("git", "status"))) == "cleanup skipped"
+
+        def test_no_refusal():
+            assert best_effort_cleanup(lambda: None) == "cleaned"
+        """
+    )
+    result = suite.runpytest_inprocess()
+    result.assert_outcomes(passed=1, failed=2)
+    result.stdout.fnmatch_lines(["*turned away a process start*docker rm x*"])
+    result.stdout.fnmatch_lines(["*turned away a process start*'git' was started*"])

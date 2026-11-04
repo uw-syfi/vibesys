@@ -12,7 +12,6 @@ from hypothesis import strategies as st
 from tests.support.executor_cases import CASES, inspect_dispatch_of
 
 from vs_core.api import DispatchTurn, ResumeSessionTurn
-from vs_runtime.api.executor_contexts import RevocableLease
 from vs_runtime.api.executor_contracts import ProcessKilledError
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_sim.api.testing import examples
@@ -32,7 +31,7 @@ _DISPATCHING = [
 async def _boundaries(case: ExecutorCase, scenario: Scenario) -> int:
     async with case.world() as probe:
         request = await probe.prepare(scenario)
-        await probe.execute(request, lease=RevocableLease(), crash_at=None)
+        await probe.execute(request, crash_at=None)
         return 2 * probe.writes()
 
 
@@ -72,9 +71,7 @@ def test_whatever_the_order_of_crashes_retries_and_inspections_every_answer_name
                         continue
                     crash_at = None if action == "complete" else cast("int", action)
                     with contextlib.suppress(ProcessKilledError):
-                        seen.append(
-                            await world.execute(request, lease=RevocableLease(), crash_at=crash_at)
-                        )
+                        seen.append(await world.execute(request, crash_at=crash_at))
                 assert_core_accepts(seen, expect_retry=False)
 
         asyncio.run(run())

@@ -8,8 +8,8 @@ is not published as a separate Python distribution.
 
 ## Responsibility
 
-This package owns the storage-neutral `IssueTracker` and `ProgressLog`
-contracts, local and GitHub implementations, issue state and history, create
+This package owns the storage-neutral `IssueTracker`, `ProgressLog` and
+`Roadmap` contracts, local and GitHub implementations, issue state and history, create
 policies, text formatting, backend configuration, and run-scoped sessions.
 Applications provide paths, run identity, and loop policy.
 
@@ -32,6 +32,14 @@ Applications provide paths, run identity, and loop policy.
   without making rendering part of the core library.
 - `CreateIssuePolicy` keeps role-specific create limits out of application
   wrappers.
+- `Roadmap` keeps a search's planning items (`RoadmapItem`: a Major or a Minor
+  that blocks one, with a status) independently of storage. `put` creates or
+  replaces items by id as one atomic batch, refusing what the pure
+  `roadmap_problem` names; items are never deleted. `DocumentRoadmap` keeps
+  them as one JSON document in a store the application opens, `FakeRoadmap` in
+  memory; both pass `tests/test_roadmap_contract.py`, as any later
+  implementation (a tracker's issues) must. `ReadRoadmap` and
+  `PutRoadmapItems` are the core operations a strategy reaches it through.
 
 GitHub issue types use `vibesys:type/*` labels. In-progress and blocked states
 use `vibesys:status/*` labels, while GitHub's native open/closed state handles

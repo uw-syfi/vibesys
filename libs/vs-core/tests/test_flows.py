@@ -183,7 +183,9 @@ def test_other_control_actions_are_ignored(begin: Begin) -> None:
     run = begin(plan_then_end)
     run.send(
         core.StopRequested(
-            control=core.ControlInput(control_id=core.ControlId(root="c"), action="pause")
+            control=core.ControlInput(
+                control_id=core.ControlId(root="c"), action="pause", owner=core.PauseOwner.OPERATOR
+            )
         )
     )
     assert waits(run) == ["planner"]
@@ -275,6 +277,153 @@ def test_leaving_a_group_waits_for_every_task(begin: Begin) -> None:
     assert run.finished is None
     answer(run, "work", 2)
     assert ended(run).reason == "no-winner: all done"
+
+
+# -- latches ------------------------------------------------------------------------------------
+
+LEARNED = core.LatchKey[int]("learned")
+
+
+async def learns_then_shares(ctx: core.Flow, _config: Config) -> core.NoWinner:
+    """Two tasks wait for what the root learns; one asks its own turn first."""
+
+    async def waiter(ctx: core.Flow, turns: int) -> int:
+        own = sum([answer_of(await ask(ctx, "own")) for _ in range(turns)])
+        return own + await ctx.latch(LEARNED)
+
+    async with ctx.group() as waiters:
+        waiters.start("a", waiter, 1)
+        waiters.start("b", waiter, 0)
+        ctx.latch(LEARNED).set(answer_of(await ask(ctx, "learn")))
+        results = sorted([done async for done in waiters], key=str)
+    return core.NoWinner(reason=f"results {results}")
+
+
+def test_a_latch_gives_every_waiter_the_value_set_once_whenever_it_waits(begin: Begin) -> None:
+    run = begin(learns_then_shares)
+    assert sorted(waits(run)) == ["a/own", "learn"]
+    answer(run, "learn", 5)
+    assert run.finished is None  # b has the value; a still waits for its own turn
+    answer(run, "own", 1)
+    assert ended(run).reason == "no-winner: results [5, 6]"
+
+
+def test_setting_a_latch_twice_is_a_bug(begin: Begin) -> None:
+    async def twice(ctx: core.Flow, _config: Config) -> None:
+        ctx.latch(LEARNED).set(1)
+        ctx.latch(LEARNED).set(2)
+
+    with pytest.raises(core.ContractError, match="set once"):
+        begin(twice)
+
+
+def test_two_latch_keys_with_one_name_are_refused_whatever_their_types(begin: Begin) -> None:
+    """A second key under a name in use could hold another type: one cell would mix them."""
+    clashing = core.LatchKey[str](LEARNED.name)
+
+    async def mixes(ctx: core.Flow, _config: Config) -> None:
+        ctx.latch(LEARNED).set(1)
+        await ctx.latch(clashing)
+
+    with pytest.raises(core.ContractError, match="another latch key has this name"):
+        begin(mixes)
+
+
+VERDICT = core.LatchKey[int]("verdict")
+REPORTS = core.ChannelKey[str]("reports")
+
+
+async def reports_then_hears(ctx: core.Flow, _config: Config) -> core.NoWinner:
+    """Two tasks report to the root mid-flight; the root answers each on its own item latch."""
+
+    async def reporter(ctx: core.Flow, name: str) -> int:
+        ctx.channel(REPORTS).send(name)
+        return await ctx.latch(VERDICT.of(name))
+
+    heard: list[str] = []
+    results: list[int] = []
+    async with ctx.group() as reporters:
+        reporters.start("a", reporter, "a")
+        reporters.start("b", reporter, "b")
+        while len(results) < 2:
+            match await ctx.first(ctx.channel(REPORTS), reporters):
+                case str() as name:
+                    heard.append(name)
+                    ctx.latch(VERDICT.of(name)).set(len(heard) * 10)
+                case int() as result:
+                    results.append(result)
+                case other:
+                    raise AssertionError(other)
+    return core.NoWinner(reason=f"heard {heard} results {sorted(results)}")
+
+
+def test_a_channel_carries_reports_to_the_root_in_order_and_item_latches_answer_each(
+    begin: Begin,
+) -> None:
+    run = begin(reports_then_hears)
+    assert ended(run).reason == "no-winner: heard ['a', 'b'] results [10, 20]"
+
+
+def test_item_latches_of_one_declaration_are_separate_and_a_clashing_name_is_refused(
+    begin: Begin,
+) -> None:
+    async def items(ctx: core.Flow, _config: Config) -> core.NoWinner:
+        ctx.latch(VERDICT.of("x")).set(1)
+        ctx.latch(VERDICT.of("y")).set(2)
+        found = (await ctx.latch(VERDICT.of("x")), await ctx.latch(VERDICT.of("y")))
+        return core.NoWinner(reason=f"items {found}")
+
+    assert ended(begin(items)).reason == "no-winner: items (1, 2)"
+
+    clashing = core.LatchKey[int]("verdict/x")
+
+    async def clashes(ctx: core.Flow, _config: Config) -> None:
+        ctx.latch(VERDICT.of("x")).set(1)
+        await ctx.latch(clashing)
+
+    with pytest.raises(core.ContractError, match="another latch key has this name"):
+        begin(clashes)
+
+
+def test_two_channel_keys_with_one_name_are_refused(begin: Begin) -> None:
+    clashing = core.ChannelKey[int](REPORTS.name)
+
+    async def mixes(ctx: core.Flow, _config: Config) -> None:
+        ctx.channel(REPORTS).send("a")
+        ctx.channel(clashing).send(1)
+
+    with pytest.raises(core.ContractError, match="another channel key has this name"):
+        begin(mixes)
+
+
+def test_a_second_flow_that_reads_a_channel_is_refused(begin: Begin) -> None:
+    """Two readers would split the channel's values between them by scheduling order."""
+
+    async def listener(ctx: core.Flow, _name: str) -> str:
+        return await ctx.channel(REPORTS)
+
+    async def two_readers(ctx: core.Flow, _config: Config) -> None:
+        async with ctx.group() as listeners:
+            listeners.start("a", listener, "a")
+            await ctx.first(ctx.channel(REPORTS), listeners)
+
+    with pytest.raises(core.ContractError, match="a channel has one reader"):
+        begin(two_readers)
+
+
+def test_a_flow_that_waits_only_on_a_channel_nobody_can_send_to_is_a_deadlock(
+    begin: Begin,
+) -> None:
+    async def alone(ctx: core.Flow, _config: Config) -> None:
+        async with ctx.group() as workers:
+            await workers.start("a", worker)
+        await ctx.channel(REPORTS)  # every other flow has ended: no value can come
+
+    run = begin(alone)
+    with pytest.raises(core.Deadlock) as caught:
+        answer(run, "work", 1)
+    assert caught.value.flow == ""
+    assert caught.value.sources == ("channel reports",)
 
 
 # -- stops, resources ---------------------------------------------------------------------------

@@ -1,9 +1,8 @@
-"""Public Docker CLI process-ownership regressions on simulated time."""
+"""The real Docker CLI adapter over the ``vs_sim`` process interface, in virtual time."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from io import StringIO
+import contextlib
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -11,95 +10,41 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sandbox.api import SubprocessDockerCli
-from vs_sandbox.api.testing import (
-    CapturedProcessFaults,
-    FakeCapturedProcessRunner,
-    StoppableScript,
+from vs_sim.api import (
+    DISCARD,
+    Capture,
+    OutputSink,
+    OutputStream,
+    ProcessOutputTooLarge,
+    ProcessRun,
+    ProcessSpec,
+    ProcessTimeoutError,
 )
-
-# test-isolation: compare real Popen close failures with the public Fake through the shared owner because OS streams cannot deterministically fail close.
-from vs_sandbox.process_execution import (
-    CapturedProcessRequest,
-    OwnedProcessRunner,
-    PopenProcess,
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    FakeProcesses,
+    ManualClock,
+    PipedStart,
+    ProcessScript,
 )
-from vs_sim.api import ProcessTimeoutError
-from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
-    import subprocess
+    from vs_sim.api import PipedProcess
+
+_TIMEOUTS = st.floats(min_value=0.001, max_value=600, allow_nan=False, allow_infinity=False)
 
 
-class _FailingCloseStream(StringIO):
-    def __init__(self, name: str, attempts: list[str]) -> None:
-        super().__init__()
-        self._name = name
-        self._attempts = attempts
-
-    def close(self) -> None:
-        self._attempts.append(self._name)
-        super().close()
-        message = f"{self._name} close failed"
-        raise OSError(message)
+def _docker(script: ProcessScript, clock: ManualClock) -> tuple[SubprocessDockerCli, FakeProcesses]:
+    processes = FakeProcesses(lambda _spec: script, pass_time=clock.advance)
+    return SubprocessDockerCli(processes=processes, launcher=_no_spawns()), processes
 
 
-@dataclass
-class _ScriptedTextPopen:
-    stdin: StringIO
-    stdout: StringIO
-    stderr: StringIO
-    communication_error: BaseException
-    returncode: int | None = 0
+def _no_spawns() -> FakePipedProcessLauncher:
+    def unexpected(start: PipedStart) -> PipedProcess:
+        message = f"unexpected docker spawn {start.argv!r}"
+        raise AssertionError(message)
 
-    def communicate(
-        self,
-        input: str | None = None,  # noqa: A002  # lint-waiver: LW-194306 [A002]; this deterministic Popen boundary must accept the real adapter's `input=` keyword; **kwargs would hide the callable contract and a wrapper would only rename this one test seam.
-        timeout: float | None = None,
-    ) -> tuple[str, str]:
-        del input, timeout
-        raise self.communication_error
-
-    def poll(self) -> int | None:
-        return self.returncode
-
-
-@dataclass
-class _SingleProcessLauncher:
-    process: PopenProcess
-
-    def start(self, request: CapturedProcessRequest) -> PopenProcess:
-        assert list(request.argv) == ["docker", "version"]
-        assert request.stdin == "request"
-        return self.process
-
-
-@given(
-    timeout=st.floats(min_value=0, max_value=600, allow_nan=False, allow_infinity=False),
-    stdout=st.text(max_size=40),
-    stderr=st.text(max_size=40),
-)
-def test_timeout_kills_settles_and_closes_the_owned_process_group(
-    timeout: float,
-    stdout: str,
-    stderr: str,
-) -> None:
-    processes = FakeCapturedProcessRunner(
-        StoppableScript(stdout=stdout, stderr=stderr, runs_for=None, term_delay=None),
-        threads=SimThreads(),
-    )
-    docker = SubprocessDockerCli(processes=processes)
-
-    with pytest.raises(ProcessTimeoutError) as raised:
-        docker.run(["docker", "info"], timeout_seconds=timeout)
-
-    process = processes.processes[0]
-    assert raised.value.cmd == ["docker", "info"]
-    assert raised.value.timeout == timeout
-    assert raised.value.output == (stdout.encode() or None)
-    assert raised.value.stderr == (stderr.encode() or None)
-    assert [number.name for number, _at in process.signals] == ["SIGKILL"]
-    assert process.closed
-    assert processes.calls[0].start_new_session
+    return FakePipedProcessLauncher(unexpected)
 
 
 @given(
@@ -107,201 +52,135 @@ def test_timeout_kills_settles_and_closes_the_owned_process_group(
     stdout=st.text(max_size=40),
     stderr=st.text(max_size=40),
 )
-def test_normal_completion_preserves_raw_status_complete_streams_and_arguments(
-    returncode: int,
-    stdout: str,
-    stderr: str,
+def test_a_finished_command_keeps_its_status_streams_and_arguments(
+    returncode: int, stdout: str, stderr: str
 ) -> None:
-    processes = FakeCapturedProcessRunner(
-        StoppableScript(stdout=stdout, stderr=stderr, returncode=returncode),
-        threads=SimThreads(),
-    )
+    clock = ManualClock()
+    script = ProcessScript(returncode, stdout.encode(), stderr.encode(), duration_s=2)
+    docker, processes = _docker(script, clock)
 
-    result = SubprocessDockerCli(processes=processes).run(["docker", "version"], timeout_seconds=30)
+    result = docker.run(["docker", "version"], timeout_seconds=30, output=DISCARD)
 
     assert result.args == ["docker", "version"]
     assert result.returncode == returncode
-    assert result.stdout == stdout
-    assert result.stderr == stderr
-    assert processes.processes[0].signals == []
-    assert processes.processes[0].closed
+    assert result.stdout == stdout.replace("\r\n", "\n").replace("\r", "\n")
+    assert result.stderr == stderr.replace("\r\n", "\n").replace("\r", "\n")
+    assert processes.ran == [ProcessSpec(("docker", "version"))]
+    assert clock.now() == 2
 
 
-def test_interruption_kills_and_settles_an_unreaped_process_group() -> None:
-    interruption = KeyboardInterrupt("interrupted wait")
-    processes = FakeCapturedProcessRunner(
-        StoppableScript(runs_for=None),
-        threads=SimThreads(),
-        faults=CapturedProcessFaults(initial_wait_failure=interruption),
+# A finished command's streams are decoded as strict UTF-8, as `subprocess.run(text=True)` does.
+_UTF8 = st.text(max_size=40).map(str.encode)
+
+
+@given(stdout=_UTF8, stderr=_UTF8, finishes=st.booleans())
+def test_every_byte_a_command_writes_reaches_the_output_whether_it_finishes_or_times_out(
+    stdout: bytes, stderr: bytes, *, finishes: bool
+) -> None:
+    script = ProcessScript(
+        stdout=stdout, stderr=stderr, duration_s=1, runs_until_signalled=not finishes
     )
+    docker, _ = _docker(script, ManualClock())
+    output = Capture(limit=1 << 10)
 
-    with pytest.raises(KeyboardInterrupt) as raised:
-        SubprocessDockerCli(processes=processes).run(["docker", "version"], timeout_seconds=30)
+    with pytest.raises(ProcessTimeoutError) if not finishes else contextlib.nullcontext():
+        docker.run(["docker", "run", "-d", "image"], timeout_seconds=30, output=output)
 
-    process = processes.processes[0]
-    assert raised.value is interruption
-    assert [number.name for number, _at in process.signals] == ["SIGKILL"]
-    assert process.close_attempted
-    assert process.closed
+    assert (output.stdout, output.stderr) == (stdout, stderr)
 
 
-def test_failure_after_leader_reap_never_signals_a_stale_process_group() -> None:
-    decode_failure = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
-    processes = FakeCapturedProcessRunner(
-        threads=SimThreads(),
-        faults=CapturedProcessFaults(
-            initial_wait_failure=decode_failure,
-            initial_wait_reaps_leader=True,
-        ),
-    )
-
-    with pytest.raises(UnicodeDecodeError) as raised:
-        SubprocessDockerCli(processes=processes).run(["docker", "version"], timeout_seconds=30)
-
-    process = processes.processes[0]
-    assert raised.value is decode_failure
-    assert process.signals == []
-    assert process.close_attempted
-    assert process.closed
-
-
-def test_interruption_preserves_ordered_group_and_pipe_cleanup_failures() -> None:
-    interruption = KeyboardInterrupt("interrupted wait")
-    processes = FakeCapturedProcessRunner(
-        StoppableScript(runs_for=None),
-        threads=SimThreads(),
-        faults=CapturedProcessFaults(
-            initial_wait_failure=interruption,
-            signal_failure=OSError("signal failed"),
-            stdout_close_failure=OSError("stdout close failed"),
-            stderr_close_failure=OSError("stderr close failed"),
-        ),
-    )
-
-    with pytest.raises(KeyboardInterrupt) as raised:
-        SubprocessDockerCli(processes=processes).run(["docker", "version"], timeout_seconds=30)
-
-    process = processes.processes[0]
-    assert raised.value is interruption
-    assert [number.name for number, _at in process.signals] == ["SIGKILL"]
-    assert process.close_attempts == ["stdout", "stderr"]
-    assert raised.value.__notes__ == [
-        "process group cleanup also failed: signal failed",
-        "process pipe cleanup also failed: stdout close failed; stderr close failed",
-    ]
-
-
-def test_timeout_preserves_its_contract_when_the_group_does_not_settle() -> None:
-    processes = FakeCapturedProcessRunner(
-        StoppableScript(stdout="partial", runs_for=None),
-        threads=SimThreads(),
-        faults=CapturedProcessFaults(kill_settles=False),
-    )
+@given(timeout=_TIMEOUTS, stdout=st.binary(max_size=40), stderr=st.binary(max_size=40))
+def test_a_timeout_raises_after_the_timeout_with_the_partial_output(
+    timeout: float, stdout: bytes, stderr: bytes
+) -> None:
+    clock = ManualClock()
+    script = ProcessScript(stdout=stdout, stderr=stderr, runs_until_signalled=True)
+    docker, _ = _docker(script, clock)
 
     with pytest.raises(ProcessTimeoutError) as raised:
-        SubprocessDockerCli(processes=processes).run(["docker", "version"], timeout_seconds=3)
+        docker.run(["docker", "info"], timeout_seconds=timeout, output=DISCARD)
 
-    process = processes.processes[0]
-    assert raised.value.output == b"partial"
-    assert raised.value.__notes__ == ["process group did not settle within 5 seconds"]
-    assert [number.name for number, _at in process.signals] == ["SIGKILL"]
-    assert process.close_attempted
-    assert process.closed
+    assert raised.value.cmd == ["docker", "info"]
+    assert raised.value.timeout == timeout
+    assert raised.value.output == (stdout or None)
+    assert raised.value.stderr == (stderr or None)
+    assert clock.now() == timeout
 
 
-@pytest.mark.parametrize(
-    ("faults", "note"),
-    [
-        pytest.param(
-            CapturedProcessFaults(signal_failure=OSError("signal failed")),
-            "process group cleanup also failed: signal failed",
-            id="signal",
-        ),
-        pytest.param(
-            CapturedProcessFaults(settle_wait_failure=RuntimeError("wait failed")),
-            "process group cleanup also failed: wait failed",
-            id="settle-wait",
-        ),
-    ],
+def test_a_group_the_kill_left_behind_is_a_timeout_that_says_so() -> None:
+    clock = ManualClock()
+    script = ProcessScript(runs_until_signalled=True, survives_kill=True)
+    docker, _ = _docker(script, clock)
+
+    with pytest.raises(ProcessTimeoutError) as raised:
+        docker.run(["docker", "rm", "-f", "c"], timeout_seconds=3, output=DISCARD)
+
+    assert raised.value.timeout == 3
+    assert raised.value.__notes__ == ["process 1000 survived the kill"]
+
+
+def test_a_docker_binary_that_cannot_start_raises_its_os_error() -> None:
+    missing = FileNotFoundError("docker")
+
+    def script(_spec: ProcessSpec) -> ProcessScript:
+        raise missing
+
+    docker = SubprocessDockerCli(
+        processes=FakeProcesses(script, pass_time=ManualClock().advance), launcher=_no_spawns()
+    )
+
+    with pytest.raises(FileNotFoundError) as raised:
+        docker.run(["docker", "version"], timeout_seconds=30, output=DISCARD)
+
+    assert raised.value is missing
+
+
+class _StoppedForOutput:
+    """Processes whose every run was stopped for writing past its cap."""
+
+    def __init__(self, stopped: ProcessOutputTooLarge) -> None:
+        self._stopped = stopped
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del spec, timeout, output
+        return self._stopped
+
+
+@given(
+    limit=st.integers(min_value=0, max_value=1 << 30),
+    stream=st.sampled_from(OutputStream),
+    detail=st.sampled_from(["", "pid 7 survived"]),
 )
-def test_timeout_preserves_its_contract_when_group_cleanup_fails(
-    faults: CapturedProcessFaults,
-    note: str,
+def test_a_run_stopped_for_too_much_output_raises_naming_the_stream_and_cap(
+    limit: int, stream: OutputStream, detail: str
 ) -> None:
-    processes = FakeCapturedProcessRunner(
-        StoppableScript(runs_for=None),
-        threads=SimThreads(),
-        faults=faults,
+    stopped = ProcessOutputTooLarge(limit, stream, b"", b"", detail)
+    docker = SubprocessDockerCli(
+        processes=_StoppedForOutput(stopped), launcher=FakePipedProcessLauncher()
     )
 
-    with pytest.raises(ProcessTimeoutError) as raised:
-        SubprocessDockerCli(processes=processes).run(["docker", "version"], timeout_seconds=3)
+    with pytest.raises(
+        OSError, match=f"docker logs wrote more than {limit} bytes to {stream}"
+    ) as raised:
+        docker.run(["docker", "logs"], timeout_seconds=30, output=DISCARD)
 
-    process = processes.processes[0]
-    assert raised.value.__notes__ == [note]
-    assert [number.name for number, _at in process.signals] == ["SIGKILL"]
-    assert process.close_attempted
-    assert process.closed
+    assert getattr(raised.value, "__notes__", []) == ([detail] if detail else [])
 
 
-def test_timeout_preserves_its_contract_when_pipe_closure_fails() -> None:
-    processes = FakeCapturedProcessRunner(
-        StoppableScript(runs_for=None),
-        threads=SimThreads(),
-        faults=CapturedProcessFaults(stdout_close_failure=OSError("close failed")),
+@given(arguments=st.lists(st.text(min_size=1, max_size=8), max_size=4))
+def test_a_spawn_starts_its_arguments_through_the_launcher_unchanged(arguments: list[str]) -> None:
+    started = object()
+    launcher = FakePipedProcessLauncher(lambda _start: cast("PipedProcess", started))
+    docker = SubprocessDockerCli(
+        processes=FakeProcesses(_no_runs, pass_time=ManualClock().advance), launcher=launcher
     )
 
-    with pytest.raises(ProcessTimeoutError) as raised:
-        SubprocessDockerCli(processes=processes).run(["docker", "version"], timeout_seconds=3)
+    process = docker.spawn(["docker", "exec", *arguments])
 
-    process = processes.processes[0]
-    assert raised.value.__notes__ == ["process pipe cleanup also failed: close failed"]
-    assert process.close_attempted
-    assert not process.closed
+    assert process is started
+    assert launcher.started == [PipedStart(("docker", "exec", *arguments))]
 
 
-@pytest.mark.parametrize("adapter", ["fake", "subprocess"])
-def test_fake_and_real_adapter_attempt_every_pipe_and_report_the_same_close_failure(
-    adapter: str,
-) -> None:
-    attempts: list[str] = []
-    interruption = KeyboardInterrupt("cancelled")
-    request = CapturedProcessRequest(
-        argv=("docker", "version"),
-        stdin="request",
-        timeout=30,
-    )
-    fake_processes: FakeCapturedProcessRunner | None = None
-    if adapter == "fake":
-        fake_processes = FakeCapturedProcessRunner(
-            threads=SimThreads(),
-            faults=CapturedProcessFaults(
-                initial_wait_failure=interruption,
-                initial_wait_reaps_leader=True,
-                stdin_close_failure=OSError("stdin close failed"),
-                stdout_close_failure=OSError("stdout close failed"),
-                stderr_close_failure=OSError("stderr close failed"),
-            ),
-        )
-        subject = fake_processes
-    else:
-        popen = _ScriptedTextPopen(
-            stdin=_FailingCloseStream("stdin", attempts),
-            stdout=_FailingCloseStream("stdout", attempts),
-            stderr=_FailingCloseStream("stderr", attempts),
-            communication_error=interruption,
-        )
-        process = PopenProcess(cast("subprocess.Popen[str]", popen))
-        subject = OwnedProcessRunner(processes=_SingleProcessLauncher(process))
-
-    with pytest.raises(KeyboardInterrupt) as raised:
-        subject.run(request)
-
-    if fake_processes is not None:
-        attempts = fake_processes.processes[0].close_attempts
-    assert attempts == ["stdin", "stdout", "stderr"]
-    assert raised.value is interruption
-    assert raised.value.__notes__ == [
-        "process pipe cleanup also failed: "
-        "stdin close failed; stdout close failed; stderr close failed"
-    ]
+def _no_runs(spec: ProcessSpec) -> ProcessScript:
+    message = f"unexpected docker run {spec.argv!r}"
+    raise AssertionError(message)

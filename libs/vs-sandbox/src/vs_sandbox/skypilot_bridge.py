@@ -46,7 +46,14 @@ from vs_sandbox.skypilot_states import (
     allocation_gone,
     is_driver_failure,
 )
-from vs_sim.api import OsThreads, UnixNetwork
+from vs_sim.api import (
+    CloseOnce,
+    NothingLeft,
+    OsThreads,
+    Released,
+    UnixNetwork,
+    WorkerStartRefusedError,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -57,6 +64,8 @@ if TYPE_CHECKING:
     from vs_sim.api import Connection, Event, Listener, Lock, Network, Threads, Worker
 
 _MAX_REQUEST_BYTES = 4096
+_SEND_BOUND_SECONDS = 30.0
+_ACCEPT_RETRY_SECONDS = 0.1
 _OUTPUT_CHUNK_CHARACTERS = 64 * 1024
 _LOG_SPOOL_READ_CHARACTERS = 64 * 1024
 _MAX_ARTIFACT_BYTES = 512 * 1024
@@ -95,9 +104,33 @@ _STAGING_EXCLUDED_NAMES = frozenset(
 class _Wire:
     """Line-framed reads and whole-frame writes over one connection."""
 
-    def __init__(self, connection: Connection) -> None:
+    def __init__(self, connection: Connection, log: Callable[[str], None]) -> None:
         self._connection = connection
+        self._log = log
         self._buffer = b""
+
+    def has_room(self, limit: int) -> bool:
+        """Whether fewer than ``limit`` bytes are buffered."""
+        return len(self._buffer) < limit
+
+    def read_ahead(self, limit: int, timeout: float) -> bool:
+        """Buffer what the peer sends within ``timeout``, up to ``limit`` bytes; ``False`` once it hung up.
+
+        Reads rather than peeks: a peer that closed with bytes still unread is not
+        at end of stream, so only reading past those bytes reveals the hangup.
+        What is read stays buffered for ``readline``; check ``has_room`` first so
+        a flooding peer cannot grow the buffer past ``limit``.
+        """
+        try:
+            chunk = self._connection.recv(limit - len(self._buffer), timeout)
+        except TimeoutError:
+            return True
+        except OSError:
+            chunk = b""
+        if not chunk:
+            return False
+        self._buffer += chunk
+        return True
 
     def readline(self, limit: int) -> bytes:
         """Up to ``limit`` bytes, ending at the first newline; fewer when the peer closes first."""
@@ -113,8 +146,22 @@ class _Wire:
         return line
 
     def write(self, data: bytes) -> None:
-        """Send all of ``data``."""
-        self._connection.send(data)
+        """Send all of ``data``, or disconnect a client that read nothing for ``_SEND_BOUND_SECONDS``.
+
+        Raises:
+            BrokenPipeError: the client stopped reading; the connection is closed, so the
+                request ends as if the client had hung up (part of ``data`` may have gone).
+        """
+        try:
+            self._connection.send(data, _SEND_BOUND_SECONDS)
+        except TimeoutError as exc:
+            self._log(
+                f"[warn] SkyPilot bridge client read nothing for {_SEND_BOUND_SECONDS:g} s; "
+                "disconnecting it"
+            )
+            self._connection.close()
+            message = "the SkyPilot bridge client stopped reading"
+            raise BrokenPipeError(message) from exc
 
 
 class _BridgeOutputSink:
@@ -386,7 +433,7 @@ class SkyPilotBridge:
         self._threads: Threads = threads or OsThreads()
         self._listener: Listener | None = None
         self._acceptor: Worker | None = None
-        self._closed = False
+        self._close = CloseOnce()
         self._active_jobs: set[tuple[str, int]] = set()
         self._active_lock = self._threads.lock()
         self._handler_condition = self._threads.condition()
@@ -401,7 +448,7 @@ class SkyPilotBridge:
         """Allocate or reuse compute, then start accepting requests."""
         if self._listener is not None:
             return
-        if self._closed:
+        if self._close.started:
             message = "SkyPilot bridge cannot be restarted after close"
             raise RuntimeError(message)
         validate_socket_path(self.socket_path)
@@ -420,15 +467,24 @@ class SkyPilotBridge:
                 lambda: self._accept_loop(listener),
                 name=f"skypilot-bridge-{self._cluster_name}",
             )
-        except BaseException:
-            self.close()
+        except BaseException as start_error:
+            try:
+                self.close()
+            except Exception as close_error:  # noqa: BLE001  # lint-waiver: LW-008199 [BLE001]; the start failure is the error to raise, and any failed teardown is attached to it.
+                # > Narrowing to NotReleasedError would let a failed listener close replace the
+                # > start failure; letting close raise loses the reason start failed.
+                start_error.add_note(f"closing the bridge also failed: {close_error!r}")
             raise
 
     def close(self) -> None:
-        """Stop serving, release the allocation, and remove the socket."""
-        if self._closed:
-            return
-        self._closed = True
+        """Stop serving, release the allocation, and remove the socket.
+
+        A cluster whose release failed stays tracked: close raises naming it, and the
+        next call releases it again.
+        """
+        self._close.run(self._release)
+
+    def _release(self) -> Released:
         self._closing.set()
         if self._listener is not None:
             self._listener.close()
@@ -446,7 +502,15 @@ class SkyPilotBridge:
                 self._runner.release(cluster_name)
             except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-008192 [BLE001]; teardown must continue after any runner failure and reports each failed release.
                 self._log(f"[warn] SkyPilot allocation release failed: {type(exc).__name__}")
+            else:
+                with self._active_lock:
+                    self._touched_clusters.discard(cluster_name)
         self.socket_path.unlink(missing_ok=True)
+        with self._active_lock:
+            unreleased = sorted(self._touched_clusters)
+        return Released.shown_by(
+            NothingLeft(unreleased, f"unreleased SkyPilot clusters {unreleased}")
+        )
 
     def _accept_loop(self, listener: Listener) -> None:
         while True:
@@ -454,13 +518,21 @@ class SkyPilotBridge:
                 connection = listener.accept()
             except OSError:
                 return  # the listener was closed
-            self._threads.spawn(
-                lambda c=connection: self._serve(c),
-                name=f"skypilot-bridge-request-{self._cluster_name}",
-            )
+            try:
+                self._threads.spawn(
+                    lambda c=connection: self._serve(c),
+                    name=f"skypilot-bridge-request-{self._cluster_name}",
+                )
+            except WorkerStartRefusedError as error:
+                connection.close()
+                self._log(
+                    "[warn] SkyPilot bridge request worker did not start: "
+                    f"{type(error).__name__}; retrying"
+                )
+                self._threads.sleep(_ACCEPT_RETRY_SECONDS)
 
     def _serve(self, connection: Connection) -> None:
-        wire = _Wire(connection)
+        wire = _Wire(connection, self._log)
         try:
             self._handle(wire, wire, connection)
         finally:
@@ -496,7 +568,7 @@ class SkyPilotBridge:
 
     def _report_closing(self, writer: _Wire) -> bool:
         """Write the existing wire error when shutdown has started."""
-        if not self._closed:
+        if not self._close.started:
             return False
         self._write(writer, ErrorFrame(error=ValueError.__name__))
         return True
@@ -530,7 +602,9 @@ class SkyPilotBridge:
         snapshot_digest = self._snapshot_digest(staging)
         request_digest = self._request_digest(request, effective_command)
         existing_record = self._journal.load(request.invocation_id)
-        record = self._journal.prepare(request.invocation_id, request_digest, snapshot_digest)
+        record = self._journal.prepare(
+            request.invocation_id, request_digest, snapshot_digest, step_tag=request.step_tag
+        )
         if existing_record is None:
             self._locally_prepared_invocations.add(request.invocation_id)
         if record.phase in {InvocationPhase.COMPLETED, InvocationPhase.ACKNOWLEDGED}:
@@ -546,7 +620,7 @@ class SkyPilotBridge:
     ) -> str:
         """Bind recovery identity to the request, evaluator argv, and trusted setup."""
         request_document: dict[str, object] = {
-            "request": request.model_dump(mode="json", exclude={"invocation_id"}),
+            "request": request.model_dump(mode="json", exclude={"invocation_id", "step_tag"}),
             "command": command,
         }
         if self._framework_setup_command is not None:
@@ -575,11 +649,15 @@ class SkyPilotBridge:
         finished = self._threads.event()
 
         def monitor_disconnect() -> None:
-            while not finished.wait(0.1):
+            # The only reader of the connection until ``finished``: ``_deliver`` reads
+            # the acknowledgement after this monitor is joined.
+            while not finished.is_set():
                 if self._closing.is_set():
                     disconnected.set()
                     return
-                if connection.peer_closed():
+                if not reader.has_room(_MAX_REQUEST_BYTES + 1):
+                    finished.wait(0.1)
+                elif not reader.read_ahead(_MAX_REQUEST_BYTES + 1, 0.1):
                     disconnected.set()
                     return
 

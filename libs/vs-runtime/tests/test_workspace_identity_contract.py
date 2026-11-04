@@ -15,14 +15,16 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
+from tests.support.real_git import REAL_GIT
 
 from vs_agent.api import NULL_SKILL_SELECTION
-from vs_core.api import HostFence, HostId, Until
+from vs_core.api import CheckoutStatus, Until
 from vs_project.api import (
     GitError,
     NullGitTrackerEvents,
     OrchestrationDescriptor,
     RunEnvironmentRecord,
+    git_repositories,
 )
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api import (
@@ -55,9 +57,11 @@ from vs_runtime.api.operation_fixtures import VerifyParentRevision as _VerifyReq
 from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaces,
+    MemoryValidationPasses,
+    idle_environment_system,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -78,6 +82,10 @@ _IMPLEMENTATIONS: tuple[Implementation, ...] = ("fake", "git")
 class _EnvironmentSession:
     sandbox: CommandRunner
     view: RunEnvironmentView
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _EnvironmentSession:
         return self
@@ -121,6 +129,8 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                         git_events=NullGitTrackerEvents(),
                         log_emit=_emit,
                         on_log_ready=lambda _path: None,
+                        clock=ManualClock(),
+                        git_repository=git_repositories(REAL_GIT),
                     ),
                     resolve_resume=lambda _manifest: pytest.fail("unexpected resume"),
                 )
@@ -130,16 +140,21 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     log_dir=project.logger.log_dir,
                     workspace=root,
                     ref_dir=None,
-                    backend=FakeComputeBackend(),
+                    backend=FakeComputeBackend(threads=SimThreads()),
                     agent_backend="stub",
                     cli_provider="codex",
                     run_id="workspace-contract",
                     framework_root=Path(scratch),
+                    clock=ManualClock(),
+                    system=idle_environment_system(),
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),
-                    RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
+                    RunEnvironmentView(
+                        paths=AgentPaths(), workspace_git_writable=True, cli_sandboxed=True
+                    ),
                 ),
+                clock=ManualClock(),
             )
             ownership.callback(environment.close)
             resources = WorkspaceResourceFactory(
@@ -151,9 +166,13 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
+                threads=SimThreads(),
+                blocking=InlineBlockingRunner(),
             )
             workspaces = create_workspace_runtime(
-                workspace_resources=resources, blocking=BlockingOperations()
+                workspace_resources=resources,
+                blocking=BlockingOperations(runner=InlineBlockingRunner(), threads=SimThreads()),
+                validation_passes=MemoryValidationPasses(),
             ).workspaces
         try:
             yield workspaces
@@ -508,7 +527,6 @@ def test_parent_verification_over_real_git_accepts_only_retained_commits() -> No
         async with _workspaces("git") as workspaces:
             owner = VerifyRevisionOwner(workspaces, _ledger(workspaces), commit_of)
             context = ExecutionContext(
-                fence=HostFence(host_id=HostId(root="h"), epoch=1),
                 now_at=5.0,
                 payload_digest="d",
                 until=Until(at=100.0),
@@ -520,6 +538,7 @@ def test_parent_verification_over_real_git_accepts_only_retained_commits() -> No
 
             retained = await workspaces.root.snapshot("retained")
             candidate = await workspaces.create_candidate(retained, member_id="parent")
+            candidate.path.mkdir(parents=True, exist_ok=True)
             (candidate.path / "candidate.py").write_text("VALUE = 5\n", encoding="utf-8")
             held = await candidate.snapshot("held")
             await candidate.discard()
@@ -539,7 +558,6 @@ def test_retention_over_real_git_keeps_a_proven_commit_and_refuses_the_rest() ->
             ledger = _ledger(workspaces)
             owner = RetainRevisionOwner(workspaces, ledger, commit_of, "verified")
             context = ExecutionContext(
-                fence=HostFence(host_id=HostId(root="h"), epoch=1),
                 now_at=5.0,
                 payload_digest="d",
                 until=Until(at=100.0),
@@ -561,5 +579,67 @@ def test_retention_over_real_git_keeps_a_proven_commit_and_refuses_the_rest() ->
                 accuracy_proof=accepted_accuracy_proof(revision_ref("0" * 40)),
             )
             assert (await owner.execute(missing, context))["retained"] is False
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("implementation", _IMPLEMENTATIONS)
+def test_adoption_publishes_without_checkout_authority(implementation: Implementation) -> None:
+    async def exercise() -> None:
+        async with _workspaces(implementation) as workspaces:
+            baseline = workspaces.root.revision
+            assert baseline is not None
+            candidate = await workspaces.create_candidate(baseline)
+            candidate.path.mkdir(parents=True, exist_ok=True)
+            (candidate.path / "candidate.py").write_text("VALUE = 5\n", encoding="utf-8")
+            winner = await candidate.snapshot_and_retain("winner", retention_label="candidate")
+            await candidate.discard()
+            result = await workspaces.adopt(winner)
+            assert result.revision == winner
+            assert result.commit
+            assert result.branch
+            assert await workspaces.export_patch(result.commit) == await workspaces.export_patch(
+                winner
+            )
+            assert workspaces.root.revision == baseline
+            assert await workspaces.root.matches_revision(baseline)
+            assert await workspaces.adopt(winner) == result
+            checkout = await workspaces.update_checkout(result)
+            assert checkout.status is CheckoutStatus.FAST_FORWARDED
+            assert workspaces.root.revision == result.commit
+            assert await workspaces.root.matches_revision(winner)
+            assert await workspaces.adopt(winner) == result
+
+    asyncio.run(exercise())
+
+
+def test_fake_publication_history_survives_reopening_the_collection(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        root = FakeWorkspace(path=tmp_path, known_revisions={"first", "second"})
+        workspaces = FakeWorkspaces(root)
+        first = await workspaces.adopt("first", message="first publication")
+        second = await workspaces.adopt("second", message="second publication")
+        await workspaces.close()
+        resumed = FakeWorkspaces(root, supports_parallel_candidates=True)
+        assert await resumed.adopt("first", message="retry") == first
+        assert await resumed.adopt("second", message="retry") == second
+        root.script_pending_changes(["operator.py"])
+        assert (await resumed.update_checkout(second)).status is CheckoutStatus.DIRTY_TREE
+        assert (await resumed.update_checkout(second)).status is CheckoutStatus.FAST_FORWARDED
+        assert (await resumed.update_checkout(first)).status is CheckoutStatus.DIVERGED
+        assert root.revision == second.commit
+        await root.restore(second.commit)
+        assert await root.matches_revision(second.revision)
+        candidate = await resumed.create_candidate(second.commit)
+        assert candidate.revision == second.commit
+        assert await candidate.matches_revision(second.revision)
+        assert await candidate.measured_input(second.commit) == await candidate.measured_input(
+            second.revision
+        )
+        await candidate.discard()
+        another = await resumed.adopt(second.commit)
+        assert (await resumed.update_checkout(another)).status is CheckoutStatus.FAST_FORWARDED
+        assert await root.matches_revision(second.revision)
+        await resumed.close()
 
     asyncio.run(exercise())

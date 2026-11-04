@@ -96,12 +96,12 @@ func summarizeTrial(
 	}
 
 	switch workload.Objective.Metric {
-	case "latency_ms.p50":
+	case "latency_ms.p50", "latency_ms.p95", "latency_ms.p99":
 		if len(objectiveLatencies) == 0 {
 			result.InvalidReasons = append(result.InvalidReasons, "objective has no successful matching latency samples")
 		} else {
 			sort.Float64s(objectiveLatencies)
-			result.PrimaryValue = pointer(percentile(objectiveLatencies, 50))
+			result.PrimaryValue = pointer(percentile(objectiveLatencies, objectivePercentile[workload.Objective.Metric]))
 		}
 	case "operations_per_second", "requests_per_second":
 		if result.ElapsedSeconds <= 0 {
@@ -200,4 +200,12 @@ func hasAllTags(actual []string, required []string) bool {
 		}
 	}
 	return true
+}
+
+// objectivePercentile maps each latency objective metric to the percentile it
+// reads from the objective's successful operation latencies.
+var objectivePercentile = map[string]float64{
+	"latency_ms.p50": 50,
+	"latency_ms.p95": 95,
+	"latency_ms.p99": 99,
 }

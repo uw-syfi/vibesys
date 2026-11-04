@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -10,31 +11,53 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.support.core_plugins import capability_plugin, failing_plugin
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.skeleton_strategy import SkeletonStrategy
+from tests.support.real_git import REAL_PROCESSES
+from tests.support.skeleton_strategy import IMPLEMENTER, SkeletonStrategy
 from tests.support.task_project import write_task
 
+from entrypoints.production import production_timing
 from entrypoints.run import supervise
-from launch import LaunchSettings, default_runs
+from launch import LaunchSettings, create_session, default_runs
 from vibesys.api import (
     ComputeBackend,
     Config,
+    CoreEvent,
     CoreEventType,
     OrchestrationDescriptor,
     OrchestrationRegistry,
     ProfilerKind,
     ResumeRef,
+    RunEndingData,
+    RunFailedData,
+    RunFailureKind,
     RunRequest,
     RunResult,
 )
 from vibesys.api import RunStatus as ProductRunStatus
 from vibesys.api.request import load_task
 from vs_agent.api import AgentCapabilities
-from vs_agent.api.testing import FakeAgentClient
-from vs_project.api import Project, ProjectStateError, validate_run_id
-from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import examples
+from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vs_core.api import EndReason
+from vs_project.api import GitFaultSink, GitRepository, Project, ProjectStateError, validate_run_id
+from vs_project.api.testing import FakeGitRepositories
+from vs_runtime.api import AgentRole
+from vs_runtime.api.core import RunTiming
+from vs_sandbox.api import CommandResult, SandboxKind
+from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
+from vs_sim.api import OsThreads, ProcessSpec, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    FakeProcesses,
+    InlineBlockingRunner,
+    ProcessScript,
+    Sim,
+    SimNetwork,
+    SimThreads,
+    examples,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -63,7 +86,42 @@ def request_template(tmp_path: Path) -> RunRequest:
 
 
 def _fake_agent(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
+
+
+def _candidate_agent(
+    git: FakeGitRepositories, revisions: list[str], threads: SimThreads
+) -> FakeAgentClient:
+    def commit(invocation: FakeInvocation) -> dict[str, object]:
+        candidate = invocation.workspace
+        (candidate / "queue.py").write_text("VALUE = 2\n", encoding="utf-8")
+        repository = git.repository(candidate)
+        repository.stage_all(["queue.py"])
+        repository.commit("keep a partial candidate")
+        revision = repository.head()
+        assert revision is not None
+        revisions.append(revision)
+        return {"commit": revision}
+
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=threads
+    ).set_response(IMPLEMENTER.root, commit)
+
+
+class _ProductGit:
+    """Product-shaped Fake Git whose linked worktrees expose their metadata marker."""
+
+    def __init__(self) -> None:
+        self.disk = FakeGitRepositories()
+
+    def repository(self, root: Path, faults: GitFaultSink) -> GitRepository:
+        """Open one Fake repository and materialize the marker real linked trees expose."""
+        repository = self.disk.repository(root, faults)
+        if repository.is_inside_work_tree() and not (root / ".git").exists():
+            (root / ".git").mkdir()
+        return repository
 
 
 @pytest.mark.asyncio
@@ -72,9 +130,14 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     registry.register_plugin(failing_plugin("identity-test"))
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=_fake_agent,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
         )
     )
     handle = runs.start(request_template)
@@ -105,11 +168,10 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     assert resumed.run_id == allocated
     assert runs.attach(allocated) is resumed
     assert runs.list_active() == (resumed,)
-    resumed_result = await resumed.result()
-    assert resumed_result.run_id == allocated
+    # Every ending permits a new epoch, even the failed first run.
+    assert (await resumed.result()).run_id == allocated
     resumed_events = [event async for event in resumed.events()]
-    assert resumed_events
-    assert {event.run_id for event in resumed_events} == {allocated}
+    assert {event.run_id for event in resumed_events} <= {allocated}
     assert runs.attach(allocated) is resumed
     assert runs.list_active() == ()
     assert await handle.result() == result
@@ -165,19 +227,192 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     )
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=_fake_agent,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
         )
     )
     handle = runs.start(request_template)
     handle.stop()
-    result = await supervise(handle, handle_signals=False)
+    result = await supervise(handle, signals=None)
     assert result.status is ProductRunStatus.STOPPED
     assert not result.succeeded
     events = [event async for event in handle.events()]
     assert any(event.type is CoreEventType.STOPPED for event in events)
     assert all(event.type is not CoreEventType.RUN_FAILED for event in events)
+
+
+@dataclass(frozen=True)
+class _Ran:
+    """What a public run of a skeleton scenario that keeps one candidate left behind."""
+
+    result: RunResult
+    events: list[CoreEvent]
+    revisions: list[str]
+    """The candidate revisions its implementer committed."""
+    processes: int
+    """How many host processes it ran."""
+
+
+def _run_keeping_a_candidate(
+    request_template: RunRequest,
+    sim: Sim,
+    strategy: SkeletonStrategy,
+    schedule_seed: int,
+    *,
+    stop_after: tuple[CoreEventType, int] | None = None,
+) -> _Ran:
+    """Run ``strategy`` publicly over a task whose benchmark passes; its one turn commits."""
+    write_task(
+        request_template.project_root,
+        'version = 1\n[agent]\ndomain = "generic"\n'
+        '[accuracy]\ncommand = ["true"]\n'
+        '[benchmark]\ncommand = ["true"]\nresult_protocol = 2\n',
+        objective="Improve the queue.\n",
+    )
+    request = request_template.model_copy(
+        update={"input_bundle": load_task(request_template.project_root)}
+    )
+    registry = OrchestrationRegistry()
+    registry.register_plugin(
+        capability_plugin(
+            "identity-test",
+            agents=(AgentRole(id=IMPLEMENTER.root, system_prompt="Implement."),),
+            strategy=strategy,
+        )
+    )
+    git = _ProductGit()
+    protocol = (
+        "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n"
+        '{"kind":"hello","protocol":2,"metrics":{"throughput":{"direction":"max"}}}\n'
+        '{"kind":"result","values":{"throughput":2}}\n'
+        "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__\n"
+    )
+    candidate_revisions: list[str] = []
+    sim.schedule_seed = schedule_seed
+    threads = sim.threads()
+    backend = FakeComputeBackend(threads=threads)
+    backend.script_sandbox_for_kind(
+        SandboxKind.DOCKER,
+        FakeLifecycleRunner(
+            default_result=CommandResult(
+                output=protocol,
+                exit_code=0,
+                stdout=protocol,
+                stderr="",
+            )
+        ),
+    )
+
+    def no_origin(spec: ProcessSpec) -> ProcessScript:
+        assert spec.argv[-3:] == ("remote", "get-url", "origin")
+        return ProcessScript(returncode=128, stderr=b"fatal: no origin")
+
+    processes = FakeProcesses(no_origin, pass_time=threads.sleep)
+    events: list[CoreEvent] = []
+
+    stops: list[Callable[[], None]] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+        if stop_after is not None and stops:
+            kind, count = stop_after
+            if sum(seen.type is kind for seen in events) == count:
+                stops.pop()()
+
+    session = create_session(
+        request,
+        sink=record,
+        registry=registry,
+        settings=LaunchSettings(
+            blocking=InlineBlockingRunner(),
+            network=SimNetwork(threads),
+            timing=RunTiming(sim.clock, threads),
+            processes=processes,
+            piped_processes=FakePipedProcessLauncher(),
+            agent_client_factory=lambda **_kwargs: _candidate_agent(
+                git.disk, candidate_revisions, threads
+            ),
+            backend_factory=lambda *_args, **_kwargs: backend,
+            git_repository=git.repository,
+        ),
+    )
+
+    async def exercise() -> RunResult:
+        stops.append(session.stop)
+        session.start()
+        try:
+            return await session.await_result()
+        finally:
+            session.close()
+
+    result = sim.run(exercise(), threads=threads)
+    return _Ran(result, events, candidate_revisions, len(processes.ran))
+
+
+@pytest.mark.parametrize("schedule_seed", range(examples(pr=8, nightly=50)))
+def test_a_failed_public_run_reports_its_verified_adopted_candidate(
+    request_template: RunRequest, schedule_seed: int, sim: Sim
+) -> None:
+    ran = _run_keeping_a_candidate(
+        request_template, sim, SkeletonStrategy.failing_after_choice(), schedule_seed
+    )
+    result, events, candidate_revisions = ran.result, ran.events, ran.revisions
+    request = request_template
+
+    assert ran.processes == 1
+    assert not result.succeeded
+    assert result.failure is not None
+    assert result.failure.kind is RunFailureKind.BUDGET_EXHAUSTED
+    assert result.failure.reason == "no-winner: out of rounds"
+    assert result.failure.workstreams_started == 1
+    assert result.failure.candidates_kept == 1
+    assert len(candidate_revisions) == 1
+    assert result.failure.adopted_candidate == candidate_revisions[0]
+    assert (request.project_root / "queue.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+    failed = [event for event in events if event.type is CoreEventType.RUN_FAILED]
+    assert len(failed) == 1
+    assert isinstance(failed[0].data, RunFailedData)
+    assert failed[0].data.failure.adopted_candidate == candidate_revisions[0]
+
+
+def test_a_public_run_that_adopts_an_uncompared_candidate_says_so_in_its_result_and_ending(
+    request_template: RunRequest, sim: Sim
+) -> None:
+    """H1: the search's ``Uncompared`` reaches the run's result and its ``run_ending`` event."""
+    ran = _run_keeping_a_candidate(
+        request_template, sim, SkeletonStrategy.uncompared_after_choice(), 0
+    )
+
+    assert ran.result.succeeded
+    assert ran.result.uncompared
+    endings = [event.data for event in ran.events if event.type is CoreEventType.RUN_ENDING]
+    assert len(endings) == 1
+    assert isinstance(endings[0], RunEndingData)
+    assert endings[0].reason is EndReason.ADOPTED
+    assert endings[0].uncompared
+
+
+def test_a_stopped_public_run_that_held_an_uncompared_choice_says_so(
+    request_template: RunRequest, sim: Sim
+) -> None:
+    """B1: the operator's stop keeps ``uncompared`` in the public result."""
+    ran = _run_keeping_a_candidate(
+        request_template,
+        sim,
+        SkeletonStrategy.uncompared_until_stopped(),
+        0,
+        # The fourth gate result is the candidate's last check, just before the search's choice.
+        stop_after=(CoreEventType.GATE_FINISHED, 4),
+    )
+
+    assert ran.result.status is ProductRunStatus.STOPPED
+    assert ran.result.uncompared
 
 
 @pytest.mark.parametrize(
@@ -213,3 +448,17 @@ def test_run_result_accepts_typed_stopped_outcome() -> None:
     )
     assert result.status is ProductRunStatus.STOPPED
     assert not result.succeeded
+
+
+@pytest.mark.regression
+def test_startup_completion_precedes_running_declaration(
+    request_template: RunRequest, sim: Sim
+) -> None:
+    ran = _run_keeping_a_candidate(
+        request_template, sim, SkeletonStrategy.uncompared_after_choice(), 0
+    )
+    kinds = [event.type for event in ran.events]
+    started = kinds.index(CoreEventType.RUN_STARTED)
+    startup = [i for i, kind in enumerate(kinds) if kind is CoreEventType.RUN_STARTUP_PROGRESS]
+    assert startup
+    assert max(startup) < started

@@ -3,6 +3,9 @@ name = "vibesys-evaluator-ordered-map"
 version = "0.1.0"
 protocol_version = 1
 toolchains = ["go", "rust"]
+go_module = "."
+# The file a candidate's [build] must produce; the framework verifies it and passes it on.
+candidate_outputs = ["ordered-map-candidate.so"]
 
 [entrypoints]
 vibesys-ordered-map = ["go", "-C", "${PACKAGE_ROOT}", "run", "."]

@@ -8,10 +8,11 @@ every step, so the choice itself is proven to survive a restart.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -58,10 +59,10 @@ def selection_of(candidate: core.Kept) -> core.RetainedCandidate:
     )
 
 
-def result_of(run: FlowRun[Config]) -> core.RunResultProposal:
-    """The result the run finished with."""
+def result_of(run: FlowRun[Config], mode: str = "drain") -> core.RunResultProposal:
+    """The result the run finished with, in the mode its stop (if any) chose."""
     assert run.finished is not None
-    assert run.finished.mode == "drain"
+    assert run.finished.mode == mode
     return run.finished.result
 
 
@@ -92,6 +93,31 @@ def test_the_last_choice_is_the_one_adopted(begin: Begin) -> None:
     result = result_of(run)
     assert (result.outcome, result.selection) == ("success", selection_of(kept("b")))
     assert result.reason.startswith("adopted")
+
+
+@pytest.mark.parametrize("chosen", [True, False], ids=["a-candidate", "nothing"])
+def test_an_uncompared_return_says_so_only_of_an_adopted_candidate(
+    begin: Begin, *, chosen: bool
+) -> None:
+    """A root that had no input reading to compare with says its adopted candidate is uncompared.
+
+    Keeping the input needs no comparison, so a run that chose nothing still keeps the input.
+    """
+
+    async def uncompared(ctx: core.Flow, _config: Config) -> core.Uncompared:
+        if chosen:
+            ctx.choose(kept("a"))
+        return core.Uncompared()
+
+    result = result_of(begin(uncompared))
+    assert result.outcome == "success"
+    if chosen:
+        assert result.selection == selection_of(kept("a"))
+        assert result.reason == "adopted: a"
+        assert result.uncompared
+    else:
+        assert result.selection == BASELINE
+        assert result.reason.startswith("kept-input")
 
 
 def test_choosing_the_input_after_a_candidate_takes_the_candidate_back(begin: Begin) -> None:
@@ -219,6 +245,34 @@ def test_the_deadline_control_cancels_the_run_with_its_own_reason(begin: Begin) 
     assert result.reason.startswith("deadline")
 
 
+@pytest.mark.parametrize("ending", [None, "stop", "deadline"], ids=["returned", "stop", "deadline"])
+@pytest.mark.parametrize("chosen", [True, False], ids=["a-candidate", "nothing"])
+def test_an_uncompared_adoption_is_a_field_of_the_result_however_the_run_ends(
+    begin: Begin, *, ending: str | None, chosen: bool
+) -> None:
+    """The mark is a fact of the result, not of its reason's first word, so a stop keeps it.
+
+    A run ends by its root returning, an operator's stop or the deadline; whichever it is, a
+    result that adopted a candidate the root returned ``Uncompared`` for says so, and one that
+    kept the input does not (keeping the input needs no comparison).
+    """
+
+    async def uncompared(ctx: core.Flow, _config: Config) -> core.Uncompared:
+        if chosen:
+            ctx.choose(kept("a"))
+        if ending is not None:
+            await ctx.stopped
+        return core.Uncompared()
+
+    run = begin(uncompared)
+    if ending is not None:
+        run.stop(ending)
+    result = result_of(run)
+    assert result.selection == (selection_of(kept("a")) if chosen else BASELINE)
+    assert result.outcome == ("success" if ending is None else "cancelled")
+    assert result.uncompared is chosen
+
+
 def test_a_stop_with_no_choice_cancels_with_the_input(begin: Begin) -> None:
     async def waiting(ctx: core.Flow, _config: Config) -> None:
         await ctx.stopped
@@ -241,11 +295,47 @@ def test_a_stop_that_ends_in_no_winner_is_cancelled_without_a_selection(begin: B
     assert result.reason == "stopped: out of time"
 
 
-def test_a_failed_adoption_after_a_stop_is_still_a_failure(begin: Begin) -> None:
+def test_a_failed_adoption_after_the_deadline_is_still_a_failure(begin: Begin) -> None:
     run = begin(until_stopped, adopting=False)
-    run.stop()
+    run.stop("deadline")
     run.refuse_adoption(run.expect(core.ProposeWinner), core.AdoptionFailureReason.VERIFY_FAILED)
     assert result_of(run).outcome == "failure"
+
+
+@pytest.mark.parametrize("mode", list(core.StopMode))
+@given(reason=st.sampled_from(list(core.AdoptionFailureReason)))
+@example(reason=core.AdoptionFailureReason.ADOPT_FAILED)
+def test_an_adoption_that_fails_under_the_operators_stop_is_no_failure_of_the_run(
+    mode: core.StopMode, reason: core.AdoptionFailureReason
+) -> None:
+    """Regression: an adoption a stop raced ended the run as failed, and no resume could reopen it.
+
+    A stop is a pause the operator can lift. What the adoption did is no verdict on the run: the
+    result is the stop's (``cancelled``, with the adoption in the reason), whichever way the
+    adoption failed, and the run stays resumable.
+    """
+    run = start(until_stopped, adopting=False)
+    run.stop(mode=mode)
+    run.refuse_adoption(run.expect(core.ProposeWinner), reason)
+    result = result_of(run, mode.value)
+    assert result.outcome == "cancelled"
+    assert result.reason == f"stopped: adoption-failed: {reason.value}"
+    assert result.selection is None
+
+
+@pytest.mark.parametrize("mode", list(core.StopMode))
+@given(cause=st.sampled_from(list(core.RejectionCode)))
+@example(cause=core.RejectionCode.ALREADY_SETTLED)
+def test_a_proposal_core_refuses_under_the_operators_stop_is_no_failure_of_the_run(
+    mode: core.StopMode, cause: core.RejectionCode
+) -> None:
+    """Regression: core refused the stop's proposal (``already-settled``), and the run ended for good."""
+    run = start(until_stopped, adopting=False)
+    run.stop(mode=mode)
+    run.fail(run.expect(core.ProposeWinner), core.FailureReason.REFUSED, cause=cause)
+    result = result_of(run, mode.value)
+    assert result.outcome == "cancelled"
+    assert result.reason == "stopped: adoption-failed: refused"
 
 
 @given(stop_after=st.integers(min_value=0, max_value=2))
@@ -283,3 +373,111 @@ def test_a_stopped_run_whose_proposal_core_refuses_is_cancelled_not_failed() -> 
     result = result_of(run)
     assert result.outcome == "cancelled"
     assert result.reason == "stopped: adoption-failed: refused"
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled"])
+def test_an_unset_uncompared_is_left_out_of_the_result_serialization(
+    outcome: Literal["success", "failure", "cancelled"],
+) -> None:
+    """Decision digests and version 38 documents hold no ``uncompared`` key for a compared run."""
+    plain = core.RunResultProposal(outcome=outcome, reason="r")
+    assert "uncompared" not in json.loads(plain.model_dump_json())
+    assert plain == core.RunResultProposal.model_validate_json(plain.model_dump_json())
+
+
+# -- who stopped the run decides how it ends -------------------------------------------------------
+
+
+@pytest.mark.parametrize("adoption", ["adopted", "refused", "verify-failed", "no-winner"])
+@pytest.mark.parametrize("requester", ["operator", "deadline", "environment"])
+def test_the_operator_pauses_the_deadline_ends_and_the_run_environment_fails_the_run(
+    requester: str, adoption: str
+) -> None:
+    """Regression (sweep F2): a run its environment stopped ended ``stopped``, like a pause.
+
+    The run environment stops the run when it can run none of the run's work (a probe that
+    failed for good). That ending is a failure, whatever the adoption did; the operator's stop
+    stays a cancelled pause, and the deadline's a cancelled end.
+    """
+    control = {
+        "operator": "stop",
+        "deadline": core.DEADLINE_STOP,
+        "environment": core.ENVIRONMENT_STOP,
+    }[requester]
+
+    async def ended(ctx: core.Flow, _config: Config) -> core.NoWinner | None:
+        ctx.choose(kept("a"))
+        await ctx.stopped
+        return core.NoWinner(reason="gave up") if adoption == "no-winner" else None
+
+    run = start(ended, adopting=adoption == "adopted")
+    run.stop(control, mode=core.StopMode.CANCEL)
+    if adoption == "refused":
+        run.fail(run.expect(core.ProposeWinner), core.FailureReason.REFUSED)
+    elif adoption == "verify-failed":
+        run.refuse_adoption(
+            run.expect(core.ProposeWinner), core.AdoptionFailureReason.VERIFY_FAILED
+        )
+    result = result_of(run, "cancel")
+    first = result.reason.split(":", 1)[0]
+    if requester == "environment":
+        assert (result.outcome, first) == ("failure", core.EndReason.FAILED.value)
+    elif requester == "operator":
+        assert (result.outcome, first) == ("cancelled", core.EndReason.STOPPED.value)
+    else:
+        failed = adoption == "verify-failed"
+        assert result.outcome == ("failure" if failed else "cancelled")
+        assert first == ("adoption-failed" if failed else core.EndReason.DEADLINE.value)
+
+
+_STOP_IDS = {
+    "operator": "stop",
+    "deadline": core.DEADLINE_STOP,
+    "environment": core.ENVIRONMENT_STOP,
+}
+_HOST_ENDINGS = {"deadline": core.EndReason.DEADLINE, "environment": core.EndReason.FAILED}
+
+
+@pytest.mark.parametrize("operator", [core.StopMode.DRAIN, core.StopMode.CANCEL])
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("operator", "environment"),
+        ("operator", "deadline"),
+        ("environment", "operator"),
+        ("deadline", "operator"),
+        ("environment", "deadline"),
+        ("deadline", "environment"),
+    ],
+)
+@pytest.mark.parametrize("window", ["while-adopting", "before-the-ending"])
+def test_the_first_host_stop_names_the_ending_whatever_stop_came_before_or_after(
+    begin: Begin, first: str, second: str, operator: core.StopMode, window: str
+) -> None:
+    """Regression (review follow-up 1 of #3327): the first stop alone named the ending.
+
+    The operator stopped the run, then its environment failed for good while the run wound down
+    (the ending was adopting). The result said ``stopped``, a resumable pause, while its controls
+    said no resume reopens it. A host stop (the deadline's, the environment's) is a verdict and
+    an operator's stop a pause, so the first host stop names the ending, whichever came first,
+    and whether the second arrived while the ending adopted or before the ending began.
+    """
+
+    async def ended(ctx: core.Flow, _config: Config) -> None:
+        ctx.choose(kept("a"))
+        await ctx.stopped
+        if window == "before-the-ending":
+            await ctx.timer(5.0)  # the root winds down; the second stop arrives meanwhile
+
+    run = begin(ended, adopting=False)
+    for requester in (first, second):
+        mode = operator if requester == "operator" else core.StopMode.CANCEL
+        run.stop(_STOP_IDS[requester], mode=mode)
+    if window == "before-the-ending":
+        run.advance_to(5.0)
+    run.adopt(run.expect(core.ProposeWinner))
+    result = run.finished.result if run.finished is not None else None
+    assert result is not None
+    ending = _HOST_ENDINGS[first if first != "operator" else second]
+    outcome = "failure" if ending is core.EndReason.FAILED else "cancelled"
+    assert (result.outcome, result.reason.split(":", 1)[0]) == (outcome, ending.value)

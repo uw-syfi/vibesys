@@ -23,8 +23,10 @@ from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
     COMMAND_BROKER_TOKEN_ENV,
     AgentGpuConfig,
+    BrokerTransport,
     GpuCommand,
     GpuCommands,
+    GpuJobOutcome,
     GpuJobRequest,
     HostCommandBroker,
     RunRoots,
@@ -32,6 +34,7 @@ from vs_sandbox.api.slurm import (
 
 # test-isolation: the client is a single-file CLI that is intentionally absent from the library API.
 from vs_sandbox.host_command_client import Stop, execute
+from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, wait_or_fail
 
 if TYPE_CHECKING:
@@ -63,14 +66,14 @@ class _Launcher:
         *,
         write: Callable[[bytes], None],
         cancel: Event,
-    ) -> int:
+    ) -> GpuJobOutcome:
         del request, command
         write(b"gpu job\n")
         self.started.set()
         if self._block:
             wait_or_fail(cancel, "the broker to cancel the job")
             self.cancelled.set()
-        return 3
+        return GpuJobOutcome(3)
 
 
 @contextmanager
@@ -94,6 +97,7 @@ def _serving(directory: Path, launcher: _Launcher) -> Iterator[HostCommandBroker
         directory / "broker.sock",
         roots=RunRoots((workspace,)),
         gpu=GpuCommands(config, _NoConfinement(), {}, launcher=launcher),
+        transport=BrokerTransport(UnixNetwork(), OsThreads()),
     )
     broker.start()
     try:

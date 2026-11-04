@@ -24,6 +24,7 @@ async def run(
     send: Callable[[int], Awaitable[object]],
     *,
     concurrency: int = 1,
+    clock: Callable[[], float] = time.perf_counter,
 ) -> RunResult:
     """Dispatch ``send(i)`` for each index from *schedule*, bounded by a semaphore.
 
@@ -33,10 +34,13 @@ async def run(
 
     For open-loop schedules (``poisson``, ``constant``), set *concurrency*
     high enough that it never blocks, letting the schedule control pacing.
+
+    ``clock`` reads the seconds ``wall_clock`` is measured in; a test passes a
+    virtual one.
     """
     sem = asyncio.Semaphore(concurrency)
     tasks: list[asyncio.Task[object]] = []
-    start = time.perf_counter()
+    start = clock()
 
     async def _wrap(i: int) -> object:
         try:
@@ -49,4 +53,4 @@ async def run(
         tasks.append(asyncio.create_task(_wrap(i)))
 
     results: list[Any] = await asyncio.gather(*tasks)
-    return RunResult(results, time.perf_counter() - start)
+    return RunResult(results, clock() - start)

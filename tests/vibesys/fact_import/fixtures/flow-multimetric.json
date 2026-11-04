@@ -1,0 +1,141 @@
+{
+  "base": null,
+  "dropped": [],
+  "facts": {
+    "artifacts": [],
+    "baseline": {
+      "digest": "base-digest",
+      "revision_id": {
+        "kind": "revision",
+        "root": "base"
+      }
+    },
+    "constraints": [],
+    "environment_digest": "environment",
+    "evaluator_digest": "evaluator",
+    "objective": "two opaque items",
+    "options": [],
+    "task": null,
+    "workload_digest": "workload"
+  },
+  "journal": [
+    {
+      "at": 0.0,
+      "digest": "48b61f2e6e25a322ccbe5af81a76d43a47760c269c6c3e0bac919b724d3c4f92",
+      "event": null,
+      "reads": [],
+      "recorded": null
+    },
+    {
+      "at": 0.0,
+      "digest": "09b99c7cdfd96bcaad270738f6d95f313fa25e2ef96747a67a078b5044588ccb",
+      "event": null,
+      "reads": [
+        "{\"owner\":{\"root\":\"run\",\"kind\":\"run\"},\"generation\":0}"
+      ],
+      "recorded": {
+        "decision": {
+          "kind": "decision",
+          "root": "worker.render.1"
+        },
+        "kind": "recorded_operation",
+        "result_json": "{\"kind\":\"operation_result\",\"operation_id\":{\"root\":\"operation-1\",\"kind\":\"operation\"},\"observation\":{\"event_id\":{\"root\":\"event-2\",\"kind\":\"event\"},\"request_id\":{\"root\":\"request-2\",\"kind\":\"request\"},\"scope\":{\"owner\":{\"root\":\"run\",\"kind\":\"run\"},\"generation\":0},\"sequence\":1,\"observed_at\":0.0,\"status\":\"succeeded\",\"resource_id\":null,\"revision\":null,\"accepted\":true,\"terminal\":true,\"released\":true,\"children\":[],\"children_complete\":false,\"child_manifest\":null,\"admission_id\":null,\"diagnostic\":\"\"},\"outcome_schema\":{\"name\":\"fake.render-role-artifacts-outcome\",\"version\":1},\"operation_schema\":{\"kind\":\"fake.render_role_artifacts\",\"request_schema\":{\"name\":\"fake.render-role-artifacts\",\"version\":1},\"outcome_schema\":{\"name\":\"fake.render-role-artifacts-outcome\",\"version\":1},\"lifecycle\":\"idempotent_external_write\"},\"outcome_json\":\"{\\\"prompts\\\":[{\\\"artifact_id\\\":{\\\"kind\\\":\\\"artifact\\\",\\\"root\\\":\\\"prompt-1\\\"},\\\"digest\\\":\\\"d\\\",\\\"schema_ref\\\":null}],\\\"status\\\":\\\"succeeded\\\",\\\"tool_policy\\\":null}\"}"
+      }
+    }
+  ],
+  "live": {
+    "choice": null,
+    "choice_label": null,
+    "flows": [
+      {
+        "checkpointed": false,
+        "holds": [],
+        "name": "root",
+        "path": "",
+        "snapshot_json": "{\"max_rounds\":2}"
+      }
+    ],
+    "in_flight": [],
+    "issued": [
+      {
+        "count": 1,
+        "label": "session:worker",
+        "path": ""
+      },
+      {
+        "count": 1,
+        "label": "serial:worker:run",
+        "path": ""
+      },
+      {
+        "count": 1,
+        "label": "worker.render",
+        "path": ""
+      },
+      {
+        "count": 1,
+        "label": "worker",
+        "path": ""
+      }
+    ],
+    "published": "{\"baseline\": {\"kind\": \"not_configured\"}, \"parents\": [{\"accuracy\": {\"evidence_id\": {\"kind\": \"evidence\", \"root\": \"accuracy\"}, \"kind\": \"correctness\", \"passed\": true, \"source_request\": {\"kind\": \"request\", \"root\": \"accuracy-request\"}, \"stage\": \"check\"}, \"benchmark\": {\"evidence_id\": {\"kind\": \"evidence\", \"root\": \"benchmark\"}, \"kind\": \"benchmark\", \"metrics\": [{\"direction\": \"max\", \"name\": \"throughput\", \"unit\": \"rps\", \"value\": 2.0}, {\"direction\": \"min\", \"name\": \"p99\", \"unit\": \"ms\", \"value\": 3.0}], \"partial\": {\"completed\": 1, \"direction\": \"max\", \"name\": \"warmup\", \"progress_unit\": \"rounds\", \"required\": 4, \"target\": 4.0, \"value\": 1.0}, \"passed\": false, \"source_request\": {\"kind\": \"request\", \"root\": \"benchmark-request\"}, \"stage\": \"benchmark\"}, \"hypothesis_id\": \"h1\", \"revision\": {\"digest\": \"candidate-digest\", \"revision_id\": {\"kind\": \"revision\", \"root\": \"candidate-a\"}}}]}",
+    "stop": null,
+    "trace": {
+      "spans": [
+        {
+          "attempts": [],
+          "ended_at": null,
+          "failure": null,
+          "id": "flow:#1",
+          "invocation": null,
+          "label": null,
+          "name": "root",
+          "parent": null,
+          "started_at": 0.0,
+          "status": "running",
+          "stop": null,
+          "type": "flow",
+          "waiting_on": [
+            {
+              "kind": "operation",
+              "ref": "op:worker.1",
+              "since": 0.0
+            }
+          ]
+        },
+        {
+          "attempts": [],
+          "ended_at": 0.0,
+          "failure": null,
+          "id": "op:worker.render.1",
+          "invocation": null,
+          "label": null,
+          "name": "fake.render_role_artifacts",
+          "parent": "flow:#1",
+          "started_at": 0.0,
+          "status": "done",
+          "stop": null,
+          "type": "operation",
+          "waiting_on": []
+        },
+        {
+          "attempts": [],
+          "ended_at": null,
+          "failure": null,
+          "id": "op:worker.1",
+          "invocation": "inv:worker:run:0",
+          "label": null,
+          "name": "worker",
+          "parent": "flow:#1",
+          "started_at": 0.0,
+          "status": "running",
+          "stop": null,
+          "type": "operation",
+          "waiting_on": []
+        }
+      ]
+    }
+  },
+  "restart_settled": [],
+  "schema_version": 1
+}

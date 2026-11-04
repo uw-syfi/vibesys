@@ -17,7 +17,9 @@ from vs_agent.api.images import (
 from vs_sim.api import PipedProcess, PipedProcessLauncher, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 pytestmark = pytest.mark.real_contract
 
@@ -29,8 +31,15 @@ class _ReadyLauncher:
     delegate: PipedProcessLauncher
     ready_fifo: Path
 
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
-        process = self.delegate.start(argv, cwd=cwd)
+    def start(
+        self,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        merge_stderr: bool = False,
+    ) -> PipedProcess:
+        process = self.delegate.start(argv, cwd=cwd, env=env, merge_stderr=merge_stderr)
         assert self.ready_fifo.read_text(encoding="utf-8") == "ready"
         return process
 
@@ -56,6 +65,7 @@ def test_real_runner_drains_large_multiline_and_unterminated_streams_into_bounde
         (sys.executable, "-c", program),
         cwd=tmp_path,
         timeout=30,
+        output=DISCARD,
     )
 
     assert result.returncode == 23
@@ -94,4 +104,5 @@ def test_timeout_kills_descendant_that_inherits_both_output_pipes(tmp_path: Path
             (sys.executable, "-c", parent),
             cwd=tmp_path,
             timeout=0,
+            output=DISCARD,
         )

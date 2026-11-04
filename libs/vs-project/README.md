@@ -51,73 +51,27 @@ objects, which prevents application code from binding them to different roots.
 State namespaces and immutable state value types remain public for integrations
 that consume them.
 
-## Atomic run state
+## Legacy run state
 
-`Project.state_store(run_id)` opens a `LocalStateStore` in the shared portable
-run namespace, including before its manifest exists. `StateStore` is the role;
-`FakeStateStore` implements the same contract in memory. Both accept a public
-`fault_plan` of `CommitFault` values for definite and ambiguous commit failures.
-Local ambiguity faults fail before rename, after rename, or at directory
-fsync. `lease_fault_plan` applies the same faults to eligible acquire and renew
-writes. `observation_fault_plan` accepts `ObservationFault.READ` and `.SYNC`
-for read and directory fsync errors, including reads inside transactions.
-A `None` entry in either plan allows that operation to complete normally.
-Rejected lease mutations do not consume the lease plan; record faults remain
-reserved for eligible commit and quarantine mutations.
+A run saved before the step loop kept its whole run envelope in `store.json`, as one record,
+together with the lease of the host that wrote it. Nothing writes that file any more: the run's
+state is its run log. `Project.state_store(run_id)` opens a `LocalStateStore` in the shared
+portable run namespace, including before its manifest exists, and `FakeStateStore` implements the
+same role in memory. `StateStore` is the role, and it only reads: `observe()` takes the atomic
+published bytes without a lock, and `load()` takes them under the store lock after synchronizing
+the document and its namespace links through the existing project root, so nothing is read as
+durable that was not made durable. Both return a `StoredEnvelope`, a `QuarantinedEnvelope` (a
+migration that was blocked, with no authority to run) or `None`.
 
-The store treats serialized kernel envelopes as opaque bytes. State, request
-outbox and event cursor belong inside one payload, encoded and decoded by the
-kernel's public codec. `StoredEnvelope.revision` is an independent storage CAS
-token, starting at zero and increasing with every replacement. It does not
-replace the kernel revision inside the payload.
-
-Acquire a `StoreFence` with a host identity, supplied time and positive lease
-duration. Renewal preserves its epoch and never shrinks its expiry. An expired
-lease permits takeover with a higher epoch; previous epochs cannot commit.
-Time must use one durable shared basis across hosts, without regressions.
-
-`commit(expected_revision, envelope, fence, now)` checks ownership and revision
-under the same lock that publishes the complete record and lease document.
-`None` expected revision means absence. Outcomes are:
-
-- `Committed`: the complete candidate is durable.
-- `Conflict`: no candidate was written; reload and reconcile the revision or
-  reacquire host ownership.
-- `Unknown`: dispatch is forbidden until reload resolves whether the complete
-  candidate exists. Compare its storage revision and bytes. A later competing
-  transition requires reconciliation rather than blind replay.
-
-An injected definite failure raises `StateStoreWriteError` and writes nothing.
-Lease write errors also grant no dispatch authority. Real observation errors
-propagate. Local publication uses a stable shared `flock`, a temporary file,
-file fsync, rename, and directory fsync. Reload synchronizes the observed file
-and namespace links through the existing project root before returning,
-resolving lost durability acknowledgements. Unchanged ancestors outside the
-project require traversal permission only. The shared filesystem must support
-these operations.
-
-`quarantine(...)` performs the same fenced CAS with a `QuarantinedEnvelope`.
-It preserves unmigratable source bytes and diagnostics and atomically replaces
-the runnable record. An explicit `None` schema version preserves unknown source
-metadata without fabricating a version. `load()` returns this explicit blocked alternative;
-quarantine grants no dispatch authority.
-
-`mutate_if_fenced(fence, now, mutation)` runs one synchronous external durable
-mutation while holding the same transaction that validates the lease and
-excludes takeover. It returns `False` without invoking the mutation when the
-fence is stale. Every writer to the protected external resource must use the
-same run store for this ordering guarantee; exceptions from the mutation
-propagate after the transaction is released. The mutation must not call back
-into the store whose transaction it holds.
-
-Future shell composition must serialize every whole transition before I/O,
-retain the storage CAS token separately from kernel state, map storage ownership
-to the kernel host fence, renew and verify the shared lease, and suspend dispatch
-on conflicts, unknown outcomes, write errors or quarantine. Restart must decode
-through the authoritative kernel codec, migrate explicitly, and reconcile
-persisted request identities before replay. External executors must honor the
-epoch or provide identity-based idempotency and reconciliation; a filesystem
-lease alone cannot stop an already executing external request.
+The store treats the envelope as opaque bytes: the kernel's public codec decodes it, and the
+migration into the run log (`vibesys.run.store_migration`) is its one reader. `StoredEnvelope.revision`
+was an independent storage token, starting at zero. The document is either version 1, which also
+holds the writer's lease and which a reader accepts and ignores, or version 2, which moved the
+lease to a `lease.json` that is never read. A damaged document, or one from a newer release, is a
+`StateDocumentDamagedError` that names the file and both versions and never echoes its bytes.
+`observation_fault_plan` accepts `ObservationFault.READ` and `.SYNC` for read and directory fsync
+errors; a `None` entry lets that read complete normally. A test puts a record in place with
+`seed_stored_record` from `vs_project.api.testing`, the only writer left.
 
 ## Git history
 

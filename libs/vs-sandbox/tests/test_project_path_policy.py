@@ -28,6 +28,8 @@ def _workspace(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     (workspace / ".state" / "local").mkdir(parents=True)
     (workspace / ".state" / "run.json").write_text("{}\n")
+    (workspace / ".state" / "runs" / "run-1" / "core-store").mkdir(parents=True)
+    (workspace / ".state" / "runs" / "run-1" / "core-store" / "store.json").write_text("{}\n")
     (workspace / ".env").write_text("TOKEN=secret\n")
     (workspace / "Cargo.toml").write_text("[package]\n")
     return workspace
@@ -36,7 +38,7 @@ def _workspace(tmp_path: Path) -> Path:
 def _policy() -> ProjectPathPolicy:
     return ProjectPathPolicy(
         read_only_paths=(".state", "Cargo.toml"),
-        hidden_paths=(".state/local", ".env"),
+        hidden_paths=(".state/local", ".state/runs", ".env"),
     )
 
 
@@ -120,7 +122,7 @@ class TestProjectPathPolicy:
         policy.validate(workspace)
 
         assert policy.read_only_paths == (Path(".state"), Path("Cargo.toml"))
-        assert policy.hidden_paths == (Path(".state/local"), Path(".env"))
+        assert policy.hidden_paths == (Path(".state/local"), Path(".state/runs"), Path(".env"))
 
     def test_rejects_missing_path(self, tmp_path: Path) -> None:
         workspace = _workspace(tmp_path)
@@ -202,12 +204,14 @@ class TestBubblewrapProjectPaths:
             str(workspace / "Cargo.toml"),
         )
         hidden_dir = _sequence_index(argv, "--tmpfs", str(workspace / ".state" / "local"))
+        hidden_runs = _sequence_index(argv, "--tmpfs", str(workspace / ".state" / "runs"))
         hidden_file = _sequence_index(argv, "--ro-bind", "/dev/null", str(workspace / ".env"))
         chdir = _sequence_index(argv, "--chdir", str(workspace))
 
         assert workspace_bind < readonly_dir < hidden_dir < chdir
+        assert readonly_dir < hidden_runs < chdir
         assert workspace_bind < readonly_file < hidden_file < chdir
-        assert max(readonly_dir, readonly_file) < min(hidden_dir, hidden_file)
+        assert max(readonly_dir, readonly_file) < min(hidden_dir, hidden_runs, hidden_file)
 
     @pytest.mark.skipif(_working_bwrap() is None, reason="requires working bubblewrap")
     def test_enforces_file_and_directory_policy(self, tmp_path: Path) -> None:
@@ -221,6 +225,9 @@ class TestBubblewrapProjectPaths:
         )
         script = (
             "test ! -e .state/local/host-secret"
+            " && test ! -e .state/runs/run-1/core-store/store.json"
+            " && ! cat .state/runs/run-1/core-store/store.json"
+            " && ! printf poisoned > .state/runs/run-1/core-store/store.json"
             " && test ! -s .env"
             " && ! printf changed > .env"
             " && ! printf changed > Cargo.toml"
@@ -241,6 +248,8 @@ class TestBubblewrapProjectPaths:
         assert (workspace / ".env").read_text() == "TOKEN=secret\n"
         assert (workspace / "Cargo.toml").read_text() == "[package]\n"
         assert (workspace / ".state" / "run.json").read_text() == "{}\n"
+        store = workspace / ".state" / "runs" / "run-1" / "core-store" / "store.json"
+        assert store.read_text() == "{}\n"
         assert not (workspace / ".state" / "local" / "agent-file").exists()
         assert (workspace / "source.txt").read_text() == "editable"
 
@@ -312,13 +321,67 @@ class TestBubblewrapProjectPaths:
         assert paths[0] == common / "worktrees" / "workspace"
         assert common / "objects" in paths
         assert common / "refs" in paths
-        assert common / "config" in paths
-        # Nothing else of the shared repository: other worktrees, reflogs, hooks.
+        # Nothing else of the shared repository: other worktrees, reflogs, hooks,
+        # and config (it can hold a credential-bearing remote URL; see #2101).
         withheld = {common, common / "worktrees", common / "worktrees" / "other"}
-        withheld |= {common / "hooks", common / "logs"}
+        withheld |= {common / "hooks", common / "logs", common / "config"}
         assert not withheld & set(paths)
         assert sandbox_api.linked_worktree_git_paths(repository) == ()
         assert sandbox_api.linked_worktree_git_paths(plain) == ()
+
+    @pytest.mark.skipif(shutil.which("git") is None, reason="requires git")
+    def test_linked_worktree_git_paths_never_exposes_the_shared_config(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression for #2101: ``config`` can hold a credential-bearing remote URL.
+
+        ``rev-parse``, ``status`` and ``diff`` (exercised by the sibling test above
+        and by ``test_git_reads_work_in_a_linked_worktree_and_history_stays_read_only``)
+        need no repository-level config at all, so it is withheld outright rather than
+        filtered section by section: that way no future ``credential.*``, ``url.*`` or
+        ``http.*`` setting can leak just because it was not yet on a strip-list.
+        """
+        repository = tmp_path / "project"
+        workspace = tmp_path / "run" / "worktrees" / "workspace"
+        identity = ("-c", "user.name=t", "-c", "user.email=t@example.invalid")
+
+        def git(*args: str, cwd: Path) -> None:
+            run_test_command(["git", *identity, *args], cwd=cwd, check=True, capture_output=True)
+
+        repository.mkdir()
+        git("init", "-q", cwd=repository)
+        (repository / "engine.py").write_text("print(1)\n")
+        git("add", "engine.py", cwd=repository)
+        git("commit", "-q", "-m", "base", cwd=repository)
+        # A fake value standing in for a real credential; it never leaves this test.
+        embedded_marker = "sshh-do-not-leak-9f3c2b"
+        git(
+            "remote",
+            "add",
+            "origin",
+            f"https://user:{embedded_marker}@example.invalid/repo.git",
+            cwd=repository,
+        )
+        common = (repository / ".git").resolve()
+        config = common / "config"
+        with config.open("a", encoding="utf-8") as handle:
+            handle.write(
+                "[credential]\n"
+                f"\thelper = store --file=/secrets/{embedded_marker}\n"
+                "[http]\n"
+                f"\textraHeader = Authorization: Bearer {embedded_marker}\n"
+                f'[url "https://{embedded_marker}@github.com/"]\n'
+                "\tinsteadOf = https://github.com/\n"
+            )
+        git("worktree", "add", "-q", str(workspace), cwd=repository)
+        assert embedded_marker in config.read_text(encoding="utf-8")
+
+        paths = sandbox_api.linked_worktree_git_paths(workspace)
+
+        assert config not in paths
+        for path in paths:
+            if path.is_file():
+                assert embedded_marker not in path.read_text(encoding="utf-8", errors="ignore")
 
     def test_builder_passes_validated_policy_to_linux_backend(
         self,
@@ -363,11 +426,16 @@ class TestSeatbeltProjectPaths:
         readonly_dir = f'(deny file-write* (subpath "{workspace / ".state"}"))'
         readonly_file = f'(deny file-write* (literal "{workspace / "Cargo.toml"}"))'
         hidden_dir = f'(deny file-read* file-write* (subpath "{workspace / ".state" / "local"}"))'
+        hidden_runs = f'(deny file-read* file-write* (subpath "{workspace / ".state" / "runs"}"))'
         hidden_file = f'(deny file-read* file-write* (literal "{workspace / ".env"}"))'
 
         allow_index = profile.index(workspace_allow)
         readonly_indexes = (profile.index(readonly_dir), profile.index(readonly_file))
-        hidden_indexes = (profile.index(hidden_dir), profile.index(hidden_file))
+        hidden_indexes = (
+            profile.index(hidden_dir),
+            profile.index(hidden_runs),
+            profile.index(hidden_file),
+        )
         assert allow_index < min(readonly_indexes)
         assert max(readonly_indexes) < min(hidden_indexes)
 

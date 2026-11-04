@@ -162,3 +162,31 @@ def test_a_scalar_contract_has_no_partial_measurement() -> None:
         decode_trusted_benchmark_run(framed, contract, frozenset(), exited_cleanly=False).partial
         is None
     )
+
+
+_DEEP = "[" * 100_000
+
+
+@pytest.mark.parametrize(
+    ("contract", "exited_cleanly"),
+    [
+        pytest.param(ProtocolBenchmarkContract(), True, id="protocol"),
+        pytest.param(ProtocolBenchmarkContract(), False, id="protocol-failed-run"),
+        pytest.param(
+            ScalarBenchmarkContract(output_argument="--out", metric="tok_s"), True, id="scalar"
+        ),
+    ],
+)
+def test_a_result_nested_past_the_recursion_limit_is_a_violation(
+    contract: ProtocolBenchmarkContract | ScalarBenchmarkContract, *, exited_cleanly: bool
+) -> None:
+    framed = (
+        f"__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n{_DEEP}\n__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__\n"
+    )
+
+    decoded = decode_trusted_benchmark_run(
+        framed, contract, frozenset(), exited_cleanly=exited_cleanly
+    )
+
+    assert decoded.passed is False
+    assert decoded.violation is not None

@@ -21,6 +21,7 @@ knowledge of application response schemas or policy defaults.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, override
 
@@ -37,7 +38,6 @@ from vs_agent.contracts import (
 )
 from vs_agent.shim_translation import default_agent_path
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
-from vs_sim.api import OsThreads, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -47,6 +47,7 @@ if TYPE_CHECKING:
         AgentTurnRequest,
         AgentTurnResult,
     )
+    from vs_sim.api import Threads
 
 FAKE_CAPABILITIES = AgentCapabilities(
     tool_servers=True,
@@ -104,6 +105,11 @@ class FakeProviderError(RuntimeError):
         return cls("fake agent turn was cancelled")
 
     @classmethod
+    def close_failed(cls) -> FakeProviderError:
+        """Describe a scheduled failure of the provider's close."""
+        return cls("fake agent provider close failed")
+
+    @classmethod
     def provider_closed(cls) -> FakeProviderError:
         """Describe session creation after the fake provider was closed."""
         return cls("fake agent provider is closed")
@@ -143,12 +149,30 @@ class FakeCancels:
         return self._event.wait(timeout)
 
 
+class FakeSteering(StrEnum):
+    """How a fake provider answers a message sent into its running turn (``steer``)."""
+
+    UNSUPPORTED = "unsupported"
+    """The profile takes no message mid-turn, like a one-shot provider process."""
+    CONSUMED = "consumed"
+    """The provider accepts the message and the model takes it into the turn."""
+    REJECTED = "rejected"
+    """The provider accepts the message, then refuses it before the model sees it."""
+
+
 @dataclass(frozen=True, slots=True)
 class FakeTurnScript:
-    """Per-turn replies and an optional successful-turn renewal threshold."""
+    """Per-turn replies, an optional successful-turn renewal threshold and mid-turn steering.
+
+    ``context_tokens`` is the context a session's Nth completed turn reports its conversation
+    holds (the last entry repeats; empty reports none), as agentshim's
+    ``TurnResult.context_tokens`` does.
+    """
 
     answers: tuple[Answer, ...]
     reset_after_turn: int | None = None
+    steering: FakeSteering = FakeSteering.UNSUPPORTED
+    context_tokens: tuple[int | None, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject empty scripts and invalid renewal boundaries."""
@@ -158,6 +182,9 @@ class FakeTurnScript:
             isinstance(self.reset_after_turn, bool) or self.reset_after_turn < 1
         ):
             message = "reset_after_turn must be a positive integer"
+            raise ValueError(message)
+        if any(tokens is not None and tokens < 0 for tokens in self.context_tokens):
+            message = "context_tokens must be non-negative"
             raise ValueError(message)
 
 
@@ -172,6 +199,8 @@ class _InFlight:
     request: AgentTurnRequest | None = None
     on_turn: Callable[[AgentTurnRequest], None] | None = None
     barrier_error: BaseException | None = None
+    context_tokens: int | None = None
+    """The context the turn that completed last reported."""
 
 
 class _ScriptedConversation:
@@ -185,6 +214,9 @@ class _ScriptedConversation:
         self._transport = transport
         self._id = spec.resume_id
         self._closed = False
+        self._lock = transport.in_flight.threads.lock()
+        self._running = False
+        self._steered: list[str] = []
 
     @property
     def conversation_id(self) -> str | None:
@@ -199,6 +231,16 @@ class _ScriptedConversation:
         if self._closed:
             message = "conversation is closed"
             raise agentshim.SessionStateError(message)
+        with self._lock:
+            self._running = True
+        try:
+            return self._turn(emit)
+        finally:
+            with self._lock:
+                self._running = False
+                self._steered.clear()
+
+    def _turn(self, emit: Callable[[agentshim.AgentEvent], None]) -> agentshim.TurnResult:
         transport = self._transport
         flight = transport.in_flight
         if flight.on_turn is not None and flight.request is not None:
@@ -215,11 +257,15 @@ class _ScriptedConversation:
         resumed = self._id is not None
         invocation = transport.next_invocation()
         events = transport.turns[min(invocation, len(transport.turns)) - 1]
+        answer = transport.answers[min(invocation, len(transport.answers)) - 1]
+        # A turn that stops on a capacity limit stops before it reports its steers' fate.
+        stops = isinstance(answer, AgentQuotaError)
         for event in events:
             emit(event)
+            self._answer_steers(emit, report=not stops)
+        self._answer_steers(emit, report=not stops)
         if self._id is None:
             self._id = transport.new_conversation_id()
-        answer = transport.answers[min(invocation, len(transport.answers)) - 1]
         if isinstance(answer, AgentOutputSchemaError):
             raise agentshim.TurnFailedError(
                 str(answer), kind=agentshim.FailureKind.SCHEMA, detail=answer.detail
@@ -227,6 +273,8 @@ class _ScriptedConversation:
         if isinstance(answer, AgentQuotaError):
             raise _failure_for(answer, emit)
         usage, cost = _last_usage(events)
+        contexts = transport.context_tokens
+        flight.context_tokens = contexts[min(invocation, len(contexts)) - 1] if contexts else None
         return agentshim.TurnResult(
             text=_turn_text(answer, transport.in_flight.request),
             structured_output=None,
@@ -237,6 +285,34 @@ class _ScriptedConversation:
             duration_ms=_USAGE_DURATION_MS if cost is not None else 0,
             exit_code=0,
         )
+
+    def steer(self, text: str) -> None:
+        """Take *text* into the running turn; its fate is reported on the turn's thread.
+
+        Only a transport whose profile can steer opens conversations the library steers.
+        """
+        with self._lock:
+            if not self._running:
+                message = "no turn is running in this fake conversation"
+                raise agentshim.NoRunningTurnError(message)
+            self._steered.append(text)
+
+    def _answer_steers(self, emit: Callable[[agentshim.AgentEvent], None], *, report: bool) -> None:
+        """Report each message steered in so far, as the script says, after the event before.
+
+        Without ``report`` the provider only acknowledges each: it stops before saying
+        whether the model read them.
+        """
+        with self._lock:
+            steered, self._steered = self._steered, []
+        for text in steered:
+            emit(agentshim.SteerDelivered(text=text))
+            if not report:
+                continue
+            if self._transport.steering is FakeSteering.REJECTED:
+                emit(agentshim.SteerRejected(text=text, reason="the fake refuses steers"))
+            else:
+                emit(agentshim.SteerConsumed(text=text))
 
     def interrupt(self) -> None:
         """Scripted turns finish on their own; there is nothing to stop."""
@@ -259,6 +335,8 @@ class _ScriptedTransport:
     ) -> None:
         self.turns = turns
         self.answers = script.answers
+        self.context_tokens = script.context_tokens
+        self.steering = script.steering
         self.in_flight = in_flight
         self._profile = profile
         self._ids = ids
@@ -286,6 +364,7 @@ class _Hooks:
     """What a session reports to and takes from its test."""
 
     on_turn: Callable[[AgentTurnRequest], None] | None
+    on_send: Callable[[AgentTurnRequest], None] | None
     cancels: FakeCancels
     resumed: list[str]
 
@@ -324,14 +403,18 @@ class ScriptedSession(LaunchedSession):
         with self.state_lock:
             self.turns_in_progress += 1
         try:
+            if self.hooks.on_send is not None:
+                self.hooks.on_send(request)
             self.in_flight.request = request
             self.in_flight.barrier_error = None
             try:
-                return super().run_turn(request, observer)
+                result = super().run_turn(request, observer)
             except Exception:
                 if self.in_flight.barrier_error is not None:
                     raise self.in_flight.barrier_error from None
                 raise
+            self.context_tokens = self.in_flight.context_tokens
+            return result
         finally:
             self.in_flight.request = None
             with self.state_lock:
@@ -372,7 +455,9 @@ class FakeProvider:
         answer: BaseModel | Mapping[str, object] | str | None = None,
         script: FakeTurnScript | None = None,
         on_turn: Callable[[AgentTurnRequest], None] | None = None,
-        threads: Threads | None = None,
+        on_send: Callable[[AgentTurnRequest], None] | None = None,
+        threads: Threads,
+        close_failures: int = 0,
     ) -> None:
         """Create a provider whose sessions emit ``turn``/``turns`` and answer with ``answer``.
 
@@ -382,7 +467,9 @@ class FakeProvider:
         more turns than ``turns`` has entries, its last entry keeps repeating.
         ``turn=[...]`` is sugar for ``turns=[[...]]``. ``on_turn`` observes
         each accepted request and may block at a deterministic barrier or
-        raise a scheduled boundary failure. Passing neither runs a turn that
+        raise a scheduled boundary failure. ``on_send`` observes each send
+        before the session starts it, while the library has no turn in flight
+        that an interrupt could stop. Passing neither runs a turn that
         emits no events. ``answer`` sets the text or structured payload every
         turn returns. It is required for a structured turn, keeping
         application response policy out of this fake. ``script.answers``
@@ -391,7 +478,9 @@ class FakeProvider:
         just like production, and can be followed by a correction turn.
         ``script.reset_after_turn`` retires a completed conversation after
         that turn, as production budget renewal does. Strict continuations
-        suppress renewal.
+        suppress renewal. ``close_failures`` makes that many first calls of
+        :meth:`close` raise before closing anything, as a launcher whose
+        cleanup command died does.
         """
         if turn is not None and turns is not None:
             raise FakeProviderError.conflicting_turn_inputs()
@@ -405,16 +494,19 @@ class FakeProvider:
             resolved_turns = ((),)
         if script is not None and answer is not None:
             raise FakeProviderError.conflicting_turn_inputs()
-        self._threads = threads or OsThreads()
+        self._threads = threads
         self._cancels = FakeCancels(self._threads)
         self._resumed: list[str] = []
         self._on_turn = on_turn
+        self._on_send = on_send
         self._turns = resolved_turns
         self._script = script if script is not None else FakeTurnScript((answer,))
         self._sessions: list[ScriptedSession] = []
         self._session_count = 0
         self._lock = self._threads.lock()
         self._closed = False
+        self._close_failures = close_failures
+        self.close_calls = 0
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -447,7 +539,7 @@ class FakeProvider:
                 raise FakeProviderError.provider_closed()
             self._session_count += 1
             ordinal = self._session_count
-        profile = _profile(spec.provider, self._script.reset_after_turn)
+        profile = _profile(spec.provider, self._script.reset_after_turn, self._script.steering)
         in_flight = _InFlight(self._threads, on_turn=self._on_turn)
         transport = _ScriptedTransport(
             turns=self._turns,
@@ -476,7 +568,7 @@ class FakeProvider:
                 timeout=None,
                 log=_ignore,
             ),
-            hooks=_Hooks(self._on_turn, self._cancels, self._resumed),
+            hooks=_Hooks(self._on_turn, self._on_send, self._cancels, self._resumed),
             in_flight=in_flight,
         )
         with self._lock:
@@ -484,10 +576,14 @@ class FakeProvider:
         return session
 
     def close(self) -> None:
-        """Close every session this provider opened, idempotently."""
+        """Close every session this provider opened, idempotently; ``close_calls`` counts calls."""
         with self._lock:
+            self.close_calls += 1
             if self._closed:
                 return
+            if self._close_failures > 0:
+                self._close_failures -= 1
+                raise FakeProviderError.close_failed()
             self._closed = True
             sessions, self._sessions = self._sessions, []
         for session in sessions:
@@ -498,8 +594,10 @@ def _ignore(_message: str) -> None:
     """Discard diagnostics: a fake has no run log."""
 
 
-def _profile(provider: str, reset_after_turn: int | None) -> agentshim.ProviderProfile:
-    """A resumable, non-steerable profile named for the provider a spec asks for."""
+def _profile(
+    provider: str, reset_after_turn: int | None, steering: FakeSteering = FakeSteering.UNSUPPORTED
+) -> agentshim.ProviderProfile:
+    """A resumable profile named for the provider a spec asks for, steerable if scripted so."""
     base = agentshim.get_provider("claude").profile
     renewal = (
         base.renewal
@@ -511,7 +609,7 @@ def _profile(provider: str, reset_after_turn: int | None) -> agentshim.ProviderP
         name=provider,
         display_name=provider.title(),
         binary=provider,
-        supports_steer=False,
+        supports_steer=steering is not FakeSteering.UNSUPPORTED,
         renewal=renewal,
     )
 
@@ -519,7 +617,15 @@ def _profile(provider: str, reset_after_turn: int | None) -> agentshim.ProviderP
 def _failure_for(
     error: AgentQuotaError, emit: Callable[[agentshim.AgentEvent], None]
 ) -> agentshim.TurnFailedError:
-    """Express a scripted capacity limit the way a provider reports one."""
+    """Express a scripted capacity limit the way a provider reports one.
+
+    An outage is a transient failure with no exhausted window; sustained rate
+    limiting is one with an exhausted window; a quota is a usage limit.
+    """
+    if error.condition is QuotaCondition.UNAVAILABLE:
+        return agentshim.TurnFailedError(
+            str(error), kind=agentshim.FailureKind.TRANSIENT, detail=error.detail
+        )
     if error.condition is QuotaCondition.RATE_LIMITED:
         emit(
             agentshim.RateLimitStatus(
@@ -628,11 +734,25 @@ def todo_write(items: Sequence[tuple[str, str]]) -> agentshim.AgentEvent:
     return agentshim.ToolCall(tool_id=None, tool=_TODO_TOOL, args={"todos": todos})
 
 
-def usage(*, input_tokens: int, output_tokens: int) -> agentshim.AgentEvent:
+def usage(
+    *,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_input_tokens: int = 0,
+    cache_write_input_tokens: int = 0,
+    reasoning_output_tokens: int = 0,
+) -> agentshim.AgentEvent:
     """Return one usage-update event."""
     return agentshim.UsageReport(
         usage=agentshim.ProviderUsage(
-            tokens=agentshim.TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens),
+            tokens=agentshim.TokenUsage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cached_input_tokens=cache_read_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+                cache_write_input_tokens=cache_write_input_tokens,
+                reasoning_output_tokens=reasoning_output_tokens,
+            ),
         ),
         cost_usd=0.0,
     )
@@ -647,11 +767,8 @@ class HandSession(LaunchedSession):
     inert library session, so nothing runs unless a subclass says so.
     """
 
-    def __init__(
-        self, spec: AgentSessionSpec | None = None, *, threads: Threads | None = None
-    ) -> None:
+    def __init__(self, spec: AgentSessionSpec | None = None, *, threads: Threads) -> None:
         """Wrap an inert library session for ``spec`` (a placeholder when omitted)."""
-        threads = threads or OsThreads()
         resolved = spec if spec is not None else _placeholder_spec()
         profile = _profile(resolved.provider, None)
         steers = SteerLedger(threads)

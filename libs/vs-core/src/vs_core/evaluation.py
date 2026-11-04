@@ -7,6 +7,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING
 
 from . import _continuations, _job_releases, _measurements
+from ._comparison import closed_answers, comparisons_settled, moment_of
 from .types.evaluation import (
     AgentMeasurementRequested,
     ContinuationJobsChanged,
@@ -17,7 +18,9 @@ from .types.evaluation import (
     JobObserved,
     JobsDrainRequested,
     JobTerminationRequested,
+    JobWaitLapsed,
     MeasurementRequested,
+    MeasurementSubmissionEnded,
     MeasurementSubmissionObserved,
     ObservationsDue,
     RegisteredJobObserved,
@@ -42,6 +45,7 @@ EVENT_TO_SUBAREA: Mapping[type[EvaluationEvent], Reducer] = MappingProxyType(
         JobsDrainRequested: _measurements.advance,
         RunJobsCancelRequested: _measurements.advance,
         MeasurementSubmissionObserved: _measurements.advance,
+        MeasurementSubmissionEnded: _measurements.submission_ended,
         ContinuationJobsChanged: _continuations.advance,
         ContinuationRetireRequested: _continuations.advance,
         ContinuationReopenRequested: _continuations.advance,
@@ -54,6 +58,7 @@ EVENT_TO_SUBAREA: Mapping[type[EvaluationEvent], Reducer] = MappingProxyType(
         TurnSuspended: _continuations.advance,
         DeadlineReached: _continuations.advance,
         ObservationsDue: _measurements.advance,
+        JobWaitLapsed: _measurements.advance,
     }
 )
 
@@ -61,9 +66,27 @@ EVENT_TO_SUBAREA: Mapping[type[EvaluationEvent], Reducer] = MappingProxyType(
 def advance_evaluation(
     state: EvaluationState, context: EvaluationContext, event: EvaluationEvent
 ) -> AreaChange[EvaluationState]:
-    """Route each closed event variant to its sole owning subarea."""
+    """Route each closed event variant to its sole owning subarea.
+
+    The event's time has already moved the run clock. Waits whose bound it reached freeze
+    first, on the job facts they had then, before the event changes them; a wait whose bound
+    the event's facts moved into the past freezes right after it (``_wait_clock``).
+    """
+    due = _continuations.reach_deadlines(state, context)
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
-    change = reducer(state, context, event)
+    change = reducer(due.state, context, event)
+    after = _continuations.reach_deadlines(change.state, context)
     # A job's release is announced to its closing attempt here, whichever subarea recorded it.
-    announced = _job_releases.job_release_signals(state, change.state, context)
-    return change.model_copy(update={"signals": (*change.signals, *announced)})
+    announced = _job_releases.job_release_signals(state, after.state, context)
+    # So is every comparison the step settled, however the run that fed it ended, after the
+    # step's own results.
+    moment = moment_of(context.run)
+    settled = comparisons_settled(state, after.state, moment)
+    return after.model_copy(
+        update={
+            "state": closed_answers(after.state, moment),
+            "signals": (*due.signals, *change.signals, *after.signals, *announced),
+            "requests": (*due.requests, *change.requests, *after.requests),
+            "events": (*due.events, *change.events, *after.events, *settled),
+        }
+    )

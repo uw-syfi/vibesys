@@ -144,6 +144,7 @@ def parked_state(episode: str) -> tuple[core.CoreState, core.ContinuationReopenR
         observation=job.observation.model_copy(
             update={"request_id": park, "resource_id": None, "admission_id": admission}
         ),
+        addressed_by=(),
     )
     owner = core.AttemptView(
         attempt_id=attempt.attempt_id,

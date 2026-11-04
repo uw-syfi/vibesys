@@ -10,17 +10,24 @@ from typing import TYPE_CHECKING
 
 import agentshim
 from agentshim.testing import (
+    ClaudeStreamPeers,
+    CodexAccount,
+    CodexScript,
+    CodexWindow,
     FakeClock,
     FakeConfinement,
     FakeExecutor,
     FakeRun,
     SequentialIds,
     TokenUsage,
+    claude_account,
+    claude_usage,
     installed_mcp_servers,
     scripted_turn,
 )
 
 from vs_agent import fake_profiles
+from vs_agent.fake_agent_processes import FakeAgentProcess, FakeAgentProcesses
 from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.fake_docker_build_runner import (
     DockerBuildResult,
@@ -31,6 +38,7 @@ from vs_agent.fake_docker_build_runner import (
     docker_result_without_output,
     docker_timed_out,
 )
+from vs_agent.fake_limits_reader import FakeLimitsReader, limits_executor
 from vs_agent.fault_injection import (
     KILLED_STATUS,
     MALFORMED_LINE,
@@ -54,6 +62,7 @@ from vs_agent.faulty_transport import FaultyTransport
 from vs_agent.scripted_provider import (
     FakeProvider,
     FakeProviderError,
+    FakeSteering,
     FakeTurnScript,
     HandSession,
     assistant_text,
@@ -75,6 +84,7 @@ if TYPE_CHECKING:
     from vs_agent.session_launch import SessionLauncher
     from vs_agent.sessions import AgentInvocationStore, AgentTurnExecutor
     from vs_sandbox.api import DockerSandbox
+    from vs_sim.api import Threads
 
 type CommandRequest = agentshim.CommandRequest
 """The spawn request a ``FakeExecutor`` script receives."""
@@ -85,6 +95,10 @@ __all__ = [
     "NOT_A_REPLY",
     "TURN_BUDGET_S",
     "AgentCrashError",
+    "ClaudeStreamPeers",
+    "CodexAccount",
+    "CodexScript",
+    "CodexWindow",
     "CommandExecutor",
     "CommandRequest",
     "ConversationFaultKind",
@@ -93,14 +107,18 @@ __all__ = [
     "DurableAgentClient",
     "FakeAgentClient",
     "FakeAgentInvocationStore",
+    "FakeAgentProcess",
+    "FakeAgentProcesses",
     "FakeAgentSessions",
     "FakeConfinement",
     "FakeDockerBuildRunner",
     "FakeExecutor",
     "FakeInvocation",
+    "FakeLimitsReader",
     "FakeProvider",
     "FakeProviderError",
     "FakeRun",
+    "FakeSteering",
     "FakeTurnScript",
     "FaultingExecutor",
     "FaultingTransport",
@@ -114,6 +132,8 @@ __all__ = [
     "Transport",
     "answering_with",
     "assistant_text",
+    "claude_account",
+    "claude_usage",
     "docker_build_result",
     "docker_result",
     "docker_result_without_output",
@@ -123,6 +143,7 @@ __all__ = [
     "fake_stream_launcher",
     "generated_replies",
     "installed_mcp_servers",
+    "limits_executor",
     "scripted_turn",
     "stream_peers",
     "thinking",
@@ -137,6 +158,7 @@ def fake_agentshim_launcher(
     *,
     provider: str,
     executor: FakeExecutor,
+    threads: Threads,
     transport: agentshim.TransportKind = agentshim.TransportKind.ONE_SHOT,
 ) -> SessionLauncher:
     """Launch real sessions under the production policy over a scripted in-memory executor.
@@ -153,6 +175,8 @@ def fake_agentshim_launcher(
         launcher_env=dict,
         transient_retry_delays=(),
         transport=transport,
+        clock=FakeClock(),
+        threads=threads,
     )
 
 
@@ -161,6 +185,7 @@ def fake_stream_launcher(
     provider: str,
     executor: CommandExecutor,
     sandboxes: Mapping[str, DockerSandbox],
+    threads: Threads,
     workspace_sandboxes: Callable[[Path], DockerSandbox | None] | None = None,
 ) -> SessionLauncher:
     """Launch container sessions over a stream transport whose process is ``executor``.
@@ -179,6 +204,7 @@ def fake_stream_launcher(
         transient_retry_delays=(),
         clock=FakeClock(),
         ids=SequentialIds(),
+        threads=threads,
     )
 
 
@@ -204,9 +230,17 @@ class FakeAgentSessions(ClientAgentSessions):
     semantics identical to production; its shared ledger retains crash evidence.
     """
 
-    def __init__(self, client: AgentTurnExecutor, slot: AgentInvocationStore | None = None) -> None:
+    def __init__(
+        self,
+        client: AgentTurnExecutor,
+        slot: AgentInvocationStore | None = None,
+        *,
+        threads: Threads,
+    ) -> None:
         """Bind fake external execution to the same strict invocation ledger."""
-        super().__init__(client, slot if slot is not None else FakeAgentInvocationStore())
+        super().__init__(
+            client, slot if slot is not None else FakeAgentInvocationStore(), threads=threads
+        )
 
 
 class FakeAgentInvocationStore:

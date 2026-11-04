@@ -14,6 +14,7 @@ model weights. See ``docs/contributing/examples.md``.
 
 from __future__ import annotations
 
+import ast
 import posixpath
 import re
 import shutil
@@ -37,8 +38,12 @@ from tests.support.example_registry import (
 from entrypoints.cli import _run_validate
 from entrypoints.example_catalog import REGISTRY_RELATIVE, Check, ExampleEntry
 from vibesys.errors import ConfigurationError
-from vibesys.run.project_policy import build_project_path_policy, trusted_project_input_paths
-from vs_project.api import Project
+from vibesys.inputs import load_input_manifest, load_task
+from vibesys.run.project_policy import (
+    build_project_path_policy,
+    trusted_project_input_paths,
+)
+from vs_project.api import Project, load_objectives
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -166,6 +171,57 @@ def test_example_validates(entry: ExampleEntry, capsys: pytest.CaptureFixture[st
     assert not failures, "\n".join(failures)
 
 
+@pytest.mark.parametrize("entry", [_param(e, Check.CANDIDATE_BUILD) for e in ENTRIES])
+def test_tasks_build_what_their_evaluator_requires(entry: ExampleEntry) -> None:
+    """A task whose evaluator requires candidate outputs declares the build that makes them.
+
+    Without one, every measurement, the baseline's included, fails its check; New run
+    preflight refuses such a task by the same rule (``InputBundle.missing_build``).
+    """
+    _require_present(entry)
+    failures = [
+        f"{entry.path} task={task}: {missing}"
+        for task in _tasks(entry)
+        if (missing := load_task(example_root(entry), task).missing_build) is not None
+    ]
+    assert not failures, "\n".join(failures)
+
+
+@pytest.mark.parametrize("entry", [_param(e, Check.BACKEND) for e in ENTRIES])
+def test_every_task_declares_the_backends_it_targets(entry: ExampleEntry) -> None:
+    """A run takes its backend from its task; an example that declares none would fall back to
+    the CLI's default (``cuda``), which fails a CPU task on a CPU-only host."""
+    _require_present(entry)
+    undeclared = [
+        f"{entry.path} task={task}: declare `backends = [...]` in its vibesys.input.toml"
+        for task in _tasks(entry)
+        if not load_task(example_root(entry), task).declared_backends
+    ]
+    assert not undeclared, "\n".join(undeclared)
+
+
+@pytest.mark.parametrize(
+    "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
+)
+def test_every_task_describes_itself_to_the_catalogue(entry: ExampleEntry) -> None:
+    """In-tree example metadata stays valid through the shipping manifest reader."""
+    for task in Project.open(example_root(entry)).discover_tasks():
+        assert load_input_manifest(task.manifest_path).catalogue is not None, (
+            f"{entry.path} task={task.name.value}: declare [catalogue] in {task.manifest_path}"
+        )
+
+
+@pytest.mark.parametrize(
+    "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
+)
+def test_every_task_declares_which_way_its_objective_improves(entry: ExampleEntry) -> None:
+    """The run CLI consumes these metric axes and their validated max/min directions."""
+    for task in Project.open(example_root(entry)).discover_tasks():
+        assert load_objectives(task.manifest_path.parent).objective, (
+            f"{entry.path} task={task.name.value}: declare an [[objective]] (name, direction)"
+        )
+
+
 @pytest.mark.parametrize("entry", [_param(e, Check.PATH_REFS) for e in ENTRIES])
 def test_command_path_references_exist(entry: ExampleEntry) -> None:
     _require_present(entry)
@@ -179,18 +235,72 @@ def test_command_path_references_exist(entry: ExampleEntry) -> None:
     assert not failures, "\n".join(failures)
 
 
+@pytest.mark.parametrize(
+    "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
+)
+def test_task_scripts_that_import_the_candidate_put_the_project_root_on_sys_path(
+    entry: ExampleEntry,
+) -> None:
+    """A checker or benchmark that does ``from main import ...`` can import it when run by path.
+
+    Running ``python .vibesys/tasks/<task>/<dir>/checker.py`` puts the script's own directory on
+    ``sys.path``, not the project root where the candidate's ``main.py`` lives, so the script has
+    to add the root itself. The check reads the ``sys.path.insert`` calls of each such script and
+    resolves their ``Path(__file__)...parents[n]`` arguments; running a script is out of scope.
+    """
+    root = example_root(entry)
+    failures = [
+        f"{script.relative_to(REPO_ROOT)}: imports main but does not insert the project "
+        f"root {root.relative_to(REPO_ROOT)} into sys.path "
+        "(sys.path.insert(0, str(Path(__file__).resolve().parents[n])))"
+        for script in sorted((root / ".vibesys" / "tasks").rglob("*.py"))
+        if _imports_module(script, "main") and root not in _inserted_roots(script)
+    ]
+    assert not failures, "\n".join(failures)
+
+
+def _imports_module(script: Path, module: str) -> bool:
+    return any(
+        (isinstance(node, ast.ImportFrom) and node.module == module)
+        or (isinstance(node, ast.Import) and any(alias.name == module for alias in node.names))
+        for node in ast.walk(ast.parse(script.read_text()))
+    )
+
+
+def _inserted_roots(script: Path) -> set[Path]:
+    """Directories the script puts on ``sys.path`` as ``str(Path(__file__)[.resolve()].parents[n])``."""
+    roots = set()
+    for node in ast.walk(ast.parse(script.read_text())):
+        is_insert = (
+            isinstance(node, ast.Call)
+            and ast.unparse(node.func) == "sys.path.insert"
+            and len(node.args) == 2
+        )
+        if not is_insert:
+            continue
+        match = re.fullmatch(
+            r"str\(Path\(__file__\)(?:\.resolve\(\))?\.parents\[(\d+)\]\)",
+            ast.unparse(node.args[1]),
+        )
+        parents = script.resolve().parents
+        if match and int(match[1]) < len(parents):
+            roots.add(parents[int(match[1])])
+    return roots
+
+
 _ROOT_REF = re.compile(r"\$\{PROJECT_ROOT\}((?:/[^\s\"'\\,\[\]=;&|]+)*)")
 #: Paths the run creates, or fills from a workspace source, so absence is fine.
 _RUNTIME_DIRS = (".vibesys/state", "_input_libs")
 
 
 def _command_strings(manifest: Path) -> list[str]:
-    document = tomllib.loads(manifest.read_text())
-    strings: list[str] = []
-    for section in ("accuracy", "benchmark"):
-        table = document.get(section, {})
-        strings += [str(item) for key in ("command", "args") for item in table.get(key, [])]
-    return strings
+    """Every argv element of the trusted check and measure commands, whichever form declares them."""
+    parsed = load_input_manifest(manifest)
+    return [
+        item
+        for command in (parsed.accuracy, parsed.benchmark)
+        for item in (*(command.command or ()), *command.args)
+    ]
 
 
 def _manifest(entry: ExampleEntry, task: str) -> Path:
@@ -300,7 +410,10 @@ STALE_REFERENCE_EXCLUSIONS: frozenset[tuple[str, str]] = frozenset(
         ("docs/running-vibesys.md", "examples/deployment/service.py"),
         # Genuinely stale: no examples/model-serving/llama-mi300 exists.
         # NEEDS AN OWNER: point the Slurm walkthrough at a current example.
-        ("docs/contributing/remote-slurm-execution.md", "examples/model-serving/llama-mi300"),
+        (
+            "docs/contributing/remote-slurm-execution.md",
+            "examples/model-serving/llama-mi300",
+        ),
     }
 )
 

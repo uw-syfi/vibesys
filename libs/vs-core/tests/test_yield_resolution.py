@@ -451,6 +451,18 @@ def test_a_checkpoint_still_in_flight_keeps_the_turn_waiting() -> None:
     assert run.invocation.pending_suspension is not None
 
 
+def test_a_yield_records_the_checkpoint_its_attempt_sends() -> None:
+    """The attempt confirms the request it sent (``InvocationCheckpointPending``) and the
+    yield names it in the same step (#2428); once published, the turn waits on nothing."""
+    run = _world()
+    run.end_turn()
+    [snapshot] = run.snapshots
+    assert snapshot.request_id is not None
+    assert run.invocation.wait == core.WaitOn(requests=(snapshot.request_id,))
+    run.answer(snapshot, core.ObservationStatus.SUCCEEDED, retained=True)
+    assert run.invocation.wait is None
+
+
 def test_a_retained_checkpoint_still_publishes_the_suspension() -> None:
     run = _world()
     run.end_turn()

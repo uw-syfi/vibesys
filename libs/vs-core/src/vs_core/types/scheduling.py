@@ -202,6 +202,16 @@ class AdoptionFenceLifted(Value):
     kind: Literal["adoption_fence_lifted"] = "adoption_fence_lifted"
 
 
+class ParallelLimitChanged(Value):
+    """The operator changed the parallel limit (``set_max_parallel``): admit what now fits.
+
+    Core emits it as it records the control. It carries no facts: the limit in force is read
+    from the run's controls (``parallel_limit``), so a duplicate is harmless.
+    """
+
+    kind: Literal["parallel_limit_changed"] = "parallel_limit_changed"
+
+
 # Admission/closure are internal signals, never shell I/O.
 type SchedulingEvent = Annotated[
     AttemptRequested
@@ -212,6 +222,7 @@ type SchedulingEvent = Annotated[
     | QueueEntryRetired
     | ClockAdvanced
     | AdmissionControl
-    | AdoptionFenceLifted,
+    | AdoptionFenceLifted
+    | ParallelLimitChanged,
     Field(discriminator="kind"),
 ]

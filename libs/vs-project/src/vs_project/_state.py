@@ -28,15 +28,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, Self
+from typing import TYPE_CHECKING, Literal, NoReturn, Self
 
 from pydantic import (
     BaseModel,
-    ValidationError,
 )
 
 import vs_project._paths as project_paths
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
+from vs_project._control_inbox import FileControlInbox, validate_request_id
+from vs_project._fingerprint import _is_excluded, _update_fingerprint
 from vs_project._framework_writes import FRAMEWORK_WRITES
+from vs_project._layout import STATE_HOME_ENV as _STATE_HOME_ENV
+from vs_project._layout import (
+    external_project_state_directory as _external_project_state_directory,
+)
+from vs_project._layout import validate_run_id
 from vs_project._manifests import (
     _IDENTIFIER_PATTERN,
     GitObjectId,
@@ -46,7 +53,9 @@ from vs_project._manifests import (
     RunEnvironmentRecord,
     RunExecutionRecord,
 )
+from vs_project._retained import list_retained
 from vs_project._state_io import (
+    STATE_DOCUMENT_MAX_BYTES,
     _atomic_write_model,
     _atomic_write_text,
     _load_model,
@@ -54,6 +63,7 @@ from vs_project._state_io import (
     _read_json_object,
     _serialize_json_object,
     _serialize_state_model,
+    exclusive_write_bytes,
     sync_directory_chain,
 )
 from vs_project._state_io import (
@@ -68,6 +78,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from uuid import UUID
 
+    from vs_project._retained import RetainedFile
     from vs_project._state_io import AtomicWriteEffects
 
 _logger = logging.getLogger(__name__)
@@ -79,21 +90,6 @@ _STATE_DIRECTORY_PARTS = project_paths.STATE_DIRECTORY_PARTS
 _STATE_DIRECTORY_PATH = project_paths.STATE_DIRECTORY_PATH
 _STATE_DIRECTORY_POSIX = project_paths.STATE_DIRECTORY_POSIX
 _RUN_NAMESPACE_PART_COUNT = len(_STATE_DIRECTORY_PARTS) + 3
-_STATE_HOME_ENV = "VIBESYS_STATE_HOME"
-_EXCLUDED_NAMES = frozenset(
-    {
-        ".cache",
-        ".git",
-        ".mypy_cache",
-        ".nox",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".tox",
-        "__pycache__",
-        "agent.toml",
-        "node_modules",
-    }
-)
 
 
 def is_project_state_path(relative_path: Path | str) -> bool:
@@ -107,16 +103,47 @@ def is_project_state_path(relative_path: Path | str) -> bool:
     )
 
 
+_AGENT_VISIBLE_DIRECTORY = "agent-visible"
+"""The state directory of documents the framework writes for agents to read.
+
+It sits beside ``runs`` and ``local`` but is not hidden: the configuration directory
+that holds it is read-only to agents, so they read these documents and cannot change them.
+"""
+
+_AGENT_HIDDEN_STATE_DIRECTORIES = ("local", "runs")
+"""The state directories agent confinement hides, each for a reason.
+
+``local`` holds machine-local state: credentials, caches and the candidate worktrees.
+``runs`` holds the run's own record: every role's turns, the judge's reviews, the
+trusted measurements and the checkpoints a resume loads, so reading it breaks the
+barriers between roles and writing it could poison a resume. ``project.json`` and
+``.gitignore`` beside them stay visible: the manifest names the project, not a run,
+and the ignore file is a fixed two-line contract.
+"""
+
+_CONTROL_NAMESPACE = "control"
+"""Run state the operator writes from outside the run's server, such as a force stop."""
+_STOP_REQUEST_FILE = "stop-request"
+
+
 @dataclass(frozen=True)
 class ProjectSandboxPaths:
     """Project-relative framework paths for a sandbox policy.
 
-    A missing path is represented by ``None`` so callers can combine this
-    capability with their own policy without interpreting the state layout.
+    A missing read-only path is ``None`` and missing hidden paths are left out, so
+    callers can combine this capability with their own policy without interpreting
+    the state layout.
+
+    ``hidden_paths`` is every part of the framework state an agent must not see:
+    the machine-local state (credentials and caches) and the run state (the core
+    record of every role's turns, the judge's reviews and the trusted
+    measurements, which a resume loads). What agents may read lives in the
+    agent-visible state (``ProjectState.agent_visible_namespace``), below the
+    read-only configuration directory.
     """
 
     read_only_path: Path | None
-    hidden_path: Path | None
+    hidden_paths: tuple[Path, ...]
 
 
 @dataclass(frozen=True, init=False)
@@ -289,6 +316,14 @@ class ProjectGitIntegration:
         """Return the ignore expression that preserves trusted VibeSys files on clean."""
         return f"{_CONFIG_DIRECTORY_NAME}/"
 
+    def record_home_branch(self, branch: str) -> None:
+        """Durably note, on this machine, the branch this run returns the checkout to."""
+        ProjectState(self._project_root).record_home_branch(self._run_id, branch)
+
+    def recorded_home_branch(self, run_id: str) -> str | None:
+        """The branch ``run_id`` noted with ``record_home_branch``, or ``None``."""
+        return ProjectState(self._project_root).home_branch(run_id)
+
     def validate_candidate_worktree(self, path: Path) -> Path:
         """Resolve a candidate worktree below this run's machine-local area."""
         store = ProjectState(self._project_root)
@@ -441,8 +476,14 @@ class StateNamespace:
         except OSError as exc:
             raise ProjectStateError.state_file_read_failed(path, exc) from exc
 
-    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
-        """List direct state-directory entry names without following symlinks."""
+    def entries(
+        self, relative_directory: str | PurePosixPath, *, list_symlinks: bool = False
+    ) -> tuple[str, ...]:
+        """List direct state-directory entry names without following symlinks.
+
+        A symlink among them raises, unless ``list_symlinks``: then it is listed by name like
+        any entry, for a caller that reads each entry on its own and refuses the bad ones.
+        """
         directory = self._resolve_file(relative_directory)
         if not directory.exists():
             return ()
@@ -453,7 +494,7 @@ class StateNamespace:
         except OSError as exc:
             raise ProjectStateError.state_directory_list_failed(directory, exc) from exc
         for entry in entries:
-            if entry.is_symlink():
+            if entry.is_symlink() and not list_symlinks:
                 raise ProjectStateError.state_entry_symlink(entry)
         return tuple(entry.name for entry in entries)
 
@@ -475,6 +516,21 @@ class StateNamespace:
             )
         except OSError as exc:
             raise ProjectStateError.state_file_write_failed(path, exc) from exc
+
+    def create_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> bool:
+        """Durably create one safe state file, unless an entry already holds its name.
+
+        Returns whether this call created it. Of two callers racing for one name, in any
+        processes, exactly one creates it; a reader sees the complete bytes or no file.
+        """
+        path = self._resolve_file(relative_path)
+        try:
+            created = exclusive_write_bytes(path, contents)
+            if created:
+                sync_directory_chain(path.parent, self._containment_root)
+        except OSError as exc:
+            raise ProjectStateError.state_file_write_failed(path, exc) from exc
+        return created
 
     def snapshot_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> StateSnapshot:
         """Prepare an exact portable snapshot of one subsystem-owned file."""
@@ -729,7 +785,8 @@ class StateSlot[ModelT: BaseModel]:
             raise TypeError(message)
         try:
             raw = json.loads(payload)
-        except (UnicodeDecodeError, ValueError) as exc:
+        except (ValueError, RecursionError) as exc:
+            # ``json`` raises ``RecursionError`` past the interpreter's nesting limit.
             raise ProjectStateError.serialized_transition_invalid_json() from exc
         if not isinstance(raw, dict):
             raise ProjectStateError.serialized_transition_not_object()
@@ -740,13 +797,17 @@ class StateSlot[ModelT: BaseModel]:
             return self.transition(None)
         if not isinstance(document, dict):
             raise ProjectStateError.serialized_transition_document_not_object()
-        try:
-            model = self._model_type.model_validate_json(
-                json.dumps(document),
-                strict=True,
+        model = decode_json(
+            json.dumps(document),
+            self._model_type,
+            source="serialized state transition",
+            max_bytes=STATE_DOCUMENT_MAX_BYTES,
+            options=ValidationOptions(strict=True),
+        )
+        if isinstance(model, Unreadable):
+            raise ProjectStateError.serialized_transition_model_mismatch(
+                ValueError(model.details())
             )
-        except ValidationError as exc:
-            raise ProjectStateError.serialized_transition_model_mismatch(exc) from exc
         return self.transition(model)
 
     def validate_transition(self, transition: StateTransition) -> StateTransition:
@@ -758,13 +819,17 @@ class StateSlot[ModelT: BaseModel]:
                 transition._project_relative_path,  # noqa: SLF001  # lint-waiver: LW-008231 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
             )
         if transition._next_document is not None:  # noqa: SLF001  # lint-waiver: LW-008232 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
-            try:
-                self._model_type.model_validate_json(
-                    transition._next_document._contents,  # noqa: SLF001  # lint-waiver: LW-008233 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
-                    strict=True,
+            replacement = decode_json(
+                transition._next_document._contents,  # noqa: SLF001  # lint-waiver: LW-008233 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+                self._model_type,
+                source=str(expected_path),
+                max_bytes=STATE_DOCUMENT_MAX_BYTES,
+                options=ValidationOptions(strict=True),
+            )
+            if isinstance(replacement, Unreadable):
+                raise ProjectStateError.typed_transition_model_mismatch(
+                    expected_path, ValueError(replacement.details())
                 )
-            except ValidationError as exc:
-                raise ProjectStateError.typed_transition_model_mismatch(expected_path, exc) from exc
         return transition
 
     def apply(self, transition: StateTransition) -> None:
@@ -772,24 +837,20 @@ class StateSlot[ModelT: BaseModel]:
         self._namespace.apply(self.validate_transition(transition))
 
 
-class _Digest(Protocol):
-    def update(self, data: bytes, /) -> object:
-        """Add bytes to the digest state."""
-
-
 def generate_run_id(
     display_name: str,
     *,
-    now: datetime | None = None,
+    now: datetime,
     unique: UUID | None = None,
 ) -> str:
     """Return a sortable, path-safe run ID.
 
-    ``now`` and ``unique`` are injectable so callers can reproduce IDs in tests.
+    ``now`` names the run's creation time; ``unique`` is injectable so tests can
+    reproduce IDs.
     The display name is cosmetic: unsafe characters are normalized and an empty
     result becomes ``run``.
     """
-    timestamp = now or datetime.now(UTC)
+    timestamp = now
     if timestamp.tzinfo is None:
         raise ProjectStateError.run_id_timestamp_timezone_missing()
     timestamp = timestamp.astimezone(UTC)
@@ -866,6 +927,45 @@ class ProjectState:
         return cls._run_local_directory_for(project_root, run_id, "logs", kind="run log directory")
 
     @classmethod
+    def chat_session_directory_for(
+        cls, project_root: Path | str, run_id: str, session_id: str
+    ) -> Path:
+        """Resolve a session without creating it or following redirected descendants."""
+        return cls._run_local_directory_for(
+            project_root,
+            run_id,
+            f"logs/sessions/{validate_request_id(session_id)}",
+            kind="chat session directory",
+        )
+
+    @classmethod
+    def logged_run_ids_for(cls, project_root: Path | str) -> tuple[str, ...]:
+        """Return the ids of the runs this machine holds logs for under ``project_root``, sorted.
+
+        A run's logs are machine-local and keyed by the project's root path, so this lists
+        runs whose portable record (manifest, branch) may be missing from the checkout.
+        Nothing is created: a project with no logs has none.
+        """
+        root = Path(project_root).expanduser().resolve()
+        state_home = _state_home()
+        local_dir = _external_project_state_directory(state_home, root)
+        runs_dir = local_dir / "runs"
+        if not runs_dir.is_dir():
+            return ()
+        _validate_storage_root(local_dir, state_home, name="local metadata")
+        try:
+            children = tuple(runs_dir.iterdir())
+        except OSError as exc:
+            raise ProjectStateError.metadata_read_failed(runs_dir, exc) from exc
+        return tuple(
+            sorted(
+                child.name
+                for child in children
+                if re.fullmatch(_IDENTIFIER_PATTERN, child.name) and (child / "logs").is_dir()
+            )
+        )
+
+    @classmethod
     def agent_homes_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return the machine-local root of one run's dedicated agent CLI homes.
 
@@ -902,10 +1002,27 @@ class ProjectState:
         self._validate_storage_roots()
         return ProjectSandboxPaths(
             read_only_path=(Path(_CONFIG_DIRECTORY_NAME) if self._config_dir.exists() else None),
-            hidden_path=(
-                _STATE_DIRECTORY_PATH / "local" if self._workspace_local_dir.exists() else None
+            hidden_paths=tuple(
+                _STATE_DIRECTORY_PATH / name
+                for name in _AGENT_HIDDEN_STATE_DIRECTORIES
+                if (self._metadata_dir / name).exists()
             ),
         )
+
+    def prepare_hidden_directories(self, run_id: str) -> None:
+        """Create the state directories agent confinement hides, where they are missing.
+
+        A linked candidate worktree omits the ignored local state and any run record its
+        revision predates, yet shares the run's confinement policy, which names those
+        directories (``sandbox_paths``). Call this before opening a confinement over such
+        a workspace so every hidden path exists to be hidden.
+        """
+        self._validate_storage_roots()
+        self._worktrees_dir(run_id).mkdir(parents=True, exist_ok=True)
+        for name in _AGENT_HIDDEN_STATE_DIRECTORIES:
+            _contained_without_symlinks(
+                self._metadata_dir, self._metadata_dir / name, kind="hidden state"
+            ).mkdir(parents=True, exist_ok=True)
 
     def log_directory(self, run_id: str) -> Path:
         """Return the machine-local log directory for one run."""
@@ -963,6 +1080,14 @@ class ProjectState:
             project_root=self.project_root, root=self._contained_run_dir(run_id)
         )
 
+    def retained_run_files(
+        self, run_id: str, *, local_namespace: str | None = None
+    ) -> tuple[RetainedFile, ...]:
+        """List originals with their sizes, without requiring today's manifest schema."""
+        if local_namespace is None:
+            return list_retained(self._contained_run_dir(run_id))
+        return list_retained(self._local_state_dir(run_id, local_namespace))
+
     def git_integration(self, run_id: str) -> ProjectGitIntegration:
         """Return opaque Git integration capabilities for one run."""
         return ProjectGitIntegration(
@@ -988,7 +1113,7 @@ class ProjectState:
         self,
         display_name: str,
         *,
-        now: datetime | None = None,
+        now: datetime,
     ) -> ProjectManifest:
         """Create the project manifest, or return the existing manifest unchanged."""
         self._validate_storage_roots()
@@ -1024,7 +1149,7 @@ class ProjectState:
         trusted_input_baseline: GitObjectId,
         task_name: str | None = None,
         run_id: str | None = None,
-        now: datetime | None = None,
+        now: datetime,
         unique: UUID | None = None,
     ) -> OrchestrationRunManifest:
         """Build the current run manifest; the orchestration validates its options."""
@@ -1087,12 +1212,81 @@ class ProjectState:
         )
 
     def load_run(self, run_id: str) -> OrchestrationRunManifest:
-        """Load the current run manifest or reject an unsupported schema."""
+        """Load the run manifest in the checkout or reject an unsupported schema.
+
+        This is the checkout's copy, which the run whose branch is checked out reads
+        and writes. ``RunHistory`` reads every run, whichever branch is checked out.
+        """
         path = self._run_manifest_path(run_id)
-        version = _read_json_object(path).get("schema_version")
-        if version != RUN_SCHEMA_VERSION:
-            raise ProjectStateError.unsupported_run_schema(path, version, RUN_SCHEMA_VERSION)
+        _require_run_schema(_read_json_object(path), source=path)
         return _load_model(path, OrchestrationRunManifest)
+
+    def record_home_branch(self, run_id: str, branch: str) -> None:
+        """Atomically note the branch a run returns the checkout to, in machine-local state.
+
+        Machine-local because it describes this checkout, and outside the project so no
+        branch switch and no agent in the workspace changes it.
+        """
+        path = self._home_branch_path(run_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(path, f"{branch}\n")
+
+    def home_branch(self, run_id: str) -> str | None:
+        """The branch noted by ``record_home_branch`` for ``run_id``, or ``None``."""
+        path = self._home_branch_path(run_id)
+        try:
+            return path.read_text(encoding="utf-8").strip() or None
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise ProjectStateError.metadata_read_failed(path, exc) from exc
+
+    def _home_branch_path(self, run_id: str) -> Path:
+        return self._local_state_dir(run_id, "git") / "home-branch"
+
+    def run_directory(self, run_id: str) -> PurePosixPath:
+        """One run's portable state directory, relative to the project root, as Git names it."""
+        return _STATE_DIRECTORY_POSIX / "runs" / validate_run_id(run_id)
+
+    def checkout_run_ids(self) -> tuple[str, ...]:
+        """The ids of the run directories in the checkout, sorted; other entries are ignored."""
+        self._validate_storage_roots()
+        runs_dir = self._metadata_dir / "runs"
+        try:
+            children = tuple(runs_dir.iterdir()) if runs_dir.is_dir() else ()
+        except OSError as exc:
+            raise ProjectStateError.metadata_read_failed(runs_dir, exc) from exc
+        return tuple(
+            sorted(
+                child.name
+                for child in children
+                if child.is_dir() and re.fullmatch(_IDENTIFIER_PATTERN, child.name)
+            )
+        )
+
+    def checkout_run_file(self, run_id: str, relative_path: str | PurePosixPath) -> bytes | None:
+        """One portable file of a run in the checkout, or ``None`` when absent.
+
+        Needs no manifest, so it also reads a run whose manifest is on another branch.
+        """
+        run_dir = self._contained_run_dir(run_id)
+        path = _contained_without_symlinks(
+            run_dir, run_dir / _validate_state_relative_path(relative_path), kind="portable"
+        )
+        if not path.exists():
+            return None
+        if not path.is_file():
+            raise ProjectStateError.state_path_not_file(path)
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise ProjectStateError.state_file_read_failed(path, exc) from exc
+
+    def checkout_run_files(self, run_id: str) -> tuple[StateFile, ...]:
+        """Every portable file of a run in the checkout, relative to its directory, sorted."""
+        return _snapshot_directory(
+            project_root=self.project_root, root=self._contained_run_dir(run_id)
+        ).files
 
     def run_manifest_snapshot(self, run_id: str) -> StateSnapshot:
         """Snapshot the current portable manifest for one run."""
@@ -1237,6 +1431,82 @@ class ProjectState:
             portable=True,
         )
 
+    def agent_visible_namespace(self, run_id: str, namespace: str) -> StateNamespace:
+        """Return the typed boundary for committed documents agents read by path.
+
+        The framework writes the documents; agent confinement leaves this directory
+        readable and read-only. Nothing else about the run is visible to an agent, so
+        put a document here only when a role's prompt names its path.
+        """
+        self.load_run(run_id)
+        self._validate_storage_roots()
+        root = _contained_without_symlinks(
+            self._metadata_dir,
+            self._metadata_dir / _AGENT_VISIBLE_DIRECTORY / validate_run_id(run_id),
+            kind="agent-visible run",
+        )
+        return StateNamespace(
+            project_root=self.project_root,
+            root=_contained_state_dir(root, namespace, kind="agent-visible"),
+            portable=True,
+        )
+
+    def record_stop_request(self, run_id: str) -> None:
+        """Durably note that the operator stopped ``run_id``, before its server is killed.
+
+        A force stop ends the server without the run committing its stop, so the request
+        is kept here; a later resume of the run reads it (``stop_requested``) and only
+        finishes the drain and ends the run, starting no new work.
+        """
+        self.portable_namespace(run_id, _CONTROL_NAMESPACE).write_bytes(
+            _STOP_REQUEST_FILE, b"stop\n"
+        )
+
+    def control_inbox(self, run_id: str) -> FileControlInbox:
+        """Open the run's inbox of operator control requests (``vibesys control``).
+
+        The inbox is machine-local state, outside git: another process (the operator's
+        ``vibesys control``) writes it, so in the project's checkout it would read as a write
+        by the run's agents.
+        """
+        return FileControlInbox(self.local_namespace(run_id, _CONTROL_NAMESPACE))
+
+    def session_inbox(self, run_id: str, session_id: str) -> FileControlInbox:
+        """Open an ordered, idempotent inbox beside one session's log."""
+        self.load_run(run_id)
+        identity = validate_request_id(session_id)
+        relative = f"logs/sessions/{identity}"
+        return FileControlInbox(
+            StateNamespace(
+                project_root=self.project_root,
+                root=self._local_state_dir(run_id, "logs") / "sessions" / identity,
+                portable=False,
+                containment_root=self._state_home,
+                namespace_root=_STATE_DIRECTORY_POSIX / "local" / "runs" / run_id / relative,
+            )
+        )
+
+    def require_local_run(self, run_id: str) -> None:
+        """Raise ``ProjectStateError`` unless this state home holds ``run_id``'s local state.
+
+        Every run that started creates its machine-local state. A process writing a run's
+        machine-local state from outside it (``vibesys control``) checks first, so a write
+        under another state home (another user, a shell without ``VIBESYS_STATE_HOME``,
+        another host) fails instead of being lost.
+        """
+        if not self._contained_local_run_dir(run_id).is_dir():
+            message = (
+                f"run {run_id!r} has no machine-local state under the VibeSys state home "
+                f"{self._state_home} on this machine; run this where the run runs, with the "
+                f"same {_STATE_HOME_ENV} as the run"
+            )
+            raise ProjectStateError(message)
+
+    def stop_requested(self, run_id: str) -> bool:
+        """Whether the operator's stop of ``run_id`` was recorded (``record_stop_request``)."""
+        namespace = self.portable_namespace(run_id, _CONTROL_NAMESPACE)
+        return namespace.read_bytes(_STOP_REQUEST_FILE) is not None
+
     def state_store_namespace(self, run_id: str) -> StateNamespace:
         """Open shared opaque kernel storage, including before manifest creation.
 
@@ -1349,8 +1619,7 @@ class ProjectState:
         _atomic_write_text(self._metadata_gitignore_path, f"{existing}{separator}{required}\n")
 
 
-def _aware_now(value: datetime | None) -> datetime:
-    timestamp = value or datetime.now(UTC)
+def _aware_now(timestamp: datetime) -> datetime:
     if timestamp.tzinfo is None:
         raise ProjectStateError.metadata_timestamp_timezone_missing()
     return timestamp.astimezone(UTC)
@@ -1377,18 +1646,6 @@ def _state_home() -> Path:
     return root.resolve()
 
 
-def _external_project_state_directory(state_home: Path, project_root: Path) -> Path:
-    """Return a collision-resistant local directory for one canonical project path."""
-    normalized = unicodedata.normalize("NFKD", project_root.name).encode("ascii", "ignore").decode()
-    slug = re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-") or "project"
-    slug = slug[:64].rstrip("-") or "project"
-    digest = hashlib.sha256(project_root.as_posix().encode("utf-8")).hexdigest()[:12]
-    destination = state_home / "projects" / f"{slug}-{digest}"
-    if destination.resolve().is_relative_to(project_root.resolve()):
-        raise ProjectStateError.state_home_inside_project(_STATE_HOME_ENV, state_home)
-    return destination
-
-
 def _prepare_state_home(state_home: Path) -> None:
     """Create private user-state parents before any run metadata is written."""
     try:
@@ -1399,11 +1656,35 @@ def _prepare_state_home(state_home: Path) -> None:
         raise ProjectStateError(message) from exc
 
 
-def validate_run_id(run_id: str, *, source: Path | None = None) -> str:
-    """Validate a path-safe run identity before project I/O."""
-    if re.fullmatch(_IDENTIFIER_PATTERN, run_id) is None:
-        raise ProjectStateError.invalid_run_id(run_id, source)
-    return run_id
+def _require_run_schema(raw: dict[str, object], *, source: Path) -> None:
+    version = raw.get("schema_version")
+    if version != RUN_SCHEMA_VERSION:
+        raise ProjectStateError.unsupported_run_schema(source, version, RUN_SCHEMA_VERSION)
+
+
+def parse_run_manifest(contents: bytes, *, source: Path) -> OrchestrationRunManifest:
+    """Strictly decode run manifest bytes read from a run branch.
+
+    It applies the same schema-version rule and strict model as ``ProjectState.load_run``
+    does to the checkout's file; ``source`` names where the bytes came from in errors.
+    """
+    try:
+        raw = json.loads(contents.decode("utf-8"))
+    except (ValueError, RecursionError) as exc:
+        raise ProjectStateError.metadata_read_failed(source, exc) from exc
+    if not isinstance(raw, dict):
+        raise ProjectStateError.metadata_not_object(source)
+    _require_run_schema(raw, source=source)
+    decoded = decode_json(
+        contents,
+        OrchestrationRunManifest,
+        source=str(source),
+        max_bytes=STATE_DOCUMENT_MAX_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if isinstance(decoded, Unreadable):
+        raise ProjectStateError.invalid_metadata(source, decoded.details("metadata"))
+    return decoded
 
 
 def _host_architecture() -> str:
@@ -1478,12 +1759,21 @@ def _validate_snapshot_root(path: PurePosixPath) -> None:
     if parts[:3] == (*_STATE_DIRECTORY_PARTS, "local"):
         message = "portable state snapshot root must not be below .vibesys/state/local"
         raise ValueError(message)
-    if parts[:3] != (*_STATE_DIRECTORY_PARTS, "runs") or len(parts) not in {4, 5}:
+    if parts[:2] != _STATE_DIRECTORY_PARTS or parts[2:3] not in (
+        ("runs",),
+        (_AGENT_VISIBLE_DIRECTORY,),
+    ):
         message = (
             "portable state snapshot root must be .vibesys/state, "
-            ".vibesys/state/runs/<run-id>, or "
-            ".vibesys/state/runs/<run-id>/<namespace>"
+            ".vibesys/state/runs/<run-id>, .vibesys/state/runs/<run-id>/<namespace>, or "
+            ".vibesys/state/agent-visible/<run-id>/<namespace>"
         )
+        raise ValueError(message)
+    run_part_count = _RUN_NAMESPACE_PART_COUNT - 1
+    if len(parts) not in {run_part_count, _RUN_NAMESPACE_PART_COUNT} or (
+        parts[2] == _AGENT_VISIBLE_DIRECTORY and len(parts) != _RUN_NAMESPACE_PART_COUNT
+    ):
+        message = f"portable state snapshot root has the wrong depth: {path}"
         raise ValueError(message)
     if re.fullmatch(_IDENTIFIER_PATTERN, parts[3]) is None:
         message = f"portable state snapshot root contains an invalid run ID: {path}"
@@ -1660,43 +1950,6 @@ def _validate_storage_root(path: Path, parent: Path, *, name: str) -> None:
         raise ProjectStateError(message) from exc
     if not path_resolved.is_relative_to(parent_resolved):
         raise ProjectStateError.storage_root_escapes(name, parent_resolved, path, path_resolved)
-
-
-def _is_excluded(relative: Path) -> bool:
-    if relative.parts == (_CONFIG_DIRECTORY_NAME,) or relative.parts[:2] == _STATE_DIRECTORY_PARTS:
-        return True
-    for part in relative.parts:
-        if part in _EXCLUDED_NAMES or part == ".env" or part.startswith(".env."):
-            return True
-        if part.endswith((".pyc", ".pyo")):
-            return True
-    return False
-
-
-def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
-    update = digest.update
-    encoded_path = relative.as_posix().encode("utf-8", "surrogateescape")
-    try:
-        metadata = path.lstat()
-        mode = metadata.st_mode
-        if stat.S_ISDIR(mode):
-            update(b"D\0" + encoded_path + b"\0")
-        elif stat.S_ISLNK(mode):
-            target = str(path.readlink()).encode("utf-8", "surrogateescape")
-            update(b"L\0" + encoded_path + b"\0" + target + b"\0")
-        elif stat.S_ISREG(mode):
-            executable = b"1" if mode & 0o111 else b"0"
-            update(b"F\0" + encoded_path + b"\0" + executable + b"\0")
-            with path.open("rb") as source:
-                while block := source.read(1024 * 1024):
-                    update(block)
-            update(b"\0")
-        else:
-            message = f"Unsupported input file type: {path}"
-            raise ProjectStateError(message)
-    except OSError as exc:
-        message = f"Could not fingerprint project input {path}: {exc}"
-        raise ProjectStateError(message) from exc
 
 
 def _atomic_write_bytes(

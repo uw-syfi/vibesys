@@ -756,7 +756,7 @@
     {
       "module": "vibesys.orchestration.dynamic.lifecycle",
       "symbol": "RecoveryStarted",
-      "canonical": "vs_core.api.RecoveryStarted",
+      "canonical": "vs_core.api",
       "relation": "split",
       "shape": {
         "bases": [

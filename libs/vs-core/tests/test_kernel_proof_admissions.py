@@ -269,6 +269,7 @@ def cleanup_facts(
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.PREPARED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     state = state.model_copy(
         update={

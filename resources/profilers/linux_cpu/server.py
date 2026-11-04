@@ -1,25 +1,39 @@
 """MCP tools for collecting a separate Linux native CPU profile."""
 
+import importlib
+import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from vs_runtime.cpu_profilers import (
+    LinuxProfilerEffects,
     collect_linux_profile,
     detect_linux_profiler,
     parse_profile_command,
     summarize_linux_profile,
 )
+from vs_sim.api import OsProcesses, SystemClock
+
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "strict_arguments.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 
 
 def build_server() -> FastMCP:
     """Build the profiler MCP server."""
-    mcp = FastMCP("vibesys-linux-cpu-profiler")
+    mcp = StrictFastMCP("vibesys-linux-cpu-profiler")
+    processes = OsProcesses()
 
     @mcp.tool()
     def capabilities() -> dict:
         """Report Linux perf availability and host profiling restrictions."""
-        capability = detect_linux_profiler()
+        capability = detect_linux_profiler(processes=processes)
         return {
             "selected": capability.tool.value,
             "perf_path": capability.perf_path,
@@ -44,6 +58,7 @@ def build_server() -> FastMCP:
             timeout=timeout,
             frequency=frequency,
             call_graph=call_graph,
+            effects=LinuxProfilerEffects(now=SystemClock().now, processes=processes),
         )
         return {
             "status": result.status,

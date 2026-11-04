@@ -111,6 +111,13 @@ class RevisionConflictError(EvaluationLifecycleError):
         )
 
 
+def loop_evaluation_deadline(timeout_s: float) -> DeadlineScope:
+    """A deadline ``timeout_s`` seconds away on the running event loop's clock."""
+    # asyncio.Timeout provides this structural scope at runtime; ty does not recognize its
+    # context-manager signature as the port protocol.
+    return cast("DeadlineScope", asyncio.timeout(timeout_s))
+
+
 class EvaluationCoordinator:
     """Coordinate durable idempotency and lifecycle around injected ports.
 
@@ -128,10 +135,14 @@ class EvaluationCoordinator:
         clock: Clock,
         *,
         max_await_timeout_s: float = 300.0,
-        deadline_factory: Callable[[float], DeadlineScope] | None = None,
+        deadline_factory: Callable[[float], DeadlineScope],
         events: EvaluationEventSink = NULL_EVALUATION_EVENT_SINK,
     ) -> None:
-        """Bind ports and the largest permitted caller wait."""
+        """Bind ports and the largest permitted caller wait.
+
+        ``deadline_factory`` bounds each wait; `loop_evaluation_deadline` bounds it on the
+        event loop's clock.
+        """
         if not math.isfinite(max_await_timeout_s) or max_await_timeout_s <= 0:
             raise EvaluationTimeoutError
         self._executor = executor
@@ -139,11 +150,7 @@ class EvaluationCoordinator:
         self._clock = clock
         self._max_await_timeout_s = max_await_timeout_s
         self._events = events
-        # asyncio.Timeout provides this structural scope at runtime; ty does
-        # not recognize its context-manager signature as the port protocol.
-        self._deadline_factory = deadline_factory or cast(
-            "Callable[[float], DeadlineScope]", asyncio.timeout
-        )
+        self._deadline_factory = deadline_factory
         self._locks: dict[str, asyncio.Lock] = {}
 
     async def status(self, handle_id: str) -> EvaluationStatus:
@@ -353,6 +360,7 @@ class EvaluationCoordinator:
             and current.current_stage == observed.current_stage
             and current.stage_results == observed.stage_results
             and current.failure == observed.failure
+            and current.operator_failure == observed.operator_failure
             and not current.submission_pending
         ):
             return current
@@ -362,6 +370,7 @@ class EvaluationCoordinator:
                 "current_stage": observed.current_stage,
                 "stage_results": observed.stage_results,
                 "failure": observed.failure,
+                "operator_failure": observed.operator_failure,
                 "submission_pending": False,
                 "revision": current.revision + 1,
             }
@@ -465,6 +474,7 @@ class EvaluationCoordinator:
                 current_stage=record.current_stage,
                 stage_results=record.stage_results,
                 failure=record.failure,
+                operator_failure=record.operator_failure,
                 submission_pending=record.submission_pending,
                 cancel_requested=record.cancel_requested,
             )

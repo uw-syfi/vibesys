@@ -6,7 +6,9 @@ from math import isfinite
 from typing import TYPE_CHECKING
 
 from ._adoption import fences_root_mutation
+from ._operator_actions import cancelled_items
 from ._proofs import Proven, descriptor_matches
+from ._run_park import drain_bound
 from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
 from .types.common import (
@@ -20,7 +22,6 @@ from .types.common import (
     RunStatus,
     WorkspaceMode,
 )
-from .types.records import RecoveryPhase
 from .types.strategy import (
     Cancel,
     Command,
@@ -42,7 +43,7 @@ from .types.until import WhileAlive, WhileOpen, Within
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.kernel import CoreState, DecisionSubmitted
+    from .types.kernel import CoreState, DecisionSubmitted, RunState
 
 
 def _reject(
@@ -51,8 +52,45 @@ def _reject(
     return Rejected(decision_id=decision.decision_id, code=code, path=path, detail=detail)
 
 
+def takes_command(run: RunState, command: Command, *, stopping: bool = False) -> bool:
+    """Whether the run's status lets core take ``command`` now.
+
+    An open run takes any command. A run that is not open (paused, closing, blocked, or with
+    its result proposed) still takes a ``Finish`` and a ``Withdraw`` until it is terminal, except
+    that a run in a pause (draining or parked) holds its search still: only the operator's stop
+    (``stopping``) ends it, and a stop ends the run whatever it is doing.
+    """
+    if run.status == RunStatus.RUNNING and run.result is None:
+        return True
+    if stopping and isinstance(command, Finish):
+        return run.status != RunStatus.TERMINAL
+    return isinstance(command, Finish | Withdraw) and run.status not in (
+        RunStatus.TERMINAL,
+        RunStatus.DRAINING,
+        RunStatus.PARKED,
+    )
+
+
+def admits_command(state: CoreState, command: Command, *, stopping: bool = False) -> bool:
+    """Whether core takes ``command`` now: its status takes it, or a pause's drain admits it.
+
+    The one decision gate. ``validate_decision`` refuses a command it fails, and the shell
+    holds (``deferred``) a command it fails while the run is paused, so the two cannot disagree.
+    A drain admits the successor of a turn it admitted (``drain_bound``); the session gates then
+    admit that turn (``admitted_work_proceeds``).
+    """
+    return (
+        takes_command(state.run, command, stopping=stopping)
+        or drain_bound(state, command) is not None
+    )
+
+
 def validate_decision(
-    state: CoreState, event: DecisionSubmitted, *, check_revision: bool = True
+    state: CoreState,
+    event: DecisionSubmitted,
+    *,
+    check_revision: bool = True,
+    stopping: bool = False,
 ) -> Rejected | None:
     submission = event.decision
     decision = event.command
@@ -60,13 +98,15 @@ def validate_decision(
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
-    if (state.run.status != RunStatus.RUNNING or state.run.result is not None) and not (
-        isinstance(decision, Finish | Withdraw) and state.run.status != RunStatus.TERMINAL
-    ):
+    if not admits_command(state, decision, stopping=stopping):
         return _reject(
             decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
         )
-    rejection = validate_scope(state, decision) or _validate_root_fence(state, decision)
+    rejection = (
+        validate_scope(state, decision)
+        or _validate_root_fence(state, decision)
+        or _cancelled_item(state, decision)
+    )
     if rejection is not None:
         return rejection
     if isinstance(decision, Finish):
@@ -74,6 +114,29 @@ def validate_decision(
         if rejection is not None:
             return rejection
     return _validate_until(state, submission, decision) or validate_offer(state, decision)
+
+
+def _cancelled_item(state: CoreState, decision: Command) -> Rejected | None:
+    """No attempt starts or reopens at a work item the operator cancelled (``cancel_item``)."""
+    if isinstance(decision, StartAttempt):
+        item, path = decision.item_id, ("item_id",)
+    elif isinstance(decision, Operation) and decision.normalized_scope_reopen is not None:
+        reopened = decision.normalized_scope_reopen.attempt
+        item = next(
+            (
+                attempt.item_id
+                for attempt in state.attempts.attempts
+                if (attempt.attempt_id, attempt.generation)
+                == (reopened.attempt_id, reopened.generation)
+            ),
+            None,
+        )
+        path = ("normalized_scope_reopen", "attempt")
+    else:
+        return None
+    if item is None or item not in cancelled_items(state.run):
+        return None
+    return _reject(decision, RejectionCode.CLOSED_SCOPE, path, "the operator cancelled the item")
 
 
 def _validate_until(state: CoreState, submission: Submission, decision: Command) -> Rejected | None:
@@ -262,15 +325,6 @@ def _validate_root_fence(state: CoreState, decision: Command) -> Rejected | None
 
 
 def validate_scope(state: CoreState, decision: Command) -> Rejected | None:
-    if state.records.recovery.phase != RecoveryPhase.READY and not isinstance(
-        decision, Finish | Withdraw
-    ):
-        return _reject(
-            decision,
-            RejectionCode.CLOSED_SCOPE,
-            ("recovery",),
-            "ordinary decisions require ready recovery",
-        )
     if decision.scope.owner == state.run.run_id:
         generation = state.run.generation
     else:

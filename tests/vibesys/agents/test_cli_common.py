@@ -7,10 +7,15 @@ copy failures.
 
 from __future__ import annotations
 
+import os
+import shutil
 from io import StringIO
-from typing import TYPE_CHECKING, Never
+from pathlib import Path, PurePosixPath
+from tempfile import TemporaryDirectory
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vibesys.constants import ComputeBackend
 from vibesys.orchestration.multi.models import JudgeResponse
@@ -22,9 +27,7 @@ from vs_agent.cli_common import (
     discover_skill_dirs,
     materialize_skills,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from vs_sim.api.testing import examples
 
 
 def _skill(root: Path, name: str, body: str = "# skill\n") -> Path:
@@ -32,6 +35,88 @@ def _skill(root: Path, name: str, body: str = "# skill\n") -> Path:
     d.mkdir(parents=True)
     (d / "SKILL.md").write_text(body)
     return d
+
+
+def _tree(root: Path) -> dict[str, str | None]:
+    """Each entry below ``root``: a file's text, ``None`` for a directory, ``->`` for a link."""
+    entries: dict[str, str | None] = {}
+    for path in sorted(root.rglob("*")):
+        key = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            entries[key] = f"->{path.readlink()}"
+        elif path.is_dir():
+            entries[key] = None
+        else:
+            entries[key] = path.read_text()
+    return entries
+
+
+def _planting_positions() -> tuple[str, ...]:
+    """Every directory ``materialize_skills`` walks through or replaces for skill ``alpha``."""
+    positions: set[str] = set()
+    for target in (".", *CLI_SKILL_DIRS):
+        parts = PurePosixPath(target, "alpha", "references").parts
+        positions.update(PurePosixPath(*parts[:depth]).as_posix() for depth in range(1, 4 + 1))
+    positions.discard(".")
+    return tuple(sorted(p for p in positions if p))
+
+
+class TestPlantedSymlinks:
+    """A symlink the agent planted below its workspace never redirects a host write."""
+
+    @settings(max_examples=examples(pr=6, nightly=300), deadline=None)
+    @given(
+        planted=st.lists(st.sampled_from(_planting_positions()), min_size=1, max_size=4),
+        materialized_first=st.booleans(),
+    )
+    def test_the_outside_target_is_never_written_or_removed(
+        self, *, planted: list[str], materialized_first: bool
+    ) -> None:
+        with TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            src = root / "src"
+            skill = _skill(src, "alpha", "# fresh\n")
+            (skill / "references").mkdir()
+            (skill / "references" / "note.md").write_text("note\n")
+            outside = root / "host-data"
+            for mirror in ("", "alpha/", "skills/alpha/", "references/"):
+                (outside / mirror).mkdir(parents=True, exist_ok=True)
+                (outside / mirror / "keep.txt").write_text("host file\n")
+            (outside / "alpha" / "SKILL.md").write_text("# host\n")
+            ws = root / "ws"
+            ws.mkdir()
+            if materialized_first:
+                materialize_skills(ws, [src])
+            links: set[str] = set()
+            for position in sorted(planted):
+                path = ws / position
+                if any(position.startswith(f"{link}/") for link in links):
+                    continue
+                if path.is_dir() and not path.is_symlink():
+                    shutil.rmtree(path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if not os.path.lexists(path):
+                    path.symlink_to(outside, target_is_directory=True)
+                    links.add(position)
+            before = _tree(outside)
+
+            materialize_skills(ws, [src])
+
+            assert _tree(outside) == before
+            for target in (".", *CLI_SKILL_DIRS):
+                copy = PurePosixPath(target, "alpha")
+                blockers = [
+                    link
+                    for link in links
+                    if copy.is_relative_to(link) and copy != PurePosixPath(link)
+                ]
+                installed = ws / copy / "SKILL.md"
+                if blockers:
+                    assert all((ws / link).is_symlink() for link in blockers)
+                else:
+                    assert not (ws / copy).is_symlink()
+                    assert installed.read_text() == "# fresh\n"
+                    assert (ws / copy / "references" / "note.md").read_text() == "note\n"
 
 
 class TestAgentLabel:
@@ -131,41 +216,50 @@ class TestMaterializeSkills:
 
         assert (ws / ".claude/skills/dup/SKILL.md").read_text() == "# second\n"
 
-    def test_a_copy_failure_is_logged_not_raised(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_refused_destination_is_logged_not_raised(self, tmp_path: Path) -> None:
         """The loop must still make progress if one skill fails to copy."""
         src = tmp_path / "src"
         _skill(src, "alpha")
         ws = tmp_path / "ws"
         ws.mkdir()
+        (tmp_path / "elsewhere").mkdir()
+        (ws / ".claude").symlink_to(tmp_path / "elsewhere", target_is_directory=True)
         log = StringIO()
-
-        def _boom(*_args: object, **_kwargs: object) -> Never:
-            _failure_message = "disk on fire"
-            raise OSError(_failure_message)
-
-        monkeypatch.setattr("vs_agent.cli_common.shutil.copytree", _boom)
 
         materialize_skills(ws, [src], log_file=log)
 
         written = log.getvalue()
         assert "failed to materialize" in written
-        assert "disk on fire" in written
+        assert ".claude is a symlink" in written
+        assert (ws / "alpha" / "SKILL.md").is_file()
 
-    def test_a_copy_failure_without_a_log_is_swallowed(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_a_refused_destination_without_a_log_is_swallowed(self, tmp_path: Path) -> None:
         src = tmp_path / "src"
         _skill(src, "alpha")
         ws = tmp_path / "ws"
         ws.mkdir()
-        monkeypatch.setattr(
-            "vs_agent.cli_common.shutil.copytree",
-            lambda *_a, **_k: (_ for _ in ()).throw(OSError("nope")),
-        )
+        (ws / ".claude").symlink_to(tmp_path, target_is_directory=True)
 
         materialize_skills(ws, [src])  # must not raise
+
+    def test_a_planted_skills_directory_symlink_leaves_its_target_untouched(
+        self, tmp_path: Path
+    ) -> None:
+        """Regression: the copy and the stale-copy removal followed ``.claude/skills``."""
+        src = tmp_path / "src"
+        _skill(src, "alpha", "# fresh\n")
+        outside = tmp_path / "host-data"
+        (outside / "alpha").mkdir(parents=True)
+        (outside / "alpha" / "keep.txt").write_text("host file\n")
+        ws = tmp_path / "ws"
+        (ws / ".claude").mkdir(parents=True)
+        (ws / ".claude" / "skills").symlink_to(outside, target_is_directory=True)
+
+        materialize_skills(ws, [src])
+
+        assert _tree(outside) == {"alpha": None, "alpha/keep.txt": "host file\n"}
+        assert (ws / ".claude" / "skills").is_symlink()
+        assert (ws / "alpha" / "SKILL.md").read_text() == "# fresh\n"
 
     def test_a_stale_symlink_destination_is_replaced(self, tmp_path: Path) -> None:
         src = tmp_path / "src"

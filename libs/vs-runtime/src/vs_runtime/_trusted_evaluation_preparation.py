@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +12,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 from vs_runtime._evaluator_packages import load_evaluator_package
+from vs_sandbox.api import BeforeReadyContext, SandboxLifecycleHooks
 from vs_sandbox.api.command_translation import (
     PROJECT_ROOT_TOKEN,
     PYTHON_TOKEN,
@@ -31,11 +33,15 @@ if TYPE_CHECKING:
 type EvaluatorToolchain = Literal["go", "rust"]
 
 SANDBOX_EVALUATOR_TOOLS_ROOT = Path("/opt/vibesys-evaluator-tools")
+SANDBOX_EVALUATOR_GO_MODULES_ROOT = Path("/opt/vibesys-evaluator-go-modules")
 REMOTE_EVALUATOR_TOOLS_ROOT = Path(".vibesys-evaluator-tools")
+REMOTE_EVALUATOR_GO_MODULES_ROOT = Path(".vibesys-evaluator-go-modules")
 REMOTE_EVALUATOR_TOOLCHAINS_ROOT = Path(".vibesys-evaluator-toolchains")
 
 _EVALUATOR_RUST_TOOLCHAIN_VERSION = "1.92.0"
 _DOCKER_EVALUATOR_CACHE_SCHEMA = 2
+_GO_MODULE_SETUP_TIMEOUT_SECONDS = 660
+_PACKAGE_DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 _PYTHON_DOWNLOAD_SCRIPT = """\
 import sys
 import time
@@ -51,6 +57,258 @@ for attempt in range(5):
             raise
         time.sleep(5)
 """
+_GO_MODULE_VERIFY_SCRIPT = """\
+import fcntl
+import os
+import shutil
+import signal
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+
+def remove_tree(path):
+    def make_writable_and_retry(function, name, _error):
+        os.chmod(name, stat.S_IRWXU)
+        function(name)
+
+    shutil.rmtree(path, onerror=make_writable_and_retry)
+
+
+def lock_available(stream):
+    try:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return False
+    return True
+
+
+module_root, module_cache = sys.argv[1:]
+scratch = Path(tempfile.gettempdir()) / f"vibesys-evaluator-go-verify-{os.getuid()}"
+scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
+scratch_info = os.lstat(scratch)
+if not stat.S_ISDIR(scratch_info.st_mode) or scratch_info.st_uid != os.getuid():
+    print(f"unsafe evaluator Go verification scratch: {scratch}", file=sys.stderr)
+    raise SystemExit(1)
+os.chmod(scratch, 0o700)
+
+with (scratch / ".recovery.lock").open("a+b") as recovery:
+    fcntl.flock(recovery.fileno(), fcntl.LOCK_EX)
+    for stale in scratch.glob("cache.*"):
+        if not stale.is_dir():
+            continue
+        stale_lease_path = scratch / f".lease.{stale.name}"
+        try:
+            stale_lease = stale_lease_path.open("a+b")
+        except FileNotFoundError:
+            continue
+        with stale_lease:
+            if not lock_available(stale_lease):
+                continue
+            try:
+                remove_tree(stale)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                print(
+                    f"cannot recover stale evaluator Go verification cache {stale}: {error}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1) from error
+        stale_lease_path.unlink(missing_ok=True)
+    for orphaned_lease in scratch.glob(".lease.cache.*"):
+        work_name = orphaned_lease.name.removeprefix(".lease.")
+        if (scratch / work_name).exists():
+            continue
+        try:
+            orphaned = orphaned_lease.open("a+b")
+        except FileNotFoundError:
+            continue
+        with orphaned:
+            if lock_available(orphaned):
+                orphaned_lease.unlink(missing_ok=True)
+    work = Path(tempfile.mkdtemp(prefix="cache.", dir=scratch))
+    lease_path = scratch / f".lease.{work.name}"
+    lease = lease_path.open("a+b")
+    fcntl.flock(lease.fileno(), fcntl.LOCK_EX)
+
+interrupted = None
+process = None
+unwinding = False
+
+
+def begin_interrupt():
+    global unwinding
+    if unwinding:
+        return
+    unwinding = True
+    # Make cleanup one-shot before control leaves the interrupted operation.
+    # A second handled signal must never raise from inside the finally block.
+    signal.pthread_sigmask(signal.SIG_BLOCK, handled_signals)
+    for handled in handled_signals:
+        signal.signal(handled, signal.SIG_IGN)
+    raise InterruptedError
+
+
+def stop(signum, _frame):
+    global interrupted
+    if interrupted is None:
+        interrupted = signum
+    # Popen can dispatch a signal after fork but before publishing the child
+    # handle. Record that signal without unwinding until the child is owned;
+    # afterwards unwinding is safe because the finally block can stop it.
+    if process is not None:
+        begin_interrupt()
+
+
+handled_signals = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
+for handled in handled_signals:
+    signal.signal(handled, stop)
+
+
+def wait_without_reaping(process, timeout=None):
+    # Observe leader exit while retaining its PID and process-group ownership.
+    # Poll instead of blocking in waitid: a signal that lands after Python's
+    # last signal check but before the syscall starts never interrupts it, so
+    # a blocking waitid would sleep until the child exits and miss the interrupt.
+    # Each pass re-enters the interpreter, so a pending handler runs within one tick.
+    options = os.WEXITED | os.WNOWAIT | os.WNOHANG
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        result = os.waitid(os.P_PID, process.pid, options)
+        if result is not None:
+            return result
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            return None
+        time.sleep(0.05 if remaining is None else min(0.05, remaining))
+
+environment = os.environ.copy()
+environment.update(
+    GOCACHE=str(work),
+    GOMODCACHE=module_cache,
+    GOENV="off",
+    GOFLAGS="-mod=readonly -buildvcs=false",
+    GOPROXY="off",
+    GOSUMDB="off",
+    GOTOOLCHAIN="local",
+    GOWORK="off",
+)
+status = 1
+cleanup_error = None
+try:
+    process = subprocess.Popen(
+        ["go", "-C", module_root, "list", "-deps", "./..."],
+        env=environment,
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+    )
+    if interrupted is not None:
+        begin_interrupt()
+    wait_without_reaping(process)
+    # From here onward every path is cleanup. A first late signal may record
+    # interruption, but must not raise from inside the finally block.
+    unwinding = True
+except InterruptedError:
+    status = 128 + (interrupted or signal.SIGTERM)
+finally:
+    signal.pthread_sigmask(signal.SIG_BLOCK, handled_signals)
+    for handled in handled_signals:
+        signal.signal(handled, signal.SIG_IGN)
+    if process is not None:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        wait_without_reaping(process, timeout=5)
+        # The group leader can exit before descendants have honored TERM.
+        # Keep that leader unreaped so its numeric PGID cannot be reused, then
+        # always retire the isolated group before deleting its shared cache.
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        leader_status = process.wait()
+        status = (
+            leader_status
+            if interrupted is None
+            else 128 + (interrupted or signal.SIGTERM)
+        )
+    try:
+        with (scratch / ".recovery.lock").open("a+b") as recovery:
+            fcntl.flock(recovery.fileno(), fcntl.LOCK_EX)
+            try:
+                remove_tree(work)
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                cleanup_error = error
+            if cleanup_error is None:
+                lease_path.unlink(missing_ok=True)
+    except OSError as error:
+        if cleanup_error is None:
+            cleanup_error = error
+    try:
+        lease.close()
+    except OSError as error:
+        if cleanup_error is None:
+            cleanup_error = error
+
+if cleanup_error is not None:
+    print(
+        f"cannot clean evaluator Go verification cache {work}: {cleanup_error}",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+raise SystemExit(status)
+"""
+
+
+class EvaluatorGoModuleError(RuntimeError):
+    """A declared evaluator Go module could not be prepared for offline use."""
+
+    @classmethod
+    def builder_incomplete(cls) -> EvaluatorGoModuleError:
+        """Describe a target builder that returned without publishing its cache."""
+        return cls("target-image builder did not publish the evaluator Go module cache")
+
+    @classmethod
+    def toolchain_setup_failed(cls, detail: str) -> EvaluatorGoModuleError:
+        """Describe target-image Go installation failure."""
+        return cls(f"target-image Go toolchain setup failed: {detail[-500:]}")
+
+    @classmethod
+    def module_setup_failed(cls, detail: str) -> EvaluatorGoModuleError:
+        """Describe target-image dependency preparation failure."""
+        return cls(f"target-image Go module setup failed: {detail[-500:]}")
+
+    @classmethod
+    def ownership_failed(cls, detail: str) -> EvaluatorGoModuleError:
+        """Describe failure to return a built cache to its host owner."""
+        return cls(f"could not return Go module cache ownership: {detail[-500:]}")
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluatorGoModule:
+    """One immutable package module and its machine-local dependency cache."""
+
+    root: Path
+    cache_root: Path
+    package_digest: str
+
+    def __post_init__(self) -> None:
+        """Reject identities that cannot safely name an atomic readiness marker."""
+        if _PACKAGE_DIGEST_PATTERN.fullmatch(self.package_digest) is None:
+            message = "evaluator Go module package digest must be a sha256 identity"
+            raise ValueError(message)
+
+
+def evaluator_go_module_ready_path(module: EvaluatorGoModule, cache_root: Path) -> Path:
+    """Return the atomic digest-specific readiness marker for one module cache."""
+    return cache_root / f".vibesys-ready.{module.package_digest}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,18 +319,31 @@ class TrustedEvaluatorRequirements:
     toolchains: frozenset[EvaluatorToolchain] = frozenset()
     tools: Mapping[str, CargoGitToolSpec] = field(default_factory=dict)
     tools_root: Path | None = None
+    go_module: EvaluatorGoModule | None = None
 
     def __post_init__(self) -> None:
         """Snapshot caller-owned mappings and reject impossible declarations."""
         object.__setattr__(self, "tools", MappingProxyType(dict(self.tools)))
-        if self.package_root is None and (self.toolchains or self.tools):
-            message = "evaluator toolchains and tools require an evaluator package root"
+        if self.package_root is None and (self.toolchains or self.tools or self.go_module):
+            message = (
+                "evaluator toolchains, tools, and Go modules require an evaluator package root"
+            )
             raise ValueError(message)
+        if self.go_module is not None:
+            package_root = self.package_root
+            if package_root is None:
+                message = "evaluator Go module requires an evaluator package root"
+                raise ValueError(message)
+            try:
+                self.go_module.root.relative_to(package_root)
+            except ValueError as exc:
+                message = "evaluator Go module root must be inside its package"
+                raise ValueError(message) from exc
 
 
 @dataclass(frozen=True, slots=True)
 class PreparedTrustedEvaluator:
-    """Validated evaluator requirements and declared local tool roots."""
+    """Validated requirements and local dependency roots imported read-only."""
 
     requirements: TrustedEvaluatorRequirements
     tool_roots: tuple[Path, ...] = ()
@@ -89,15 +360,30 @@ def prepare_trusted_evaluator(
     package = load_evaluator_package(package_root)
     tools = package.metadata.tools
     tools_root = evaluator_tools_root if tools else None
+    go_module = (
+        EvaluatorGoModule(
+            root=package.go_module_root,
+            cache_root=(
+                evaluator_tools_root / "go-modules" / package.digest.removeprefix("sha256:")
+            ),
+            package_digest=package.digest,
+        )
+        if package.go_module_root is not None
+        else None
+    )
     requirements = TrustedEvaluatorRequirements(
         package_root=package.root,
         toolchains=frozenset(package.metadata.toolchains),
         tools=tools,
         tools_root=tools_root,
+        go_module=go_module,
     )
     return PreparedTrustedEvaluator(
         requirements,
-        tuple(tool_install_root(evaluator_tools_root, name, spec) for name, spec in tools.items()),
+        (
+            *(tool_install_root(evaluator_tools_root, name, spec) for name, spec in tools.items()),
+            *((go_module.cache_root,) if go_module is not None else ()),
+        ),
     )
 
 
@@ -110,6 +396,7 @@ class TrustedEvaluationCommandPaths:
     python_executable: str
     runtime_package_root: str | None = None
     runtime_tools_root: Path | None = None
+    runtime_go_module_cache_root: str | None = None
 
 
 def prepare_trusted_evaluation_plan(
@@ -277,16 +564,102 @@ def remote_evaluator_setup_command(
         commands.append(
             evaluator_tools_install_command(requirements.tools, REMOTE_EVALUATOR_TOOLS_ROOT)
         )
+    if requirements.go_module is not None:
+        commands.append(
+            evaluator_go_module_setup_command(
+                requirements,
+                runtime_package_root=".vibesys-evaluator-package",
+                runtime_cache_root=str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
+            )
+        )
     if not commands:
         return None
     reserved_paths = [
         str(REMOTE_EVALUATOR_TOOLS_ROOT),
+        str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
         str(REMOTE_EVALUATOR_TOOLCHAINS_ROOT),
     ]
     if not preserve_bootstrap:
         reserved_paths[:0] = [".bin", ".pip", ".uv-cache"]
     reserved = shlex.join(("rm", "-rf", "--", *reserved_paths))
     return "set -e\n" + "\n".join((reserved, *commands))
+
+
+def evaluator_go_module_setup_command(
+    requirements: TrustedEvaluatorRequirements,
+    *,
+    runtime_package_root: str,
+    runtime_cache_root: str,
+) -> str:
+    """Return target-side setup that makes one package's Go module offline-ready.
+
+    The online download is part of framework preparation, never gate execution.
+    A package-digest receipt turns later preparations into offline verification;
+    the final verification deliberately disables both the module proxy and sum
+    database so an incomplete cache fails before the evaluator is exposed.
+    """
+    module = requirements.go_module
+    package_root = requirements.package_root
+    if module is None or package_root is None:
+        message = "evaluator package declares no Go module"
+        raise ValueError(message)
+    relative_module = module.root.relative_to(package_root).as_posix()
+    package_argument = shlex.quote(runtime_package_root)
+    cache_argument = shlex.quote(runtime_cache_root)
+    relative_argument = shlex.quote(relative_module)
+    ready_name = shlex.quote(evaluator_go_module_ready_path(module, Path()).name)
+    verify_command = (
+        f'python3 -c {shlex.quote(_GO_MODULE_VERIFY_SCRIPT)} "$module_root" "$cache_root"'
+    )
+    return f"""\
+package_root=$(cd -- {package_argument} && pwd) || {{ echo 'evaluator Go module package root is unavailable' >&2; exit 1; }}
+module_root="$package_root"/{relative_argument}
+cache_path={cache_argument}
+cache_parent=$(dirname -- "$cache_path")
+mkdir -p -- "$cache_parent" || {{ echo 'cannot create evaluator Go module cache parent' >&2; exit 1; }}
+cache_root=$(cd -- "$cache_parent" && pwd)/$(basename -- "$cache_path")
+mkdir -p -- "$cache_root" || {{ echo 'cannot create evaluator Go module cache' >&2; exit 1; }}
+ready="$cache_root"/{ready_name}
+publish_ready=
+if [ ! -d "$ready" ]; then
+  GOMODCACHE="$cache_root" GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS='-mod=readonly -buildvcs=false' \
+    go -C "$module_root" mod download all || {{ echo 'failed to prepare evaluator Go modules; verify go.mod, go.sum, and module-proxy access' >&2; exit 1; }}
+  publish_ready=1
+fi
+GOMODCACHE="$cache_root" GOENV=off GOWORK=off GOTOOLCHAIN=local GOFLAGS='-mod=readonly -buildvcs=false' GOPROXY=off GOSUMDB=off \
+  go -C "$module_root" mod verify >/dev/null || {{ echo 'evaluator Go module cache is incomplete after preparation' >&2; exit 1; }}
+{verify_command} || {{ echo 'evaluator Go module cache cannot resolve the declared package offline' >&2; exit 1; }}
+if [ -n "$publish_ready" ]; then
+  mkdir -- "$ready" 2>/dev/null || [ -d "$ready" ] || {{ echo 'cannot publish evaluator Go module cache receipt' >&2; exit 1; }}
+fi"""
+
+
+class EvaluatorGoModuleLifecycleHooks(SandboxLifecycleHooks):
+    """Prepare one declared Go module before a host runner becomes ready."""
+
+    def __init__(self, requirements: TrustedEvaluatorRequirements) -> None:
+        """Snapshot the immutable package and cache requirement."""
+        self._requirements = requirements
+
+    def before_ready(self, context: BeforeReadyContext) -> None:
+        """Download and offline-verify module dependencies through the runner."""
+        module = self._requirements.go_module
+        package_root = self._requirements.package_root
+        if module is None or package_root is None:
+            return
+        command = evaluator_go_module_setup_command(
+            self._requirements,
+            runtime_package_root=str(package_root),
+            runtime_cache_root=str(module.cache_root),
+        )
+        result = context.sandbox.execute(
+            command,
+            timeout=_GO_MODULE_SETUP_TIMEOUT_SECONDS,
+            output=context.output,
+        )
+        if result.exit_code != 0:
+            detail = (result.output or "Go module setup failed").strip()[-2000:]
+            raise EvaluatorGoModuleError(detail)
 
 
 def evaluator_agent_toolchains(
@@ -313,6 +686,23 @@ def required_evaluator_tools_root(
     except ValueError:
         return root
     message = "evaluator tools root must be outside the candidate workspace"
+    raise ValueError(message)
+
+
+def required_evaluator_go_module_cache_root(
+    requirements: TrustedEvaluatorRequirements,
+    workspace: Path,
+) -> Path:
+    """Return the operator-owned Go cache after enforcing workspace isolation."""
+    if requirements.go_module is None:
+        message = "evaluator package declares no Go module cache"
+        raise ValueError(message)
+    root = requirements.go_module.cache_root.resolve()
+    try:
+        root.relative_to(workspace.resolve())
+    except ValueError:
+        return root
+    message = "evaluator Go module cache must be outside the candidate workspace"
     raise ValueError(message)
 
 
@@ -360,7 +750,40 @@ def _environment_command(
             paths.source_project_root,
         )
         replacements.extend(tool_path_replacements(requirements.tools, tools_root).items())
-    return shlex.join(translate_command_arguments(arguments, replacements))
+    translated = translate_command_arguments(arguments, replacements)
+    if requirements.go_module is not None:
+        cache_root = paths.runtime_go_module_cache_root
+        if cache_root is None:
+            message = "evaluator Go module execution requires a runtime cache root"
+            raise ValueError(message)
+        environment = (
+            "env",
+            f"GOMODCACHE={cache_root}",
+            "GOPROXY=off",
+            "GOSUMDB=off",
+            "GOWORK=off",
+            "GOENV=off",
+            "GOTOOLCHAIN=local",
+            "GOFLAGS=-mod=readonly -buildvcs=false",
+        )
+        if Path(cache_root).is_absolute():
+            translated = (*environment, *translated)
+        else:
+            script = (
+                'cache_path=$1; shift; cache_parent=$(dirname -- "$cache_path"); '
+                'cache_root=$(cd -- "$cache_parent" && pwd)/$(basename -- "$cache_path") || exit; '
+                'exec env "GOMODCACHE=$cache_root" GOPROXY=off GOSUMDB=off GOWORK=off '
+                "GOENV=off GOTOOLCHAIN=local 'GOFLAGS=-mod=readonly -buildvcs=false' \"$@\""
+            )
+            translated = (
+                "sh",
+                "-c",
+                script,
+                "vibesys-offline-go",
+                cache_root,
+                *translated,
+            )
+    return shlex.join(translated)
 
 
 def _python_download_command(

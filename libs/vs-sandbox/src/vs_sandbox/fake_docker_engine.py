@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -21,10 +22,17 @@ from vs_sandbox.container_runtime import (
     NESTED_DAEMON_START_SCRIPT,
 )
 from vs_sandbox.docker_cli import EXEC_MARKER_ENV, SIGNAL_EXEC_SCRIPT
-from vs_sandbox.process_execution import shell_exit_status, start_process_group
+from vs_sandbox.fake_docker_command import docker_result
+from vs_sandbox.process_execution import shell_exit_status
+from vs_sim.api import OutputStream
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from vs_sandbox.fake_docker_command import DockerResult
+    from vs_sim.api import OutputSink, PipedProcess, PipedProcessLauncher
+
+_FORMAT_LABEL = re.compile(r"\{\{\.Label \"([^\"]+)\"\}\}")
 
 # The container program's parent, standing in for the ``docker exec`` client.
 # It starts the program in a session of its own (the daemon's side), records
@@ -102,10 +110,45 @@ status = child.wait()
 sys.exit(128 - status if status < 0 else status)
 """
 
+# Counts the live (not yet exited) processes of session ``argv[1]``, after waiting up to
+# ``argv[2]`` tenths of a second for its leader to exit: the stop script's count, for a
+# program the fake runs on the host.
+_COUNT_SESSION = r"""
+import os, select, sys
+group, tenths = int(sys.argv[1]), int(sys.argv[2])
+
+def live():
+    count = 0
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/stat") as handle:
+                text = handle.read()
+        except OSError:
+            continue
+        state, _parent, process_group = text[text.rindex(")") + 2 :].split()[:3]
+        count += state != "Z" and int(process_group) == group
+    return count
+
+if tenths and live():
+    try:
+        leader = os.pidfd_open(group)
+    except ProcessLookupError:
+        pass
+    else:
+        select.select([leader], [], [], tenths / 10)
+print(live())
+"""
+# Guards the count against a hang; the pass path ends as soon as the count prints.
+_COUNT_BOUND_S = 30.0
+
 _FLAGS_WITH_VALUE = frozenset({"-e", "-w", "-u", "--env", "--workdir", "--user"})
 _FLAGS = frozenset({"-i", "-t", "-it", "-d"})
 _AGENT_IDENTITY_SCRIPT = "id -u agent && id -g agent"
 _DAEMON_ERROR_EXIT = 1
+# How a client's status reads when SIGKILL ended it before it reported one.
+_CLIENT_KILLED_EXIT = -9
 _RUN_ERROR_EXIT = 125
 _DEFAULT_RUNTIMES = ("runc",)
 
@@ -198,6 +241,10 @@ def _parse_exec(argv: tuple[str, ...]) -> _Exec:
     return _Exec(argv[index], env, workdir, user, tuple(argv[index + 1 :]))
 
 
+DEFAULT_MEMORY_TOTAL = 64 * 1024**3
+"""The host memory a fake daemon reports unless told otherwise: 64 GiB."""
+
+
 class FakeDockerEngine:
     """A :class:`~vs_sandbox.docker_cli.DockerCli` backed by local processes.
 
@@ -241,14 +288,18 @@ class FakeDockerEngine:
         agent_ids: tuple[int, int] = (1000, 1000),
         runtimes: Sequence[str] = _DEFAULT_RUNTIMES,
         nested_daemons_start: bool = True,
+        launcher: PipedProcessLauncher,
     ) -> None:
         """Keep exec bookkeeping in *state_dir*; the ``agent`` user has *agent_ids*.
 
         *runtimes* are the names ``docker info`` reports; *nested_daemons_start*
         says whether a daemon started inside a container ever becomes ready.
         Without a *state_dir* the bookkeeping lives in a temporary directory
-        that goes with the engine.
+        that goes with the engine. *launcher* starts the host processes that
+        stand in for spawned ``docker exec`` clients.
         """
+        self.daemon_id = "fake-daemon"
+        self._launcher = launcher
         self._scratch: tempfile.TemporaryDirectory[str] | None = None
         if state_dir is None:
             self._scratch = tempfile.TemporaryDirectory()
@@ -256,11 +307,17 @@ class FakeDockerEngine:
         self._state_dir = state_dir
         self._agent_ids = agent_ids
         self._runtimes = tuple(runtimes)
+        self._memory_total: int | None = DEFAULT_MEMORY_TOTAL
         self._nested_daemons_start = nested_daemons_start
         self._containers: dict[str, _Container] = {}
         self.calls: list[tuple[str, ...]] = []
         self._signal_requests_finding_nothing = 0
+        self._signal_requests_failing = 0
+        self._signal_requests_unreadable = 0
         self._runs_lost_after_creating: list[bool] = []
+        self._removals_lost = 0
+        self._removing: set[str] = set()
+        self._pull_progress = ""
 
     def containers(self) -> tuple[FakeContainer, ...]:
         """Every container the daemon still holds, stopped ones included."""
@@ -286,6 +343,21 @@ class FakeDockerEngine:
         """
         self._runs_lost_after_creating = list(outcomes)
 
+    def pulls_on_run(self, progress: str) -> None:
+        """Make every later ``docker run`` print *progress* to stderr, as pulling its image does."""
+        self._pull_progress = progress
+
+    def removals_lost(self, count: int) -> None:
+        """Fault: the next *count* ``docker rm`` clients die by ``SIGKILL`` before the daemon acts.
+
+        Each answers exit ``-9`` with no output, and the container stays.
+        """
+        self._removals_lost = count
+
+    def report_memory(self, total: int | None) -> None:
+        """Have ``docker info`` report *total* bytes of host memory; ``None`` fails to report it."""
+        self._memory_total = total
+
     def signal_requests_find_nothing(self, count: int) -> None:
         """Fault: the next *count* signal requests reach no process.
 
@@ -294,11 +366,33 @@ class FakeDockerEngine:
         """
         self._signal_requests_finding_nothing = count
 
+    def signal_requests_fail(self, count: int) -> None:
+        """Fault: the next *count* signal requests fail before signalling anything.
+
+        This is what a request sees when its own ``docker exec`` client dies or the
+        daemon refuses it: exit 1, no count on stdout.
+        """
+        self._signal_requests_failing = count
+
+    def signal_requests_meet_unreadable(self, count: int) -> None:
+        """Fault: the next *count* signal requests meet a process they cannot read.
+
+        Each signals the marked program as usual, but some process started
+        after it (another user's, or a setuid program) has an environment the
+        script cannot read, so it answers ``unknown`` instead of a count.
+        """
+        self._signal_requests_unreadable = count
+
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> subprocess.CompletedProcess[str]:
-        """Run one ``docker`` subcommand to completion."""
-        arguments = tuple(argv)
+        """Run one ``docker`` subcommand to completion, writing what it printed to *output*."""
+        result = self._answer(tuple(argv), timeout_seconds)
+        output.write(OutputStream.STDOUT, result.stdout.encode())
+        output.write(OutputStream.STDERR, result.stderr.encode())
+        return result
+
+    def _answer(self, arguments: tuple[str, ...], timeout_seconds: float) -> DockerResult:
         self.calls.append(arguments)
         match arguments[1]:
             case "run":
@@ -310,13 +404,25 @@ class FakeDockerEngine:
             case "ps":
                 return self._list(arguments)
             case "info":
-                runtimes = {name: {"path": name} for name in self._runtimes}
-                return subprocess.CompletedProcess(arguments, 0, json.dumps(runtimes) + "\n", "")
+                return self._info(arguments)
             case other:
                 message = f"FakeDockerEngine does not model `docker {other}`"
                 raise AssertionError(message)
 
-    def spawn(self, argv: Sequence[str]) -> subprocess.Popen[str]:
+    def _info(self, arguments: tuple[str, ...]) -> DockerResult:
+        """Answer ``docker info``: the daemon's id, the host's memory, or its runtimes."""
+        match arguments[2:]:
+            case ("--format", "{{.ID}}"):
+                return docker_result(stdout=self.daemon_id + "\n")
+            case ("--format", "{{.MemTotal}}") if self._memory_total is None:
+                return docker_result(returncode=1, stderr="template: no MemTotal\n")
+            case ("--format", "{{.MemTotal}}"):
+                return docker_result(stdout=f"{self._memory_total}\n")
+            case _:
+                runtimes = {name: {"path": name} for name in self._runtimes}
+                return subprocess.CompletedProcess(arguments, 0, json.dumps(runtimes) + "\n", "")
+
+    def spawn(self, argv: Sequence[str]) -> PipedProcess:
         """Start a ``docker exec`` whose program survives its client's death."""
         arguments = tuple(argv)
         self.calls.append(arguments)
@@ -342,9 +448,7 @@ class FakeDockerEngine:
             "env": {**os.environ, **(container.env if container else {}), **request.env},
             "pidfile": str(pidfile),
         }
-        return start_process_group(
-            (sys.executable, "-c", _EXEC_CLIENT, json.dumps(spec)), env=None, cwd=None
-        )
+        return self._launcher.start((sys.executable, "-c", _EXEC_CLIENT, json.dumps(spec)))
 
     def _pidfile(self, marker: str) -> Path:
         return self._state_dir / f"{marker}.pid"
@@ -384,7 +488,7 @@ class FakeDockerEngine:
                 f"docker: Error response from daemon: unknown or invalid runtime name: {runtime}.\n"
             )
             return subprocess.CompletedProcess(arguments, _RUN_ERROR_EXIT, "", stderr)
-        identifier = f"fake{len(self._containers):04d}{uuid.uuid4().hex[:8]}"
+        identifier = uuid.uuid4().hex + uuid.uuid4().hex
         self._containers[identifier] = _Container(
             mounts, read_only, workdir, name, labels, runtime, env=env
         )
@@ -392,45 +496,76 @@ class FakeDockerEngine:
             if self._runs_lost_after_creating.pop(0):
                 raise subprocess.TimeoutExpired(arguments, 0)
             return subprocess.CompletedProcess(arguments, 130, "", "")
-        return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", "")
+        return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", self._pull_progress)
+
+    def hold_removal(self, container_id: str) -> None:
+        """Leave a container in the daemon's removal-in-progress state until completed."""
+        if container_id not in self._containers:
+            raise KeyError(container_id)
+        self._removing.add(container_id)
+
+    def finish_removal(self, container_id: str) -> None:
+        """Complete a held removal, including all processes in that domain."""
+        self._removing.remove(container_id)
+        self._end(("docker", "rm", "-f", container_id))
 
     def _end(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
-        reference = arguments[-1]
-        identifier = next(
-            (
-                known
-                for known, candidate in self._containers.items()
-                if reference in {known, candidate.name}
-            ),
-            reference,
-        )
-        container = self._containers.get(identifier)
-        if container is None:
-            return self._no_such_container(arguments, reference)
-        for marker in container.markers:
-            self._signal_marker(marker, signal.SIGKILL)
-        container.running = False
-        if arguments[1] == "rm":
-            del self._containers[identifier]
-        return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", "")
+        if arguments[1] == "rm" and self._removals_lost:
+            self._removals_lost -= 1
+            status, stdout = _CLIENT_KILLED_EXIT, ""
+        else:
+            reference = arguments[-1]
+            identifier = next(
+                (
+                    known
+                    for known, candidate in self._containers.items()
+                    if reference in {known, candidate.name}
+                ),
+                reference,
+            )
+            container = self._containers.get(identifier)
+            if identifier in self._removing:
+                return docker_result(
+                    returncode=1,
+                    stderr=f"Error response from daemon: removal of container {identifier} is already in progress",
+                )
+            if container is None:
+                return self._no_such_container(arguments, reference)
+            for marker in container.markers:
+                self._signal_marker(marker, signal.SIGKILL, 0)
+            container.running = False
+            if arguments[1] == "rm":
+                del self._containers[identifier]
+            status, stdout = 0, f"{identifier}\n"
+        return subprocess.CompletedProcess(arguments, status, stdout, "")
 
     def _list(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         """``docker ps [-a] -q [--filter label=K=V]...``: the matching container ids."""
         everything = any(
             a.startswith("-") and not a.startswith("--") and "a" in a for a in arguments
         )
-        wanted: dict[str, str] = {}
+        wanted: dict[str, str | None] = {}
         for flag, value in pairwise(arguments):
             if flag == "--filter" and value.startswith("label="):
-                key, _, label = value.removeprefix("label=").partition("=")
-                wanted[key] = label
+                key, has_value, label = value.removeprefix("label=").partition("=")
+                wanted[key] = label if has_value else None
         found = [
-            identifier
+            (identifier, container)
             for identifier, container in self._containers.items()
             if (everything or container.running)
-            and all(container.labels.get(key) == label for key, label in wanted.items())
+            and all(
+                key in container.labels if label is None else container.labels.get(key) == label
+                for key, label in wanted.items()
+            )
         ]
-        return subprocess.CompletedProcess(arguments, 0, "".join(f"{i}\n" for i in found), "")
+        labelled = _FORMAT_LABEL.search(" ".join(arguments))
+        rows = [
+            identifier
+            if labelled is None
+            else f"{identifier} {container.labels.get(labelled[1], '')}"
+            for identifier, container in found
+        ]
+        return subprocess.CompletedProcess(arguments, 0, "".join(f"{row}\n" for row in rows), "")
 
     def _exec(
         self, arguments: tuple[str, ...], timeout_seconds: float
@@ -439,7 +574,7 @@ class FakeDockerEngine:
         container = self._containers.get(request.container)
         if container is None or not container.running:
             return self._no_such_container(arguments, request.container)
-        nested = self._nested_daemon_exec(container, request, arguments)
+        nested = self._scripted_exec(container, request, arguments)
         if nested is not None:
             return nested
         if request.user == "root":
@@ -449,13 +584,6 @@ class FakeDockerEngine:
         if request.program == ("sh", "-c", _AGENT_IDENTITY_SCRIPT):
             uid, gid = self._agent_ids
             return subprocess.CompletedProcess(arguments, 0, f"{uid}\n{gid}\n", "")
-        if request.program[:3] == ("sh", "-c", SIGNAL_EXEC_SCRIPT):
-            marker, number = request.program[4], request.program[5]
-            if self._signal_requests_finding_nothing > 0:
-                self._signal_requests_finding_nothing -= 1
-            else:
-                self._signal_marker(marker.partition("=")[2], signal.Signals(int(number)))
-            return subprocess.CompletedProcess(arguments, 0, "", "")
         completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-731012 [S603]; the fake daemon runs the exec argv a sandbox assembled, without a shell.
             request.program,
             cwd=self._host_path(container, request.workdir),
@@ -469,10 +597,17 @@ class FakeDockerEngine:
             arguments, shell_exit_status(completed.returncode), completed.stdout, completed.stderr
         )
 
-    def _nested_daemon_exec(
+    def _scripted_exec(
         self, container: _Container, request: _Exec, arguments: tuple[str, ...]
     ) -> subprocess.CompletedProcess[str] | None:
-        """Answer the sandbox's nested-daemon start and readiness scripts, else ``None``."""
+        """Answer the stop script and the nested-daemon scripts, else ``None``.
+
+        The stop script runs as the command's user, root included.
+        """
+        if request.program[:3] == ("sh", "-c", SIGNAL_EXEC_SCRIPT):
+            return subprocess.CompletedProcess(
+                arguments, *self._signal_request(request.program[4:9])
+            )
         if request.user != "root" or request.program[:2] != ("sh", "-c"):
             return None
         if request.program[2:] == (NESTED_DAEMON_START_SCRIPT,):
@@ -488,12 +623,43 @@ class FakeDockerEngine:
             return subprocess.CompletedProcess(arguments, _DAEMON_ERROR_EXIT, "", stderr)
         return None
 
-    def _signal_marker(self, marker: str, number: signal.Signals) -> None:
+    def _signal_request(self, operands: tuple[str, ...]) -> tuple[int, str, str]:
+        """Answer the stop script with its status, stdout and stderr.
+
+        It signals the marked program, then prints how many of its processes remain.
+        """
+        marker, number, tenths, _sessions, _since = operands
+        if self._signal_requests_failing > 0:
+            self._signal_requests_failing -= 1
+            return 1, "", "signal request failed\n"
+        survivors = 0
+        if self._signal_requests_finding_nothing > 0:
+            self._signal_requests_finding_nothing -= 1
+        else:
+            survivors = self._signal_marker(
+                marker.partition("=")[2], signal.Signals(int(number)), int(tenths)
+            )
+        if self._signal_requests_unreadable > 0:
+            self._signal_requests_unreadable -= 1
+            return 0, "unknown -\n", ""
+        # The fake tracks a program by its host session, not by container
+        # session ids, so it reports no evidence for later requests to carry.
+        return 0, f"{survivors} -\n", ""
+
+    def _signal_marker(self, marker: str, number: signal.Signals, settle_tenths: int) -> int:
+        """Signal the program's session as the stop script does, and count what is left."""
         pidfile = self._pidfile(marker)
         if not pidfile.exists():
-            return
+            return 0
+        group = int(pidfile.read_text())
         with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(int(pidfile.read_text()), number)
+            os.killpg(group, number)
+        counter = self._launcher.start(
+            (sys.executable, "-c", _COUNT_SESSION, str(group), str(settle_tenths))
+        )
+        survivors = counter.stdout.read()
+        counter.wait(settle_tenths / 10 + _COUNT_BOUND_S)
+        return int(survivors)
 
     def runtime_of(self, container_id: str) -> str | None:
         """Return the ``--runtime`` *container_id* was created with, if any."""

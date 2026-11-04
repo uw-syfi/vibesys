@@ -4,7 +4,7 @@ MCP tooling and profiler prompts are meant to work against any candidate
 process, not just vLLM or SGLang: engine-specific knowledge (multiprocessing
 model, torch.profiler contract, graceful-shutdown behavior, ...) belongs in
 the serving-systems skill tree
-(``resources/skills/serving-systems/references/engines/`` and
+(``skills/domains/serving-systems/references/engines/`` and
 ``references/tooling/profiling-serving-engines.md``), not in tool code or
 agent prompts. A previous pass removed every such mention from the profiler
 prompt templates and the ``resources/profilers`` analyzer CLIs; this test

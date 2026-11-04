@@ -69,6 +69,14 @@ def _profiler(bin_dir: Path, *, emit_api: bool) -> None:
     executable.chmod(0o755)
 
 
+# The capture runtime observes processes through Linux /proc and pidfds, so a real capture runs
+# only there (CI is Linux); `LinuxProcessTable` is named for it.
+_LINUX_CAPTURE = pytest.mark.skipif(
+    sys.platform != "linux", reason="the capture runtime needs Linux /proc and pidfds"
+)
+
+
+@_LINUX_CAPTURE
 @pytest.mark.parametrize("emit_api", [True, False], ids=["api-rows", "missing-api-rows"])
 def test_real_semantic_producer_requires_hip_rows(
     tmp_path: Path,
@@ -149,6 +157,7 @@ def test_requested_hip_field_requires_a_valid_measured_interval(
     assert remote_capture.failed_profile_fields(profiles, [capture.name], ["hip_api_timing"]) == []
 
 
+@_LINUX_CAPTURE
 def test_supported_hip_field_without_rows_is_capture_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

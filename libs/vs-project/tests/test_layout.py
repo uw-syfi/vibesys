@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -256,7 +257,7 @@ def test_configuration_symlink_is_rejected_even_within_project(tmp_path: Path) -
     with pytest.raises(UnsafeProjectPathError, match="symlink"):
         project.is_initialized()
     with pytest.raises(ProjectStateError, match="symlink"):
-        project.state.create_project("project")
+        project.state.create_project("project", now=datetime(2026, 1, 1, tzinfo=UTC))
 
 
 def test_state_symlinks_cannot_escape_configuration(tmp_path: Path) -> None:

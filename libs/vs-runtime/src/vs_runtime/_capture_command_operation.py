@@ -1,10 +1,12 @@
-"""Owner of command capture, over the public ``Workspaces`` and ``Commands`` interfaces.
+"""Owner of command capture, over public ``Workspaces`` and ``CaptureCommands`` interfaces.
 
 A profile-guided strategy runs a configured profiler command against a retained revision and
 reads what it wrote. The command runs in a throwaway isolated candidate created from that
 revision, through the runtime's own output capture (it appends the output argument and a
 temporary path, bounds the output and removes the file), and the candidate is discarded on
-every path. Nothing durable changes, so the operation is a query. The candidate is created
+every settled path. If a remote stop cannot be confirmed, the candidate is durably retained
+across host cleanup and restart rather than being removed under a possibly live process.
+Nothing durable changes on a settled path, so the operation is a query. The candidate is created
 under a member identity derived from the request's identity, so the worktree a host that died
 mid-capture leaves behind is replaced by the replay's, never accumulated; inspection proves
 nothing happened (the executor seals a finished result, so a finished capture is never rerun)
@@ -17,13 +19,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, cast
 
 from vs_runtime._operation_catalog import Inspection, NotApplied
+from vs_runtime.contracts import CaptureStopUnconfirmedError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from vs_core.api import OperationRequest, RevisionRef
     from vs_runtime._core_requests import ExecutionContext
-    from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
+    from vs_runtime.contracts import CaptureCommands, RevisionLedger, Workspaces
 
 
 class CaptureRequest(Protocol):
@@ -41,7 +44,7 @@ class CaptureCommandOwner:
     def __init__(
         self,
         workspaces: Workspaces,
-        commands: Commands,
+        commands: CaptureCommands,
         ledger: RevisionLedger,
         commit_of: Callable[[RevisionRef], str | None],
     ) -> None:
@@ -79,6 +82,7 @@ class CaptureCommandOwner:
         candidate = await self._workspaces.create_candidate(
             commit, member_id=f"capture-{identity[:32]}"
         )
+        settled = True
         try:
             result = await self._commands.capture_output(
                 asked.argv,
@@ -86,12 +90,17 @@ class CaptureCommandOwner:
                 output_argument=asked.output_argument,
                 timeout_seconds=asked.timeout_seconds,
             )
+        except CaptureStopUnconfirmedError:
+            settled = False
+            raise
         finally:
-            await candidate.discard()
+            if settled:
+                await candidate.discard()
+        output = result.output if result.exit_code == 0 else result.diagnostic_output
         return {
             "status": "succeeded",
             "exit_code": result.exit_code,
-            "output": result.output,
+            "output": output,
             "truncated": result.truncated,
         }
 

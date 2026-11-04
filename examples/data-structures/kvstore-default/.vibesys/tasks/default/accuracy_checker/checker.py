@@ -15,6 +15,9 @@ from reference import KVStoreFactory
 
 
 def _load_candidate():
+    # Running this file puts its own directory on sys.path, not the repository root, where the
+    # candidate's main.py lives.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
     try:
         from main import VibeSysKVStore
 
@@ -57,7 +60,7 @@ def _run_porcupine_checker(history):
         history_path = Path(tmp.name)
     try:
         proc = subprocess.run(
-            ["go", "run", ".", "--history", str(history_path)],
+            ["go", "run", "-mod=vendor", ".", "--history", str(history_path)],
             cwd=checker_dir,
             capture_output=True,
             text=True,

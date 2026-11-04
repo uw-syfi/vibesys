@@ -98,9 +98,8 @@ _BOARD = [
 ]
 
 
-def _index(tmp_path: Path, issues: list[Issue]) -> str:
-    render_all(tmp_path / "issues", issues)
-    return (tmp_path / "issues" / "INDEX.md").read_text(encoding="utf-8")
+def _index(issues: list[Issue]) -> str:
+    return render_all(issues)["INDEX.md"]
 
 
 def _progress(tmp_path: Path) -> str:
@@ -125,8 +124,8 @@ def _progress(tmp_path: Path) -> str:
 _CASES: dict[str, Callable[[Path], str]] = {
     "issue_rich": lambda _: render_issue(_RICH),
     "issue_minimal": lambda _: render_issue(_issue(1)),
-    "index_board": lambda tmp_path: _index(tmp_path, _BOARD),
-    "index_empty": lambda tmp_path: _index(tmp_path, []),
+    "index_board": lambda _tmp_path: _index(_BOARD),
+    "index_empty": lambda _tmp_path: _index([]),
     "progress_log": _progress,
 }
 

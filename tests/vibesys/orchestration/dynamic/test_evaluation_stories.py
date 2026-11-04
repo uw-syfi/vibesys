@@ -24,11 +24,11 @@ from tests.vibesys.orchestration.dynamic._evidence_host import (
 from tests.vibesys.orchestration.dynamic._host import (
     FACTS,
     PLANNER_LABEL,
-    assert_flow_closed,
     config,
 )
 from tests.vibesys.orchestration.dynamic._replies import implement
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
+from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.search.api import (

@@ -28,8 +28,9 @@ so the shards partition the suite: each test runs in exactly one shard.
 
 Every CI shard records its measured seconds (``--record-shard-durations=PATH``,
 or ``$VIBESYS_RECORD_SHARD_DURATIONS``) and uploads them as a
-``shard-durations-I`` artifact; a run on main merges them into a cache entry that
-later runs read through ``$VIBESYS_SHARD_DURATIONS`` (``.github/workflows/test.yml``),
+``shard-durations-I`` artifact; a run on main averages them into the previous record
+(``SMOOTHING_WEIGHT``) and caches the result for later runs to read through
+``$VIBESYS_SHARD_DURATIONS`` (``.github/workflows/test.yml``),
 and ``scripts/refresh_shard_durations.py`` can still merge a run's artifacts into the
 checked-in ``shard_durations.json``, the cold-start record used when that cache is empty. Each shard also warns when it
 overran ``SHARD_BUDGET_SECONDS`` or ran files the record underestimates. A
@@ -61,11 +62,19 @@ DURATIONS_ENV = "VIBESYS_SHARD_DURATIONS"
 
 #: A file above this multiple of the mean shard load has its tests spread over the shards.
 HEAVY_SHARE = 1.1
-#: xdist workers per CI shard (a standard runner has two cores).
-WORKERS_PER_SHARD = 2
+#: xdist workers per CI shard: ``-n auto`` on a standard runner (four cores) starts four.
+#: Measured over 24 shard jobs of 8 runs on main, a shard's recorded seconds divided by its
+#: job time less 100 s of setup is 4.0 (3.6 to 4.4).
+WORKERS_PER_SHARD = 4
 #: Wall seconds one shard's tests may take; above this the shards need rebalancing
 #: or more of them. Leaves room under ten minutes for runner setup.
 SHARD_BUDGET_SECONDS = 400.0
+#: How much of the latest run the cached record takes: ``new = WEIGHT * measured + (1 - WEIGHT) *
+#: previous``. A file's measured seconds swing with what ran beside it (a CPU-bound sim test took
+#: 64 s in one run and 34 s in the next), so a record that is the last run alone moves the swing from
+#: shard to shard: the shards balanced on it ended a run at 283, 259 and 426 s. Replaying 11 runs of
+#: recorded main seconds, the heaviest shard's excess over an even split fell from 72 to 37 CPU-seconds.
+SMOOTHING_WEIGHT = 0.5
 #: Granularity used to project the even spread of heavy files.
 _PROJECTION_UNITS = 200
 
@@ -267,6 +276,25 @@ def merge_durations(records: Iterable[Mapping[str, float]]) -> dict[str, float]:
     return {name: round(seconds, 2) for name, seconds in sorted(total.items())}
 
 
+def smooth_durations(
+    previous: Mapping[str, float], measured: Mapping[str, float], weight: float = SMOOTHING_WEIGHT
+) -> dict[str, float]:
+    """The record after a run: each measured file moves ``weight`` of the way to its seconds.
+
+    A file the previous record lacks takes its measured seconds. A file the run did not measure
+    drops out, since it no longer exists or no longer runs.
+    """
+    if not 0.0 <= weight <= 1.0:
+        message = f"the smoothing weight must be between 0 and 1, got {weight!r}"
+        raise ValueError(message)
+    return {
+        name: round(
+            seconds if name not in previous else weight * seconds + (1 - weight) * previous[name], 2
+        )
+        for name, seconds in sorted(measured.items())
+    }
+
+
 def record_durations(measured: Mapping[str, float], previous: Path) -> dict[str, float]:
     """The record to write: ``previous`` (from an earlier pytest run of this shard) updated by ``measured``.
 
@@ -431,6 +459,48 @@ def slowest_files(measured: Mapping[str, float], limit: int = 3) -> str:
     """One line naming the files that took the most seconds, for an over-budget warning."""
     top = sorted(measured.items(), key=lambda pair: (-pair[1], pair[0]))[:limit]
     return ", ".join(f"{name} {seconds:.0f}s" for name, seconds in top)
+
+
+def projection_lines(
+    index: int, count: int, files: Iterable[str], durations: Mapping[str, float]
+) -> list[str]:
+    """What the record says shard ``index`` of ``count`` will cost, before its first test runs.
+
+    The end-of-session report comes after the tests, and a job cancelled at its time limit
+    never prints it. These lines are for the top of the log: the projected wall seconds
+    against the budget, how much of the suite the record does not know, and the whole files
+    that weigh most on this shard.
+    """
+    names = sorted(set(files))
+    seconds = projected_shard_seconds(names, durations, count)[index - 1]
+    weight = {name: durations.get(name, fallback_seconds(durations)) for name in names}
+    owned = assign_shards(names, durations, count)
+    heaviest = sorted(
+        (name for name in owned if owned[name] == index), key=lambda n: (-weight[n], n)
+    )
+    unknown = sum(1 for name in names if name not in durations)
+    lines = [
+        f"shard {index}/{count}: projected {seconds:.0f}s of tests across {WORKERS_PER_SHARD} "
+        f"workers (budget {SHARD_BUDGET_SECONDS:.0f}s), from a record of {len(durations)} files "
+        f"and {sum(durations.values()):.0f}s; {unknown} of {len(names)} test files have no "
+        "recorded seconds",
+        "shard heaviest whole files: "
+        + (", ".join(f"{name} {weight[name]:.0f}s" for name in heaviest[:3]) or "none"),
+    ]
+    if seconds > SHARD_BUDGET_SECONDS:
+        lines.append(
+            f"::warning::shard {index}/{count} is projected at {seconds:.0f}s of tests, over the "
+            f"{SHARD_BUDGET_SECONDS:.0f}s budget before it starts: refresh {DEFAULT_DURATIONS.name}"
+        )
+    return lines
+
+
+def pytest_report_header(config: pytest.Config) -> list[str] | None:
+    """Print the shard's projection at the top of the log (the controller prints the header)."""
+    if config.getoption("--shard") is None:
+        return None
+    plan = _plan(config)
+    return projection_lines(plan.index, plan.count, plan.files, plan.durations)
 
 
 def pytest_terminal_summary(terminalreporter: TerminalReporter, config: pytest.Config) -> None:

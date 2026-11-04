@@ -4,6 +4,10 @@ r14: Ctrl-C reached both the launcher and its headless engine. The launcher's
 ``subprocess.call`` SIGKILLed the engine 0.25 seconds later, so the engine's
 teardown never cancelled the run's Slurm job.
 
+r3: an operator's ``kill -INT`` named the launcher, which kept SIGINT from its
+engine on the assumption that a terminal had delivered it there too; the run
+never heard a stop. The launcher now forwards it.
+
 The launcher runs its child through a Fake foreground launcher and receives its signals
 from a Fake signal source, so no signal reaches this process. The real processes and
 signals are in ``tests/e2e/test_launcher_signals.py``.
@@ -12,13 +16,13 @@ signals are in ``tests/e2e/test_launcher_signals.py``.
 from __future__ import annotations
 
 import asyncio
-import signal
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from entrypoints.launcher import run_child
+from vs_sim.api import Signals
 from vs_sim.api.testing import (
     FakeForegroundLauncher,
     FakeSignalSource,
@@ -27,8 +31,20 @@ from vs_sim.api.testing import (
 )
 
 _ENGINE_STATUS = 7
-_HANDLED = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
-_FORWARDED = (signal.SIGTERM, signal.SIGHUP)
+_HANDLED = (Signals.SIGINT, Signals.SIGTERM, Signals.SIGHUP)
+
+
+def _forwarded(delivered: list[Signals]) -> list[Signals]:
+    """What the engine receives: each signal as it is, but every SIGINT after the first as SIGTERM."""
+    received: list[Signals] = []
+    interrupted = False
+    for number in delivered:
+        if number is Signals.SIGINT:
+            received.append(Signals.SIGTERM if interrupted else Signals.SIGINT)
+            interrupted = True
+        else:
+            received.append(number)
+    return received
 
 
 def _engine(_argv: tuple[str, ...]) -> ForegroundScript:
@@ -37,7 +53,7 @@ def _engine(_argv: tuple[str, ...]) -> ForegroundScript:
 
 
 async def _run_with_signals(
-    delivered: list[signal.Signals],
+    delivered: list[Signals],
 ) -> tuple[int, FakeForegroundLauncher, FakeSignalSource]:
     launcher = FakeForegroundLauncher(_engine)
     signals = FakeSignalSource()
@@ -51,25 +67,27 @@ async def _run_with_signals(
     return await launch, launcher, signals
 
 
+@pytest.mark.regression
 @given(st.lists(st.sampled_from(_HANDLED), max_size=8))
+# r3: one SIGINT to the launcher alone.
+@example([Signals.SIGINT])
+# A repeated Ctrl-C forces the engine to end.
+@example([Signals.SIGINT, Signals.SIGINT])
 @pytest.mark.asyncio
-async def test_the_launcher_waits_for_its_engine_and_forwards_termination(
-    delivered: list[signal.Signals],
+async def test_the_launcher_waits_for_its_engine_and_forwards_every_shutdown_signal(
+    delivered: list[Signals],
 ) -> None:
     status, launcher, signals = await _run_with_signals(delivered)
 
     assert status == _ENGINE_STATUS
-    # Ctrl-C reaches the engine from the terminal; only termination is forwarded.
-    assert launcher.children[0].received == [n for n in delivered if n in _FORWARDED]
+    assert launcher.children[0].received == _forwarded(delivered)
     assert not any(signals.handles(number) for number in _HANDLED)
 
 
-@given(
-    st.sampled_from([*signal.Signals]).filter(lambda n: n not in (signal.SIGKILL, signal.SIGSTOP))
-)
+@given(st.sampled_from([*Signals]).filter(lambda n: n not in (Signals.SIGKILL, Signals.SIGSTOP)))
 @pytest.mark.asyncio
 async def test_a_child_ended_by_a_signal_reports_128_plus_the_signal(
-    number: signal.Signals,
+    number: Signals,
 ) -> None:
     launcher = FakeForegroundLauncher(lambda _argv: ForegroundScript())
     launch = asyncio.ensure_future(

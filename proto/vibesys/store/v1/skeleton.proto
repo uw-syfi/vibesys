@@ -1,0 +1,238 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/store/v1/agent_attrs.proto";
+import "vibesys/store/v1/content.proto";
+import "vibesys/store/v1/epoch.proto";
+import "vibesys/store/v1/lifecycle.proto";
+import "vibesys/store/v1/record.proto";
+import "vibesys/store/v1/span.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// Machine-local routing metadata, published by Project before its host discovery link.
+// Stored beside the host index, separately from the writer-owned log and head.
+message RunAddress {
+  string project_root = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+    prefix: "/"
+  }];
+  // Binds the address to the resolved discovery target across index retargeting.
+  string log_directory = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+    prefix: "/"
+  }];
+}
+
+// Writer-computed dashboard projection. Absence of committed_seq retains the
+// phase 1 rule: every complete record is committed. A present zero commits none.
+message RunHead {
+  option (buf.validate.message).cel = {
+    id: "run_head.chart_points"
+    message: "chart_points must contain at most 256 points"
+    expression: "this.chart_points.size() <= 256"
+  };
+  option (buf.validate.message).cel = {
+    id: "run_head.lifecycle"
+    message: "head has either a lifecycle or an explicitly awaiting epoch"
+    expression: "has(this.lifecycle) != this.awaiting_lifecycle && (!this.awaiting_lifecycle || (this.epoch > 0u && has(this.committed_seq)))"
+  };
+  Lifecycle lifecycle = 1;
+  string strategy = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  HeadlineObjective objective = 3;
+  map<string, uint64> span_counts = 4 [(buf.validate.field).map.keys.string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  TokenUsage usage = 5;
+  repeated MetricPoint chart_points = 6;
+  bool needs_user = 7;
+  optional uint64 committed_seq = 8;
+  RunProcess process = 9;
+  // The current epoch header is committed, but its first lifecycle record is not.
+  bool awaiting_lifecycle = 10;
+  // Canonical writer epoch, derived from run.log independently of process metadata.
+  uint32 epoch = 11;
+  // Core decisions over this exact committed prefix, including unowned measurements.
+  repeated SeriesPerformance performance = 12;
+  bool performance_stated = 13;
+}
+
+// Values are absent until reported. The declaration supplies unit and direction.
+message HeadlineObjective {
+  MetricSeriesDecl series = 1 [(buf.validate.field).required = true];
+  optional double best_value = 2 [(buf.validate.field).double.finite = true];
+  optional double input_value = 3 [(buf.validate.field).double.finite = true];
+  // True when the writer states the input's measurement in this head: input_value present means
+  // measured, absent means unmeasured or not yet measured. False is a previous writer's head,
+  // whose input a reader recovers once from the committed prefix of the log.
+  bool input_stated = 4;
+}
+
+// Informational process identity, never a substitute for probing run.lock.
+message RunProcess {
+  uint32 pid = 1 [(buf.validate.field).uint32.gt = 0];
+  uint32 epoch = 2 [(buf.validate.field).uint32.gt = 0];
+  google.protobuf.Timestamp started_at = 3 [(buf.validate.field).required = true];
+}
+
+// Immutable skeleton through through_seq. log_offset is the byte immediately
+// after that record in run.log, including magic and framing. It lets readers
+// seek without parsing old records. The store reader supplies retained semantic
+// upgrades before the gateway addresses descriptors and serves the snapshot.
+message Keyframe {
+  option (buf.validate.message).cel = {
+    id: "keyframe.failures_within_prefix"
+    message: "failures must be error notices of the prefix: sequence at most through_seq, at most one per epoch, and only a keyframe that tracks them may carry any"
+    expression: "this.failures.all(f, f.seq <= this.through_seq && has(f.notice) && f.notice.severity >= 2) && this.failures.map(f, f.epoch).unique() && (this.failures.size() == 0 || this.failures_tracked)"
+  };
+  option (buf.validate.message).cel = {
+    id: "keyframe.record_facts"
+    message: "record facts must be unique records within the checkpoint prefix, with intent bodies only in intents"
+    expression: "this.intents.all(r, r.seq <= this.through_seq && has(r.intent)) && this.intents.map(r, r.seq).unique() && this.record_facts.all(r, r.seq <= this.through_seq && (has(r.blob) || has(r.chat) || has(r.span))) && this.record_facts.map(r, r.seq).unique()"
+  };
+  uint64 through_seq = 1 [(buf.validate.field).uint64.gt = 0];
+  uint64 log_offset = 2 [(buf.validate.field).uint64 = {
+    gte: 8
+    lte: 9223372036854775807
+  }];
+  map<string, SpanHistory> spans = 3;
+  repeated MetricHistory metrics = 4;
+  repeated StreamRef streams = 5;
+  repeated EpochVersion epochs = 6;
+  repeated LifecycleVersion lifecycles = 7;
+  // The latest error notice of each epoch, whole, so a reader can show a run's diagnostic
+  // without reading the records the keyframe summarises.
+  repeated Record failures = 8;
+  // True when the writer folded every record through through_seq into `failures`, so that an
+  // empty list means no error notice. Keyframes written before the field are false: their
+  // reader recovers the failure facts from the log.
+  bool failures_tracked = 9;
+  // Complete semantic intent history, including writer positions, refusal reasons and targets.
+  repeated Record intents = 10;
+  // Every record through through_seq was folded into intents, record_facts and epoch starts.
+  // A reader of an older checkpoint recovers these facts from the frozen committed prefix
+  // through its single progressive Tail, rather than assuming its raw replay window suffices.
+  bool records_tracked = 11;
+  // Blob attachments, chat events and spans carrying steer delivery links. Other span facts
+  // already live in spans; epochs, lifecycles, metrics and streams have their own indexes.
+  repeated Record record_facts = 12;
+  // Exact-prefix core projection restored by the read upgrade for previous writers.
+  // A reader ignores a head whose committed_seq differs from through_seq.
+  RunHead head = 13;
+}
+
+message SpanHistory {
+  repeated SpanVersion versions = 1;
+}
+
+message SpanVersion {
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  Span span = 2 [(buf.validate.field).required = true];
+}
+
+message MetricHistory {
+  string series = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  repeated MetricVersion points = 2;
+}
+
+message MetricVersion {
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  MetricPoint point = 2 [(buf.validate.field).required = true];
+}
+
+// A stored keyframe carries epoch.descriptors inline. The gateway replaces them
+// with descriptors_sha256 on the wire (SkeletonResponse.descriptor_sets), since
+// every epoch of a run usually repeats one set. Exactly one of the two names the
+// descriptors of an epoch that has any. The wire form is not valid under the
+// EpochStarted descriptor rules until a reader has restored them.
+message EpochVersion {
+  option (buf.validate.message).cel = {
+    id: "epoch_version.descriptors_once"
+    message: "descriptors are inline or addressed by hash, not both"
+    expression: "this.descriptors_sha256 == '' || !has(this.epoch.descriptors)"
+  };
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  EpochStarted epoch = 2 [(buf.validate.field).required = true];
+  string descriptors_sha256 = 3 [(buf.validate.field).string.pattern = "^([0-9a-f]{64})?$"];
+  // The original header envelope. Amendments and inferred input declarations do not start epochs.
+  google.protobuf.Timestamp started_at = 4;
+  bool starts_epoch = 5;
+}
+
+message LifecycleVersion {
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  Lifecycle lifecycle = 2 [(buf.validate.field).required = true];
+}
+
+// A refusal preserves readings without guessing how an unknown objective improves.
+enum PerformanceRefusal {
+  PERFORMANCE_REFUSAL_UNSPECIFIED = 0;
+  PERFORMANCE_REFUSAL_UNKNOWN_DIRECTION = 1;
+}
+
+enum IdeaOutcome {
+  IDEA_OUTCOME_UNSPECIFIED = 0;
+  IDEA_OUTCOME_PENDING = 1;
+  IDEA_OUTCOME_FAILED = 2;
+  IDEA_OUTCOME_KEPT = 3;
+  IDEA_OUTCOME_NOT_KEPT = 4;
+  IDEA_OUTCOME_WITHIN_NOISE = 5;
+  IDEA_OUTCOME_WORSE_THAN_INPUT = 6;
+  IDEA_OUTCOME_INPUT = 7;
+  IDEA_OUTCOME_UNATTRIBUTED = 8;
+}
+
+message SeriesPerformance {
+  string series = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional double input_value = 2 [(buf.validate.field).double.finite = true];
+  optional double best_value = 3 [(buf.validate.field).double.finite = true];
+  repeated IdeaPerformance points = 4;
+  repeated IdeaDecision ideas = 6;
+  optional PerformanceRefusal refusal = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message IdeaPerformance {
+  uint64 measurement_seq = 1 [(buf.validate.field).uint64.gt = 0];
+  MetricPoint point = 2 [(buf.validate.field).required = true];
+  optional string idea = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  IdeaOutcome outcome = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  bool new_best = 5;
+}
+
+// An idea still has an outcome when no gate produced a reading.
+message IdeaDecision {
+  string idea = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  IdeaOutcome outcome = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional uint64 measurement_seq = 3 [(buf.validate.field).uint64.gt = 0];
+  bool new_best = 4;
+}

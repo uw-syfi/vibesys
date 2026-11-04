@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 from hypothesis import given
@@ -37,6 +39,46 @@ def test_a_telemetry_query_names_the_configured_tool_and_its_timeout() -> None:
     assert [gpu.index for gpu in gpus] == [0]
     ((argv, timeout),) = probe.calls
     assert (argv[0], timeout) == ("/opt/nvidia-smi", 4.0)
+
+
+class _GpuCase(TypedDict):
+    name: str
+    output: str
+    gpus: list[dict[str, int | str]]
+
+
+class _GpuFixture(TypedDict):
+    query: list[str]
+    cases: list[_GpuCase]
+
+
+_GPU_FIXTURE: _GpuFixture = json.loads(
+    (
+        Path(__file__).resolve().parents[3]
+        / "tests/conformance/fixtures/gpu-telemetry/nvidia-smi.json"
+    ).read_text()
+)
+
+
+@pytest.mark.parametrize("case", _GPU_FIXTURE["cases"], ids=lambda case: case["name"])
+def test_nvidia_output_matches_the_fixture_the_gateway_reads(case: _GpuCase) -> None:
+    probe = ScriptedProbe(lambda _argv: ProbeResult(0, case["output"]))
+
+    gpus = NvidiaSmiTelemetry("nvidia-smi", probe=probe).gpus()
+
+    assert [
+        {
+            "index": gpu.index,
+            "uuid": gpu.uuid,
+            "name": gpu.name,
+            "memory_used_mib": gpu.memory_used_mib,
+            "memory_total_mib": gpu.memory_total_mib,
+            "utilization_pct": gpu.utilization_pct,
+        }
+        for gpu in gpus
+    ] == case["gpus"]
+    ((argv, _timeout),) = probe.calls
+    assert list(argv[1:]) == _GPU_FIXTURE["query"]
 
 
 @given(rows=st.integers(min_value=0, max_value=12))

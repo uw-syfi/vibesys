@@ -1,0 +1,201 @@
+{
+  "EvidenceKey": {
+    "kind": "evidence_key",
+    "source_request": {
+      "root": "x",
+      "kind": "request"
+    },
+    "evidence_id": {
+      "root": "x",
+      "kind": "evidence"
+    }
+  },
+  "RevisionRef": {
+    "revision_id": {
+      "root": "x",
+      "kind": "revision"
+    },
+    "digest": "x"
+  },
+  "TaskStage": {
+    "stage_id": "x",
+    "execution_seconds": 0
+  },
+  "TaskObjective": {
+    "name": "x",
+    "direction": "max"
+  },
+  "Reading": {
+    "metric": "x",
+    "value": 0,
+    "direction": null,
+    "unit": null,
+    "repetitions": 1
+  },
+  "BaseRef": {
+    "commit": {
+      "revision_id": {
+        "root": "x",
+        "kind": "revision"
+      },
+      "digest": "x"
+    },
+    "measured_input": "x"
+  },
+  "Sample": {
+    "run": {
+      "root": "x",
+      "kind": "request"
+    },
+    "scope": {
+      "owner": {
+        "root": "x",
+        "kind": "run"
+      },
+      "generation": 0
+    },
+    "commit": {
+      "revision_id": {
+        "root": "x",
+        "kind": "revision"
+      },
+      "digest": "x"
+    },
+    "measured_input": "x",
+    "evaluation": "x",
+    "gates": [],
+    "host": "x",
+    "dedicated_resources": false,
+    "reading": {
+      "metric": "x",
+      "value": 0,
+      "direction": null,
+      "unit": null,
+      "repetitions": 1
+    },
+    "observed_at": 0,
+    "base": null
+  },
+  "Comparison": {
+    "scope": {
+      "owner": {
+        "root": "x",
+        "kind": "run"
+      },
+      "generation": 0
+    },
+    "metric": "x",
+    "unit": null,
+    "direction": "max",
+    "candidate": {
+      "revision_id": {
+        "root": "x",
+        "kind": "revision"
+      },
+      "digest": "x"
+    },
+    "candidate_input": "x",
+    "base": {
+      "revision_id": {
+        "root": "x",
+        "kind": "revision"
+      },
+      "digest": "x"
+    },
+    "base_input": "x",
+    "candidate_value": 0,
+    "base_value": 0,
+    "ratio": 0,
+    "noise": 0,
+    "verdict": "better",
+    "candidate_samples": 0,
+    "base_samples": 0
+  },
+  "PureOption": {
+    "key": "x",
+    "value": null
+  },
+  "OperationSchemaRef": {
+    "kind": "x",
+    "request_schema": {
+      "name": "x",
+      "version": 1
+    },
+    "outcome_schema": {
+      "name": "x",
+      "version": 1
+    },
+    "lifecycle": "query"
+  },
+  "ReplyError": {
+    "path": [],
+    "code": "missing",
+    "message": ""
+  },
+  "EvidenceAcceptanceReceipt": {
+    "source_request": {
+      "root": "source",
+      "kind": "request"
+    },
+    "scope": {
+      "owner": {
+        "root": "run",
+        "kind": "run"
+      },
+      "generation": 0
+    },
+    "observation_sequence": 0,
+    "status": "succeeded"
+  },
+  "EvidenceRef": {
+    "evidence_id": {
+      "root": "x",
+      "kind": "evidence"
+    },
+    "kind": "correctness",
+    "purpose": "baseline",
+    "scope": {
+      "owner": {
+        "root": "x",
+        "kind": "run"
+      },
+      "generation": 0
+    },
+    "source_request": {
+      "root": "x",
+      "kind": "request"
+    },
+    "candidate": {
+      "revision_id": {
+        "root": "x",
+        "kind": "revision"
+      },
+      "digest": "x"
+    },
+    "observation_sequence": 0,
+    "evaluator_digest": "x",
+    "workload_digest": "x",
+    "environment_digest": "x",
+    "provenance": "trusted",
+    "status": "succeeded",
+    "artifacts": [],
+    "acceptance_receipt": {
+      "source_request": {
+        "root": "x",
+        "kind": "request"
+      },
+      "scope": {
+        "owner": {
+          "root": "x",
+          "kind": "run"
+        },
+        "generation": 0
+      },
+      "observation_sequence": 0,
+      "status": "succeeded"
+    },
+    "reused_from": null,
+    "reading": null,
+    "unmet_requirement": null
+  }
+}

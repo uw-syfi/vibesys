@@ -18,6 +18,7 @@ from vs_sandbox.api.skypilot import SubprocessCommandRunner
 from vs_sim.api import PipedProcess, ProcessTimeoutError, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from io import TextIOBase
     from pathlib import Path
 
@@ -47,6 +48,9 @@ class _ReadyProcess:
     def kill_group(self) -> None:
         self._process.kill_group()
 
+    def terminate_group(self) -> None:
+        self._process.terminate_group()
+
     def cancel_output(self) -> None:
         self._process.cancel_output()
 
@@ -56,8 +60,16 @@ class _ReadyProcessLauncher:
         self._launcher = SubprocessPipedProcessLauncher()
         self._ready = ready
 
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> _ReadyProcess:
-        return _ReadyProcess(self._launcher.start(argv, cwd=cwd), self._ready)
+    def start(
+        self,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        merge_stderr: bool = False,
+    ) -> _ReadyProcess:
+        process = self._launcher.start(argv, cwd=cwd, env=env, merge_stderr=merge_stderr)
+        return _ReadyProcess(process, self._ready)
 
 
 class _ReadySink:

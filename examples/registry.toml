@@ -26,18 +26,30 @@ path = "examples/data-structures/kvstore-default"
 
 [[example]]
 path = "examples/data-structures/ordered-map"
+known_failing = [
+  { check = "candidate-build", reason = "its tasks declare no build of the candidate library its evaluator requires", tracking = "#2964" },
+]
 
 [[example]]
 path = "examples/data-structures/prioqueue"
+known_failing = [
+  { check = "candidate-build", reason = "its tasks declare no build of the candidate library its evaluator requires", tracking = "#2964" },
+]
 
 [[example]]
 path = "examples/data-structures/repositories/queue-rs"
 
 [[example]]
 path = "examples/data-structures/stack"
+known_failing = [
+  { check = "candidate-build", reason = "its tasks declare no build of the candidate library its evaluator requires", tracking = "#2964" },
+]
 
 [[example]]
 path = "examples/data-structures/unordered-map"
+known_failing = [
+  { check = "candidate-build", reason = "its tasks declare no build of the candidate library its evaluator requires", tracking = "#2964" },
+]
 
 [[example]]
 path = "examples/database/differential-dataflow"
@@ -58,6 +70,10 @@ path = "examples/microservices/repositories/masa"
 external_repo = true
 
 [[example]]
+path = "examples/microservices/repositories/rpcstack"
+external_repo = true
+
+[[example]]
 path = "examples/microservices/repositories/train-ticket"
 external_repo = true
 
@@ -75,6 +91,9 @@ path = "examples/model-serving/Llama-3.1-8B-Instruct-MLX-8bit"
 
 [[example]]
 path = "examples/model-serving/deepseek-v3.2-8xb200"
+
+[[example]]
+path = "examples/model-serving/flint"
 
 [[example]]
 path = "examples/model-serving/glm-5.2-8xb200"
@@ -104,7 +123,7 @@ path = "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke"
 path = "examples/model-serving/qwen3.5-9b-mi210"
 
 [[example]]
-path = "examples/model-serving/qwen3.6-35b-a3b-2xh100"
+path = "examples/model-serving/qwen3.6-35b-a3b"
 
 [[example]]
 path = "examples/model-serving/repositories/sglang"

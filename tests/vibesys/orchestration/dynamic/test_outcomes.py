@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hypothesis import assume, given, settings
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.dynamic._host import TERMS
 from tests.vibesys.orchestration.dynamic._values import (
@@ -85,6 +85,9 @@ def _failed_facts() -> dict[FailureReason, st.SearchStrategy[Failed]]:
 
     return {
         FailureReason.TIMED_OUT: of(FailureReason.TIMED_OUT, limit_at=st.floats(0, 1e6)),
+        FailureReason.QUEUE_BUDGET_SPENT: of(
+            FailureReason.QUEUE_BUDGET_SPENT, limit_at=st.floats(0, 1e6)
+        ),
         FailureReason.WORKSPACE_CLOSED: of(
             FailureReason.WORKSPACE_CLOSED, watch=st.just(WhileOpen(workspace=ref))
         ),
@@ -106,6 +109,7 @@ def _failed_facts() -> dict[FailureReason, st.SearchStrategy[Failed]]:
                 FailureReason.RENDER_FAILED,
                 FailureReason.OUT_OF_BUDGET,
                 FailureReason.MEASUREMENT_UNTRUSTED,
+                FailureReason.ATTEMPTS_EXHAUSTED,
             )
         },
     }
@@ -186,6 +190,9 @@ def test_the_last_turn_that_gave_nothing_is_what_a_workstream_that_may_not_retry
     }
     if blocker.kind in expected:
         assert found.kind is expected[blocker.kind]
+    elif blocker.kind is BlockerKind.REPLY_REJECTED:
+        # A reply the run refused, as the last turn: the implementer kept replying invalidly.
+        assert (found.kind, found.role) == (FailureKind.INVALID_REPLY, AgentName.IMPLEMENTER)
     else:
         assert found.role is AgentName.IMPLEMENTER
         assert found.kind in {FailureKind.TURN_FAILED, FailureKind.ENDED}
@@ -235,7 +242,8 @@ def test_a_candidate_is_eligible_exactly_when_the_task_the_review_and_the_input_
         evidence=evidence_of(accuracy=accuracy, benchmark=benchmark, throughput=case.throughput),
         cause=case.cause,
     )
-    settle = assertion(workstream_start(), closing, TERMS)
+    start = workstream_start()
+    settle = assertion(start, closing, TERMS, start.baseline)
 
     # TERMS measures accuracy and benchmark, so both gates need a passed reading.
     expected = (
@@ -269,7 +277,7 @@ def test_a_profile_workstream_settles_ineligible_and_discarded_whatever_it_measu
         evidence=Evidence(readings=(reading,), proof=Proof(refs=(ref,))),
         cause=Failure(kind=FailureKind.OUT_OF_BUDGET) if failed_workstream else None,
     )
-    settle = assertion(workstream_start(WorkKind.PROFILE), closing, TERMS)
+    settle = assertion(workstream_start(WorkKind.PROFILE), closing, TERMS, None)
     assert (settle.eligible, settle.retention, settle.candidate) == (False, "discard", None)
     assert settle.outcome == ("failed" if failed_workstream else "succeeded")
 
@@ -278,13 +286,14 @@ def test_a_profile_workstream_settles_ineligible_and_discarded_whatever_it_measu
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
+@example(accuracy=True, retention="candidate", kind=WorkKind.MERGE, with_proof=True)
 @given(
     accuracy=st.none() | st.booleans(),
     retention=st.sampled_from(["discard", "wip", "candidate"]),
     kind=st.sampled_from(WorkKind),
     with_proof=st.booleans(),
 )
-def test_a_parent_is_offered_only_for_a_retained_accuracy_proven_candidate_of_an_implement(
+def test_a_parent_is_offered_only_for_a_retained_accuracy_proven_candidate_of_an_implement_or_a_merge(
     *, accuracy: bool | None, retention: str, kind: WorkKind, with_proof: bool
 ) -> None:
     finished = finished_workstream(
@@ -292,7 +301,10 @@ def test_a_parent_is_offered_only_for_a_retained_accuracy_proven_candidate_of_an
     )
     parent = snapshot_of(finished)
     offered = (
-        retention == "candidate" and kind is WorkKind.IMPLEMENT and accuracy is True and with_proof
+        retention == "candidate"
+        and kind is not WorkKind.PROFILE
+        and accuracy is True
+        and with_proof
     )
     assert (parent is not None) == offered
     if parent is not None:

@@ -47,7 +47,7 @@ def taken(name: str, sequence: int, status: ObservationStatus, scope: Scope) -> 
     """A trusted evaluation the author took of the candidate in its own workspace."""
     return EvidenceRef(
         evidence_id=EvidenceId(root=name),
-        kind=EvidenceKind.LOCAL_VALIDATION,
+        kind=EvidenceKind.BENCHMARK,
         purpose="local-validation",
         scope=scope,
         source_request=RequestId(root=f"request-{name}"),

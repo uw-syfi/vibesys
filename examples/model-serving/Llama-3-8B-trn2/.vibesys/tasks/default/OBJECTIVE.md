@@ -15,7 +15,8 @@ every round; do not substitute or invert it.
 - A single `trn2.3xlarge`: **1 Neuron device, 4 NeuronCores, ~96 GB device
   memory.** The device is exposed as `/dev/neuron0` inside the container.
 - This is **not** a GPU. There is no CUDA, no `nvidia-smi`, no `torch.cuda`.
-  The accelerator is programmed through the AWS Neuron SDK.
+  The accelerator is the `neuron` PyTorch device (AWS Neuron SDK 2.33). Each
+  of the 4 logical NeuronCores sees ~24 GiB of the device memory.
 
 ## Implementation rules
 
@@ -23,18 +24,17 @@ every round; do not substitute or invert it.
   / RMSNorm / RoPE), using `transformers` only as a utility for config /
   tokenizer / weight loading. Keep the architecture yours — don't hide the whole
   model behind a one-call turnkey `generate()`.
-- You **may** (and for performance, should) build on **NxD Inference**
-  (`neuronx_distributed` / `neuronx_distributed_inference`) for the
-  Neuron-specific serving plumbing — in particular its **`KVCacheManager`**
-  (device-resident, in-place KV cache) and **`ModelBuilder`** (tracing + the
-  input/output aliasing that keeps the cache resident across decode steps). A
-  from-scratch KV cache on raw `torch_neuronx.trace` cannot stay device-resident
-  — NxD is the supported way to get there. See the **`nxd-kv-cache`** skill.
+- Run it with **native TorchNeuron** (`torch-neuronx` 2.14 in the container):
+  tensors on `torch.device("neuron")`, the hot path compiled with
+  `torch.compile(..., backend="neuron", fullgraph=True)`, and a KV cache that
+  stays resident on the device and is updated in place inside the compiled
+  step. See the `neuron-pytorch` and `static-kv-cache` serving-systems
+  references. vLLM-Neuron and NxD Inference are not part of this target.
 - Run it on the NeuronCore in **BF16**; do not run the hot path on CPU or in
   `float32` (a server that loads but silently falls back to CPU is incorrect for
   this target). See the Trainium skill for how PyTorch maps onto NeuronCores.
-- Quantization, batching, KV-cache layout, and using more than one of the 4
-  NeuronCores are optimizations, not prerequisites.
+- Quantization, batching, KV-cache layout, NKI kernels, and using more than one
+  of the 4 NeuronCores are optimizations, not prerequisites.
 
 ## Notes
 

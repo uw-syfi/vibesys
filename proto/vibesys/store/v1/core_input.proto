@@ -1,0 +1,232 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// The records core folds into its state (docs/contributing/run-recovery.md). Each is the
+// body of a Record that carries its seq, epoch, at and clock. The bodies of events,
+// requests, observations and failures are the canonical JSON of today's validated
+// vs_core values, versioned by schema_version, until those values are proto messages.
+
+// RunStarted is the first core record of a run: the state its fold starts from. It holds the
+// inputs the run was built from, so every process that folds the log starts from the same
+// state, the run's deadline included.
+message RunStarted {
+  // Version of the canonical encoding of state.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  // The canonical JSON of the vs_core CoreState the run starts from.
+  bytes state = 2 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+}
+
+// CoreSnapshot is the seed of a run that an older version saved in store.json: its core state,
+// the inputs that version had not applied yet, and the search it left, appended once as one
+// record so a crash can never leave one of them without the others. It is the only way a run
+// that began before its log held core's state enters the log, and it is never written for a new
+// run (RunStarted is). It folds as RunStarted does, then applies the inputs in order.
+message CoreSnapshot {
+  // Version of the canonical encoding of state, inputs and held.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  // Version of the saved run envelope the snapshot was read from, after its own upgrades.
+  uint32 envelope_version = 2 [(buf.validate.field).uint32.gte = 1];
+  // The zlib-compressed canonical JSON of the vs_core CoreState the saved run held. A saved
+  // state is megabytes of JSON and a record holds one, so the encoding is compressed.
+  bytes state = 3 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 1048576
+  }];
+  // The canonical JSON of each owner event the saved run had received and not yet applied, in
+  // the order it would have applied them.
+  repeated bytes inputs = 4 [(buf.validate.field).repeated.items.bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+  // The zlib-compressed whole state of the search, in the search driver's own encoding, as a
+  // StrategyAdvanced checkpoint holds it.
+  bytes strategy = 5 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 1048576
+  }];
+  // Run-clock times the search had asked to be woken at.
+  repeated double wakes = 6 [(buf.validate.field).repeated.items.double = {
+    gte: 0
+    finite: true
+  }];
+  // The canonical JSON of the decisions the search had made that core could not take yet.
+  bytes held = 7 [(buf.validate.field).bytes.max_len = 524288];
+}
+
+// StrategyAdvanced is one advance of the run's search, appended as one record so that what it
+// proposed and what it kept can never disagree after a crash: the proposals core took, the
+// state change the search made, and the wake-ups it asked for.
+message StrategyAdvanced {
+  // Version of the canonical encoding of proposals and held.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  // The canonical JSON of each ProposalSubmitted core took from the search in this advance, in
+  // the order core took them.
+  repeated bytes proposals = 2 [(buf.validate.field).repeated.items.bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+  // What the search kept of the advance, in the search driver's own encoding: the steps its
+  // journal gained, or the whole state at a checkpoint.
+  oneof strategy {
+    option (buf.validate.oneof).required = true;
+    // The steps the state gained.
+    bytes steps = 3 [(buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 524288
+    }];
+    // The whole state, written at a restart, at a doubling of the advance count, and when the
+    // run parks or ends.
+    bytes checkpoint = 4 [(buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 524288
+    }];
+  }
+  // Run-clock times the search asked to be woken at in this advance.
+  repeated double wakes = 5 [(buf.validate.field).repeated.items.double = {
+    gte: 0
+    finite: true
+  }];
+  // Run-clock times of the wake-ups this advance delivered to the search.
+  repeated double delivered = 6 [(buf.validate.field).repeated.items.double = {
+    gte: 0
+    finite: true
+  }];
+  // The canonical JSON of the decisions core could not take yet, replacing those held before.
+  bytes held = 7 [(buf.validate.field).bytes.max_len = 524288];
+}
+
+// CoreInput is one external input core consumed: a decision or proposal, an owner event,
+// an operator control, an epoch resume, or a clock advance that changed state.
+message CoreInput {
+  // Version of the canonical encoding of event.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  // The canonical JSON of one validated vs_core CoreEvent.
+  bytes event = 2 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+}
+
+// StepStarted is the durable intent to run one attempt of a step. It is appended before any
+// I/O, so a restart sees that the attempt may have run.
+message StepStarted {
+  // The step's request id, the same in every epoch.
+  string tag = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  // The attempt, numbered from 1.
+  uint32 attempt = 2 [(buf.validate.field).uint32.gte = 1];
+  // Version of the canonical encoding of request.
+  uint32 schema_version = 3 [(buf.validate.field).uint32.gte = 1];
+  // The canonical JSON of the vs_core Request.
+  bytes request = 4 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+  // Run-clock seconds at which core cancels the attempt.
+  double deadline_at = 5 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+}
+
+// StepFinished is the one result of a step: its last attempt ended with a result, or core
+// settled it without running.
+message StepFinished {
+  string tag = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  // The attempt that produced the result; a step settled without running names its last.
+  uint32 attempt = 2 [(buf.validate.field).uint32.gte = 0];
+  // Version of the canonical encoding of finished and failed.
+  uint32 schema_version = 3 [(buf.validate.field).uint32.gte = 1];
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    // The canonical JSON of the vs_core Observation the work produced.
+    bytes finished = 4 [(buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 524288
+    }];
+    // The canonical JSON of the vs_core Failed that ended the step.
+    bytes failed = 5 [(buf.validate.field).bytes = {
+      min_len: 1
+      max_len: 524288
+    }];
+    // Why core cancelled the step.
+    StepCancelReason cancelled = 6 [(buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    }];
+  }
+}
+
+// Why core cancelled a step. Closed; vs_core.api.recovery.CancelReason names the same set.
+enum StepCancelReason {
+  STEP_CANCEL_REASON_UNSPECIFIED = 0;
+  // The step's limit passed.
+  STEP_CANCEL_REASON_DEADLINE = 1;
+  // The operator paused the run without a drain.
+  STEP_CANCEL_REASON_PAUSE_NOW = 2;
+  // A paused run's drain deadline passed while the step still ran.
+  STEP_CANCEL_REASON_DRAIN_EXPIRED = 3;
+  // The run is ending and closes what is open.
+  STEP_CANCEL_REASON_RUN_ENDING = 4;
+  // The asker no longer wants the step's result.
+  STEP_CANCEL_REASON_WITHDRAWN = 5;
+  // An attempt was interrupted and the step's policy is to cancel it.
+  STEP_CANCEL_REASON_INTERRUPTED = 6;
+}
+
+// Why an attempt ended without ending its step.
+enum InterruptionReason {
+  INTERRUPTION_REASON_UNSPECIFIED = 0;
+  // The operator paused the run.
+  INTERRUPTION_REASON_PAUSE = 1;
+  // The run process shut down in an orderly way.
+  INTERRUPTION_REASON_SHUTDOWN = 2;
+  // The runner raised, or gave nothing back. Unlike the two above it is charged to the step's
+  // retry bound, as a crash of the attempt is.
+  INTERRUPTION_REASON_RAISED = 3;
+  // The attempt's process died with its host, and `clear` of the step then found nothing of its
+  // work: the attempt is lost, and charged to the step's retry bound. Written after the epoch
+  // that ended the attempt; work `clear` found alive is adopted and never charged.
+  INTERRUPTION_REASON_LOST = 4;
+}
+
+// AttemptInterrupted is an attempt that ended without a result. The step stays open. A pause or
+// shutdown is not charged an attempt of its retry bound; a runner that raised, or whose work a
+// dead host lost, is.
+message AttemptInterrupted {
+  string tag = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  uint32 attempt = 2 [(buf.validate.field).uint32.gte = 1];
+  InterruptionReason reason = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// RunEnded is the end of a run: its result, published once nothing is open. The loop appends it
+// when core says the run is over, so a reader of the log sees the end and a restart does not
+// publish it again.
+message RunEnded {
+  // Version of the canonical encoding of result.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  // The canonical JSON of the vs_core RunResultProposal the run ended with.
+  bytes result = 2 [(buf.validate.field).bytes = {
+    min_len: 1
+    max_len: 524288
+  }];
+}

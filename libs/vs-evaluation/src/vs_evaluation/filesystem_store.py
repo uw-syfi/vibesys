@@ -5,12 +5,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import fcntl
 from typing import TYPE_CHECKING, TypeVar
 
-from pydantic import ValidationError
-
+from vs_decode.api import Unreadable, UnreadableKind, read_json
 from vs_evaluation.coordinator import (
     EvaluationKeyConflictError,
     RevisionConflictError,
@@ -24,8 +22,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vs_sim.api import BlockingRunner
+
 T = TypeVar("T")
 _HANDLE_ID_LENGTH = len("eval_") + 64
+_MAX_RECORD_BYTES = 16 * 1024 * 1024
+"""The largest evaluation record this store reads back."""
 
 
 class EvaluationStoreCorruptionError(RuntimeError):
@@ -46,9 +48,10 @@ class FilesystemEvaluationStore:
     raw keys and credentials never appear in filenames.
     """
 
-    def __init__(self, root: Path) -> None:
-        """Create the storage directory if needed and retain its path."""
+    def __init__(self, root: Path, blocking: BlockingRunner) -> None:
+        """Create the storage directory if needed; file and lock calls run on ``blocking``."""
         self._root = root
+        self._blocking = blocking
         self._root.mkdir(parents=True, exist_ok=True)
         self._lock_path = self._root / ".lock"
 
@@ -127,7 +130,7 @@ class FilesystemEvaluationStore:
 
     async def _run_locked(self, operation: Callable[[], T]) -> T:
         """Run blocking filesystem and flock operations off the event loop."""
-        return await asyncio.to_thread(lambda: self._locked(operation))
+        return await self._blocking.run(lambda: self._locked(operation))
 
     def _locked(self, operation: Callable[[], T]) -> T:
         with self._lock_path.open("a+b") as lock_file:
@@ -146,14 +149,11 @@ class FilesystemEvaluationStore:
 
     @staticmethod
     def _read_path(path: Path) -> StoredEvaluation | None:
-        try:
-            contents = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-        try:
-            record = StoredEvaluation.model_validate_json(contents)
-        except ValidationError as error:
-            raise EvaluationStoreCorruptionError(path, error) from error
+        record = read_json(path, StoredEvaluation, max_bytes=_MAX_RECORD_BYTES)
+        if isinstance(record, Unreadable):
+            if record.kind is UnreadableKind.MISSING:
+                return None
+            raise EvaluationStoreCorruptionError(path, ValueError(str(record)))
         if path.name != f"{record.handle_id}.json":
             raise EvaluationStoreCorruptionError(path)
         if stable_handle_id(record.request.key) != record.handle_id:

@@ -1,0 +1,189 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/orchestrator/v1/events.proto";
+import "vibesys/orchestrator/v1/orchestrator.proto";
+import "vibesys/orchestrator/v1/search.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// OrchestratorService is what the daemon serves to its clients, the desktop app and the headless
+// client, over one connection per host.
+service OrchestratorService {
+  rpc Hello(HelloRequest) returns (HelloResponse);
+  // Dispatch carries out a command as the operator. Retrying an id answers with the same receipt,
+  // and reusing an id for another command is an error.
+  rpc Dispatch(DispatchRequest) returns (DispatchResponse);
+  // Snapshot of runs and agents, then every event after its sequence.
+  rpc WatchRuns(WatchRunsRequest) returns (stream WatchRunsResponse);
+  // One agent: a page of items, then items and deltas after the sequence.
+  rpc WatchAgent(WatchAgentRequest) returns (stream WatchAgentResponse);
+  // Older history, paged.
+  rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+  // Read-through to vibesys-cli, so the app needs one connection per host.
+  rpc ListPlans(ListPlansRequest) returns (ListPlansResponse);
+  rpc ViewPlan(ViewPlanRequest) returns (ViewPlanResponse);
+}
+
+// BuildVersions is what one build carries.
+message BuildVersions {
+  // The release version, or "dev". Display only: callers never compare it.
+  string binary_version = 1;
+  // The revision of this contract's behavior. It increases only when a change breaks a peer.
+  uint32 protocol_version = 2;
+  // The oldest protocol_version this build still serves.
+  uint32 min_protocol_version = 3;
+}
+
+// Compatibility is the answer to a handshake, from the daemon's side.
+enum Compatibility {
+  COMPATIBILITY_UNSPECIFIED = 0;
+  COMPATIBILITY_COMPATIBLE = 1;
+  COMPATIBILITY_CLIENT_TOO_OLD = 2;
+  COMPATIBILITY_DAEMON_TOO_OLD = 3;
+}
+
+message DispatchRequest {
+  Command command = 1 [(buf.validate.field).required = true];
+}
+
+message DispatchResponse {
+  Receipt receipt = 1 [(buf.validate.field).required = true];
+}
+
+message HelloRequest {
+  BuildVersions client = 1 [(buf.validate.field).required = true];
+}
+
+message HelloResponse {
+  BuildVersions daemon = 1 [(buf.validate.field).required = true];
+  Compatibility compatibility = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+message WatchRunsRequest {
+  // Zero starts with a snapshot; otherwise the stream continues after this sequence.
+  uint64 after_sequence = 1;
+}
+
+message RunsSnapshot {
+  repeated Run runs = 1;
+  repeated Agent agents = 2;
+  // The sequence the snapshot is current to.
+  uint64 sequence = 3;
+  // Every turn and message of those runs, so that a client that connects late can show when each
+  // agent ran, what each turn cost, and the handoffs and reports it missed. Items are not here:
+  // WatchAgent and ListItems page them.
+  repeated Turn turns = 4;
+  repeated Message messages = 5;
+  repeated SearchState searches = 6;
+  // Older run bundles or history were omitted to fit the snapshot byte budget.
+  // Search views omitted here follow as individual search responses.
+  bool truncated = 7;
+}
+
+message WatchRunsResponse {
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    RunsSnapshot snapshot = 1;
+    Event event = 2;
+    SearchState search = 3;
+  }
+}
+
+message WatchAgentRequest {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  // How many of the newest items the first page holds.
+  uint32 page_size = 2 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 1000
+  }];
+  // Zero starts with a page; otherwise the stream continues after this sequence.
+  uint64 after_sequence = 3;
+}
+
+message ItemsPage {
+  repeated Item items = 1;
+  // The sequence the page is current to.
+  uint64 sequence = 2;
+  // Pass as before_ordinal to read older items. Zero when there are none.
+  uint32 next_before_ordinal = 3;
+}
+
+message WatchAgentResponse {
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    ItemsPage page = 1;
+    Item item = 2;
+    Delta delta = 3;
+    Turn turn = 4;
+  }
+  // The committed sequence this frame is current to: for an item or a turn, the sequence of the
+  // event that committed it; for a delta, the latest committed sequence when the progress was
+  // made; for a page, the page's own sequence. A client decides by it which of two whole items,
+  // or whether a delta, is the newer, because neither carries a revision of its own.
+  uint64 sequence = 5;
+}
+
+message ListItemsRequest {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  // Items below this ordinal, newest first.
+  uint32 before_ordinal = 2 [(buf.validate.field).uint32.gt = 0];
+  uint32 page_size = 3 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 1000
+  }];
+}
+
+message ListItemsResponse {
+  ItemsPage page = 1 [(buf.validate.field).required = true];
+}
+
+// PlanStatus mirrors vibesys-cli's plan status. The orchestrator shows it and decides nothing on
+// it. New consumers use the CLI contract generated in this module. This legacy read-through
+// remains until ListPlans and ViewPlan are retired.
+enum PlanStatus {
+  PLAN_STATUS_UNSPECIFIED = 0;
+  PLAN_STATUS_OPEN = 1;
+  PLAN_STATUS_CHOSEN = 2;
+  PLAN_STATUS_WON = 3;
+  PLAN_STATUS_PARKED = 4;
+  PLAN_STATUS_REJECTED = 5;
+}
+
+message PlanComment {
+  string text = 1;
+  google.protobuf.Timestamp at = 2;
+  string agent = 3;
+}
+
+message Plan {
+  uint32 number = 1 [(buf.validate.field).uint32.gt = 0];
+  string title = 2;
+  string body = 3;
+  PlanStatus status = 4 [(buf.validate.field).enum.defined_only = true];
+  repeated PlanComment comments = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message ListPlansRequest {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message ListPlansResponse {
+  repeated Plan plans = 1;
+}
+
+message ViewPlanRequest {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
+}
+
+message ViewPlanResponse {
+  Plan plan = 1 [(buf.validate.field).required = true];
+}

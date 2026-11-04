@@ -11,6 +11,7 @@ to adopt it. A broken store must never cost a completed turn.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
@@ -40,7 +41,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import run_execution_record
-from vs_sim.api.testing import HANG_GUARD_S, wait_or_fail
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
     from vs_agent.shim_turns import LaunchedSession
@@ -54,7 +55,7 @@ MEMBER = AgentSessionKey(SessionScope.MEMBER, "worker:workspace=root:H-01 / Tria
 def _project(tmp_path: Path) -> Project:
     (tmp_path / "OBJECTIVE.md").write_text("Make it fast.\n", encoding="utf-8")
     project = Project.open(tmp_path)
-    project.state.create_project("test")
+    project.state.create_project("test", now=datetime(2026, 1, 1, tzinfo=UTC))
     run = project.state.new_run_manifest(
         "Run 1",
         run_id="run-1",
@@ -68,6 +69,7 @@ def _project(tmp_path: Path) -> Project:
             config_version=1,
             options={},
         ),
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(run)
     return project
@@ -81,8 +83,8 @@ def _store(tmp_path: Path, log: list[str] | None = None) -> DurableSessionStore:
     project = _project(tmp_path)
     slot = project.state.local_namespace("run-1", "agent").slot("sessions.json", AgentSessionState)
     if log is None:
-        return DurableSessionStore(slot)
-    return DurableSessionStore(slot, log=log.append)
+        return DurableSessionStore(slot, threads=SimThreads())
+    return DurableSessionStore(slot, log=log.append, threads=SimThreads())
 
 
 def _spec(*, provider: str = "codex", model: str = "gpt-5.6-sol") -> AgentSessionSpec:
@@ -174,13 +176,17 @@ def test_checkpoint_survives_a_new_store_instance(tmp_path: Path) -> None:
     namespace = project.state.local_namespace("run-1", "agent")
 
     _checkpoint(
-        DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)),
+        DurableSessionStore(
+            namespace.slot("sessions.json", AgentSessionState), threads=SimThreads()
+        ),
         "thr-xyz",
         key=MEMBER,
     )
     # A fresh instance over the same slot models a resumed process: the on-disk
     # map, not any in-memory cache, is the source of truth.
-    reloaded = DurableSessionStore(namespace.slot("sessions.json", AgentSessionState)).get(MEMBER)
+    reloaded = DurableSessionStore(
+        namespace.slot("sessions.json", AgentSessionState), threads=SimThreads()
+    ).get(MEMBER)
 
     assert reloaded is not None
     assert reloaded.session_id == "thr-xyz"
@@ -241,7 +247,7 @@ def test_clear_of_missing_key_is_a_noop(tmp_path: Path) -> None:
 def test_role_scoped_conversations_are_never_persisted(tmp_path: Path) -> None:
     project = _project(tmp_path)
     slot = project.state.local_namespace("run-1", "agent").slot("sessions.json", AgentSessionState)
-    store = DurableSessionStore(slot)
+    store = DurableSessionStore(slot, threads=SimThreads())
 
     _checkpoint(store, "judge-thread", key=ROLE)
 
@@ -259,7 +265,7 @@ def test_malformed_map_degrades_to_no_persistence(tmp_path: Path) -> None:
     slot = project.state.local_namespace("run-1", "agent").slot("sessions.json", AgentSessionState)
     _slot_path(project).write_text("{not json", encoding="utf-8")
     log: list[str] = []
-    store = DurableSessionStore(slot, log=log.append)
+    store = DurableSessionStore(slot, log=log.append, threads=SimThreads())
 
     assert store.get(HYPOTHESIS) is None
     assert any("unreadable" in message for message in log)
@@ -283,7 +289,7 @@ def test_map_written_by_a_foreign_key_contract_is_rejected(tmp_path: Path) -> No
     )
     log: list[str] = []
 
-    assert DurableSessionStore(slot, log=log.append).get(HYPOTHESIS) is None
+    assert DurableSessionStore(slot, log=log.append, threads=SimThreads()).get(HYPOTHESIS) is None
     assert log
 
 
@@ -293,7 +299,7 @@ def test_unwritable_slot_does_not_fail_the_turn(tmp_path: Path) -> None:
     # A directory where the map belongs makes every write fail.
     _slot_path(project).mkdir(parents=True)
     log: list[str] = []
-    store = DurableSessionStore(slot, log=log.append)
+    store = DurableSessionStore(slot, log=log.append, threads=SimThreads())
 
     _checkpoint(store, "thread-1")  # must not raise
 
@@ -304,9 +310,11 @@ def test_a_broken_store_never_discards_a_completed_turn(tmp_path: Path) -> None:
     project = _project(tmp_path)
     slot = project.state.local_namespace("run-1", "agent").slot("sessions.json", AgentSessionState)
     _slot_path(project).mkdir(parents=True)
-    store = DurableSessionStore(slot, log=lambda _message: None)
+    store = DurableSessionStore(slot, log=lambda _message: None, threads=SimThreads())
     session = _FakeSession(results=[AgentTurnResult("done", provider_session_id="thread-1")])
-    client = AgentClient(_FakeLauncher([session]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([session]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     result = client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
 
@@ -340,7 +348,7 @@ class _FakeSession(HandSession):
         error: Exception | None = None,
         adopts: bool = True,
     ) -> None:
-        super().__init__()
+        super().__init__(threads=SimThreads())
         self.results = results
         self.error = error
         self.adopts = adopts
@@ -393,7 +401,9 @@ class _FakeLauncher:
 def test_completed_turn_checkpoints_its_provider_session_id(tmp_path: Path) -> None:
     store = _store(tmp_path)
     session = _FakeSession(results=[AgentTurnResult("done", provider_session_id="thread-1")])
-    client = AgentClient(_FakeLauncher([session]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([session]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
 
@@ -406,7 +416,9 @@ def test_completed_turn_checkpoints_its_provider_session_id(tmp_path: Path) -> N
 def test_role_scoped_turn_checkpoints_nothing(tmp_path: Path) -> None:
     store = _store(tmp_path)
     session = _FakeSession(results=[AgentTurnResult("done", provider_session_id="thread-1")])
-    client = AgentClient(_FakeLauncher([session]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([session]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     # No session_key: the client falls back to a role-scoped key.
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"))
@@ -418,7 +430,9 @@ def test_turn_without_a_session_id_keeps_the_prior_checkpoint(tmp_path: Path) ->
     store = _store(tmp_path)
     _checkpoint(store, "thread-old")
     session = _FakeSession(results=[AgentTurnResult("done", provider_session_id=None)])
-    client = AgentClient(_FakeLauncher([session]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([session]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
 
@@ -432,7 +446,9 @@ def test_fresh_client_offers_the_checkpoint_to_its_first_turn(tmp_path: Path) ->
     _checkpoint(store, "thread-1")
     session = _FakeSession(results=[AgentTurnResult("resumed", provider_session_id="thread-1")])
     # A brand new client with no in-memory session models a resumed process.
-    client = AgentClient(_FakeLauncher([session]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([session]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("continue"), session_key=HYPOTHESIS)
 
@@ -447,7 +463,9 @@ def test_a_reused_live_session_is_not_offered_the_checkpoint_again(tmp_path: Pat
             AgentTurnResult("two", provider_session_id="thread-1"),
         ]
     )
-    client = AgentClient(_FakeLauncher([session]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([session]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
     client.run(session_spec=_spec(), turn=AgentTurnRequest("two"), session_key=HYPOTHESIS)
@@ -471,7 +489,9 @@ def test_checkpoint_from_a_different_spec_is_refused_and_dropped(tmp_path: Path)
     )
     _checkpoint(store, "thread-1", spec=other)
     session = _FakeSession(results=[AgentTurnResult("fresh", provider_session_id="thread-2")])
-    client = AgentClient(_FakeLauncher([session]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([session]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("go"), session_key=HYPOTHESIS)
 
@@ -486,7 +506,9 @@ def test_a_refused_adoption_drops_the_checkpoint(tmp_path: Path) -> None:
     _checkpoint(store, "thread-1")
     # A session whose provider cannot resume reports False.
     session = _FakeSession(results=[AgentTurnResult("fresh")], adopts=False)
-    client = AgentClient(_FakeLauncher([session]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([session]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("go"), session_key=HYPOTHESIS)
 
@@ -498,7 +520,9 @@ def test_restarted_turn_evicts_and_clears_the_checkpoint(tmp_path: Path) -> None
     store = _store(tmp_path)
     _checkpoint(store, "thread-1")
     session = _FakeSession(results=[AgentTurnResult("reset", restarted=True)])
-    client = AgentClient(_FakeLauncher([session]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([session]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     client.run(session_spec=_spec(), turn=AgentTurnRequest("one"), session_key=HYPOTHESIS)
 
@@ -512,7 +536,9 @@ def test_a_failed_turn_keeps_the_checkpoint(tmp_path: Path) -> None:
     # A timeout or a cancelled run says nothing about whether the conversation
     # is still resumable, so the checkpoint outlives it.
     failing = _FakeSession(results=[], error=RuntimeError("transient network error"))
-    client = AgentClient(_FakeLauncher([failing]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([failing]), session_store=store, clock=ManualClock(), threads=SimThreads()
+    )
 
     with pytest.raises(RuntimeError):
         client.run(session_spec=_spec(), turn=AgentTurnRequest("go"), session_key=HYPOTHESIS)
@@ -526,7 +552,12 @@ def test_in_process_spec_change_replaces_the_checkpoint(tmp_path: Path) -> None:
     store = _store(tmp_path)
     first = _FakeSession(results=[AgentTurnResult("one", provider_session_id="thread-1")])
     second = _FakeSession(results=[AgentTurnResult("two", provider_session_id="thread-2")])
-    client = AgentClient(_FakeLauncher([first, second]), session_store=store)
+    client = AgentClient(
+        _FakeLauncher([first, second]),
+        session_store=store,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
 
     client.run(
         session_spec=_spec(model="gpt-5.6-sol"),

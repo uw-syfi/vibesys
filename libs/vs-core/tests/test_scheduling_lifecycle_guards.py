@@ -311,14 +311,9 @@ def test_closing_intake_preserves_accepted_fifo_execution(
     )
 
 
-@given(
-    paused=st.booleans(),
-    phase=st.sampled_from(tuple(core.RecoveryPhase)),
-    deadline=st.integers(1, 1000),
-    count=st.integers(1, 6),
-)
-def test_closed_intake_keeps_pause_recovery_and_deadline_execution_guards(
-    *, paused: bool, phase: core.RecoveryPhase, deadline: int, count: int
+@given(paused=st.booleans(), deadline=st.integers(1, 1000), count=st.integers(1, 6))
+def test_closed_intake_keeps_pause_and_deadline_execution_guards(
+    *, paused: bool, deadline: int, count: int
 ) -> None:
     state = _queued_state(count, 1, 0)
     state = state.model_copy(
@@ -330,13 +325,10 @@ def test_closed_intake_keeps_pause_recovery_and_deadline_execution_guards(
                     "status": core.RunStatus.PAUSED if paused else core.RunStatus.RUNNING,
                 }
             ),
-            "records": state.records.model_copy(
-                update={"recovery": core.RecoveryBarrier(phase=phase)}
-            ),
         }
     )
     event = core.ClockAdvanced(now_at=0.0)
-    if not paused and phase == core.RecoveryPhase.READY:
+    if not paused:
         _assert_attempts_signal(state, event, "attempt_admitted")
     else:
         result = core.step(_reload(state), event)

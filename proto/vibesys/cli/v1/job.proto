@@ -1,0 +1,249 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/environment.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+enum JobKind {
+  JOB_KIND_UNSPECIFIED = 0;
+  // Build and run the task's correctness check.
+  JOB_KIND_CHECK = 1;
+  // An agent-defined, cheap job. Never cached and never deduplicated.
+  JOB_KIND_COMMAND = 2;
+  // The official measurement: build, check, benchmark samples, saved result.
+  JOB_KIND_MEASURE = 3;
+}
+
+// JobState is where a job is. SUCCEEDED, FAILED, CANCELLED and LOST are final.
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_QUEUED = 1;
+  JOB_STATE_RUNNING = 2;
+  JOB_STATE_SUCCEEDED = 3;
+  JOB_STATE_FAILED = 4;
+  JOB_STATE_CANCELLED = 5;
+  // The machine or the supervisor went away while the job ran, and the job is not run again: its
+  // command may have started and its kind is not rerun after that, or it was cut off as often as a
+  // job may be (see Job.attempts).
+  JOB_STATE_LOST = 6;
+}
+
+message CheckSettings {}
+
+// ServiceSpec is a long-lived process a command job runs against. The environment owns its
+// lifecycle: it starts the service, waits for the probe to succeed, and kills the whole process
+// group when the job ends.
+message ServiceSpec {
+  repeated string argv = 1;
+  // Succeeds when the service is ready. Empty means ready as soon as it starts.
+  repeated string probe = 2;
+}
+
+message CommandSettings {
+  repeated string argv = 1;
+  ServiceSpec service = 2;
+  // Zero means the default limit.
+  google.protobuf.Duration timeout = 3;
+}
+
+message MeasureSettings {
+  // How many benchmark samples the measurement needs. Zero means the task's default.
+  uint32 samples = 1;
+  // Run a fresh check instead of reusing a matching pass.
+  bool recheck = 2;
+}
+
+// JobSpec is what a submission asks for. The job kind is the settings case, so it cannot disagree
+// with its settings.
+message JobSpec {
+  // The full commit to run from, 40 hexadecimal characters. The CLI resolves a ref before it calls.
+  string commit = 1;
+  // The environment the caller asks for. Unspecified lets the task choose.
+  EnvironmentKind environment = 2;
+  // The one placement of the operator config a docker job may run on, where its container runs.
+  // Empty lets it run on any placement that gives every resource its task needs, which the
+  // scheduler chooses when the job starts; the placement it ran on is a fact of its environment. A
+  // host job has none.
+  string placement = 3 [(buf.validate.field).string.pattern = "^([a-z0-9][a-z0-9_-]{0,62})?$"];
+  oneof settings {
+    CheckSettings check = 10;
+    CommandSettings command = 11;
+    MeasureSettings measure = 12;
+  }
+}
+
+// Note is free text attached to a job. It never takes part in a cache key, a verdict or a
+// promotion.
+message Note {
+  string text = 1;
+  google.protobuf.Timestamp at = 2;
+  string agent = 3;
+}
+
+// Submitter is one caller that submitted a job: a submission that created it, joined it or was
+// answered from it. It is the caller's identity as the submission named it, and a submission that
+// named no run or no agent leaves that field empty (a person at a terminal).
+message Submitter {
+  string run_id = 1;
+  string agent = 2;
+  // When this caller first submitted the job.
+  google.protobuf.Timestamp at = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).timestamp = {
+      gte: {seconds: -62135596800}
+      lte: {
+        seconds: 253402300799
+        nanos: 999999999
+      }
+    }
+  ];
+}
+
+// CutCause is how an attempt's supervisor was proved gone.
+enum CutCause {
+  CUT_CAUSE_UNSPECIFIED = 0;
+  // The supervisor died: its lock could be taken.
+  CUT_CAUSE_SUPERVISOR_DIED = 1;
+  // The machine restarted since the attempt began.
+  CUT_CAUSE_REBOOTED = 2;
+}
+
+// Attempt is one earlier attempt at a job that was cut off, after which the job was queued again.
+// Its number is its place in Job.attempts, from 1. Exactly one end is set.
+message Attempt {
+  // When the store recorded the attempt running.
+  google.protobuf.Timestamp started_at = 1;
+  // When the attempt was found cut off and the job queued again.
+  google.protobuf.Timestamp ended_at = 2;
+  oneof end {
+    // The supervisor was proved gone before its command was told to start.
+    CutCause cut_before_start = 3;
+    // The supervisor was proved gone after its command may have started.
+    CutCause cut_mid_command = 4;
+  }
+}
+
+message Job {
+  string id = 1;
+  JobSpec spec = 2;
+  JobState state = 3;
+  // The cache key. Empty for command jobs, which are never cached. A job that starts in another
+  // environment than it was keyed in, such as on a placement whose engine built the task's image to
+  // another digest, takes the key of the environment it starts in.
+  string key = 4;
+  // The environment the job runs in, pinned when it starts. Unset while queued.
+  EnvironmentFingerprint environment = 5;
+  repeated Note notes = 6;
+  // Every plan a submission linked this job to, in link order.
+  repeated uint32 plans = 7;
+  google.protobuf.Timestamp submitted_at = 8;
+  google.protobuf.Timestamp started_at = 9;
+  google.protobuf.Timestamp finished_at = 10;
+  // Set when state is CANCELLED.
+  string cancel_reason = 11;
+  // Set when state is FAILED or SUCCEEDED for a command job.
+  optional int32 exit_code = 12;
+  // The result a check or measure job saved. Empty when it saved none.
+  string result_job_id = 13;
+  // The check pass a measure job links to.
+  string check_job_id = 14;
+  // The submission asked to run the whole job fresh: no saved samples and no saved check pass are
+  // reused when it starts.
+  bool no_cache = 15;
+  // The earlier attempts that were cut off, oldest first. The current attempt is the next one.
+  // There are fewer than the most attempts a job gets, which is 3.
+  repeated Attempt attempts = 16;
+  // Everyone who submitted the job, one entry for each distinct (run_id, agent), oldest first. A
+  // submission that joins a job or is answered from it adds its caller here, also when the job is
+  // final, and changes nothing else.
+  repeated Submitter submitters = 17;
+  // The resources the task at the job's commit needs of the placement a docker job runs on,
+  // decided when it was submitted, each once. Only a placement that gives them all runs it.
+  repeated ResourceKind needs = 18 [(buf.validate.field).repeated = {
+    unique: true
+    items: {
+      enum: {
+        defined_only: true
+        not_in: [0]
+      }
+    }
+  }];
+  // The version of the task a check or measure job was submitted for. The job runs only if the
+  // task is still at it when the job starts. Empty for a command job, and for a job saved before
+  // this field was, which runs the task as it is when it starts.
+  string task_version = 19 [(buf.validate.field).string.max_len = 256];
+}
+
+// WaitKind is why a queued job has not started.
+enum WaitKind {
+  WAIT_KIND_UNSPECIFIED = 0;
+  // A resource has no room left for the job's claim: its holders use all of it.
+  WAIT_KIND_FULL = 1;
+  // A holder claims the resource for itself alone.
+  WAIT_KIND_HELD_EXCLUSIVELY = 2;
+  // The job claims the resource for itself alone, and holders use it.
+  WAIT_KIND_IN_USE = 3;
+  // An earlier job waits for the resource and keeps its turn; the holders are those jobs.
+  WAIT_KIND_BEHIND = 4;
+  // A rule of the daemon's scheduler holds the job back; the detail says which.
+  WAIT_KIND_HELD = 5;
+  // The job waits for a job's or its store's trouble to pass, or can never start; the detail says
+  // why. A wait on the job ends with this as its failure.
+  WAIT_KIND_TROUBLE = 6;
+  // Another daemon, or another job of this one, holds the lease of a resource the job claims
+  // alone; elsewhere names who, or, when the lease could not be read, the detail says why.
+  WAIT_KIND_LEASED = 7;
+}
+
+// LeaseHolder is who holds the lease of a resource: a daemon's user, machine and process, and the
+// job it holds it for. Each field is empty or zero when the holder did not say.
+message LeaseHolder {
+  string user = 1;
+  string host = 2;
+  uint32 pid = 3;
+  string job_id = 4;
+  google.protobuf.Timestamp since = 5;
+}
+
+// WaitHolder is a job that stands in a queued job's way.
+message WaitHolder {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  // The task whose store the job is in, which may be another task than the waiting job's. Empty
+  // when the daemon does not know it.
+  string task = 2;
+  JobKind kind = 3;
+  // The run that submitted the job first. Empty when it named none.
+  string run_id = 4;
+}
+
+// WaitReason says why a queued job has not started, as the daemon's scheduler decided at its last
+// change. The daemon derives it from what it holds; no store keeps it.
+message WaitReason {
+  option (buf.validate.message).cel = {
+    id: "wait_reason.shape"
+    message: "a wait on a resource names the resource and its holders, a held or trouble wait says why, and a leased wait names the resource and its holder or why"
+    expression: "this.kind == 5 || this.kind == 6 ? this.detail != '' : (this.kind == 7 ? (this.resource != '' && (has(this.elsewhere) || this.detail != '')) : (this.resource != '' && size(this.holders) > 0))"
+  };
+  // 5 is HELD, 6 is TROUBLE and 7 is LEASED in the rule above.
+  WaitKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The resource the job waits for, such as placement:default.
+  string resource = 2;
+  // The jobs that hold the resource, or for BEHIND the earlier jobs that wait for it.
+  repeated WaitHolder holders = 3;
+  string detail = 4;
+  // Who holds the lease, for LEASED.
+  LeaseHolder elsewhere = 5;
+}
+
+// JobWait is why one queued job waits.
+message JobWait {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  WaitReason reason = 2 [(buf.validate.field).required = true];
+}

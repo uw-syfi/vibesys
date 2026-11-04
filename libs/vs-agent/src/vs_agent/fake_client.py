@@ -16,7 +16,7 @@ from __future__ import annotations
 import functools
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Concatenate, Literal, Self, TypeVar
 from uuid import uuid4
 
@@ -33,6 +33,7 @@ from vs_agent.contracts import (
     AgentTurnRequest,
     AgentTurnResult,
     AgentUsage,
+    CapacityStops,
     SteerOutcome,
     session_spec_fingerprint,
 )
@@ -42,9 +43,11 @@ from vs_agent.session_errors import SessionResumeError
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION
+from vs_agent.ungated_retry import BoundedRetryCapacityGate
 from vs_agent.usage_records import append_usage_record
 from vs_mcp.api import StdioServerDescriptor
-from vs_sim.api import OsThreads
+from vs_sim.api import utc_datetime
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,6 +63,8 @@ T = TypeVar("T", bound=BaseModel)
 #: Default answer :meth:`FakeAgentClient.invoke_text` returns when nothing is
 #: configured for the call's ``kind`` and no module-wide default was set.
 DEFAULT_TEXT = "Fake agent inspected the trajectory."
+_FAKE_EPOCH = ManualClock()
+"""Every fake turn happens at the epoch: the fake's usage rows carry no real time."""
 
 type ResponseValue = BaseModel | dict[str, object]
 type ResponseSource = ResponseValue | Callable[[FakeInvocation], ResponseValue]
@@ -190,7 +195,7 @@ class FakeAgentClient:
         session_store: SessionStore | None = None,
         skill_selection: SkillSelection = NULL_SKILL_SELECTION,
         log_dir: Path | None = None,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Create a fake client; see the class docstring for defaults.
 
@@ -244,15 +249,21 @@ class FakeAgentClient:
         self._refuses_accepted_steers = False
         self._refusals: list[Callable[[], None]] = []
         self._turns_in_flight = 0
-        threads = threads or OsThreads()
+        self._keys_in_flight: list[AgentSessionKey] = []
+        self._refused_ids: dict[AgentSessionKey, list[str]] = {}
+        self.threads = threads
+        """The simulator this client's locks and events come from; turns run on it."""
         self._steer_lock = threads.lock()
 
-        self._capacity_gate: CapacityGate | None = None
+        # As the real client: one transient resend until a run installs its gate.
+        self._capacity_gate: CapacityGate = BoundedRetryCapacityGate()
         self._closed = False
         self.cancel_count = 0
         self.cancelled_sessions: list[AgentSessionKey] = []
         self.released_sessions: list[AgentSessionKey] = []
         self._cancelled = threads.event()
+        self._turns: list[tuple[AgentSessionKey | None, CapacityStops]] = []
+        self._turns_lock = threads.lock()
 
     # -- AgentClientProtocol: attribution ---------------------------------
 
@@ -298,6 +309,7 @@ class FakeAgentClient:
     def cancel(self) -> None:
         """Record a cancellation request and release turns waiting for one."""
         self.cancel_count += 1
+        self._cancel_turns(None)
         self._cancelled.set()
 
     # -- optional capability: steering a running turn ---------------------------
@@ -336,9 +348,26 @@ class FakeAgentClient:
         for refusal in refusals:
             refusal()
 
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
+        """Offer *text* to *key*'s turn in flight, answering as scripted.
+
+        Only a turn ``run`` is running under *key* can take it, as with the real client. A
+        message scripted to be refused is named in that turn's ``refused_steers``.
+        """
+        with self._steer_lock:
+            if key not in self._keys_in_flight:
+                return SteerOutcome.NO_RUNNING_TURN
+            outcome = self._steer_outcome
+            if outcome is SteerOutcome.DELIVERED:
+                self.steers.append(text)
+                if self._refuses_accepted_steers:
+                    self._refused_ids.setdefault(key, []).append(steer_id)
+            return outcome
+
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Record a cancellation of one key and release turns waiting for a cancellation."""
         self.cancelled_sessions.append(key)
+        self._cancel_turns(key)
         self._cancelled.set()
 
     def release_session(self, key: AgentSessionKey) -> None:
@@ -486,7 +515,29 @@ class FakeAgentClient:
         session_key: AgentSessionKey | None = None,
         observer: AgentObserver | None = None,
     ) -> AgentTurnResult:
-        """Execute a raw turn with the same scripts and strict identity fences."""
+        """Execute a raw turn with the same scripts and strict identity fences.
+
+        While it runs, ``steer_session`` reaches it under *session_key*.
+        """
+        if session_key is None:
+            return self._run_raw(session_spec, turn, None, observer)
+        with self._steer_lock:
+            self._keys_in_flight.append(session_key)
+        try:
+            result = self._run_raw(session_spec, turn, session_key, observer)
+        finally:
+            with self._steer_lock:
+                self._keys_in_flight.remove(session_key)
+                refused = tuple(self._refused_ids.pop(session_key, ()))
+        return replace(result, refused_steers=refused) if refused else result
+
+    def _run_raw(
+        self,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey | None,
+        observer: AgentObserver | None,
+    ) -> AgentTurnResult:
         fingerprint = session_spec_fingerprint(session_spec)
         if turn.require_provider_checkpoint and (session_key is None or not session_key.durable):
             raise SessionResumeError(
@@ -516,11 +567,7 @@ class FakeAgentClient:
             reuse_session=True,
             session_key=session_key,
         )
-        self._write_usage(
-            session_spec.role, turn.label, session_spec.model, session_spec.reasoning_effort
-        )
-        self._maybe_raise(session_spec.role, turn.message, turn.label, turn.invocation_id)
-        self._update_session(reuse_session=True, session_key=session_key)
+        self._finish_turn(invocation, session_spec.model, session_spec.reasoning_effort)
         if session_key is not None:
             self._raw_fingerprints[session_key] = fingerprint
             # The provider hands out the conversation id with the turn, so it is on record
@@ -539,6 +586,7 @@ class FakeAgentClient:
         _refuse_flood(text)
         result = AgentTurnResult(
             text=text,
+            usage=self._usage,
             provider_session_id=(
                 None if session_key is None else self.provider_session_id(session_key)
             ),
@@ -645,9 +693,7 @@ class FakeAgentClient:
             reuse_session=reuse_session,
             session_key=session_key,
         )
-        self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind, user_prompt, round_label, invocation_id)
-        self._update_session(reuse_session=reuse_session, session_key=session_key)
+        self._finish_turn(invocation, self.model_for_kind(kind), None)
         self._emit_stream(kind, invocation)
         return self._resolve_response(kind, invocation, response_cls)
 
@@ -683,9 +729,7 @@ class FakeAgentClient:
             reuse_session=reuse_session,
             session_key=session_key,
         )
-        self._write_usage(kind, round_label, self.model_for_kind(kind), None)
-        self._maybe_raise(kind, user_prompt, round_label, invocation_id)
-        self._update_session(reuse_session=reuse_session, session_key=session_key)
+        self._finish_turn(invocation, self.model_for_kind(kind), None)
         self._emit_stream(kind, invocation)
         text = self._resolve_text(kind, invocation)
         _refuse_flood(text)
@@ -730,10 +774,46 @@ class FakeAgentClient:
             callback(invocation)
         return invocation
 
-    def _write_usage(
-        self, kind: str, round_label: str | None, model: str | None, reasoning_effort: str | None
+    def _finish_turn(
+        self, invocation: FakeInvocation, model: str | None, reasoning_effort: str | None
     ) -> None:
-        """Append the turn's usage row, before its outcome is known, like the real client."""
+        """Write the turn's usage row, then fail it if a failure is due, else keep its conversation.
+
+        The row names the conversation the turn ran in, as the real client's does: the one on
+        record when the turn failed (the provider named no other), the id the turn returns when it
+        did not. A failed turn keeps no new conversation.
+        """
+        key = invocation.session_key
+        kind, label = invocation.kind, invocation.round_label
+        session_id = self._turn_session_id(reuse_session=invocation.reuse_session, session_key=key)
+        try:
+            self._maybe_raise(kind, invocation.user_prompt, label, invocation.invocation_id, key)
+        except BaseException:
+            on_record = None if key is None else self.provider_session_id(key)
+            self._write_usage(kind, label, model, reasoning_effort, on_record)
+            raise
+        self._write_usage(kind, label, model, reasoning_effort, session_id)
+        if session_id is not None and key is not None:
+            self._sessions[key] = session_id
+            self._last_turn_sessions[key] = session_id
+
+    def _turn_session_id(
+        self, *, reuse_session: bool | None, session_key: AgentSessionKey | None
+    ) -> str | None:
+        """The conversation a turn on ``session_key`` runs in: the one on record, else a new one."""
+        if not (self._session_reuse and reuse_session and session_key is not None):
+            return None
+        return self.provider_session_id(session_key) or f"fake-session-{uuid4()}"
+
+    def _write_usage(
+        self,
+        kind: str,
+        round_label: str | None,
+        model: str | None,
+        reasoning_effort: str | None,
+        provider_session_id: str | None,
+    ) -> None:
+        """Append the turn's usage row, like the real client."""
         if self._log_dir is None:
             return
         append_usage_record(
@@ -745,31 +825,64 @@ class FakeAgentClient:
             reasoning_effort=reasoning_effort,
             usage=self._usage,
             skills=AgentSkillUse(),
+            recorded_at=utc_datetime(_FAKE_EPOCH),
+            provider_session_id=provider_session_id,
         )
 
     def set_capacity_gate(self, gate: CapacityGate) -> None:
-        """Route a scripted ``AgentQuotaError`` through ``gate``, as the real client does."""
+        """Route a scripted ``AgentQuotaError`` through ``gate``, as the real client does.
+
+        Until then a transient stop is sent again once, as the real client's own gate does.
+        """
         self._capacity_gate = gate
 
     def _maybe_raise(
-        self, kind: str, message: str, label: str | None, invocation_id: str | None
+        self,
+        kind: str,
+        message: str,
+        label: str | None,
+        invocation_id: str | None,
+        session_key: AgentSessionKey | None,
     ) -> None:
-        """Raise the scripted failure; a quota limit waits at the gate and sends the turn again."""
-        stops = 0
-        while True:
-            try:
-                self._raise_scripted(kind)
-            except AgentQuotaError as error:
-                gate = self._capacity_gate
-                if gate is None:
-                    raise
-                stops += 1
-                request = AgentTurnRequest(
-                    message=message, label=label, invocation_id=invocation_id
-                )
-                gate.wait_for_capacity(error, request, role=kind, attempt=stops)
-            else:
-                return
+        """Raise the scripted failure; a quota limit waits at the gate and sends the turn again.
+
+        As in the real client, the turn's record outlives each resend: a cancellation of
+        the turn (or of its key) ends the gate's wait, and a cancelled turn is not sent
+        again. A turn that gets through is reported to the gate as served.
+        """
+        stops = CapacityStops(self.threads, model=self.model_for_kind(kind))
+        entry = (session_key, stops)
+        with self._turns_lock:
+            self._turns.append(entry)
+        try:
+            while True:
+                try:
+                    self._raise_scripted(kind)
+                except AgentQuotaError as error:
+                    if stops.cancelled:
+                        # As the real client: a cancelled turn is not waited for.
+                        raise
+                    stops.count += 1
+                    request = AgentTurnRequest(
+                        message=message, label=label, invocation_id=invocation_id
+                    )
+                    self._capacity_gate.wait_for_capacity(error, request, role=kind, stops=stops)
+                    if stops.cancelled:
+                        raise error from None
+                else:
+                    if self._provider is not None:
+                        self._capacity_gate.turn_served(self._provider, stops.model)
+                    return
+        finally:
+            with self._turns_lock:
+                self._turns.remove(entry)
+
+    def _cancel_turns(self, key: AgentSessionKey | None) -> None:
+        """Cancel the turns in flight on ``key``, or every one when ``key`` is None."""
+        with self._turns_lock:
+            turns = [stops for turn_key, stops in self._turns if key is None or turn_key == key]
+        for stops in turns:
+            stops.cancel()
 
     def _raise_scripted(self, kind: str) -> None:
         state = self._failures.get(kind)
@@ -780,17 +893,6 @@ class FakeAgentClient:
         if state.remaining > 0:
             state.remaining -= 1
             raise state.exc
-
-    def _update_session(
-        self, *, reuse_session: bool | None, session_key: AgentSessionKey | None
-    ) -> None:
-        if not (self._session_reuse and reuse_session and session_key is not None):
-            return
-        session_id = self.provider_session_id(session_key)
-        if session_id is None:
-            session_id = f"fake-session-{uuid4()}"
-        self._sessions[session_key] = session_id
-        self._last_turn_sessions[session_key] = session_id
 
     def _emit_stream(self, kind: str, invocation: FakeInvocation) -> None:
         chunks = self._stream_chunks.get(kind)

@@ -14,15 +14,22 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from vs_agent.api import (
     AgentClient,
     AgentExecutionPolicy,
     AgentSessionSpec,
+    AgentTurnExecutor,
     AgentTurnRequest,
 )
-from vs_agent.api.testing import FakeAgentInvocationStore, FakeAgentSessions, FakeProvider
+from vs_agent.api.testing import (
+    FakeAgentInvocationStore,
+    FakeAgentSessions,
+    FakeProvider,
+    FakeSteering,
+    FakeTurnScript,
+)
 from vs_core.api import (
     Access,
     ArtifactId,
@@ -43,6 +50,7 @@ from vs_core.api import (
     SessionSpec,
     SnapshotAndRetainRun,
     TurnObserved,
+    TurnPermit,
     TurnSpec,
     Until,
     WorkspaceRef,
@@ -51,20 +59,21 @@ from vs_prompts.api import RenderedPrompt, TemplateRenderer
 from vs_runtime.api.core import (
     AccessGrant,
     ExecutionResult,
-    ReceiptStore,
+    KeyedDocuments,
     RuntimeSessionRequests,
 )
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.testing import FakeWorkspace
 from vs_runtime.contracts import WorkspaceAccess
+from vs_sim.api import OsThreads, ThreadBlockingRunner
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from vs_core.api import RequestBase
-    from vs_runtime.api.core import AccessGuardedWorkspace, SessionResolver
-    from vs_runtime.api.executor_contexts import RevocableLease
+    from vs_runtime.api.core import AccessGuardedWorkspace, ExecutionContext, SessionResolver
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 ROLE = RoleId(root="worker")
@@ -74,6 +83,8 @@ SESSION = SessionId(root="session-1")
 
 class Reply(BaseModel):
     """The structured reply the Fake driver returns."""
+
+    model_config = ConfigDict(extra="forbid")
 
     value: int
 
@@ -218,6 +229,10 @@ class FakeSessionResolver:
             policy=AgentExecutionPolicy(require_enforcement=False),
         )
 
+    def hold_permit(self, execution_id: str, scope: Scope, permit: TurnPermit) -> None:
+        """This resolver has no control channel, so the permit is not a gate here."""
+        del execution_id, scope, permit
+
     def turn_timeout(self, role: RoleId) -> timedelta | None:
         """The one declared in-turn timeout of every role."""
         del role
@@ -242,6 +257,12 @@ class FakeSessionResolver:
             count=len(inputs),
         )
 
+    def mid_turn_message(self, item: SessionInput) -> RenderedPrompt | None:
+        """A rendered mid-turn message that names the input it offers."""
+        if not self.messages_resolve:
+            return None
+        return self.renderer.render_string("mid-turn {{ input }}", input=item.input_id.root)
+
 
 def turn_output(result: ExecutionResult) -> str | None:
     """The structured output JSON a result's TurnObserved event carries."""
@@ -251,7 +272,7 @@ def turn_output(result: ExecutionResult) -> str | None:
     return None
 
 
-class CrashOnReplace(ReceiptStore):
+class CrashOnReplace(KeyedDocuments):
     """A receipt store whose host dies at the first record it overwrites.
 
     After a provider turn, every overwrite (settling its workspace access, sealing the
@@ -278,37 +299,44 @@ class SessionHost:
     """The durable pieces that survive a host restart."""
 
     resolver: FakeSessionResolver
-    client: AgentClient
+    client: AgentTurnExecutor
     journal: FakeAgentInvocationStore
     turns: list[AgentTurnRequest]
     faults: ProviderFaults
     driver: FakeProvider | None = None
     turn_started: threading.Event = field(default_factory=threading.Event)
 
-    def executor(self, store: ReceiptStore) -> RuntimeSessionRequests:
+    def executor(self, store: KeyedDocuments) -> RuntimeSessionRequests:
         """A freshly started host over the same journal and provider conversation."""
         resolver: SessionResolver = self.resolver
-        return RuntimeSessionRequests(FakeAgentSessions(self.client, self.journal), resolver, store)
+        return RuntimeSessionRequests(
+            FakeAgentSessions(self.client, self.journal, threads=OsThreads()),
+            resolver,
+            store,
+            yields=None,
+            blocking=ThreadBlockingRunner(),
+        )
 
     def sessions(self) -> FakeAgentSessions:
         """A freshly started journal reader, for assertions on durable facts."""
-        return FakeAgentSessions(self.client, self.journal)
+        return FakeAgentSessions(self.client, self.journal, threads=OsThreads())
 
     async def run(
         self,
         request: RequestBase,
-        store: ReceiptStore,
+        store: KeyedDocuments,
         *,
-        lease: RevocableLease | None = None,
         now_at: float | None = None,
         digest: str | None = None,
     ) -> ExecutionResult:
         """Execute *request* once on a freshly started host over *store*."""
-        context = context_for(request, lease=lease).model_copy(update={"until": Until(at=100.0)})
-        if now_at is not None:
-            context = context.model_copy(update={"now_at": now_at})
-        if digest is not None:
-            context = context.model_copy(update={"payload_digest": digest})
+        context = session_context(request, now_at=now_at, digest=digest)
+        return await self.run_in(request, store, context)
+
+    async def run_in(
+        self, request: RequestBase, store: KeyedDocuments, context: ExecutionContext
+    ) -> ExecutionResult:
+        """Execute *request* once on a freshly started host over *store*, under *context*."""
         outcome = await self.executor(store).execute(cast("Any", request), context)
         assert isinstance(outcome, ExecutionResult), outcome
         return outcome
@@ -320,17 +348,34 @@ class SessionHost:
         return lost
 
 
+def session_context(
+    request: RequestBase,
+    *,
+    now_at: float | None = None,
+    digest: str | None = None,
+) -> ExecutionContext:
+    """The context a shell would build for a session *request*, ending at 100 s."""
+    context = context_for(request).model_copy(update={"until": Until(at=100.0)})
+    if now_at is not None:
+        context = context.model_copy(update={"now_at": now_at})
+    if digest is not None:
+        context = context.model_copy(update={"payload_digest": digest})
+    return context
+
+
 def open_host(
     workspace: Path,
     *,
     answer: dict[str, object] | None = None,
     effect: Callable[[], None] | None = None,
     hang_until_cancelled: bool = False,
+    steering: FakeSteering = FakeSteering.UNSUPPORTED,
 ) -> SessionHost:
     """A host whose Fake provider answers every turn with *answer*, records it, runs *effect*.
 
     With *hang_until_cancelled* every turn starts, then never returns until the provider is
-    asked to cancel it (``turn_started`` is set once the turn is running).
+    asked to cancel it (``turn_started`` is set once the turn is running). *steering* says
+    how the provider answers a message sent into a running turn.
     """
     turns: list[AgentTurnRequest] = []
     faults = ProviderFaults()
@@ -349,8 +394,12 @@ def open_host(
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
 
-    driver = FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn)
-    client = AgentClient(driver)
+    driver = FakeProvider(
+        script=FakeTurnScript((answer or {"value": 7},), steering=steering),
+        on_turn=on_turn,
+        threads=OsThreads(),
+    )
+    client = AgentClient(driver, clock=ManualClock(), threads=OsThreads())
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),
         client,

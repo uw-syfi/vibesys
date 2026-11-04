@@ -18,6 +18,14 @@ func checkStackHistory(capacity int, history []recordedOperation) bool {
 	return porcupine.CheckOperations(stackModel(capacity), operations)
 }
 
+func hashStackItems(items []stackItem) uint64 {
+	values := make([]uint64, len(items))
+	for index, item := range items {
+		values[index] = item.value
+	}
+	return hashValues(values...)
+}
+
 func stackModel(capacity int) porcupine.Model {
 	return porcupine.Model{
 		Init: func() any { return []stackItem{} },
@@ -57,6 +65,7 @@ func stackModel(capacity int) porcupine.Model {
 				return false, state
 			}
 		},
+		Hash: func(state any) uint64 { return hashStackItems(state.([]stackItem)) },
 		Equal: func(first, second any) bool {
 			return slices.Equal(first.([]stackItem), second.([]stackItem))
 		},

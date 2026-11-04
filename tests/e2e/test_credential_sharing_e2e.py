@@ -30,10 +30,13 @@ import pytest
 
 from vs_agent.api import auth_bind_mounts, auth_copy_paths
 from vs_agent.api.images import agent_image
+from vs_sandbox.api import SubprocessDockerCli
 from vs_sandbox.docker_sandbox import DockerSandbox
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+from vs_sim.api import DISCARD
 
 pytestmark = pytest.mark.e2e
 
@@ -66,11 +69,17 @@ def container(tmp_path: Path, host_home: Path) -> Iterator[DockerSandbox]:
     workspace.mkdir()
     sandbox = DockerSandbox(
         host_workspace=str(workspace),
-        image=agent_image(_BASE_IMAGE, timeout=_BUILD_TIMEOUT_S),
+        image=agent_image(
+            _BASE_IMAGE, timeout=_BUILD_TIMEOUT_S, clock=MonotonicClock(), output=DISCARD
+        ),
         bind_mounts=auth_bind_mounts(_PROVIDER),
         auth_files=auth_copy_paths(_PROVIDER),
+        docker=SubprocessDockerCli(
+            processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+        ),
+        threads=OsThreads(),
     )
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     try:
         yield sandbox
     finally:
@@ -93,7 +102,7 @@ def _in_container(relative: str) -> str:
 def test_an_in_place_write_reaches_the_host_file(container: DockerSandbox, host_home: Path) -> None:
     target = _in_container(agentshim.get_provider(_PROVIDER).profile.credential_files[0])
 
-    result = container.execute(f"printf in-place > {target}")
+    result = container.execute(f"printf in-place > {target}", output=DISCARD)
 
     assert result.exit_code == 0, result.output
     assert _credential(host_home).read_text() == "in-place"
@@ -109,7 +118,8 @@ def test_a_temp_then_rename_write_reaches_the_host_file(
     result = container.execute(
         f"printf renamed > {target}.tmp && "
         f"{{ mv {target}.tmp {target} 2>/dev/null || {{ cat {target}.tmp > {target}; "
-        f"rm {target}.tmp; }}; }}"
+        f"rm {target}.tmp; }}; }}",
+        output=DISCARD,
     )
 
     assert result.exit_code == 0, result.output
@@ -121,7 +131,9 @@ def test_a_rename_only_writer_fails_closed_and_leaves_the_host_file_intact(
 ) -> None:
     target = _in_container(agentshim.get_provider(_PROVIDER).profile.credential_files[0])
 
-    result = container.execute(f"printf renamed > {target}.tmp && mv {target}.tmp {target}")
+    result = container.execute(
+        f"printf renamed > {target}.tmp && mv {target}.tmp {target}", output=DISCARD
+    )
 
     assert result.exit_code != 0
     assert _credential(host_home).read_text() == "host-original\n"
@@ -136,7 +148,8 @@ def test_settings_and_history_stay_inside_the_container(
 
     result = container.execute(
         f"printf container > {_in_container(setting)} && "
-        f"printf container > {_in_container(str(credential_dir))}/sessions-in-container.jsonl"
+        f"printf container > {_in_container(str(credential_dir))}/sessions-in-container.jsonl",
+        output=DISCARD,
     )
 
     assert result.exit_code == 0, result.output

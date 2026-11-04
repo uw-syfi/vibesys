@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -42,7 +43,7 @@ def namespace(
         return InMemoryEvaluationNamespace()
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path.parent / "state-home"))
     project = Project.open(tmp_path)
-    project.state.create_project("contract")
+    project.state.create_project("contract", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         "Namespace contract",
         run_id="namespace-contract",
@@ -59,6 +60,7 @@ def namespace(
             agent_roles={},
         ),
         orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(manifest)
     return project.state.portable_namespace(manifest.run_id, "namespace-contract")
@@ -92,3 +94,13 @@ def test_replacement_reads_are_strict_detached_and_missing_is_explicit(
 def test_unsafe_paths_are_rejected(namespace: EvaluationStateNamespace, path: str) -> None:
     with pytest.raises(ProjectStateError, match="path"):
         namespace.save(path, Record(values=[]))
+
+
+def test_protobuf_bytes_share_the_atomic_namespace(namespace: EvaluationStateNamespace) -> None:
+    assert namespace.read_bytes("receipt.pb") is None
+    namespace.write_bytes("receipt.pb", b"\x08\x01")
+    assert namespace.read_bytes("receipt.pb") == b"\x08\x01"
+    namespace.write_bytes("receipt.pb", b"\x08\x02")
+    assert namespace.read_bytes("receipt.pb") == b"\x08\x02"
+    assert namespace.delete("receipt.pb")
+    assert namespace.read_bytes("receipt.pb") is None

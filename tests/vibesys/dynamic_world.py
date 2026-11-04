@@ -73,6 +73,7 @@ class DynamicWorld:
             implementer=deque([implemented()] if implementer is None else implementer),
             judge=deque([reviewed()] if judge is None else judge),
             throughputs=tuple(throughputs),
+            ends_jobs_at_submission=True,
             # A turn past the script gets a reply that is no valid JSON, never silence: a
             # silent turn is lost only after its time limit, and a host that dies meanwhile
             # leaves a recovery check core cannot end (the gap named in `vs_core/_waits.py`).

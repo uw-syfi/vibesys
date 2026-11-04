@@ -459,7 +459,7 @@ def test_freed_slot_selects_fifo_head_at_real_attempts_boundary() -> None:
     )
 
 
-@pytest.mark.parametrize("gate", ["paused", "recovery", "capacity", "pool", "exclusive"])
+@pytest.mark.parametrize("gate", ["paused", "capacity", "pool", "exclusive"])
 def test_fifo_head_cannot_be_bypassed_when_any_admission_gate_is_closed(gate: str) -> None:
     pool = core.PoolId(root="exclusive-pool")
     running = _request(0, pools=(pool,))
@@ -481,14 +481,6 @@ def test_fifo_head_cannot_be_bypassed_when_any_admission_gate_is_closed(gate: st
         paused=gate == "paused",
         limits=sample_limits(max_attempts=20, max_parallel=1 if gate == "capacity" else 3),
     )
-    if gate == "recovery":
-        state = state.model_copy(
-            update={
-                "records": state.records.model_copy(
-                    update={"recovery": core.RecoveryBarrier(phase=core.RecoveryPhase.BLOCKED)}
-                )
-            }
-        )
     result = _step(state, core.ClockAdvanced(now_at=25.0))
     assert result.requests == result.events == ()
     assert result.state.scheduling.queue == (head, tail)
@@ -1130,6 +1122,8 @@ def test_pause_resume_duplicate_controls_preserve_held_occupancy_and_receipts(
         control = core.ControlInput(
             control_id=core.ControlId(root=f"control-{index}"),
             action="pause" if index % 2 else "resume",
+            owner=core.PauseOwner.QUOTA if index % 2 else None,
+            when=None if index % 2 else "now",
         )
         result = _step(state, core.RunControlEvent(control=control, now_at=float(supplied)))
         state = result.state
@@ -1158,7 +1152,11 @@ def test_resuming_paused_queue_wakes_already_paid_fifo_head() -> None:
     state = _step(
         state,
         core.RunControlEvent(
-            control=core.ControlInput(control_id=core.ControlId(root="pause"), action="pause"),
+            control=core.ControlInput(
+                control_id=core.ControlId(root="pause"),
+                action="pause",
+                owner=core.PauseOwner.QUOTA,
+            ),
             now_at=5.0,
         ),
     ).state
@@ -1168,7 +1166,9 @@ def test_resuming_paused_queue_wakes_already_paid_fifo_head() -> None:
     _assert_attempts_boundary(
         state,
         core.RunControlEvent(
-            control=core.ControlInput(control_id=core.ControlId(root="resume"), action="resume"),
+            control=core.ControlInput(
+                control_id=core.ControlId(root="resume"), action="resume", when="now"
+            ),
             now_at=10.0,
         ),
         "attempt_admitted",

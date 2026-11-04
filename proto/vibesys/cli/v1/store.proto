@@ -1,0 +1,89 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "vibesys/cli/v1/event.proto";
+import "vibesys/cli/v1/frontier.proto";
+import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/plan.proto";
+import "vibesys/cli/v1/promote.proto";
+import "vibesys/cli/v1/result.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// The files of a store on disk. Each file is the protojson of one of these messages, written with
+// the proto field names, and read with unknown fields refused. The stored form is therefore
+// generated from this file and never described by hand: a record that does not decode as its
+// message here is damaged or from another version, and the store says so.
+//
+// Every file starts with `format`, the version of the layout and of every record in it. A program
+// reads files of its own version and refuses any other. A file of an older version is not
+// migrated: the store is thrown away.
+//
+// Versions: 1 was a hand-written encoding that no release wrote. 2 is protojson of these messages.
+// Submitters are additive in format 2; old writers reject jobs containing the new field.
+
+// FormatFile is the `format` file of a store, and the part of every other file that is read first,
+// so that a file of another version is reported as that and not as a record with unknown fields.
+message FormatFile {
+  int32 format = 1;
+}
+
+// JobFile is jobs/<job>.json: one job, replaced whole on each change.
+message JobFile {
+  int32 format = 1;
+  Job job = 2;
+}
+
+// ResultFile is results/<job>.json: the result a job saved, with its place in the order of saving.
+message ResultFile {
+  int32 format = 1;
+  uint64 seq = 2;
+  Result result = 3;
+}
+
+// PlanFile is plans/<number>.json: one plan, replaced whole on each change.
+message PlanFile {
+  int32 format = 1;
+  Plan plan = 2;
+}
+
+// PromotionFile is promotions/<n>.json: the nth promotion.
+message PromotionFile {
+  int32 format = 1;
+  uint64 seq = 2;
+  Promotion promotion = 3;
+}
+
+// FrontierFile is frontier/<n>.json: the task's frontier after its nth change, whole. The frontier is
+// the last of them, and a store with none has an empty frontier.
+message FrontierFile {
+  int32 format = 1;
+  uint64 seq = 2;
+  repeated FrontierMember members = 3;
+}
+
+// EventFile is runs/<run>/<n>.json: the nth event of a run.
+message EventFile {
+  int32 format = 1;
+  Event event = 2;
+}
+
+// OwnerFile is .owner: who owns the store. generation counts the owners the store has had, so that
+// no two owners have the same record, not even the same process opening it twice.
+message OwnerFile {
+  int32 format = 1;
+  uint64 generation = 2;
+  string host = 3;
+  // The owner's runtime directory, where its supervisors can be reached.
+  string dir = 4;
+  int64 pid = 5;
+  // The running jobs whose runs were given up, by job id.
+  repeated string given_up = 6;
+}
+
+// TaskFile is an entry of the per-user index of stores: tasks/<hash>.json.
+message TaskFile {
+  int32 format = 1;
+  string repository = 2;
+  string task = 3;
+}

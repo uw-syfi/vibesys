@@ -19,6 +19,7 @@ any script.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
@@ -35,6 +36,7 @@ from vs_core.api import (
     CollectEvidence,
     ContractError,
     CoreEvent,
+    CoreReducers,
     CoreState,
     CoreView,
     Decision,
@@ -47,8 +49,6 @@ from vs_core.api import (
     EventCursor,
     EventId,
     EvidenceRequirements,
-    HostFence,
-    HostId,
     Inbox,
     InspectRequest,
     InspectTurn,
@@ -63,7 +63,6 @@ from vs_core.api import (
     ObserveOwnedJob,
     OperationRegistry,
     OwnedJob,
-    RecoveryStarted,
     ReissueProof,
     ReplyError,
     Request,
@@ -84,6 +83,7 @@ from vs_core.api import (
     SubmitMeasurement,
     TargetObservation,
     TimeReached,
+    Transition,
     TurnObserved,
     VerifyAdoption,
     WorkspaceObserved,
@@ -96,6 +96,7 @@ from vs_core.api import (
     validate_startup,
 )
 from vs_core.testing.builders import initial_state, sample_limits
+from vs_core.testing.limits import end_one, next_end
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -117,6 +118,9 @@ class Succeeded:
     evidence: tuple[EvidenceRef, ...] = ()
     facts: EvaluationTerminalFacts | None = None
     suspension: Continuation | None = None
+    measured_input: str | None = None
+    """What the evaluation reads at the revision, as a workspace executor digests it: the
+    attempt's base input, which a comparison with its candidates needs."""
 
 
 @dataclass(frozen=True)
@@ -158,6 +162,16 @@ class _InvalidReply:
 
 
 type Answer = Succeeded | Running | Unknown | Retryable | Failed
+
+
+def _ends(observation: Observation) -> bool:
+    """Whether ``observation`` reports that its job has ended (terminal, with a known status)."""
+    return observation.terminal and observation.status not in (
+        ObservationStatus.PENDING,
+        ObservationStatus.UNKNOWN,
+    )
+
+
 """One executor observation; a tuple of answers is a sequence of observations."""
 
 type Script = Callable[[Request, CoreState], Answer | tuple[Answer, ...]]
@@ -192,6 +206,16 @@ class Faults:
     first. ``reload`` round-trips the whole envelope through the registered codec
     after every step, as a restart would.
 
+    ``reobserve_after`` lists commit numbers (counted as for ``crash_after``) after which the
+    executor answers again for every job that has ended: a poll that was in flight when the job
+    ended reports the same end, at a newer sequence, event and time.
+
+    ``replay_after`` lists commit numbers (counted as for ``crash_after``) after which the
+    job executors deliver again, oldest first, every answer to a job poll they delivered
+    before, as an executor that resends its answers after a restart does. An answer delivered
+    long ago may name a poll the ledger no longer holds (a spent poll), which must change
+    nothing.
+
     ``crash_after`` lists commit numbers (counted from the first, over the whole drive:
     every authorization, every delivery of a request's observations and its owner events, every
     clock move, and the recovery's own) after which the host dies and a new one takes over. The
@@ -208,6 +232,8 @@ class Faults:
     reload: bool = False
     crash_after: frozenset[int] = frozenset()
     unsealed: Callable[[Request], bool] = lambda _request: False
+    reobserve_after: frozenset[int] = frozenset()
+    replay_after: frozenset[int] = frozenset()
 
 
 class _CrashError(Exception):
@@ -271,7 +297,8 @@ class _Driver[S: StrategyState]:
     ) -> None:
         self.script = script
         self.registry = harness.registry
-        self.host = SearchHost(step=step, registry=harness.registry)
+        self.step = partial(step, reducers=harness.reducers)
+        self.host = SearchHost(step=self.step, registry=harness.registry)
         self.faults = faults
         self.search = search
         self.trace: Trace[S]
@@ -282,14 +309,18 @@ class _Driver[S: StrategyState]:
         self.calls: dict[str, int] = {}
         self.ledger: dict[str, _Executed] = {}
         self.commits = 0
-        self.epoch = 1
         self.recovering = False
         self.ticked: CoreState | None = None
         self.in_turn = 0
         self.envelope_type = harness.envelope_type
         self.during_turn = harness.during_turn
+        self.operator = harness.operator
         self.shell_events = harness.shell_events
         self.schemas = harness.schemas
+        self.ended: dict[ResourceId, JobObserved] = {}
+        """The last observation delivered of each job that has ended, by job."""
+        self.reobserve_owed = 0
+        self.replay_owed = 0
 
     # -- the shell loop ---------------------------------------------------
 
@@ -298,7 +329,7 @@ class _Driver[S: StrategyState]:
             try:
                 if self.recovering:
                     self.recover()
-                progressed = self.dispatch_all()
+                progressed = self.dispatch_all() or self.control()
                 if not progressed:
                     progressed = self.tick()
                 if not progressed:
@@ -312,6 +343,10 @@ class _Driver[S: StrategyState]:
             return  # the turn is running: a host that dies now leaves it begun, which is not modelled
         self.commits += 1
         self.trace.commits = self.commits
+        if self.commits in self.faults.reobserve_after:
+            self.reobserve_owed += 1
+        if self.commits in self.faults.replay_after:
+            self.replay_owed += 1
         if self.commits in self.faults.crash_after:
             raise _CrashError
 
@@ -326,12 +361,9 @@ class _Driver[S: StrategyState]:
         self.recovering = True
 
     def recover(self) -> None:
-        """A new host: reload what was persisted, then start recovery under the next epoch."""
+        """A new host: reload what was persisted and go on from it, as the step loop does."""
         self.reload()
-        self.epoch += 1
         self.recovering = False
-        now_at = max(self.clock, self.trace.core.run.now_at)
-        self.consume(RecoveryStarted(epoch=self.epoch, now_at=now_at))
         self.commit()
 
     def start(self, config: object, events: tuple[CoreEvent, ...]) -> None:
@@ -341,7 +373,7 @@ class _Driver[S: StrategyState]:
         discarded: list[Discarded] = []
         core = self.core
         for event in (ClockAdvanced(now_at=1.0), *events):
-            transition = step(core, event)
+            transition = self.step(core, event)
             core = transition.state
             published.extend(transition.events)
             translated = translate(core, transition.events)
@@ -378,6 +410,14 @@ class _Driver[S: StrategyState]:
         if core.run.status.value == "terminal":
             trace.finished = True
 
+    def control(self) -> bool:
+        """Deliver what the operator does while nothing is dispatchable; whether it did anything."""
+        events = self.operator(self.trace.core)
+        for event in events:
+            self.consume(event)
+            self.commit()
+        return bool(events)
+
     def tick(self) -> bool:
         """Move the clock to the next wake-up or request limit; deliver what that causes."""
         trace = self.trace
@@ -385,6 +425,9 @@ class _Driver[S: StrategyState]:
         asked = project(trace.core).next_observe_at
         if asked is not None:
             due.append(asked)
+        limit = next_end(trace.core)
+        if limit is not None:
+            due.append(limit)
         if not due and trace.core == self.ticked:
             return False
         # The shell's loop delivers the clock after every pass that changed state, even with
@@ -395,6 +438,7 @@ class _Driver[S: StrategyState]:
         reached = tuple(TimeReached(time=wake) for wake in sorted(self.wakes) if wake <= moment)
         self.wakes = [wake for wake in self.wakes if wake > moment]
         self.consume(ClockAdvanced(now_at=moment), extra=reached)
+        self.end_at_limits()
         self.ticked = trace.core
         self.commit()
         return trace.core != before or bool(reached)
@@ -411,18 +455,77 @@ class _Driver[S: StrategyState]:
                 deliveries.reverse()
             for request, delivery in deliveries:
                 for event in delivery:
+                    self.note_end(event)
                     for _ in range(2 if self.faults.duplicate else 1):
                         self.consume(event)
                 executed = self.ledger.get(self.key_of(request))
                 if executed is not None:
                     executed.delivered = True
                 self.commit()
+                self.reobserve()
+                self.replay()
+
+    # -- jobs observed again after their end ---------------------------------------------
+
+    def note_end(self, event: CoreEvent) -> None:
+        """Remember the first observation that reports a job's end."""
+        if isinstance(event, JobObserved) and _ends(event.observation):
+            self.ended.setdefault(event.resource_id, event)
+
+    def again(self, resource: ResourceId) -> None:
+        """The executor answers again for an ended job: the same end, at a newer sequence and time."""
+        ended = self.ended[resource]
+        key = ended.observation.request_id.root
+        sequence = self.calls.get(key, 0)
+        self.calls[key] = sequence + 1
+        self.clock += 1.0
+        view = ended.observation.model_copy(
+            update={
+                "event_id": EventId(root=f"{key}:observation:{sequence}"),
+                "sequence": sequence,
+                "observed_at": self.clock,
+            }
+        )
+        event = JobObserved(
+            resource_id=resource, observation=view, evaluation_result=ended.evaluation_result
+        )
+        self.ended[resource] = event
+        self.consume(event)
+        self.commit()
+
+    def reobserve(self) -> None:
+        """Answer again for every ended job once per ``reobserve_after`` point passed."""
+        while self.reobserve_owed and not self.trace.finished:
+            self.reobserve_owed -= 1
+            for resource in tuple(self.ended):
+                self.again(resource)
+
+    def replay(self) -> None:
+        """Deliver again every poll answer delivered so far, once per ``replay_after`` point."""
+        while self.replay_owed and not self.trace.finished:
+            self.replay_owed -= 1
+            log = self.trace.log
+            polls = {self.key_of(item) for item in log if isinstance(item, ObserveOwnedJob)}
+            delivered = [
+                item
+                for item in log
+                if isinstance(item, RequestObserved) and item.observation.request_id.root in polls
+            ]
+            for event in delivered:
+                self.consume(event)
+            self.commit()
 
     def authorize_round(self) -> list[Request]:
         """Authorize every prepared request core lets go now, in ledger order."""
         batch: list[Request] = []
-        for record in self.trace.core.records.records:
-            if record.phase is not RequestPhase.PREPARED:
+        for prepared in self.trace.core.records.records:
+            if prepared.phase is not RequestPhase.PREPARED:
+                continue
+            # An earlier authorization in this round can end a later request (a close settles the
+            # inspection that waited on it): read it as the ledger holds it now.
+            at = self.trace.core.records.positions(prepared.request_id)
+            record = self.trace.core.records.records[at[0]] if at else None
+            if record is None or record.phase is not RequestPhase.PREPARED:
                 continue
             try:
                 self.consume(DispatchAuthorized(request_id=record.request_id))
@@ -539,7 +642,9 @@ class _Driver[S: StrategyState]:
             status=ObservationStatus.REJECTED if terminal else ObservationStatus.UNKNOWN,
             accepted=False,
             terminal=terminal,
-            released=False,
+            # A request that never began holds nothing: nothing is left to release.
+            released=terminal,
+            children_complete=terminal,
             diagnostic="no sealed result for this request",
         )
 
@@ -732,6 +837,7 @@ class _Driver[S: StrategyState]:
                 else None
             ),
             revision=answer.revision if isinstance(answer, Succeeded) else None,
+            measured_input=answer.measured_input if isinstance(answer, Succeeded) else None,
         )
         if isinstance(answer, Failed):
             return RequestObserved(
@@ -772,7 +878,17 @@ class _Driver[S: StrategyState]:
         trace = self.trace
         if isinstance(event, RequestObserved):
             trace.log.append(event)
-        transition = step(trace.core, event)
+        self.take_transition(self.step(trace.core, event), extra)
+
+    def end_at_limits(self) -> None:
+        """What the runner loop records at the run clock: the end of every step past its limit."""
+        while (ended := end_one(self.trace.core, self.trace.core.run.now_at)) is not None:
+            state, heard = ended
+            self.take_transition(Transition(state=state, requests=(), events=heard), ())
+            self.commit()
+
+    def take_transition(self, transition: Transition, extra: tuple[Event, ...]) -> None:
+        trace = self.trace
         translated = translate(transition.state, transition.events)
         incoming = (*translated.events, *extra)
         advanced = advance(
@@ -801,7 +917,6 @@ class _Driver[S: StrategyState]:
             raise ValueError(message)
         envelope = self.envelope_type(
             schema_version=ENVELOPE_SCHEMA_VERSION,
-            fence=HostFence(host_id=HostId(root="driver"), epoch=1),
             strategy_id=trace.core.run.declaration.strategy_id,
             state_schema=trace.core.run.declaration.state_schema,
             core=trace.core,
@@ -835,11 +950,14 @@ class Harness:
     events: tuple[CoreEvent, ...] = ()
     envelope_type: type[RunEnvelope] | None = None
     during_turn: Callable[[Request, CoreState], tuple[CoreEvent, ...]] = lambda _r, _c: ()
+    operator: Callable[[CoreState], tuple[CoreEvent, ...]] = lambda _c: ()
     shell_events: bool = False
     schemas: Mapping[SchemaRef, type[BaseModel]] = field(default_factory=dict)
     deadline_at: float = 100000.0
     max_steps: int = 2000
     requirements: EvidenceRequirements = field(default_factory=EvidenceRequirements)
+    reducers: CoreReducers | None = None
+    """Sibling implementations core's step uses (see ``CoreReducers``); production when None."""
 
 
 def new_run[S: StrategyState](search: SearchDriver[S, Any], harness: Harness) -> CoreState:
@@ -851,7 +969,9 @@ def new_run[S: StrategyState](search: SearchDriver[S, Any], harness: Harness) ->
     capabilities = validate_startup(declaration, offered)
     return base.model_copy(
         update={
-            "registry": registry.descriptors,
+            # The selection, as production stores it. The codec lists an optional
+            # operation before an owned one; the declaration selects owned first.
+            "registry": capabilities.operations,
             "run": base.run.model_copy(
                 update={
                     "facts": harness.facts,

@@ -1,0 +1,73 @@
+{
+  "name": "a_steer_that_comes_too_late_is_refused_after_the_turn_end",
+  "doc": "A steer for a turn that has ended is answered as not accepted, after the TurnEnded.",
+  "provider": [
+    [
+      {
+        "say": "quick",
+        "item": "a1"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "send": {
+        "effectId": "e1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t1"
+      }
+    },
+    {
+      "send": {
+        "effectId": "e2",
+        "steer": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "m-late",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "also this"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "steer": "m-late"
+      }
+    }
+  ],
+  "checks": [
+    "late_steer_refused",
+    "one_end_per_turn"
+  ],
+  "expect": {
+    "steer": {
+      "m-late": false
+    }
+  }
+}

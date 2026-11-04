@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     REQUESTS_FILE,
     FakeConnector,
@@ -53,8 +54,8 @@ def test_submit_poll_and_collect_stay_within_their_command_budgets(tmp_path: Pat
             remote_workspace_root=str(remote),
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         ),
-        process=connector,
-        clock=lambda: 0.0,
+        processes=connector,
+        clock=ManualClock(),
     )
     cluster = SlurmCluster(runner, state_root=tmp_path / "ids")
     connector.script(

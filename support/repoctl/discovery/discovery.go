@@ -3,17 +3,30 @@
 // do not select jobs or walk dependency edges.
 package discovery
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Component is a graph node emitted by an adapter or declared in policy.
 // Paths are slash-separated and relative to the repository root. DependsOn
 // contains component IDs, including any adapter-specific ID prefix.
 type Component struct {
-	ID                   string   `toml:"id"`
-	Class                string   `toml:"class"`
-	Root                 string   `toml:"root"`
-	Roots                []string `toml:"roots"`
-	Files                []string `toml:"files"`
+	ID    string `toml:"id"`
+	Class string `toml:"class"`
+	Root  string `toml:"root"`
+	// Roots and Files are the paths that select this component's jobs. In policy
+	// they are written as `roots` and `files`, each entry a string or a table
+	// (see Entry); `add` splits them into these and the key-only lists.
+	Roots       []string `toml:"-"`
+	Files       []string `toml:"-"`
+	RootEntries []Entry  `toml:"roots"`
+	FileEntries []Entry  `toml:"files"`
+	// KeyOnlyRoots and KeyOnlyFiles are entries written `{path = "...", selects = false}`.
+	// The component owns them for whoever reads its list (a content key), but a
+	// change under one selects no job, in CI or in `repoctl test`.
+	KeyOnlyRoots         []string `toml:"-"`
+	KeyOnlyFiles         []string `toml:"-"`
 	DependsOn            []string `toml:"depends_on"`
 	Job                  string   `toml:"job"`
 	Jobs                 []string `toml:"jobs"`
@@ -24,6 +37,51 @@ type Component struct {
 	OwnershipGroup       string   `toml:"ownership_group"`
 	SelectAllJobs        bool     `toml:"select_all_jobs"`
 	SelectAllCollections bool     `toml:"select_all_collections"`
+	// LocalJobs replaces SelectAllJobs and SelectAllCollections in `repoctl test`
+	// (never in `plan`, which CI uses): the component selects only these jobs there.
+	LocalJobs []string `toml:"local_jobs"`
+	// LocalIgnoreRoots are roots CI still owns. `repoctl test` treats a change
+	// under one of them as ignored, so it selects no job from this component.
+	// Each entry must also be one of Roots.
+	LocalIgnoreRoots []string `toml:"local_ignore_roots"`
+}
+
+// Entry is one path of a component's roots or files in policy: a string, which
+// selects, or a table `{path = "dir", selects = false}`, which the component
+// lists without selecting anything from it. One list carries both tiers, so a
+// path is never written twice.
+type Entry struct {
+	Path    string
+	KeyOnly bool
+}
+
+// UnmarshalTOML accepts a string or a table with exactly the keys path and
+// selects, and rejects anything else naming what it found.
+func (e *Entry) UnmarshalTOML(data any) error {
+	switch value := data.(type) {
+	case string:
+		*e = Entry{Path: value}
+	case map[string]any:
+		path, ok := value["path"].(string)
+		if !ok || path == "" {
+			return fmt.Errorf("a roots or files entry written as a table needs a string path, got %v", value)
+		}
+		for key := range value {
+			if key != "path" && key != "selects" {
+				return fmt.Errorf("entry %q has unknown key %q; only path and selects are allowed", path, key)
+			}
+		}
+		selects := true
+		if raw, present := value["selects"]; present {
+			if selects, ok = raw.(bool); !ok {
+				return fmt.Errorf("entry %q: selects must be true or false, got %v", path, raw)
+			}
+		}
+		*e = Entry{Path: path, KeyOnly: !selects}
+	default:
+		return fmt.Errorf("a roots or files entry must be a string or a table, got %T", data)
+	}
+	return nil
 }
 
 // Spec is one policy discovery entry. Adapter selects the parser. Class,
@@ -46,10 +104,14 @@ type Spec struct {
 	DependencyFields []string `toml:"dependency_fields"`
 	WorkspacePrefix  string   `toml:"workspace_prefix"`
 	// Native: manifest filename to language mapping, roots requiring CI
-	// selection, and jobs assigned to those selected roots.
+	// selection, and jobs assigned to those selected roots. ExcludedRoots maps a
+	// scoped root that CI does not select to the reason it cannot be; such a root
+	// is still discovered and owned, but selects no job and joins no selected-only
+	// collection.
 	Manifests     map[string]string `toml:"manifests"`
 	ScopeRoots    []string          `toml:"scope_roots"`
 	SelectedRoots []string          `toml:"selected_roots"`
+	ExcludedRoots map[string]string `toml:"excluded_roots"`
 	SelectedJobs  []string          `toml:"selected_jobs"`
 	Target        bool              `toml:"target"`
 }

@@ -30,11 +30,11 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
-from mcp.server.fastmcp import FastMCP
-
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
     from types import ModuleType
+
+    from mcp.server.fastmcp import FastMCP
 
 
 class RemoteCapture(Protocol):
@@ -90,6 +90,9 @@ import kernel_bench  # noqa: E402  # LW-920177; the sys.path setup directly abov
 _capture_cli = capture.run_cli
 
 
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
+
+
 def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements one cohesive parsing/validation routine that resists a clean split
     *,
     run_worker: Callable[..., Awaitable[str]] = mcp_async.run_cancellable,
@@ -104,7 +107,7 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
     ``profile_*`` capture off the event loop; ``import_sibling`` locates the
     torch plugin's analyzer module.
     """
-    mcp = FastMCP("vibesys-rocprof-profiler")
+    mcp = StrictFastMCP("vibesys-rocprof-profiler")
     jobs = capture_jobs.CaptureJobs()
 
     def _run_profile(
@@ -1036,6 +1039,9 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
     def bench_parse(log: str) -> str:
         """Extract `wall_ms: <float>` lines from a driver log into a JSON `{"wall_ms": [...]}`.
 
+        The driver must print `wall_ms_done: <count>` once after its last sample; a log
+        without it, cut mid-line, or whose count differs is refused as incomplete.
+
         Args:
             log: Path to the driver log.
         """
@@ -1098,6 +1104,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # LW-910106; thi
             Path(config_path),
             _HERE.parent,
             profile_root=capture_runtime.profiles_root(),
+            clock=importlib.import_module("vs_sim.api").MonotonicClock(),
             evaluator_plan=Path(plan_path) if plan_path else None,
         )
     mcp = build_server(

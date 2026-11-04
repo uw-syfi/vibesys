@@ -1,0 +1,4655 @@
+{
+ "coverage_version": "7.14.3",
+ "cases": [
+  {
+   "pattern": "src",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/vibesys/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/main.py",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/vibesys/run.py",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/vibesys/sub/run.py",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/vibesys/run.txt",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/vibesys",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/a.b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/aXb/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/a+b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "src/aab/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/*",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/*",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/vibesys/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/main.py",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/vibesys/run.py",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/vibesys/sub/run.py",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/vibesys/run.txt",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/vibesys",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/a.b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/aXb/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/a+b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "src/aab/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/**",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/**",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/vibesys/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/vibesys/run.py",
+   "match": true
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/*.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/vibesys",
+   "match": true
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys/",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "tests/test_b.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "tests/test_d.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "tests/test_ab.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "tests/test_cat.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "tests/unit/test_x.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/**/test_*.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "libs/vs-core/src",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*.py",
+   "path": "main.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/vibesys/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/main.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/vibesys/run.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "*.py",
+   "path": "srcs/vibesys/run.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/a.b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/aXb/x.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/a+b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "src/aab/x.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "tests/test_b.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "tests/test_d.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "tests/test_ab.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "tests/test_cat.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "tests/unit/test_x.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "tests/helper.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "tests/unit/helper.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "*.py",
+   "path": "scripts/corevalue/run.py",
+   "match": true
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/vibesys/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "__main__.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/vibesys/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "*/__main__.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/vibesys/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "**/__main__.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": true
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": true
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "*/vs_proto/_generated/*",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "scripts/corevalue/tests/*",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "tests/test_b.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "tests/test_d.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "tests/test_ab.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "tests/test_cat.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "tests/unit/test_x.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "tests/unit/deep/test_x.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "tests/helper.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "tests/unit/helper.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "*/tests/*",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "tests/test_b.py",
+   "match": true
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "tests/test_d.py",
+   "match": true
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "tests/test_ab.py",
+   "match": true
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "tests/test_cat.py",
+   "match": true
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "tests/helper.py",
+   "match": true
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": true
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "**/tests/*.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "tests/test_b.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "tests/test_d.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_?.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "tests/test_b.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[ab].py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "tests/test_a.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "tests/test_b.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "tests/test_ab.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "tests/test_cat.py",
+   "match": true
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "tests/test_[a-c]*.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/a.b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a.b/*.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/a+b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/a+b/*",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/vibesys/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/main.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/vibesys/run.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/vibesys/sub/run.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/vibesys/run.txt",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/vibesys",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/a.b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/aXb/x.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/a+b/x.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "src/aab/x.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/src/*",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "main.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/vibesys/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "{root}/*.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/__main__.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/vibesys/__main__.py",
+   "match": true
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/main.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/vibesys/run.py",
+   "match": true
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/vibesys/sub/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/vibesys/run.txt",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/vibesys",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "srcs/vibesys/run.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/a.b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/aXb/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/a+b/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "src/aab/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "tests/test_b.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "tests/test_d.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "tests/test_ab.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "tests/test_cat.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "tests/unit/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "tests/unit/deep/test_x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "tests/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "tests/unit/helper.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": false
+  },
+  {
+   "pattern": "src/vibesys\\*.py",
+   "path": "scripts/corevalue/run.py",
+   "match": false
+  },
+  {
+   "pattern": "x**",
+   "path": "main.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/vibesys/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/main.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/vibesys/sub/run.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/vibesys/run.txt",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/vibesys",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "srcs/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/a.b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/aXb/x.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/a+b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "src/aab/x.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "tests/test_b.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "tests/test_d.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "tests/test_ab.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "tests/test_cat.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "tests/unit/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "tests/unit/deep/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "tests/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "tests/unit/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "x**",
+   "path": "scripts/corevalue/run.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "main.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/vibesys/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/main.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/vibesys/sub/run.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/vibesys/run.txt",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/vibesys",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "srcs/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/a.b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/aXb/x.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/a+b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "src/aab/x.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "tests/test_b.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "tests/test_d.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "tests/test_ab.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "tests/test_cat.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "tests/unit/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "tests/unit/deep/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "tests/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "tests/unit/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "**x",
+   "path": "scripts/corevalue/run.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "main.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/vibesys/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/main.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/vibesys/sub/run.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/vibesys/run.txt",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/vibesys",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "srcs/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/a.b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/aXb/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/a+b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "src/aab/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "tests/test_b.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "tests/test_d.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "tests/test_ab.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "tests/test_cat.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "tests/unit/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "tests/unit/deep/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "tests/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "tests/unit/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "a***",
+   "path": "scripts/corevalue/run.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "main.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/vibesys/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/main.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/vibesys/sub/run.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/vibesys/run.txt",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/vibesys",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "srcs/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/a.b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/aXb/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/a+b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "src/aab/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "tests/test_b.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "tests/test_d.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "tests/test_ab.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "tests/test_cat.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "tests/unit/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "tests/unit/deep/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "tests/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "tests/unit/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "a/**/**",
+   "path": "scripts/corevalue/run.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "main.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/vibesys/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/main.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/vibesys/sub/run.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/vibesys/run.txt",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/vibesys",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "srcs/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/a.b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/aXb/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/a+b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "src/aab/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "tests/test_b.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "tests/test_d.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "tests/test_ab.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "tests/test_cat.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "tests/unit/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "tests/unit/deep/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "tests/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "tests/unit/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "src/[",
+   "path": "scripts/corevalue/run.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "main.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/vibesys/__main__.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/main.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/vibesys/sub/run.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/vibesys/run.txt",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/vibesys",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "srcs/vibesys/run.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/a.b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/aXb/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/a+b/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "src/aab/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "tests/test_b.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "tests/test_d.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "tests/test_ab.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "tests/test_cat.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "tests/unit/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "tests/unit/deep/test_x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "tests/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "tests/unit/helper.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "libs/vs-core/src/vs_core/api.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "libs/vs-core/tests/test_api.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "libs/vs-proto/src/vs_proto/_generated/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "libs/vs-proto/src/vs_proto/_generated/sub/x_pb2.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "libs/vs-proto/src/vs_proto/x.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "scripts/corevalue/tests/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "scripts/corevalue/tests/sub/test_a.py",
+   "match": null
+  },
+  {
+   "pattern": "src/]",
+   "path": "scripts/corevalue/run.py",
+   "match": null
+  }
+ ]
+}

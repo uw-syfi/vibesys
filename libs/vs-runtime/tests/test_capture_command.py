@@ -10,7 +10,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_core.api import CaptureCommandBase, HostFence, HostId, RevisionId, RevisionRef, Until
+from vs_core.api import CaptureCommandBase, RevisionId, RevisionRef, Until
 from vs_runtime.api import CommandResult, Workspace
 from vs_runtime.api.core import CaptureCommandOwner, ExecutionContext, NotApplied
 from vs_runtime.api.testing import FakeCommands, FakeWorkspace, FakeWorkspaces
@@ -81,6 +81,41 @@ async def test_a_command_that_exits_nonzero_is_reported_not_raised() -> None:
     commands.script(CommandResult(output="boom", exit_code=2))
     outcome = await owner.capture(_request("r1"), "id")
     assert (outcome["status"], outcome["exit_code"], outcome["output"]) == ("succeeded", 2, "boom")
+
+
+async def test_a_failed_capture_exposes_only_its_prebounded_diagnostic() -> None:
+    """Attribution cannot recover a secret split by the raw stream's prefix/tail cap."""
+    owner, _, commands = _owner({"r1"})
+    secret = "s" * 240
+    commands.script(
+        CommandResult(
+            output=f"prefix API_TOKEN={secret[:20]}...[truncated]...{secret[-20:]} tail",
+            exit_code=7,
+            truncated=True,
+            diagnostic_output="prefix API_TOKEN=[REDACTED] tail",
+        )
+    )
+
+    outcome = await owner.capture(_request("r1"), "id")
+
+    assert outcome["output"] == "prefix API_TOKEN=[REDACTED] tail"
+    assert secret[:20] not in str(outcome["output"])
+    assert secret[-20:] not in str(outcome["output"])
+
+
+async def test_a_successful_capture_keeps_raw_protocol_output() -> None:
+    owner, _, commands = _owner({"r1"})
+    commands.script(
+        CommandResult(
+            output="protocol-token",
+            exit_code=0,
+            diagnostic_output="[REDACTED]",
+        )
+    )
+
+    outcome = await owner.capture(_request("r1"), "id")
+
+    assert outcome["output"] == "protocol-token"
 
 
 async def test_an_infrastructure_failure_propagates_and_still_discards_the_candidate() -> None:
@@ -154,7 +189,6 @@ async def test_a_host_that_dies_mid_capture_leaves_nothing_after_the_replay(iden
 async def test_inspection_never_runs_the_command() -> None:
     owner, _, commands = _owner({"r1"})
     context = ExecutionContext(
-        fence=HostFence(host_id=HostId(root="h"), epoch=1),
         now_at=0.0,
         payload_digest="d",
         until=Until(at=100.0),

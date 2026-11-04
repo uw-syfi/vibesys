@@ -63,6 +63,7 @@ from vs_issue_tracker.api import (
     MemoryProgressLog,
 )
 from vs_runtime.api.core import IssueBoardOwner
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -185,7 +186,9 @@ class Host:
     dropped_writes: frozenset[int] = frozenset()
     accurate: bool = True
     suspending: bool = False
-    tracker: FakeIssueTracker = field(default_factory=FakeIssueTracker)
+    tracker: FakeIssueTracker = field(
+        default_factory=lambda: FakeIssueTracker(clock=ManualClock(), threads=SimThreads())
+    )
     opened: list[AttemptRef] = field(default_factory=list)
     """Every attempt the host admitted, in order."""
     settled: dict[str, Settle] = field(default_factory=dict)
@@ -433,18 +436,3 @@ class Host:
             stage=ref.kind.value,
             metrics=(),
         )
-
-
-def play(host: Host, steps: Sequence[tuple[int, int]]) -> None:
-    """Answer the open waits as ``steps`` say (which wait, which way), then in the ordinary way."""
-    for pick, variant in steps:
-        if not host.step(pick, variant):
-            break
-    host.drain()
-
-
-def assert_flow_closed(host: Host) -> None:
-    """The flow finished the run and left no attempt open and no wait unanswered."""
-    assert host.run.finished is not None, host.run.timeline()
-    assert not host.unsettled, host.run.timeline()
-    assert not [item for item in host.run.open if item.until is not None], host.run.timeline()

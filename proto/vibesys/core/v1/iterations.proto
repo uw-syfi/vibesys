@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+// A strategy derives the lifetime number from previously completed units.
+// Epoch allowances are policy and never part of this request's identity.
+message IterationRequest {
+  string scope = 1 [(buf.validate.field).string.min_len = 1];
+  uint64 number = 2 [(buf.validate.field).uint64.gt = 0];
+}
+
+// The canonical admission identity binds completion to one exact occurrence.
+message IterationGranted {
+  IterationRequest unit = 1 [(buf.validate.field).required = true];
+  bytes admission_digest = 2 [(buf.validate.field).bytes.len = 32];
+}
+
+message IterationCompletion {
+  IterationGranted grant = 1 [(buf.validate.field).required = true];
+}
+
+message IterationCompleted {
+  IterationGranted grant = 1 [(buf.validate.field).required = true];
+}

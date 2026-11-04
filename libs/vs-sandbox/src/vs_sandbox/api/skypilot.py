@@ -22,6 +22,7 @@ from vs_sandbox.skypilot_protocol import (
     ArtifactFrame,
     ErrorFrame,
     EvaluationRequest,
+    FrameDecodeError,
     OutputFrame,
     ResponseFrame,
     ResultFrame,
@@ -90,6 +91,7 @@ from vs_sandbox.skypilot_states import (
     observe,
     status_text,
 )
+from vs_sandbox.skypilot_step_jobs import JobsSurvivedCancelError, cancel_step_jobs
 
 __all__ = [
     "INITIAL_JOB_LIFE",
@@ -113,6 +115,7 @@ __all__ = [
     "ErrorFrame",
     "EvaluationRequest",
     "Finished",
+    "FrameDecodeError",
     "Indeterminate",
     "InvocationJournal",
     "InvocationPhase",
@@ -127,6 +130,7 @@ __all__ = [
     "JobRunning",
     "JobStatus",
     "JobUnknown",
+    "JobsSurvivedCancelError",
     "LogsFailed",
     "LogsVerdict",
     "OutputFrame",
@@ -151,6 +155,7 @@ __all__ = [
     "advance",
     "allocation_gone",
     "build_task_document",
+    "cancel_step_jobs",
     "cluster_life",
     "compact_json",
     "decode_ack",

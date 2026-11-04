@@ -1,0 +1,85 @@
+---
+name: measure
+description: "Use when you must measure a commit for a vibesys optimization, compare it with another commit, or read the current best number. Submits check, measure and command jobs to vibesys-cli, which builds and runs the exact commit in a clean checkout and owns the queue, the cache, the verdict and the saved results. Says how to wait for a job, what each wait exit code means, and how to read what came back."
+---
+
+# Measure
+
+A number is a job that `vibesys-cli` ran from a clean checkout of one commit and saved. Never
+report a number that `vibesys-cli` did not print. The CLI decides what a check, a sample, a verdict
+and a promotion are; this skill says how to use it and how to read what comes back. The lead
+installs and checks the CLI (`vibesys:optimize`).
+
+**Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
+`PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
+started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
+set; export it as the absolute path of the vibesys-cli to use`.
+
+Every call takes the context flags your brief names: `--task`, `--run`, `--harness` and `--agent`.
+All worktrees of the repository share one store per task, so a call from your worktree sees the
+jobs and results of every other agent. The examples leave them out. Add `--json` wherever you parse the output. Detail on jobs,
+exit codes and slow runs: [jobs.md](references/jobs.md).
+
+Harness-specific mechanics (background tasks, waiting): read `references/harness/<harness>.md` for
+the harness you are running in.
+
+## Jobs
+
+Commit first: a job runs a commit, never a working copy, so what is not committed is not run
+(`vibesys:commit`).
+
+| You need | Run |
+| --- | --- |
+| The correctness check on a commit | `vibesys-cli submit check <sha>` |
+| The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5` |
+| Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> -- <argv...>` |
+
+Each prints a job id and returns at once. Useful flags: `--plan <n>` links the job to your plan,
+`--note "<text>"` says why you ran it (notes are for readers; they change no result), and
+`--service` with `--probe` runs the command against a service the CLI starts and stops.
+`--no-cache` and `--recheck` force fresh work; only a reason to doubt a saved result justifies
+them. Use the task's own commands through `check` and `measure`; do not rebuild them by hand.
+
+Everything that puts load on the machine goes through a job, so the daemon decides what runs
+together and the numbers stay clean: a measure job holds its placement alone, while checks and
+command jobs may share it up to the placement's `max_jobs`. Do not start a benchmark, a profiler
+or a server in your own shell.
+
+## Wait
+
+Run `vibesys-cli wait <job>...` as one tracked background task of your harness and take its
+completion notification; add `--timeout` to bound it. `submit ... --wait` blocks the same way and
+is for short jobs only. Never wait with a foreground `sleep` or a polling loop. Read the exit code
+before the output:
+
+| Code | Meaning | Do |
+| --- | --- | --- |
+| 0 | every job succeeded (with `--any`, the first one did) | read the result |
+| 1 | the daemon said no: a job failed, was cancelled or was lost | `vibesys-cli logs <job>`, fix, commit, resubmit the new commit |
+| 2 | invalid input, or a job or commit that does not exist | fix the call |
+| 3 | the wait timed out; no job was cancelled | the jobs still run; wait again |
+| 4 | no answer: no daemon, an incompatible one, an internal failure, or the end of the jobs is unknown | says nothing about the jobs, which may still succeed; do not resubmit, inspect (see [jobs.md](references/jobs.md)) |
+
+With `--json`, `wait` prints one `WaitOutcome`: `kind` (`ALL_SUCCEEDED`, `SOME_FAILED`,
+`FIRST_SUCCEEDED`, `FIRST_FAILED` or `TIMED_OUT`), `decided_by` (the job that ended the wait) and
+`jobs` with each job's last state. `submit --wait --json` prints the submit response first and
+the `WaitOutcome` on the last line. The exit code follows the `kind`; use it to branch.
+
+A failed check or build saves nothing; put the failing output in the hand-back, with the SHA.
+
+## Read
+
+- `vibesys-cli show <sha> --json` lists what was saved for a commit. A measure result's
+  `measure.value` is its headline number, computed by the CLI. Never average samples yourself, and
+  never report a number from anywhere else.
+- `vibesys-cli compare <sha> [--against <sha2>]` prints one verdict and its numbers, against the
+  result branch head or against `<sha2>`. It exits 0 for every verdict; read the verdict, which
+  `--json` has as `comparison.verdict.kind`. Only `better` is a gain. `worse` and `within_noise` are
+  not. On `inconclusive`, add samples within your brief's budget, unless the line says `not comparable`: the two commits were measured under different task versions or metrics, which more samples cannot fix, so report it. Never compute a verdict yourself.
+- Samples add up: `submit measure <sha> --samples 8` runs only the missing ones. Identical readings
+  on both sides stay inconclusive however many you add.
+- `vibesys-cli result --json` has the number to report for the result branch, in
+  `current.result.measure.value`. It exits 1 when the head has no measurement taken since it last
+  moved (`none.reason` says why); the way to get one is `vibesys-cli submit measure <head SHA>
+  --no-cache`, because reusing the samples that picked a winner would overstate its score.
+- Tell the reader the base, the sample counts and the environment from the output, never from memory.

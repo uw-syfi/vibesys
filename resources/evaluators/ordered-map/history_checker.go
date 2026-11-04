@@ -68,6 +68,7 @@ func orderedMapModel() porcupine.Model {
 			}
 			return true, next
 		},
+		Hash: func(state any) uint64 { return hashSpec(state.(*orderedMapSpec)) },
 		Equal: func(first, second any) bool {
 			return specEqual(first.(*orderedMapSpec), second.(*orderedMapSpec))
 		},

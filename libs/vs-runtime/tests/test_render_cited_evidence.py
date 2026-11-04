@@ -8,8 +8,6 @@ from vs_core.api import (
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
-    HostFence,
-    HostId,
     ObservationStatus,
     OperationRequest,
     RequestId,
@@ -77,7 +75,7 @@ def _held() -> tuple[EvidenceRef, TrustedEvidence]:
     )
     ref = EvidenceRef(
         evidence_id=EvidenceId(root=evidence.evidence_id),
-        kind=EvidenceKind.LOCAL_VALIDATION,
+        kind=EvidenceKind.BENCHMARK,
         purpose="local-validation",
         scope=Scope(owner=RunId(root="run"), generation=0),
         source_request=RequestId(root="request"),
@@ -104,7 +102,6 @@ def _render(tmp_path: Path, template: str, context: BaseModel) -> str:
     ledger.record(ref.source_request, evidence, ref.purpose)
     owner = RenderArtifactsOwner(TemplateRenderer(roots), store, None, ledger, {})
     fence = ExecutionContext(
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         now_at=1.0,
         payload_digest="d",
         until=Until(at=100.0),

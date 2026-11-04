@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import asyncio
-import signal
 import sys
-import threading
 from contextlib import contextmanager
 from functools import partial
 from typing import TYPE_CHECKING
 
+from headless import printable
 from headless import run as render_run
-from vibesys.api import RunStopped
-from vs_sim.api import LoopSignalSource
+from vibesys.api import RunStopped, StopMode, relaunch
+from vs_sim.api import Signals
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Iterator
@@ -20,13 +19,17 @@ if TYPE_CHECKING:
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs
     from vs_sim.api import SignalSource
 
-# Ctrl-C asks for a cooperative stop. These, and any repeated signal, end the
-# run now: its task is cancelled, so its teardown cancels external work (Slurm
-# jobs) before the process exits.
+# Ctrl-C asks for a stop that cancels the work in flight (Slurm jobs) at once,
+# bounded like every stop, even after a draining stop: the run's control is the
+# one authority for its stop, and a stop there only escalates. The launcher
+# forwards each Ctrl-C once (this process leads its own session, so the
+# terminal's copy never reaches it) and sends a repeated one on as SIGTERM.
+# SIGTERM and SIGHUP end the run now: its task is cancelled, so its teardown
+# cancels external work before the process exits.
 __all__ = ["failure_reason", "run_headless", "supervise"]
 
-_TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
-_HANDLED_SIGNALS = (signal.SIGINT, *_TERMINATION_SIGNALS)
+_TERMINATION_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP)
+_HANDLED_SIGNALS = (Signals.SIGINT, *_TERMINATION_SIGNALS)
 
 
 class _Supervisor:
@@ -35,15 +38,15 @@ class _Supervisor:
     def __init__(self, session: RunHandle, execution: asyncio.Task[RunResult]) -> None:
         self._session = session
         self._execution = execution
-        self._stopping = False
         self.terminating = False
-        self.signalled: signal.Signals | None = None
+        self.signalled: Signals | None = None
 
-    def stop(self) -> None:
-        """Request a cooperative stop once; the run drains in-flight work."""
-        if not self._stopping:
-            self._stopping = True
-            self._session.stop()
+    def stop(self, mode: StopMode = StopMode.DRAIN) -> None:
+        """Request a cooperative stop in ``mode``; the run's control keeps the strongest.
+
+        A repeated request changes nothing, and a cancel after a drain escalates it.
+        """
+        self._session.stop(mode)
 
     def terminate(self) -> None:
         """Cancel the run once; cancellation unwinds through its teardown."""
@@ -51,12 +54,12 @@ class _Supervisor:
             self.terminating = True
             self._session.cancel()
 
-    def on_signal(self, number: signal.Signals) -> None:
-        """Stop on the first Ctrl-C; cancel on any other or repeated signal."""
-        first = self.signalled is None
+    def on_signal(self, number: Signals) -> None:
+        """Stop, cancelling work in flight, on Ctrl-C; cancel the run on any other signal."""
         self.signalled = self.signalled or number
-        if first and number is signal.SIGINT:
-            self.stop()
+        if number is Signals.SIGINT:
+            if not self.terminating:
+                self.stop(StopMode.CANCEL)
         else:
             self.terminate()
 
@@ -73,22 +76,26 @@ async def supervise(
     session: RunHandle,
     work: Awaitable[RunResult] | None = None,
     *,
-    handle_signals: bool = True,
-    signals: SignalSource | None = None,
+    signals: SignalSource | None,
 ) -> RunResult:
     """Await the run; a stop or signal unwinds it through its own teardown.
 
     Cancelling this coroutine requests a cooperative stop and drains the run
-    before the cancellation propagates. With *handle_signals*, the first SIGINT
-    requests that stop and returns the typed stopped result; SIGTERM, SIGHUP,
-    or a repeated signal cancel the run and end in ``SystemExit(128 + n)``.
+    before the cancellation propagates. With a *signals* source, SIGINT requests a
+    stop in ``StopMode.CANCEL`` (the run cancels its evaluations and jobs at once,
+    and the host bounds how long its agents' turns may take to end) and returns the
+    typed stopped result. If cancelling this coroutine already asked for a draining
+    stop, a SIGINT escalates it to ``StopMode.CANCEL`` and the cancellation still
+    propagates once the run has ended. A repeated SIGINT changes nothing. SIGTERM or SIGHUP,
+    first or after a SIGINT, cancel the run and end in ``SystemExit(128 + n)``,
+    where n is the first signal received.
     The handlers run on the event loop, so no signal raises inside a teardown step.
-    *signals* is where they arrive: the process's own signals by default, a Fake
-    that a test delivers by hand otherwise.
+    *signals* is where they arrive: the process's own (``LoopSignalSource``, built
+    by the entrypoint), a Fake that a test delivers by hand, or None to handle none.
     """
     execution = asyncio.ensure_future(work if work is not None else session.result())
     supervisor = _Supervisor(session, execution)
-    with _signal_scope(supervisor, signals, enabled=handle_signals):
+    with _signal_scope(supervisor, signals):
         completed = False
         try:
             result = await _await_completion(supervisor, execution)
@@ -127,39 +134,35 @@ async def _await_completion(
 
 
 @contextmanager
-def _signal_scope(
-    supervisor: _Supervisor, signals: SignalSource | None, *, enabled: bool
-) -> Iterator[None]:
-    """Temporarily install signal callbacks and, for the process's own, restore its signals."""
-    own = signals is None
-    source = LoopSignalSource() if signals is None else signals
-    installed: list[signal.Signals] = []
-    previous = {}
+def _signal_scope(supervisor: _Supervisor, signals: SignalSource | None) -> Iterator[None]:
+    """Route the handled signals to *supervisor* for the scope, then hand them back."""
+    if signals is None:
+        yield
+        return
+    installed: list[Signals] = []
     try:
-        if enabled and (not own or threading.current_thread() is threading.main_thread()):
-            for number in _HANDLED_SIGNALS:
-                if own:
-                    previous[number] = signal.getsignal(number)
-                source.add_handler(number, partial(supervisor.on_signal, number))
-                installed.append(number)
+        for number in _HANDLED_SIGNALS:
+            signals.add_handler(number, partial(supervisor.on_signal, number))
+            installed.append(number)
         yield
     finally:
         for number in installed:
-            source.remove_handler(number)
-            if previous.get(number) is not None:
-                signal.signal(number, previous[number])
+            signals.remove_handler(number)
 
 
-def _signal_exit(number: signal.Signals) -> BaseException:
+def _signal_exit(number: Signals) -> BaseException:
     return SystemExit(128 + number)
 
 
-def run_headless(request: RunRequest, runs: Runs) -> RunResult:
-    """Start one run and supervise terminal rendering through completion."""
+def run_headless(request: RunRequest, runs: Runs, signals: SignalSource) -> RunResult:
+    """Start one run and supervise terminal rendering through completion.
+
+    *signals* is where the process's stop and termination signals arrive.
+    """
 
     async def execute() -> RunResult:
-        handle = runs.resume(request) if request.resume is not None else runs.start(request)
-        return await supervise(handle, render_run(handle))
+        handle = relaunch(request, runs) if request.resume is not None else runs.start(request)
+        return await supervise(handle, render_run(handle), signals=signals)
 
     try:
         return asyncio.run(execute())
@@ -167,7 +170,7 @@ def run_headless(request: RunRequest, runs: Runs) -> RunResult:
         raise
     except Exception as error:
         # The traceback still follows; this is the one line a reader of the output needs.
-        sys.stderr.write(f"run failed: {failure_reason(error)}\n")
+        sys.stderr.write(f"run failed: {printable(failure_reason(error))}\n")
         raise
 
 

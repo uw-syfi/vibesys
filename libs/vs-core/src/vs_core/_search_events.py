@@ -15,12 +15,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ._comparison import comparison_of_result, moment_of, stated_comparisons
 from ._registry import ContractError
 from .types.attempts import AttemptExhausted, CheckpointResolved
 from .types.common import Scope
-from .types.evaluation import MeasurementResult, ResumeAuthorized, TurnSuspended
-from .types.kernel import ControlChanged
+from .types.evaluation import MeasurementResult, ResumeAuthorized, ResumeRefused, TurnSuspended
+from .types.kernel import ControlChanged, StopLiftRecorded
 from .types.kinds import EventKind
+from .types.measurement import ComparisonSettled
 from .types.records import OperationResult
 from .types.scheduling import AttemptReady
 from .types.search import (
@@ -34,8 +36,10 @@ from .types.search import (
     MessageDelivered,
     MessageDropped,
     OperationFinished,
+    ResumeFailed,
     ResumeReady,
     RunView,
+    StopLifted,
     StopRequested,
     TurnEnded,
     TurnYielded,
@@ -71,13 +75,14 @@ def run_view(core: CoreState) -> RunView:
         attempts=tuple(AttemptSummary.of(view) for view in core.attempts.attempts),
         measurements=core.evaluation.evidence,
         settlements=core.settlement.settlements,
+        comparisons=stated_comparisons(core.evaluation, moment_of(run)),
     )
 
 
 def _record(core: CoreState, request_id: RequestId) -> RequestRecord:
-    for record in core.records.records:
-        if record.request_id == request_id:
-            return record
+    record = core.records.record(request_id)
+    if record is not None:
+        return record
     raise ContractError(("request_id", request_id.root), "result for an unknown request")
 
 
@@ -151,9 +156,8 @@ def _ignored(core: CoreState, event: StrategyEvent) -> None:
 def _failed(core: CoreState, event: Failed) -> Event | Discarded:
     """A search hears only the failures of its own decisions.
 
-    One without a decision ended a request core made for itself (a recovery check, a
-    release, an inspection). Core owns those: the recovery barrier and the run status
-    already react to them, and the shell logs the discard.
+    One without a decision ended a request core made for itself (a release, an inspection).
+    Core owns those: the run status already reacts to them, and the shell logs the discard.
     """
     del core
     if event.decision is None:
@@ -186,7 +190,7 @@ def _never_started(core: CoreState, event: TurnResult) -> DecisionId | None:
 
 def _turn(core: CoreState, event: TurnResult) -> Event | Discarded | None:
     request = event.observation.request_id
-    if not any(record.request_id == request for record in core.records.records):
+    if not core.records.positions(request):
         decision = _never_started(core, event)
         return None if decision is None else TurnEnded(decision=decision, result=event)
     decision = _decision_of(core, request)
@@ -212,17 +216,34 @@ def _resume(core: CoreState, event: ResumeAuthorized) -> Event:
     return ResumeReady(authorization=event)
 
 
+def _resume_refused(core: CoreState, event: ResumeRefused) -> Event:
+    del core
+    return ResumeFailed(refusal=event)
+
+
 def _checkpoint(core: CoreState, event: CheckpointResolved) -> Event:
     del core
     return CheckpointKnown(invocation=event.invocation, checkpoint=event.checkpoint)
 
 
+def _comparison_settled(core: CoreState, event: ComparisonSettled) -> Event:
+    del core
+    return event
+
+
 def _measurement(core: CoreState, event: MeasurementResult) -> Event | Discarded:
     source = event.source_request
+    comparison = comparison_of_result(
+        core.evaluation, moment_of(core.run), event.scope, (e.candidate for e in event.evidence)
+    )
+    if event.decision_id is not None:
+        # Core answered the decision itself, so no request of its own ended: the run named
+        # as the source may be an earlier one, and whatever became of it is no news here.
+        return MeasurementFinished(decision=event.decision_id, result=event, comparison=comparison)
     if source is None:
-        return MeasurementFinished(decision=None, result=event)
+        return MeasurementFinished(decision=None, result=event, comparison=comparison)
     return _late(core, source, EventKind.MEASUREMENT_FINISHED) or MeasurementFinished(
-        decision=_decision_of(core, source), result=event
+        decision=_decision_of(core, source), result=event, comparison=comparison
     )
 
 
@@ -257,6 +278,11 @@ def _control(core: CoreState, event: ControlChanged) -> Event:
     return StopRequested(control=event.control)
 
 
+def _stop_lifted(core: CoreState, event: StopLiftRecorded) -> Event:
+    del core
+    return StopLifted(control=event.control, new_epoch=event.new_epoch)
+
+
 def _delivered(core: CoreState, event: InputDelivered) -> Event:
     del core
     return MessageDelivered(delivery=event)
@@ -280,7 +306,9 @@ _TRANSLATE: dict[type, Callable[[CoreState, Any], Event | Discarded | None]] = {
     TurnSuspended: _yielded,
     YieldPublicationFailed: _yield_failed,
     ResumeAuthorized: _resume,
+    ResumeRefused: _resume_refused,
     CheckpointResolved: _checkpoint,
+    ComparisonSettled: _comparison_settled,
     MeasurementResult: _measurement,
     OperationResult: _operation,
     AdoptionResult: _adoption,
@@ -288,6 +316,7 @@ _TRANSLATE: dict[type, Callable[[CoreState, Any], Event | Discarded | None]] = {
     AttemptSettled: _settled,
     AttemptReady: _ready,
     ControlChanged: _control,
+    StopLiftRecorded: _stop_lifted,
     InputDelivered: _delivered,
     InputDropped: _dropped,
     InterruptCompleted: _interrupted,

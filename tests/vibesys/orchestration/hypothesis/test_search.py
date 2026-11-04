@@ -20,6 +20,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.support.declared_reply import DeclaredImplementerResponse
 
 from vibesys.hypothesis import (
     CandidateDisposition,
@@ -34,7 +35,6 @@ from vibesys.hypothesis import (
     HypothesisStrategyUpdate,
     NewHypothesis,
     OrchestratorPlan,
-    RollbackTarget,
     RoundRecord,
 )
 from vibesys.hypothesis import cadence as hypothesis_cadence
@@ -46,7 +46,6 @@ from vibesys.hypothesis.attempts import (
 )
 from vibesys.hypothesis.state import Hypothesis, HypothesisState
 from vibesys.metrics import MetricComparison, MetricSpace, Objective
-from vibesys.orchestration.multi.models import ImplementerResponse
 from vs_sim.api.testing import examples
 
 # --- helpers -----------------------------------------------------------
@@ -55,7 +54,7 @@ from vs_sim.api.testing import examples
 def _plan(
     identifier: str,
     *,
-    revert_to_round: int | None = None,
+    base_round: int | None = None,
     updates: list[HypothesisStrategyUpdate] | None = None,
 ) -> OrchestratorPlan:
     return OrchestratorPlan(
@@ -65,7 +64,7 @@ def _plan(
         task=f"implement {identifier}",
         pass_criteria="tests pass",  # noqa: S106  # LW-040073 [S106]; the argument is a fixture literal, not a credential.
         reasoning="test the claim",
-        revert_to_round=revert_to_round,
+        base_round=base_round,
     )
 
 
@@ -151,12 +150,16 @@ def _run_round(  # noqa: PLR0913  # LW-040075 [PLR0913]; the parameters are inde
 ) -> HypothesisState:
     """Start ``hypothesis_id`` and close it in one round; return the new state.
 
-    ``start``'s own parent resolution (the previous round, from ``records``)
-    is always used, which is what every scenario below needs: each hypothesis
-    here is a direct child of the round immediately before it.
+    Each hypothesis here is a direct child of the round immediately before
+    it (the base the search would resolve when that round was the best).
     """
+    previous = next((r for r in records if r.round_number == round_number - 1), None)
     started = search.start(
-        state, _plan(hypothesis_id), round_number=round_number, current_commit=None, records=records
+        state,
+        _plan(hypothesis_id),
+        round_number=round_number,
+        parent_round=None if previous is None else previous.round_number,
+        parent_commit=None if previous is None else previous.commit,
     )
     closed = search.close_round(
         started.state,
@@ -185,7 +188,7 @@ def test_next_round_is_finished_past_the_round_budget() -> None:
 def test_next_round_continues_an_active_hypothesis() -> None:
     search = HypothesisSearch(HypothesisConfig(max_rounds=5))
     started = search.start(
-        search.initial(), _plan("H-1"), round_number=1, current_commit=None, records=[]
+        search.initial(), _plan("H-1"), round_number=1, parent_round=None, parent_commit=None
     )
     decision = search.next_round(started.state, round_number=1, records=[], carry=CarryOver())
     assert isinstance(decision, Continue)
@@ -196,7 +199,6 @@ def test_next_round_asks_for_a_new_hypothesis_when_none_is_active() -> None:
     search = HypothesisSearch(HypothesisConfig(max_rounds=5))
     decision = search.next_round(search.initial(), round_number=1, records=[], carry=CarryOver())
     assert isinstance(decision, NewHypothesis)
-    assert decision.default_parent_round is None
 
 
 # --- start: basic lifecycle, rollback, strategy updates, validation ----
@@ -205,7 +207,7 @@ def test_next_round_asks_for_a_new_hypothesis_when_none_is_active() -> None:
 def test_start_activates_the_named_hypothesis() -> None:
     search = HypothesisSearch(HypothesisConfig(max_rounds=5))
     started = search.start(
-        search.initial(), _plan("H-1"), round_number=1, current_commit=None, records=[]
+        search.initial(), _plan("H-1"), round_number=1, parent_round=None, parent_commit=None
     )
     assert started.state.active_hypothesis_id == "H-1"
     assert started.hypothesis.hypothesis_id == "H-1"
@@ -217,9 +219,11 @@ def test_start_rejects_a_blank_or_duplicate_hypothesis_id() -> None:
     state = search.initial()
 
     with pytest.raises(ValueError, match="blank"):
-        search.start(state, _plan("  "), round_number=1, current_commit=None, records=[])
+        search.start(state, _plan("  "), round_number=1, parent_round=None, parent_commit=None)
 
-    started = search.start(state, _plan("H-1"), round_number=1, current_commit=None, records=[])
+    started = search.start(
+        state, _plan("H-1"), round_number=1, parent_round=None, parent_commit=None
+    )
     closed = search.close_round(
         started.state,
         hypothesis=started.hypothesis,
@@ -228,23 +232,27 @@ def test_start_rejects_a_blank_or_duplicate_hypothesis_id() -> None:
         **_closing_kwargs(passed=True),
     )
     with pytest.raises(ValueError, match="already exists"):
-        search.start(closed.state, _plan("H-1"), round_number=2, current_commit=None, records=[])
+        search.start(
+            closed.state, _plan("H-1"), round_number=2, parent_round=None, parent_commit=None
+        )
 
 
 def test_start_rejects_starting_while_another_hypothesis_is_active() -> None:
     search = HypothesisSearch(HypothesisConfig(max_rounds=5))
     started = search.start(
-        search.initial(), _plan("H-1"), round_number=1, current_commit=None, records=[]
+        search.initial(), _plan("H-1"), round_number=1, parent_round=None, parent_commit=None
     )
     with pytest.raises(ValueError, match="another"):
-        search.start(started.state, _plan("H-2"), round_number=2, current_commit=None, records=[])
+        search.start(
+            started.state, _plan("H-2"), round_number=2, parent_round=None, parent_commit=None
+        )
 
 
 def test_start_applies_strategy_updates_to_completed_hypotheses() -> None:
     """A designer's parked/abandoned update lands on the named hypothesis."""
     search = HypothesisSearch(HypothesisConfig(max_rounds=5))
     started = search.start(
-        search.initial(), _plan("old"), round_number=1, current_commit=None, records=[]
+        search.initial(), _plan("old"), round_number=1, parent_round=None, parent_commit=None
     )
     closed = search.close_round(
         started.state,
@@ -260,8 +268,8 @@ def test_start_applies_strategy_updates_to_completed_hypotheses() -> None:
         closed.state,
         _plan("new", updates=[update]),
         round_number=2,
-        current_commit=None,
-        records=closed.state.rounds,
+        parent_round=None,
+        parent_commit=None,
     )
     old = started_new.state.by_id("old")
     assert old is not None
@@ -279,102 +287,41 @@ def test_start_strategy_update_rejects_an_unknown_hypothesis() -> None:
             search.initial(),
             _plan("H-1", updates=[update]),
             round_number=1,
-            current_commit=None,
-            records=[],
+            parent_round=None,
+            parent_commit=None,
         )
 
 
-def test_start_resolves_rollback_to_earlier_committed_round() -> None:
+def test_start_records_the_base_the_caller_resolved() -> None:
     search = HypothesisSearch(HypothesisConfig(max_rounds=10))
-    state = HypothesisState()
-    records = [
-        _round(1, hypothesis_id="H-1", commit="a" * 40, outcome="proven"),
-        _round(
-            2,
-            hypothesis_id="H-2",
-            commit="b" * 40,
-            outcome="disproven",
-            parent_round=1,
-            parent_commit="a" * 40,
-        ),
-    ]
-    plan = _plan("H-3", revert_to_round=1)
-    started = search.start(state, plan, round_number=3, current_commit="c" * 40, records=records)
-    assert started.rollback is not None
-    assert started.rollback.resolved
-    assert started.rollback.commit == "a" * 40
-    rollback_round = next(r for r in records if r.commit == started.rollback.commit)
-    assert rollback_round.round_number < 3
-
-
-def test_start_rollback_unresolved_when_the_named_round_has_no_commit() -> None:
-    search = HypothesisSearch(HypothesisConfig(max_rounds=10))
-    records = [_round(1, hypothesis_id="H-1", commit=None, outcome="continue", declared="continue")]
-    plan = _plan("H-2", revert_to_round=1)
-    started = search.start(
-        HypothesisState(), plan, round_number=2, current_commit="a" * 40, records=records
-    )
-    assert started.rollback is not None
-    assert not started.rollback.resolved
-    assert started.rollback.commit is None
-
-
-def test_start_revert_to_round_zero_restores_the_input_baseline() -> None:
-    search = HypothesisSearch(HypothesisConfig(max_rounds=10))
-    records = [
-        _round(1, hypothesis_id="H-1", commit="a" * 40, outcome="disproven"),
-        _round(
-            2,
-            hypothesis_id="H-2",
-            commit="b" * 40,
-            outcome="continue",
-            declared="continue",
-            parent_round=1,
-            parent_commit="a" * 40,
-        ),
-    ]
     started = search.start(
         HypothesisState(),
-        _plan("H-3", revert_to_round=0),
+        _plan("H-3", base_round=1),
         round_number=3,
-        current_commit="c" * 40,
-        records=records,
-        input_baseline="0" * 40,
+        parent_round=1,
+        parent_commit="a" * 40,
     )
-    assert started.rollback == RollbackTarget(
-        commit="0" * 40, failed_child_round=None, resolved=True
+    assert started.hypothesis.parent_round == 1
+    assert started.hypothesis.parent_commit == "a" * 40
+    assert started.hypothesis.plan.base_round == 1
+
+
+def test_start_on_the_input_records_no_parent_round() -> None:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=10))
+    started = search.start(
+        HypothesisState(),
+        _plan("H-3", base_round=0),
+        round_number=3,
+        parent_round=None,
+        parent_commit="0" * 40,
     )
     assert started.hypothesis.parent_round is None
     assert started.hypothesis.parent_commit == "0" * 40
 
 
-def test_start_revert_to_round_zero_is_unresolved_without_an_input_baseline() -> None:
-    search = HypothesisSearch(HypothesisConfig(max_rounds=10))
-    started = search.start(
-        HypothesisState(),
-        _plan("H-2", revert_to_round=0),
-        round_number=2,
-        current_commit="c" * 40,
-        records=[_round(1, hypothesis_id="H-1", commit="a" * 40)],
-    )
-    assert started.rollback is not None
-    assert not started.rollback.resolved
-    assert started.hypothesis.parent_round is None
-    assert started.hypothesis.parent_commit == "c" * 40
-
-
-def test_plan_rejects_a_negative_revert_to_round() -> None:
-    with pytest.raises(ValidationError, match="revert_to_round"):
-        _plan("H-1", revert_to_round=-1)
-
-
-def test_start_with_no_revert_falls_back_to_the_current_commit() -> None:
-    search = HypothesisSearch(HypothesisConfig(max_rounds=10))
-    started = search.start(
-        HypothesisState(), _plan("H-1"), round_number=1, current_commit="c" * 40, records=[]
-    )
-    assert started.rollback is None
-    assert started.hypothesis.parent_commit == "c" * 40
+def test_plan_rejects_a_negative_base_round() -> None:
+    with pytest.raises(ValidationError, match="base_round"):
+        _plan("H-1", base_round=-1)
 
 
 # --- attempts: never exceed budget --------------------------------------
@@ -448,46 +395,12 @@ def test_review_due_override_skips_a_bounded_already_reviewed_continuation() -> 
     assert not due
 
 
-@settings(max_examples=examples(pr=8, nightly=100))
-@given(
-    round_number=st.integers(min_value=1, max_value=10),
-    max_rounds=st.integers(min_value=1, max_value=10),
-    official_eval_every=st.integers(min_value=1, max_value=5),
-    requested=st.booleans(),
-    candidate_ready=st.booleans(),
-    provisional=st.integers(min_value=0, max_value=5),
-)
-def test_official_due_matches_expected_cadence(  # noqa: PLR0913  # LW-040077 [PLR0913]; the parameters are independent injected collaborators or options, and bundling them would hide ownership.
-    round_number: int,
-    max_rounds: int,
-    official_eval_every: int,
-    requested: bool,  # noqa: FBT001  # LW-040078 [FBT001]; the boolean is a flag in a parametrized test case, not a public call signature.
-    candidate_ready: bool,  # noqa: FBT001  # LW-040079 [FBT001]; the boolean is a flag in a parametrized test case, not a public call signature.
-    provisional: int,
-) -> None:
-    records = [
-        _round(
-            n, hypothesis_id=f"H-{n}", outcome="continue", declared="continue", judge_verdict="pass"
-        )
-        for n in range(1, provisional + 1)
-    ]
-    search = HypothesisSearch(
-        HypothesisConfig(max_rounds=max_rounds, official_eval_every=official_eval_every)
-    )
-    reason = search.official_due(
-        records=records,
-        round_number=round_number,
-        requested=requested,
-        candidate_ready=candidate_ready,
-    )
-    if round_number == max_rounds:
-        assert reason == "final_round"
-    elif not candidate_ready:
-        assert reason is None
-    elif requested:
-        assert reason == "orchestrator_request"
-    elif provisional + 1 >= official_eval_every:
-        assert reason == "cadence"
+@given(candidate_ready=st.booleans())
+def test_official_due_measures_every_ready_candidate(*, candidate_ready: bool) -> None:
+    search = HypothesisSearch(HypothesisConfig(max_rounds=10))
+    reason = search.official_due(candidate_ready=candidate_ready)
+    if candidate_ready:
+        assert reason == hypothesis_cadence.MEASURED_AFTER_REVIEW
     else:
         assert reason is None
 
@@ -502,8 +415,8 @@ def _attempt_state(
     next_step: str = "keep going",
     feedback: str | None = None,
 ) -> AttemptState:
-    implementation = ImplementerResponse(
-        hypothesis_outcome=outcome,
+    implementation = DeclaredImplementerResponse(
+        declared=outcome,
         next_step=next_step,
         summary="did the thing",
         expected_behavior="it works",
@@ -535,7 +448,9 @@ def test_close_round_is_deterministic_and_bounds_the_lease(
     """
     plan = _plan("H-1")
     search = HypothesisSearch(HypothesisConfig(max_rounds=5, max_retries_per_round=3))
-    started = search.start(search.initial(), plan, round_number=1, current_commit=None, records=[])
+    started = search.start(
+        search.initial(), plan, round_number=1, parent_round=None, parent_commit=None
+    )
     state = started.state
     hypothesis = started.hypothesis
     assert hypothesis is not None
@@ -905,8 +820,8 @@ def test_start_strategy_update_rejects_a_duplicate_hypothesis_id() -> None:
             state,
             _plan("new", updates=[update, update]),
             round_number=2,
-            current_commit=None,
-            records=state.rounds,
+            parent_round=None,
+            parent_commit=None,
         )
 
 
@@ -926,5 +841,9 @@ def test_start_strategy_update_rejects_an_incomplete_hypothesis() -> None:
     search = HypothesisSearch(HypothesisConfig(max_rounds=5))
     with pytest.raises(ValueError, match="incomplete hypothesis"):
         search.start(
-            state, _plan("next", updates=[update]), round_number=2, current_commit=None, records=[]
+            state,
+            _plan("next", updates=[update]),
+            round_number=2,
+            parent_round=None,
+            parent_commit=None,
         )

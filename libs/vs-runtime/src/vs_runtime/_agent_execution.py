@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 from pydantic import BaseModel
@@ -15,6 +15,7 @@ from vs_runtime._agent_lifecycle import (
     AgentExecutionStatus,
 )
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
+from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     )
     from vs_runtime._run_environment import RunEnvironmentRequest, RunEnvironmentSession
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
+    from vs_sim.api import Released
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
@@ -94,15 +96,17 @@ class ScopedAgentEnvironment:
     backends: dict[str, CommandRunner] | None
     use_docker: bool
     owns_session: bool
-    _closed: bool = False
+    _close: CloseOnce = field(default_factory=CloseOnce)
 
     def close(self) -> None:
-        """Release an owned session exactly once; borrowed sessions remain open."""
-        if self._closed:
-            return
-        self._closed = True
+        """Release an owned session; borrowed sessions remain open. A failed close runs again."""
         if self.owns_session:
-            self.session.close()
+            self._close.run(self._release)
+
+    def _release(self) -> Released:
+        steps = ReleaseStack()
+        steps.callback(self.session.close)
+        return steps.close()
 
     def agent_path(self, host_path: Path | str) -> str:
         """Translate a host path through this environment's active sandbox."""
@@ -117,7 +121,7 @@ class _AgentPathSandbox(Protocol):
 
 def open_agent_execution_environment(  # noqa: PLR0913  # lint-waiver: LW-954433 [PLR0913]; these are independent resolved lower-layer resources; bundling them would create the broad environment DTO this composition seam replaces.
     base_request: RunEnvironmentRequest,
-    shared_session: RunEnvironmentSession,
+    shared_session: RunEnvironmentSession | None,
     *,
     share_session: bool,
     skill_source_dirs: tuple[Path, ...],
@@ -141,12 +145,15 @@ def open_agent_execution_environment(  # noqa: PLR0913  # lint-waiver: LW-954433
             or (cli_provider is not None and cli_provider != base_request.cli_provider)
         ):
             raise SharedAgentEnvironmentConflictError
+        if shared_session is None:
+            raise SharedAgentEnvironmentConflictError
         session = shared_session
         request = base_request
         owns_session = False
     else:
         request = replace(
             base_request,
+            session_role=type(base_request.session_role).CHILD,
             agent_backend=(
                 agent_backend if agent_backend is not None else base_request.agent_backend
             ),

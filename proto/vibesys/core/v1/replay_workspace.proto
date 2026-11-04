@@ -1,0 +1,87 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/agent_facts.proto";
+import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/leaves.proto";
+import "vibesys/store/v1/replay.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+enum ReplayWorkspaceMode {
+  REPLAY_WORKSPACE_MODE_UNSPECIFIED = 0;
+  REPLAY_WORKSPACE_MODE_ISOLATED = 1;
+  REPLAY_WORKSPACE_MODE_EXCLUSIVE_ROOT = 2;
+}
+
+enum ReplayRetention {
+  REPLAY_RETENTION_UNSPECIFIED = 0;
+  REPLAY_RETENTION_WIP = 1;
+  REPLAY_RETENTION_CANDIDATE = 2;
+}
+
+message ReplayOpenWorkspace {
+  ReplayWorkspaceMode mode = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  RevisionRef base = 2 [(buf.validate.field).required = true];
+}
+
+message ReplaySnapshotWorkspace {
+  ReplayRetention retention = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  InvocationRef invocation = 2;
+}
+
+message ReplayRetainWorkspace {
+  RevisionRef revision = 1 [(buf.validate.field).required = true];
+  ReplayRetention retention = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+}
+
+message ReplaySettleWorkspace {}
+
+message ReplayAdoptWorkspace {
+  option (buf.validate.message).cel = {
+    id: "replay_adopt.selection"
+    message: "a retained candidate requires a settlement id; baseline adoption takes none"
+    expression: "this.baseline == (this.settlement_id == '')"
+  };
+  RevisionRef revision = 1 [(buf.validate.field).required = true];
+  bool baseline = 2;
+  string settlement_id = 3;
+  repeated EvidenceRef evidence = 4;
+}
+
+message ReplayWorkspaceRequest {
+  option (vibesys.store.v1.replay_context) = true;
+  option (buf.validate.message).cel = {
+    id: "replay_workspace.owner"
+    message: "workspace steps require an attempt and admission; adoption is run-owned"
+    expression: "has(this.adopt) ? (this.attempt == '' && this.admission == '' && this.generation == 0u) : (this.attempt != '' && this.admission != '')"
+  };
+  string attempt = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  uint64 generation = 2 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  string admission = 3 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  oneof action {
+    option (buf.validate.oneof).required = true;
+    ReplayOpenWorkspace open = 4 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+    ReplaySnapshotWorkspace snapshot = 5 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+    ReplayRetainWorkspace retain = 6 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+    ReplaySettleWorkspace settle = 7 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+    ReplayAdoptWorkspace adopt = 8 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  }
+}
+
+enum ReplayWorkspaceStatus {
+  REPLAY_WORKSPACE_STATUS_UNSPECIFIED = 0;
+  REPLAY_WORKSPACE_STATUS_SUCCEEDED = 1;
+  REPLAY_WORKSPACE_STATUS_FAILED = 2;
+  REPLAY_WORKSPACE_STATUS_REJECTED = 3;
+  REPLAY_WORKSPACE_STATUS_CANCELLED = 4;
+}
+
+message ReplayWorkspaceResult {
+  ReplayWorkspaceStatus status = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  RevisionRef revision = 2;
+  optional string resource_id = 3 [(buf.validate.field).string.min_len = 1];
+  bool released = 4;
+  string detail = 5;
+}

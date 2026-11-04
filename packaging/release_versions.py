@@ -1,4 +1,4 @@
-"""Canonical cross-ecosystem release version parsing."""
+"""Canonical Python release version parsing."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import re
 from dataclasses import dataclass
 
 _PYTHON_RELEASE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:rc(0|[1-9]\d*))?$")
-_NPM_RELEASE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-rc\.(0|[1-9]\d*))?$")
 
 
 class ReleaseVersionSyntaxError(ValueError):
@@ -16,11 +15,6 @@ class ReleaseVersionSyntaxError(ValueError):
     def invalid_python(cls, source: str, raw: str) -> ReleaseVersionSyntaxError:
         """Build an error for a noncanonical Python project version."""
         return cls(f"{source} must use canonical PEP 440 X.Y.Z or X.Y.ZrcN spelling: {raw!r}")
-
-    @classmethod
-    def invalid_npm(cls, source: str, raw: str) -> ReleaseVersionSyntaxError:
-        """Build an error for a noncanonical npm package version."""
-        return cls(f"{source} must use canonical npm SemVer X.Y.Z or X.Y.Z-rc.N spelling: {raw!r}")
 
 
 @dataclass(frozen=True)
@@ -38,14 +32,6 @@ def python_release_identity(raw: str, *, source: str) -> ReleaseIdentity:
     match = _PYTHON_RELEASE.fullmatch(raw)
     if match is None:
         raise ReleaseVersionSyntaxError.invalid_python(source, raw)
-    return _identity(match)
-
-
-def npm_release_identity(raw: str, *, source: str) -> ReleaseIdentity:
-    """Parse canonical npm SemVer ``X.Y.Z`` or ``X.Y.Z-rc.N`` spelling."""
-    match = _NPM_RELEASE.fullmatch(raw)
-    if match is None:
-        raise ReleaseVersionSyntaxError.invalid_npm(source, raw)
     return _identity(match)
 
 

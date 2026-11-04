@@ -2,24 +2,26 @@
 
 They sit beside ``RuntimeSessionRequests`` (EnsureSession, DispatchTurn, InspectTurn)
 and read its durable tables: the ``SessionBinding`` of a session (spec, conversation
-key, resource) and the ``DispatchRecord`` of an invocation. Each request runs at most
-once per canonical identity through the shared ``ReceiptStore`` (begun marker, fence
-and lease check, sealed result) and reports through the shared ``ObservationFactory``.
+key, resource) and the ``DispatchRecord`` of an invocation. A request repeated after an
+attempt that may have run (``ExecutionContext.repeat``) finds what that attempt did, and
+the executors report through the shared ``ObservationFactory``.
 
 Mechanisms:
 
-* **CancelTurn** never assumes a stop. It asks ``AgentSessions.cancel`` to stop the
-  turn this instance runs, then reads the invocation's journal row. A ``Pending`` row
-  means the dispatch call has not returned, here or in an earlier host that a restart
-  replaced: Unknown, because a new host cannot prove the old provider process
-  stopped. A ``Completed`` or ``InvalidResponse`` row shows the turn ended. An
-  ``Unknown`` row was written by a dispatch call that returned, so the key is
-  released with ``release_interrupted``, which itself refuses an active invocation.
-  An invocation that was never dispatched is REJECTED.
+* **CancelTurn** never assumes a stop. No dispatch record for the invocation proves nothing
+  is held: no provider call began, and the step loop runs a cancel only after the
+  invocation's dispatch has a result or was cancelled. Otherwise it asks
+  ``AgentSessions.cancel`` to stop the turn this instance runs, then reads the
+  invocation's journal row. No row: no provider call began. A ``Pending`` row means the
+  dispatch call has not returned, here or in an earlier host that a restart replaced:
+  Unknown, because a new host cannot prove the old provider process stopped. A
+  ``Completed`` or ``InvalidResponse`` row shows the turn ended. An ``Unknown`` row was
+  written by a dispatch call that returned, so the key is released with
+  ``release_interrupted``, which itself refuses an active invocation.
 * **CloseSession** releases the key's live provider resources with
-  ``AgentSessions.release`` and keeps the binding and the provider checkpoint, so a
-  reused conversation is reattached and resumed later. An active invocation makes it
-  Unknown: the shell cancels first.
+  ``AgentSessions.release`` and keeps the binding and the provider checkpoint, so a reused
+  conversation is reattached and resumed later. An active invocation makes it Unknown: the
+  shell cancels first. No binding proves nothing is held.
 * **ResumeSessionTurn** continues the retained conversation and never substitutes a
   fresh one. The first resume of a continuation binds it to one successor invocation
   and to the retained provider conversation; another successor, or another
@@ -35,8 +37,8 @@ observation. Only terminal observations are stored.
 
 from __future__ import annotations
 
-import asyncio
-from typing import TYPE_CHECKING, Protocol, assert_never
+from functools import partial
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
@@ -71,20 +73,14 @@ from vs_runtime._access_settlement import (
 )
 from vs_runtime._core_identity import CoreRequestId, core_identity
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
+from vs_runtime._keyed_documents import (
+    DocumentCorruptError,
+    owner_key,
+)
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
     ObservationSubject,
-)
-from vs_runtime._receipt_store import (
-    Conflict,
-    Declined,
-    Performed,
-    ReceiptCorruptError,
-    Replayed,
-    Settled,
-    Transient,
-    owner_key,
 )
 from vs_runtime._session_requests import (
     SessionBinding,
@@ -95,11 +91,15 @@ from vs_runtime._session_requests import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from vs_agent.api import AgentInvocationRecord, AgentSessionCheckpoint, AgentSessions
     from vs_core.api import RequestBase, SessionId, SnapshotAndRetainRun
-    from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_core.api.recovery import OwnerEvent
+    from vs_runtime._core_requests import SessionRoleRequest
+    from vs_runtime._keyed_documents import KeyedDocuments
     from vs_runtime._workspace_requests import RunInvocationProof
+    from vs_sim.api import BlockingRunner
 
 _CONTINUATIONS = "session-continuations"
 _HANDLED = (CancelTurn, CloseSession, ResumeSessionTurn)
@@ -121,6 +121,23 @@ class TurnDispatcher(Protocol):
         """Dispatch the turn of a request core sent as another kind, recording *behalf*."""
         ...
 
+    async def attempt(
+        self,
+        request: DispatchTurn,
+        context: ExecutionContext,
+        *,
+        mark: str,
+        behalf: CoreRequestId | None = None,
+    ) -> ExecutionResult:
+        """Run one attempt of the turn, recording no receipt of its result (see the runner)."""
+        ...
+
+
+type ResumedDispatch = Callable[
+    [DispatchTurn, CoreRequestId, ExecutionContext], Awaitable[ExecutionOutcome]
+]
+"""How the turn of a resume is dispatched: with a receipt of its result, or as one attempt."""
+
 
 class ContinuationBinding(BaseModel):
     """What the first resume of one continuation fixed: its successor and conversation."""
@@ -136,6 +153,17 @@ def _rejected(diagnostic: str, binding: SessionBinding | None = None) -> Observa
         diagnostic=diagnostic,
         resource_id=None if binding is None else binding.resource_id,
     )
+
+
+def _refused_before_dispatch(facts: ObservationFacts) -> ObservationFacts:
+    """Facts of a resume that ended before its dispatch: a terminal refusal holds nothing.
+
+    The refusal proves only that this turn holds nothing. The session it names stays held,
+    so the answer drops the session's resource rather than report it released.
+    """
+    if facts.terminal and facts.status is ObservationStatus.REJECTED:
+        return ObservationFacts.refused(facts.diagnostic)
+    return facts
 
 
 def _unknown(diagnostic: str, binding: SessionBinding | None = None) -> ObservationFacts:
@@ -202,7 +230,7 @@ class ReleasedRunInvocations:
     """
 
     def __init__(
-        self, settled: RunInvocationProof, sessions: AgentSessions, store: ReceiptStore
+        self, settled: RunInvocationProof, sessions: AgentSessions, store: KeyedDocuments
     ) -> None:
         """Wrap the settled-turn proof; read the same journal and bindings."""
         self._settled = settled
@@ -230,7 +258,7 @@ class ReleasedRunInvocations:
                 AgentSessionKey.parse(binding.session_key),
                 invocation.invocation_id.root,
             )
-        except (ReceiptCorruptError, *_SESSION_ERRORS) as error:
+        except (DocumentCorruptError, *_SESSION_ERRORS) as error:
             return f"invocation evidence is unreadable: {error}"
         if _writer_ended(row):
             return None
@@ -244,17 +272,20 @@ class SessionLifecycleRequests:
         self,
         sessions: AgentSessions,
         dispatcher: TurnDispatcher,
-        store: ReceiptStore,
+        store: KeyedDocuments,
         settlement: AccessSettlement,
+        blocking: BlockingRunner,
     ) -> None:
         """Bind the durable agent sessions, the turn dispatcher, the store and its settlement.
 
-        *settlement* is the instance the turn dispatcher records receipts with.
+        *settlement* is the instance the turn dispatcher records receipts with; *blocking*
+        runs the journal reads and provider calls off the event loop.
         """
         self._sessions = sessions
         self._dispatcher = dispatcher
         self._store = store
         self._settlement = settlement
+        self._blocking = blocking
         self._observations = ObservationFactory(store)
 
     async def execute(
@@ -268,34 +299,11 @@ class SessionLifecycleRequests:
         if not isinstance(request, _HANDLED):
             return self._result(request, context, _rejected(f"{request.kind} is not executed here"))
 
-        async def perform(
-            *, resumed: bool
-        ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-            del resumed  # every step inspects durable evidence before it acts
-            try:
-                result = await self._perform(request, request_id, context)
-            except ReceiptCorruptError as error:
-                result = self._result(request, context, _unknown(str(error)))
-            return Settled(result) if result.observation.observation.terminal else Transient(result)
-
-        execution = await self._store.run_once(
-            request_id.root,
-            owner=owner_key(request),
-            context=context,
-            result_type=ExecutionResult,
-            perform=perform,
-        )
-        match execution:
-            case Replayed(result) | Performed(result):
-                return result
-            case Conflict():
-                return self._result(
-                    request, context, _rejected("same request identity with another payload")
-                )
-            case Declined(reason):
-                return self._result(request, context, _unknown(reason))
-            case _:
-                assert_never(execution)
+        # Every step inspects durable evidence before it acts, so a repeat needs no flag.
+        try:
+            return await self._perform(request, request_id, context)
+        except DocumentCorruptError as error:
+            return self._result(request, context, _unknown(str(error)))
 
     def _result(
         self,
@@ -323,6 +331,7 @@ class SessionLifecycleRequests:
                     observation=observation,
                     output_schema=None if turn is None else turn.output_schema,
                     output_json=None if turn is None else turn.output_json,
+                    suspension=None if turn is None else turn.suspension,
                 ),
             )
         return ExecutionResult(
@@ -337,7 +346,7 @@ class SessionLifecycleRequests:
     ) -> ExecutionResult:
         match request:
             case CancelTurn():
-                facts = await asyncio.to_thread(self._cancel, request)
+                facts = await self._blocking.run(self._cancel, request)
                 facts = await self._settled(
                     facts,
                     request,
@@ -345,10 +354,10 @@ class SessionLifecycleRequests:
                     request.invocation.invocation_id.root,
                 )
             case CloseSession():
-                facts = await asyncio.to_thread(self._close, request)
+                facts = await self._blocking.run(self._close, request)
                 facts = await self._settled(facts, request, request.session_id, None)
             case ResumeSessionTurn():
-                return await self._resume(request, request_id, context)
+                return await self._resume(request, request_id, context, self._dispatch_resumed)
             case _:
                 facts = _rejected(f"{request.kind} is not executed here")
         return self._result(request, context, facts)
@@ -382,7 +391,7 @@ class SessionLifecycleRequests:
             )
         except AccessSettlementError as error:
             return _unknown(str(error), binding)
-        except (ReceiptCorruptError, *_SESSION_ERRORS) as error:
+        except (DocumentCorruptError, *_SESSION_ERRORS) as error:
             return _unknown(f"access cannot be settled: {error}", binding)
         return facts
 
@@ -400,39 +409,45 @@ class SessionLifecycleRequests:
             receipt = self._settlement.receipt(access_key)
             if receipt is None or receipt.settled:
                 continue
-            row = await asyncio.to_thread(_journal_row, self._sessions, key, invocation_id)
+            row = await self._blocking.run(_journal_row, self._sessions, key, invocation_id)
             if (_call_returned if closed else _writer_ended)(row):
                 await self._settlement.settle(access_key)
 
     # cancel
 
     def _cancel(self, request: CancelTurn) -> ObservationFacts:
+        """Stop and judge whatever the invocation's dispatches began."""
         invocation = request.invocation
-        binding = self._binding(request, invocation.session_id)
+        bkey = session_binding_key(request, invocation.session_id)
+        with self._store.exclusive():
+            dispatched = (
+                load_dispatch_record(self._store, bkey, invocation.invocation_id) is not None
+            )
+            binding = self._binding(request, invocation.session_id)
+        if not dispatched:
+            # No dispatch recorded itself, so no provider call began. The step loop runs a
+            # cancel only after the invocation's dispatch has a result or was cancelled.
+            return ObservationFacts.nothing_held("the invocation was never dispatched")
         if binding is None:
-            return _rejected("no ensured session for this invocation")
-        link = load_dispatch_record(
-            self._store,
-            session_binding_key(request, invocation.session_id),
-            invocation.invocation_id,
-        )
-        if link is None:
-            return _rejected("the invocation was never dispatched", binding)
+            return _unknown("the invocation was dispatched without a session binding", None)
+        return self._stop(binding, invocation.invocation_id.root)
+
+    def _stop(self, binding: SessionBinding, invocation_id: str) -> ObservationFacts:
+        """Stop the turn this instance runs, then judge it from its journal row."""
         key = AgentSessionKey.parse(binding.session_key)
-        invocation_id = invocation.invocation_id.root
         try:
             self._sessions.cancel(key, invocation_id)
             record = _journal_row(self._sessions, key, invocation_id)
-            if record is not None and isinstance(record.outcome, Pending):
+            if record is None:
+                return self._never_journaled(binding)
+            if isinstance(record.outcome, Pending):
                 # Pending: the dispatch call has not returned, here or in an earlier
                 # host. Only this instance can reach a turn it runs, so a restarted
-                # host cannot prove the provider process stopped. A turn with no row at all
-                # never began (the dispatch intent is journaled before any provider call),
-                # so a refused dispatch leaves nothing to stop.
+                # host cannot prove the provider process stopped.
                 return _unknown(
                     "the turn is not proven stopped: its dispatch has not returned", binding
                 )
-            if record is not None and isinstance(record.outcome, (Completed, InvalidResponse)):
+            if isinstance(record.outcome, (Completed, InvalidResponse)):
                 return _released(
                     ObservationStatus.CANCELLED,
                     binding,
@@ -445,12 +460,26 @@ class SessionLifecycleRequests:
             return _unknown(f"the invocation cannot be settled: {error}", binding)
         return _released(ObservationStatus.CANCELLED, binding)
 
+    def _never_journaled(self, binding: SessionBinding) -> ObservationFacts:
+        """A dispatched invocation with no journal row: no provider call began.
+
+        The dispatch intent is journaled before any provider call, and the loop runs the cancel
+        after the dispatch step has a result or was cancelled, so the turn never will begin.
+        """
+        return _released(
+            ObservationStatus.CANCELLED, binding, "the turn was cancelled before it began"
+        )
+
     # close
 
     def _close(self, request: CloseSession) -> ObservationFacts:
-        binding = self._binding(request, request.session_id)
+        """Release the session an ensure bound, if any."""
+        bkey = session_binding_key(request, request.session_id)
+        with self._store.exclusive():
+            binding = load_session_binding(self._store, bkey)
         if binding is None:
-            return _rejected("no ensured session to close")
+            # An ensure binds in one locked step, so no binding means nothing was bound.
+            return ObservationFacts.nothing_held("no ensured session to close")
         try:
             self._sessions.release(AgentSessionKey.parse(binding.session_key))
         except InvocationConflictError as error:
@@ -463,21 +492,53 @@ class SessionLifecycleRequests:
 
     # resume
 
+    async def attempt(
+        self, request: ResumeSessionTurn, context: ExecutionContext, *, mark: str
+    ) -> ExecutionResult:
+        """Run one attempt of a resume and return what it observed, recording no receipt of it.
+
+        The step loop owns the step's result. The continuation binding is written once and an
+        attempt that repeats finds it; the nested dispatch is ``RuntimeSessionRequests.attempt``,
+        so a rerun after a killed attempt is dispatched again once the runner has cleared it.
+        The turn's agent processes carry *mark*.
+        """
+        request_id = core_identity(request)
+        dispatch = partial(self._attempt_resumed, mark=mark)
+        return await self._resume(request, request_id, context, dispatch)
+
+    async def _dispatch_resumed(
+        self, dispatch: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext
+    ) -> ExecutionOutcome:
+        return await self._dispatcher.dispatch_on_behalf_of(dispatch, behalf, context)
+
+    async def _attempt_resumed(
+        self, dispatch: DispatchTurn, behalf: CoreRequestId, context: ExecutionContext, *, mark: str
+    ) -> ExecutionOutcome:
+        return await self._dispatcher.attempt(dispatch, context, mark=mark, behalf=behalf)
+
     async def _resume(
-        self, request: ResumeSessionTurn, request_id: RequestId, context: ExecutionContext
+        self,
+        request: ResumeSessionTurn,
+        request_id: RequestId,
+        context: ExecutionContext,
+        dispatch_turn: ResumedDispatch,
     ) -> ExecutionResult:
         turn = request.turn
         if turn.charge_class != "resume":
             return self._result(
-                request, context, _rejected("a resume turn needs charge class resume")
+                request,
+                context,
+                ObservationFacts.refused("a resume turn needs charge class resume"),
             )
         if turn.continuation_id != request.continuation_id:
             return self._result(
-                request, context, _rejected("the turn names another continuation than the request")
+                request,
+                context,
+                ObservationFacts.refused("the turn names another continuation than the request"),
             )
-        problem = await asyncio.to_thread(self._bind_continuation, request)
+        problem = await self._blocking.run(self._bind_continuation, request)
         if problem is not None:
-            return self._result(request, context, problem)
+            return self._result(request, context, _refused_before_dispatch(problem))
         superseded = await self._settle_superseded(request)
         if superseded is not None:
             return self._result(request, context, superseded)
@@ -491,22 +552,26 @@ class SessionLifecycleRequests:
             admission_id=request.admission_id,
             turn=turn,
             inputs=request.inputs,
+            guidance=request.guidance,
         )
-        outcome = await self._dispatcher.dispatch_on_behalf_of(
-            dispatch, core_identity(request), context
-        )
+        outcome = await dispatch_turn(dispatch, core_identity(request), context)
         if not isinstance(outcome, ExecutionResult):
             return self._result(request, context, _unknown(outcome.detail))
         seen = outcome.observation.observation
         event = next((e for e in outcome.owner_events if isinstance(e, TurnObserved)), None)
-        facts = ObservationFacts(
-            status=seen.status,
-            terminal=seen.terminal,
-            accepted=seen.accepted,
-            released=seen.released,
-            children_complete=seen.children_complete,
-            resource_id=seen.resource_id,
-            diagnostic=seen.diagnostic,
+        facts = (
+            # The nested dispatch refused itself, sealed under its identity: so does the resume.
+            ObservationFacts.refused(seen.diagnostic)
+            if seen.terminal and seen.released and not seen.accepted and seen.resource_id is None
+            else ObservationFacts(
+                status=seen.status,
+                terminal=seen.terminal,
+                accepted=seen.accepted,
+                released=seen.released,
+                children_complete=seen.children_complete,
+                resource_id=seen.resource_id,
+                diagnostic=seen.diagnostic,
+            )
         )
         return self._result(request, context, facts, turn=event)
 
@@ -525,7 +590,7 @@ class SessionLifecycleRequests:
             await self._settle_ended(bkey, binding, None)
         except AccessSettlementError as error:
             return _unknown(str(error), binding)
-        except (ReceiptCorruptError, *_SESSION_ERRORS) as error:
+        except (DocumentCorruptError, *_SESSION_ERRORS) as error:
             return _unknown(f"access cannot be settled: {error}", binding)
         return None
 

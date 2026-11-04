@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep the Mermaid architecture overview in docs/contributing/architecture.md current.
+"""Keep the Mermaid architecture overview in docs/contributing/python-module-graph.md current.
 
 `tach show --mermaid` renders the module graph declared in `tach.toml`. This
 script embeds a high-level overview collapsed to top-level packages between
@@ -24,7 +24,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-DOC = Path("docs/contributing/architecture.md")
+DOC = Path("docs/contributing/python-module-graph.md")
 START = "[//]: # (tach-graph:start)"
 END = "[//]: # (tach-graph:end)"
 
@@ -76,7 +76,7 @@ def render_block(edges: list[tuple[str, str]], nodes: tuple[str, ...] = ()) -> s
             START,
             "## Architecture overview",
             "",
-            "Submodules such as `vibesys.orchestration` and `server.api` are collapsed "
+            "Submodules such as `vibesys.orchestration` and `vibesys.api` are collapsed "
             "into their top-level package.",
             "",
             "```mermaid",

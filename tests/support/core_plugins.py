@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from tests.support.skeleton_strategy import OPERATIONS, SkeletonConfig, SkeletonStrategy, skeleton
 
 from vibesys.run.evaluation_identity import semantic_evaluation_identity
-from vs_core.api import RunFacts, SearchDef
+from vs_core.api import Limits, RunFacts, SearchDef
 from vs_core.api.testing import sample_limits
 from vs_runtime.api import (
     AgentRole,
@@ -41,11 +41,12 @@ def core_policy(
     strategy: SkeletonStrategy | None = None,
     deadline_seconds: float = 1000.0,
     search: SearchDef[SkeletonConfig] = skeleton,
+    limits: Limits | None = None,
 ) -> CorePolicy:
     """A core policy that plays ``strategy`` (the scripted skeleton by default).
 
     ``search`` replaces the skeleton's flow for a test that scripts its own, over the same
-    operations and config.
+    operations and config. ``limits`` replaces ``sample_limits()``.
     """
     scenario = SkeletonStrategy() if strategy is None else strategy
 
@@ -63,7 +64,7 @@ def core_policy(
                 workload_digest=identity.workload.value,
                 environment_digest=identity.environment.value,
             ),
-            limits=sample_limits(),
+            limits=sample_limits() if limits is None else limits,
             deadline_seconds=deadline_seconds,
         )
 
@@ -87,9 +88,17 @@ def capability_plugin(  # noqa: PLR0913  # lint-waiver: LW-950002 [PLR0913]; eac
     artifact_directories: tuple[str, ...] = (),
     strategy: SkeletonStrategy | None = None,
     search: SearchDef[SkeletonConfig] = skeleton,
+    deadline_seconds: float = 1000.0,
+    limits: Limits | None = None,
 ) -> OrchestrationPlugin:
-    """A core plugin for a test that composes the host and drives the strategy it is given."""
-    policy = core_policy(strategy=strategy, search=search)
+    """A core plugin for a test that composes the host and drives the strategy it is given.
+
+    ``deadline_seconds`` is the run's own deadline, counted from its start, and ``limits``
+    its core limits (``sample_limits()`` by default).
+    """
+    policy = core_policy(
+        strategy=strategy, search=search, deadline_seconds=deadline_seconds, limits=limits
+    )
     if artifact_directories:
         policy = replace(policy, artifact_directories=artifact_directories)
     return OrchestrationPlugin(

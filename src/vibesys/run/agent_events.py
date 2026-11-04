@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+
+from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic_core import to_jsonable_python
 
 from vibesys.events import (
     AgentOutputChannel,
@@ -13,43 +15,99 @@ from vibesys.events import (
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
+    ModelTurnUsageData,
     ProviderSwitchedData,
     QuotaAbandonedData,
     QuotaPausedData,
     QuotaResumedData,
+    QuotaWaitCancelledData,
+    QuotaWaitingData,
     RateLimitUpdateData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
     ToolResultPayload,
+    TurnUsageData,
     UsageUpdateData,
     make_core_event,
 )
+from vibesys.records.api import usage_split_refusals
+from vs_decode.api import Unreadable, decode_json
+from vs_sim.api import Clock, utc_datetime
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from vs_agent.api import (
+        AgentModelUsage,
         AgentQuotaError,
         AgentRateLimit,
+        AgentUsage,
         Attribution,
         ProviderSwitch,
         QuotaPlan,
         QuotaResumeReason,
+        QuotaWaitCancelReason,
     )
 
 EventSink = Callable[[CoreEvent], object]
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_TOOL_RESULT_BYTES = 8 * 1024 * 1024
+"""A longer tool result is kept as raw text, not parsed."""
 
 
 def _json_safe(args: dict[str, Any]) -> dict[str, Any]:
     """Coerce tool arguments to a JSON-serializable dictionary."""
-    return json.loads(json.dumps(args, default=repr))
+    return to_jsonable_python(args, fallback=repr)
+
+
+def _model_turn_usage(row: AgentModelUsage) -> ModelTurnUsageData:
+    """The journal's row for one model's share of a turn, carried over unchanged."""
+    return ModelTurnUsageData(
+        model=row.model,
+        input_tokens=row.input_tokens,
+        cache_creation_input_tokens=row.cache_creation_input_tokens,
+        cache_creation_1h_input_tokens=row.cache_creation_1h_input_tokens,
+        cache_read_input_tokens=row.cache_read_input_tokens,
+        output_tokens=row.output_tokens,
+        reasoning_output_tokens=row.reasoning_output_tokens,
+        turns=row.turns,
+        recorded_usd=row.recorded_usd,
+        speed=row.speed,
+        primary=row.primary,
+    )
+
+
+def _journal_split(
+    rows: Sequence[AgentModelUsage],
+) -> tuple[tuple[ModelTurnUsageData, ...], tuple[str, ...]]:
+    """The per-model rows a journal line may carry, and why they were refused when it may not.
+
+    The rules live in the ``.proto`` the projector validates against, and a line carrying rows it
+    refuses would be written first and fail the projection after, which disables the run log's
+    tee for the rest of the process. So the rows are checked here, before the line exists. A
+    refused split is dropped whole, never in part: the rest of the turn is still true.
+    """
+    try:
+        split = tuple(_model_turn_usage(row) for row in rows)
+    except ValidationError as error:
+        return (), tuple(f"by_model: {each['msg']}" for each in error.errors())
+    reasons = usage_split_refusals(split)
+    return ((), reasons) if reasons else (split, ())
 
 
 def _classify_tool_result(content: str) -> ToolResultPayload | None:
-    """Preserve JSON-shaped tool results alongside their raw text."""
-    try:
-        value = json.loads(content)
-    except (json.JSONDecodeError, TypeError):
+    """Preserve JSON-shaped tool results alongside their raw text.
+
+    The content is whatever the tool printed, so ``vs_decode`` parses it: bounded in
+    size, with nesting bounded by pydantic's parser, where ``json.loads`` raised
+    ``RecursionError`` out of the agent's callback.
+    """
+    value = decode_json(
+        content, _JSON_VALUE, source="tool result", max_bytes=_MAX_TOOL_RESULT_BYTES
+    )
+    if isinstance(value, Unreadable):
         return None
     if isinstance(value, (dict, list)):
         return JsonResultPayload(value=value)
@@ -64,9 +122,10 @@ class CoreAgentEventSink:
     process-global state.
     """
 
-    def __init__(self, sink: EventSink) -> None:
-        """Create an adapter that sends every translated event to ``sink``."""
+    def __init__(self, sink: EventSink, clock: Clock) -> None:
+        """Send every translated event to ``sink``, stamped by epoch ``clock``."""
         self._sink = sink
+        self._clock = clock
 
     def _emit(
         self,
@@ -76,10 +135,13 @@ class CoreAgentEventSink:
         | ToolResultData
         | TodoUpdateData
         | UsageUpdateData
+        | TurnUsageData
         | RateLimitUpdateData
         | QuotaPausedData
         | QuotaResumedData
         | QuotaAbandonedData
+        | QuotaWaitingData
+        | QuotaWaitCancelledData
         | ProviderSwitchedData,
         *,
         agent_kind: str | None,
@@ -89,6 +151,7 @@ class CoreAgentEventSink:
         self._sink(
             make_core_event(
                 event_type,
+                timestamp=utc_datetime(self._clock),
                 data=data,
                 agent_kind=agent_kind,
                 round_label=round_label,
@@ -207,6 +270,50 @@ class CoreAgentEventSink:
             invocation_id=invocation_id,
         )
 
+    def turn_usage_recorded(
+        self,
+        usage: AgentUsage,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+        provider_session_id: str | None = None,
+    ) -> None:
+        """Emit settled token and cost accounting for one finished turn.
+
+        The line always records a cost basis (``NOT_REPORTED`` when the usage names none), so a
+        line without one was written before the field existed. A per-model split the ``.proto``
+        refuses is left out and the refusal is reported on the diagnostic channel.
+        """
+        split, refusals = _journal_split(usage.by_model)
+        if refusals:
+            self.agent_output(
+                "[usage] the per-model split of this turn was refused and is not recorded: "
+                + "; ".join(refusals),
+                channel="diagnostic",
+                agent_kind=agent_kind,
+                round_label=round_label,
+                invocation_id=invocation_id,
+            )
+        self._emit(
+            CoreEventType.TURN_USAGE_RECORDED,
+            TurnUsageData(
+                input_tokens=usage.input_tokens,
+                cache_creation_input_tokens=usage.cache_creation_input_tokens,
+                cache_read_input_tokens=usage.cache_read_input_tokens,
+                output_tokens=usage.output_tokens,
+                reasoning_output_tokens=usage.reasoning_output_tokens,
+                total_cost_usd=usage.total_cost_usd,
+                duration_ms=usage.duration_ms,
+                cost_basis=usage.recorded_cost_basis,
+                by_model=split,
+                provider_session_id=provider_session_id or None,
+            ),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
+
     def rate_limit_update(
         self,
         rate_limit: AgentRateLimit,
@@ -251,13 +358,30 @@ class CoreAgentEventSink:
             where,
         )
 
-    def quota_resumed(self, provider: str, reason: QuotaResumeReason, where: Attribution) -> None:
-        """Emit that the paused turn is being sent again on the same provider."""
+    def quota_resumed(
+        self,
+        error: AgentQuotaError,
+        reason: QuotaResumeReason,
+        waited_seconds: float,
+        where: Attribution,
+    ) -> None:
+        """Emit that the stopped turn is being sent again on the same provider."""
         self._attributed(
-            CoreEventType.QUOTA_RESUMED, QuotaResumedData(provider=provider, reason=reason), where
+            CoreEventType.QUOTA_RESUMED,
+            QuotaResumedData.model_validate(
+                {
+                    "provider": error.provider,
+                    "condition": error.condition.value,
+                    "reason": reason,
+                    "waited_seconds": waited_seconds,
+                }
+            ),
+            where,
         )
 
-    def quota_abandoned(self, error: AgentQuotaError, reason: str, where: Attribution) -> None:
+    def quota_abandoned(
+        self, error: AgentQuotaError, reason: str, waited_seconds: float, where: Attribution
+    ) -> None:
         """Emit that the turn ended with the quota error."""
         self._attributed(
             CoreEventType.QUOTA_ABANDONED,
@@ -266,7 +390,26 @@ class CoreAgentEventSink:
                 condition=error.condition.value,
                 detail=error.detail,
                 reason=reason,
+                waited_seconds=waited_seconds,
             ),
+            where,
+        )
+
+    def quota_waiting(self, provider: str, resumes_at: float | None, where: Attribution) -> None:
+        """Emit that the paused run resumes when capacity returns, at the operator's request."""
+        self._attributed(
+            CoreEventType.QUOTA_WAITING,
+            QuotaWaitingData(provider=provider, resumes_at=resumes_at),
+            where,
+        )
+
+    def quota_wait_cancelled(
+        self, provider: str, reason: QuotaWaitCancelReason, where: Attribution
+    ) -> None:
+        """Emit that the operator ended a wait for capacity."""
+        self._attributed(
+            CoreEventType.QUOTA_WAIT_CANCELLED,
+            QuotaWaitCancelledData(provider=provider, reason=reason),
             where,
         )
 
@@ -287,7 +430,12 @@ class CoreAgentEventSink:
     def _attributed(
         self,
         event_type: CoreEventType,
-        data: QuotaPausedData | QuotaResumedData | QuotaAbandonedData | ProviderSwitchedData,
+        data: QuotaPausedData
+        | QuotaResumedData
+        | QuotaAbandonedData
+        | QuotaWaitingData
+        | QuotaWaitCancelledData
+        | ProviderSwitchedData,
         where: Attribution,
     ) -> None:
         self._emit(

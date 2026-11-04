@@ -19,6 +19,7 @@ from ._attempt_terminal import (
     retained_sessions_for,
     successful,
     unresolved_acceptance,
+    vacant_workspace_request,
 )
 from ._checkpoint_events import declined, retained
 from ._deadlines import from_dispatch, limit_to
@@ -34,14 +35,15 @@ from ._proofs import (
     admission_remaining,
     current_admission,
     current_closure,
-    draining,
     invocation_for,
     observation_for,
     occupied_episode,
     operation_for,
+    stop_draining,
 )
 from ._registry import ContractError
 from ._session_scope import retains_write_turn, write_turn_authority, yield_authority, yields_turn
+from ._turn_holds import lost_without_debit
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
@@ -108,10 +110,12 @@ from .types.sessions import (
     InvocationChargeRefunded,
     InvocationChargesAuthorized,
     InvocationCheckpointAvailable,
+    InvocationCheckpointPending,
     SessionPhase,
     SessionsAcquireRequested,
 )
 from .types.strategy import Operation, RequestTurn, StartAttempt
+from .types.until import Failed, FailureReason
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsEvent
@@ -153,7 +157,7 @@ def _within_run(context: AttemptsContext, request: Request) -> Outbound:
 
 
 def _record(context: AttemptsContext, identity: RequestId) -> RequestRecord | None:
-    return next((row for row in context.records.records if row.request_id == identity), None)
+    return context.records.record(identity)
 
 
 def _fresh_observation(record: RequestRecord, observation: Observation) -> bool:
@@ -303,7 +307,7 @@ def _admit(
     if not isinstance(occupied_episode(context.scheduling.slots, event.request), Proven):
         return AreaChange(state=state)
     if (
-        not (context.run.status == RunStatus.RUNNING or draining(context.run))
+        not (context.run.status == RunStatus.RUNNING or stop_draining(context.run))
         or context.run.now_at >= context.run.deadline_at
     ):
         registered = (
@@ -545,7 +549,10 @@ def _workspace(
                 identity
                 for identity in attempt.pending_records
                 if identity != observation.request_id
-            )
+            ),
+            "base_input": observation.measured_input
+            if isinstance(record.request, EnsureWorkspace)
+            else attempt.base_input,
         }
     )
     state = _replace(state, updated)
@@ -627,12 +634,20 @@ def _setup_failed(
             ),
         )
     )
-    updated = attempt.model_copy(update={"charges": charges})
+    # A workspace the executor never took leaves nothing to release; settling must not wait on it.
+    vacant = vacant_workspace_request(_record(context, observation.request_id))
+    pending = tuple(
+        identity
+        for identity in attempt.pending_records
+        if not (vacant and identity == observation.request_id)
+    )
+    updated = attempt.model_copy(update={"charges": charges, "pending_records": pending})
     return AreaChange(
         state=_replace(state, updated),
+        # The search waits for the start to open; it hears that it will not, not the close.
         events=(AttemptExhausted(attempt=attempt_ref(attempt), reason="paid-limit"),)
         if exhausted
-        else (),
+        else (Failed(reason=FailureReason.ATTEMPTS_EXHAUSTED, decision=attempt.admission_id),),
         signals=(
             RetireRequested(
                 attempt=attempt_ref(attempt),
@@ -696,7 +711,7 @@ def _correction_allowed(
 ) -> bool:
     predecessor = invocation.turn.predecessor
     seen = {invocation.invocation}
-    depth = 0
+    links = depth = 0
     child = invocation
     while predecessor is not None:
         if predecessor in seen:
@@ -706,10 +721,12 @@ def _correction_allowed(
         if previous is None or not _terminal(context, previous, attempt):
             return False
         if _completed_interruption(context, attempt, child) is not True:
-            depth += 1
+            links += 1
+            # A re-ask after a turn lost to its provider is no link: the gate bounds an outage.
+            depth += 0 if lost_without_debit(context.records, previous) else 1
         child = previous
         predecessor = previous.turn.predecessor if previous.turn.charge_class != "resume" else None
-    return depth > 0 and depth <= MAX_REASK_CHAIN
+    return links > 0 and depth <= MAX_REASK_CHAIN
 
 
 def _initial_session_acquisition(
@@ -1139,11 +1156,12 @@ def _checkpoint_request(
     ):
         return AreaChange(state=state)
     identity = event.authority
-    if (
-        any(checkpoint.request_id == identity for checkpoint in attempt.checkpoints)
-        or identity in attempt.pending_records
-    ):
+    pending = InvocationCheckpointPending(invocation=event.invocation, request_id=identity)
+    if any(checkpoint.request_id == identity for checkpoint in attempt.checkpoints):
         return AreaChange(state=state)
+    if identity in attempt.pending_records:
+        # The request is already out; whatever newly waits on this checkpoint waits on it.
+        return AreaChange(state=state, signals=(pending,))
     declined = _checkpoint_decline(context, attempt, invocation, identity)
     if declined is not None:
         return _decline_checkpoint(state, attempt, event, declined)
@@ -1156,7 +1174,11 @@ def _checkpoint_request(
         invocation=event.invocation,
     )
     updated = attempt.model_copy(update={"pending_records": (*attempt.pending_records, identity)})
-    return AreaChange(state=_replace(state, updated), requests=(_within_run(context, request),))
+    return AreaChange(
+        state=_replace(state, updated),
+        requests=(_within_run(context, request),),
+        signals=(pending,),
+    )
 
 
 def _checkpoint_acknowledged(
@@ -1266,6 +1288,7 @@ def _checkpointed(
         request_id=event.checkpoint_request,
         revision=event.revision,
         retention=record.request.retention,
+        measured_input=record.observation.measured_input,
     )
     updated = attempt.model_copy(
         update={

@@ -99,6 +99,7 @@ EXCHANGES = core.Exchanges(
 )
 IMPLEMENTER = core.Role(
     name="implementer",
+    title="Implementer",
     prompt="toy/implementer.j2",
     reply=Result,
     workspace=core.WorkspaceMode.ISOLATED_CHILD,
@@ -113,6 +114,7 @@ IMPLEMENTER = core.Role(
 """The implementer writes a candidate."""
 JUDGE = core.Role(
     name="judge",
+    title="Judge",
     prompt="toy/judge.j2",
     reply=Verdict,
     workspace=core.WorkspaceMode.READ_ONLY_REVISION,
@@ -247,6 +249,22 @@ def _final(role: str) -> str:
     return json.dumps({"summary": "done"} if role == "implementer" else {"passed": True})
 
 
+_IN_FLIGHT = frozenset(
+    {core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING}
+)
+
+
+def _control(action: Literal["pause", "resume"], now_at: float) -> core.RunControlEvent:
+    control = (
+        core.ControlInput(
+            control_id=core.ControlId(root=action), action=action, owner=core.PauseOwner.QUOTA
+        )
+        if action == "pause"
+        else core.ControlInput(control_id=core.ControlId(root=action), action=action, when="now")
+    )
+    return core.RunControlEvent(control=control, now_at=now_at)
+
+
 def _lease(session_id: core.SessionId) -> core.ResourceId:
     return core.ResourceId(root=f"lease:{session_id.root}")
 
@@ -271,11 +289,17 @@ class ToyHost:
     """Roles whose turns end with a reply that does not parse."""
     events: tuple[core.CoreEvent, ...] = ()
     """Operator controls delivered before the first decision."""
+    pause_at: int | None = None
+    """The operator pauses the run just before the executor of the n-th request answers (from 0),
+    if the run is open then, and resumes it once nothing of the paused run is in flight."""
+    paused_with: str | None = None
+    """The kind of the request the pause came before, once the operator paused."""
     shares: bool = True
     calls: list[tuple[str, str, str]] = field(default_factory=list)
     """(attempt, role, call id) of every evaluation a turn asked for."""
     _fresh: int = 0
     _jobs: int = 0
+    _requests: int = 0
     _running: dict[str, int] = field(default_factory=dict)
     _asking: dict[str, Ending] = field(default_factory=dict)
 
@@ -284,20 +308,45 @@ class ToyHost:
     def during_turn(
         self, request: core.Request, state: core.CoreState
     ) -> tuple[core.CoreEvent, ...]:
-        """The evaluation a fresh turn submits while it runs, as the bridge admits it."""
-        del state
+        """The operator's pause, then the evaluation a fresh turn submits while it runs."""
+        pause = self._pause(request, state)
         if not isinstance(request, core.DispatchTurn) or request.request_id is None:
-            return ()
+            return pause
         role = request.turn.session.role_id.root.removeprefix("toy-")
         if role in self.submit_only:
-            return (self._call(request, role),)
+            return (*pause, self._call(request, role))
         if role in self.roles and self.waits:
             ordinal = self._fresh
             self._fresh += 1
             if self.waits[ordinal % len(self.waits)]:
                 self._asking[request.request_id.root] = self.ends[ordinal % len(self.ends)]
-                return (self._call(request, role),)
-        return ()
+                return (*pause, self._call(request, role))
+        return pause
+
+    # -- the operator ----------------------------------------------------------------------
+
+    def _pause(self, request: core.Request, state: core.CoreState) -> tuple[core.CoreEvent, ...]:
+        ordinal = self._requests
+        self._requests += 1
+        run = state.run
+        if ordinal != self.pause_at or run.status != core.RunStatus.RUNNING or run.result:
+            return ()
+        self.paused_with = type(request).__name__
+        return (_control("pause", run.now_at),)
+
+    def operator(self, state: core.CoreState) -> tuple[core.CoreEvent, ...]:
+        """Resume a paused run once nothing of it is in flight (asked while nothing dispatches).
+
+        That is where the run sits while it waits on the operator: whatever it was doing when
+        it was paused has finished, and what it decided since is held until the resume.
+        """
+        if state.run.status != core.RunStatus.PAUSED:
+            return ()
+        if core.project(state).next_observe_at is not None or any(
+            record.phase in _IN_FLIGHT for record in state.records.records
+        ):
+            return ()
+        return (_control("resume", state.run.now_at),)
 
     def _call(self, request: core.DispatchTurn, role: str) -> core.AgentMeasurementRequested:
         attempt = request.scope.owner.root
@@ -383,7 +432,7 @@ class ToyHost:
         evidence = tuple(
             core.EvidenceRef(
                 evidence_id=core.EvidenceId(root=f"{stage.stage_id}:{owned.submission_id.root}"),
-                kind=core.EvidenceKind.LOCAL_VALIDATION,
+                kind=core.EvidenceKind.BENCHMARK,
                 purpose=plan.purpose,
                 scope=owned.scope,
                 source_request=owned.submission_id,
@@ -456,6 +505,29 @@ class ToyHost:
         return Succeeded(output_json=replies[ending], resource_id=lease, suspension=suspension)
 
 
+def toy_harness(
+    host: ToyHost,
+    *,
+    limits: core.Limits = LIMITS,
+    definition: core.SearchDef[Config] = toy,
+    reducers: core.CoreReducers | None = None,
+) -> Harness:
+    """The harness the toy search runs on the real core under, against ``host``."""
+    return Harness(
+        registry=OPERATIONS.registry(),
+        facts=FACTS,
+        limits=limits,
+        lifecycle=frozenset({"suspend"}),
+        during_turn=host.during_turn,
+        operator=host.operator,
+        shell_events=True,
+        schemas=definition.reply_schemas,
+        envelope_type=core.RunEnvelope[core.FlowState],
+        events=host.events,
+        reducers=reducers,
+    )
+
+
 def run_toy(
     host: ToyHost,
     config: Config | None = None,
@@ -466,17 +538,7 @@ def run_toy(
 ) -> Trace:
     """Drive the toy search on the real core against ``host`` until nothing more happens."""
     chosen = config or Config()
-    harness = Harness(
-        registry=OPERATIONS.registry(),
-        facts=FACTS,
-        limits=limits,
-        lifecycle=frozenset({"suspend"}),
-        during_turn=host.during_turn,
-        shell_events=True,
-        schemas=definition.reply_schemas,
-        envelope_type=core.RunEnvelope[core.FlowState],
-        events=host.events,
-    )
+    harness = toy_harness(host, limits=limits, definition=definition)
     return drive(definition.driver(chosen, OPERATIONS.registry()), chosen, host, harness, faults)
 
 

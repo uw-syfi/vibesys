@@ -1,0 +1,27 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/value_options.proto";
+import "vibesys/core/v1/vocabulary.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+message ReplyPathPart {
+  option (core_value).union = true;
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    string key = 1;
+    string index = 2 [(buf.validate.field).string.pattern = "^(0|-?[1-9][0-9]*)$", (core_field).integer = true];
+  }
+}
+
+// One typed problem in a reply: where it is and what is wrong.
+//
+// ``message`` is the validator's own wording when it reported one (a provider's schema
+// check does); the reply model's check leaves it empty and ``code`` says what is wrong.
+message ReplyError {
+  repeated ReplyPathPart path = 1 [(core_field).explicit = true];
+  ReplyErrorCode code = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  string message = 3 [(buf.validate.field).string.max_len = 500, (core_field) = {default_json: "\"\"", constant_name: "REPLY_ERROR_MESSAGE_LIMIT", constant_rule: "max_len"}];
+}

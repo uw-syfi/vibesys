@@ -1,4 +1,5 @@
 version = 1
+backends = ["cuda"]
 
 [agent]
 domain = "llm-serving"
@@ -20,3 +21,15 @@ name = "vllm"
 repo = "https://github.com/vllm-project/vllm"
 commit = "568afb3a13806beb53bb2e6bd518269357b237c0"
 dest = "vllm"
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "NVIDIA L4"
+count = 1
+vendor = "nvidia"
+
+[catalogue.model]
+name = "Olmo Hybrid 7B"
+maker = "ai2"

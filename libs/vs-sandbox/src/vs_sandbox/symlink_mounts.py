@@ -10,6 +10,7 @@ from vs_sandbox.lifecycle import BeforeReadyContext, SandboxLifecycleHooks
 
 if TYPE_CHECKING:
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class _SymlinkLifecycleHooks(SandboxLifecycleHooks):
 
     def before_ready(self, context: BeforeReadyContext) -> None:
         for command in self.commands:
-            result = context.sandbox.execute(command)
+            result = context.sandbox.execute(command, output=DISCARD)
             if result.exit_code != 0:
                 message = f"failed to create sandbox symlink with {command!r}: {result.output}"
                 raise RuntimeError(message)

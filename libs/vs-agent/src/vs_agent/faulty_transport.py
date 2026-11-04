@@ -17,7 +17,6 @@ blindly. An empty plan makes it a pass-through.
 
 from __future__ import annotations
 
-import threading
 from typing import TYPE_CHECKING, cast
 
 from vs_agent.fault_injection import (
@@ -30,6 +29,7 @@ from vs_faults.api import Boundary, ConversationFault, FaultPlan
 
 if TYPE_CHECKING:
     from vs_agent.fault_injection import Transport
+    from vs_sim.api import Threads
 
 __all__ = ["NOT_A_REPLY", "TURN_BUDGET_S", "FaultyTransport"]
 
@@ -42,12 +42,14 @@ class FaultyTransport(FaultingTransport):
     ``injected`` records each fault that fired as ``(ordinal, fault)``.
     """
 
-    def __init__(self, inner: Transport, plan: FaultPlan, *, name: str = "agent") -> None:
+    def __init__(
+        self, inner: Transport, plan: FaultPlan, *, name: str = "agent", threads: Threads
+    ) -> None:
         """Wrap ``inner``; ``name`` is the rules' target for this transport."""
         super().__init__(inner, self._next_kind)
         self._plan = plan
         self._name = name
-        self._count_lock = threading.Lock()
+        self._count_lock = threads.lock()
         self._turns = 0
         self.injected: list[tuple[int, ConversationFault]] = []
 

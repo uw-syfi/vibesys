@@ -1,6 +1,8 @@
 ---
 name: review-pr
 description: Review VibeSys pull requests and local diffs for correctness, regressions, architecture violations, insufficient tests, contract or documentation drift, and risky prompt changes. Use when a user asks to review, audit, assess, or find bugs in a VibeSys PR, branch, commit, patch, or working-tree change, including pre-merge reviews and second-pass reviews after updates.
+metadata:
+  kind: workflow
 ---
 
 # Review PR
@@ -60,8 +62,8 @@ repository's contracts, architecture, tests, and affected callers.
    - Use only the language and surface sections relevant to the diff, plus the
      cross-cutting checks.
    - Review new code placement explicitly. Favor an existing canonical owner;
-     extract a standalone reusable capability into `libs/` only when it has a
-     real interface and reuse boundary. Flag both misplaced shared behavior and
+     extract a standalone reusable capability into its own library package only
+     when it has a real interface and reuse boundary. Flag both misplaced shared behavior and
      abstractions that add indirection without protecting a boundary.
 
    - Run a design pass for any diff that adds or moves modules, interfaces,
@@ -72,14 +74,17 @@ repository's contracts, architecture, tests, and affected callers.
      red flags in `.agents/skills/software-design/references/red-flags.md`.
      Look for an existing violating pattern that the diff extends, and for a
      new or split module that does not declare its public interface.
+   - For every new written rule (in a skill, `AGENTS.md`, a doc, or a review
+     comment) and every fix of a bug class that recurs, ask: could a check
+     catch this? Request the type, lint rule, graph rule or test that would
+     (the `enforce-rules` skill), or an `Unenforced: <reason>` on the rule.
    - For stateful systems, apply
      [Functional core, interfaces and implementations](../software-design/references/functional-core.md).
      Flag lifecycle decisions in the shell or implementations, transitions
      without durable intent and replay, and implementations missing their
      interface's shared contract tests.
-   - For TypeScript clients, control state is an XState machine and data folds
-     are plain reducers; flag hand-rolled timers or cancellation in a feature
-     ([clients-architecture.md](../../../docs/contributing/clients-architecture.md), "State").
+   - For TypeScript clients, follow the `write-effect-code` skill for control
+     state; data folds are plain reducers.
    - Then read across files, as an LLM reviewer, for problems linters cannot
      see: one concept duplicated in several files, shallow wrappers that add a
      layer without a new abstraction, callers reaching into a module's
@@ -94,11 +99,8 @@ repository's contracts, architecture, tests, and affected callers.
      never mutated; remove it when done.
    - Choose the narrowest deterministic reproduction: run the PR's own new
      tests against the base source (they must fail there and pass at the
-     head), write a throwaway test or script from the issue's steps, or for
-     TUI rendering fixes render the affected view at a fixed width with the
-     `clients/tui` test harness. Drive the live TUI through the
-     `tui-bug-hunt` harness only when no cheaper reproduction exists and the
-     cost is justified.
+     head), write a throwaway test or script from the issue's steps, or use the
+     `verify-desktop-ui` harness for a screen defect when needed.
    - Report the reproduction as evidence: the command, the observed failure
      at the base, and the observed result at the head. If a reproduction was
      not possible, say why and treat the fix as unverified rather than

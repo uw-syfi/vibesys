@@ -30,8 +30,8 @@
  *   that entry is `neutral` or of the same runtime, so a Node-only package is unreachable from a
  *   `dom` or `neutral` entry.
  * - `external-dependencies`: React only in `dom` entries, Electron only in `node` and `preload`
- *   entries of features and apps, XState only where control state lives (features' `./state` and
- *   `./renderer`, and the effect-owning packages in `MACHINE_PACKAGES`), Node builtins only in
+ *   entries of features and apps, Effect only in the
+ *   desktop app's `./core`, `./ui` and `./main` entries (`EFFECT_PACKAGES`), Node builtins only in
  *   `node` entries (`EXTERNAL_DEPENDENCIES`); a package that declares one of them in
  *   `dependencies` has an entry that may use it.
  * - `preload-sandbox`: a `preload` entry's emitted code loads only Electron. Electron's sandbox
@@ -54,8 +54,10 @@
  * - `layer-matches-folder`: a package's folder agrees with the layer its manifest declares, so the
  *   manifest stays the one source of truth and the folder tree only mirrors it (`LAYER_FOLDERS`):
  *   `libs/*` declares foundation, core, domain, or service; `features/*` declares feature; and
- *   `apps/*` declares app. A package outside those folders fails, except a deprecated package on
- *   `DEPRECATED_OUTSIDE_FOLDERS` (`tui`), which stays where it is until it is deleted.
+ *   `apps/*` declares app. A package outside those folders fails.
+ *
+ * Two rules hold the desktop design system for every feature and app package:
+ * `strict-no-stylesheets` and `strict-imports`. Biome applies the strict Grit rules to their source.
  *
  * An export whose source is a stylesheet (`./tokens.css`) is a `dom` asset, not a compiled entry:
  * it has no tsconfig project, and bundlers resolve it through the same source condition.
@@ -94,6 +96,9 @@ export const RULES = [
   'domain-free',
   'bucket-names',
   'layer-matches-folder',
+  'strict-no-stylesheets',
+  'strict-imports',
+  'search-fact-imports',
 ];
 
 /**
@@ -110,12 +115,8 @@ export const LAYER_FOLDERS = {
   app: 'apps',
 };
 
-/**
- * Packages allowed to sit outside the layer folders, by directory. `clients/tui` is deprecated: it
- * is not migrated into the folder layout and is deleted when the desktop app replaces it. Nothing
- * else belongs here, and this list only shrinks.
- */
-export const DEPRECATED_OUTSIDE_FOLDERS = new Set(['tui']);
+/** The keys of a package's `vibesys` block. */
+const DECLARED_KEYS = new Set(['layer', 'entries']);
 
 /** Layer ranks. A package may depend only on a strictly lower rank. */
 export const LAYERS = {foundation: 0, core: 1, domain: 2, service: 3, feature: 4, app: 5};
@@ -138,15 +139,9 @@ export const FEATURE_ENTRIES = {'./state': 'neutral', './renderer': 'dom', './ma
 /** A feature may also publish its views' stylesheet, a `dom` asset its apps import. */
 const FEATURE_STYLESHEET = {'./styles.css': 'dom'};
 
-/**
- * The packages that own effects and run control-state machines outside a feature
- * (docs/contributing/clients-architecture.md, "State"): the machine glue and its test kit, and the
- * desktop connection manager (its host connection machine), and the live run session (its session
- * machine). Folds (`store`, `run-state`), models (`hosts`, `runs`), primitives
- * (`ui`), and the wire packages (`contracts`, `transport`, `ipc`) never import XState.
- */
-export const MACHINE_PACKAGES = ['@vibesys/machine', '@vibesys/connection', '@vibesys/run-session'];
 const ALL_RUNTIMES = Object.keys(RUNTIMES);
+/** The Effect runtime and its React bindings (the test kit, `@effect/vitest`, is test code). */
+export const EFFECT_PACKAGES = ['effect', '@effect/atom-react'];
 
 /**
  * Third-party imports confined by runtime and layer, the one allowlist for them. A specifier
@@ -159,14 +154,15 @@ const ALL_RUNTIMES = Object.keys(RUNTIMES);
 export const EXTERNAL_DEPENDENCIES = [
   {packages: ['react', 'react-dom'], runtimes: ['dom']},
   {packages: ['electron'], runtimes: ['node', 'preload'], layers: ['feature', 'app']},
-  {packages: ['@opentui/core'], runtimes: ['node'], layers: ['app']},
+  // Effect is the new desktop app's control layer (docs/contributing/clients-architecture.md,
+  // "State"). Its folds (`./state`) and sandboxed preload stay free of it, and no other package
+  // adopts it without a rule here.
   {
-    packages: ['xstate'],
+    packages: EFFECT_PACKAGES,
     runtimes: ALL_RUNTIMES,
-    layers: ['feature'],
-    subpaths: ['./state', './renderer'],
+    names: ['@vibesys/desktop'],
+    subpaths: ['./core', './ui', './main'],
   },
-  {packages: ['xstate'], runtimes: ALL_RUNTIMES, names: MACHINE_PACKAGES},
 ];
 const NODE_BUILTINS = {runtimes: ['node']};
 /** What a sandboxed preload's `require` reaches. */
@@ -178,16 +174,14 @@ const PRELOAD_MODULES = new Set(['electron']);
  * three) cannot apply to their single tsconfig per package. Every other rule applies. This table
  * only shrinks.
  */
-export const LEGACY_EXEMPTIONS = {
-  '@vibesys/tui': new Set(['entry-projects']),
-};
+export const LEGACY_EXEMPTIONS = {};
 
 /**
  * Packages whose production source must stay free of the product's domain, and the words that
  * name it. Matching is per word: identifiers are split at case changes (`runStatus` is `run` and
  * `status`), and a plural `s` is dropped.
  */
-export const DOMAIN_FREE = new Set(['@vibesys/ui', '@vibesys/store']);
+export const DOMAIN_FREE = new Set(['@vibesys/ui']);
 export const DOMAIN_WORDS = new Set([
   'agent',
   'candidate',
@@ -271,6 +265,9 @@ export function packageGraphErrors(root) {
       errors.push(...domainWordErrors(root, workspacePackage));
     }
     errors.push(...bucketNameErrors(workspacePackage));
+    if (isDesignPackage(workspacePackage)) {
+      errors.push(...strictErrors(root, workspacePackage, byName));
+    }
   }
   return errors;
 }
@@ -305,7 +302,7 @@ function declarationErrors(root, {name, directory, manifest}) {
   }
   const errors = [];
   for (const key of Object.keys(metadata)) {
-    if (key !== 'layer' && key !== 'entries') {
+    if (!DECLARED_KEYS.has(key)) {
       errors.push(violation('declarations', where, `unknown key vibesys.${key}`));
     }
   }
@@ -407,7 +404,6 @@ function featureEntryErrors(where, entries) {
 // --- folders ----------------------------------------------------------------------------------
 
 function folderErrors({name, directory, manifest}) {
-  if (DEPRECATED_OUTSIDE_FOLDERS.has(directory)) return [];
   const where = `${directory}/package.json`;
   const layer = manifest.vibesys.layer;
   const expected = LAYER_FOLDERS[layer];
@@ -477,16 +473,23 @@ function layerErrors({name, directory, manifest}, byName) {
 
 // --- imports ----------------------------------------------------------------------------------
 
-/** Source files under the package, package-relative, skipping installs, output, and dot-dirs. */
-function sourceFiles(packageRoot, relativeDirectory = '') {
+/** Files under the package that `accept` their name, package-relative, skipping installs, output, and dot-dirs. */
+function filesWhere(packageRoot, accept, relativeDirectory = '') {
   const files = [];
   for (const entry of readdirSync(join(packageRoot, relativeDirectory), {withFileTypes: true})) {
     if (entry.name.startsWith('.') || SKIPPED_DIRECTORIES.has(entry.name)) continue;
     const path = relativeDirectory === '' ? entry.name : `${relativeDirectory}/${entry.name}`;
-    if (entry.isDirectory()) files.push(...sourceFiles(packageRoot, path));
-    else if (SOURCE_FILE.test(entry.name) && !DECLARATION_FILE.test(entry.name)) files.push(path);
+    if (entry.isDirectory()) files.push(...filesWhere(packageRoot, accept, path));
+    else if (accept(entry.name)) files.push(path);
   }
   return files;
+}
+
+const isSourceFile = name => SOURCE_FILE.test(name) && !DECLARATION_FILE.test(name);
+
+/** Source files under the package, package-relative. */
+function sourceFiles(packageRoot) {
+  return filesWhere(packageRoot, isSourceFile);
 }
 
 /** Test code: a test file, a test-support directory, or anything outside `src/` (tooling). */
@@ -519,6 +522,17 @@ export function owningEntry(entries, path) {
 export function importedSpecifiers(text) {
   const {importedFiles} = ts.preProcessFile(text, true, true);
   return importedFiles.map(({fileName}) => fileName).filter(name => !name.startsWith('.'));
+}
+
+/** The bare specifiers a source text imports, each with its 1-based line. */
+export function importedSpecifierLines(text) {
+  const {importedFiles} = ts.preProcessFile(text, true, true);
+  return importedFiles
+    .filter(({fileName}) => !fileName.startsWith('.'))
+    .map(({fileName, pos}) => ({
+      specifier: fileName,
+      line: text.slice(0, pos).split('\n').length,
+    }));
 }
 
 /** The `@vibesys/*` specifiers among them. */
@@ -876,6 +890,305 @@ function bucketNameErrors({name, directory, manifest}) {
         'concept it owns; name it for that concept, or split it into one package per concept',
     ),
   ];
+}
+
+// --- design rules for feature and app packages ------------------------------------------------
+
+/**
+ * The workspace packages a feature or app imports, with the entries it may import (`null`: any
+ * entry the package publishes). UI comes only from `@vibesys/ui`'s `.` and `./tokens`; the rest are
+ * the non-UI libraries a screen composes.
+ */
+export const STRICT_WORKSPACE_IMPORTS = {
+  '@vibesys/ui': ['.', './tokens'],
+  // The names a person reads for roles; generated from the one Python catalog.
+  '@vibesys/display-names': ['.'],
+  // The gateway's wire contract: the main process speaks it, so it is a typed dependency.
+  '@vibesys/proto': null,
+  // The orchestrator screens read a run through its generated messages.
+  '@vibesys/orchestrator-proto': null,
+};
+/** An app imports the stylesheets of `@vibesys/ui` once, in its entry wiring. */
+const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css', './components.css'];
+/**
+ * The third-party packages a feature or app imports and declares: no component kit, utility CSS or
+ * icon package. Electron and Node builtins stay confined by `external-dependencies`.
+ */
+export const STRICT_THIRD_PARTY = [
+  'react',
+  'react-dom',
+  ...EFFECT_PACKAGES,
+  // The wire contract's runtime: a typed client builds, encodes and validates generated messages.
+  '@bufbuild/protobuf',
+  '@bufbuild/protovalidate',
+];
+const STRICT_STYLE_FILE = /\.(?:css|scss|sass|less|styl|pcss)$/;
+const STRICT_FIX =
+  'build the UI from @vibesys/ui (add the missing component there) and drop the dependency';
+
+/** The Biome plugins every feature and app source runs. */
+export const STRICT_LINT_PLUGINS = [
+  './tools/lint-rules/strict-no-raw-elements.grit',
+  './tools/lint-rules/strict-no-raw-values.grit',
+];
+function strictErrors(root, workspacePackage, byName) {
+  return [
+    ...stylesheetErrors(root, workspacePackage),
+    ...strictManifestErrors(workspacePackage, byName),
+    ...strictImportErrors(root, workspacePackage, byName),
+  ];
+}
+
+/** The design rules cover every feature and app package. */
+function isDesignPackage({directory}) {
+  return directory.startsWith('features/') || directory.startsWith('apps/');
+}
+
+function stylesheetErrors(root, {name, directory, manifest}) {
+  const errors = [];
+  const fix = 'style through the components and tokens of @vibesys/ui, and delete it';
+  for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
+    const source = sourceTarget(target) ?? '';
+    if (STRICT_STYLE_FILE.test(subpath) || STRICT_STYLE_FILE.test(source)) {
+      errors.push(
+        violation(
+          'strict-no-stylesheets',
+          `${directory}/package.json`,
+          `exports["${subpath}"] is a stylesheet (S2), but the strict package ${name} ships none; ${fix}`,
+        ),
+      );
+    }
+  }
+  for (const path of filesWhere(join(root, directory), file => STRICT_STYLE_FILE.test(file))) {
+    errors.push(
+      violation(
+        'strict-no-stylesheets',
+        `${directory}/${path}`,
+        `a stylesheet (S2) in the strict package ${name}; ${fix}`,
+      ),
+    );
+  }
+  return errors;
+}
+
+/** Whether `name` is a feature or app package: an app may compose feature screens. */
+function isStrictPackage(name, byName) {
+  const target = byName.get(name);
+  return target !== undefined && isDesignPackage(target);
+}
+
+function strictManifestErrors({name, directory, manifest}, byName) {
+  const errors = [];
+  for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+    const message = isStrictPackage(dependency, byName)
+      ? undefined
+      : strictDependencyMessage(dependency);
+    if (message === undefined) continue;
+    errors.push(
+      violation(
+        'strict-imports',
+        `${directory}/package.json`,
+        `dependencies["${dependency}"] (S6) in the strict package ${name}: ${message}`,
+      ),
+    );
+  }
+  return errors;
+}
+
+/** Why a strict package may not depend on `dependency`, or undefined when it may. */
+function strictDependencyMessage(dependency) {
+  if (dependency.startsWith(SCOPE)) {
+    if (Object.hasOwn(STRICT_WORKSPACE_IMPORTS, dependency)) return undefined;
+    return `${dependency} is not a library a strict package may use; ${STRICT_FIX}`;
+  }
+  if (STRICT_THIRD_PARTY.includes(dependency) || dependency === 'electron') return undefined;
+  return `${dependency} is outside ${STRICT_THIRD_PARTY.join(', ')}; ${STRICT_FIX}`;
+}
+
+/** The isolated projection has an import boundary; shared folds and panels also carry agent data. */
+function isSearchProjection(path) {
+  return (
+    /^apps\/desktop\/src\/state\/orchestrator\/search[^/]*\.ts$/.test(path) &&
+    !path.endsWith('.test.ts')
+  );
+}
+
+function isSearchFactFile(path) {
+  return (
+    isSearchProjection(path) ||
+    [
+      'apps/desktop/src/state/orchestrator/views.ts',
+      'apps/desktop/src/state/orchestrator/fold.ts',
+      'apps/desktop/src/ui/orchestrator/search-panels.tsx',
+    ].includes(path)
+  );
+}
+
+/** Search fact readers cannot reach agent items or tool-text projections through imports. */
+function searchFactImportMessage(path, specifier) {
+  if (!isSearchProjection(path)) return undefined;
+  if (specifier === '@vibesys/orchestrator-proto' || specifier === './time.js') return undefined;
+  return (
+    'search facts may import only generated protocol fields and the pure timestamp conversion; remove ' +
+    specifier
+  );
+}
+
+// Derive permitted bindings from the generated search contract and its CLI facts rather than
+// copying enum names here. The orchestrator item/agent contract is deliberately outside this set.
+const searchBindings = new Set(
+  [
+    'orchestrator/v1/search',
+    'orchestrator/v1/orchestrator',
+    'cli/v1/job',
+    'cli/v1/plan',
+    'cli/v1/result',
+    'cli/v1/service',
+    'cli/v1/verdict',
+    'cli/v1/failure',
+    'cli/v1/promote',
+  ].flatMap(file => {
+    const path = fileURLToPath(
+      new URL(`../../libs/orchestrator-proto/src/generated/vibesys/${file}_pb.ts`, import.meta.url),
+    );
+    const source = ts.createSourceFile(
+      path,
+      readFileSync(path, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    return source.statements.flatMap(node => {
+      if (file === 'orchestrator/v1/orchestrator')
+        return ts.isEnumDeclaration(node) ? [node.name.text] : [];
+      if (ts.isVariableStatement(node))
+        return node.declarationList.declarations.flatMap(declaration =>
+          ts.isIdentifier(declaration.name) ? [declaration.name.text] : [],
+        );
+      return ts.isTypeAliasDeclaration(node) ||
+        ts.isEnumDeclaration(node) ||
+        ts.isInterfaceDeclaration(node)
+        ? [node.name.text]
+        : [];
+    });
+  }),
+);
+
+// This pure predicate requires an explicit decision for every generated oneof kind.
+searchBindings.add('oneofIs');
+
+function checkSearchBindings(node, report) {
+  const clause = node.importClause;
+  const bindings = clause?.namedBindings;
+  if (clause?.name !== undefined || bindings === undefined || !ts.isNamedImports(bindings)) {
+    report(
+      node,
+      'import generated search fields by name; namespace and default imports expose agent items',
+    );
+    return;
+  }
+  for (const binding of bindings.elements) {
+    const name = binding.propertyName?.text ?? binding.name.text;
+    if (!searchBindings.has(name))
+      report(
+        binding,
+        `search facts cannot import ${name}; use named bindings from the generated search contract or its CLI fact contracts`,
+      );
+  }
+}
+
+/** The complete import boundary for fact readers, including relative imports and aliases. */
+export function searchFactErrors(path, text) {
+  if (!isSearchFactFile(path)) return [];
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true);
+  const errors = [];
+  const report = (node, message) =>
+    errors.push(
+      violation(
+        'search-fact-imports',
+        `${path}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`,
+        message,
+      ),
+    );
+  for (const node of source.statements) {
+    if (!ts.isImportDeclaration(node)) continue;
+    const specifier = node.moduleSpecifier.text;
+    const message = searchFactImportMessage(path, specifier);
+    if (message !== undefined) {
+      report(node, message);
+      continue;
+    }
+    if (specifier !== '@vibesys/orchestrator-proto') continue;
+    if (isSearchProjection(path)) checkSearchBindings(node, report);
+  }
+  const visit = node => {
+    if (
+      (ts.isPropertyAccessExpression(node) && node.name.text === 'argsJson') ||
+      (ts.isElementAccessExpression(node) &&
+        ts.isStringLiteral(node.argumentExpression) &&
+        node.argumentExpression.text === 'argsJson')
+    )
+      report(node, 'search facts must use typed fields, never argsJson');
+    if (
+      isSearchProjection(path) &&
+      ((ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) ||
+        ts.isImportTypeNode(node) ||
+        ts.isImportEqualsDeclaration(node) ||
+        (ts.isCallExpression(node) &&
+          (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+            (ts.isIdentifier(node.expression) && node.expression.text === 'require'))))
+    )
+      report(
+        node,
+        'search facts use named static imports only; do not load or re-export another module',
+      );
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return errors;
+}
+
+function strictImportErrors(root, workspacePackage, byName) {
+  const {directory} = workspacePackage;
+  const packageRoot = join(root, directory);
+  const errors = [];
+  for (const path of sourceFiles(packageRoot).filter(file => !isTestCode(file))) {
+    const text = readFileSync(join(packageRoot, path), 'utf8');
+    errors.push(...searchFactErrors(`${directory}/${path}`, text));
+    for (const {specifier, line} of importedSpecifierLines(text)) {
+      const message = strictSpecifierMessage(workspacePackage, specifier, byName);
+      if (message !== undefined) {
+        errors.push(violation('strict-imports', `${directory}/${path}:${line}`, message));
+      }
+    }
+  }
+  return errors;
+}
+
+/** Why a strict package may not import `specifier` (S6), or undefined when it may. */
+function strictSpecifierMessage({name, manifest}, specifier, byName) {
+  if (!specifier.startsWith(SCOPE)) return strictThirdPartyMessage(specifier);
+  const target = splitSpecifier(specifier);
+  if (target.name === name || !byName.has(target.name)) return undefined;
+  if (isStrictPackage(target.name, byName)) return undefined;
+  if (!Object.hasOwn(STRICT_WORKSPACE_IMPORTS, target.name)) {
+    return `imports ${specifier}, which a strict package may not use (S6); ${STRICT_FIX}`;
+  }
+  const entries = STRICT_WORKSPACE_IMPORTS[target.name];
+  const stylesheets = manifest.vibesys.layer === 'app' ? STRICT_APP_STYLESHEETS : [];
+  if (entries === null || [...entries, ...stylesheets].includes(target.subpath)) return undefined;
+  const allowed = entries.map(entry => `${target.name}${entry === '.' ? '' : entry.slice(1)}`);
+  return (
+    `imports ${specifier} (S6); a strict package imports only ${allowed.join(' and ')}: ` +
+    'use the public components and tokens'
+  );
+}
+
+function strictThirdPartyMessage(specifier) {
+  if (externalPolicy(specifier)?.rules.includes(NODE_BUILTINS)) return undefined;
+  const [first, second] = specifier.split('/');
+  const base = first.startsWith('@') ? `${first}/${second}` : first;
+  if (STRICT_THIRD_PARTY.includes(base) || base === 'electron') return undefined;
+  return `imports ${specifier} (S6), outside ${STRICT_THIRD_PARTY.join(', ')}; ${STRICT_FIX}`;
 }
 
 function main() {

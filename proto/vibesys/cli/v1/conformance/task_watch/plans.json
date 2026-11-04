@@ -1,0 +1,95 @@
+{
+  "description": "a plan made and commented after the stream opened is sent as a change, never as a reset",
+  "judged_commits": 0,
+  "setup": [],
+  "ops": [
+    {
+      "op": "create_plan",
+      "title": "try a bigger batch",
+      "body": "raise the batch size"
+    },
+    {
+      "op": "comment_plan",
+      "number": 1,
+      "text": "picked"
+    }
+  ],
+  "cuts": null,
+  "expect": [
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "plan": {
+                "body": "raise the batch size",
+                "createdAt": "T",
+                "number": 1,
+                "status": "PLAN_STATUS_OPEN",
+                "title": "try a bigger batch",
+                "updatedAt": "T"
+              }
+            }
+          ]
+        },
+        "sequence": "4"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "plan": {
+                "body": "raise the batch size",
+                "comments": [
+                  {
+                    "agent": "agent-1",
+                    "at": "T",
+                    "text": "picked"
+                  }
+                ],
+                "createdAt": "T",
+                "number": 1,
+                "status": "PLAN_STATUS_OPEN",
+                "title": "try a bigger batch",
+                "updatedAt": "T"
+              }
+            }
+          ]
+        },
+        "sequence": "5"
+      }
+    ]
+  ]
+}

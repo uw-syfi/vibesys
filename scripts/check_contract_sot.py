@@ -23,6 +23,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections import Counter
 from dataclasses import dataclass
 from functools import cache, cached_property
@@ -32,9 +33,12 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from scripts.ast_identity import node_identity
-from vs_project.api import run_git
+from vs_project.api import Git, GitCommandError
+from vs_sim.api import OsProcesses
 
 __all__ = ["Scan", "main", "measure", "ratchet"]
+
+_GIT = Git(OsProcesses())
 
 MANIFEST = "scripts/contract_replacements.json"
 BASELINE = "scripts/contract_sot_baseline.jsonl"
@@ -46,7 +50,7 @@ MAX_RESOLUTION_PATHS = 256
 AMBIGUOUS_ALIAS = "<ambiguous-alias>"
 IMPORT_FUNCTIONS = frozenset({"importlib.import_module", "__import__", "builtins.__import__"})
 GETATTR_FUNCTIONS = frozenset({"getattr", "builtins.getattr"})
-ROOTS = ("src", "libs", "tests", "scripts", "sdk", "examples", "resources")
+ROOTS = ("src", "libs", "tests", "scripts", "sdk", "examples", "resources", "skills")
 SKIP = frozenset({".venv", "__pycache__", "node_modules", ".git", "fixtures"})
 type Key = tuple[str, str, str]
 type Names = dict[str, frozenset[str]]
@@ -81,6 +85,44 @@ class Manifest(BaseModel):
     schema_version: int = Field(ge=2, le=2)
     seed_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
     replacements: tuple[Replacement, ...]
+
+
+class CopyWaiver(BaseModel):
+    """One generated contract temporarily duplicated during a named migration."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    path: str = Field(min_length=1)
+    symbol: SymbolName
+    reason: str = Field(min_length=1)
+
+
+class GateConfig(BaseModel):
+    """Explicit per-contract exceptions, never a directory-wide scan exclusion."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    copy_waivers: list[CopyWaiver] = Field(default_factory=list)
+
+
+def copy_waivers(root: Path) -> dict[str, frozenset[str]]:
+    """Read exact generated-contract exceptions from the project configuration."""
+    project = root / "pyproject.toml"
+    if not project.exists():
+        return {}
+    config = tomllib.loads(project.read_text()).get("tool", {}).get("vibesys", {})
+    waivers = GateConfig.model_validate(config.get("contract_sot", {})).copy_waivers
+    generated = config.get("file_length", {}).get("generated", [])
+    result: dict[str, frozenset[str]] = {}
+    for waiver in waivers:
+        path = Path(waiver.path)
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or not any(path.is_relative_to(directory) for directory in generated)
+            or waiver.symbol in result.get(waiver.path, frozenset())
+        ):
+            raise ContractGateError.invalid_waiver(waiver.path)
+        result[waiver.path] = result.get(waiver.path, frozenset()) | {waiver.symbol}
+    return result
 
 
 class BaselineRecord(BaseModel):
@@ -118,6 +160,11 @@ class Source:
 
 class ContractGateError(ValueError):
     """Invalid manifest/baseline input, with the offending key or record."""
+
+    @classmethod
+    def invalid_waiver(cls, path: str) -> ContractGateError:
+        """Name a duplicate or non-generated copy exception."""
+        return cls(f"invalid contract_sot.copy_waivers: {path}")
 
     @classmethod
     def invalid(cls, detail: object) -> ContractGateError:
@@ -572,11 +619,13 @@ def copied_definitions(
     authorities: dict[str, frozenset[str]],
     fingerprints: set[tuple[str, ...]],
     exports: dict[str, Names],
+    waived: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Reject alternate named or structurally identical model definitions."""
     names = {name.rpartition(".")[2] for name in authorities}
     canonical = set().union(*authorities.values())
     errors = []
+    used: set[str] = set()
     for node in source.nodes:
         if isinstance(node, ast.Call):
             bases = {
@@ -606,7 +655,13 @@ def copied_definitions(
             or node.name in names
             or (len(signature) >= GETATTR_ARGUMENTS and signature in fingerprints)
         ):
-            errors.append(f"{source.path}:{node.lineno}: copied frozen contract {node.name}")
+            if node.name in waived:
+                used.add(node.name)
+            else:
+                errors.append(f"{source.path}:{node.lineno}: copied frozen contract {node.name}")
+    errors.extend(
+        f"{source.path}: stale copy waiver for {name}; remove it" for name in waived - used
+    )
     return errors
 
 
@@ -774,12 +829,21 @@ def measure(root: Path, parsed: tuple[Source, ...] | None = None) -> Scan:
     counts: Counter[Key] = Counter()
     errors = canonical_errors(authorities, parsed, exports)
     errors.extend(shape_errors(manifest, class_definitions(parsed)))
+    waivers = copy_waivers(root)
+    errors.extend(
+        f"{path}: stale copy waiver; file is absent, remove it"
+        for path in waivers.keys() - {source.path for source in parsed}
+    )
     for source in parsed:
         scan = source_counts(source, exports[source.module], exports, set(authorities))
         counts.update(scan.counts)
         errors.extend(scan.errors)
         owners = {name: resolve(canonical, exports) for name, canonical in authorities.items()}
-        errors.extend(copied_definitions(source, owners, fingerprints, exports))
+        errors.extend(
+            copied_definitions(
+                source, owners, fingerprints, exports, waivers.get(source.path, frozenset())
+            )
+        )
     return Scan(counts, tuple(errors))
 
 
@@ -816,9 +880,9 @@ def consumer_renames(root: Path, ref: str) -> dict[str, str]:
     """Preserve identities only for Git-detected renames whose source is absent."""
     if ref.startswith("-"):
         raise ContractGateError.invalid(ref)
-    base = run_git(["merge-base", ref, "HEAD"], cwd=root, text=True, timeout=30)
-    base.check_returncode()
-    changes = run_git(
+    base = _GIT.run_text(["merge-base", ref, "HEAD"], cwd=root, timeout=30)
+    base.check()
+    changes = _GIT.run_text(
         [
             "diff",
             "--name-status",
@@ -829,10 +893,9 @@ def consumer_renames(root: Path, ref: str) -> dict[str, str]:
             "--",
         ],
         cwd=root,
-        text=True,
         timeout=30,
     )
-    changes.check_returncode()
+    changes.check()
     fields = changes.stdout.split("\0")[:-1]
     if len(fields) % 3:
         raise ContractGateError.invalid(fields)
@@ -920,7 +983,13 @@ def main(argv: list[str] | None = None) -> int:
         elif scan.counts != baseline:
             print("contract baseline is stale; run check_contract_sot.py --write", file=sys.stderr)
             return 1
-    except (OSError, ValueError, SyntaxError, subprocess.CalledProcessError) as exc:
+    except (
+        OSError,
+        ValueError,
+        SyntaxError,
+        subprocess.CalledProcessError,
+        GitCommandError,
+    ) as exc:
         print(f"check_contract_sot: {exc}", file=sys.stderr)
         return 2
     print(f"contract SOT: {len(scan.counts)} tuples, {sum(scan.counts.values())} occurrences")

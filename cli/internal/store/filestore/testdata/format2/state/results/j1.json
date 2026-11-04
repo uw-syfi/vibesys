@@ -1,0 +1,52 @@
+{
+  "format":  2,
+  "seq":  "1",
+  "result":  {
+    "job_id":  "j1",
+    "key":  "k1",
+    "task":  "kv-store",
+    "task_version":  "v1",
+    "commit":  "c1",
+    "schema_version":  1,
+    "environment":  {
+      "kind":  "ENVIRONMENT_KIND_HOST",
+      "backend":  "BACKEND_KIND_CPU",
+      "facts":  {
+        "go":  "1.25"
+      }
+    },
+    "machine":  {
+      "host_id":  "host-a",
+      "os":  "linux",
+      "arch":  "amd64",
+      "logical_cpus":  8,
+      "memory_bytes":  "17179869184"
+    },
+    "load":  {
+      "sampled_at":  "2026-11-01T00:00:20Z",
+      "load_average_1m":  0.25
+    },
+    "recorded_at":  "2026-11-01T00:00:21Z",
+    "measure":  {
+      "metric":  {
+        "name":  "ops",
+        "direction":  "DIRECTION_MAXIMIZE"
+      },
+      "samples":  [
+        1.5,
+        2.5,
+        3.5
+      ],
+      "observations":  [
+        {
+          "name":  "p99",
+          "values":  [
+            0.1
+          ]
+        }
+      ],
+      "check_job_id":  "j-check",
+      "value":  2.5
+    }
+  }
+}

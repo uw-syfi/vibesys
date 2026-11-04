@@ -14,9 +14,17 @@
       "**/*.cts",
       "**/*.mts",
       "tools/scripts/**/*.mjs",
+      "libs/proto/**/*.mjs",
+      "libs/ui/src/**/*.css",
+      "!libs/ui/src/tokens.css",
       "!**/dist",
-      "!libs/contracts/src/generated"
+      "!libs/display-names/src/generated",
+      "!libs/proto/src/generated",
+      "!libs/orchestrator-proto/src/generated"
     ]
+  },
+  "css": {
+    "formatter": { "enabled": false }
   },
   "formatter": {
     "enabled": true,
@@ -59,7 +67,53 @@
   },
   "overrides": [
     {
-      "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
+      "includes": [
+        "apps/desktop/src/state/orchestrator/search*.ts",
+        "apps/desktop/src/state/orchestrator/views.ts",
+        "apps/desktop/src/state/orchestrator/fold.ts",
+        "apps/desktop/src/ui/orchestrator/search-panels.tsx",
+        "!**/*.test.ts"
+      ],
+      "plugins": ["./tools/lint-rules/no-argsjson-in-fact-code.grit"]
+    },
+    {
+      "includes": [
+        "apps/**/src/**/*.ts",
+        "apps/**/src/**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
+      "plugins": [
+        "./tools/lint-rules/strict-no-raw-elements.grit",
+        "./tools/lint-rules/strict-no-raw-values.grit"
+      ]
+    },
+    {
+      "includes": [
+        "libs/ui/src/**/*.ts",
+        "libs/ui/src/**/*.tsx",
+        "!libs/ui/src/tokens/**",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
+      "plugins": ["./tools/lint-rules/strict-no-raw-values.grit"]
+    },
+    {
+      "includes": [
+        "libs/ui/src/**/*.css",
+        "!libs/ui/src/tokens.css",
+        "!libs/ui/src/primitives.css"
+      ],
+      "plugins": ["./tools/lint-rules/ui-no-raw-css-values.grit"]
+    },
+    {
+      "includes": [
+        "**/ui/**/*.ts",
+        "**/ui/**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx",
+        "!libs/ui/scripts/**"
+      ],
       "plugins": [
         "./tools/lint-rules/ui-no-io-calls.grit",
         "./tools/lint-rules/ui-no-effect-hooks.grit",
@@ -68,55 +122,57 @@
     },
     {
       "includes": [
-        "apps/web/src/**/*.ts",
-        "apps/web/src/**/*.tsx",
-        "features/*/src/**/*.ts",
-        "features/*/src/**/*.tsx",
-        "!apps/web/src/platform/backend.ts",
-        "!**/*.test.ts",
-        "!**/*.test.tsx"
-      ],
-      "plugins": ["./tools/lint-rules/web-fetch-only-in-backend.grit"]
-    },
-    {
-      "includes": [
-        "**/ui/**/*.ts",
-        "**/ui/**/*.tsx",
+        "apps/*/src/**/*.ts",
+        "apps/*/src/**/*.tsx",
+        "libs/*/src/**/*.ts",
+        "libs/*/src/**/*.tsx",
         "!**/*.test.ts",
         "!**/*.test.tsx",
-        "!tui/src/ui/activity-bar.ts",
-        "!tui/src/ui/agent-map.ts",
-        "!tui/src/ui/chat-composer.ts",
-        "!tui/src/ui/experiment-log.ts",
-        "!tui/src/ui/round-rail.ts"
+        "!**/generated/**",
+        "!**/testing/**"
       ],
+      "plugins": ["./tools/lint-rules/no-role-words.grit"]
+    },
+    {
+      "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
       "plugins": ["./tools/lint-rules/ui-no-timers.grit"]
     },
     {
       "includes": [
-        "features/*/src/**/state/**/*.ts",
-        "features/*/src/**/state/**/*.tsx",
-        "features/*/src/**/effects/**/*.ts",
-        "features/*/src/**/effects/**/*.tsx",
-        "libs/connection/src/state/**/*.ts",
-        "!**/*.test.ts",
-        "!**/*.test.tsx",
-        "!features/gateway-connect/src/renderer/effects/gateway-connect.ts",
-        "!features/hosts/src/renderer/effects/stores.ts"
+        "apps/desktop/src/**/*.ts",
+        "apps/desktop/src/**/*.tsx",
+        "apps/desktop/src/**/*.cts"
       ],
-      "plugins": ["./tools/lint-rules/features-no-hand-rolled-control.grit"]
+      "plugins": ["./tools/lint-rules/effect-namespace-imports.grit"]
     },
     {
       "includes": [
-        "features/run-control/src/**/*.ts",
-        "features/run-control/src/**/*.tsx",
-        "libs/run-session/src/**/*.ts",
-        "!libs/run-session/src/run.ts",
-        "libs/connection/src/**/*.ts",
+        "apps/desktop/src/**/*.ts",
+        "apps/desktop/src/**/*.tsx",
+        "!apps/desktop/src/main/index.ts",
+        "!apps/desktop/src/ui/main.tsx",
+        "!apps/desktop/src/testing/page/main.tsx"
+      ],
+      "plugins": ["./tools/lint-rules/effect-run-only-in-entries.grit"]
+    },
+    {
+      "includes": [
+        "apps/desktop/src/core/**/*.ts",
+        "apps/desktop/src/state/**/*.ts",
+        "apps/desktop/src/ui/**/*.ts",
+        "apps/desktop/src/ui/**/*.tsx",
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],
-      "plugins": ["./tools/lint-rules/control-state-no-store-kernel.grit"]
+      "plugins": ["./tools/lint-rules/effect-no-ambient-time-random.grit"]
+    },
+    {
+      "includes": ["apps/desktop/src/core/**/*.ts"],
+      "plugins": ["./tools/lint-rules/effect-core-no-promises.grit"]
+    },
+    {
+      "includes": ["apps/desktop/src/**/*.test.ts", "apps/desktop/src/**/*.test.tsx"],
+      "plugins": ["./tools/lint-rules/effect-tests-no-real-time.grit"]
     },
     {
       "includes": ["**/*.test.ts", "**/*.test.tsx"],

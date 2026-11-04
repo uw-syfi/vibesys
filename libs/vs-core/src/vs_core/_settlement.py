@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
+
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from .types.attempts import AttemptPhase, RetentionRequired
 from .types.common import (
@@ -38,6 +39,10 @@ if TYPE_CHECKING:
     from .types.records import RequestRecord
     from .types.sessions import Invocation
     from .types.settlement import AssessmentProposal, SettlementEvent
+
+
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
 def _owner(context: SettlementContext, attempt: AttemptRef) -> AttemptView | None:
@@ -139,8 +144,8 @@ def _invocation_valid(
     # Sessions owns schema validation before accepting final output. Settlement
     # additionally rejects malformed persisted JSON, without owning role schemas.
     try:
-        json.loads(invocation.output_json)
-    except (ValueError, TypeError):
+        _ANY_JSON.validate_json(invocation.output_json)
+    except ValidationError:
         return False
     authorized = any(
         authority.kind == assessment.kind

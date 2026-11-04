@@ -1,0 +1,9 @@
+[package]
+name = "stitch-source-api"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+stitch-core = { path = "../stitch-core" }
+thiserror.workspace = true

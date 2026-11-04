@@ -11,7 +11,6 @@ from ._session_scope import (
 )
 from .types.common import (
     DecisionId,
-    InvocationRef,
     RequestId,
     Scope,
 )
@@ -29,35 +28,8 @@ from .types.sessions import (
 )
 
 if TYPE_CHECKING:
-    from .types.common import SessionId
     from .types.kernel import SessionsContext
     from .types.records import Request, RequestRecord
-
-
-def _session(state: SessionsState, identity: SessionId) -> SessionView | None:
-    return next((row for row in state.sessions if row.spec.session_id == identity), None)
-
-
-def _invocation(state: SessionsState, ref: InvocationRef) -> Invocation | None:
-    return next((row for row in state.invocations if row.invocation == ref), None)
-
-
-def _replace_session(state: SessionsState, session: SessionView) -> SessionsState:
-    rows = tuple(
-        session if row.spec.session_id == session.spec.session_id else row for row in state.sessions
-    )
-    if _session(state, session.spec.session_id) is None:
-        rows = (*rows, session)
-    return state.model_copy(update={"sessions": rows})
-
-
-def _replace_invocation(state: SessionsState, invocation: Invocation) -> SessionsState:
-    rows = tuple(
-        invocation if row.invocation == invocation.invocation else row for row in state.invocations
-    )
-    if _invocation(state, invocation.invocation) is None:
-        rows = (*rows, invocation)
-    return state.model_copy(update={"invocations": rows})
 
 
 def _session_id(session: SessionView, action: str) -> RequestId:
@@ -88,7 +60,7 @@ def _reconciling(context: SessionsContext, request: Request) -> Outbound:
 
 
 def _record(context: SessionsContext, identity: RequestId | None) -> RequestRecord | None:
-    return next((row for row in context.records.records if row.request_id == identity), None)
+    return context.records.record(identity)
 
 
 def _episode(context: SessionsContext, scope: Scope) -> DecisionId | None:
@@ -144,7 +116,11 @@ def _close(session: SessionView, context: SessionsContext, authority: RequestId)
 def _inspect_session(
     session: SessionView, context: SessionsContext, target: RequestId
 ) -> InspectRequest:
-    identity = RequestId(root=encode_identity("inspect-root", target.root))
+    # One inspection per host epoch: a later epoch asks afresh. An answer a dead host's
+    # inspection gave (or never gave) says nothing new to the restarted host, and the same
+    # identity would only hand back that ended request.
+    epoch = str(context.records.epoch)
+    identity = RequestId(root=encode_identity("inspect-root", epoch, target.root))
     previous = _record(context, identity)
     if previous is not None and isinstance(previous.request, InspectRequest):
         return previous.request

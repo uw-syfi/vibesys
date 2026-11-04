@@ -5,11 +5,15 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from vibesys.api import (
+    ComparisonsReadData,
+    ComparisonStatus,
     CoreEvent,
     EventStatus,
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    InputMeasurementFailedData,
+    MeasurementComparedData,
     ProviderSwitchedData,
     QuotaAbandonedData,
     QuotaPausedData,
@@ -17,7 +21,9 @@ from vibesys.api import (
     RateLimitUpdateData,
     RunConfiguredData,
     WinnerSelectedData,
+    WorkspaceRootProbeData,
     WorkspaceSnapshotData,
+    describe_seconds,
 )
 
 _EXCLUDED_PATHS_SHOWN = 5
@@ -41,6 +47,23 @@ def format_framework_event(event: CoreEvent) -> str | None:
             text = _format_framework_warning(data)
         case WinnerSelectedData():
             text = _format_winner_selected(data)
+        case _:
+            text = _format_measurement_event(data)
+    return text
+
+
+def _format_measurement_event(data: object) -> str | None:
+    """Return the rendering of an input-measurement or workspace-probe event, or None."""
+    text: str | None = None
+    match data:
+        case InputMeasurementFailedData():
+            text = _format_input_measurement_failed(data)
+        case MeasurementComparedData():
+            text = _format_measurement_compared(data)
+        case ComparisonsReadData():
+            text = _format_comparisons_read(data)
+        case WorkspaceRootProbeData():
+            text = _format_workspace_root_probe(data)
     return text
 
 
@@ -63,19 +86,42 @@ def format_rate_limit_event(event: CoreEvent) -> str | None:
 def format_quota_event(event: CoreEvent) -> str | None:
     """Return the terminal rendering of a quota pause, resume or abandonment, or None."""
     data = event.data
-    if isinstance(data, QuotaResumedData):
-        by = "the wait elapsed" if data.reason == "wait_elapsed" else "resumed"
-        return f"[quota] {by}; sending the paused {data.provider} turn again"
-    if isinstance(data, ProviderSwitchedData):
-        return (
-            f"[quota] switched from {data.from_provider} to {data.to_provider} ({data.to_model}) "
-            f"by the {data.reason}; new sessions start there ({data.detail})"
-        )
-    if isinstance(data, QuotaAbandonedData):
-        return f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}; {data.reason}"
-    if not isinstance(data, QuotaPausedData):
-        return None
-    line = f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}; the run is paused"
+    match data:
+        case QuotaResumedData():
+            return _format_quota_resumed(data)
+        case ProviderSwitchedData():
+            return (
+                f"[quota] switched from {data.from_provider} to {data.to_provider} "
+                f"({data.to_model}) by the {data.reason}; new sessions start there ({data.detail})"
+            )
+        case QuotaAbandonedData():
+            return (
+                f"[quota] {data.provider} {_quota_condition(data.condition)}: "
+                f"{data.detail}; {data.reason}"
+            )
+        case QuotaPausedData():
+            return _format_quota_paused(data)
+        case _:
+            return None
+
+
+def _format_quota_resumed(data: QuotaResumedData) -> str:
+    waited = describe_seconds(data.waited_seconds)
+    if data.condition == "unavailable":
+        return f"[quota] {data.provider} turn waited {waited} out of an outage; sending it again"
+    by = "the wait elapsed" if data.reason == "wait_elapsed" else "resumed"
+    after = f" after {waited}" if data.waited_seconds > 0 else ""
+    return f"[quota] {by}{after}; sending the paused {data.provider} turn again"
+
+
+def _format_quota_paused(data: QuotaPausedData) -> str:
+    what = f"[quota] {data.provider} {_quota_condition(data.condition)}: {data.detail}"
+    if data.condition == "unavailable":
+        line = f"{what}; this turn waits, the run goes on"
+        if data.resumes_at is not None:
+            line += f"; trying again at {_utc(data.resumes_at)}"
+        return line
+    line = f"{what}; the run is paused"
     if data.resets_at is not None:
         line += f" (capacity returns {_utc(data.resets_at)})"
     if data.resumes_at is not None:
@@ -85,8 +131,34 @@ def format_quota_event(event: CoreEvent) -> str | None:
     return line
 
 
+_QUOTA_CONDITIONS = {
+    "quota_exhausted": "quota exhausted",
+    "rate_limited": "rate limited",
+    "unavailable": "unavailable",
+}
+
+
 def _quota_condition(condition: str) -> str:
-    return "quota exhausted" if condition == "quota_exhausted" else "rate limited"
+    return _QUOTA_CONDITIONS[condition]
+
+
+def outage_wait_seconds(event: CoreEvent) -> float:
+    """Seconds a turn waited out a provider outage in this event; zero for any other event.
+
+    A wait counts whether the turn was then sent again (``quota_resumed``) or the wait
+    ended it (``quota_abandoned``: cancelled, or the run's deadline came).
+    """
+    data = event.data
+    if isinstance(data, QuotaResumedData | QuotaAbandonedData) and data.condition == "unavailable":
+        return data.waited_seconds
+    return 0.0
+
+
+def format_outage_summary(seconds: float) -> str | None:
+    """The run-end line for the time turns spent waiting out provider outages, or None."""
+    if seconds <= 0:
+        return None
+    return f"[quota] turns waited out provider outages for {describe_seconds(seconds)} in total"
 
 
 def _utc(epoch: float) -> str:
@@ -149,10 +221,76 @@ def _format_run_configured(data: RunConfiguredData) -> str:
     return "\n".join(lines)
 
 
+def _format_workspace_root_probe(data: WorkspaceRootProbeData) -> str:
+    match data.state:
+        case "queued":
+            waited = describe_seconds(data.waited_seconds or 0.0)
+            reason = f" (scheduler reason: {data.pending_reason})" if data.pending_reason else ""
+            limit = (
+                f" of up to {describe_seconds(data.queue_timeout_seconds)}"
+                if data.queue_timeout_seconds is not None
+                else ""
+            )
+            return (
+                f"[slurm] workspace-root probe job {data.job_id} has waited {waited}{limit} "
+                f"in the queue{reason}; Slurm work waits for it, agents carry on"
+            )
+        case "retrying":
+            retry_in = describe_seconds(data.retry_in_seconds or 0.0)
+            return (
+                f"[slurm] workspace-root probe attempt {data.attempt} starts in {retry_in}; "
+                f"Slurm work keeps waiting, agents carry on. Last attempt: {data.failure}"
+            )
+        case "proven":
+            return "[slurm] workspace root proven shared with the compute nodes"
+        case "failed":
+            return (
+                f"[slurm] workspace-root probe failed; Slurm work is refused and the run "
+                f"ends: {data.failure}"
+            )
+
+
 def _format_framework_warning(data: FrameworkWarningData) -> str:
     if data.detail:
         return f"[warn] {data.summary}: {data.detail}"
     return f"[warn] {data.summary}"
+
+
+def _format_measurement_compared(data: MeasurementComparedData) -> str:
+    unit = f" {data.unit}" if data.unit else ""
+    return (
+        f"[compare] {data.candidate_commit[:_SHA_ABBREV]} vs base "
+        f"{data.base_commit[:_SHA_ABBREV]}: {data.verdict.value}, "
+        f"{data.candidate_value:g}{unit} vs {data.base_value:g}{unit}, "
+        f"ratio {data.ratio:.3f} \u00b1 {data.noise:.3f} "
+        f"({data.candidate_samples} and {data.base_samples} samples)"
+    )
+
+
+def _format_comparisons_read(data: ComparisonsReadData) -> str:
+    parts = []
+    for row in data.comparisons:
+        if row.status is ComparisonStatus.MEASURED and row.value is not None:
+            unit = f" {row.unit}" if row.unit else ""
+            parts.append(f"{row.label} {row.value:.4g}{unit}")
+        else:
+            parts.append(f"{row.label} {row.status.value.replace('_', ' ')}")
+    return "[baselines] " + ", ".join(parts)
+
+
+def _format_input_measurement_failed(data: InputMeasurementFailedData) -> str:
+    where = f", stage {data.stage}" if data.stage else ""
+    twice = ", measured twice" if data.attempts > 1 else ""
+    judged = (
+        "its benchmark numbers stay the bar candidates must beat"
+        if data.compared
+        else "a candidate adopted now is adopted without an input comparison"
+    )
+    line = (
+        f"[input] the input's trusted measurement failed ({data.failure.value}{where}{twice}); "
+        f"the run goes on, {judged}, and the planner is told why"
+    )
+    return f"{line}:\n{data.summary}" if data.summary else line
 
 
 def _format_winner_selected(data: WinnerSelectedData) -> str:

@@ -33,8 +33,10 @@ the operator's terminal, not a diagnostics channel::
 
     VIBESYS_BOOT_TRACE=1 vibesys --input ... 2>trace.log
 
-This module imports nothing from VibeSys beyond the standard-library-only
-``vs_sim`` clocks, so product entrypoints can use it
+The process's entrypoint installs the trace (:func:`install`) with the clocks it
+builds; until then spans run untimed and record nothing, and asking for the
+launch anchor is an error. This module imports nothing from VibeSys beyond the
+``vs_sim`` clock protocols, so product entrypoints can use it
 before importing product composition and concrete execution backends. There is no
 exporter, sampler, or propagation machinery: the span shape is the point, so
 one could be added later without touching call sites.
@@ -44,10 +46,10 @@ import functools
 import os
 import sys
 from collections.abc import Callable, Generator
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from typing import ParamSpec, TypeVar
 
-from vs_sim.api import Clock, MonotonicClock, SystemClock
+from vs_sim.api import Clock
 
 #: Set to exactly ``"1"`` to echo boot-trace lines to stderr.
 BOOT_TRACE_ENV = "VIBESYS_BOOT_TRACE"
@@ -74,7 +76,7 @@ def trace_enabled() -> bool:
 class BootTrace:
     """Span stack and line buffer, timed by two injected clocks.
 
-    One process-lifetime instance (:data:`_TRACE`) backs the module-level
+    The instance the entrypoint installs backs the module-level
     functions. Boot happens once per process on one thread, so the state is
     deliberately unsynchronized. ``wall`` is the epoch clock that anchors the
     launch; ``elapsed`` measures span durations and only its differences matter.
@@ -141,7 +143,25 @@ class BootTrace:
             self.record(f"boot span {qualified}: {elapsed_ms:.0f}ms{outcome}")
 
 
-_TRACE = BootTrace(wall=SystemClock(), elapsed=MonotonicClock())
+_TRACE: BootTrace | None = None
+
+
+def install(trace: BootTrace | None) -> None:
+    """Make ``trace`` the process's boot trace, or ``None`` for none; the entrypoint calls this first."""
+    global _TRACE  # noqa: PLW0603  # lint-waiver: LW-182904 [PLW0603]; the boot trace is one process-wide buffer that code with no logger yet records into, installed once by the entrypoint.
+    # > Threading the trace through every boot-stage caller (the CLI, run assembly, each
+    # > runtime library) would give them all a parameter for a diagnostic that exists only
+    # > before the run logger does; a holder object would be the same global behind a name.
+    _TRACE = trace
+
+
+def _installed() -> BootTrace:
+    if _TRACE is None:
+        message = (
+            "no boot trace is installed; the entrypoint installs one before it asks for the launch"
+        )
+        raise RuntimeError(message)
+    return _TRACE
 
 
 def span(name: str) -> AbstractContextManager[None]:
@@ -150,9 +170,10 @@ def span(name: str) -> AbstractContextManager[None]:
     Spans nest: *name* is qualified by whatever spans are still open, so an
     outermost span reports its region's total after its children report their
     parts. A body that raises is still recorded, tagged with the exception
-    type, and the exception propagates unchanged.
+    type, and the exception propagates unchanged. Before :func:`install` a span
+    only runs its body.
     """
-    return _TRACE.span(name)
+    return nullcontext() if _TRACE is None else _TRACE.span(name)
 
 
 def traced(name: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
@@ -175,7 +196,7 @@ def drain_log_lines() -> list[str]:
     Draining is the only way lines reach the persistent log, and it empties
     the buffer, so each line is written once by whichever consumer takes it.
     """
-    return _TRACE.drain()
+    return [] if _TRACE is None else _TRACE.drain()
 
 
 def mark_launch() -> None:
@@ -185,7 +206,7 @@ def mark_launch() -> None:
     rebuild, so a frontend's own boot measurements can be reported against
     when the user actually ran the command.
     """
-    _TRACE.mark_launch()
+    _installed().mark_launch()
 
 
 def child_env() -> dict[str, str]:
@@ -196,7 +217,7 @@ def child_env() -> dict[str, str]:
     anchor is set on demand, so a spawn that skipped :func:`mark_launch`
     still anchors (at spawn time) rather than shipping nothing.
     """
-    env = {LAUNCH_START_ENV: str(_TRACE.launched_at_ms())}
+    env = {LAUNCH_START_ENV: str(_installed().launched_at_ms())}
     if trace_enabled():
         env[BOOT_TRACE_ENV] = "1"
     return env

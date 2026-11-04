@@ -31,8 +31,6 @@ from vs_core.api import (
     EvaluationTerminalFacts,
     EventCursor,
     EventId,
-    HostFence,
-    HostId,
     InvocationId,
     InvocationRef,
     ItemId,
@@ -66,6 +64,7 @@ from vs_core.api import (
     TimedOut,
     UnobservedJobFacts,
     Until,
+    WaitEnd,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
@@ -132,7 +131,6 @@ def test_durable_history_cursor_and_terminal_reason_survive_step_and_codec(count
     assert state.model_dump_json() == before
     envelope = RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=result.state,
@@ -395,7 +393,7 @@ def test_publication_receipt_cannot_rewrite_frozen_timeout(reached: float) -> No
     timeout = TimedOut(
         deadline_at=10.0,
         reached_at=reached,
-        unfinished=(JobTimeout(resource_id=ResourceId(root="job")),),
+        unfinished=(JobTimeout(resource_id=ResourceId(root="job"), by=WaitEnd.LIMIT, at=10.0),),
     )
     receipt = ResumeAuthorizationReceipt(
         continuation_id=ContinuationId(root="wait"),
@@ -476,6 +474,7 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
             lifecycle=LifecycleClass.OWNED_JOB,
             phase=RequestPhase.COMPLETED,
             until=Until(at=100.0),
+            addressed_by=(),
         )
         with pytest.raises(ValidationError, match="evaluation_result"):
             RequestRecord.model_validate({**payload, "observation": None})

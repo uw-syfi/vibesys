@@ -416,8 +416,14 @@ class StateDocumentDamagedError(ProjectStateError):
 
     @classmethod
     def unsupported_version(cls, source: Path | str, found: int, expected: int) -> Self:
-        """Describe a document written by another release of the format."""
+        """Describe a document written by another release of the format, and what to do."""
+        action = (
+            "a newer VibeSys release wrote it: resume this run with that release or a later one"
+            if found > expected
+            else "an older VibeSys release wrote it and this release has no migration for it: "
+            "resume it with that release, or start a new run"
+        )
         return cls(
             f"Invalid VibeSys state model at {source}: document version {found}, "
-            f"this release reads version {expected}"
+            f"this release reads version {expected}; {action}"
         )

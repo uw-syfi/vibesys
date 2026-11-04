@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from vs_core.api import Scope
 
 if TYPE_CHECKING:
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._keyed_documents import KeyedDocuments
 
 _FAMILY = "agent-owed-submissions"
 
@@ -52,9 +52,9 @@ class _Entries(BaseModel):
 
 
 class OwedSubmissions:
-    """The run's owed submissions, as one record in the shared ``ReceiptStore``."""
+    """The run's owed submissions, as one record in the shared ``KeyedDocuments``."""
 
-    def __init__(self, store: ReceiptStore) -> None:
+    def __init__(self, store: KeyedDocuments) -> None:
         """Bind the receipt store of the run."""
         self._store = store
 

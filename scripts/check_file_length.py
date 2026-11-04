@@ -21,6 +21,7 @@ Configuration lives in `pyproject.toml` under `[tool.vibesys.file_length]`:
                   a `tests` or `__pycache__` component is skipped: long test
                   modules are normal, and the same exemption applies to
                   TypeScript test files in `clients/biome.json`.
+    generated -- repo-relative directory globs excluded as generated artifacts.
     allowlist  -- table of repo-relative path -> recorded line count for files
                   currently over the ceiling. Every entry should be preceded
                   by a comment explaining why it is still there.
@@ -60,6 +61,7 @@ class Config:
     max_lines: int
     roots: tuple[str, ...]
     allowlist: dict[str, int]
+    generated: tuple[str, ...] = ()
 
 
 class ConfigError(Exception):
@@ -74,6 +76,11 @@ class ConfigError(Exception):
     def invalid_toml(cls, path: Path, error: tomllib.TOMLDecodeError) -> ConfigError:
         """Describe invalid TOML in the project configuration file."""
         return cls(f"{path}: is not valid TOML ({error})")
+
+    @classmethod
+    def invalid_generated(cls, path: Path) -> ConfigError:
+        """Name malformed generated-directory exclusions."""
+        return cls(f"{path}: file_length.generated must be a list of relative directory globs")
 
     @classmethod
     def missing_key(cls, path: Path, key: KeyError) -> ConfigError:
@@ -99,8 +106,22 @@ def load_config(pyproject_path: Path) -> Config:
         roots = tuple(str(entry) for entry in section["roots"])
     except KeyError as exc:
         raise ConfigError.missing_key(pyproject_path, exc) from exc
+    generated = section.get("generated", [])
+    if not isinstance(generated, list) or any(
+        not isinstance(pattern, str)
+        or not pattern
+        or Path(pattern).is_absolute()
+        or ".." in Path(pattern).parts
+        for pattern in generated
+    ):
+        raise ConfigError.invalid_generated(pyproject_path)
     allowlist = {str(path): int(count) for path, count in section.get("allowlist", {}).items()}
-    return Config(max_lines=max_lines, roots=roots, allowlist=allowlist)
+    return Config(
+        max_lines=max_lines,
+        roots=roots,
+        allowlist=allowlist,
+        generated=tuple(generated),
+    )
 
 
 def count_lines(path: Path) -> int:
@@ -108,13 +129,17 @@ def count_lines(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
 
 
-def measure(repo_root: Path, roots: tuple[str, ...]) -> dict[str, int]:
+def measure(
+    repo_root: Path, roots: tuple[str, ...], generated: tuple[str, ...] = ()
+) -> dict[str, int]:
     """Map every scanned repo-relative `*.py` path to its physical line count."""
     measured: dict[str, int] = {}
     for root in roots:
         for path in sorted((repo_root / root).rglob("*.py")):
             relative = path.relative_to(repo_root)
             if SKIPPED_DIR_NAMES.intersection(relative.parts):
+                continue
+            if any(parent.match(pattern) for parent in relative.parents for pattern in generated):
                 continue
             measured[relative.as_posix()] = count_lines(path)
     return measured
@@ -196,7 +221,7 @@ def main() -> int:
 
     try:
         config = load_config(pyproject_path)
-        measured = measure(args.root, config.roots)
+        measured = measure(args.root, config.roots, config.generated)
     except (ConfigError, OSError) as exc:
         print(f"check_file_length: {exc}", file=sys.stderr)
         return EXIT_TOOL_ERROR

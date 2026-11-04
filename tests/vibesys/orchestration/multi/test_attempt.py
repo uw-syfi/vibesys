@@ -56,8 +56,7 @@ def attempt(*, validation_offered: bool = False, **changes: object) -> MultiAtte
         rounds.Ledger(rounds.decode(rounds.EncodedLedger()).search),
         plan,
         round_number=1,
-        current_commit=BASE.revision_id.root,
-        input_baseline=BASE.revision_id.root,
+        parent=rounds.Parent(None, BASE.revision_id.root),
     )
     fields = {
         "config": selected,
@@ -68,7 +67,6 @@ def attempt(*, validation_offered: bool = False, **changes: object) -> MultiAtte
         "base": BASE,
         "ledger": ledger,
         "validation_offered": validation_offered,
-        "planned_official_reason": None,
         "revalidation_required": False,
         **changes,
     }
@@ -111,11 +109,9 @@ def test_a_reply_with_a_candidate_is_reviewed() -> None:
     assert taken.candidate == CANDIDATE
 
 
-@settings(max_examples=examples(pr=8, nightly=100))
-@given(outcome=st.sampled_from(["nominated", "supported"]))
-def test_a_reply_that_claims_a_ready_candidate_it_did_not_retain_asks_again(outcome: str) -> None:
+def test_a_reply_that_claims_a_ready_candidate_it_did_not_retain_asks_again() -> None:
     taken = attempt()
-    assert taken.replied(implemented(outcome), None) is Next.AGAIN
+    assert taken.replied(implemented(), None) is Next.AGAIN
     assert taken.no_valid_reply is not None
     assert not taken.passed
 

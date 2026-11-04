@@ -26,6 +26,7 @@ from tests.support.session_world import (
     ensure_request,
     inspect_request,
     open_host,
+    session_context,
 )
 from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
 
@@ -34,9 +35,7 @@ from vs_core.api import (
     AdoptRevision,
     AttemptId,
     AttemptRef,
-    BlockRequest,
     CancelOwnedJob,
-    CancelOwnedResource,
     CancelTurn,
     CloseAttemptScope,
     CloseSession,
@@ -46,16 +45,12 @@ from vs_core.api import (
     DispatchTurn,
     EnsureSession,
     EnsureWorkspace,
-    ExecuteRegisteredOperation,
-    FailureReason,
     InspectOwnedJob,
-    InspectRequest,
     InspectTurn,
     InvocationId,
     InvocationRef,
     ObserveOwnedJob,
     RequestId,
-    ResourceId,
     RestoreRevision,
     ResumeSessionTurn,
     RetainedCandidate,
@@ -76,20 +71,16 @@ from vs_project.api.testing import WorldGit, world_git
 from vs_runtime.api.core import (
     ContinuationBinding,
     ExecutionResult,
-    JournalSemanticEvents,
+    KeyedDocuments,
     MeasurementRequests,
-    NamespaceOperationReceipts,
-    ObservationFactory,
-    ReceiptStore,
-    RegisteredOperationRequests,
+    ReceiptEvidenceLedger,
     RuntimeWorkspaceRequests,
     SessionBinding,
     owner_key,
     revision_ref,
 )
-from vs_runtime.api.executor_contexts import RevocableLease, context_for
+from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.executor_contracts import FaultingNamespace, Scenario
-from vs_runtime.api.operation_fixtures import SCOPE, catalog_of, execute_request, scenarios
 from vs_runtime.api.slurm_evaluation_stack import (
     ADMISSION,
     ScenarioCluster,
@@ -100,6 +91,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
 from vs_runtime.api.slurm_evaluation_stack import (
     SCOPE as EVALUATION_SCOPE,
 )
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
@@ -107,7 +99,6 @@ if TYPE_CHECKING:
     from vs_core.api import Request, RequestBase, RevisionRef
     from vs_project.api import StateNamespace
     from vs_runtime.api.executor_contracts import CaseWorld
-    from vs_runtime.api.operation_fixtures import OperationScenario
 
 
 class _World:
@@ -125,8 +116,8 @@ class _World:
     def faulting(self, crash_at: int | None) -> FaultingNamespace:
         return FaultingNamespace(self.real_namespace(), crash_at)
 
-    def store(self, faulting: FaultingNamespace) -> ReceiptStore:
-        return ReceiptStore(cast("StateNamespace", faulting))
+    def store(self, faulting: FaultingNamespace) -> KeyedDocuments:
+        return KeyedDocuments(cast("StateNamespace", faulting), threads=OsThreads())
 
     def writes(self) -> int:
         return self._writes
@@ -136,30 +127,6 @@ class _World:
 
     def owners_root(self) -> Path:
         return self.base / "owners"
-
-
-async def inspect_request_of(world: CaseWorld, target: RequestBase) -> ExecutionResult:
-    """What a recovering shell learns from ``InspectRequest`` for *target*, on a fresh executor.
-
-    Inspection is routed like production does (to the operations role), over the
-    same disk as the world's executor, whatever kind the target is.
-    """
-    target_id = cast("RequestId", target.request_id)
-    namespace = world.receipts_namespace()
-    store = ReceiptStore(namespace)
-    inspector = RegisteredOperationRequests(
-        catalog_of(scenarios(world.owners_root(), namespace)),
-        NamespaceOperationReceipts(store),
-        ObservationFactory(store),
-    )
-    request = InspectRequest(
-        request_id=RequestId(root=f"inspect-of-{target_id.root}"),
-        scope=target.scope,
-        admission_id=target.admission_id,
-        target=target_id,
-        resource_id=None,
-    )
-    return await inspector.execute(request, context_for(request))
 
 
 async def inspect_dispatch_of(
@@ -172,122 +139,8 @@ async def inspect_dispatch_of(
             dispatching.turn.invocation_id.root,
             dispatch=cast("RequestId", dispatching.request_id).root,
         ),
-        lease=RevocableLease(),
         crash_at=None,
     )
-
-
-# operations
-
-
-class _OperationsWorld(_World):
-    def _items(self) -> tuple[OperationScenario, ...]:
-        return scenarios(self.base / "owners", self.real_namespace())
-
-    async def prepare(self, scenario: Scenario) -> RequestBase:
-        catalog = catalog_of(self._items())
-        echo = next(item for item in self._items() if item.name == "echo")
-        if scenario.kind is ExecuteRegisteredOperation:
-            return execute_request(catalog, echo.request, "req-exec")
-        seed = execute_request(catalog, echo.request, "req-seed")
-        await self.execute(seed, lease=RevocableLease(), crash_at=None)
-        if scenario.kind is InspectRequest:
-            return InspectRequest(
-                request_id=RequestId(root="req-inspect"),
-                scope=SCOPE,
-                target=RequestId(root="req-seed"),
-                resource_id=None,
-            )
-        return CancelOwnedResource(
-            request_id=RequestId(root="req-cancel"),
-            scope=SCOPE,
-            resource_id=ResourceId(root="resource"),
-            target=RequestId(root="req-seed"),
-        )
-
-    async def execute(
-        self,
-        request: RequestBase,
-        *,
-        lease: RevocableLease,
-        crash_at: int | None,
-        digest: str | None = None,
-    ) -> ExecutionResult:
-        faulting = self.faulting(crash_at)
-        store = self.store(faulting)
-        runner = RegisteredOperationRequests(
-            catalog_of(self._items()), NamespaceOperationReceipts(store), ObservationFactory(store)
-        )
-        context = context_for(request, lease=lease)
-        if digest is not None:
-            context = context.model_copy(update={"payload_digest": digest})
-        try:
-            return await runner.execute(cast("ExecuteRegisteredOperation", request), context)
-        finally:
-            self._writes = faulting.writes
-
-    def effects(self) -> int:
-        return next(item for item in self._items() if item.name == "echo").effects()
-
-
-class _OperationsCase:
-    name = "operations"
-    scenarios = (
-        Scenario("execute", ExecuteRegisteredOperation, effectful=True),
-        Scenario("inspect", InspectRequest, effectful=False),
-        Scenario("cancel", CancelOwnedResource, effectful=True),
-    )
-
-    @asynccontextmanager
-    async def world(self) -> AsyncIterator[_OperationsWorld]:
-        with tempfile.TemporaryDirectory() as raw:
-            yield _OperationsWorld(Path(raw))
-
-
-# semantic events
-
-
-class _SemanticWorld(_World):
-    async def prepare(self, scenario: Scenario) -> RequestBase:
-        del scenario
-        return BlockRequest(
-            request_id=RequestId(root="block"),
-            scope=SCOPE,
-            target=RequestId(root="target"),
-            reason=FailureReason.LOST,
-        )
-
-    async def execute(
-        self,
-        request: RequestBase,
-        *,
-        lease: RevocableLease,
-        crash_at: int | None,
-        digest: str | None = None,
-    ) -> ExecutionResult:
-        faulting = self.faulting(crash_at)
-        events = JournalSemanticEvents(self.store(faulting), cast("StateNamespace", faulting))
-        context = context_for(request, lease=lease)
-        if digest is not None:
-            context = context.model_copy(update={"payload_digest": digest})
-        try:
-            return await events.execute(cast("BlockRequest", request), context)
-        finally:
-            self._writes = faulting.writes
-
-    def effects(self) -> int:
-        real = self.real_namespace()
-        return len(JournalSemanticEvents(ReceiptStore(real), real).read())
-
-
-class _SemanticEventsCase:
-    name = "semantic_events"
-    scenarios = (Scenario("block", BlockRequest, effectful=True),)
-
-    @asynccontextmanager
-    async def world(self) -> AsyncIterator[_SemanticWorld]:
-        with tempfile.TemporaryDirectory() as raw:
-            yield _SemanticWorld(Path(raw))
 
 
 # evaluation
@@ -303,7 +156,6 @@ class _EvaluationWorld(_World):
             return submission("sub", candidate=self.stack.snapshot)
         seed = await self.execute(
             submission("seed", candidate=self.stack.snapshot),
-            lease=RevocableLease(),
             crash_at=None,
         )
         resource = seed.observation.observation.resource_id
@@ -333,13 +185,13 @@ class _EvaluationWorld(_World):
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         requests = MeasurementRequests(self.stack.executor, self.store(faulting))
-        context = context_for(request, lease=lease)
+        context = context_for(request).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -398,7 +250,7 @@ def _run_request(name: str) -> dict[str, Any]:
     }
 
 
-class _WorkspacesWorld:
+class WorkspacesWorld:
     def __init__(self, env: WorkspaceEnv) -> None:
         self.env = env
         self._writes = 0
@@ -416,7 +268,12 @@ class _WorkspacesWorld:
         return candidate
 
     async def _seed(self, request: RequestBase) -> ExecutionResult:
-        return await self.execute(request, lease=RevocableLease(), crash_at=None)
+        return await self.execute(request, crash_at=None)
+
+    def drift(self, request: RequestBase) -> None:
+        """Change the files *request* snapshots, as a writer that outlived its attempt would."""
+        tree = self._root if isinstance(request, SnapshotAndRetainRun) else self._candidate()
+        (tree / "candidate.py").write_text("VALUE = 3\n", encoding="utf-8")
 
     async def prepare(self, scenario: Scenario) -> RequestBase:
         base = self.env.hosts[0].root.revision
@@ -468,14 +325,20 @@ class _WorkspacesWorld:
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = FaultingNamespace(self.env.receipts_namespace(), crash_at)
-        store = ReceiptStore(cast("StateNamespace", faulting))
-        executor = RuntimeWorkspaceRequests(self.env.start_host(), store, SettledRunInvocations())
-        context = context_for(request, lease=lease)
+        store = KeyedDocuments(cast("StateNamespace", faulting), threads=OsThreads())
+        executor = RuntimeWorkspaceRequests(
+            self.env.start_host(),
+            store,
+            SettledRunInvocations(),
+            blocking=ThreadBlockingRunner(),
+            evidence=ReceiptEvidenceLedger(store),
+        )
+        context = context_for(request).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -514,14 +377,14 @@ class _WorkspacesCase:
     )
 
     @asynccontextmanager
-    async def world(self) -> AsyncIterator[_WorkspacesWorld]:
+    async def world(self) -> AsyncIterator[WorkspacesWorld]:
         with (
             tempfile.TemporaryDirectory() as raw,
-            _state_home(Path(raw) / "operator-state"),
+            state_home(Path(raw) / "operator-state"),
             open_workspace_env(Path(raw)) as env,
         ):
             try:
-                yield _WorkspacesWorld(env)
+                yield WorkspacesWorld(env)
             finally:
                 for host in reversed(env.hosts):
                     await host.close()
@@ -537,7 +400,7 @@ class _SessionsWorld(_World):
         self.host: SessionHost = open_host(base / "workspace")
 
     async def _seed(self, request: RequestBase) -> None:
-        await self.execute(request, lease=RevocableLease(), crash_at=None)
+        await self.execute(request, crash_at=None)
 
     async def prepare(self, scenario: Scenario) -> RequestBase:
         if scenario.kind is EnsureSession:
@@ -552,13 +415,15 @@ class _SessionsWorld(_World):
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         try:
-            return await self.host.run(request, self.store(faulting), lease=lease, digest=digest)
+            context = session_context(request, digest=digest)
+            context = context.model_copy(update={"repeat": repeat})
+            return await self.host.run_in(request, self.store(faulting), context)
         finally:
             self._writes = faulting.writes
 
@@ -593,7 +458,9 @@ class _SessionLifecycleWorld(_SessionsWorld):
     def __init__(self, base: Path) -> None:
         super().__init__(base)
         slot = self.real_namespace().slot("sessions.json", AgentSessionState)
-        self.host = open_lifecycle_host(base / "workspace", DurableSessionStore(slot))
+        self.host = open_lifecycle_host(
+            base / "workspace", DurableSessionStore(slot, threads=OsThreads())
+        )
 
     async def prepare(self, scenario: Scenario) -> RequestBase:
         await self._seed(ensure_request())
@@ -608,13 +475,13 @@ class _SessionLifecycleWorld(_SessionsWorld):
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
         faulting = self.faulting(crash_at)
         executor = lifecycle_executor(self.host, self.store(faulting))
-        context = context_for(request, lease=lease)
+        context = context_for(request).model_copy(update={"repeat": repeat})
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
         try:
@@ -653,7 +520,7 @@ class _SessionLifecycleCase:
 
 
 @contextmanager
-def _state_home(path: Path) -> Iterator[None]:
+def state_home(path: Path) -> Iterator[None]:
     """Point the Project state home at *path* for one world (restored on exit)."""
     previous = os.environ.get("VIBESYS_STATE_HOME")
     os.environ["VIBESYS_STATE_HOME"] = str(path)
@@ -667,8 +534,6 @@ def _state_home(path: Path) -> Iterator[None]:
 
 
 CASES = (
-    _OperationsCase(),
-    _SemanticEventsCase(),
     _EvaluationCase(),
     _WorkspacesCase(),
     _SessionsCase(),

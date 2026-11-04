@@ -55,6 +55,11 @@ if TYPE_CHECKING:
     from vibesys.plugin_registration import OrchestrationRegistration
     from vs_runtime.api import CorePlan, OrchestrationPlugin, RunFacts
 
+# The dynamic search's contexts come from hypothesis `find`, 1 to 4 s each and cached per process,
+# so spreading this file's tests over the shard's workers repeats them in each: four workers cost
+# four times the one that runs the whole file (30 s of CPU against 7 s).
+pytestmark = pytest.mark.xdist_group("domain-sections-in-prompts")
+
 _RolePrompts = tuple[tuple[DomainRole, "BaseModel"], ...]
 _CRITERIA = "criteria"
 _REV = RevisionRef(revision_id=RevisionId(root="a1"), digest="git-commit:a1")
@@ -63,7 +68,7 @@ _ROUND: dict[str, JsonValue] = {
     "judge_every": 1,
     "max_retries_per_round": 1,
 }
-_ROUNDS: dict[str, JsonValue] = {**_ROUND, "max_rounds": 2, "official_eval_every": 1}
+_ROUNDS: dict[str, JsonValue] = {**_ROUND, "max_rounds": 2}
 _SINGLE: dict[str, JsonValue] = {k: v for k, v in _ROUNDS.items() if k != "judge_every"}
 _EVOLVE_PROFILER = {
     "profiler_kind": "torch",
@@ -173,7 +178,7 @@ _STRATEGIES = (
                     claims=multi_api.ImplementerClaims(
                         summary="s",
                         expected_behavior="e",
-                        hypothesis_outcome="nominated",
+                        status="implemented",
                         candidate_disposition="unassessed",
                     ),
                     framework=multi_api.GateFacts(),
@@ -184,7 +189,6 @@ _STRATEGIES = (
                 multi_api.ProfilerPrompt(
                     round_number=1,
                     profile_focus="hot path",
-                    evidence_directory="profile",
                 ),
             ),
         ),
@@ -233,7 +237,7 @@ _STRATEGIES = (
 _DOMAINS = tuple(DomainName)
 
 
-def _sections(domain: DomainName) -> dict[DomainRole, str]:
+def _sections(domain: DomainName, profiler_id: str = "none") -> dict[DomainRole, str]:
     """What the pack of ``domain`` renders for the plan's default context."""
     return render_domain_sections(
         resolve_domain(domain),
@@ -244,6 +248,7 @@ def _sections(domain: DomainName) -> dict[DomainRole, str]:
         accuracy_command=None,
         runtime_notes="",
         profile_execution="local",
+        profiler_id=profiler_id,
         workspace_sources=(),
     )
 
@@ -320,12 +325,13 @@ def test_every_role_prompt_carries_its_domains_section_and_no_other_domains_text
     strategy: _Strategy, domain: DomainName, tmp_path: Path
 ) -> None:
     plan = _plan(strategy, domain, tmp_path)
-    own = _sections(domain)
+    profiler_id = "torch" if strategy.name == "multi" else "none"
+    own = _sections(domain, profiler_id)
     foreign = {
         _own_text(text)
         for other in _DOMAINS
         if other is not domain
-        for text in _sections(other).values()
+        for text in _sections(other, profiler_id).values()
         if text
     } - {_own_text(text) for text in own.values() if text}
     for role, context in strategy.prompts:

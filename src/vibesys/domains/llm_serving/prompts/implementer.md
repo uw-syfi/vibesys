@@ -28,6 +28,20 @@ calls and a synthetic success traverses it. Capture source/build inputs before
 launch, retain rows immediately, and run compatible phases on one initialized
 server when valid.
 
+## Profile under the benchmark's load
+
+Isolated-request profiles miss costs that appear only under load. Before
+tuning kernels, compare isolated-request throughput with throughput under the
+benchmark workload and attribute any gap. Profile over a short post-warmup
+window of the real benchmark workload{% if profiler_id == "nsys" %}, with nsys and NVTX ranges per step
+and per pipeline stage{% elif profiler_id == "torch" %}, with the torch profiler and a
+`record_function` range per step and per pipeline stage{% elif profiler_id == "none" %}, timing each
+step and pipeline stage inside the server{% else %}, with the run's profiler (`{{ profiler_id }}`){% endif %}. Report per-stage busy share,
+host gaps by cause, batch token fill and sequences per batch, and kernel time
+against context length. Size each change in ms per step against the
+measurement noise, and batch changes too small to confirm one at a time.
+This applies to prefill-bound tasks as well as decode-bound ones.
+
 ## Use references as implementation support
 
 Read `serving-systems/SKILL.md`, then the one materialized

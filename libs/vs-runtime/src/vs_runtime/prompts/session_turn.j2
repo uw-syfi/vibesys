@@ -2,6 +2,13 @@
 {{ prompt | trim }}
 
 {% endfor %}
+{% if guidance %}
+Standing guidance from the operator. It holds for this turn and every later one until the operator withdraws it:
+{% for text in guidance %}
+- {{ text | trim }}
+{% endfor %}
+
+{% endif %}
 {% if steers %}
 New steering from the operator since the last turn. Treat it as high-priority guidance for the work you do now:
 {% for steer in steers %}

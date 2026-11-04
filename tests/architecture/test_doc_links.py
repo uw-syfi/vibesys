@@ -10,10 +10,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 from scripts.check_doc_links import (
     anchors_of,
     check,
+    check_orphans,
     extract_links,
+    find_orphans,
+    sidebar_doc_ids,
 )
 
 if TYPE_CHECKING:
@@ -129,3 +134,68 @@ def test_anchors_cover_explicit_ids_and_repeated_headings(tmp_path: Path) -> Non
     anchors = anchors_of(root / "docs/a.md")
 
     assert {"install", "notes", "notes-1"} <= anchors
+
+
+def _orphans(root: Path, files: dict[str, str], sidebar: str = "") -> list[str]:
+    _repo(root, files)
+    return find_orphans([root / name for name in sorted(files)], root, sidebar_doc_ids(sidebar))
+
+
+def test_a_docs_page_nothing_links_to_is_an_orphan(tmp_path: Path) -> None:
+    assert _orphans(tmp_path, {"docs/a.md": "# A\n", "README.md": "# R\n"}) == ["docs/a.md"]
+
+
+def test_a_docs_page_linked_from_outside_docs_is_reached(tmp_path: Path) -> None:
+    files = {"docs/a.md": "# A\n", "README.md": "[a](docs/a.md)\n"}
+
+    assert _orphans(tmp_path, files) == []
+
+
+def test_a_docs_page_named_in_the_sidebar_is_reached(tmp_path: Path) -> None:
+    files = {"docs/sub/a.md": "# A\n"}
+
+    assert _orphans(tmp_path, files, "items: ['sub/a']") == []
+
+
+def test_a_self_link_or_a_backticked_path_does_not_reach_a_page(tmp_path: Path) -> None:
+    files = {"docs/a.md": "[me](a.md)\n", "README.md": "See `docs/a.md`.\n"}
+
+    assert _orphans(tmp_path, files) == ["docs/a.md"]
+
+
+def test_pages_outside_docs_are_never_orphans(tmp_path: Path) -> None:
+    assert _orphans(tmp_path, {"src/README.md": "# S\n"}) == []
+
+
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=30)
+@given(
+    edges=st.sets(st.tuples(st.integers(0, 5), st.integers(0, 5))),
+    in_sidebar=st.sets(st.integers(0, 5)),
+)
+def test_orphans_are_exactly_the_pages_without_an_inbound_edge(
+    tmp_path: Path, edges: set[tuple[int, int]], in_sidebar: set[int]
+) -> None:
+    # Every example writes the same six pages, so reusing `tmp_path` is safe.
+    files = {
+        f"docs/p{page}.md": "".join(f"[x](p{dst}.md)\n" for src, dst in edges if src == page)
+        for page in range(6)
+    }
+    sidebar = " ".join(f"'p{page}'" for page in in_sidebar)
+    reached = {dst for src, dst in edges if src != dst} | in_sidebar
+
+    assert _orphans(tmp_path, files, sidebar) == sorted(
+        f"docs/p{page}.md" for page in range(6) if page not in reached
+    )
+
+
+def test_an_unrecorded_orphan_fails_with_its_path() -> None:
+    (message,) = check_orphans(["docs/new.md"], frozenset())
+
+    assert message.startswith("docs/new.md: ")
+
+
+def test_a_recorded_orphan_that_gained_a_link_fails_until_removed() -> None:
+    assert check_orphans(["docs/old.md"], frozenset({"docs/old.md"})) == []
+    (message,) = check_orphans([], frozenset({"docs/old.md"}))
+    assert message.startswith("docs/old.md: ")
+    assert "remove the entry" in message

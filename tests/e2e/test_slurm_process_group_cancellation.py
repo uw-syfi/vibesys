@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import signal
-import subprocess
 import sys
 import threading
 from contextlib import suppress
@@ -14,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_sandbox.api.slurm import AgentGpuConfig, AgentGpuLauncher, GpuCommand, GpuJobRequest
-from vs_sim.api import ProbeResult
+from vs_sim.api import OsThreads, ProbeResult, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import ScriptedProbe
 
 if TYPE_CHECKING:
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
 
 
 @pytest.mark.skipif(os.name != "posix", reason="process groups require a POSIX host")
-@pytest.mark.timeout(20)
+@pytest.mark.timeout(45)
 def test_agent_gpu_real_process_group_terminates_pipe_holding_descendants(
     tmp_path: Path,
 ) -> None:
@@ -42,17 +41,24 @@ if child == 0:
 print(f"leader={{os.getpid()}} group={{os.getpgrp()}}", flush=True)
 signal.pause()
 """
-    probe = ScriptedProbe(lambda _argv: ProbeResult(0, ""))
+    # The scheduler reports the partition's limit before submission; every
+    # other probe (the cancel's scancel and queue check) succeeds with no output.
+    probe = ScriptedProbe(
+        lambda argv: ProbeResult(0, "gpu* 2:00:00\n" if argv[-1].split()[0] == "sinfo" else "")
+    )
     launcher = AgentGpuLauncher(
         AgentGpuConfig(
             partitions=("gpu",),
             max_gpus=1,
             max_time_minutes=5,
             default_time_minutes=5,
+            # The queue answers at once; the default 5 s between the six checks is 25 s of waiting.
+            queue_check_interval_seconds=0.05,
         ),
         (sys.executable, "-c", wrapper),
-        popen=subprocess.Popen,
         probe=probe,
+        processes=SubprocessPipedProcessLauncher(),
+        threads=OsThreads(),
     )
     cancel = threading.Event()
     output = bytearray()
@@ -64,7 +70,7 @@ signal.pause()
             cancel.set()
 
     try:
-        status = launcher.run(
+        outcome = launcher.run(
             GpuJobRequest(gpus=1, time_minutes=5),
             GpuCommand(argv=("work",), cwd=tmp_path, env=dict(os.environ)),
             write=capture,
@@ -79,6 +85,9 @@ signal.pause()
     leader_and_group = re.search(rb"leader=(\d+) group=(\d+)", output)
     assert leader_and_group is not None
     assert leader_and_group[1] == leader_and_group[2]
-    assert status == -signal.SIGTERM
-    assert len(probe.calls) == 1
-    assert "scancel" in probe.calls[0][0][-1]
+    assert outcome.exit_code == -signal.SIGTERM
+    assert outcome.termination_confirmed
+    programs = [argv[-1].split()[0] for argv, _timeout in probe.calls]
+    # The partition-limit query before submission, then cancellation and the
+    # launcher's bounded continuous-absence proof.
+    assert programs == ["sinfo", "scancel", *("squeue",) * 6]

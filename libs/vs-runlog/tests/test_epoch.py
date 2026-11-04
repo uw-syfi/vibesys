@@ -1,0 +1,286 @@
+"""Epoch identity and lifecycle have one projection across records, replay and keyframes."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
+
+from vs_proto.api import (
+    RUN_LOG_MAGIC,
+    DrainGoal,
+    Draining,
+    Ended,
+    EpochStarted,
+    Lifecycle,
+    Oneof,
+    Outcome,
+    Parked,
+    Record,
+    RunFailure,
+    RunFailureKind,
+    RunHead,
+    Running,
+    RunProcess,
+    StageState,
+    Starting,
+    StartupStage,
+    Timestamp,
+)
+from vs_runlog.api import (
+    CurrentEpoch,
+    current_epoch,
+    encode_frame,
+    epoch_has_ended,
+    fold_skeleton,
+    read_current_epoch,
+    read_run_head,
+)
+from vs_sim.api.testing import examples
+
+from .test_run_writers import scenarios
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+
+@pytest.mark.regression
+@example(epochs=[1, 5], amendments=2)
+@given(
+    epochs=st.lists(st.integers(1, 100), min_size=1, max_size=5, unique=True).map(sorted),
+    amendments=st.integers(0, 5),
+)
+def test_current_epoch_survives_amendments_and_replay_without_inheriting_lifecycle(
+    epochs: list[int],
+    amendments: int,
+) -> None:
+    records: list[Record] = []
+    for epoch in epochs:
+        records.append(
+            Record(
+                seq=len(records) + 1,
+                epoch=epoch,
+                body=Oneof("epoch_started", EpochStarted(epoch=epoch)),
+            )
+        )
+        assert current_epoch(records).number == epoch
+        assert current_epoch(records).lifecycle is None
+        records.append(
+            Record(
+                seq=len(records) + 1,
+                epoch=epoch,
+                body=Oneof("lifecycle", Lifecycle(state=Oneof("running", Running()))),
+            )
+        )
+        expected = current_epoch(records)
+        for index in range(amendments):
+            records.append(
+                Record(
+                    seq=len(records) + 1,
+                    epoch=epoch,
+                    body=(
+                        Oneof("declaration_amended", EpochStarted(epoch=epoch))
+                        if index % 2
+                        else Oneof("epoch_started", EpochStarted(epoch=epoch))
+                    ),
+                )
+            )
+            assert current_epoch(records) == expected
+    before = [record.to_binary() for record in records]
+    full = current_epoch(records)
+    assert current_epoch(fold_skeleton(records, log_offset=8)) == full
+    for cut in range(len(records) + 1):
+        assert current_epoch(records[cut:], current_epoch(records[:cut])) == full
+    assert [record.to_binary() for record in records] == before
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("committed", [0, 1, 2, 3, 4])
+@pytest.mark.parametrize("process_epoch", [None, 7])
+def test_epoch_readers_ignore_a_complete_uncommitted_successor(
+    tmp_path: Path,
+    committed: int,
+    process_epoch: int | None,
+) -> None:
+    first = scenarios()["core"][0][:2]
+    successor = Record.from_binary(first[0].to_binary())
+    successor.seq = 3
+    successor.epoch = 2
+    assert successor.body is not None
+    assert successor.body.field == "epoch_started"
+    successor.body.value.epoch = 2
+    running = Record.from_binary(first[1].to_binary())
+    running.seq = 4
+    running.epoch = 2
+    assert running.body is not None
+    assert running.body.field == "lifecycle"
+    records = [*first, successor, running]
+    path = tmp_path / "run.log"
+    path.write_bytes(RUN_LOG_MAGIC + b"".join(encode_frame(record) for record in records))
+    expected_epoch = (0, 1, 1, 2, 2)[committed]
+    lifecycle = running.body.value if committed in (0, 2, 4) else None
+    head = RunHead(
+        strategy="example",
+        committed_seq=committed,
+        epoch=expected_epoch,
+        lifecycle=lifecycle,
+        awaiting_lifecycle=lifecycle is None,
+    )
+    (tmp_path / "run.head").write_bytes(head.to_binary())
+    facts = read_current_epoch(path)
+    assert facts is not None
+    assert facts.number == expected_epoch
+    assert facts.lifecycle == (running.body.value if committed in (2, 4) else None)
+
+    if lifecycle is not None:
+        # Retained heads cache lifecycle but predate the canonical epoch field.
+        head.epoch = 0
+        head.process = (
+            None
+            if process_epoch is None
+            else RunProcess(pid=1, epoch=process_epoch, started_at=Timestamp(seconds=1))
+        )
+        original = head.to_binary()
+        path.with_name("run.head").write_bytes(original)
+        assert read_run_head(path).epoch == expected_epoch
+        assert path.with_name("run.head").read_bytes() == original
+
+
+def test_a_typed_header_without_a_committed_head_cannot_confirm_an_epoch(tmp_path: Path) -> None:
+    path = tmp_path / "run.log"
+    record = scenarios()["core"][0][0]
+    path.write_bytes(RUN_LOG_MAGIC + encode_frame(record))
+    facts = read_current_epoch(path)
+    assert facts is not None
+    assert facts.number == 0
+    assert facts.lifecycle is None
+
+
+def test_missing_and_truncated_committed_epoch_sources_fail_explicitly(tmp_path: Path) -> None:
+    path = tmp_path / "run.log"
+    assert read_current_epoch(path) is None
+    head = RunHead(strategy="example", committed_seq=1, epoch=1, awaiting_lifecycle=True)
+    (tmp_path / "run.head").write_bytes(head.to_binary())
+    with pytest.raises(ValueError, match="without run"):
+        read_current_epoch(path)
+    path.write_bytes(RUN_LOG_MAGIC)
+    with pytest.raises(ValueError, match="exceeds log sequence"):
+        read_current_epoch(path)
+    path.write_bytes(b"corrupt")
+    with pytest.raises(ValueError, match="bad magic"):
+        read_current_epoch(path)
+
+
+def _arm(name: str) -> Lifecycle:
+    """One lifecycle whose state arm is ``name``, using a real ending when that arm is one."""
+    if name == "starting":
+        return Lifecycle(
+            state=Oneof(
+                "starting",
+                Starting(stage=StartupStage.PROBING_WORKSPACE, state=StageState.RUNNING),
+            )
+        )
+    if name == "running":
+        return Lifecycle(state=Oneof("running", Running()))
+    if name == "draining":
+        return Lifecycle(state=Oneof("draining", Draining(goal=DrainGoal.PARK)))
+    if name == "parked":
+        return Lifecycle(state=Oneof("parked", Parked()))
+    if name == "ended":
+        return Lifecycle(state=Oneof("ended", Ended(outcome=Outcome.FINISHED)))
+    message = f"lifecycle arm {name} has no ending classification"
+    raise AssertionError(message)
+
+
+def _ended_outcomes() -> list[Lifecycle]:
+    """Every ended outcome, including each failure kind and an interrupt."""
+    endings: list[Lifecycle] = []
+    for outcome in Outcome:
+        if outcome is Outcome.UNSPECIFIED:
+            continue
+        if outcome is Outcome.FAILED:
+            for kind in RunFailureKind:
+                if kind is RunFailureKind.UNSPECIFIED:
+                    continue
+                endings.append(
+                    Lifecycle(
+                        state=Oneof(
+                            "ended",
+                            Ended(
+                                outcome=outcome,
+                                failure=RunFailure(kind=kind, reason=kind.name),
+                            ),
+                        )
+                    )
+                )
+            continue
+        ending = Ended(outcome=outcome)
+        if outcome is Outcome.INTERRUPTED:
+            ending.interruption_reason = "signal"
+        endings.append(Lifecycle(state=Oneof("ended", ending)))
+    return endings
+
+
+_ARMS = tuple(field.name for field in Lifecycle.desc().oneofs[0].fields)
+_ENDINGS = _ended_outcomes()
+_CASES = tuple(("ended", index) for index in range(len(_ENDINGS))) + tuple(
+    (arm, 0) for arm in _ARMS if arm != "ended"
+)
+_DEADLINE = next(
+    index
+    for index, lifecycle in enumerate(_ENDINGS)
+    if lifecycle.state is not None
+    and lifecycle.state.field == "ended"
+    and lifecycle.state.value.failure is not None
+    and lifecycle.state.value.failure.kind is RunFailureKind.DEADLINE
+)
+
+
+@pytest.mark.regression
+@example(case=("parked", 0))
+@example(case=("ended", _DEADLINE))
+@settings(max_examples=examples(pr=len(_CASES), nightly=len(_CASES)), deadline=None)
+@given(case=st.sampled_from(_CASES))
+def test_an_epoch_has_ended_only_when_parked_or_ended(case: tuple[str, int]) -> None:
+    """Every lifecycle arm is classified once, and a successor does not inherit it.
+
+    Deadline is an ended failure, so it closes the epoch with the other outcomes.
+    """
+    arm, outcome = case
+    lifecycle = _ENDINGS[outcome] if arm == "ended" else _arm(arm)
+    epoch = CurrentEpoch(number=3, lifecycle=lifecycle)
+    assert lifecycle.state is not None
+    assert epoch_has_ended(epoch) is (lifecycle.state.field in {"parked", "ended"})
+    records = [
+        Record(seq=1, epoch=3, body=Oneof("epoch_started", EpochStarted(epoch=3))),
+        Record(seq=2, epoch=3, body=Oneof("lifecycle", lifecycle)),
+        Record(seq=3, epoch=4, body=Oneof("epoch_started", EpochStarted(epoch=4))),
+    ]
+    successor = current_epoch(records)
+    assert successor.number == 4
+    assert successor.lifecycle is None
+    assert not epoch_has_ended(successor)
+
+
+def test_legacy_epoch_headers_keep_the_complete_record_rule(tmp_path: Path) -> None:
+    record = scenarios()["core"][0][0]
+    assert record.body is not None
+    assert record.body.field == "epoch_started"
+    record.body.value.clear_field("run")
+    path = tmp_path / "run.log"
+    path.write_bytes(RUN_LOG_MAGIC + encode_frame(record))
+    facts = read_current_epoch(path)
+    assert facts is not None
+    assert facts.number == 1
+
+
+def test_native_observation_uses_its_epoch_cache_without_reading_a_log(tmp_path: Path) -> None:
+    path = tmp_path / "run.log"
+    head = RunHead(strategy="test", epoch=7, lifecycle=Lifecycle(state=Oneof("running", Running())))
+    path.with_name("run.head").write_bytes(head.to_binary())
+    assert read_run_head(path) == head
+    head.epoch = 0
+    path.with_name("run.head").write_bytes(head.to_binary())
+    assert read_run_head(path).epoch == 0

@@ -42,6 +42,9 @@ _RENDERED_PROMPT_OWNER = "libs/vs-prompts/src/vs_prompts/renderer.py"
 _MINTING_NAMES = frozenset({"RenderedPrompt", "_RENDER_TOKEN"})
 _STRING_METHODS = frozenset({"format", "join", "replace", "dedent"})
 _STRING_FUNCTIONS = frozenset({"str", "dedent"})
+# A list method splices its one argument into a list of strings being built;
+# a typed sink such as ``log.append(n, section)`` takes more than one.
+_LIST_METHODS = frozenset({"append", "extend"})
 _SELF_NAMES = frozenset({"self", "cls"})
 
 _Function = ast.FunctionDef | ast.AsyncFunctionDef
@@ -372,6 +375,10 @@ def _edits_operand(parent: ast.AST | None, grandparent: ast.AST | None) -> bool:
             return True
         case ast.Attribute(attr=attr):
             return attr in _STRING_METHODS
+        case ast.Call(func=ast.Attribute(attr=attr), args=[_], keywords=[]) if (
+            attr in _LIST_METHODS
+        ):
+            return True
         case ast.Call():
             return _call_name(parent) in _STRING_METHODS | _STRING_FUNCTIONS
         case ast.List() | ast.Tuple():
@@ -509,6 +516,10 @@ _REPORTED = {
         "    def run(self, session, value):\n        return session.turn(self._build(value))"
     ),
     "rendered edited": "def f(value):\n    text = render_x()\n    return text + value",
+    "rendered extended": "def f(lines):\n    lines.extend(render_x())\n    return lines",
+    "rendered appended": (
+        "def f(lines):\n    text = render_x()\n    lines.append(text)\n    return lines"
+    ),
     "constant formatted": "_T = 'do {v}'\n\ndef f(value):\n    return render_x(extra=_T.format(v=value))",
     "typed sink": (
         "class Log:\n    def append(self, n: int, section: RenderedPrompt) -> None: ...\n\n"

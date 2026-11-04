@@ -20,18 +20,32 @@ from vibesys.events import (
     GateStartedData,
     SubprocessOutputData,
 )
+from vs_core.api import DecisionId, SpanId, operation_span
+from vs_redaction.api import redact_diagnostic_tail
 
 if TYPE_CHECKING:
-    from vs_runtime.api.core import StageSettled, StageStarted
+    from vs_runtime.api.core import MeasurementDecisions, StageSettled, StageStarted
 
 GATE_TAIL_CHARS = 1000
 _LOCAL_VALIDATION = "local-validation"
-_GATES = {"accuracy": GateKind.ACCURACY, "benchmark": GateKind.BENCHMARK}
-_PROCESS_KINDS = {GateKind.ACCURACY: "accuracy_checker", GateKind.BENCHMARK: "benchmark"}
+_GATES = {
+    "build": GateKind.BUILD,
+    "accuracy": GateKind.ACCURACY,
+    "benchmark": GateKind.BENCHMARK,
+}
+_PROCESS_KINDS = {
+    GateKind.BUILD: "candidate_build",
+    GateKind.ACCURACY: "accuracy_checker",
+    GateKind.BENCHMARK: "benchmark",
+}
 
 
-def _gate(purpose: str, stage_id: str) -> GateKind | None:
-    """The framework gate a stage is, or None for a stage that is no gate (profiling)."""
+def gate_of(purpose: str | None, stage_id: str) -> GateKind | None:
+    """The framework gate a stage of a job measured for ``purpose`` is, or None (profiling).
+
+    The one mapping from stages to gates: the gate events and the gate stages' log
+    streams both name a stage by it.
+    """
     gate = _GATES.get(stage_id)
     if gate is GateKind.ACCURACY and purpose == _LOCAL_VALIDATION:
         return GateKind.VALIDATION
@@ -41,25 +55,30 @@ def _gate(purpose: str, stage_id: str) -> GateKind | None:
 class CoreMeasurementEvents:
     """A ``MeasurementObserver`` that writes gate events to one run's event stream."""
 
-    def __init__(self, events: CoreEventWriter) -> None:
+    def __init__(self, events: CoreEventWriter, decisions: MeasurementDecisions) -> None:
         """Write every translated event to *events*."""
         self._events = events
+        self._decisions = decisions
+
+    def _span(self, handle_id: str) -> SpanId | None:
+        decision = self._decisions.decision(handle_id)
+        return None if decision is None else operation_span(DecisionId(root=decision))
 
     def stage_started(self, event: StageStarted) -> None:
         """One ``GATE_STARTED`` for a gate stage."""
-        gate = _gate(event.purpose, event.stage_id)
+        gate = gate_of(event.purpose, event.stage_id)
         if gate is None:
             return
         self._events.emit(
             CoreEventType.GATE_STARTED,
-            data=GateStartedData(gate=gate),
+            data=GateStartedData(gate=gate, span_id=self._span(event.handle_id)),
             status=EventStatus.ACTIVE,
             execution_id=event.handle_id,
         )
 
     def stage_settled(self, event: StageSettled) -> None:
         """The stage's output, then one ``GATE_FINISHED`` whose status says pass or fail."""
-        gate = _gate(event.purpose, event.stage_id)
+        gate = gate_of(event.purpose, event.stage_id)
         if gate is None:
             return
         passed = event.passed
@@ -70,12 +89,18 @@ class CoreMeasurementEvents:
             CoreEventType.GATE_FINISHED,
             data=GateFinishedData(
                 gate=gate,
+                span_id=self._span(event.handle_id),
+                reused=event.reused,
                 metric=None if metric is None or gate is not GateKind.BENCHMARK else metric.name,
                 value=None if metric is None or gate is not GateKind.BENCHMARK else metric.value,
                 unit=None
                 if metric is None or gate is not GateKind.BENCHMARK
                 else (metric.unit or metric.name),
-                output_tail=None if passed or reason is None else reason[-GATE_TAIL_CHARS:],
+                output_tail=(
+                    None
+                    if passed or reason is None
+                    else redact_diagnostic_tail(reason, max_chars=GATE_TAIL_CHARS)
+                ),
             ),
             status=EventStatus.COMPLETED if passed else EventStatus.FAILED,
             execution_id=event.handle_id,
@@ -90,6 +115,7 @@ class CoreMeasurementEvents:
                     data=SubprocessOutputData(
                         process_id=f"{event.handle_id}-{event.stage_id}",
                         process_kind=kind,
+                        span_id=self._span(event.handle_id),
                         stream=stream,
                         content=content,
                     ),

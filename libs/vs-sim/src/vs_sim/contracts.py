@@ -11,31 +11,46 @@ from __future__ import annotations
 import asyncio
 import signal
 import subprocess
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from vs_sim.child import run_in_child
 from vs_sim.gate import Gate
-from vs_sim.processes import ProcessSpec
+from vs_sim.loopback_http import HttpReply
+from vs_sim.output import Capture, OutputStream
+from vs_sim.processes import (
+    ProcessGroupUnreaped,
+    ProcessOutcome,
+    ProcessOutputTooLarge,
+    ProcessSpec,
+    ProcessTimedOut,
+    ProcessTimeoutError,
+)
 from vs_sim.randomness import SeededRandom
+from vs_sim.waits import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
     from vs_sim.blocking import BlockingRunner
     from vs_sim.clock import Clock, Sleeper
+    from vs_sim.loopback_http import LoopbackHttp
     from vs_sim.probes import CommandProbe
-    from vs_sim.processes import ForegroundLauncher, ProcessLauncher, ProcessOutcome
-    from vs_sim.signals import ProcessSignaller, SignalSource
+    from vs_sim.processes import ForegroundLauncher, PipedProcess, Processes, ProcessLauncher
+    from vs_sim.signals import ProcessSignaller, SignalSource, WriterProcessSignaller
     from vs_sim.streaming import StreamingCommand
+from vs_sim.output import DISCARD
 
 type Run = Callable[[Coroutine[Any, Any, Any]], Any]
 """Run a coroutine to completion on the loop the implementation under test belongs to."""
 
 _CASES = 25
 """Seeded cases per property: the same draws every run."""
+_PROCESS_CASES = 4
+"""Seeded cases per process property: each starts a real interpreter in the real suite."""
+_SHORT_TIMEOUT_S = 0.2
+"""A timeout a command is meant to outlive."""
 
 
 @dataclass(frozen=True)
@@ -385,6 +400,17 @@ class ProcessSignallerContract:
 
         self._case(case)
 
+    def test_a_process_exists_until_it_is_terminated(self) -> None:
+        """The live process exists; once terminated and gone, it does not."""
+
+        def case(subject: ProcessSignallerUnderTest) -> None:
+            assert subject.signaller.exists(subject.pid)
+            assert subject.signaller.terminate_if_current(subject.pid, lambda: True) is True
+            subject.assert_terminated()
+            assert not subject.signaller.exists(subject.pid)
+
+        self._case(case)
+
     def test_a_changed_identity_is_not_terminated(self) -> None:
         """A false revalidation leaves the stable process running."""
 
@@ -413,6 +439,43 @@ class ProcessSignallerContract:
             subject.assert_live()
 
         self._case(case)
+
+
+@dataclass(frozen=True)
+class LockOwnershipUnderTest:
+    """One exclusive flock owned by a process and a way to release it."""
+
+    signaller: WriterProcessSignaller
+    pid: int
+    path: Path
+    release: Callable[[], None]
+    close: Callable[[], None]
+
+
+class LockOwnershipContract:
+    """Exclusive flock ownership is specific to a process and an inode."""
+
+    def lock_ownership_under_test(self) -> LockOwnershipUnderTest:
+        """Return a fresh owner with one held exclusive flock."""
+        raise NotImplementedError
+
+    def test_only_the_exact_process_and_file_prove_ownership(self) -> None:
+        """An unrelated inode cannot authorize signalling the same numeric PID."""
+        subject = self.lock_ownership_under_test()
+        try:
+            assert subject.signaller.owns_lock(subject.pid, subject.path)
+            assert not subject.signaller.owns_lock(subject.pid, subject.path.with_name("other"))
+        finally:
+            subject.close()
+
+    def test_release_removes_the_ownership_proof(self) -> None:
+        """A released flock no longer identifies the process as its owner."""
+        subject = self.lock_ownership_under_test()
+        try:
+            subject.release()
+            assert not subject.signaller.owns_lock(subject.pid, subject.path)
+        finally:
+            subject.close()
 
 
 @dataclass(frozen=True)
@@ -513,6 +576,210 @@ class ProcessLauncherContract:
             return
         message = "starting a missing program did not raise OSError"
         raise AssertionError(message)
+
+
+@dataclass(frozen=True)
+class ProcessesUnderTest:
+    """A :class:`~vs_sim.processes.Processes` and commands with known outcomes for it.
+
+    A real implementation gets Python one-liners, a Fake gets argvs its script recognises.
+    """
+
+    processes: Processes
+    exit_with: Callable[[int, bytes, bytes], tuple[str, ...]]
+    """A command that writes the first bytes to stdout, the second to stderr, and exits."""
+    echo_stdin: tuple[str, ...]
+    """A command that writes its stdin to stdout and exits 0."""
+    print_cwd_and_env: Callable[[str], tuple[str, ...]]
+    """A command that prints its working directory, a newline, and the named variable."""
+    outlives_timeout: Callable[[bytes], tuple[str, ...]]
+    """A command that writes the bytes to stdout, then never ends, with a descendant in its group."""
+    survives_kill: tuple[str, ...]
+    """A command that leaves a descendant outside its group holding its output open."""
+    missing_program: tuple[str, ...]
+    """A command whose program does not exist."""
+    now: Callable[[], float]
+    """The time the implementation's runs take, in seconds."""
+    release: Callable[[], None] = lambda: None
+    """Ends what a run of ``survives_kill`` reported unreaped left running."""
+
+
+class ProcessesContract:
+    """Cases for :class:`~vs_sim.processes.Processes`. Implement :meth:`processes_under_test`."""
+
+    def processes_under_test(self, *, cleanup_timeout: float) -> ProcessesUnderTest:
+        """A fresh implementation that waits ``cleanup_timeout`` for a killed group to end."""
+        raise NotImplementedError
+
+    def test_status_and_both_streams_come_back(self) -> None:
+        """The outcome carries the exit status, zero or not, and what each stream received."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        for seed in range(_PROCESS_CASES):
+            rng = SeededRandom(seed)
+            status = rng.randint(0, 100)
+            out, err = (_random_bytes(rng) for _ in "oe")
+            outcome = subject.processes.run(
+                ProcessSpec(subject.exit_with(status, out, err)),
+                timeout=HANG_GUARD_S,
+                output=DISCARD,
+            )
+            assert outcome == ProcessOutcome(status, out, err), seed
+
+    def test_output_gets_every_byte_the_outcome_holds(self) -> None:
+        """What a run writes reaches ``output`` too, and the outcome is the same without it."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        for seed in range(_PROCESS_CASES):
+            rng = SeededRandom(seed)
+            out, err = (_random_bytes(rng) for _ in "oe")
+            spec = ProcessSpec(subject.exit_with(1, out, err))
+            seen = Capture(len(out) + len(err))
+            outcome = subject.processes.run(spec, timeout=HANG_GUARD_S, output=seen)
+            assert outcome == ProcessOutcome(1, out, err), seed
+            assert (seen.stdout, seen.stderr) == (out, err), seed
+
+    def test_output_gets_what_a_stopped_run_wrote_past_its_cap(self) -> None:
+        """A run stopped at the cap or the timeout still forwarded what it read, cap or not."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        written = b"more than four"
+        seen = Capture(len(written))
+        spec = ProcessSpec(subject.outlives_timeout(written), max_output_bytes=4)
+        run = subject.processes.run(spec, timeout=HANG_GUARD_S, output=seen)
+        assert isinstance(run, ProcessOutputTooLarge), run
+        assert seen.stdout.startswith(run.stdout), (seen.stdout, run)
+        assert len(seen.stdout) > len(run.stdout), (seen.stdout, run)
+        timed_out = Capture(len(written))
+        run = subject.processes.run(
+            ProcessSpec(subject.outlives_timeout(written)),
+            timeout=_SHORT_TIMEOUT_S,
+            output=timed_out,
+        )
+        assert isinstance(run, ProcessTimedOut), run
+        assert timed_out.stdout == run.stdout, (timed_out.stdout, run)
+
+    def test_input_reaches_the_process(self) -> None:
+        """The spec's input is the process's stdin."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        for seed in range(_PROCESS_CASES):
+            data = _random_bytes(SeededRandom(seed))
+            spec = ProcessSpec(subject.echo_stdin, input=data)
+            assert subject.processes.run(
+                spec, timeout=HANG_GUARD_S, output=DISCARD
+            ) == ProcessOutcome(0, data, b""), seed
+
+    def test_the_command_runs_in_the_given_directory_and_environment(self) -> None:
+        """``cwd`` and ``env`` are the process's directory and its whole environment."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        cwd = Path(__file__).resolve().parent
+        spec = ProcessSpec(
+            subject.print_cwd_and_env("VS_SIM_CONTRACT"), cwd=cwd, env={"VS_SIM_CONTRACT": "x y"}
+        )
+        outcome = subject.processes.run(spec, timeout=HANG_GUARD_S, output=DISCARD)
+        assert outcome == ProcessOutcome(0, f"{cwd}\nx y".encode(), b"")
+
+    def test_a_command_that_outlives_the_timeout_times_out_once_its_group_is_gone(self) -> None:
+        """Past the timeout the whole group is killed, and what it wrote comes back."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        written = b"partial"
+        run = subject.processes.run(
+            ProcessSpec(subject.outlives_timeout(written)),
+            timeout=_SHORT_TIMEOUT_S,
+            output=DISCARD,
+        )
+        assert isinstance(run, ProcessTimedOut), run
+        assert run.timeout == _SHORT_TIMEOUT_S
+        assert written.startswith(run.stdout), run
+
+    def test_a_run_that_times_out_takes_at_least_its_timeout(self) -> None:
+        """A caller that retries until a deadline sees each timed-out run use up its timeout."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        started = subject.now()
+        run = subject.processes.run(
+            ProcessSpec(subject.outlives_timeout(b"")),
+            timeout=_SHORT_TIMEOUT_S,
+            output=DISCARD,
+        )
+        elapsed = subject.now() - started
+        assert isinstance(run, ProcessTimedOut), run
+        assert elapsed >= _SHORT_TIMEOUT_S, elapsed
+
+    def test_a_group_the_kill_cannot_end_is_reported_unreaped_not_timed_out(self) -> None:
+        """A descendant that escaped the group and holds the output open is a distinct result.
+
+        A run that times out before the command started that descendant is a plain timeout,
+        so the timeout doubles until the command got that far.
+        """
+        subject = self.processes_under_test(cleanup_timeout=_SHORT_TIMEOUT_S)
+        timeout = _SHORT_TIMEOUT_S
+        run = subject.processes.run(
+            ProcessSpec(subject.survives_kill), timeout=timeout, output=DISCARD
+        )
+        while isinstance(run, ProcessTimedOut) and timeout < HANG_GUARD_S:
+            timeout *= 2
+            run = subject.processes.run(
+                ProcessSpec(subject.survives_kill), timeout=timeout, output=DISCARD
+            )
+        if isinstance(run, ProcessGroupUnreaped):
+            subject.release()
+        assert isinstance(run, ProcessGroupUnreaped), run
+        assert run.timeout == timeout
+        assert run.detail
+
+    def test_output_up_to_the_cap_comes_back_and_more_is_cut_and_reported(self) -> None:
+        """Each stream is kept up to the spec's cap; a stream past it stops the run, named."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        for seed in range(_PROCESS_CASES):
+            rng = SeededRandom(seed)
+            limit = rng.randint(0, 12)
+            out, err = (_random_bytes(rng) for _ in "oe")
+            spec = ProcessSpec(subject.exit_with(3, out, err), max_output_bytes=limit)
+            run = subject.processes.run(spec, timeout=HANG_GUARD_S, output=DISCARD)
+            if len(out) <= limit and len(err) <= limit:
+                assert run == ProcessOutcome(3, out, err), seed
+                continue
+            assert isinstance(run, ProcessOutputTooLarge), (seed, run)
+            assert run.limit == limit, seed
+            assert run.stream in {
+                stream
+                for stream, written in ((OutputStream.STDOUT, out), (OutputStream.STDERR, err))
+                if len(written) > limit
+            }, seed
+            assert out[:limit].startswith(run.stdout), seed
+            assert err[:limit].startswith(run.stderr), seed
+            assert not run.detail, seed
+
+    def test_a_command_writing_past_the_cap_is_stopped_before_its_timeout(self) -> None:
+        """A writer that would never end is killed at the cap, not left to run to its timeout."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        written = b"more than four"
+        spec = ProcessSpec(subject.outlives_timeout(written), max_output_bytes=4)
+        run = subject.processes.run(spec, timeout=HANG_GUARD_S, output=DISCARD)
+        assert run == ProcessOutputTooLarge(4, OutputStream.STDOUT, written[:4], b""), run
+
+    def test_a_negative_cap_is_refused(self) -> None:
+        """A spec cannot ask for a negative output cap."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        try:
+            ProcessSpec(subject.echo_stdin, max_output_bytes=-1)
+        except ValueError:
+            return
+        message = "a negative max_output_bytes was accepted"
+        raise AssertionError(message)
+
+    def test_a_missing_program_fails_to_start(self) -> None:
+        """A program that does not exist raises ``OSError`` instead of returning an outcome."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        try:
+            subject.processes.run(
+                ProcessSpec(subject.missing_program), timeout=HANG_GUARD_S, output=DISCARD
+            )
+        except OSError:
+            return
+        message = "running a missing program did not raise OSError"
+        raise AssertionError(message)
+
+
+def _random_bytes(rng: SeededRandom) -> bytes:
+    return bytes(rng.randint(0, 255) for _ in range(rng.randint(0, 20)))
 
 
 @dataclass(frozen=True)
@@ -632,6 +899,158 @@ class CommandProbeContract:
 
 
 @dataclass(frozen=True)
+class PipedUnderTest:
+    """Piped process groups with known behaviour, and how to run a case beside them.
+
+    A real launcher starts a Python one-liner for each; a scripted process is driven
+    by its script. Every case body runs inside ``drive``: the call itself for real
+    processes, ``SimThreads.run`` for scripted ones, whose reads block on simulated
+    threads.
+    """
+
+    writes_then_exits: Callable[[str, str, int], PipedProcess]
+    """``(stdout, stderr, status)``: writes stdout, then stderr, then exits with the status."""
+    merged_writes_then_exits: Callable[[str, str, int], PipedProcess]
+    """The same, started with stderr merged into stdout."""
+    blocks_until_signalled: Callable[[], PipedProcess]
+    """A group that writes nothing and never ends by itself."""
+    descendant_holds_output: Callable[[], PipedProcess]
+    """A leader that exits 0 at once while a descendant keeps the pipes.
+
+    The descendant writes ``ready`` only after the leader has exited, so a case that
+    reads it knows the leader's status is already fixed.
+    """
+    drive: Callable[[Callable[[], object]], object]
+
+
+_PIPED_TEXT = "ab \n"
+
+
+class PipedProcessContract:
+    """Cases for :class:`~vs_sim.processes.PipedProcess`. Implement :meth:`piped_under_test`.
+
+    The cases that matter most to a caller that stops a group: a signal reaches the
+    whole group only while its leader is unreaped, so a descendant still holding a
+    pipe after the leader exited can be stopped until the leader is waited for, and
+    a signal after that changes nothing.
+    """
+
+    def piped_under_test(self) -> PipedUnderTest:
+        """A fresh harness."""
+        raise NotImplementedError
+
+    def test_output_and_status_come_back(self) -> None:
+        """Both pipes carry what the group wrote, to end of file, and ``wait`` its status."""
+        for seed in range(_CASES):
+            rng = SeededRandom(seed)
+            subject = self.piped_under_test()
+            out = "".join(rng.choice(_PIPED_TEXT) for _ in range(rng.randint(0, 20)))
+            err = "".join(rng.choice(_PIPED_TEXT) for _ in range(rng.randint(0, 20)))
+            status = rng.randint(0, 100)
+
+            def case(
+                subject: PipedUnderTest = subject,
+                out: str = out,
+                err: str = err,
+                status: int = status,
+            ) -> object:
+                process = subject.writes_then_exits(out, err, status)
+                return process.stdout.read(), process.stderr.read(), process.wait(None)
+
+            assert subject.drive(case) == (out, err, status), seed
+
+    def test_merged_output_keeps_the_write_order_and_stderr_is_at_end_of_file(self) -> None:
+        """Started merged, stdout carries stdout then stderr, and stderr reads as empty."""
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.merged_writes_then_exits("out\n", "err\n", 0)
+            return process.stdout.read(), process.stderr.read(), process.wait(None)
+
+        assert subject.drive(case) == ("out\nerr\n", "", 0)
+
+    def test_a_timed_wait_on_a_running_group_times_out_and_a_group_signal_ends_it(self) -> None:
+        """``wait`` raises ``ProcessTimeoutError`` while the leader runs; a signal then ends it."""
+        for stop, expected in (
+            ("terminate_group", -signal.SIGTERM),
+            ("kill_group", -signal.SIGKILL),
+        ):
+            subject = self.piped_under_test()
+
+            def case(subject: PipedUnderTest = subject, stop: str = stop) -> object:
+                process = subject.blocks_until_signalled()
+                try:
+                    process.wait(0)
+                except ProcessTimeoutError:
+                    timed_out = True
+                else:
+                    timed_out = False
+                getattr(process, stop)()
+                return timed_out, process.wait(None)
+
+            assert subject.drive(case) == (True, expected), stop
+
+    def test_a_signal_after_the_leader_is_reaped_changes_nothing(self) -> None:
+        """Once ``wait`` returned, group signals are no-ops and ``wait`` repeats the status."""
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.writes_then_exits("", "", 3)
+            first = process.wait(None)
+            process.terminate_group()
+            process.kill_group()
+            return first, process.wait(None)
+
+        assert subject.drive(case) == (3, 3)
+
+    def test_a_signal_after_the_leader_exited_and_before_it_is_reaped_changes_nothing(self) -> None:
+        """A stop that arrives once the leader exited but is not yet reaped is not an error.
+
+        macOS refuses a signal to a group whose only members are unreaped zombies (``EPERM``,
+        where Linux succeeds), and the stop paths turned that refusal into a failed stop.
+        """
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.writes_then_exits(_PIPED_TEXT, "", 3)
+            process.stdout.read()  # Its output closed: the leader has exited or is exiting.
+            process.terminate_group()
+            process.kill_group()
+            return process.wait(None)
+
+        assert subject.drive(case) == 3
+
+    def test_a_signal_before_reaping_reaches_a_descendant_that_holds_the_output(self) -> None:
+        """A leader that exited but is unreaped still lets a group signal end its descendants.
+
+        The descendant's pipe then reaches end of file with nothing more written, and
+        ``wait`` reports the leader's own status.
+        """
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.descendant_holds_output()
+            ready = process.stdout.readline()
+            process.terminate_group()
+            return ready, process.stdout.read(), process.wait(None)
+
+        assert subject.drive(case) == ("ready\n", "", 0)
+
+    def test_cancelled_output_reads_return_while_the_group_still_runs(self) -> None:
+        """``cancel_output`` makes reads return ``""`` without signalling the group."""
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.blocks_until_signalled()
+            process.cancel_output()
+            read = process.stdout.read(), process.stderr.read()
+            process.kill_group()
+            return read, process.wait(None)
+
+        assert subject.drive(case) == (("", ""), -signal.SIGKILL)
+
+
+@dataclass(frozen=True)
 class StreamingUnderTest:
     """A streaming command, a directory to run in, and commands with known outcomes."""
 
@@ -648,6 +1067,8 @@ class StreamingUnderTest:
 
 
 _LINE_CHARACTERS = "".join(chr(code) for code in range(32, 127))
+_STREAMED_BYTES = 1 << 20
+"""More than any case writes, so the capture keeps everything."""
 
 
 def _text(rng: SeededRandom, longest: int) -> str:
@@ -661,8 +1082,8 @@ class StreamingCommandContract:
         """A fresh command with its harness."""
         raise NotImplementedError
 
-    def test_lines_stream_in_order_and_the_result_keeps_status_and_both_streams(self) -> None:
-        """Each stderr line reaches the callback once, in order; the result holds all of it."""
+    def test_output_streams_in_order_and_the_result_keeps_status_and_both_streams(self) -> None:
+        """Every byte reaches the sink once, in order, per stream; the result holds all of it."""
         for seed in range(_CASES):
             rng = SeededRandom(seed)
             subject = self.streaming_under_test()
@@ -670,28 +1091,15 @@ class StreamingCommandContract:
             stdout = _text(rng, 20)
             lines = tuple(_text(rng, 12) for _ in range(rng.randint(0, 5)))
             argv = subject.exits_with(status, stdout, lines)
-            seen: list[str] = []
+            seen = Capture(_STREAMED_BYTES)
 
-            result = subject.command.run(
-                argv, cwd=subject.cwd, timeout_seconds=30, on_stderr_line=seen.append
-            )
+            result = subject.command.run(argv, cwd=subject.cwd, timeout_seconds=30, output=seen)
 
-            assert seen == list(lines), seed
+            stderr = "".join(f"{line}\n" for line in lines)
+            assert (seen.stdout, seen.stderr) == (stdout.encode(), stderr.encode()), seed
             assert result.args == argv, seed
             assert (result.returncode, result.stdout) == (status, stdout), seed
-            assert result.stderr == "".join(f"{line}\n" for line in lines), seed
-
-    def test_the_callback_runs_on_the_calling_thread(self) -> None:
-        """No line is handed to the callback from another thread."""
-        subject = self.streaming_under_test()
-        threads: list[int] = []
-        subject.command.run(
-            subject.exits_with(0, "", ("one", "two")),
-            cwd=subject.cwd,
-            timeout_seconds=30,
-            on_stderr_line=lambda _line: threads.append(threading.get_ident()),
-        )
-        assert threads == [threading.get_ident()] * 2
+            assert result.stderr == stderr, seed
 
     def test_the_command_runs_in_the_given_directory(self) -> None:
         """``cwd`` is the command's working directory."""
@@ -700,7 +1108,7 @@ class StreamingCommandContract:
             subject.prints_cwd,
             cwd=subject.cwd,
             timeout_seconds=30,
-            on_stderr_line=lambda _line: None,
+            output=DISCARD,
         )
         assert result.returncode == 0
         assert Path(result.stdout).resolve() == subject.cwd.resolve()
@@ -714,7 +1122,7 @@ class StreamingCommandContract:
                 subject.missing_program,
                 cwd=subject.cwd,
                 timeout_seconds=30,
-                on_stderr_line=lambda _line: None,
+                output=DISCARD,
             )
         except FileNotFoundError:
             raised = True
@@ -729,9 +1137,54 @@ class StreamingCommandContract:
                 subject.blocks_forever,
                 cwd=subject.cwd,
                 timeout_seconds=0.2,
-                on_stderr_line=lambda _line: None,
+                output=DISCARD,
             )
         except subprocess.TimeoutExpired as error:
             raised = error
         assert raised is not None, "a command past its timeout did not raise TimeoutExpired"
         assert (raised.cmd, raised.timeout) == (subject.blocks_forever, 0.2)
+
+
+@dataclass(frozen=True)
+class LoopbackHttpUnderTest:
+    """A loopback HTTP client and the way a test puts a server behind a port."""
+
+    http: LoopbackHttp
+    serve: Callable[[HttpReply], tuple[int, Callable[[], None]]]
+    """Start a server answering every GET with the reply; its port and how to stop it."""
+    unused_port: Callable[[], int]
+    """A port nothing listens on."""
+
+
+class LoopbackHttpContract:
+    """Cases for :class:`~vs_sim.loopback_http.LoopbackHttp`. Implement one factory."""
+
+    def loopback_http_under_test(self) -> LoopbackHttpUnderTest:
+        """A fresh client with its harness."""
+        raise NotImplementedError
+
+    def test_a_served_reply_comes_back_with_its_status_and_body(self) -> None:
+        """Success and error statuses both count as an answer."""
+        subject = self.loopback_http_under_test()
+        for reply in (HttpReply(200, b"vibesys-ok\n"), HttpReply(404, b"missing")):
+            port, stop = subject.serve(reply)
+            try:
+                got = subject.http.get(port, "/health?token=t", timeout=HANG_GUARD_S, max_bytes=64)
+            finally:
+                stop()
+            assert got == reply
+
+    def test_the_body_is_read_up_to_its_bound(self) -> None:
+        """A longer body is cut at ``max_bytes``."""
+        subject = self.loopback_http_under_test()
+        port, stop = subject.serve(HttpReply(200, b"x" * 100))
+        try:
+            got = subject.http.get(port, "/", timeout=HANG_GUARD_S, max_bytes=10)
+        finally:
+            stop()
+        assert got == HttpReply(200, b"x" * 10)
+
+    def test_a_port_with_no_server_answers_nothing(self) -> None:
+        """No listener is ``None``, not an error."""
+        subject = self.loopback_http_under_test()
+        assert subject.http.get(subject.unused_port(), "/", timeout=1.0, max_bytes=64) is None

@@ -32,7 +32,7 @@ guarantee is a failure, not a win.
 
 Prefer one micro-optimization per round so a regression is attributable to a
 single change, and so the diff against the pristine reference stays a short list
-of named, defensible edits. The honest expectation for an accepted round is a
+of named, defensible edits. The honest expectation for a passed idea is a
 **modest percentage, not a multiple**.
 
 If the engine's build, run, checker, or benchmark contract is uncertain, first

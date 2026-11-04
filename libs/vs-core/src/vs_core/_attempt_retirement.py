@@ -5,7 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._acquisition_stall import is_stalled_acquisition
+from ._attempt_terminal import vacant_workspace_request
 from ._deadlines import cleanup
+from ._submission_receipts import same_conclusion
 from .types.attempts import (
     AttemptCheckpoint,
     AttemptClosure,
@@ -77,7 +79,7 @@ if TYPE_CHECKING:
     from .types.common import ContinuationId, Observation, RevisionRef
     from .types.evaluation import OwnedJob
     from .types.kernel import AttemptsContext, Signal
-    from .types.records import ChildLease, Request, RequestRecord
+    from .types.records import Request, RequestRecord
     from .types.sessions import Invocation, SessionSpec, SessionView
     from .types.settlement import Settlement
 
@@ -97,10 +99,9 @@ def _identity(owner: AttemptView, suffix: str) -> RequestId:
 
 
 def _record(context: AttemptsContext, identity: RequestId) -> RequestRecord | None:
-    # Compare the id strings: a `RequestId` differs from another only by its root, and the ledger
-    # holds every record of the run, so a model comparison per row dominated each step.
-    root = identity.root
-    rows = tuple(row for row in context.records.records if row.request_id.root == root)
+    # The ledger holds every record of the run, and closing an attempt looks up one identity per
+    # record, so a scan here made the step cost the square of the ledger; `find` reads the index.
+    rows = context.records.find(identity)
     return rows[0] if len(rows) == 1 and rows[0].request.request_id == identity else None
 
 
@@ -117,47 +118,6 @@ def _released(observation: Observation | None) -> bool:
         and observation.terminal
         and observation.released
         and observation.children_complete
-    )
-
-
-def _vacant_workspace_request(record: RequestRecord | None) -> bool:
-    """A workspace request that was answered terminal without taking anything.
-
-    A request the executor rejected, failed, or cancelled before accepting it created no
-    workspace resource, so there is nothing for a closing attempt to wait to see released.
-    The executor marks such an answer neither ``released`` nor ``children_complete`` (there is
-    nothing to release and no manifest), so ``_released`` can never hold for it.
-    """
-    if record is None or not isinstance(record.request, EnsureWorkspace | RestoreRevision):
-        return False
-    observation = record.observation
-    return bool(
-        observation is not None
-        and observation.terminal
-        and not observation.accepted
-        and observation.resource_id is None
-        and not observation.children
-        and observation.status
-        in (ObservationStatus.REJECTED, ObservationStatus.FAILED, ObservationStatus.CANCELLED)
-    )
-
-
-def _child_released(context: AttemptsContext, child: ChildLease) -> bool:
-    marks = child.observation_watermarks
-    return bool(
-        child.watermark_history_complete
-        and marks
-        and child.observation is not None
-        and {mark.source_request for mark in marks} == set(child.source_requests)
-        and any(mark.observation == child.observation for mark in marks)
-        and all(
-            mark.observation.request_id == mark.source_request
-            and mark.observation.scope == child.scope
-            and mark.observation.resource_id == child.resource_id
-            and _child_source_proved(context, mark.source_request, mark.observation)
-            and _released(mark.observation)
-            for mark in marks
-        )
     )
 
 
@@ -199,18 +159,12 @@ def _typed_job_released(context: AttemptsContext, job: OwnedJob | RegisteredOwne
 
 
 def _resource_released(context: AttemptsContext, scope: Scope, resource: ResourceId) -> bool:
-    children = tuple(
-        child
-        for child in context.records.children
-        if child.resource_id == resource and child.scope == scope
-    )
-    if children:
-        return all(_child_released(context, child) for child in children)
     jobs = tuple(
         job
         for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
         if job.resource_id == resource and job.scope == scope
     )
+    # The job's own ledger proves the resource released.
     return bool(jobs) and all(_typed_job_released(context, job) for job in jobs)
 
 
@@ -362,37 +316,9 @@ def _manifest_dependencies(
     return tuple(collected)
 
 
-def _child_dependencies(
-    owner: AttemptView, context: AttemptsContext, previous: tuple[ReleaseDependency, ...]
-) -> tuple[ReleaseDependency, ...]:
-    scope = _scope(owner)
-    edges = list(previous)
-    for child in context.records.children:
-        edge = ReleaseDependency(kind="job", identity=child.resource_id)
-        if child.scope == scope:
-            if not _child_released(context, child) and edge not in edges:
-                edges.append(edge)
-            edges = list(
-                _manifest_dependencies(
-                    context,
-                    scope,
-                    tuple(edges),
-                    tuple(
-                        resource
-                        for observation in (
-                            *(mark.observation for mark in child.observation_watermarks),
-                            *((child.observation,) if child.observation is not None else ()),
-                        )
-                        for resource in observation.children
-                    ),
-                )
-            )
-    return tuple(edges)
-
-
 def _discover(owner: AttemptView, context: AttemptsContext) -> AttemptView:
     """Install all known child ownership before considering graph completion."""
-    edges = list(_child_dependencies(owner, context, _session_dependencies(owner, context)))
+    edges = list(_session_dependencies(owner, context))
     scope = _scope(owner)
     for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs):
         if job.scope != scope:
@@ -980,7 +906,7 @@ def _start_closure(
     edges.extend(
         ReleaseDependency(kind="request", identity=value)
         for value in owner.pending_records
-        if not _vacant_workspace_request(_record(context, value))
+        if not vacant_workspace_request(_record(context, value))
     )
     edges.append(ReleaseDependency(kind="request", identity=event.authority))
     closure = AttemptClosure(
@@ -1044,20 +970,12 @@ def _job_proof(
     observation = event.observation
     if event.dependency.identity != observation.resource_id or not _released(observation):
         return False
-    for child in context.records.children:
-        if child.resource_id == observation.resource_id:
-            return (
-                child.scope == _scope(owner)
-                and _known_child_observation(owner, context, observation)
-                and observation.request_id in child.source_requests
-                and _child_released(context, child)
-            )
     for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs):
         if job.resource_id == observation.resource_id:
             source = job.request_id if hasattr(job, "request_id") else job.submission_id
             return (
                 job.scope == _scope(owner)
-                and job.observation == observation
+                and same_conclusion(job.observation, observation)
                 and source == observation.request_id
                 and _typed_job_released(context, job)
             )
@@ -1136,7 +1054,7 @@ def _request_release_proof(
             and observation.terminal
             and _retention_done(owner, context)
         )
-    return _vacant_workspace_request(record) or (
+    return vacant_workspace_request(record) or (
         _released(observation)
         and (
             edge.kind != "operation"
@@ -1665,38 +1583,20 @@ def _inspection_identity(
     )
 
 
-def _known_child_observation(
-    owner: AttemptView, context: AttemptsContext, observation: Observation
-) -> bool:
-    return any(
-        child.scope == _scope(owner)
-        and child.resource_id == observation.resource_id
-        and observation.request_id in child.source_requests
-        and (
-            child.observation == observation
-            or any(
-                mark.source_request == observation.request_id and mark.observation == observation
-                for mark in child.observation_watermarks
-            )
-        )
-        for child in context.records.children
-    )
-
-
 def _known_job_observation(
     owner: AttemptView, context: AttemptsContext, observation: Observation
 ) -> bool:
     return any(
         job.scope == _scope(owner)
         and job.resource_id == observation.resource_id
-        and job.observation == observation
+        and same_conclusion(job.observation, observation)
         and (job.request_id if isinstance(job, RegisteredOwnedJob) else job.submission_id)
         == observation.request_id
         for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
     )
 
 
-def _historical_child_owned(
+def _historical_job_owned(
     owner: AttemptView, context: AttemptsContext, event: ReleaseDependencyObserved
 ) -> bool:
     observation = event.observation
@@ -1704,10 +1604,7 @@ def _historical_child_owned(
         event.dependency.kind == "job"
         and event.dependency.identity == observation.resource_id
         and _child_source_proved(context, observation.request_id, observation)
-        and (
-            _known_child_observation(owner, context, observation)
-            or _known_job_observation(owner, context, observation)
-        )
+        and _known_job_observation(owner, context, observation)
     )
 
 
@@ -1722,17 +1619,15 @@ def _inspect_unknown(
         or observation.scope != _scope(owner)
         or (
             observation.admission_id != owner.closure.admission_id
-            and not _historical_child_owned(owner, context, event)
+            and not _historical_job_owned(owner, context, event)
         )
         or record is None
         or record.request.scope != observation.scope
         or record.request.admission_id != observation.admission_id
     ):
         return ()
-    if (
-        record.observation != observation
-        and not _known_child_observation(owner, context, observation)
-        and not _known_job_observation(owner, context, observation)
+    if record.observation != observation and not _known_job_observation(
+        owner, context, observation
     ):
         return ()
     request = InspectRequest(
@@ -1835,6 +1730,7 @@ def _record_retention(
         request_id=expected.request_id,
         revision=revision,
         retention=expected.retention,
+        measured_input=observation.measured_input,
     )
     return owner.model_copy(update={"checkpoints": (*owner.checkpoints, checkpoint)})
 

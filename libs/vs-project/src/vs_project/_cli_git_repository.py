@@ -2,7 +2,7 @@
 
 This is the reference implementation of the contract in
 ``vs_project.api.git_repository``; every other implementation is checked
-against it. All commands go through ``run_git``, so background maintenance stays
+against it. All commands go through ``Git``, so background maintenance stays
 disabled (see ``_git_process``). After ``bind`` they are pinned with
 ``GIT_DIR`` and ``GIT_WORK_TREE`` to the repository selected at that moment.
 """
@@ -10,35 +10,50 @@ disabled (see ``_git_process``). After ``bind`` they are pinned with
 from __future__ import annotations
 
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from vs_project._exclude_file import append_excludes
-from vs_project._git_process import git_environment, run_git
+from vs_project._git_process import git_environment
+from vs_project._nested_repositories import GITLINK_MODE, require_no_nested_repository
+from vs_project._ref_names import require_branch_prefix
 from vs_project.api.git_repository import (
     COMMIT_IDENTITY_EMAIL,
     COMMIT_IDENTITY_NAME,
     CommitSubject,
     GitCommandError,
     GitTimeoutError,
+    NestedRepositoryError,
     PatchStyle,
     RepositoryLocation,
     StagingError,
 )
+from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vs_project._git_process import Git
     from vs_project.api.git_repository import GitFaultSink, Pathspec, Revision
+    from vs_sim.api import ProcessOutcome
 
 
 _BRANCH_PREFIX = "refs/heads/"
+_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
+
+
+_LIST_INDEX = ("ls-files", "--stage", "-z")
 
 
 def _text(data: bytes) -> str:
     return data.decode(errors="replace")
+
+
+def _gitlinks(listing: bytes) -> tuple[str, ...]:
+    """The paths ``git ls-files --stage -z`` output records as nested repositories."""
+    records = (record.partition("\t") for record in _text(listing).split("\0"))
+    return tuple(path for metadata, _, path in records if metadata[:6] == GITLINK_MODE)
 
 
 class CliGitRepository:
@@ -57,20 +72,24 @@ class CliGitRepository:
         "GIT_OPTIONAL_LOCKS": "0",
     }
 
-    def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
+    def __init__(self, root: Path, *, git: Git, faults: GitFaultSink) -> None:
         self._root = root
+        self._git = git
         self._faults = faults
         self._git_dir: Path | None = None
         self._work_tree: Path | None = None
         self._exclude_file = root / ".git" / "info" / "exclude"
 
     def pin(self, location: RepositoryLocation) -> None:
-        """Adopt an already-resolved ``location`` instead of asking Git for it (see ``bind``).
-
-        For an implementation that wraps this one and located the repository itself.
-        """
+        """Adopt an already-resolved ``location`` instead of asking Git for it (see ``bind``)."""
         self._git_dir = location.git_dir
         self._work_tree = location.work_tree
+        exclude = _text(
+            self._run_checked(
+                ["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"]
+            ).stdout
+        )
+        self._exclude_file = (self._root / exclude.strip()).resolve()
 
     # -- process plumbing ----------------------------------------------------
 
@@ -88,13 +107,13 @@ class CliGitRepository:
         *,
         timeout: float | None = None,
         index_file: Path | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
+    ) -> ProcessOutcome:
         """Run ``git <args>`` at the root; the caller judges the exit code."""
         overrides = self._pins()
         if index_file is not None:
             overrides["GIT_INDEX_FILE"] = str(index_file)
         try:
-            return run_git(
+            return self._git.run(
                 args,
                 cwd=self._root,
                 env=git_environment(
@@ -102,18 +121,18 @@ class CliGitRepository:
                 ),
                 timeout=timeout,
             )
-        except subprocess.TimeoutExpired as error:
+        except ProcessTimeoutError as error:
             raise GitTimeoutError(["git", *args], timeout or 0.0) from error
 
     @staticmethod
-    def _failure(
-        args: Sequence[str], result: subprocess.CompletedProcess[bytes]
-    ) -> GitCommandError:
+    def _failure(args: Sequence[str], result: ProcessOutcome) -> GitCommandError:
         return GitCommandError(["git", *args], result.returncode, _text(result.stderr).strip())
 
-    def _run_checked(self, args: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
+    def _run_checked(
+        self, args: Sequence[str], *, index_file: Path | None = None
+    ) -> ProcessOutcome:
         """Run ``git <args>``; a nonzero exit is reported to the fault sink and raised."""
-        result = self._run(args)
+        result = self._run(args, index_file=index_file)
         if result.returncode != 0:
             error = self._failure(args, result)
             self._faults.warning(
@@ -122,6 +141,33 @@ class CliGitRepository:
             )
             raise error
         return result
+
+    def require_plain_work_tree(
+        self, pathspecs: Sequence[Pathspec], index_file: Path | None = None
+    ) -> None:
+        """Refuse before Git reads ``pathspecs`` of a work tree holding a nested repository.
+
+        See ``_nested_repositories``. An index or a worktree list Git cannot read fails
+        the guarded command the same way, before it reads the work tree.
+        """
+        listing = self._run(_LIST_INDEX, index_file=index_file)
+        require_no_nested_repository(
+            self._work_tree or self._root,
+            pathspecs,
+            gitlinks=_gitlinks(listing.stdout) if listing.returncode == 0 else (),
+            linked_worktrees=self._linked_worktrees,
+        )
+
+    def _linked_worktrees(self) -> tuple[Path, ...]:
+        """The work trees ``git worktree list`` reports now; none when Git cannot list them."""
+        worktrees = self._run(["worktree", "list", "--porcelain", "-z"])
+        if worktrees.returncode != 0:
+            return ()
+        return tuple(
+            Path(record.removeprefix("worktree "))
+            for record in _text(worktrees.stdout).split("\0")
+            if record.startswith("worktree ")
+        )
 
     def _prefix(self) -> str:
         return _text(self._run_checked(["rev-parse", "--show-prefix"]).stdout).strip()
@@ -171,7 +217,7 @@ class CliGitRepository:
     def head(self) -> str | None:
         try:
             result = self._run(["rev-parse", "HEAD"])
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, ProcessTimeoutError):
             return None
         if result.returncode != 0:
             return None
@@ -235,6 +281,12 @@ class CliGitRepository:
         result = self._run(["cat-file", "blob", f"{revision}:{path}"])
         return None if result.returncode != 0 else result.stdout
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        result = self._run(
+            ["for-each-ref", "--count=1", f"--points-at={commit}", "--format=%(refname)", prefix]
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         result = self._run(
             [
@@ -247,10 +299,144 @@ class CliGitRepository:
         )
         return result.returncode == 0 and bool(result.stdout.strip())
 
+    def branches(self, prefix: str) -> tuple[str, ...]:
+        hierarchy = f"{_BRANCH_PREFIX}{require_branch_prefix(prefix)}"
+        result = self._run(["for-each-ref", "--format=%(refname)", hierarchy])
+        if result.returncode != 0:
+            return ()
+        names = (line.removeprefix(_BRANCH_PREFIX) for line in _text(result.stdout).splitlines())
+        return tuple(sorted(name for name in names if name.startswith(prefix)))
+
+    def tree_files(self, revision: Revision, directory: str) -> tuple[str, ...]:
+        commit = self.resolve_commit(revision)
+        if commit is None:
+            return ()
+        result = self._run(["ls-tree", "-r", "-z", "--full-tree", commit, "--", f"{directory}/"])
+        if result.returncode != 0:
+            return ()
+        records = (record.partition("\t") for record in _text(result.stdout).split("\0"))
+        return tuple(
+            sorted(
+                path
+                for metadata, _, path in records
+                if metadata.split(" ")[0] in _REGULAR_FILE_MODES
+                and path.startswith(f"{directory}/")
+            )
+        )
+
     # -- changing refs -------------------------------------------------------
 
     def update_ref(self, ref: str, commit: str) -> None:
         self._run_checked(["update-ref", ref, commit])
+
+    def create_ref(self, ref: str, commit: str) -> str:
+        if not ref.startswith("refs/") or not self.is_valid_ref_name(ref):
+            raise GitCommandError(["update-ref", ref, commit], 1, f"invalid ref name: {ref}")
+        target = self.resolve_commit(commit)
+        args = ["update-ref", "--no-deref", ref, target or commit, "0" * len(target or commit)]
+        result = self._run(args)
+        if result.returncode == 0:
+            resolved = self.resolve_commit(ref)
+            if resolved is not None:
+                return resolved
+        elif target is not None and self._run(["symbolic-ref", "-q", ref]).returncode != 0:
+            winner = self.resolve_commit(ref)
+            if winner is not None:
+                return winner
+        raise self._failure(args, result)
+
+    def create_commit(
+        self,
+        revision: Revision,
+        parents: Sequence[str],
+        message: str,
+        *,
+        preserve_from: Revision,
+        preserve_paths: Sequence[str] = (),
+    ) -> str:
+        with tempfile.TemporaryDirectory(prefix="vibesys-publication-") as scratch:
+            index = Path(scratch) / "index"
+            self._run_checked(["read-tree", revision], index_file=index)
+            for path in preserve_paths:
+                # restore also removes source entries absent from preserve_from. A path
+                # absent from both trees has nothing to restore and is not a Git pathspec.
+                present = (
+                    self._run_checked(["ls-tree", "-r", "--name-only", revision, "--", path]).stdout
+                    or self._run_checked(
+                        ["ls-tree", "-r", "--name-only", preserve_from, "--", path]
+                    ).stdout
+                )
+                if present:
+                    self._run_checked(
+                        [
+                            "restore",
+                            "--source",
+                            preserve_from,
+                            "--staged",
+                            "--",
+                            f":(literal){path}",
+                        ],
+                        index_file=index,
+                    )
+            tree = _text(self._run_checked(["write-tree"], index_file=index).stdout).strip()
+            parent_args = [arg for parent in parents for arg in ("-p", parent)]
+            return _text(
+                self._run_checked(["commit-tree", tree, *parent_args, "-m", message]).stdout
+            ).strip()
+
+    def advance_branch(self, branch: str, commit: str) -> bool:
+        if not self.is_valid_branch_name(branch):
+            return False
+        target = self.resolve_commit(commit)
+        if target is None:
+            return False
+        # Local fetch owns both atomic ref locking and the checked-out-branch and
+        # fast-forward rules. update-ref bypasses the former; branch -f bypasses the latter.
+        repository = str(self._git_dir or self._root)
+        return (
+            self._run(
+                [
+                    "fetch",
+                    "--no-write-fetch-head",
+                    "--no-tags",
+                    "--no-recurse-submodules",
+                    "--",
+                    repository,
+                    f"{target}:refs/heads/{branch}",
+                ]
+            ).returncode
+            == 0
+        )
+
+    def fast_forward_checkout(
+        self,
+        branch: str,
+        commit: str,
+        *,
+        untracked_exclusions: Sequence[str] = (),
+    ) -> bool:
+        self.require_plain_work_tree(())
+        target = self.resolve_commit(commit)
+        if target is None:
+            return False
+        paths = [".", *(f":(exclude){path}" for path in untracked_exclusions)]
+        tracked_exclusions = (
+            self.tracked_changes_since_head(untracked_exclusions) if untracked_exclusions else ()
+        )
+        if self.current_branch() != branch or self.uncommitted_paths(paths) or tracked_exclusions:
+            return False
+        return (
+            self._run(
+                [
+                    "merge",
+                    "--ff-only",
+                    "--no-overwrite-ignore",
+                    "--no-edit",
+                    target,
+                ]
+            ).returncode
+            == 0
+        )
 
     def switch_branch(self, branch: str, *, create: bool = False) -> None:
         self._run_checked(["switch", *(["-c"] if create else []), branch])
@@ -269,6 +455,9 @@ class CliGitRepository:
         args = [
             "diff",
             "--no-ext-diff",
+            # A textconv driver is a program the user configured; agent-written
+            # attributes choose which file it runs on, and the patch reaches agents.
+            "--no-textconv",
             *(
                 ["--no-renames", "--full-index"]
                 if style is PatchStyle.EXACT
@@ -294,13 +483,15 @@ class CliGitRepository:
         return _text(result.stdout)
 
     def tracked_changes_since_head(self, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
+        self.require_plain_work_tree(pathspecs)
         # ``-z``: without it Git quotes names with non-ASCII characters.
         output = self._run_checked(["diff", "--name-only", "-z", "HEAD", "--", *pathspecs]).stdout
         return tuple(sorted(path for path in _text(output).split("\0") if path))
 
     def uncommitted_paths(self, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
+        self.require_plain_work_tree(pathspecs)
         status = self._run_checked(
-            ["status", "--porcelain=v1", "--untracked-files=all", "--", *pathspecs]
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *pathspecs]
         )
         prefix = self._prefix()
         # A path can have two status lines (``D `` staged deletion plus ``??`` recreated
@@ -316,26 +507,33 @@ class CliGitRepository:
         return tuple(sorted(found))
 
     def changed_since(self, commit: Revision, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
-        committed = self._run_checked(["diff", "--name-only", f"{commit}..HEAD", "--", *pathspecs])
+        self.require_plain_work_tree(pathspecs)
+        committed = self._run_checked(
+            ["diff", "--name-only", "-z", f"{commit}..HEAD", "--", *pathspecs]
+        )
         pending = self._run_checked(
-            ["status", "--porcelain=v1", "--untracked-files=all", "--", *pathspecs]
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", *pathspecs]
         )
         prefix = self._prefix()
         changes = {
-            line.removeprefix(prefix) if prefix else line
-            for line in _text(committed.stdout).splitlines()
-            if line
+            path.removeprefix(prefix) for path in _text(committed.stdout).split("\0") if path
         }
         changes.update(self._status_paths(pending.stdout, prefix))
         return tuple(sorted(changes))
 
     @staticmethod
     def _status_paths(output: bytes, prefix: str) -> list[str]:
-        return [
-            line[3:].removeprefix(prefix) if prefix else line[3:]
-            for line in _text(output).splitlines()
-            if line[3:]
-        ]
+        """Every path ``status -z`` names: a rename or copy names its new path, then its origin."""
+        fields = iter(_text(output).split("\0"))
+        paths: list[str] = []
+        for field in fields:
+            status, path = field[:2], field[3:]
+            if not path:
+                continue
+            paths.append(path)
+            if status[0] in "RC" or status[1] in "RC":
+                paths.append(next(fields, ""))
+        return [path.removeprefix(prefix) for path in paths if path]
 
     def has_staged_changes(self, pathspecs: Sequence[Pathspec] = ()) -> bool:
         args = ["diff", "--cached", "--quiet", *(["--", *pathspecs] if pathspecs else [])]
@@ -358,6 +556,7 @@ class CliGitRepository:
             index = Path(scratch) / "index"
             if self._run(["read-tree", revision], index_file=index).returncode != 0:
                 return False
+            self.require_plain_work_tree(pathspecs, index)
             add = ["add", "--all", *(["--force"] if include_ignored else []), "--", *pathspecs]
             if self._run(add, index_file=index).returncode != 0:
                 return False
@@ -367,9 +566,18 @@ class CliGitRepository:
     # -- index and commits ---------------------------------------------------
 
     def stage_all(self, pathspecs: Sequence[Pathspec], *, force: bool = False) -> None:
+        self.require_plain_work_tree(pathspecs)
         args = ["add", *(["--force"] if force else []), "-A", "--", *pathspecs]
         result = self._run(args)
         if result.returncode == 0:
+            # A repository nested after the check above was staged as a gitlink: take it
+            # out again, so no commit records it and no later command checks inside it.
+            listing = self._run(_LIST_INDEX)
+            if listing.returncode != 0:
+                raise self._failure(_LIST_INDEX, listing)
+            if gitlinks := _gitlinks(listing.stdout):
+                self.unstage([f":(literal){path}" for path in gitlinks])
+                raise NestedRepositoryError(gitlinks)
             return
         stderr = _text(result.stderr)
         offenders = self._unreadable_from_stderr(stderr)
@@ -402,6 +610,8 @@ class CliGitRepository:
     def commit(
         self, message: str, *, only: Sequence[Pathspec] = (), allow_empty: bool = False
     ) -> None:
+        if only:
+            self.require_plain_work_tree(only)
         args = [
             "commit",
             *(["--allow-empty"] if allow_empty else []),
@@ -440,14 +650,36 @@ class CliGitRepository:
 
     def worktree_head(self, worktree: Path) -> str:
         args = ["rev-parse", "HEAD"]
-        result = run_git(
+        location = self.linked_worktree_location(worktree)
+        overrides = {
+            **self._ENVIRONMENT,
+            "GIT_DIR": str(location.git_dir),
+            "GIT_WORK_TREE": str(location.work_tree),
+        }
+        result = self._git.run(
             args,
-            cwd=worktree,
-            env=git_environment(safe_directory=worktree, overrides=self._ENVIRONMENT),
+            cwd=location.work_tree,
+            env=git_environment(safe_directory=location.work_tree, overrides=overrides),
         )
         if result.returncode != 0:
             raise self._failure(args, result)
         return _text(result.stdout).strip()
+
+    def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        args = ["rev-parse", "--path-format=absolute", "--git-common-dir"]
+        common = Path(_text(self._run_checked(args).stdout).strip())
+        # The pointer path itself, never what an agent-planted ``.git`` symlink names.
+        pointer = worktree.resolve() / ".git"
+        registrations = common / "worktrees"
+        for gitdir in sorted(registrations.iterdir()) if registrations.is_dir() else ():
+            back_pointer = gitdir / "gitdir"
+            if back_pointer.is_symlink() or not back_pointer.is_file():
+                continue
+            recorded = Path(back_pointer.read_text(encoding="utf-8").strip())
+            if recorded.parent.resolve() / recorded.name == pointer:
+                return RepositoryLocation(git_dir=gitdir.resolve(), work_tree=worktree.resolve())
+        message = f"fatal: '{worktree}' is not a linked worktree of {common}"
+        raise GitCommandError(["git", "worktree", "list"], 128, message)
 
     # -- repository-local ignore rules ---------------------------------------
 

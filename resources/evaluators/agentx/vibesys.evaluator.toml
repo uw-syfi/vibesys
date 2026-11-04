@@ -1,0 +1,7 @@
+schema_version = 1
+name = "vibesys-evaluator-agentx"
+version = "0.1.0"
+protocol_version = 1
+
+[entrypoints]
+agentx-v1 = ["uv", "run", "--locked", "--isolated", "--no-project", "--python", "3.12", "--script", "${PACKAGE_ROOT}/agentx_eval.py"]

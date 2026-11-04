@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from vs_core.types.common import Seconds
 
     from ._kit import Kit
+    from ._labels import Label
 
 
 class Owners:
@@ -35,11 +36,12 @@ class Owners:
         self._kit = kit
 
     async def perform(
-        self, request: OperationRequest, *, within: Seconds | Within
+        self, request: OperationRequest, *, within: Seconds | Within, label: Label | None = None
     ) -> BaseModel | Failed:
         """Have the owner perform ``request``: its typed outcome, or the failure that ended the wait.
 
-        ``request`` must be of a kind the search registered with ``owned=``.
+        ``request`` must be of a kind the search registered with ``owned=``; ``label`` labels the
+        operation's span.
         """
         owned = {item.descriptor.kind for item in self._kit.run.wiring.owned}
         if request.kind not in owned:
@@ -47,7 +49,7 @@ class Owners:
             raise ContractError(("owners", "perform"), message)
         decision = Operation(decision_id=DecisionId(root="owned"), scope=THIS_RUN, request=request)
         bound = within if isinstance(within, Within) else Within(limit=within)
-        match await self._kit.wait(decision, bound):
+        match await self._kit.wait(decision, bound, label):
             case OperationFinished(result=finished):
                 if finished.outcome is None:
                     message = f"the owner of {request.kind!r} finished without an outcome"

@@ -107,6 +107,35 @@ existing core semantics: a turn whose outcome is unknown is inspected and never
 dispatched again, and a conversation the provider lost is not silently replaced
 by a fresh one.
 
+## Vetted harnesses
+
+`vs_agent.provider_policy.harnesses()` is the one list of the provider and
+model pairs VibeSys runs agents with. It is derived at call time: for each
+shipped provider, the models agentshim's `ProviderProfile.models` lists, the
+provider's default first. Which models a CLI runs, its default model, and each
+model's context window (`agentshim.context_window`) are model knowledge, owned
+by agentshim; VibeSys's policy is only which providers it ships and the
+operator's opt-out. `test_no_model_knowledge_in_product_code` fails on a model
+id literal in product code.
+
+`AgentSpec` enforces it: constructing a CLI spec, or replacing its model (a
+role override, a quota fallback, a chat thread), raises
+`UnvettedHarnessError` unless the spec carries `allow_unvetted_model`.
+`resolve_agent_specs` runs in `validate_run_request`, before any image build,
+and reports the error naming the configuration key. Only the terminal's
+`--allow-unvetted-model` and a resume set the opt-out. Experiment chat offers
+the same list. Python run validation enforces this policy before starting work; see
+[CLI flags](../cli-flags.md) for the operator's options.
+
+The same construction also applies the host allow-list
+(`~/.config/vibesys/host.toml`, key `allowed_models`; see
+[cli-flags.md](../cli-flags.md)). A missing file or an empty list adds no
+restriction. A non-empty list refuses a CLI model outside it, including on
+resume, relaunch, and a chat thread, and `allow_unvetted_model` does not
+bypass it. The refusal is a configuration error whose message names the key,
+the role, the model, and the list, so the app shows it as a start or resume
+refusal. Scripted runs and any other non-CLI backend are not checked.
+
 ## Provider readiness
 
 A missing CLI or a logged-out account would otherwise surface as the first
@@ -167,8 +196,8 @@ provider's reset time plus a margin, else `retry_seconds`, cut to what is left o
 spent or the reset lies beyond it, it publishes `quota_abandoned` and raises the
 quota error, so the turn fails as it did before. A stop request ends any wait.
 
-A run drives every role through one agent client bound to one provider, so it
-cannot open a session on another provider: the run host refuses a configured
+A run fixes each role's provider when it starts (one agent client per provider),
+so it cannot open a session on another provider: the run host refuses a configured
 `fallback_provider` at startup, naming the key, rather than accepting and ignoring it
 (`policy = "fallback"` needs one, so it is refused too). The gate and
 `ProviderFallback` still implement the switch for a host whose sessions can change
@@ -188,7 +217,8 @@ run starts reserves the input, renders it into that turn's prompt, and the run
 journals `steer_consumed` once the message has reached a turn. An input is
 delivered exactly once: a turn that is cancelled or rejected before the provider
 accepts it returns the input to pending, and a later turn receives it. A turn
-already running is never interrupted by a steer.
+already running is never interrupted by a default steer; an `--interrupt` steer is
+offered to it first, as [Running VibeSys](../running-vibesys.md) describes.
 
 ## Provider session resume
 
@@ -299,13 +329,15 @@ process. Fixing that belongs with the checkpoint, not the session.
 agentshim classifies every failed turn: `CliExitError.kind` is a
 `FailureKind`, read by the provider package from what its CLI reported. `vs_agent`
 never matches provider error text. A turn whose kind is `TRANSIENT`
-(an overload, a rate limit, or a server error) is retried in place after
-each delay in `TRANSIENT_RETRY_DELAYS_S`, about fifteen minutes in total,
-before the error propagates. The CLI has already retried inside the turn by
-then, and without this one overload ends a run that is hours long. The retry
-keeps the conversation, and `cancel()` ends a wait immediately. Every other
-kind propagates at once: a usage limit or a login problem outlasts any
-backoff here.
+(an overload, a rate limit, or a server error) is not retried in place:
+`TRANSIENT_RETRY_DELAYS_S` is empty, because the CLI has already retried inside
+the turn. The failure reaches the client as a capacity limit after one attempt,
+and the run's capacity gate waits out the outage. Only the gate's waits are kept
+off the turn's limit, so every retry here would charge a whole CLI attempt (3 to
+4 min) to it. A retry, when a caller configures one, keeps the conversation, and
+`cancel()` ends a wait immediately. A cancelled turn
+still ends with its classified capacity error. Every other kind propagates at
+once: a usage limit or a login problem outlasts any backoff here.
 
 ### Output that never matched its schema is a structured-response failure
 
@@ -354,9 +386,7 @@ An over-budget Codex thread is retired after it has answered, so the two
 disagree only from the next turn onward: that answer stands, and the next
 prompt is a cold one. A conversation the provider refuses to resume is replaced
 mid-turn, so the last turn ran somewhere the caller did not intend, and a
-caller that shortened its prompt has to ask again in full. The
-experiment chat is the caller that does this today
-(`src/server/chat/session.py`).
+caller that shortened its prompt has to ask again in full.
 
 ## Images
 
@@ -376,14 +406,16 @@ A Docker run starts from two images, built by `vs_agent.api.images`:
 
 The agent layer sits on top so that a CLI version bump rebuilds only that top
 layer, and a task image stays pure enough to serve the evaluator on its own.
-Docker's layer cache is what makes a repeat build of either image cheap;
-`vs_agent.api.images` builds an image once per launch and resolves its
-immutable manifest ID rather than keeping a manifest of its own.
+Each image's local tag is keyed on its build inputs, so a daemon that already
+has the tag builds nothing (a build, even a fully cached one, re-exports the
+image, which takes minutes for a large base); a changed input gets a new tag
+and Docker's layer cache redoes only what changed. `vs_agent.api.images`
+resolves the immutable manifest ID rather than keeping a manifest of its own.
 
 How a run's Dockerfile is generated from its Features, why no devcontainer CLI
 or Docker socket is involved at run time, and how Features are tested on each
 base family are in
-[devcontainer-features.md](devcontainer-features.md).
+[Feature README](https://github.com/uw-syfi/vibesys/blob/main/libs/vs-sandbox/src/vs_sandbox/features/README.md).
 
 CLI and toolchain versions are not in the Features' scripts: they are options
 that `agent_feature` fills from the library's public API, `vs_agent.api`
@@ -393,6 +425,13 @@ module). The Rust, Go, and container-runtime pins live with their Features in
 version bump is a one-line change in one module. Each Feature's option defaults
 repeat the pins so `devcontainer features test` can run unconfigured, and a test
 fails if they drift.
+
+The pinned Claude Code must also know every Claude model agentshim lists, or it
+bills an unknown model at a fallback rate. `CLAUDE_CLI_MIN_FOR_GENERATION` names
+the oldest release that knows each generation, and `test_claude_cli_pin` fails
+when agentshim lists a newer generation than the table, or the pin is older
+than an entry. Raise the pin in the same PR that bumps agentshim for a new
+generation.
 
 A task Dockerfile that needs the backend's base image declares `ARG
 BASE_IMAGE` and `FROM ${BASE_IMAGE}`; `agent_image` always passes
@@ -556,6 +595,21 @@ not comparable without adding `cache_read_input_tokens` back into the older
 rows. Since agentshim 0.7, `cache_read_input_tokens` counts cache reads only;
 on Claude it used to include cache writes, which `cache_creation_input_tokens`
 reports.
+
+Each row also records where the cost came from and which models spent it. `cost_basis` is how
+the library reached `total_cost_usd`: `price_table`, `provider_reported` (the CLI's own figure,
+opencode's included), `unknown_model` (a model with no price, so no cost) or `not_reported` (a CLI
+that prints no cost, or a turn that reported nothing). It is never null on a row written now; a
+journal line without one was written before the field existed. `by_model` has one row per model the turn ran, in the
+journal's names: a Claude turn's Task subagents and advisors run on their own models, and the
+token fields above count only the main conversation, so the rows are a superset that sums to the
+whole turn. Exactly one row is `primary`, the model the turn was run with, and only it carries the
+turn's requests (`turns`) and its service `speed`. Each row's `recorded_usd` is the library's price
+of the row at the standard tier, copied as given: VibeSys never recomputes a cost, and a fast or
+ultrafast row was billed more than that list price. `provider_session_id` is the provider's own id
+of the conversation the turn ran in, `null` when it named none or the turn failed before it did
+(a turn that timed out after naming it, or whose reply was refused after a complete result, keeps it).
+The run journal's `turn_usage_recorded` event carries the same three fields.
 
 Each row also records skill use for the turn: `skill_uses` (number of skill
 loads), `skills_invoked` (their names, one per load, in order) and

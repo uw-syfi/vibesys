@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import closing
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -16,6 +17,8 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import FakeGitRepositories, run_execution_record
+from vs_runtime.api import OrchestrationResumeDecision, RuntimeContractError
+from vs_runtime.api.core import BaselineEntryKind
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentPaths,
@@ -30,16 +33,26 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
-from vs_runtime.api.testing import FakeAgentExecutionEnvironment, unconfined_host_environment
-from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
+from vs_runtime.api.testing import (
+    FakeAgentExecutionEnvironment,
+    idle_environment_system,
+    unconfined_host_environment,
+)
+from vs_sandbox.api import (
+    CaptureExecutionIdentity,
+    CaptureExecutionKind,
+    HostResource,
+    HostResourceAccess,
+    ProjectPathPolicy,
+)
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_project.api import OrchestrationRunManifest
-    from vs_runtime.api import OrchestrationResumeDecision
-    from vs_runtime.api.infrastructure import RunEnvironmentSession
+    from vs_runtime.api.infrastructure import RunEnvironmentSession, WorkspaceResourceEvent
     from vs_sandbox.api import CommandRunner
 
 
@@ -48,6 +61,10 @@ class _Session:
     sandbox: CommandRunner
     view: RunEnvironmentView
     closed: bool = False
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -93,6 +110,7 @@ def _effects() -> ProjectRunEffects:
         git_repository=_DISK.repository,
         log_emit=emit,
         on_log_ready=lambda _path: None,
+        clock=ManualClock(),
     )
 
 
@@ -102,20 +120,30 @@ def _unexpected_resume(
     raise AssertionError
 
 
-def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize("resuming", [False, True])
+def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(
+    tmp_path: Path, *, resuming: bool
+) -> None:
     root = tmp_path / "project"
     root.mkdir()
     (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
     project = open_project_run_resources(
         _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
     )
-    backend = FakeComputeBackend()
+    if resuming:
+        project.close()
+        project = open_project_run_resources(
+            replace(_project_request(root), existing=True),
+            effects=_effects(),
+            resolve_resume=lambda _manifest: OrchestrationResumeDecision(descriptor=None),
+        )
+    backend = FakeComputeBackend(threads=SimThreads())
     opened_sessions: list[_Session] = []
 
     def open_session(_request: RunEnvironmentRequest) -> RunEnvironmentSession:
         session = _Session(
             FakeCommandRunner(),
-            RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
+            RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True, cli_sandboxed=True),
         )
         opened_sessions.append(session)
         return session
@@ -131,10 +159,13 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
             run_id="workspace-resource-test",
             framework_root=tmp_path,
             project_path_policy=ProjectPathPolicy(),
+            clock=ManualClock(),
+            system=idle_environment_system(),
         ),
         open_session,
+        clock=ManualClock(),
     )
-    events: list[WorkspaceRestoreFailed] = []
+    events: list[WorkspaceResourceEvent] = []
     factory = WorkspaceResourceFactory(
         project,
         environment,
@@ -144,6 +175,8 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
         skill_selection=NULL_SKILL_SELECTION,
         host_resources=(),
         events=events.append,
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
     )
     revision = factory.root.revision
     assert revision is not None
@@ -153,12 +186,72 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
     assert candidate_path.is_dir()
     assert candidate.revision == revision
     assert factory.supports_parallel_candidates
-    assert not factory.root.try_restore("missing-revision", clean=True)
-    assert events == [WorkspaceRestoreFailed("missing-revision")]
+    if resuming:
+        notes = root / "operator-notes.txt"
+        notes.write_text("preserve", encoding="utf-8")
+        with pytest.raises(RuntimeContractError, match="project-edit protection"):
+            factory.root.restore(revision, clean=True)
+        assert notes.read_text(encoding="utf-8") == "preserve"
+        assert events == []
+    else:
+        assert not factory.root.try_restore("missing-revision", clean=True)
+        assert events == [WorkspaceRestoreFailed("missing-revision")]
 
     candidate.close()
     assert not candidate_path.exists()
     assert opened_sessions[-1].closed
+    environment.close()
+    project.close()
+
+
+def test_workspace_factory_cannot_reconcile_through_a_replacement_session(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
+    project = open_project_run_resources(
+        _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
+    )
+    execution = CaptureExecutionIdentity(
+        kind=CaptureExecutionKind.SLURM_GPU,
+        execution_id="vibesys-recorded-capture-deadbeef",
+    )
+    project.record_capture_intent("candidate-1", execution)
+    sandbox = FakeCommandRunner()
+    session = _Session(sandbox, RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True))
+    environment = open_run_environment_resources(
+        RunEnvironmentRequest(
+            log_dir=project.logger.log_dir,
+            workspace=root,
+            ref_dir=None,
+            backend=FakeComputeBackend(threads=SimThreads()),
+            agent_backend="stub",
+            cli_provider="codex",
+            run_id="workspace-resource-test",
+            framework_root=tmp_path,
+            clock=ManualClock(),
+            system=idle_environment_system(),
+        ),
+        lambda _request: session,
+        clock=ManualClock(),
+    )
+    factory = WorkspaceResourceFactory(
+        project,
+        environment,
+        evaluation_plan=TrustedEvaluationPlan(),
+        memory_paths=(),
+        skill_source_dirs=(),
+        skill_selection=NULL_SKILL_SELECTION,
+        host_resources=(),
+        events=lambda _event: None,
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
+    )
+
+    assert factory.reconcile_capture_intents() == frozenset({"candidate-1"})
+    assert project.unsettled_candidates() == frozenset({"candidate-1"})
+
     environment.close()
     project.close()
 
@@ -170,7 +263,7 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
     project = open_project_run_resources(
         _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
     )
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     environment = open_run_environment_resources(
         RunEnvironmentRequest(
             log_dir=project.logger.log_dir,
@@ -181,8 +274,13 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
             cli_provider="codex",
             run_id="workspace-resource-test",
             framework_root=tmp_path,
+            clock=ManualClock(),
+            system=idle_environment_system(),
         ),
-        lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
+        lambda _request: _Session(
+            FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True)
+        ),
+        clock=ManualClock(),
     )
     opened = FakeAgentExecutionEnvironment(project_path_policy=ProjectPathPolicy())
     configurations: list[AgentExecutionConfiguration] = []
@@ -203,6 +301,8 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
         host_resources=(),
         events=lambda _event: None,
         root_agent_environment_opener=open_agent,
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
     )
     configuration = AgentExecutionConfiguration("worker", AgentSpec(backend=AgentBackend.STUB))
 
@@ -230,7 +330,7 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             log_dir=project.logger.log_dir,
             workspace=root,
             ref_dir=None,
-            backend=FakeComputeBackend(),
+            backend=FakeComputeBackend(threads=SimThreads()),
             agent_backend="stub",
             cli_provider=None,
             run_id="workspace-resource-test",
@@ -238,6 +338,8 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             objective=agent_objective,
             objective_document=authored,
             git_history_root=project.git.history_root,
+            clock=ManualClock(),
+            system=idle_environment_system(),
         )
         objective_paths: list[str] = []
 
@@ -250,7 +352,9 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             objective_paths.append(session.view.paths.objective)
             return session
 
-        with closing(open_run_environment_resources(request, open_session)) as environment:
+        with closing(
+            open_run_environment_resources(request, open_session, clock=ManualClock())
+        ) as environment:
             factory = WorkspaceResourceFactory(
                 project,
                 environment,
@@ -260,6 +364,8 @@ def test_candidate_environment_uses_the_runs_verified_objective(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
+                threads=SimThreads(),
+                blocking=InlineBlockingRunner(),
             )
             revision = (
                 project.git.trusted_input_baseline
@@ -270,8 +376,10 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             candidate = factory.create_candidate("candidate-1", revision)
             try:
                 assert Path(objective_paths[-1]).read_text() == agent_objective
-                if authored is not None:
-                    assert objective_paths[-1] == str(authored)
+                # The agent reads a copy beside the candidate's logs, never the committed
+                # document in the run's record, which agent confinement hides.
+                assert not Path(objective_paths[-1]).is_relative_to(root)
+                assert authored is None or objective_paths[-1] != str(authored)
                 configuration = AgentExecutionConfiguration(
                     "worker", AgentSpec(backend=AgentBackend.STUB)
                 )
@@ -284,3 +392,67 @@ def test_candidate_environment_uses_the_runs_verified_objective(
                     )
             finally:
                 candidate.close()
+
+
+def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "weights.bin").write_bytes(b"w" * 3_000_000)
+    (root / "cache").mkdir()
+    outside = tmp_path / "host-secret"
+    outside.write_text("secret", encoding="utf-8")
+    (root / "planted").symlink_to(outside)
+    project = open_project_run_resources(
+        _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
+    )
+    environment = open_run_environment_resources(
+        RunEnvironmentRequest(
+            log_dir=project.logger.log_dir,
+            workspace=root,
+            ref_dir=None,
+            backend=FakeComputeBackend(threads=SimThreads()),
+            agent_backend="stub",
+            cli_provider="codex",
+            run_id="workspace-resource-test",
+            framework_root=tmp_path,
+            clock=ManualClock(),
+            system=idle_environment_system(),
+        ),
+        lambda _request: _Session(
+            FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths(), workspace_git_writable=True)
+        ),
+        clock=ManualClock(),
+    )
+    factory = WorkspaceResourceFactory(
+        project,
+        environment,
+        evaluation_plan=TrustedEvaluationPlan(),
+        memory_paths=(),
+        skill_source_dirs=(),
+        skill_selection=NULL_SKILL_SELECTION,
+        host_resources=(),
+        events=lambda _event: None,
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
+    )
+
+    os.mkfifo(root / "pipe")
+    entries = factory.root.baseline_entries(("weights.bin", "planted", "cache/", "pipe"))
+
+    kinds = {entry.path: entry.kind for entry in entries}
+    assert kinds == {
+        "weights.bin": BaselineEntryKind.FILE,
+        "planted": BaselineEntryKind.UNFINGERPRINTED,
+        "cache/": BaselineEntryKind.DIRECTORY,
+        "pipe": BaselineEntryKind.UNFINGERPRINTED,
+    }
+    # Nothing changed yet: a path that could not be fingerprinted is not "removed".
+    assert factory.root.baseline_drift(entries).is_empty
+    (root / "pipe").unlink()
+    assert factory.root.baseline_drift(entries).removed == ("pipe",)
+    (root / "weights.bin").unlink()
+    (root / "weights.bin").symlink_to(outside)
+    assert "weights.bin" in factory.root.baseline_drift(entries).removed
+    environment.close()
+    project.close()

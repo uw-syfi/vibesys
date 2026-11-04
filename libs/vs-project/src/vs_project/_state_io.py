@@ -9,8 +9,9 @@ from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter
 
+from vs_decode.api import Unreadable, UnreadableKind, ValidationOptions, decode_json, read_json
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project.errors import (
     ProjectStateError,
@@ -20,6 +21,26 @@ from vs_project.errors import (
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+STATE_DOCUMENT_MAX_BYTES = 256 * 1024 * 1024
+"""The largest state document read; far past any the framework writes."""
+
+
+def publish_run_link(link: Path, directory: Path) -> Path:
+    """Publish a run's absolute discovery target, replacing only an existing symlink."""
+    index = link.parent
+    index.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if link.exists() and not link.is_symlink():
+        message = f"run index entry is not a symlink: {link}"
+        raise ProjectStateError(message)
+    directory.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() and link.resolve() == directory.resolve():
+        return link
+    with tempfile.TemporaryDirectory(prefix=".publish-", dir=index) as temporary:
+        staged = Path(temporary) / "link"
+        staged.symlink_to(directory.resolve(), target_is_directory=True)
+        staged.replace(link)
+    return link
 
 
 def _serialize_state_model(model: BaseModel) -> bytes:
@@ -198,6 +219,32 @@ def atomic_write_bytes(
             filesystem.remove_temporary(temporary_path)
 
 
+def exclusive_write_bytes(path: Path, contents: bytes) -> bool:
+    """Durably create ``path`` with ``contents``, unless something already exists there.
+
+    The bytes are written and synced under a private name, then linked into place: the
+    kernel's link refuses an existing name, so of two writers racing for one name exactly
+    one creates it, and a reader sees the complete bytes or no file. Returns whether this
+    call created the file; the caller syncs the directory chain it owns.
+    """
+    filesystem = LocalAtomicWriteEffects()
+    temporary_path: Path | None = None
+    try:
+        with filesystem.temporary(path) as (temporary_path, stream):
+            stream.write(contents)
+            stream.flush()
+            filesystem.sync_file(stream)
+        try:
+            with FRAMEWORK_WRITES.creating(path, contents):
+                os.link(temporary_path, path, follow_symlinks=False)
+        except FileExistsError:
+            return False
+        return True
+    finally:
+        if temporary_path is not None:
+            filesystem.remove_temporary(temporary_path)
+
+
 def _atomic_write_bytes(path: Path, contents: bytes) -> None:
     """Replace owned state bytes through the shared durability mechanism."""
     atomic_write_bytes(path, contents)
@@ -209,12 +256,17 @@ def _atomic_write_text(path: Path, content: str) -> None:
 
 
 def _read_json_object(path: Path) -> dict[str, object]:
-    """Read a JSON object from a metadata path."""
+    """Read a JSON object from a metadata path.
+
+    Bad UTF-8 (a ``UnicodeDecodeError``), truncation and nesting past the interpreter's
+    recursion limit (a ``RecursionError`` from ``json``) are each a
+    ``ProjectStateError``, so a caller that skips damaged metadata skips all of it.
+    """
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise ProjectStateError.metadata_file_missing(path) from exc
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
         raise ProjectStateError.metadata_read_failed(path, exc) from exc
     if not isinstance(raw, dict):
         raise ProjectStateError.metadata_not_object(path)
@@ -223,15 +275,21 @@ def _read_json_object(path: Path) -> dict[str, object]:
 
 def _load_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> ModelT:
     """Load and strictly validate a required metadata model."""
-    try:
-        content = path.read_text(encoding="utf-8")
-        return model_type.model_validate_json(content, strict=True)
-    except FileNotFoundError as exc:
-        raise ProjectStateError.metadata_file_missing(path) from exc
-    except (OSError, UnicodeError) as exc:
-        raise ProjectStateError.metadata_read_failed(path, exc) from exc
-    except ValidationError as exc:
-        raise ProjectStateError.invalid_metadata(path, _validation_message(exc)) from exc
+    decoded = read_json(
+        path,
+        model_type,
+        max_bytes=STATE_DOCUMENT_MAX_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if not isinstance(decoded, Unreadable):
+        return decoded
+    match decoded.kind:
+        case UnreadableKind.MISSING:
+            raise ProjectStateError.metadata_file_missing(path)
+        case UnreadableKind.NOT_READABLE:
+            raise ProjectStateError.metadata_read_failed(path, OSError(decoded.details()))
+        case _:
+            raise ProjectStateError.invalid_metadata(path, decoded.details("metadata"))
 
 
 def _load_state_model[ModelT: BaseModel](path: Path, model_type: type[ModelT]) -> ModelT:
@@ -251,7 +309,7 @@ def decode_state_document[ModelT: BaseModel](
     *,
     source: Path | str,
     context: dict[str, Any] | None = None,
-    versioned_by: tuple[str, int] | None = None,
+    versioned_by: tuple[str, int | range] | None = None,
 ) -> ModelT:
     """Strictly decode persisted bytes as ``model_type``: the one path every reader uses.
 
@@ -260,39 +318,37 @@ def decode_state_document[ModelT: BaseModel](
     ``StateDocumentDamagedError`` naming ``source`` and the failing fields,
     never echoing the document. ``versioned_by=(field, expected)`` makes a
     document whose integer ``field`` differs from ``expected`` report both
-    versions instead of a schema error.
+    versions instead of a schema error. ``expected`` may be a range of versions, for a model
+    that still reads what older releases wrote; the newest is the one reported.
     """
     if versioned_by is not None:
         field, expected = versioned_by
+        readable = range(expected, expected + 1) if isinstance(expected, int) else expected
         found = _declared_version(data, field)
-        if found is not None and found != expected:
-            raise StateDocumentDamagedError.unsupported_version(source, found, expected)
-    try:
-        return model_type.model_validate_json(data, strict=True, context=context)
-    except ValidationError as exc:
-        raise StateDocumentDamagedError.invalid(source, _validation_message(exc)) from None
+        if found is not None and found not in readable:
+            raise StateDocumentDamagedError.unsupported_version(source, found, readable[-1])
+    decoded = decode_json(
+        data,
+        model_type,
+        source=str(source),
+        max_bytes=STATE_DOCUMENT_MAX_BYTES,
+        options=ValidationOptions(strict=True, context=context),
+    )
+    if isinstance(decoded, Unreadable):
+        raise StateDocumentDamagedError.invalid(source, decoded.details("metadata"))
+    return decoded
+
+
+_JSON_OBJECT = TypeAdapter(dict[str, Any])
 
 
 def _declared_version(data: bytes | str, field: str) -> int | None:
     """The integer version a JSON object declares, or None when it declares none."""
-    try:
-        document = json.loads(data)
-    except ValueError:
-        return None
-    if not isinstance(document, dict):
+    document = decode_json(
+        data, _JSON_OBJECT, source="state document", max_bytes=STATE_DOCUMENT_MAX_BYTES
+    )
+    if isinstance(document, Unreadable):
+        # The model decode that follows reports the damage.
         return None
     value = document.get(field)
     return value if isinstance(value, int) and not isinstance(value, bool) else None
-
-
-def _validation_message(error: ValidationError) -> str:
-    """Render stable validation details without echoing input values.
-
-    Field locations are reported, including the name of an unknown field (a
-    newer release's key is the diagnostic), but never the offending values.
-    """
-    failures: list[str] = []
-    for detail in error.errors(include_url=False, include_context=False, include_input=False):
-        location = ".".join(str(part) for part in detail["loc"]) or "metadata"
-        failures.append(f"{location}: {detail['msg']}")
-    return "; ".join(failures)

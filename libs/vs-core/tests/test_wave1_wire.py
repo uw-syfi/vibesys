@@ -10,19 +10,16 @@ from pydantic import BaseModel, ValidationError
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    OLDEST_SUPPORTED_ENVELOPE_VERSION,
     AttemptId,
     AttemptRef,
     Capabilities,
-    ChildLease,
     ContinuationId,
     ContractError,
     DecisionId,
     DecisionSubmitted,
-    EnvelopeMigration,
     EventCursor,
     EventId,
-    HostFence,
-    HostId,
     LifecycleClass,
     Observation,
     ObservationStatus,
@@ -32,9 +29,6 @@ from vs_core.api import (
     OperationRegistration,
     OperationRegistry,
     OperationRequest,
-    RecoveryBarrier,
-    RecoveryCheck,
-    RecoveryPhase,
     Rejected,
     RejectionCode,
     RequestId,
@@ -51,6 +45,7 @@ from vs_core.api import (
     Within,
     initial_state,
     step,
+    upgrade_envelope,
 )
 
 
@@ -95,7 +90,6 @@ def envelope() -> RunEnvelope[StrategyState]:
     state = initial_state()
     return RunEnvelope[StrategyState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,
@@ -104,15 +98,29 @@ def envelope() -> RunEnvelope[StrategyState]:
     )
 
 
-@given(st.integers().filter(lambda value: value != ENVELOPE_SCHEMA_VERSION))
-def test_envelope_versions_are_rejected_before_decoding_new_contracts(version: int) -> None:
+@given(
+    st.integers().filter(
+        lambda value: not OLDEST_SUPPORTED_ENVELOPE_VERSION <= value <= ENVELOPE_SCHEMA_VERSION
+    )
+)
+def test_envelope_versions_out_of_range_are_rejected_before_decoding_new_contracts(
+    version: int,
+) -> None:
     codec = OperationRegistry()
     # Deliberately absent core proves the version barrier precedes nested decode.
     named = rf"schema_version.*envelope version {version} is not supported"
     with pytest.raises(ContractError, match=named):
         codec.decode_envelope(RunEnvelope[StrategyState], json.dumps({"schema_version": version}))
     with pytest.raises(ContractError, match=named):
-        codec.encode_envelope(envelope().model_copy(update={"schema_version": version}))
+        upgrade_envelope(json.dumps({"schema_version": version}), ("schema_version",))
+
+
+@given(st.integers().filter(lambda value: value != ENVELOPE_SCHEMA_VERSION))
+def test_a_run_writes_only_the_current_envelope_version(version: int) -> None:
+    with pytest.raises(ContractError, match="schema_version"):
+        OperationRegistry().encode_envelope(
+            envelope().model_copy(update={"schema_version": version})
+        )
 
 
 @pytest.mark.parametrize("version", [None, True, "2", 2.0])
@@ -123,28 +131,25 @@ def test_envelope_version_must_be_an_explicit_integer(version: object) -> None:
         )
 
 
-def upgrade_envelope(source: str) -> str:
-    payload = json.loads(source)
-    payload["schema_version"] = ENVELOPE_SCHEMA_VERSION
-    return json.dumps(payload)
+@pytest.mark.parametrize(
+    "source",
+    ["[" * 100_000, "[" * 100_000 + "]" * 100_000, '{"schema_version":' + "[" * 100_000, "\ud800"],
+    ids=["deep-open", "deep-closed", "deep-under-key", "lone-surrogate"],
+)
+def test_a_hostile_envelope_is_a_contract_error(source: str) -> None:
+    with pytest.raises(ContractError):
+        OperationRegistry().decode_envelope(RunEnvelope[StrategyState], source)
 
 
-def test_previous_envelope_requires_selected_migration() -> None:
+def test_an_envelope_older_than_the_oldest_supported_names_both_versions() -> None:
     codec = OperationRegistry()
-    current = envelope()
-    previous = current.model_copy(update={"schema_version": 1}).model_dump_json()
-    with pytest.raises(ContractError, match="envelope version 1 is not supported"):
-        codec.decode_envelope(RunEnvelope[StrategyState], previous)
-    loaded = codec.migrate_envelope(
-        RunEnvelope[StrategyState],
-        previous,
-        EnvelopeMigration(
-            source_version=1,
-            target_version=ENVELOPE_SCHEMA_VERSION,
-            rewrite=upgrade_envelope,
-        ),
-    )
-    assert loaded == current
+    stored = envelope().model_copy(update={"schema_version": OLDEST_SUPPORTED_ENVELOPE_VERSION - 1})
+    with pytest.raises(
+        ContractError,
+        match=rf"envelope version {OLDEST_SUPPORTED_ENVELOPE_VERSION - 1} is not supported; "
+        rf"versions {OLDEST_SUPPORTED_ENVELOPE_VERSION} to {ENVELOPE_SCHEMA_VERSION}",
+    ):
+        codec.decode_envelope(RunEnvelope[StrategyState], stored.model_dump_json())
 
 
 @given(
@@ -249,42 +254,6 @@ def test_unknown_target_fields_fail_at_the_contract_boundary() -> None:
     with pytest.raises(ValidationError, match="fabricated"):
         TargetObservation.model_validate(
             {"observation": observation("target", 1), "fabricated": "proof"}
-        )
-
-
-@given(st.integers(min_value=0, max_value=100))
-def test_ready_recovery_requires_a_conclusive_target_receipt(epoch: int) -> None:
-    target = RequestId(root="recover")
-    for resolution in ("pending", "blocked"):
-        with pytest.raises(ValidationError, match="READY"):
-            RecoveryBarrier(
-                epoch=epoch,
-                phase=RecoveryPhase.READY,
-                checks=(RecoveryCheck(target=target, resolution=resolution),),
-            )
-    for resolution in ("safe-prepared", "reattached", "terminal"):
-        barrier = RecoveryBarrier(
-            epoch=epoch,
-            phase=RecoveryPhase.READY,
-            checks=(RecoveryCheck(target=target, resolution=resolution),),
-        )
-        assert RecoveryBarrier.model_validate_json(barrier.model_dump_json()) == barrier
-
-
-def test_child_lease_cannot_reuse_an_ancestor_observation() -> None:
-    parent = observation("root", 1)
-    with pytest.raises(ValidationError, match="resource_id"):
-        ChildLease(
-            resource_id=ResourceId(root="child"),
-            scope=parent.scope,
-            source_requests=(parent.request_id,),
-            observation=parent,
-        )
-    with pytest.raises(ValidationError, match="source_requests"):
-        ChildLease(
-            resource_id=ResourceId(root="child"),
-            scope=parent.scope,
-            source_requests=(parent.request_id, parent.request_id),
         )
 
 

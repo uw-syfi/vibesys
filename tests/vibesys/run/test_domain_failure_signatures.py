@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.task_project import write_task
-from tests.vibesys.run.test_evaluation_plan import _Session
 
 from vibesys.constants import DomainName
 from vibesys.domains.registry import DOMAINS, resolve_domain
@@ -68,7 +67,9 @@ def test_the_plan_carries_the_causes_the_wiring_passes(name: DomainName, tmp_pat
 
     plan = trusted_evaluation_plan(
         load_task(tmp_path),
-        _Session(),
+        accuracy_command=None,
+        benchmark_command=None,
+        framework_setup_timeout_seconds=0,
         candidate_startup_causes=resolve_domain(name).candidate_startup_causes,
     )
 

@@ -6,10 +6,6 @@ internal modules directly.
 
 from __future__ import annotations
 
-from vs_sandbox.fake_captured_process import (
-    CapturedProcessFaults,
-    FakeCapturedProcessRunner,
-)
 from vs_sandbox.fake_command_runner import (
     DEFAULT_RESULT,
     FakeCommandRunner,
@@ -36,21 +32,19 @@ from vs_sandbox.fake_docker_confinement import FakeDockerConfinement
 from vs_sandbox.fake_docker_engine import FakeContainer, FakeDockerEngine
 from vs_sandbox.fake_gpu_telemetry import FakeGpuTelemetry
 from vs_sandbox.fake_host_container import HostExecutedContainer, HostExecutedContainerBackend
-from vs_sandbox.fake_signal_relay import FakeSignalRelay
+from vs_sandbox.fake_skypilot_cluster import FakeSkyPilotCluster
+from vs_sandbox.fake_step_containers import FakeRunStepContainers, FakeStepContainers
 from vs_sandbox.fake_stoppable_process import FakeStoppableProcess, StoppableScript
 from vs_sandbox.gpu_telemetry_contracts import GpuTelemetryContract, TelemetryHarness
 from vs_sandbox.process_contracts import ProcessHarness, StoppableProcessContract
-from vs_sandbox.signal_relay_contracts import RelayUnderTest, SignalRelayContract
 
 __all__ = [
     "DEFAULT_RESULT",
-    "CapturedProcessFaults",
     "DockerCliCall",
     "DockerCliOutcome",
     "DockerCommandCall",
     "DockerCommandOutcome",
     "FakeAcceleratorDiscovery",
-    "FakeCapturedProcessRunner",
     "FakeCommandRunner",
     "FakeComputeBackend",
     "FakeContainer",
@@ -60,16 +54,16 @@ __all__ = [
     "FakeExecution",
     "FakeGpuTelemetry",
     "FakeLifecycleRunner",
+    "FakeRunStepContainers",
     "FakeRunnerCreation",
-    "FakeSignalRelay",
+    "FakeSkyPilotCluster",
+    "FakeStepContainers",
     "FakeStoppableProcess",
     "GpuTelemetryContract",
     "HostExecutedContainer",
     "HostExecutedContainerBackend",
     "ProcessHarness",
-    "RelayUnderTest",
     "ScriptedDockerCli",
-    "SignalRelayContract",
     "StoppableProcessContract",
     "StoppableScript",
     "TelemetryHarness",

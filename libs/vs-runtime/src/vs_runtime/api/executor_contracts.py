@@ -10,7 +10,8 @@ registered case through the same checks:
   core receives are accepted in order;
 * a stale host (lost lease, older fence) performs zero effects and reports Unknown;
 * the observation contract (``assert_core_accepts``) over Unknown-then-final and replays;
-* the same request identity with another payload is a REJECTED observation;
+* the same request identity with another payload is a REJECTED observation that claims
+  no release (the identity's first request may still hold its resource);
 * ``InspectRequest`` of the request, at every crash boundary, never says "never started"
   once an effect happened, and reports the sealed result once the request finished.
 
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
     from vs_core.api import RequestBase
     from vs_project.api import StateNamespace
     from vs_runtime.api.core import ExecutionResult
-    from vs_runtime.api.executor_contexts import RevocableLease
 
 
 class ProcessKilledError(
@@ -101,11 +101,14 @@ class CaseWorld(Protocol):
         self,
         request: RequestBase,
         *,
-        lease: RevocableLease,
         crash_at: int | None,
         digest: str | None = None,
+        repeat: bool = False,
     ) -> ExecutionResult:
-        """Run the request on a freshly built executor over the same disk (a restart)."""
+        """Run the request on a freshly built executor over the same disk (a restart).
+
+        With *repeat*, the context says an earlier attempt of the request may have run.
+        """
         ...
 
     def writes(self) -> int:
@@ -113,7 +116,7 @@ class CaseWorld(Protocol):
         ...
 
     def receipts_namespace(self) -> StateNamespace:
-        """The real namespace the executor's ReceiptStore writes to (no fault injection)."""
+        """The real namespace the executor's KeyedDocuments writes to (no fault injection)."""
         ...
 
     def owners_root(self) -> Path:

@@ -17,6 +17,7 @@ from vs_sandbox.api import (
     host_resource_for_mount,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import SimThreads
 
 
 def test_host_sandbox_creates_parent_directories_for_imported_sockets(tmp_path: Path) -> None:
@@ -123,7 +124,7 @@ def test_normalized_resources_flow_through_the_public_backend_fake(tmp_path: Pat
             replacement,
         )
     )
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
 
     backend.make_sandbox(
         SandboxKind.DOCKER,

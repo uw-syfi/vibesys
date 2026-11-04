@@ -26,8 +26,6 @@ from vs_core.api import (
     EvidenceId,
     EvidenceKind,
     EvidenceRef,
-    HostFence,
-    HostId,
     InvocationId,
     InvocationRef,
     JobObserved,
@@ -56,6 +54,7 @@ from vs_core.api import (
     TurnResult,
     TurnSpec,
     Until,
+    WaitOn,
     initial_state,
     step,
 )
@@ -135,13 +134,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     )
     # The paid measurement was authorized by a real accepted Measure decision.
     measured = step(
-        state.model_copy(
-            update={
-                "records": core.RecordsState(
-                    recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
-                )
-            }
-        ),
+        state.model_copy(update={"records": core.RecordsState()}),
         DecisionSubmitted(
             decision=core.Wait(
                 request=core.Measure(
@@ -184,6 +177,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     )
     dispatch = DispatchTurn(request_id=yielded.request_id, scope=scope, turn=original_turn)
     job = OwnedJob(
+        wait=WaitOn(timer=0.0),
         resource_id=resource,
         scope=scope,
         plan=plan,
@@ -241,7 +235,6 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                 ),
             ),
             "records": core.RecordsState(
-                recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY),
                 records=(
                     core.RequestRecord(
                         request_id=yielded.request_id,
@@ -252,6 +245,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         sequence=yielded.sequence,
                         observation=yielded,
                         until=core.Until(at=100.0),
+                        addressed_by=(),
                     ),
                     core.RequestRecord(
                         request_id=job_request,
@@ -260,6 +254,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         lifecycle=core.LifecycleClass.OWNED_JOB,
                         phase=core.RequestPhase.DISPATCHED,
                         until=core.Until(at=10.0),
+                        addressed_by=(),
                     ),
                 ),
             ),
@@ -445,7 +440,6 @@ def test_crash_boundaries_do_not_duplicate_resume_or_paid_work() -> None:
     assert submitted.phase == core.RequestPhase.COMPLETED
     initial = RunEnvelope[CallbackState](
         schema_version=ENVELOPE_SCHEMA_VERSION,
-        fence=HostFence(host_id=HostId(root="host"), epoch=1),
         strategy_id=original.run.declaration.strategy_id,
         state_schema=SchemaRef(name="callbacks", version=1),
         core=ingress.state,

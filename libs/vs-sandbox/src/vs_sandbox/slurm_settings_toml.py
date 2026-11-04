@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
     from vs_sandbox.slurm_policy import SlurmOperatorSettings
 
@@ -27,6 +28,11 @@ def render_slurm_operator_toml(settings: SlurmOperatorSettings) -> str:
     for name, table in document.items():
         _emit_table((name,), table, lines)
     return "\n".join(lines) + "\n"
+
+
+def write_slurm_operator_toml(settings: SlurmOperatorSettings, path: Path) -> None:
+    """Write ``render_slurm_operator_toml(settings)`` to ``path`` for the run's readers."""
+    path.write_text(render_slurm_operator_toml(settings), encoding="utf-8")
 
 
 def _emit_table(path: tuple[str, ...], table: Mapping[str, object], lines: list[str]) -> None:

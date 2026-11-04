@@ -12,8 +12,10 @@ them. No existing dynamic execution path is moved or activated here.
 
 Persisted schema versions are explicit. Unknown or changed operation, envelope,
 or strategy state schemas are rejected and require a caller-supplied migration
-before decoding. `OperationMigration` and `EnvelopeMigration` select a pure
-conversion explicitly and validate its registered target. Legacy dynamic-state
+before decoding. `OperationMigration` selects a pure conversion explicitly and validates
+its registered target. A stored run envelope of an older supported version is brought to
+the current one by the chain in `vs_core._envelope_migrations` (`upgrade_envelope`), so an
+update never forces a fresh run. Legacy dynamic-state
 conversion and its golden fixtures belong to W0B.
 
 `ProposalSubmitted(decisions, expected_revision)` consumes an ordered proposal
@@ -59,7 +61,13 @@ newly emitted copy. A prepared proposal alone does not authorize I/O; recovery
 and bounded retries retain the recorded request identity.
 
 Pause and resume cannot reverse closing or blocked runs, or a committed stop
-result. `RunDrained` defers final publication while attempts, sessions, jobs,
+result. While a run is paused core takes only a `Finish` or a `Withdraw`; the
+shell holds every other decision the search makes (`deferred`) and submits it on
+the resume, so a pause never reaches the search as a refusal. A pause holds
+only that intake (and queued starts): work already admitted carries on and what
+it yields is delivered while paused (`continues_admitted_work`), such as a
+turn's evaluation call and wait, a job's end, or the resume of a wait whose
+jobs ended. `RunDrained` defers final publication while attempts, sessions, jobs,
 records or child ownership remain unresolved. Evidence and assessment kinds are
 closed, and eligibility requirements retain exact provenance, purpose, revision
 and source ownership attribution.

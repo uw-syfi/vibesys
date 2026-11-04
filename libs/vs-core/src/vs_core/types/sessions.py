@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, assert_never
 
 from pydantic import ConfigDict, Field, model_validator
 
@@ -20,6 +20,7 @@ from .common import (
     ExecuteRegisteredOperation,
     Generation,
     InputId,
+    InterruptPolicy,
     InvocationId,
     InvocationRef,
     Observation,
@@ -45,6 +46,7 @@ from .evaluation import Continuation, ResumeAuthorizationReceipt
 from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
 from .until import ReplyError, Until
+from .waits import WaitOn
 
 
 class Access(StrEnum):
@@ -92,6 +94,10 @@ class TurnSpec(Value):
     charge_class: Literal["paid", "correction", "resume", "free"]
     max_turns: int = Field(default=1, ge=1)
     predecessor: InvocationRef | None = None
+    on_interrupt: InterruptPolicy = Field(
+        default=InterruptPolicy.RERUN, exclude_if=lambda policy: policy is InterruptPolicy.RERUN
+    )
+    """What an interrupted attempt of this turn means: only the asker knows if a person watches."""
 
 
 class SessionPhase(StrEnum):
@@ -105,6 +111,43 @@ class SessionPhase(StrEnum):
     CLOSING = "closing"
     TERMINAL = "terminal"
     UNKNOWN = "unknown"
+
+
+def session_may_wait(phase: SessionPhase) -> bool:
+    """Whether a session in this phase may wait: a waiting one, or an unknown one inspected.
+
+    A session whose acquisition or turn core cannot settle is unknown; while the inspection
+    that settles it is out, it waits on that inspection. One with nothing out waits on nothing
+    core can name, and carries no wait.
+    """
+    return session_waits(phase) or phase == SessionPhase.UNKNOWN
+
+
+def turn_acquires(invocation: Invocation) -> bool:
+    """Whether a turn is still acquiring: requested, charged or not, with no result yet."""
+    return invocation.phase == SessionPhase.ACQUIRING and invocation.observation is None
+
+
+def turn_may_wait(invocation: Invocation) -> bool:
+    """Whether a turn may carry a wait: while it acquires, or while its yield is unpublished."""
+    return turn_acquires(invocation) or invocation.pending_suspension is not None
+
+
+def session_waits(phase: SessionPhase) -> bool:
+    """Whether a session in this phase waits on a request's result."""
+    match phase:
+        case SessionPhase.ACQUIRING | SessionPhase.EXECUTING | SessionPhase.CLOSING:
+            return True
+        case (
+            SessionPhase.IDLE
+            | SessionPhase.CHECKPOINTED
+            | SessionPhase.SUSPENDED
+            | SessionPhase.TERMINAL
+            | SessionPhase.UNKNOWN
+        ):
+            return False
+        case _:
+            assert_never(phase)
 
 
 class SessionView(Value):
@@ -129,6 +172,22 @@ class SessionView(Value):
     pending_records: tuple[RequestId, ...] = ()
     acceptance_sequence: int | None = Field(default=None, ge=0)
     continuation_id: ContinuationId | None = None
+    wait: WaitOn | None = None
+    """The requests the session waits on while acquiring, executing or closing: the one
+    that acquires, runs or closes it, or the inspection that stands in for one."""
+
+    @model_validator(mode="after")
+    def waits_only_while_waiting(self) -> SessionView:
+        """A session that waits on nothing carries no wait.
+
+        The other half, that a waiting session always carries one, holds at the end of every
+        step (``unmet_waits``): a transition builds the session before it names the request.
+        """
+        if self.wait is not None and not session_may_wait(self.phase):
+            raise ContractValidationError(
+                "wait", f"a session in phase {self.phase.value} waits on nothing"
+            )
+        return self
 
 
 class SessionProjection(SessionView):
@@ -171,6 +230,8 @@ class Invocation(Value):
     output_json: str | None = None
     reserved_inputs: tuple[ArtifactRef, ...] = ()
     input_ids: tuple[InputId, ...] = ()
+    guidance_ids: tuple[InputId, ...] = ()
+    """The standing inputs the turn was dispatched with, in the order it received them."""
     evaluation_prefix: EvaluationHistoryCursor | None = None
     pending_suspension: Continuation | None = None
     until: Until
@@ -179,6 +240,20 @@ class Invocation(Value):
     """How long the turn may run once the shell dispatches it: what ``until`` allowed, as a
     duration. The turn's own requests count it from their dispatch, not from this admission.
     Admission always sets it; None is a turn whose ``until`` is already absolute."""
+    wait: WaitOn | None = None
+    """What the turn waits on. While it acquires: its session, whose acquisition carries it
+    on. While its yield is unpublished: the checkpoint request that retains its workspace, or
+    the inspection of the turn that lets core request one."""
+
+    @model_validator(mode="after")
+    def waits_only_while_waiting(self) -> Invocation:
+        """Only a turn acquiring or yielding waits; the other half holds after each step."""
+        if self.wait is not None and not turn_may_wait(self):
+            raise ContractValidationError(
+                "wait",
+                f"a turn in phase {self.phase.value} acquires nothing and publishes no yield",
+            )
+        return self
 
     @model_validator(mode="after")
     def pending_suspension_identity(self) -> Invocation:
@@ -235,6 +310,16 @@ class InterruptClaim(Value):
     phase: Literal["pending", "draining", "checkpointed", "completed", "blocked"] = "pending"
     checkpoint_authority: RequestId | None = None
     refunded_charge: ChargeId | None = None
+    wait: WaitOn | None
+    """What a draining claim waits on once its turn ended: the checkpoint request that
+    retains the interrupted turn's workspace."""
+
+    @model_validator(mode="after")
+    def waits_only_while_draining(self) -> InterruptClaim:
+        """Only a draining claim waits; the other half holds after each step."""
+        if self.wait is not None and self.phase != "draining":
+            raise ContractValidationError("wait", f"a {self.phase} interruption waits on nothing")
+        return self
 
 
 class SessionAcquisitionGroup(Value):
@@ -542,6 +627,36 @@ class AcquisitionStalled(Value):
     invocation: InvocationRef
 
 
+class InvocationCheckpointPending(Value):
+    """Internal signal: the checkpoint of a terminal turn is requested as *request_id*.
+
+    The attempt that owns the turn raises it in the step it sends the checkpoint request, or
+    when the request it was asked for is already out. A turn whose yield is unpublished, and a
+    draining interruption of it, then name that request as what they wait on. A checkpoint the
+    attempt declines raises nothing, so the waits it would have carried have nothing to end
+    them and the step ends them by name (``CheckpointStalled``).
+    """
+
+    kind: Literal["invocation_checkpoint_pending"] = "invocation_checkpoint_pending"
+    invocation: InvocationRef
+    request_id: RequestId
+
+
+class SessionWaitLapsed(Value):
+    """A request a waiting session names ended without moving the session.
+
+    Internal signal raised once a step's other signals settle, never shell input. The
+    session's own transition takes each answer of its requests, so a session still naming an
+    ended request is one the answer did not move: the request blocked at its bound, or the
+    session refused what it said. The session waits again on the requests it names that are
+    still open, or, with none left, no longer knows what the executor holds (``UNKNOWN``).
+    """
+
+    kind: Literal["session_wait_lapsed"] = "session_wait_lapsed"
+    session_id: SessionId
+    request_id: RequestId
+
+
 class EnsureSession(RequestBase):
     """Acquire a lease or positively reattach required_resource.
 
@@ -566,6 +681,8 @@ class DispatchTurn(RequestBase):
     kind: Literal["dispatch_turn"] = "dispatch_turn"
     turn: TurnSpec
     inputs: tuple[SessionInput, ...] = ()
+    guidance: tuple[SessionInput, ...] = ()
+    """The standing inputs in force for this turn when it was dispatched; none is reserved."""
 
 
 class InspectTurn(RequestBase):
@@ -623,6 +740,8 @@ class ResumeSessionTurn(RequestBase):
     kind: Literal["resume_session_turn"] = "resume_session_turn"
     turn: TurnSpec
     inputs: tuple[SessionInput, ...] = ()
+    guidance: tuple[SessionInput, ...] = ()
+    """The standing inputs in force for this turn when it was dispatched; none is reserved."""
     continuation_id: ContinuationId
     publication: ResumeAuthorizationReceipt | None = None
     """The publication proof core held for this continuation when it issued the resume.
@@ -638,6 +757,65 @@ class SessionInputReceived(Value):
 
     kind: Literal["session_input_received"] = "session_input_received"
     input: SessionInput
+
+
+class InputWithdrawRequested(Value):
+    """End one standing input: the signal an operator's withdraw control raises.
+
+    Only core raises it, from a recorded withdraw control; it is not accepted as ingress.
+    """
+
+    kind: Literal["input_withdraw_requested"] = "input_withdraw_requested"
+    input_id: InputId
+
+
+class InputOfferedMidTurn(Value):
+    """The shell is about to offer an interrupt-mode input to a running turn.
+
+    Committed before the provider is asked, so a crash after the call cannot lose the
+    fact that it may have been made. Core records the offer only for a pending
+    interrupt-mode input and an executing session turn that would take it; any other
+    offer is a no-op the shell sees in the committed state before it calls.
+    """
+
+    kind: Literal["input_offered_mid_turn"] = "input_offered_mid_turn"
+    input_id: InputId
+    invocation: InvocationRef
+    now_at: Seconds
+
+
+class InputTakenMidTurn(Value):
+    """The provider took an offered input into its running turn (it answered ``DELIVERED``).
+
+    Committed after the provider's answer. Only a taken offer joins the turn when the turn's
+    acceptance commits; an offer the turn ends without having taken waits for the next turn.
+    A crash between the answer and this commit leaves the offer untaken, so the input reaches
+    a turn again: delivery is at least once. A take for an offer core no longer holds for that
+    turn changes nothing.
+    """
+
+    kind: Literal["input_taken_mid_turn"] = "input_taken_mid_turn"
+    input_id: InputId
+    invocation: InvocationRef
+    now_at: Seconds
+
+
+class InputMidTurnReleased(Value):
+    """An offered input did not stay in the running turn: it waits for the next turn instead.
+
+    The shell raises it when the provider takes no mid-turn input or has no turn running, or
+    when it finds an offer an earlier host made. The turn's own result raises it, before the
+    turn's acceptance, for a message the provider took and then refused (``refused``): the
+    agent never read that one. An offer that already settled, or that core holds for another
+    turn, changes nothing.
+    """
+
+    kind: Literal["input_mid_turn_released"] = "input_mid_turn_released"
+    input_id: InputId
+    invocation: InvocationRef
+    now_at: Seconds
+    refused: bool = False
+    """The provider took the message and then refused it, so the agent did not read it."""
 
 
 class InputReservationRequested(Value):
@@ -832,6 +1010,10 @@ type SessionsEvent = Annotated[
     | SteerReceived
     | InterruptRequested
     | SessionInputReceived
+    | InputWithdrawRequested
+    | InputOfferedMidTurn
+    | InputTakenMidTurn
+    | InputMidTurnReleased
     | InputReservationRequested
     | TurnInputsReserved
     | InputAcceptanceObserved
@@ -846,7 +1028,9 @@ type SessionsEvent = Annotated[
     | RunInvocationCheckpointRequested
     | RunInvocationCheckpointObserved
     | CheckpointStalled
-    | AcquisitionStalled,
+    | AcquisitionStalled
+    | SessionWaitLapsed
+    | InvocationCheckpointPending,
     Field(discriminator="kind"),
 ]
 type SessionRequest = Annotated[

@@ -54,6 +54,7 @@ def test_cleanup_registration_never_creates_past_timers(
         }
     )
     owner = core.RegisteredOwnedJob(
+        wait=core.WaitOn(timer=0.0),
         operation_id=core.OperationId(root="operation:owned-job"),
         request_id=core.RequestId(root="submission"),
         scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),

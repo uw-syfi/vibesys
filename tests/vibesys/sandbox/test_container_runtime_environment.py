@@ -26,19 +26,29 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
     build_run_environment,
 )
-from vs_runtime.api.testing import unconfined_host_environment
+from vs_runtime.api.testing import idle_environment_system, unconfined_host_environment
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
+    ComputeBackendImpl,
     ContainerRuntimeUnavailableError,
+    CudaAcceleratorUnavailableError,
+    CudaBackend,
     DockerSandbox,
     SandboxKind,
 )
-from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry, ScriptedDockerCli
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ManualClock,
+    ScriptedProbe,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from vs_sandbox.api import CommandRunner, HostResource
+    from vs_sim.api import OutputSink
 
 _IMAGE_ID = "sha256:" + "c" * 64
 
@@ -54,6 +64,7 @@ class _RecordingBuildRunner:
     def __init__(self) -> None:
         self.argvs: list[tuple[str, ...]] = []
         self.selected_features: list[str] = []
+        self.built: set[str] = set()
 
     def run(
         self,
@@ -61,19 +72,23 @@ class _RecordingBuildRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
-        del cwd, timeout, on_stderr_line
+        del cwd, timeout, output
         self.argvs.append(tuple(argv))
+        result_tag = argv[-1].startswith("vibesys-agent-build:")
+        unbuilt = tuple(argv[1:3]) == ("image", "inspect") and result_tag
+        unbuilt = unbuilt and argv[-1] not in self.built
         if argv[1] == "build":
+            self.built.add(argv[list(argv).index("--tag") + 1])
             dockerfile = Path(argv[list(argv).index("--file") + 1]).read_text()
             self.selected_features = [
                 line.split()[1].rsplit("/", 1)[-1]
                 for line in dockerfile.splitlines()
                 if line.startswith("COPY ")
             ]
-        stdout = _IMAGE_ID if argv[1] == "image" else ""
-        return subprocess.CompletedProcess(tuple(argv), 0, stdout, "")
+        stdout = _IMAGE_ID if argv[1] == "image" and not unbuilt else ""
+        return subprocess.CompletedProcess(tuple(argv), 1 if unbuilt else 0, stdout, "")
 
 
 class _DaemonBackend:
@@ -106,7 +121,11 @@ class _DaemonBackend:
             resources=resources,
             docker=self.engine,
             docker_in_docker=docker_in_docker,
+            threads=SimThreads(),
         )
+
+    def ensure_accelerator_available(self) -> None:
+        return
 
     def make_monitor(self, log_dir: Path) -> None:
         del log_dir
@@ -117,7 +136,7 @@ class _DaemonBackend:
 
 def _request(
     tmp_path: Path,
-    backend: _DaemonBackend,
+    backend: ComputeBackendImpl,
     *,
     docker_in_docker: bool = False,
     benchmark_command: str | None = None,
@@ -138,12 +157,17 @@ def _request(
         benchmark_command=benchmark_command,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         docker_in_docker=docker_in_docker,
+        clock=ManualClock(),
+        system=idle_environment_system(),
     )
 
 
 def _engine(tmp_path: Path, runtimes: Sequence[str]) -> FakeDockerEngine:
     return FakeDockerEngine(
-        tmp_path / "engine", agent_ids=(os.getuid(), os.getgid()), runtimes=runtimes
+        tmp_path / "engine",
+        agent_ids=(os.getuid(), os.getgid()),
+        runtimes=runtimes,
+        launcher=FakePipedProcessLauncher(),
     )
 
 
@@ -178,6 +202,27 @@ def test_a_docker_in_docker_task_gets_the_runtime_layer_and_a_same_path_workspac
         session.close()
 
 
+@pytest.mark.parametrize("docker_in_docker", [False, True])
+def test_the_notes_offer_reproducing_failures_exactly_when_the_editor_has_the_hardware(
+    tmp_path: Path, *, docker_in_docker: bool
+) -> None:
+    # Trusted evaluation runs on the same Docker host. An agent told that its editor
+    # says nothing about the target never reproduces a failing case on hardware it
+    # holds; one told it can, where it cannot, wastes its turn on a missing device.
+    runtimes = ("runc", "sysbox-runc") if docker_in_docker else ("runc",)
+    engine = _engine(tmp_path, runtimes)
+    backend = _DaemonBackend(engine)
+    request = _request(tmp_path, backend, docker_in_docker=docker_in_docker)
+
+    session = open_run_environment(_environment(engine, _RecordingBuildRunner()), request)
+    try:
+        offers = "reproduce the failing case" in session.view.prompt_notes
+        assert backend.accelerator_requests == [not docker_in_docker]
+        assert offers == backend.accelerator_requests[0]
+    finally:
+        session.close()
+
+
 def test_an_ordinary_task_keeps_the_workspace_mount_and_an_unchanged_image(
     tmp_path: Path,
 ) -> None:
@@ -208,6 +253,33 @@ def test_a_host_without_sysbox_fails_before_any_image_is_built(tmp_path: Path) -
 
     assert runner.argvs == []
     assert backend.creations == []
+
+
+def test_a_host_without_a_gpu_fails_before_any_image_is_built(tmp_path: Path) -> None:
+    """The default 'cuda' backend refuses a GPU-less host before any docker build.
+
+    Regression for #2093: on a host with no NVIDIA GPU, ``vibesys`` used to accept
+    the default ``--backend cuda``, build the agent image, and fail only once
+    ``docker run --gpus all`` ran for the first container. The real
+    ``CudaBackend`` (not a stand-in) is driven through ``open_run_environment``
+    so the check under test is exactly the one the CLI's run path takes.
+    """
+    engine = _engine(tmp_path, ("runc",))
+    runner = _RecordingBuildRunner()
+    backend = CudaBackend(
+        tmp_path,
+        gpu_telemetry=FakeGpuTelemetry(gpus=[]),
+        clock=ManualClock(),
+        threads=SimThreads(),
+        docker=ScriptedDockerCli(),
+        launcher=FakePipedProcessLauncher(),
+        probe=ScriptedProbe(lambda _argv: None),
+    )
+
+    with pytest.raises(CudaAcceleratorUnavailableError, match="NVIDIA GPU"):
+        open_run_environment(_environment(engine, runner), _request(tmp_path, backend))
+
+    assert runner.argvs == []
 
 
 @pytest.mark.parametrize("name", ["modal", "skypilot", "local"])

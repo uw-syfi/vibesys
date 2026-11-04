@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "label": "small correlated trace",
+  "source_root": ".",
+  "source_revision": "example-revision",
+  "inputs": [
+    {"format": "otlp_json", "path": "otel.json", "clock": "unix"},
+    {"format": "dial9_bridge_jsonl", "path": "dial9.jsonl", "clock": "monotonic"},
+    {"format": "perf_script", "path": "perf.script", "clock": "monotonic"}
+  ]
+}

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import signal
 import subprocess
+import sys
 from pathlib import Path
 from signal import Signals
 from tempfile import TemporaryDirectory
@@ -95,7 +96,13 @@ class ScriptedCaptureProcessGroup:
                 content += "incomplete,2\n"
             elif self.fault == "bad_timestamp":
                 content = content.replace("100,200", "200,100")
-            (self.directory / f"{pid}_kernel_trace.csv").write_text(content)
+            trace = self.directory / f"{pid}_kernel_trace.csv"
+            # A second flush adds records. Rewriting identical bytes relies on
+            # filesystem timestamp granularity to distinguish it from startup.
+            if trace.exists():
+                content = content.partition("\n")[2]
+            with trace.open("a") as handle:
+                handle.write(content)
             if self.fault != "missing_marker":
                 markers.extend(
                     [
@@ -105,7 +112,8 @@ class ScriptedCaptureProcessGroup:
                         "found chained signal handler for 2... executing chained sigaction (SIGINFO)",
                     ]
                 )
-        (self.directory / "target.log").write_text("\n".join(markers) + "\n")
+        with (self.directory / "target.log").open("a") as handle:
+            handle.write("\n".join(markers) + "\n")
 
     def history_complete(self) -> bool:
         return True
@@ -162,24 +170,22 @@ def test_unproven_trace_retains_full_grace(tmp_path: Path, fault: str) -> None:
     assert not group.child_alive
 
 
-def test_each_trace_writer_must_finalize_after_stop(tmp_path: Path) -> None:
+@pytest.mark.parametrize("writers", [1, 2, 4])
+def test_each_trace_writer_must_finalize_after_stop(tmp_path: Path, writers: int) -> None:
     clock = FakeClock()
-    group = ScriptedCaptureProcessGroup(tmp_path, clock, flush_at=4, writers=2)
+    group = ScriptedCaptureProcessGroup(tmp_path, clock, flush_at=4, writers=writers)
     group.flush()
     completion = capture.RocprofTraceCompletion(tmp_path, process_root=group.process_root)
     completion.begin(group.members())
     assert not completion.complete(
         group.members()
     )  # Old startup/helper finalizations do not count.
-    group.flushed = False
     group.flush()
-    # Append new stop-time output after the checkpoint.
     log = tmp_path / "target.log"
-    log.write_text(log.read_text() * 2)
     assert completion.complete(group.members())
     with log.open("a") as handle:
         handle.write("[rocprofv3] tool finalization :: 4.1 sec\n")
-    (tmp_path / "102_kernel_trace.csv").write_text(
+    (tmp_path / f"{100 + writers}_kernel_trace.csv").write_text(
         "Kernel_Name,Dispatch_Id,Start_Timestamp,End_Timestamp\nGEMM,1,100,200\n"
     )
     assert not completion.complete(group.members())
@@ -814,6 +820,9 @@ def test_transient_unfinalized_writer_prevents_completion(
         assert clock.now >= GRACE_S
 
 
+@pytest.mark.skipif(
+    sys.platform != "linux", reason="LinuxProcessTable reads /proc and needs pidfds"
+)
 def test_polling_process_table_cannot_prove_writer_history() -> None:
     table = runtime.LinuxProcessTable()
     assert not table.history_complete(set())

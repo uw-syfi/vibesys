@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"repoctl/discovery"
 	"sort"
+	"strings"
 )
 
 type Adapter struct{ Run discovery.RunCommand }
@@ -20,7 +21,18 @@ func (a Adapter) Discover(root string, spec discovery.Spec) ([]discovery.Compone
 			return nil, fmt.Errorf("invalid manifest mapping %q=%q", manifest, language)
 		}
 	}
-	for _, targetRoot := range append(append([]string{}, spec.ScopeRoots...), spec.SelectedRoots...) {
+	excluded := make([]string, 0, len(spec.ExcludedRoots))
+	for excludedRoot, reason := range spec.ExcludedRoots {
+		if strings.TrimSpace(reason) == "" {
+			return nil, fmt.Errorf("excluded root %q needs a reason", excludedRoot)
+		}
+		if discovery.Contains(spec.SelectedRoots, excludedRoot) {
+			return nil, fmt.Errorf("root %q is both selected and excluded", excludedRoot)
+		}
+		excluded = append(excluded, excludedRoot)
+	}
+	sort.Strings(excluded)
+	for _, targetRoot := range append(append(append([]string{}, spec.ScopeRoots...), spec.SelectedRoots...), excluded...) {
 		if !discovery.ValidPath(targetRoot) {
 			return nil, fmt.Errorf("unsafe target root %q", targetRoot)
 		}
@@ -68,6 +80,12 @@ func (a Adapter) Discover(root string, spec discovery.Spec) ([]discovery.Compone
 		}
 	}
 
+	for _, excludedRoot := range excluded {
+		if _, found := languageByRoot[excludedRoot]; !found {
+			return nil, fmt.Errorf("excluded root has no configured manifest: %s", excludedRoot)
+		}
+	}
+
 	components := make([]discovery.Component, 0, len(languageByRoot))
 	for targetRoot, language := range languageByRoot {
 		selected := discovery.Contains(spec.SelectedRoots, targetRoot)
@@ -78,8 +96,8 @@ func (a Adapter) Discover(root string, spec discovery.Spec) ([]discovery.Compone
 				break
 			}
 		}
-		if inScope && !selected {
-			return nil, fmt.Errorf("manifest root %q is in scope but has no selected CI target", targetRoot)
+		if inScope && !selected && spec.ExcludedRoots[targetRoot] == "" {
+			return nil, fmt.Errorf("manifest root %q is in scope but is neither selected for CI nor excluded with a reason", targetRoot)
 		}
 
 		jobs := []string{}

@@ -1,0 +1,122 @@
+[
+  {
+    "name": "ListTasks valid",
+    "id": 10,
+    "payload": "0a09726571756573742d6112082f70726f6a656374",
+    "valid": true
+  },
+  {
+    "name": "ListTasks missing identity",
+    "id": 10,
+    "payload": "12082f70726f6a656374",
+    "valid": false
+  },
+  {
+    "name": "ListHarnesses valid",
+    "id": 11,
+    "payload": "0a09726571756573742d61",
+    "valid": true
+  },
+  {
+    "name": "ListHarnesses missing identity",
+    "id": 11,
+    "payload": "",
+    "valid": false
+  },
+  {
+    "name": "ListExamples valid",
+    "id": 12,
+    "payload": "0a09726571756573742d61",
+    "valid": true
+  },
+  {
+    "name": "ListExamples missing identity",
+    "id": 12,
+    "payload": "",
+    "valid": false
+  },
+  {
+    "name": "GetTaskGoal valid",
+    "id": 13,
+    "payload": "0a09726571756573742d6112082f70726f6a6563741a067461736b2d61",
+    "valid": true
+  },
+  {
+    "name": "GetTaskGoal missing identity",
+    "id": 13,
+    "payload": "12082f70726f6a6563741a067461736b2d61",
+    "valid": false
+  },
+  {
+    "name": "DescribeMachine valid",
+    "id": 14,
+    "payload": "0a09726571756573742d61",
+    "valid": true
+  },
+  {
+    "name": "DescribeMachine missing identity",
+    "id": 14,
+    "payload": "",
+    "valid": false
+  },
+  {
+    "name": "ListCompute valid",
+    "id": 15,
+    "payload": "0a09726571756573742d61",
+    "valid": true
+  },
+  {
+    "name": "ListCompute missing identity",
+    "id": 15,
+    "payload": "",
+    "valid": false
+  },
+  {
+    "name": "PreflightRun valid",
+    "id": 16,
+    "payload": "0a09726571756573742d6112082f70726f6a656374",
+    "valid": true
+  },
+  {
+    "name": "PreflightRun missing identity",
+    "id": 16,
+    "payload": "12082f70726f6a656374",
+    "valid": false
+  },
+  {
+    "name": "unknown route",
+    "id": 999,
+    "payload": "",
+    "valid": false
+  },
+  {
+    "name": "truncated frame",
+    "id": 10,
+    "payload": "0a",
+    "valid": false
+  },
+  {
+    "name": "missing project",
+    "id": 10,
+    "payload": "0a09726571756573742d61",
+    "valid": false
+  },
+  {
+    "name": "unknown request fields",
+    "id": 10,
+    "payload": "0a09726571756573742d6112082f70726f6a656374f80701",
+    "valid": false
+  },
+  {
+    "name": "ListAgentLogins valid",
+    "id": 19,
+    "payload": "0a09726571756573742d61",
+    "valid": true
+  },
+  {
+    "name": "ListAgentLogins missing identity",
+    "id": 19,
+    "payload": "",
+    "valid": false
+  }
+]

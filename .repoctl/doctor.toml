@@ -1,0 +1,74 @@
+# `repoctl doctor`: check that a machine can run the pre-push gate and the tests, and repair what is
+# safe to repair. Everything repository-specific is here; machine-specific values (a better TMPDIR,
+# a pinned tool found elsewhere on PATH) are derived from the environment when the doctor runs and
+# are never written down. Paths are relative to the repository root. See
+# docs/contributing/development.md, "Check your environment".
+
+[hooks]
+# The tracked directory whose pre-push hook runs `repoctl gate`.
+path = ".githooks"
+
+[temp]
+# Go tests and unix sockets misbehave on a network file system, a local clone needs the repository
+# and TMPDIR on one file system, and a socket path is limited to 104 bytes.
+max_path_length = 64
+# Directories offered as a better TMPDIR, tried in order; `$NAME` is an environment variable, and a
+# candidate whose variable is unset is skipped. VIBESYS_DEV_TMPDIR is for a machine that wants its
+# own choice. A candidate must be on a local file system; one on the repository's is preferred.
+candidates = ["$VIBESYS_DEV_TMPDIR", "$XDG_RUNTIME_DIR/vibesys", "/var/tmp/vibesys-$USER"]
+
+# A program the gate or the tests run. The first copy on PATH is the one a script resolves, so a
+# pinned program must be first on PATH, not merely installed somewhere.
+[[programs]]
+name = "python3"
+# The gate's policy scripts run `python3`; the system one is often older than the project needs.
+minimum_from = { file = "pyproject.toml", pattern = 'requires-python = ">=([0-9.]+)"' }
+repo_directories = [".venv/bin"]
+fix = ["uv", "sync"]
+hint = "install Python 3.12 or newer and uv (https://docs.astral.sh/uv/)"
+
+[[programs]]
+name = "uv"
+hint = "install uv (https://docs.astral.sh/uv/)"
+
+[[programs]]
+name = "bun"
+# The client tests resolve imports differently under another Bun, so only the pinned one will do.
+exact_from = { file = "packaging/fetch_bun.py", pattern = 'BUN_VERSION = "([0-9.]+)"' }
+hint = "install the pinned Bun (see BUN_VERSION in packaging/fetch_bun.py, or `python packaging/fetch_bun.py --help`) and put it first on PATH"
+
+[[programs]]
+name = "buf"
+# Generated protocol code cannot be refreshed without it; it comes from the `proto` dependency group.
+repo_directories = [".venv/bin"]
+fix = ["uv", "sync", "--group", "proto"]
+hint = "run `uv sync --group proto`"
+
+[[programs]]
+name = "pnpm"
+hint = "install Node and pnpm (see clients/package.json, `packageManager`)"
+
+[[programs]]
+name = "go"
+hint = "install Go 1.25 or newer (see go.mod in support/repoctl)"
+
+# A dependency tree an install command creates. A directory without its marker was installed
+# halfway, which fails the gate until a clean install replaces it.
+[[installs]]
+name = "client-dependencies"
+directory = "clients/node_modules"
+marker = "clients/node_modules/.modules.yaml"
+command = ["pnpm", "install", "--frozen-lockfile"]
+command_directory = "clients"
+
+# Go refuses to build in a linked worktree without this: "error obtaining VCS status".
+[[env_flags]]
+name = "GOFLAGS"
+flag = "-buildvcs=false"
+linked_worktree_only = true
+reason = "a Go build in a linked worktree fails with \"error obtaining VCS status\""
+
+# Every script these files name must exist, so an instruction never points at a removed script.
+[instructions]
+files = ["AGENTS.md"]
+roots = ["scripts/", "support/", ".githooks/"]

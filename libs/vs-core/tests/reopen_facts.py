@@ -53,6 +53,7 @@ def released_job(
         phase=core.RequestPhase.COMPLETED,
         observation=proof,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     return job, record
 

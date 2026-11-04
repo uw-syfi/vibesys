@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.real_git import REAL_GIT, real_git_tracker
 
 from vs_project.api import (
     CliGitRepository,
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
 
 
 def _tracker(project: Path, *, excluded_dirs: set[str] | None = None) -> GitTracker:
-    return GitTracker(
+    return real_git_tracker(
         project,
         run_id="test-run",
         events=NullGitTrackerEvents(),
@@ -79,7 +80,7 @@ class _RepositoryRefusingFirstStage(CliGitRepository):
     """Report an unreadable file the host scan missed, on the first staging attempt only."""
 
     def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
-        super().__init__(root, faults=faults)
+        super().__init__(root, git=REAL_GIT, faults=faults)
         self.refused_first_stage = False
 
     def stage_all(self, pathspecs: Sequence[str], *, force: bool = False) -> None:

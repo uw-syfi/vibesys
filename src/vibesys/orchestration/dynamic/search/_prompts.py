@@ -13,8 +13,22 @@ from pydantic import Field
 
 from vibesys.candidates.api import InputFailure, ReviewEvaluation
 from vibesys.metrics import MetricRow, PartialRow
+from vibesys.orchestration.dynamic.models import UnappliedPart
 from vibesys.orchestration.dynamic.search import _roles as roles
-from vibesys.orchestration.dynamic.search._values import Blocker, Failure, PlanProblem
+from vibesys.orchestration.dynamic.search._queue import PickPolicy
+from vibesys.orchestration.dynamic.search._values import (
+    Blocker,
+    CombinePick,
+    CombineSource,
+    DropReason,
+    Failure,
+    MainMeasurement,
+    MergeRecord,
+    MergeSource,
+    PlanProblem,
+    StrayUnapplied,
+    WorkKind,
+)
 from vs_core.api.search import (
     Correction,
     EvidenceId,
@@ -33,6 +47,8 @@ class PromptTemplate(StrEnum):
     IMPLEMENT = "implement"
     REVIEW = "review"
     PROFILE_REQUEST = "profile_request"
+    OUTLINE = "outline"
+    MERGE = "merge"
 
 
 class EvidenceCitation(Value):
@@ -58,6 +74,46 @@ class BuildableRow(Value):
     partial: PartialRow | None = None
 
 
+class MergeableRow(Value):
+    """A buildable candidate that passes accuracy and beats main's latest measurement."""
+
+    hypothesis_id: str
+    revision: RevisionRef
+    metric: MetricRow | None = None
+
+
+class PartsVerdict(StrEnum):
+    """How a composite measured against the best of its parts. Informational: it adopts nothing."""
+
+    BETTER = "better"
+    WITHIN_NOISE = "within_noise"
+    WORSE = "worse"
+    UNKNOWN = "unknown"
+    """The composite, or every part, has no trusted headline to compare, or they are on
+    different metrics."""
+
+
+class CompositeRow(Value):
+    """A combine's candidate beside its parts.
+
+    Each part carries its trusted headline; the verdict compares the composite's with the best.
+    """
+
+    parts: tuple[CombineSource, ...]
+    verdict: PartsVerdict
+    best_part: str | None = None
+    """The hypothesis of the part with the strongest headline by raw value, the one compared."""
+    relative_noise: float = 0.0
+    """The task's declared relative noise the comparison allowed; 0 is a strict comparison."""
+    cancelled: bool = False
+    """The combine never started: fewer than two of its parts were still buildable."""
+    unapplied: tuple[UnappliedPart, ...] = ()
+    """What the implementer said it could not apply."""
+    unattributed: tuple[UnappliedPart, ...] = ()
+    """What the implementer said it could not apply, naming no part (`RoundRecord.unattributed`):
+    shown so a dropped part it misnamed is not hidden from the planner."""
+
+
 class HistoryRow(Value):
     """Compact history of one hypothesis shown to the planner."""
 
@@ -79,6 +135,8 @@ class HistoryRow(Value):
     """Why the workstream ended, unless a trusted check's output already says it."""
     failure_fence: str = "```"
     """The Markdown fence that holds the tail: longer than any backtick run inside it."""
+    composite: CompositeRow | None = None
+    """For a hypothesis a combine started: its parts and how it compares with them."""
 
 
 class ProfileHistoryStatus(StrEnum):
@@ -119,6 +177,50 @@ class ProfileHistoryRow(Value):
 type WorkstreamHistoryRow = HistoryRow | ProfileHistoryRow
 
 
+class QueuedEvaluation(Value):
+    """A trusted measurement a workstream asked for: holding a slot, or waiting for one."""
+
+    work_id: str
+    kind: WorkKind
+    revision: RevisionRef
+    waited_seconds: int | None = None
+    """Seconds since it was submitted; None when the request was built without the clock."""
+
+
+class DroppedEvaluation(Value):
+    """A candidate dropped from the queue without being measured."""
+
+    work_id: str
+    revision: RevisionRef
+    reason: DropReason
+    superseded_by: str | None = None
+
+
+class EvaluationQueueView(Value):
+    """The run's trusted evaluations as the orchestrator sees them."""
+
+    pick: PickPolicy
+    slots: int = Field(gt=0)
+    input_holds_slot: bool
+    """The input's own measurement holds a slot (it always goes first)."""
+    measuring: tuple[QueuedEvaluation, ...] = ()
+    waiting: tuple[QueuedEvaluation, ...] = ()
+    """In the order free slots will take them."""
+    dropped: tuple[DroppedEvaluation, ...] = ()
+    """The latest candidates dropped unmeasured."""
+    ranking: tuple[str, ...] = ()
+    """The order the orchestrator last gave (``ranked`` only)."""
+
+
+class InputOverdueView(Value):
+    """The input's measurement has kept a workstream waiting longer than the run allows."""
+
+    waited_seconds: int | None = None
+    """How long the first workstream has waited; None when the request was built without the
+    clock."""
+    limit_seconds: int
+
+
 class _Planning(RolePromptContext):
     """What a planning request says; the request and its correction share it."""
 
@@ -130,14 +232,38 @@ class _Planning(RolePromptContext):
     base_revision: RevisionRef
     base_accuracy_passed: bool | None
     offer_snapshot: str
+    main_revision: RevisionRef
+    """The run's main: where a new workstream that names no parent starts."""
+    main_measurement: MainMeasurement | None = None
+    """The latest trusted measurement of a merged main; None while main is the input."""
+    merge_running: str | None = None
+    """The merge under way, if one is: main moves when it finishes."""
+    mergeable: tuple[MergeableRow, ...] = ()
+    merges: tuple[MergeRecord, ...] = ()
+    """Every finished merge, oldest first."""
     buildable: tuple[BuildableRow, ...] = ()
     history: tuple[WorkstreamHistoryRow, ...] = ()
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
+    """The bar a candidate must beat (`input_metrics`); empty when there is none."""
     input_failure: InputFailure | None = None
+    input_first_attempt: InputFailure | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    """Why the input's first measurement failed, when it was measured again."""
+    input_at_fault: bool = Field(default=False, exclude_if=lambda value: not value)
+    """The input's failure shows a fault of its own code, so fixing it is worth planning."""
+    baseline_pending: bool = False
+    """The input is still being measured: what is scheduled now starts when its reading lands."""
     profiling: bool = False
     profile_fields: tuple[str, ...] = ()
     """The measurement fields a profile workstream may require: what the capture supplies."""
+    handoff_paths: tuple[str, ...] = ()
+    """Where the earlier planning calls' handoff files are, newest first: paths, never contents."""
+    evaluations: EvaluationQueueView | None = None
+    """The trusted evaluation queue; None in a request built before the queue existed."""
+    input_overdue: InputOverdueView | None = None
+    """The input's measurement is overdue: workstreams wait for it to settle their candidates."""
     problem: PlanProblem | None = None
     """Why the earlier reply, or the earlier planning call, was not accepted; None if it was lost."""
 
@@ -179,6 +305,30 @@ class ImplementPrompt(RolePromptContext):
     last_blocker: Blocker | None = None
     """The latest turn of this workstream that ended without a candidate."""
     turns_without_candidate: int = Field(default=0, ge=0)
+    baseline_pending: bool = False
+    """The input's own measurement had not landed when the turn was asked."""
+    input_failure: InputFailure | None = None
+    """Why the input's own measurement failed, when it had when the turn was asked."""
+    input_at_fault: bool = Field(default=False, exclude_if=lambda value: not value)
+    """The input's failure shows a fault of its own code (see the planner's field)."""
+    input_compared: bool = Field(default=False, exclude_if=lambda value: not value)
+    """The input failed yet still has a bar the candidate must beat (its benchmark passed)."""
+    rebase_onto: RevisionRef | None = None
+    """The run's main, when it advanced past this hypothesis's work: rebase onto it first."""
+    reply_rejected: tuple[StrayUnapplied, ...] = ()
+    """The ``unapplied`` entries of the last reply that named no part of the combine, when an
+    older build refused that reply (`BlockerKind.REPLY_REJECTED`) and the workstream resumed
+    here: the implementer submits again. This build keeps such entries on the round instead."""
+    rebase_from: RevisionRef | None = None
+    """With ``rebase_onto``: the revision the work's tree and main both hold (a main, or a merged
+    candidate the work was built on), so the catch-up applies only what main has beyond it. None
+    for a workstream an older build scheduled."""
+    combine: tuple[CombineSource, ...] = ()
+    """For a combine: the parts to apply onto ``parent_revision`` (main), in order."""
+    combine_missing: tuple[CombinePick, ...] = ()
+    """For a combine: the parts the planner named that are no longer buildable, left out."""
+    watch_for: str = ""
+    """For a combine: what the planner said to check or be careful of."""
 
 
 class ReviewPrompt(RolePromptContext):
@@ -208,8 +358,37 @@ class ProfilePrompt(RolePromptContext):
     target: RevisionRef
 
 
+class OutlinePrompt(RolePromptContext):
+    """Request to outline the steps of the task's plan from its documents."""
+
+    reply_schema: ClassVar[SchemaRef | None] = roles.OUTLINER.reply_schema
+
+    template: Literal[PromptTemplate.OUTLINE] = PromptTemplate.OUTLINE
+    documents: tuple[str, ...]
+    """The plan's documents, as paths relative to the task directory."""
+
+
+class MergePrompt(RolePromptContext):
+    """One merge of candidates into the run's main revision, on a checkout of main."""
+
+    reply_schema: ClassVar[SchemaRef | None] = roles.MERGER.reply_schema
+
+    template: Literal[PromptTemplate.MERGE] = PromptTemplate.MERGE
+    merge_id: str
+    main_revision: RevisionRef
+    candidates: tuple[MergeSource, ...]
+    instructions: str
+    watch_for: str
+
+
 type PromptContext = Annotated[
-    PlannerPrompt | PlannerCorrection | ImplementPrompt | ReviewPrompt | ProfilePrompt,
+    PlannerPrompt
+    | PlannerCorrection
+    | ImplementPrompt
+    | ReviewPrompt
+    | ProfilePrompt
+    | OutlinePrompt
+    | MergePrompt,
     Field(discriminator="template"),
 ]
 """The union the render operation carries; the exchanges core starts are core's own contexts."""

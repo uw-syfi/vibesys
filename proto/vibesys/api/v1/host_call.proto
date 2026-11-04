@@ -1,0 +1,146 @@
+syntax = "proto3";
+
+package vibesys.api.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/store/v1/intent.proto";
+import "vibesys/host/v1/operations.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
+
+// The caller takes checkout from the host's saved configuration. Carrying it on
+// each call lets a stateless gateway immediately follow a checkout change.
+message HostCallRequest {
+  // Set by the gateway from its execution context, including helper startup time.
+  google.protobuf.Timestamp deadline = 5;
+  string checkout = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
+  oneof method {
+    option (buf.validate.oneof).required = true;
+    PostIntentRequest post_intent = 2;
+    RelaunchRequest relaunch = 3;
+    ChatMessageRequest chat_message = 4;
+    CreateChatSessionRequest create_chat_session = 6;
+  }
+}
+
+// Both pipes carry the envelope, including a configuration_failed result on
+// command failure. Transport failures use the same result shape.
+message HostCallResponse {
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    PostIntentResponse post_intent = 1;
+    ConfigurationFailed configuration_failed = 2;
+    RelaunchResponse relaunch = 3;
+    ChatMessageResponse chat_message = 4;
+    CreateChatSessionResponse create_chat_session = 6;
+  }
+}
+
+message ConfigurationFailed {
+  string code = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
+  string stage = 2 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
+  string message = 3 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
+  int32 exit_code = 4;
+  string stderr = 5 [(buf.validate.field).string.max_bytes = 65536];
+}
+
+message PostIntentRequest {
+  option (buf.validate.message).cel = {
+    id: "intent.epoch"
+    message: "Pause and Pause now require the observed epoch"
+    expression: "!(has(this.pause) || has(this.pause_now)) || this.expected_epoch > 0"
+  };
+  uint64 expected_epoch = 14;
+  string project_root = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
+  string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string request_id = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  reserved 5, 6, 7;
+  reserved "park", "resume", "stop";
+  oneof intent {
+    option (buf.validate.oneof).required = true;
+    PauseIntent pause = 4;
+    SteerIntent steer = 8;
+    WithdrawIntent withdraw = 9;
+    CancelAttemptIntent cancel_attempt = 10;
+    CancelItemIntent cancel_item = 11;
+    SetParallelismIntent set_parallelism = 12;
+    PauseNowIntent pause_now = 13;
+  }
+}
+
+// Posting acknowledges durable admission only. Applied/refused comes from the
+// run's IntentState record, never from subprocess success.
+message PostIntentResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  bool ordered_reader = 2;
+  vibesys.host.v1.TerminateRunResponse termination = 3;
+}
+message PauseIntent {}
+message PauseNowIntent {}
+message SteerIntent {
+  string text = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
+  vibesys.store.v1.SteerTarget target = 2 [(buf.validate.field).required = true];
+  vibesys.store.v1.SteerMode mode = 3 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+}
+message WithdrawIntent {
+  string withdraws = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+}
+message CancelAttemptIntent {
+  string attempt = 1 [(buf.validate.field).string = {min_len: 1, max_len: 256, pattern: "^[^\\s]+$"}];
+}
+message CancelItemIntent {
+  string item = 1 [(buf.validate.field).string = {min_len: 1, max_len: 256, pattern: "^[^\\s]+$"}];
+}
+message SetParallelismIntent {
+  uint32 max_parallel = 1 [(buf.validate.field).uint32.gte = 1];
+}
+
+// The observed epoch fences retries. Reconcile an uncertain call through
+// Skeleton before retrying; it must never start a second new epoch silently.
+message RelaunchRequest {
+  string project_root = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
+  string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  uint64 expected_epoch = 3 [(buf.validate.field).uint64.gte = 1];
+}
+message RelaunchResponse {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    uint64 epoch = 1 [(buf.validate.field).uint64.gte = 1];
+    RelaunchRefusal refusal = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  }
+}
+enum RelaunchRefusal {
+  RELAUNCH_REFUSAL_UNSPECIFIED = 0;
+  RELAUNCH_REFUSAL_LOCKED = 1;
+  reserved 2;
+  reserved "RELAUNCH_REFUSAL_ENDED";
+  RELAUNCH_REFUSAL_CHECKOUT_MISSING = 3;
+  RELAUNCH_REFUSAL_EPOCH_CHANGED = 4;
+}
+
+// Retrying an id with identical content admits exactly one question.
+message ChatMessageRequest {
+  string project_root = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
+  string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string session_id = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string request_id = 4 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string text = 5 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
+}
+message ChatMessageResponse {
+  string session_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string request_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+}
+
+// A caller-chosen session id makes uncertain creation safe to retry. The first
+// session record owns its immutable provider/model; messages cannot change it.
+message CreateChatSessionRequest {
+  string project_root = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
+  string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string session_id = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string provider = 4 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
+  string model = 5 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
+}
+message CreateChatSessionResponse {
+  string session_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+}

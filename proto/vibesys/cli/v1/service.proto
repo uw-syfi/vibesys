@@ -1,0 +1,565 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/failure.proto";
+import "vibesys/cli/v1/frontier.proto";
+import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/machine.proto";
+import "vibesys/cli/v1/plan.proto";
+import "vibesys/cli/v1/promote.proto";
+import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/verdict.proto";
+import "vibesys/cli/v1/version.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// DaemonService is what the per-user daemon serves over a private Unix socket. The daemon owns
+// the queue, the job states and all store access; the CLI is a thin client of it. The response
+// messages are also the `--json` output of the command that made the call.
+//
+// A call that cannot complete returns a gRPC error status whose details carry a Failure.
+// A client calls Hello first and goes on only if the answer is COMPATIBLE.
+service DaemonService {
+  rpc Hello(HelloRequest) returns (HelloResponse);
+  rpc Status(StatusRequest) returns (StatusResponse);
+  // Stop ends the daemon. Running jobs have their own supervisors and are not affected.
+  rpc Stop(StopRequest) returns (StopResponse);
+
+  // Submit queues a job, or returns the queued or running job with the same key, or answers from
+  // a reusable result.
+  rpc Submit(SubmitRequest) returns (SubmitResponse);
+  // Watch streams the watched jobs' states: first their current states, then each change, and it
+  // ends when all are final. It is kept for command lines of protocol 1, which wait over it and
+  // decide the end themselves; a command line of 2 waits through Wait.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // Wait streams the waited-on jobs' states like Watch, and ends with one WaitOutcome that says how
+  // the wait ended. The daemon decides the outcome, the timeout included, so every client reads the
+  // same answer. `wait` and `submit --wait` use it; a timeout never cancels a job.
+  rpc Wait(WaitRequest) returns (stream WaitResponse);
+  // WatchTask streams the state of one task as facts, and never ends on its own. Each message is
+  // the difference between the task's store now and what this stream last sent, so a client that
+  // applies the messages in order holds the store as it was at some moment, and a slow client gets
+  // a larger difference later, never a gap. Protocol 3.
+  rpc WatchTask(WatchTaskRequest) returns (stream WatchTaskResponse);
+  // Cancel stops a job, whole process group included, and does so for every waiter on a shared
+  // job. A cancelled measure saves nothing.
+  rpc Cancel(CancelRequest) returns (CancelResponse);
+  rpc AddNote(AddNoteRequest) returns (AddNoteResponse);
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  // ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
+  // dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
+  rpc ForgetRepository(ForgetRepositoryRequest) returns (ForgetRepositoryResponse);
+  // ReadLogs streams a job's output from an offset, and with follow keeps streaming until the job
+  // is final.
+  rpc ReadLogs(ReadLogsRequest) returns (stream ReadLogsResponse);
+
+  rpc Show(ShowRequest) returns (ShowResponse);
+  rpc Compare(CompareRequest) returns (CompareResponse);
+  // Promote moves the result branch to a commit, or refuses with typed reasons. A refusal is a
+  // normal response, not an error.
+  rpc Promote(PromoteRequest) returns (PromoteResponse);
+  rpc CurrentResult(CurrentResultRequest) returns (CurrentResultResponse);
+  // AddToFrontier admits a commit of a multi-objective task to the task's frontier, or refuses with
+  // typed reasons. A refusal is a normal response, not an error.
+  rpc AddToFrontier(AddToFrontierRequest) returns (AddToFrontierResponse);
+  // ListFrontier lists the task's frontier with each member's headline number per objective.
+  rpc ListFrontier(ListFrontierRequest) returns (ListFrontierResponse);
+
+  rpc CreatePlan(CreatePlanRequest) returns (CreatePlanResponse);
+  rpc ListPlans(ListPlansRequest) returns (ListPlansResponse);
+  rpc ViewPlan(ViewPlanRequest) returns (ViewPlanResponse);
+  rpc EditPlan(EditPlanRequest) returns (EditPlanResponse);
+  rpc CommentPlan(CommentPlanRequest) returns (CommentPlanResponse);
+  rpc ClosePlan(ClosePlanRequest) returns (ClosePlanResponse);
+}
+
+// CallContext identifies who is calling and about what. The daemon serves many repositories and
+// agents, so every call carries it, and it fills the envelope of the event the call appends.
+message CallContext {
+  // The absolute path of the directory the command ran in, or of --repo. The daemon resolves the
+  // repository from it through the common git directory, so every linked worktree of a repository
+  // shares one store per task.
+  string repository = 1;
+  string task = 2;
+  string run_id = 3;
+  // The agent harness, such as "claude-code".
+  string harness = 4;
+  string agent = 5;
+}
+
+message HelloRequest {
+  Component component = 1;
+  BuildVersions versions = 2;
+}
+
+message HelloResponse {
+  // The daemon's own versions.
+  BuildVersions versions = 1;
+  Compatibility compatibility = 2;
+}
+
+message StatusRequest {}
+
+message StatusResponse {
+  BuildVersions versions = 1;
+  uint32 pid = 2;
+  google.protobuf.Timestamp started_at = 3;
+  uint32 queued_jobs = 4;
+  uint32 running_jobs = 5;
+  // The environment variables of the daemon, which every job inherits, sorted by name. Only the
+  // names are reported, but for the variables whose value is safe to show and says where a job
+  // runs: PATH, HOME, TMPDIR, and those whose names start with VIBESYS_ and do not look like a
+  // secret (contain KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL).
+  repeated InheritedVariable environment = 6;
+  // The directory clean checkouts of a job's commit are made in.
+  string checkout_directory = 7;
+  // Whether this daemon is a sandbox daemon, which runs beside the daemon that holds the machine.
+  bool sandbox = 8;
+  // The sandbox daemons of the user on this machine that run, this one included, by runtime
+  // directory.
+  repeated MachineDaemon sandboxes = 9;
+  // The leases this daemon's jobs hold, so that the daemons of other users and machines that
+  // share a resource do not run beside them, oldest first.
+  repeated HeldLease leases = 10;
+  // The leases of jobs that run already and could not take them, such as after a restart that
+  // found another daemon holding one.
+  repeated LeaseConflict lease_conflicts = 11;
+  // The other vibesysd processes of this machine, of any user.
+  repeated DaemonProcess other_daemons = 12;
+}
+
+// HeldLease is a lease a job of the daemon holds.
+message HeldLease {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string task = 2;
+  // The resource the job holds alone, such as placement:default.
+  string resource = 3 [(buf.validate.field).string.min_len = 1];
+  // The lease's name where it is kept, and that place, such as "this machine (/run/lock/vibesys-leases)".
+  string key = 4 [(buf.validate.field).string.min_len = 1];
+  string where = 5;
+  google.protobuf.Timestamp since = 6;
+}
+
+// LeaseConflict is a lease a job that runs could not take.
+message LeaseConflict {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  string resource = 2 [(buf.validate.field).string.min_len = 1];
+  // Who holds it, or, when the lease could not be read, why.
+  LeaseHolder holder = 3;
+  string detail = 4;
+}
+
+// DaemonProcess is a vibesysd process of the machine.
+message DaemonProcess {
+  uint32 pid = 1 [(buf.validate.field).uint32.gt = 0];
+  // The user it runs as, by name, or by number when the name is not known.
+  string user = 2;
+}
+
+// InheritedVariable is one environment variable a job inherits from the daemon.
+message InheritedVariable {
+  string name = 1;
+  // Set only for a variable whose value the daemon shows.
+  optional string value = 2;
+}
+
+message StopRequest {}
+
+message StopResponse {}
+
+message ForgetRepositoryRequest {
+  // The absolute path the repository had.
+  string repository = 1;
+}
+
+message ForgetRepositoryResponse {
+  // The tasks forgotten.
+  repeated string tasks = 1;
+  // The jobs whose run may still live and could not be ended, which the daemon leaves alone.
+  repeated string left = 2;
+}
+
+message SubmitRequest {
+  CallContext context = 1;
+  JobSpec spec = 2;
+  // Run a new job even when a reusable result or a matching queued or running job exists.
+  bool no_cache = 3;
+  // A note to attach to the job, including one reached by a cache hit or a duplicate.
+  string note = 4;
+  // A plan to link the job to, or zero.
+  uint32 plan = 5;
+}
+
+// SubmitDisposition says what a submission turned into.
+enum SubmitDisposition {
+  SUBMIT_DISPOSITION_UNSPECIFIED = 0;
+  // A new job was queued.
+  SUBMIT_DISPOSITION_CREATED = 1;
+  // A queued or running job had the same key; this is that job.
+  SUBMIT_DISPOSITION_JOINED = 2;
+  // A saved result answers the submission; this is the job that produced it.
+  SUBMIT_DISPOSITION_REUSED = 3;
+}
+
+message SubmitResponse {
+  Job job = 1;
+  SubmitDisposition disposition = 2;
+}
+
+message WatchRequest {
+  CallContext context = 1;
+  repeated string job_ids = 2;
+}
+
+message WatchResponse {
+  Job job = 1;
+}
+
+message WaitRequest {
+  CallContext context = 1;
+  repeated string job_ids = 2;
+  // The wait is over when one job is final, and not when all are.
+  bool any = 3;
+  // The wait ends with WAIT_OUTCOME_KIND_TIMED_OUT after this long. Unset waits as long as it takes.
+  google.protobuf.Duration timeout = 4;
+}
+
+message WaitResponse {
+  oneof event {
+    // A job's state: first the current state of each job, then each change.
+    Job job = 1;
+    // How the wait ended. It is the last message of the stream; a stream that ends without one
+    // says nothing about the jobs.
+    WaitOutcome outcome = 2;
+  }
+}
+
+// WaitOutcomeKind is how a wait ended. The exit code of `wait` is a function of it alone.
+enum WaitOutcomeKind {
+  WAIT_OUTCOME_KIND_UNSPECIFIED = 0;
+  // Every job is final and succeeded.
+  WAIT_OUTCOME_KIND_ALL_SUCCEEDED = 1;
+  // Every job is final and one did not succeed: decided_by is the first, in the order asked.
+  WAIT_OUTCOME_KIND_SOME_FAILED = 2;
+  // With any: a job is final and every final job succeeded. decided_by is the first final job, in
+  // the order asked.
+  WAIT_OUTCOME_KIND_FIRST_SUCCEEDED = 3;
+  // With any: a final job did not succeed. decided_by is the first such job, in the order asked.
+  WAIT_OUTCOME_KIND_FIRST_FAILED = 4;
+  // The timeout passed before the jobs got where the wait wants them. No job was cancelled.
+  WAIT_OUTCOME_KIND_TIMED_OUT = 5;
+}
+
+// WaitOutcome is how a wait ended, as the daemon decided it. It is the `--json` output of `wait`.
+message WaitOutcome {
+  WaitOutcomeKind kind = 1;
+  // The job that decided the outcome, for SOME_FAILED, FIRST_SUCCEEDED and FIRST_FAILED. Empty for
+  // ALL_SUCCEEDED, where every job did, and for TIMED_OUT.
+  string decided_by = 2;
+  // The state of each job when the wait ended, in the order asked.
+  repeated Job jobs = 3;
+}
+
+message CancelRequest {
+  CallContext context = 1;
+  string job_id = 2;
+  string reason = 3;
+}
+
+message CancelResponse {
+  Job job = 1;
+}
+
+message AddNoteRequest {
+  CallContext context = 1;
+  string job_id = 2;
+  string text = 3;
+}
+
+message AddNoteResponse {
+  Job job = 1;
+}
+
+message ListJobsRequest {
+  CallContext context = 1;
+  // Filters combine with AND; an empty one matches everything.
+  string commit = 2;
+  repeated JobState states = 3;
+  JobKind kind = 4;
+  string note_contains = 5;
+}
+
+message ListJobsResponse {
+  repeated Job jobs = 1;
+  // Why each listed queued job that has not started waits. A queued job that is about to start has
+  // none.
+  repeated JobWait waits = 2;
+}
+
+message ReadLogsRequest {
+  CallContext context = 1;
+  string job_id = 2;
+  uint64 offset = 3;
+  bool follow = 4;
+}
+
+message ReadLogsResponse {
+  bytes data = 1;
+  // Where the next read continues.
+  uint64 next_offset = 2;
+}
+
+message ShowRequest {
+  CallContext context = 1;
+  string commit = 2;
+}
+
+message ShowResponse {
+  // Every result saved for the commit, checks and measurements, oldest first.
+  repeated Result results = 1;
+  // The commit's measurements pooled as compare pools them: one per environment, task version,
+  // metric and objectives, holding the samples of every measure job of that kind, oldest first.
+  repeated Measurement measurements = 2;
+}
+
+message CompareRequest {
+  CallContext context = 1;
+  string commit = 2;
+  // The commit to compare against. Empty means the current result branch head.
+  string against = 3;
+}
+
+message CompareResponse {
+  Comparison comparison = 1;
+}
+
+message PromoteRequest {
+  CallContext context = 1;
+  string commit = 2;
+}
+
+message PromoteResponse {
+  oneof outcome {
+    Promotion promoted = 1;
+    PromoteRefusal refused = 2;
+  }
+  // For a promotion of a multi-objective commit: what the frontier made of the promoted commit. The
+  // promotion stands whatever it says. Absent for a refusal and for a single-metric task.
+  FrontierDecision frontier = 3;
+}
+
+message AddToFrontierRequest {
+  CallContext context = 1;
+  string commit = 2;
+}
+
+message AddToFrontierResponse {
+  FrontierDecision decision = 1;
+}
+
+message ListFrontierRequest {
+  CallContext context = 1;
+}
+
+message ListFrontierResponse {
+  // The members in the order they were admitted.
+  repeated FrontierEntry members = 1;
+}
+
+message CurrentResultRequest {
+  CallContext context = 1;
+}
+
+message CurrentResultResponse {
+  oneof state {
+    CurrentResult current = 1;
+    NoCurrentResult none = 2;
+  }
+}
+
+message CreatePlanRequest {
+  CallContext context = 1;
+  string title = 2;
+  string body = 3;
+}
+
+message CreatePlanResponse {
+  Plan plan = 1;
+}
+
+message ListPlansRequest {
+  CallContext context = 1;
+  repeated PlanStatus statuses = 2;
+  // Matches a plan whose title or body contains the text.
+  string text = 3;
+}
+
+message ListPlansResponse {
+  repeated Plan plans = 1;
+}
+
+message ViewPlanRequest {
+  CallContext context = 1;
+  uint32 number = 2;
+}
+
+message ViewPlanResponse {
+  PlanView view = 1;
+}
+
+message EditPlanRequest {
+  CallContext context = 1;
+  uint32 number = 2;
+  // A field that is absent is left as it is.
+  optional string title = 3;
+  optional string body = 4;
+  optional PlanStatus status = 5;
+}
+
+message EditPlanResponse {
+  Plan plan = 1;
+}
+
+message CommentPlanRequest {
+  CallContext context = 1;
+  uint32 number = 2;
+  string text = 3;
+}
+
+message CommentPlanResponse {
+  Plan plan = 1;
+}
+
+// ClosePlan sets a status and adds a comment as one change. Any status but OPEN closes.
+message ClosePlanRequest {
+  CallContext context = 1;
+  uint32 number = 2;
+  PlanStatus status = 3;
+  string comment = 4;
+}
+
+message ClosePlanResponse {
+  Plan plan = 1;
+}
+
+message WatchTaskRequest {
+  // The repository and the task. The run and the agent are not used.
+  CallContext context = 1 [(buf.validate.field).required = true];
+  // The token of the last CaughtUp the client applied, or empty. Protocol 3 ignores it and
+  // answers every connection with a Reset; the fields stay so a later protocol can resume.
+  string epoch = 2;
+  uint64 after_sequence = 3;
+  // How many of the newest measured commits to judge against the head. 0 means 20, and more than
+  // 100 is INVALID_INPUT.
+  uint32 judged_commits = 4 [(buf.validate.field).uint32.lte = 100];
+}
+
+message WatchTaskResponse {
+  // Names one daemon boot. A client resumes only within one epoch.
+  string epoch = 1 [(buf.validate.field).string.min_len = 1];
+  // 1.. on a stream, with no gap.
+  uint64 sequence = 2 [(buf.validate.field).uint64.gt = 0];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    Reset reset = 3;
+    TaskFacts facts = 4;
+    CaughtUp caught_up = 5;
+  }
+}
+
+// Reset says the facts that follow, up to CaughtUp, are the whole state: a client holds them aside
+// and replaces what it has, all at once, at CaughtUp. A client cut before CaughtUp keeps what it
+// had.
+message Reset {}
+
+// CaughtUp ends a Reset. Its epoch and sequence are the client's resume token.
+message CaughtUp {}
+
+// TaskFacts is 1 to 500 facts, each replacing the fact with the same key.
+message TaskFacts {
+  repeated TaskFact facts = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 500
+  }];
+}
+
+// A fact is keyed by job.id, result.job_id, judgment.commit, promotion.seq, plan.number or
+// trouble.job_id; head and health are singletons. A trouble fact exists while the job's end is out
+// of the daemon's hands; a key that stops existing is conveyed by a Reset, except a judgment, which
+// leaves the window of judged commits and is then stale by its against.
+message TaskFact {
+  oneof fact {
+    option (buf.validate.oneof).required = true;
+    Job job = 1;
+    Result result = 2;
+    Judgment judgment = 3;
+    PromotionRecord promotion = 4;
+    Plan plan = 5;
+    Head head = 6;
+    StoreHealth health = 7;
+    JobTrouble trouble = 8;
+  }
+}
+
+// Judgment is how a measured commit compares with the head at `against`, or why it cannot be.
+message Judgment {
+  string commit = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+  string against = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    Comparison comparison = 3;
+    Failure refused = 4;
+  }
+}
+
+// PromotionRecord is a promotion with its place in the task's record, 1 for the first.
+message PromotionRecord {
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  Promotion promotion = 2 [(buf.validate.field).required = true];
+}
+
+// JobTrouble is why a job that is not final is not being worked on, the failure Wait would end
+// with.
+message JobTrouble {
+  string job_id = 1 [(buf.validate.field).string.min_len = 1];
+  Failure failure = 2 [(buf.validate.field).required = true];
+}
+
+message Head {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    CurrentResult current = 1;
+    NoCurrentResult none = 2;
+  }
+}
+
+message StoreHealth {
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    Live live = 1;
+    Away away = 2;
+  }
+}
+
+// Live says the task's store was read.
+message Live {}
+
+// Away says it could not be read now. The facts sent before stay as they were.
+message Away {
+  AwayReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  Failure failure = 2 [(buf.validate.field).required = true];
+}
+
+enum AwayReason {
+  AWAY_REASON_UNSPECIFIED = 0;
+  // Another daemon or machine owns the store.
+  AWAY_REASON_OWNED_ELSEWHERE = 1;
+  // The store did not answer or could not be read.
+  AWAY_REASON_UNAVAILABLE = 2;
+}

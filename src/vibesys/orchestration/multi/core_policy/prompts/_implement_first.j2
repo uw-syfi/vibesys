@@ -1,5 +1,6 @@
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
+{% from '_prose.j2' import item as prose_item %}
 {% if active_component %}
 ## Focus this round: `{{ active_component }}`
 
@@ -18,23 +19,26 @@ and measure only what is needed; report truthfully.
 Hypothesis `{{ plan.hypothesis_id }}`{% if plan.title %} ({{ plan.title }}){% endif %}, round {{ round_number }}, attempt {{ retry }}.
 Your workspace is an isolated candidate at `{{ rev(base_revision) }}`; edit it freely.
 
-- Claim: {{ plan.hypothesis }}
-- Task: {{ plan.task }}
-- Pass criteria: {{ plan.pass_criteria }}
-{% if plan.invariants %}- Invariants: {{ plan.invariants }}
-{% endif %}{% if plan.activation_evidence %}- Activation evidence: {{ plan.activation_evidence }}
-{% endif %}{% if plan.falsification_criteria %}- Falsifier: {{ plan.falsification_criteria }}
-{% endif %}{% if plan.minimum_acceptance_criteria %}- Minimum acceptance: {{ plan.minimum_acceptance_criteria }}
+{{ prose_item('Claim', plan.hypothesis) }}
+{{ prose_item('Task', plan.task) }}
+{{ prose_item('Pass criteria', plan.pass_criteria) }}
+{% if plan.invariants %}{{ prose_item('Invariants', plan.invariants) }}
+{% endif %}{% if plan.activation_evidence %}{{ prose_item('Activation evidence', plan.activation_evidence) }}
+{% endif %}{% if plan.falsification_criteria %}{{ prose_item('Falsifier', plan.falsification_criteria) }}
 {% endif %}
+- Expected-effect bar: the candidate's headline metric ratio over its base's must clear
+  `{{ plan.minimum_ratio }}` (in the metric's own direction). The framework measures the
+  candidate and derives supported, within noise or disproven from this bar; you do not state it.
+
+
 Read the code and the objective with tools. Files in the workspace override memory.
 {% if retry > 1 %}
 
 ## Same-round retry boundary
 
-This is attempt {{ retry }} of the same framework round. Target or paid work recorded by
-any prior attempt remains consumed against the typed plan's hard maximum over all branches.
-Do not repeat exhausted target work; make the smallest local/report-only correction or return
-the truthful incomplete outcome.
+This is attempt {{ retry }} of the same framework round. Target work recorded by any prior
+attempt stays on record. Do not repeat work that already answered its question; make the
+smallest local/report-only correction or return the truthful incomplete outcome.
 {% endif %}
 {% if no_valid_reply %}
 
@@ -76,10 +80,8 @@ parent rows unless concrete drift or comparability evidence requires otherwise.
 - Before target work, prove materialization closure: compare prelaunch identity
   paths/bytes with the resolved target package/mount plan; archive presence is
   insufficient.
-- Stage paid work behind the directional gate and reuse compatible initialized
-  state. Budgets remain cumulative across hypothesis rounds/reviews/retries.
-- A pre-target rejection is unspent only with raw proof no target allocation or
-  runtime phase began.
+- Stage target work behind the directional gate and reuse compatible initialized
+  state.
 - Archive only target-bound bytes. For local/report-only edits, framework
   checkpoint plus validation-input hashes suffice until launch.
 - Atomically persist raw rows, configuration, failures, operating point,
@@ -109,49 +111,47 @@ then prove the repair reaches that exact path; a sibling or internal route is
 not a substitute.
 {% endif %}
 
-{% if official_due %}
-This working head is scheduled for framework evaluation after review because
-`{{ official_reason or 'framework policy' }}`. Produce the
+The trusted gates measure this working head after it passes review. Produce the
 plan-required evidence but do not duplicate framework-owned commands.
-{% else %}
-Official evaluation is deferred. A scoped supported/disproven result or a
-reviewable provisional frontier point does not require a ceremonial full sweep.
-{% endif %}
 {% if not benchmark_enabled %}
 No framework-parsable benchmark exists; when the plan requires a canonical
 performance claim, retain a fresh canonical artifact and copy its selected row
 verbatim into the structured response.
 {% endif %}
 
+{% include '_trusted_evaluation.j2' %}
+
 ## Self-verification
 
-Before declaring `nominated` or `supported`, verify your changes work by running
+Before reporting `implemented`, verify your changes work by running
 the fastest check that exercises the failure-prone path. Use the same tools and
 environment the framework will use. A build that has not been attempted is not
-nominated, it is speculative. If the plan includes verification steps, execute
+implemented, it is speculative. If the plan includes verification steps, execute
 them (or a representative subset) before exiting. State what you verified and
 what you could not.
 
 ## Outcome contract
 
-Choose the evidence-supported lifecycle outcome:
+Report implementation status only, in {{ reply.status }}:
 
+- `implemented`: the candidate is complete and ready for independent review and the
+  framework's trusted measurement; leave {{ reply.next_step }} empty.
 - `continue`: bounded unfinished work in the same causal mechanism; give one
   concrete {{ reply.next_step }}.
-- `supported`: the scoped claim is complete; leave {{ reply.next_step }} empty.
-- `nominated`: leave {{ reply.next_step }} empty; framework gates run after review.
-- `disproven`: activation was fair and direct evidence met the falsifier.
-- `implementation_failed`, `inconclusive`, or `blocked`: concrete implementation,
-  evidence, or external conditions prevented a fair test; state the smallest
-  remaining step when one exists.
+- `implementation_failed` or `blocked`: concrete implementation or external conditions
+  prevented a fair test; state the smallest remaining step when one exists.
+
+Whether the idea held is not yours to declare. The framework measures the candidate against
+its base and derives supported, within noise or disproven from the plan's bar, so the
+numbers you report are evidence for the reviewer, never the verdict.
 
 Do not use `continue` for an optional future idea or another mechanism. If work
-needs new authority or a cap change, explain it in {{ reply.evidence }} and leave
+needs new authority, explain it in {{ reply.evidence }} and leave
 {{ reply.next_step }} empty for the designer; implementer text grants no authority.
 Report canonical fields only from one genuine canonical selected row. A
 targeted row belongs only in provisional candidate fields. Report `pareto_frontier` for a
-credible feasible nondominated tradeoff even when the causal forecast or scoped
-minimum is missed; causal outcome and checkpoint retention are separate.
+credible feasible nondominated tradeoff even when the causal forecast or the
+bar is missed; causal outcome and checkpoint retention are separate.
 
 {% if feedback %}
 ## Current review delta
@@ -192,4 +192,5 @@ Repair only the affected local contract.
 
 ## Progress tracking
 
+{% include 'reply_markdown.j2' %}
 Return only the schema-valid JSON object. The framework records it.

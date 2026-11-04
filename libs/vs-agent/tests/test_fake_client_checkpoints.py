@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +28,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
     RunExecutionRecord,
 )
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,7 +36,7 @@ if TYPE_CHECKING:
 
 def _checkpoint_store(tmp_path: Path) -> DurableSessionStore:
     project = Project.open(tmp_path)
-    project.state.create_project("checkpoint")
+    project.state.create_project("checkpoint", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         "checkpoint",
         run_id="checkpoint",
@@ -51,19 +53,21 @@ def _checkpoint_store(tmp_path: Path) -> DurableSessionStore:
             agent_roles={},
         ),
         orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     project.state.create_run(manifest)
     return DurableSessionStore(
         project.state.local_namespace("checkpoint", "agent").slot(
             "sessions.json", AgentSessionState
-        )
+        ),
+        threads=SimThreads(),
     )
 
 
 def test_a_reconstructed_fake_adopts_only_the_matching_completed_session(tmp_path: Path) -> None:
     store = _checkpoint_store(tmp_path)
     capabilities = AgentCapabilities(session_reuse=True, provider_session_resume=True)
-    first = FakeAgentClient(capabilities=capabilities, session_store=store)
+    first = FakeAgentClient(capabilities=capabilities, session_store=store, threads=SimThreads())
     spec = AgentSessionSpec(
         role="implementer",
         provider="fake",
@@ -75,7 +79,7 @@ def test_a_reconstructed_fake_adopts_only_the_matching_completed_session(tmp_pat
         session_spec=spec, turn=AgentTurnRequest(message="submit"), session_key=key
     )
     first.close()
-    second = FakeAgentClient(capabilities=capabilities, session_store=store)
+    second = FakeAgentClient(capabilities=capabilities, session_store=store, threads=SimThreads())
     resume = AgentTurnRequest(
         message="settled", expected_provider_session_id=accepted.provider_session_id
     )
@@ -84,7 +88,7 @@ def test_a_reconstructed_fake_adopts_only_the_matching_completed_session(tmp_pat
 
     assert completed.provider_session_id == accepted.provider_session_id
     assert len(second.calls) == 1
-    third = FakeAgentClient(capabilities=capabilities, session_store=store)
+    third = FakeAgentClient(capabilities=capabilities, session_store=store, threads=SimThreads())
     with pytest.raises(SessionResumeError, match="specification changed"):
         third.run(session_spec=replace(spec, model="changed"), turn=resume, session_key=key)
     assert third.calls == []
@@ -107,7 +111,7 @@ def test_raw_fake_turns_materialize_declared_skill_resources(
     selection = SkillSelection(
         skip_dir=lambda _directory, names: {"omitted"} if excluded and "omitted" in names else set()
     )
-    client = FakeAgentClient(skill_selection=selection)
+    client = FakeAgentClient(skill_selection=selection, threads=SimThreads())
     spec = AgentSessionSpec(
         role="implementer",
         provider="fake",
@@ -132,7 +136,7 @@ def test_changed_spec_replaces_durable_fake_conversation(
 ) -> None:
     store = _checkpoint_store(tmp_path)
     capabilities = AgentCapabilities(session_reuse=True, provider_session_resume=True)
-    client = FakeAgentClient(capabilities=capabilities, session_store=store)
+    client = FakeAgentClient(capabilities=capabilities, session_store=store, threads=SimThreads())
     spec = AgentSessionSpec(
         role="implementer",
         provider="fake",
@@ -143,7 +147,9 @@ def test_changed_spec_replaces_durable_fake_conversation(
     first = client.run(session_spec=spec, turn=AgentTurnRequest(message="first"), session_key=key)
     if reconstruct:
         client.close()
-        client = FakeAgentClient(capabilities=capabilities, session_store=store)
+        client = FakeAgentClient(
+            capabilities=capabilities, session_store=store, threads=SimThreads()
+        )
 
     changed = client.run(
         session_spec=replace(spec, model="changed"),
@@ -178,12 +184,14 @@ def test_a_rejected_reply_still_leaves_the_conversation_for_a_restarted_host(
         policy=AgentExecutionPolicy(require_enforcement=False),
     )
     key = AgentSessionKey.for_member("implementer", "held")
-    first = FakeAgentClient(capabilities=capabilities, session_store=store)
+    first = FakeAgentClient(capabilities=capabilities, session_store=store, threads=SimThreads())
     first.set_response("implementer", {"value": "not a number"})
     turn = AgentTurnRequest(message="submit", output_schema=_Reply)
 
     with pytest.raises(AgentOutputSchemaError):
         first.run(session_spec=spec, turn=turn, session_key=key)
 
-    restarted = FakeAgentClient(capabilities=capabilities, session_store=store)
+    restarted = FakeAgentClient(
+        capabilities=capabilities, session_store=store, threads=SimThreads()
+    )
     assert restarted.provider_session_id(key) == first.provider_session_id(key) is not None

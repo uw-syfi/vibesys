@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 from unittest.mock import Mock
@@ -17,6 +16,7 @@ from vs_issue_tracker.api import (
     IssueStatus,
     IssueType,
 )
+from vs_sim.api.testing import ManualClock, SimThreads, hostile_json_frames
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,7 +31,7 @@ class _CreateOptions(TypedDict, total=False):
 
 
 def _make_store(tmp_path: Path) -> IssueBoard:
-    return IssueBoard(tmp_path / "issues.json")
+    return IssueBoard(tmp_path / "issues.json", clock=ManualClock(), threads=SimThreads())
 
 
 def _create(store: IssueBoard, **options: Unpack[_CreateOptions]) -> Issue:
@@ -100,13 +100,23 @@ class TestCreate:
 
 
 class TestLoadCorrupt:
+    def test_a_store_of_any_hostile_bytes_is_a_load_error(self, tmp_path: Path) -> None:
+        """``json`` raised ``RecursionError`` on deep nesting, past the load error."""
+        path = tmp_path / "issues.json"
+        for name, frame in hostile_json_frames():
+            path.write_bytes(frame)
+
+            with pytest.raises(IssueBoardLoadError):
+                IssueBoard(path, clock=ManualClock(), threads=SimThreads())
+            assert path.read_bytes() == frame, name
+
     def test_load_corrupt_json_raises_without_replacing_file(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
         path.write_text("not json", encoding="utf-8")
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match="invalid JSON"):
-            IssueBoard(path)
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -116,7 +126,7 @@ class TestLoadCorrupt:
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match="unsupported version 999"):
-            IssueBoard(path)
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -131,7 +141,7 @@ class TestLoadCorrupt:
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match="invalid store structure"):
-            IssueBoard(path)
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -166,7 +176,7 @@ class TestLoadCorrupt:
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match=message):
-            IssueBoard(path)
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -181,7 +191,7 @@ class TestLoadCorrupt:
         self, tmp_path: Path, mutate: Callable[[dict[str, Any]], None]
     ) -> None:
         path = tmp_path / "issues.json"
-        board = IssueBoard(path)
+        board = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(board, title="existing")
         payload = json.loads(path.read_text())
         mutate(payload)
@@ -189,7 +199,7 @@ class TestLoadCorrupt:
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match="invalid store structure"):
-            IssueBoard(path)
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -197,7 +207,7 @@ class TestLoadCorrupt:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         path = tmp_path / "issues.json"
-        writer = IssueBoard(path)
+        writer = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(writer, title="existing")
         original_read_text = Path.read_text
         wrote_concurrently = False
@@ -213,10 +223,16 @@ class TestLoadCorrupt:
             return content
 
         monkeypatch.setattr(Path, "read_text", read_then_write)
-        opened = IssueBoard(path)
+        opened = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert [issue.title for issue in opened.list()] == ["existing", "concurrent"]
-        assert [issue.title for issue in IssueBoard(path).list()] == ["existing", "concurrent"]
+        assert [
+            issue.title
+            for issue in IssueBoard(path, clock=ManualClock(), threads=SimThreads()).list()
+        ] == [
+            "existing",
+            "concurrent",
+        ]
 
 
 class TestReload:
@@ -246,7 +262,7 @@ class TestReload:
         self, tmp_path: Path
     ) -> None:
         path = tmp_path / "issues.json"
-        store = IssueBoard(path)
+        store = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(store, title="last valid")
         path.write_text("not json", encoding="utf-8")
         corrupt = path.read_bytes()
@@ -260,7 +276,7 @@ class TestReload:
 
     def test_reload_wrong_version_raises_without_modifying_the_file(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
-        store = IssueBoard(path)
+        store = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(store, title="last valid")
         path.write_text(
             json.dumps({"version": 2, "next_id": 1, "issues": []}),
@@ -277,7 +293,7 @@ class TestReload:
 
     def test_reload_missing_file_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
-        store = IssueBoard(path)
+        store = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(store, title="last valid")
         path.unlink()
 
@@ -335,7 +351,9 @@ class TestList:
         refetched = store.get(created.id)
         assert refetched is not None
         assert refetched.title == "original"
-        reloaded_board = IssueBoard(store.path).get(created.id)
+        reloaded_board = IssueBoard(store.path, clock=ManualClock(), threads=SimThreads()).get(
+            created.id
+        )
         assert reloaded_board is not None
         assert reloaded_board.title == "original"
 
@@ -497,12 +515,12 @@ class TestNextOpen:
         assert third.id == perf.id
 
     def test_next_open_fifo_within_type(self, tmp_path: Path) -> None:
-        store = _make_store(tmp_path)
+        clock = ManualClock()
+        store = IssueBoard(tmp_path / "issues.json", clock=clock, threads=SimThreads())
         a = _create(store, type=IssueType.BUG, title="first bug")
-        # Ensure a strict timestamp gap so created_at sort is stable
-        time.sleep(0.005)
+        clock.advance(1)
         b = _create(store, type=IssueType.BUG, title="second bug")
-        time.sleep(0.005)
+        clock.advance(1)
         c = _create(store, type=IssueType.BUG, title="third bug")
         first = store.next_open()
         assert first is not None
@@ -616,7 +634,7 @@ class TestEventPayload:
             ),
             encoding="utf-8",
         )
-        store = IssueBoard(path)
+        store = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         issue = store.get(1)
         assert issue is not None
         assert len(issue.history) == 1
@@ -692,7 +710,9 @@ class TestReopenBlocked:
 
     def test_reopen_blocked_no_blocked_is_noop(self, tmp_path: Path) -> None:
         cb = Mock()
-        store = IssueBoard(tmp_path / "issues.json", on_change=cb)
+        store = IssueBoard(
+            tmp_path / "issues.json", on_change=cb, clock=ManualClock(), threads=SimThreads()
+        )
         reopened = store.reopen_blocked(actor="loop:resume", iteration=1)
         assert reopened == []
         # No mutation -> no callback fired (and importantly no save).
@@ -726,7 +746,9 @@ class TestReopenBlocked:
 class TestOnChangeCallback:
     def test_callback_fires_on_each_mutation(self, tmp_path: Path) -> None:
         cb = Mock()
-        store = IssueBoard(tmp_path / "issues.json", on_change=cb)
+        store = IssueBoard(
+            tmp_path / "issues.json", on_change=cb, clock=ManualClock(), threads=SimThreads()
+        )
         # Bootstrap save in __init__ must NOT fire the callback.
         assert cb.call_count == 0
 
@@ -751,7 +773,7 @@ class TestOnChangeCallback:
     def test_callback_failure_does_not_corrupt_store(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
         cb = Mock(side_effect=RuntimeError("renderer exploded"))
-        store = IssueBoard(path, on_change=cb)
+        store = IssueBoard(path, on_change=cb, clock=ManualClock(), threads=SimThreads())
         # The mutation must still succeed even though the callback raises.
         issue = _create(store, title="resilient")
         assert cb.call_count == 1

@@ -13,15 +13,18 @@ from vibesys.orchestration.evolve.search._operations import OPERATIONS
 from vibesys.orchestration.evolve.search._record import EvolveRecord
 from vibesys.orchestration.evolve.search._roles import ROLES
 from vibesys.orchestration.evolve.search._round import Round
+from vibesys.orchestration.evolve.search._spans import builds_on
 from vibesys.orchestration.evolve.search._values import STOPPED, ChildDone, Closing
-from vs_core.api.search import Flow, Group, NoWinner, TaskStopped, search
+from vibesys.search_spans.api import SPANS
+from vs_core.api.search import Flow, Group, NoWinner, SpanId, TaskStopped, search
 
 
-@search("evolve", config=EvolveConfig, operations=OPERATIONS, roles=ROLES)
+@search("evolve", config=EvolveConfig, operations=OPERATIONS, roles=ROLES, spans=SPANS)
 async def evolve(ctx: Flow, config: EvolveConfig) -> NoWinner | None:
     """Seed the population, evolve it generation by generation, name the best."""
     ctx.checkpoint(config)
     run = EvolveRecord.begin(config, ctx.facts.baseline, ctx.task.terms)
+    ctx.fall_back_to_input(run.leading()[1])
     while (round_ := run.open_round(stopping=ctx.stop_requested)) is not None:
         await run_round(ctx, run, round_)
         run.close_round(round_)
@@ -31,21 +34,30 @@ async def evolve(ctx: Flow, config: EvolveConfig) -> NoWinner | None:
 
 async def run_round(ctx: Flow, run: EvolveRecord, round_: Round) -> None:
     """Run a round's children, admitting each outcome in slot order as it becomes admissible."""
+    spans: dict[str, SpanId | None] = {}
     async with ctx.group(limit=round_.width) as children:
-        launch(ctx, children, round_)
+        launch(ctx, run, children, round_, spans)
         ctx.publish(run.snapshot())
         async for result in children:
             for done in round_.finish(finished(round_, result)):
-                run.admit(done)
-            ctx.choose(run.leader())
-            launch(ctx, children, round_)
+                run.admit(done, spans.get(done.start.key))
+            ctx.choose(*run.leading())
+            launch(ctx, run, children, round_, spans)
             ctx.publish(run.snapshot())
 
 
-def launch(ctx: Flow, children: Group[ChildDone], round_: Round) -> None:
-    """Start the children that fit in the free slots."""
+def launch(
+    ctx: Flow,
+    run: EvolveRecord,
+    children: Group[ChildDone],
+    round_: Round,
+    spans: dict[str, SpanId | None],
+) -> None:
+    """Start the children that fit in the free slots, each linked to the one it builds on."""
     for start in round_.ready(children.free, stopping=ctx.stop_requested):
-        children.start(start.key, child, start)
+        span = children.start(start.key, child, start).span
+        spans[start.key] = span
+        builds_on(ctx, span, run.built_by(start.base))
 
 
 def finished(round_: Round, result: ChildDone | TaskStopped) -> ChildDone:

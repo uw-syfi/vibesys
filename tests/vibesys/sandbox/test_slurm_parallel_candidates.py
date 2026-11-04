@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,9 +21,21 @@ import pytest
 from tests.support.workspace_world import open_workspace_env
 
 from vibesys.run.environment import open_run_environment
-from vs_runtime.api.infrastructure import SlurmEnvironment
+from vs_runtime.api.infrastructure import (
+    EnvironmentSystem,
+    RunEnvironmentSessionRole,
+    SlurmEnvironment,
+)
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
-from vs_sandbox.api.slurm import load_slurm_operator_settings, run_brokered_process
+from vs_sandbox.api.slurm import BrokeredProcesses, load_slurm_operator_settings
+from vs_sim.api import (
+    OsThreads,
+    ProcessOutcome,
+    ProcessSpec,
+    SubprocessPipedProcessLauncher,
+    UnixNetwork,
+)
+from vs_sim.api.testing import NO_PROCESSES, FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
@@ -31,6 +44,8 @@ if TYPE_CHECKING:
         RuntimeWorkspaces,
     )
     from vs_sandbox.api import CommandResult
+    from vs_sim.api import Processes
+from vs_sim.api import DISCARD
 
 _CONFIG = """[slurm]
 name = "test-cluster"
@@ -96,15 +111,21 @@ def _run(
     *,
     environment: SlurmEnvironment | None = None,
     opened: list[RunEnvironmentSession] | None = None,
+    slurm_processes: Processes | None = None,
 ) -> None:
     """Open a run whose candidates are Slurm sessions, and await *exercise* with its workspaces.
 
     Every session the run opens (the root's first, then each candidate's) is appended to *opened*.
     """
-    backend = DaemonBackend(daemon_engine(tmp_path))
+    threads = OsThreads()
+    launcher = SubprocessPipedProcessLauncher()
+    backend = DaemonBackend(daemon_engine(tmp_path, launcher=launcher), threads=threads)
     environment = environment or _environment(tmp_path, backend)
 
     def open_session(request: RunEnvironmentRequest) -> RunEnvironmentSession:
+        # Startup probing has its own deterministic contract tests. This suite
+        # exercises the already-prepared root and its candidate brokers.
+        request = replace(request, session_role=RunEnvironmentSessionRole.CHILD)
         session = open_run_environment(environment, request)
         if opened is not None:
             opened.append(session)
@@ -117,6 +138,18 @@ def _run(
         backend=backend,
         open_session=open_session,
         owns_candidate_worktrees=True,
+        system=EnvironmentSystem(
+            threads=threads,
+            network=UnixNetwork(),
+            processes=NO_PROCESSES,
+            launcher=launcher,
+            # The scheduler answers the GPU launcher's partition-limit query.
+            slurm_processes=slurm_processes
+            or FakeProcesses(
+                lambda _spec: ProcessScript(stdout=b"main* 2:00:00\n"),
+                pass_time=ManualClock().advance,
+            ),
+        ),
     ) as env:
         try:
             asyncio.run(exercise(env.hosts[0]))  # ty: ignore[call-non-callable]
@@ -129,20 +162,27 @@ def _run(
 def _in(workspaces: RuntimeWorkspaces, path: Path, command: str) -> CommandResult:
     sandbox = workspaces.agent_sandbox_at(path)
     assert sandbox is not None
-    return sandbox.execute(command)
+    return sandbox.execute(command, output=DISCARD)
 
 
 def test_a_candidates_gpu_command_runs_in_its_own_worktree(tmp_path: Path) -> None:
+    sessions: list[RunEnvironmentSession] = []
+
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         first = await workspaces.create_candidate()
         second = await workspaces.create_candidate()
 
-        for candidate in (first, second):
+        for candidate, session in zip((first, second), sessions[1:], strict=True):
             ran = _in(workspaces, candidate.path, f"{_LAUNCH}pwd")
             assert ran.exit_code == 0, ran.output
             assert str(candidate.path) in ran.output.splitlines()
+            captured = session.capture_commands.execute("pwd", timeout=10, output=DISCARD)
+            assert captured.exit_code == 0, captured.output
+            assert str(candidate.path) in captured.output.splitlines()
 
-    _run(tmp_path, exercise)
+        assert sessions[1].capture_commands.id != sessions[2].capture_commands.id
+
+    _run(tmp_path, exercise, opened=sessions)
 
 
 def test_a_candidates_gpu_command_is_refused_in_another_candidates_worktree(
@@ -193,7 +233,9 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
     """The SSH transport's broker of a candidate session is scoped like its GPU broker."""
     config = tmp_path / "ssh.toml"
     config.write_text(_SSH_CONFIG, encoding="utf-8")
-    backend = DaemonBackend(daemon_engine(tmp_path))
+    backend = DaemonBackend(
+        daemon_engine(tmp_path, launcher=SubprocessPipedProcessLauncher()), threads=OsThreads()
+    )
     environment = SlurmEnvironment(
         load_slurm_operator_settings(config), docker=daemon_docker_config(backend.engine)
     )
@@ -205,18 +247,20 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             "/bin/true",
             "-a",
             "-e",
-            "/usr/bin/true",
+            # The configured ssh_command with every prompt off (SlurmSshTransport.ssh_argv).
+            "/usr/bin/true -o BatchMode=yes",
             "--",
             f"{local}/",
             "test-cluster:/remote/vibesys/test-cluster/job/",
         )
-        return run_brokered_process(
+        processes = BrokeredProcesses(
             Path(env["VIBESYS_SLURM_BROKER_SOCKET"]),
             env["VIBESYS_SLURM_BROKER_TOKEN"],
-            argv,
-            stdin=None,
-            timeout=5,
-        ).returncode
+            network=UnixNetwork(),
+        )
+        run = processes.run(ProcessSpec(tuple(argv)), timeout=5, output=DISCARD)
+        assert isinstance(run, ProcessOutcome)
+        return run.returncode
 
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         first = await workspaces.create_candidate()
@@ -228,4 +272,12 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             upload(first_session, second.path)
         assert upload(second_session, second.path) == 0
 
-    _run(tmp_path, exercise, environment=environment, opened=sessions)
+    _run(
+        tmp_path,
+        exercise,
+        environment=environment,
+        opened=sessions,
+        slurm_processes=FakeProcesses(
+            lambda _spec: ProcessScript(), pass_time=ManualClock().advance
+        ),
+    )

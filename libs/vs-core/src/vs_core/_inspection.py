@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 def _canonical_record(state: CoreState, identity: RequestId) -> RequestRecord | None:
-    records = tuple(row for row in state.records.records if row.request_id == identity)
+    records = state.records.find(identity)
     if len(records) > 1:
         raise ContractError(("request_id",), "requires a unique canonical request")
     return records[0] if records else None
@@ -84,11 +84,6 @@ def _root_resources(state: CoreState, original: RequestRecord) -> set[ResourceId
 def _descendants(state: CoreState, original: RequestRecord) -> set[ResourceId]:
     """Provisional roots still own every discovered descendant manifest."""
     resources = {
-        child.resource_id
-        for child in state.records.children
-        if child.scope == original.request.scope and original.request_id in child.source_requests
-    }
-    resources.update(
         resource
         for job, submission in (
             *((job, job.submission_id) for job in state.evaluation.jobs),
@@ -96,7 +91,7 @@ def _descendants(state: CoreState, original: RequestRecord) -> set[ResourceId]:
         )
         if submission == original.request_id and job.scope == original.request.scope
         for resource in job.children
-    )
+    }
     observations = tuple(
         job.observation
         for job, submission in (

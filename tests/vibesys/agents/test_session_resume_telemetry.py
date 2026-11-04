@@ -34,6 +34,7 @@ from vs_agent.api.testing import (
     usage,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,7 +53,9 @@ def test_resume_publishes_turn_events_and_one_usage_record(
         turn_events.append(usage(input_tokens=tokens, output_tokens=tokens))
     if streamed:
         turn_events.append(assistant_text("continued answer"))
-    provider = FakeProvider(turns=[[], turn_events], answer="continued answer")
+    provider = FakeProvider(
+        turns=[[], turn_events], answer="continued answer", threads=SimThreads()
+    )
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
     spec = AgentSessionSpec(
         role="implementer",
@@ -70,7 +73,9 @@ def test_resume_publishes_turn_events_and_one_usage_record(
         log_dir=tmp_path,
         model_name="test-model",
         default_reasoning_effort="high",
-        event_sink=CoreAgentEventSink(events.append),
+        event_sink=CoreAgentEventSink(events.append, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
     ) as client:
         client.invoke_text(
             kind="implementer",
@@ -81,7 +86,7 @@ def test_resume_publishes_turn_events_and_one_usage_record(
             session_key=key,
         )
         events.clear()
-        sessions = ClientAgentSessions(client, FakeAgentInvocationStore())
+        sessions = ClientAgentSessions(client, FakeAgentInvocationStore(), threads=SimThreads())
         sessions.bind(key, spec, AgentTurnRequest(message="", label="round 2"))
         outcome = sessions.resume(key, message, "evaluation-resume-1")
         assert isinstance(outcome, Completed)
@@ -129,7 +134,7 @@ def test_failed_resume_writes_unknown_usage_once_and_never_replays(tmp_path: Pat
             detail = "lost provider acknowledgement"
             raise LookupError(detail)
 
-    provider = FakeProvider(answer="first answer", on_turn=fail_resumed_turn)
+    provider = FakeProvider(answer="first answer", on_turn=fail_resumed_turn, threads=SimThreads())
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
     spec = AgentSessionSpec(
         role="implementer",
@@ -139,7 +144,9 @@ def test_failed_resume_writes_unknown_usage_once_and_never_replays(tmp_path: Pat
     )
     (tmp_path / "resume.j2").write_text("Evaluation settled.", encoding="utf-8")
     message = TemplateRenderer(tmp_path).render_template("resume.j2")
-    with AgentClient(provider, provider="codex", log_dir=tmp_path) as client:
+    with AgentClient(
+        provider, provider="codex", log_dir=tmp_path, clock=ManualClock(), threads=SimThreads()
+    ) as client:
         client.invoke_text(
             kind="implementer",
             workspace=tmp_path,
@@ -148,7 +155,7 @@ def test_failed_resume_writes_unknown_usage_once_and_never_replays(tmp_path: Pat
             round_label="round 1",
             session_key=key,
         )
-        sessions = ClientAgentSessions(client, FakeAgentInvocationStore())
+        sessions = ClientAgentSessions(client, FakeAgentInvocationStore(), threads=SimThreads())
         sessions.bind(key, spec, AgentTurnRequest(message="", label="round 2"))
         outcome = sessions.resume(key, message, "evaluation-resume-1")
         assert isinstance(outcome, Unknown)

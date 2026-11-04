@@ -20,8 +20,10 @@ import agentshim
 
 from vs_agent.container_python import containerize_server
 from vs_agent.contracts import (
+    AgentContextOverflowError,
     AgentEvent,
     AgentEventKind,
+    AgentModelUsage,
     AgentOutputSchemaError,
     AgentQuotaError,
     AgentRateLimit,
@@ -30,9 +32,11 @@ from vs_agent.contracts import (
     AgentTurnTimeoutError,
     AgentUsage,
     AuthStatus,
+    CostBasis,
     MCPServerSpec,
     ProviderReadiness,
     QuotaCondition,
+    UsageSpeed,
 )
 from vs_agent.events import CommandResultPayload
 
@@ -46,6 +50,20 @@ _AUTH_STATUS = {
     agentshim.AuthState.KNOWN_OK: AuthStatus.OK,
     agentshim.AuthState.FAILED: AuthStatus.FAILED,
     agentshim.AuthState.UNKNOWN: AuthStatus.UNKNOWN,
+}
+
+# Total on purpose: a member agentshim adds that these tables miss is a KeyError in the first test
+# that walks the enum, never a silently dropped fact.
+_COST_BASIS = {
+    agentshim.CostSource.PRICE_TABLE: CostBasis.PRICE_TABLE,
+    agentshim.CostSource.PROVIDER_REPORTED: CostBasis.PROVIDER_REPORTED,
+    agentshim.CostSource.UNKNOWN_MODEL: CostBasis.UNKNOWN_MODEL,
+    agentshim.CostSource.NOT_REPORTED: CostBasis.NOT_REPORTED,
+}
+_SPEED = {
+    agentshim.UsageSpeed.STANDARD: UsageSpeed.STANDARD,
+    agentshim.UsageSpeed.FAST: UsageSpeed.FAST,
+    agentshim.UsageSpeed.ULTRAFAST: UsageSpeed.ULTRAFAST,
 }
 
 
@@ -102,7 +120,11 @@ def usage_from(
 
     ``input_tokens`` includes cached tokens on every provider: the library
     folds Anthropic's disjoint cache counts into the input total so the same
-    field means the same thing everywhere.
+    field means the same thing everywhere. The token fields count the main
+    conversation only, as the library's ``tokens`` do; ``by_model`` carries
+    every model the turn ran, priced by the library and copied here unchanged,
+    so the sum of its rows is the whole turn. ``cost_basis`` names how the
+    library reached the cost.
     """
     if not usage.increment_known:
         # Unknown resumed totals are zero placeholders, not measured increments.
@@ -114,8 +136,29 @@ def usage_from(
         cache_creation_input_tokens=tokens.cache_write_input_tokens,
         cache_read_input_tokens=tokens.cache_read_input_tokens,
         output_tokens=tokens.output_tokens,
+        reasoning_output_tokens=tokens.reasoning_output_tokens,
         total_cost_usd=cost_usd if cost_usd is not None else usage.total_cost_usd,
         duration_ms=duration_ms,
+        cost_basis=None if usage.cost_source is None else _COST_BASIS[usage.cost_source],
+        by_model=tuple(model_usage_from(row) for row in usage.by_model),
+    )
+
+
+def model_usage_from(row: agentshim.ModelUsage) -> AgentModelUsage:
+    """Carry one model's share of a turn over, with the cost the library priced it at."""
+    tokens = row.tokens
+    return AgentModelUsage(
+        model=row.model,
+        input_tokens=tokens.input_tokens,
+        cache_creation_input_tokens=tokens.cache_write_input_tokens,
+        cache_creation_1h_input_tokens=tokens.cache_write_1h_input_tokens,
+        cache_read_input_tokens=tokens.cache_read_input_tokens,
+        output_tokens=tokens.output_tokens,
+        reasoning_output_tokens=tokens.reasoning_output_tokens,
+        turns=tokens.turns,
+        recorded_usd=row.recorded_usd,
+        speed=None if row.speed is None else _SPEED[row.speed],
+        primary=row.primary,
     )
 
 
@@ -161,12 +204,16 @@ def spawn_error_from(provider: str, error: BaseException) -> AgentSpawnError:
 
 
 def timeout_error_from(error: agentshim.TurnTimeoutError) -> AgentTurnTimeoutError:
-    """Carry the exceeded budget over.
+    """Carry the exceeded budget and any partial accounting over.
 
     A one-shot process reports the budget as ``CliTimeoutError``; a long-lived
-    one raises its parent, ``TurnTimeoutError``.
+    one raises its parent, ``TurnTimeoutError``. Only the one-shot error can
+    carry the parsed prefix that was received before the process timed out.
     """
-    return AgentTurnTimeoutError(error.timeout)
+    partial = error.partial if isinstance(error, agentshim.CliTimeoutError) else None
+    usage = usage_from(partial.usage, cost_usd=partial.cost_usd) if partial is not None else None
+    session_id = None if partial is None else partial.session_id
+    return AgentTurnTimeoutError(error.timeout, usage=usage, provider_session_id=session_id)
 
 
 def failure_from(
@@ -174,28 +221,35 @@ def failure_from(
     *,
     provider: str,
     exhausted: Sequence[agentshim.RateLimitStatus],
-) -> AgentOutputSchemaError | AgentQuotaError | None:
-    """Classify a failed turn as a schema rejection or a capacity limit.
+) -> AgentOutputSchemaError | AgentQuotaError | AgentContextOverflowError | None:
+    """Classify a failed turn as a schema rejection, a context overflow or a capacity limit.
 
     Returns ``None`` for any other failure, which the caller re-raises as it
     came.
 
     A provider that gave up matching the output schema
     (``FailureKind.SCHEMA``) is an :class:`AgentOutputSchemaError` carrying its
-    validation errors. agentshim classifies a usage or spend limit as
+    validation errors. A conversation that no longer fits the model's context window
+    (``FailureKind.CONTEXT_OVERFLOW``) is an :class:`AgentContextOverflowError`: the work did
+    not fail, and the same turn may run in a fresh conversation. agentshim classifies a usage
+    or spend limit as
     ``USAGE_LIMIT`` and has already waited out the transient failures it can. A
     ``TRANSIENT`` failure that outlasted those waits is sustained rate limiting
-    only when the provider also reported an exhausted window during the turn:
-    a server error or an overload names no capacity limit and stays a plain
-    failure. The reset time is the latest of the *exhausted* windows, since
-    capacity returns only when every one of them has reopened.
+    when the provider also reported an exhausted window during the turn, and a
+    provider outage (an overload, a server error) when it did not. Either way
+    the work did not fail and the same turn may be sent again, so both are
+    capacity limits the caller's gate waits out instead of failing the run. The
+    reset time is the latest of the *exhausted* windows, since capacity returns
+    only when every one of them has reopened.
     """
     if error.kind is agentshim.FailureKind.SCHEMA:
         return AgentOutputSchemaError(error.detail)
+    if error.kind is agentshim.FailureKind.CONTEXT_OVERFLOW:
+        return AgentContextOverflowError(provider, error.detail or str(error))
     if error.kind is agentshim.FailureKind.USAGE_LIMIT:
         condition = QuotaCondition.QUOTA_EXHAUSTED
-    elif error.kind is agentshim.FailureKind.TRANSIENT and exhausted:
-        condition = QuotaCondition.RATE_LIMITED
+    elif error.kind is agentshim.FailureKind.TRANSIENT:
+        condition = QuotaCondition.RATE_LIMITED if exhausted else QuotaCondition.UNAVAILABLE
     else:
         return None
     resets = [window.resets_at for window in exhausted if window.resets_at is not None]

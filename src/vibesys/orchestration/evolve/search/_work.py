@@ -10,6 +10,7 @@ from vibesys.orchestration.evolve.models import JudgeResponse, MutatorResponse
 from vibesys.orchestration.evolve.search._measure import gate
 from vibesys.orchestration.evolve.search._prompts import JudgePrompt, ObjectiveAxis, ProfilerPrompt
 from vibesys.orchestration.evolve.search._roles import JUDGE, MUTATOR, PROFILER
+from vibesys.orchestration.evolve.search._spans import mutated
 from vibesys.orchestration.evolve.search._values import (
     ChildStart,
     Closing,
@@ -20,12 +21,14 @@ from vibesys.orchestration.evolve.search._values import (
 )
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict as ReviewVerdict
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import (
     Declined,
     Failed,
     Flow,
     PatchExport,
     Retained,
+    Session,
     TurnFinished,
     Workspace,
 )
@@ -33,10 +36,14 @@ from vs_core.api.search import (
 
 async def work(ctx: Flow, start: ChildStart, ws: Workspace) -> Closing:
     """Let the agents and the gates decide what the child is: a failed or a passing individual."""
-    closing = await mutate(ctx, start, ws)
+    mutator = ctx.agents.session(MUTATOR, workspace=ws, revision=start.base)
+    closing = await mutate(start, mutator)
+    mutated(ctx, start, closing)
     if closing.cause is not None:
         return closing
-    closing = await review(ctx, ws, closing)
+    # the judge and the profiler look at what the mutator made: its work started them
+    made_by = (mutator.agent,)
+    closing = await review(ctx, ws, closing, made_by)
     if not closing.passed:
         return closing
     if ctx.task.terms.measured:
@@ -44,7 +51,7 @@ async def work(ctx: Flow, start: ChildStart, ws: Workspace) -> Closing:
         if not closing.passed:
             return closing
     if start.config.profiling:
-        closing = await profile(ctx, ws, closing)
+        closing = await profile(ctx, ws, closing, made_by)
     if start.config.needs_code:
         closing = await export(ctx, closing)
     return closing
@@ -60,14 +67,13 @@ def no_reply(role: str, failed: Failed) -> Failure:
     )
 
 
-async def mutate(ctx: Flow, start: ChildStart, ws: Workspace) -> Closing:
+async def mutate(start: ChildStart, mutator: Session) -> Closing:
     """Have the mutator edit the workspace into an offspring, which core checkpoints.
 
     A mutation is never asked again: a reply that stays invalid, or a turn that is lost for
     good, is a failed individual.
     """
-    mutator = ctx.agents.session(MUTATOR, workspace=ws, revision=start.base)
-    match await mutator.turn(start.prompt):
+    match await mutator.turn(start.prompt, label=turn_label(mutator)):
         case TurnFinished(reply=MutatorResponse() as reply, checkpoint=Declined() as declined):
             declining = Failure(kind=FailureKind.CHECKPOINT_DECLINED, declined=declined.reason)
             return Closing(summary=reply.summary).ended_by(declining)
@@ -80,15 +86,15 @@ async def mutate(ctx: Flow, start: ChildStart, ws: Workspace) -> Closing:
             raise TypeError(message)
 
 
-async def review(ctx: Flow, ws: Workspace, closing: Closing) -> Closing:
+async def review(ctx: Flow, ws: Workspace, closing: Closing, made_by: tuple[str, ...]) -> Closing:
     """Have the judge grade the offspring, showing it what the mutator's own evaluations said."""
     revision = closing.revision
     if revision is None:
         message = "only a checkpointed offspring is reviewed"
         raise ValueError(message)
-    judge = ctx.agents.session(JUDGE, workspace=ws)
+    judge = ctx.agents.session(JUDGE, workspace=ws, started_by=made_by)
     prompt = JudgePrompt(candidate=revision, cited_evidence=ctx.evaluation.taken(ws, revision))
-    match await judge.turn(prompt, revision=revision):
+    match await judge.turn(prompt, revision=revision, label=turn_label(judge)):
         case TurnFinished(reply=JudgeResponse() as reply, invocation=invocation):
             passed = reply.verdict is ReviewVerdict.PASS
             return closing.model_copy(
@@ -105,7 +111,7 @@ async def review(ctx: Flow, ws: Workspace, closing: Closing) -> Closing:
             raise TypeError(message)
 
 
-async def profile(ctx: Flow, ws: Workspace, closing: Closing) -> Closing:
+async def profile(ctx: Flow, ws: Workspace, closing: Closing, made_by: tuple[str, ...]) -> Closing:
     """Ask the advisory profiler about a passing offspring; a failed profile is only a note."""
     revision = closing.revision
     if revision is None:
@@ -115,8 +121,10 @@ async def profile(ctx: Flow, ws: Workspace, closing: Closing) -> Closing:
         ObjectiveAxis(name=item.name, direction=item.direction)
         for item in ctx.task.terms.objectives
     )
-    profiler = ctx.agents.session(PROFILER, workspace=ws, revision=revision)
-    match await profiler.turn(ProfilerPrompt(candidate=revision, objectives=axes)):
+    profiler = ctx.agents.session(PROFILER, workspace=ws, revision=revision, started_by=made_by)
+    match await profiler.turn(
+        ProfilerPrompt(candidate=revision, objectives=axes), label=turn_label(profiler)
+    ):
         case TurnFinished(reply=ProfilerSummary() as summary):
             reading = ProfileReading(
                 perf_metric=summary.perf_metric,

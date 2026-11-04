@@ -20,6 +20,7 @@ import {existsSync, mkdtempSync, rmSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {testFileNames} from './run_bun_tests.mjs';
+import {NODE_TEST_ARGUMENTS} from './test_runner_config.mjs';
 
 const CONFIG = 'tsconfig.node-tests.json';
 const BUILD_PREFIX = '.vibesys-node-tests-';
@@ -106,11 +107,7 @@ async function main(argv) {
       );
     }
 
-    const result = await runProcess(process.execPath, [
-      '--test',
-      '--test-concurrency=1',
-      ...compiledNames,
-    ]);
+    const result = await runProcess(process.execPath, [...NODE_TEST_ARGUMENTS, ...compiledNames]);
     return exitCode(result, 'node --test');
   } finally {
     rmSync(buildDirectory, {recursive: true, force: true});

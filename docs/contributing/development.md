@@ -1,417 +1,158 @@
 # Development guide
 
-This page is the starting point for contributors extending VibeSys. It links
-to the focused guides for framework code, domains, skills, profilers, input
-bundles, and the TUI.
-
-## Before you change code
-
-- Load the `software-design` skill for every code change and the `testing` skill for
-  any test work (see [Coding best practices](coding-best-practices.md) for where they
-  live and for size limits, lint waivers, and doc links). The
-  [testing map](testing-map.md) says which layer a new test belongs in.
-- Adding or moving an example? Register it in `examples/registry.toml`; see
-  [Adding an example](examples.md).
-- Keep changes within the owning package and preserve the framework boundaries.
-- Use the repository [pull request template](https://github.com/uw-syfi/vibesys/blob/main/.github/pull_request_template.md)
-  when opening a PR.
+Start with [Architecture](architecture.md) for process ownership, the
+[Python module graph](python-module-graph.md) for Python boundaries and
+[Clients architecture](clients-architecture.md) for the desktop's state and
+runtime boundaries. Component READMEs hold build and command details; repository
+skills hold the workflow for making each kind of change.
 
 ## Repository layout
 
-```text
-src/vibesys/             Orchestration policy and thin product API/composition
-src/server/              Frontend-serving runtime and protocol
-src/entrypoints/         Process composition and command entrypoints
-clients/libs/contracts/      TypeScript server protocol types and validator
-clients/libs/transport/      Runtime-neutral transport and the WebSocket adapter
-clients/libs/transport-node/ Node transport: the Unix-socket client
-clients/libs/run-state/      Pure backend-event projection (the run fold)
-clients/tui/                 TypeScript terminal UI and launcher
-libs/                    Reusable standalone libraries
-examples/                Candidate repositories, tasks, and input bundles
-resources/evaluators/    Reusable versioned evaluator packages
-resources/skills/        Bundled Agent Skills and reference material
-resources/profilers/     Profiler MCP servers and support packages
-docs/                    Contributor and subsystem guides
-tests/                   Python and integration tests
-```
+- `src/`: product and entrypoints; `libs/`: shared libraries.
+- `clients/`: desktop and shared client packages.
+- `examples/`: example inputs and repositories; `skills/`: bundled agent skills.
+- `third_party/`: vendored dependencies; `resources/`: shared resources.
 
-The main framework boundaries are:
-
-- `src/entrypoints/` owns executable composition. Entrypoints do not live in
-  `libs/`.
-- `src/server/` owns serving and frontend-specific behavior. It may depend on
-  `src/vibesys/`, but the headless core does not depend on it.
-- `src/vibesys/orchestration/` owns built-in orchestration plugins: agent
-  roles, prompts, reply schemas, search and selection policy, evaluation
-  cadence, and policy state. See
-  [Orchestration plugins and runtime](orchestration-runtime.md).
-- `src/vibesys/api/`, `src/vibesys/run/`, and
-  `src/vibesys/composition.py` form the thin product facade and composition
-  layer over the reusable runtime libraries.
-- `libs/` owns reusable libraries. Import each library through its public
-  `<package>.api` surface, for example `vs_agent.api` or `vs_project.api`.
-  Each library exposes its owned fakes through `<package>.api.testing` where
-  applicable. Orchestration policy normally uses
-  `vs_runtime.api.testing.FakeRun`. Tach rejects imports of root-level
-  exports and internal modules.
-- `src/vibesys/domains/` owns domain-specific prompt policy.
-  Generic execution mechanisms belong in `libs/vs-runtime/`; agent harnesses,
-  compute isolation, and project persistence belong in `libs/vs-agent/`,
-  `libs/vs-sandbox/`, and `libs/vs-project/`, respectively.
-- Candidate repositories own target-specific tasks and candidate contracts
-  below `.vibesys/tasks/`. Example projects live under `examples/<category>/`.
-- `resources/evaluators/` owns reusable versioned evaluator packages.
-
-## Local development
-
-### Work from a source checkout
-
-Install Python 3.12+, Git, and [uv](https://docs.astral.sh/uv/), then clone the
-repository. Optional local credentials and configuration can be copied from the
-provided examples:
-
-```bash
-cp .env.example .env
-cp agent.toml.example agent.toml
-```
-
-`uv run` creates the Python environment automatically, so `uv sync` is not
-required before running commands. For example:
-
-```bash
-uv run vibesys --help
-uv run vibesys validate examples/data-structures/repositories/queue-rs --task spsc
-uv run pytest
-```
-
-To use the interactive TUI from a checkout, install Node.js 20+, Bun, and pnpm
-11 (or enable Corepack). The launcher installs frontend dependencies and builds
-the client when needed.
-
-For a headless installation directly from GitHub without a checkout:
-
-```bash
-python -m pip install "git+https://github.com/uw-syfi/vibesys.git"
-```
-
-GitHub source installs skip optional submodules and do not build the native TUI.
-Pass `--headless` to suppress the fallback notice. Use a supported PyPI wheel
-when you need the bundled TUI.
-
-### Tests and submodules
-
-Repository submodules are opt-in. Initialize them only when your work needs the
-vendored sources, using `--checkout` to override their default update policy:
-
-```bash
-git submodule update --init --recursive --checkout
-```
-
-`uv run pytest` does not need any of them. The tests that assert on a
-repository-native example's tasks skip when its submodule is absent, and CI's
-`validate-examples` job covers them instead. To get the same coverage locally
-without cloning the candidate repositories, fetch just their `.vibesys`
-directories (a few MB and a few seconds, against hundreds of MB for a full
-checkout):
-
-```bash
-uv run python scripts/example_repositories.py
-```
-
-The example evaluators' build-and-run tests (they compile an example's native code and
-run the real Go evaluator on it) carry the `native_build` marker and are deselected by
-default. CI's `native-evaluator-examples` job runs them when an example or the evaluator
-SDK changes; run them yourself with `uv run pytest -m native_build tests/architecture
-tests/examples`.
-
-Run the Python checks from the repository root:
-
-```bash
-./scripts/check_format.sh
-./scripts/check_lint.sh
-uv run pytest
-```
-
-For a focused test, use for example:
-
-```bash
-uv run pytest tests/vibesys/orchestration/issue_queue/test_stories.py
-uv run pytest -k orchestrator
-```
-
-### Dynamic-loop smoke tier
-
-Run `./scripts/smoke_dynamic_loop.sh` before every live hardware run. It
-launches the installed `vibesys` CLI (launcher and engine) with `--outer-loop
-dynamic --headless` against the Slurm run environment on the Fake cluster
-(`vs_slurm.fake_connector` in executing mode), with real agent CLIs (Claude
-Haiku by default; `VIBESYS_SMOKE_PROVIDER=codex` selects Codex). The input is a
-small CPU task under `tests/e2e/dynamic_smoke/bundle`. A second scenario sends
-Ctrl-C mid-run.
-
-It checks loop invariants from the run's own records
-(`tests/support/loop_invariants.py`): a typed terminal status and no empty
-completion, every offered capability served or withdrawn after `unsupported`,
-no MCP tool timeout, every run path a prompt names present at turn start, no
-evaluation submitted after a stop, the stop grace bound, no Slurm job left
-behind, and recorded token usage. Each run prints one summary line (wall time,
-tokens, cost) to `smoke-summary.txt` under a fresh `vibesys-smoke-*` directory in `$TMPDIR` (or `/tmp`); set
-`VIBESYS_SMOKE_DIR` to choose another location outside the checkout. One run
-of both scenarios takes about 5 minutes and about $0.60 of Haiku tokens. It is
-opt-in (`VIBESYS_E2E_AGENTS=1`) and not in PR CI, because real agents are
-nondeterministic.
-
-### Real-cluster tier
-
-`./scripts/run_slurm_cluster_tests.sh` runs the `slurm` run environment, in four
-configurations, against a real Slurm cluster started in Docker: munge, slurmctld,
-slurmdbd (so `sacct` works), sshd and a login node in a `head` container, and one
-slurmd with four fake GPUs (GRES backed by character devices, no real hardware)
-in a `node` container. No LLM agents run. The agent is a real Docker container
-that VibeSys creates exactly as in production, and the tests drive it with
-scripted commands (`vibesys-gpu`) through the session's sandbox.
-
-The test's run directory is mounted into both cluster containers at the same
-absolute path and stands in for the shared filesystem. `slurm` reaches the head
-over SSH with a per-session key and `ssh_command` options, so nothing in
-`~/.ssh` is read or changed. The local transport needs a Slurm client on the host;
-the tier points its `shell_command` at a small shim that runs the command line in
-the head container (the login node) with the caller's working directory and
-exactly the caller's environment, so the host installs nothing.
-
-| Kind | Configuration | Tests |
-|---|---|---|
-| `slurm` | SSH transport | opening and closing, the agent surface, sockets |
-| `slurm-local` | local transport, no agent GPU commands | the same, and that the container reaches no broker |
-| `slurm-local-gpu` | local transport plus `[vibesys.agent_gpu]` | the same, plus GPU scheduling, cancellation, paths, job environment, confinement and `vibesys-gpu` |
-| `slurm-gpu-alias` | the deprecated `--run-environment slurm-gpu` file | smoke: its deprecation notice and one GPU command |
-
-Each kind is opened as a run would open it: the agents have the evaluation tool, so no gate,
-and `test_agent_surface.py` checks that no evaluation command reaches the container.
-
-The tier is marked `slurm_cluster` and skipped unless `VIBESYS_SLURM_CLUSTER=1`
-and Docker are available. CI runs it as the `real-tiers-slurm` job when the `real_tiers` change filter selects it, on every merge-queue entry, and nightly. The script sets the variable,
-removes everything it created on exit, and passes extra arguments to pytest.
-The shared directory must be on a local filesystem: set
-`VIBESYS_SLURM_CLUSTER_DIR` when `/tmp` is a network mount. The first run builds
-two small images (Ubuntu with `slurm-wlm`, about a minute); later runs reuse
-Docker's cache. Tests wait on Slurm's own state (a job running, the queue
-empty) with a hang guard, never on a fixed delay.
-
-What it does not cover: the ROCprof profiler transport, real GPU devices and
-drivers, cgroup-based resource enforcement, multi-node jobs, and Landlock
-confinement (the compute node uses bubblewrap).
-
-### Minimal-container tier
-
-`./scripts/run_minimal_container_tests.sh` starts every process that runs in the
-agent's editor container, in a real container, on a host without GPUs. For each of
-the CPU, CUDA and ROCm default base images (the ones named by the backends in
-`libs/vs-sandbox/src/vs_sandbox/*_backend.py`) it opens the editor through
-`open_run_environment`, so `docker build` of the real agent layer, the mounts, the
-environment and the uid remap are all production's. The CUDA and ROCm images are
-built and started without an accelerator; nothing runs on a GPU. No LLM is involved.
-In each container it checks that:
-
-- `claude --version` runs and `codex app-server` answers the `initialize` handshake;
-- the evaluation tool server (both the core-run and the per-role descriptor) answers
-  MCP `initialize` and lists its tools, started from the descriptor the run builds;
-- the profiler MCP server of the base's default profiler answers `initialize` and
-  lists its tools;
-- `vibesys-gpu` runs a command through a real host
-  broker (its `srun` is a local program);
-- the `agent` user has a group of its own name and the host's uid and gid.
-
-A fourth, small stand-in base (`ubuntu:24.04`, which owns uid 1000 as `ubuntu` and has
-no `python` command) runs the tool-server and identity checks, so a host that cannot
-pull the large images still covers them.
-
-Tool servers do not use the base image's `python`: the agent image installs a uv-managed
-Python at a fixed path, and the agent launcher starts every Python server on it with
-the framework's source roots on `PYTHONPATH` (`vs_agent.containerize_server`).
-
-The tier is marked `minimal_container` and skipped unless `VIBESYS_MINIMAL_CONTAINER=1`
-and Docker are available. CI runs the CPU base as the `real-tiers-minimal-container` job when the `real_tiers` change filter selects it, on every merge-queue entry, and nightly. The script sets the variable, removes
-the containers it started on exit (their run id starts with `minimal-container-`), and
-passes extra arguments to pytest. Set `VIBESYS_MINIMAL_CONTAINER_BASES` (for example
-`cpu,rocm`) to run some bases, and `VIBESYS_MINIMAL_CONTAINER_DIR` to a directory on a
-local filesystem when `/tmp` is a network mount. A base image is pulled only when the
-local store lacks it and is never removed: the CUDA and ROCm images are tens of
-gigabytes each. With the images cached, one base takes about 15 seconds after its
-agent layer is built, which takes minutes on the first run.
-
-A test that fails for a known bug is marked `expect_failure_for(...)` with the
-issue that tracks it. It is a strict expected failure, so fixing the bug fails the
-tier until the marker is removed. Run with `--runxfail` to see the failures.
-
-What it does not cover: GPU devices and drivers, profiler captures (only the server
-starts), the accelerator-attached editor of the plain Docker environment on a GPU
-host, and the SkyPilot and Modal editors.
-
-The TypeScript client has its own workflow; see
-[`clients/tui/README.md`](https://github.com/uw-syfi/vibesys/blob/main/clients/tui/README.md). The short version is:
-
-```bash
-cd clients
-pnpm install --frozen-lockfile
-pnpm --dir contracts generate:protocol
-pnpm check:ts-architecture
-pnpm check:knip
-pnpm check:clients
-pnpm test:clients
-pnpm build:clients
-pnpm check:ts
-```
-
-`check:clients`, `test:clients`, and `build:clients` run through Turborepo: packages run in
-dependency order and in parallel, and a task whose inputs are unchanged replays its cached result
-from `.turbo/cache` at the repository root. Dev, tests, and type checks read workspace dependencies from source,
-so no command needs another package built first; `pnpm turbo run test --filter @vibesys/<package>`
-checks one package. The [clients architecture](clients-architecture.md) guide describes the build
-model. `tsc -b` keeps each package's `dist` incrementally; `pnpm exec tsc -b --clean` in a package
-removes it.
-
-When Python protocol models change, regenerate the files under
-`clients/libs/contracts/src/generated/` and review the diff.
-See the [TUI architecture guide](tui-architecture.md) for package ownership and dependency rules.
-TUI-specific contributor docs are indexed in [`tui/README.md`](tui/README.md).
-
-The [web UI development guide](web-development.md) covers replay mode, live
-WebSocket smoke runs, detached gateway lifecycle, and SSH access from a local
-laptop to a remote VibeSys host.
-
-## Extend VibeSys
-
-Use the guide that matches the surface you are adding:
-
-- [Add or customize a domain](domains.md) for new
-  problem-space prompts, hooks, and domain registration.
-- [Add or update Agent Skills](https://github.com/uw-syfi/vibesys/blob/main/resources/skills/README.md) and read the
-  [VibeSys skill metadata guide](skill-metadata.md) when routing skills by
-  backend or domain.
-- [Extend profilers](extending-profilers.md) for profiler support packages,
-  MCP tools, and profiler prompts.
-- [Update CLI flags and combinations](../cli-flags.md) when changing the user
-  facing command contract.
-
-See the [agent sessions guide](agent-drivers.md) before changing how agents are
-launched.
-
-Keep target-specific APIs, ABIs, ownership rules, and service protocols in the
-task's `CANDIDATE_CONTRACT.md` or design documentation rather than in the
-neutral framework prompts.
-
-## Internal workflows
-
-For issue forms and repository issue conventions, see
-[`docs/contributing/issue-authoring.md`](issue-authoring.md). For evolutionary search policy
-work, see [`docs/contributing/openevolve.md`](openevolve.md).
-
-## CI gates
-
-Every pull request must pass the following gates before it can be merged.
-You can run each one locally before pushing.
-
-The `changes` job reads `.repoctl/components.toml` for ownership, discovery,
-and dependency policy, and `.repoctl/checks.toml` for executable check groups
-and native commands. `support/repoctl/` provides configurable adapters for
-language and package manifests. The component graph records cross-component
-effects those manifests cannot express. The job prints each selection and its
-reason; an unowned changed path fails selection instead of silently skipping
-checks. To run the selected check groups configured for local runs, use one
-command. The wrapper runs the repository's Go tool, so install Go 1.25 first:
-
-```bash
-./support/repoctl/repoctl test
-```
-
-This does not run every CI check. Browser end-to-end tests (`tui_e2e`) are
-CI-only by default: Playwright needs Chromium and its system libraries as well
-as the client and Python environments, so making the normal local command
-acquire or require them would make it unexpectedly heavyweight. Run that group
-explicitly when browser coverage is needed. Local port 5173 must be free or
-already serve this checkout's web app: Playwright reuses a local listener, so
-an unrelated listener would run the wrong app.
+## Common commands
 
 ```bash
 uv sync --dev
 pnpm --dir clients install --frozen-lockfile
-(cd clients && pnpm --filter @vibesys/app-web exec playwright install --with-deps chromium)
-./support/repoctl/repoctl run-checks --group tui_e2e
+./support/repoctl/repoctl doctor
+./scripts/check_format.sh
+./scripts/check_lint.sh
+uv run pytest
+./support/repoctl/repoctl test
+./support/repoctl/repoctl test --checks-only
 ```
 
-The CI-only decision is specific to `tui_e2e`. It does not change the
-selection policy for the other check groups without local-selection keys; each
-has its own prerequisites and needs its own policy decision.
+## Before you change code
 
-Use `./support/repoctl/repoctl plan` to inspect the selection without running checks.
-The workflow runs named check groups from `.repoctl/checks.toml`. Run
-`./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml` after
-changing component ownership or dependencies; CI runs this contract check before
-selecting jobs.
+Use the repository software-design skill for code changes and the testing skills
+for tests. Keep policy with its owner, dependencies one-way and I/O behind the
+owning library's interface. Product policy belongs above reusable mechanisms.
+The [coding guide](coding-best-practices.md) describes the enforced limits.
+
+## Local development
+
+### Check your environment
+
+Run the repository doctor's environment check before the first check on a
+machine. It checks tool versions, dependencies, temporary storage and hook setup.
+Apply its reported environment exports in the same shell that runs later checks.
+A setup failure should be repaired at that boundary rather than suppressed in
+a test or gate.
+
+The [repository tooling README](https://github.com/uw-syfi/vibesys/blob/main/support/repoctl/README.md)
+owns setup, development launchers and check commands. Python dependencies use
+uv, client dependencies use the pinned workspace package manager, and Go tools
+use the repository's declared toolchain. The client test runner checks its
+pinned runtime before running tests.
+
+### Work from a source checkout
+
+Keep credentials and machine-specific configuration outside tracked changes.
+Use generic placeholders in examples and prose. Start the desktop through the
+repository development launcher so the app and host artifacts agree; see
+[Desktop app development](desktop-development.md).
+
+Initialize submodules when needed with `git submodule update --init --recursive --checkout`. Submodules are opt-in. Fetch only what a task needs. Missing example checkouts
+do not prevent ordinary unit tests; dedicated example validation covers those
+contracts. Review and stage explicit paths so a local submodule checkout never
+silently changes the repository's pin. Declare each intentional example pin change with an `Example-Bump: <path>` commit trailer; this also selects example validation in CI. Repair an accidental pin with `git checkout origin/main -- <path>`. Example native build tests are excluded by default; run them with `uv run pytest -m native_build tests/architecture tests/examples`.
+
+## Verification tiers
+
+Use the cheapest check that can disprove the change first. Types, dependency
+checks and pure tests cover local contracts. Deterministic simulation exercises
+whole lifecycles with injected I/O and a virtual clock. Real-system tiers check
+boundaries that simulation cannot establish.
+
+A deterministic test uses no real clock, process, thread, socket or signal
+outside the simulation library. Fakes stand at I/O boundaries; tests exercise
+public APIs. Timing bounds guard against hangs and never decide correctness.
+See [Testing map](testing-map.md) for the suite boundaries.
+
+### Dynamic-loop smoke tier
+
+The smoke tier runs a complete search with scripted agents and simulated
+infrastructure. It checks the connection between policy, lifecycle, evidence
+and final selection without model-provider cost.
+
+### Agent-less runs
+
+Scripted agents make search behavior repeatable. They are useful for lifecycle
+and recovery assertions, but do not establish that a real provider accepts the
+launch configuration or that a model can solve the task.
+
+### Real-cluster tier
+
+Real-cluster checks exercise dispatch, collection and cleanup on external
+infrastructure. They need operator credentials and resources and belong outside
+the deterministic suite. See [remote Slurm execution](../remote-slurm-execution.md)
+for the operator model.
+
+### Minimal-container tier
+
+The container tier checks the built agent image, installed provider programs,
+tool-server startup and confinement wiring. It complements simulation by
+checking the actual process boundary. It does not establish device-driver or
+remote-cluster compatibility.
+
+## Extend VibeSys
+
+A search is written as a journaled flow; see [Flows](flows.md). The
+[orchestration guide](orchestration-runtime.md) explains policy ownership.
+Domain resources, [input bundles](examples.md), [profilers](extending-profilers.md)
+and [skills](skill-metadata.md) each have a focused guide.
+
+## CI gates
+
+CI selects checks from the repository's component and dependency policy.
+Unowned changes fail selection. The local test command runs the groups selected
+for the change and reports groups that cannot run locally with their reasons.
+Inspect the plan when the selection is surprising rather than guessing a suite.
+
+The two-stage CI model runs selected checks on pull requests and the full stage in the merge queue and on main. The `test.yml` workflow and check registry own the stage budgets, command lists and selection rules. This guide
+does not duplicate them. The [tooling README](https://github.com/uw-syfi/vibesys/blob/main/support/repoctl/README.md)
+explains how to inspect and run the selection.
+
+### Client checks before a push
+
+Run the repository client-check command for desktop or shared client changes.
+Package tests alone miss dependency, runtime, unused-code and design-system
+violations. Visual checks use the built app and deterministic fixtures; the
+repository desktop verification skill owns their review workflow.
+
+### Pre-push gate
+
+Every push runs the selected fast checks through the tracked hook. Verify that
+the hook is installed; the doctor reports a different hook configuration.
+Repair setup failures and rerun the gate before pushing. CI and the merge queue
+remain authoritative for checks that need their infrastructure.
+
+### Private terms
+
+Private server names, internal hostnames, personal paths and credentials do not
+belong in commits. The local private-terms check reads an external private list
+and reports locations without printing the matched secrets. A machine without
+that list cannot establish that a change contains no private terms. Review is
+still necessary because CI cannot carry the private list.
 
 ### Format
 
-```bash
-./scripts/check_format.sh
-```
-
-Runs `ruff format --check` (whitespace, line length, blank lines) and
-`ruff check --select I` (import order) across `src`, `tests`, `examples`,
-`resources`, `libs`, and `support`. To auto-fix locally:
-
-```bash
-uv run ruff format src tests examples resources libs support
-uv run ruff check --select I --fix src tests examples resources libs support
-```
+Run the repository format check. Generated artifacts are regenerated from their
+source rather than hand-formatted independently.
 
 ### Lint
 
-```bash
-./scripts/check_lint.sh
-```
-
-Runs `ruff check .` across the whole repository. Fix automatically where
-possible with `--fix`; the remaining errors need manual attention. Test
-files that trigger false-positive rules (e.g. `S106` on fixture arguments,
-`ANN001`/`ANN201` on helpers, `PLR0913` on builder functions) can suppress
-them at the site with `# noqa: <code>` only when reasonable lint-compliant
-alternatives would make the design more hacky. List those alternatives and why
-each is worse in the source rationale. Every suppression, including a
-file-level `# ruff: noqa`, needs a `LW-` waiver ID and that rationale; see
-[Ratchets](coding-best-practices.md#ratchets).
+Run the repository lint check. A suppression is an explicit opt-out with a
+reason and a waiver, not a fix for a boundary violation. See
+[coding best practices](coding-best-practices.md#ratchets).
 
 ### Coverage
 
-The test job enforces two independent coverage floors:
-
-**Repo-wide floor — 75 %**  
-`uv run pytest` (with `--cov` already wired in via `pyproject.toml`) must
-reach 75 % combined statement + branch coverage across the tracked packages
-(`entrypoints`, `server`, `vibesys`, `vs_agent`, `vs_bench`,
-`vs_evaluator_protocol`, `vs_github`, `vs_issue_tracker`, `vs_core`,
-`vs_project`, `vs_prompts`, `vs_runtime`, and `vs_sandbox`; the list is
-`[tool.coverage.run] source` in `pyproject.toml`).
-
-**Per-module floor — 40 %**  
-`scripts/check_coverage_floor.py` reads `coverage.json` and rejects any
-module below 40 % that is not in the `allowlist` in
-`[tool.vibesys.per_module_coverage]` in `pyproject.toml`. The repo-wide
-average can mask a single near-zero module; this floor prevents that (see
-issue #298). Modules may be allowlisted only with a comment explaining why
-they are intentionally untested.
-
-**Patch coverage (PRs only)**  
-New lines introduced by a pull request are checked separately against a
-patch-coverage threshold. If your PR adds code that is not exercised by any
-test, this gate will fail even if the repo-wide numbers are healthy. Add
-focused unit tests for the new code paths — prefer pure-function extraction
-(as in issue #290) to make new logic directly testable.
-
-To reproduce the coverage check locally:
-
-```bash
-uv run pytest --cov-report=json
-uv run python scripts/check_coverage_floor.py coverage.json
-```
+Coverage gates catch untested changes and weakly covered modules. The repository
+configuration owns the thresholds and exceptions. A coverage number does not
+replace correctness properties: test public behavior, recovery and failure
+contracts with the smallest relevant suite.

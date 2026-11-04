@@ -19,6 +19,7 @@ from vibesys.orchestration.single.search._operations import (
     VerifyParentRevision,
 )
 from vibesys.orchestration.single.search._prompts import PromptContext, PromptTemplate, RoundPrompt
+from vibesys.orchestration.single.search._resume import SingleResume
 from vibesys.orchestration.single.search._roles import EXCHANGES, IMPLEMENTER, ROLES
 from vibesys.orchestration.single.search._round import SingleRound, play_round
 from vibesys.orchestration.single.search._search import single
@@ -48,6 +49,7 @@ __all__ = [
     "RoundPrompt",
     "SingleAttempt",
     "SingleConfig",
+    "SingleResume",
     "SingleRound",
     "VerifyParentRevision",
     "budget",

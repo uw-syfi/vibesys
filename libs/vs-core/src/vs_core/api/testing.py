@@ -34,9 +34,21 @@ from vs_core.testing.flows import (
     Render,
     RestartPolicy,
     Verify,
+    code_changed,
     fake_search,
 )
+from vs_core.testing.limits import next_end, reach
 from vs_core.testing.liveness import Budget, End, Journal, Violation, assert_live, liveness
+from vs_core.testing.persisted_schema import (
+    Incompatibility,
+    SchemaSnapshot,
+    assert_schema_snapshot,
+    parse_schema_snapshot,
+    schema_incompatibilities,
+    schema_snapshot,
+    snapshot_problems,
+)
+from vs_core.testing.schema_versions import assert_schema_pinned, schema_digest
 
 __all__ = [
     "FAKE_OPERATIONS",
@@ -50,6 +62,7 @@ __all__ = [
     "Faults",
     "FlowRun",
     "Harness",
+    "Incompatibility",
     "Interpret",
     "Journal",
     "Prompt",
@@ -57,6 +70,7 @@ __all__ = [
     "RestartPolicy",
     "Retryable",
     "Running",
+    "SchemaSnapshot",
     "Script",
     "Succeeded",
     "Trace",
@@ -64,10 +78,20 @@ __all__ = [
     "Verify",
     "Violation",
     "assert_live",
+    "assert_schema_pinned",
+    "assert_schema_snapshot",
+    "code_changed",
     "drive",
     "fake_search",
     "liveness",
     "new_run",
+    "next_end",
+    "parse_schema_snapshot",
+    "reach",
     "sample_limits",
     "sample_retries",
+    "schema_digest",
+    "schema_incompatibilities",
+    "schema_snapshot",
+    "snapshot_problems",
 ]

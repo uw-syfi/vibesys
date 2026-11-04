@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, assert_never, cast
@@ -15,6 +14,7 @@ from vs_sandbox.compute_backends import (
     SandboxKind,
     make_local_shell_sandbox,
 )
+from vs_sandbox.container_memory import ContainerMemoryCap
 from vs_sandbox.gpu_monitor import (
     GpuContentionMonitor,
     GpuInfo,
@@ -22,7 +22,7 @@ from vs_sandbox.gpu_monitor import (
     NvidiaSmiTelemetry,
     pick_gpu,
 )
-from vs_sim.api import OsThreads, SubprocessProbe, Threads
+from vs_sim.api import Threads, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -30,13 +30,30 @@ if TYPE_CHECKING:
     from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.docker_sandbox import DockerSandbox as DockerSandboxType
     from vs_sandbox.execution import CommandRunner
+    from vs_sandbox.gpu_monitor import GpuContentionEvents
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sandbox.local_shell import LocalShellRunner
-    from vs_sim.api import CommandProbe
+    from vs_sim.api import Clock, CommandProbe, PipedProcessLauncher
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
-_DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
+DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
+
+
+class CudaAcceleratorUnavailableError(RuntimeError):
+    """No NVIDIA GPU is usable on this host for the ``cuda`` backend.
+
+    Raised before any image build or container start: nothing falls back to
+    running the container without its accelerator.
+    """
+
+    @classmethod
+    def no_gpu_detected(cls) -> CudaAcceleratorUnavailableError:
+        """Describe a host where ``nvidia-smi`` reports no GPU, or is not installed."""
+        return cls(
+            "The 'cuda' backend needs an NVIDIA GPU and the NVIDIA Container Toolkit's "
+            "Docker runtime, but `nvidia-smi` reports no GPU on this host."
+        )
 
 
 class CudaBackend:
@@ -49,25 +66,35 @@ class CudaBackend:
 
     name = ComputeBackend.CUDA
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's four collaborators (GPU telemetry, threads, Docker CLI, command probe) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's six collaborators (GPU telemetry, threads, process launcher, Docker CLI, command probe, contention events) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
         self,
         log_dir: Path,
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
         gpu_telemetry: GpuTelemetry | None = None,
-        threads: Threads | None = None,
-        docker: DockerCli | None = None,
-        probe: CommandProbe | None = None,
+        threads: Threads,
+        launcher: PipedProcessLauncher,
+        docker: DockerCli,
+        probe: CommandProbe,
+        clock: Clock,
+        events: GpuContentionEvents | None = None,
     ) -> None:
-        """Configure CUDA execution with its log directory, image override and GPU telemetry."""
-        self._probe: CommandProbe = probe or SubprocessProbe()
+        """Configure CUDA execution with its log directory, image override and GPU telemetry.
+
+        ``clock`` counts seconds since the epoch; it stamps each GPU selection in ``gpu.json``.
+        """
+        self._clock = clock
+        self._probe = probe
         self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry(probe=self._probe)
-        self._threads: Threads = threads or OsThreads()
+        self._threads = threads
+        self._launcher = launcher
         self._docker = docker
+        self._memory = ContainerMemoryCap(docker)
+        self._events = events
         self.log_dir = Path(log_dir)
         self._lprint = log or print
-        self.image = image or _DEFAULT_IMAGE
+        self.image = image or DEFAULT_IMAGE
         self.selected_device: GpuInfo | None = None
         self._monitor: GpuContentionMonitor | None = None
         # Sandboxes built so far, so maybe_rebalance can find them without
@@ -120,9 +147,13 @@ class CudaBackend:
                 host_workspace=host_workspace,
                 env=env,
                 lifecycle_hooks=lifecycle_hooks,
+                threads=self._threads,
+                launcher=self._launcher,
             )
         elif kind is SandboxKind.DOCKER:
             sandbox = docker_sandbox_class(
+                # A runaway process dies inside its container, not the host.
+                memory_limit=self._memory.limit(),
                 host_workspace=host_workspace,
                 image=container_image or self.image,
                 gpus=self._docker_gpu_spec() if attach_accelerator else None,
@@ -133,6 +164,7 @@ class CudaBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
                 docker=self._docker,
+                threads=self._threads,
                 docker_in_docker=docker_in_docker,
                 same_path_workspace=same_path_workspace,
                 run_id=run_id,
@@ -145,6 +177,18 @@ class CudaBackend:
             self._sandboxes.append((kind, sandbox))
         return sandbox
 
+    def ensure_accelerator_available(self) -> None:
+        """Raise :class:`CudaAcceleratorUnavailableError` when no GPU is usable here.
+
+        A pinned ``CUDA_VISIBLE_DEVICES`` is trusted, matching :meth:`_pick_device`'s own
+        "user pinned GPU" exception; otherwise this reads the same ``nvidia-smi``
+        telemetry :meth:`_pick_device` later selects a device from, so a host with no
+        GPU fails here -- before any image build -- instead of at the first
+        ``docker run --gpus`` call.
+        """
+        if not _gpu_usable(self._telemetry):
+            raise CudaAcceleratorUnavailableError.no_gpu_detected()
+
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Create a contention monitor when a CUDA device is selected."""
         if self.selected_device is None:
@@ -154,6 +198,8 @@ class CudaBackend:
             gpu_uuid=self.selected_device.uuid,
             telemetry=self._telemetry,
             threads=self._threads,
+            clock=self._clock,
+            events=self._events,
         )
         return self._monitor
 
@@ -207,6 +253,8 @@ class CudaBackend:
             gpu_uuid=new_gpu.uuid,
             telemetry=self._telemetry,
             threads=self._threads,
+            clock=self._clock,
+            events=self._events,
         )
         self._monitor.start()
 
@@ -297,7 +345,7 @@ class CudaBackend:
         data = {
             "selected_gpu": _gpu_to_dict(gpu),
             "all_gpus_at_selection": [_gpu_to_dict(g) for g in all_gpus],
-            "selected_at": datetime.now(UTC).isoformat(),
+            "selected_at": utc_datetime(self._clock).isoformat(),
             "contention_detected": False,
             "contention_events": 0,
         }
@@ -314,3 +362,19 @@ def _gpu_to_dict(g: GpuInfo) -> dict[str, int | str]:
         "memory_free_mib": g.memory_free_mib,
         "utilization_pct": g.utilization_pct,
     }
+
+
+def cuda_accelerator_unavailable(probe: CommandProbe) -> str | None:
+    """Why the ``cuda`` backend cannot run on this host, read through *probe*, or ``None``.
+
+    The same decision :meth:`CudaBackend.ensure_accelerator_available` makes before a
+    run builds its image, so startup validation agrees with the run.
+    """
+    if _gpu_usable(NvidiaSmiTelemetry(probe=probe)):
+        return None
+    return str(CudaAcceleratorUnavailableError.no_gpu_detected())
+
+
+def _gpu_usable(telemetry: GpuTelemetry) -> bool:
+    """A pinned ``CUDA_VISIBLE_DEVICES`` is trusted; otherwise ``nvidia-smi`` must list a GPU."""
+    return bool(os.environ.get("CUDA_VISIBLE_DEVICES")) or bool(telemetry.gpus())

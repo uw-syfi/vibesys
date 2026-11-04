@@ -24,6 +24,8 @@ from vs_evaluation.models import (
     EvaluationState,
     EvaluationStepResult,
     ExecutorObservation,
+    ExecutorPoll,
+    PollPhase,
     ProfileField,
     ResourceRequirements,
     ReuseStatus,
@@ -298,6 +300,20 @@ class FakeEvaluationExecutor:
             return self._observations.popleft()
         return self.backend.inspect(handle_id)
 
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        """Read the shared backend without submitting or starting recovery tasks."""
+        observed = await self.inspect_only(handle_id)
+        if observed is None:
+            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        if is_finished(observed.state):
+            return ExecutorPoll(phase=PollPhase.ENDED, terminal=observed)
+        phase = PollPhase.QUEUED if observed.state is EvaluationState.QUEUED else PollPhase.RUNNING
+        return ExecutorPoll(phase=phase, current_stage=observed.current_stage)
+
+    async def recover(self, handle_id: str) -> ExecutorPoll:
+        """A reopened client reads authoritative state from its shared backend."""
+        return await self.poll(handle_id)
+
     async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
         """Wait for a deliberate test state change or advance fake time."""
         self.wait_calls.append((handle_id, timeout_s))
@@ -391,7 +407,7 @@ class InMemoryEvaluationNamespace:
 
     def __init__(self) -> None:
         """Start with no external operational state."""
-        self._values: dict[str, str] = {}
+        self._values: dict[str, bytes] = {}
 
     def load[ModelT: BaseModel](
         self, relative_path: str | PurePosixPath, model_type: type[ModelT]
@@ -426,7 +442,15 @@ class InMemoryEvaluationNamespace:
             serialized = json.dumps(model.model_dump(mode="json", round_trip=True), allow_nan=False)
         except (TypeError, ValueError) as error:
             raise ProjectStateError.state_serialization_failed() from error
-        self._values[key] = serialized
+        self._values[key] = serialized.encode()
+
+    def read_bytes(self, relative_path: str | PurePosixPath) -> bytes | None:
+        """Read detached subsystem bytes through the same safe path boundary."""
+        return self._values.get(self._key(relative_path))
+
+    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+        """Atomically replace one subsystem-owned receipt."""
+        self._values[self._key(relative_path)] = contents
 
     def delete(self, relative_path: str | PurePosixPath) -> bool:
         """Delete an existing model, reporting whether it was present."""

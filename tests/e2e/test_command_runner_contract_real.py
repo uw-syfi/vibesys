@@ -34,13 +34,26 @@ from tests.support.command_runner_contract import (
 )
 
 from vs_agent.api.images import agent_image
-from vs_sandbox.api import CommandRunner, DockerSandbox, LocalShellRunner
+from vs_sandbox.api import (
+    STEP_TAG_ENV,
+    CommandRunner,
+    DockerSandbox,
+    LocalShellRunner,
+    SubprocessDockerCli,
+)
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api import OsThreads, Threads
+from vs_sim.api import (
+    MonotonicClock,
+    OsProcesses,
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    Threads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 #: Upper bound on a stopped process exiting; reached only when a stop failed.
 _EXIT_BOUND_SECONDS = 30.0
@@ -81,10 +94,12 @@ class _ShellHarness:
         return f"kill -{signal_number} $$"
 
     def hang(self, *, announce: bool) -> str:
-        # Relative paths: the command runs in the workspace on every kind.
+        # Relative paths: the command runs in the workspace on every kind. The
+        # child clears its environment, as harnesses that pass ``env=`` do, so a
+        # stop cannot rely on finding it by an inherited variable.
         steps = [
             "exec 3> alive",
-            "sleep 1000 &",
+            "env -i sleep 1000 &",
             f"printf %s {PARTIAL_STDOUT}",
             f"printf %s {PARTIAL_STDERR} >&2",
         ]
@@ -128,7 +143,36 @@ class _ShellHarness:
 class TestLocalShellRunner(CommandRunnerContract):
     @pytest.fixture
     def harness(self, tmp_path: Path) -> Iterator[Harness]:
-        harness = _ShellHarness(LocalShellRunner(tmp_path, max_output_chars=CAP), tmp_path)
+        harness = _ShellHarness(
+            LocalShellRunner(
+                tmp_path,
+                max_output_chars=CAP,
+                threads=OsThreads(),
+                launcher=SubprocessPipedProcessLauncher(),
+            ),
+            tmp_path,
+        )
+        try:
+            yield harness
+        finally:
+            harness.close()
+
+
+class TestMarkedLocalShellRunner(CommandRunnerContract):
+    """A stage command under the step mark runs in a leader wrapper; the contract still holds."""
+
+    @pytest.fixture
+    def harness(self, tmp_path: Path) -> Iterator[Harness]:
+        harness = _ShellHarness(
+            LocalShellRunner(
+                tmp_path,
+                env={STEP_TAG_ENV: "run-a:vs-x"},
+                max_output_chars=CAP,
+                threads=OsThreads(),
+                launcher=SubprocessPipedProcessLauncher(),
+            ),
+            tmp_path,
+        )
         try:
             yield harness
         finally:
@@ -148,10 +192,13 @@ class TestDockerSandboxOnFakeDaemon(CommandRunnerContract):
             agent_uid=os.getuid(),
             agent_gid=os.getgid(),
             docker=FakeDockerEngine(
-                tmp_path / "engine-state", agent_ids=(os.getuid(), os.getgid())
+                tmp_path / "engine-state",
+                agent_ids=(os.getuid(), os.getgid()),
+                launcher=SubprocessPipedProcessLauncher(),
             ),
+            threads=OsThreads(),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         harness = _ShellHarness(sandbox, workspace)
         try:
             yield harness
@@ -173,10 +220,19 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
         workspace.mkdir()
         sandbox = DockerSandbox(
             host_workspace=str(workspace),
-            image=agent_image(_DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S),
+            image=agent_image(
+                _DOCKER_BASE_IMAGE,
+                timeout=_DOCKER_BUILD_TIMEOUT_S,
+                clock=MonotonicClock(),
+                output=DISCARD,
+            ),
             max_output_bytes=CAP,
+            docker=SubprocessDockerCli(
+                processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+            ),
+            threads=OsThreads(),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         harness = _ShellHarness(sandbox, workspace)
         try:
             yield harness

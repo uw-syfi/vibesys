@@ -17,7 +17,12 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "agentshim>=0.15.7,<0.16",
+    "typing-extensions>=4.12",
+    "google-crc32c>=1.7,<2",
+    "protobuf-py==0.6.0",
+    "protobuf==6.33.5",
+    "protovalidate==2.0.0",
+    "agentshim>=0.25.0,<0.26",
     "cbor2<6",
     "cryptography<50",
     "jinja2>=3.1",
@@ -25,11 +30,14 @@ dependencies = [
     "mcp>=1.0,<2",
     "modal>=1.4.2",
     "pydantic>=2",
+    "pydantic-core",
     "pygit2>=1.18,<2",
     "websockets>=14.2,<15",
     "pyyaml>=6",
     "python-dotenv>=1.0.1",
     "openevolve==0.3.1",
+    "jsonschema>=4.23,<5",
+    "rpds-py>=0.30,<0.31",
 ]
 
 [project.urls]
@@ -37,23 +45,16 @@ Repository = "https://github.com/uw-syfi/vibesys"
 Issues = "https://github.com/uw-syfi/vibesys/issues"
 
 [project.scripts]
-# The `vibesys` launcher: starts the interactive TUI (bundled only when the
-# wheel was built with a JavaScript toolchain), or runs the headless engine with
-# `--headless`/`validate`/no TTY. The engine itself is
-# `python -m entrypoints.headless`.
+# The `vibesys` launcher routes Python run and utility commands to their entrypoints.
 vibesys = "entrypoints.launcher:main"
-# The one program the desktop app runs on a host, once per channel
-# (docs/contributing/desktop-connection.md, "The host helper").
-vibesys-host-helper = "entrypoints.host_helper:main"
 
 [tool.setuptools.package-data]
-# ``entrypoints/_tui`` is produced at build time by setup.py's build_py step;
-# the glob keeps it as package data when present.
-vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_sdk/**/*"]
-entrypoints = ["py.typed", "_tui/**/*"]
-server = ["py.typed", "chat/prompts/*.j2"]
+vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_skills/**/*", "_sdk/**/*", "fact_import/descriptors/*.json"]
+entrypoints = ["py.typed"]
 launch = ["py.typed"]
 vs_evaluator_protocol = ["py.typed"]
+vs_decode = ["py.typed"]
+vs_redaction = ["py.typed"]
 vs_evaluation = ["py.typed"]
 vs_async_ops = ["py.typed"]
 vs_github = ["py.typed"]
@@ -69,8 +70,16 @@ vs_mcp = ["py.typed"]
 vs_faults = ["py.typed"]
 vs_sim = ["py.typed"]
 vs_dst = ["py.typed"]
+vs_logs = ["py.typed"]
+vs_proto = ["py.typed"]
+vs_runlog = ["py.typed"]
 
 [dependency-groups]
+proto = ["buf-bin==1.73.0", "protoc-gen-py==0.6.0"]
+# All the `coverage` job installs: it combines the shards' data and reads it with `coverage` and
+# `diff-cover`, and imports none of the project. Installing `dev` there cost 6 s of the queue run's
+# critical path (about ten packages against the whole development environment).
+coverage-report = ["coverage", "diff-cover"]
 dev = [
     "auditwheel==6.8.0",
     "chardet<6",
@@ -80,6 +89,7 @@ dev = [
     "tach==0.35.1",
     "matplotlib>=3.10.8",
     "pytest",
+    "protobuf==6.33.5",
     "pytest-asyncio",
     "pytest-cov",
     "pytest-timeout",
@@ -92,6 +102,7 @@ dev = [
     "ruff==0.15.12",
     "twine",
     "ty==0.0.75",
+    "types-protobuf==7.35.1.20260906",
 ]
 test = [
     "hypothesis",
@@ -100,34 +111,43 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "scripts/published_skills/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "skills/search/commit/tests"]
+# Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
+sim_smoke_slow = ["libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
 # below, so `uv run pytest` reports coverage locally without needing the full
-# flag string CI uses. CI layers on `--cov-report=xml`, `--cov-report=json`,
-# and `--cov-fail-under` on top of this; it does not need its own `--cov=...`
-# flags.
+# flag string CI uses; with no `--cov-report`, pytest-cov prints its terminal
+# report, and `[tool.coverage.report] show_missing` adds the missing lines.
+# Name no report here: a command's `--cov-report=` adds to this list instead of
+# replacing it, so CI's shards (which pass `--cov-report=` and leave reporting
+# to the combine job) would still build a report, 15 to 25 s each.
 # Keep worker queues short so long tests do not remain queued behind fast tests.
 # loadgroup keeps each xdist_group (shared native-build fixtures, shared worlds)
 # on one worker, locally as in CI.
-addopts = "-ra -p no:tach --import-mode=importlib --dist loadgroup --maxschedchunk=1 --cov --cov-report=term-missing -m 'not native_build'"
+addopts = "-ra -p no:tach --import-mode=importlib --dist loadgroup --maxschedchunk=1 --max-worker-restart=0 --cov -m 'not native_build'"
 pythonpath = [".", "packaging", "libs/vs-sim/pytest_plugin"]
-# A test still running after this many seconds dumps every thread's stack to
-# stderr (xdist workers inherit the controller's stderr, so it reaches the CI
-# log). It never kills or fails the test, so it is a diagnostic and not a
-# wall-clock assertion. It sits above the slowest legitimate test (about 93 s).
-faulthandler_timeout = 120
-# Hard backstop for a hung test, not a test condition: no test may rely on it to
-# pass (a test synchronizes on the thing it waits for). CI's slowest legitimate
-# test takes about 93 s and a whole 16-way shard finishes in 2 to 2.5 minutes, so
-# 300 s is over three times the slowest test. `signal` raises in the main thread,
-# which a blocked lock, join or read does not stop (CPython runs the handler after
-# the system call is interrupted), and xdist then reports one failed test and goes
-# on. `thread` was rejected: it kills the worker, and CI's `--dist loadgroup` then
+# No `faulthandler_timeout`: pytest's watchdog for it dumps every thread's stack from a C
+# thread that holds no GIL, and walking the frames of a thread that is running Python code can
+# segfault the worker (a script with eight busy threads and one dump crashed 26 of 100 runs;
+# CI run 39144616313 lost a worker 10 s after such a dump). The hard bound below dumps the same
+# stacks from Python with the GIL held and fails the test.
+# Hard bound for a hung deterministic-tier test, not a test condition: no test
+# may rely on it to pass (a test synchronizes on the thing it waits for). It
+# stays under half the `test` job's cancel time
+# (tests/quality/test_hang_backstop.py), so a hang is named before that job is
+# cancelled. Tests in sim_real_tiers, and tests marked e2e, real_contract or
+# slow, keep a longer bound from the root conftest.py.
+# `signal` raises in the main thread, which a blocked lock, join or read does
+# not stop (CPython runs the handler after the system call is interrupted), and
+# xdist then reports one failed test and goes on. `thread` was rejected: it
+# kills the worker, and `--dist loadgroup` then
 # stalls with no replacement worker until the job timeout (reproduced with
-# xdist 3.8.0; `--dist load` recovers). faulthandler's dump at 120 s shows where the
-# test was stuck. Tests marked e2e, real_contract or slow get a higher bound from
+# xdist 3.8.0; `--dist load` recovers). The same stall follows any worker crash, so
+# `--max-worker-restart=0` (in addopts) ends the session at once with the crash reported
+# (`tests/support/worker_exit.py` adds the exit code or signal) instead of waiting for
+# the job timeout. Tests marked e2e, real_contract or slow get a higher bound from
 # the root conftest.py.
-timeout = 300
+timeout = 200
 timeout_method = "signal"
 markers = [
     # Applied by `pytest_collection_modifyitems` in the root conftest.py, which
@@ -141,20 +161,24 @@ markers = [
     # A Fake-vs-real contract suite run against the real implementation. Each
     # such test is skipped unless its opt-in environment variable is set.
     "native_build: compiles an example evaluator's native code and runs it; applied by the root conftest.py to tests that request a native build fixture, deselected by default, run by CI's native-evaluator-examples job with -m native_build",
-    "slow: an exhaustive sweep too long for a pull request; the vs-sim plugin deselects it at --depth=pr and runs it at --depth=nightly",
+    "slow: an exhaustive sweep too long for a pull request; the vs-sim plugin deselects it at --depth=pr (keeping one case of each under sim_smoke_slow) and runs it at --depth=nightly",
     "slurm_cluster: runs the slurm environment (SSH, local, local with agent GPU commands, and the deprecated slurm-gpu alias) against a real Slurm cluster in Docker; opt in with VIBESYS_SLURM_CLUSTER=1",
     "minimal_container: starts every in-container process in a real container built on each default base image, on a host without GPUs; opt in with VIBESYS_MINIMAL_CONTAINER=1",
+    "regression: a test that pins a fixed bug; a @given one must also carry @example (tests/quality/test_regression_properties_are_pinned.py)",
     "real_contract: runs a Fake-vs-real contract suite against the real implementation (real DB, subprocess, or service); opt in with VIBESYS_REAL_CONTRACTS=1",
 ]
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_bench"]
+source = ["entrypoints", "launch", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_redaction", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_logs", "vs_proto", "vs_runlog", "vs_bench", "scripts.corevalue", "scripts.host_operations"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured
     # entrypoint. Exercising them would require invoking a separate process.
     "*/__main__.py",
+    # Generated bindings are verified byte-for-byte by the proto check.
+    "*/vs_proto/_generated/*",
+    "scripts/corevalue/tests/*",
 ]
 
 [tool.coverage.report]
@@ -182,6 +206,15 @@ floor = 40
 # implies it is untested.
 allowlist = []
 
+[tool.vibesys.contract_sot]
+# Phase 3 generates the core types from these protos and deletes the hand-written
+# copies. Only this generated Attempt is temporarily exempt from the copy rule;
+# imports and all other copies remain checked. Proto regenerate-and-diff guards it.
+# A directory exclusion would hide unrelated copies and legacy imports.
+copy_waivers = [
+    { path = "libs/vs-proto/src/vs_proto/_generated/vibesys/store/v1/span_pb.py", symbol = "Attempt", reason = "Run transport v2 phase 3 generates core types from proto and deletes hand-written copies (#3332)." },
+]
+
 [tool.vibesys.file_length]
 # God-file ceiling for first-party Python, in physical lines (`wc -l`).
 # Enforced by `scripts/check_file_length.py`. Ruff's C901/PL rules bound
@@ -189,6 +222,8 @@ allowlist = []
 # accumulate, and `clients/biome.json` has the TypeScript counterpart
 # (`style/noExcessiveLinesPerFile`) at the same 2000-line ceiling.
 max_lines = 2000
+# Generated artifacts are guarded by the proto regenerate-and-diff check.
+generated = ["libs/vs-proto/src/vs_proto/_generated"]
 
 # Directories scanned for `*.py`. Any path with a `tests` or `__pycache__`
 # component is skipped: long test modules are normal, and `clients/biome.json`
@@ -210,7 +245,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # Glob patterns of directories scanned for Python tests and `*.test.ts`.
 # Python roots mirror `[tool.pytest.ini_options] testpaths`; `clients` adds the
 # TypeScript workspaces. `__pycache__` and `fixtures` directories are skipped.
-roots = ["tests", "libs/*/tests", "sdk/*/tests", "clients"]
+roots = ["tests", "libs/*/tests", "sdk/*/tests", "scripts/corevalue/tests", "skills/search/*/tests", "clients"]
 
 # Repo-relative JSONL baseline, one {"path", "rule", "count"} entry per line.
 baseline = "tests/quality/isolation_baseline.jsonl"
@@ -218,21 +253,35 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
-# resources/skills/ vendors reference code (submodule checkouts and copied
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/src", "libs/vs-decode/tests", "libs/vs-redaction/src", "libs/vs-redaction/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "libs/vs-logs/src", "libs/vs-logs/tests", "libs/vs-proto/src", "libs/vs-runlog/src", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+# skills/domains/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
 extend-exclude = [
-    "resources/skills",
+    # Tool-owned output: edits are rejected by the proto regenerate-and-diff check.
+    "libs/vs-proto/src/vs_proto/_generated",
+    "libs/vs-core/src/vs_core/_generated",
+    "libs/vs-runtime/src/vs_runtime/_core_values",
+    "scripts/corevalue/tests/generated_pb",
+    "scripts/corevalue/tests/generated_values",
+    "scripts/corevalue/tests/generated_boundary",
+    "skills/domains",
+    "third_party/serving-repos",
+    "examples/model-serving/show-o2-1.5B-HQ/.vibesys/tasks/default/reference/Show-o",
     "examples/microservices/repositories/deathstarbench",
     "examples/microservices/repositories/masa",
+    "examples/microservices/repositories/rpcstack",
     "examples/microservices/repositories/train-ticket",
+    "examples/model-serving/repositories/sglang",
     "examples/model-serving/repositories/vllm",
     "examples/model-serving/repositories/vllm-omni",
     # Verbatim transformers modeling code shipped as a bundle reference.
     "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/.vibesys/tasks/default/reference/modeling_qwen3_5_moe.py",
     "examples/model-serving/qwen3.5-397b-a17b-mi300a-bespoke/.vibesys/tasks/default/reference/configuration_qwen3_5_moe.py",
 ]
+
+[tool.ruff.per-file-target-version]
+"skills/search/**/scripts/*.py" = "py310"
 
 [tool.ruff.lint]
 select = [
@@ -248,7 +297,7 @@ ignore = [
     # only becomes lintable at target-version py312, so raising the floor
     # surfaced 11 of these at once. The repo has not adopted that syntax, and
     # this is not the change to adopt it in: ruff marks the rewrites unsafe,
-    # and the hits include vendored reference code under `resources/skills/`
+    # and the hits include vendored reference code under `skills/domains/`
     # that VibeSys does not own. Moving to PEP 695 is a separate decision.
     "UP040",
     "UP046",
@@ -268,25 +317,49 @@ convention = "google"
 "langchain_openai".msg = "langchain was removed; do not reintroduce it."
 "langchain_google_vertexai".msg = "langchain was removed; do not reintroduce it."
 "langgraph".msg = "langgraph was removed; do not reintroduce it."
-"agentshim".msg = "Only vs_agent talks to agentshim; use vs_agent.api (or vs_agent.api.testing in tests)."
+# Real time: product code and deterministic-tier tests take a vs_sim Clock, Sleeper or
+# SleepingClock as a required argument (vs_sim.api.testing has ManualClock and VirtualClock),
+# and yield to the event loop with vs_sim.api.yield_now(). Only libs/vs-sim, the real test
+# tiers and code that runs outside the VibeSys process are exempt (per-file-ignores below).
+"time".msg = "Take a vs_sim.api Clock or Sleeper as a required argument instead of reading real time."
+"datetime.datetime.now".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"datetime.datetime.utcnow".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"datetime.datetime.today".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"datetime.date.today".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"asyncio.sleep".msg = "Wait on a vs_sim.api Sleeper; yield to the loop with vs_sim.api.yield_now()."
 
 [tool.ruff.lint.flake8-type-checking]
-runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope.ProtocolModel", "server.control_envelope.Request", "server.control_envelope.ResponseEnvelope", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
 
 [tool.ruff.lint.per-file-ignores]
-# agentshim is the agent-CLI library; vs_agent is its only importer. The e2e
-# tests drive the real library and CLIs, so they may name it too.
-"libs/vs-agent/**" = ["TID251"]
+# The e2e tests drive the real library and CLIs, so they may use real time.
 "tests/e2e/**" = ["TID251"]
+# The real-time bans exempt the owner of the real clock, the other real test tiers, and code
+# that runs outside the VibeSys process: staged profiler and evaluator resources, the
+# stdlib-only Modal evaluator helper, CI and release scripts, and the vs-bench SDK.
+"libs/vs-sim/**" = ["TID251"]
+"tests/slurm_cluster/**" = ["TID251"]
+"tests/minimal_container/**" = ["TID251"]
+"resources/**" = ["TID251"]
+"libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py" = ["TID251"]
+"sdk/vs-bench/**" = ["TID251"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "support/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
+# Build-tool tests live beside their tool, with the same assertion rules as library tests.
+"scripts/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 # The contract suites are test code shipped in the library so every implementation runs them:
 # their assertions are the output, as in a test module.
 "libs/vs-sandbox/src/vs_sandbox/*_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-evaluation/src/vs_evaluation/*_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/concurrency_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-sim/src/vs_sim/signal_relay_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-sim/src/vs_sim/exit_wait_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-logs/src/vs_logs/_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-runlog/src/vs_runlog/_fold_cache_contract.py" = ["S101", "PLR2004"]
+"libs/vs-sim/src/vs_sim/output_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-runtime/src/vs_runtime/api/*_contracts.py" = ["S101", "PLR2004"]
 # Scenario and fixture builders for the runtime's own test suites, moved out of tests/support
 # (where D, S101 and PLR2004 were already waived) so every consumer reaches them through
@@ -296,11 +369,20 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 # scripts/ holds standalone CI helper tools whose job is to report diagnostics
 # on stdout, so `print` is the intended output mechanism rather than a stray
 # debug statement. Same categorical treatment as S101 in tests/.
-"scripts/**" = ["T201"]
+"scripts/**" = ["T201", "TID251"]
+# These plugin entry points run on Python 3.10 without VibeSys installed. Importing vs_sim
+# would add a forbidden runtime dependency; indirect clock lookup would only hide real I/O.
+# datetime.UTC would drop Python 3.10 support. Tests inject clocks and need no clock waiver.
+# TRY003: one CLI input-error type carries contextual diagnostics. A subclass per validation
+# would expand the public API without distinct handling; assigning each message to a temporary
+# variable would only hide the same construction from lint. Keep messages at their validation.
+"skills/search/commit/scripts/commit_schema.py" = ["TRY003"]
+# Tests retain the Python 3.10 timestamps used in the standalone entry points' contract.
+"skills/search/*/tests/**" = ["S101", "PLR2004", "D", "INP001", "UP017"]
 # packaging/ holds top-level build modules with no __init__.py on purpose (a
 # `packaging` package would shadow the PyPA `packaging` library), and release
 # tools that report on stdout/stderr like scripts/.
-"packaging/*.py" = ["INP001", "T201"]
+"packaging/*.py" = ["INP001", "T201", "TID251"]
 # This file unit-tests resources/profilers/torch/analyze_torch_profile.py, a
 # standalone script (no public library API) loaded by file path. Exercising
 # its trace-indexing, correlation, and shape/roofline math directly means
@@ -340,8 +422,8 @@ root = [
     # Repository root: the `scripts` package is imported by tests, which pytest
     # makes importable through `[tool.pytest.ini_options] pythonpath`.
     ".",
-    # Release/packaging helpers (`wheel_targets`, `packaging_support`,
-    # `tui_packaging`, `resources_packaging`, `release_versions`) are top-level
+    # Release/packaging helpers (`packaging_support`, `resources_packaging`,
+    # `release_versions`) are top-level
     # modules in `packaging/`, which deliberately has no `__init__.py` so it
     # cannot shadow the PyPA `packaging` library.
     "packaging",
@@ -349,6 +431,8 @@ root = [
     "tests",
     "resources/evaluators/microservice",
     "libs/vs-evaluator-protocol/src",
+    "libs/vs-decode/src",
+    "libs/vs-redaction/src",
     "libs/vs-evaluation/src",
     "libs/vs-async-ops/src",
     "libs/vs-github/src",
@@ -365,6 +449,8 @@ root = [
     "libs/vs-sim/src",
     "libs/vs-sim/pytest_plugin",
     "libs/vs-dst/src",
+    "libs/vs-logs/src",
+    "libs/vs-proto/src", "libs/vs-runlog/src",
     "sdk/vs-bench/src",
 ]
 
@@ -375,8 +461,9 @@ root = [
 unused-ignore-comment = "error"
 
 [tool.ty.src]
+exclude = ["libs/vs-proto/src/vs_proto/_generated"]
 # Same tree the previous checker covered: first-party sources plus their
-# tests. `examples/` and `resources/skills/` vendor code VibeSys does not own
+# tests. `examples/` and `skills/domains/` vendor code VibeSys does not own
 # and are left out.
 include = [
     "src",
@@ -384,6 +471,10 @@ include = [
     "resources/evaluators/microservice/kubernetes_runtime",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-evaluator-protocol/tests",
+    "libs/vs-decode/src",
+    "libs/vs-decode/tests",
+    "libs/vs-redaction/src",
+    "libs/vs-redaction/tests",
     "libs/vs-evaluation/src",
     "libs/vs-evaluation/tests",
     "libs/vs-async-ops/src",
@@ -415,6 +506,10 @@ include = [
     "libs/vs-sim/tests",
     "libs/vs-dst/src",
     "libs/vs-dst/tests",
+    "libs/vs-logs/src",
+    "libs/vs-proto/src", "libs/vs-runlog/src",
+    "libs/vs-logs/tests",
+    "libs/vs-proto/tests", "libs/vs-runlog/tests",
     "sdk/vs-bench/src",
     "sdk/vs-bench/tests",
 ]

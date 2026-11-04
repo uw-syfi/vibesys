@@ -280,3 +280,38 @@ def test_the_declaration_has_no_defaults_no_unknown_keys_and_no_harder_ambiguity
         )
     with pytest.raises(ValidationError, match="ambiguous_attempts"):
         EvaluationRetries(infrastructure_attempts=1, ambiguous_attempts=2)
+
+
+@dataclass
+class _UnavailableEnvironmentExecutor(ScriptedExecutor):
+    """Refuses every try: the run environment cannot run Slurm work (its probe failed)."""
+
+    def refusal(self) -> ExecutorObservation:
+        return ExecutorObservation(
+            state=EvaluationState.FAILED,
+            failure="Slurm `remote_workspace_root` startup probe failed: probe job 5000 "
+            "exited with code 1",
+            run_environment_unavailable=True,
+        )
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        if handle_id not in self.submitted:
+            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        return ExecutorPoll(phase=PollPhase.ENDED, terminal=self.refusal())
+
+    async def inspect(self, handle_id: str) -> ExecutorObservation | None:
+        return self.refusal() if handle_id in self.submitted else None
+
+
+@given(retries=_RETRIES)
+def test_a_measurement_refused_because_the_run_environment_is_unavailable_is_never_retried(
+    retries: EvaluationRetries,
+) -> None:
+    inner = _UnavailableEnvironmentExecutor((Outcome.SUCCEEDED,))
+    executor = RetryingEvaluationExecutor(inner, retries, InMemoryEvaluationNamespace())
+
+    terminal = run_virtual(VirtualClock(), _measure(executor))
+
+    assert inner.submitted == ["h"]
+    assert terminal.run_environment_unavailable is True
+    assert not MeasurementFailure.RUN_ENVIRONMENT_UNAVAILABLE.retryable

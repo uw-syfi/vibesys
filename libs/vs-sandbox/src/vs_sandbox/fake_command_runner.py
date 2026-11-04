@@ -23,10 +23,10 @@ from typing import TYPE_CHECKING
 from vs_sandbox.command_execution import rejected_result, result_of, validate_timeout
 from vs_sandbox.execution import CommandResult
 from vs_sandbox.process_execution import ProcessOutcome, ProcessStop
-from vs_sim.api import OsThreads, Threads
+from vs_sim.api import OsThreads, OutputStream, Threads
 
 if TYPE_CHECKING:
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 #: Result an unscripted command receives when no other default was set.
 DEFAULT_RESULT = CommandResult(output="", exit_code=0, stdout="", stderr="")
@@ -130,13 +130,17 @@ class FakeCommandRunner:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         """Return the scripted result for *command*, or the default result.
 
         Applies the same validation as the real runners: an empty or
         non-string command never reaches the script table, and a non-positive
         timeout raises ``ValueError``. A fake command finishes instantly, so
-        *cancel* is honored when it is already set.
+        *cancel* is honored when it is already set. What the command wrote
+        (a canned result's streams, a scripted process's, a hang's partial
+        output before it blocks) is written to *output* before the call
+        returns; a command cancelled before it ran writes nothing.
         """
         if not command or not isinstance(command, str):
             return rejected_result(
@@ -150,6 +154,7 @@ class FakeCommandRunner:
         if cancel is not None and cancel.is_set():
             outcome = ProcessOutcome("", "", _SIGTERM_STATUS, ProcessStop.CANCELLED)
         elif isinstance(scripted, _Hang):
+            _write(output, scripted.stdout, scripted.stderr)
             stop = ProcessStop.TIMEOUT
             self._hanging.set()
             if cancel is not None:
@@ -157,10 +162,19 @@ class FakeCommandRunner:
                 stop = ProcessStop.CANCELLED
             outcome = ProcessOutcome(scripted.stdout, scripted.stderr, _SIGTERM_STATUS, stop)
         elif isinstance(scripted, ProcessOutcome):
+            _write(output, scripted.stdout, scripted.stderr)
             outcome = scripted
         else:
+            _write(output, scripted.stdout, scripted.stderr)
             return scripted
         return result_of(outcome, effective_timeout, self.max_output_chars)
+
+
+def _write(output: OutputSink, stdout: str, stderr: str) -> None:
+    """Write what a fake command printed to *output*, each stream as one chunk."""
+    for stream, text in ((OutputStream.STDOUT, stdout), (OutputStream.STDERR, stderr)):
+        if text:
+            output.write(stream, text.encode())
 
 
 @dataclass(slots=True)
@@ -172,16 +186,19 @@ class FakeLifecycleRunner(FakeCommandRunner):
     start_error: Exception | None = None
     stop_error: Exception | None = None
 
-    def start(self) -> None:
-        """Record one lifecycle start attempt and raise a scripted error."""
+    def start(self, *, output: OutputSink) -> None:
+        """Record one lifecycle start attempt and raise a scripted error; it prints nothing."""
+        del output
         self.start_count += 1
         if self.start_error is not None:
             raise self.start_error
 
-    def execute_as_root(self, command: str, *, timeout: int | None = None) -> CommandResult:
+    def execute_as_root(
+        self, command: str, *, timeout: int | None = None, output: OutputSink
+    ) -> CommandResult:
         """Run *command* like :meth:`execute` and record it as a root execution."""
         before = len(self.calls)
-        result = self.execute(command, timeout=timeout)
+        result = self.execute(command, timeout=timeout, output=output)
         for index in range(before, len(self.calls)):
             self.calls[index] = replace(self.calls[index], as_root=True)
         return result

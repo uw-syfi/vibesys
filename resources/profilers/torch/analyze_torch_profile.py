@@ -120,6 +120,20 @@ class ProfileServerURLError(ValueError):
         return cls("Profile server URL must use HTTP or HTTPS")
 
 
+class ProfileReportError(ValueError):
+    """Report a profile file that is cut, unreadable, or not a whole summarized report."""
+
+    @classmethod
+    def unreadable(cls, path: str, reason: str) -> ProfileReportError:
+        """Create an error for a file that is not one complete JSON document."""
+        return cls(f"{path}: not a complete profile ({reason}); capture it again")
+
+    @classmethod
+    def missing_field(cls, origin: str, key: str) -> ProfileReportError:
+        """Create an error for a report that lacks a field analyses read."""
+        return cls(f"{origin}: profile report lacks a valid {key!r}; it is incomplete")
+
+
 class ProfileServerContractError(RuntimeError):
     """Report a response that violates the profile server contract."""
 
@@ -319,6 +333,7 @@ def cmd_capture_server(args: argparse.Namespace) -> None:
 
     if "events" not in result:
         raise ProfileServerContractError.missing_events()
+    _require_whole_report(result, "/admin/profile/stop response")
 
     result.setdefault("captured_at", datetime.now(UTC).isoformat())
     result.setdefault("mode", "server")
@@ -405,10 +420,36 @@ def _read_json_maybe_gz(path: str) -> dict:
     A serving engine's profiler-stop endpoint and ``torch.profiler``'s own
     Chrome-trace export both commonly gzip the trace (``*.pt.trace.json.gz``).
     """
-    if path.endswith(".gz"):
-        with gzip.open(path, "rt", encoding="utf-8") as f:
-            return json.load(f)
-    return json.loads(Path(path).read_text())
+    try:
+        if path.endswith(".gz"):
+            with gzip.open(path, "rt", encoding="utf-8") as f:
+                return json.load(f)
+        return json.loads(Path(path).read_text())
+    except (
+        EOFError,
+        gzip.BadGzipFile,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+        RecursionError,
+    ) as exc:
+        # A trace cut mid-write or mid-transfer is unknown, not an error to guess past.
+        raise ProfileReportError.unreadable(path, type(exc).__name__) from exc
+
+
+_REPORT_TOTALS = ("total_cuda_time_us", "total_cpu_time_us")
+
+
+def _require_whole_report(data: object, origin: str) -> None:
+    """Refuse a summarized report that lacks the fields every analysis reads.
+
+    A report without its totals must not read as a profile whose totals are zero.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("events"), list):
+        raise ProfileReportError.missing_field(origin, "events")
+    for key in _REPORT_TOTALS:
+        value = data.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ProfileReportError.missing_field(origin, key)
 
 
 def _is_chrome_trace(data: dict) -> bool:
@@ -428,6 +469,7 @@ def _load(path: str) -> dict:
     raw = _read_json_maybe_gz(path)
     if _is_chrome_trace(raw):
         return _summarize_chrome_trace(raw)
+    _require_whole_report(raw, path)
     return raw
 
 
@@ -571,6 +613,7 @@ def cmd_summary(
         _print_certify(_certify(index, op_to_kernels))
         data = _summarize_chrome_trace(raw)
     else:
+        _require_whole_report(raw, args.report)
         data = raw
     _print(f"\nCaptured: {data.get('captured_at', '?')}")
     _print(f"Mode:     {data.get('mode', '?')}")
@@ -596,8 +639,8 @@ def cmd_tables(args: argparse.Namespace) -> None:
     _print(f"Captured:   {data.get('captured_at', '?')}")
     _print(f"Mode:       {data.get('mode', '?')}")
     _print(f"Num events: {data.get('num_events', len(data.get('events', [])))}")
-    _print(f"Total CUDA: {_fmt_us(data.get('total_cuda_time_us', 0))}")
-    _print(f"Total CPU:  {_fmt_us(data.get('total_cpu_time_us', 0))}")
+    _print(f"Total CUDA: {_fmt_us(data['total_cuda_time_us'])}")
+    _print(f"Total CPU:  {_fmt_us(data['total_cpu_time_us'])}")
     _print("\nEvent categories:")
     for cat, n in sorted(categories.items(), key=lambda kv: -kv[1]):
         _print(f"  {cat:<10} {n:>6} events")

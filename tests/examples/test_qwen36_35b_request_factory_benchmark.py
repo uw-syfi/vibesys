@@ -6,7 +6,7 @@ from tests.examples.example_task import load_example_task, task_root
 from tests.examples.request_factory_cpu_smoke import load_profile
 
 _REPO_ROOT = Path(__file__).parents[2]
-_BUNDLE_ROOT = _REPO_ROOT / "examples" / "model-serving" / "qwen3.6-35b-a3b-2xh100"
+_BUNDLE_ROOT = _REPO_ROOT / "examples" / "model-serving" / "qwen3.6-35b-a3b"
 _BENCHMARK = _REPO_ROOT / "resources" / "evaluators" / "request-factory" / "fixed_text.py"
 
 

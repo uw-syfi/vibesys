@@ -61,6 +61,8 @@ def _workspace(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     (workspace / ".state" / "local").mkdir(parents=True)
     (workspace / ".state" / "run.json").write_text("{}\n")
+    (workspace / ".state" / "runs" / "run-1" / "core-store").mkdir(parents=True)
+    (workspace / ".state" / "runs" / "run-1" / "core-store" / "store.json").write_text("{}\n")
     (workspace / ".env").write_text("TOKEN=secret\n")
     (workspace / "Cargo.toml").write_text("[package]\n")
     (workspace / "source.txt").write_text("original")
@@ -70,7 +72,7 @@ def _workspace(tmp_path: Path) -> Path:
 def _policy() -> ProjectPathPolicy:
     return ProjectPathPolicy(
         read_only_paths=(".state", "Cargo.toml"),
-        hidden_paths=(".state/local", ".env"),
+        hidden_paths=(".state/local", ".state/runs", ".env"),
     )
 
 
@@ -143,16 +145,18 @@ class TestLandlockPolicyCompilation:
         assert argv[-3:] == ["--", "agent", "--flag"]
 
     def test_unenforced_policy_names_every_tier_it_drops(self, tmp_path: Path) -> None:
-        sandbox = LandlockSandbox(workspace=_workspace(tmp_path), project_path_policy=_policy())
+        sandbox = _confined(_workspace(tmp_path), project_path_policy=_policy())
 
         gaps = "\n".join(sandbox.unenforced_policy())
 
         assert ".state" in gaps
         assert "Cargo.toml" in gaps
         assert ".env" in gaps
+        assert ".state/local" in gaps
+        assert ".state/runs" in gaps
 
     def test_unenforced_policy_is_empty_without_a_nested_policy(self, tmp_path: Path) -> None:
-        sandbox = LandlockSandbox(workspace=_workspace(tmp_path))
+        sandbox = _confined(_workspace(tmp_path))
 
         assert sandbox.unenforced_policy() == ()
 
@@ -227,6 +231,14 @@ class TestLandlockCannotEnforceNestedPolicy:
 
         assert result.returncode == 0, result.stderr
         assert "TOKEN=secret" in result.stdout
+
+    def test_the_hidden_run_record_remains_readable(self, sandbox_tmp_path: Path) -> None:
+        workspace = _workspace(sandbox_tmp_path)
+        sandbox = _confined(workspace, project_path_policy=_policy())
+
+        result = _run(sandbox, "cat .state/runs/run-1/core-store/store.json")
+
+        assert result.returncode == 0, result.stderr
 
 
 @requires_landlock

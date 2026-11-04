@@ -24,20 +24,10 @@ if TYPE_CHECKING:
     from tests.support.distribution_build import BuiltDistributions, BuiltWheel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-INTERNAL_DISTRIBUTIONS = {
-    "vs-async-ops",
-    "vs-evaluator-protocol",
-    "vs-evaluation",
-    "vs-github",
-    "vs-issue-tracker",
-    "vs-core",
-    "vs-project",
-    "vs-prompts",
-    "vs-runtime",
-    "vs-sandbox",
-    "vs-slurm",
-    "vs-mcp",
-}
+INTERNAL_DISTRIBUTIONS = frozenset(
+    tomllib.loads(project.read_text())["project"]["name"]
+    for project in (PROJECT_ROOT / "libs").glob("*/pyproject.toml")
+)
 INTERNAL_IMPORT_PACKAGES = {
     "vs_async_ops",
     "vs_evaluator_protocol",
@@ -177,13 +167,12 @@ def test_root_distribution_discovers_internal_packages_from_their_source_roots()
     module = _load_packaging_support()
     packages, package_dirs = module.discover_distribution_packages(PROJECT_ROOT)
 
-    assert {"entrypoints", "server", "vibesys", *INTERNAL_IMPORT_PACKAGES} <= set(packages)
+    assert {"entrypoints", "vibesys", *INTERNAL_IMPORT_PACKAGES} <= set(packages)
     assert "vibesys.prompts.backend.cuda" in packages
     assert "vibesys.prompts" in packages
     assert "vibesys.domains" in packages
     assert package_dirs["vibesys"] == "src/vibesys"
     assert package_dirs["entrypoints"] == "src/entrypoints"
-    assert package_dirs["server"] == "src/server"
     assert package_dirs["vs_prompts"] == "libs/vs-prompts/src/vs_prompts"
     assert package_dirs["vs_runtime"] == "libs/vs-runtime/src/vs_runtime"
     assert package_dirs["vs_sandbox"] == "libs/vs-sandbox/src/vs_sandbox"
@@ -361,14 +350,6 @@ def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None
     libraries = sorted((PROJECT_ROOT / "libs").iterdir())
     assert libraries
     assert all((library / "pyproject.toml").is_file() for library in libraries)
-
-
-def test_frontend_payload_belongs_to_the_entrypoints_package() -> None:
-    pyproject = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
-    package_data = pyproject["tool"]["setuptools"]["package-data"]
-
-    assert "_tui/**/*" in package_data["entrypoints"]
-    assert "_tui/**/*" not in package_data["vibesys"]
 
 
 @pytest.mark.xdist_group("built_wheel")

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from vibesys.hypothesis import (
     AgentAttribution,
     ArchiveConflict,
+    CandidateDisposition,
     Hypothesis,
     HypothesisOutcome,
     JudgeOutcome,
@@ -53,6 +54,8 @@ from vs_core.api.search import (
     LocalValidationReport,
     RevisionRef,
     Settlement,
+    effect_verdict,
+    terms_policy,
 )
 
 if TYPE_CHECKING:
@@ -61,7 +64,7 @@ if TYPE_CHECKING:
     from vibesys.orchestration.multi.models import ImplementerResponse, JudgeResponse
     from vibesys.orchestration.multi.search._config import MultiConfig
     from vibesys.serial_search.api import GateResult
-    from vs_core.api.search import TaskTerms
+    from vs_core.api.search import EffectVerdict, TaskTerms
 
 UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATION_FAILED})
 """Implementer outcomes that make a candidate ineligible however well it measures."""
@@ -82,22 +85,6 @@ class Next(StrEnum):
     """The claims are approved and the cadence asks for the trusted gates."""
     SETTLE = "settle"
     """The attempt is over; the workspace closes with what it established."""
-
-
-def planned_reason(
-    config: MultiConfig, ledger: rounds.Ledger, plan: OrchestratorPlan, number: int
-) -> str | None:
-    """Why the official gates are scheduled after this round's candidate, as the prompts show it."""
-    reason = rounds.official_reason(
-        config.hypotheses,
-        ledger,
-        round_number=number,
-        requested=plan.request_official_evaluation,
-    )
-    focus = serial.focus_of(ledger, serial.focus_policy(config.attribution))
-    if reason is None and focus is not None and focus.active_component:
-        return "profile-guided component measurement"
-    return reason
 
 
 def conflict_view(conflict: ArchiveConflict) -> ArchiveConflictView:
@@ -127,7 +114,7 @@ def hypothesis_plan(plan: OrchestratorPlan) -> HypothesisPlan:
         invariants=plan.invariants,
         activation_evidence=plan.activation_evidence,
         falsification_criteria=plan.falsification_criteria,
-        minimum_acceptance_criteria=plan.minimum_acceptance_criteria,
+        minimum_ratio=plan.minimum_ratio,
     )
 
 
@@ -155,7 +142,7 @@ def claims_of(reply: ImplementerResponse) -> ImplementerClaims:
     return ImplementerClaims(
         summary=reply.summary,
         expected_behavior=reply.expected_behavior,
-        hypothesis_outcome=reply.hypothesis_outcome.value,
+        status=reply.status.value,
         evidence=reply.evidence,
         next_step=reply.next_step,
         perf_metric=reply.perf_metric,
@@ -171,6 +158,20 @@ def claims_of(reply: ImplementerResponse) -> ImplementerClaims:
     )
 
 
+@dataclass(frozen=True)
+class Evaluated:
+    """What the trusted gates read of a revision the agent evaluated with no ready candidate.
+
+    The measurement is evidence for the next designer; it adopts nothing, because the
+    implementer offered no candidate for review (it was blocked, failed, or asked to continue).
+    """
+
+    revision: RevisionRef
+    readings: tuple[AcceptedReading, ...]
+    effect: EffectVerdict | None
+    """What the framework's comparison says of the plan's typed bar; None without a comparison."""
+
+
 @dataclass
 class MultiAttempt:
     """What the turns of one round have established so far."""
@@ -184,7 +185,7 @@ class MultiAttempt:
     ledger: rounds.Ledger
     validation_offered: bool
     """Whether the run offers the trusted run of validation recipes."""
-    planned_official_reason: str | None
+    """Whether the trusted gates will measure the candidate once it passes review."""
     revalidation_required: bool
     feedback: str | None = None
     turns: int = 0
@@ -199,6 +200,12 @@ class MultiAttempt:
     judge_invocation: InvocationRef | None = None
     official_reason: str | None = None
     readings: tuple[AcceptedReading, ...] = ()
+    effect: EffectVerdict | None = None
+    """What the framework's comparison says of the plan's typed bar; None without a comparison."""
+    measurement_noise: serial.MeasurementNoise | None = None
+    """The noise the latest trusted comparison stated, which the next designer is shown."""
+    evaluated: Evaluated | None = None
+    """The measurement of the revision the agent evaluated when the attempt ended unsettled."""
     passed: bool = False
     gate_failed: bool = False
     unmeasured: bool = False
@@ -221,8 +228,6 @@ class MultiAttempt:
             validation_failure=self.validation_failure,
             no_valid_reply=self.no_valid_reply,
             pareto_archive_conflict=self.conflict,
-            official_due=self.planned_official_reason is not None,
-            official_reason=self.planned_official_reason,
             benchmark_enabled="benchmark" in self.terms.measured,
             active_component=None if focus is None else (focus.active_component or None),
         )
@@ -239,8 +244,6 @@ class MultiAttempt:
             claims=claims_of(self.response),
             framework=gate_facts(self.ledger.search.active_hypothesis),
             pareto_archive_conflict=self.conflict,
-            official_due=self.planned_official_reason is not None,
-            official_reason=self.planned_official_reason,
             benchmark_enabled="benchmark" in self.terms.measured,
             cited_evidence=cited,
         )
@@ -250,6 +253,7 @@ class MultiAttempt:
     def _fresh_attempt(self) -> None:
         """What a new paid turn starts without: the last turn's verdict, validation and gates."""
         self.readings = ()
+        self.effect = None
         self.judge_pass = None
         self.judge_invocation = None
         self.review_skipped = False
@@ -363,19 +367,13 @@ class MultiAttempt:
         return Next.AGAIN
 
     def _approve(self) -> Next:
-        """Approve the reply's claims, then settle or schedule the official gates."""
+        """Approve the reply's claims, then settle or have the trusted gates measure the candidate."""
         reply = self.response
         if reply is None:
             return Next.SETTLE
         hypotheses = self.config.hypotheses
         ledger = reviewed.approve_candidate(hypotheses, self.ledger, reply)
-        reason = rounds.official_reason(
-            hypotheses,
-            ledger,
-            round_number=self.number,
-            requested=self.plan.request_official_evaluation,
-            candidate_ready=reviewed.candidate_ready(reply),
-        )
+        reason = rounds.official_reason(candidate_ready=reviewed.candidate_ready(reply))
         if reason is None or not self.terms.measured or self.candidate is None:
             self.ledger = ledger
             self.passed = True
@@ -388,8 +386,16 @@ class MultiAttempt:
     def gated(self, result: GateResult) -> Next:
         """Fold the trusted gates: a rejection is feedback, a missing measurement is nobody's fault."""
         match result:
-            case serial.Gated(readings=readings):
+            case serial.Gated(readings=readings, comparison=comparison, noise=noise):
                 self.readings = readings
+                self.measurement_noise = noise or self.measurement_noise
+                self.effect = (
+                    None
+                    if comparison is None
+                    else effect_verdict(
+                        comparison, self.plan.minimum_ratio, terms_policy(self.terms)
+                    )
+                )
                 feedback = serial.failed_gate(readings)
                 if feedback is None:
                     self.passed = True
@@ -404,6 +410,47 @@ class MultiAttempt:
                 return Next.SETTLE
             case serial.Unreadable(reason=reason):
                 return self.failed(reason)
+
+    def owes_evaluated_measurement(self) -> bool:
+        """Whether the attempt ended with no ready candidate and its trusted evaluations unmeasured.
+
+        An implementer that was blocked, could not implement the idea, asked to continue, or
+        never replied may still have evaluated a revision through the trusted evaluation tool.
+        Nothing else measures it (a candidate the gates measured has its readings), and a failure
+        of the machinery is not the idea's, so neither is a measurement that already failed.
+        """
+        offered = self.response is not None and reviewed.candidate_ready(self.response)
+        return (
+            not offered
+            and bool(self.terms.measured)
+            and not self.readings
+            and self.evaluated is None
+            and not self.unmeasured
+            and self.failure is None
+        )
+
+    def evaluated_gated(self, revision: RevisionRef, result: GateResult) -> None:
+        """Fold the gates' measurement of the revision the agent evaluated.
+
+        A reading is recorded when no gate rejected it, as it is for a round that passed; a
+        rejection is feedback for the designer. A measurement that could not be taken leaves the
+        round as it was: nobody owes the idea a second attempt at the machinery.
+        """
+        if not isinstance(result, serial.Gated):
+            return
+        feedback = serial.failed_gate(result.readings)
+        if feedback is not None:
+            self.feedback = self.feedback or feedback
+            return
+        self.measurement_noise = result.noise or self.measurement_noise
+        comparison = result.comparison
+        self.evaluated = Evaluated(
+            revision=revision,
+            readings=result.readings,
+            effect=None
+            if comparison is None
+            else effect_verdict(comparison, self.plan.minimum_ratio, terms_policy(self.terms)),
+        )
 
     def _gate_failed(self, feedback: str) -> None:
         """A trusted gate rejected the candidate: another attempt may repair it."""
@@ -431,7 +478,19 @@ class MultiAttempt:
             passed=self.passed,
             judge_invocation=self.judge_invocation,
             outcome=None if self.response is None else self.response.hypothesis_outcome,
+            disposition=CandidateDisposition.UNASSESSED
+            if self.response is None
+            else self.response.candidate_disposition,
         )
+
+    def turned_down(self) -> bool:
+        """Whether the round's own checks turned its work down (`serial_search.turned_down`)."""
+        return serial.turned_down(self.finished(), unsettled=UNSETTLED)
+
+    def reported(self) -> tuple[str | None, str] | None:
+        """The implementer's own account: its outcome and its summary; None when it gave none."""
+        reply = self.response
+        return None if reply is None else (reply.hypothesis_outcome.value, reply.summary)
 
     def asserted(self) -> tuple[RevisionRef | None, Assessment]:
         """What the workspace settles with.
@@ -460,8 +519,14 @@ class MultiAttempt:
     def close(self, settlement: Settlement | None) -> rounds.Ledger:
         """Close the round in the ledger with what core settled (None: nothing was)."""
         retained = None if settlement is None else settlement.candidate
-        benchmark, metric = serial.benchmark_outcome(self.readings)
+        evaluated = self.evaluated
+        benchmark, metric = serial.benchmark_outcome(
+            self.readings if evaluated is None else evaluated.readings
+        )
         passed = self.passed and self.failure is None
+        # A measurement and the revision it measured are recorded together.
+        measured = retained if evaluated is None else evaluated.revision
+        commit = None if measured is None else measured.revision_id.root
         closed = reviewed.close_reviewed_round(
             self.config.hypotheses,
             self.ledger,
@@ -472,15 +537,23 @@ class MultiAttempt:
                 judge=self.judge_outcome(),
                 passed=passed,
                 feedback=None if passed else (self.feedback or self.no_valid_reply or self.failure),
-                official_reason=self.official_reason if passed else None,
+                official_reason=(
+                    rounds.evaluated_reason()
+                    if evaluated is not None
+                    else self.official_reason
+                    if passed
+                    else None
+                ),
                 benchmark=benchmark,
                 benchmark_metric=metric,
-                candidate_commit=None if retained is None else retained.revision_id.root,
+                candidate_commit=commit,
                 attempts=self.turns,
                 accuracy_configured="accuracy" in self.terms.measured,
                 benchmark_configured="benchmark" in self.terms.measured,
                 implementer=AgentAttribution("core", None, None),
                 revalidation_required=self.revalidation_required,
+                evaluated_only=evaluated is not None,
+                effect=self.effect if evaluated is None else evaluated.effect,
             ),
         )
         return serial.record_round(

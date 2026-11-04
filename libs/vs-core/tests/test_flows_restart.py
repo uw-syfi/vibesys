@@ -11,11 +11,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_core.api.testing import FlowRun, RestartPolicy, fake_search
+from vs_sim.api.testing import examples
 
-from .flow_support import ROLES, Config, Plan, ask, open_workspace, start
+from .flow_support import ROLES, Config, Plan, answer_of, ask, open_workspace, start
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -250,23 +253,68 @@ def test_a_task_the_new_code_starts_as_another_flow_cannot_be_restarted() -> Non
         run.reply(stale, Plan(n=2))
 
 
-def test_a_flow_that_is_not_registered_cannot_be_restarted() -> None:
-    async def loose(ctx: core.Flow) -> None:
-        await ask(ctx, "loose")
+class Renumbered(core.Value):
+    """A snapshot type whose field the old worker's snapshot does not have."""
+
+    stage: int
+
+
+@core.flow(snapshot=Renumbered, name="worker")
+async def retyped(ctx: core.Flow, _job: Renumbered) -> int:
+    await ask(ctx, "two")
+    return 2
+
+
+def test_a_task_whose_snapshot_the_new_code_cannot_read_cannot_be_restarted() -> None:
+    """The same flow name with an incompatible snapshot type is a code change, not a crash."""
+    run = _run_v1()
+    run.reply(run.expect_turn("one"), Plan(n=1))
+    stale = run.expect_turn("two")
 
     @fake_search("flows", Config, ROLES)
-    async def parent(ctx: core.Flow, _config: Config) -> None:
+    async def root(ctx: core.Flow, config: Config) -> None:
+        ctx.checkpoint(config)
+        async with ctx.group() as workers:
+            workers.start("w", retyped, Renumbered(stage=0))
+
+    run.swap(root)
+    with pytest.raises(core.FlowCodeChanged):
+        run.reply(stale, Plan(n=2))
+
+
+def _parent_of(label: str) -> SearchDef[Config]:
+    """A root that checkpoints, then runs one task that is not a registered flow."""
+
+    async def loose(ctx: core.Flow) -> int:
+        await ask(ctx, label)
+        return 1
+
+    @fake_search("flows", Config, ROLES)
+    async def parent(ctx: core.Flow, config: Config) -> None:
+        ctx.checkpoint(config)
         async with ctx.group() as tasks:
             tasks.start("l", loose)
+            results = [result async for result in tasks]
+        ctx.publish(Gave(result=results[0]))  # ty: ignore[invalid-argument-type]
 
-    @fake_search("flows", Config, ROLES)
-    async def parent_v2(ctx: core.Flow, _config: Config) -> None:
-        await ask(ctx, "other")
+    return parent
 
-    run = FlowRun.start(parent, Config())
-    run.swap(parent_v2)
-    with pytest.raises(core.FlowCodeChanged):
-        run.advance_to(1.0)
+
+@pytest.mark.parametrize("restarting", [False, True], ids=["live", "restart-every-step"])
+def test_a_task_that_is_not_a_registered_flow_is_dropped_and_its_parent_starts_it_again(
+    *, restarting: bool
+) -> None:
+    """A planning-like task without a snapshot does not block the restart of the whole run."""
+    run = FlowRun.start(_parent_of("loose"), Config(), restarting=restarting)
+    stale = run.expect_turn("loose")
+    run.swap(_parent_of("loose again"))
+    run.reply(stale, Plan(n=1))  # the first event the new code sees
+    assert [d.decision for d in run.state.dropped] == [stale.decision]
+    again = run.expect_turn("loose again")
+    assert again.decision != stale.decision  # numbering continued: no decision id repeats
+    run.reply(again, Plan(n=2))
+    assert run.driver.published(run.state, Gave) == Gave(result=1)
+    assert run.finished is not None
 
 
 def test_only_a_registered_flow_has_checkpoints() -> None:
@@ -302,3 +350,130 @@ def test_a_restart_policy_restarts_only_after_the_steps_it_names() -> None:
     assert _answered(RestartPolicy()) == 0
     assert _answered(RestartPolicy(steps=frozenset(range(1000)))) == every
     assert _answered(RestartPolicy(after_stop=True)) == 0
+
+
+# -- latches across a restart -------------------------------------------------------------------
+
+LEARNED = core.LatchKey[int]("learned")
+
+
+class Known(core.Value):
+    """The root's config and snapshot: what it learned, once it has."""
+
+    learned: int | None = None
+
+
+class Shared(core.Value):
+    """What the root publishes: its worker's result, and the latch as the root first saw it."""
+
+    result: int
+    latch_at_start: int | None
+
+
+def latch_search(label: str) -> SearchDef[Known]:
+    """A root that learns a value and shares it through a latch with a worker it started.
+
+    The worker asks its own turn (``label``: changing it changes the code), checkpoints the
+    answer, then waits for the latch. The root, as `flows.md` asks, sets the latch again from
+    its snapshot when it restarts after learning.
+    """
+
+    @core.flow(snapshot=Job, name="latch-worker")
+    async def worker(ctx: core.Flow, job: Job) -> int:
+        ctx.checkpoint(job)
+        own = job.step
+        if own == 0:
+            own = answer_of(await ask(ctx, label))
+            ctx.checkpoint(Job(step=own))
+        return own + await ctx.latch(LEARNED)
+
+    @fake_search("flows", Known, ROLES)
+    async def root(ctx: core.Flow, known: Known) -> None:
+        ctx.checkpoint(known)
+        at_start = ctx.latch(LEARNED).value
+        async with ctx.group() as workers:
+            workers.start("w", worker, Job())
+            learned = known.learned
+            if learned is None:
+                learned = answer_of(await ask(ctx, "learn"))
+                ctx.checkpoint(Known(learned=learned))
+            ctx.latch(LEARNED).set(learned)
+            results = [result async for result in workers]
+        ctx.publish(Shared(result=results[0], latch_at_start=at_start))  # ty: ignore[invalid-argument-type]
+
+    return root
+
+
+def _reader(reads: int, capabilities_at: int | None) -> SearchDef[Config]:
+    """A root that reads the clock then asks, ``reads`` times; one read may be another type."""
+
+    @fake_search("flows", Config, ROLES)
+    async def root(ctx: core.Flow, config: Config) -> None:
+        ctx.checkpoint(config)
+        for index in range(reads):
+            if index == capabilities_at:
+                ctx.publish(ctx.capabilities)
+            else:
+                ctx.clock.now()
+            await ask(ctx, f"s{index}")
+
+    return root
+
+
+def test_a_latch_set_before_a_restart_starts_empty_and_is_set_again_from_the_snapshot() -> None:
+    run = FlowRun.start(latch_search("own"), Known())
+    run.reply(run.expect_turn("learn"), Plan(n=5))  # set before the restart; the worker still asks
+    stale = run.expect_turn("own")
+
+    run.swap(latch_search("own, again"))
+    run.reply(stale, Plan(n=1))  # the first event the new code sees: the flows restart
+
+    assert run.state.base is not None
+    assert not [a for a in run.open if a.prompt is not None and a.prompt.text == "learn"]
+    run.reply(run.expect_turn("own, again"), Plan(n=1))
+    # The restored root saw the latch empty, set it from its snapshot, and the worker got it.
+    assert run.driver.published(run.state, Shared) == Shared(result=6, latch_at_start=None)
+    assert run.finished is not None
+
+
+def test_a_latch_set_after_a_restart_reaches_the_restored_worker_that_waits_for_it() -> None:
+    run = FlowRun.start(latch_search("own"), Known())
+    run.reply(run.expect_turn("own"), Plan(n=1))  # the worker checkpoints and waits on the latch
+    stale = run.expect_turn("learn")
+
+    run.swap(latch_search("own, again"))
+    run.reply(stale, Plan(n=5))  # dropped: the root restarts from its first snapshot
+
+    assert run.state.base is not None
+    assert [d.decision for d in run.state.dropped] == [stale.decision]
+    run.reply(run.expect_turn("learn"), Plan(n=7))
+    assert run.driver.published(run.state, Shared) == Shared(result=8, latch_at_start=None)
+    assert run.finished is not None
+
+
+@settings(max_examples=examples(pr=10, nightly=200), deadline=None)
+@given(data=st.data(), reads=st.integers(min_value=1, max_value=5))
+def test_a_recorded_read_the_new_code_reads_as_another_type_restarts_the_run(
+    data: st.DataObject, reads: int
+) -> None:
+    """Version B reads the capabilities where version A's journal holds a clock read.
+
+    Wherever that read falls in the journal, the resume restarts the flows from their
+    checkpoints instead of failing to decode the recorded value.
+    """
+    diverges = data.draw(st.integers(min_value=0, max_value=reads - 1), label="diverges")
+    answered = data.draw(st.integers(min_value=diverges, max_value=reads - 1), label="answered")
+    run = FlowRun.start(_reader(reads, None), Config())
+    for index in range(answered):
+        run.reply(run.expect_turn(f"s{index}"), Plan(n=index))
+    stale = run.expect_turn(f"s{answered}")
+
+    run.swap(_reader(reads, diverges))
+    run.reply(stale, Plan(n=answered))  # replaying A's journal reaches the read B changed
+
+    assert run.state.base is not None  # restarted, not replayed
+    assert [d.decision for d in run.state.dropped] == [stale.decision]
+    for index in range(reads):
+        run.reply(run.expect_turn(f"s{index}"), Plan(n=index))
+    assert run.published(core.Capabilities) is not None
+    assert run.finished is not None

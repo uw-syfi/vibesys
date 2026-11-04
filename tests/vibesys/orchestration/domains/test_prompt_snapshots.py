@@ -53,6 +53,7 @@ def test_domain_role_prompt_bytes_are_stable(
         reference_path="/workspace/reference/main.py",
         runtime_notes="Runtime notes.",
         profile_execution=execution,
+        profiler_id="none",
         **_CASES[case],
     )
     key = f"{domain.value}/{role.value}/{case}/{execution}"

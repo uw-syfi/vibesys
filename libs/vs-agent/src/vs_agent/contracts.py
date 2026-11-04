@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from vs_agent.session_key import AgentSessionKey
     from vs_mcp.api import ToolServerDescriptor
     from vs_sandbox.api import HostResource, ProjectPathPolicy
+    from vs_sim.api import Threads
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -40,11 +41,26 @@ class AgentSpawnError(RuntimeError):
 
 
 class AgentTurnTimeoutError(TimeoutError):
-    """An agent turn exceeded its configured wall-clock budget."""
+    """An agent turn exceeded its configured wall-clock budget.
 
-    def __init__(self, timeout_seconds: float) -> None:
-        """Record the configured budget, independent of execution mechanism."""
+    ``usage`` is the accounting from a partial turn parsed before the timeout,
+    when one reached the boundary. It stays ``None`` when there was no parsed
+    partial turn; individual fields retain the provider's known/unknown semantics.
+    ``provider_session_id`` is the conversation the partial turn named, which the CLI's transcript
+    is filed under; ``None`` when it named none.
+    """
+
+    def __init__(
+        self,
+        timeout_seconds: float,
+        *,
+        usage: AgentUsage | None = None,
+        provider_session_id: str | None = None,
+    ) -> None:
+        """Record the configured budget and any provider-reported partial usage and session."""
         self.timeout_seconds = timeout_seconds
+        self.usage = usage
+        self.provider_session_id = provider_session_id
         super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
 
 
@@ -69,11 +85,36 @@ class AgentOutputSchemaError(RuntimeError):
     correction sent as the next turn continues the same work.
     """
 
-    def __init__(self, detail: str, violations: tuple[SchemaViolation, ...] = ()) -> None:
-        """Record the validation errors the provider reported last."""
+    def __init__(
+        self,
+        detail: str,
+        violations: tuple[SchemaViolation, ...] = (),
+        *,
+        usage: AgentUsage | None = None,
+        provider_session_id: str | None = None,
+    ) -> None:
+        """Record the validation errors and any usage and session measured before rejection."""
         self.detail = detail
         self.violations = violations or (SchemaViolation(path=(), message=detail),)
+        self.usage = usage
+        self.provider_session_id = provider_session_id
         super().__init__(f"agent output did not match the response schema: {detail}")
+
+
+class AgentContextOverflowError(RuntimeError):
+    """The provider refused a turn because its conversation no longer fits the model's window.
+
+    Raised instead of a provider exit error so the session owner can tell a conversation that
+    outgrew its model from a failed turn: the work did not fail, and the same message may run
+    in a fresh conversation. agentshim reports the condition as
+    ``FailureKind.CONTEXT_OVERFLOW``, which ``shim_translation.failure_from`` maps to this.
+    """
+
+    def __init__(self, provider: str, detail: str) -> None:
+        """Record the provider and its diagnostic."""
+        self.provider = provider
+        self.detail = detail
+        super().__init__(f"{provider} context window exceeded: {detail}")
 
 
 class QuotaCondition(StrEnum):
@@ -83,6 +124,10 @@ class QuotaCondition(StrEnum):
     """A usage quota, spend limit or billing limit: retrying now cannot succeed."""
     RATE_LIMITED = "rate_limited"
     """Sustained rate limiting: the provider's retries ran out while a window was exhausted."""
+    UNAVAILABLE = "unavailable"
+    """A provider outage: transient errors (an overload, a server error, a gateway with no
+    accounts) outlasted the provider's retries, and no window was reported exhausted, so
+    capacity may return at any moment."""
 
 
 class AgentQuotaError(RuntimeError):
@@ -112,6 +157,9 @@ class AgentQuotaError(RuntimeError):
 
 type QuotaResumeReason = Literal["operator", "wait_elapsed"]
 """Who ended a quota pause: the operator, or the policy's wait running out."""
+
+type QuotaWaitCancelReason = Literal["resumed", "paused"]
+"""How the operator ended a wait for capacity: resumed the run now, or paused it again."""
 
 type ProviderSwitchReason = Literal["policy", "operator"]
 """Who switched the run to its fallback provider: the quota policy, or the operator."""
@@ -154,6 +202,82 @@ class ProviderSwitch:
     detail: str
 
 
+class CapacityStops:
+    """One turn's capacity stops so far, and whether its caller cancelled it.
+
+    The client makes one record per turn, before its first send, and hands the same
+    record to every gate call of that turn, so the record outlives each resend. It
+    counts each stop in ``count`` (the first stop is 1) and calls :meth:`cancel` when
+    the caller cancels the turn; it never sends a cancelled turn again. ``model`` is the
+    model the turn runs on (``None`` for the provider's default), so a gate can tell one
+    model that is down from another the same provider still serves.
+
+    ``memory`` belongs to the gate: what it keeps about this turn between stops (its
+    budgets, its outage backoff). The client never reads it. One record per turn keeps
+    the budgets of turns that stop at the same time apart. A gate waits with
+    :meth:`park`, which :meth:`cancel` and :meth:`interrupt` end early, and a gate that
+    parks elsewhere learns of a cancellation through :meth:`on_cancel`.
+    """
+
+    def __init__(self, threads: Threads, *, model: str | None = None) -> None:
+        """Start a turn with no stops; ``threads`` makes the event a wait parks on."""
+        self.count = 0
+        self.model = model
+        self.memory: object | None = None
+        self._cancelled = False
+        self._wake = threads.event()
+        self._lock = threads.lock()
+        self._listeners: list[Callable[[], object]] = []
+
+    @property
+    def cancelled(self) -> bool:
+        """Whether the caller cancelled this turn."""
+        return self._cancelled
+
+    def cancel(self) -> None:
+        """Mark the turn cancelled, end a wait in progress and tell the cancel listeners."""
+        with self._lock:
+            self._cancelled = True
+            listeners = tuple(self._listeners)
+        self._wake.set()
+        for listener in listeners:
+            listener()
+
+    def on_cancel(self, listener: Callable[[], object]) -> Callable[[], None]:
+        """Call ``listener`` when the turn is cancelled; return its unsubscribe callable.
+
+        A listener added after the cancellation is called at once. It runs on the
+        cancelling thread and must not block.
+        """
+        with self._lock:
+            already = self._cancelled
+            if not already:
+                self._listeners.append(listener)
+        if already:
+            listener()
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if listener in self._listeners:
+                    self._listeners.remove(listener)
+
+        return unsubscribe
+
+    def interrupt(self) -> None:
+        """End a wait in progress without cancelling the turn (a stop request, say)."""
+        self._wake.set()
+
+    def park(self, seconds: float) -> bool:
+        """Wait at most ``seconds``, on the threads' clock; True when woken sooner.
+
+        The wake is consumed, so the next wait starts clear; its causes (the
+        cancellation, a run's stop request) stay readable where they are recorded.
+        """
+        woke = self._wake.wait(seconds)
+        self._wake.clear()
+        return woke
+
+
 class CapacityGate(Protocol):
     """The caller's policy for a turn that stopped on a provider capacity limit.
 
@@ -161,16 +285,26 @@ class CapacityGate(Protocol):
     only when the same turn should be sent again on the same conversation. It
     raises to end the turn instead, and the raised error replaces the quota
     error. The call may block for hours, so a gate owns its own cancellation:
-    a stop request must end the wait by raising.
+    a stop request, and a cancellation of the turn (:meth:`CapacityStops.cancel`),
+    must end the wait by raising.
     """
 
     def wait_for_capacity(
-        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, attempt: int
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
     ) -> None:
         """Block until ``turn`` may be sent again, or raise to give up.
 
-        ``attempt`` counts the capacity stops of this one turn, starting at 1, so a
-        gate can budget its waiting per turn.
+        ``stops`` is this turn's record, already counting this stop (see
+        :class:`CapacityStops`).
+        """
+        ...
+
+    def turn_served(self, provider: str, model: str | None) -> None:
+        """Note that a turn on ``provider`` and ``model`` just succeeded.
+
+        The client calls it after every successful turn, with the ``model`` it gave the
+        turn's :class:`CapacityStops`, so the gate can tell a model that is down from
+        one that fails only this turn.
         """
         ...
 
@@ -366,6 +500,56 @@ class AgentCapabilities:
     config_isolation: bool = False
 
 
+class UsageSpeed(StrEnum):
+    """The service speed a request ran at; a speed the provider did not report is ``None``."""
+
+    STANDARD = "standard"
+    FAST = "fast"
+    ULTRAFAST = "ultrafast"
+
+
+class CostBasis(StrEnum):
+    """How a turn's ``total_cost_usd`` was reached: what the library says, never inferred here.
+
+    A turn the client records carries one of these; ``None`` on a stored line means only that the
+    line predates the field (``AgentUsage.recorded_cost_basis`` is what the client writes).
+    """
+
+    PRICE_TABLE = "price_table"
+    """Computed from the turn's tokens and the library's pinned price table."""
+    PROVIDER_REPORTED = "provider_reported"
+    """The CLI's own figure, used when it did not say which model ran."""
+    UNKNOWN_MODEL = "unknown_model"
+    """A model in the turn has no price, so the turn has no cost."""
+    NOT_REPORTED = "not_reported"
+    """The provider reported no cost and none is computed, or the library named no source."""
+
+
+@dataclass(frozen=True, slots=True)
+class AgentModelUsage:
+    """One model's share of one finished turn, as the library priced it.
+
+    A turn can run several models: Claude's Task subagents and advisors run on their own, and the
+    turn's :class:`AgentUsage` token fields leave them out. The rows of ``AgentUsage.by_model``
+    sum to the whole turn, so they are a superset of those fields. Exactly one row is primary.
+    ``recorded_usd`` is the library's price of these tokens at the standard tier; nothing here
+    recomputes it.
+    """
+
+    model: str
+    input_tokens: int
+    cache_creation_input_tokens: int
+    cache_creation_1h_input_tokens: int
+    cache_read_input_tokens: int
+    output_tokens: int
+    reasoning_output_tokens: int
+    turns: int
+    """The turn's requests. Only the primary row counts them, so summing rows counts each once."""
+    recorded_usd: float | None
+    speed: UsageSpeed | None
+    primary: bool
+
+
 @dataclass(frozen=True, slots=True)
 class AgentUsage:
     """Provider-independent token and cost accounting for one turn.
@@ -381,6 +565,23 @@ class AgentUsage:
     output_tokens: int | None = None
     total_cost_usd: float | None = None
     duration_ms: int | None = None
+    reasoning_output_tokens: int | None = None
+    """The part of ``output_tokens`` the provider reports as reasoning (never in addition to it)."""
+    cost_basis: CostBasis | None = None
+    """How ``total_cost_usd`` was reached; ``None`` when the usage carries no basis (a turn that
+    failed before reporting any, an unknown increment): ``recorded_cost_basis`` is what is written."""
+    by_model: tuple[AgentModelUsage, ...] = ()
+    """Each model the turn ran. The token fields above count only the main conversation, so
+    these rows are a superset; empty when the provider reports no split."""
+
+    @property
+    def recorded_cost_basis(self) -> CostBasis:
+        """The basis a new journal line records: the library's, ``NOT_REPORTED`` when it names none.
+
+        A line never records ``None``, so a missing basis on a stored line means one thing only:
+        the line was written before the field existed.
+        """
+        return CostBasis.NOT_REPORTED if self.cost_basis is None else self.cost_basis
 
 
 @dataclass(frozen=True, slots=True)
@@ -419,6 +620,8 @@ class AgentSessionSpec:
     workspace: Path
     policy: AgentExecutionPolicy
     model: str | None = None
+    scripted: bool = False
+    """True when a scripted client runs the turn. The provider and model stay the selection."""
     mcp_servers: tuple[MCPServerSpec, ...] = ()
     skills: tuple[Path, ...] = ()
     environment: tuple[tuple[str, str], ...] = ()
@@ -440,6 +643,15 @@ def session_spec_fingerprint(spec: AgentSessionSpec) -> str:
     return hashlib.sha256(repr(spec).encode("utf-8")).hexdigest()
 
 
+DEFAULT_TURN_TIMEOUT_S = 6 * 60 * 60
+"""The bound on a turn when neither the turn nor its session names one.
+
+A hang guard, not a budget: no provider turn should run six hours, and a run
+with no ``cli_timeout`` and no ``max_run_seconds`` would otherwise wait for ever
+on a provider process that stopped answering.
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class AgentTurnRequest:
     """Context added to an existing conversation for one agent turn."""
@@ -448,12 +660,27 @@ class AgentTurnRequest:
     instructions: str = ""
     output_schema: type[BaseModel] | None = None
     timeout: timedelta | None = None
+    """This turn's bound; ``None`` takes the session's, then ``DEFAULT_TURN_TIMEOUT_S``."""
     invocation_id: str | None = None
     label: str | None = None
     expected_provider_session_id: str | None = None
     """Strict continuation: refuse any reset, replacement, or fresh session."""
     require_provider_checkpoint: bool = False
     """Retain resumable history after this turn, including an initial dispatch."""
+    renewable: bool = False
+    """The message stands alone: it may run in a fresh conversation instead of the expected one.
+
+    Set only for a turn whose message carries the role's whole prompt, never for one that
+    answers the conversation (a correction, a resumed wait). The session owner then retires a
+    conversation near its model's context window before the turn, and runs the turn once more
+    in a fresh conversation after the provider refused it for context overflow
+    (``AgentContextOverflowError``). A strict continuation (``expected_provider_session_id``)
+    is checked against the conversation before it is retired.
+    """
+    step_tag: str | None = None
+    """The step that asked for this turn: every agent process the turn starts carries it
+    (``vs_sandbox.step_marks``), so ``reap_step_agents`` can end exactly those. It is not part of
+    the turn's payload digest: the same step asks the same turn in every attempt."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,6 +711,13 @@ class AgentTurnResult:
     is still valid.
     """
     skills: AgentSkillUse = field(default_factory=AgentSkillUse)
+    refused_steers: tuple[str, ...] = ()
+    """The ids of the keyed steers this turn's provider took and then did not keep.
+
+    Each steer a keyed call answered ``DELIVERED`` (``steer_session``) ends the turn either
+    consumed or here: refused by the provider, or still unresolved when the provider stopped
+    (a quota stop before the turn was sent again counts). The model did not read these.
+    """
 
 
 class SteerOutcome(StrEnum):

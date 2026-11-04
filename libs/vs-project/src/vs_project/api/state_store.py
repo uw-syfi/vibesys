@@ -1,20 +1,13 @@
-"""Atomic opaque run records and host leases, independent of kernel schemas.
+"""A legacy run's stored record, independent of kernel schemas.
 
-The shell serializes the complete kernel envelope, including state, request
-outbox and cursor, into ``payload``. Metadata permits CAS without decoding it.
-Time is finite nonnegative seconds on one durable clock basis shared by hosts.
-Fencing commits does not fence external executors: they must honor the epoch
-or reconcile stable request identities before replay.
+A run saved before the step loop serialized its complete kernel envelope into ``payload``. This
+release only reads that record, for the migration of the run into the run log; nothing writes it.
 """
 
-from collections.abc import Callable
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal, Protocol
+from typing import Annotated, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
-
-if TYPE_CHECKING:
-    from vs_project.project import Project
 
 
 class _Value(BaseModel):
@@ -55,67 +48,6 @@ class QuarantinedEnvelope(_Value):
 StoreRecord = Annotated[StoredEnvelope | QuarantinedEnvelope, Field(discriminator="kind")]
 
 
-class StoreFence(_Value):
-    """Storage lease identity, mapped to the kernel host fence by the shell.
-
-    Epoch and host identify ownership. The persisted expiry is authoritative,
-    so a token retained before same-epoch renewal remains valid.
-    """
-
-    host_id: str = Field(min_length=1, pattern=r"^\S+$")
-    epoch: int = Field(ge=1)
-    expires_at: float = Field(ge=0, allow_inf_nan=False)
-
-
-class ConflictReason(StrEnum):
-    """Reasons a CAS was rejected without publication."""
-
-    REVISION = "revision"
-    FENCE = "fence"
-
-
-class Committed(_Value):
-    """The complete candidate was durably published under a valid fence."""
-
-    kind: Literal["committed"] = "committed"
-    record: StoreRecord
-
-
-class Conflict(_Value):
-    """Nothing was written; revision or host ownership no longer matches."""
-
-    kind: Literal["conflict"] = "conflict"
-    reason: ConflictReason
-    revision: int | None = Field(ge=0)
-
-
-class Unknown(_Value):
-    """Publication is uncertain. Dispatch is forbidden until reload resolves it.
-
-    Reload sees the complete old or new record. Compare the attempted revision
-    and payload; if another host advanced it, reconcile instead of replaying.
-    """
-
-    kind: Literal["unknown"] = "unknown"
-    revision: int = Field(ge=0)
-
-
-CommitOutcome = Annotated[Committed | Conflict | Unknown, Field(discriminator="kind")]
-
-
-class CommitFault(StrEnum):
-    """Deterministic publication faults for record or lease mutations.
-
-    The record fault_plan is consumed only by eligible commit/quarantine calls;
-    lease_fault_plan is consumed only by eligible acquire/renew calls.
-    """
-
-    FAILED = "failed"
-    UNKNOWN_BEFORE = "unknown_before"
-    UNKNOWN_AFTER = "unknown_after"
-    UNKNOWN_SYNC = "unknown_sync"
-
-
 class ObservationFault(StrEnum):
     """Faults consumed by observations, including internal transaction reads."""
 
@@ -123,77 +55,21 @@ class ObservationFault(StrEnum):
     SYNC = "sync"
 
 
-class StateStoreWriteError(OSError):
-    """An injected definite failure published nothing; dispatch is forbidden."""
-
-
 class StateStore(Protocol):
-    """Atomic record CAS and epoch fencing with interchangeable implementations.
+    """Read the record a legacy run's writer published, with interchangeable implementations.
 
-    None expected revision means no record. The initial candidate is revision
-    zero; every subsequent mutation is exactly the next revision. Invalid
-    inputs raise ValueError. I/O observation errors propagate; write errors
-    return Unknown because replacement may already have happened. Lease-write
-    errors propagate and grant no dispatch authority until reconciliation.
+    I/O observation errors propagate. A document that is damaged, or written by a newer release,
+    is a typed error that names its source and never echoes it.
     """
 
+    def observe(self) -> StoreRecord | None:
+        """Read one atomic published record without locking or synchronizing it.
+
+        Observation grants no durability. A concurrent publication yields either whole
+        version, including a quarantined record.
+        """
+        ...
+
     def load(self) -> StoreRecord | None:
-        """Load the latest whole record, including a blocked quarantine."""
+        """Load the latest whole record, including a blocked quarantine, synchronized under the lock."""
         ...
-
-    def commit(
-        self, expected_revision: int | None, envelope: StoredEnvelope, fence: StoreFence, now: float
-    ) -> CommitOutcome:
-        """Persist the whole transition, verifying revision and fence atomically."""
-        ...
-
-    def quarantine(
-        self,
-        expected_revision: int | None,
-        envelope: QuarantinedEnvelope,
-        fence: StoreFence,
-        now: float,
-    ) -> CommitOutcome:
-        """Atomically replace active state with an explicit blocked record."""
-        ...
-
-    def acquire(self, host_id: str, now: float, duration: float) -> StoreFence | None:
-        """Acquire an absent or expired lease with a new epoch.
-
-        Any live owner, including the same host, prevents acquisition. Expiry
-        is inclusive. Renew an existing lease explicitly instead.
-        """
-        ...
-
-    def renew(self, fence: StoreFence, now: float, duration: float) -> StoreFence | None:
-        """Extend a live matching epoch without shrinking its expiry."""
-        ...
-
-    def release(self, fence: StoreFence, now: float) -> bool:
-        """End a live matching lease at ``now``; False when this fence no longer holds it.
-
-        The epoch is kept, so the next acquire still gets a higher one and this host's
-        token stays invalid.
-        """
-        ...
-
-    def verify(self, fence: StoreFence, now: float) -> bool:
-        """Verify current owner and epoch against authoritative expiry.
-
-        Time before the last successful mutation cannot authorize dispatch.
-        """
-        ...
-
-    def mutate_if_fenced(self, fence: StoreFence, now: float, mutation: Callable[[], None]) -> bool:
-        """Run one synchronous mutation while takeover is excluded.
-
-        Return ``False`` without calling ``mutation`` when the fence is not
-        current. The mutation must complete its durable write before returning;
-        it must not call back into this store. Its exception propagates after
-        the store releases its transaction.
-        """
-        ...
-
-
-type StateStoreFactory = Callable[[Project, str], StateStore]
-"""Opens the ``StateStore`` of one run of a project; a Project's default is the local one."""

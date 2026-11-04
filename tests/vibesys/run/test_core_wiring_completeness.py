@@ -9,9 +9,11 @@ role tool a built-in core plugin declares is either the bridged evaluation tool 
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from tests.support.docker_environment import host_container_backend
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import (
     _plugin,
@@ -23,6 +25,7 @@ from tests.vibesys.run.test_core_host_composition import (
 
 from launch.composition import STATELESS_TOOL_SERVERS
 from vibesys.api import catalog
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeAgentInvocationStore
@@ -31,10 +34,14 @@ from vs_core.api import (
     CommandCapture,
     OperationDescriptor,
     OperationRegistration,
+    RequestId,
     SchemaRef,
 )
 from vs_runtime.api import CoreOperation
 from vs_runtime.api.core import EVALUATION_TOOL_ID, OperationRole, RunTiming
+from vs_runtime.api.operation_step_runner import ClearedWork
+from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -80,8 +87,14 @@ def _services(tmp_path: Path) -> CoreServices:
         prompt_templates=policy.prompt_templates,
     )
     plugin = type(plugin)(id=plugin.id, agents=plugin.agents, options=EmptyOptions, core=policy)
-    integration = LocalRunIntegration()
     clock = VirtualClock(at=0.0)
+    integration = LocalRunIntegration(
+        clock=clock,
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        system=idle_environment_system(),
+    )
 
     async def exercise() -> CoreServices:
         try:
@@ -90,10 +103,14 @@ def _services(tmp_path: Path) -> CoreServices:
                 integration,
                 plugin=plugin,
                 options=EmptyOptions(),
-                timing=RunTiming(clock, 60.0),
+                timing=RunTiming(clock, OsThreads()),
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ) as host:
                 return host.services
         finally:
@@ -107,6 +124,25 @@ def test_command_capture_has_a_production_owner(tmp_path: Path) -> None:
     services = _services(tmp_path)
     offered = {descriptor.kind for descriptor in services.catalog.offered_operations}
     assert "test.capture_command" in offered
+
+
+def test_a_rerun_of_every_owned_operation_can_always_proceed(tmp_path: Path) -> None:
+    """After a crash a step with no result is run again: no owned operation waits on a cleaner.
+
+    A command role used to be declared with a cleaner the production run never wired, so its
+    `clear` raised `ClearUnavailableError` on every try and the step never ran again.
+    """
+    services = _services(tmp_path)
+    owned = [entry for entry in services.catalog.entries if entry.owner is not None]
+    assert any(entry.registration.descriptor.kind == "test.capture_command" for entry in owned)
+
+    async def clear_all() -> None:
+        for entry in owned:
+            if isinstance(entry.rerun, ClearedWork):
+                request = entry.registration.request_model.model_construct()
+                await entry.rerun.cleaner.clear(RequestId(root="step"), request)
+
+    asyncio.run(clear_all())
 
 
 def test_every_stateless_tool_a_builtin_core_role_declares_is_served() -> None:

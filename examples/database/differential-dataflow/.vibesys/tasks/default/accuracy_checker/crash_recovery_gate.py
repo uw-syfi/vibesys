@@ -92,6 +92,35 @@ def _clean_run(binary, args, cwd):
     return True, workload.normalize(p.stdout)
 
 
+class _StdoutLines:
+    """Whole lines of the engine's stdout, read from the descriptor itself.
+
+    A buffered `readline()` takes whatever the pipe holds, so two lines the engine printed
+    together arrive in one read: the first `readline()` keeps the second in the stream's own
+    buffer, and a `select` on the descriptor then waits for bytes that are not coming. The gate
+    would report "no stdout" and skip the crash point although the line was already read. This
+    reader keeps its own buffer, so it waits only while no whole line is held.
+    """
+
+    def __init__(self, selector, descriptor):
+        self._selector = selector
+        self._descriptor = descriptor
+        self._pending = b""
+
+    def next_line(self, deadline):
+        """The next line, "" at end of file, or None when `deadline` passes first."""
+        while b"\n" not in self._pending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not self._selector.select(remaining):
+                return None
+            chunk = os.read(self._descriptor, 65536)
+            if not chunk:
+                return ""
+            self._pending += chunk
+        line, _, self._pending = self._pending.partition(b"\n")
+        return line.decode(errors="replace") + "\n"
+
+
 def _crash_then_restart(binary, args, cwd, kill_after_lines):
     """Start the engine in `cwd`, SIGKILL after `kill_after_lines` stdout lines, then
     restart it clean in the SAME `cwd`. Returns (crashed, ok, normalized_or_error)."""
@@ -100,23 +129,21 @@ def _crash_then_restart(binary, args, cwd, kill_after_lines):
         cwd=cwd,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
-        text=True,
-        bufsize=1,  # line-buffered on our side so readline() returns lines as they arrive
     )
     crashed = False
     injection_error = "completed-before-crash"
     selector = selectors.DefaultSelector()
     try:
         selector.register(proc.stdout, selectors.EVENT_READ)
+        lines = _StdoutLines(selector, proc.stdout.fileno())
         deadline = time.monotonic() + _CRASH_INJECTION_TIMEOUT_S
         for _ in range(kill_after_lines):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0 or not selector.select(remaining):
+            line = lines.next_line(deadline)
+            if line is None:
                 injection_error = (
                     f"no stdout within {_CRASH_INJECTION_TIMEOUT_S}s before crash point"
                 )
                 break
-            line = proc.stdout.readline()
             if line == "":  # EOF: the engine finished before we could crash it
                 break
         else:

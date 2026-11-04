@@ -54,8 +54,12 @@ def socket_dir() -> Iterator[Path]:
 
     Rooting the directory at ``/tmp`` keeps every path it yields far under the
     limit on both platforms.
+
+    The path is resolved: ``/tmp`` is a symlink to ``/private/tmp`` on macOS, and a server
+    resolves the socket path it is given, so a listener bound at the resolved address is not
+    found by a client that dials the unresolved one.
     """
-    directory = Path(tempfile.mkdtemp(prefix="vibesys-sock-", dir="/tmp"))
+    directory = Path(tempfile.mkdtemp(prefix="vibesys-sock-", dir="/tmp")).resolve()
     try:
         yield directory
     finally:

@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import platform
 import shutil
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, create_session
 from vibesys.api import (
     AgentOutputChunkData,
@@ -29,16 +33,41 @@ from vibesys.api.request import RunEnvironmentSpec, load_task
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-_PREFLIGHT_WARNING = (
-    "[profiler] Resolved profiler 'linux_cpu' is not usable on this host: "
-    "perf_event_paranoid_restrictive, perf_stat_unavailable. "
-    "--profiler auto is falling back to 'none'."
-)
+def _preflight_warning(kind: ProfilerKind) -> str:
+    return (
+        f"[profiler] Resolved profiler '{kind.value}' is not usable on this host: "
+        "perf_event_paranoid_restrictive, perf_stat_unavailable. "
+        "--profiler auto is falling back to 'none'."
+    )
+
+
+@dataclass(frozen=True)
+class _HostNativeProfiler:
+    """What the generic domain's ``auto`` does on one host OS, by the operating system's facts.
+
+    ``found_through_path`` is whether a PATH naming only ``git`` hides the profiler's tool: Linux's
+    ``perf`` is found through PATH alone, while macOS also finds ``sample`` at ``/usr/bin/sample``.
+    """
+
+    kind: ProfilerKind
+    found_through_path: bool
+
+
+_HOST_NATIVE_PROFILERS = {
+    "Linux": _HostNativeProfiler(ProfilerKind.LINUX_CPU, found_through_path=True),
+    "Darwin": _HostNativeProfiler(ProfilerKind.MACOS_CPU, found_through_path=False),
+}
+
+
+def _host_native_profiler() -> _HostNativeProfiler:
+    return _HOST_NATIVE_PROFILERS[platform.system()]
 
 
 class _UnavailableNativeProfiler:
@@ -64,7 +93,7 @@ class _RecordingBackendFactory:
 
     def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
         self.calls += 1
-        return FakeComputeBackend()
+        return FakeComputeBackend(threads=SimThreads())
 
 
 def _profiler_registry() -> OrchestrationRegistry:
@@ -90,7 +119,7 @@ def _native_profiler_request(root: Path, requested: ProfilerKind) -> RunRequest:
         orchestration=OrchestrationDescriptor(
             id="profiler-preflight-test", config_version=1, options={}
         ),
-        config=Config.model_validate({"model": {"name": "gpt-test"}}),
+        config=Config.model_validate({"model": {"name": "gpt-5.5"}}),
         input_bundle=load_task(project),
         exp_name="profiler-preflight",
         run_environment=fake_docker_environment(),
@@ -141,10 +170,9 @@ def _request(root: Path, *, service: bool, profile: bool, requested: ProfilerKin
                 "max_rounds": 1,
                 "max_retries_per_round": 1,
                 "judge_every": 1,
-                "official_eval_every": 1,
             },
         ),
-        config=Config.model_validate({"model": {"name": "gpt-test"}}),
+        config=Config.model_validate({"model": {"name": "gpt-5.5"}}),
         exp_name="profile-preflight",
         runs_dir=root / "runs",
         profiler_kind=requested,
@@ -175,13 +203,29 @@ def test_profile_workload_requirement_precedes_provisioning(
             create_session(
                 request,
                 sink=record,
-                settings=LaunchSettings(backend_factory=host_container_backend),
+                settings=LaunchSettings(
+                    timing=production_timing(),
+                    processes=REAL_PROCESSES,
+                    piped_processes=FakePipedProcessLauncher(),
+                    backend_factory=host_container_backend,
+                    blocking=ThreadBlockingRunner(),
+                    network=UnixNetwork(),
+                ),
             )
         assert error.value.diagnostic.code == "profile_workload_invalid"
         assert error.value.diagnostic.stage == "profiler_validation"
     else:
         session = create_session(
-            request, sink=record, settings=LaunchSettings(backend_factory=host_container_backend)
+            request,
+            sink=record,
+            settings=LaunchSettings(
+                timing=production_timing(),
+                processes=REAL_PROCESSES,
+                piped_processes=FakePipedProcessLauncher(),
+                backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+            ),
         )
         session.close()
     assert events == []
@@ -207,7 +251,16 @@ def test_incompatible_profiler_is_a_typed_early_configuration_failure(
 
     with pytest.raises(ConfigurationError, match="--profiler") as error:
         create_session(
-            request, sink=discard, settings=LaunchSettings(backend_factory=host_container_backend)
+            request,
+            sink=discard,
+            settings=LaunchSettings(
+                timing=production_timing(),
+                processes=REAL_PROCESSES,
+                piped_processes=FakePipedProcessLauncher(),
+                backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+            ),
         )
     assert error.value.diagnostic.code == "profiler_incompatible"
     assert error.value.diagnostic.stage == "profiler_validation"
@@ -231,6 +284,11 @@ def test_auto_native_preflight_failure_records_none_without_profiler_support(
         request,
         sink=record,
         settings=LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=_profiler_registry(),
             backend_factory=backend,
             git_repository=git.repository,
@@ -241,31 +299,34 @@ def test_auto_native_preflight_failure_records_none_without_profiler_support(
 
     result = asyncio.run(session.await_result())
 
+    native = _host_native_profiler().kind
+    warning = _preflight_warning(native)
     assert result.loop == "profiler-preflight-test"
-    assert preflight.calls == [ProfilerKind.LINUX_CPU]
+    assert preflight.calls == [native]
     assert backend.calls == 1
     manifest = Project.open(request.project_root).state.load_run(request.resolved_run_id)
     assert manifest.execution.requested_profiler == ProfilerKind.AUTO.value
     assert manifest.execution.resolved_profiler == ProfilerKind.NONE.value
-    assert not (request.project_root / "linux_cpu_profiler").exists()
+    assert not (request.project_root / f"{native.value}_profiler").exists()
     emitted_diagnostics = [
         event.data.content.removesuffix("\n")
         for event in events
         if isinstance(event.data, AgentOutputChunkData) and event.data.channel == "diagnostic"
     ]
-    assert emitted_diagnostics.count(_PREFLIGHT_WARNING) == 1
+    assert emitted_diagnostics.count(warning) == 1
     persisted_logs = "".join(
         path.read_text(encoding="utf-8")
         for path in Project.log_directory_for(request.project_root, request.resolved_run_id).glob(
             "run-*.log"
         )
     )
-    assert persisted_logs.count(_PREFLIGHT_WARNING) == 1
+    assert persisted_logs.count(warning) == 1
 
 
-def test_auto_native_preflight_failure_through_default_launch_wiring(
+def test_auto_native_preflight_through_default_launch_wiring_follows_the_host_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """The default wiring probes the host: a PATH naming only git hides what PATH finds."""
     request = _native_profiler_request(tmp_path, ProfilerKind.AUTO)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     git_executable = shutil.which("git")
@@ -282,6 +343,11 @@ def test_auto_native_preflight_failure_through_default_launch_wiring(
         request,
         sink=discard,
         settings=LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=_profiler_registry(),
             backend_factory=_RecordingBackendFactory(),
             git_repository=FakeGitRepositories().repository,
@@ -291,8 +357,11 @@ def test_auto_native_preflight_failure_through_default_launch_wiring(
     result = asyncio.run(session.await_result())
 
     assert result.loop == "profiler-preflight-test"
+    host = _host_native_profiler()
     manifest = Project.open(request.project_root).state.load_run(request.resolved_run_id)
-    assert manifest.execution.resolved_profiler == ProfilerKind.NONE.value
+    assert manifest.execution.resolved_profiler == (
+        ProfilerKind.NONE if host.found_through_path else host.kind
+    )
 
 
 def test_explicit_native_preflight_failure_precedes_backend_and_project_effects(
@@ -310,6 +379,11 @@ def test_explicit_native_preflight_failure_precedes_backend_and_project_effects(
         request,
         sink=record,
         settings=LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=_profiler_registry(),
             backend_factory=backend,
             profiler_preflight=preflight,
@@ -326,8 +400,8 @@ def test_explicit_native_preflight_failure_precedes_backend_and_project_effects(
     assert preflight.calls == [ProfilerKind.LINUX_CPU]
     assert backend.calls == 0
     assert _tree(tmp_path) == before
+    warning = _preflight_warning(ProfilerKind.LINUX_CPU)
     assert all(
-        not isinstance(event.data, AgentOutputChunkData)
-        or _PREFLIGHT_WARNING not in event.data.content
+        not isinstance(event.data, AgentOutputChunkData) or warning not in event.data.content
         for event in events
     )

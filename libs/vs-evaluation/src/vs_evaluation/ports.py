@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -154,6 +154,20 @@ class PollingEvaluationExecutor(EvaluationExecutor, Protocol):
 
     async def poll(self, handle_id: str) -> ExecutorPoll:
         """Inspect handle_id once. Never submit, resume, cancel or create a workspace."""
+        ...
+
+
+@runtime_checkable
+class RecoverableEvaluationExecutor(PollingEvaluationExecutor, Protocol):
+    """Inspect an earlier delivery without mistaking an empty client cache for absence."""
+
+    async def recover(self, handle_id: str) -> ExecutorPoll:
+        """Read authoritative prior work, without dispatch, cancellation or recovery tasks.
+
+        UNSUBMITTED proves the earlier delivery never reached this owner. A new
+        process-local executor cannot prove that from an empty cache and returns
+        UNKNOWN. A durable provider can inspect its retained submission identity.
+        """
         ...
 
 

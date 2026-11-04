@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import threading
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from vs_sim.api import Threads
 
 
 class EventCodec[EventT](Protocol):
@@ -42,20 +45,33 @@ class _PendingWrite:
 class DurableEventJournal[EventT]:
     """Persist codec-defined events while supporting replay and subscriptions."""
 
-    def __init__(self, codec: EventCodec[EventT], *, filename: str) -> None:
-        """Create an unattached journal for one event codec and file name."""
+    def __init__(self, codec: EventCodec[EventT], *, filename: str, threads: Threads) -> None:
+        """Create an unattached journal for one event codec and file name, locked by ``threads``."""
         if not filename or Path(filename).name != filename:
             message = "journal filename must be one non-empty path component"
             raise ValueError(message)
+        self._append_sink: Callable[[bytes], None] | None = None
         self._codec = codec
         self._filename = filename
-        self._condition = threading.Condition(threading.RLock())
+        self._condition = threads.condition(threads.rlock())
         self._path: Path | None = None
         self._stream_id = ""
         self._events: list[EventT] = []
         self._pending: list[EventT] = []
         self._pending_write: _PendingWrite | None = None
         self._subscribers: tuple[EventSubscriber[EventT], ...] = ()
+
+    def set_append_sink(self, sink: Callable[[bytes], None]) -> None:
+        """Install an additive byte sink before attachment, including buffered events.
+
+        A sink failure is diagnosed once and disables it without affecting the
+        authoritative JSONL journal, its subscriptions or its retry behavior.
+        """
+        with self._condition:
+            if self._path is not None:
+                message = "append sink must be installed before journal attachment"
+                raise RuntimeError(message)
+            self._append_sink = sink
 
     @property
     def path(self) -> Path | None:
@@ -141,6 +157,11 @@ class DurableEventJournal[EventT]:
         with self._condition:
             return [event for event in self._events if self._codec.sequence(event) > after_sequence]
 
+    def history(self) -> list[EventT]:
+        """Return every event recorded so far: the durable ones, then any awaiting attachment."""
+        with self._condition:
+            return [*self._events, *self._pending]
+
     def wait(self, after_sequence: int, timeout: float | None = None) -> list[EventT]:
         """Wait until durable events exist after a cursor."""
         with self._condition:
@@ -179,6 +200,12 @@ class DurableEventJournal[EventT]:
             if written != len(payload):
                 message = f"incomplete event journal write: {written} of {len(payload)} bytes"
                 raise OSError(message)
+        if self._append_sink is not None:
+            try:
+                self._append_sink(payload)
+            except Exception:
+                self._append_sink = None
+                logging.getLogger(__name__).exception("Run log tee disabled after append failure")
         self._events.append(recorded)
         if notify:
             self._condition.notify_all()

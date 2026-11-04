@@ -1,4 +1,5 @@
 version = 1
+backends = ["cpu"]
 
 [agent]
 domain = "generic"
@@ -14,3 +15,15 @@ timeout_seconds = 300
 [benchmark.result]
 json_argument = "--output-json"
 metric = "total_ops_per_sec"
+
+[catalogue]
+domain = "data-structures"
+
+[catalogue.hardware]
+accelerator = "CPU"
+count = 1
+vendor = "cpu"
+
+[catalogue.workload]
+name = "Mixed reads and writes"
+description = "Concurrent put, get and delete on a key-value store; checked for linearizability with Porcupine, scored in operations per second."

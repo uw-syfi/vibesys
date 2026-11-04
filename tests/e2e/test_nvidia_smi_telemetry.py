@@ -15,6 +15,7 @@ import pytest
 
 from vs_sandbox.api import GpuInfo, NvidiaSmiTelemetry
 from vs_sandbox.api.testing import GpuTelemetryContract, TelemetryHarness
+from vs_sim.api import SubprocessProbe
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,13 +45,16 @@ class TestNvidiaSmiTelemetry(GpuTelemetryContract):
             f'case "$1" in --query-gpu=*) cat "{self._dir}/gpus.csv";; '
             f'--query-compute-apps=*) cat "{self._dir}/procs.csv";; *) exit 2;; esac',
         )
-        return NvidiaSmiTelemetry(script)
+        return NvidiaSmiTelemetry(script, probe=SubprocessProbe())
 
     def harness(self) -> TelemetryHarness:
         return TelemetryHarness(
             reporting=self._reporting,
-            without_driver=lambda: NvidiaSmiTelemetry(str(self._dir / "missing-nvidia-smi")),
+            without_driver=lambda: NvidiaSmiTelemetry(
+                str(self._dir / "missing-nvidia-smi"), probe=SubprocessProbe()
+            ),
             failing=lambda: NvidiaSmiTelemetry(
-                _write_executable(self._dir / "broken-smi", "echo oops; exit 9")
+                _write_executable(self._dir / "broken-smi", "echo oops; exit 9"),
+                probe=SubprocessProbe(),
             ),
         )

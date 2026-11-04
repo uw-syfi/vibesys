@@ -12,6 +12,10 @@ root:
 
     make
 
+The task declares this build (`[build]` in `vibesys.input.toml`): VibeSys runs
+it confined in a fresh checkout of each measured commit, verifies that it
+produced `queue-candidate.so`, and only then runs the check and the benchmark.
+
 VibeSys resolves the evaluator package during validation,
 then runs it during optimization. The evaluator command is not a repository
 executable.

@@ -1,4 +1,5 @@
 {% from '_revision.j2' import rev %}
+{% from '_prose.j2' import item as prose_item %}
 You are the Implementer continuing hypothesis `{{ plan.hypothesis_id }}`{% if plan.title %} ({{ plan.title }}){% endif %}.
 Execute the required delta; do not rediscover completed work.
 
@@ -10,19 +11,22 @@ Round {{ round_number }}, attempt {{ retry }}. Your workspace is an isolated can
 `{{ rev(base_revision) }}`, the revision the previous rounds of this hypothesis left; edit it
 freely.
 
-- Claim: {{ plan.hypothesis }}
-- Pass criteria: {{ plan.pass_criteria }}
-{% if plan.invariants %}- Invariants: {{ plan.invariants }}
-{% endif %}{% if plan.falsification_criteria %}- Falsifier: {{ plan.falsification_criteria }}
-{% endif %}{% if plan.minimum_acceptance_criteria %}- Minimum acceptance: {{ plan.minimum_acceptance_criteria }}
+{{ prose_item('Claim', plan.hypothesis) }}
+{{ prose_item('Pass criteria', plan.pass_criteria) }}
+{% if plan.invariants %}{{ prose_item('Invariants', plan.invariants) }}
+{% endif %}{% if plan.falsification_criteria %}{{ prose_item('Falsifier', plan.falsification_criteria) }}
 {% endif %}
+- Expected-effect bar: the candidate's headline metric ratio over its base's must clear
+  `{{ plan.minimum_ratio }}` (in the metric's own direction). The framework measures the
+  candidate and derives supported, within noise or disproven from this bar; you do not state it.
+
+
 {% if retry > 1 %}
 ## Same-round retry boundary
 
-This is attempt {{ retry }} of the same framework round. Target or paid work recorded by any
-prior attempt remains consumed against the typed plan's hard maximum over all branches. Do not
-repeat exhausted target work; make the smallest local/report-only correction or return the
-truthful incomplete outcome.
+This is attempt {{ retry }} of the same framework round. Target work recorded by any prior
+attempt stays on record. Do not repeat work that already answered its question; make the
+smallest local/report-only correction or return the truthful incomplete outcome.
 {% endif %}
 {% if no_valid_reply %}
 
@@ -35,11 +39,10 @@ schema-valid JSON object this time.
 {{ continuation_step }}
 
 This delta replaces original task/pass criteria, but cannot change the
-hypothesis, falsifier, minimum, invariants, paid cap, evidence/workload identity,
+hypothesis, falsifier, minimum, invariants, evidence/workload identity,
 or correctness/lifecycle/evaluation gates. It grants scope, not authority.
-Tally cumulative paid work from your own records; rounds/reviews/retries do not
-replenish it. If spent or new authority is needed, make no paid call and return
-a terminal outcome with empty {{ reply.next_step }}.
+If the work needs new authority, return a terminal outcome with empty
+{{ reply.next_step }}.
 
 {% if feedback %}
 ## New review/framework feedback
@@ -88,12 +91,14 @@ then prove the repair reaches that exact path; a sibling or internal route is
 not a substitute.
 {% endif %}
 
+{% include '_trusted_evaluation.j2' %}
+
 ## Self-verification
 
-Before declaring `nominated` or `supported`, verify your changes work by running
+Before reporting `implemented`, verify your changes work by running
 the fastest check that exercises the failure-prone path. Use the same tools and
 environment the framework will use. A build that has not been attempted is not
-nominated, it is speculative. State what you verified and what you could not.
+implemented, it is speculative. State what you verified and what you could not.
 
 Before target work, match exact target-read build/provenance/gate bytes to the
 resolved target package/mount plan; an archive alone is insufficient. A
@@ -112,4 +117,5 @@ target, deployment, benchmark, profiler, and official-evaluator commands.
 
 {% include '_validation_contract.j2' %}
 
+{% include 'reply_markdown.j2' %}
 Return only schema-valid JSON. The framework records it.

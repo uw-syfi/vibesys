@@ -1,0 +1,1 @@
+{"type":"span_started","timestamp":"2026-01-01T00:00:00Z","data":{"kind":"span_started","span":{"id":"op:old#1","parent":null,"type":"operation","name":"implement","status":"running","started_at":0,"label":{"kind":"agent_turn","attrs_json":"{\"role\":\"implementer\"}"}}}}

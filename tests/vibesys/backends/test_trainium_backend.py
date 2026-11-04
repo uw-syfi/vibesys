@@ -20,7 +20,8 @@ from vs_sandbox.api import (
     TrainiumBackend,
     create_compute_backend,
 )
-from vs_sandbox.api.testing import FakeAcceleratorDiscovery
+from vs_sandbox.api.testing import FakeAcceleratorDiscovery, ScriptedDockerCli
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, ScriptedProbe, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -38,13 +39,24 @@ def _make_backend(
         accelerator_discovery=FakeAcceleratorDiscovery(
             trainium=AcceleratorInventory(tuple(devices))
         ),
-        docker=docker,
+        docker=ScriptedDockerCli() if docker is None else docker,
+        clock=ManualClock(),
+        threads=SimThreads(),
+        launcher=FakePipedProcessLauncher(),
     )
 
 
 class TestTrainiumRegistry:
     def test_trainium_in_registry(self, tmp_path: Path) -> None:
-        impl = create_compute_backend(ComputeBackend.TRAINIUM, log_dir=tmp_path)
+        impl = create_compute_backend(
+            ComputeBackend.TRAINIUM,
+            log_dir=tmp_path,
+            clock=ManualClock(),
+            docker=ScriptedDockerCli(),
+            threads=SimThreads(),
+            launcher=FakePipedProcessLauncher(),
+            probe=ScriptedProbe(lambda _argv: None),
+        )
         assert isinstance(impl, TrainiumBackend)
         assert impl.name is ComputeBackend.TRAINIUM
 
@@ -61,6 +73,29 @@ class TestTrainiumSandbox:
             extra_env={"FOO": "bar"},
         )
         assert isinstance(sb, LocalShellRunner)
+
+    def test_local_keeps_every_torchneuron_cache_under_the_run_log_dir(
+        self, tmp_path: Path
+    ) -> None:
+        # TorchNeuron's caches default to /tmp; a local run has no cache mounts,
+        # so each one must be redirected under the run's writable log dir.
+        impl = _make_backend(tmp_path)
+        workspace = tmp_path / "ws"
+        workspace.mkdir()
+        sb = impl.make_sandbox(
+            SandboxKind.LOCAL,
+            host_workspace=str(workspace),
+            log_path=None,
+        )
+        assert isinstance(sb, LocalShellRunner)
+        env = sb.env
+        cache = tmp_path / "logs" / "neuron-compile-cache"
+        tmp = tmp_path / "logs" / "neuron-tmp"
+        assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(cache / "neff")
+        assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == str(cache / "hlo")
+        assert env["NKI_TRACE_CACHE_URL"] == str(cache / "nki")
+        assert env["TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"] == str(tmp / "neff-locks")
+        assert env["TMPDIR"] == str(tmp)
 
     def test_docker_forwards_neuron_devices_and_no_gpus(self, tmp_path: Path) -> None:
         docker = recording_docker_cli()
@@ -91,8 +126,12 @@ class TestTrainiumSandbox:
         assert argv[argv.index("--shm-size") + 1] == "16g"
         assert any(mount.endswith(":/opt/neuron-compile-cache") for mount in mounts)
         assert any(mount.endswith(":/opt/neuron-tmp") for mount in mounts)
-        assert "NEURON_COMPILE_CACHE_URL=/opt/neuron-compile-cache" in env
+        assert "TORCH_NEURONX_NEFF_CACHE_DIR=/opt/neuron-compile-cache/neff" in env
+        assert "TORCH_NEURONX_HLO_CACHE_DIR=/opt/neuron-compile-cache/hlo" in env
+        assert "NKI_TRACE_CACHE_URL=/opt/neuron-compile-cache/nki" in env
+        assert "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR=/opt/neuron-tmp/neff-locks" in env
         assert "TMPDIR=/opt/neuron-tmp" in env
+        assert not any(item.startswith("NEURON_COMPILE_CACHE_URL=") for item in env)
 
     def test_docker_forwards_resources_to_the_sandbox(self, tmp_path: Path) -> None:
         docker = recording_docker_cli()

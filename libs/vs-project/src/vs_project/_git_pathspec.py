@@ -144,6 +144,8 @@ class _Item:
     test: Callable[[str], bool]
     wild: bool
     """Whether ``text`` holds wildcards, so any path below any directory may match."""
+    glob: bool
+    """Whether the spec carries ``:(glob)`` magic."""
 
 
 def _literal(text: str) -> Callable[[str], bool]:
@@ -197,11 +199,16 @@ def _item(spec: str) -> _Item:
         raise PathspecError(message)
     normalized = _normalize(text, spec)
     exclude = "exclude" in words
+    glob = "glob" in words
     if "literal" in words or not (_WILDCARDS & set(normalized)):
-        return _Item(exclude, normalized, _literal(normalized), wild=False)
-    regex = wildmatch_regex(byte_view(normalized), pathname="glob" in words)
+        return _Item(exclude, normalized, _literal(normalized), wild=False, glob=glob)
+    regex = wildmatch_regex(byte_view(normalized), pathname=glob)
     return _Item(
-        exclude, normalized, lambda path: regex.fullmatch(byte_view(path)) is not None, wild=True
+        exclude,
+        normalized,
+        lambda path: regex.fullmatch(byte_view(path)) is not None,
+        wild=True,
+        glob=glob,
     )
 
 
@@ -219,12 +226,22 @@ class Pathspecs:
         included = not self._includes or any(item.test(path) for item in self._includes)
         return included and not any(item.test(path) for item in self._excludes)
 
-    def unmatched(self, paths: Sequence[str]) -> list[str]:
-        """The include pathspecs (as written) that select none of ``paths``."""
+    def unmatched(
+        self, paths: Sequence[str], *, on_disk: Callable[[str], bool] | None = None
+    ) -> list[str]:
+        """The include pathspecs (as written) that select none of ``paths``.
+
+        With ``on_disk``, a pathspec without ``:(glob)`` magic whose text names a path
+        ``on_disk`` reports present is not unmatched, as in ``git add``: an empty
+        directory, say, matches no file but is no typo.
+        """
         return [
             spec
             for spec, item in self._items
-            if not item.exclude and item.text and not any(item.test(path) for path in paths)
+            if not item.exclude
+            and item.text
+            and not any(item.test(path) for path in paths)
+            and not (on_disk is not None and not item.glob and on_disk(item.text))
         ]
 
     def may_match_below(self, directory: str) -> bool:
@@ -246,3 +263,23 @@ class Pathspecs:
             not item.wild and (item.text == path or item.text.startswith(f"{path}/"))
             for item in self._includes
         )
+
+    def fixed_prefixes(self) -> tuple[str, ...]:
+        """The leading wildcard-free directories that hold every path an include selects.
+
+        ``""`` (the whole tree) when there is no include or one starts with a wildcard.
+        """
+        if not self._includes:
+            return ("",)
+        prefixes: set[str] = set()
+        for item in self._includes:
+            parts = item.text.split("/") if item.text else []
+            if item.wild:
+                fixed = len(parts)
+                for index, part in enumerate(parts):
+                    if _WILDCARDS & set(part):
+                        fixed = index
+                        break
+                parts = parts[:fixed]
+            prefixes.add("/".join(parts))
+        return tuple(sorted(prefixes))

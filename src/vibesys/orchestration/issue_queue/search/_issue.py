@@ -19,6 +19,11 @@ from vibesys.orchestration.issue_queue.search._prompts import ImplementPrompt, R
 from vibesys.orchestration.issue_queue.search._replies import Rejection, rejection_of
 from vibesys.orchestration.issue_queue.search._roles import IMPLEMENTER, JUDGE
 from vibesys.orchestration.issue_queue.search._settle import assessment_of, retained
+from vibesys.orchestration.issue_queue.search._spans import (
+    issue_begun,
+    issue_not_opened,
+    issue_settled,
+)
 from vibesys.orchestration.issue_queue.search._tracker import write
 from vibesys.orchestration.issue_queue.search._values import (
     Closing,
@@ -29,6 +34,7 @@ from vibesys.orchestration.issue_queue.search._values import (
     JobEndedError,
     failure_of,
 )
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import (
     Again,
     Declined,
@@ -52,13 +58,16 @@ from vs_core.api.search import (
 async def issue_job(ctx: Flow, job: IssueJob) -> JobDone:
     """Work one issue to the settlement of its workspace."""
     ctx.checkpoint(job)  # restartable from its start: every board write is keyed
+    issue_begun(ctx, job)
     async with ctx.workspaces.open(
         attempt=job.attempt, item=job.item, plan=job.workspace, budget=job.budget
     ) as opened:
         if isinstance(opened, NotOpened):
             failure = Failure(kind=FailureKind.NOT_OPENED, reason=opened.failed.reason.value)
+            issue_not_opened(ctx, Closing(failure=failure))
             return JobDone(issue_id=job.issue.id, closing=Closing(failure=failure), refunded=True)
         closing = await work_issue(ctx, job, opened)
+        issue_settled(ctx, job, closing, retained=retained(closing))
         revision = closing.candidate if retained(closing) else None
         ctx.workspaces.keep(opened, revision, assessment_of(closing))
     return JobDone(
@@ -84,10 +93,10 @@ async def work_issue(ctx: Flow, job: IssueJob, ws: Workspace) -> Closing:
     """
     try:
         await write(ctx, job.config, writes.claim(job), "claiming the issue")
-        agents = Conversation(
-            implementer=ctx.agents.session(IMPLEMENTER, workspace=ws, revision=job.base),
-            judge=ctx.agents.session(JUDGE, workspace=ws),
-        )
+        implementer = ctx.agents.session(IMPLEMENTER, workspace=ws, revision=job.base)
+        # the implementer's candidate is what the judge reviews: its work started the judge
+        judge = ctx.agents.session(JUDGE, workspace=ws, started_by=(implementer.agent,))
+        agents = Conversation(implementer=implementer, judge=judge)
 
         async def attempt(tries: Tries[Rejection]) -> Closing | Again[Rejection]:
             return await take_attempt(ctx, job, ws, agents, tries)
@@ -137,7 +146,7 @@ async def implement(session: Session, job: IssueJob, rejected: Rejection | None)
         feedback=None if rejected is None else rejected.feedback,
         analysis=None if rejected is None else rejected.analysis,
     )
-    match await session.turn(prompt):
+    match await session.turn(prompt, label=turn_label(session)):
         case TurnFinished(reply=IssueImplementerResult() as reply, checkpoint=checkpoint):
             return Implemented(reply=reply, candidate=changed(job.base, checkpoint))
         case Failed() as failed:
@@ -183,7 +192,7 @@ async def review(
         self_check=made.reply.self_check,
         evaluations=review_evaluations(refs, readings),
     )
-    match await judge.turn(prompt, revision=revision):
+    match await judge.turn(prompt, revision=revision, label=turn_label(judge)):
         case TurnFinished(reply=IssueJudgeResult() as reply, invocation=invocation):
             return Judged(reply=reply, invocation=invocation)
         case Failed() as failed:

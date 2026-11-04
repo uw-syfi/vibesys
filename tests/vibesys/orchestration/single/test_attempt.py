@@ -14,9 +14,10 @@ from tests.vibesys.serial_search._host import TERMS
 from tests.vibesys.serial_search._replies import plan_reply
 
 from vibesys.candidates.api import NotConfigured
-from vibesys.hypothesis import OrchestratorPlan, rounds
+from vibesys.hypothesis import OrchestratorPlan, RoundRecord, rounds
+from vibesys.hypothesis.state import Hypothesis
 from vibesys.metrics import AcceptedReading
-from vibesys.orchestration.single.search.api import Next, SingleAttempt
+from vibesys.orchestration.single.search.api import Next, SingleAttempt, SingleConfig
 from vibesys.serial_search.api import Gated, NotMeasured, Unreadable
 from vs_core.api import EvidenceId, EvidenceKind, RequestId, RevisionRef
 from vs_sim.api.testing import examples
@@ -25,22 +26,46 @@ BASE = RevisionRef.of_git_commit("base")
 CANDIDATE = RevisionRef.of_git_commit("candidate")
 
 
-def attempt(**changes: object) -> SingleAttempt:
-    hypotheses = config().hypotheses
+def attempt(*, measured: int = 0, **changes: object) -> SingleAttempt:
+    """An attempt of round ``measured + 1``, after ``measured`` rounds the gates measured."""
+    given = changes.pop("config", None)
+    assert given is None or isinstance(given, SingleConfig)
+    selected = config() if given is None else given
     plan = OrchestratorPlan.model_validate_json(plan_reply("h1"))
+    earlier = rounds.decode(rounds.EncodedLedger()).search
+    for number in range(1, measured + 1):
+        record = RoundRecord(
+            number,
+            f"m{number}",
+            None,
+            None,
+            passed=True,
+            reviewed=True,
+            hypothesis_outcome="proven",
+            hypothesis_id=f"m{number}",
+            judge_verdict="pass",
+            official_evaluation=True,
+        )
+        earlier.hypotheses.append(
+            Hypothesis(
+                hypothesis_id=f"m{number}",
+                plan=OrchestratorPlan.model_validate_json(plan_reply(f"m{number}")),
+                started_round=number,
+                rounds=[record],
+            )
+        )
     ledger, _ = rounds.start(
-        hypotheses,
-        rounds.Ledger(rounds.decode(rounds.EncodedLedger()).search),
+        selected.hypotheses,
+        rounds.Ledger(earlier),
         plan,
-        round_number=1,
-        current_commit=BASE.revision_id.root,
-        input_baseline=BASE.revision_id.root,
+        round_number=measured + 1,
+        parent=rounds.Parent(None, BASE.revision_id.root),
     )
     fields = {
-        "config": config(),
+        "config": selected,
         "terms": TERMS,
         "baseline": NotConfigured(),
-        "number": 1,
+        "number": measured + 1,
         "plan": plan,
         "base": BASE,
         "ledger": ledger,
@@ -89,13 +114,6 @@ def test_a_passing_self_review_with_a_candidate_goes_to_the_gates_when_they_are_
     assert taken.replied(implemented(), CANDIDATE) is Next.GATES
     assert taken.official_reason is not None
     assert not taken.passed
-
-
-def test_a_passing_self_review_settles_as_passed_when_no_gate_is_due() -> None:
-    taken = attempt(config=config(max_rounds=4, official_eval_every=3))
-    assert taken.replied(implemented(), CANDIDATE) is Next.SETTLE
-    assert taken.passed
-    assert taken.official_reason is None
 
 
 def test_a_gate_that_rejects_asks_again_and_demands_the_gates_again() -> None:

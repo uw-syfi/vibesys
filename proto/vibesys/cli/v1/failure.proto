@@ -1,0 +1,31 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// FailureKind is why a command could not do what it was asked.
+enum FailureKind {
+  FAILURE_KIND_UNSPECIFIED = 0;
+  FAILURE_KIND_INVALID_INPUT = 1;
+  FAILURE_KIND_NOT_FOUND = 2;
+  // The request conflicts with current state, such as cancelling a finished job.
+  FAILURE_KIND_CONFLICT = 3;
+  // Something the command needs is not available, such as Docker when the task selected it.
+  FAILURE_KIND_UNAVAILABLE = 4;
+  // The CLI and the daemon cannot talk; the Hello answer says which side to upgrade.
+  FAILURE_KIND_INCOMPATIBLE = 5;
+  // A command asked to mix environments.
+  FAILURE_KIND_ENVIRONMENT_MISMATCH = 6;
+  // A commit has no measurement the command could use.
+  FAILURE_KIND_NOT_MEASURED = 7;
+  FAILURE_KIND_INTERNAL = 8;
+}
+
+// Failure is a typed error. Callers branch on kind; message is display text and may change.
+// A call that cannot complete returns a gRPC error status whose details carry a Failure. A
+// refusal that is a normal answer, such as a refused promotion, is not an error and uses its own
+// message.
+message Failure {
+  FailureKind kind = 1;
+  string message = 2;
+}

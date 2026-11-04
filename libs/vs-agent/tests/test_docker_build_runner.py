@@ -14,7 +14,6 @@ from hypothesis import strategies as st
 
 from vs_agent.api.images import (
     DOCKER_OUTPUT_TAIL_CHARACTERS,
-    DOCKER_PROGRESS_LINE_CHARACTERS,
     DockerCommandResult,
     ImageBuildTimeoutError,
     SubprocessDockerBuildRunner,
@@ -23,19 +22,20 @@ from vs_agent.api.images import (
     build_task_image,
 )
 from vs_agent.api.testing import FakeDockerBuildRunner, docker_build_result
-from vs_sim.api import ProcessTimeoutError
+from vs_sim.api import DISCARD, Capture, OutputStream, ProcessTimeoutError
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
     ManualClock,
+    PipedStart,
     ScriptedStreamingCommand,
     SimThreads,
     StreamedRun,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Coroutine, Sequence
 
-    from vs_sim.api import Condition, Event, Lock, Worker
+    from vs_sim.api import Condition, Event, Lock, OutputSink, ThreadLocal, Worker
 
 
 class _FakePipedProcess:
@@ -85,6 +85,10 @@ class _FakePipedProcess:
         if self._kill_error is not None:
             raise self._kill_error
 
+    def terminate_group(self) -> None:
+        """These runners stop a process group only with SIGKILL."""
+        raise AssertionError
+
     def cancel_output(self) -> None:
         """Record that active reads were asked to return."""
         self.output_cancellations += 1
@@ -109,10 +113,10 @@ class _StuckWorker:
         if not self.is_alive() or timeout is None:
             return
         if self._threads.kill_requested and timeout >= self._threads.worker_settle_seconds:
-            self._threads.advance_to(self._threads.now() + self._threads.worker_settle_seconds)
+            self._threads.advance(self._threads.worker_settle_seconds)
             self._stopped = True
             return
-        self._threads.advance_to(self._threads.now() + timeout)
+        self._threads.advance(timeout)
 
 
 class _StuckThreads:
@@ -142,14 +146,20 @@ class _StuckThreads:
     def event(self) -> Event:
         return self._threads.event()
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        return self._threads.local(initial)
+
     def sleep(self, seconds: float) -> None:
         self._threads.sleep(seconds)
 
     def now(self) -> float:
         return self._threads.now()
 
-    def advance_to(self, instant: float) -> None:
-        self._threads.advance_to(instant)
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        return self._threads.run_async(main)
+
+    def advance(self, seconds: float) -> None:
+        self._threads.advance(seconds)
 
     def request_kill(self) -> None:
         self.kill_requested = True
@@ -170,7 +180,7 @@ def test_runner_drains_large_multiline_and_unterminated_streams_into_bounded_tai
         stderr=stderr,
         wait_results=(23,),
     )
-    launcher = FakePipedProcessLauncher(lambda _argv, _cwd: process)
+    launcher = FakePipedProcessLauncher(lambda _start: process)
     threads = SimThreads()
 
     result = threads.run(
@@ -178,6 +188,7 @@ def test_runner_drains_large_multiline_and_unterminated_streams_into_bounded_tai
             ("docker", "build"),
             cwd=tmp_path,
             timeout=30,
+            output=DISCARD,
         )
     )
 
@@ -202,84 +213,87 @@ def test_runner_drains_large_multiline_and_unterminated_streams_into_bounded_tai
     assert "earlier Docker output characters truncated" in diagnostic
     assert diagnostic.endswith(stderr_end)
     assert len(diagnostic) <= 1000
-    assert launcher.started == [(("docker", "build"), tmp_path)]
+    assert launcher.started == [PipedStart(("docker", "build"), tmp_path)]
     assert process.group_kills == 0
     assert process.stdout.closed
     assert process.stderr.closed
 
 
-def test_runner_streams_complete_and_unterminated_progress_lines(tmp_path: Path) -> None:
-    process = _FakePipedProcess(stderr="first\nsecond")
-    launcher = FakePipedProcessLauncher(lambda _argv, _cwd: process)
-    threads = SimThreads()
-    observed: list[str] = []
-
-    threads.run(
-        lambda: SubprocessDockerBuildRunner(threads=threads, processes=launcher).run(
-            ("docker", "build"),
-            cwd=tmp_path,
-            timeout=30,
-            on_stderr_line=observed.append,
-        )
-    )
-
-    assert observed == ["first", "second"]
+_OUTPUT_TEXT = st.text(st.characters(blacklist_categories=("Cs",)), max_size=200)
 
 
 @pytest.mark.parametrize("implementation", ["bounded-process", "public-fake"])
-def test_docker_runner_contract_caps_each_progress_line(
-    tmp_path: Path,
-    implementation: str,
+@given(stdout=_OUTPUT_TEXT, stderr=_OUTPUT_TEXT)
+def test_docker_runner_contract_writes_every_byte_of_both_streams_to_the_output(
+    implementation: str, stdout: str, stderr: str
 ) -> None:
-    long_line = "x" * (DOCKER_PROGRESS_LINE_CHARACTERS + 200)
-    observed: list[str] = []
-    if implementation == "bounded-process":
-        process = _FakePipedProcess(stderr=long_line)
-        threads = SimThreads()
-        runner = SubprocessDockerBuildRunner(
-            threads=threads,
-            processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
-        )
-        threads.run(
-            lambda: runner.run(
-                ("docker", "build"),
-                cwd=tmp_path,
-                timeout=30,
-                on_stderr_line=observed.append,
+    captured = Capture(limit=1 << 20)
+    with tempfile.TemporaryDirectory() as directory:
+        cwd = Path(directory)
+        if implementation == "bounded-process":
+            process = _FakePipedProcess(stdout=stdout, stderr=stderr)
+            threads = SimThreads()
+            runner = SubprocessDockerBuildRunner(
+                threads=threads,
+                processes=FakePipedProcessLauncher(lambda _start: process),
             )
-        )
-    else:
-        FakeDockerBuildRunner(build_result=docker_build_result(stderr=long_line)).run(
-            ("docker", "build"),
-            cwd=tmp_path,
-            timeout=30,
-            on_stderr_line=observed.append,
+            result = threads.run(
+                lambda: runner.run(("docker", "build"), cwd=cwd, timeout=30, output=captured)
+            )
+        else:
+            result = FakeDockerBuildRunner(
+                build_result=docker_build_result(stdout=stdout, stderr=stderr)
+            ).run(("docker", "build"), cwd=cwd, timeout=30, output=captured)
+
+    assert captured.stdout == stdout.encode()
+    assert captured.stderr == stderr.encode()
+    assert (result.stdout, result.stderr) == (stdout, stderr)
+
+
+def test_a_failing_output_sink_does_not_stall_the_drain_and_fails_the_command(
+    tmp_path: Path,
+) -> None:
+    class _Broken:
+        def write(self, stream: OutputStream, data: bytes) -> None:
+            del stream, data
+            message = "sink broke"
+            raise RuntimeError(message)
+
+    process = _FakePipedProcess(stdout="a\n" * 100, stderr="b\n" * 100)
+    threads = SimThreads()
+    runner = SubprocessDockerBuildRunner(
+        threads=threads, processes=FakePipedProcessLauncher(lambda _start: process)
+    )
+
+    with pytest.raises(RuntimeError, match="sink broke"):
+        threads.run(
+            lambda: runner.run(("docker", "build"), cwd=tmp_path, timeout=30, output=_Broken())
         )
 
-    assert observed == [long_line[:DOCKER_PROGRESS_LINE_CHARACTERS]]
+    assert process.stdout.closed
+    assert process.stderr.closed
 
 
 def test_positional_streaming_command_seam_remains_compatible(tmp_path: Path) -> None:
-    long_line = "p" * (DOCKER_PROGRESS_LINE_CHARACTERS + 20)
     streaming = ScriptedStreamingCommand(
         lambda _argv, _cwd: StreamedRun(
             returncode=19,
             stdout="stdout",
-            stderr_lines=(long_line,),
+            stderr_lines=("progress",),
         )
     )
-    observed: list[str] = []
+    captured = Capture(limit=1024)
 
     result = SubprocessDockerBuildRunner(streaming).run(
         ("docker", "build"),
         cwd=tmp_path,
         timeout=30,
-        on_stderr_line=observed.append,
+        output=captured,
     )
 
     assert result.returncode == 19
     assert result.stdout == "stdout"
-    assert observed == [long_line[:DOCKER_PROGRESS_LINE_CHARACTERS]]
+    assert b"progress" in captured.stderr
     assert streaming.calls == [(("docker", "build"), tmp_path, 30)]
 
 
@@ -287,7 +301,7 @@ def test_timeout_kills_reaps_and_closes_the_fake_process_group(tmp_path: Path) -
     dockerfile = tmp_path / "Dockerfile"
     dockerfile.write_text("FROM scratch\n", encoding="utf-8")
     process = _FakePipedProcess(wait_results=(None, -9))
-    launcher = FakePipedProcessLauncher(lambda _argv, _cwd: process)
+    launcher = FakePipedProcessLauncher(lambda _start: process)
     threads = SimThreads()
     runner = SubprocessDockerBuildRunner(threads=threads, processes=launcher)
 
@@ -297,6 +311,8 @@ def test_timeout_kills_reaps_and_closes_the_fake_process_group(tmp_path: Path) -
                 dockerfile,
                 command_runner=runner,
                 timeout=7,
+                clock=ManualClock(),
+                output=DISCARD,
             )
         )
 
@@ -314,13 +330,13 @@ def test_normal_exit_and_inherited_writer_share_one_cleanup_deadline(tmp_path: P
     process = _FakePipedProcess(wait_results=(0, -9), on_kill=threads.request_kill)
     runner = SubprocessDockerBuildRunner(
         threads=threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=5,
     )
     started_at = threads.now()
 
     with pytest.raises(RuntimeError, match="output pipes did not settle"):
-        runner.run(("docker", "build"), cwd=tmp_path, timeout=30)
+        runner.run(("docker", "build"), cwd=tmp_path, timeout=30, output=DISCARD)
 
     assert threads.now() - started_at <= 5
     assert process.wait_timeouts == [30, 2.5]
@@ -346,12 +362,12 @@ def test_runtime_kill_failure_does_not_skip_remaining_cleanup(tmp_path: Path) ->
     )
     runner = SubprocessDockerBuildRunner(
         threads=threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=5,
     )
 
     with pytest.raises(ProcessTimeoutError) as caught:
-        runner.run(("docker", "build"), cwd=tmp_path, timeout=7)
+        runner.run(("docker", "build"), cwd=tmp_path, timeout=7, output=DISCARD)
 
     assert any("RuntimeError" in note for note in caught.value.__notes__)
     assert process.output_cancellations == 1
@@ -379,13 +395,13 @@ def test_timeout_preserves_original_error_when_cleanup_fails(
     threads = SimThreads()
     runner = SubprocessDockerBuildRunner(
         threads=threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=5,
     )
 
     def exercise() -> None:
         with pytest.raises(ProcessTimeoutError) as caught:
-            runner.run(("docker", "build"), cwd=tmp_path, timeout=7)
+            runner.run(("docker", "build"), cwd=tmp_path, timeout=7, output=DISCARD)
         assert any(cleanup_error in note for note in caught.value.__notes__)
 
     threads.run(exercise)
@@ -434,9 +450,11 @@ def test_an_agent_image_build_that_never_finishes_is_stopped_with_its_output() -
     """The stalled build's process group is killed and the error names the step and output."""
     stalled = _FakePipedProcess(stderr=_STALLED_BUILD_OUTPUT, wait_results=(None, -9))
 
-    def start(argv: Sequence[str], _cwd: Path | None) -> _FakePipedProcess:
-        if argv[1] == "build":
+    def start(request: PipedStart) -> _FakePipedProcess:
+        if request.argv[1] == "build":
             return stalled
+        if request.argv[-1].startswith("vibesys-agent-build:"):
+            return _FakePipedProcess(wait_results=(1,))  # not built yet, so the build runs
         return _FakePipedProcess(stdout=_IMAGE_ID)
 
     threads = SimThreads()
@@ -445,7 +463,11 @@ def test_an_agent_image_build_that_never_finishes_is_stopped_with_its_output() -
     with pytest.raises(ImageBuildTimeoutError) as caught:
         threads.run(
             lambda: agent_image(
-                "python:3.12-bookworm", command_runner=runner, timeout=240, clock=ManualClock()
+                "python:3.12-bookworm",
+                command_runner=runner,
+                timeout=240,
+                clock=ManualClock(),
+                output=DISCARD,
             )
         )
 
@@ -467,18 +489,23 @@ def test_a_stopped_task_build_reports_the_output_tail_and_running_step(tail: str
             *,
             cwd: Path,
             timeout: float,
-            on_stderr_line: Callable[[str], None] | None = None,
+            output: OutputSink,
         ) -> DockerCommandResult:
             del cwd
-            assert on_stderr_line is not None
-            on_stderr_line("#4 [2/9] RUN pip install torch")
+            output.write(OutputStream.STDERR, b"#4 [2/9] RUN pip install torch\n")
             raise ProcessTimeoutError(tuple(argv), timeout, stderr=tail.encode())
 
     with tempfile.TemporaryDirectory() as directory:
         dockerfile = Path(directory) / "Dockerfile"
         dockerfile.write_text("FROM scratch\n", encoding="utf-8")
         with pytest.raises(ImageBuildTimeoutError) as caught:
-            build_task_image(dockerfile, command_runner=StallingRunner(), timeout=30)
+            build_task_image(
+                dockerfile,
+                command_runner=StallingRunner(),
+                timeout=30,
+                clock=ManualClock(),
+                output=DISCARD,
+            )
 
     assert caught.value.step == "step 2/9: RUN pip install torch"
     assert caught.value.output == tail.strip()[-4000:]
@@ -504,9 +531,9 @@ class _BudgetedRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink,
     ) -> DockerCommandResult:
-        del cwd, on_stderr_line
+        del cwd, output
         duration = self._durations[min(len(self.timeouts), len(self._durations) - 1)]
         self.timeouts.append(timeout)
         self.starts.append(self.clock.now())
@@ -529,7 +556,13 @@ def test_no_docker_command_is_given_more_than_the_budget_that_remains(
     runner = _BudgetedRunner(clock, durations)
 
     with contextlib.suppress(ImageBuildTimeoutError):
-        agent_image("python:3.12-bookworm", command_runner=runner, timeout=budget, clock=clock)
+        agent_image(
+            "python:3.12-bookworm",
+            command_runner=runner,
+            timeout=budget,
+            clock=clock,
+            output=DISCARD,
+        )
 
     assert runner.timeouts
     for started, timeout in zip(runner.starts, runner.timeouts, strict=True):

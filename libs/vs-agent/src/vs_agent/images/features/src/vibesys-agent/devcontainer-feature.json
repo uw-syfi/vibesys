@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "name": "VibeSys agent layer",
   "description": "Node, the four provider CLIs, a non-root `agent` user (uid 1000), and VibeSys's uv-managed Python with the MCP library. Debian/Ubuntu bases only.",
-  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/docs/contributing/devcontainer-features.md",
+  "documentationURL": "https://github.com/uw-syfi/vibesys/blob/main/libs/vs-sandbox/src/vs_sandbox/features/README.md",
   "options": {
     "node_version": {
       "type": "string",
@@ -12,7 +12,7 @@
     },
     "claude_version": {
       "type": "string",
-      "default": "2.1.268",
+      "default": "2.1.304",
       "description": "@anthropic-ai/claude-code version; default mirrors vs_agent.provider_policy."
     },
     "codex_version": {

@@ -1,0 +1,208 @@
+package daemon
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"time"
+
+	"google.golang.org/grpc"
+
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/app"
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
+	"github.com/uw-syfi/vibesys/cli/internal/owned"
+	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
+)
+
+// ErrAlreadyRunning says another daemon of this user holds the instance lock.
+var ErrAlreadyRunning = runtimedir.ErrDaemonRunning
+
+// stopGrace is how long a stopping daemon waits for its calls to end. They end at once, but a client
+// that stopped reading a stream would otherwise hold the daemon, and with it the machine, for good.
+const stopGrace = 10 * time.Second
+
+// Runtime is what the daemon runs on. A shipped binary and a test compose it differently; the
+// daemon itself never branches on which.
+type Runtime struct {
+	Stores       app.Stores
+	Supervisors  supervisor.Supervisors
+	Environments environment.Environments
+	// Placements are the placements a docker job can run on (app.Config.Placements).
+	Placements []core.PlacementOffer
+	Branches   gitrepo.Branches
+	// Repositories resolves a caller's directory to the repository its store is keyed by.
+	Repositories gitrepo.Resolver
+	// Tasks reads the task of a check or a measure job as its commit has it. Without it those
+	// jobs are refused as unavailable.
+	Tasks task.Source
+	// Scheduler is how the machine is shared between jobs. The zero value runs one job at a time.
+	Scheduler app.Scheduler
+	// Leasing is how the resources jobs hold alone are shared with other daemons. The zero value
+	// leases nothing.
+	Leasing app.Leasing
+	// Neighbors lists the other daemons of the machine, of any user, for the status. Nil lists
+	// none.
+	Neighbors func() []Neighbor
+}
+
+// Neighbor is another daemon process of the machine, and the user it runs as.
+type Neighbor struct {
+	PID  int
+	User string
+}
+
+// Config is what Run needs.
+type Config struct {
+	// Dir is the opened runtime directory: the socket and the locks are in it.
+	Dir     runtimedir.Dir
+	Version string
+	Runtime Runtime
+	// Inherited is what the jobs inherit from the daemon, which the status reports.
+	Inherited Inherited
+	Clock     clock.Clock
+	// Timers is what the daemon's waits go through. It defaults to the system's.
+	Timers clock.Timers
+	// Retry is how the daemon tries again. It defaults to app.DefaultRetry.
+	Retry app.Retry
+	// SlowPeriod is how often the daemon looks again at what it could not settle. It defaults to
+	// app.DefaultSlowPeriod.
+	SlowPeriod time.Duration
+	// LogBatchDelay is how long a job's first unwritten output byte waits to be written to its
+	// store. It defaults to app.DefaultLogBatchDelay.
+	LogBatchDelay time.Duration
+	// Logf receives the daemon's diagnostics. It may be nil.
+	Logf func(format string, args ...any)
+	// Machine is how the daemon takes this machine for its user. Nil takes nothing: a daemon of a
+	// test, in a directory of its own, in-process.
+	Machine Machine
+	// Ready receives one runtimedir.ReadyByte once the daemon serves, and is closed. A daemon that fails
+	// first closes it without a byte, so the client that started it learns of the failure from
+	// the pipe and not from a clock. It may be nil.
+	Ready io.WriteCloser
+}
+
+// Run is the daemon process. It takes the instance lock, recovers from what the stores and the
+// supervisors hold, serves the socket, and returns when ctx is done or a client calls Stop. It
+// fails with ErrAlreadyRunning, touching nothing, when another daemon holds the lock.
+//
+// The socket is opened only after recovery, so a client that connects sees a daemon that has
+// already decided what every job is. Jobs that run have supervisors of their own, so stopping
+// the daemon stops no job.
+func Run(ctx context.Context, cfg Config) (err error) {
+	ready := cfg.Ready
+	defer func() {
+		if err != nil && ready != nil {
+			ready.Close()
+		}
+	}()
+
+	lock, err := runtimedir.TryLock(cfg.Dir.DaemonLock())
+	switch {
+	case errors.Is(err, runtimedir.ErrHeld):
+		if ready != nil {
+			// The client that started this process needs to know this from a failure: it looks
+			// again for the daemon there is. If the pipe is gone, so is that client.
+			_, _ = ready.Write([]byte{runtimedir.ReadyTaken})
+		}
+		return ErrAlreadyRunning
+	case err != nil:
+		return fmt.Errorf("daemon: the instance lock: %w", err)
+	}
+	defer lock.Unlock()
+	// The machine is taken with the runtime directory's lock held, so a second daemon of the same
+	// runtime directory is told the first runs (ErrAlreadyRunning), and one of another runtime
+	// directory is refused, naming the daemon that holds the machine.
+	if cfg.Machine != nil {
+		release, err := cfg.Machine.Claim(ctx)
+		if err != nil {
+			return fmt.Errorf("daemon: %w", err)
+		}
+		defer release()
+	}
+	// The stores go before the lock: a client takes a free lock to mean the daemon is gone, and the
+	// next daemon must find its stores free. Run on after this point holds neither.
+	defer func() {
+		if err := cfg.Runtime.Stores.Close(); err != nil && cfg.Logf != nil {
+			cfg.Logf("giving up the stores: %v", err)
+		}
+	}()
+
+	// With the lock held, a socket in the way belongs to a daemon that died.
+	if err := os.Remove(cfg.Dir.Socket()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("daemon: removing the old socket: %w", err)
+	}
+
+	a := app.New(app.Config{
+		Clock:         cfg.Clock,
+		Timers:        cfg.Timers,
+		Retry:         cfg.Retry,
+		SlowPeriod:    cfg.SlowPeriod,
+		LogBatchDelay: cfg.LogBatchDelay,
+		Stores:        cfg.Runtime.Stores,
+		Environments:  cfg.Runtime.Environments,
+		Placements:    cfg.Runtime.Placements,
+		Supervisors:   cfg.Runtime.Supervisors,
+		Branches:      cfg.Runtime.Branches,
+		Repositories:  cfg.Runtime.Repositories,
+		Tasks:         cfg.Runtime.Tasks,
+		Scheduler:     cfg.Runtime.Scheduler,
+		Leasing:       cfg.Runtime.Leasing,
+		Logf:          cfg.Logf,
+	})
+	defer a.Close()
+	if err := a.Start(ctx); err != nil {
+		return fmt.Errorf("daemon: recovering: %w", err)
+	}
+
+	listener, err := net.Listen("unix", cfg.Dir.Socket())
+	if err != nil {
+		return fmt.Errorf("daemon: %w", err)
+	}
+	defer os.Remove(cfg.Dir.Socket())
+	if err := os.Chmod(cfg.Dir.Socket(), 0o600); err != nil {
+		listener.Close()
+		return fmt.Errorf("daemon: %w", err)
+	}
+
+	srv := NewServer(a, cfg.Version, cfg.Inherited).WithMachine(cfg.Machine).WithNeighbors(cfg.Runtime.Neighbors)
+	server := grpc.NewServer()
+	cliv1.RegisterDaemonServiceServer(server, srv)
+	served := make(chan error, 1)
+	var serving owned.Group
+	defer serving.Wait()
+	serving.Go(func() { served <- server.Serve(listener) })
+
+	if ready != nil {
+		if _, err := ready.Write([]byte{runtimedir.ReadyByte}); err != nil {
+			server.Stop()
+			return fmt.Errorf("daemon: telling the client it serves: %w", err)
+		}
+		ready.Close()
+		ready = nil
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-srv.Stopping():
+	case err := <-served:
+		return fmt.Errorf("daemon: serving: %w", err)
+	}
+	// Calls that wait on a job end now; then the answer to Stop reaches its caller before the
+	// socket goes.
+	srv.Shutdown()
+	timers := cfg.Timers
+	if timers == nil {
+		timers = clock.System{}
+	}
+	clock.Graceful(timers, stopGrace, server.GracefulStop, server.Stop)
+	return nil
+}

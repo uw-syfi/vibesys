@@ -35,10 +35,10 @@ class ToolRefusal(StrEnum):
     WAIT_NOT_RESUMABLE = "wait_not_resumable"
     WAIT_OVERLAPPED = "wait_overlapped"
     WAIT_DEADLINE = "wait_deadline"
-    BUSY = "busy"
     RUN_FAILING = "run_failing"
     MALFORMED = "malformed"
     UNKNOWN_CALLER = "unknown_caller"
+    NESTED_REPOSITORY = "nested_repository"
     REFUSED = "refused"
 
 

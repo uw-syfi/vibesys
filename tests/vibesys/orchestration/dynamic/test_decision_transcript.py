@@ -54,7 +54,7 @@ def _scenarios() -> dict[str, dict[str, object]]:
 def _play(spec: dict[str, object]) -> Host:
     count, parallel = int(str(spec["count"])), int(str(spec["parallel"]))
     host = begin(
-        config(max_rounds=1, max_in_flight=parallel),
+        config(max_rounds=1, max_in_flight=parallel, evaluation_slots=parallel),
         restarting=False,
         throughputs={revision: float(str(spec["bench"])) for revision in _REVISIONS},
     )

@@ -17,7 +17,10 @@ from scripts.check_purity import (
     scan_value_exports,
 )
 
-from vs_project.api import run_git
+from vs_project.api import Git
+from vs_sim.api import OsProcesses
+
+_GIT = Git(OsProcesses())
 
 
 @pytest.mark.parametrize(
@@ -54,6 +57,99 @@ def test_pure_value_libraries_and_ordinary_strategy_text_are_allowed() -> None:
         )
         == ()
     )
+
+
+@pytest.mark.parametrize(
+    "name", ["IterationRequest", "IterationGranted", "IterationCompletion", "IterationCompleted"]
+)
+def test_replay_proto_values_allow_memory_codecs_but_no_unreviewed_methods(name: str) -> None:
+    prefix = "from vs_proto.api import core_iterations as units\n"
+    path = f"{PURE_SCOPE}/flows/example.py"
+    assert (
+        scan_source(
+            path, prefix + f"value = units.{name}.from_binary(data)\nschema = units.{name}.desc()\n"
+        )
+        == ()
+    )
+    forbidden = scan_source(path, prefix + f"units.{name}.read_file('input.pb')\n")
+    assert {site.rule for site in forbidden} == {"effect-path"}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ReplayPhysical",
+        "WriterBacking",
+        "WriterIdentity",
+        "WriterManifest",
+        "WriterTerminationProof",
+        "WriterReconciliation",
+        "ReplayToolSubmission",
+        "ReplayToolAcknowledgement",
+        "ReplayTurnWait",
+    ],
+)
+def test_writer_proto_codecs_are_pure_but_file_methods_stay_forbidden(name: str) -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    prefix = "from vs_proto.api import replay as pb\n"
+    assert (
+        scan_source(
+            path, prefix + f"value = pb.{name}.from_binary(data)\nschema = pb.{name}.desc()\n"
+        )
+        == ()
+    )
+    assert {
+        site.rule for site in scan_source(path, prefix + f"pb.{name}.read_file('input.pb')\n")
+    } == {"effect-path"}
+
+
+@pytest.mark.parametrize(
+    ("family", "name"),
+    [
+        ("replay_agent", "ReplayAgentRequest"),
+        ("replay_evaluation", "ReplayEvaluationRequest"),
+    ],
+)
+def test_turn_request_codecs_are_pure_but_unreviewed_methods_are_rejected(
+    family: str, name: str
+) -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    prefix = f"from vs_proto.api import {family} as pb\n"
+    assert (
+        scan_source(
+            path, prefix + f"value = pb.{name}.from_binary(data)\nschema = pb.{name}.desc()\n"
+        )
+        == ()
+    )
+    assert {
+        site.rule for site in scan_source(path, prefix + f"pb.{name}.read_file('input.pb')\n")
+    } == {"effect-path"}
+    assert scan_source(path, prefix + "pb.ExecutionService()\n")
+
+
+def test_native_replay_record_validation_is_pure_but_unreviewed_exports_are_rejected() -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    source = (
+        "from vs_proto.api import ReplayStore, validate\nvalidate(ReplayStore.from_binary(data))\n"
+    )
+    assert scan_source(path, source) == ()
+    assert scan_source(path, "from vs_proto.api import FileStore\n")
+
+
+def test_only_pure_epoch_exports_are_allowed_in_core() -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    source = (
+        "from vs_runlog.api import CurrentEpoch, epoch_has_ended\n"
+        "closed = epoch_has_ended(CurrentEpoch(1, lifecycle))\n"
+    )
+    assert scan_source(path, source) == ()
+    assert scan_source(path, "from vs_runlog.api import RunLogReader\n")
+
+
+@pytest.mark.parametrize("operation", ["is_pydantic_dataclass", "rebuild_dataclass"])
+def test_generated_dataclass_schema_operations_are_pure(operation: str) -> None:
+    source = f"from pydantic.dataclasses import {operation}\n{operation}(Record)"
+    assert scan_source("values.py", source) == ()
 
 
 def test_syntax_errors_fail_closed() -> None:
@@ -161,6 +257,17 @@ def test_effect_path_import_aliases_cannot_evade_allowlist(
     assert scan_source("strategy.py", source)
 
 
+def test_a_model_deep_copy_is_allowed_and_other_model_dunders_fail_closed() -> None:
+    copying = (
+        "from pydantic import BaseModel\n"
+        "class Box(BaseModel):\n"
+        "    def __deepcopy__(self, memo=None):\n"
+        "        return super().__deepcopy__(memo)\n"
+    )
+    assert scan_source("strategy.py", copying) == ()
+    assert scan_source("strategy.py", copying.replace("__deepcopy__(memo)", "__init_subclass__()"))
+
+
 def test_pure_import_paths_and_value_aliases_remain_allowed() -> None:
     source = (
         "from collections.abc import Callable\n"
@@ -194,42 +301,42 @@ def test_previous_baseline_fetches_only_explicit_base_for_a_shallow_checkout(
 ) -> None:
     origin = tmp_path / "origin"
     origin.mkdir()
-    run_git(["init", "--initial-branch=main"], cwd=origin).check_returncode()
-    run_git(["config", "user.name", "Purity fixture"], cwd=origin).check_returncode()
-    run_git(["config", "user.email", "purity@example.invalid"], cwd=origin).check_returncode()
+    _GIT.run_text(["init", "--initial-branch=main"], cwd=origin).check()
+    _GIT.run_text(["config", "user.name", "Purity fixture"], cwd=origin).check()
+    _GIT.run_text(["config", "user.email", "purity@example.invalid"], cwd=origin).check()
     baseline = origin / "scripts" / "purity_violations.json"
     baseline.parent.mkdir()
     baseline.write_text("[]\n")
-    run_git(["add", "."], cwd=origin).check_returncode()
-    run_git(
+    _GIT.run_text(["add", "."], cwd=origin).check()
+    _GIT.run_text(
         [
             "commit",
             "-m",
             "Initial baseline\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
         ],
         cwd=origin,
-    ).check_returncode()
-    run_git(["checkout", "-b", "feature"], cwd=origin).check_returncode()
+    ).check()
+    _GIT.run_text(["checkout", "-b", "feature"], cwd=origin).check()
     (origin / "feature.txt").write_text("feature\n")
-    run_git(["add", "."], cwd=origin).check_returncode()
-    run_git(
+    _GIT.run_text(["add", "."], cwd=origin).check()
+    _GIT.run_text(
         ["commit", "-m", "Feature\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"],
         cwd=origin,
-    ).check_returncode()
+    ).check()
     if history == "merged":
-        run_git(["checkout", "main"], cwd=origin).check_returncode()
+        _GIT.run_text(["checkout", "main"], cwd=origin).check()
         (origin / "main.txt").write_text("main advance\n")
-        run_git(["add", "."], cwd=origin).check_returncode()
-        run_git(
+        _GIT.run_text(["add", "."], cwd=origin).check()
+        _GIT.run_text(
             [
                 "commit",
                 "-m",
                 "Main advance\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
             ],
             cwd=origin,
-        ).check_returncode()
-        run_git(["checkout", "feature"], cwd=origin).check_returncode()
-        run_git(
+        ).check()
+        _GIT.run_text(["checkout", "feature"], cwd=origin).check()
+        _GIT.run_text(
             [
                 "merge",
                 "main",
@@ -237,9 +344,9 @@ def test_previous_baseline_fetches_only_explicit_base_for_a_shallow_checkout(
                 "Merge main\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
             ],
             cwd=origin,
-        ).check_returncode()
+        ).check()
     checkout = tmp_path / "checkout"
-    run_git(
+    _GIT.run_text(
         [
             "clone",
             "--depth=1",
@@ -249,10 +356,10 @@ def test_previous_baseline_fetches_only_explicit_base_for_a_shallow_checkout(
             str(checkout),
         ],
         cwd=tmp_path,
-    ).check_returncode()
+    ).check()
     assert previous_baseline(checkout, "origin/main") == frozenset()
     assert (
-        run_git(["rev-parse", "--is-shallow-repository"], cwd=checkout, text=True).stdout.strip()
+        _GIT.run_text(["rev-parse", "--is-shallow-repository"], cwd=checkout).stdout.strip()
         == "false"
     )
 

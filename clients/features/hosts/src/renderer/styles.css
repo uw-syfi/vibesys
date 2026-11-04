@@ -1,6 +1,0 @@
-/* "Connect to host": the search field and the host list. */
-.card input.search { width: 100%; font-size: 14px; padding: 8px 10px; }
-.list { margin: 10px 0 0; max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; }
-.list .option { padding: 7px 10px; border: none; border-radius: 6px; background: none; display: flex; justify-content: space-between; text-align: left; }
-.list .option[aria-selected="true"] { background: var(--selected); }
-.list .option:hover { background: var(--hover); }

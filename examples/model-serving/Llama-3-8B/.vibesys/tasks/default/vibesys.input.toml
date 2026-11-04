@@ -1,4 +1,5 @@
 version = 1
+backends = ["cuda"]
 
 [agent]
 domain = "llm-serving"
@@ -16,3 +17,15 @@ entrypoint = "request-factory-adapter"
 args = ["${PROJECT_ROOT}/.vibesys/tasks/default/benchmark/benchmark.py"]
 timeout_seconds = 1800
 result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "NVIDIA H100"
+count = 1
+vendor = "nvidia"
+
+[catalogue.model]
+name = "Llama 3 8B"
+maker = "meta"

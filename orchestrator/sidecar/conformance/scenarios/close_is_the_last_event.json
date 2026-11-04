@@ -1,0 +1,59 @@
+{
+  "name": "close_is_the_last_event",
+  "doc": "A closed session says so once and then says nothing.",
+  "provider": [
+    [
+      {
+        "say": "bye",
+        "item": "a1"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "send": {
+        "effectId": "e1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t1"
+      }
+    },
+    {
+      "send": {
+        "effectId": "e-close",
+        "close": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "closed": true
+      }
+    }
+  ],
+  "checks": [
+    "close_is_last",
+    "follow_resumes"
+  ]
+}

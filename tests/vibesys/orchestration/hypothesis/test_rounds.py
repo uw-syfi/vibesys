@@ -83,8 +83,7 @@ def test_rounds_close_in_order_and_the_ledger_round_trips(passes: list[bool]) ->
                 ledger,
                 plan,
                 round_number=number,
-                current_commit=current,
-                input_baseline="base",
+                parent=rounds.Parent(None, current),
             )
             assert started.hypothesis.parent_commit == current
         else:
@@ -107,7 +106,7 @@ def test_a_failed_attempt_keeps_its_feedback_and_a_gate_failure_marks_revalidati
     config = HypothesisConfig(max_rounds=2)
     ledger = rounds.decode(rounds.EncodedLedger(), SPACE)
     ledger, _ = rounds.start(
-        config, ledger, _plan(1), round_number=1, current_commit="base", input_baseline="base"
+        config, ledger, _plan(1), round_number=1, parent=rounds.Parent(None, "base")
     )
     ledger = rounds.note_attempt_failure(
         config, ledger, "benchmark failed", rounds.GateFailure("c1", accuracy_passed=True)

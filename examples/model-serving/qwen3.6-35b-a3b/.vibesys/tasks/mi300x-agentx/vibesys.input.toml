@@ -1,0 +1,32 @@
+version = 1
+backends = ["rocm"]
+
+[agent]
+domain = "llm-serving"
+interface = "service"
+
+[accuracy]
+command = ["uv", "run", "python", "-I", "${PROJECT_ROOT}/.vibesys/tasks/default/accuracy_checker/checker.py"]
+timeout_seconds = 300
+
+[evaluator]
+name = "vibesys-evaluator-agentx"
+version = "0.1.0"
+
+[benchmark]
+entrypoint = "agentx-v1"
+args = ["--mode", "full", "--model", "Qwen/Qwen3.6-35B-A3B", "--tokenizer", "Qwen/Qwen3.6-35B-A3B", "--tokenizer-revision", "995ad96eacd98c81ed38be0c5b274b04031597b0", "--concurrency", "4", "--max-context-length", "262144"]
+timeout_seconds = 3600
+result_protocol = 2
+
+[catalogue]
+domain = "llm-serving"
+
+[catalogue.hardware]
+accelerator = "AMD MI300X"
+count = 1
+vendor = "amd"
+
+[catalogue.model]
+name = "Qwen3.6 35B A3B"
+maker = "qwen"

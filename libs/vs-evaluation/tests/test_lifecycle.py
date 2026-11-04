@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -30,13 +31,14 @@ from vs_evaluation.api import (
     StageFailureKind,
     StageState,
     StoredEvaluation,
+    loop_evaluation_deadline,
 )
 from vs_evaluation.api.testing import (
     FakeDeadlineFactory,
     FakeEvaluationExecutor,
     InMemoryEvaluationStore,
 )
-from vs_sim.api.testing import ManualClock, arrival, examples
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, arrival, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,13 +64,20 @@ def coordinator(
 ) -> EvaluationCoordinator:
     """Create a coordinator with the executor's clock."""
     if events is None:
-        return EvaluationCoordinator(executor, store, executor.clock, max_await_timeout_s=20)
+        return EvaluationCoordinator(
+            executor,
+            store,
+            executor.clock,
+            max_await_timeout_s=20,
+            deadline_factory=loop_evaluation_deadline,
+        )
     return EvaluationCoordinator(
         executor,
         store,
         executor.clock,
         max_await_timeout_s=20,
         events=events.append,
+        deadline_factory=loop_evaluation_deadline,
     )
 
 
@@ -177,6 +186,7 @@ async def test_submit_deduplicates_by_stable_key_and_reuses_terminal_result() ->
                 name="correctness",
                 state=StageState.SUCCEEDED,
                 result={"passed": True},
+                operator_summary="safe correctness summary",
                 duration_s=2,
             ),
             EvaluationStepResult(
@@ -192,6 +202,7 @@ async def test_submit_deduplicates_by_stable_key_and_reuses_terminal_result() ->
     assert isinstance(result, EvaluationCompleted)
     assert [stage.name for stage in result.stages] == ["correctness", "measurement"]
     assert result.stages[0].result == {"passed": True}
+    assert result.stages[0].operator_summary == "safe correctness summary"
 
 
 @pytest.mark.asyncio
@@ -314,12 +325,12 @@ async def test_availability_is_typed_and_freshness_uses_injected_clock() -> None
 async def test_reconcile_reuses_durable_handle_after_store_reopen(tmp_path: Path) -> None:
     clock = ManualClock()
     first_executor = FakeEvaluationExecutor(clock)
-    first_store = FilesystemEvaluationStore(tmp_path)
+    first_store = FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner())
     first_service = coordinator(first_executor, first_store)
     first_handle = await first_service.submit(request("resume-key"))
 
     resumed_executor = FakeEvaluationExecutor(clock)
-    resumed_store = FilesystemEvaluationStore(tmp_path)
+    resumed_store = FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner())
     resumed_service = coordinator(resumed_executor, resumed_store)
     recovered = await resumed_service.reconcile()
 
@@ -335,7 +346,10 @@ async def test_reconcile_reuses_durable_handle_after_store_reopen(tmp_path: Path
 async def test_filesystem_store_claim_is_atomic_across_store_instances(tmp_path: Path) -> None:
     clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
-    stores = [FilesystemEvaluationStore(tmp_path), FilesystemEvaluationStore(tmp_path)]
+    stores = [
+        FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner()),
+        FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner()),
+    ]
     services = [coordinator(executor, store) for store in stores]
 
     handles = await asyncio.gather(*(service.submit(request("shared-key")) for service in services))
@@ -628,7 +642,9 @@ async def test_cancel_known_undispatched_claim_has_no_executor_effects() -> None
     clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     store = InMemoryEvaluationStore()
-    service = EvaluationCoordinator(executor, store, clock)
+    service = EvaluationCoordinator(
+        executor, store, clock, deadline_factory=loop_evaluation_deadline
+    )
     handle = await service.prepare(request("never-dispatched"))
     prepared = await store.get(handle.id)
     assert prepared is not None
@@ -662,7 +678,20 @@ async def test_external_submit_observes_durable_dispatch_authorization() -> None
     clock = ManualClock()
     store = InMemoryEvaluationStore()
     executor = _DispatchGuardExecutor(clock, store=store)
-    service = EvaluationCoordinator(executor, store, clock)
+    service = EvaluationCoordinator(
+        executor, store, clock, deadline_factory=loop_evaluation_deadline
+    )
     handle = await service.submit(request("authorized-before-effect"))
     assert len(executor.submissions) == 1
     await handle.cancel()
+
+
+@pytest.mark.asyncio
+async def test_a_record_that_is_not_a_regular_file_is_corrupt_not_a_hang(tmp_path: Path) -> None:
+    # Reading a FIFO blocks until a writer appears; the store must refuse it instead.
+    store = FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner())
+    os.mkfifo(tmp_path / f"eval_{'0' * 64}.json")
+
+    with pytest.raises(RuntimeError, match="invalid evaluation record") as raised:
+        await store.records()
+    assert "not a regular file" in str(raised.value.__cause__)

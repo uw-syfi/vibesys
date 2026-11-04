@@ -32,6 +32,8 @@ from .types.common import (
     RevisionRef,
     RunStatus,
     Scope,
+    StopMode,
+    escalate_stop,
 )
 from .types.evaluation import (
     MeasurementIdentity,
@@ -42,7 +44,6 @@ from .types.evaluation import (
     SubmitMeasurement,
 )
 from .types.records import (
-    ChildLease,
     RecordsState,
     Request,
     RequestPhase,
@@ -603,10 +604,7 @@ def dependencies_for(request: RequestBase, records: RecordsState) -> Verdict[Req
     Inspect every declared obligation. Within concrete denials, declaration order
     is deterministic. An unfinished obligation cannot hide a later known failure.
     """
-    proofs = tuple(
-        _request_dependency(tuple(row for row in records.records if row.request_id == identity))
-        for identity in request.depends_on
-    )
+    proofs = tuple(_request_dependency(records.find(identity)) for identity in request.depends_on)
     failures = tuple(proof for proof in proofs if not isinstance(proof, Proven))
     if not failures:
         return Proven(request)
@@ -653,10 +651,7 @@ def dependency_failed(request: Request, records: RecordsState) -> bool:
     Only a dependency that has concluded counts: one that is unfinished, or not yet recorded,
     may still succeed. A concluded failure is final, so the request can never be dispatched.
     """
-    proofs = tuple(
-        _request_dependency(tuple(row for row in records.records if row.request_id == identity))
-        for identity in request.depends_on
-    )
+    proofs = tuple(_request_dependency(records.find(identity)) for identity in request.depends_on)
     return any(
         (isinstance(proof, Mismatch) and proof.field == ProofField.STATUS)
         or (isinstance(proof, Missing) and proof.reason not in _NOT_YET_KNOWN)
@@ -708,19 +703,81 @@ def admission_remaining(
     return max(0, max_attempts - consumed - reserved)
 
 
-def draining(run: RunState) -> bool:
-    """Whether the run is CLOSING under a proved drain Finish.
+def continues_admitted_work(run: RunState) -> bool:
+    """Whether the run carries on with work it already admitted: it is running or paused.
 
-    The one definition of the drain rule: a drain starts no new requests, but
+    The one definition of what a pause holds. A pause holds intake only: core takes no
+    decision but a Finish or a Withdraw (``takes_command``) and admits no queued start
+    (scheduling). Work already under way finishes, and what it yields is delivered: a turn's
+    evaluation call and its wait, a job's end, the resume of a wait whose jobs ended. The
+    turn that resume asks for is a decision the shell holds until the run is resumed. A gate
+    that refused these while paused would drop them for good, because a resume re-sends
+    only held decisions and nothing else re-delivers a fact that came while paused.
+
+    A run that is draining an operator's pause (``RunStatus.DRAINING``) is not in this set: a
+    gate that reads it admits that run's work only through its own narrower rule (a permit, a
+    scope in flight). ``admitted_work_proceeds`` is the broader question the session gates ask.
+    """
+    return run.status in (RunStatus.RUNNING, RunStatus.PAUSED)
+
+
+def admitted_work_proceeds(run: RunState) -> bool:
+    """Whether work the run already admitted goes on: it runs, is paused for quota, or drains a pause.
+
+    The one answer for the session gates (a scope's ownership, a continuation's liveness). The
+    drain of an operator's pause (``RunStatus.DRAINING``) lets admitted work finish: a turn that
+    was requested before the pause still gets its input reserved, and a turn the pause admitted
+    as a successor is still admitted. A gate that refused them would end the turn for good, since
+    nothing re-requests it. What starts is the drain's decision, not this predicate's:
+    ``dispatch_allowed`` holds an effect back, and ``takes_command`` holds a new decision.
+
+    Not ``stop_draining``, which is the drain of a stop (``RunStatus.CLOSING``).
+    """
+    return continues_admitted_work(run) or run.status is RunStatus.DRAINING
+
+
+def stop_draining(run: RunState) -> bool:
+    """Whether the run is CLOSING under a proved Finish and its stop is a drain.
+
+    The one definition of the drain rule of a stop: it starts no new requests, but
     the already accepted queue still starts and runs to completion (legacy
-    FinishSearch). A cancel Finish starts nothing. Scheduling admits under this
-    rule and Attempts accepts those admissions under the same predicate.
+    FinishSearch). A cancel starts nothing. Scheduling admits under this
+    rule and Attempts accepts those admissions under the same predicate. It is not the
+    drain of an operator's pause (``RunStatus.DRAINING``), which ``admitted_work_proceeds`` admits.
     """
     match committed_stop(run):
-        case Proven(value=stop):
-            return run.status == RunStatus.CLOSING and stop.mode == "drain"
+        case Proven():
+            return run.status == RunStatus.CLOSING and stop_mode(run) is StopMode.DRAIN
         case _:
             return False
+
+
+def requested_stop_mode(run: RunState) -> StopMode | None:
+    """The strongest mode the run's standing stop asks for; None before any stop or after a lift."""
+    held: StopMode | None = None
+    for control in run.controls:
+        if control.action == "stop" and control.mode is not None:
+            held = escalate_stop(held, control.mode)
+        elif control.action == "resume":
+            held = None  # a resume lifts the stop (`_run_pause.stop_standing`)
+    return held
+
+
+def stop_mode(run: RunState) -> StopMode | None:
+    """How the run's stop treats work in flight; None while nothing stops the run.
+
+    The one definition of the run's stop mode: the strongest of its committed Finish's
+    mode and every stop control it recorded (``escalate_stop``). A stop only escalates,
+    so a cancel recorded after a drain Finish committed turns the drain into a cancel,
+    and a later drain never weakens a cancel. The first committed Finish keeps the run's
+    result (``committed_stop``); only the mode escalates.
+    """
+    held = requested_stop_mode(run)
+    match committed_stop(run):
+        case Proven(value=stop):
+            return escalate_stop(held, StopMode(stop.mode))
+        case _:
+            return held
 
 
 def committed_stop(run: RunState) -> Verdict[Finish]:
@@ -884,42 +941,6 @@ def _job_release_binding(
     return Proven(observation)
 
 
-def _released_child(owner: ChildLease, sources: tuple[RequestRecord, ...]) -> Verdict[Observation]:
-    observation = owner.observation
-    if observation is None:
-        return Missing(ProofReason.ABSENT_OBSERVATION)
-    if not owner.watermark_history_complete or (
-        {mark.source_request for mark in owner.observation_watermarks} != set(owner.source_requests)
-    ):
-        return Missing(ProofReason.INCOMPLETE_HISTORY)
-    if not any(mark.observation == observation for mark in owner.observation_watermarks):
-        return Mismatch(ProofField.MANIFEST)
-    for mark in owner.observation_watermarks:
-        proof = _released_child_source(owner, mark.observation, sources)
-        if not isinstance(proof, Proven):
-            return proof
-    return Proven(observation)
-
-
-def _released_child_source(
-    owner: ChildLease, observation: Observation, sources: tuple[RequestRecord, ...]
-) -> Verdict[Observation]:
-    matches = tuple(source for source in sources if source.request_id == observation.request_id)
-    if len(matches) > 1:
-        return Mismatch(ProofField.REQUEST_ID)
-    proof = _release_source(observation, matches[0] if matches else None)
-    if not isinstance(proof, Proven):
-        return proof
-    mismatch = _identity_mismatch(
-        (
-            (ProofField.RESOURCE_ID, observation.resource_id, owner.resource_id),
-            (ProofField.SCOPE, observation.scope.owner, owner.scope.owner),
-            (ProofField.GENERATION, observation.scope.generation, owner.scope.generation),
-        )
-    )
-    return mismatch if mismatch is not None else resolved_observation(observation)
-
-
 def _released_session(
     owner: SessionView, sources: tuple[RequestRecord, ...]
 ) -> Verdict[Observation]:
@@ -978,7 +999,7 @@ def blocked_unnamed(record: RequestRecord) -> bool:
 
 
 def released_owner(
-    owner: RequestRecord | OwnedJob | RegisteredOwnedJob | SessionView | ChildLease | None,
+    owner: RequestRecord | OwnedJob | RegisteredOwnedJob | SessionView | None,
     sources: tuple[RequestRecord, ...],
 ) -> Verdict[Observation]:
     """Prove physical release in the source's recorded episode, preserving child debt."""
@@ -988,8 +1009,6 @@ def released_owner(
         return _released_record(owner)
     if isinstance(owner, (OwnedJob, RegisteredOwnedJob)):
         return _released_job(owner, sources)
-    if isinstance(owner, ChildLease):
-        return _released_child(owner, sources)
     return _released_session(owner, sources)
 
 

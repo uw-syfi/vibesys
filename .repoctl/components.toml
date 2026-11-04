@@ -1,8 +1,8 @@
 # Repository component ownership, discovery, and change impact policy.
 default_base = "main"
-jobs = ["python", "tui", "examples", "agent_image", "real_tiers", "evaluators", "impact"]
+jobs = ["python", "clients", "examples", "dockerfiles", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway", "cli", "orchestrator", "desktop_path"]
 
-ignored_roots = ["website", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
+ignored_roots = ["website", "third_party", ".agents", ".claude", ".claude-plugin", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
 
 [[discoveries]]
@@ -15,32 +15,10 @@ ownership_group = "python_modules"
 
 [[discoveries]]
 adapter = "package_json"
-manifest_glob = "clients/*/package.json"
-class = "workspace_package"
-id_prefix = "pnpm:"
-job = "tui"
-ownership_group = "workspace_packages"
-workspace_prefix = "workspace:"
-dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
-
-# Library, feature, and app packages sit one level down (`pnpm-workspace.yaml`: `libs/*`,
-# `features/*`, `apps/*`); the deprecated `tui` is the one package at the workspace root.
-[[discoveries]]
-adapter = "package_json"
 manifest_glob = "clients/libs/*/package.json"
 class = "workspace_package"
 id_prefix = "pnpm:"
-job = "tui"
-ownership_group = "workspace_packages"
-workspace_prefix = "workspace:"
-dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
-
-[[discoveries]]
-adapter = "package_json"
-manifest_glob = "clients/features/*/package.json"
-class = "workspace_package"
-id_prefix = "pnpm:"
-job = "tui"
+job = "clients"
 ownership_group = "workspace_packages"
 workspace_prefix = "workspace:"
 dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
@@ -50,7 +28,7 @@ adapter = "package_json"
 manifest_glob = "clients/apps/*/package.json"
 class = "workspace_package"
 id_prefix = "pnpm:"
-job = "tui"
+job = "clients"
 ownership_group = "workspace_packages"
 workspace_prefix = "workspace:"
 dependency_fields = ["dependencies", "devDependencies", "optionalDependencies"]
@@ -84,6 +62,53 @@ selected_roots = [
 ]
 selected_jobs = ["evaluators"]
 
+# Every example Dockerfile is built when it, or a file in its directory (the build context), changes.
+# `scope_roots` makes discovery fail for a Dockerfile under examples/ that is neither built nor
+# excluded below, so a new task Dockerfile has to choose. An excluded root names why a CI runner
+# cannot build it; it is still owned, but selects no job. The `dockerfile_contexts` collection holds
+# the built directories a change selects, one matrix leg each (the `example-dockerfiles` CI job).
+[[discoveries]]
+adapter = "manifest_directories"
+class = "dockerfile"
+id_prefix = "dockerfile:"
+ownership_group = "example_dockerfiles"
+manifests = { "Dockerfile" = "docker" }
+scope_roots = ["examples"]
+selected_roots = [
+  "examples/data-structures/kvstore-default/.vibesys/tasks/default",
+  "examples/data-structures/ordered-map/.vibesys/tasks/mw",
+  "examples/data-structures/ordered-map/.vibesys/tasks/point-heavy",
+  "examples/data-structures/ordered-map/.vibesys/tasks/range-heavy",
+  "examples/data-structures/ordered-map/.vibesys/tasks/swmr",
+  "examples/data-structures/prioqueue/.vibesys/tasks/mpmc",
+  "examples/data-structures/prioqueue/.vibesys/tasks/mpsc",
+  "examples/data-structures/prioqueue/.vibesys/tasks/spmc",
+  "examples/data-structures/prioqueue/.vibesys/tasks/spsc",
+  "examples/data-structures/repositories/queue-rs/.vibesys/tasks/mpmc",
+  "examples/data-structures/repositories/queue-rs/.vibesys/tasks/mpsc",
+  "examples/data-structures/repositories/queue-rs/.vibesys/tasks/spsc",
+  "examples/data-structures/repositories/queue-rs/.vibesys/tasks/verus-mpmc-open",
+  "examples/data-structures/stack/.vibesys/tasks/mpmc",
+  "examples/data-structures/stack/.vibesys/tasks/mpsc",
+  "examples/data-structures/stack/.vibesys/tasks/spmc",
+  "examples/data-structures/stack/.vibesys/tasks/spsc",
+  "examples/data-structures/unordered-map/.vibesys/tasks/mw",
+  "examples/data-structures/unordered-map/.vibesys/tasks/swmr",
+  "examples/database/differential-dataflow/.vibesys/tasks/default",
+  "examples/database/kv-store/.vibesys/tasks/default",
+]
+selected_jobs = ["dockerfiles"]
+
+[discoveries.excluded_roots]
+"examples/model-serving/Llama-3-8B-trn2/.vibesys/tasks/default" = "builds FROM the Trainium Neuron deep-learning image passed as BASE_IMAGE, a multi-gigabyte base that needs a Neuron host to be useful and is not pulled on a CI runner"
+"examples/model-serving/images/rocm-mi30x-engine-free" = "builds FROM the SGLang ROCm image (about 25 GB) and its verify step imports a ROCm build of torch, which does not fit a CI runner disk or its time budget"
+
+[[collections]]
+name = "dockerfile_contexts"
+class = "dockerfile"
+field = "root"
+selected_only = true
+
 [[collections]]
 name = "native_targets"
 class = "native"
@@ -105,8 +130,10 @@ field = "name"
 id = "python_support"
 class = "python_support"
 job = "python"
-# Central tests and project tooling are outside Tach's source roots.
-roots = ["tests", "libs", "sdk", "scripts", "packaging", "resources", "examples"]
+# Central tests and project tooling are outside Tach's source roots. The committed goldens under
+# proto/testdata have no input hash, so the Python tests that compare them with what the converter
+# writes now run when one changes.
+roots = ["tests", "libs", "sdk", "scripts", "packaging", "resources", "skills", "examples", "proto/testdata"]
 files = [
   "tach.toml",
   "pyproject.toml",
@@ -119,29 +146,28 @@ files = [
 ]
 
 [[components]]
-id = "server_protocol"
-files = ["src/server/api/schema.py", "src/server/events.py", "src/server/api/protocol.py", "src/server/controller.py", "src/server/diagnostics.py", "src/server/settings.py"]
-
-[[components]]
-id = "server_transport"
-# The browser e2e suite is the only check that the served bundle still loads and
-# still reaches the gateway, so a transport change has to select the `tui` job.
-# Covers the directory rather than `websocket.py` alone: the framing in
-# `unix_jsonl.py` and the fan-out in `subscriptions.py` are equally observable
-# from a client.
-roots = ["src/server/transport"]
+id = "client_protocol"
+roots = ["proto/vibesys"]
 
 [[components]]
 id = "clients"
 class = "manual"
-job = "tui"
+job = "clients"
 root = "clients"
-depends_on = ["server_protocol", "server_transport", "bun_fetcher"]
+depends_on = ["client_protocol", "bun_fetcher"]
+
+[[components]]
+id = "stitch"
+class = "manual"
+job = "stitch"
+# Stitch is one Cargo workspace with nested crate manifests. Check it once at
+# its workspace root rather than registering each nested manifest as a target.
+root = "experimental/stitch"
 
 [[components]]
 id = "test_isolation_policy"
 class = "manual"
-jobs = ["python", "tui"]
+jobs = ["python", "clients"]
 # The implementation, configuration, and ratchet data must select both jobs:
 # Python exercises the scanner and the client job executes it over TypeScript.
 files = [
@@ -152,7 +178,7 @@ files = [
 
 [[components]]
 id = "bun_fetcher"
-files = ["packaging/fetch_bun.py"]
+files = ["packaging/fetch_bun.py", "packaging/bun_targets.py"]
 
 [[components]]
 id = "examples"
@@ -161,6 +187,10 @@ job = "examples"
 roots = ["examples", "docs"]
 files = [".gitmodules", "README.md"]
 depends_on = ["example_validation", "microservice_evaluator", "native_evaluator_examples"]
+# CI still selects the examples job for a docs change. Locally those files are
+# documentation: `repoctl test` ignores this root and runs only the always-on
+# scripts. The root stays on the component, so the CI plan does not change.
+local_ignore_roots = ["docs"]
 
 [[components]]
 id = "example_validation"
@@ -168,25 +198,33 @@ files = ["src/entrypoints/headless.py", "src/entrypoints/example_catalog.py", "s
 roots = ["src/vibesys/inputs"]
 
 # The build-and-run tests of the example evaluators (the `native_build` marker) run in the
-# examples job. They read the evaluator SDK and the queue evaluator, which live outside
-# `examples`, so a change there must select the job too.
+# examples job. They read the evaluator SDK and reusable evaluator packages, which live outside
+# `examples`, so a change there or in their offline preparation path must select the job too.
 [[components]]
 id = "native_evaluator_examples"
 files = [
+  "libs/vs-runtime/src/vs_runtime/_docker_evaluator_tools.py",
+  "libs/vs-runtime/src/vs_runtime/_evaluator_packages.py",
+  "libs/vs-runtime/src/vs_runtime/_run_environment.py",
+  "libs/vs-runtime/src/vs_runtime/_slurm_environment.py",
+  "libs/vs-runtime/src/vs_runtime/_trusted_evaluation_preparation.py",
+  "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py",
   "tests/architecture/test_stack_evaluator.py",
   "tests/architecture/test_ordered_map_evaluator.py",
   "tests/architecture/test_unordered_map_evaluator.py",
   "tests/examples/test_prioqueue_evaluator.py",
   "tests/examples/test_queue_evaluator.py",
+  "tests/e2e/test_bundled_go_evaluator_offline.py",
+  "tests/e2e/test_kvstore_default_gate_e2e.py",
 ]
-roots = ["sdk/vs-evaluator", "resources/evaluators/queue"]
+roots = ["sdk/vs-evaluator", "resources/evaluators"]
 
 [[components]]
 id = "agent_image"
 class = "manual"
 job = "agent_image"
 roots = ["libs/vs-agent/src/vs_agent/images", "libs/vs-sandbox", "libs/vs-runtime/src/vs_runtime/features"]
-files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/agent_feature.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "libs/vs-runtime/src/vs_runtime/_image_features.py", "scripts/ci_docker_data_root.sh"]
+files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/agent_feature.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "libs/vs-runtime/src/vs_runtime/_image_features.py", "scripts/ci_docker_data_root.sh", "scripts/ci_ubuntu_mirror.py", "scripts/ci_image_cache.py", "scripts/ci_registry_image_cache.sh", ".github/actions/docker-image-cache/action.yml"]
 
 [[components]]
 id = "real_tiers"
@@ -227,6 +265,9 @@ files = [
   "scripts/run_slurm_cluster_tests.sh",
   "scripts/run_minimal_container_tests.sh",
   "scripts/ci_docker_data_root.sh",
+  "scripts/ci_image_cache.py",
+  "scripts/ci_registry_image_cache.sh",
+  ".github/actions/docker-image-cache/action.yml",
 ]
 
 [[components]]
@@ -269,12 +310,73 @@ to = "native:examples/data-structures/repositories/queue-rs"
 id = "repo_policy"
 # Policy inputs affect every CI selection.
 roots = ["support/repoctl", ".repoctl"]
-files = [".github/workflows/test.yml", ".github/actions/setup-tui/action.yml", ".github/actions/setup-repoctl/action.yml", "tests/repoctl/cases.toml"]
+files = [".github/workflows/test.yml", ".github/actions/setup-clients/action.yml", ".github/actions/setup-clients/retry-download.sh", ".github/actions/setup-repoctl/action.yml", ".github/actions/docker-cache-week/action.yml", ".github/actions/setup-runner-apt/action.yml", "tests/repoctl/cases.toml"]
 select_all_jobs = true
 select_all_collections = true
+# CI selects everything for a policy change; a local `repoctl test` runs only repoctl's own
+# tests (the `impact` job), because CI runs the rest and no repoctl change can break them.
+local_jobs = ["impact"]
+
+# The tracked git hooks. The pre-push hook runs `repoctl gate`, so a change to it is checked by
+# repoctl's own tests (the `impact` job), which also hold its executable bit and its call.
+[[components]]
+id = "git_hooks"
+class = "manual"
+job = "impact"
+root = ".githooks"
 
 [[components]]
 id = "workflow_references"
 class = "manual"
 job = "examples"
 root = ".github/workflows"
+
+# All contract sources, generated bindings, and codegen pins share one fast check.
+[[components]]
+id = "proto"
+class = "manual"
+job = "proto"
+roots = ["proto", "scripts/corevalue", "scripts/host_operations", "libs/vs-core/src/vs_core/_generated", "libs/vs-runtime/src/vs_runtime/_core_values", "libs/vs-proto", "clients/libs/proto", "clients/libs/orchestrator-proto/src/generated", "gateway/gen", "gateway/schemahash", "gateway/cmd/schema-hashes", "cli/gen", "orchestrator/gen"]
+files = ["buf.yaml", "buf.gen.yaml", "buf.gen.core.yaml", "buf.gen.cli.yaml", "buf.gen.orchestrator.yaml", "buf.gen.orchestrator-ts.yaml", "scripts/check_proto_layers.py", "scripts/protoc_gen_corevalue.py", "scripts/generate_proto.sh", "scripts/check_schema_hashes.sh", "scripts/generate_proto_framing.py", "scripts/check_proto.sh", "scripts/check_proto_breaking.sh", "scripts/tests/test_proto_breaking.sh", "gateway/go.mod", "gateway/go.sum", "cli/go.mod", "cli/go.sum", "orchestrator/go.mod", "orchestrator/go.sum", "clients/package.json", "clients/pnpm-lock.yaml", "pyproject.toml", "uv.lock"]
+
+[[components]]
+id = "gateway"
+class = "manual"
+job = "gateway"
+# The gateway tests read the conversion and retained goldens and compare the Skeleton wire golden
+# byte for byte, so a change to any of them runs them.
+roots = ["gateway", "proto/testdata"]
+# vibesys-host hosts the orchestrator through a replace of the sibling module, so its changes run these.
+depends_on = ["orchestrator"]
+
+[[components]]
+id = "cli"
+class = "manual"
+job = "cli"
+# The contract the CLI is generated from selects its checks too, so an edit to it cannot leave the
+# Go bindings unvetted. The proto job checks that the bindings are current.
+roots = ["cli", "proto/vibesys/cli"]
+# The release workflow builds and publishes what these checks build, so a change to it runs them too.
+files = ["buf.gen.cli.yaml", ".github/workflows/cli-release.yml"]
+
+[[components]]
+id = "orchestrator"
+class = "manual"
+job = "orchestrator"
+# The contract the module is generated from selects its checks too, as for the CLI. The proto job
+# checks that the bindings are current.
+roots = ["orchestrator", "cli/gen", "proto/vibesys/orchestrator", "proto/vibesys/cli"]
+files = ["buf.gen.orchestrator.yaml", "buf.gen.orchestrator-ts.yaml"]
+
+[[components]]
+id = "desktop_path"
+class = "manual"
+job = "desktop_path"
+# The desktop path end to end test (gateway/e2e) runs the gateway, the orchestrator and its sidecar,
+# the CLI and the skills plugin together, so a change to any of them selects it. The plugin
+# marketplace manifest is read from the repository root.
+roots = ["gateway", "cli", "orchestrator", "skills", "proto/vibesys/orchestrator", "proto/vibesys/cli"]
+files = [".claude-plugin/marketplace.json"]
+# With VIBESYS_E2E_DESKTOP_UI=1 the test also builds the desktop app and drives it on screen, so a
+# change to the app or to a package it uses (found through the package graph) selects it too.
+depends_on = ["pnpm:@vibesys/desktop"]

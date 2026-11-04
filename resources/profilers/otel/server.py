@@ -1,14 +1,15 @@
 """MCP tools for normalized servicebench OpenTelemetry reports."""
 
-import json
+import importlib
 import math
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, model_validator
-from pydantic_core import PydanticCustomError
+from pydantic_core import PydanticCustomError, from_json
 
 _GRAPH_REPORT_MISMATCH = (
     "trace graph and telemetry report must have matching workload identity and windows"
@@ -874,8 +875,10 @@ def _find_artifacts(root: str, *, schema_version: int, model: type[BaseModel]) -
     artifacts = []
     for path in Path(root).rglob("*.json"):
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, RecursionError, ValueError):
+            # pydantic's parser bounds nesting; ``allow_inf_nan`` keeps the NaN and
+            # Infinity that servicebench's reports may carry, as ``json`` read them.
+            payload = from_json(path.read_bytes(), allow_inf_nan=True)
+        except (OSError, ValueError):
             # A candidate controls workspace files. One unreadable, malformed,
             # deeply nested, or oversized JSON artifact must not abort discovery.
             continue
@@ -889,9 +892,19 @@ def _find_artifacts(root: str, *, schema_version: int, model: type[BaseModel]) -
     return sorted(artifacts)
 
 
+# The same common runtime is staged beside each standalone profiler bundle.
+for _common_name in ("_common", "profilers_common"):
+    _common_path = Path(__file__).resolve().parent.parent / _common_name
+    if (_common_path / "strict_arguments.py").is_file():
+        sys.path.insert(0, str(_common_path))
+        break
+
+StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
+
+
 def build_server() -> FastMCP:
     """Build the profiler MCP server."""
-    mcp = FastMCP("vibesys-otel-profiler")
+    mcp = StrictFastMCP("vibesys-otel-profiler")
 
     @mcp.tool()
     def reports(root: str = ".") -> list[str]:

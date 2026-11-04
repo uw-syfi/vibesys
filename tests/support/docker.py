@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vs_sandbox.api.testing import ScriptedDockerCli, docker_result
+from vs_sim.api import DISCARD
+
+if TYPE_CHECKING:
+    from vs_sim.api import OutputSink
 
 
 class _StartableSandbox(Protocol):
-    def start(self) -> None: ...
+    def start(self, *, output: OutputSink) -> None: ...
     def stop(self) -> None: ...
 
 
@@ -26,7 +30,7 @@ def capture_docker_start_argv(
 ) -> list[str]:
     """Return the Docker argv issued by a sandbox's public start operation."""
     try:
-        sandbox.start()
+        sandbox.start(output=DISCARD)
     finally:
         sandbox.stop()
     return list(next(argv for argv in docker.argvs if argv[1:2] == ("run",)))

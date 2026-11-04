@@ -15,7 +15,10 @@ from hypothesis import strategies as st
 from scripts.ast_identity import node_identity
 from scripts.check_contract_sot import main, measure, ratchet
 
-from vs_project.api import run_git
+from vs_project.api import Git
+from vs_sim.api import OsProcesses
+
+_GIT = Git(OsProcesses())
 
 OWNER = "legacy.types"
 
@@ -288,19 +291,19 @@ def test_model_factories_cannot_rename_a_frozen_authority(tmp_path: Path, factor
 def committed_fixture(root: Path) -> None:
     repository(root, "from legacy.types import OldModel")
     baseline(root, measure(root).counts)
-    run_git(["init", "--initial-branch=main"], cwd=root).check_returncode()
-    run_git(["config", "user.name", "Contract fixture"], cwd=root).check_returncode()
-    run_git(["config", "user.email", "contract@example.invalid"], cwd=root).check_returncode()
-    run_git(["add", "."], cwd=root).check_returncode()
-    run_git(
+    _GIT.run_text(["init", "--initial-branch=main"], cwd=root).check()
+    _GIT.run_text(["config", "user.name", "Contract fixture"], cwd=root).check()
+    _GIT.run_text(["config", "user.email", "contract@example.invalid"], cwd=root).check()
+    _GIT.run_text(["add", "."], cwd=root).check()
+    _GIT.run_text(
         [
             "commit",
             "-m",
             "Contract fixture\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
         ],
         cwd=root,
-    ).check_returncode()
-    run_git(["checkout", "-b", "feature"], cwd=root).check_returncode()
+    ).check()
+    _GIT.run_text(["checkout", "-b", "feature"], cwd=root).check()
 
 
 def test_merge_base_prevents_editing_the_allowance_to_accept_growth(tmp_path: Path) -> None:
@@ -424,16 +427,16 @@ def test_merge_base_cannot_reverse_authority_retirement(tmp_path: Path) -> None:
     committed_fixture(tmp_path)
     (tmp_path / "src/legacy/types.py").write_text("")
     assert main(["--root", str(tmp_path), "--write"]) == 0
-    run_git(["add", "."], cwd=tmp_path).check_returncode()
-    run_git(
+    _GIT.run_text(["add", "."], cwd=tmp_path).check()
+    _GIT.run_text(
         [
             "commit",
             "-m",
             "Retire authority\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
         ],
         cwd=tmp_path,
-    ).check_returncode()
-    run_git(["branch", "retired"], cwd=tmp_path).check_returncode()
+    ).check()
+    _GIT.run_text(["branch", "retired"], cwd=tmp_path).check()
     manifest = tmp_path / "scripts/contract_replacements.json"
     metadata = json.loads(manifest.read_text())
     metadata["replacements"][0]["shape"]["retired"] = False
@@ -641,7 +644,7 @@ def test_verified_consumer_rename_preserves_exact_symbol_budget(tmp_path: Path) 
     original = tmp_path / "src/consumer.py"
     relocated = tmp_path / "src/relocated.py"
     original.rename(relocated)
-    run_git(["add", "--intent-to-add", "src/relocated.py"], cwd=tmp_path).check_returncode()
+    _GIT.run_text(["add", "--intent-to-add", "src/relocated.py"], cwd=tmp_path).check()
     args = ["--root", str(tmp_path), "--base-ref", "main"]
     assert main([*args, "--write"]) == 0
     assert main(args) == 0
@@ -661,7 +664,7 @@ def test_copy_or_simultaneous_old_and_new_consumer_cannot_transfer_budget(
     relocated.write_text(original.read_text())
     if retained_source:
         original.write_text(original.read_text() + "\nvalue = 1\n")
-    run_git(["add", "--intent-to-add", "src/relocated.py"], cwd=tmp_path).check_returncode()
+    _GIT.run_text(["add", "--intent-to-add", "src/relocated.py"], cwd=tmp_path).check()
     args = ["--root", str(tmp_path), "--base-ref", "main"]
     assert main(args) == 1
     assert main([*args, "--write"]) == 1
@@ -672,16 +675,16 @@ def test_consumer_rename_cannot_acquire_a_new_frozen_symbol(tmp_path: Path) -> N
     original = tmp_path / "src/consumer.py"
     original.write_text("from legacy.types import OldModel\n" + "value = 1\n" * 10)
     baseline(tmp_path, measure(tmp_path).counts)
-    run_git(["add", "."], cwd=tmp_path).check_returncode()
-    run_git(
+    _GIT.run_text(["add", "."], cwd=tmp_path).check()
+    _GIT.run_text(
         [
             "commit",
             "-m",
             "Preserve rename context\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
         ],
         cwd=tmp_path,
-    ).check_returncode()
-    run_git(["branch", "rename-base"], cwd=tmp_path).check_returncode()
+    ).check()
+    _GIT.run_text(["branch", "rename-base"], cwd=tmp_path).check()
     manifest = tmp_path / "scripts/contract_replacements.json"
     metadata = json.loads(manifest.read_text())
     second = {**metadata["replacements"][0], "symbol": "SecondModel"}
@@ -689,20 +692,20 @@ def test_consumer_rename_cannot_acquire_a_new_frozen_symbol(tmp_path: Path) -> N
     manifest.write_text(json.dumps(metadata))
     owner = tmp_path / "src/legacy/types.py"
     owner.write_text(owner.read_text() + "\nclass SecondModel:\n    first: int\n    second: str\n")
-    run_git(["add", "."], cwd=tmp_path).check_returncode()
-    run_git(
+    _GIT.run_text(["add", "."], cwd=tmp_path).check()
+    _GIT.run_text(
         [
             "commit",
             "-m",
             "Add preexisting unused authority\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
         ],
         cwd=tmp_path,
-    ).check_returncode()
-    run_git(["branch", "authorities"], cwd=tmp_path).check_returncode()
+    ).check()
+    _GIT.run_text(["branch", "authorities"], cwd=tmp_path).check()
     relocated = tmp_path / "src/relocated.py"
     original.rename(relocated)
     relocated.write_text(relocated.read_text() + "from legacy.types import SecondModel\n")
-    run_git(["add", "--intent-to-add", "src/relocated.py"], cwd=tmp_path).check_returncode()
+    _GIT.run_text(["add", "--intent-to-add", "src/relocated.py"], cwd=tmp_path).check()
     args = ["--root", str(tmp_path), "--base-ref", "authorities"]
     assert main(args) == 1
     assert main([*args, "--write"]) == 1
@@ -713,8 +716,59 @@ def test_recreated_untracked_source_cannot_keep_and_transfer_its_budget(tmp_path
     original = tmp_path / "src/consumer.py"
     relocated = tmp_path / "src/relocated.py"
     original.rename(relocated)
-    run_git(["add", "--all"], cwd=tmp_path).check_returncode()
+    _GIT.run_text(["add", "--all"], cwd=tmp_path).check()
     original.write_text("from legacy.types import OldModel\n")
     args = ["--root", str(tmp_path), "--base-ref", "main"]
     assert main(args) == 1
     assert main([*args, "--write"]) == 1
+
+
+def waiver_config(root: Path, symbol: str = "OldModel") -> None:
+    (root / "pyproject.toml").write_text(
+        '[tool.vibesys.file_length]\ngenerated = ["src/generated"]\n'
+        "[tool.vibesys.contract_sot]\n"
+        'copy_waivers = [{path = "src/generated/types.py", symbol = "'
+        + symbol
+        + '", reason = "Phase 3 replaces hand-written core types."}]\n'
+    )
+
+
+def test_named_generated_copy_waiver_preserves_other_copies_and_import_checks(
+    tmp_path: Path,
+) -> None:
+    repository(tmp_path, "class OldModel: pass\n")
+    generated = tmp_path / "src/generated/types.py"
+    generated.parent.mkdir()
+    generated.write_text("class OldModel: pass\nfrom legacy.types import OldModel as Legacy\n")
+    assert any(str(generated.relative_to(tmp_path)) in error for error in measure(tmp_path).errors)
+    waiver_config(tmp_path)
+    scan = measure(tmp_path)
+    assert not any("src/generated/types.py" in error for error in scan.errors)
+    assert any("src/consumer.py" in error for error in scan.errors)
+    assert scan.counts[("src/generated/types.py", OWNER, "OldModel")] == 1
+    generated.write_text(
+        generated.read_text() + "class RenamedCopy:\n    first: int\n    second: str\n"
+    )
+    assert any("copied frozen contract RenamedCopy" in error for error in measure(tmp_path).errors)
+
+
+@pytest.mark.parametrize("state", ["absent", "renamed", "no_longer_copy"])
+def test_generated_copy_waiver_must_be_removed_when_it_stops_matching(
+    tmp_path: Path, state: str
+) -> None:
+    repository(tmp_path, "")
+    waiver_config(tmp_path)
+    generated = tmp_path / "src/generated/types.py"
+    generated.parent.mkdir()
+    if state != "absent":
+        generated.write_text("class Unrelated: pass\n" if state == "renamed" else "value = 1\n")
+    assert any("stale copy waiver" in error for error in measure(tmp_path).errors)
+
+
+def test_copy_waiver_cannot_exempt_a_handwritten_contract(tmp_path: Path) -> None:
+    repository(tmp_path, "class OldModel: pass\n")
+    waiver_config(tmp_path)
+    project = tmp_path / "pyproject.toml"
+    project.write_text(project.read_text().replace("src/generated/types.py", "src/consumer.py"))
+    with pytest.raises(ValueError, match=r"contract_sot.copy_waivers: src/consumer.py"):
+        measure(tmp_path)

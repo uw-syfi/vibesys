@@ -20,6 +20,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from launch.agents import run_tool_descriptors
 from launch.composition import profiler_server
 from vibesys.api.wiring import AgentToolContext
 from vibesys.config import BUNDLED_RESOURCES
@@ -53,7 +54,10 @@ def _spec(descriptor: ToolServerDescriptor) -> MCPServerSpec:
 
 def _launcher_descriptors() -> list[ToolServerDescriptor]:
     """What each server launcher in the product produces, for every profiler it can bind."""
-    descriptors = [core_evaluation_mcp_descriptor("token", "/run/evaluation.sock")]
+    descriptors = [
+        core_evaluation_mcp_descriptor("token", "/run/evaluation.sock"),
+        *run_tool_descriptors("/run/relay.sock", "token"),
+    ]
     for kind in ProfilerKind:
         server = profiler_server(AgentToolContext(profiler_id=kind.value))
         if server is not None:
@@ -66,6 +70,7 @@ def test_the_survey_covers_a_profiler_server() -> None:
 
     assert "vibesys-linux-cpu-profiler" in names
     assert "vs-evaluation" in names
+    assert "vibesys-run" in names
 
 
 @pytest.mark.parametrize("descriptor", _launcher_descriptors(), ids=lambda d: d.name)
@@ -182,6 +187,22 @@ def _server_framework_imports() -> list[str]:
     return sorted(modules)
 
 
+def _launcher_entrypoint_modules() -> list[str]:
+    """The module each launched server runs with ``python -m``, as its descriptor names it."""
+    modules = []
+    for descriptor in _launcher_descriptors():
+        assert isinstance(descriptor, StdioServerDescriptor)
+        if descriptor.args[:1] == ("-m",):
+            modules.append(descriptor.args[1])
+    return modules
+
+
+def test_the_survey_covers_the_chat_agents_run_tools_and_the_evaluation_tool() -> None:
+    assert {"vs_evaluation.tool_relay_mcp", "vs_evaluation.agent_core_mcp"} <= set(
+        _launcher_entrypoint_modules()
+    )
+
+
 def test_the_profiler_servers_import_only_the_container_packages() -> None:
     modules = _server_framework_imports()
 
@@ -195,10 +216,7 @@ def test_the_profiler_servers_import_only_the_container_packages() -> None:
 def test_every_module_a_container_server_imports_needs_only_the_container_interpreters_packages() -> (
     None
 ):
-    modules = [
-        "vs_evaluation.agent_core_mcp",
-        *_server_framework_imports(),
-    ]
+    modules = [*_launcher_entrypoint_modules(), *_server_framework_imports()]
 
     # A fresh interpreter is the only way to see exactly what the imports pull in.
     probe = subprocess.run(  # noqa: S603  # LW-158203; the argv is this interpreter and a fixed program.

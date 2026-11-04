@@ -15,11 +15,18 @@
   },
   "include": [
     "src/**/*.test.ts",
-    "src/**/*.test.tsx"
+    "src/**/*.test.tsx",
+    "scripts/*.ts"
   ],
   "references": [
     {
       "path": "./tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.legacy.json"
+    },
+    {
+      "path": "./tsconfig.tokens.json"
     }
   ]
 }

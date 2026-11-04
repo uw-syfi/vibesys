@@ -78,6 +78,7 @@ from vs_project.api.git_repository import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vs_project._git_process import Git
     from vs_project.api.git_repository import (
         GitFaultSink,
         Pathspec,
@@ -96,11 +97,11 @@ _REF_WILDCARDS = frozenset("*?[\\")
 class Pygit2GitRepository:
     """libgit2 for the portable operations, the Git CLI for the rest."""
 
-    def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
+    def __init__(self, root: Path, *, git: Git, faults: GitFaultSink) -> None:
         pygit2.option(pygit2.enums.Option.SET_OWNER_VALIDATION, 0)
         self._root = root
         self._faults = faults
-        self._cli = CliGitRepository(root, faults=faults)
+        self._cli = CliGitRepository(root, git=git, faults=faults)
         self._location: RepositoryLocation | None = None
         self._exclude_file = root / ".git" / "info" / "exclude"
 
@@ -204,6 +205,11 @@ class Pygit2GitRepository:
         self._location = location
         self._cli.pin(location)
         return location
+
+    def pin(self, location: RepositoryLocation) -> None:
+        self._location = location
+        self._exclude_file = (_common_dir(location.git_dir) / "info" / "exclude").resolve()
+        self._cli.pin(location)
 
     # -- names ---------------------------------------------------------------
 
@@ -313,6 +319,9 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS:
             return None
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        return self._cli.has_ref_pointing_at(commit, prefix)
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         if not prefix or _REF_WILDCARDS & set(prefix):
             return self._cli.has_ref_containing(commit, prefix)
@@ -328,6 +337,12 @@ class Pygit2GitRepository:
             )
         except _LIBGIT2_ERRORS:
             return False
+
+    def branches(self, prefix: str) -> tuple[str, ...]:
+        return self._cli.branches(prefix)
+
+    def tree_files(self, revision: Revision, directory: str) -> tuple[str, ...]:
+        return self._cli.tree_files(revision, directory)
 
     def _reaches(self, repository: pygit2.Repository, name: str, wanted: pygit2.Oid) -> bool:
         """Whether the ref ``name`` ends at a commit that is, or descends from, ``wanted``."""
@@ -361,6 +376,42 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS as error:
             self._fail(f"update-ref {ref} {commit}", error)
 
+    def create_ref(self, ref: str, commit: str) -> str:
+        return self._cli.create_ref(ref, commit)
+
+    def create_commit(
+        self,
+        revision: Revision,
+        parents: Sequence[str],
+        message: str,
+        *,
+        preserve_from: Revision,
+        preserve_paths: Sequence[str] = (),
+    ) -> str:
+        return self._cli.create_commit(
+            revision,
+            parents,
+            message,
+            preserve_from=preserve_from,
+            preserve_paths=preserve_paths,
+        )
+
+    def advance_branch(self, branch: str, commit: str) -> bool:
+        return self._cli.advance_branch(branch, commit)
+
+    def fast_forward_checkout(
+        self,
+        branch: str,
+        commit: str,
+        *,
+        untracked_exclusions: Sequence[str] = (),
+    ) -> bool:
+        return self._cli.fast_forward_checkout(
+            branch,
+            commit,
+            untracked_exclusions=untracked_exclusions,
+        )
+
     def switch_branch(self, branch: str, *, create: bool = False) -> None:
         self._cli.switch_branch(branch, create=create)
 
@@ -386,6 +437,7 @@ class Pygit2GitRepository:
         matcher = compile_pathspecs(pathspecs)
         if matcher is None:
             return self._cli.tracked_changes_since_head(pathspecs)
+        self._cli.require_plain_work_tree(pathspecs)
         try:
             repository = self._open()
             tree = self._head_tree(repository)
@@ -526,13 +578,17 @@ class Pygit2GitRepository:
         self._cli.prune_worktrees()
 
     def worktree_head(self, worktree: Path) -> str:
+        location = self.linked_worktree_location(worktree)
         try:
-            repository = self._open_at(worktree)
+            repository = pygit2.Repository(str(location.git_dir))
             if repository.head_is_unborn:
                 _refuse("ambiguous argument 'HEAD': unknown revision")
             return str(repository.head.peel(pygit2.Commit).id)
         except _LIBGIT2_ERRORS as error:
             self._fail("rev-parse HEAD", error)
+
+    def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        return self._cli.linked_worktree_location(worktree)
 
     # -- repository-local ignore rules ---------------------------------------
 

@@ -1,8 +1,6 @@
 """``vibesys example``: list the example catalog and start a project from an example.
 
-``vibesys example list [--json]`` prints every example in the checkout's
-``examples/registry.toml`` by category, with its tasks; ``--json`` prints one
-:class:`~entrypoints.example_catalog.ExampleList`.
+``vibesys example list`` prints the registered example names and tasks.
 
 ``vibesys example new EXAMPLE DEST`` copies the example's tracked files into
 ``DEST`` (absent or an empty directory), makes ``DEST`` a Git repository with
@@ -28,13 +26,12 @@ from typing import TYPE_CHECKING, Protocol
 
 from entrypoints.example_catalog import (
     CatalogError,
-    ExampleList,
     example_tasks,
     find_example,
-    list_examples,
     load_registry,
 )
-from vs_project.api import run_git
+from vs_project.api import Git
+from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -69,7 +66,9 @@ class ExampleMaterializer(Protocol):
 
 @dataclass(frozen=True)
 class GitExampleMaterializer:
-    """Uses the real file system, and starts Git through ``vs_project``'s ``run_git``."""
+    """Uses the real file system, and starts Git through ``git``."""
+
+    git: Git
 
     def copy_tracked(
         self, checkout: Path, example: PurePosixPath, destination: Path, *, message: str
@@ -106,7 +105,7 @@ class GitExampleMaterializer:
 
     def _git(self, cwd: Path, *args: str) -> str:
         try:
-            completed = run_git(args, cwd=cwd, text=True)
+            completed = self.git.run_text(args, cwd=cwd)
         except OSError as exc:
             message = f"cannot run git: {exc}"
             raise ExampleMaterializationError(message) from exc
@@ -155,7 +154,15 @@ class NewProject:
 
 
 class DestinationError(Exception):
-    """``example new`` refuses a destination that is not empty or lies inside the checkout."""
+    """A new project's destination is refused; the subclass says why and the message names it."""
+
+
+class DestinationExistsError(DestinationError):
+    """The destination exists (for an example, and is not an empty directory)."""
+
+
+class DestinationNestedError(DestinationError):
+    """The destination lies inside the VibeSys checkout or another Git repository."""
 
 
 def new_example(
@@ -168,10 +175,10 @@ def new_example(
     existed = target.exists()
     if existed and (not target.is_dir() or any(target.iterdir())):
         message = f"refusing to create a project in {target}: it exists and is not empty"
-        raise DestinationError(message)
+        raise DestinationExistsError(message)
     if target.is_relative_to(root):
         message = f"refusing to create a project inside the VibeSys checkout: {target}"
-        raise DestinationError(message)
+        raise DestinationNestedError(message)
     example = PurePosixPath(entry.path)
     try:
         if entry.external_repo:
@@ -201,17 +208,22 @@ def _restore(target: Path, *, existed: bool) -> None:
             child.unlink()
 
 
-def format_examples(listing: ExampleList) -> str:
-    """Render the catalog for a terminal: categories, then one example per line with its tasks."""
-    lines: list[str] = []
-    width = max((len(example.name) for example in listing.examples), default=0)
+def format_examples(checkout: Path) -> str:
+    """Render the registry as category, example and task names."""
+    entries = sorted(
+        load_registry(checkout).example, key=lambda entry: (entry.category, entry.name)
+    )
+    width = max((len(entry.name) for entry in entries), default=0)
     category = None
-    for example in listing.examples:
-        if example.category != category:
-            category = example.category
+    lines: list[str] = []
+    for entry in entries:
+        if entry.category != category:
+            category = entry.category
             lines.append(f"{category}:")
-        tasks = ", ".join(example.tasks) or "(external repository, not fetched)"
-        lines.append(f"  {example.name:<{width}}  {tasks}")
+        tasks = ", ".join(example_tasks(checkout / entry.path))
+        if not tasks:
+            tasks = "(external repository, not fetched)" if entry.external_repo else "(no tasks)"
+        lines.append(f"  {entry.name:<{width}}  {tasks}")
     return "\n".join(lines) if lines else "The catalog has no examples."
 
 
@@ -227,8 +239,7 @@ def _parser() -> argparse.ArgumentParser:
         help="the VibeSys source checkout whose examples/ to use (default: this one)",
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    listing = commands.add_parser("list", help="list examples by category with their tasks")
-    listing.add_argument("--json", action="store_true", help="print one JSON document")
+    commands.add_parser("list", help="list examples by category with their tasks")
     new = commands.add_parser("new", help="copy an example into a new Git repository")
     new.add_argument("example", help="the example name `vibesys example list` shows")
     new.add_argument("destination", type=Path, help="an absent or empty directory")
@@ -253,14 +264,16 @@ def run(
         root = cwd / root
     try:
         if args.command == "list":
-            listing = list_examples(root)
-            text = listing.model_dump_json() if args.json else format_examples(listing)
+            text = format_examples(root)
             return 0, text + "\n", ""
         destination = args.destination.expanduser()
         if not destination.is_absolute():
             destination = cwd / destination
         project = new_example(
-            root, args.example, destination, materializer or GitExampleMaterializer()
+            root,
+            args.example,
+            destination,
+            materializer or GitExampleMaterializer(Git(OsProcesses())),
         )
     except (CatalogError, DestinationError, ExampleMaterializationError) as exc:
         return 1, "", f"vibesys example: {exc}\n"

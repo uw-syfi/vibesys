@@ -15,7 +15,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -33,8 +39,6 @@ jobs:
       # crash point, the larger Hypothesis example counts, and the randomized
       # `nightly` Hypothesis profile (conftest.py), so each night explores new
       # inputs. The `slow` tests run in the `crash-sweep` job below.
-      # The chaos harness's seed set follows the depth too
-      # (tests/system/chaos/test_chaos.py).
       - name: Run the full test suite at nightly depth
         run: uv run python -m pytest --depth=nightly -m 'not slow and not native_build' -n auto --dist loadgroup --no-cov -q
 
@@ -48,17 +52,18 @@ jobs:
           path: .hypothesis/examples
           if-no-files-found: ignore
 
-      # Seeds the pull-request tier never draws (see
-      # tests/system/chaos/test_chaos.py).
-      - name: Sweep the skeleton-search chaos harness over more seeds
-        run: ./scripts/chaos_loop.sh 200 1000 2
-
   # The exhaustive crash sweeps (`-m slow`), which a pull request deselects.
   crash-sweep:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -87,14 +92,24 @@ jobs:
       matrix:
         group: [slurm_cluster_tests, minimal_container_tests]
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       # The host-side job confinement the tier exercises needs bubblewrap; see
       # the sandbox-linux job for why the AppArmor userns restriction is lifted.
       - name: Install bubblewrap
+        timeout-minutes: 3
+        uses: ./.github/actions/setup-runner-apt
+        with:
+          packages: bubblewrap
+
+      - name: Enable runner user namespaces
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Install uv

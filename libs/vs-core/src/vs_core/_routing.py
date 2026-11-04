@@ -42,7 +42,9 @@ from .types.evaluation import (
     JobObserved,
     JobsDrainRequested,
     JobTerminationRequested,
+    JobWaitLapsed,
     MeasurementRequested,
+    MeasurementSubmissionEnded,
     MeasurementSubmissionObserved,
     ObservationsDue,
     RegisteredJobObserved,
@@ -62,13 +64,11 @@ from .types.records import (
     BlockedRecordStalled,
     DispatchAuthorized,
     OperationRetireRequested,
-    ReconciliationDeadline,
-    RecoveryReady,
-    RecoveryStarted,
     RequestObserved,
     RequestPrepared,
     RequestUndispatchable,
     RetryDue,
+    TurnHeld,
 )
 from .types.scheduling import (
     AdmissionControl,
@@ -79,6 +79,7 @@ from .types.scheduling import (
     AttemptRequested,
     ClockAdvanced,
     CloseAdmission,
+    ParallelLimitChanged,
     QueueEntryRetired,
     RegisterAttempt,
     RunDrained,
@@ -89,13 +90,18 @@ from .types.sessions import (
     AcquisitionStalled,
     CheckpointStalled,
     InputAcceptanceObserved,
+    InputMidTurnReleased,
+    InputOfferedMidTurn,
     InputReservationReleased,
     InputReservationRequested,
+    InputTakenMidTurn,
+    InputWithdrawRequested,
     InterruptRequested,
     InvocationCancellationRequested,
     InvocationChargeRefunded,
     InvocationChargesAuthorized,
     InvocationCheckpointAvailable,
+    InvocationCheckpointPending,
     RegisteredTurnRequested,
     RunInvocationCheckpointObserved,
     RunInvocationCheckpointRequested,
@@ -104,6 +110,7 @@ from .types.sessions import (
     SessionInputReceived,
     SessionObserved,
     SessionsAcquireRequested,
+    SessionWaitLapsed,
     SteerReceived,
     TurnInputsReserved,
     TurnObserved,
@@ -141,6 +148,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | ClockAdvanced()
             | AdmissionControl()
             | AdoptionFenceLifted()
+            | ParallelLimitChanged()
             | AdmitAttempt()
             | CloseAdmission()
             | RunDrained()
@@ -186,7 +194,13 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | InvocationCheckpointAvailable()
             | CheckpointStalled()
             | AcquisitionStalled()
+            | SessionWaitLapsed()
+            | InvocationCheckpointPending()
             | SessionInputReceived()
+            | InputWithdrawRequested()
+            | InputOfferedMidTurn()
+            | InputTakenMidTurn()
+            | InputMidTurnReleased()
             | InputReservationRequested()
             | InputAcceptanceObserved()
             | InputReservationReleased()
@@ -204,6 +218,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | JobsDrainRequested()
             | RunJobsCancelRequested()
             | MeasurementSubmissionObserved()
+            | MeasurementSubmissionEnded()
             | ContinuationJobsChanged()
             | ContinuationRetireRequested()
             | ContinuationReopenRequested()
@@ -215,6 +230,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | TurnSuspended()
             | DeadlineReached()
             | ObservationsDue()
+            | JobWaitLapsed()
         ):
             return Area.EVALUATION
         case (
@@ -229,12 +245,10 @@ def event_area(event: CoreEvent | Signal) -> Area:
             RequestPrepared()
             | DispatchAuthorized()
             | RequestObserved()
-            | RecoveryStarted()
-            | RecoveryReady()
-            | ReconciliationDeadline()
             | RetryDue()
             | RequestUndispatchable()
             | BlockedRecordStalled()
+            | TurnHeld()
             | OperationRetireRequested()
             | DecisionCompleted()
         ):

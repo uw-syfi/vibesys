@@ -409,11 +409,29 @@ function ignoredDirectories(root, candidates) {
 function gitIgnoredDirectories(root, paths) {
   const query = spawnSync('git', GIT_IGNORE_QUERY, {
     cwd: root,
+    env: environmentOfTheTreeAt(root),
     input: paths.join('\0'),
     encoding: 'utf8',
   });
   if (query.error !== undefined || !GIT_STATUS_ANSWERED.has(query.status)) return undefined;
   return new Set(query.stdout.split('\0').filter(path => path !== ''));
+}
+
+/**
+ * The environment for asking git about the tree at `root`: the caller's without the variables git
+ * itself lists as selecting a repository (`GIT_DIR`, `GIT_INDEX_FILE`, `GIT_PREFIX`, ...). A git
+ * hook runs with them set for the repository being pushed, so inherited they answer for that
+ * repository's index and layout instead of this tree: `git check-ignore` exits 128 from the
+ * clients directory, and the layout fell back to names, cruising `node_modules` and `dist`. The
+ * same gate passed in a plain shell. The tree is found from `root`, as it is outside a hook.
+ */
+function environmentOfTheTreeAt(root) {
+  const listed = spawnSync('git', ['rev-parse', '--local-env-vars'], {cwd: root, encoding: 'utf8'});
+  if (listed.error !== undefined || listed.status !== 0) return process.env;
+  const repositoryVariables = new Set(listed.stdout.split('\n').filter(name => name !== ''));
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !repositoryVariables.has(name)),
+  );
 }
 
 /** The stand-in answer, by directory name, for the paths git has none for. */

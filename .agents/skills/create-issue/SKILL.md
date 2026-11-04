@@ -1,6 +1,8 @@
 ---
 name: create-issue
 description: Investigate, draft, and file well-scoped VibeSys GitHub issues using the repository issue forms and project conventions. Use when a user asks to create, open, or file a bug report, engineering change, expansion scenario or harness, research experiment, or roadmap issue, or asks to turn findings, TODOs, or proposed work into GitHub issues.
+metadata:
+  kind: workflow
 ---
 
 # Create Issue

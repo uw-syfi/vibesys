@@ -14,6 +14,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSession,
+    RunEnvironmentView,
     SkyPilotEnvironmentFacts,
     SlurmEnvironmentFacts,
 )
@@ -21,15 +22,48 @@ from vs_runtime.api.infrastructure import (
 _TEMPLATE_DIR = PROMPTS_DIR / "environments"
 
 
+def _placeholder_missing_hidden_files(request: RunEnvironmentRequest) -> None:
+    """Create empty files for hidden paths a linked worktree did not check out.
+
+    State directories are created by ``prepare_hidden_directories``. ``agent.toml``
+    and root ``.env*`` stay in the canonical policy when they exist on the operator
+    checkout, and a worktree of a commit does not contain those ignored files.
+    Confinement masks a hidden path only when it exists. The placeholder is empty;
+    the operator file is not copied.
+    """
+    workspace = request.workspace
+    for relative in request.project_path_policy.hidden_paths:
+        target = workspace / relative
+        if target.exists() or target.is_symlink():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.touch()
+
+
+def agent_environment_notes(view: RunEnvironmentView) -> str:
+    """The run environment notes every agent prompt states, for the run's root session *view*.
+
+    Prompts are rendered for the run, so the Git sentence follows where agents write
+    (``RunEnvironmentView.agent_git_writable``), not the root session's own checkout.
+    """
+    return render_template(
+        "agent_notes.j2",
+        template_dir=_TEMPLATE_DIR,
+        environment_notes=view.prompt_notes,
+        git_writable=view.agent_git_writable,
+    )
+
+
 def open_run_environment(
     environment: RunEnvironment, request: RunEnvironmentRequest
 ) -> RunEnvironmentSession:
     """Render product policy and open a prepared infrastructure environment."""
-    # Linked candidates omit ignored local state, but share the canonical
-    # confinement policy. Prepare its hidden root before any sandbox opens.
-    Project.open(request.workspace).state.candidate_worktrees_directory(request.run_id).mkdir(
-        parents=True, exist_ok=True
-    )
+    # Linked candidates omit ignored local state and any run record their revision
+    # predates, but share the canonical confinement policy. Prepare its hidden
+    # directories, and empty placeholders for ignored secret files the worktree
+    # did not check out, before any sandbox opens.
+    Project.open(request.workspace).state.prepare_hidden_directories(request.run_id)
+    _placeholder_missing_hidden_files(request)
     prepared = environment.prepare(request)
     facts = prepared.presentation_facts
     if isinstance(facts, HostEnvironmentFacts):
@@ -40,6 +74,11 @@ def open_run_environment(
                 "docker/prompt_notes.j2",
                 template_dir=_TEMPLATE_DIR,
                 history_root=request.git_history_root,
+                # Trusted evaluation runs on the same Docker host; whether the editor
+                # shares its hardware decides whether agents can reproduce failures here.
+                hardware_attached=environment.attaches_backend_accelerator(
+                    docker_in_docker=request.docker_in_docker
+                ),
             )
         )
     elif isinstance(facts, SlurmEnvironmentFacts):

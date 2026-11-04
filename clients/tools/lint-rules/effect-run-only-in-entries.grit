@@ -1,0 +1,16 @@
+// An Effect program is a value: it runs once, at the edge, where the application builds its
+// layers and starts the first fiber. `Effect.runPromise`, `runFork`, `runSync` (and their `Exit`
+// and `Callback` forms, also on a `ManagedRuntime`) anywhere else start a fiber nothing owns, with
+// no layer, no interruption and no clock to control. Wired to the desktop app's src with the
+// designated entry files excluded (biome.json): src/main/index.ts and src/ui/main.tsx. Tests use
+// `it.effect`.
+language js;
+
+`$runner.$method($args)` as $call where {
+  $method <: r"run(?:Promise|Fork|Sync|Callback)(?:Exit)?",
+  register_diagnostic(
+    span = $call,
+    message = "Effect.run* may be called only in the entry files (src/main/index.ts, src/ui/main.tsx). Return the Effect and let the entry run it; in a test use it.effect.",
+    severity = "error"
+  )
+}

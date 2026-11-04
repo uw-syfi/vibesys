@@ -9,13 +9,19 @@ or inspected turn reports nothing. It changes no behavior of the client it wraps
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from functools import cache
+from typing import TYPE_CHECKING, Any
 
-from vs_agent.api import AgentOutputSchemaError, AgentTurnExecutor
+from pydantic import BaseModel
+
+from vs_agent.api import AgentExecutionCancelledError, AgentOutputSchemaError, AgentTurnExecutor
+from vs_core.api import WaitableReply
+from vs_decode.api import Unreadable, decode_json
 from vs_runtime._agent_lifecycle import (
     AgentExecutionFinished,
     AgentExecutionStarted,
     AgentExecutionStatus,
+    AgentReply,
 )
 
 if TYPE_CHECKING:
@@ -26,17 +32,64 @@ if TYPE_CHECKING:
         AgentSessionSpec,
         AgentTurnRequest,
         AgentTurnResult,
+        SteerOutcome,
     )
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleSink
+    from vs_runtime._run_control import RunControlChannel
+
+
+_MAX_REPLY_BYTES = 1024 * 1024
+"""A longer reply is not read as a typed one; its text is still reported."""
+
+
+@cache
+def _json_schema(model: type[BaseModel]) -> dict[str, Any]:
+    return model.model_json_schema()
+
+
+def structured_reply(schema: type[BaseModel] | None, text: str) -> AgentReply | None:
+    """``text`` read as a reply of the turn's ``schema``, or None when it is not one.
+
+    A role that may wait for evaluations answers in an envelope; the reply is what the envelope
+    holds, a result or a wait, and ``kind`` names that model. Text that is no valid reply is the
+    turn's failure to report elsewhere, never a guess here.
+    """
+    if schema is None:
+        return None
+    try:
+        parsed = decode_json(text, schema, source="agent reply", max_bytes=_MAX_REPLY_BYTES)
+    except TypeError:
+        # A reply model that allows unknown keys cannot be decoded strictly. The report is a
+        # reading aid, so the turn goes on without it; the property test over every role's reply
+        # model fails for such a model.
+        return None
+    if isinstance(parsed, Unreadable):
+        return None
+    reply = parsed.reply if isinstance(parsed, WaitableReply) else parsed
+    if not isinstance(reply, BaseModel):
+        return None
+    model = type(reply)
+    return AgentReply(
+        kind=model.__name__,
+        json_schema=_json_schema(model),
+        value=reply.model_dump(mode="json"),
+    )
 
 
 class LifecycleReportingExecutor:
     """An ``AgentTurnExecutor`` that reports each dispatched turn to a lifecycle sink."""
 
-    def __init__(self, client: AgentTurnExecutor, lifecycle: AgentExecutionLifecycleSink) -> None:
+    def __init__(
+        self,
+        client: AgentTurnExecutor,
+        lifecycle: AgentExecutionLifecycleSink,
+        *,
+        control: RunControlChannel | None = None,
+    ) -> None:
         """Wrap *client*; *lifecycle* is called on the thread that runs the turn."""
         self._client = client
         self._lifecycle = lifecycle
+        self._control = control
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -50,6 +103,10 @@ class LifecycleReportingExecutor:
     def cancel_session(self, key: AgentSessionKey) -> None:
         """Ask the keyed conversation's in-flight turn to stop."""
         self._client.cancel_session(key)
+
+    def steer_session(self, key: AgentSessionKey, text: str, *, steer_id: str) -> SteerOutcome:
+        """Offer a message to the keyed conversation's in-flight turn."""
+        return self._client.steer_session(key, text, steer_id=steer_id)
 
     def release_session(self, key: AgentSessionKey) -> None:
         """Release the keyed conversation's live resources."""
@@ -67,21 +124,40 @@ class LifecycleReportingExecutor:
         agent_id = session_spec.role
         label = turn.label or agent_id
         execution_id = turn.invocation_id or ""
-        self._lifecycle(
-            AgentExecutionStarted(
-                agent_id=agent_id,
-                label=label,
-                execution_id=execution_id,
-                system_prompt=turn.instructions,
-                user_prompt=turn.message,
-                provider=session_spec.provider,
-                model=session_spec.model,
-            )
+        started = AgentExecutionStarted(
+            agent_id=agent_id,
+            label=label,
+            execution_id=execution_id,
+            system_prompt=turn.instructions,
+            user_prompt=turn.message,
+            provider=session_spec.provider,
+            model=session_spec.model,
+            reasoning_effort=session_spec.reasoning_effort,
+            client="scripted" if session_spec.scripted else "provider",
         )
 
+        def publish_start() -> None:
+            self._lifecycle(started)
+
+        if self._control is None:
+            publish_start()
+        else:
+            try:
+                self._control.start_execution(publish_start, execution_id=execution_id)
+            except AgentExecutionCancelledError as error:
+                self._control.finish_execution(execution_id)
+                message = f"{error}: turn {execution_id} ({agent_id})"
+                raise AgentExecutionCancelledError(message) from error
+
         def finished(
-            status: AgentExecutionStatus, *, result: str | None, error: str | None
+            status: AgentExecutionStatus,
+            *,
+            result: str | None,
+            error: str | None,
+            reply: AgentReply | None = None,
         ) -> None:
+            if self._control is not None:
+                self._control.finish_execution(execution_id)
             self._lifecycle(
                 AgentExecutionFinished(
                     agent_id=agent_id,
@@ -90,6 +166,7 @@ class LifecycleReportingExecutor:
                     status=status,
                     result=result,
                     error=error,
+                    reply=reply,
                 )
             )
 
@@ -107,15 +184,23 @@ class LifecycleReportingExecutor:
         except BaseException:
             finished(AgentExecutionStatus.CANCELLED, result=None, error="cancelled")
             raise
-        finished(AgentExecutionStatus.COMPLETED, result=outcome.text, error=None)
+        finished(
+            AgentExecutionStatus.COMPLETED,
+            result=outcome.text,
+            error=None,
+            reply=structured_reply(turn.output_schema, outcome.text),
+        )
         return outcome
 
 
 def report_turns(
-    client: AgentTurnExecutor, lifecycle: AgentExecutionLifecycleSink
+    client: AgentTurnExecutor,
+    lifecycle: AgentExecutionLifecycleSink,
+    *,
+    control: RunControlChannel | None = None,
 ) -> AgentTurnExecutor:
     """The client with every dispatched turn reported to *lifecycle*."""
-    return LifecycleReportingExecutor(client, lifecycle)
+    return LifecycleReportingExecutor(client, lifecycle, control=control)
 
 
 __all__ = ["LifecycleReportingExecutor", "report_turns"]

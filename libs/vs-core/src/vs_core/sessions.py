@@ -6,20 +6,25 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from . import _session_inputs, _session_stalls, _session_turns
+from . import _session_checkpoints, _session_inputs, _session_stalls, _session_turns
 from ._proofs import Proven, committed_stop
 from .types.kernel import AreaChange
 from .types.sessions import (
     AcquisitionStalled,
     CheckpointStalled,
     InputAcceptanceObserved,
+    InputMidTurnReleased,
+    InputOfferedMidTurn,
     InputReservationReleased,
     InputReservationRequested,
+    InputTakenMidTurn,
+    InputWithdrawRequested,
     InterruptRequested,
     InvocationCancellationRequested,
     InvocationChargeRefunded,
     InvocationChargesAuthorized,
     InvocationCheckpointAvailable,
+    InvocationCheckpointPending,
     RegisteredTurnRequested,
     RunInvocationCheckpointObserved,
     RunInvocationCheckpointRequested,
@@ -28,6 +33,7 @@ from .types.sessions import (
     SessionInputReceived,
     SessionObserved,
     SessionsAcquireRequested,
+    SessionWaitLapsed,
     SteerReceived,
     TurnInputsReserved,
     TurnObserved,
@@ -115,7 +121,13 @@ EVENT_TO_SUBAREA: Mapping[type[SessionsEvent], Reducer] = MappingProxyType(
         InvocationCheckpointAvailable: _shared_observation,
         CheckpointStalled: _session_stalls.advance_stalled_checkpoint_waits,
         AcquisitionStalled: _session_stalls.advance_stalled_acquisitions,
+        SessionWaitLapsed: _session_stalls.advance_lapsed_session_waits,
+        InvocationCheckpointPending: _session_checkpoints.advance,
         SessionInputReceived: _session_inputs.advance,
+        InputWithdrawRequested: _session_inputs.advance,
+        InputOfferedMidTurn: _session_inputs.advance,
+        InputTakenMidTurn: _session_inputs.advance,
+        InputMidTurnReleased: _session_inputs.advance,
         InputReservationRequested: _session_inputs.advance,
         InputAcceptanceObserved: _session_inputs.advance,
         InputReservationReleased: _session_inputs.advance,

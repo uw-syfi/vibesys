@@ -1,8 +1,24 @@
 # Evolving existing code
 
-Read this when you refactor, split a module, migrate callers, or change a
-contract. Language-specific tools are in [python.md](python.md) and
+Read this when you fix a bug, refactor, split a module, migrate callers, or
+change a contract. Language-specific tools are in [python.md](python.md) and
 [typescript.md](typescript.md).
+
+## Fixing a bug at its mechanism
+
+One instance found is not evidence of one instance. Before choosing the fix,
+name the mechanism that allowed the bug, then search for its other instances:
+sibling exit paths, roles, backends, tools, and call sites that state the same
+fact. Change the mechanism instead of patching each place. Prefer:
+
+- a constrained type where agent output becomes a name or path;
+- one source of truth that consumers project from;
+- one owner that every exit path passes through;
+- a failure type set where the failure happens.
+
+Record the class and the instances found (or "none found, searched X") in the
+PR. If the mechanism fix is too large for the PR, land the instance fix only to
+unblock, and name the mechanism fix as a follow-up.
 
 ## Two hats, separate commits
 

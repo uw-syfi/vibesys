@@ -1,0 +1,3 @@
+Validation definitions vendored from bufbuild/protovalidate v1.0.0:
+https://github.com/bufbuild/protovalidate/blob/v1.0.0/proto/protovalidate/buf/validate/validate.proto
+Apache-2.0; see LICENSE. Kept local so generation and lint need no BSR access.

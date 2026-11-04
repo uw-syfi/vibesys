@@ -19,6 +19,8 @@ from vs_async_ops.models import (
     OperationTimedOut,
 )
 from vs_async_ops.ports import NULL_OPERATION_EVENT_SINK
+from vs_async_ops.settling import finish
+from vs_sim.api import AsyncCloseOnce, NothingLeft, Released
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -48,6 +50,13 @@ class AsyncioOperationWaiter:
         except TimeoutError:
             return False
         return True
+
+
+def loop_operation_deadline(timeout_s: float) -> OperationDeadlineScope:
+    """A deadline ``timeout_s`` seconds away on the running event loop's clock."""
+    # asyncio.Timeout provides this structural scope at runtime; ty does not recognize its
+    # context-manager signature as the port protocol.
+    return cast("OperationDeadlineScope", asyncio.timeout(timeout_s))
 
 
 class OperationNotFoundError(KeyError):
@@ -136,19 +145,21 @@ class OperationCoordinator:
         runner: OperationRunner,
         store: OperationStore,
         *,
-        waiter: OperationWaiter | None = None,
-        deadline_factory: Callable[[float], OperationDeadlineScope] | None = None,
+        waiter: OperationWaiter,
+        deadline_factory: Callable[[float], OperationDeadlineScope],
         events: OperationEventSink = NULL_OPERATION_EVENT_SINK,
         event_errors: OperationEventErrorSink = _report_event_error,
         policy: OperationPolicy | None = None,
     ) -> None:
-        """Bind injected effects and lifecycle policy."""
+        """Bind injected effects and lifecycle policy.
+
+        ``waiter`` and ``deadline_factory`` bound waits; `AsyncioOperationWaiter` and
+        `loop_operation_deadline` bound them on the event loop's clock.
+        """
         self._runner = runner
         self._store = store
-        self._waiter = waiter or AsyncioOperationWaiter()
-        self._deadline_factory = deadline_factory or cast(
-            "Callable[[float], OperationDeadlineScope]", asyncio.timeout
-        )
+        self._waiter = waiter
+        self._deadline_factory = deadline_factory
         self._events = events
         self._event_errors = event_errors
         policy = policy or OperationPolicy()
@@ -160,7 +171,8 @@ class OperationCoordinator:
         self._start_lock = asyncio.Lock()
         self._lifecycle_lock = asyncio.Lock()
         self._started = False
-        self._closed = False
+        self._admission_closed = False
+        self._close = AsyncCloseOnce()
         self._key_locks = _LockPool()
         self._operation_locks = _LockPool()
         self._changed: dict[str, asyncio.Event] = {}
@@ -182,7 +194,7 @@ class OperationCoordinator:
         """Durably accept work and return before its runner completes."""
         await self.start()
         async with self._lifecycle_lock:
-            if self._closed:
+            if self._admission_closed:
                 raise OperationCoordinatorClosedError
             record = OperationHandle(request=request, state=OperationState.QUEUED)
             await self._store.create(record)
@@ -252,12 +264,18 @@ class OperationCoordinator:
         return await self._terminate(operation_id, OperationState.CANCELED)
 
     async def close(self) -> None:
-        """Reject new work, then interrupt and cancel work owned here."""
+        """Reject new work, then retry owned interruption until it completes."""
         await self.start()
         async with self._lifecycle_lock:
-            if self._closed:
-                return
-            self._closed = True
+            self._admission_closed = True
+        await finish(asyncio.ensure_future(self._close.run(self._close_to_the_end)))
+
+    async def _close_to_the_end(self) -> Released:
+        """Interrupt every owned operation and prove no execution task remains."""
+        await self._interrupt_everything()
+        return Released.shown_by(NothingLeft(self._tasks, "operation coordinator tasks"))
+
+    async def _interrupt_everything(self) -> None:
         first_error: Exception | None = None
         for record in await self._store.records():
             if record.state.terminal:
@@ -267,11 +285,19 @@ class OperationCoordinator:
             except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-930002 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
                 if first_error is None:
                     first_error = exc
-        self._tasks.clear()
         if first_error is not None:
             raise first_error
 
     async def _terminate(
+        self, operation_id: str, terminal_state: OperationState
+    ) -> OperationHandle:
+        # A cancelled caller must not strand a record RUNNING after its task was
+        # stopped: nothing else would ever make it terminal.
+        return await finish(
+            asyncio.ensure_future(self._terminate_to_the_end(operation_id, terminal_state))
+        )
+
+    async def _terminate_to_the_end(
         self, operation_id: str, terminal_state: OperationState
     ) -> OperationHandle:
         async with self._operation_locks.hold(operation_id):
@@ -332,7 +358,7 @@ class OperationCoordinator:
                     await self._admission.acquire()
                     admitted = True
                 async with self._lifecycle_lock:
-                    if self._closed:
+                    if self._admission_closed:
                         return
                     async with self._operation_locks.hold(request.operation_id):
                         record = await self.status(request.operation_id)

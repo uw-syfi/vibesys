@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NamedTuple
 
+import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -198,7 +199,6 @@ def _reload(state: core.CoreState) -> core.CoreState:
     """A host restart: the whole state through the envelope codec."""
     envelope = core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=1),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,
@@ -257,22 +257,41 @@ _OPS = st.one_of(
 )
 
 
+def _agent_call(
+    state: core.CoreState, call_id: str, measurement: core.MeasurementPlan
+) -> core.Transition:
+    """An agent's in-turn measurement: core allocates its submission, which has no decision."""
+    return core.step(
+        state,
+        core.AgentMeasurementRequested(
+            scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
+            plan=measurement,
+            within=core.Within(limit=100.0),
+            call_id=call_id,
+        ),
+    )
+
+
 class _Run:
     """The run's own measurement jobs, driven by hand: the events the shell would feed core.
 
     Core refuses a second measurement of a plan the scope already measures, so each job
-    measures a plan of its own (a distinct evaluator).
+    measures a plan of its own (a distinct evaluator). A job is a strategy's (a ``Measure``
+    decision) or, where ``agents`` says so, an agent's call, whose submission has no decision.
     """
 
-    def __init__(self, count: int, *, no_record: bool = False) -> None:
+    def __init__(
+        self, count: int, *, no_record: bool = False, agents: tuple[bool, ...] = ()
+    ) -> None:
         self.no_record = no_record
         self.state = core.initial_state()
         self.jobs: dict[core.ResourceId, core.SubmitMeasurement] = {}
         for index in range(count):
-            asked = requested(
-                self.state,
-                identity=f"measure-{index}",
-                measurement=plan(evaluator_digest=f"evaluator-{index}"),
+            measurement = plan(evaluator_digest=f"evaluator-{index}")
+            asked = (
+                _agent_call(self.state, f"call-{index}", measurement)
+                if index < len(agents) and agents[index]
+                else requested(self.state, identity=f"measure-{index}", measurement=measurement)
             )
             job = asked.requests[0]
             assert isinstance(job, core.SubmitMeasurement)
@@ -301,6 +320,10 @@ class _Run:
         result = core.step(self.state, event)
         self.state = result.state
         self.sent.extend(result.requests)
+
+    def feed(self, event: core.CoreEvent) -> None:
+        """Step core with an event the shell received, keeping what core asks for."""
+        self._step(event)
 
     def tick(self, seconds: float) -> None:
         """Let time pass, but not past the queue allowance (10 s): an unconfirmed job that
@@ -376,6 +399,12 @@ class _Run:
         self.sent.extend(asked)
         self.settle_over((1.0,) * 6 if self.no_record else (5.0, 10.0, 70.0))
 
+    def answer_now(self) -> None:
+        """Answer, without the clock moving, whatever core asked and the shell has yet to."""
+        asked: list[core.Request] = []
+        self.state = _settle(self.state, self._unanswered(), self.now, asked, self.executor)
+        self.sent.extend(asked)
+
     def end_jobs(self) -> None:
         """Every job finishes by itself."""
         for resource, job in self.jobs.items():
@@ -420,6 +449,26 @@ class _Run:
             )
         ]
 
+    def misattributed(self) -> list[core.Request]:
+        """The steps on a job that name a decision other than its submission's.
+
+        A poll, inspection or cancel is the job's own, whoever asked for it; an agent's job
+        has no decision, so its steps have none either.
+        """
+        return [
+            r
+            for r in self.sent
+            if isinstance(
+                r,
+                core.ObserveOwnedJob
+                | core.InspectOwnedJob
+                | core.CancelOwnedJob
+                | core.CollectEvidence,
+            )
+            and r.resource_id in self.jobs
+            and r.decision_id != self.jobs[r.resource_id].decision_id
+        ]
+
     def cancels(self, resource: core.ResourceId) -> int:
         return len(
             {
@@ -431,29 +480,51 @@ class _Run:
 
 
 @settings(max_examples=examples(pr=3, nightly=500), deadline=None, database=None)
-@example(count=1, ops=[("stop", core.StopMode.CANCEL)], no_record=True)
+@example(count=1, ops=[("stop", core.StopMode.CANCEL)], no_record=True, agents=())
 @example(
     count=2,
     ops=[("observe", 0, _STATUSES[0]), ("tick", 0.0), ("stop", core.StopMode.CANCEL)],
     no_record=True,
+    agents=(),
 )
-@given(count=st.integers(1, 3), ops=st.lists(_OPS, max_size=16), no_record=st.booleans())
+@example(
+    count=2,
+    ops=[
+        ("observe", 0, _STATUSES[2]),
+        ("observe", 1, _STATUSES[2]),
+        ("stop", core.StopMode.CANCEL),
+    ],
+    no_record=False,
+    agents=(False, True),
+)
+@given(
+    count=st.integers(1, 3),
+    ops=st.lists(_OPS, max_size=16),
+    no_record=st.booleans(),
+    agents=st.tuples(st.booleans(), st.booleans(), st.booleans()),
+)
 def test_polls_stops_and_observations_at_shared_instants_never_conflict(
-    count: int, ops: list[tuple[object, ...]], *, no_record: bool
+    count: int, ops: list[tuple[object, ...]], *, no_record: bool, agents: tuple[bool, ...]
 ) -> None:
     """Whatever order polls, stops, observations, replays and restarts come in, at the same
     instant or not, on one to three run-owned jobs, core never issues one request id with two
     payloads and cancels each job at most once. A cancel stop closes the run with every job
     ended; a drain stop cancels nothing, keeps the run CLOSING while a job lives, and closes
     it once every job finishes.
+
+    Run r2 (2026-10-17): a cancel stop ended an agent's job (its submission has no decision)
+    beside a strategy's. Each signal of the stop asked for the agent job's cancellation, and
+    core stamped each copy with the decision of the signal that asked (the stop, then the
+    strategy job's measure), so one cancel id carried two payloads and the run halted.
     """
-    run = _Run(count, no_record=no_record)
+    run = _Run(count, no_record=no_record, agents=agents)
     for op in ops:
         if run.state.run.status == core.RunStatus.TERMINAL:
             break
         run.apply(op)
     run.settle_out()
     assert all(run.cancels(resource) <= 1 for resource in run.resources)
+    assert run.misattributed() == []
     match run.mode:
         case core.StopMode.CANCEL:
             assert run.state.run.status == core.RunStatus.TERMINAL
@@ -464,3 +535,111 @@ def test_polls_stops_and_observations_at_shared_instants_never_conflict(
             run.no_record = False
             run.end_jobs()
             assert run.state.run.status == core.RunStatus.TERMINAL
+
+
+def _authorize(state: core.CoreState, requests: Iterable[core.Request]) -> core.CoreState:
+    for request in requests:
+        assert request.request_id is not None
+        state = core.step(state, core.DispatchAuthorized(request_id=request.request_id)).state
+    return state
+
+
+@settings(max_examples=examples(pr=6, nightly=200), deadline=None, database=None)
+@example(count=1, mode=core.StopMode.DRAIN, no_record=True)
+@example(count=1, mode=core.StopMode.DRAIN, no_record=False)
+@given(
+    count=st.integers(1, 3),
+    mode=st.sampled_from((core.StopMode.CANCEL, core.StopMode.DRAIN)),
+    no_record=st.booleans(),
+)
+def test_a_run_past_its_deadline_cancels_its_own_jobs_whatever_the_stop(
+    count: int, mode: core.StopMode, *, no_record: bool
+) -> None:
+    """Chaos seed 2578: a drain waits for the run's own jobs only while the run has time left.
+
+    Each job stays queued for good, or the executor holds no record of it (its sbatch was
+    lost). A drain stop lets such a job be until the run deadline; from then on core
+    inspects it and cancels it, once, as a cancel stop does, and the run closes. Before,
+    a drained run past its deadline polled the job forever.
+    """
+    run = _Run(count, no_record=no_record)
+    for index in range(count):
+        run.observe(index, core.ObservationStatus.PENDING, accepted=True)
+    run.stop(mode)
+    run.answer_now()
+    deadline = run.state.run.deadline_at
+    run.settle_over((5.0, 10.0))
+    if mode == core.StopMode.DRAIN:
+        assert run.state.run.status == core.RunStatus.CLOSING
+        assert all(run.cancels(resource) == 0 for resource in run.resources)
+    run.settle_over((deadline - run.now, *(10.0,) * 4))
+    assert run.state.run.status == core.RunStatus.TERMINAL
+    assert all(run.cancels(resource) == 1 for resource in run.resources)
+
+
+def _operator_stop(index: int, mode: core.StopMode, now_at: float) -> core.RunControlEvent:
+    """An operator's stop as the run's control bridge records it: a control, with no result."""
+    control = core.ControlInput(
+        control_id=core.ControlId(root=f"op-stop-{index}"), action="stop", mode=mode
+    )
+    return core.RunControlEvent(control=control, now_at=now_at)
+
+
+def _strategy_finish(state: core.CoreState, mode: core.StopMode) -> core.DecisionSubmitted:
+    """The search's own end of the run, with the mode it read from the first stop it saw."""
+    finish = core.Finish(
+        decision_id=core.DecisionId(root="finish"),
+        scope=core.Scope(owner=state.run.run_id, generation=state.run.generation),
+        mode=mode.value,
+        result=core.RunResultProposal(outcome="cancelled", reason="operator stop"),
+    )
+    return core.DecisionSubmitted(decision=finish, expected_revision=state.revision)
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=6, nightly=300), deadline=None, database=None)
+@example(count=1, stops=[core.StopMode.DRAIN, core.StopMode.CANCEL], finish_at=1, restart=False)
+@example(count=1, stops=[core.StopMode.CANCEL, core.StopMode.DRAIN], finish_at=0, restart=False)
+@example(count=2, stops=[core.StopMode.DRAIN, core.StopMode.CANCEL], finish_at=2, restart=True)
+@given(
+    count=st.integers(1, 2),
+    stops=st.lists(st.sampled_from(core.StopMode), min_size=1, max_size=4),
+    finish_at=st.integers(0, 4),
+    restart=st.booleans(),
+)
+def test_a_stop_only_escalates_whatever_order_its_requests_come_in(
+    count: int, stops: list[core.StopMode], finish_at: int, *, restart: bool
+) -> None:
+    """periodic-1330 MED-2: a cancel after a drain was recorded, and changed nothing.
+
+    Operator stops arrive in any order, before or after the search commits its end of the
+    run (which carries the first stop's mode, or a drain when the run ended by itself).
+    The run's stop is the strongest asked for: one cancel anywhere cancels every job the
+    run owns, once, and closes the run; only drains let every job finish. ``restart``
+    reloads core after every step, so an escalation is durable.
+    """
+    run = _Run(count)
+    for index in range(count):
+        run.observe(index, core.ObservationStatus.PENDING, accepted=True)
+    finished = False
+    for index, mode in enumerate([*stops, None]):
+        if run.state.run.status == core.RunStatus.TERMINAL:
+            break
+        if not finished and (index >= finish_at or mode is None):
+            finished = True
+            run.feed(_strategy_finish(run.state, stops[0] if index else core.StopMode.DRAIN))
+        if mode is not None and run.state.run.status != core.RunStatus.TERMINAL:
+            run.feed(_operator_stop(index, mode, run.now))
+        if restart:
+            run.state = _reload(run.state)
+    run.mode = core.StopMode.CANCEL if core.StopMode.CANCEL in stops else core.StopMode.DRAIN
+    run.settle_out()
+    assert all(run.cancels(resource) <= 1 for resource in run.resources)
+    if run.mode is core.StopMode.CANCEL:
+        assert run.state.run.status == core.RunStatus.TERMINAL
+        assert all(run.cancels(resource) == 1 for resource in run.resources)
+    else:
+        assert all(run.cancels(resource) == 0 for resource in run.resources)
+        assert run.state.run.status == core.RunStatus.CLOSING
+        run.end_jobs()
+        assert run.state.run.status == core.RunStatus.TERMINAL

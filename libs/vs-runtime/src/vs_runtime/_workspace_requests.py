@@ -1,12 +1,8 @@
 """Workspace request executors: core workspace requests over ``RuntimeWorkspaces``.
 
-Each request is executed at most once per canonical request identity. A durable
-receipt store records an intent before the side effect and the typed result
-after it. Re-executing a request with a stored result returns that result;
-re-executing one with only an intent inspects the workspace and either
-reattaches, repeats a naturally idempotent effect, or returns an explicit
-Unknown observation. No path fabricates a second snapshot, restore or
-candidate.
+A request repeated after an attempt that may have run (``ExecutionContext.repeat``) inspects the
+workspace and either reattaches, repeats a naturally idempotent effect, or returns an explicit
+Unknown observation. No path fabricates a second snapshot, restore or candidate.
 
 Revision identity: ``RevisionRef.revision_id`` is the Git commit and
 ``RevisionRef.digest`` is ``git-commit:<commit>``. Core defines no stronger
@@ -30,8 +26,11 @@ from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 
 from vs_core.api import (
     AdoptionObserved,
+    AdoptionPublication,
     AdoptRevision,
     AttemptRef,
+    CheckoutStatus,
+    CheckoutUpdate,
     DiscardWorkspace,
     EnsureWorkspace,
     ObservationStatus,
@@ -49,25 +48,17 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspaceObserved,
 )
+from vs_project.api import NestedRepositoryError
+from vs_runtime._adoption_commit import adoption_commit_message
 from vs_runtime._core_requests import (
     ExecutionContext,
     ExecutionOutcome,
     ExecutionResult,
-    OwnerEvent,
 )
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
     ObservationSubject,
-)
-from vs_runtime._receipt_store import (
-    Conflict,
-    Declined,
-    Performed,
-    Replayed,
-    Settled,
-    Transient,
-    owner_key,
 )
 from vs_runtime._workspace_lookup import candidate_member_id, find_attempt_workspace
 from vs_runtime._workspace_receipts import (
@@ -83,8 +74,11 @@ from vs_runtime.contracts import RuntimeContractError, WorkspaceRestoreError
 
 if TYPE_CHECKING:
     from vs_core.api import Request
-    from vs_runtime._receipt_store import ReceiptStore
+    from vs_core.api.recovery import OwnerEvent
+    from vs_runtime._evidence_ledger import EvidenceLookup
+    from vs_runtime._keyed_documents import KeyedDocuments
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
+    from vs_sim.api import BlockingRunner
 
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 
@@ -115,16 +109,38 @@ class _Facts:
     children_complete: bool = False
     resource_id: ResourceId | None = None
     revision: RevisionRef | None = None
+    measured_input: str | None = None
     diagnostic: str = ""
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
+    publication: AdoptionPublication | None = None
+    checkout: CheckoutUpdate | None = None
+    holding_nothing: ObservationFacts | None = None
+    """The facts as ``refused`` or ``nothing_held`` built them, when the answer holds nothing."""
 
 
-def _rejected(diagnostic: str, *, resource_id: ResourceId | None = None) -> _Facts:
+def _rejected(diagnostic: str) -> _Facts:
+    """A refusal decided before the request did anything: it holds nothing, now or later.
+
+    The refusal is sealed, so a replay answers the same and the request never acts afterwards.
+    Like ``ObservationFacts.nothing_held`` it names no resource, so core never reads it as the
+    release of a workspace that the attempt (or another one) still holds.
+    """
+    return _holding_nothing(ObservationFacts.refused(diagnostic))
+
+
+def _nothing_held(diagnostic: str) -> _Facts:
+    """The discard's answer that the attempt holds no workspace: none was bound, none is left."""
+    return _holding_nothing(ObservationFacts.nothing_held(diagnostic))
+
+
+def _holding_nothing(facts: ObservationFacts) -> _Facts:
     return _Facts(
-        ObservationStatus.REJECTED,
-        resource_id=resource_id,
-        diagnostic=diagnostic,
+        facts.status,
+        released=facts.released,
+        children_complete=facts.children_complete,
+        diagnostic=facts.diagnostic,
         setup_failure=SetupFailureKind.PERMANENT,
+        holding_nothing=facts,
     )
 
 
@@ -141,7 +157,90 @@ def _retryable(diagnostic: str, resource_id: ResourceId | None) -> _Facts:
     )
 
 
+@dataclass(frozen=True)
+class _AdoptionRefused:
+    """A sealed refusal: the request holds nothing and must not publish."""
+
+    diagnostic: str
+
+
+@dataclass(frozen=True)
+class _AdoptionFailed:
+    """A terminal unsuccessful observation after the request was accepted."""
+
+    diagnostic: str
+
+
+@dataclass(frozen=True)
+class _AdoptionSucceeded:
+    """The selected revision stands. Publication and checkout are present only when made."""
+
+    revision: RevisionRef
+    diagnostic: str = ""
+    publication: AdoptionPublication | None = None
+    checkout: CheckoutUpdate | None = None
+
+
+_AdoptionOutcome = _AdoptionRefused | _AdoptionFailed | _AdoptionSucceeded
+
+
+def _adoption_facts(outcome: _AdoptionOutcome) -> _Facts:
+    """Project one adoption decision onto the observation facts callers already receive."""
+    match outcome:
+        case _AdoptionRefused(diagnostic):
+            facts = _rejected(diagnostic)
+        case _AdoptionFailed(diagnostic):
+            facts = _Facts(ObservationStatus.FAILED, accepted=True, diagnostic=diagnostic)
+        case _AdoptionSucceeded() as succeeded:
+            facts = _Facts(
+                ObservationStatus.SUCCEEDED,
+                accepted=True,
+                revision=succeeded.revision,
+                publication=succeeded.publication,
+                checkout=succeeded.checkout,
+                diagnostic=succeeded.diagnostic,
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
+    return facts
+
+
+def _adoption_target(
+    commit: str | None, *, baseline: bool, trusted: str | None
+) -> str | _AdoptionRefused:
+    """The commit adoption may use, or the refusal that the selection is not that commit."""
+    if commit is None:
+        return _AdoptionRefused("selected revision is not a retained revision of this run")
+    if baseline and commit != trusted:
+        return _AdoptionRefused("selected baseline is not the run's trusted input baseline")
+    return commit
+
+
+def _resume_adoption_outcome(
+    request: AdoptRevision | VerifyAdoption, *, applied: bool
+) -> _AdoptionOutcome:
+    """Resume keeps the operator's tree. A matching tree is success for either request."""
+    if applied:
+        return _AdoptionSucceeded(request.selection.revision)
+    if isinstance(request, AdoptRevision):
+        return _AdoptionRefused(
+            "candidate retained; adoption in a resumed epoch requires project-edit protection"
+        )
+    if isinstance(request, VerifyAdoption):
+        return _AdoptionFailed("root workspace content differs from the selected revision")
+    assert_never(request)
+
+
+def _checkout_diagnostic(checkout: CheckoutUpdate) -> str:
+    return (
+        "checkout updated"
+        if checkout.status is CheckoutStatus.FAST_FORWARDED
+        else f"checkout skipped: {checkout.status.value.replace('_', ' ')}"
+    )
+
+
 _RUN_OWNER = "run"
+_WITHDRAWN = "the attempt's workspace was withdrawn before any ensure bound it"
 _HANDLED = (EnsureWorkspace, RestoreRevision, SnapshotAndRetain, RetainRevision, DiscardWorkspace)
 
 
@@ -159,20 +258,31 @@ class RuntimeWorkspaceRequests:
     def __init__(
         self,
         workspaces: RuntimeWorkspaces,
-        store: ReceiptStore,
+        store: KeyedDocuments,
         run_invocations: RunInvocationProof,
+        blocking: BlockingRunner,
+        evidence: EvidenceLookup,
     ) -> None:
         """Bind the workspaces to the shared store and to the proof run snapshots require.
 
         A run snapshot retains the root only after *run_invocations* proves the
         invocation's writer ended; a missing proof is Unknown and snapshots nothing.
+        *blocking* runs the executor's own disk checks off the event loop. *evidence*
+        reads back what an adopted revision measured, for the commit that records it.
         """
+        self._allow_adoption = True
+        self._evidence = evidence
+        self._blocking = blocking
         self._workspaces = workspaces
         self._run_invocations = run_invocations
         self._store = store
         self._receipts: WorkspaceReceipts = StoreWorkspaceReceipts(store)
         self._observations = ObservationFactory(store)
         self._locks: dict[str, asyncio.Lock] = {}
+
+    def protect_adoption(self) -> None:
+        """Retain selections without replacing the root after an operator Resume."""
+        self._allow_adoption = False
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionOutcome:
         """Execute, replay or inspect one request under its canonical identity."""
@@ -188,34 +298,9 @@ class RuntimeWorkspaceRequests:
             )
         lock = self._locks.setdefault(self._serialization_key(request), asyncio.Lock())
         async with lock:
-
-            async def perform(
-                *, resumed: bool
-            ) -> Settled[ExecutionResult] | Transient[ExecutionResult]:
-                result = self._result(
-                    request, context, await self._perform(request, resumed=resumed)
-                )
-                observation = result.observation.observation
-                return Settled(result) if observation.terminal else Transient(result)
-
-            execution = await self._store.run_once(
-                request_id.root,
-                owner=owner_key(request),
-                context=context,
-                result_type=ExecutionResult,
-                perform=perform,
+            return self._result(
+                request, context, await self._perform(request, repeat=context.repeat)
             )
-        match execution:
-            case Replayed(result) | Performed(result):
-                return result
-            case Conflict():
-                return self._result(
-                    request, context, _rejected("same request identity with another payload")
-                )
-            case Declined(reason):
-                return self._result(request, context, _unknown(reason))
-            case _:
-                assert_never(execution)
 
     @staticmethod
     def _serialization_key(request: Request) -> str:
@@ -228,19 +313,19 @@ class RuntimeWorkspaceRequests:
     ) -> ExecutionResult:
         request_id = request.request_id
         assert request_id is not None  # noqa: S101  # lint-waiver: LW-402301 [S101]; execute() rejects a missing identity before translation.
+        observed = facts.holding_nothing or ObservationFacts(
+            status=facts.status,
+            terminal=facts.terminal,
+            accepted=facts.accepted,
+            released=facts.released,
+            children_complete=facts.children_complete,
+            resource_id=facts.resource_id,
+            diagnostic=facts.diagnostic,
+            revision=facts.revision,
+            measured_input=facts.measured_input,
+        )
         observation = self._observations.observe(
-            ObservationSubject.of(request),
-            ObservationFacts(
-                status=facts.status,
-                terminal=facts.terminal,
-                accepted=facts.accepted,
-                released=facts.released,
-                children_complete=facts.children_complete,
-                resource_id=facts.resource_id,
-                diagnostic=facts.diagnostic,
-                revision=facts.revision,
-            ),
-            observed_at=context.now_at,
+            ObservationSubject.of(request), observed, observed_at=context.now_at
         )
         events: tuple[OwnerEvent, ...] = ()
         match request:
@@ -254,7 +339,14 @@ class RuntimeWorkspaceRequests:
                     ),
                 )
             case AdoptRevision() | VerifyAdoption():
-                events = (AdoptionObserved(observation=observation, revision=facts.revision),)
+                events = (
+                    AdoptionObserved(
+                        observation=observation,
+                        revision=facts.revision,
+                        publication=facts.publication,
+                        checkout=facts.checkout,
+                    ),
+                )
             case EnsureWorkspace() | RestoreRevision():
                 events = (
                     WorkspaceObserved(
@@ -270,26 +362,28 @@ class RuntimeWorkspaceRequests:
                 observation=observation,
                 setup_failure=facts.setup_failure,
                 revision=facts.revision,
+                publication=facts.publication,
+                checkout=facts.checkout,
             ),
             owner_events=events,
         )
 
-    async def _perform(self, request: Request, *, resumed: bool) -> _Facts:
+    async def _perform(self, request: Request, *, repeat: bool) -> _Facts:
         if isinstance(request, _HANDLED) and not self._receipts.admit_generation(request.attempt):
             return _rejected("a newer generation of this attempt exists")
         match request:
             case EnsureWorkspace():
-                return await self._ensure(request, resumed=resumed)
+                return await self._ensure(request)
             case SnapshotAndRetainRun():
-                return await self._run_snapshot(request, resumed=resumed)
+                return await self._run_snapshot(request, repeat=repeat)
             case AdoptRevision() | VerifyAdoption():
-                return await self._adoption(request, resumed=resumed)
+                return await self._adoption(request)
             case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
-                return await self._attempt_request(request, resumed=resumed)
+                return await self._attempt_request(request, repeat=repeat)
             case _:
                 return _rejected(f"{request.kind} cannot be executed against a workspace")
 
-    async def _run_snapshot(self, request: SnapshotAndRetainRun, *, resumed: bool) -> _Facts:
+    async def _run_snapshot(self, request: SnapshotAndRetainRun, *, repeat: bool) -> _Facts:
         """Retain the run's root, but only once the invocation's writer is proven gone."""
         unproven = self._run_invocations.unproven(request)
         if unproven is not None:
@@ -298,22 +392,51 @@ class RuntimeWorkspaceRequests:
             self._workspaces.root,
             request,
             request.retention,
-            resumed=resumed,
+            repeat=repeat,
             resource_id=None,
             owner=_RUN_OWNER,
         )
+
+    async def _withdraw_or_discard(self, request: DiscardWorkspace, *, repeat: bool) -> _Facts:
+        """Discard the attempt's workspace; a generation no ensure bound ends unbound, holding none."""
+        attempt = request.attempt
+        with self._store.exclusive():
+            bound = self._receipts.load_binding(attempt)
+            if bound is None:
+                # The generation ends unbound: it never holds the exclusive root again.
+                self._receipts.mark_released(attempt)
+        if bound is not None:
+            return await self._discard(request, bound, repeat=repeat)
+        return await self._remove_unbound(attempt)
+
+    async def _remove_unbound(self, attempt: AttemptRef) -> _Facts:
+        """Remove a worktree an ensure created but never bound, so the attempt holds nothing.
+
+        An ensure that stopped between creating its worktree and binding it left the worktree
+        behind: removing it makes "nothing held" true now.
+        """
+        member = candidate_member_id(attempt)
+        leftover = self._workspaces.live_candidate(member)
+        if leftover is None:
+            leftover = await self._workspaces.reattach_candidate(member)
+        try:
+            if leftover is not None:
+                await leftover.discard()
+        except (OSError, BaseExceptionGroup) as error:
+            return _unknown(f"an unbound worktree of the attempt was not removed: {error}")
+        return _nothing_held(_WITHDRAWN)
 
     async def _attempt_request(
         self,
         request: RestoreRevision | RetainRevision | SnapshotAndRetain | DiscardWorkspace,
         *,
-        resumed: bool,
+        repeat: bool,
     ) -> _Facts:
+        if isinstance(request, DiscardWorkspace):
+            return await self._withdraw_or_discard(request, repeat=repeat)
         binding = self._receipts.load_binding(request.attempt)
         if binding is None:
             return _rejected("no workspace was ensured for this attempt")
-        if isinstance(request, DiscardWorkspace):
-            return await self._discard(request, binding, resumed=resumed)
         workspace = await self._bound_workspace(request.attempt, binding)
         if isinstance(workspace, _Facts):
             return workspace
@@ -327,7 +450,7 @@ class RuntimeWorkspaceRequests:
                     workspace,
                     request,
                     request.retention,
-                    resumed=resumed,
+                    repeat=repeat,
                     resource_id=binding.resource_id,
                     owner=attempt_key(request.attempt),
                 )
@@ -342,7 +465,7 @@ class RuntimeWorkspaceRequests:
         """Return the attempt's live workspace, reopening it from disk after a restart."""
         found = await find_attempt_workspace(self._workspaces, self._receipts, attempt, binding)
         if isinstance(found, str):
-            return _rejected(found, resource_id=binding.resource_id)
+            return _rejected(found)
         return found
 
     async def _known_revision(
@@ -365,34 +488,53 @@ class RuntimeWorkspaceRequests:
             return commit
         return commit if retained_by_any and owners else None
 
-    async def _adoption(self, request: AdoptRevision | VerifyAdoption, *, resumed: bool) -> _Facts:
+    async def _adoption(self, request: AdoptRevision | VerifyAdoption) -> _Facts:
+        return _adoption_facts(await self._adoption_outcome(request))
+
+    async def _adoption_outcome(self, request: AdoptRevision | VerifyAdoption) -> _AdoptionOutcome:
         root = self._workspaces.root
-        ref = request.selection.revision
         commit = await self._known_revision(
-            ref,
+            request.selection.revision,
             owner=None,
             retained_by_any=not isinstance(request.selection, TrustedBaseline),
         )
-        if commit is None:
-            return _rejected("selected revision is not a retained revision of this run")
-        if isinstance(request.selection, TrustedBaseline) and commit != root.trusted_input_baseline:
-            return _rejected("selected baseline is not the run's trusted input baseline")
-        applied = await root.matches_revision(commit)
+        target = _adoption_target(
+            commit,
+            baseline=isinstance(request.selection, TrustedBaseline),
+            trusted=root.trusted_input_baseline,
+        )
+        if isinstance(target, _AdoptionRefused):
+            return target
+        if not self._allow_adoption:
+            # Resume keeps the operator's tree. Publication stays on the ordinary path.
+            applied = await root.matches_revision(target)
+            return _resume_adoption_outcome(request, applied=applied)
+        # Legacy VerifyAdoption records are replayed as publication reads/retries,
+        # never as permission to restore or compare the operator's working tree.
+        return await self._publication_outcome(request, target)
+
+    async def _publication_outcome(
+        self, request: AdoptRevision | VerifyAdoption, commit: str
+    ) -> _AdoptionOutcome:
+        message = (
+            adoption_commit_message(request, commit, self._evidence)
+            if isinstance(request, AdoptRevision)
+            else "vibesys: adopt retained revision"
+        )
+        try:
+            publication = await self._workspaces.adopt(commit, message=message)
+        except RuntimeContractError as error:
+            return _AdoptionFailed(str(error))
+        ref = request.selection.revision
         if isinstance(request, VerifyAdoption):
-            if not applied:
-                # The root was read and its tracked content differs from the selection:
-                # a conclusive mismatch, which core treats as terminal FAILED. UNKNOWN
-                # stays for what could not be compared at all (a missing revision above).
-                return _Facts(
-                    ObservationStatus.FAILED,
-                    accepted=True,
-                    diagnostic="root workspace content differs from the selected revision",
-                )
-        elif not (resumed and applied):
-            failure = await self._materialize(root, commit)
-            if failure is not None:
-                return failure
-        return _Facts(ObservationStatus.SUCCEEDED, accepted=True, revision=ref)
+            return _AdoptionSucceeded(ref, diagnostic="published", publication=publication)
+        checkout = await self._workspaces.update_checkout(publication)
+        return _AdoptionSucceeded(
+            ref,
+            diagnostic=_checkout_diagnostic(checkout),
+            publication=publication,
+            checkout=checkout,
+        )
 
     @staticmethod
     async def _materialize(
@@ -411,15 +553,12 @@ class RuntimeWorkspaceRequests:
             return _retryable("tree does not match the revision after restore", resource_id)
         return None
 
-    async def _ensure(self, request: EnsureWorkspace, *, resumed: bool) -> _Facts:
+    async def _ensure(self, request: EnsureWorkspace) -> _Facts:
         plan = request.plan
         attempt = request.attempt
         existing = self._receipts.load_binding(attempt)
         if existing is not None and (existing.mode, existing.base) != (plan.mode, plan.base):
-            return _rejected(
-                "attempt is already bound to another workspace plan",
-                resource_id=existing.resource_id,
-            )
+            return _rejected("attempt is already bound to another workspace plan")
         base = await self._known_revision(
             plan.base,
             owner=attempt_key(attempt),
@@ -429,7 +568,7 @@ class RuntimeWorkspaceRequests:
             return _rejected("base revision is not a revision of this run")
         if plan.mode is WorkspaceMode.EXCLUSIVE_ROOT:
             return await self._ensure_root(request, base=base)
-        return await self._ensure_candidate(request, existing, base, resumed=resumed)
+        return await self._ensure_candidate(request, existing, base)
 
     async def _ensure_root(self, request: EnsureWorkspace, *, base: str) -> _Facts:
         """Grant the root, and make its tree the plan's base before the attempt may use it.
@@ -456,40 +595,46 @@ class RuntimeWorkspaceRequests:
             # included, so the grant is exactly base plus the preserved artifact dirs plus
             # what the root held before the run, which is never touched. The baseline is
             # recorded before the first restore and replayed afterwards, never re-scanned.
-            keeping = await self._root_baseline(root)
+            baseline = await self._root_baseline(root)
+            keeping = baseline.paths
             if not await root.matches_revision(base, exact_keeping=keeping):
                 failure = await self._materialize(
                     root, base, resource_id=resource_id, exact_keeping=keeping
                 )
                 if failure is not None:
                     return failure
-            self._bind(attempt, request, resource_id, None)
+            self._bind(request, resource_id, None)
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
             children_complete=True,
             resource_id=resource_id,
             revision=request.plan.base,
+            measured_input=await self._workspaces.root.measured_input(base),
         )
 
-    async def _root_baseline(self, root: RuntimeWorkspace) -> tuple[str, ...]:
+    async def _root_baseline(self, root: RuntimeWorkspace) -> RootBaseline:
         """The paths the root held before the run, recorded on the first root grant."""
         stored = self._receipts.root_baseline()
         if stored is None:
+            paths = await root.unversioned_paths()
             stored = self._receipts.record_root_baseline(
-                RootBaseline(paths=await root.unversioned_paths())
+                RootBaseline(entries=await root.baseline_entries(paths))
             )
-        return stored.paths
+        return stored
+
+    async def _check_root_baseline_drift(self) -> None:
+        """Warn (through the root resource's event sink) of a changed or missing baseline path."""
+        baseline = self._receipts.root_baseline()
+        if baseline is not None:
+            await self._workspaces.root.baseline_drift(baseline.entries)
 
     async def _ensure_candidate(
         self,
         request: EnsureWorkspace,
         existing: AttemptBinding | None,
         base: str,
-        *,
-        resumed: bool,
     ) -> _Facts:
-        del resumed
         attempt = request.attempt
         member = candidate_member_id(attempt)
         live = self._workspaces.live_candidate(member)
@@ -499,7 +644,7 @@ class RuntimeWorkspaceRequests:
             live = await self._workspaces.reattach_candidate(member)
         if live is None:
             if existing is not None:
-                return _rejected("attempt workspace was released", resource_id=existing.resource_id)
+                return _rejected("attempt workspace was released")
             try:
                 live = await self._workspaces.create_candidate(base, member_id=member)
             except (RuntimeContractError, WorkspaceRestoreError) as error:
@@ -510,33 +655,30 @@ class RuntimeWorkspaceRequests:
             if existing is not None
             else ResourceId(root=f"workspace:{attempt_key(attempt)}:{request.request_id.root}")
         )
-        binding = self._bind(attempt, request, resource_id, live.id)
+        binding = self._bind(request, resource_id, live.id)
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
             children_complete=True,
             resource_id=binding.resource_id,
             revision=request.plan.base,
+            measured_input=await live.measured_input(base),
         )
 
     def _bind(
-        self,
-        attempt: AttemptRef,
-        request: EnsureWorkspace,
-        resource_id: ResourceId,
-        workspace_id: str | None,
+        self, request: EnsureWorkspace, resource_id: ResourceId, workspace_id: str | None
     ) -> AttemptBinding:
+        """Bind the attempt's workspace, or find the binding an earlier attempt made."""
         assert request.request_id is not None  # noqa: S101  # lint-waiver: LW-402302 [S101]; execute() rejects a missing identity.
-        return self._receipts.bind(
-            attempt,
-            AttemptBinding(
-                ensure_request=request.request_id,
-                mode=request.plan.mode,
-                base=request.plan.base,
-                resource_id=resource_id,
-                workspace_id=workspace_id,
-            ),
+        binding = AttemptBinding(
+            ensure_request=request.request_id,
+            mode=request.plan.mode,
+            base=request.plan.base,
+            resource_id=resource_id,
+            workspace_id=workspace_id,
         )
+        with self._store.exclusive():
+            return self._receipts.bind(request.attempt, binding)
 
     async def _restore(
         self, request: RestoreRevision, binding: AttemptBinding, workspace: RuntimeWorkspace
@@ -547,11 +689,8 @@ class RuntimeWorkspaceRequests:
             extra=commit_of(binding.base),
         )
         if commit is None:
-            return _rejected(
-                "revision is not a revision this attempt may restore",
-                resource_id=binding.resource_id,
-            )
-        # Restore is idempotent, so a resumed request only repeats it when the tree differs.
+            return _rejected("revision is not a revision this attempt may restore")
+        # Restore is idempotent, so a repeated request only redoes it when the tree differs.
         if not await workspace.matches_revision(commit):
             failure = await self._materialize(workspace, commit, resource_id=binding.resource_id)
             if failure is not None:
@@ -573,10 +712,7 @@ class RuntimeWorkspaceRequests:
             extra=commit_of(binding.base),
         )
         if commit is None:
-            return _rejected(
-                "revision is not a revision this attempt may retain",
-                resource_id=binding.resource_id,
-            )
+            return _rejected("revision is not a revision this attempt may retain")
         assert request.request_id is not None  # noqa: S101  # lint-waiver: LW-402303 [S101]; execute() rejects a missing identity.
         # Retention is an idempotent ref update under a per-request label.
         await workspace.retain(commit, label=f"{request.retention}:{request.request_id.root}")
@@ -598,7 +734,7 @@ class RuntimeWorkspaceRequests:
         request: SnapshotAndRetain | SnapshotAndRetainRun,
         retention: Literal["wip", "candidate"],
         *,
-        resumed: bool,
+        repeat: bool,
         resource_id: ResourceId | None,
         owner: str,
     ) -> _Facts:
@@ -607,9 +743,19 @@ class RuntimeWorkspaceRequests:
         retention_label = f"{retention}:{request.request_id.root}"
         # An interrupted snapshot may already have committed: recover it by its
         # deterministic label rather than commit a second time.
-        commit = await workspace.find_snapshot(label) if resumed else None
+        commit = await workspace.find_snapshot(label) if repeat else None
         if commit is None:
-            commit = await workspace.snapshot_and_retain(label, retention_label=retention_label)
+            try:
+                commit = await workspace.snapshot_and_retain(label, retention_label=retention_label)
+            except NestedRepositoryError as error:
+                # The agent left a repository in its workspace that host Git must not read;
+                # the snapshot fails for good, and the diagnostic says which paths.
+                return _Facts(
+                    ObservationStatus.FAILED,
+                    accepted=True,
+                    resource_id=resource_id,
+                    diagnostic=str(error),
+                )
         else:
             await workspace.retain(commit, label=retention_label)
         self._receipts.record_revision(commit, owner)
@@ -619,20 +765,25 @@ class RuntimeWorkspaceRequests:
             children_complete=True,
             resource_id=resource_id,
             revision=revision_ref(commit),
+            measured_input=await workspace.measured_input(commit),
         )
 
     async def _discard(
-        self, request: DiscardWorkspace, binding: AttemptBinding, *, resumed: bool
+        self, request: DiscardWorkspace, binding: AttemptBinding, *, repeat: bool
     ) -> _Facts:
         if binding.workspace_id is None:
             # The root is run-owned and stays; ending the attempt ends only its hold. A
-            # stale generation is not the holder, so its discard changes nothing.
+            # stale generation is not the holder, so its discard changes nothing. Whether or
+            # not this generation is the one releasing, this is the moment an attempt's view
+            # of the root ends, so it is also when a baseline change becomes visible: check
+            # before releasing, so a crash between release and the check still re-checks on
+            # the inevitable replay (release is effect-once and would otherwise skip it).
+            await self._check_root_baseline_drift()
             match self._receipts.release_root(request.attempt):
                 case RootRelease.NOT_HOLDER:
                     return _rejected(
                         "this attempt generation never ended its hold and a newer generation"
-                        " holds the exclusive root; nothing was released",
-                        resource_id=binding.resource_id,
+                        " holds the exclusive root; nothing was released"
                     )
                 case RootRelease.ALREADY_RELEASED:
                     diagnostic = "the exclusive root hold had already ended; nothing released now"
@@ -652,10 +803,10 @@ class RuntimeWorkspaceRequests:
             candidate = await self._workspaces.reattach_candidate(member)
         if candidate is None:
             # Claim completeness only with proof the session close ran: a recorded
-            # discard, or this very request begun by an earlier host (a crash between
-            # the discard and its record). Anyone else's release proves nothing.
+            # discard, or this very request run before (a crash between the discard and
+            # its record). Anyone else's release proves nothing.
             recorded = self._receipts.is_released(request.attempt)
-            if resumed and not recorded:
+            if repeat and not recorded:
                 self._receipts.mark_released(request.attempt)
                 recorded = True
             return _Facts(
@@ -677,7 +828,7 @@ class RuntimeWorkspaceRequests:
                 resource_id=binding.resource_id,
                 diagnostic=f"discard failed: {error}",
             )
-        if await asyncio.to_thread(path.exists):
+        if await self._blocking.run(path.exists):
             return _unknown(
                 "workspace directory still exists after discard", resource_id=binding.resource_id
             )

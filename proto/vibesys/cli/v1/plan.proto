@@ -1,0 +1,49 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/verdict.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// PlanStatus is where a plan stands. Agents own what a plan says and which status it takes: the
+// CLI enforces no workflow between statuses.
+enum PlanStatus {
+  PLAN_STATUS_UNSPECIFIED = 0;
+  PLAN_STATUS_OPEN = 1;
+  PLAN_STATUS_CHOSEN = 2;
+  PLAN_STATUS_WON = 3;
+  PLAN_STATUS_PARKED = 4;
+  PLAN_STATUS_REJECTED = 5;
+}
+
+message PlanComment {
+  string text = 1;
+  google.protobuf.Timestamp at = 2;
+  string agent = 3;
+}
+
+// Plan is stored the way an issue is: a number the CLI assigns, a free-form markdown body, and
+// comments that carry decisions and results.
+message Plan {
+  uint32 number = 1;
+  string title = 2;
+  string body = 3;
+  PlanStatus status = 4;
+  repeated PlanComment comments = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// LinkedJob is a job a plan was linked to, with its commit's verdict against the current result
+// branch when one exists.
+message LinkedJob {
+  Job job = 1;
+  Verdict verdict = 2;
+}
+
+message PlanView {
+  Plan plan = 1;
+  repeated LinkedJob jobs = 2;
+}

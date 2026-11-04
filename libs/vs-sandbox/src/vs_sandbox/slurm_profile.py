@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import json
 import shlex
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from vs_decode.api import Unreadable, decode_json
 from vs_evaluation.api import EvidenceMetric, ExecutorRejectedError, ProfileField
-from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port
+from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port, unframed_output
 
 if TYPE_CHECKING:
     from vs_sandbox.slurm_policy import SlurmExecutionPolicy
@@ -29,6 +30,11 @@ PROFILE_OUTPUT_ROOT = ".vibesys-profile"
 # `ProfileStats` JSON object. The remote script cannot import this library, so it spells
 # the prefix itself and a test keeps the two equal.
 PROFILE_STATS_PREFIX = "VIBESYS_PROFILE_STATS "
+# The capture's very last stdout line when it succeeded, after the summary and any statistics
+# line. A capture whose output lacks it was cut (a lost or truncated read), and "no
+# statistics line" must not be read from output that may have lost it. The remote script
+# spells the line itself and a test keeps the two equal.
+PROFILE_END = "VIBESYS_PROFILE_END"
 GPU_ACTIVE_FRACTION_METRIC = "gpu_active_fraction"
 HIP_API_TIME_METRIC_PREFIX = "hip_api_time_ms."
 _PORT_FILE = ".vibesys-profile-port"
@@ -179,11 +185,34 @@ class ProfileCaptureDescriptor(BaseModel):
     supported_fields: tuple[ProfileField, ...] = ()
 
 
+_REQUEST: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
+"""A capture request this module serialized."""
+_MAX_PROFILE_LINE_BYTES = 1024 * 1024
+"""The largest capture request or profile statistics line decoded."""
+
+
+class ProfileCaptureDecodeError(ValueError):
+    """A capture request or statistics line that is not valid; names problems, not input."""
+
+    def __init__(self, unreadable: Unreadable) -> None:
+        """Describe the unreadable document."""
+        super().__init__(f"malformed {unreadable.source}: {len(unreadable.problems)} problem(s)")
+
+
+def _capture_request(encoded: str) -> dict[str, Any]:
+    request = decode_json(
+        encoded, _REQUEST, source="capture request", max_bytes=_MAX_PROFILE_LINE_BYTES
+    )
+    if isinstance(request, Unreadable):
+        raise ProfileCaptureDecodeError(request)
+    return request
+
+
 def profile_capture_descriptor(command: tuple[str, ...] | None) -> ProfileCaptureDescriptor:
     """Derive support from the capture request actually selected by wiring."""
     if command is None or "--request-json" not in command:
         return ProfileCaptureDescriptor()
-    request = json.loads(command[command.index("--request-json") + 1])
+    request = _capture_request(command[command.index("--request-json") + 1])
     if request.get("kind") == "timeline":
         return ProfileCaptureDescriptor(supported_fields=(ProfileField.HIP_API_TIMING,))
     return ProfileCaptureDescriptor()
@@ -203,7 +232,7 @@ def require_profile_fields(
         message = "configured capture cannot supply fields: " + ", ".join(sorted(missing))
         raise ExecutorRejectedError(message)
     index = command.index("--request-json") + 1
-    request = json.loads(command[index])
+    request = _capture_request(command[index])
     request["options"]["hip_api"] = True
     request["required_fields"] = sorted(set(fields))
     return (
@@ -261,26 +290,37 @@ def split_profile_stats(stdout: str) -> tuple[str, ProfileStats | None]:
     """Separate a capture's printed summary from its typed statistics line.
 
     Returns the text without the statistics line, and the parsed statistics, or None
-    when the capture printed none. A statistics line that does not parse raises
-    ``ValueError`` naming the problem: the capture's own record is never guessed at.
+    when the capture printed none. Raises ``ValueError`` naming the problem when the
+    output does not end with :data:`PROFILE_END` (it did not arrive whole, so what it
+    lacks is unknown, not absent) or when a statistics line does not parse: the
+    capture's own record is never guessed at.
     """
+    body = unframed_output(stdout, PROFILE_END)
+    if body is None:
+        message = "profile capture output did not arrive whole: it lacks its end line"
+        raise ValueError(message)
     kept: list[str] = []
     stats: ProfileStats | None = None
-    for line in stdout.splitlines(keepends=True):
+    for line in body.splitlines(keepends=True):
         if not line.startswith(PROFILE_STATS_PREFIX):
             kept.append(line)
             continue
-        try:
-            stats = ProfileStats.model_validate_json(line[len(PROFILE_STATS_PREFIX) :])
-        except ValidationError as exc:
-            message = f"malformed profile statistics line: {exc.error_count()} invalid field(s)"
-            raise ValueError(message) from exc
+        decoded = decode_json(
+            line[len(PROFILE_STATS_PREFIX) :],
+            ProfileStats,
+            source="profile statistics line",
+            max_bytes=_MAX_PROFILE_LINE_BYTES,
+        )
+        if isinstance(decoded, Unreadable):
+            raise ProfileCaptureDecodeError(decoded)
+        stats = decoded
     return "".join(kept), stats
 
 
 __all__ = [
     "GPU_ACTIVE_FRACTION_METRIC",
     "HIP_API_TIME_METRIC_PREFIX",
+    "PROFILE_END",
     "PROFILE_OUTPUT_ROOT",
     "PROFILE_STATS_PREFIX",
     "HipApiTime",

@@ -1,8 +1,8 @@
 """Behavioral tests for the Python file-length ratchet.
 
-Every case drives `scripts/check_file_length.py` through its CLI against a
-throwaway fixture tree, so the assertions cover the contract CI depends on
-(exit code plus the file named in the output) rather than internal helpers.
+CLI cases pin the exit code and offending path that CI depends on. Generated
+directory policy cases exercise the public configuration and measurement API
+over throwaway fixture trees.
 """
 
 from __future__ import annotations
@@ -11,6 +11,14 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+from scripts.check_file_length import (
+    Config,
+    ConfigError,
+    check_measured_files,
+    load_config,
+    measure,
+)
 from tests.support import run_test_command
 
 if TYPE_CHECKING:
@@ -130,3 +138,43 @@ def test_reports_a_tool_error_when_the_config_section_is_missing(tmp_path: Path)
 
     assert result.returncode == 2
     assert "missing [tool.vibesys.file_length]" in result.stderr
+
+
+def test_generated_directory_exclusion_does_not_hide_handwritten_siblings(tmp_path: Path) -> None:
+    write_module(tmp_path, "src/pkg/_generated/binding.py", 150)
+    write_module(tmp_path, "src/pkg/_generated/nested/binding.py", 150)
+    write_module(tmp_path, "src/pkg/api.py", 150)
+    write_module(tmp_path, "src/pkg/_generated_other/handwritten.py", 150)
+    measured = measure(tmp_path, ("src",), ("src/pkg/_generated",))
+    failures = check_measured_files(measured, Config(100, ("src",), {}))
+    assert len(failures) == 2
+    assert any("src/pkg/api.py" in failure for failure in failures)
+    assert any("src/pkg/_generated_other/handwritten.py" in failure for failure in failures)
+
+
+def test_generated_directory_globs_are_loaded_from_config(tmp_path: Path) -> None:
+    write_config(tmp_path, max_lines=100, allowlist={})
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        config_path.read_text().replace(
+            'roots = ["src"]',
+            'roots = ["src"]\ngenerated = ["src/*/_generated"]',
+        )
+    )
+    write_module(tmp_path, "src/pkg/_generated/binding.py", 150)
+    config = load_config(config_path)
+    assert measure(tmp_path, config.roots, config.generated) == {}
+
+
+@pytest.mark.parametrize("value", ['"src/_generated"', "[1]", '["/absolute"]', '["../outside"]'])
+def test_generated_exclusions_reject_invalid_directory_globs(tmp_path: Path, value: str) -> None:
+    write_config(tmp_path, max_lines=100, allowlist={})
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text(
+        config_path.read_text().replace(
+            'roots = ["src"]',
+            f'roots = ["src"]\ngenerated = {value}',
+        )
+    )
+    with pytest.raises(ConfigError, match=r"file_length\.generated"):
+        load_config(config_path)

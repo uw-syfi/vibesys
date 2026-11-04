@@ -1,0 +1,18 @@
+{
+  "format":  2,
+  "plan":  {
+    "number":  1,
+    "title":  "tile the loop",
+    "body":  "try 8x8",
+    "status":  "PLAN_STATUS_CHOSEN",
+    "comments":  [
+      {
+        "text":  "go",
+        "at":  "2026-11-01T00:00:12Z",
+        "agent":  "agent-a"
+      }
+    ],
+    "created_at":  "2026-11-01T00:00:03Z",
+    "updated_at":  "2026-11-01T00:00:12Z"
+  }
+}

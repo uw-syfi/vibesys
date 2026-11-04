@@ -45,6 +45,7 @@ from tests.vibesys.loops.profiler_strategies import FAST, FEWER
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import ModuleType
 
 _REPO = Path(__file__).resolve().parents[3]
 _TORCH_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "torch"
@@ -1256,3 +1257,52 @@ class TestRealTraceFixtures:
             out = _run_capturing_stdout(analyzer.cmd_summary, args)
             assert "TORCH PROFILER SUMMARY" in out
             assert "Device:   mi210" in out
+
+
+_WHOLE_REPORT = json.dumps(
+    {"total_cuda_time_us": 120.0, "total_cpu_time_us": 80.0, "num_events": 0, "events": []}
+)
+
+
+class TestWholeReportsOnly:
+    """A report that is cut or lacks its totals is unknown, never a profile with zero time."""
+
+    @pytest.mark.parametrize("missing", ["total_cuda_time_us", "total_cpu_time_us", "events"])
+    def test_a_report_missing_a_field_is_refused_not_read_as_zero(
+        self, analyzer: ModuleType, tmp_path: Path, missing: str
+    ) -> None:
+        report = json.loads(_WHOLE_REPORT)
+        del report[missing]
+        path = tmp_path / "prof.json"
+        path.write_text(json.dumps(report))
+
+        for command in (analyzer.cmd_tables, analyzer.cmd_summary, analyzer.cmd_kernels):
+            with pytest.raises(analyzer.ProfileReportError, match=missing):
+                command(argparse.Namespace(report=str(path), top=5))
+
+    @given(cut=st.integers(min_value=0, max_value=len(_WHOLE_REPORT) - 1))
+    def test_a_report_cut_anywhere_is_refused(
+        self, analyzer: ModuleType, cut: int, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        path = tmp_path_factory.mktemp("cut") / "prof.json"
+        path.write_text(_WHOLE_REPORT[:cut])
+        with pytest.raises(analyzer.ProfileReportError):
+            analyzer._load(str(path))
+
+    def test_a_gzipped_trace_cut_mid_stream_is_refused(
+        self, analyzer: ModuleType, tmp_path: Path
+    ) -> None:
+        whole = gzip.compress(json.dumps(_trace(_gemm_call(0, ts=0))).encode())
+        for cut in range(len(whole) - 1):
+            path = tmp_path / f"cut{cut}.pt.trace.json.gz"
+            path.write_bytes(whole[:cut])
+            with pytest.raises(analyzer.ProfileReportError):
+                analyzer._load(str(path))
+
+    def test_deeply_nested_json_is_refused_not_a_crash(
+        self, analyzer: ModuleType, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "deep.json"
+        path.write_text("[" * 200_000)
+        with pytest.raises(analyzer.ProfileReportError):
+            analyzer._load(str(path))

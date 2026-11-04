@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import subprocess
-from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from vs_project._git_process import git_environment
 
-GitRunner = Callable[..., subprocess.CompletedProcess[str]]
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from vs_project._git_process import Git, GitText
 
 
 class GitRemoteRepository:
@@ -23,14 +25,14 @@ class GitRemoteRepository:
         self,
         root: Path,
         *,
-        runner: GitRunner = subprocess.run,
+        git: Git,
     ) -> None:
         self.root = root
-        self._runner = runner
+        self._git = git
 
     def require_root(self) -> None:
         """Raise unless ``root`` is the repository's top-level directory."""
-        result = self._run(["git", "rev-parse", "--show-toplevel"], check=False)
+        result = self._run(["rev-parse", "--show-toplevel"], check=False)
         if result.returncode != 0:
             message = f"project directory is not a Git repository: {self.root}"
             raise ValueError(message)
@@ -46,7 +48,7 @@ class GitRemoteRepository:
     def origin_url(self) -> str | None:
         """Return the configured ``origin`` URL, or ``None`` when absent."""
         result = self._run(
-            ["git", "remote", "get-url", "origin"],
+            ["remote", "get-url", "origin"],
             check=False,
         )
         return result.stdout.strip() if result.returncode == 0 else None
@@ -60,12 +62,12 @@ class GitRemoteRepository:
         if self.has_origin():
             message = f"project repository already has an origin remote: {self.root}"
             raise ValueError(message)
-        self._run(["git", "remote", "add", "origin", url])
+        self._run(["remote", "add", "origin", url])
 
     def current_branch(self) -> str | None:
         """Return the symbolic current branch, or ``None`` for detached HEAD."""
         result = self._run(
-            ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+            ["symbolic-ref", "--quiet", "--short", "HEAD"],
             check=False,
         )
         branch = result.stdout.strip()
@@ -74,7 +76,7 @@ class GitRemoteRepository:
     def upstream(self) -> str | None:
         """Return the current branch's upstream ref, or ``None`` when absent."""
         result = self._run(
-            ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+            ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
             check=False,
         )
         upstream = result.stdout.strip()
@@ -82,36 +84,29 @@ class GitRemoteRepository:
 
     def refs(self, prefix: str) -> tuple[str, ...]:
         """Return full local ref names beneath ``prefix``."""
-        result = self._run(["git", "for-each-ref", "--format=%(refname)", prefix])
+        result = self._run(["for-each-ref", "--format=%(refname)", prefix])
         return tuple(result.stdout.splitlines())
 
     def push_origin(self, refspecs: Sequence[str]) -> None:
         """Push exact ``refspecs`` to ``origin`` and configure upstream."""
         self.require_root()
-        self._run(["git", "push", "-u", "origin", *refspecs])
+        self._run(["push", "-u", "origin", *refspecs])
 
     def _run(
         self,
         command: list[str],
         *,
         check: bool = True,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> GitText:
         env = git_environment(safe_directory=self.root.resolve())
         try:
-            result = self._runner(
-                command,
-                cwd=self.root,
-                capture_output=True,
-                text=True,
-                env=env,
-                check=False,
-            )
+            result = self._git.run_text(command, cwd=self.root, env=env)
         except FileNotFoundError as exc:
             message = "git is required for project repository operations"
             raise RuntimeError(message) from exc
         if check and result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "unknown error"
-            message = f"git command failed ({' '.join(command)}): {detail}"
+            message = f"git command failed (git {' '.join(command)}): {detail}"
             raise RuntimeError(message)
         return result
 

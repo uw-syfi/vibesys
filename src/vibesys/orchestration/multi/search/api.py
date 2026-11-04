@@ -36,6 +36,7 @@ from vibesys.orchestration.multi.search._prompts import (
     PromptTemplate,
     ValidationFailure,
 )
+from vibesys.orchestration.multi.search._resume import MultiResume
 from vibesys.orchestration.multi.search._roles import (
     EXCHANGES,
     IMPLEMENTER,
@@ -78,6 +79,7 @@ __all__ = [
     "LocalValidationReport",
     "MultiAttempt",
     "MultiConfig",
+    "MultiResume",
     "MultiRound",
     "Next",
     "ParentVerification",

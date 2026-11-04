@@ -7,10 +7,13 @@ name = "vs-evaluator-protocol"
 version = "0.1.0"
 description = "Evaluator record-stream validation and typed measurements"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2"]
+dependencies = ["pydantic>=2", "vs-decode"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 vs_evaluator_protocol = ["py.typed"]
+
+[tool.uv.sources]
+vs-decode = { workspace = true }

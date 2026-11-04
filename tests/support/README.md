@@ -20,6 +20,11 @@ before application imports. Each worker owns its home and runtime directory,
 and each test gets a separate lazy state path beneath its pytest basetemp.
 Children inherit these defaults. Tests can still set explicit environment inputs.
 Process-owned directories are removed at pytest cleanup.
+It also turns off Git auto maintenance through `GIT_CONFIG_*`, as `run_git`
+does for product Git, so a test's commit never starts a background prune.
+It also points `GIT_CONFIG_GLOBAL` at an empty file, sets `GIT_CONFIG_NOSYSTEM=1`, and fixes the
+Git identity, so a developer's hooks, commit signing, or default branch never reach a test.
+`tests/quality/test_git_hermetic.py` bans tests from resetting those variables.
 
 Installed Rust toolchains remain available through explicit CARGO_HOME and
 RUSTUP_HOME paths. Go compiler caches default to a private controller-owned
@@ -41,7 +46,7 @@ imported through `<package>.api` or `<package>.api.testing` only.
 
 | Kind | Files |
 | --- | --- |
-| Composition worlds and scenarios (several libraries wired together) | `*_world.py`, `skeleton_*.py`, `timed_dynamic_run.py`, `crash_harness.py`, `loop_invariants.py`, `executor_cases.py` |
+| Composition worlds and scenarios (several libraries wired together) | `*_world.py`, `skeleton_*.py`, `loop_invariants.py`, `executor_cases.py` |
 | Contract suites that span libraries | `command_runner_contract.py`, `executor_cases.py` (runs `vs_runtime.api.executor_contracts` over real owners) |
 | Pytest infrastructure | `sharding.py`, `shard_durations.json`, `cwd_hygiene.py`, `tree_hygiene.py`, `path_hygiene.py`, `scratch_tree.py`, `distribution_build.py`, `isolated_environment.py`, `shared_build.py`, `fast_cargo.py`, `posix_tools.py`, `example_registry.py`, `container_credentials.py` |
 | Run-environment specs built from `vibesys.api` types | `docker_environment.py`, `host_environment.py`; `slurm_environment.py` waits for #1650 |
@@ -50,7 +55,7 @@ Where the rest went:
 
 | Helper | Home |
 | --- | --- |
-| crashable and probing virtual clocks, `clock_from`, `pairwise_rows`, `file_size_limit`, fault counting, matching and seeded streams | `vs_sim.api.testing` |
+| `clock_from`, `pairwise_rows`, `file_size_limit`, fault counting, matching and seeded streams | `vs_sim.api.testing` |
 | `wait_until_executor_started` | `vs_evaluation.api.testing` |
 | liveness invariants | `vs_core.testing.liveness` |
 | `FakeDockerConfinement` | `vs_sandbox.api.testing` |

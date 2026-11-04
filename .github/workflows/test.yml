@@ -11,19 +11,48 @@ on:
       - 'website/**'
       - '.github/workflows/website.yml'
   pull_request:
-    branches: [main]
+    branches: [main, 'transport/**']
   # GitHub merge queue: Required PR CI must report on the queue's temporary
   # gh-readonly-queue/... branch or the queue waits for it until timeout.
   merge_group:
     types: [checks_requested]
 
+# CI runs in two stages (docs/contributing/development.md, "CI gates"):
+#
+# - The commit stage runs on `pull_request`: change selection, format, lint, types, the
+#   Python repository-policy checks, the Python tests the change reaches through imports
+#   (`test-impact`), and the client quality, unit-test and build checks. It is the fast
+#   signal on every push and has a budget of about 270 s.
+# - The full stage runs on `merge_group` (and on `push` to main): the commit stage's checks
+#   and everything else, every Python test shard, the client end-to-end check, seed
+#   exploration, coverage, the real-system tiers and the example and image jobs. Every
+#   test therefore still runs before every merge, on the tree the merge will produce.
+#
+# Merge groups restore image caches but do not snapshot or publish multi-GB archives:
+# cache maintenance must not exhaust the merge budget after tests have passed. Eligible
+# PR and main-push jobs still publish. test_merge_queue_never_snapshots_or_publishes_image_archives
+# holds both archive steps to this rule; the Slurm cache already publishes only on push.
+#
+# A job that belongs to the full stage only carries `github.event_name != 'pull_request'` in
+# its `if`. `Required PR CI` and `ci-budget` run on both events. `validate-examples` also runs in
+# the commit stage when the change moves an example repository's pin (`example_pointers`), and
+# `clients-e2e` runs the UI gallery's browser suite when the clients change.
+
 env:
   # Wall-clock thresholds for a whole run, checked by `ci-budget` below (issue
   # #474): a warning above the first, a failure above the second. Kept here so
   # raising or lowering them is a one-line change and the guard and the
-  # documentation can't disagree.
-  CI_WALL_TIME_WARN_SECONDS: '360'
+  # documentation can't disagree. The first pair is the full stage (`merge_group`,
+  # `push`), the second the commit stage (`pull_request`).
+  # The budget is under 5 minutes with no added compute (no bigger runners, no
+  # more shards). 270 s warns that a run is near it. The failure stays at 600 s
+  # until p95 execution is under about 260 s: runs measured 250 to 280 s with
+  # slow-runner outliers to 373 s, so failing at 300 s now would be noise.
+  CI_WALL_TIME_WARN_SECONDS: '270'
   CI_WALL_TIME_ERROR_SECONDS: '600'
+  # The commit stage is the one that has to stay fast, so it fails sooner than the full stage.
+  CI_COMMIT_STAGE_WARN_SECONDS: '270'
+  CI_COMMIT_STAGE_ERROR_SECONDS: '360'
 
 jobs:
   # This job decides which parts of the tree a change can affect. The workflow
@@ -31,17 +60,27 @@ jobs:
   # in by reading these outputs and can skip for documentation-only changes.
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       python: ${{ steps.filter.outputs.python }}
-      tui: ${{ steps.filter.outputs.tui }}
+      clients: ${{ steps.filter.outputs.clients }}
+      proto: ${{ steps.filter.outputs.proto }}
       examples: ${{ steps.filter.outputs.examples }}
+      dockerfiles: ${{ steps.filter.outputs.dockerfiles }}
       agent_image: ${{ steps.filter.outputs.agent_image }}
       real_tiers: ${{ steps.filter.outputs.real_tiers }}
       evaluators: ${{ steps.filter.outputs.evaluators }}
+      stitch: ${{ steps.filter.outputs.stitch }}
       native_targets: ${{ steps.filter.outputs.native_targets }}
       native_languages: ${{ steps.filter.outputs.native_languages }}
       pnpm_packages: ${{ steps.filter.outputs.pnpm_packages }}
+      dockerfile_contexts: ${{ steps.filter.outputs.dockerfile_contexts }}
       impact: ${{ steps.filter.outputs.impact }}
+      gateway: ${{ steps.filter.outputs.gateway }}
+      cli: ${{ steps.filter.outputs.cli }}
+      orchestrator: ${{ steps.filter.outputs.orchestrator }}
+      desktop_path: ${{ steps.filter.outputs.desktop_path }}
+      example_pointers: ${{ steps.example-pointers.outputs.example_pointers }}
       # The per-file test seconds the shards balance on, read once here so that
       # every shard of a run sees the same record (a shard that read a newer
       # cache entry than its siblings would break the partition of the suite).
@@ -68,6 +107,15 @@ jobs:
           ./support/repoctl/repoctl validate
           ./support/repoctl/repoctl verify-policy --cases tests/repoctl/cases.toml
           ./support/repoctl/repoctl plan --github-event --github-output "$GITHUB_OUTPUT"
+
+      # An example repository's pinned commit moves only on purpose: a commit message of the
+      # change names it (`Example-Bump: <path>`). On a pull request only: the queue's squash
+      # message need not carry the trailer, and validate-examples runs there regardless. The
+      # output below runs validate-examples on a pull request that moves a pin.
+      - name: Check example repository pins
+        id: example-pointers
+        if: github.event_name == 'pull_request'
+        run: python3 -m scripts.check_example_pointers --base-ref origin/main --github-output "$GITHUB_OUTPUT"
 
       # Best effort: a missing, evicted or malformed cache entry only means the
       # shards balance on the checked-in record, never that the run fails.
@@ -102,6 +150,7 @@ jobs:
   # depends on this job.
   doc-checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -112,12 +161,72 @@ jobs:
       - name: Check doc code citations
         run: python3 -m scripts.check_doc_citations
 
+      - name: Check conceptual architecture
+        run: python3 -m scripts.check_architecture_conceptual
+
+      # Here as well as in python_quality: `.repoctl/components.toml` ignores `.agents/`,
+      # so a skills-only change selects no Python job. Stdlib only, about a second.
+      - name: Check agent skills
+        run: python3 -m scripts.check_skills
+
+      # The Claude Code plugin manifest lists every skill under `skills/`; a change to either
+      # side must keep them in step, and `.claude-plugin/` selects no job of its own.
+      - name: Check published skills and plugin manifest
+        run: python3 -m scripts.published_skills
+
+  # Stale reverts and tools' leftover files, on every change whatever it touches. A job of
+  # its own, not a step of `changes`: every other job waits for `changes`, and `git blame`
+  # over a `blob:none` clone fetches blobs on demand, which took 4 to 42 s (median 14 s) of
+  # the queue run's critical path across 17 runs. Here it runs beside the test shards
+  # and still blocks the merge, since Required PR CI waits for it. Not in python-checks,
+  # which a workflow, client or docs change skips.
+  history-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      # Full history (the stale-revert check compares each file with its history on main)
+      # without the blobs of every old revision.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Check for stale reverts and leftover files
+        run: |
+          python3 scripts/check_stale_revert.py --base-ref origin/main
+          python3 scripts/check_stray_files.py
+
+  stitch:
+    needs: changes
+    if: github.event_name != 'pull_request' && needs.changes.outputs.stitch == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: clippy, rustfmt
+
+      - name: Install cargo-strata
+        run: cargo install cargo-strata --version 0.4.0 --locked
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
+
+      - name: Check Stitch workspace
+        run: ./support/repoctl/repoctl run-checks --group stitch_checks
+
   # One environment setup for the Python quality group. repoctl prints each
   # command before running it and names the failing command in its error.
   python-checks:
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -138,14 +247,44 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       - name: Run Python quality checks
         run: ./support/repoctl/repoctl run-checks --group python_quality
+
+  # The Python repo-policy guards (tests/quality and tests/ci) beside `python-checks`, not after
+  # it: the two are independent check groups, and run one after the other they were the longest
+  # job of the commit stage (about 105 s of quality checks, then 74 s of guards).
+  python-guards:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       - name: Run Python repo-policy guards
         run: ./support/repoctl/repoctl run-checks --group python_guards
@@ -155,6 +294,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -171,98 +311,192 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       - name: Check Python types
         run: ./support/repoctl/repoctl run-checks --group python_types
 
-  # The TUI work is four jobs, one per independent check group, so its wall time
+  # The commit stage's Python tests: the test files the change can reach through imports,
+  # closest first, cheapest first, within a time budget (scripts/impacted_tests.py; the
+  # `python_impact_tests` group names the command and the budget). Pull requests only: the
+  # full stage runs every shard on the merge queue's tree. What the budget leaves out is
+  # listed in the step's report.
+  test-impact:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
+      # The history back to the merge base with main: the selection reads the diff.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
+
+      - name: Run the Python tests the change reaches
+        run: ./support/repoctl/repoctl run-checks --group python_impact_tests
+
+  # The client work is four jobs, one per independent check group, so its wall time
   # is the slowest leg rather than the sum (issue #1678). Each job has its own
   # checkout, so the `build` and `check` task graphs never share a `dist`.
   # Required PR CI lists all four.
-  tui-quality:
+  clients-quality:
     needs: changes
-    if: needs.changes.outputs.tui == 'true'
+    if: needs.changes.outputs.clients == 'true' || needs.changes.outputs.proto == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
 
-      - name: Set up the TUI workspace
-        uses: ./.github/actions/setup-tui
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The protobuf compatibility check needs the actual common ancestor.
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
+
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
 
       - name: Check TypeScript packages
-        run: ./support/repoctl/repoctl run-checks --group tui_quality
+        if: needs.changes.outputs.clients == 'true'
+        run: ./support/repoctl/repoctl run-checks --group clients_quality
 
-  tui-tests:
+      # The proto check downloads and compiles the Go bindings and the Go code generation
+      # plugins, and the standard library is most of that compile. The caches setup-go restores
+      # belong to whichever job saved them first, which built and downloaded none of this, so
+      # this check keeps its own build cache and module cache. The module cache gets its own
+      # directory, so restoring it never lands on the read-only one setup-go filled.
+      # The build cache path comes from `go env`, as with the pnpm store: a wrong path caches
+      # nothing.
+      - name: Locate the Go caches for the proto check
+        if: needs.changes.outputs.proto == 'true'
+        id: go-cache
+        run: |
+          {
+            echo "build=$(go env GOCACHE)"
+            echo "modules=$RUNNER_TEMP/proto-go-modules"
+            echo "version=$(go env GOVERSION)"
+          } >> "$GITHUB_OUTPUT"
+
+      # The key names the toolchain: objects compiled by another Go version never match, so an
+      # unnamed key would stay stale after a patch release and never be saved again.
+      - name: Cache the Go build for the proto check
+        if: needs.changes.outputs.proto == 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ steps.go-cache.outputs.build }}
+            ${{ steps.go-cache.outputs.modules }}
+          key: proto-go-${{ runner.os }}-${{ steps.go-cache.outputs.version }}-${{ hashFiles('gateway/go.mod', 'gateway/go.sum') }}
+
+      # Reuse this job's Node, Python and Go setup rather than adding a runner.
+      - name: Check protobuf contracts
+        if: needs.changes.outputs.proto == 'true'
+        env:
+          # Compare against the pull request's merge base (main outside a PR).
+          BASE_BRANCH: ${{ github.base_ref || 'main' }}
+          GOMODCACHE: ${{ steps.go-cache.outputs.modules }}
+          # Writable module directories, so the cache can be restored over and cleaned up.
+          GOFLAGS: -modcacherw
+        run: |
+          git fetch --no-tags origin "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+          PROTO_BASE_REF="origin/${BASE_BRANCH}" ./support/repoctl/repoctl run-checks --group proto
+
+  clients-tests:
     needs: changes
-    if: needs.changes.outputs.tui == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up the TUI workspace
-        uses: ./.github/actions/setup-tui
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
 
       - name: Test affected TypeScript packages
         env:
           PNPM_PACKAGES: ${{ needs.changes.outputs.pnpm_packages }}
-        run: ./support/repoctl/repoctl run-checks --group tui_tests --collection-json "$PNPM_PACKAGES"
+        run: ./support/repoctl/repoctl run-checks --group clients_tests --collection-json "$PNPM_PACKAGES"
 
-  tui-build:
+  clients-build:
     needs: changes
-    if: needs.changes.outputs.tui == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up the TUI workspace
-        uses: ./.github/actions/setup-tui
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
 
       - name: Build TypeScript packages
-        run: ./support/repoctl/repoctl run-checks --group tui_build
+        run: ./support/repoctl/repoctl run-checks --group clients_build
 
-      - name: Check browser transport bundle for Node builtins
-        working-directory: clients
-        run: pnpm check:web-browser-bundle
-
-      - name: Smoke-test TUI packages
-        run: ./support/repoctl/repoctl run-checks --group tui_package_smoke
-
-  tui-e2e:
+  # The UI gallery's visual and accessibility suite (Playwright, Chromium on Linux), the one
+  # browser suite of the clients. The desktop app's own screens are checked by the vitest suites of
+  # `clients-tests`.
+  clients-e2e:
     needs: changes
-    if: needs.changes.outputs.tui == 'true'
+    if: needs.changes.outputs.clients == 'true'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up the TUI workspace
-        uses: ./.github/actions/setup-tui
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
+        with:
+          playwright: true
 
-      - name: Install Chromium for the web smoke test
-        working-directory: clients
-        run: pnpm --filter @vibesys/app-web exec playwright install --with-deps chromium
+      - name: Test the UI gallery
+        run: ./support/repoctl/repoctl run-checks --group clients_e2e
 
-      - name: Test the replay-driven web viewer
-        env:
-          # The downloaded Electron runtime's SUID helper cannot have Chromium's required root
-          # ownership on a hosted runner. This opt-out is scoped to the E2E child process.
-          VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
-        # Electron's native windows require a display; Playwright's dependency install above
-        # provides Xvfb on this Linux runner. The wrapper owns the display for this one check group.
-        run: xvfb-run -a ./support/repoctl/repoctl run-checks --group tui_e2e
+      # A gallery screenshot that differs from its baseline leaves the actual and the diff here, so
+      # a reviewer can see the change without rerunning it in the Linux image.
+      - name: Upload the gallery's screenshot differences
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-gallery-test-results
+          path: clients/apps/ui-gallery/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   queue-native:
     needs: changes
-    if: needs.changes.outputs.evaluators == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.evaluators == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -280,19 +514,16 @@ jobs:
             resources/evaluators/stack/go.sum
             resources/evaluators/unordered-map/go.sum
 
-      # Bounded because an apt mirror or a service-restart prompt makes this
-      # hang rather than fail: three runs on this branch sat here for tens of
-      # minutes each and never reached a test. A timeout turns that into a
-      # legible failure in minutes instead of a job that burns hours.
       - name: Install managed-candidate containment dependency
         if: contains(fromJSON(needs.changes.outputs.native_targets), 'resources/evaluators/microservice')
-        timeout-minutes: 10
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
+        timeout-minutes: 3
+        uses: ./.github/actions/setup-runner-apt
+        with:
+          packages: bubblewrap
+
+      - name: Enable runner user namespaces
+        if: contains(fromJSON(needs.changes.outputs.native_targets), 'resources/evaluators/microservice')
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Set up Rust
@@ -306,10 +537,121 @@ jobs:
           NATIVE_TARGETS: ${{ needs.changes.outputs.native_targets }}
         run: ./support/repoctl/repoctl run-native --targets-json "$NATIVE_TARGETS"
 
+  # Runs on every push to main, not only when the gateway changed: a cache is
+  # readable only from its own ref and the default branch, so the module and build
+  # caches that pull-request and merge-queue runs restore are the ones a passing
+  # main run saved. Without it a merge-queue run always starts cold.
+  gateway:
+    needs: changes
+    if: needs.changes.outputs.gateway == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: gateway/go.sum
+
+      - name: Check the host gateway
+        run: ./support/repoctl/repoctl run-checks --group gateway_checks
+
+  # Runs on every push to main for the same reason as `gateway`: a merge-queue run restores the
+  # Go caches a passing main run saved.
+  cli:
+    needs: changes
+    if: needs.changes.outputs.cli == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache-dependency-path: cli/go.sum
+
+      - name: Check vibesys-cli
+        run: ./support/repoctl/repoctl run-checks --group cli_checks
+
+  # Runs on every push to main for the same reason as `gateway`: a merge-queue run restores the
+  # Go caches a passing main run saved.
+  orchestrator:
+    needs: changes
+    if: needs.changes.outputs.orchestrator == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: orchestrator/go.mod
+          cache-dependency-path: orchestrator/go.sum
+
+      - name: Check the orchestrator
+        run: ./support/repoctl/repoctl run-checks --group orchestrator_checks
+
+  # The deterministic end to end test of the desktop path (gateway/e2e): vibesys-host, the orchestrator,
+  # real sidecars over agentshim's scripted providers, the vibesys-cli daemon and git run a lead, two
+  # workers and a judge on a toy task. No model is called. The built Electron desktop app is then
+  # launched against that world and a Playwright journey checks the run list, each agent's harness
+  # and the lead's report on screen and presses Stop (VIBESYS_E2E_DESKTOP_UI=1). Its own job, so it
+  # adds no time to the gateway, cli or orchestrator jobs; it builds vibesys-host and vibesys-cli from
+  # the Go caches those jobs share. Runs on every push to main for the same reason as `gateway`.
+  desktop-path:
+    needs: changes
+    if: needs.changes.outputs.desktop_path == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: |
+            gateway/go.sum
+            cli/go.sum
+            orchestrator/go.sum
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: orchestrator/sidecar/uv.lock
+
+      # Only what the built app needs: Node, pnpm, the Electron binary and the workspace. The sidecar
+      # environment above is the only uv and Python use, and Go is set up above.
+      - name: Set up the client workspace
+        uses: ./.github/actions/setup-clients
+        with:
+          workspace-only: true
+
+      - name: Run the desktop path end to end
+        env:
+          VIBESYS_E2E_DESKTOP_UI: "1"
+          # Chromium's SUID sandbox helper cannot have the ownership it needs on a hosted runner. This
+          # opts the one Electron child the journey launches out of it; no production window changes.
+          VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
+        # Electron's native windows require a display; Ubuntu runners provide Xvfb. The wrapper owns
+        # the display for this one check group.
+        run: xvfb-run -a ./support/repoctl/repoctl run-checks --group desktop_path_e2e
+
   impact-tool:
     needs: changes
     if: needs.changes.outputs.impact == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -334,11 +676,18 @@ jobs:
   # workload checks below stay explicit because their flags differ per task.
   validate-examples:
     needs: changes
-    if: needs.changes.outputs.examples == 'true'
+    if: (github.event_name != 'pull_request' || needs.changes.outputs.example_pointers == 'true') && needs.changes.outputs.examples == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -374,11 +723,18 @@ jobs:
   # runner's own Go, Rust and C++ toolchains are what the shards used.
   native-evaluator-examples:
     needs: changes
-    if: needs.changes.outputs.examples == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.examples == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -412,21 +768,25 @@ jobs:
   # `cpu_check` project's own and takes ~3 s to build.
   validate-examples-cpu-check:
     needs: changes
-    if: needs.changes.outputs.examples == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.examples == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -442,6 +802,69 @@ jobs:
           CPU_CHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
         run: ./support/repoctl/repoctl run-checks --group examples_cpu_check_shard
 
+  # Builds the example Dockerfiles a change selects, one matrix leg per Dockerfile directory (its
+  # build context): a Dockerfile, or a file next to it, changing builds that Dockerfile and nothing
+  # else, and a change to no Dockerfile skips the job. Build only: no benchmark, no secret, no GPU.
+  # The Dockerfiles a runner cannot build are listed with a reason in the discovery entry in
+  # .repoctl/components.toml, and `repoctl validate` fails for one that is neither built nor listed.
+  # The layer cache is named by the Dockerfile's own content, so the byte-identical Rust and Go files
+  # share one snapshot and a rebuild after a context-only change reuses every layer.
+  example-dockerfiles:
+    needs: changes
+    if: needs.changes.outputs.dockerfiles == 'true' && needs.changes.outputs.dockerfile_contexts != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        context: ${{ fromJSON(needs.changes.outputs.dockerfile_contexts) }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
+
+      - name: Name the layer cache by the Dockerfile's content
+        id: dockerfile
+        env:
+          CONTEXT: ${{ matrix.context }}
+        run: echo "digest=$(sha256sum "$CONTEXT/Dockerfile" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Docker layer cache
+        id: docker-cache
+        uses: ./.github/actions/docker-image-cache
+        with:
+          mode: restore
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: example-dockerfile-v1-${{ steps.dockerfile.outputs.digest }}
+
+      - name: Point Docker at the layer cache storage
+        run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Build the Dockerfile
+        env:
+          CONTEXT: ${{ matrix.context }}
+        run: |
+          start=$(date +%s)
+          ./support/repoctl/repoctl run-checks --group example_dockerfile_builds --collection-json "$(jq -cn --arg context "$CONTEXT" '[$context]')"
+          echo "Built $CONTEXT in $(( $(date +%s) - start )) s (layer cache hit: ${{ steps.docker-cache.outputs.cache-hit }})" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Snapshot Docker layer cache
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
+
+      - name: Save Docker layer cache
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: ./.github/actions/docker-image-cache
+        with:
+          mode: save
+          path: ${{ runner.temp }}/docker-data.tar.zst
+          key: ${{ steps.docker-cache.outputs.cache-primary-key }}
+
   # Builds the CPU agent image for real and runs every shipped CLI inside it
   # as the non-root `agent` user (issue #675), then reuses that same build to
   # prove the Docker sandbox backend enforces the shared resource-list
@@ -452,11 +875,21 @@ jobs:
   # image's contents or the sandbox backend pays for this job's build time.
   agent-image:
     needs: changes
-    if: needs.changes.outputs.agent_image == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.agent_image == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -470,27 +903,34 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
-      # The tests build through `docker build` against the daemon's own
-      # builder, so layer reuse needs the daemon's storage itself (images and
-      # build cache), not buildx cache flags. The key covers every file that
-      # decides what the layers contain; a miss builds cold, as before. The
-      # ISO week refreshes the floating python:3.12-bookworm base weekly.
-      - name: Compute the Docker layer cache key
-        id: docker-cache-week
-        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      # Preserve the daemon's images and BuildKit state for both plain Docker and
+      # devcontainer CLI builds. GHCR shares snapshots across PR/merge-queue refs.
+      # Exact keys include install inputs and base digests; the family/base alias
+      # reuses unchanged layers after edits, with Docker validating each input.
+      - name: Resolve the image cache's base digests
+        id: image-bases
+        run: |
+          cpu=$(uv run python -c 'from vs_sandbox.api import ComputeBackend, backend_default_image; print(backend_default_image(ComputeBackend.CPU))')
+          cpu_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cpu" --format '{{.Manifest.Digest}}')
+          uid_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect ubuntu:24.04 --format '{{.Manifest.Digest}}')
+          [[ "$cpu_digest" =~ ^sha256:[0-9a-f]{64}$ && "$uid_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          cli_base=$(awk '$1 == "FROM" {print $2}' libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/Dockerfile)
+          cli_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cli_base" --format '{{.Manifest.Digest}}')
+          [[ "$cli_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$(printf '%s\n' "$cpu_digest" "$uid_digest" "$cli_digest" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: ./.github/actions/docker-image-cache
         with:
+          mode: restore
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: agent-image-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'tests/e2e/test_agent_image_e2e.py', 'libs/vs-sandbox/tests/test_docker_conformance_e2e.py', 'tests/e2e/test_credential_sharing_e2e.py', 'scripts/ci_docker_data_root.sh') }}
+          key: agent-image-docker-v2-${{ steps.image-bases.outputs.digest }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/agent_feature.py', 'libs/vs-runtime/src/vs_runtime/_image_features.py', 'libs/vs-runtime/src/vs_runtime/_run_environment.py', 'libs/vs-agent/src/vs_agent/images.py', 'tests/e2e/test_agent_image_e2e.py', 'libs/vs-sandbox/tests/test_docker_conformance_e2e.py', 'tests/e2e/test_credential_sharing_e2e.py', 'scripts/ci_docker_data_root.sh', 'scripts/ci_image_cache.py', 'scripts/ci_registry_image_cache.sh', '.github/actions/docker-image-cache/action.yml', '.github/workflows/test.yml') }}
+          restore-keys: |
+            agent-image-docker-v2-${{ steps.image-bases.outputs.digest }}-
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
@@ -499,31 +939,35 @@ jobs:
         run: ./support/repoctl/repoctl run-checks --group agent_image_tests
 
       - name: Snapshot Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true'
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
 
       - name: Save Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: ./.github/actions/docker-image-cache
         with:
+          mode: save
           path: ${{ runner.temp }}/docker-data.tar.zst
           key: ${{ steps.docker-cache.outputs.cache-primary-key }}
+          restore-keys: agent-image-docker-v2-${{ steps.image-bases.outputs.digest }}-
 
   # Several tests read clients/ directly (packaging, theme, and distribution
   # tests), so a TypeScript-only change still needs this job. Documentation-only
   # changes do not.
   # The suite is split by test file across the runners listed in `matrix.shard`
   # (`VIBESYS_TEST_SHARD`, see tests/support/sharding.py) so the job fits the
-  # ten-minute CI budget. The shard count is the length of that list
+  # five-minute CI budget. The shard count is the length of that list
   # (`strategy.job-total`), so growing the suite means extending the list and
   # nothing else; `coverage` downloads whatever `coverage-data-*` artifacts exist.
   # Each shard uploads its coverage data; `coverage` combines them.
   test:
     needs: changes
     if: >-
-      needs.changes.outputs.python == 'true' ||
-      needs.changes.outputs.tui == 'true'
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.clients == 'true')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -533,7 +977,13 @@ jobs:
         # slowest near three minutes (see docs/contributing/testing-map.md).
         shard: [1, 2, 3]
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -574,6 +1024,16 @@ jobs:
           VIBESYS_RECORD_SHARD_DURATIONS: shard-durations-${{ matrix.shard }}.json
         run: ./support/repoctl/repoctl run-checks --group python_ci_tests_shard
 
+      # The test ids this shard failed (pytest's own record), for `classify-failures`.
+      - name: Upload the failed test ids
+        if: failure() && github.event_name == 'merge_group'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: failed-tests-${{ matrix.shard }}
+          path: .pytest_cache/v/cache/lastfailed
+          include-hidden-files: true
+          if-no-files-found: ignore
+
       - name: Upload coverage data
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -588,8 +1048,56 @@ jobs:
           name: shard-durations-${{ matrix.shard }}
           path: shard-durations-${{ matrix.shard }}.json
 
+  # Explains a failed queue run, never changes it. When a shard of `test` fails in the merge
+  # queue, this reruns only the tests it failed, once, on the main the queue branched from
+  # (`base_sha`, which does not contain this pull request), and labels each in the job summary:
+  # "fails on main (flaky or broken main)" or "fails only with this PR"
+  # (scripts/classify_failed_tests.py). The pull request's own result is not retried: the shards
+  # stay red and the queue still ejects it. `continue-on-error` keeps a failure here from adding
+  # a second red job to `Required PR CI`.
+  classify-failures:
+    needs: [changes, test]
+    if: always() && github.event_name == 'merge_group' && needs.test.result == 'failure'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.merge_group.base_sha }}
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --dev --python 3.14
+
+      - name: Download the failed test ids
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: failed-tests-*
+          path: failed-tests
+
+      - name: Rerun the failed tests on main and label them
+        env:
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: uv run --no-sync python scripts/classify_failed_tests.py run failed-tests/*/lastfailed
+
   # Keeps the shard balance current without a hand-edited record: a green run on
-  # main merges its shards' measured seconds into a cache entry, which the
+  # main averages its shards' measured seconds into the previous record and caches the result, which the
   # `changes` job of every later run restores. Off the critical path (it runs
   # beside `coverage`), and advisory: its failure does not fail the run.
   record-durations:
@@ -600,6 +1108,7 @@ jobs:
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       needs.test.result == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -622,9 +1131,20 @@ jobs:
           path: measured-durations
           merge-multiple: true
 
+      # The record the run balanced on, so the merge averages this run into it (see
+      # `SMOOTHING_WEIGHT` in tests/support/sharding.py). Best effort like the restore in `changes`.
+      - name: Restore the previous shard durations
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/shard-durations
+          key: shard-durations-no-exact-match
+          restore-keys: shard-durations-
+
       - name: Merge the shards' durations
         run: |
           uv run --no-sync python -m scripts.refresh_shard_durations measured-durations \
+            --previous "$RUNNER_TEMP/shard-durations/shard_durations.json" \
             --output "$RUNNER_TEMP/shard-durations/shard_durations.json"
 
       - name: Cache the merged durations for later runs
@@ -639,9 +1159,11 @@ jobs:
   coverage:
     needs: [changes, test]
     if: >-
-      needs.changes.outputs.python == 'true' ||
-      needs.changes.outputs.tui == 'true'
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.python == 'true' ||
+      needs.changes.outputs.clients == 'true')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       # Full history (repoctl plan and diff-cover need the merge base) without the blobs
       # of every old revision: they are fetched only for the few files a diff reads.
@@ -659,8 +1181,10 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
+      # Only coverage and diff-cover (the `coverage-report` group): this job imports none of the
+      # project, and the whole `dev` environment took 6 s of the queue run's critical path.
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --only-group coverage-report
 
       - name: Set up repoctl
         uses: ./.github/actions/setup-repoctl
@@ -681,29 +1205,45 @@ jobs:
           name: coverage-xml
           path: coverage.xml
 
+      # Against main as the queue saw it, so it is the merge's own change. A pull request
+      # run has no coverage; the full stage owns it.
       - name: Check patch coverage
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'merge_group'
         run: ./support/repoctl/repoctl run-checks --group patch_coverage
 
   # Reruns the tests a pull request adds or changes across many seeds and schedule
   # orderings (issue #1640), so a test that only passes in one scheduling order fails its
-  # own PR. A job of its own, beside the shards: it adds no time to the critical path, and
-  # a PR that touches no test pays for the checkout and a stdlib-only diff scan only (no
-  # environment setup). Pull requests only; the merge queue has already seen the result.
+  # own PR. A job of its own, beside the shards, and off the critical path at any PR size:
+  # the exploration step has a hard wall-clock cap (scripts/explore_changed_tests.py,
+  # DEFAULT_CAP_SECONDS) that ends it at least 30 s before the shards and coverage do. The
+  # head commit salts the seeds and where each round of tests starts, so a PR too large
+  # for one push's cap gets its other tests explored on later pushes; the job summary lists
+  # what the cap left out. A PR that touches no test pays for the checkout and a
+  # stdlib-only diff scan only (no environment setup). Merge queue entries only: the commit
+  # stage of a pull request leaves it to the full stage, which explores the change the queue
+  # is about to merge, against the main the queue branched from.
   seed-exploration:
     needs: changes
-    if: github.event_name == 'pull_request' && needs.changes.outputs.python == 'true'
+    if: github.event_name == 'merge_group' && needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A backstop only: the cap ends the exploration step after 150 s.
+    timeout-minutes: 6
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          filter: blob:none
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Select the tests this pull request adds or changes
         id: select
-        run: python3 scripts/explore_changed_tests.py select --base "origin/${{ github.base_ref }}" --ids-file "$RUNNER_TEMP/changed-tests.txt"
+        run: python3 scripts/explore_changed_tests.py select --base "${{ github.event.merge_group.base_sha }}" --ids-file "$RUNNER_TEMP/changed-tests.txt"
 
       - name: Install uv
         if: steps.select.outputs.selected == 'true'
@@ -722,7 +1262,9 @@ jobs:
 
       - name: Explore the changed tests across seeds and schedules
         if: steps.select.outputs.selected == 'true'
-        run: uv run --no-sync python scripts/explore_changed_tests.py run --ids-file "$RUNNER_TEMP/changed-tests.txt"
+        env:
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: uv run --no-sync python scripts/explore_changed_tests.py run --ids-file "$RUNNER_TEMP/changed-tests.txt" --salt "$HEAD_SHA"
 
   # Exercises the real Linux workspace-confinement boundary (issue #149). The
   # main `test` job skips these (no bubblewrap), so this job installs it and
@@ -730,27 +1272,43 @@ jobs:
   # broken sandbox into a failure instead of a silent skip.
   sandbox-linux:
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Bounded for the same reason as the containment-dependency install in
-      # `queue-native`: this apt install intermittently hangs on these runners
-      # instead of failing, and an unbounded step reports nothing while it
-      # burns the job's budget.
-      - name: Install bubblewrap
-        timeout-minutes: 10
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
+
+      - name: Install bubblewrap and the user D-Bus session
+        timeout-minutes: 3
+        uses: ./.github/actions/setup-runner-apt
+        with:
+          packages: bubblewrap dbus-user-session
+
+      - name: Enable runner user namespaces
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
           # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor;
           # relax it so bwrap can create the namespace on the runner.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+
+      # The control-socket reachability suite probes the user's D-Bus and the
+      # Docker socket, and under VIBESYS_REQUIRE_SANDBOX_TESTS=1 a missing one
+      # fails it. A runner has no login session, so start the user manager,
+      # which serves /run/user/<uid>/bus.
+      - name: Start the runner's user D-Bus
+        timeout-minutes: 2
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          bus="/run/user/$(id -u)/bus"
+          for _ in $(seq 1 60); do test -S "$bus" && break; sleep 1; done
+          test -S "$bus"
+          test -S /var/run/docker.sock
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -764,13 +1322,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
-      - name: Run workspace-confinement tests
+      - name: Run workspace-confinement and host process-wait tests
         run: ./support/repoctl/repoctl run-checks --group sandbox_tests
 
   # macOS counterpart of sandbox-linux: exercises the Seatbelt confinement
@@ -779,11 +1334,18 @@ jobs:
   # run (and fail loudly) rather than skip.
   sandbox-macos:
     needs: changes
-    if: needs.changes.outputs.python == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.python == 'true'
     runs-on: macos-latest
+    timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -797,13 +1359,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
-      - name: Run workspace-confinement tests
+      - name: Run workspace-confinement and host process-wait tests
         run: ./support/repoctl/repoctl run-checks --group sandbox_tests
 
   # The real-Slurm tier (issue #1732): the `slurm` and `slurm-gpu` run environments
@@ -814,19 +1373,31 @@ jobs:
   # lives on the runner's local disk.
   real-tiers-slurm:
     needs: changes
-    if: needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group'
+    if: >-
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group')
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       # The host-side job confinement the tier exercises needs bubblewrap; see
       # the sandbox-linux job for why the AppArmor userns restriction is lifted.
       - name: Install bubblewrap
+        timeout-minutes: 3
+        uses: ./.github/actions/setup-runner-apt
+        with:
+          packages: bubblewrap
+
+      - name: Enable runner user namespaces
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Install uv
@@ -841,17 +1412,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       # Same Docker layer cache as `agent-image` (scripts/ci_docker_data_root.sh),
       # keyed on this tier's image inputs and the ISO week (floating base images).
       - name: Compute the Docker layer cache key
         id: docker-cache-week
-        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/docker-cache-week
 
       - name: Restore Docker layer cache
         id: docker-cache
@@ -859,6 +1427,9 @@ jobs:
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
           key: real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('tests/slurm_cluster/image/**', 'tests/slurm_cluster/cluster.py', 'tests/slurm_cluster/harness.py', 'scripts/run_slurm_cluster_tests.sh', 'scripts/ci_docker_data_root.sh') }}
+          restore-keys: |
+            real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.week }}-
+            real-tiers-slurm-docker-${{ steps.docker-cache-week.outputs.previous }}-
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
@@ -869,11 +1440,11 @@ jobs:
         run: ./support/repoctl/repoctl run-checks --group slurm_cluster_tests
 
       - name: Snapshot Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true'
+        if: github.event_name == 'push' && steps.docker-cache.outputs.cache-hit != 'true'
         run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
 
       - name: Save Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true'
+        if: github.event_name == 'push' && steps.docker-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
@@ -885,12 +1456,23 @@ jobs:
   # ROCm bases are about 25 GB each to pull.
   real-tiers-minimal-container:
     needs: changes
-    if: needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group'
+    if: >-
+      github.event_name != 'pull_request' &&
+      (needs.changes.outputs.real_tiers == 'true' || github.event_name == 'merge_group')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     timeout-minutes: 20
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -904,24 +1486,32 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
 
-      - name: Set up Go for repoctl
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: support/repoctl/go.mod
-          cache-dependency-path: support/repoctl/go.sum
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
 
       # Same Docker layer cache as `agent-image` (scripts/ci_docker_data_root.sh),
-      # keyed on this tier's image inputs and the ISO week (floating base images).
-      - name: Compute the Docker layer cache key
-        id: docker-cache-week
-        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      # keyed on install inputs and resolved base digests, including floating bases.
+      - name: Resolve the image cache's base digests
+        id: image-bases
+        run: |
+          cpu=$(uv run python -c 'from vs_sandbox.api import ComputeBackend, backend_default_image; print(backend_default_image(ComputeBackend.CPU))')
+          cpu_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cpu" --format '{{.Manifest.Digest}}')
+          uid_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect ubuntu:24.04 --format '{{.Manifest.Digest}}')
+          [[ "$cpu_digest" =~ ^sha256:[0-9a-f]{64}$ && "$uid_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          cli_base=$(awk '$1 == "FROM" {print $2}' libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/Dockerfile)
+          cli_digest=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cli_base" --format '{{.Manifest.Digest}}')
+          [[ "$cli_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "digest=$(printf '%s\n' "$cpu_digest" "$uid_digest" "$cli_digest" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: ./.github/actions/docker-image-cache
         with:
+          mode: restore
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: real-tiers-minimal-container-docker-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/images.py', 'scripts/run_minimal_container_tests.sh', 'scripts/ci_docker_data_root.sh') }}
+          key: real-tiers-minimal-container-docker-v2-${{ steps.image-bases.outputs.digest }}-${{ hashFiles('libs/vs-sandbox/src/vs_sandbox/feature_image.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'libs/vs-sandbox/src/vs_sandbox/toolchain_features.py', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-agent/src/vs_agent/provider_policy.py', 'libs/vs-agent/src/vs_agent/agent_feature.py', 'libs/vs-runtime/src/vs_runtime/_image_features.py', 'libs/vs-runtime/src/vs_runtime/_run_environment.py', 'libs/vs-agent/src/vs_agent/images.py', 'scripts/run_minimal_container_tests.sh', 'tests/minimal_container/editor.py', 'tests/minimal_container/conftest.py', 'scripts/ci_docker_data_root.sh', 'scripts/ci_image_cache.py', 'scripts/ci_registry_image_cache.sh', '.github/actions/docker-image-cache/action.yml', '.github/workflows/test.yml') }}
+          restore-keys: |
+            real-tiers-minimal-container-docker-v2-${{ steps.image-bases.outputs.digest }}-
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
@@ -930,31 +1520,42 @@ jobs:
         env:
           VIBESYS_MINIMAL_CONTAINER_DIR: ${{ runner.temp }}/minimal-container
           VIBESYS_MINIMAL_CONTAINER_BASES: cpu,ubuntu-uid-1000
-        run: ./support/repoctl/repoctl run-checks --group minimal_container_tests
+        run: |
+          docker image ls --filter 'reference=vibesys-agent-build:*' --format '{{.Repository}}:{{.Tag}}' > "$RUNNER_TEMP/image-cache-sources"
+          cache_sources=()
+          while IFS= read -r image; do
+            cache_sources+=(--image-cache-from "$image")
+          done < "$RUNNER_TEMP/image-cache-sources"
+          ./scripts/run_minimal_container_tests.sh "${cache_sources[@]}"
 
       - name: Snapshot Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true'
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
 
       - name: Save Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: ./.github/actions/docker-image-cache
         with:
+          mode: save
           path: ${{ runner.temp }}/docker-data.tar.zst
           key: ${{ steps.docker-cache.outputs.cache-primary-key }}
+          restore-keys: real-tiers-minimal-container-docker-v2-${{ steps.image-bases.outputs.digest }}-
 
   # Runs `devcontainer features test` for every VibeSys Feature on one base per
   # family the product runs on: Debian (the CPU base), ROCm Ubuntu, and CUDA
   # Ubuntu. The product's real GPU bases (rocm/pytorch is 23 GB compressed,
   # nvcr.io pytorch 25 GB) cannot be pulled inside the budget, so each family is
   # represented by a small official image of the same distribution and package
-  # manager; the real bases are built by hand (docs/contributing/devcontainer-features.md).
-  # Docker's own storage is cached between runs like `agent-image`, so an
-  # unchanged Feature costs a layer-cache check.
+  # manager; the real bases are built by hand (libs/vs-sandbox/src/vs_sandbox/features/README.md).
+  # Docker's own storage is cached by install inputs and resolved base digests.
+  # Every successful event saves missing entries, including PRs and merge groups.
   feature-tests:
     needs: changes
-    if: needs.changes.outputs.agent_image == 'true'
+    if: github.event_name != 'pull_request' && needs.changes.outputs.agent_image == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     timeout-minutes: 10
     strategy:
       fail-fast: false
@@ -970,37 +1571,68 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Compute the Docker layer cache key
-        id: docker-cache-week
-        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+      - name: Resolve the image cache's base digests
+        id: image-bases
+        env:
+          BASE_IMAGE: ${{ matrix.base }}
+        run: |
+          base=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$BASE_IMAGE" --format '{{.Manifest.Digest}}')
+          cli_base=$(awk '$1 == "FROM" {print $2}' libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/Dockerfile)
+          cli=$(timeout --kill-after=5s 60s docker buildx imagetools inspect "$cli_base" --format '{{.Manifest.Digest}}')
+          [[ "$base" =~ ^sha256:[0-9a-f]{64}$ && "$cli" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "digest=$(printf '%s\n' "$base" "$cli" "$(sha256sum libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/UbuntuMirror.Dockerfile scripts/ci_ubuntu_mirror.py)" | sha256sum | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Restore Docker layer cache
         id: docker-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: ./.github/actions/docker-image-cache
         with:
+          mode: restore
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'scripts/ci_docker_data_root.sh') }}
+          key: feature-tests-${{ matrix.family }}-v2-${{ steps.image-bases.outputs.digest }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'scripts/ci_docker_data_root.sh', 'scripts/ci_ubuntu_mirror.py', 'libs/vs-sandbox/src/vs_sandbox/feature_dockerfile.py', 'scripts/ci_image_cache.py', 'scripts/ci_registry_image_cache.sh', '.github/actions/docker-image-cache/action.yml', '.github/workflows/test.yml') }}
+          restore-keys: |
+            feature-tests-${{ matrix.family }}-v2-${{ steps.image-bases.outputs.digest }}-
 
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
 
+      # ROCm's default archives completed cold package installs in seconds; the
+      # runner mirror stalled twice. CUDA passed with the runner mirror.
+      - name: Use the runner's Ubuntu archive mirror
+        if: matrix.family == 'cuda-ubuntu'
+        env:
+          BASE_IMAGE: ${{ matrix.base }}@${{ steps.image-bases.outputs.base }}
+        run: |
+          if docker image inspect vibesys-feature-base:ci >/dev/null 2>&1; then exit 0; fi
+          mirror=$(python3 scripts/ci_ubuntu_mirror.py)
+          echo "Feature apt mirror: ${mirror}"
+          docker build --tag vibesys-feature-base:ci \
+            --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+            --build-arg "UBUNTU_MIRROR=${mirror}" \
+            --file libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/UbuntuMirror.Dockerfile \
+            libs/vs-sandbox/src/vs_sandbox/devcontainer-cli
+
       - name: Test every Feature on ${{ matrix.base }}
+        env:
+          FEATURE_BASE: ${{ matrix.family == 'cuda-ubuntu' && 'vibesys-feature-base:ci' || format('{0}@{1}', matrix.base, steps.image-bases.outputs.base) }}
         run: >-
-          libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/test_features.sh "${{ matrix.base }}"
+          libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/test_features.sh "$FEATURE_BASE"
           libs/vs-sandbox/src/vs_sandbox/features
           libs/vs-agent/src/vs_agent/images/features
           libs/vs-runtime/src/vs_runtime/features
 
       - name: Snapshot Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true'
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         run: ./scripts/ci_docker_data_root.sh snapshot "${{ runner.temp }}/docker-data.tar.zst"
 
       - name: Save Docker layer cache
-        if: steps.docker-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'merge_group' && steps.docker-cache.outputs.cache-hit != 'true' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: ./.github/actions/docker-image-cache
         with:
+          mode: save
           path: ${{ runner.temp }}/docker-data.tar.zst
           key: ${{ steps.docker-cache.outputs.cache-primary-key }}
+          restore-keys: feature-tests-${{ matrix.family }}-v2-${{ steps.image-bases.outputs.digest }}-
 
   # One stable, always-present result for branch protection and delegated merge
   # policy. Filtered jobs may skip, but every job that ran must succeed. Keep
@@ -1010,22 +1642,32 @@ jobs:
     needs:
       - changes
       - doc-checks
+      - history-checks
       - python-checks
+      - python-guards
       - typecheck
-      - tui-quality
-      - tui-tests
-      - tui-build
-      - tui-e2e
+      - test-impact
+      - clients-quality
+      - clients-tests
+      - clients-build
+      - clients-e2e
       - queue-native
+      - stitch
       - impact-tool
+      - gateway
+      - cli
+      - orchestrator
+      - desktop-path
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
+      - example-dockerfiles
       - agent-image
       - feature-tests
       - real-tiers-slurm
       - real-tiers-minimal-container
       - test
+      - classify-failures
       - record-durations
       - coverage
       - seed-exploration
@@ -1033,6 +1675,7 @@ jobs:
       - sandbox-macos
     if: always()
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
 
     steps:
       - name: Require every applicable test job to succeed
@@ -1053,7 +1696,8 @@ jobs:
           PY
 
   # Reports the run's execution time against CI_WALL_TIME_WARN_SECONDS and
-  # CI_WALL_TIME_ERROR_SECONDS (issue #474). Over the warn threshold it
+  # CI_WALL_TIME_ERROR_SECONDS (issue #474), or against the CI_COMMIT_STAGE_* pair when the
+  # run is a pull request's commit stage. Over the warn threshold it
   # annotates the run; over the error threshold the job fails, so a slow run is
   # visibly red instead of a green run nobody inspects. It is not a required
   # check (Required PR CI does not need it), so a slow run is still mergeable.
@@ -1062,32 +1706,47 @@ jobs:
   # can push a run over for reasons no workflow change can fix. Elapsed and
   # queue time stay in the summary and the annotation.
   #
+  # `seed-exploration` and `doc-checks` are in `needs` so their time counts: a job
+  # still running when this one starts drops out of the math, which is how a
+  # 10-minute seed exploration once reported as a 262 s run.
+  #
   # `typecheck` is deliberately absent from `needs`; Required PR CI owns that
   # dependency. It still appears in the table because this step reads every job
   # of the run from the API, not just the ones listed here.
   ci-budget:
     needs:
       - changes
+      - doc-checks
+      - history-checks
       - python-checks
-      - tui-quality
-      - tui-tests
-      - tui-build
-      - tui-e2e
+      - python-guards
+      - test-impact
+      - clients-quality
+      - clients-tests
+      - clients-build
+      - clients-e2e
       - queue-native
       - impact-tool
+      - gateway
+      - cli
+      - orchestrator
+      - desktop-path
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
+      - example-dockerfiles
       - agent-image
       - feature-tests
       - real-tiers-slurm
       - real-tiers-minimal-container
       - test
       - coverage
+      - seed-exploration
       - sandbox-linux
       - sandbox-macos
     if: always()
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       actions: read
       contents: read
@@ -1105,8 +1764,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-          WARN_SECONDS: ${{ env.CI_WALL_TIME_WARN_SECONDS }}
-          ERROR_SECONDS: ${{ env.CI_WALL_TIME_ERROR_SECONDS }}
+          WARN_SECONDS: ${{ github.event_name == 'pull_request' && env.CI_COMMIT_STAGE_WARN_SECONDS || env.CI_WALL_TIME_WARN_SECONDS }}
+          ERROR_SECONDS: ${{ github.event_name == 'pull_request' && env.CI_COMMIT_STAGE_ERROR_SECONDS || env.CI_WALL_TIME_ERROR_SECONDS }}
         run: |
           set -euo pipefail
           # This job is still running, so its own row has an empty

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import REAL_GIT
 
 from vs_project.api import CliGitRepository, NullGitTrackerEvents, Pygit2GitRepository
 from vs_project.api.testing import ContractProject, FakeGitRepositories
@@ -24,11 +25,11 @@ if TYPE_CHECKING:
 
 
 def _cli(root: Path) -> GitRepository:
-    return CliGitRepository(root, faults=NullGitTrackerEvents())
+    return CliGitRepository(root, git=REAL_GIT, faults=NullGitTrackerEvents())
 
 
 def _pygit2(root: Path) -> GitRepository:
-    return Pygit2GitRepository(root, faults=NullGitTrackerEvents())
+    return Pygit2GitRepository(root, git=REAL_GIT, faults=NullGitTrackerEvents())
 
 
 IMPLEMENTATIONS: dict[str, RepositoryFactory] = {

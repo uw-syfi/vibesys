@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ._adoption import view as adoption_view
+from ._operator_actions import parallel_limit
 from ._request_ledger import next_retry_at
-from ._request_recovery import next_reconciliation_at
 from .types.common import ChargeKind
 from .types.kernel import CoreState, CoreView, RunSummary
 from .types.records import (
@@ -14,23 +14,24 @@ from .types.records import (
     OperationView,
     RecordsState,
     Request,
-    RequestPhase,
+    phase_open,
 )
 from .types.scheduling import SchedulingState, SchedulingView
 from .types.sessions import SessionProjection
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptsState, AttemptView
-    from .types.common import Limits
     from .types.evaluation import EvaluationState, EvidenceRef
+    from .types.kernel import RunState
     from .types.sessions import SessionsState
     from .types.settlement import Settlement, SettlementState
 
 
 def scheduling_view(
-    state: SchedulingState, limits: Limits, attempts: AttemptsState, now_at: float
+    state: SchedulingState, run: RunState, attempts: AttemptsState
 ) -> SchedulingView:
-    """Derive admission capacity from authoritative slots and paid bounds."""
+    """Derive admission capacity from authoritative slots, paid bounds and the parallel limit."""
+    limits, now_at = run.limits, run.now_at
     receipts = tuple(
         receipt
         for attempt in attempts.attempts
@@ -40,7 +41,7 @@ def scheduling_view(
     charged = sum(receipt.charged for receipt in receipts)
     refunded = sum(receipt.refunded for receipt in receipts)
     remaining = max(0, limits.max_attempts - charged + refunded)
-    available = min(max(0, limits.max_parallel - len(state.slots)), remaining)
+    available = min(max(0, parallel_limit(run) - len(state.slots)), remaining)
     return SchedulingView(
         queue=state.queue,
         slots=state.slots,
@@ -94,11 +95,11 @@ def evidence_view(state: EvaluationState) -> tuple[EvidenceRef, ...]:
 
 
 def next_observe_at(state: EvaluationState) -> float | None:
-    """The earliest scheduled poll time, so the run loop can sleep until it."""
+    """The earliest timer a job waits on, so the run loop can sleep until it."""
     due = tuple(
-        job.pacing.next_at
+        job.wait.timer
         for job in (*state.jobs, *state.registered_jobs)
-        if job.pacing.next_at is not None
+        if job.wait is not None and job.wait.timer is not None
     )
     return min(due) if due else None
 
@@ -115,9 +116,7 @@ def settlement_view(state: SettlementState) -> tuple[Settlement, ...]:
 
 def pending_requests(state: RecordsState) -> tuple[Request, ...]:
     """The durable outbox; this does not authorize external dispatch."""
-    return tuple(
-        record.request for record in state.records if record.phase != RequestPhase.COMPLETED
-    )
+    return tuple(record.request for record in state.records if phase_open(record.phase))
 
 
 def project(state: CoreState) -> CoreView:
@@ -149,7 +148,7 @@ def project(state: CoreState) -> CoreView:
         facts=run.facts,
         capabilities=run.capabilities,
         limits=run.limits,
-        scheduling=scheduling_view(state.scheduling, run.limits, state.attempts, run.now_at),
+        scheduling=scheduling_view(state.scheduling, run, state.attempts),
         attempts=attempt_view(state.attempts),
         sessions=session_view(state.sessions),
         inputs=state.sessions.inputs,
@@ -161,7 +160,6 @@ def project(state: CoreState) -> CoreView:
         adoption=adoption_view(state.settlement, state.records),
         next_observe_at=_earliest(
             next_observe_at(state.evaluation),
-            next_reconciliation_at(state.records),
             next_retry_at(state.records),
         ),
     )

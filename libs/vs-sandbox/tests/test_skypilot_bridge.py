@@ -16,7 +16,8 @@ Guarantees under test (``vs_sandbox.api.skypilot.SkyPilotBridge``):
 * An unresolved prior attempt is never resubmitted; infrastructure retries are
   bounded by the persisted attempt count.
 * Closing cancels every in-flight job (including one discovered mid-close),
-  releases every touched cluster exactly once, logs failures and continues, and
+  releases every touched cluster, logs failures and continues; a cluster whose
+  release failed makes close raise and is released again by the next close; and
   the bridge cannot be restarted.
 * The one real-socket test pins the filesystem contract: the socket file is
   owner-only and removed on close.
@@ -68,16 +69,19 @@ from vs_sandbox.api.skypilot import (
     decode_response,
     encode_message,
 )
-from vs_sim.api import ProcessTimeoutError, Threads
-from vs_sim.api.testing import HANG_GUARD_S, FakePipedProcessLauncher, SimThreads
+from vs_sim.api import NotReleasedError, ProcessTimeoutError, Threads
+from vs_sim.api.testing import HANG_GUARD_S, FakePipedProcessLauncher, SimNetwork, SimThreads
 
 from .skypilot_world import MemoryTransport
 
+# The scripted bridge runs on a thread: an exception there must fail the test, not warn.
+pytestmark = pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
+
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Coroutine, Sequence
 
     from vs_sandbox.api.skypilot import RemoteJobInfo
-    from vs_sim.api import Condition, Connection, Event, Listener, Lock, Worker
+    from vs_sim.api import Condition, Connection, Event, Listener, Lock, ThreadLocal, Worker
 
 
 @pytest.fixture
@@ -117,6 +121,8 @@ class FakeRunner(SkyPilotJobRunner):
         self.workdirs: list[Path] = []
         self.commands: list[tuple[str, ...]] = []
         self.cluster_life: ClusterLife | None = ClusterUp()
+        self.before_start: Callable[[], None] = lambda: None
+        """Runs before the job starts, as a remote queue or a launch would delay it."""
 
     def ensure_cluster(
         self,
@@ -166,6 +172,7 @@ class FakeRunner(SkyPilotJobRunner):
         assert not (workdir / "private").exists()
         assert (workdir / "candidate.py").read_text() == "candidate"
         assert (workdir / ".vibesys-evaluator-package" / "checker.py").exists()
+        self.before_start()
         job_started(9)
         artifact_script = next(
             (argument for argument in command if "__VIBESYS_SKYPILOT_ARTIFACT_BEGIN_" in argument),
@@ -225,11 +232,17 @@ class _RecordingThreads:
     def event(self) -> Event:
         return self._threads.event()
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        return self._threads.local(initial)
+
     def sleep(self, seconds: float) -> None:
         self._threads.sleep(seconds)
 
     def now(self) -> float:
         return self._threads.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        return self._threads.run_async(main)
 
     def run[T](self, main: Callable[[], T]) -> T:
         return self._threads.run(main)
@@ -243,8 +256,8 @@ class _BlockedBridgeConnection:
         self.send_started = threads.event()
         self.closed = threads.event()
 
-    def send(self, data: bytes) -> None:
-        del data
+    def send(self, data: bytes, timeout: float | None = None) -> None:
+        del data, timeout
         self.send_started.set()
         if not self.closed.wait(timeout=1):
             raise AssertionError
@@ -317,6 +330,10 @@ class _TimeoutAfterBridgeWriteProcess:
     def kill_group(self) -> None:
         self.group_kills += 1
 
+    def terminate_group(self) -> None:
+        """These runners stop a process group only with SIGKILL."""
+        raise AssertionError
+
     def cancel_output(self) -> None:
         pass
 
@@ -333,7 +350,7 @@ class _BlockingBridgeRunner(FakeRunner):
         self.finished = threads.event()
         self._command = SubprocessCommandRunner(
             threads,
-            processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+            processes=FakePipedProcessLauncher(lambda _start: process),
             cleanup_timeout=1,
         )
 
@@ -1355,10 +1372,39 @@ def test_bridge_close_logs_failed_cancel_and_release_and_continues(
     bridge.start()
     _private(bridge, "_active_jobs").add(("lease", 3))
 
-    bridge.close()
+    with pytest.raises(NotReleasedError, match="lease"):
+        bridge.close()
 
     assert "[warn] SkyPilot job cancellation failed: RuntimeError" in logs
     assert "[warn] SkyPilot allocation release failed: OSError" in logs
+
+
+@pytest.mark.parametrize("failures", [1, 2])
+def test_a_cluster_whose_release_failed_is_released_again_on_the_next_close(
+    tmp_path: Path, transport: MemoryTransport, failures: int
+) -> None:
+    """Regression: a failed release was logged and the bridge latched closed, leaking the cluster."""
+
+    class FlakyRelease(FakeRunner):
+        def release(self, cluster_name: str, *, timeout: float = 60) -> None:
+            super().release(cluster_name, timeout=timeout)
+            if cluster_name == "old-lease" and self.release_names.count(cluster_name) <= failures:
+                message = "sky down was killed"
+                raise OSError(message)
+
+    runner = FlakyRelease()
+    bridge = _bridge(tmp_path, transport, runner)
+    bridge.start()
+    _private(bridge, "_touched_clusters").add("old-lease")
+
+    for _ in range(failures):
+        with pytest.raises(NotReleasedError, match="old-lease"):
+            bridge.close()
+    bridge.close()
+    bridge.close()
+
+    assert runner.release_names.count("old-lease") == failures + 1
+    assert runner.release_names.count("lease") == 1
 
 
 def test_handler_reports_value_error_frame_once_shutdown_has_started(
@@ -1663,3 +1709,72 @@ def test_a_unix_socket_bridge_serves_an_evaluation_with_a_private_socket_file(
         assert not socket_path.exists()
     finally:
         shutil.rmtree(short_dir, ignore_errors=True)
+
+
+@pytest.mark.parametrize("extra", [b"", b"x", b"more than nothing\n"], ids=["none", "byte", "line"])
+def test_a_client_that_sent_extra_bytes_and_hung_up_is_seen_disconnected(
+    tmp_path: Path, extra: bytes
+) -> None:
+    """Bytes a client leaves unread after its request cannot hide its hangup.
+
+    The monitor asked ``peer_closed``, which is false while unread data
+    remains, so a client that wrote anything past its request and then hung
+    up was never seen as gone (the flaw #2323 fixed in the Unix transport).
+    """
+    threads = SimThreads(schedule_seed=0)
+    logs: list[str] = []
+    socket_path = Path(tempfile.mkdtemp(prefix="vs-sky-")) / "bridge.sock"
+
+    def main() -> None:
+        network = SimNetwork(threads)
+        workspace, package = _staging_fixture(tmp_path)
+        runner = FakeRunner()
+        runner.before_start = lambda: threads.sleep(5.0)
+        bridge = SkyPilotBridge(
+            runner=runner,
+            cluster_name="lease",
+            resources=_resources(),
+            workspace=workspace,
+            evaluator_package_root=package,
+            hidden_paths=(Path("private"),),
+            commands={"benchmark": ("python", ".vibesys-evaluator-package/checker.py")},
+            benchmark_output_argument="--output-json",
+            state_namespace=_namespace(tmp_path),
+            socket_path=socket_path,
+            network=network,
+            threads=threads,
+            log=logs.append,
+        )
+        bridge.start()
+        try:
+            client = network.connect(str(socket_path), HANG_GUARD_S)
+            request = EvaluationRequest(kind="benchmark", invocation_id="2" * 32)
+            client.send(encode_message(request))
+            threads.sleep(1.0)  # the bridge has read the request and is running it
+            if extra:
+                client.send(extra)
+            client.close()
+            threads.sleep(30.0)
+        finally:
+            bridge.close()
+
+    threads.run(main)
+    assert any("client disconnected" in line for line in logs), logs
+
+
+def test_the_bridge_journals_the_step_of_an_evaluation_and_the_tag_is_not_part_of_its_identity(
+    tmp_path: Path, transport: MemoryTransport
+) -> None:
+    bridge = _bridge(tmp_path, transport)
+    bridge.start()
+    try:
+        tagged = EvaluationRequest(kind="accuracy", invocation_id="7" * 32, step_tag="step-a")
+        first = transport.evaluate(bridge, tagged)
+        again = transport.evaluate(bridge, tagged.model_copy(update={"step_tag": "step-b"}))
+    finally:
+        bridge.close()
+
+    record = InvocationJournal(_namespace(tmp_path)).load("7" * 32)
+    assert record is not None
+    assert record.step_tag == "step-a"
+    assert [frame.type for frame in first] == [frame.type for frame in again]

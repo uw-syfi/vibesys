@@ -1,1 +1,1 @@
-"""Process entrypoints that compose the VibeSys core and presentation server."""
+"""Process entrypoints for Python runs and standalone tools."""

@@ -19,6 +19,7 @@ from vibesys.events import (
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
+    TurnUsageData,
     UsageUpdateData,
 )
 from vibesys.run import CoreAgentEventSink, EventJournal
@@ -26,20 +27,23 @@ from vs_agent.api import (
     AgentEventSink,
     AgentQuotaError,
     AgentRateLimit,
+    AgentUsage,
     Attribution,
+    CostBasis,
     ProviderSwitch,
     QuotaCondition,
     QuotaPlan,
 )
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 def _attached_sink(tmp_path: Path, run_id: str) -> tuple[EventJournal, CoreAgentEventSink]:
-    journal = EventJournal()
+    journal = EventJournal(clock=ManualClock(), threads=SimThreads())
     journal.attach(tmp_path / run_id, run_id)
-    return journal, CoreAgentEventSink(journal.record)
+    return journal, CoreAgentEventSink(journal.record, clock=ManualClock())
 
 
 def test_adapter_implements_public_agent_event_sink(tmp_path: Path) -> None:
@@ -140,6 +144,17 @@ def test_explicit_tool_result_payload_is_preserved(tmp_path: Path) -> None:
     assert event.data.is_error is True
 
 
+def test_a_tool_result_nested_past_the_recursion_limit_is_kept_as_text(tmp_path: Path) -> None:
+    journal, sink = _attached_sink(tmp_path, "run-1")
+    content = "[" * 100_000 + "]" * 100_000
+
+    sink.tool_result("shell", content)
+
+    event = journal.read()[0]
+    assert isinstance(event.data, ToolResultData)
+    assert event.data.payload is None
+
+
 def test_adapters_are_isolated_by_their_injected_run_journals(tmp_path: Path) -> None:
     first_journal, first_sink = _attached_sink(tmp_path, "run-1")
     second_journal, second_sink = _attached_sink(tmp_path, "run-2")
@@ -155,6 +170,44 @@ def test_adapters_are_isolated_by_their_injected_run_journals(tmp_path: Path) ->
     assert [event.run_id for event in first_journal.read()] == ["run-1", "run-1"]
     assert [event.type for event in second_journal.read()] == [CoreEventType.AGENT_OUTPUT_CHUNK]
     assert [event.run_id for event in second_journal.read()] == ["run-2"]
+
+
+def test_a_finished_turn_s_settled_usage_is_recorded_with_routing_metadata(
+    tmp_path: Path,
+) -> None:
+    journal, sink = _attached_sink(tmp_path, "run-1")
+    usage = AgentUsage(
+        input_tokens=1234,
+        cache_creation_input_tokens=56,
+        cache_read_input_tokens=78,
+        output_tokens=90,
+        total_cost_usd=0.42,
+        duration_ms=1500,
+    )
+
+    sink.turn_usage_recorded(
+        usage,
+        agent_kind="implementer",
+        round_label="round-2",
+        invocation_id="invocation-7",
+    )
+
+    (event,) = journal.read()
+    assert event.type is CoreEventType.TURN_USAGE_RECORDED
+    assert event.agent_kind == "implementer"
+    assert event.round_label == "round-2"
+    assert event.execution_id == "invocation-7"
+    assert event.data == TurnUsageData(
+        input_tokens=1234,
+        cache_creation_input_tokens=56,
+        cache_read_input_tokens=78,
+        output_tokens=90,
+        total_cost_usd=0.42,
+        duration_ms=1500,
+        # A usage that names no basis is recorded as not reported, never as null: null on a stored
+        # line means only that it was written before the field existed.
+        cost_basis=CostBasis.NOT_REPORTED,
+    )
 
 
 def test_a_rate_limit_report_is_recorded_with_its_resolved_exhaustion(tmp_path: Path) -> None:
@@ -188,8 +241,8 @@ def test_a_quota_pause_and_its_resolutions_are_recorded_with_the_provider_diagno
 
     error = AgentQuotaError("claude", QuotaCondition.RATE_LIMITED, "429 too many", 1.5e9)
     sink.quota_paused(error, QuotaPlan("fallback", 1.6e9, "codex", "gpt-5"), where)
-    sink.quota_resumed("claude", "wait_elapsed", where)
-    sink.quota_abandoned(error, "policy", Attribution("implementer"))
+    sink.quota_resumed(error, "wait_elapsed", 90.0, where)
+    sink.quota_abandoned(error, "policy", 30.0, Attribution("implementer"))
     sink.provider_switched(
         ProviderSwitch("claude", "codex", "gpt-5", "operator", "the operator resumed"), where
     )
@@ -212,9 +265,15 @@ def test_a_quota_pause_and_its_resolutions_are_recorded_with_the_provider_diagno
         fallback_provider="codex",
         fallback_model="gpt-5",
     )
-    assert resumed.data == QuotaResumedData(provider="claude", reason="wait_elapsed")
+    assert resumed.data == QuotaResumedData(
+        provider="claude", condition="rate_limited", reason="wait_elapsed", waited_seconds=90.0
+    )
     assert abandoned.data == QuotaAbandonedData(
-        provider="claude", condition="rate_limited", detail="429 too many", reason="policy"
+        provider="claude",
+        condition="rate_limited",
+        detail="429 too many",
+        reason="policy",
+        waited_seconds=30.0,
     )
     assert switched.data == ProviderSwitchedData(
         from_provider="claude",

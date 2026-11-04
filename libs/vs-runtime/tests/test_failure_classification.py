@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -61,6 +61,9 @@ _GENERIC_CANDIDATE_LOGS = (
     "HIP error: out of memory",
     "OSError: [Errno 12] Cannot allocate memory",
     "error: unrecognized arguments: --max-batch 99",
+    "/cluster/work/venv/bin/python: Error while finding module specification for "
+    "'engine.server' (ModuleNotFoundError: No module named 'engine')",
+    "ModuleNotFoundError: No module named 'triton_kernels'",
 )
 # What one task's server prints: only that task's domain can say so.
 _TASK_LOGS = (
@@ -71,11 +74,20 @@ _TASK_CAUSES = (
     r"no available memory for the cache blocks",
     r"larger than the maximum number of tokens that can be stored in kv cache",
 )
+# One line per node-fault signature the classifier knows, in the case a log may print it.
 _NODE_LOGS = (
     "HSA_STATUS_ERROR_OUT_OF_RESOURCES: hip device lost",
     "OSError: [Errno 5] Input/output error: '/shared/model/model.safetensors'",
     "hipErrorNoDevice: no ROCm-capable device is detected",
+    "RuntimeError: No GPU devices found",
+    "OSError: [Errno 28] No space left on device",
+    "OSError: [Errno 116] Stale file handle",
+    "STALE FILE HANDLE",
+    "OSError: [Errno 107] Transport endpoint is not connected",
 )
+# Filler that no cause or node-fault signature can be spelled from (they all need letters),
+# so it never changes what a log says.
+_NOISE = st.text(alphabet="0123456789 .,:;-_/[]()", max_size=40)
 _OTHER_LOGS = ("", "Traceback (most recent call last):\nKeyError: 'x'", "waiting for the server")
 _CAUSES = st.lists(st.sampled_from(_TASK_CAUSES), unique=True).map(tuple)
 
@@ -88,14 +100,15 @@ def _startup_kind(log: str, causes: tuple[str, ...]) -> set[BenchmarkFailureKind
     return {classify(signal, record) for record in RecordState}
 
 
-@given(log=st.sampled_from(_GENERIC_CANDIDATE_LOGS), noise=st.text(max_size=40), causes=_CAUSES)
-def test_a_server_that_ran_out_of_memory_is_the_candidates_whatever_the_task(
+@given(log=st.sampled_from(_GENERIC_CANDIDATE_LOGS), noise=_NOISE, causes=_CAUSES)
+@example(log=_GENERIC_CANDIDATE_LOGS[4], noise="", causes=())
+def test_a_server_that_died_of_a_fact_true_of_any_process_is_the_candidates_whatever_the_task(
     log: str, noise: str, causes: tuple[str, ...]
 ) -> None:
     assert _startup_kind(f"{noise}\n{log}", causes) == {BenchmarkFailureKind.WORKLOAD}
 
 
-@given(log=st.sampled_from(_TASK_LOGS), noise=st.text(max_size=40))
+@given(log=st.sampled_from(_TASK_LOGS), noise=_NOISE)
 def test_a_task_cause_is_the_candidates_only_when_the_task_names_it(log: str, noise: str) -> None:
     text = f"{noise}\n{log}"
     assert _startup_kind(text, ()) == {BenchmarkFailureKind.AMBIGUOUS}
@@ -129,6 +142,7 @@ def test_a_task_cause_only_adds_to_what_the_generic_facts_say(
     cause=st.sampled_from(_GENERIC_CANDIDATE_LOGS + _TASK_LOGS),
     causes=_CAUSES,
 )
+@example(log="STALE FILE HANDLE", cause=_TASK_LOGS[0], causes=_TASK_CAUSES)
 def test_a_server_that_never_became_ready_without_a_candidate_cause_is_ambiguous(
     log: str, cause: str, causes: tuple[str, ...]
 ) -> None:

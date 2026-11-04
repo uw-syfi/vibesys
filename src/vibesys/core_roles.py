@@ -23,9 +23,12 @@ __all__ = [
     "MEASURING",
     "MEASURING_READER",
     "MEASURING_WRITER",
+    "QUEUE_STATUS_TOOL",
     "READER",
+    "WRITER",
     "RoleKind",
     "core_role",
+    "reading_queue_status",
 ]
 
 # A turn that ends in a reply the host may re-dispatch needs the provider to resume it.
@@ -58,8 +61,23 @@ READER = RoleKind(WorkspaceAccess.READ_ONLY, frozenset())
 CONTINUING_READER = RoleKind(WorkspaceAccess.READ_ONLY, CONTINUATION)
 # A reader that may also submit a measurement of the workspace it reads.
 MEASURING_READER = RoleKind(WorkspaceAccess.READ_ONLY, MEASURING, (EVALUATION_TOOL,))
+# A writer that answers once and commits what it wrote, measuring nothing itself.
+WRITER = RoleKind(WorkspaceAccess.READ_WRITE, frozenset())
 # A writer that may also submit a measurement of the workspace it writes.
 MEASURING_WRITER = RoleKind(WorkspaceAccess.READ_WRITE, MEASURING, (EVALUATION_TOOL,))
+
+# Reads the run's evaluation and agent GPU job queue. Its server holds no run state, so core
+# admits it beside its own writes; reaching the server needs MCP.
+QUEUE_STATUS_TOOL = AgentTool(id="queue_status", stateless=True)
+
+
+def reading_queue_status(kind: RoleKind) -> RoleKind:
+    """``kind``, also given the read-only queue status tool and the MCP capability it needs."""
+    return RoleKind(
+        kind.access,
+        kind.capabilities | {AgentCapability.MCP_SERVERS},
+        (*kind.tools, QUEUE_STATUS_TOOL),
+    )
 
 
 def core_role(

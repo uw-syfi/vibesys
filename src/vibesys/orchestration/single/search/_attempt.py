@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from vibesys.hypothesis import AgentAttribution, HypothesisOutcome, rounds
+from vibesys.hypothesis import AgentAttribution, CandidateDisposition, HypothesisOutcome, rounds
 from vibesys.metrics import MetricRow, reading_of
 from vibesys.orchestration.review import Verdict
 from vibesys.orchestration.single.search._prompts import RoundPrompt
@@ -64,6 +64,8 @@ class SingleAttempt:
     dominated_by: tuple[int, ...] = ()
     official_reason: str | None = None
     readings: tuple[AcceptedReading, ...] = ()
+    measurement_noise: serial.MeasurementNoise | None = None
+    """The noise the latest trusted comparison stated, which the next designer is shown."""
     passed: bool = False
     gate_failed: bool = False
     unmeasured: bool = False
@@ -85,13 +87,11 @@ class SingleAttempt:
             invariants=plan.invariants,
             activation_evidence=plan.activation_evidence,
             falsification_criteria=plan.falsification_criteria,
-            minimum_acceptance_criteria=plan.minimum_acceptance_criteria,
+            minimum_ratio=plan.minimum_ratio,
             base_revision=self.base,
             feedback=self.feedback,
             no_valid_reply=self.no_valid_reply,
             dominated_by_rounds=self.dominated_by,
-            official_due=self.official_reason is not None,
-            official_reason=self.official_reason,
         )
 
     # -- what a turn came to -----------------------------------------------------------------
@@ -112,6 +112,7 @@ class SingleAttempt:
     def replied(self, reply: SingleAgentRoundResponse, revision: RevisionRef | None) -> Next:
         """Judge a valid reply: the Pareto guard, the candidate, then whether the gates are due."""
         hypotheses = self.config.hypotheses
+        self.readings = ()  # a reading is of the candidate it measured, never of a later one
         conflict = rounds.pareto_conflict(hypotheses, self.ledger, reply)
         passing = reply.verdict is Verdict.PASS and conflict is None
         guarded = reply
@@ -133,12 +134,7 @@ class SingleAttempt:
             self.no_valid_reply = "the implementer retained no changed candidate"
             self.feedback = "retained no changed candidate"
             return Next.AGAIN
-        reason = rounds.official_reason(
-            hypotheses,
-            self.ledger,
-            round_number=self.number,
-            requested=self.plan.request_official_evaluation,
-        )
+        reason = rounds.official_reason()
         if reason is None or not self.terms.measured:
             self.passed = True
             self.official_reason = None
@@ -149,8 +145,9 @@ class SingleAttempt:
     def gated(self, result: GateResult) -> Next:
         """Fold the trusted gates: a rejection is feedback, a missing measurement is nobody's fault."""
         match result:
-            case serial.Gated(readings=readings):
+            case serial.Gated(readings=readings, noise=noise):
                 self.readings = readings
+                self.measurement_noise = noise or self.measurement_noise
                 feedback = serial.failed_gate(readings)
                 if feedback is None:
                     self.passed = True
@@ -187,7 +184,19 @@ class SingleAttempt:
             review_passed=self.verdict_pass,
             failure=self.failure,
             passed=self.passed,
+            disposition=CandidateDisposition.UNASSESSED
+            if self.response is None
+            else self.response.candidate_disposition,
         )
+
+    def turned_down(self) -> bool:
+        """Whether the round's own checks turned its work down (`serial_search.turned_down`)."""
+        return serial.turned_down(self.finished(), unsettled=UNSETTLED)
+
+    def reported(self) -> tuple[str | None, str] | None:
+        """The implementer's own account: no outcome (single states none) and its summary."""
+        reply = self.response
+        return None if reply is None else (None, reply.summary)
 
     def asserted(self) -> tuple[RevisionRef | None, Assessment]:
         """What the workspace settles with."""

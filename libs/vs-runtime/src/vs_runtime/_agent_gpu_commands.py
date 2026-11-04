@@ -18,16 +18,19 @@ from vs_agent.api import declare_command_host_resources
 from vs_sandbox.api import HostResource, HostResourceAccess
 from vs_sandbox.api.slurm import (
     AgentGpuLauncher,
+    CappedGpuLauncher,
     GpuCommands,
     HostJobConfinement,
     check_read_only_links,
 )
+from vs_sim.api import ProcessesProbe
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vs_runtime._environment_system import EnvironmentSystem
     from vs_sandbox.api import ProjectPathPolicy
-    from vs_sandbox.api.slurm import AgentGpuConfig, JobConfinement
+    from vs_sandbox.api.slurm import AgentGpuConfig, GpuLauncher, JobConfinement
 
 #: The client's name in the container, whose ``PATH`` finds it.
 AGENT_GPU_LAUNCHER = "vibesys-gpu"
@@ -40,16 +43,15 @@ def agent_gpu_commands(
     *,
     workspace: Path,
     project_path_policy: ProjectPathPolicy,
-    shell_command: Sequence[str],
+    launcher: GpuLauncher,
     confinement: JobConfinement | None = None,
 ) -> GpuCommands:
     """Return what the broker needs to offer the ``gpu`` operation under *config*.
 
     The job confinement is chosen here, explicitly: *confinement*, or by default
     the host sandbox. The job runs on a compute node, where Docker is normally
-    unavailable, whatever the agent itself runs in. *shell_command* is how this
-    host reaches Slurm (the local transport's shell): ``srun`` and ``scancel``
-    run through it, so the operator names the Slurm binaries in one place.
+    unavailable, whatever the agent itself runs in. *launcher* starts each job
+    (:func:`agent_gpu_launcher`).
     """
     host_env = dict(os.environ)
     if confinement is None:
@@ -68,9 +70,32 @@ def agent_gpu_commands(
     # Fail closed now, not at the first GPU command: a host that cannot confine
     # a job must not start a run whose agent can only use GPUs through jobs.
     confinement.wrap(workspace, [])
-    return GpuCommands(
-        config, confinement, host_env, launcher=AgentGpuLauncher(config, shell_command)
+    return GpuCommands(config, confinement, host_env, launcher=launcher)
+
+
+def agent_gpu_launcher(
+    config: AgentGpuConfig, shell_command: Sequence[str], system: EnvironmentSystem
+) -> GpuLauncher:
+    """Return the launcher that runs the agent's GPU commands as Slurm jobs on *system*.
+
+    *shell_command* is how this host reaches Slurm (the local transport's shell):
+    ``srun`` and ``scancel`` run through it, so the operator names the Slurm
+    binaries in one place. ``srun`` starts through *system*'s launcher, and
+    ``scancel`` and the scheduler report through its Slurm processes. With
+    ``max_concurrent_jobs`` set, jobs past the cap wait for a slot; the cap
+    counts the jobs of this launcher, so one launcher serves every session of
+    a run.
+    """
+    launcher = AgentGpuLauncher(
+        config,
+        shell_command,
+        probe=ProcessesProbe(system.slurm_processes),
+        processes=system.launcher,
+        threads=system.threads,
     )
+    if config.max_concurrent_jobs is None:
+        return launcher
+    return CappedGpuLauncher(launcher, config.max_concurrent_jobs, system.threads)
 
 
 def _operator_read_only_resources(config: AgentGpuConfig) -> tuple[HostResource, ...]:

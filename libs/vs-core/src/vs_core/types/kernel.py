@@ -22,13 +22,13 @@ from .common import (
     Count,
     DecisionId,
     EventCursor,
-    HostFence,
     Limits,
     OperationDescriptor,
     RequestId,
     RevisionNumber,
     RunFacts,
     RunId,
+    RunPark,
     RunStatus,
     SchemaRef,
     Seconds,
@@ -39,10 +39,13 @@ from .evaluation import (
     EvaluationEvent,
     EvaluationState,
     EvidenceRef,
+    JobQueued,
     MeasurementResult,
     ResumeAuthorized,
+    ResumeRefused,
     TurnSuspended,
 )
+from .measurement import ComparisonSettled
 from .records import (
     OperationResult,
     OperationView,
@@ -82,6 +85,7 @@ from .settlement import (
     SettlementEvent,
     SettlementState,
 )
+from .steps import StepsState
 from .strategy import (
     Command,
     DecisionFeedback,
@@ -114,8 +118,11 @@ class RunState(Value):
     run_id: RunId
     generation: Count = 0
     status: RunStatus = RunStatus.RUNNING
+    park: RunPark | None = None
     now_at: Seconds
     deadline_at: Seconds
+    duration_seconds: Seconds | None = Field(default=None, gt=0)
+    """Original epoch duration; older records use the supplied run configuration once."""
     facts: RunFacts
     capabilities: Capabilities = Capabilities()
     limits: Limits
@@ -138,6 +145,10 @@ class RunSummary(Value):
     result: RunResultProposal | None
 
 
+NO_STEPS = StepsState()
+"""The steps of a log with none: ``CoreState`` leaves them out of its JSON, so identities hold."""
+
+
 class CoreState(Value):
     """Core state lifecycle contract."""
 
@@ -150,6 +161,10 @@ class CoreState(Value):
     evaluation: EvaluationState = EvaluationState()
     settlement: SettlementState = SettlementState()
     records: RecordsState = RecordsState()
+    steps: StepsState = Field(
+        default=NO_STEPS, exclude_if=lambda value: value is NO_STEPS or value == NO_STEPS
+    )
+    """The attempts the log records, which only the recovery rule's fold writes."""
 
 
 class CoreView(Value):
@@ -170,8 +185,9 @@ class CoreView(Value):
     controls: tuple[ControlInput, ...]
     inputs: tuple[InputRecord, ...]
     adoption: AdoptionView | None = None
-    # Earliest core time a ClockAdvanced does work: a paced job poll comes due, or an
-    # answered-but-open record passes its reconciliation bound. None when neither is scheduled.
+    # Earliest core time a ClockAdvanced does work: a paced job poll or a request's retry comes
+    # due. None when none is scheduled. A step's limit is not one: `decide` ends it, and the
+    # runner loop wakes at it.
     next_observe_at: Seconds | None = None
 
 
@@ -204,6 +220,9 @@ class DecisionCompleted(Value):
     status: CompletionStatus
 
 
+_PAUSES = ("pause", "pause_now", "park")
+
+
 class RunControlEvent(Value):
     """Operator control with explicit stop publication, never an invented result.
 
@@ -212,18 +231,26 @@ class RunControlEvent(Value):
     conflict), or carries none. A stop without a result only records the request and tells the
     search: it changes no status, and the search ends the run itself. Other actions cannot
     supply a result.
+
+    A pause may carry ``drain_seconds``, how long its drain waits for running requests before it
+    interrupts them; core records the deadline it makes in the run's park (``RunPark.deadline_at``).
+    A Pause-now that names none waits the run's cleanup bound, and a pause that names none waits
+    for its turns' own limits.
     """
 
     kind: Literal["run_control"] = "run_control"
     control: ControlInput
     now_at: Seconds
     result: RunResultProposal | None = None
+    drain_seconds: Annotated[float, Field(gt=0, allow_inf_nan=False)] | None = None
 
     @model_validator(mode="after")
     def stop_result_correspondence(self) -> RunControlEvent:
         """Only an explicit stop proposal may authorize final run publication by the kernel."""
         if self.result is not None and self.control.action != "stop":
             raise ContractValidationError("result", "allowed only for stop control")
+        if self.drain_seconds is not None and self.control.action not in _PAUSES:
+            raise ContractValidationError("drain_seconds", "allowed only for a pause")
         return self
 
 
@@ -232,6 +259,19 @@ class ControlChanged(Value):
 
     kind: Literal["control_changed"] = "control_changed"
     control: ControlInput
+
+
+class StopLiftRecorded(Value):
+    """An explicit resume lifted the run's standing stop (the control that did it).
+
+    Core publishes it after the ``ControlChanged`` of the same control, so a consumer sees
+    the stop and then its lift. It is recorded only while the stop stands and the run has not
+    committed its ending (`vs_core._run_pause.control_refusal`).
+    """
+
+    kind: Literal["stop_lift_recorded"] = "stop_lift_recorded"
+    control: ControlInput
+    new_epoch: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class RunEnded(Value):
@@ -267,15 +307,19 @@ type StrategyEvent = Annotated[
     | InputDropped
     | AttemptExhausted
     | CheckpointResolved
+    | ComparisonSettled
     | InterruptCompleted
     | MeasurementResult
+    | JobQueued
     | ResumeAuthorized
+    | ResumeRefused
     | TurnSuspended
     | YieldPublicationFailed
     | InterruptFailed
     | OperationResult
     | Failed
     | ControlChanged
+    | StopLiftRecorded
     | AdoptionResult
     | AdoptionFailed
     | RunEnded,
@@ -319,6 +363,7 @@ class SchedulingContext(AreaContext):
     records: RecordsState
     sessions: SessionsState
     settlement: SettlementState
+    evaluation: EvaluationState
 
 
 class AttemptsContext(AreaContext):
@@ -384,15 +429,20 @@ class Transition(Value):
 
 
 class RunEnvelope[S: StrategyState](Value):
-    """Atomic core, strategy, fence and cursor envelope with explicit versioning.
+    """Atomic core, strategy and cursor envelope with explicit versioning.
 
-    Version 4 stores each request's ``until`` on its ``RequestRecord`` and no deadline on
-    the request. Decoding an envelope of any other version is refused with an error that
-    names the version; there is no migration from the strategy-API envelopes.
+    ``schema_version`` is ``ENVELOPE_SCHEMA_VERSION`` when written; the shape is pinned by
+    vs-core's ``tests/envelope.persisted-schema.txt``, and a change every saved envelope
+    survives keeps the version (``scripts/check_persisted_schema_compat.py``). An envelope of
+    an older supported version is migrated to the current one before it is decoded
+    (``vs_core._envelope_migrations``, checked by ``tests/test_envelope_migrations.py``); one
+    of any other version is refused, before its shape is validated, with an error that names
+    the version and says whether an older or a newer VibeSys wrote it. One of the current
+    version holding a field or value this build does not know is refused as written by a
+    newer VibeSys (`vs_core._registry.decode_stored`).
     """
 
     schema_version: int = Field(ge=1)
-    fence: HostFence
     strategy_id: StrategyId
     state_schema: SchemaRef
     core: CoreState

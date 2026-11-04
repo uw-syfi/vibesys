@@ -235,7 +235,9 @@ def load_instructions(dispatch_dir: Path) -> list[Instruction]:
     code_json = _find_code_json(dispatch_dir)
     try:
         data = json.loads(code_json.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, RecursionError) as exc:
+        # ``json`` raises ``RecursionError`` past the interpreter's nesting limit, and
+        # invalid UTF-8 is a ``UnicodeDecodeError`` (a ``ValueError``).
         msg = f"could not parse {code_json}: {exc}"
         raise AttOutputNotFoundError(msg) from exc
     rows = data.get("code") if isinstance(data, dict) else None

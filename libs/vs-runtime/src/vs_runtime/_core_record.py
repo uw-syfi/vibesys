@@ -9,7 +9,6 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
-    SkipValidation,
     model_validator,
 )
 
@@ -21,11 +20,12 @@ from vs_core.api import (
     RunEnvelope,
     StrategyEvent,
     StrategyState,
+    decode_stored,
 )
-from vs_project.api import StoreFence
-from vs_runtime._core_requests import ExecutionLease, OwnerEvent
+from vs_core.api.recovery import OwnerEvent
 
 if TYPE_CHECKING:
+    from vs_core.api import Comparison, Runaway
     from vs_project.api import StoredEnvelope
 
 RUNTIME_SCHEMA_VERSION = 1
@@ -120,24 +120,16 @@ class RuntimeRecord[S: StrategyState](BaseModel):
         """Validate the runtime schema and canonical core codecs before replay."""
         if stored.schema_version != RUNTIME_SCHEMA_VERSION:
             raise ContractError(("runtime", "schema_version"), "unsupported record schema")
-        record = cls.model_validate_json(
-            stored.payload, context={"operation_registry": registry, "persisted_operation": True}
+        record = decode_stored(
+            cls,
+            stored.payload,
+            ("envelope", "schema_version"),
+            context={"operation_registry": registry, "persisted_operation": True},
         )
         envelope = registry.decode_envelope(
             type(record.envelope), record.envelope.model_dump_json()
         )
         return record.model_copy(update={"envelope": envelope})
-
-
-class PublicationContext(BaseModel):
-    """Publication execution epoch, separate from its stable identity."""
-
-    model_config = ConfigDict(
-        extra="forbid", frozen=True, strict=True, arbitrary_types_allowed=True
-    )
-    fence: StoreFence
-    now_at: float = Field(ge=0, allow_inf_nan=False)
-    lease: SkipValidation[ExecutionLease | None] = Field(default=None, exclude=True, repr=False)
 
 
 class PublicationAcknowledgement(BaseModel):
@@ -197,6 +189,30 @@ class WinnerSelection(BaseModel):
     selection: Literal["candidate", "baseline"]
     revision: str = Field(min_length=1)
     settlement_id: str | None = None
+
+
+def new_comparisons(
+    previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]
+) -> tuple[Comparison, ...]:
+    """The comparisons of candidates with their bases that ``current`` logged beyond ``previous``.
+
+    Core's log of comparisons only grows, so the new ones are the tail past what ``previous``
+    held; with no previous record, all of them. Every strategy measures through core, so this
+    is the one place that sees all of them.
+    """
+    held = 0 if previous is None else len(previous.envelope.core.evaluation.comparisons)
+    return current.envelope.core.evaluation.comparisons[held:]
+
+
+def new_runaways(
+    previous: RuntimeRecord[Any] | None, current: RuntimeRecord[Any]
+) -> tuple[Runaway, ...]:
+    """The runaway evaluation counts that ``current`` recorded beyond ``previous``.
+
+    Like the comparisons, core's log of them only grows, so the new ones are the tail.
+    """
+    held = 0 if previous is None else len(previous.envelope.core.evaluation.runaways)
+    return current.envelope.core.evaluation.runaways[held:]
 
 
 def winner_selection(record: RuntimeRecord[Any] | None) -> WinnerSelection | None:

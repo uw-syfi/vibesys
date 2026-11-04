@@ -7,8 +7,12 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn
 
+from vs_sim.api import OutputStream
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from vs_sim.api import OutputSink
 
 # Tests build Docker outcomes through the helpers below, so they never import
 # ``subprocess`` just to describe what a scripted ``docker`` printed or how it failed.
@@ -143,13 +147,17 @@ class ScriptedDockerCli:
         self._sequence.clear()
         self._fallback = None
 
-    def run(self, argv: Sequence[str], *, timeout_seconds: float) -> DockerResult:
-        """Return or raise the scripted outcome for *argv*."""
+    def run(
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
+    ) -> DockerResult:
+        """Return or raise the scripted outcome for *argv*, writing its output to *output*."""
         call = DockerCliCall(tuple(argv), timeout_seconds)
         self.calls.append(call)
         outcome = self._outcome_for(call.argv)
         if isinstance(outcome, BaseException):
             raise outcome
+        output.write(OutputStream.STDOUT, (outcome.stdout or "").encode())
+        output.write(OutputStream.STDERR, (outcome.stderr or "").encode())
         return outcome
 
     def spawn(self, argv: Sequence[str]) -> NoReturn:

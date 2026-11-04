@@ -6,15 +6,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping
+    from collections.abc import Callable, Mapping
 
     from pydantic import BaseModel
 
-    from vs_core.api import CoreState, Request, SchemaRef
+    from vs_core.api import CoreEvent, CoreState, Request, SchemaRef, Transition
     from vs_core.api.testing import Answer, Harness
-    from vs_runtime.api.core import CoreRuntime, ExecutionResult
     from vs_runtime.api.testing import Launch
-    from vs_sim.api.testing import VirtualClock
+    from vs_sim.api import SleepingClock
 
 
 @dataclass(frozen=True)
@@ -27,12 +26,12 @@ class RunSetup:
     """Registry, run facts, limits, envelope type and evidence requirements of the run."""
     schemas: Mapping[SchemaRef, type[BaseModel]]
     """The reply types the run's agent turns answer."""
-    max_concurrent: int = 1
-    """How many requests the loop executes at once."""
-    controlled: bool = False
-    """Whether the loop has an idle run-control channel, as a product run has, so it looks at the
-    shell every control-poll interval while requests run (a world whose agents act on the shell
-    while their turn runs needs it)."""
+    upgrade: Callable[[], Launch[Any]] | None = None
+    """The search the code has become, for a world that tests resuming a run on changed code.
+
+    A host that resumes a run (the operator's Resume after a pause or a crash) runs this search
+    instead of ``new_launch``'s; the first host of a run never does. ``None``: the code does not
+    change."""
 
 
 class World(Protocol):
@@ -54,22 +53,92 @@ class World(Protocol):
         ...
 
 
-type Enact = Callable[[Request, ExecutionResult], Awaitable[ExecutionResult]]
-"""What happens around an executed request: given the request and the result its executor
-produced, the result the shell is told (after the world's own side effects on the host, such as
-an agent calling a tool server while its turn runs)."""
+@runtime_checkable
+class HoldingWorld(Protocol):
+    """A world whose far side can hold a request forever: a job queued that nothing ever starts.
+
+    The host honours it: the effect of a request the world holds began, never ends by itself and
+    seals nothing, and it ends only when the loop cancels it, as a job held pending in a
+    scheduler's queue ends only by a cancel.
+    """
+
+    def holds(self, request: Request) -> bool:
+        """Whether the effect of ``request`` stays pending until the loop cancels it."""
+        ...
 
 
 @runtime_checkable
-class HostedWorld(Protocol):
-    """A world that also acts on the host: it hears each host's shell and clock.
+class SlowWorld(Protocol):
+    """A world whose far side takes time: each effect ends a while after it began.
 
-    `attach` is called once per host, so a restarted host gets its own, once its `CoreRuntime`
-    and clock exist and before the loop starts. Everything that belongs to a host (a tool server
-    bound to the shell, the clock) is created there and kept in the returned `Enact`, never in
-    the world, because the world is copied at crash points and a host is not.
+    The host honours it: the effect of a request begins (a kill landing then leaves it begun and
+    unsealed), the run clock passes ``takes(request)`` seconds, and then the effect ends. A step of
+    the run that began first can end last, so the order a scope's work is released in is the
+    world's to choose.
     """
 
-    def attach(self, shell: CoreRuntime[Any], clock: VirtualClock) -> Enact | None:
-        """Bind this host's ``shell`` and ``clock``; return how its executed requests are enacted."""
+    def takes(self, request: Request) -> float:
+        """Virtual seconds the effect of ``request`` is in flight before it ends."""
+        ...
+
+
+@runtime_checkable
+class ClearFailingWorld(Protocol):
+    """A world whose far side cannot be reached to clear a request: a Docker daemon that is down.
+
+    The host honours it: the runner's ``clear`` of a request the world says it cannot clear
+    raises ``ClearUnavailableError``, as the real runners' do when their backend is unreachable,
+    so the loop retries it with backoff and records no result over it. It is asked at every
+    ``clear``, which a step takes only when work of it may exist (after a kill, or an attempt
+    that ended without a result).
+    """
+
+    def clear_fails(self, request: Request) -> bool:
+        """Whether ``clear`` of ``request`` cannot reach its backend now."""
+        ...
+
+
+class Admission(Protocol):
+    """The run as a service the host runs beside the loop sees it: commit an input, then answer.
+
+    This is how a tool an agent calls during its turn reaches core, as the production host's
+    evaluation bridge does: the input is in the run.log before the call returns.
+    """
+
+    @property
+    def admitted_core(self) -> CoreState:
+        """The committed core, including every input admitted so far."""
+        ...
+
+    def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
+        """Commit core's step of ``event`` before returning; a refusal commits nothing."""
+        ...
+
+
+class Serving(Protocol):
+    """What a world runs inside one host process: its memory, which ends with the host."""
+
+    async def during(self, request: Request, core: CoreState) -> None:
+        """Act while the effect of ``request`` is in flight (an agent's tool calls in its turn).
+
+        The effect has begun and nothing of it is sealed, so a host that dies here leaves the
+        calls made and the effect to run again, as a real turn does.
+        """
+        ...
+
+    async def close(self) -> None:
+        """The host's loop has returned, or been cancelled: release what the service holds."""
+        ...
+
+
+@runtime_checkable
+class ServingWorld(Protocol):
+    """A world that serves each host process, through the run's admission of inputs.
+
+    The world stays the outside world's position (plain data, copied with a crash); what it
+    serves is the host's own and is made again by every host, from that position.
+    """
+
+    def serve(self, admission: Admission, clock: SleepingClock) -> Serving:
+        """The service of a new host: it admits inputs through ``admission``, on ``clock``."""
         ...

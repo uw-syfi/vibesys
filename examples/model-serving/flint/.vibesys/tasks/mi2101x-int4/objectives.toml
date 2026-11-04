@@ -1,0 +1,23 @@
+# Share the throughput/TTFT/TPOT frontier across hardware targets.
+[[objective]]
+name = "output_tokens_per_s"
+direction = "max"
+
+[[objective]]
+name = "ttft_p50_ms"
+direction = "min"
+
+[[objective]]
+name = "ttft_p90_ms"
+direction = "min"
+
+[[objective]]
+name = "tpot_p50_ms"
+direction = "min"
+
+[[objective]]
+name = "tpot_p90_ms"
+direction = "min"
+
+[pareto]
+relative_noise = 0.03

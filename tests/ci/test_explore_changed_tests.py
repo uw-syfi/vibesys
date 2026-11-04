@@ -1,19 +1,38 @@
-"""The seed-exploration selector picks exactly the tests a diff touches."""
+"""The seed-exploration step picks exactly the tests a diff touches and reports what the cap cut."""
 
 from __future__ import annotations
 
+import dataclasses
 import difflib
+import json
 import textwrap
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hypothesis import given
 from hypothesis import strategies as st
 from scripts.explore_changed_tests import (
+    LISTED_UNEXPLORED,
+    PYTEST_NO_TESTS_COLLECTED,
+    UNEXPLORED_WARNING_SHARE,
+    Explored,
     changed_lines,
+    failures,
     function_spans,
+    outcome,
+    read_report,
     selected_ids,
     suite_pathspecs,
+    summary,
+    unexplored_warning,
 )
+
+if TYPE_CHECKING:
+    import pytest
+
+pytest_plugins = ["pytester"]
+
+PLUGIN_DIR = Path(__file__).resolve().parents[2] / "libs" / "vs-sim" / "pytest_plugin"
 
 MODULE = textwrap.dedent(
     """\
@@ -91,7 +110,7 @@ def test_every_hunk_range_covers_its_new_lines(start: int, count: int, old: int)
     assert last == start + max(count, 1) - 1 + (1 if count == 0 else 0)
 
 
-def function_spans_include_class_methods_and_skip_helpers() -> None:
+def test_function_spans_include_class_methods_and_skip_helpers() -> None:
     assert [span.node for span in function_spans(MODULE)] == [
         "test_one",
         "test_two",
@@ -106,3 +125,139 @@ def test_only_the_suites_testpaths_are_explored() -> None:
 
     assert ":(glob)tests/**/*.py" in pathspecs
     assert all("examples" not in spec for spec in pathspecs)
+
+
+_ROWS = st.lists(
+    st.builds(
+        Explored,
+        test=st.from_regex(r"tests/test_[a-z]{1,6}\.py::test_[a-z]{1,6}", fullmatch=True),
+        runs=st.integers(0, 24),
+        planned=st.integers(0, 24),
+        outcome=st.sampled_from(["passed", "failed", "skipped", "not explored"]),
+        seed=st.none() | st.integers(0, 2**63),
+    ),
+    max_size=80,
+    unique_by=lambda row: row.test,
+)
+
+
+@given(_ROWS)
+def test_a_report_reads_back_the_rows_it_was_written_from(rows: list[Explored]) -> None:
+    text = "".join(f"{json.dumps(dataclasses.asdict(row))}\n" for row in rows)
+    assert read_report(text) == rows
+
+
+@given(_ROWS)
+def test_the_failures_file_lists_each_failing_seeded_test_with_its_seed(
+    rows: list[Explored],
+) -> None:
+    listed = [json.loads(line) for line in failures(rows).splitlines()]
+
+    assert listed == [
+        {"test": row.test, "seed": row.seed}
+        for row in rows
+        if row.outcome == "failed" and row.seed is not None
+    ]
+
+
+@given(_ROWS, st.floats(1, 600))
+def test_the_summary_names_every_failure_and_the_cut_tests_it_has_room_for(
+    rows: list[Explored], cap: float
+) -> None:
+    text = summary(rows, selections=len(rows), cap=cap, elapsed=cap, verdict="passed")
+
+    listed = [
+        line.removeprefix("- `").removesuffix("`")
+        for line in text.splitlines()
+        if line.startswith("- `")
+    ]
+    failed = [row.test for row in rows if row.outcome == "failed"]
+    unexplored = [row.test for row in rows if row.outcome == "not explored"]
+    assert listed == failed + unexplored[:LISTED_UNEXPLORED]
+    assert f"{len(rows) - len(unexplored)} explored" in text
+    assert (f"and {len(unexplored) - LISTED_UNEXPLORED} more" in text) == (
+        len(unexplored) > LISTED_UNEXPLORED
+    )
+
+
+@given(_ROWS, st.floats(1, 600))
+def test_the_step_warns_exactly_when_most_changed_tests_went_unexplored(
+    rows: list[Explored], cap: float
+) -> None:
+    unexplored = sum(1 for row in rows if row.outcome == "not explored")
+    warning = unexplored_warning(rows, cap=cap)
+
+    expected = bool(rows) and unexplored > UNEXPLORED_WARNING_SHARE * len(rows)
+    assert (warning is not None) == expected
+    if warning is not None:
+        assert warning.startswith("::warning ")
+        assert f"left {unexplored} of {len(rows)} changed tests" in warning
+
+
+@given(code=st.integers(-9, 5), capped=st.booleans())
+def test_only_a_failing_test_fails_a_capped_run(code: int, *, capped: bool) -> None:
+    failed, verdict = outcome(code, capped=capped)
+
+    if capped:
+        assert failed == (code == 1)
+    else:
+        assert failed == (code not in {0, PYTEST_NO_TESTS_COLLECTED})
+    assert (verdict == "FAILED") == failed
+
+
+def test_the_plugins_exploration_report_is_what_the_summary_reads(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.syspath_prepend(str(PLUGIN_DIR))
+    pytester.makeini("[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\n")
+    pytester.makepyfile(
+        test_pair="async def test_sim():\n    pass\n\ndef test_plain():\n    pass\n"
+    )
+
+    pytester.runpytest_inprocess(
+        "--sim-explore=4", "--sim-repeat=2", "--sim-explore-report=explored.jsonl"
+    ).assert_outcomes(passed=2)
+
+    rows = read_report((pytester.path / "explored.jsonl").read_text())
+    assert sorted(rows, key=lambda row: row.test) == [
+        Explored("test_pair.py::test_plain", 2, 2, "passed", None),
+        Explored("test_pair.py::test_sim", 4, 4, "passed", None),
+    ]
+
+
+def test_a_failure_the_step_records_fails_first_on_the_next_push(
+    pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.syspath_prepend(str(PLUGIN_DIR))
+    pytester.makeini("[pytest]\naddopts = -p vs_sim_pytest -p no:cacheprovider -p no:tach\n")
+    pytester.makepyfile(
+        test_race="""
+        import asyncio
+
+        async def test_race():
+            order = []
+
+            async def claim(name):
+                await asyncio.sleep(1)
+                order.append(name)
+
+            await asyncio.gather(claim("a"), claim("b"))
+            assert order == ["a", "b"]
+        """
+    )
+    pytester.runpytest_inprocess(
+        "--sim-explore=24", "--sim-explore-salt=push-1", "--sim-explore-report=first.jsonl"
+    ).assert_outcomes(failed=1)
+    recorded = pytester.path / "failures.jsonl"
+    recorded.write_text(failures(read_report((pytester.path / "first.jsonl").read_text())))
+
+    pytester.runpytest_inprocess(
+        "--sim-explore=1",
+        "--sim-explore-salt=push-2",
+        f"--sim-explore-replay={recorded}",
+        "--sim-explore-report=second.jsonl",
+    ).assert_outcomes(failed=1)
+
+    [second] = read_report((pytester.path / "second.jsonl").read_text())
+    [first] = read_report((pytester.path / "first.jsonl").read_text())
+    assert (second.outcome, second.runs, second.seed) == ("failed", 1, first.seed)

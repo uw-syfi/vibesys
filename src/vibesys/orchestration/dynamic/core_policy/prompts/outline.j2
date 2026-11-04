@@ -1,0 +1,16 @@
+{% from 'domain_section.j2' import domain_section %}
+This run follows the task's plan instead of exploring. The plan's design is in these
+documents, as paths relative to the task directory:
+{% for path in documents %}
+- `{{ path }}`
+{% endfor %}
+
+{% include 'run_context.j2' %}
+{{ domain_section(domain_sections, 'orchestrator') }}
+Read the documents and outline the plan as ordered implementation steps. Give each step
+a short unique id, a title, the documents (or document sections) it implements, a
+`{{ reply.done_when }}` condition its implementer and a reviewer can check, and the steps it
+builds on. Set `{{ reply.evaluate }}` to `"trusted"` only for a step that reaches a milestone
+the task's trusted evaluation can measure; every other step is `"none"` and is accepted on its
+own tests.
+Return only the requested structured response.

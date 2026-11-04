@@ -8,7 +8,6 @@ from pydantic import BaseModel
 
 from vs_agent.contracts import AgentCapabilities, AgentOutputSchemaError
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -31,11 +30,11 @@ class StubAgentClient:
         self,
         *,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Create a stateless deterministic client."""
         self._sink = event_sink
-        self._threads = threads or OsThreads()
+        self._threads = threads
 
     @property
     def capabilities(self) -> AgentCapabilities:

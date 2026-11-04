@@ -9,7 +9,6 @@ nothing ever submits it.
 
 from __future__ import annotations
 
-import asyncio
 import threading
 from typing import TYPE_CHECKING
 
@@ -28,6 +27,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationExecutor,
     SlurmStagePayload,
 )
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, yield_until
 from vs_slurm.api import (
     ClusterSubmitOutcome,
     FakeCluster,
@@ -43,6 +43,8 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.asyncio
 
+_BLOCKING = InlineBlockingRunner()
+
 _HOLDER = "holder-evaluation"
 _WAITER = "waiting-evaluation"
 
@@ -51,7 +53,7 @@ class _QueuedCluster(FakeCluster):
     """Every accepted batch stays PENDING; records which identities were submitted."""
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(clock=ManualClock())
         self.submitted: list[str] = []
         self.holder_accepted = threading.Event()
 
@@ -103,7 +105,19 @@ def _executor(root: Path, cluster: _QueuedCluster) -> SlurmEvaluationExecutor:
         cluster=cluster,
         admission=SharedSlurmAdmission(1),
         # Pacing is free: the holder's wait loop never sleeps on the wall clock.
-        pause=lambda _seconds: None,
+        sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
+        clock=ManualClock(),
+    )
+
+
+async def _one_queued(executor: SlurmEvaluationExecutor) -> None:
+    """Wait until one evaluation waits in the admission queue."""
+    await yield_until(
+        lambda: executor.availability(ResourceRequirements()),
+        lambda availability: availability.queue_depth == 1,
+        "one evaluation queued for admission",
     )
 
 
@@ -115,11 +129,7 @@ async def _cancel_while_waiting_for_admission(
     await wait_until_executor_started(cluster.holder_accepted, executor, _HOLDER)
     await executor.submit(_request("waiter"), handle_id=_WAITER)
     # The waiter's task reaches the admission queue within a few loop turns.
-    for _ in range(100):
-        if (await executor.availability(ResourceRequirements())).queue_depth == 1:
-            break
-        await asyncio.sleep(0)
-    assert (await executor.availability(ResourceRequirements())).queue_depth == 1
+    await _one_queued(executor)
 
     await executor.cancel(_WAITER)
 
@@ -177,10 +187,7 @@ async def test_closing_the_executor_ends_an_evaluation_still_awaiting_admission(
     await executor.submit(_request("holder"), handle_id=_HOLDER)
     await wait_until_executor_started(cluster.holder_accepted, executor, _HOLDER)
     await executor.submit(_request("waiter"), handle_id=_WAITER)
-    for _ in range(100):
-        if (await executor.availability(ResourceRequirements())).queue_depth == 1:
-            break
-        await asyncio.sleep(0)
+    await _one_queued(executor)
 
     await executor.close()
 

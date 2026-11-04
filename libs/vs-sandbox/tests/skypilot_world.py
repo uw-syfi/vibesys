@@ -12,6 +12,9 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, BinaryIO, cast
 
+from pydantic import JsonValue, TypeAdapter
+
+from vs_decode.api import decode_json
 from vs_sandbox.api.skypilot import AckedFrame, AckRequest, decode_response, encode_message
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import HANG_GUARD_S, SimNetwork
@@ -120,11 +123,20 @@ class MemoryPeer:
         self._connection.close()
 
 
+_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+# Past every frame a test scripts, the oversized one included.
+_MAX_SCRIPTED_FRAME_BYTES = 64 * 1024 * 1024
+
+
 def _is_result(frame: bytes) -> bool:
-    try:
-        decoded = json.loads(frame)
-    except ValueError:
-        return False
+    """Whether a scripted frame is a result; a hostile frame (too deep, not JSON) is not.
+
+    ``vs_decode`` parses it, so a frame nested past the recursion limit is unreadable here
+    rather than a ``RecursionError`` that kills the scripted bridge's thread.
+    """
+    decoded = decode_json(
+        frame, _JSON, source="scripted frame", max_bytes=_MAX_SCRIPTED_FRAME_BYTES
+    )
     return isinstance(decoded, dict) and decoded.get("type") == "result"
 
 
@@ -173,7 +185,12 @@ class ScriptedBridge:
             for frame in self._frames:
                 connection.send(frame)
             if self._acknowledge and any(_is_result(frame) for frame in self._frames):
-                ack = json.loads(reader.readline())
+                ack = decode_json(
+                    reader.readline(), _JSON, source="ack", max_bytes=_MAX_SCRIPTED_FRAME_BYTES
+                )
+                if not isinstance(ack, dict):
+                    # The helper refused the stream and closed without acknowledging it.
+                    return
                 self.acks.append(ack)
                 connection.send(
                     self._ack_reply

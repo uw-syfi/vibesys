@@ -6,25 +6,32 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
 from entrypoints.cli.config import _prepare_experiment_repository, load_config_and_skills
 from entrypoints.cli.environment import (
+    TaskImageBuild,
     _validate_run_environment_profiler,
     run_environment_spec_from_args,
 )
-from entrypoints.cli.errors import _configuration_error
+from entrypoints.cli.errors import _cause_error, _configuration_error
 from entrypoints.cli.inputs import _standalone_input_dests_set, _validate_target_inputs
 from entrypoints.cli.remote import _clone_project, _is_remote_project
+from entrypoints.production import production_runs
 from entrypoints.run import run_headless
-from launch import default_runs, validate_descriptor, validate_run_request
+from launch import validate_descriptor, validate_run_request
 from vibesys.api import (
+    ArgumentsRejected,
     DomainName,
     OrchestrationDescriptor,
+    ProfilerKind,
     ResumeRef,
     RunFailure,
     RunFailureKind,
     RunRequest,
     RunResult,
     Runs,
+    RunStatus,
     boot_trace,
 )
 from vibesys.api.evolve import resolve_openevolve_options
@@ -35,10 +42,14 @@ from vibesys.api.request import (
     with_operator_constraints,
 )
 from vs_issue_tracker.api import IssueTrackerConfig
-from vs_project.api import Project, ProjectLayoutError
+from vs_project.api import Git, Project, ProjectLayoutError
+from vs_sim.api import LoopSignalSource, OsProcesses
 
 if TYPE_CHECKING:
     import argparse
+
+    from vibesys.api import Config
+    from vs_sim.api import CommandProbe
 
 
 def _normalize_runs_dir(args: argparse.Namespace) -> None:
@@ -68,7 +79,7 @@ def _normalize_runs_dir(args: argparse.Namespace) -> None:
             stage="argument_parsing",
         )
     try:
-        Project.validate_collection_root(runs_dir)
+        Project.validate_collection_root(runs_dir, git=Git(OsProcesses()))
     except ProjectLayoutError as exc:
         _configuration_error(
             f"--runs-dir: {exc}", code="invalid_runs_dir", stage="argument_parsing"
@@ -226,6 +237,15 @@ def _validate_plain(args: argparse.Namespace) -> None:
     _validate_run_environment_profiler(args)
 
 
+def _validate_input_check(args: argparse.Namespace) -> None:
+    """Validate the one-shot command separately from resumable search runs."""
+    _validate_plain(args)
+    if args.resume is not None:
+        _configuration_error("check-input does not resume an earlier run; start a fresh check.")
+    if args.profiler is not ProfilerKind.NONE:
+        _configuration_error("check-input does not capture a profiler; use --profiler none.")
+
+
 def _agent_policy_descriptor(
     args: argparse.Namespace, bundle: InputBundle
 ) -> OrchestrationDescriptor:
@@ -244,7 +264,7 @@ def _agent_policy_descriptor(
             }
         )
     task = {
-        "interface": args.interface,
+        "interface": args.interface or bundle.manifest.agent.interface or "inprocess",
         "modality": args.modality
         or ("text_generation" if bundle.domain is DomainName.LLM_SERVING else None),
         "operator_constraints": [item.strip() for item in args.constraint if item.strip()],
@@ -262,7 +282,14 @@ def _agent_policy_descriptor(
             "max_in_flight": args.max_in_flight,
             "judge_every": args.judge_every,
             "max_unmeasured_turns": args.max_unmeasured_turns,
+            "evaluation_slots": args.evaluation_slots,
+            "max_backlog": args.max_backlog,
+            "pick": args.evaluation_pick,
+            "input_wait_seconds": args.input_wait_seconds,
+            "mode": args.dynamic_mode,
         }
+        if bundle.plan is not None:
+            options["plan"] = bundle.plan.model_dump(mode="json")
     else:
         # The serial searches read only their own knobs; their agents' retries and timeouts are
         # the roles'. Only the multi search has a judge to ask every so often.
@@ -270,7 +297,6 @@ def _agent_policy_descriptor(
             **task,
             "max_rounds": args.max_rounds,
             "max_retries_per_round": args.max_retries_per_round,
-            "official_eval_every": args.official_eval_every,
             **({"judge_every": args.judge_every} if args.inner_loop == "multi-agent" else {}),
         }
     return OrchestrationDescriptor(id=orchestration_id, config_version=1, options=options)
@@ -289,6 +315,23 @@ def _plain_policy_descriptor(args: argparse.Namespace) -> OrchestrationDescripto
         ).model_dump(mode="json"),
     }
     return OrchestrationDescriptor(id="plain", config_version=1, options=options)
+
+
+def _input_check_descriptor(args: argparse.Namespace) -> OrchestrationDescriptor:
+    """Describe the zero-agent run using only the task's metric space."""
+    metrics = _resolve_metric_space(args)
+    benchmark = args.input_bundle.benchmark_result
+    if benchmark is not None and metrics.axis(benchmark.metric) is None:
+        metrics = metrics.model_copy(
+            update={
+                "objectives": (*metrics.objectives, Objective(benchmark.metric, "max")),
+            }
+        )
+    return OrchestrationDescriptor(
+        id="check-input",
+        config_version=1,
+        options={"metric_space": metrics.model_dump(mode="json")},
+    )
 
 
 def _evolve_policy_descriptor(
@@ -320,9 +363,50 @@ def _evolve_policy_descriptor(
 def _build_run_request(args: argparse.Namespace) -> RunRequest:
     """Build the one request format consumed by every registered policy."""
     with boot_trace.span("run_preamble"):
+        request, config = validated_run_request(args)
+        _prepare_experiment_repository(args, config)
+        run_environment = run_environment_spec_from_args(
+            args, task_image=TaskImageBuild(backend=request.backend)
+        )
+        if args.resume is not None:
+            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {request.project_root}/\n")
+        return request.model_copy(
+            update={
+                "exp_name": args.exp_name,
+                "remote_repo": args.repo,
+                "run_environment": run_environment,
+            }
+        )
+
+
+def _validate_options(descriptor: OrchestrationDescriptor) -> None:
+    """Refuse options the selected orchestration's own validation rejects, as arguments."""
+    try:
+        validate_descriptor(descriptor)
+    except ValidationError as error:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in each['loc'])}: {each['msg']}"
+            for each in error.errors()
+        )
+        _cause_error(ArgumentsRejected(f"{descriptor.id} options are invalid: {problems}"))
+
+
+def validated_run_request(
+    args: argparse.Namespace, probe: CommandProbe | None = None, *, read_only: bool = False
+) -> tuple[RunRequest, Config]:
+    """The run's request and configuration, validated as a run validates them, with no effect.
+
+    Raises ``ConfigurationError`` naming what is wrong. Startup validation neither discovers
+    a GitHub account nor builds an image before it returns. ``probe`` asks the host which of a
+    task's several backends it provides (a real one by default).
+    """
+    with boot_trace.span("validate_run_request"):
         bundle: InputBundle = args.input_bundle
-        config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
-        if args.outer_loop in {"agent", "profile-guided", "dynamic"}:
+        config, skills, backend = load_config_and_skills(args, domain=bundle.domain, probe=probe)
+        if args.outer_loop == "check-input":
+            descriptor = _input_check_descriptor(args)
+            objective = bundle.objective
+        elif args.outer_loop in {"agent", "profile-guided", "dynamic"}:
             descriptor = _agent_policy_descriptor(args, bundle)
             objective = with_operator_constraints(bundle.objective, args.constraint)
         elif args.outer_loop == "plain":
@@ -331,7 +415,7 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
         else:
             descriptor = _evolve_policy_descriptor(args, bundle)
             objective = bundle.objective
-        validate_descriptor(descriptor)
+        _validate_options(descriptor)
         request = RunRequest(
             project_root=bundle.root,
             orchestration=descriptor,
@@ -347,52 +431,82 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             run_environment=run_environment_spec_from_args(args),
             agent_backend=args.agent_backend,
             cli_provider=args.cli_provider,
+            # A resume keeps the harness its run was started with, vetted then or not.
+            allow_unvetted_model=args.allow_unvetted_model or args.resume is not None,
             backend=backend,
             remote_repo=args.repo,
             repo_visibility=args.repo_visibility,
         )
-        # Both entrypoints use this builder. Validate the complete request
-        # before GitHub account discovery or building a task Docker image.
-        validate_run_request(request)
-        _prepare_experiment_repository(args, config)
-        run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
-        if args.resume is not None:
-            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {bundle.root}/\n")
-        return request.model_copy(
-            update={
-                "exp_name": args.exp_name,
-                "remote_repo": args.repo,
-                "run_environment": run_environment,
-            }
-        )
+        validate_run_request(request, git=Git(OsProcesses()), read_only=read_only)
+        return request, config
 
 
 def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:
     request = _build_run_request(args)
-    result = _execute_run_request(request, default_runs() if runs is None else runs)
-    if result.succeeded:
+    result = _execute_run_request(request, production_runs() if runs is None else runs)
+    if request.orchestration.id == "check-input":
+        if result.succeeded:
+            sys.stdout.write("\nInput gates passed.\n")
+            return
+        sys.stdout.write("\nInput gates failed.\n")
+        if result.failure is not None:
+            sys.stdout.write(f"Reason: {result.failure.reason}\n")
+        sys.exit(1)
+    if result.status is RunStatus.PARKED:
+        sys.stdout.write(f"\n{request.orchestration.id} run paused. Resume to continue.\n")
+    elif result.succeeded:
         sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
+        if result.uncompared:
+            sys.stdout.write(f"{_UNCOMPARED}\n")
     else:
         sys.stdout.write(f"\n{request.orchestration.id} run stopped early.\n")
-        if result.failure is not None:
-            sys.stdout.write(f"{describe_failure(result.failure)}\n")
+        sys.stdout.write(f"{describe_early_stop(result)}\n")
+        if result.uncompared:
+            sys.stdout.write(f"{_UNCOMPARED}\n")
         sys.exit(1)
 
+
+def describe_early_stop(result: RunResult) -> str:
+    """One line saying why a run that did not succeed ended: every such exit names a reason."""
+    if result.status is RunStatus.FAILED:
+        if result.failure is not None:
+            return describe_failure(result.failure)
+        return (
+            "Reason: the run failed and recorded no cause; its event log names the error that "
+            "ended it."
+        )
+    if result.stop_reason is not None:
+        # Core ended the run when the stop landed: a resume refuses it, so say so here.
+        return f"Reason: {result.stop_reason}. The run has ended; start a new run to go on."
+    return "Reason: the run was stopped on request."
+
+
+_UNCOMPARED = (
+    "The candidate was adopted without an input comparison: the input failed its own "
+    "measurement, so nothing shows the candidate beats it."
+)
+"""What a run that adopted an uncompared candidate adds to its completion line."""
 
 _FAILURE_HEADLINES = {
     RunFailureKind.BUDGET_EXHAUSTED: "the workstream budget ran out",
     RunFailureKind.DEADLINE: "the run's time limit ended it",
     RunFailureKind.NO_RESULT: "the run ended",
+    RunFailureKind.RUN_ENVIRONMENT_UNAVAILABLE: "the run environment could run none of its work",
 }
 
 
 def describe_failure(failure: RunFailure) -> str:
     """One line saying why a run failed: the cause, what was kept, the counts, then its account.
 
-    Candidates can be kept yet not adopted, so the line says "no result to keep" only
-    when none was kept.
+    Candidates can be kept yet not adopted, and a strategy may report failure after asking core
+    to adopt its best partial result, so the line reports the adoption fact explicitly.
     """
-    kept = "with no result to keep" if failure.candidates_kept == 0 else "with no candidate adopted"
+    if failure.adopted_candidate is not None:
+        kept = f"after adopting candidate {failure.adopted_candidate}"
+    elif failure.candidates_kept == 0:
+        kept = "with no result to keep"
+    else:
+        kept = "with no candidate adopted"
     counts = (
         f"{failure.workstreams_started} of {failure.workstream_budget} workstreams started, "
         f"{failure.candidates_kept} candidates kept"
@@ -401,5 +515,5 @@ def describe_failure(failure: RunFailure) -> str:
 
 
 def _execute_run_request(request: RunRequest, runs: Runs) -> RunResult:
-    """Run *request* to completion via `headless.run`."""
-    return run_headless(request, runs)
+    """Run *request* to completion via `headless.run`, handling the process's own signals."""
+    return run_headless(request, runs, LoopSignalSource())

@@ -79,7 +79,6 @@ import contextlib
 import csv
 import importlib
 import io
-import json
 import math
 import re
 import sqlite3
@@ -883,10 +882,10 @@ def _json_string_lookup(root: dict, section: str, id_key: str, name_keys: tuple[
     return out
 
 
-def _load_json(path: Path) -> dict:
+def _load_json(path: Path) -> object:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return capture_runtime.read_json_file(path)
+    except (OSError, ValueError) as exc:
         diagnostic = f"could not parse {path}: {exc}"
         raise capture_runtime.CaptureFailedError.analysis_failed(diagnostic) from exc
 
@@ -1202,8 +1201,8 @@ def _load_capture_manifest(report: str) -> dict[str, Any] | None:
         if not manifest_path.is_file():
             continue
         try:
-            data = json.loads(manifest_path.read_text())
-        except (OSError, json.JSONDecodeError):
+            data = capture_runtime.read_json_file(manifest_path)
+        except (OSError, ValueError):
             continue
         if isinstance(data, dict):
             return data

@@ -28,7 +28,7 @@ import asyncio
 import collections.abc
 import heapq
 import selectors
-from typing import TYPE_CHECKING, Any, Protocol, overload
+from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
 from vs_sim.randomness import SeededRandom
 
@@ -53,6 +53,15 @@ class IdleDriver(Protocol):
     jumps to whichever is due first, the loop's next timer or a thread's.
     """
 
+    def attach(self) -> None:
+        """Take note that a virtual loop drives this work from now on."""
+        ...
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        """The loop's default executor: ``run_in_executor`` calls run as this work's threads."""
+        ...
+
     def run_until_blocked(self) -> None:
         """Run until nothing the driver owns can run."""
         ...
@@ -71,6 +80,32 @@ class IdleDriver(Protocol):
 
     def close(self) -> None:
         """Release everything the driver holds when the run ends."""
+        ...
+
+
+class LoopHost(Protocol):
+    """The simulated thread a loop runs on, which it hands the baton back to while idle.
+
+    :class:`~vs_sim.sim_threads.SimThreads` implements it for ``run_async``: an idle loop
+    parks its thread on the simulated timeline, so the other simulated threads run and
+    time advances, and a callback scheduled from another simulated thread wakes it.
+    """
+
+    def park(self, timeout: float | None) -> None:
+        """Wait on the timeline until woken or ``timeout`` seconds pass; ``None`` waits for a wake."""
+        ...
+
+    def wake(self) -> None:
+        """End a current or the next ``park``; raises when the caller cannot hand over the baton."""
+        ...
+
+    def now(self) -> float:
+        """The reading the loop's ``time()`` returns: the host's own monotonic clock."""
+        ...
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        """The loop's default executor, which runs ``run_in_executor`` calls as host threads."""
         ...
 
 
@@ -130,23 +165,29 @@ class _VirtualSelector(selectors.DefaultSelector):
             if driven is not None:
                 return driven
         if self.loop is not None and self.loop.workers_in_flight > 0:
-            # Time stands still while a worker thread runs; its completion wakes this select.
-            ready = super().select(WORKER_GUARD_S)
-            if not ready:
-                message = (
-                    f"a worker thread ran for {WORKER_GUARD_S:g} s without finishing: "
-                    f"{self._describe_waiters()}"
-                )
-                raise VirtualDeadlockError(message)
-            if self._trace is not None:
-                self._trace.io(len(ready))
-            return ready
+            return self._await_worker()
+        if self.loop is not None and self.loop.host is not None:
+            self.loop.host.park(timeout)
+            return super().select(0)
         if timeout is None:
             raise VirtualDeadlockError(self._describe_waiters())
         if self._trace is not None:
             self._trace.advance(self._clock.at, self._clock.at + timeout)
         self._clock.at += timeout
         return []
+
+    def _await_worker(self) -> list[tuple[selectors.SelectorKey, int]]:
+        """Time stands still while a worker thread runs; its completion wakes this select."""
+        ready = super().select(WORKER_GUARD_S)
+        if not ready:
+            message = (
+                f"a worker thread ran for {WORKER_GUARD_S:g} s without finishing: "
+                f"{self._describe_waiters()}"
+            )
+            raise VirtualDeadlockError(message)
+        if self._trace is not None:
+            self._trace.io(len(ready))
+        return ready
 
     def _drive(
         self, driver: IdleDriver, timeout: float | None
@@ -238,13 +279,28 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         self.clock = clock
         self.workers_in_flight = 0
         self.driver: IdleDriver | None = None
+        self.host: LoopHost | None = None
+        self.schedule_seed = schedule_seed
+        self.trace = trace
         if trace is not None:
             self._created = 0
             self.set_task_factory(self._recording_task)
             self._trace = trace
 
+    def adopt(self, driver: IdleDriver) -> None:
+        """Let ``driver`` run whenever this loop is idle, until the run ends."""
+        self.driver = driver
+        driver.attach()
+
     def time(self) -> float:
-        return self._clock.at
+        return self._clock.at if self.host is None else self.host.now()
+
+    def _write_to_self(self) -> None:
+        # A callback scheduled from another thread writes to the loop's wakeup pipe; a hosted
+        # loop parked on the timeline must also be woken there, or it never reads the pipe.
+        super()._write_to_self()  # ty: ignore[unresolved-attribute]
+        if self.host is not None:
+            self.host.wake()
 
     def call_at(
         self,
@@ -289,6 +345,13 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         func: Callable[[*Ts], T],
         *args: *Ts,
     ) -> asyncio.Future[T]:
+        owner = self.host or self.driver
+        if owner is not None and executor is None:
+            # The owner's executor runs the call as a simulated thread, whose completion wakes
+            # this loop like any other callback, and no real thread reaches the simulation's
+            # locks. (asyncio accepts only a real thread pool as the default executor, so it is
+            # chosen here.)
+            return super().run_in_executor(owner.executor, func, *args)
         # Count the call until its future is done, so the selector can tell "idle" from
         # "waiting for a thread". A call whose waiter was cancelled stops counting at once.
         self.workers_in_flight += 1
@@ -314,12 +377,19 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         coro: Coroutine[object, object, object],
         *,
         context: contextvars.Context | None = None,
+        **task_options: object,
     ) -> asyncio.Task[object]:
         # Task names count process-wide, so label by creation order within this loop.
         label = f"{getattr(coro, '__qualname__', type(coro).__name__)}#{self._created}"
         self._created += 1
-        return asyncio.Task(
-            _RecordedCoroutine(coro, label, self._trace), loop=loop, context=context
+        # The event loop forwards every task option its Python version supports. Keep that
+        # contract open rather than copying today's version-specific name/eager_start set.
+        task_constructor = cast("Callable[..., asyncio.Task[object]]", asyncio.Task)
+        return task_constructor(
+            _RecordedCoroutine(coro, label, self._trace),
+            loop=loop,
+            context=context,
+            **task_options,
         )
 
 
@@ -351,8 +421,41 @@ class VirtualClock:
         await asyncio.sleep(seconds)
 
 
-def current_virtual_clock() -> VirtualClock:
-    """The clock of the virtual loop the caller is running on.
+SIM_WALL_EPOCH = 1_700_000_000.0
+"""Where a simulated wall clock starts: 2023-11-14 UTC."""
+
+SIM_MONOTONIC_ORIGIN = 1_000_000.0
+"""Where simulated monotonic time (``SimThreads.now``) starts, like seconds since a boot.
+
+It differs from both the timeline (near zero) and ``SIM_WALL_EPOCH``, so a reading of one
+compared with another is off by days or decades in every simulated test.
+"""
+
+
+class WallClockView:
+    """A simulated timeline read as wall-clock time: the same ticks, offset by an epoch.
+
+    The timeline itself (``VirtualClock.now``) starts near zero and ``SimThreads.now`` near
+    ``SIM_MONOTONIC_ORIGIN``. This view is the wall-clock reading of the same timeline, so a
+    timestamp and a monotonic reading never agree by accident.
+    """
+
+    def __init__(self, timeline: VirtualClock, epoch: float = SIM_WALL_EPOCH) -> None:
+        """Read ``timeline`` as seconds since the Unix epoch, starting near ``epoch``."""
+        self._timeline = timeline
+        self._epoch = epoch
+
+    def now(self) -> float:
+        """Seconds since the Unix epoch on the simulated timeline."""
+        return self._epoch + self._timeline.now()
+
+    async def sleep(self, seconds: float) -> None:
+        """Sleep on the underlying timeline."""
+        await self._timeline.sleep(seconds)
+
+
+def current_virtual_loop() -> _VirtualLoop:
+    """The virtual loop the caller is running on.
 
     Raises:
         RuntimeError: the caller is not running on a loop started by :func:`run_virtual`.
@@ -361,7 +464,16 @@ def current_virtual_clock() -> VirtualClock:
     if not isinstance(loop, _VirtualLoop):
         message = "this code is not running on a virtual loop (see run_virtual)"
         raise RuntimeError(message)  # noqa: TRY004  # LW-163811 [TRY004]; a missing precondition of the call, not a bad argument type.
-    return loop.clock
+    return loop
+
+
+def current_virtual_clock() -> VirtualClock:
+    """The clock of the virtual loop the caller is running on.
+
+    Raises:
+        RuntimeError: the caller is not running on a loop started by :func:`run_virtual`.
+    """
+    return current_virtual_loop().clock
 
 
 def run_virtual[T](
@@ -381,17 +493,48 @@ def run_virtual[T](
     gives the same order); without it, ties run in the order they were started.
 
     A ``driver`` (simulated threads) runs whenever the loop is idle and shares the clock;
-    it is closed when the run ends.
+    it is closed when the run ends. Code on the loop can also ask for one with
+    :func:`~vs_sim.sim_threads.loop_threads`.
     """
+    loops: list[_VirtualLoop] = []
 
     def make_loop() -> _VirtualLoop:
         loop = _VirtualLoop(clock, trace, schedule_seed)
-        loop.driver = driver
+        loops.append(loop)
+        if driver is not None:
+            loop.adopt(driver)
         return loop
 
     try:
         with asyncio.Runner(loop_factory=make_loop) as runner:
             return runner.run(main)
     finally:
-        if driver is not None:
-            driver.close()
+        for loop in loops:
+            if loop.driver is not None:
+                loop.driver.close()
+
+
+def run_hosted[T](
+    clock: VirtualClock,
+    main: Coroutine[object, object, T],
+    *,
+    host: LoopHost,
+    trace: EventTrace | None = None,
+    schedule_seed: int | None = None,
+) -> T:
+    """Run ``main`` to completion on a loop whose time is ``clock``, on ``host``'s thread.
+
+    Unlike :func:`run_virtual`, the loop does not drive the simulated threads: it runs on
+    one of them, and while idle it parks that thread until another wakes it or its next
+    timer is due. Its ``time()`` is ``host.now()``, and ``run_in_executor`` (so also
+    ``asyncio.to_thread``) runs calls on ``host.executor``. ``SimThreads.run_async`` is the
+    caller.
+    """
+
+    def make_loop() -> _VirtualLoop:
+        loop = _VirtualLoop(clock, trace, schedule_seed)
+        loop.host = host
+        return loop
+
+    with asyncio.Runner(loop_factory=make_loop) as runner:
+        return runner.run(main)

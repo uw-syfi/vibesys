@@ -1,0 +1,90 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/timestamp.proto";
+import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/verdict.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// The frontier of a multi-objective (Pareto) task is the set of its commits that no member beats:
+// each was measured, rests on a passing check, and when it was admitted it was a tradeoff against
+// every member it did not evict. `frontier add` admits a commit, and a promotion of a
+// multi-objective commit offers it too.
+
+// FrontierMember is one commit on a task's frontier.
+message FrontierMember {
+  string commit = 1;
+  // When it was admitted.
+  google.protobuf.Timestamp added_at = 2;
+}
+
+// ObjectiveValue is a commit's headline number on one objective: the mean of the samples of every
+// measurement of the commit, computed by the daemon.
+message ObjectiveValue {
+  Metric metric = 1;
+  double value = 2;
+  uint32 samples = 3;
+}
+
+// FrontierEntry is a member with its headline number on each objective, in the order the task
+// declares them.
+message FrontierEntry {
+  FrontierMember member = 1;
+  repeated ObjectiveValue values = 2;
+}
+
+// FrontierRefusalKind is one reason a commit was not admitted. A refusal can carry several.
+enum FrontierRefusalKind {
+  FRONTIER_REFUSAL_KIND_UNSPECIFIED = 0;
+  // The commit, or the member named, has no measurement.
+  FRONTIER_REFUSAL_KIND_UNMEASURED = 1;
+  // A measurement of the commit rests on no passing check for its task version and environment.
+  FRONTIER_REFUSAL_KIND_CHECK_MISSING = 2;
+  // The member named beats the commit: the commit is worse on some objective and better on none.
+  FRONTIER_REFUSAL_KIND_DOMINATED = 3;
+  // The commit is within noise of the member named on every objective.
+  FRONTIER_REFUSAL_KIND_WITHIN_NOISE = 4;
+  // The samples cannot place the commit against the member named.
+  FRONTIER_REFUSAL_KIND_INCONCLUSIVE = 5;
+  // The commit and the member named were measured under different task versions.
+  FRONTIER_REFUSAL_KIND_STALE = 6;
+  // The commit and the member named were measured in different environments.
+  FRONTIER_REFUSAL_KIND_ENVIRONMENT_MISMATCH = 7;
+}
+
+message FrontierRefusalReason {
+  FrontierRefusalKind kind = 1;
+  // Display text. Callers branch on kind.
+  string message = 2;
+  // The member the reason is about. Empty for a reason about the commit alone.
+  string member = 3;
+  // The overall verdict of the commit against the member, and the verdict on each objective. Set
+  // for DOMINATED, WITHIN_NOISE, INCONCLUSIVE and STALE.
+  Verdict verdict = 4;
+  repeated ObjectiveVerdict objectives = 5;
+}
+
+// FrontierRefusal is a normal answer, not an error: the frontier is unchanged.
+message FrontierRefusal {
+  repeated FrontierRefusalReason reasons = 1;
+}
+
+// FrontierAdmission is a commit admitted to the frontier.
+message FrontierAdmission {
+  FrontierMember added = 1;
+  // The members the commit beats, which left the frontier.
+  repeated string evicted = 2;
+  // The commit was a member already, and nothing changed.
+  bool already_member = 3;
+  // The frontier after the change, in the order the members were admitted.
+  repeated FrontierMember members = 4;
+}
+
+// FrontierDecision is what the frontier made of a commit.
+message FrontierDecision {
+  oneof outcome {
+    FrontierAdmission admitted = 1;
+    FrontierRefusal refused = 2;
+  }
+}

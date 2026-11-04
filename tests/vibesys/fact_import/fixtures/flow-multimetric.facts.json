@@ -1,0 +1,170 @@
+{
+  "facts": [
+    {
+      "contentReference": {
+        "artifactId": {
+          "kind": "artifact",
+          "root": "prompt-1"
+        },
+        "digest": "d"
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.journal[1].recorded.result_json.outcome.prompts[0]",
+          "sha256": "62db6f85d663b015abd544725b67ba4f658abd6ea9fafb5193f52904038f69ee"
+        }
+      ]
+    },
+    {
+      "candidate": {
+        "revision": {
+          "digest": "base-digest",
+          "revisionId": {
+            "kind": "revision",
+            "root": "base"
+          }
+        }
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.facts.baseline",
+          "sha256": "62db6f85d663b015abd544725b67ba4f658abd6ea9fafb5193f52904038f69ee"
+        }
+      ]
+    },
+    {
+      "candidate": {
+        "revision": {
+          "digest": "candidate-digest",
+          "revisionId": {
+            "kind": "revision",
+            "root": "candidate-a"
+          }
+        }
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.live.published.parents[0].revision",
+          "sha256": "62db6f85d663b015abd544725b67ba4f658abd6ea9fafb5193f52904038f69ee"
+        }
+      ]
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.facts",
+          "sha256": "62db6f85d663b015abd544725b67ba4f658abd6ea9fafb5193f52904038f69ee"
+        }
+      ],
+      "input": {
+        "baseline": {
+          "digest": "base-digest",
+          "revisionId": {
+            "kind": "revision",
+            "root": "base"
+          }
+        },
+        "baselineRevision": "base",
+        "environmentDigest": "environment",
+        "evaluatorDigest": "evaluator",
+        "objective": "two opaque items",
+        "workloadDigest": "workload"
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.live.published.parents[0].accuracy",
+          "sha256": "62db6f85d663b015abd544725b67ba4f658abd6ea9fafb5193f52904038f69ee"
+        }
+      ],
+      "measurement": {
+        "acceptedReading": {
+          "key": {
+            "evidenceId": {
+              "kind": "evidence",
+              "root": "accuracy"
+            },
+            "kind": "evidence_key",
+            "sourceRequest": {
+              "kind": "request",
+              "root": "accuracy-request"
+            }
+          },
+          "kind": "EVIDENCE_KIND_CORRECTNESS",
+          "passed": true,
+          "protocol": "1",
+          "stage": "check"
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.live.published.parents[0].benchmark",
+          "sha256": "62db6f85d663b015abd544725b67ba4f658abd6ea9fafb5193f52904038f69ee"
+        }
+      ],
+      "measurement": {
+        "acceptedReading": {
+          "key": {
+            "evidenceId": {
+              "kind": "evidence",
+              "root": "benchmark"
+            },
+            "kind": "evidence_key",
+            "sourceRequest": {
+              "kind": "request",
+              "root": "benchmark-request"
+            }
+          },
+          "kind": "EVIDENCE_KIND_BENCHMARK",
+          "partial": {
+            "completed": "1",
+            "reading": {
+              "direction": "DIRECTION_MAX",
+              "metric": "warmup",
+              "repetitions": "1",
+              "value": 1.0
+            },
+            "required": "4",
+            "target": 4.0,
+            "unit": "rounds"
+          },
+          "protocol": "1",
+          "readings": [
+            {
+              "direction": "DIRECTION_MAX",
+              "metric": "throughput",
+              "repetitions": "1",
+              "unit": "rps",
+              "value": 2.0
+            },
+            {
+              "direction": "DIRECTION_MIN",
+              "metric": "p99",
+              "repetitions": "1",
+              "unit": "ms",
+              "value": 3.0
+            }
+          ],
+          "stage": "benchmark"
+        }
+      }
+    }
+  ],
+  "runId": "run",
+  "schemaVersion": 1
+}

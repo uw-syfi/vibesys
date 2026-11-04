@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, assert_never
 
+from pydantic import ConfigDict
+
 from vibesys.hypothesis.history import (
     CandidateDisposition,
     HypothesisOutcome,
@@ -49,17 +51,6 @@ if TYPE_CHECKING:
 
     from vibesys.hypothesis.history import PerfProvenance, RoundRecord
     from vibesys.hypothesis.plan import HypothesisStrategyUpdate, OrchestratorPlan
-
-# ``hypothesis_outcome`` values that mark a hypothesis campaign as failed, for
-# rollback-target resolution. A record with no outcome yet is never "failed".
-FAILED_HYPOTHESIS_OUTCOMES = (
-    frozenset(outcome.value for outcome in HypothesisOutcome)
-    - {
-        HypothesisOutcome.CONTINUE.value,
-        HypothesisOutcome.SUPPORTED.value,
-        HypothesisOutcome.NOMINATED.value,
-    }
-) | {"rejected"}
 
 _PARETO_ARCHIVE_PENDING_CLAIM_LIMIT = 8
 _PLATEAU_THRESHOLD_PCT = 5.0
@@ -203,7 +194,8 @@ def baseline_candidates(
     return [
         item
         for item in rounds
-        if item.official_evaluation
+        if item.passed
+        and item.official_evaluation
         and item.perf_metric is not None
         and trusted_perf_provenance(item.perf_provenance)
         and (item.perf_unit == metric or (metric is not None and metric in item.metrics))
@@ -570,9 +562,11 @@ def _measurement(
 class CarryOver:
     """Record-derived guidance passed to the next planning turn.
 
-    Rebuilt from round records on resume (:meth:`HypothesisSearch.initial_carry`),
-    never persisted.
+    Built from round records on resume (:meth:`HypothesisSearch.initial_carry`) and
+    persisted between turns in the strategy state's ledger, which decodes it strictly.
     """
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
 
     regression: RegressionNotice | None = None
     exhaustion: ExhaustionNotice | None = None
@@ -860,25 +854,6 @@ def detect_plateau(
         f"— a {spread_pct:.2f}% spread, well within bench noise. Whatever you've "
         f"been working on for those rounds is not actually moving the headline metric."
     )
-
-
-def provisional_candidates_since_official(records: Sequence[RoundRecord]) -> int:
-    """Count accepted candidate checkpoints after the latest official one."""
-    count = 0
-    for record in reversed(records):
-        if record.official_evaluation:
-            break
-        if (
-            record.passed
-            and record.reviewed
-            and (
-                record_candidate_retained(record) is True
-                or record.hypothesis_outcome
-                in {HypothesisResolution.PROVEN.value, HypothesisResolution.UNMEASURED.value}
-            )
-        ):
-            count += 1
-    return count
 
 
 def terminal_workspace_notice(

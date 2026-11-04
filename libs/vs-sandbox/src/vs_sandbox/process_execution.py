@@ -10,34 +10,48 @@ period.
 
 from __future__ import annotations
 
-import os
 import signal
-import subprocess
-from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
-from math import isfinite
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sim.api import OsThreads, ProcessTimeoutError, Threads
+from vs_sim.api import OutputStream, ProcessTimeoutError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable
+    from io import TextIOBase
 
-type _TextProcess = subprocess.Popen[str]
-
+    from vs_sim.api import OutputSink, PipedProcess, Threads
 
 #: The signals a stop sends, named here so only this adapter module refers to ``signal``.
 type StopSignal = signal.Signals
 TERMINATE: StopSignal = signal.SIGTERM
 KILL: StopSignal = signal.SIGKILL
-#: Delivers a signal to the processes of a command that live outside the launched process group.
-type SignalSender = Callable[[StopSignal], None]
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteProcesses:
+    """What signalling a command's remote processes found: how many remain, if known.
+
+    ``survivors`` is ``None`` when the signal could not be delivered or its answer
+    could not be read, so nothing is known about the remote side.
+    """
+
+    survivors: int | None
+
+    @property
+    def gone(self) -> bool:
+        """Whether the remote side was shown to hold none of the command's processes."""
+        return self.survivors == 0
+
+
+#: Signals the processes of a command that live outside the launched process group (a
+#: container exec's) and says how many of them remain.
+type SignalSender = Callable[[StopSignal], RemoteProcesses]
 
 #: Default time a stopped command gets between ``SIGTERM`` and ``SIGKILL``.
 DEFAULT_TERMINATION_GRACE_SECONDS = 30.0
-#: Longest cleanup wait after a synchronous command timeout kills its owned group.
-DEFAULT_PROCESS_SETTLE_SECONDS = 5.0
 # How often a cancellable wait checks the caller's event. The event has no
 # wait-any primitive with process exit, so the wait polls; this bounds the
 # latency of a cancellation, not of a normal exit.
@@ -49,6 +63,10 @@ class ProcessStop(StrEnum):
 
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
+    CLIENT_LOST = "client_lost"
+    """The launched process was the client of a remote command, and a signal this
+    module did not send ended it. The client's death says nothing about the
+    command, which may still be running where it lives, so it is stopped there."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,14 +74,17 @@ class ProcessOutcome:
     """Captured streams and exit status of one finished or stopped command.
 
     ``returncode`` is the shell-convention status: ``128 + N`` for a process
-    killed by signal ``N``, never a negative number. The streams hold
-    everything the command wrote before it exited or was stopped.
+    killed by signal ``N``, never a negative number. It is ``None`` when the
+    command's own status is unknown (:attr:`ProcessStop.CLIENT_LOST`). The
+    streams hold everything the command wrote before it exited or was stopped.
     """
 
     stdout: str
     stderr: str
-    returncode: int
+    returncode: int | None
     stopped: ProcessStop | None = None
+    unconfirmed: RemoteProcesses | None = None
+    """Set when a stop could not show that the command's remote processes ended."""
 
 
 def shell_exit_status(returncode: int) -> int:
@@ -87,7 +108,7 @@ class CancelSignal(Protocol):
 class StoppableProcess(Protocol):
     """A started process group leader that :func:`wait_stoppable` can wait for and stop.
 
-    :class:`PopenProcess` is the real one; ``FakeStoppableProcess`` in
+    :class:`PipedStoppableProcess` is the real one; ``FakeStoppableProcess`` in
     ``vs_sandbox.api.testing`` runs on a simulated clock. Both pass the cases in
     :class:`~vs_sandbox.process_contracts.StoppableProcessContract`.
     """
@@ -110,271 +131,91 @@ class StoppableProcess(Protocol):
         ...
 
 
-class CapturedProcess(StoppableProcess, Protocol):
-    """A process whose captured streams can be released after its leader is reaped."""
+class PipedStoppableProcess:
+    """A :class:`StoppableProcess` over a started ``vs_sim`` :class:`~vs_sim.api.PipedProcess`.
 
-    @property
-    def timeout_output(self) -> tuple[bytes | None, bytes | None]:
-        """Raw stdout and stderr captured when the first wait timed out."""
-        ...
+    Two drain workers read stdout and stderr as the command writes them, so
+    neither pipe fills and blocks the command; a wait returns the output once
+    the leader exited and both pipes reached EOF. Like ``subprocess`` text
+    mode, CRLF and a lone CR become LF in what a wait returns.
 
-    def signal_group_if_unreaped(self, signal_number: StopSignal) -> bool:
-        """Signal the group only while the leader's PID still reserves its PGID.
+    Each chunk a drain reads is also written to *output* as it arrives, UTF-8
+    encoded and with its line endings as the command wrote them, so a caller
+    sees a long command's output while it runs. *output* receives the same text
+    whatever the wait later returns, before and after a stop alike.
+    """
 
-        Return whether the leader was still unreaped and the signal was
-        attempted. Once the leader is reaped, its numeric process-group ID may
-        belong to an unrelated group and must never be signalled.
-        """
-        ...
-
-    def close(self) -> None:
-        """Attempt every pipe close, grouping multiple failures in stream order."""
-        ...
-
-
-@dataclass(frozen=True, slots=True)
-class CapturedProcessRequest:
-    """One synchronous captured command and its unchanged subprocess inputs."""
-
-    argv: Sequence[str]
-    stdin: str | None
-    timeout: float
-    env: Mapping[str, str] | None = None
-    cwd: str | None = None
-    start_new_session: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class CapturedProcessResult:
-    """Complete captured streams and raw subprocess status for one command."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-class CapturedProcessLauncher(Protocol):
-    """Start a captured command as the leader of a locally owned process group."""
-
-    def start(self, request: CapturedProcessRequest) -> CapturedProcess:
-        """Start *request*, raising its launch error unchanged."""
-        ...
-
-
-class CapturedProcessRunner(Protocol):
-    """Run captured commands while owning their whole local process group."""
-
-    def run(self, request: CapturedProcessRequest) -> CapturedProcessResult:
-        """Return a completed command or raise :class:`subprocess.TimeoutExpired`."""
-        ...
-
-
-class PopenProcess:
-    """A ``subprocess.Popen`` started with :func:`start_process_group`."""
-
-    def __init__(self, process: _TextProcess, *, stdin: str | None = None) -> None:
-        """Wrap *process*, the leader of its own process group."""
+    def __init__(self, process: PipedProcess, *, threads: Threads, output: OutputSink) -> None:
+        """Take ownership of *process* and start draining its pipes on *threads* into *output*."""
         self._process = process
-        self._stdin = stdin
-        self._communication_started = False
-        self._timeout_output: tuple[bytes | None, bytes | None] = (None, None)
+        self._threads = threads
+        self._stdout: list[str] = []
+        self._stderr: list[str] = []
+        self._returncode: int | None = None
+        self._drains = (
+            threads.spawn(
+                partial(_drain, process.stdout, self._stdout, output, OutputStream.STDOUT),
+                name="vibesys-command-stdout",
+            ),
+            threads.spawn(
+                partial(_drain, process.stderr, self._stderr, output, OutputStream.STDERR),
+                name="vibesys-command-stderr",
+            ),
+        )
 
     @property
     def returncode(self) -> int:
         """The return code of the exited leader."""
-        code = self._process.returncode
-        if code is None:
+        if self._returncode is None:
             message = "the process has not exited"
             raise RuntimeError(message)
-        return code
+        return self._returncode
 
     def wait(self, timeout: float | None) -> tuple[str, str] | None:
-        """Wait with ``communicate``, retaining partial output after timeout."""
-        try:
-            stdin = None if self._communication_started else self._stdin
-            self._communication_started = True
-            return self._process.communicate(input=stdin, timeout=timeout)
-        except ProcessTimeoutError as error:
-            self._timeout_output = (error.output, error.stderr)
-            return None
+        """Wait for both pipes' EOF and then the leader, within *timeout* seconds in total.
 
-    @property
-    def timeout_output(self) -> tuple[bytes | None, bytes | None]:
-        """Return the raw partial streams reported by ``communicate``."""
-        return self._timeout_output
+        The pipes come first: reaping the leader ends the group's signals, so a
+        descendant that still holds a pipe open after the leader exited stays
+        reachable by a stop until the pipes close.
+        """
+        deadline = None if timeout is None else self._threads.now() + timeout
+
+        def remaining() -> float | None:
+            return None if deadline is None else max(0.0, deadline - self._threads.now())
+
+        for drain in self._drains:
+            drain.join(remaining())
+            if drain.is_alive():
+                return None
+        if self._returncode is None:
+            try:
+                self._returncode = self._process.wait(remaining())
+            except ProcessTimeoutError:
+                return None
+        return _universal_newlines(self._stdout), _universal_newlines(self._stderr)
 
     def signal_group(self, signal_number: StopSignal) -> None:
-        """Signal the group; it outlives its leader while any descendant remains in it."""
-        with suppress(ProcessLookupError, PermissionError):
-            os.killpg(self._process.pid, signal_number)
-
-    def signal_group_if_unreaped(self, signal_number: StopSignal) -> bool:
-        """Signal while this handle still reserves the leader's PID and PGID."""
-        # ``Popen.returncode`` changes only when this owner reaps the child.
-        # A leader that exited in the kernel but remains unreaped is a zombie,
-        # so its PID still reserves the process-group identity and is safe to
-        # signal. Conversely, ``communicate`` can reap before raising a decode
-        # error, in which case signalling the stale numeric PGID is unsafe.
-        if self._process.returncode is not None:
-            return False
-        self.signal_group(signal_number)
-        return True
-
-    def close(self) -> None:
-        """Release all pipes and reap an already-exited leader without blocking."""
-        failures: list[BaseException] = []
-        for stream in (self._process.stdin, self._process.stdout, self._process.stderr):
-            if stream is not None:
-                try:
-                    stream.close()
-                except BaseException as failure:  # noqa: BLE001  # lint-waiver: LW-194305 [BLE001]; all three owned pipes must be attempted even when cancellation or an injected stream failure interrupts an earlier close.
-                    # > Catching only I/O errors would let cancellation skip later
-                    # > resources; a context manager would retain only its last
-                    # > failure instead of reporting the complete cleanup.
-                    failures.append(failure)
-        self._process.poll()
-        raise_pipe_close_failures(failures)
-
-
-def raise_pipe_close_failures(failures: list[BaseException]) -> None:
-    """Raise one close failure unchanged or group several in attempt order."""
-    if len(failures) == 1:
-        raise failures[0]
-    if failures:
-        message = "captured process pipes could not be closed"
-        raise BaseExceptionGroup(message, failures)
-
-
-def _cleanup_failure_message(failure: BaseException) -> str:
-    """Describe nested cleanup failures in their deterministic attempt order."""
-    if isinstance(failure, BaseExceptionGroup):
-        return "; ".join(_cleanup_failure_message(item) for item in failure.exceptions)
-    return str(failure) or type(failure).__name__
-
-
-def _open_process(
-    argv: Sequence[str],
-    *,
-    env: Mapping[str, str] | None,
-    cwd: str | None,
-    stdin: int | None,
-    start_new_session: bool = False,
-) -> _TextProcess:
-    return subprocess.Popen(  # noqa: S603  # lint-waiver: LW-731001 [S603]; the sandbox boundary intentionally executes its caller's command.
-        # > Each sandbox assembles its own argv (a shell command is ``sh -c``);
-        # > validating argv here would duplicate each sandbox's command contract.
-        argv,
-        env=dict(env) if env is not None else None,
-        cwd=cwd,
-        stdin=stdin,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=start_new_session,
-        process_group=-1 if start_new_session else 0,
-    )
-
-
-def start_process_group(
-    argv: Sequence[str],
-    *,
-    env: Mapping[str, str] | None,
-    cwd: str | None,
-) -> _TextProcess:
-    """Start *argv* as the leader of a new process group with piped output.
-
-    Launch failures raise the ``subprocess`` error unchanged.
-    """
-    return _open_process(argv, env=env, cwd=cwd, stdin=subprocess.DEVNULL)
-
-
-class _SubprocessCapturedProcessLauncher:
-    """Start a real captured process group for :class:`OwnedProcessRunner`."""
-
-    def start(self, request: CapturedProcessRequest) -> CapturedProcess:
-        process = _open_process(
-            request.argv,
-            env=request.env,
-            cwd=request.cwd,
-            stdin=subprocess.PIPE if request.stdin is not None else None,
-            start_new_session=request.start_new_session,
-        )
-        return PopenProcess(process, stdin=request.stdin)
-
-
-class OwnedProcessRunner:
-    """Run a captured command and settle its locally owned group on failure.
-
-    A timeout sends ``SIGKILL`` to the group while its leader remains unreaped,
-    preserving ``subprocess.run``'s immediate-kill policy while extending it to
-    descendants. Other failures do the same only while the leader remains
-    unreaped; after a decode failure has reaped it, cleanup cannot safely signal
-    its potentially reused numeric PGID. Cleanup waits at most
-    *settle_seconds*, then closes the captured pipes and reaps an exited leader
-    without another blocking wait. The original exception remains authoritative.
-    """
-
-    def __init__(
-        self,
-        *,
-        processes: CapturedProcessLauncher | None = None,
-        threads: Threads | None = None,
-        settle_seconds: float = DEFAULT_PROCESS_SETTLE_SECONDS,
-    ) -> None:
-        """Use OS process effects by default with a finite cleanup budget."""
-        if not isfinite(settle_seconds) or settle_seconds < 0:
-            message = "process settle timeout must be finite and nonnegative"
+        """Send ``SIGTERM`` or ``SIGKILL`` to the group while its leader is unreaped."""
+        if signal_number == TERMINATE:
+            self._process.terminate_group()
+        elif signal_number == KILL:
+            self._process.kill_group()
+        else:
+            message = f"a stoppable process is stopped only with SIGTERM or SIGKILL, not {signal_number!r}"
             raise ValueError(message)
-        self._processes = processes or _SubprocessCapturedProcessLauncher()
-        self._threads = threads or OsThreads()
-        self._settle_seconds = settle_seconds
 
-    def run(self, request: CapturedProcessRequest) -> CapturedProcessResult:
-        """Run *request*, safely settling its owned process group on failure."""
-        process = self._processes.start(request)
-        try:
-            finished = process.wait(request.timeout)
-        except BaseException as failure:
-            self._settle_owned_failure(process, failure)
-            raise
-        if finished is None:
-            error = ProcessTimeoutError(request.argv, request.timeout)
-            self._settle_owned_failure(process, error)
-            error.output, error.stderr = process.timeout_output
-            raise error
-        try:
-            return CapturedProcessResult(process.returncode, *finished)
-        finally:
-            process.close()
 
-    def _settle_owned_failure(
-        self,
-        process: CapturedProcess,
-        failure: BaseException,
-    ) -> tuple[str, str] | None:
-        """Kill and settle a group only while its leader identity is reserved."""
-        settled: tuple[str, str] | None = None
-        deadline = self._threads.now() + self._settle_seconds
-        try:
-            if process.signal_group_if_unreaped(KILL):
-                settled = process.wait(max(0.0, deadline - self._threads.now()))
-                if settled is None:
-                    failure.add_note(
-                        f"process group did not settle within {self._settle_seconds:g} seconds"
-                    )
-        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-731022 [BLE001]; cleanup must preserve the caller's timeout or interruption while still attempting pipe closure.
-            # > Catching only OS errors would let an injected process adapter replace
-            # > the primary failure; a wrapper around these two steps adds no isolation.
-            detail = _cleanup_failure_message(cleanup_error)
-            failure.add_note(f"process group cleanup also failed: {detail}")
-        try:
-            process.close()
-        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-731023 [BLE001]; pipe cleanup must preserve the primary process failure, including interpreter-level cancellation.
-            # > Narrow catches cannot guarantee closure after an injected adapter's
-            # > failure, and a generic cleanup helper would obscure ownership here.
-            detail = _cleanup_failure_message(cleanup_error)
-            failure.add_note(f"process pipe cleanup also failed: {detail}")
-        return settled
+_DRAIN_CHARACTERS = 65_536
+
+
+def _drain(stream: TextIOBase, kept: list[str], output: OutputSink, name: OutputStream) -> None:
+    while chunk := stream.read(_DRAIN_CHARACTERS):
+        kept.append(chunk)
+        output.write(name, chunk.encode())
+
+
+def _universal_newlines(chunks: list[str]) -> str:
+    return "".join(chunks).replace("\r\n", "\n").replace("\r", "\n")
 
 
 def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the stop policy is five independent keywords (timeout, cancel, grace, remote signal, clock) and bundling them would only rename them.
@@ -384,7 +225,7 @@ def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the st
     cancel: CancelSignal | None,
     grace_seconds: float = DEFAULT_TERMINATION_GRACE_SECONDS,
     signal_remote: SignalSender | None = None,
-    threads: Threads | None = None,
+    threads: Threads,
 ) -> ProcessOutcome:
     """Wait for a process group leader until it exits, times out, or is cancelled.
 
@@ -397,7 +238,7 @@ def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the st
     killed before the interruption propagates, so nothing outlives the call.
     *threads* supplies the clock the timeout is measured on.
     """
-    clock = (threads or OsThreads()).now
+    clock = threads.now
     deadline = None if timeout is None else clock() + timeout
     try:
         while True:
@@ -405,6 +246,8 @@ def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the st
             wait = remaining if cancel is None else _min_wait(remaining)
             finished = process.wait(wait)
             if finished is not None:
+                if signal_remote is not None and process.returncode < 0:
+                    return _client_lost(finished, grace_seconds, signal_remote, threads)
                 return ProcessOutcome(*finished, shell_exit_status(process.returncode))
             if cancel is not None and cancel.is_set():
                 stop = ProcessStop.CANCELLED
@@ -412,7 +255,7 @@ def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the st
                 stop = ProcessStop.TIMEOUT
             else:
                 continue
-            return _stop(process, stop, grace_seconds, signal_remote)
+            return _stop(process, stop, grace_seconds, signal_remote, threads)
     except BaseException:
         _kill(process, signal_remote)
         raise
@@ -423,24 +266,60 @@ def _stop(
     stop: ProcessStop,
     grace_seconds: float,
     signal_remote: SignalSender | None,
+    threads: Threads,
 ) -> ProcessOutcome:
-    stop_signal = TERMINATE
+    grace_end = threads.now() + grace_seconds
     if signal_remote is not None:
-        signal_remote(stop_signal)
-    process.signal_group(stop_signal)
+        signal_remote(TERMINATE)
+    process.signal_group(TERMINATE)
     finished = process.wait(grace_seconds)
-    if finished is None:
+    killed = finished is None
+    if killed:
         _kill(process, signal_remote)
         finished = process.wait(None)
-    elif signal_remote is not None:
-        # The local client is gone. A command whose remote process started after the
-        # first request found nothing to signal (its client was killed before it
-        # existed there) is reachable only now, and nothing else would stop it.
-        signal_remote(stop_signal)
     if finished is None:
         message = "a killed process did not exit"
         raise RuntimeError(message)
-    return ProcessOutcome(*finished, shell_exit_status(process.returncode), stop)
+    unconfirmed = None
+    if signal_remote is not None:
+        remote = _end_remote(signal_remote, grace_end, threads, killed=killed)
+        unconfirmed = None if remote.gone else remote
+    return ProcessOutcome(*finished, shell_exit_status(process.returncode), stop, unconfirmed)
+
+
+def _client_lost(
+    finished: tuple[str, str],
+    grace_seconds: float,
+    signal_remote: SignalSender,
+    threads: Threads,
+) -> ProcessOutcome:
+    """Stop a remote command whose client a signal ended, and report no status for it.
+
+    A client relays its remote command's status as an ordinary exit code, so a
+    client ended by a signal is the client's own death (an OOM kill on the host,
+    an operator's ``kill``), not the command's. The command may still run, so it
+    gets ``SIGTERM`` and, after the grace period, ``SIGKILL`` where it lives.
+    """
+    remote = _end_remote(signal_remote, threads.now() + grace_seconds, threads, killed=False)
+    unconfirmed = None if remote.gone else remote
+    return ProcessOutcome(*finished, None, ProcessStop.CLIENT_LOST, unconfirmed)
+
+
+def _end_remote(
+    signal_remote: SignalSender, grace_end: float, threads: Threads, *, killed: bool
+) -> RemoteProcesses:
+    """Stop what remains of the command where it runs, now that its local client is gone.
+
+    Killing the local client does not stop the remote command, so the remote side is
+    signalled again and checked. ``SIGTERM`` reaches a remote process that started
+    after the first request (its client was killed before it existed there); whatever
+    outlives the grace period gets ``SIGKILL``.
+    """
+    remote = signal_remote(KILL if killed else TERMINATE)
+    if remote.gone or killed:
+        return remote
+    threads.sleep(max(0.0, grace_end - threads.now()))
+    return signal_remote(KILL)
 
 
 def _kill(process: StoppableProcess, signal_remote: SignalSender | None) -> None:

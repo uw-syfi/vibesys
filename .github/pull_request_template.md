@@ -60,3 +60,13 @@ introduces, especially for user-facing behavior and shared interfaces.
 <!--
 List the exact commands or workflows run, plus the relevant result.
 -->
+
+### Screens
+
+<!--
+UI pull requests (desktop screens, wording, layout): the contact sheet from the
+verify-desktop-ui skill, before and after the change, from the app window only
+(never a full-screen capture), and what the critic step found and fixed. Write
+"n/a: no screen changes" for any other pull request.
+-->
+

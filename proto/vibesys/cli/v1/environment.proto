@@ -1,0 +1,77 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// EnvironmentKind is where a job's commands run.
+enum EnvironmentKind {
+  ENVIRONMENT_KIND_UNSPECIFIED = 0;
+  ENVIRONMENT_KIND_HOST = 1;
+  ENVIRONMENT_KIND_DOCKER = 2;
+}
+
+// BackendKind is the compute stack a task targets. It is closed: a new stack is a contract change.
+enum BackendKind {
+  BACKEND_KIND_UNSPECIFIED = 0;
+  BACKEND_KIND_CPU = 1;
+  BACKEND_KIND_CUDA = 2;
+  BACKEND_KIND_ROCM = 3;
+  BACKEND_KIND_METAL = 4;
+  BACKEND_KIND_TRAINIUM = 5;
+}
+
+// ResourceKind is something a placement can give a job's container, and a task can need. It is
+// closed: a new kind is a contract change. A task names one in vibesys.input.toml as the value's
+// name without its prefix, in lower case ([environment] needs = ["kubernetes"]).
+enum ResourceKind {
+  RESOURCE_KIND_UNSPECIFIED = 0;
+  // GPUs passed into the container.
+  RESOURCE_KIND_GPU = 1;
+  // Access to a Kubernetes cluster: its kubeconfig, the network that reaches it, and the addresses
+  // of the registry and image builder it pulls from.
+  RESOURCE_KIND_KUBERNETES = 2;
+  // Read-only directories of the engine's machine.
+  RESOURCE_KIND_MOUNTS = 3;
+}
+
+// EnvironmentFingerprint identifies the environment a result was taken in. Two results are
+// comparable, and a check pass is reusable, only when their fingerprints are equal, and the cache
+// key takes the fingerprint as equality compares it. A docker environment is its kind, backend and
+// image digest: the image pins every program a job runs, so where its container ran is no part of
+// it. A host environment is its kind, backend and facts.
+message EnvironmentFingerprint {
+  EnvironmentKind kind = 1;
+  BackendKind backend = 2;
+  // The exact image digest ("sha256:..."), set for the docker environment and empty for host.
+  string image_digest = 3;
+  // Facts the environment pinned, by name: operating system, architecture, toolchain versions.
+  // A host environment's facts identify it: equality is over the whole map, so the names it reports
+  // are part of its contract. A docker environment's facts say where its container ran, for
+  // diagnosis, and take no part in equality or the cache key: the machine, the placement of the
+  // operator config ("placement") and what identifies each resource attached to it (such as
+  // "gpu_model" or "kubernetes_server"). Placements are interchangeable, so results taken on
+  // different placements are compared and reused.
+  map<string, string> facts = 4;
+}
+
+// MachineFacts describes the machine a result was taken on.
+message MachineFacts {
+  string host_id = 1;
+  string os = 2;
+  string arch = 3;
+  string cpu_model = 4;
+  uint32 logical_cpus = 5;
+  uint64 memory_bytes = 6;
+}
+
+// MachineLoad is the machine's load when it was sampled. The CLI reports it and never acts on it:
+// load from outside VibeSys is neither detected nor prevented.
+message MachineLoad {
+  google.protobuf.Timestamp sampled_at = 1;
+  double load_average_1m = 2;
+  // The fraction of CPU time spent busy, from 0 to 1, over the sampling interval.
+  double cpu_busy_fraction = 3;
+  uint64 memory_available_bytes = 4;
+}

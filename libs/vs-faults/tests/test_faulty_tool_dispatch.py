@@ -12,6 +12,7 @@ from vs_faults.api import (
     ToolCallFailedError,
     ToolFault,
 )
+from vs_sim.api.testing import SimThreads
 
 
 @pytest.mark.parametrize("fault", list(ToolFault))
@@ -23,7 +24,7 @@ def test_a_tool_fault_delivers_the_call_as_declared(fault: ToolFault) -> None:
         return {"n": len(delivered)}
 
     rule = FaultRule(boundary=Boundary.TOOL_CALL, target="submit", at=1, fault=fault)
-    tools = FaultyToolDispatch(dispatch, FaultPlan(seed=1, rules=(rule,)))
+    tools = FaultyToolDispatch(dispatch, FaultPlan(seed=1, rules=(rule,)), threads=SimThreads())
 
     if fault is ToolFault.DUPLICATE:
         assert tools("submit", {}) == {"n": 2}

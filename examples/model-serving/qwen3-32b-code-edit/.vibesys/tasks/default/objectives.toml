@@ -1,0 +1,3 @@
+[[objective]]
+name = "median_tok_per_sec"
+direction = "max"

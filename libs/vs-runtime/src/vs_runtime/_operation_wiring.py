@@ -3,14 +3,13 @@
 A strategy declares its operations (codec registrations) and says which role each
 plays. The runtime owns what performs each role. This module joins the two:
 ``build_operation_catalog`` makes the closed catalog, giving every role an owner or
-a typed refusal, and ``bind_operations`` is the startup gate. It rejects a strategy
-whose required operation has no owner, then returns the shell bindings that execute
-the catalog. Tests build their catalogs through the same functions.
+a typed refusal. ``OperationCatalog.require_owned`` is the startup gate that rejects a
+strategy whose required operation has no owner. Tests build their catalogs through the
+same functions.
 """
 
 from __future__ import annotations
 
-import dataclasses
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
@@ -27,15 +26,16 @@ from vs_core.api import (
     OperationRegistry,
 )
 from vs_runtime._capture_command_operation import CaptureCommandOwner
-from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._export_patch_operation import ExportPatchOwner
-from vs_runtime._observation_factory import ObservationFactory
+from vs_runtime._local_validation import LocalValidator
 from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, RefusalReason
-from vs_runtime._operation_receipts import NamespaceOperationReceipts
-from vs_runtime._operation_requests import RegisteredOperationRequests
-from vs_runtime._receipt_store import ReceiptStore
 from vs_runtime._render_operation import RenderArtifactsOwner
+from vs_runtime._rerun_policy import (
+    KeyedWrite,
+    ReadOnly,
+    RerunPolicy,
+)
 from vs_runtime._validate_local_operation import ValidateLocalOwner
 from vs_runtime._verify_revision_operation import VerifyRevisionOwner
 
@@ -48,16 +48,15 @@ if TYPE_CHECKING:
         OperationRegistration,
         RevisionRef,
         SchemaRef,
-        SearchDeclaration,
         StrategyOperations,
     )
-    from vs_project.api import StateNamespace
     from vs_prompts.api import TemplateRenderer
     from vs_runtime._artifact_store import ArtifactStore
-    from vs_runtime._core_requests import RequestExecutors
     from vs_runtime._evidence_ledger import EvidenceLookup
+    from vs_runtime._local_validation import LocalValidationEvents
     from vs_runtime._operation_catalog import OperationOwner
-    from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
+    from vs_runtime._validation_passes import ValidationPasses
+    from vs_runtime.contracts import CaptureCommands, Commands, RevisionLedger, Workspaces
 
 
 class OperationRole(StrEnum):
@@ -130,21 +129,33 @@ class OperationPorts:
     evidence: EvidenceLookup
     commit_of: Callable[[RevisionRef], str | None]
     retention_label: str
+    validation_passes: ValidationPasses
     variables: Mapping[str, object] = field(default_factory=dict)
     commands: Commands | None = None
+    capture_commands: CaptureCommands | None = None
     replies: Mapping[SchemaRef, type[BaseModel]] = field(default_factory=dict)
+    local_validation_events: LocalValidationEvents | None = None
 
 
 def _command_owner(role: OperationRole, ports: OperationPorts) -> OperationOwner | None:
     """The owner of a role that runs commands, or None when the run cannot offer it."""
+    if role is OperationRole.CAPTURE_COMMAND:
+        if ports.capture_commands is None:
+            return None
+        return CaptureCommandOwner(
+            ports.workspaces, ports.capture_commands, ports.ledger, ports.commit_of
+        )
     if ports.commands is None:
         return None
-    if role is OperationRole.CAPTURE_COMMAND:
-        return CaptureCommandOwner(ports.workspaces, ports.commands, ports.ledger, ports.commit_of)
     if not ports.workspaces.supports_parallel_candidates:
         return None
     return ValidateLocalOwner(
-        ports.workspaces, ports.commands, ports.ledger, ports.commit_of, ports.artifacts
+        ports.workspaces,
+        LocalValidator(ports.commands, ports.validation_passes),
+        ports.ledger,
+        ports.commit_of,
+        ports.artifacts,
+        events=ports.local_validation_events,
     )
 
 
@@ -175,6 +186,21 @@ def production_owners(
     return owners
 
 
+# What a rerun of each role's operation may repeat: the role fixes it, not the owner instance.
+# The two command roles run in a throwaway candidate named by the request's identity: the
+# workspaces replace a dead host's candidate when the rerun opens it and refuse while a command's
+# stop is unconfirmed, and the command's sandbox closed with its host. A rerun needs no clear.
+_RERUN_OF_ROLE: Mapping[OperationRole, RerunPolicy] = {
+    OperationRole.RENDER_ARTIFACTS: KeyedWrite("the digest of the rendered artifact"),
+    OperationRole.VERIFY_REVISION: ReadOnly(),
+    OperationRole.INTERPRET_EVIDENCE: ReadOnly(),
+    OperationRole.RETAIN_REVISION: KeyedWrite("the retention label of the request"),
+    OperationRole.CAPTURE_COMMAND: ReadOnly(),
+    OperationRole.VALIDATE_LOCAL: ReadOnly(),
+    OperationRole.EXPORT_PATCH: ReadOnly(),
+}
+
+
 def build_operation_catalog(
     registrations: Mapping[OperationRole, OperationRegistration],
     owners: Mapping[OperationRole, OperationOwner],
@@ -195,7 +221,7 @@ def build_operation_catalog(
     for role, registration in registrations.items():
         owner = owners.get(role)
         if owner is not None:
-            entries.append(OperationEntry.owned(registration, owner))
+            entries.append(OperationEntry.owned(registration, owner, _RERUN_OF_ROLE[role]))
         elif role in _REFUSALS:
             reason, detail = _REFUSALS[role]
             entries.append(OperationEntry.refused(registration, reason, detail))
@@ -204,25 +230,3 @@ def build_operation_catalog(
     all_entries = (*entries, *extra)
     registry = OperationRegistry(tuple(entry.registration for entry in all_entries))
     return OperationCatalog(registry, all_entries)
-
-
-def bind_operations(
-    declaration: SearchDeclaration,
-    catalog: OperationCatalog,
-    receipts: StateNamespace,
-    *,
-    base: CoreRuntimeBindings | None = None,
-) -> CoreRuntimeBindings:
-    """Startup gate and shell bindings: reject unowned required operations, then execute the catalog.
-
-    Raises ``ContractError`` naming the first required operation that is missing
-    or refused. ``base`` supplies the other executor roles unchanged.
-    """
-    catalog.require_owned(declaration)
-    selected = base or CoreRuntimeBindings()
-    store = ReceiptStore(receipts)
-    operations = RegisteredOperationRequests(
-        catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
-    )
-    executors: RequestExecutors = dataclasses.replace(selected.executors, operations=operations)
-    return dataclasses.replace(selected, registry=catalog.registry, executors=executors)

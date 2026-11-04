@@ -1,0 +1,423 @@
+{
+  "description": "a head and its judgments: promoting c1 gives the task a head, and c0 and c2, measured before, are judged against it",
+  "judged_commits": 0,
+  "setup": [
+    {
+      "op": "measure",
+      "commit": "c0",
+      "samples": "level"
+    },
+    {
+      "op": "measure",
+      "commit": "c1",
+      "samples": "win"
+    },
+    {
+      "op": "measure",
+      "commit": "c2",
+      "samples": "lose"
+    }
+  ],
+  "ops": [
+    {
+      "op": "promote",
+      "commit": "c1"
+    }
+  ],
+  "cuts": null,
+  "expect": [
+    [
+      {
+        "epoch": "E1",
+        "reset": {},
+        "sequence": "1"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "health": {
+                "live": {}
+              }
+            },
+            {
+              "head": {
+                "none": {
+                  "reason": "NO_CURRENT_RESULT_REASON_NO_HEAD"
+                }
+              }
+            },
+            {
+              "job": {
+                "checkJobId": "j1",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j1",
+                "key": "seed-1",
+                "resultJobId": "j1",
+                "spec": {
+                  "commit": "c0",
+                  "environment": "ENVIRONMENT_KIND_HOST",
+                  "measure": {
+                    "samples": 5
+                  }
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_SUCCEEDED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "at": "T"
+                  }
+                ]
+              }
+            },
+            {
+              "job": {
+                "checkJobId": "j2",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j2",
+                "key": "seed-2",
+                "resultJobId": "j2",
+                "spec": {
+                  "commit": "c1",
+                  "environment": "ENVIRONMENT_KIND_HOST",
+                  "measure": {
+                    "samples": 5
+                  }
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_SUCCEEDED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "at": "T"
+                  }
+                ]
+              }
+            },
+            {
+              "job": {
+                "checkJobId": "j3",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "finishedAt": "T",
+                "id": "j3",
+                "key": "seed-3",
+                "resultJobId": "j3",
+                "spec": {
+                  "commit": "c2",
+                  "environment": "ENVIRONMENT_KIND_HOST",
+                  "measure": {
+                    "samples": 5
+                  }
+                },
+                "startedAt": "T",
+                "state": "JOB_STATE_SUCCEEDED",
+                "submittedAt": "T",
+                "submitters": [
+                  {
+                    "at": "T"
+                  }
+                ]
+              }
+            },
+            {
+              "result": {
+                "commit": "c0",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "jobId": "j1",
+                "key": "seed-1",
+                "load": {
+                  "loadAverage1m": 0.25,
+                  "sampledAt": "T"
+                },
+                "machine": {
+                  "arch": "amd64",
+                  "hostId": "host",
+                  "logicalCpus": 8,
+                  "memoryBytes": "17179869184",
+                  "os": "linux"
+                },
+                "measure": {
+                  "checkJobId": "j1",
+                  "metric": {
+                    "direction": "DIRECTION_MAXIMIZE",
+                    "name": "ops"
+                  },
+                  "samples": [
+                    100,
+                    101,
+                    99,
+                    100,
+                    102
+                  ],
+                  "value": 100.4
+                },
+                "recordedAt": "T",
+                "schemaVersion": 1,
+                "task": "kv-store",
+                "taskVersion": "v1"
+              }
+            },
+            {
+              "result": {
+                "commit": "c1",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "jobId": "j2",
+                "key": "seed-2",
+                "load": {
+                  "loadAverage1m": 0.25,
+                  "sampledAt": "T"
+                },
+                "machine": {
+                  "arch": "amd64",
+                  "hostId": "host",
+                  "logicalCpus": 8,
+                  "memoryBytes": "17179869184",
+                  "os": "linux"
+                },
+                "measure": {
+                  "checkJobId": "j2",
+                  "metric": {
+                    "direction": "DIRECTION_MAXIMIZE",
+                    "name": "ops"
+                  },
+                  "samples": [
+                    120,
+                    121,
+                    119,
+                    122,
+                    120
+                  ],
+                  "value": 120.4
+                },
+                "recordedAt": "T",
+                "schemaVersion": 1,
+                "task": "kv-store",
+                "taskVersion": "v1"
+              }
+            },
+            {
+              "result": {
+                "commit": "c2",
+                "environment": {
+                  "backend": "BACKEND_KIND_CPU",
+                  "facts": {
+                    "go": "1.25"
+                  },
+                  "kind": "ENVIRONMENT_KIND_HOST"
+                },
+                "jobId": "j3",
+                "key": "seed-3",
+                "load": {
+                  "loadAverage1m": 0.25,
+                  "sampledAt": "T"
+                },
+                "machine": {
+                  "arch": "amd64",
+                  "hostId": "host",
+                  "logicalCpus": 8,
+                  "memoryBytes": "17179869184",
+                  "os": "linux"
+                },
+                "measure": {
+                  "checkJobId": "j3",
+                  "metric": {
+                    "direction": "DIRECTION_MAXIMIZE",
+                    "name": "ops"
+                  },
+                  "samples": [
+                    80,
+                    81,
+                    79,
+                    80,
+                    82
+                  ],
+                  "value": 80.4
+                },
+                "recordedAt": "T",
+                "schemaVersion": 1,
+                "task": "kv-store",
+                "taskVersion": "v1"
+              }
+            }
+          ]
+        },
+        "sequence": "2"
+      },
+      {
+        "caughtUp": {},
+        "epoch": "E1",
+        "sequence": "3"
+      },
+      {
+        "epoch": "E1",
+        "facts": {
+          "facts": [
+            {
+              "head": {
+                "current": {
+                  "head": "c1",
+                  "result": {
+                    "commit": "c1",
+                    "environment": {
+                      "backend": "BACKEND_KIND_CPU",
+                      "facts": {
+                        "go": "1.25"
+                      },
+                      "kind": "ENVIRONMENT_KIND_HOST"
+                    },
+                    "jobId": "j2",
+                    "key": "seed-2",
+                    "load": {
+                      "loadAverage1m": 0.25,
+                      "sampledAt": "T"
+                    },
+                    "machine": {
+                      "arch": "amd64",
+                      "hostId": "host",
+                      "logicalCpus": 8,
+                      "memoryBytes": "17179869184",
+                      "os": "linux"
+                    },
+                    "measure": {
+                      "checkJobId": "j2",
+                      "metric": {
+                        "direction": "DIRECTION_MAXIMIZE",
+                        "name": "ops"
+                      },
+                      "samples": [
+                        120,
+                        121,
+                        119,
+                        122,
+                        120
+                      ],
+                      "value": 120.4
+                    },
+                    "recordedAt": "T",
+                    "schemaVersion": 1,
+                    "task": "kv-store",
+                    "taskVersion": "v1"
+                  }
+                }
+              }
+            },
+            {
+              "promotion": {
+                "promotion": {
+                  "at": "T",
+                  "commit": "c1",
+                  "environment": {
+                    "backend": "BACKEND_KIND_CPU",
+                    "facts": {
+                      "go": "1.25"
+                    },
+                    "kind": "ENVIRONMENT_KIND_HOST"
+                  },
+                  "previousHead": "c0",
+                  "resultJobId": "j2",
+                  "verdict": {
+                    "baseMean": 100.4,
+                    "baseSamples": 5,
+                    "candidateMean": 120.4,
+                    "candidateSamples": 5,
+                    "kind": "VERDICT_KIND_BETTER",
+                    "noise": 0.007930081942578819,
+                    "ratio": 1.199203187250996
+                  }
+                },
+                "seq": "1"
+              }
+            },
+            {
+              "judgment": {
+                "against": "c1",
+                "commit": "c0",
+                "comparison": {
+                  "against": "c1",
+                  "commit": "c0",
+                  "environment": {
+                    "backend": "BACKEND_KIND_CPU",
+                    "facts": {
+                      "go": "1.25"
+                    },
+                    "kind": "ENVIRONMENT_KIND_HOST"
+                  },
+                  "verdict": {
+                    "baseMean": 120.4,
+                    "baseSamples": 5,
+                    "candidateMean": 100.4,
+                    "candidateSamples": 5,
+                    "kind": "VERDICT_KIND_WORSE",
+                    "noise": 0.005514322054551365,
+                    "ratio": 0.8338870431893688
+                  }
+                }
+              }
+            },
+            {
+              "judgment": {
+                "against": "c1",
+                "commit": "c2",
+                "comparison": {
+                  "against": "c1",
+                  "commit": "c2",
+                  "environment": {
+                    "backend": "BACKEND_KIND_CPU",
+                    "facts": {
+                      "go": "1.25"
+                    },
+                    "kind": "ENVIRONMENT_KIND_HOST"
+                  },
+                  "verdict": {
+                    "baseMean": 120.4,
+                    "baseSamples": 5,
+                    "candidateMean": 80.4,
+                    "candidateSamples": 5,
+                    "kind": "VERDICT_KIND_WORSE",
+                    "noise": 0.005092518958789325,
+                    "ratio": 0.6677740863787376
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "sequence": "4"
+      }
+    ]
+  ]
+}

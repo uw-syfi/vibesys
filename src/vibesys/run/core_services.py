@@ -10,13 +10,19 @@ cannot serve, fails at composition with the name of what is missing, never mid-r
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from pydantic import BaseModel
 
-from vibesys.run.evaluation_socket import evaluation_socket_path
+from vibesys.run.evaluation_socket import prepare_evaluation_socket
+from vibesys.run.step_runners import (
+    RunnerSeams,
+    RunnerServices,
+    build_run_runner,
+)
 from vs_agent.api import (
+    AgentBackend,
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnExecutor,
@@ -34,12 +40,13 @@ from vs_runtime.api.core import (
     CoreStartup,
     IgnoreCommits,
     IgnoreMeasurement,
+    KeyedDocuments,
+    MeasurementDecisions,
     MeasurementServices,
     OperationPorts,
     OwedSubmissions,
     ProductionSessionResolver,
     ReceiptEvidenceLedger,
-    ReceiptStore,
     ResolverInputs,
     ScopeWorkspaces,
     SessionServices,
@@ -47,38 +54,50 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
     build_operation_catalog,
     commit_of,
-    core_bindings,
+    core_executors,
     new_core_state,
     production_owners,
     report_turns,
     revision_ref,
 )
+from vs_runtime.api.infrastructure import StateValidationPasses
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
 
+    from vibesys.run.run_clock import RunClock
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
-    from vs_core.api import CoreState, LifecycleCapability, RequestRetries, SearchDef
+    from vs_core.api import (
+        CoreState,
+        LifecycleCapability,
+        OperationRegistry,
+        RequestRetries,
+        SearchDef,
+    )
+    from vs_github.api import GitHubClient
     from vs_mcp.api import ToolServerDescriptor
-    from vs_project.api import Project, StateNamespace, StateStore
-    from vs_runtime.api import AgentRole, Commands, CorePolicy, RunFacts
+    from vs_project.api import ControlInbox, Project
+    from vs_runtime.api import AgentRole, CaptureCommands, Commands, CorePolicy, RunFacts
     from vs_runtime.api.core import (
         CommitObserver,
-        CoreRuntimeBindings,
         MeasurementObserver,
         OperationCatalog,
         SessionSpecFactory,
+        TurnSteering,
     )
     from vs_runtime.api.infrastructure import (
         AgentConfigurationResolver,
         AgentExecutionEnvironment,
         AgentExecutionLifecycleSink,
+        LocalValidationEvents,
+        RunControlChannel,
         RunEnvironmentView,
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
     )
-    from vs_sim.api import SleepingClock
+    from vs_runtime.api.step_runner import StepRunner
+    from vs_sim.api import BlockingRunner, Network, SleepingClock, Threads
 
 
 class CoreCompositionError(RuntimeError):
@@ -108,6 +127,8 @@ class CoreEnvironment:
     queue_allowance_seconds: int
     observe_interval_seconds: int
     observe_backoff_cap_seconds: int
+    queue_wait_budget_seconds: int
+    queue_notice_interval_seconds: int
     request_retries: RequestRetries
     max_run_seconds: int | None
     cancellation_bound_seconds: int
@@ -115,6 +136,8 @@ class CoreEnvironment:
     reconciliation_bound_seconds: int
     lifecycle: frozenset[LifecycleCapability]
     """Lifecycle capabilities this host offers the strategy."""
+    prompt_variables: Mapping[str, object] = field(default_factory=dict)
+    """Data the host adds to the run's prompts (see ``CoreRunContext.prompt_variables``)."""
 
 
 def ignore_lifecycle(event: object) -> None:
@@ -128,8 +151,26 @@ def ignore_diagnostic(line: str) -> None:
 
 
 @dataclass(frozen=True, slots=True)
+class CoreAgentResources:
+    """Agent-session resources, absent as a group from a zero-agent run."""
+
+    agent_turns: AgentTurnExecutor
+    """Runs each role's keyed turns, on the provider that role's spec names."""
+    invocation_slot: AgentInvocationStore
+    configuration: AgentConfigurationResolver
+    session_spec: SessionSpecFactory
+    lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
+    """Receives provider-turn lifecycle observations for the host's event stream."""
+
+
+@dataclass(frozen=True, slots=True)
 class CoreResources:
-    """What the host already opened, as one value the composition reads."""
+    """What the host already opened, as one value the composition reads.
+
+    ``agents`` is one optional capability bundle: a policy with no declared
+    roles composes without an agent environment, provider client, or invocation
+    journal. A policy with roles must supply the whole bundle.
+    """
 
     run_id: str
     project: Project
@@ -142,54 +183,104 @@ class CoreResources:
     roles: tuple[AgentRole, ...]
     role_models: Mapping[str, str]
     """The model the operator chose per role id where it differs from the run's default."""
-    agent_client: AgentClientProtocol
-    invocation_slot: AgentInvocationStore
-    configuration: AgentConfigurationResolver
-    session_spec: SessionSpecFactory
+    agents: CoreAgentResources | None
     clock: SleepingClock
-    """The run's clock: it places the deadline and later paces the loop on one timeline."""
+    """The wall clock the run's operation owners read."""
+    run_clock: RunClock
+    """The run's clock, which the loop and the log run on: the host's journal's, one per run.
+
+    It is started when the run's log is open."""
+    github: GitHubClient
+    """Reaches GitHub, for operation owners that keep their records there."""
+    threads: Threads
+    """Locks the run's receipts and serves its agent evaluation calls."""
+    blocking: BlockingRunner
+    """Runs the request executors' synchronous calls off the event loop."""
+    network: Network
+    """Serves the in-turn agent evaluation socket."""
     measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
+    measurement_decisions: MeasurementDecisions = field(default_factory=MeasurementDecisions)
+    """Which decision each measurement answers; the same one names stage output by its gate."""
     """Hears each measurement stage start and end, for the host's event stream."""
+    epoch: Callable[[], int | None] = lambda: None
+    """Published writer identity; unjournaled hosts leave epoch selection to their runtime."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
     """Hears each confirmed commit, for committed views and round events."""
-    agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
-    """Receives the start and end of each provider turn, for the host's event stream."""
+    resuming: bool = False
+    control: RunControlChannel | None = None
     evaluation_diagnostics: Callable[[str], None] = ignore_diagnostic
     """Receives one line for each agent evaluation call the run refused as busy."""
     stateless_tool_servers: Mapping[str, ToolServerDescriptor] = field(default_factory=dict)
     """The server of each stateless tool a role may declare, keyed by tool id."""
     commands: Commands | None = None
-    """Sandboxed process execution in a run workspace, which a command-capturing operation uses."""
+    """Ordinary editor process execution in a run workspace, used by local validation."""
+    capture_commands: CaptureCommands | None = None
+    """Role-specific process execution used only by command-capturing operations."""
+    local_validation_events: LocalValidationEvents | None = None
+    """Hears each recipe's start and settled result, for the host's event stream."""
+    seams: Callable[[], RunnerSeams] | None = None
+    """The runners the run environment decides: the agent's reaper and the evaluation job runner.
+
+    Called once, when the run's runner is built; ``None`` is a run that composes no step runner
+    (a composition test that only reads the services)."""
+
+    def __post_init__(self) -> None:
+        """Reject a role declaration whose session capability bundle disagrees."""
+        if not self.roles and self.agents is not None:
+            detail = "a run with no declared agent roles must not open them"
+            error = CoreCompositionError("agent resources", detail)
+            raise error
+        if self.roles and self.agents is None:
+            detail = "a run with declared agent roles needs session resources"
+            error = CoreCompositionError("agent resources", detail)
+            raise error
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionComposition:
+    """Shared resources for resolving and executing the run's declared roles."""
+
+    receipts: KeyedDocuments
+    artifacts: ArtifactStore
+    bridge: AgentEvaluationBridge | None
+    stateless: StatelessToolServers
 
 
 @dataclass(frozen=True, slots=True)
 class CoreServices:
     """Everything the production core run loop needs, built once per host.
 
-    ``state`` is the state of a run that has not started (the loop ignores it when the
-    store already holds a recoverable envelope). ``bindings`` execute every request
-    role, and ``registry`` inside them is the operation codec to hand the publication
-    delivery. ``store`` is the run's durable record; ``publications`` and ``receipts``
-    are its Project namespaces.
+    ``state`` is the seed of a run that has not started: the loop appends it as the run's first
+    record and ignores it when the log already holds one. ``registry`` is the operation codec
+    the log's records are decoded with. ``runner`` builds the run's step runners once the log
+    is open and names its epoch.
     """
 
     run_id: str
+    project: Project
+    """The project the run belongs to, which says where its files are."""
     search: SearchDef[Any]
     config: object
     """The config the search runs on."""
     state: CoreState
-    bindings: CoreRuntimeBindings
+    registry: OperationRegistry
     catalog: OperationCatalog
-    store: StateStore
-    publications: StateNamespace
-    receipts: StateNamespace
+    steering: TurnSteering | None
+    """Reaches the turns this host runs while they run; ``None`` offers no input mid-turn."""
+    commit_observer: CommitObserver
+    """Hears the run's state after each record, for the committed view and its events."""
+    runner: Callable[[SleepingClock], StepRunner]
     evaluation: ClosableEvaluation
     artifacts: ArtifactStore
-    clock: SleepingClock
+    clock: RunClock
     agent_evaluation: AgentEvaluationBridge | None = None
     """The in-turn evaluation tool service, when the plan offers one; the run loop serves it."""
     profile_capture_withheld: bool = False
     """The plan would offer profile work, but the run environment cannot capture a profile."""
+    control_inbox: ControlInbox | None = None
+    """The run's durable control inbox, where ``vibesys control`` writes; the loop reads it."""
+    cancellation_bound_seconds: float = 30.0
+    """How long a cancelled step may take to return before the loop stops waiting on it."""
 
     async def close(self) -> None:
         """Release the evaluation executor; workspaces and the client close with the host."""
@@ -201,9 +292,8 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     run_id = resources.run_id
     state_dir = resources.project.state
     receipts = state_dir.local_namespace(run_id, "receipts")
-    publications = state_dir.portable_namespace(run_id, "publications")
     artifacts = ArtifactStore(state_dir.portable_namespace(run_id, "artifacts"))
-    receipt_store = ReceiptStore(receipts)
+    receipt_store = KeyedDocuments(receipts, resources.threads)
     try:
         plan = policy.plan(_context(resources, artifacts))
         _validate_plan(plan)
@@ -215,45 +305,64 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         bridge = _agent_bridge(plan, resources, receipt_store, evidence)
         catalog = _catalog(policy, plan, resources, artifacts, evidence)
         catalog.require_owned(plan.search.declaration)
-        resolver = ProductionSessionResolver(
-            ResolverInputs(
-                roles=resources.roles,
-                schemas=plan.search.reply_schemas,
-                workspaces=resources.workspaces,
-                workspace_receipts=StoreWorkspaceReceipts(receipt_store),
-                artifacts=artifacts,
-                configuration=resources.configuration,
-                session_spec=resources.session_spec,
-                artifact_directories=policy.artifact_directories,
-                tool_servers=CombinedToolServers(*(() if bridge is None else (bridge,)), stateless),
-            )
+        sessions = _session_services(
+            policy,
+            plan,
+            resources,
+            _SessionComposition(receipt_store, artifacts, bridge, stateless),
         )
         state = _initial_state(plan, resources, catalog, suspendable=bridge is not None)
     except ContractError as error:
         raise CoreCompositionError(".".join(map(str, error.path)), error.detail) from error
-    bindings = core_bindings(
+    bound = core_executors(
         receipts=receipts,
+        threads=resources.threads,
+        blocking=resources.blocking,
         workspaces=resources.workspaces,
-        measurement=MeasurementServices(resources.evaluation, resources.measurement_observer),
-        sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
-        operations=catalog,
+        measurement=MeasurementServices(
+            resources.evaluation,
+            observer=resources.measurement_observer,
+            decisions=resources.measurement_decisions,
+            control=resources.control,
+        ),
+        sessions=sessions,
+    )
+    runner_services = RunnerServices(
+        run_id=run_id,
+        executors=bound,
+        catalog=catalog,
+        workspaces=resources.workspaces,
+        sessions=None if sessions is None else sessions.agent_sessions,
+        blocking=resources.blocking,
     )
     return CoreServices(
         run_id=run_id,
+        project=resources.project,
         search=plan.search,
         config=plan.config,
         state=state,
-        bindings=replace(bindings, commits=resources.commit_observer),
+        registry=catalog.registry,
         catalog=catalog,
-        store=resources.project.state_store(run_id),
-        publications=publications,
-        receipts=receipts,
+        steering=None if bound.sessions is None else bound.sessions.turns,
+        commit_observer=resources.commit_observer,
+        runner=lambda clock: build_run_runner(runner_services, _seams(resources), clock=clock),
         evaluation=resources.evaluation,
         artifacts=artifacts,
-        clock=resources.clock,
+        clock=resources.run_clock,
         agent_evaluation=bridge,
         profile_capture_withheld=plan.profile_capture_withheld,
+        control_inbox=resources.project.state.control_inbox(run_id),
+        cancellation_bound_seconds=resources.environment.cancellation_bound_seconds,
     )
+
+
+def _seams(resources: CoreResources) -> RunnerSeams:
+    """The runners the run environment decides, or the refusal of a composition that has none."""
+    if resources.seams is None:
+        detail = "the run environment supplies no step runners"
+        error = CoreCompositionError("step runners", detail)
+        raise error
+    return resources.seams()
 
 
 def _context(resources: CoreResources, artifacts: ArtifactStore) -> CoreRunContext:
@@ -276,12 +385,15 @@ def _context(resources: CoreResources, artifacts: ArtifactStore) -> CoreRunConte
         queue_allowance_seconds=environment.queue_allowance_seconds,
         observe_interval_seconds=environment.observe_interval_seconds,
         observe_backoff_cap_seconds=environment.observe_backoff_cap_seconds,
+        queue_wait_budget_seconds=environment.queue_wait_budget_seconds,
+        queue_notice_interval_seconds=environment.queue_notice_interval_seconds,
         request_retries=environment.request_retries,
         max_run_seconds=environment.max_run_seconds,
         cancellation_bound_seconds=environment.cancellation_bound_seconds,
         cleanup_bound_seconds=environment.cleanup_bound_seconds,
         reconciliation_bound_seconds=environment.reconciliation_bound_seconds,
         role_models=resources.role_models,
+        prompt_variables=environment.prompt_variables,
     )
 
 
@@ -317,7 +429,8 @@ def _initial_state(
         plan.search.declaration,
         offered=catalog,
         startup=CoreStartup(
-            deadline_at=resources.clock.now() + plan.deadline_seconds,
+            deadline_at=plan.deadline_seconds,
+            duration_seconds=plan.deadline_seconds,
             limits=plan.limits,
             lifecycle=_lifecycle(resources, suspendable=suspendable),
             requirements=plan.requirements,
@@ -364,18 +477,20 @@ def _refuse_unbridged_tools(
 def _agent_bridge(
     plan: CorePlan,
     resources: CoreResources,
-    receipts: ReceiptStore,
+    receipts: KeyedDocuments,
     evidence: ReceiptEvidenceLedger,
 ) -> AgentEvaluationBridge | None:
     """The in-turn evaluation tool service, when the plan offers the tool."""
     if plan.agent_evaluation is None:
         return None
     return AgentEvaluationBridge(
-        evaluation_socket_path(resources.project.root, resources.run_id),
+        prepare_evaluation_socket(resources.project.root, resources.run_id),
         plan.agent_evaluation,
         ScopeWorkspaces(resources.workspaces, StoreWorkspaceReceipts(receipts)),
         AgentEvaluationRecords(OwedSubmissions(receipts), evidence),
         resources.evaluation_diagnostics,
+        network=resources.network,
+        threads=resources.threads,
     )
 
 
@@ -399,7 +514,12 @@ def _catalog(
         retention_label=policy.retention_label,
         variables=plan.prompt_variables,
         commands=resources.commands,
+        capture_commands=resources.capture_commands,
         replies=plan.search.reply_schemas,
+        validation_passes=StateValidationPasses(
+            resources.project.state.local_namespace(resources.run_id, "validation")
+        ),
+        local_validation_events=resources.local_validation_events,
     )
     owned = (
         ()
@@ -411,6 +531,9 @@ def _catalog(
                 options=resources.options,
                 variables=plan.prompt_variables,
                 templates=policy.prompt_templates,
+                clock=resources.clock,
+                threads=resources.threads,
+                github=resources.github,
             )
         )
     )
@@ -419,25 +542,67 @@ def _catalog(
     )
 
 
-def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:
-    client = resources.agent_client
+def _session_services(
+    policy: CorePolicy,
+    plan: CorePlan,
+    resources: CoreResources,
+    composition: _SessionComposition,
+) -> SessionServices | None:
+    """Bind declared agent roles, or make the session role explicitly unavailable."""
+    agent_resources = resources.agents
+    if agent_resources is None:
+        return None
+    resolver = ProductionSessionResolver(
+        ResolverInputs(
+            control=resources.control,
+            roles=resources.roles,
+            schemas=plan.search.reply_schemas,
+            workspaces=resources.workspaces,
+            workspace_receipts=StoreWorkspaceReceipts(composition.receipts),
+            artifacts=composition.artifacts,
+            configuration=agent_resources.configuration,
+            session_spec=agent_resources.session_spec,
+            artifact_directories=policy.artifact_directories,
+            tool_servers=CombinedToolServers(
+                *(() if composition.bridge is None else (composition.bridge,)),
+                composition.stateless,
+            ),
+        )
+    )
+    return SessionServices(
+        _agent_sessions(agent_resources, resources.threads, resources.control),
+        resolver,
+        yields=composition.bridge,
+    )
+
+
+def turn_executor(client: AgentClientProtocol) -> AgentTurnExecutor:
+    """``client`` as the keyed-turn executor a durable core session needs.
+
+    Raises :class:`CoreCompositionError` for a client that is not one.
+    """
     if not isinstance(client, AgentTurnExecutor):
         detail = "a durable core session needs a client that implements AgentTurnExecutor"
         resource = "agent client"
         raise CoreCompositionError(resource, detail)
-    reported = report_turns(client, resources.agent_lifecycle)
-    return ClientAgentSessions(reported, resources.invocation_slot)
+    return client
+
+
+def _agent_sessions(
+    resources: CoreAgentResources, threads: Threads, control: RunControlChannel | None
+) -> ClientAgentSessions:
+    reported = report_turns(resources.agent_turns, resources.lifecycle, control=control)
+    return ClientAgentSessions(reported, resources.invocation_slot, threads=threads)
 
 
 def agent_session_spec(
     *,
-    client: AgentClientProtocol,
-    environment: AgentExecutionEnvironment,
+    environments: Mapping[str, AgentExecutionEnvironment],
     specs: Mapping[str, AgentSpec],
     variables: Callable[[], Mapping[str, str]],
     configuration: AgentConfigurationResolver,
 ) -> SessionSpecFactory:
-    """Provider session configuration for each role, from the run's one agent environment.
+    """Provider session configuration for each role, from the agent environment of its provider.
 
     A role's own mounts (the evaluation tool socket, profiler files) come from its
     `configuration`; without them a confined agent cannot reach the tools it is offered.
@@ -445,10 +610,11 @@ def agent_session_spec(
 
     def spec_for(role: AgentRole, workspace: Path) -> AgentSessionSpec:
         spec = specs[role.id]
+        environment = environments[spec.provider]
         env = {} if environment.use_docker else dict(variables())
         return AgentSessionSpec(
             role=role.id,
-            provider=client.provider or spec.provider,
+            provider=spec.provider,
             workspace=workspace,
             policy=AgentExecutionPolicy(
                 project_paths=environment.project_path_policy,
@@ -456,7 +622,8 @@ def agent_session_spec(
                 require_enforcement=not environment.use_docker,
                 containerized=environment.use_docker,
             ),
-            model=client.model_for_kind(role.id),
+            model=spec.model,
+            scripted=spec.backend is AgentBackend.SCRIPTED,
             mcp_servers=(),
             skills=environment.skill_source_dirs,
             environment=tuple(sorted(env.items())),
@@ -467,10 +634,12 @@ def agent_session_spec(
 
 
 __all__ = [
+    "CoreAgentResources",
     "CoreCompositionError",
     "CoreEnvironment",
     "CoreResources",
     "CoreServices",
     "agent_session_spec",
     "build_core_services",
+    "turn_executor",
 ]

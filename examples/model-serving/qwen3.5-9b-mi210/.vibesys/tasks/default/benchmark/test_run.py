@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 import tempfile
 import textwrap
@@ -43,6 +44,50 @@ class ModeTableTests(unittest.TestCase):
     def test_mode_flag_accepts_holdout(self) -> None:
         args = run.parse_args(["--mode", "holdout", "--request-factory-engine", "/bin/true"])
         self.assertEqual(args.mode, "holdout")
+
+
+class BackendTests(unittest.TestCase):
+    """`--backend` picks session_runner's wire protocol; candidates keep the OpenAI one."""
+
+    @staticmethod
+    def _argv(backend: str | None = None) -> list[str]:
+        common = {
+            "trace": Path("t.csv"),
+            "text_file": Path("c.txt"),
+            "tokenizer": Path("tok"),
+            "base_url": "http://127.0.0.1:1/v1",
+            "model": "m",
+            "max_concurrency": 4,
+            "max_items": 2,
+            "max_model_len": 8,
+            "log_path": Path("l"),
+            "summary_path": Path("s"),
+            "timeline_path": Path("tl"),
+        }
+        if backend is None:
+            return run._base_replay_argv(**common)
+        return run._base_replay_argv(**common, backend=backend)
+
+    @staticmethod
+    def _value(argv: list[str], flag: str) -> str:
+        return argv[argv.index(flag) + 1]
+
+    def test_the_default_is_the_openai_protocol(self) -> None:
+        self.assertEqual(
+            run.parse_args(["--mode", "quick", "--request-factory-engine", "e"]).backend, "openai"
+        )
+        self.assertEqual(self._value(self._argv(), "--backend"), "openai")
+
+    def test_every_backend_reaches_session_runner(self) -> None:
+        for backend in run.BACKENDS:
+            args = run.parse_args(
+                ["--mode", "quick", "--request-factory-engine", "e", "--backend", backend]
+            )
+            self.assertEqual(self._value(self._argv(args.backend), "--backend"), backend)
+
+    def test_an_unknown_backend_is_refused(self) -> None:
+        with self.assertRaises(SystemExit):
+            run.parse_args(["--mode", "quick", "--request-factory-engine", "e", "--backend", "x"])
 
 
 class TraceDigestTests(unittest.TestCase):
@@ -343,6 +388,48 @@ class WarmupWatchTests(unittest.TestCase):
         headline, _, command_line = str(caught.exception).partition("\n")
         self.assertIn("warmup sub-run stopped at 178s", headline)
         self.assertEqual(command_line, f"command: {engine} --trace t.csv")
+
+
+class RequirementNotMetTests(unittest.TestCase):
+    """A server session_runner's preflight refuses fails as `requirement_not_met`, once."""
+
+    def _fail_with(self, error: run.HarnessError) -> dict[str, object]:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "out.jsonl"
+            run.ProtocolReport(path).fail(str(error), error.partial, error.requirement)
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+        self.assertEqual([record["kind"] for record in records], ["hello", "error"])
+        return records[-1]
+
+    def test_a_preflight_refusal_is_reported_as_an_unmet_prefix_cache(self) -> None:
+        tail = "error: prefix-cache preflight failed: the second response reported cached_tokens=0"
+        self.assertTrue(run.is_preflight_failure(tail))
+        record = self._fail_with(run.warmup_failure("quick", tail))
+        self.assertEqual(record["error_kind"], "requirement_not_met")
+        self.assertEqual(record["requirement"], "prefix_cache")
+
+    def test_an_ordinary_failure_names_no_kind_so_it_stays_transient(self) -> None:
+        self.assertFalse(run.is_preflight_failure("connection reset by peer"))
+        record = self._fail_with(run.warmup_failure("quick", "connection reset by peer"))
+        self.assertNotIn("error_kind", record)
+        self.assertNotIn("requirement", record)
+
+    def test_a_fake_session_runner_that_refuses_at_the_preflight_is_recognised(self) -> None:
+        script = textwrap.dedent(
+            """\
+            #!{python}
+            import sys
+            print("prefix-cache preflight: second response reported cached_tokens=0", file=sys.stderr)
+            sys.exit(1)
+            """
+        ).format(python=sys.executable)
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = Path(tmp) / "fake_session_runner"
+            engine.write_text(script)
+            engine.chmod(0o755)
+            result = run.run_session_runner(engine, [], timeout_s=60.0, label="warmup sub-run")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(run.is_preflight_failure(result.stderr_tail))
 
 
 if __name__ == "__main__":

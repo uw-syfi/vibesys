@@ -28,11 +28,35 @@ class JobProgress(Value):
     estimated_start_at: Seconds | None = None
 
 
+class WaitEnd(StrEnum):
+    """What ended a wait on a job: every wait ends by exactly one of these, or by a stop.
+
+    Closed. The bound of every wait is a time (``_wait_clock.Bound``), never absent; this
+    names the rule that set it.
+    """
+
+    LIMIT = "limit"
+    """The work's stated limit passed, counted from its job's start (plus the queue time
+    its fresh pending facts were credited)."""
+    QUEUE_BUDGET = "queue_budget"
+    """The job waited in its queue for the run's whole ``queue_wait_budget``."""
+    RUN_END = "run_end"
+    """The run's own deadline: only queue time can carry a limit past it."""
+
+
 class JobTimeout(Value):
-    """Frozen progress of one unfinished dependency at its wait deadline."""
+    """Frozen progress of one unfinished dependency when the bound that ended it passed.
+
+    A wait ends a job either with the wait itself (its earliest bound) or alone, when the
+    job's own queue budget runs out while its siblings go on (``QUEUE_BUDGET``).
+    """
 
     resource_id: ResourceId
     progress: JobProgress | None = None
+    by: WaitEnd
+    """The bound that ended this job's part of the wait."""
+    at: Seconds
+    """When that bound passed."""
 
 
 class TimedOut(Value):
@@ -47,6 +71,8 @@ class TimedOut(Value):
     kind: Literal["timed_out"] = "timed_out"
     deadline_at: Seconds
     reached_at: Seconds
+    by: WaitEnd = WaitEnd.LIMIT
+    """Which bound ``deadline_at`` was: the wait's limit, a job's queue budget, or the run's end."""
     unfinished: tuple[JobTimeout, ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -54,6 +80,8 @@ class TimedOut(Value):
         """Reject premature timeout and duplicate unfinished dependencies."""
         if self.reached_at < self.deadline_at:
             raise ContractValidationError("reached_at", "precedes deadline_at")
+        if any(job.at > self.reached_at for job in self.unfinished):
+            raise ContractValidationError("unfinished", "a job's bound follows reached_at")
         ids = tuple(job.resource_id for job in self.unfinished)
         if len(set(ids)) != len(ids):
             raise ContractValidationError("unfinished", "duplicate resource ID")
@@ -66,12 +94,17 @@ class MeasurementFailure(StrEnum):
     ``AMBIGUOUS`` is a failure the evidence cannot assign to the candidate or to the
     machinery. The backend decides how often it measures such a failure again, within its
     declared bound and core's hard cap; what reaches core is final.
+
+    ``RUN_ENVIRONMENT_UNAVAILABLE`` is a measurement the run environment refused because
+    it can run no such work at all (a local Slurm root its probe could not prove shared).
+    It is nobody's candidate's fault, and no retry can succeed, so it is never retried.
     """
 
     WORKLOAD = "workload"
     INFRASTRUCTURE = "infrastructure"
     AMBIGUOUS = "ambiguous"
     UNKNOWN = "unknown"
+    RUN_ENVIRONMENT_UNAVAILABLE = "run_environment_unavailable"
 
     @property
     def retryable(self) -> bool:

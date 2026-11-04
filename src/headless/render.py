@@ -15,8 +15,10 @@ from typing import TextIO
 from headless.format import format_status_prefix
 from headless.framework_events import (
     format_framework_event,
+    format_outage_summary,
     format_quota_event,
     format_rate_limit_event,
+    outage_wait_seconds,
 )
 from vibesys.api import (
     AgentOutputChunkData,
@@ -34,6 +36,22 @@ GREEN = "\033[32m"
 RESET = "\033[0m"
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+# C0 and C1 control characters other than tab and newline, and DEL. Any of
+# them in text the run did not author (agent output, tool results, a
+# benchmark's output tail) would reach the terminal as a command: ESC starts
+# cursor moves, screen erases, title or clipboard writes (OSC 52), and a bare
+# carriage return rewrites the current line.
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def printable(text: str) -> str:
+    r"""Show the control characters in untrusted *text* instead of sending them.
+
+    Each becomes its ``\xNN`` spelling, so the reader still sees that it was
+    there. A CRLF line ending stays a line ending.
+    """
+    return _CONTROL_RE.sub(lambda match: f"\\x{ord(match.group()):02x}", text.replace("\r\n", "\n"))
+
 
 _COLOR_STATUS_INDICATORS = {
     "completed": f"{GREEN}✓{RESET}",
@@ -65,7 +83,7 @@ class TodoDisplay:
         if not todos:
             return
         indicators = _COLOR_STATUS_INDICATORS if self._color else _PLAIN_STATUS_INDICATORS
-        items = [f"│ {indicators.get(t.status, '?')} {t.content}" for t in todos]
+        items = [f"│ {indicators.get(t.status, '?')} {printable(t.content)}" for t in todos]
         width = max(len(self._strip_ansi(line)) for line in items) + 2
         width = max(width, len("─ Todo ─") + 4)
 
@@ -118,6 +136,7 @@ class HeadlessRenderer:
         self.max_text_len = max_text_len
         self._at_line_start = True
         self._todo_display = TodoDisplay(file=out, color=color)
+        self._outage_wait_seconds = 0.0
 
     @property
     def _out(self) -> TextIO:
@@ -126,6 +145,7 @@ class HeadlessRenderer:
     def handle(self, event: CoreEvent) -> None:
         """Render one core event to the configured terminal stream."""
         data = event.data
+        self._outage_wait_seconds += outage_wait_seconds(event)
         if isinstance(data, AgentOutputChunkData):
             self._render_chunk(data)
         elif isinstance(data, ToolCallData):
@@ -143,6 +163,12 @@ class HeadlessRenderer:
             self._render_line(framework_line)
         # Other event types (usage updates, lifecycle) carry no direct
         # terminal output; status readings surface through chunk prefixes.
+
+    def finish(self) -> None:
+        """Render the run-end summary: the time turns spent waiting out provider outages."""
+        line = format_outage_summary(self._outage_wait_seconds)
+        if line is not None:
+            self._render_line(line)
 
     # -- channel rendering ---------------------------------------------------
 
@@ -164,13 +190,16 @@ class HeadlessRenderer:
         if self._at_line_start:
             prefix = format_status_prefix(data.status)
             if prefix:
-                out.write(prefix)
-        out.write(data.content)
+                out.write(printable(prefix))
+        content = printable(data.content)
+        out.write(content)
         out.flush()
-        self._at_line_start = data.content.endswith("\n")
+        self._at_line_start = content.endswith("\n")
 
     def _render_line(self, text: str) -> None:
+        """Write one line of event text; every line the renderer writes, but the todo box."""
         self._break_line()
+        text = printable(text)
         out = self._out
         out.write(text)
         if not text.endswith("\n"):

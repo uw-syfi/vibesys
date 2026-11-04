@@ -1,4 +1,5 @@
 version = 1
+backends = ["cpu"]
 
 [agent]
 domain = "generic"
@@ -26,3 +27,15 @@ timeout_seconds = 300
 [benchmark.result]
 json_argument = "--output-json"
 metric = "total_ops_per_sec"
+
+[catalogue]
+domain = "data-structures"
+
+[catalogue.hardware]
+accelerator = "CPU"
+count = 1
+vendor = "cpu"
+
+[catalogue.workload]
+name = "Mixed, multiple writers"
+description = "A concurrent unordered map where several threads put, get and remove keys at once; checked for linearizability, scored in operations per second."

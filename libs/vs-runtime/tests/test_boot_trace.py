@@ -7,6 +7,8 @@ buffers their lines until a consumer drains them into the run log. See
 through a real ``open_run_resources`` call.
 """
 
+from collections.abc import Iterator
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -14,12 +16,16 @@ from hypothesis import strategies as st
 from vs_runtime.api import boot_trace
 from vs_sim.api.testing import ManualClock
 
+_EPOCH_S = 1_800_000_000
+
 
 @pytest.fixture(autouse=True)
-def quiet_and_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Start each test with the trace off and nothing left buffered."""
+def quiet_and_empty(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Start each test with the trace off and nothing left buffered, on virtual clocks."""
     monkeypatch.delenv(boot_trace.BOOT_TRACE_ENV, raising=False)
-    boot_trace.drain_log_lines()
+    boot_trace.install(boot_trace.BootTrace(wall=ManualClock(_EPOCH_S), elapsed=ManualClock()))
+    yield
+    boot_trace.install(None)
 
 
 def test_span_records_one_line_per_span() -> None:
@@ -143,12 +149,29 @@ def test_child_env_carries_the_launch_anchor(monkeypatch: pytest.MonkeyPatch) ->
     env = boot_trace.child_env()
 
     assert set(env) == {boot_trace.LAUNCH_START_ENV}
-    assert int(env[boot_trace.LAUNCH_START_ENV]) > 0
+    assert int(env[boot_trace.LAUNCH_START_ENV]) == _EPOCH_S * 1000
 
 
 def test_child_env_anchors_even_without_mark_launch() -> None:
     """A spawn that skipped ``mark_launch`` still ships an anchor."""
-    assert int(boot_trace.child_env()[boot_trace.LAUNCH_START_ENV]) > 0
+    assert int(boot_trace.child_env()[boot_trace.LAUNCH_START_ENV]) == _EPOCH_S * 1000
+
+
+def test_before_install_a_span_runs_its_body_and_records_nothing() -> None:
+    boot_trace.install(None)
+    ran: list[str] = []
+
+    with boot_trace.span("context"):
+        ran.append("body")
+
+    assert (ran, boot_trace.drain_log_lines()) == (["body"], [])
+
+
+def test_the_launch_anchor_needs_an_installed_trace() -> None:
+    boot_trace.install(None)
+
+    with pytest.raises(RuntimeError, match="no boot trace is installed"):
+        boot_trace.child_env()
 
 
 def test_child_env_propagates_the_trace_request(monkeypatch: pytest.MonkeyPatch) -> None:

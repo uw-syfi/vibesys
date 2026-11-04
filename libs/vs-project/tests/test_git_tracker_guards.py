@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
+from tests.support.real_git import REAL_GIT, real_git_tracker
 
 from vs_project.api import (
     CliGitRepository,
@@ -54,7 +57,7 @@ def _git(root: Path, *args: str) -> str:
 
 
 def _tracker(root: Path, run_id: str = "guard-run") -> GitTracker:
-    return GitTracker(root, run_id=run_id, events=NullGitTrackerEvents())
+    return real_git_tracker(root, run_id=run_id, events=NullGitTrackerEvents())
 
 
 def _committed_repository(root: Path) -> str:
@@ -97,7 +100,7 @@ def _initialized_tracker(root: Path, run_id: str = "guard-run") -> GitTracker:
 
 def _project(root: Path, tracker: GitTracker) -> Project:
     project = Project.open(root)
-    project.state.create_project("Guard test")
+    project.state.create_project("Guard test", now=datetime(2026, 1, 1, tzinfo=UTC))
     assert tracker.trusted_input_baseline is not None
     project.state.create_run(
         project.state.new_run_manifest(
@@ -109,6 +112,7 @@ def _project(root: Path, tracker: GitTracker) -> Project:
             run_environment=RunEnvironmentRecord(name="docker"),
             execution=run_execution_record(),
             orchestration=OrchestrationDescriptor(id="guard", config_version=1, options={}),
+            now=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
     tracker.snapshot_with_framework_metadata(
@@ -120,7 +124,7 @@ def _project(root: Path, tracker: GitTracker) -> Project:
 @pytest.mark.parametrize("bad", ["/abs/path", "", ".", "a/../b", "../up"])
 def test_trusted_input_paths_must_be_normalized_relative(tmp_path: Path, bad: str) -> None:
     with pytest.raises(ValueError, match=r"project path must be a normalized relative path"):
-        GitTracker(
+        real_git_tracker(
             tmp_path,
             run_id="guard-run",
             events=NullGitTrackerEvents(),
@@ -163,7 +167,7 @@ def test_candidate_patch_requires_a_resolvable_baseline(tmp_path: Path) -> None:
         tmp_path,
         run_id="guard-run",
         events=events,
-        repository=_RepositoryWithoutRoots(tmp_path, faults=events),
+        repository=_RepositoryWithoutRoots(tmp_path, git=REAL_GIT, faults=events),
     )
     tracker.init(existing=False)
     sha = tracker.current_sha()
@@ -202,7 +206,7 @@ class _RepositoryWhoseRestoreReplacesMemory(CliGitRepository):
     """A repository whose worktree restore fails after replacing ``memory`` with a file."""
 
     def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
-        super().__init__(root, faults=faults)
+        super().__init__(root, git=REAL_GIT, faults=faults)
         self._memory = root / "memory"
 
     def restore_worktree(self, revision: str, exclude: Sequence[str] = ()) -> None:
@@ -237,6 +241,44 @@ def test_checkout_tree_reports_failed_restore_of_preserved_memory(tmp_path: Path
         "failed to restore preserved workspace memory after tree restore error",
         f"git tree restore {sha[:8]} failed",
     ]
+
+
+class _RepositoryWhoseRestoreRacesALinkIn(_RepositoryWhoseRestoreReplacesMemory):
+    """A repository during whose restore the agent swaps ``memory`` for a link to ``target``."""
+
+    def __init__(self, root: Path, *, faults: GitFaultSink, target: Path) -> None:
+        super().__init__(root, faults=faults)
+        self._target = target
+
+    def restore_worktree(self, revision: str, exclude: Sequence[str] = ()) -> None:
+        CliGitRepository.restore_worktree(self, revision, exclude)
+        shutil.rmtree(self._memory)
+        self._memory.symlink_to(self._target, target_is_directory=True)
+
+
+def test_reapplying_preserved_memory_never_writes_through_a_planted_link(tmp_path: Path) -> None:
+    """Regression: the reapply wrote preserved files through a link swapped in for ``memory``."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    events = _RecordingEvents()
+    tracker = GitTracker(
+        workspace,
+        run_id="guard-run",
+        events=events,
+        repository=_RepositoryWhoseRestoreRacesALinkIn(workspace, faults=events, target=outside),
+    )
+    tracker.init(existing=False)
+    sha = tracker.current_sha()
+    assert sha is not None
+    (workspace / "memory").mkdir()
+    (workspace / "memory" / "notes.txt").write_text("keep\n", encoding="utf-8")
+
+    tracker.checkout_tree(sha, preserve_paths=["memory"])
+
+    assert list(outside.iterdir()) == []
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can write a read-only file")
@@ -466,6 +508,66 @@ def test_isolation_reports_exactly_what_the_agent_wrote_including_below_vibesys(
     assert tracker.pending_changes() == expected
 
 
+_EARLIER_RUN = ".vibesys/state/runs/earlier-run"
+_LEFTOVERS = tuple(
+    f"{_EARLIER_RUN}/{name}"
+    for name in ("core-store/store.json", "core-store/store.lock", "artifacts/objects/ab12")
+)
+
+
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    left=st.dictionaries(st.sampled_from(_LEFTOVERS), st.sampled_from([b"", b"state"])),
+    writes=st.lists(
+        st.tuples(
+            st.sampled_from((*_LEFTOVERS, f"{_EARLIER_RUN}/stray.txt")),
+            st.sampled_from([None, b"state", b"agent"]),
+        ),
+        max_size=4,
+    ),
+)
+def test_run_state_an_earlier_process_left_is_not_the_agents(
+    tmp_path_factory: pytest.TempPathFactory,
+    left: dict[str, bytes],
+    writes: list[tuple[str, bytes | None]],
+) -> None:
+    """Regression: a second run stalled on its first orchestrator turn.
+
+    Every run leaves its store and artifacts untracked in the checkout. The next run's
+    isolation check reported them as the read-only agent's writes, could not restore them
+    and never settled the turn. What an earlier process left is the framework's while it
+    keeps its bytes; whatever the agent then creates or rewrites there is still reported.
+    """
+    root = tmp_path_factory.mktemp("project")
+    _committed_repository(root)
+    for path, content in left.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_bytes(content)
+    tracker = _tracker(root)
+    tracker.init(existing=False)
+    assert tracker.pending_changes() == []
+
+    final: dict[str, bytes | None] = dict(left)
+    for path, content in writes:
+        target = root / path
+        if content is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        final[path] = content
+
+    expected = sorted(
+        path
+        for path, content in final.items()
+        if content is not None and (path not in left or content != left[path])
+    )
+    assert tracker.pending_changes() == expected
+
+
 def test_an_agent_overwrite_of_a_framework_file_is_reported(tmp_path: Path) -> None:
     tracker = _initialized_tracker(tmp_path)
     project = _project(tmp_path, tracker)
@@ -555,3 +657,77 @@ def test_is_retained_separates_reachable_commits_from_dangling_and_unknown_ones(
     assert not tracker.is_retained("0" * 40)
     with pytest.raises(ValueError, match="not a commit object name"):
         tracker.is_retained("--all")
+
+
+class _RepositoryThatRacesALinkIn(_RepositoryWhoseRestoreReplacesMemory):
+    """A repository during whose ``ls-files`` the agent swaps ``victim`` for a link to ``target``."""
+
+    def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
+        super().__init__(root, faults=faults)
+        self.swap: tuple[Path, Path] | None = None
+
+    def has_tracked_files(self, pathspec: str) -> bool:
+        tracked = CliGitRepository.has_tracked_files(self, pathspec)
+        if self.swap is not None:
+            victim, target = self.swap
+            shutil.rmtree(victim)
+            victim.symlink_to(target, target_is_directory=True)
+        return tracked
+
+
+def test_replacing_framework_state_never_follows_a_link_planted_after_the_check(
+    tmp_path: Path,
+) -> None:
+    """Regression: the namespace was reconciled by path after its symlink check."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("host\n", encoding="utf-8")
+    events = _RecordingEvents()
+    repository = _RepositoryThatRacesALinkIn(workspace, faults=events)
+    tracker = GitTracker(workspace, run_id="guard-run", events=events, repository=repository)
+    tracker.init(existing=False)
+    project = _project(workspace, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, _NAMESPACE)
+    namespace.write_bytes("a.json", b"fw-0")
+    snapshot = namespace.snapshot()
+    repository.swap = (namespace.external_directory(), outside)
+
+    with pytest.raises((ValueError, OSError)):
+        tracker.snapshot_framework_state("replace", snapshot)
+
+    assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]
+
+
+def test_a_control_another_process_posts_is_not_the_agents_write(tmp_path: Path) -> None:
+    """Regression: an operator's ``vibesys control`` failed the next read-only turn.
+
+    The operator posts from another process, so the run never wrote the file itself; in the
+    project's checkout the isolation check would report it as the agent's write.
+    """
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    project.state.control_inbox(tracker.run_id).post("first", b"{}", ended=lambda: None)
+    local = project.state.local_namespace(tracker.run_id, "control").external_directory()
+    inbox = next(path for root in (tmp_path, local) for path in root.rglob("first.json")).parent
+    assert tracker.pending_changes() == []
+
+    (inbox / "second.json").write_bytes(b"{}")  # as the operator's process writes it
+
+    assert tracker.pending_changes() == []
+
+
+def test_a_file_the_framework_did_not_create_stays_the_agents(tmp_path: Path) -> None:
+    """Regression: a create that found the file already there recorded it as the framework's."""
+    tracker = _initialized_tracker(tmp_path)
+    project = _project(tmp_path, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, "probe")
+    assert namespace.create_bytes("first.json", b"{}")
+    planted = next(tmp_path.rglob("first.json")).parent / "second.json"
+    planted.write_bytes(b"{}")  # as an agent writes it, with the bytes the framework would
+
+    assert not namespace.create_bytes("second.json", b"{}")
+
+    assert planted.relative_to(tmp_path).as_posix() in tracker.pending_changes()

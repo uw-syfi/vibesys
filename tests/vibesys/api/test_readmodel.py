@@ -1,10 +1,4 @@
-"""The agent-owned read model faithfully projects canonical agent state.
-
-Mirrors the hypothesis/round fixtures in ``tests/server/test_experiments.py``
-so these assertions can be checked directly against
-``server.api.experiments``'s own projection, which the boundary DTOs must
-match field-for-field.
-"""
+"""The agent-owned read model faithfully projects canonical hypothesis and round state."""
 
 from __future__ import annotations
 
@@ -184,7 +178,7 @@ def test_hypothesis_view_matches_fixture_facts_field_for_field() -> None:
         "base-c1",
     )
     assert view.perf_delta_reason == measurement_delta_reason(hypothesis)
-    assert view.kept is False
+    assert view.best is False
     assert view.strategy_disposition == HypothesisStrategy.ABANDONED.value
     assert view.strategy_reason == "The official baseline regressed."
     assert view.active is False

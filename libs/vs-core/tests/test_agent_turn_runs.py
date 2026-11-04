@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -39,6 +39,7 @@ from .toy_agent_search import (
     LIMITS,
     ROLES,
     Config,
+    Done,
     Ending,
     ToyHost,
     run_toy,
@@ -290,3 +291,61 @@ def test_a_stop_ends_the_run_with_every_resource_released_in_the_mode_the_operat
     assert all(a.phase == core.AttemptPhase.TERMINAL for a in trace.core.attempts.attempts)
     assert not [c for c in trace.core.evaluation.continuations if c.phase in _OPEN]
     assert all(item.closed for item in summary(trace).done if item.opened)
+
+
+def _ends(trace: Trace) -> list[Done]:
+    return sorted(summary(trace).done, key=lambda done: done.key)
+
+
+def _paused(scenario: Scenario, pause_at: int) -> tuple[Trace, ToyHost]:
+    host = ToyHost(
+        waits=scenario.waits,
+        polls=scenario.polls,
+        roles=scenario.roles,
+        ends=scenario.ends,
+        shares=scenario.shares,
+        pause_at=pause_at,
+    )
+    config = Config(workstreams=scenario.workstreams, in_flight=scenario.in_flight)
+    return run_toy(host, config, faults=scenario.faults), host
+
+
+#: A judge that waits for its evaluation, whose job reports running for two polls.
+_WAITING_JUDGE = Scenario(
+    workstreams=1,
+    in_flight=1,
+    waits=(True,),
+    polls=(2,),
+    roles=("judge",),
+    ends=("wait",),
+    shares=True,
+    faults=Faults(),
+)
+
+
+@settings(max_examples=examples(pr=8, nightly=60), deadline=None, derandomize=True, database=None)
+@example(scenario=_WAITING_JUDGE, pause_at=11)  # the job ends while paused (the live stall)
+@example(scenario=_WAITING_JUDGE, pause_at=9)  # the waiting turn's checkpoint lands paused
+@example(scenario=_WAITING_JUDGE, pause_at=7)  # the turn asks for its evaluation paused
+@given(scenario=SCENARIOS, pause_at=st.integers(0, 40))
+def test_a_pause_holds_the_run_and_after_the_resume_it_ends_as_it_would_have(
+    scenario: Scenario, pause_at: int
+) -> None:
+    """A pause before any executor answer, then a resume once nothing runs, changes no outcome.
+
+    Pausing holds what the search decides until the resume; work already under way (a turn,
+    its evaluation call, its wait, a job's polls) finishes while paused, and what it yields
+    is delivered. So a judge whose evaluation ends while the run is paused is resumed, and
+    every workstream ends as it does unpaused: the same asks answered, nothing timed out.
+    """
+    trace, host = _paused(scenario, pause_at)
+
+    assert_ended_closed(trace)
+    # Held work resumes in another order, so parallel workstreams may end in another order.
+    assert _ends(trace) == _ends(scenario.run())
+    # The run may end while paused (its last decision, the Finish, is taken while paused).
+    actions = [c.action for c in trace.core.run.controls]
+    assert actions in (["pause"], ["pause", "resume"]) if host.paused_with else actions == []
+    waits = {c.continuation_id for c in trace.core.evaluation.continuations}
+    resumed = {r.continuation_id for r in trace.requests if isinstance(r, core.ResumeSessionTurn)}
+    assert resumed == waits, "every wait recorded is resumed"

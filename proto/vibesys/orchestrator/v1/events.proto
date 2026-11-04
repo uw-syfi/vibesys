@@ -1,0 +1,166 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/orchestrator/v1/orchestrator.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// SidecarSource names the sidecar event a stored event came from, so that a replay knows how far
+// each session's stream was committed. It is what a restarted daemon resumes that stream from.
+message SidecarSource {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  uint32 session = 2 [(buf.validate.field).uint32.gt = 0];
+  uint64 offset = 3 [(buf.validate.field).uint64.gt = 0];
+}
+
+// Event is one committed fact. The state is a fold of these, so nothing that a decision depends on
+// lives anywhere else. One input's events commit as one transaction.
+message Event {
+  // Global, gap-free, assigned at commit.
+  uint64 sequence = 1 [(buf.validate.field).uint64.gt = 0];
+  // Empty only on the receipt of a command refused before it reached a run.
+  string run_id = 2;
+  // Empty unless a command caused the event.
+  string command_id = 3;
+  google.protobuf.Timestamp at = 4 [(buf.validate.field).required = true];
+  // Absent unless a sidecar event caused the event.
+  SidecarSource source = 5;
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    Run run_updated = 10;
+    Agent agent_updated = 11;
+    Turn turn_updated = 12;
+    // The whole item, so a client replaces by id.
+    Item item_updated = 13;
+    Message message_updated = 14;
+    // Every command ends in one, so a refused command is idempotent across a restart too.
+    Receipt receipt_recorded = 15;
+  }
+}
+
+// Delta is progress on a running item. It is never stored and never reaches the decision core: the
+// next item_updated for the same item replaces it.
+message Delta {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  string item_id = 2 [(buf.validate.field).string.min_len = 1];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    string text = 3;
+    string command_output = 4;
+  }
+}
+
+// AgentSpec says what to run an agent on. An absent harness takes the lead's. An absent model or
+// effort takes the lead's on the lead's harness, and is the harness's default on another.
+message AgentSpec {
+  Harness harness = 1 [(buf.validate.field).enum.defined_only = true];
+  string model = 2;
+  string reasoning_effort = 3;
+}
+
+message StartRun {
+  string repository = 1 [(buf.validate.field).string.min_len = 1];
+  string task = 2 [(buf.validate.field).string.min_len = 1];
+  uint32 fanout_limit = 3;
+  // Absent when the run has no deadline.
+  google.protobuf.Timestamp deadline = 4;
+  // The lead has nothing to inherit from, so its harness is required.
+  AgentSpec lead = 5 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).cel = {
+      id: "start_run.lead.harness"
+      message: "the lead needs a harness"
+      expression: "this.harness != 0"
+    }
+  ];
+  // The operator's steering text for the lead, such as a note about cost or which harnesses to
+  // prefer. Empty when there is none; a template words the lead's first prompt around it.
+  string brief = 6;
+}
+
+message StopRun {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message SpawnAgent {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  // Any role but the lead's.
+  AgentRole role = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0, 1]
+  }];
+  AgentSpec spec = 3;
+  uint32 plan_number = 4;
+  string brief = 5 [(buf.validate.field).string.min_len = 1];
+}
+
+message StopAgent {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+}
+
+message SendMessage {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  string text = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message PostHandoff {
+  Handoff handoff = 1 [(buf.validate.field).required = true];
+}
+
+message PostReport {
+  Report report = 1 [(buf.validate.field).required = true];
+}
+
+// Command is what clients and agents ask for. It names no caller: the daemon adds who is asking
+// from the connection or the agent's session, so that a caller cannot claim to be someone else.
+message Command {
+  // Idempotency key; the receipt is keyed on it.
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    StartRun start_run = 10;
+    StopRun stop_run = 11;
+    SpawnAgent spawn_agent = 12;
+    StopAgent stop_agent = 13;
+    SendMessage send_message = 14;
+    PostHandoff post_handoff = 15;
+    PostReport post_report = 16;
+  }
+}
+
+// Refusal says why a command was not carried out.
+enum Refusal {
+  REFUSAL_UNSPECIFIED = 0;
+  REFUSAL_RUN_NOT_FOUND = 1;
+  REFUSAL_AGENT_NOT_FOUND = 2;
+  // The role table does not let this caller do this.
+  REFUSAL_NOT_PERMITTED = 3;
+  // The run is not in a status that allows this.
+  REFUSAL_RUN_NOT_RUNNING = 4;
+  REFUSAL_FANOUT_LIMIT = 5;
+  // The lead is stopped by stopping its run.
+  REFUSAL_AGENT_IS_LEAD = 6;
+  // The agent's session is already over or closing.
+  REFUSAL_AGENT_NOT_LIVE = 7;
+  // The deadline had passed when the command arrived.
+  REFUSAL_DEADLINE_PASSED = 8;
+}
+
+// Receipt is the answer to a command, and the same answer to each retry of it.
+message Receipt {
+  string command_id = 1 [(buf.validate.field).string.min_len = 1];
+  // SHA-256 of the command, so that one id reused for another command is a conflict.
+  string command_digest = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  // Unspecified when the command was accepted.
+  Refusal refusal = 3 [(buf.validate.field).enum.defined_only = true];
+  // What the command made or acted on, where it did.
+  string run_id = 4;
+  string agent_id = 5;
+  string message_id = 6;
+  // Where the message stood when the command finished.
+  Delivery delivery = 7 [(buf.validate.field).enum.defined_only = true];
+  // The sequence of this receipt's event, the last one of the command.
+  uint64 sequence = 8;
+}

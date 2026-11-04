@@ -32,12 +32,13 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from tests.e2e.dynamic_loop_harness import LoopInput
+from tests.e2e.dynamic_loop_harness import LoopInput, load_run, published_snapshot
 from tests.support import run_test_command
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import (
@@ -48,17 +49,19 @@ from tests.support.loop_invariants import (
     summarize,
     terminal_event,
 )
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.slurm_environment import with_fake_image_build
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
+from entrypoints.production import production_timing
 from entrypoints.run import supervise
 from headless import HeadlessRenderer
 from headless import run as render_run
 from launch import LaunchSettings
 from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.events import CoreEventType
+from vibesys.events import CoreEventType, MeasurementComparedData
 from vibesys.orchestration.dynamic import PLUGIN
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import (
@@ -71,14 +74,27 @@ from vs_agent.api.testing import (
     tool_result,
     usage,
 )
+from vs_core.api import MIN_SAMPLES_WITHOUT_FLOOR, ObservationStatus, StopMode, SubmitMeasurement
+from vs_core.api.recovery import CancelReason
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
-from vs_project.api import Project, StoredEnvelope
-from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
+from vs_project.api import Project
+from vs_sim.api import (
+    LoopSignalSource,
+    MonotonicClock,
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    SystemClock,
+    ThreadBlockingRunner,
+    UnixNetwork,
+)
+from vs_sim.api.testing import wait_or_fail
+from vs_slurm.api import recorded_job_ids
+from vs_slurm.fake_connector import HOLD_FILE, active_jobs, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from vibesys.api import CoreEvent, RunRequest, RunResult, Runs
+    from vibesys.api import CoreEvent, RunHandle, RunRequest, RunResult, Runs
     from vs_agent.api import AgentEventSink, AgentSpec, SessionStore
     from vs_agent.contracts import AgentCapabilities, AgentSessionSpec, AgentTurnRequest
     from vs_agent.shim_turns import LaunchedSession
@@ -92,7 +108,7 @@ _BUNDLE = Path(__file__).parent / "dynamic_smoke" / "bundle"
 _PROVIDERS = {
     "claude": (
         "claude",
-        '[model]\nname = "claude-haiku-4-5-20251001"\n[agent]\ncli_provider = "claude"\n',
+        '[model]\nname = "claude-haiku-4-5"\n[agent]\ncli_provider = "claude"\n',
     ),
     "codex": (
         "codex",
@@ -197,6 +213,8 @@ class SmokeRun:
             'name = "fake"\n'
             f'remote_workspace_root = "{remote}"\n'
             "poll_interval_seconds = 1.0\n"
+            # Exclusive nodes: the candidate's official run may reuse the agent's (#2949).
+            'sbatch_arguments = ["--exclusive"]\n'
             f'transport = {{ kind = "connector", command = {connector} }}\n'
             "[vibesys]\n"
             f'remote_python = "{remote_python}"\n'
@@ -325,12 +343,9 @@ class SmokeRun:
         logs = self.logs_dir()
         assert logs is not None, (self.base / "vibesys.log").read_text(encoding="utf-8")[-4000:]
         run_id = next(str(event["run_id"]) for event in self.events() if event.get("run_id"))
-        stored = Project.open(self.project).state_store(run_id).load()
-        envelope = (
-            json.loads(stored.payload)["envelope"] if isinstance(stored, StoredEnvelope) else None
-        )
+        logged = load_run(Project.open(self.project), run_id)
         loaded = RunRecords.load(logs, None, self.cluster)
-        return replace(loaded, envelope=envelope)
+        return replace(loaded, envelope=None if logged is None else logged.envelope)
 
     def verdict(self, *, stop_grace_s: float | None = None) -> list[Violation]:
         """Check the invariants and print the run's one-line summary."""
@@ -471,6 +486,17 @@ _PLAN = {
             "pass_criteria": "Accuracy passes and throughput improves.",
         }
     ],
+    "handoff": {
+        "expectations": [
+            {
+                "work_id": "raise-value",
+                "expected": "Throughput rises with VALUE.",
+                "if_it_succeeds": "Raise it further.",
+                "if_it_fails": "Look elsewhere.",
+            }
+        ],
+        "doubts": [],
+    },
 }
 _IMPLEMENTED = {
     "summary": "Raised VALUE.",
@@ -492,9 +518,10 @@ class _RoleLaunchers:
     @property
     def capabilities(self) -> AgentCapabilities:
         """What every scripted role honors; the roles share one fake's capabilities."""
-        return FakeProvider(turn=[assistant_text("")]).capabilities
+        return FakeProvider(turn=[assistant_text("")], threads=OsThreads()).capabilities
 
-    def __init__(self) -> None:
+    def __init__(self, on_judge: Callable[[], None] | None = None) -> None:
+        self._on_judge = on_judge
         self._launchers: list[FakeProvider] = []
 
     def launch(self, spec: AgentSessionSpec) -> LaunchedSession:
@@ -521,6 +548,8 @@ class _RoleLaunchers:
                 for tool in build_core_evaluation_tools(
                     socket_path=Path(env["VS_EVALUATION_SOCKET"]),
                     token=env["VS_EVALUATION_TOKEN"],
+                    network=UnixNetwork(),
+                    clock=MonotonicClock(),
                 )
             }
             submit = tools[SUBMIT_TOOL]
@@ -538,6 +567,7 @@ class _RoleLaunchers:
                     usage(input_tokens=1200, output_tokens=80),
                 ],
                 answer=_PLAN,
+                threads=OsThreads(),
             ),
             IMPLEMENTER.id: FakeProvider(
                 turn=[
@@ -548,8 +578,14 @@ class _RoleLaunchers:
                 ],
                 script=FakeTurnScript(answers=(waiting, _IMPLEMENTED)),
                 on_turn=measure_own_edit,
+                threads=OsThreads(),
             ),
-            JUDGE.id: FakeProvider(turn=[assistant_text("The change is correct.")], answer=_JUDGED),
+            JUDGE.id: FakeProvider(
+                turn=[assistant_text("The change is correct.")],
+                answer=_JUDGED,
+                threads=OsThreads(),
+                on_turn=lambda _: self._on_judge() if self._on_judge else None,
+            ),
         }
         launcher = scripts[spec.role]
         self._launchers.append(launcher)
@@ -565,15 +601,18 @@ def _core_agents(
     spec: AgentSpec,
     session_store: SessionStore,
     events: AgentEventSink,
+    on_judge: Callable[[], None] | None = None,
     **_kwargs: object,
 ) -> AgentClient:
     """The production agent client over role-scripted fake providers."""
     return AgentClient(
-        _RoleLaunchers(),
+        _RoleLaunchers(on_judge),
         provider=spec.provider,
         model_name=spec.model,
         session_store=session_store,
         event_sink=events,
+        clock=SystemClock(),
+        threads=OsThreads(),
     )
 
 
@@ -618,7 +657,12 @@ _REQUIRED_KINDS = frozenset(
 
 
 def _assert_headless_stream(
-    events: list[CoreEvent], *, run_id: str, committed: frozenset[str], rendered: str
+    events: list[CoreEvent],
+    *,
+    run_id: str,
+    committed: frozenset[str],
+    rendered: str,
+    job_counts: range,
 ) -> None:
     """What a headless frontend received from the core path is complete, legal and anchored.
 
@@ -629,7 +673,9 @@ def _assert_headless_stream(
     """
     kinds = [event.type for event in events]
     assert set(kinds) >= _REQUIRED_KINDS, sorted(k.value for k in _REQUIRED_KINDS - set(kinds))
-    assert kinds[0] is CoreEventType.RUN_STARTED
+    assert kinds.count(CoreEventType.RUN_STARTED) == 1
+    started = kinds.index(CoreEventType.RUN_STARTED)
+    assert CoreEventType.RUN_STARTUP_PROGRESS not in kinds[started + 1 :]
     assert kinds[-1] is CoreEventType.RUN_FINISHED
     sequences = [event.sequence for event in events]
     assert sequences == sorted(set(sequences)), "event sequence numbers must increase"
@@ -655,7 +701,10 @@ def _assert_headless_stream(
         assert all(opened < i < closed for i, kind in mine if kind in _AGENT_CONTENT)
 
     jobs = {event.execution_id for event in events if event.type is CoreEventType.GATE_STARTED}
-    assert len(jobs) == 3, jobs  # the baseline, the implementer's own and the candidate's
+    # The baseline, the implementer's own, the runs core asked for, and the candidate's
+    # official measurement (a re-read of the samples held runs its gates too). A run of core's
+    # that the run's end cancelled before it started ran no gate.
+    assert len(jobs) in job_counts, jobs
     for job in jobs:
         # A job runs the gates its kind needs: a validation run has fewer than a trusted one.
         gates = {
@@ -707,23 +756,33 @@ def _assert_headless_stream(
 class _RecordingRenderer(HeadlessRenderer):
     """The headless renderer, keeping every event it was handed."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_event: Callable[[CoreEvent], None] | None = None) -> None:
         super().__init__()
         self.events: list[CoreEvent] = []
+        self._on_event = on_event
 
     def handle(self, event: CoreEvent) -> None:
         self.events.append(event)
+        if self._on_event is not None:
+            self._on_event(event)
         super().handle(event)
 
 
 def _run_headless_recording(
-    request: RunRequest, runs: Runs, renderer: HeadlessRenderer
+    request: RunRequest,
+    runs: Runs,
+    renderer: HeadlessRenderer,
+    on_handle: Callable[[RunHandle], None] | None = None,
 ) -> RunResult:
-    """``run_headless`` with the renderer chosen by the caller."""
+    """``run_headless`` with the renderer chosen by the caller, and the run's handle offered."""
 
     async def execute() -> RunResult:
         handle = runs.start(request)
-        return await supervise(handle, render_run(handle, renderer=renderer))
+        if on_handle is not None:
+            on_handle(handle)
+        return await supervise(
+            handle, render_run(handle, renderer=renderer), signals=LoopSignalSource()
+        )
 
     return asyncio.run(execute())
 
@@ -743,22 +802,72 @@ def _executing_cluster_input(base: Path) -> LoopInput:
     return loop_input
 
 
-@pytest.mark.usefixtures("container_cli_credentials")
-def test_core_path_runs_the_fake_slurm_search(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The product launcher drives a dynamic run on the core path.
+class _PendingCoreRuns:
+    """Keep the fifth allocation pending and the sixth waiting for local admission.
 
-    Nothing is substituted but the agents' scripted replies: the built-in catalog, the
-    CLI-built request, the launcher, the host composition, the runtime loop, the executing
-    Fake Slurm cluster and the trusted evaluation scripts.
+    Once that allocation exists and core compared two samples on each side, the operator stops
+    the run, cancelling what is in flight: the strategy would otherwise wait for the runs core
+    still has under way (a comparison is final only when they end), and a job held in the queue
+    never ends. The cancel finds the fifth allocation pending in the scheduler and the sixth
+    still waiting for local admission, which must never be submitted.
     """
-    loop_input = _executing_cluster_input(tmp_path)
-    (tmp_path / "agent.toml").write_text(
-        '[model]\nname = "scripted"\n[evaluation]\n'
-        "observe_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n",
-        encoding="utf-8",
-    )
+
+    def __init__(self, loop_input: LoopInput) -> None:
+        self._cluster = loop_input.cluster
+        self._ready = OsThreads().event()
+        self._lock = OsThreads().lock()
+        self._accepted = False
+        self._compared = False
+        self._submissions = 0
+        self._handle: RunHandle | None = None
+        loop_input.connector.intercept(self.intercept)
+
+    def bind(self, handle: RunHandle) -> None:
+        """The run this interleaving stops."""
+        self._handle = handle
+
+    def intercept(
+        self,
+        request: dict[str, object],
+        answer: Callable[[dict[str, object]], dict[str, object]],
+    ) -> dict[str, object]:
+        if request.get("operation") == "exec" and "sbatch " in str(request.get("command", "")):
+            self._submissions += 1
+            if self._submissions == 5:
+                (self._cluster / HOLD_FILE).touch()
+                response = answer(request)
+                with self._lock:
+                    self._accepted = True
+                    self._release_judge()
+                return response
+        return answer(request)
+
+    def observe(self, event: CoreEvent) -> None:
+        """Wait for core to record both sides' second samples, not just their execution."""
+        data = event.data
+        if (
+            isinstance(data, MeasurementComparedData)
+            and data.base_samples == data.candidate_samples == MIN_SAMPLES_WITHOUT_FLOOR - 1
+        ):
+            with self._lock:
+                self._compared = True
+                self._release_judge()
+
+    def _release_judge(self) -> None:
+        if self._accepted and self._compared:
+            self._ready.set()
+
+    def before_judge(self) -> None:
+        """Hold the judge until core reserved its last sample, then stop the run, cancelling."""
+        wait_or_fail(self._ready, "core's second comparison and last baseline allocation")
+        assert self._handle is not None
+        self._handle.stop(StopMode.CANCEL)
+
+
+def _core_slurm_search(
+    loop_input: LoopInput, *, interleaving: _PendingCoreRuns | None = None
+) -> tuple[RunResult, _RecordingRenderer]:
+    """Run the CLI-built search, optionally holding its judge at a cluster barrier."""
     request = build_run_request(
         parse_cli_invocation(
             [
@@ -767,7 +876,7 @@ def test_core_path_runs_the_fake_slurm_search(
                 "--input",
                 str(loop_input.root),
                 "--config",
-                str(tmp_path / "agent.toml"),
+                str(loop_input.agent_config),
                 "--run-environment",
                 "slurm",
                 "--slurm-config",
@@ -779,31 +888,61 @@ def test_core_path_runs_the_fake_slurm_search(
                 "--max-rounds",
                 "1",
                 "--max-in-flight",
-                "1",
+                # A held judge must leave a dispatch slot for core to observe its jobs.
+                "2" if interleaving is not None else "1",
             ]
         )
     )
     request = with_fake_image_build(request)
     runs = launch.default_runs(
-        LaunchSettings(agent_client_factory=_core_agents, backend_factory=host_container_backend)
+        LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            piped_processes=SubprocessPipedProcessLauncher(),
+            agent_client_factory=(
+                _core_agents
+                if interleaving is None
+                else partial(_core_agents, on_judge=interleaving.before_judge)
+            ),
+            slurm_processes=loop_input.connector if interleaving is not None else None,
+            backend_factory=host_container_backend,
+        )
     )
 
-    renderer = _RecordingRenderer()
-    result = _run_headless_recording(request, runs, renderer)
+    renderer = _RecordingRenderer(None if interleaving is None else interleaving.observe)
+    on_handle = None if interleaving is None else interleaving.bind
+    return _run_headless_recording(request, runs, renderer, on_handle), renderer
+
+
+@pytest.mark.usefixtures("container_cli_credentials")
+def test_core_path_runs_the_fake_slurm_search(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The product launcher drives a dynamic run on the core path.
+
+    Nothing is substituted but the agents' scripted replies: the built-in catalog, the
+    CLI-built request, the launcher, the host composition, the runtime loop, the executing
+    Fake Slurm cluster and the trusted evaluation scripts.
+    """
+    loop_input = _executing_cluster_input(tmp_path)
+    result, renderer = _core_slurm_search(loop_input)
 
     assert result.succeeded is True
     assert result.status is RunStatus.COMPLETED
     run = Project.open(loop_input.root)
-    stored = run.state_store(result.run_id).load()
-    assert isinstance(stored, StoredEnvelope)
-    envelope = json.loads(stored.payload)["envelope"]
+    logged = load_run(run, result.run_id)
+    assert logged is not None
+    envelope = logged.envelope
     assert envelope["strategy"]["schema_version"] >= 1
     assert (envelope["core"]["run"]["status"], envelope["core"]["run"]["result"]["outcome"]) == (
         "terminal",
         "success",
     )
-    publications = run.state.portable_namespace(result.run_id, "publications")
-    assert publications.read_bytes("publications.json")
+    # The search published its record: the run.log holds the state it published, which is the
+    # one place a run's publications are kept (the loop journals none beside it).
+    assert published_snapshot(run, result.run_id) is not None
     assert (
         not run.state.portable_namespace(result.run_id, PLUGIN.id)
         .external_directory()
@@ -814,26 +953,113 @@ def test_core_path_runs_the_fake_slurm_search(
     selection = envelope["core"]["run"]["result"]["selection"]
     assert selection["kind"] == "retained_candidate"
     assert selection["revision"] != envelope["core"]["run"]["facts"]["baseline"]
-    # The baseline, the implementer's own in-turn measurement through the tool, and the
-    # trusted measurement of the one candidate were each submitted exactly once.
-    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == 3
+    # The baseline and the implementer's own in-turn measurement through the tool were each
+    # submitted exactly once. The task declares no per-run noise and the Fake benchmark reads
+    # the same value on every run, so the comparison is a close call with no estimate of its
+    # noise (`vs_core._comparison`): core asks for runs of the base and of the candidate's input
+    # itself, each side up to `MIN_SAMPLES_WITHOUT_FLOOR` runs, and once both sides hold that
+    # many identical runs no verdict can ever be reached, so nothing more is run. The
+    # implementer's turn does not wait for core's runs (they are not its attempt's history),
+    # and they only feed the scope's comparison: a run that has not ended when the strategy
+    # leaves its workspace is withdrawn by the closing scope, so how many of them land depends
+    # on how long the jobs take against the agents. What does not depend on it: every run core
+    # asked for ended, landed or withdrawn, and the runs that landed never pass what a verdict
+    # needs.
     evaluation = envelope["core"]["evaluation"]
+    state = logged.core.evaluation
+    asked = {row.request_id for row in state.core_runs}
+    landed = [job for job in state.jobs if job.submission_id in asked]
+    withdrawn = [
+        row
+        for row in logged.core.records.records
+        if row.request_id in asked
+        and row.observation is not None
+        and row.observation.status is ObservationStatus.CANCELLED
+        and row.observation.diagnostic == CancelReason.WITHDRAWN.value
+    ]
+    assert len(landed) + len(withdrawn) == len(asked), evaluation["core_runs"]
+    purposes = [job.plan.purpose for job in landed]
+    (official,) = (job for job in state.jobs if job.plan.purpose == "official")
+    fresh_official = official.reuses is None
+    assert purposes.count("baseline") <= MIN_SAMPLES_WITHOUT_FLOOR - 1, evaluation["core_runs"]
+    # The agent's run, core's runs of its input, and a fresh official run: at most the fewest
+    # for a verdict.
+    assert 1 + purposes.count("local-validation") + fresh_official <= MIN_SAMPLES_WITHOUT_FLOOR, (
+        evaluation["core_runs"]
+    )
+    _assert_cluster_submissions(run, result.run_id, loop_input)
     assert [call["rejection"] for call in evaluation["agent_calls"]] == [None]
-    # The agent's own evaluations and the official one both sit in the ledger for the winner,
-    # yet only the official accuracy record is accuracy proof: the agent's are local-validation.
+    # The agent's own evaluation and the official one both sit in the ledger for the winner. A
+    # framework run is trusted whoever asked for it, so the agent's records are correctness and
+    # benchmark records too; the purpose only says who asked.
     held = [item for item in evaluation["evidence"] if item["candidate"] == selection["revision"]]
     assert {(item["purpose"], item["kind"]) for item in held} == {
-        ("local-validation", "local-validation"),
+        ("local-validation", "correctness"),
+        ("local-validation", "benchmark"),
         ("official", "correctness"),
         ("official", "benchmark"),
     }
-    assert [item["purpose"] for item in held if item["kind"] == "correctness"] == ["official"]
-    # The turn waited once: core recorded exactly one continuation for the whole run.
-    assert len(evaluation["continuations"]) == 1
     assert active_jobs(loop_input.cluster) == ()
     _assert_headless_stream(
         renderer.events,
         run_id=result.run_id,
         committed=_strings_of(envelope["core"]),
         rendered=capsys.readouterr().out,
+        job_counts=range(3 + len(asked) - len(withdrawn), 3 + len(asked) + 1),
     )
+
+
+def _assert_cluster_submissions(run: Project, run_id: str, loop_input: LoopInput) -> frozenset[str]:
+    """Every durable scheduler acceptance has exactly one sbatch and one Fake cluster job."""
+    handles = run.state.local_namespace(run_id, "core-evaluation").external_directory()
+    submitted = recorded_job_ids(handles / "slurm-provider-handles" / "cluster")
+    assert sum("sbatch " in command for command in recorded_commands(loop_input.cluster)) == len(
+        submitted
+    )
+    assert submitted == frozenset(loop_input.connector.submitted_job_ids())
+    return submitted
+
+
+@pytest.mark.usefixtures("container_cli_credentials")
+def test_core_run_cancelled_before_local_admission_never_submits(tmp_path: Path) -> None:
+    """A run cancelled while core's final candidate run is queued never submits the one waiting.
+
+    Core holds two runs of the candidate's comparison when the operator cancels the run: one
+    held pending in the Slurm queue, and one waiting for local admission that never reached the
+    scheduler. Both are steps of the run: the cancel ends the strategy's flows, the scope they
+    leave closes, and the closing scope withdraws both through their runner. The held job is
+    cancelled in the scheduler, and the other ends before dispatch and is never submitted. (An official check that reuses a run not seen ended is refused, so core measures
+    afresh, and the strategy waits for the runs under way, so only a stop or a failed attempt
+    closes a scope over them. The rule is `libs/vs-dst/tests/test_close_withdraws.py`'s.)
+    """
+    loop_input = _executing_cluster_input(tmp_path)
+    interleaving = _PendingCoreRuns(loop_input)
+    result, _renderer = _core_slurm_search(loop_input, interleaving=interleaving)
+    assert result.status is RunStatus.STOPPED
+    run = Project.open(loop_input.root)
+    logged = load_run(run, result.run_id)
+    assert logged is not None
+    core = logged.core
+    assert len(core.evaluation.core_runs) == 4
+    ended = [
+        row
+        for row in core.records.records
+        if isinstance(row.request, SubmitMeasurement)
+        and row.observation is not None
+        and row.observation.status is ObservationStatus.CANCELLED
+    ]
+    assert len(ended) == 2
+    # The stop ends the strategy's flows, and the scope they leave closes over both runs.
+    assert {row.observation.diagnostic for row in ended if row.observation is not None} == {
+        CancelReason.WITHDRAWN.value
+    }
+    namespace = run.state.local_namespace(result.run_id, "core-evaluation")
+    handles = namespace.external_directory() / "slurm-provider-handles"
+    durable = [
+        (record["ended"], record["handle"] is None, record["dispatch_started"])
+        for record in (json.loads(path.read_bytes()) for path in sorted(handles.glob("*.json")))
+    ]
+    # The step that waited for local admission ended before dispatch and never reached sbatch.
+    assert durable.count(("cancelled_before_dispatch", True, False)) == 1
+    assert len(_assert_cluster_submissions(run, result.run_id, loop_input)) == 5
+    assert active_jobs(loop_input.cluster) == ()

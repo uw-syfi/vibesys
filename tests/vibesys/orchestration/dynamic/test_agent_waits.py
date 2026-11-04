@@ -49,10 +49,11 @@ def test_the_roles_that_work_on_a_candidate_are_asked_again_after_a_lost_turn() 
     """How often and after how long is core's; who is asked again is ours.
 
     The planner is not a role core asks again: the planning flow does it itself, which
-    `test_a_lost_planner_turn_is_asked_again_after_five_then_ten_seconds` pins.
+    `test_a_lost_planner_turn_is_asked_again_after_five_then_ten_seconds` pins. The outliner,
+    asked once for a plan's steps, leaves it to core.
     """
     again = {role.name for role in ROLES if role.lost_turns > 0}
-    assert again == {"implementer", "judge", "profiler"}
+    assert again == {"implementer", "judge", "profiler", "merger", "outliner"}
 
 
 @MODES

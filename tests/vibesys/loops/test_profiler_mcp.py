@@ -1416,7 +1416,7 @@ class TestRocprofMcpServer:
 
     def test_bench_parse_tool_extracts_wall_ms_lines(self, rocprof_server_mod, tmp_path):  # noqa: ANN001, ANN201  # LW-910199; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work
         log = tmp_path / "driver.log"
-        log.write_text("wall_ms: 12.5\nwall_ms: 13.0\n")
+        log.write_text("wall_ms: 12.5\nwall_ms: 13.0\nwall_ms_done: 2\n")
 
         server = rocprof_server_mod.build_server()
         out = asyncio.run(_call_tool(server, "bench_parse", log=str(log)))

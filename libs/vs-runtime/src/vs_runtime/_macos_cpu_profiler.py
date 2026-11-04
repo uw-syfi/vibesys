@@ -7,7 +7,6 @@ import platform
 import shlex
 import shutil
 import subprocess
-import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import StrEnum
@@ -80,16 +79,17 @@ class ChildProcess(Protocol):
 
 @dataclass(frozen=True)
 class MacOSProfilerEffects:
-    """Injected process, clock, and executable lookup effects for collection."""
+    """Injected process, clock, and executable lookup effects for collection.
 
+    ``now`` stamps the collection's start and end, in seconds since the epoch;
+    ``sleep`` waits out the workload's warm-up before sampling.
+    """
+
+    now: Callable[[], float]
+    sleep: Callable[[float], None]
     run: Runner = subprocess.run
     start: ProcessStarter = subprocess.Popen
-    sleep: Callable[[float], None] = time.sleep
-    now: Callable[[], float] = time.time
     which: Callable[[str], str | None] = shutil.which
-
-
-_DEFAULT_EFFECTS = MacOSProfilerEffects()
 
 
 def detect_capability(
@@ -183,7 +183,7 @@ def collect(  # noqa: PLR0913  # lint-waiver: LW-009005 [PLR0913]; platform coll
     duration: int = 10,
     warmup: float = 1.0,
     capability: Capability | None = None,
-    effects: MacOSProfilerEffects = _DEFAULT_EFFECTS,
+    effects: MacOSProfilerEffects,
 ) -> CollectionResult:
     """Run a separate diagnostic workload and persist raw data plus metadata."""
     capability = capability or detect_capability()

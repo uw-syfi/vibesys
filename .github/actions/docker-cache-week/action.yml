@@ -1,0 +1,27 @@
+name: Docker layer cache week
+description: >-
+  The ISO weeks the Docker layer caches are keyed on, which refresh floating base images
+  weekly. `week` is this week. `previous` is last week for runs that do not save (pull
+  requests and the merge queue), so the first runs of a week restore last week's snapshot
+  instead of building cold, and this week on a push, so main never chains an old base
+  forward into a saved entry.
+
+outputs:
+  week:
+    description: This ISO week, as YYYY-WW.
+    value: ${{ steps.weeks.outputs.week }}
+  previous:
+    description: The oldest week this run may restore from, as YYYY-WW.
+    value: ${{ steps.weeks.outputs.previous }}
+
+runs:
+  using: composite
+  steps:
+    - id: weeks
+      shell: bash
+      env:
+        EVENT: ${{ github.event_name }}
+      run: |
+        echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+        if [ "$EVENT" = push ]; then ago=0; else ago=7; fi
+        echo "previous=$(date -u -d "$ago days ago" +%G-%V)" >> "$GITHUB_OUTPUT"

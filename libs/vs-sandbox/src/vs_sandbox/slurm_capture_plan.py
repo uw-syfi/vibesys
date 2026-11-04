@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from vs_decode.api import Unreadable, ValidationOptions, read_json
 from vs_project.api import atomic_write_bytes
 
 _SUPPORT_NAME = re.compile(r"^(?!\.\.?$)[A-Za-z0-9.][A-Za-z0-9._-]*$")
@@ -17,6 +17,10 @@ def _validate_support_paths(value: dict[str, Path]) -> dict[str, Path]:
     if any(_SUPPORT_NAME.fullmatch(name) is None for name in value):
         raise ValueError("support path names must be safe workspace basenames")  # noqa: TRY003  # lint-waiver: LW-930035 [TRY003]; this validation boundary must raise ValueError with its precise contract message; a custom exception class would add a public type without improving recovery.
     return value
+
+
+_MAX_PLAN_BYTES = 16 * 1024 * 1024
+"""The largest capture plan file read."""
 
 
 class SlurmCapturePlanError(ValueError):
@@ -96,7 +100,9 @@ def write_slurm_capture_plan(path: Path, plan: SlurmCapturePlan) -> None:
 
 def read_slurm_capture_plan(path: Path) -> SlurmCapturePlan:
     """Load a strict machine-local capture plan."""
-    try:
-        return SlurmCapturePlan.model_validate_json(path.read_text(encoding="utf-8"), strict=True)
-    except (OSError, UnicodeError, ValueError, ValidationError, json.JSONDecodeError) as exc:
-        raise SlurmCapturePlanError(path) from exc
+    plan = read_json(
+        path, SlurmCapturePlan, max_bytes=_MAX_PLAN_BYTES, options=ValidationOptions(strict=True)
+    )
+    if isinstance(plan, Unreadable):
+        raise SlurmCapturePlanError(path)
+    return plan

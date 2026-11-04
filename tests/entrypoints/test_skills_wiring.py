@@ -41,8 +41,9 @@ class _ArgsOptions(TypedDict, total=False):
     default_presets: bool
 
 
-NKI_WRAPPER_DIR = PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development"
+NKI_WRAPPER_DIR = PROJECT_ROOT / "skills" / "domains" / "neuron-agentic-development"
 NKI_SKILL_NAMES = {
+    "neuron-explorer-profile-schema",
     "neuron-nki-debugging",
     "neuron-nki-docs",
     "neuron-nki-profile-querying",
@@ -65,7 +66,7 @@ def _args(
     # By default emulate "presets only" by pointing --skills-dir at the repo
     # presets; pass default_presets=False to exercise the omitted-flag path.
     if skills_dir is None and default_presets:
-        skills_dir = [Path("resources/skills")]
+        skills_dir = [Path("skills/domains")]
     return argparse.Namespace(
         config=cfg,
         no_skills=no_skills,
@@ -134,7 +135,7 @@ def test_no_skills_disables_even_compatible_skills(tmp_path: Path) -> None:
 
 
 def test_omitted_skills_dir_uses_presets(tmp_path: Path) -> None:
-    # With no --skills-dir the preset roots (resources/skills) are the base.
+    # With no --skills-dir the preset roots (skills/domains) are the base.
     _, skills, _ = load_config_and_skills(
         _args(tmp_path, ComputeBackend.CUDA, default_presets=False),
         domain=DomainName.LLM_SERVING,
@@ -340,13 +341,17 @@ def test_missing_skill_frontmatter_is_invalid(tmp_path: Path) -> None:
 def test_all_repository_skill_metadata_is_valid() -> None:
     metadata = {
         item.skill_dir.name: item
-        for item in validate_skill_tree(PROJECT_ROOT / "resources" / "skills")
+        for item in validate_skill_tree(PROJECT_ROOT / "skills" / "domains")
     }
     assert metadata["serving-systems"].domains == (DomainName.LLM_SERVING,)
+    assert metadata["custom-rpc-optimization"].domains == (DomainName.MICROSERVICES,)
+    assert metadata["custom-rpc-optimization"].backends is None
     assert metadata["kernel-correctness"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-performance"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-ncu-analysis"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-ncu-analysis"].backends == (ComputeBackend.CUDA,)
+    assert metadata["kernel-timeline-analysis"].domains == (DomainName.KERNEL_WRITING,)
+    assert metadata["kernel-timeline-analysis"].backends == (ComputeBackend.CUDA,)
     assert metadata["kernel-rocprof-analysis"].domains == (DomainName.KERNEL_WRITING,)
     assert metadata["kernel-rocprof-analysis"].backends == (ComputeBackend.ROCM,)
     assert set(metadata) >= NKI_SKILL_NAMES
@@ -370,11 +375,12 @@ def test_kernel_skills_follow_domain_and_backend(tmp_path: Path) -> None:
     )
 
     shared = {"kernel-correctness", "kernel-performance"}
-    analysis = {"kernel-ncu-analysis", "kernel-rocprof-analysis"}
-    assert shared | {"kernel-ncu-analysis"} <= _skill_names(kernel_skills)
+    cuda_analysis = {"kernel-ncu-analysis", "kernel-timeline-analysis"}
+    analysis = cuda_analysis | {"kernel-rocprof-analysis"}
+    assert shared | cuda_analysis <= _skill_names(kernel_skills)
     assert "kernel-rocprof-analysis" not in _skill_names(kernel_skills)
     assert shared | {"kernel-rocprof-analysis"} <= _skill_names(rocm_skills)
-    assert "kernel-ncu-analysis" not in _skill_names(rocm_skills)
+    assert cuda_analysis.isdisjoint(_skill_names(rocm_skills))
     assert (shared | analysis).isdisjoint(_skill_names(serving_skills))
     assert (shared | analysis).isdisjoint(_skill_names(rocm_serving_skills))
     assert analysis.isdisjoint(_skill_names(trainium_skills))
@@ -455,9 +461,7 @@ def test_serving_systems_platform_dirs_cover_every_compute_backend() -> None:
     Without this, selecting a backend silently falls back to reading another
     platform's floor — which is wrong work, not merely missing work.
     """
-    platforms = (
-        PROJECT_ROOT / "resources" / "skills" / "serving-systems" / "references" / "platforms"
-    )
+    platforms = PROJECT_ROOT / "skills" / "domains" / "serving-systems" / "references" / "platforms"
     present = {p.name for p in platforms.iterdir() if p.is_dir()}
 
     assert present == {backend.value for backend in ComputeBackend}
@@ -465,7 +469,7 @@ def test_serving_systems_platform_dirs_cover_every_compute_backend() -> None:
 
 # -- link discipline: portable tiers must not link into platforms/ ----------
 
-SERVING_SYSTEMS = PROJECT_ROOT / "resources" / "skills" / "serving-systems"
+SERVING_SYSTEMS = PROJECT_ROOT / "skills" / "domains" / "serving-systems"
 PORTABLE_TIERS = ("algorithms", "models", "tooling", "frameworks", "engines")
 # `](...)` targets that resolve into a platform directory.
 _PLATFORM_LINK = re.compile(r"\]\((?:\.{1,2}/)*platforms/[a-z0-9]+/[^)]+\)")
@@ -563,3 +567,13 @@ def test_skill_catalog_rejects_frontmatter_name_that_cannot_be_materialized(tmp_
 
     with pytest.raises(RuntimeSkillMetadataError, match="must match directory name"):
         build_skill_catalog([skill])
+
+
+@pytest.mark.parametrize("domain", list(DomainName))
+def test_custom_rpc_skill_is_selected_only_for_microservices(
+    tmp_path: Path, domain: DomainName
+) -> None:
+    _, selected, _ = load_config_and_skills(_args(tmp_path, ComputeBackend.CPU), domain=domain)
+    assert ("custom-rpc-optimization" in _skill_names(selected)) == (
+        domain is DomainName.MICROSERVICES
+    )

@@ -19,6 +19,11 @@ from vs_agent.api.testing import docker_timed_out
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine
 
+# test-isolation: the exit sweep's registry is the module's process-exit backstop.
+from vs_sandbox.docker_sandbox import _live_containers
+from vs_sim.api import DISCARD
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
+
 # One entry per `docker run` that loses its client after the daemon created the
 # container: False leaves no id on stdout (crashed or interrupted client), True
 # times out. Runs past the list succeed.
@@ -36,14 +41,18 @@ class _BodyFailedError(RuntimeError):
 def _engine(base: Path) -> FakeDockerEngine:
     state = base / "engine"
     state.mkdir(exist_ok=True)
-    return FakeDockerEngine(state)
+    return FakeDockerEngine(state, launcher=FakePipedProcessLauncher())
 
 
 def _sandbox(base: Path, engine: FakeDockerEngine, run_id: str | None = "run-1") -> DockerSandbox:
     workspace = base / "workspace"
     workspace.mkdir(exist_ok=True)
     return DockerSandbox(
-        host_workspace=str(workspace), image="agent-image", docker=engine, run_id=run_id
+        host_workspace=str(workspace),
+        image="agent-image",
+        docker=engine,
+        run_id=run_id,
+        threads=SimThreads(),
     )
 
 
@@ -72,7 +81,7 @@ def test_a_run_lost_after_the_daemon_created_the_container_is_removed() -> None:
         engine.runs_lost_after_creating([False])
 
         with pytest.raises(RuntimeError, match="Failed to start Docker container"):
-            _sandbox(base, engine).start()
+            _sandbox(base, engine).start(output=DISCARD)
 
         assert engine.containers() == ()
 
@@ -84,7 +93,7 @@ def test_a_run_that_times_out_after_the_daemon_created_the_container_is_removed(
         engine.runs_lost_after_creating([True])
 
         with pytest.raises(RuntimeError, match="Timed out starting Docker container"):
-            _sandbox(base, engine).start()
+            _sandbox(base, engine).start(output=DISCARD)
 
         assert engine.containers() == ()
 
@@ -110,3 +119,35 @@ def test_a_sandbox_without_a_run_id_is_unlabelled() -> None:
         with _sandbox(base, engine, run_id=None):
             (container,) = engine.containers()
             assert container.labels == {}
+
+
+@given(lost_removals=st.integers(min_value=0, max_value=4), timed_out=st.booleans())
+def test_a_named_container_whose_removal_fails_is_reported_and_left_to_the_exit_sweep(
+    *, lost_removals: int, timed_out: bool
+) -> None:
+    """Regression (REVIEW-10 P2-2): a container known only by name leaked when every removal failed.
+
+    The start removes it by name, retrying a lost ``docker rm``. If all three
+    attempts are lost, the start's error names the container, and the exit
+    sweep's registry still holds the name.
+    """
+    with tempfile.TemporaryDirectory() as raw:
+        base = Path(raw)
+        engine = _engine(base)
+        engine.runs_lost_after_creating([timed_out])
+        engine.removals_lost(lost_removals)
+        sandbox = _sandbox(base, engine)
+
+        with pytest.raises(RuntimeError) as raised:
+            sandbox.start(output=DISCARD)
+
+        notes = "".join(getattr(raised.value, "__notes__", ()))
+        if lost_removals < 3:
+            assert engine.containers() == ()
+            assert notes == ""
+            assert not any(docker is engine for docker in _live_containers.values())
+        else:
+            (container,) = engine.containers()
+            assert container.name in notes
+            # The exit sweep removes what the registry holds; its own tests cover the sweep.
+            assert _live_containers.pop(container.name) is engine

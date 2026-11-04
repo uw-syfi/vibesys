@@ -1,0 +1,48 @@
+{
+  "name": "a_tool_that_never_completes_is_settled_at_the_turn_end",
+  "doc": "Codex does not always send item/completed. No item may stay running once its turn ended.",
+  "provider": [
+    [
+      {
+        "tool_left_running": "sleep 99",
+        "id": "c1"
+      },
+      {
+        "say": "moving on",
+        "item": "a1"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "send": {
+        "effectId": "e1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "go"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t1"
+      }
+    }
+  ],
+  "checks": [
+    "one_end_per_turn",
+    "items_precede_end",
+    "no_running_item_after_end"
+  ]
+}

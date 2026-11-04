@@ -1,0 +1,262 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "google/protobuf/duration.proto";
+import "vibesys/cli/v1/environment.proto";
+import "vibesys/cli/v1/failure.proto";
+import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/result.proto";
+import "vibesys/cli/v1/version.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// SupervisorService is what one job's supervisor serves over a private Unix socket in the job's
+// run directory. The daemon is its only client: it dials a supervisor when it starts the job, and
+// again after a restart of its own, so a supervisor never has to find the daemon.
+//
+// A supervisor starts parked. It runs nothing until Start, so the daemon can record the job as
+// running before the command runs, and a job that was never recorded as running never runs. After
+// the command ends the supervisor keeps the outcome and the output until Release, so a daemon
+// that was away still collects both. A call that cannot complete returns a gRPC error status whose
+// details carry a Failure.
+service SupervisorService {
+  // Handshake is the version handshake. The daemon sends COMPONENT_DAEMON and its versions, and
+  // goes on only if the answer is COMPATIBLE. The answer carries the supervisor's own versions.
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+
+  // Start begins the job. It is idempotent: a started supervisor answers the same way.
+  rpc Start(StartRequest) returns (StartResponse);
+
+  // Attach streams the job's output from an offset and then, once the command has ended, its
+  // outcome as the last message. A caller that comes back with the offset it already holds
+  // receives each byte once, so the daemon can resume after its own restart. Attach does not end
+  // the supervisor.
+  rpc Attach(AttachRequest) returns (stream AttachResponse);
+
+  // CancelJob asks the supervisor to end the whole process group of the job. It returns once the
+  // request is recorded, not once the group has ended: the outcome says that. A cancel after the
+  // command ended changes nothing. The first reason wins.
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+
+  // Release ends the supervisor and removes what it kept. It refuses a job that is running,
+  // since a running job is cancelled first and released after its outcome is recorded. A parked
+  // supervisor is released to abort a job that never started.
+  rpc Release(ReleaseRequest) returns (ReleaseResponse);
+}
+
+// Launch is what one supervisor runs: a job as the daemon resolved it. The daemon writes it into
+// the run directory before it starts the supervisor, so the supervisor decides nothing: the
+// environment is a concrete kind, never unspecified, and a command's timeout is positive.
+message Launch {
+  // The repository and task name the store the job belongs to; the daemon reads them back after a
+  // restart to find that store.
+  string repository = 1;
+  string task = 2;
+  string job_id = 3;
+  JobSpec spec = 4;
+  // What a check or a measure job runs, as the daemon decided it when the job started. It is set
+  // for those kinds and unset for a command job.
+  FlowPlan plan = 5;
+  // Where this attempt's output starts in the job's stored output: what earlier attempts of a job
+  // that was queued again left there. The supervisor's output offsets count from it, so a daemon
+  // follows the job from what its store holds, whichever attempt wrote it.
+  uint64 output_base = 6;
+}
+
+// PlanCommand is one command of a plan, with its argument vector as the task wrote it and its
+// time limit. The supervisor resolves the project root placeholder in the checkout it makes.
+message PlanCommand {
+  repeated string argv = 1;
+  google.protobuf.Duration timeout = 2;
+}
+
+// ResultFormat is how a benchmark reports a result: the evaluator record stream, or a JSON file
+// with one numeric field. Exactly one of protocol2 and json_argument is set.
+message ResultFormat {
+  // The benchmark writes evaluator result protocol 2 records to the path after `--vs-output`.
+  bool protocol2 = 1;
+  // The flag the benchmark takes the path of its JSON result after.
+  string json_argument = 2;
+  // The numeric field of the JSON object that holds the scored value.
+  string field = 3;
+}
+
+// FlowPlan is everything a check or a measure job needs to run. Nothing in it is decided by the
+// supervisor: the daemon applies the cache to the task when the job starts, so the plan says how
+// many samples to take and which saved check pass to link.
+message FlowPlan {
+  JobKind kind = 1;
+  string task = 2;
+  string task_version = 3;
+  string key = 4;
+  EnvironmentFingerprint environment = 5;
+  // Run first when set.
+  PlanCommand build = 6;
+  PlanCommand check = 7;
+  // The following are for a measure job.
+  PlanCommand benchmark = 8;
+  ResultFormat result_format = 9;
+  Metric metric = 10;
+  // How many benchmark runs this job takes now: what the cache lacks.
+  uint32 samples = 11;
+  // The saved check pass a measure job links instead of running the check.
+  string check_pass_job_id = 12;
+  // For a measure job of a multi-objective task: the objectives every sample reports and the
+  // result records.
+  Objectives objectives = 13;
+}
+
+// ExecutionKind is how a command ended.
+enum ExecutionKind {
+  EXECUTION_KIND_UNSPECIFIED = 0;
+  EXECUTION_KIND_EXITED = 1;
+  EXECUTION_KIND_TIMED_OUT = 2;
+  EXECUTION_KIND_CANCELLED = 3;
+  EXECUTION_KIND_SERVICE_NOT_READY = 4;
+  EXECUTION_KIND_SERVICE_EXITED = 5;
+  // Not sent: a command whose end the environment did not see has no ending, and is reported as
+  // CommandEnd.unobserved or FlowEnd.lost. A receiver reads it as an ending it does not know.
+  EXECUTION_KIND_UNKNOWN = 6 [deprecated = true];
+}
+
+message ExecutionOutcome {
+  ExecutionKind kind = 1;
+  // Set when kind is EXITED.
+  int32 exit_code = 2;
+}
+
+// CommandEnd is how a command job's one attempt went.
+message CommandEnd {
+  oneof attempt {
+    // The command never started, so nothing of it ran, and this says why.
+    Failure not_started = 1;
+    // The command started and the environment saw it end this way.
+    ExecutionOutcome ended = 2;
+    // The command started and the environment cannot vouch for how it ended or for what it left,
+    // and this says what was lost.
+    Failure unobserved = 3;
+  }
+}
+
+// FlowEnd is how a check or a measure job ended.
+message FlowEnd {
+  oneof verdict {
+    // The job passed, and this is the result it found.
+    Result passed = 1;
+    // A step's command ended unlike a pass, this way.
+    ExecutionOutcome stopped = 2;
+    // A step's command never started, and this says why.
+    Failure not_attempted = 3;
+    // Every command ran and the job has no acceptable result. The text says why.
+    string rejected = 4;
+    // A step's command started and nobody can say how it ended, and this says what was lost.
+    Failure lost = 5;
+  }
+}
+
+// SupervisorOutcome is the one report a supervisor makes about its job.
+message SupervisorOutcome {
+  // How the job ended. Its member is the job's kind: a command job ends in command, and a check or
+  // a measure job in flow. The members before command are not sent, and a receiver reads them as
+  // an ending it does not know, which is never a success.
+  oneof result {
+    ExecutionOutcome executed = 1 [deprecated = true];
+    Failure not_attempted = 2 [deprecated = true];
+    Result passed = 4 [deprecated = true];
+    string rejected = 5 [deprecated = true];
+    // How a command job's one attempt went.
+    CommandEnd command = 6;
+    // How a check or a measure job ended.
+    FlowEnd flow = 7;
+  }
+  // The reason of the cancel request, present when one reached the supervisor before the command
+  // ended. The reason may be empty, so presence and not the text says that a cancel was asked. A
+  // command that ended on its own before the request still reports how it ended.
+  optional string cancel_reason = 3;
+}
+
+message HandshakeRequest {
+  // Always COMPONENT_DAEMON: the daemon is the only caller of a supervisor.
+  Component component = 1;
+  // The caller's versions.
+  BuildVersions versions = 2;
+}
+
+message HandshakeResponse {
+  // The supervisor's own versions.
+  BuildVersions versions = 1;
+  // Whether the two builds can talk, judged from the supervisor's side.
+  Compatibility compatibility = 2;
+  // Where the supervisor is now, so that a daemon that finds one knows what it holds.
+  SupervisorPhase phase = 3;
+}
+
+// SupervisorPhase is where a supervisor is in its life. Only RUNNING has a command that may be
+// using the machine. A supervisor that says nothing is not assumed to be in any phase.
+enum SupervisorPhase {
+  SUPERVISOR_PHASE_UNSPECIFIED = 0;
+  // The command has not started, and does not until Start.
+  SUPERVISOR_PHASE_PARKED = 1;
+  SUPERVISOR_PHASE_RUNNING = 2;
+  // The command ended. The supervisor keeps the outcome and the output until Release.
+  SUPERVISOR_PHASE_FINISHED = 3;
+  // The supervisor was released and is on its way out.
+  SUPERVISOR_PHASE_RELEASED = 4;
+}
+
+// RunRecord is the daemon's own note that it started a run. It is kept apart from the run
+// directory, which can be cleared while the supervisor lives, so that a missing directory is proof
+// of death only when the machine restarted since the run began.
+message RunRecord {
+  // The identity of the boot the run began in.
+  string boot_id = 1;
+  Launch launch = 2;
+  // What the record says of the command's start. A daemon that marks starts writes NOT_SENT with
+  // the record and SENT before it asks the supervisor to start, and a supervisor runs nothing
+  // before that request: so only NOT_SENT proves the command never started. UNSPECIFIED is a
+  // record written by a build that did not mark starts, whose command may have started.
+  StartMark start_mark = 3;
+}
+
+// StartMark is what a run record says of the command's start.
+enum StartMark {
+  // The record predates start marks: the command may have started.
+  START_MARK_UNSPECIFIED = 0;
+  // The supervisor was never asked to start the command.
+  START_MARK_NOT_SENT = 1;
+  // The supervisor was asked, or was about to be asked, to start the command.
+  START_MARK_SENT = 2;
+}
+
+message StartRequest {}
+
+message StartResponse {}
+
+message AttachRequest {
+  // Where in the job's output to continue from.
+  uint64 offset = 1;
+}
+
+message OutputChunk {
+  // Where this chunk begins in the job's output.
+  uint64 offset = 1;
+  bytes data = 2;
+}
+
+message AttachResponse {
+  oneof item {
+    OutputChunk output = 1;
+    // The last message of a stream: every byte of output was sent before it.
+    SupervisorOutcome outcome = 2;
+  }
+}
+
+message CancelJobRequest {
+  string reason = 1;
+}
+
+message CancelJobResponse {}
+
+message ReleaseRequest {}
+
+message ReleaseResponse {}

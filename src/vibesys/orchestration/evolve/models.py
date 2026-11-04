@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Annotated, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vibesys.hypothesis import DecidedFrom
 from vibesys.orchestration.evolve.population import OpenEvolveSelectorConfig
 from vibesys.orchestration.review import Verdict
 from vs_core.api.search import RevisionReply
@@ -15,10 +16,8 @@ class MutatorResponse(RevisionReply):
     """Mutation rationale recorded on the resulting population member.
 
     Every mutation claims work, so core checkpoints the turn's workspace and hands the checkpoint
-    to the search with this reply. Unknown keys are ignored: an agent may add notes.
+    to the search with this reply.
     """
-
-    model_config = ConfigDict(extra="ignore")
 
     summary: str = Field(
         description=(
@@ -35,11 +34,15 @@ class MutatorResponse(RevisionReply):
 class JudgeResponse(BaseModel):
     """Review decision for one evolve candidate."""
 
+    model_config = ConfigDict(extra="forbid")
+
     analysis: str = Field(description="Detailed analysis of the candidate implementation.")
     feedback: str = Field(
         description="Specific actionable feedback for the mutator. Empty string if passing."
     )
-    verdict: Verdict = Field(description="PASS if all criteria are met, FAIL otherwise.")
+    verdict: Annotated[Verdict, DecidedFrom("cited_evidence")] = Field(
+        description="PASS if all criteria are met, FAIL otherwise."
+    )
 
 
 class OpenEvolveOverrides(TypedDict, total=False):

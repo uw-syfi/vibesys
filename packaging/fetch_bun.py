@@ -1,4 +1,4 @@
-"""Fetch and verify the official Bun runtime for a release target."""
+"""Fetch and verify the Bun runtime used by client tests."""
 
 from __future__ import annotations
 
@@ -14,10 +14,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Never
 
-from tui_packaging import BUN_VERSION
-from wheel_targets import TARGETS
+from bun_targets import TARGETS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+BUN_VERSION = "1.4.2"
 
 BUN_RELEASE_ROOT = "https://github.com/oven-sh/bun/releases/download"
 Downloader = Callable[[str], bytes]
@@ -28,8 +28,8 @@ class BunFetchError(RuntimeError):
 
     @classmethod
     def unsupported_target(cls, target_key: str) -> BunFetchError:
-        """Build an error for an unknown wheel target."""
-        return cls(f"Unsupported wheel target: {target_key}")
+        """Build an error for an unknown Bun target."""
+        return cls(f"Unsupported Bun target: {target_key}")
 
     @classmethod
     def download_failed(cls, url: str) -> BunFetchError:
@@ -54,18 +54,18 @@ def fetch_bun(
         target = TARGETS[target_key]
     except KeyError as exc:
         raise BunFetchError.unsupported_target(target_key) from exc
-    url = f"{BUN_RELEASE_ROOT}/bun-v{BUN_VERSION}/{target.bun_asset}"
+    url = f"{BUN_RELEASE_ROOT}/bun-v{BUN_VERSION}/{target.asset}"
     try:
         payload = (downloader or _download)(url)
     except (OSError, urllib.error.URLError) as exc:
         raise BunFetchError.download_failed(url) from exc
-    expected = expected_sha256 or target.bun_sha256
+    expected = expected_sha256 or target.sha256
     actual = hashlib.sha256(payload).hexdigest()
     if actual != expected:
         _fail(f"Bun archive SHA-256 mismatch: expected {expected}, found {actual}")
 
-    member = f"{target.bun_asset.removesuffix('.zip')}/bun"
-    directory = f"{target.bun_asset.removesuffix('.zip')}/"
+    member = f"{target.asset.removesuffix('.zip')}/bun"
+    directory = f"{target.asset.removesuffix('.zip')}/"
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
             infos = archive.infolist()

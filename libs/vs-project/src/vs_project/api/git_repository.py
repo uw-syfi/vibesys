@@ -32,6 +32,13 @@ Conventions
   exception, and an error is never mapped to an absence unless a method's
   contract says so. ``OSError`` still means the machinery itself (a missing
   ``git`` executable, an unreadable directory) is unavailable.
+* The operations that make Git read the work tree (``tracked_changes_since_head``,
+  ``uncommitted_paths``, ``changed_since``, ``worktree_matches``, ``stage_all`` and
+  ``commit`` with ``only``) raise :class:`NestedRepositoryError` instead of running Git
+  when a repository is nested in the work tree: a ``.git`` below its top level, or a
+  gitlink in the index or the compared tree. Git would check such a repository by running
+  a child Git inside it under that repository's own config and attributes, which an agent
+  writes, so a filter driver the agent names would run on the host.
 * Commits are authored and committed as ``COMMIT_IDENTITY_NAME
   <COMMIT_IDENTITY_EMAIL>``.
 * Nothing here caches. Every read observes the repository as it is now, so
@@ -143,6 +150,28 @@ class StagingError(GitCommandError):
         self.unreadable = tuple(unreadable)
 
 
+class NestedRepositoryError(GitError):
+    """The work tree holds a nested repository, so Git was not run on it.
+
+    ``paths`` names each ``.git`` entry below the top level and each gitlink, relative to
+    the top level. ``scan_limit`` is set instead when the tree held more entries than
+    the scan looks at, so nothing can be said about the rest.
+    """
+
+    def __init__(self, paths: Sequence[str], *, scan_limit: int | None = None) -> None:
+        """Record the nested ``paths``, or the ``scan_limit`` the work tree exceeded."""
+        self.paths = tuple(paths)
+        self.scan_limit = scan_limit
+        if scan_limit is not None:
+            detail = f"the work tree holds more than {scan_limit} entries to check"
+        else:
+            detail = "nested repositories at " + ", ".join(self.paths)
+        super().__init__(
+            f"host Git refuses a work tree that may hold a nested repository: {detail}; "
+            "remove each nested .git (or move the repository out of the workspace)"
+        )
+
+
 @dataclass(frozen=True)
 class RepositoryLocation:
     """Where the repository lives: its Git directory and worktree top level."""
@@ -170,8 +199,8 @@ class GitFaultSink(Protocol):
 type GitRepositoryFactory = Callable[[Path, GitFaultSink], GitRepository]
 """Build the implementation serving the worktree at a path, reporting faults to the sink.
 
-``GitTracker`` builds ``CliGitRepository`` when it is given none; a composition that
-wants another implementation (a Fake in tests) passes a factory instead.
+Production wiring passes ``git_repositories(git)``, the configured implementation; a
+composition that wants another one (a Fake in tests) passes its own factory.
 """
 
 
@@ -201,6 +230,15 @@ class GitRepository(Protocol):
         An agent can create a nested ``.git`` after tracking started; without
         pinning, later calls would silently switch repositories. Call once
         after ``initialize`` or at resume (portable).
+        """
+        ...
+
+    def pin(self, location: RepositoryLocation) -> None:
+        """Pin every later call to ``location`` without asking Git where the repository is.
+
+        For a linked worktree whose ``.git`` file the host must not trust: the agent
+        working in it can rewrite it. Take ``location`` from the parent repository's
+        :meth:`linked_worktree_location` (portable).
         """
         ...
 
@@ -288,8 +326,31 @@ class GitRepository(Protocol):
         """
         ...
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        """Whether a ref under ``prefix`` points exactly at ``commit`` (portable)."""
+        ...
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         """Whether any ref under ``prefix`` points at a commit that reaches ``commit`` (portable)."""
+        ...
+
+    def branches(self, prefix: str) -> tuple[str, ...]:
+        """The names of the local branches that start with ``prefix``, sorted (cli-only).
+
+        ``prefix`` is empty (every branch) or a branch-name prefix that ends in ``/``
+        (``vibesys-runs/``), so it names a branch hierarchy; another value raises
+        ``ValueError``. No match, or no repository, is empty.
+        """
+        ...
+
+    def tree_files(self, revision: Revision, directory: str) -> tuple[str, ...]:
+        """The repository paths of the regular files below ``directory`` in ``revision``'s tree.
+
+        Sorted, at any depth. ``directory`` is a normalized relative directory path
+        without a trailing ``/``. Symbolic links and nested repositories are not
+        files. An absent directory, or a ``revision`` that names no commit, is
+        empty (cli-only).
+        """
         ...
 
     # -- changing refs -------------------------------------------------------
@@ -299,6 +360,55 @@ class GitRepository(Protocol):
 
         Raises ``GitCommandError`` when ``commit`` is not an existing object
         (portable).
+        """
+        ...
+
+    def create_ref(self, ref: str, commit: str) -> str:
+        """Atomically retain ``commit`` if ``ref`` is absent, returning the winning commit.
+
+        An existing ref is never moved. The call never writes through a symbolic ref;
+        failures other than a concurrent creator raise GitCommandError (cli-only).
+        """
+        ...
+
+    def create_commit(
+        self,
+        revision: Revision,
+        parents: Sequence[str],
+        message: str,
+        *,
+        preserve_from: Revision,
+        preserve_paths: Sequence[str] = (),
+    ) -> str:
+        """Create an unreferenced commit without reading or changing the worktree or index.
+
+        Its tree is ``revision`` with ``preserve_paths`` (literal repository-relative
+        paths) taken from ``preserve_from``.
+        The supplied parents determine ancestry; no branch or HEAD moves (cli-only).
+        """
+        ...
+
+    def advance_branch(self, branch: str, commit: str) -> bool:
+        """Fast-forward or create a branch without touching any checkout.
+
+        Return False if Git refuses, including a branch checked out in any worktree
+        or a non-fast-forward. Never force an update (cli-only).
+        """
+        ...
+
+    def fast_forward_checkout(
+        self,
+        branch: str,
+        commit: str,
+        *,
+        untracked_exclusions: Sequence[str] = (),
+    ) -> bool:
+        """Fast-forward the clean checkout of ``branch`` using Git's conflict checks.
+
+        Return False on another/detached branch, dirty tree, divergence or conflict.
+        Ignored and untracked files must never be overwritten. ``untracked_exclusions``
+        exempts framework-owned namespaces from the clean-tree test, never tracked edits
+        or Git's final conflict checks (cli-only).
         """
         ...
 
@@ -322,7 +432,7 @@ class GitRepository(Protocol):
     ) -> str:
         """The unified diff from ``base`` to ``head`` limited to ``pathspecs``.
 
-        No external diff drivers. Raises ``GitCommandError``, or
+        No external diff drivers and no textconv. Raises ``GitCommandError``, or
         ``GitTimeoutError`` past ``timeout`` (cli-only).
         """
         ...
@@ -471,6 +581,15 @@ class GitRepository(Protocol):
         """The commit a linked worktree's ``HEAD`` resolves to.
 
         Raises ``GitCommandError`` when it does not resolve (portable).
+        """
+        ...
+
+    def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        """Where this repository registered its linked worktree ``worktree``.
+
+        Read from this repository's own records, never from ``worktree/.git``.
+        Raises ``GitCommandError`` when ``worktree`` is not a linked worktree of this
+        repository (portable).
         """
         ...
 

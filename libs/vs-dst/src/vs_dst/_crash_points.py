@@ -43,14 +43,16 @@ class CrashPointPolicy:
 
     per_kind: int | None
 
-    def choose(self, commits: int) -> tuple[CrashPoint, ...]:
-        """The crash points of a run of ``commits`` commits: this policy's boundaries of each kind.
+    def indexes(self, count: int) -> list[int]:
+        """The positions this policy tries among ``count``.
 
-        A sample is evenly spaced and always includes the first and the last commit.
+        A sample is evenly spaced and always includes the first and the last; or every one.
         """
-        indexes = (
-            list(range(commits)) if self.per_kind is None else evenly_spaced(commits, self.per_kind)
-        )
+        return list(range(count)) if self.per_kind is None else evenly_spaced(count, self.per_kind)
+
+    def choose(self, commits: int) -> tuple[CrashPoint, ...]:
+        """The crash points of a run of ``commits`` commits: this policy's boundaries of each kind."""
+        indexes = self.indexes(commits)
         return tuple(CrashPoint(kind, index) for kind in CrashKind for index in indexes)
 
 

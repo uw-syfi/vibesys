@@ -14,13 +14,15 @@ from typing import TYPE_CHECKING
 
 from vibesys.candidates.api import (
     Baseline,
-    Measured,
     gates_of,
     improves_on,
+    input_metrics,
     measurement,
     settle_for,
     space_of,
 )
+from vibesys.candidates.api import turned_down as checks_turned_down
+from vibesys.hypothesis import CandidateDisposition
 from vibesys.metrics import FrameworkBenchmarkOutcome, MetricRow, reading_of
 from vs_core.api.search import Assessment, EvidenceKind
 
@@ -41,6 +43,20 @@ class FinishedRound:
     passed: bool
     judge_invocation: InvocationRef | None = None
     outcome: HypothesisOutcome | None = None
+    disposition: CandidateDisposition = CandidateDisposition.UNASSESSED
+    """What the implementer recommends doing with the checkpoint it leaves."""
+
+
+def turned_down(finished: FinishedRound, *, unsettled: frozenset[HypothesisOutcome]) -> bool:
+    """Whether the round's own checks turned its work down, whatever its workspace keeps.
+
+    The shared rule (`candidates.turned_down`: a failed review, an unsettled outcome or a
+    rejecting trusted gate), and the implementer's own recommendation to discard the checkpoint.
+    The workspace may still keep the code as work in progress, which the next round builds on
+    unless its designer reverts; the round did not succeed, so its workstream is rejected.
+    """
+    discarded = finished.disposition is CandidateDisposition.DISCARD
+    return discarded or checks_turned_down(finished, unsettled=unsettled)
 
 
 def beats_input(
@@ -48,13 +64,14 @@ def beats_input(
 ) -> bool:
     """Whether the candidate's benchmark beats the input's beyond noise.
 
-    An input with no trusted reading leaves nothing to beat.
+    The bar is `input_metrics` (a measured input's benchmark, or that of one that failed only
+    its accuracy check); an input with no bar leaves nothing to beat.
     """
     benchmark = reading_of(readings, EvidenceKind.BENCHMARK)
-    seen = baseline.reading if isinstance(baseline, Measured) else None
+    bar = input_metrics(baseline)
     return improves_on(
         measurement(None if benchmark is None else benchmark.headline()),
-        measurement(seen.metrics[0] if seen is not None and seen.metrics else None),
+        measurement(bar[0] if bar else None),
         space=space_of(terms),
         when_input_unmeasured=True,
     )

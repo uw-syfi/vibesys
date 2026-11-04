@@ -6,8 +6,11 @@ import asyncio
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vs_async_ops.api import (
+    AsyncioOperationWaiter,
     OperationCancellationTimeoutError,
     OperationCompleted,
     OperationCoordinator,
@@ -18,6 +21,7 @@ from vs_async_ops.api import (
     OperationRequest,
     OperationState,
     OperationTimedOut,
+    loop_operation_deadline,
 )
 from vs_async_ops.api.testing import (
     FakeOperationDeadlineFactory,
@@ -26,7 +30,8 @@ from vs_async_ops.api.testing import (
     InMemoryOperationStore,
     ObservingWaiter,
 )
-from vs_sim.api.testing import arrival
+from vs_sim.api import yield_now
+from vs_sim.api.testing import arrival, examples
 
 if TYPE_CHECKING:
     from pydantic import JsonValue
@@ -65,6 +70,50 @@ class _BlockingStore:
         return await self.delegate.records()
 
 
+class _ReplaceFailedError(RuntimeError):
+    """A scripted transient durable-transition failure."""
+
+
+class _GetFailedError(RuntimeError):
+    """A scripted transient durable-read failure."""
+
+
+class _FailingStore:
+    """Faithful in-memory store with scripted transient read and replace failures."""
+
+    def __init__(self) -> None:
+        self.delegate = InMemoryOperationStore()
+        self._get_failures: dict[str, int] = {}
+        self._failures: dict[str, int] = {}
+
+    def fail_next_get(self, operation_id: str) -> None:
+        self._get_failures[operation_id] = self._get_failures.get(operation_id, 0) + 1
+
+    def fail_next_interruption(self, operation_id: str) -> None:
+        self._failures[operation_id] = self._failures.get(operation_id, 0) + 1
+
+    async def create(self, record: OperationHandle) -> None:
+        await self.delegate.create(record)
+
+    async def get(self, operation_id: str) -> OperationHandle | None:
+        remaining = self._get_failures.get(operation_id, 0)
+        if remaining > 0:
+            self._get_failures[operation_id] = remaining - 1
+            raise _GetFailedError(operation_id)
+        return await self.delegate.get(operation_id)
+
+    async def replace(self, record: OperationHandle, *, expected_revision: int) -> None:
+        operation_id = record.request.operation_id
+        remaining = self._failures.get(operation_id, 0)
+        if record.state is OperationState.INTERRUPTED and remaining > 0:
+            self._failures[operation_id] = remaining - 1
+            raise _ReplaceFailedError(operation_id)
+        await self.delegate.replace(record, expected_revision=expected_revision)
+
+    async def records(self) -> tuple[OperationHandle, ...]:
+        return await self.delegate.records()
+
+
 class _CancellationRunner:
     """Expose runner cancellation and task-unwind order."""
 
@@ -84,6 +133,10 @@ class _CancellationRunner:
         except asyncio.CancelledError:
             self.events.append("task-canceled")
             raise
+
+    async def wait_started(self) -> None:
+        """Wait until the product-owned execution reaches this Fake."""
+        await self.started.wait()
 
     async def cancel(self, operation_id: str) -> None:
         del operation_id
@@ -139,6 +192,7 @@ async def test_submit_is_nonblocking_and_timeout_is_observational() -> None:
         runner,
         InMemoryOperationStore(),
         waiter=ImmediateTimeoutWaiter(),
+        deadline_factory=loop_operation_deadline,
     )
 
     submitted = await coordinator.submit(_request("one"))
@@ -162,9 +216,7 @@ async def test_running_transition_does_not_finish_a_bounded_await() -> None:
     runner = FakeOperationRunner()
     waiter = ObservingWaiter()
     coordinator = OperationCoordinator(
-        runner,
-        InMemoryOperationStore(),
-        waiter=waiter,
+        runner, InMemoryOperationStore(), waiter=waiter, deadline_factory=loop_operation_deadline
     )
     await coordinator.submit(_request("one"))
     pending = asyncio.create_task(coordinator.await_result("one", 10))
@@ -181,7 +233,9 @@ async def test_running_transition_does_not_finish_a_bounded_await() -> None:
 async def test_terminal_signal_wakes_all_waiters_and_late_waiter_reads_store() -> None:
     runner = FakeOperationRunner()
     waiter = _CountingWaiter(3)
-    coordinator = OperationCoordinator(runner, InMemoryOperationStore(), waiter=waiter)
+    coordinator = OperationCoordinator(
+        runner, InMemoryOperationStore(), waiter=waiter, deadline_factory=loop_operation_deadline
+    )
     await coordinator.submit(_request("many-waiters"))
     await runner.wait_started("many-waiters")
     waiters = [asyncio.create_task(coordinator.await_result("many-waiters", 10)) for _ in range(3)]
@@ -198,7 +252,12 @@ async def test_terminal_signal_wakes_all_waiters_and_late_waiter_reads_store() -
 @pytest.mark.asyncio
 async def test_same_key_serializes_while_distinct_keys_run_concurrently() -> None:
     runner = FakeOperationRunner()
-    coordinator = OperationCoordinator(runner, InMemoryOperationStore())
+    coordinator = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await coordinator.submit(_request("a1", "a"))
     await coordinator.submit(_request("a2", "a"))
     await coordinator.submit(_request("b1", "b"))
@@ -222,7 +281,9 @@ async def test_same_key_serializes_while_distinct_keys_run_concurrently() -> Non
 async def test_cancel_is_terminal_and_restart_interrupts_orphans() -> None:
     runner = FakeOperationRunner()
     store = InMemoryOperationStore()
-    coordinator = OperationCoordinator(runner, store)
+    coordinator = OperationCoordinator(
+        runner, store, deadline_factory=loop_operation_deadline, waiter=AsyncioOperationWaiter()
+    )
     await coordinator.submit(_request("cancel"))
     await runner.wait_started("cancel")
     canceled = await coordinator.cancel("cancel")
@@ -230,12 +291,22 @@ async def test_cancel_is_terminal_and_restart_interrupts_orphans() -> None:
     assert runner.canceled == ["cancel"]
 
     orphan = OperationHandle(request=_request("orphan"), state=OperationState.RUNNING)
-    restarted = OperationCoordinator(FakeOperationRunner(), InMemoryOperationStore((orphan,)))
+    restarted = OperationCoordinator(
+        FakeOperationRunner(),
+        InMemoryOperationStore((orphan,)),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await restarted.start()
     assert (await restarted.status("orphan")).state is OperationState.INTERRUPTED
 
     closing_runner = FakeOperationRunner()
-    closing = OperationCoordinator(closing_runner, InMemoryOperationStore())
+    closing = OperationCoordinator(
+        closing_runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await closing.submit(_request("close-running", "close"))
     await closing.submit(_request("close-queued", "close"))
     await closing_runner.wait_started("close-running")
@@ -252,6 +323,8 @@ async def test_global_limit_and_queued_cancel_are_enforced() -> None:
         runner,
         InMemoryOperationStore(),
         policy=OperationPolicy(max_in_flight=2),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
     )
     await coordinator.submit(_request("one", "one"))
     await coordinator.submit(_request("two", "two"))
@@ -267,7 +340,12 @@ async def test_global_limit_and_queued_cancel_are_enforced() -> None:
     runner.complete("three", {"done": 3})
     await asyncio.gather(coordinator.await_result("two", 10), coordinator.await_result("three", 10))
 
-    serial = OperationCoordinator(runner, InMemoryOperationStore())
+    serial = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await serial.submit(_request("running", "serial"))
     await serial.submit(_request("queued", "serial"))
     await runner.wait_started("running")
@@ -281,7 +359,12 @@ async def test_global_limit_and_queued_cancel_are_enforced() -> None:
 @pytest.mark.asyncio
 async def test_canceling_a_key_waiter_allows_the_key_to_be_reused() -> None:
     runner = FakeOperationRunner()
-    coordinator = OperationCoordinator(runner, InMemoryOperationStore())
+    coordinator = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await coordinator.submit(_request("running", "shared"))
     await coordinator.submit(_request("waiting", "shared"))
     await runner.wait_started("running")
@@ -314,7 +397,12 @@ def test_invalid_cancellation_timeout_is_rejected(value: float) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("value", [0, -1, float("inf"), float("nan"), True])
 async def test_invalid_await_timeout_is_rejected(value: float) -> None:
-    coordinator = OperationCoordinator(FakeOperationRunner(), InMemoryOperationStore())
+    coordinator = OperationCoordinator(
+        FakeOperationRunner(),
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await coordinator.submit(_request("one"))
     with pytest.raises(ValueError, match="timeout_s"):
         await coordinator.await_result("one", value)
@@ -326,6 +414,8 @@ async def test_configured_await_maximum_is_enforced() -> None:
         FakeOperationRunner(),
         InMemoryOperationStore(),
         policy=OperationPolicy(max_await_timeout_s=5),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
     )
     await coordinator.submit(_request("one"))
     with pytest.raises(ValueError, match="at most 5"):
@@ -335,7 +425,12 @@ async def test_configured_await_maximum_is_enforced() -> None:
 @pytest.mark.asyncio
 async def test_json_null_is_a_present_successful_result() -> None:
     runner = FakeOperationRunner()
-    coordinator = OperationCoordinator(runner, InMemoryOperationStore())
+    coordinator = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await coordinator.submit(_request("null"))
     await runner.wait_started("null")
     runner.complete("null", None)
@@ -356,6 +451,8 @@ async def test_event_sink_failure_is_reported_without_controlling_work() -> None
         InMemoryOperationStore(),
         events=observer.publish,
         event_errors=observer.report,
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
     )
     await coordinator.submit(_request("event-error"))
     await runner.wait_started("event-error")
@@ -370,7 +467,12 @@ async def test_event_sink_failure_is_reported_without_controlling_work() -> None
 @pytest.mark.asyncio
 async def test_close_cancels_runner_before_task_and_rejects_later_submit() -> None:
     runner = _CancellationRunner()
-    coordinator = OperationCoordinator(runner, InMemoryOperationStore())
+    coordinator = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await coordinator.submit(_request("closing"))
     await runner.started.wait()
 
@@ -382,9 +484,104 @@ async def test_close_cancels_runner_before_task_and_rejects_later_submit() -> No
 
 
 @pytest.mark.asyncio
+async def test_close_retries_only_the_interruption_left_nonterminal() -> None:
+    """A failed durable transition remains owned after admission has closed."""
+    runner = FakeOperationRunner()
+    store = _FailingStore()
+    coordinator = OperationCoordinator(
+        runner,
+        store,
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
+    await coordinator.submit(_request("retry", "retry"))
+    await coordinator.submit(_request("settled", "settled"))
+    await runner.wait_started("retry")
+    await runner.wait_started("settled")
+    store.fail_next_interruption("retry")
+
+    with pytest.raises(_ReplaceFailedError, match="retry"):
+        await coordinator.close()
+
+    assert (await coordinator.status("retry")).state is OperationState.RUNNING
+    assert (await coordinator.status("settled")).state is OperationState.INTERRUPTED
+    assert runner.canceled == ["retry", "settled"]
+    with pytest.raises(OperationCoordinatorClosedError):
+        await coordinator.submit(_request("too-late"))
+
+    await coordinator.close()
+    await coordinator.close()
+
+    assert (await coordinator.status("retry")).state is OperationState.INTERRUPTED
+    assert runner.canceled == ["retry", "settled", "retry"]
+
+
+@pytest.mark.asyncio
+async def test_close_retry_keeps_the_task_owned_after_a_pre_cancellation_failure() -> None:
+    """A store failure before task capture cannot let live work outlast close."""
+    runner = _CancellationRunner()
+    store = _FailingStore()
+    coordinator = OperationCoordinator(
+        runner,
+        store,
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
+    await coordinator.submit(_request("pre-cancel-failure"))
+    await runner.wait_started()
+    store.fail_next_get("pre-cancel-failure")
+
+    with pytest.raises(_GetFailedError, match="pre-cancel-failure"):
+        await coordinator.close()
+
+    assert runner.events == []
+    await coordinator.close()
+
+    assert runner.events == ["runner-cancel", "task-canceled"]
+    assert (await coordinator.status("pre-cancel-failure")).state is OperationState.INTERRUPTED
+
+
+@pytest.mark.asyncio
+async def test_concurrent_close_callers_share_cancellation_safe_cleanup() -> None:
+    """No close caller reports completion while the authoritative attempt is blocked."""
+    runner = _CancellationRunner(block_cancel=True)
+    coordinator = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
+    await coordinator.submit(_request("shared-close"))
+    await runner.wait_started()
+
+    first = asyncio.create_task(coordinator.close())
+    await arrival(runner.cancel_entered.wait(), first)
+    second = asyncio.create_task(coordinator.close())
+    await yield_now()
+    assert not second.done()
+
+    first.cancel()
+    await yield_now()
+    assert not first.done()
+    assert not second.done()
+    runner.cancel_release.set()
+    first_result, second_result = await asyncio.gather(first, second, return_exceptions=True)
+
+    assert isinstance(first_result, asyncio.CancelledError)
+    assert second_result is None
+    assert runner.events == ["runner-cancel", "task-canceled"]
+    assert (await coordinator.status("shared-close")).state is OperationState.INTERRUPTED
+
+
+@pytest.mark.asyncio
 async def test_concurrent_cancel_is_idempotent() -> None:
     runner = _CancellationRunner()
-    coordinator = OperationCoordinator(runner, InMemoryOperationStore())
+    coordinator = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await coordinator.submit(_request("cancel-race"))
     await runner.started.wait()
 
@@ -399,7 +596,12 @@ async def test_concurrent_cancel_is_idempotent() -> None:
 @pytest.mark.asyncio
 async def test_runner_cancel_failure_still_terminates_task_and_record() -> None:
     runner = _CancellationRunner(fail_cancel=True)
-    coordinator = OperationCoordinator(runner, InMemoryOperationStore())
+    coordinator = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await coordinator.submit(_request("cancel-error"))
     await runner.started.wait()
 
@@ -415,7 +617,9 @@ async def test_deadline_covers_store_observation_without_unbounded_fallback() ->
     store = _BlockingStore()
     runner = FakeOperationRunner()
     deadlines = FakeOperationDeadlineFactory()
-    coordinator = OperationCoordinator(runner, store, deadline_factory=deadlines)
+    coordinator = OperationCoordinator(
+        runner, store, deadline_factory=deadlines, waiter=AsyncioOperationWaiter()
+    )
     await coordinator.submit(_request("slow-read"))
     await runner.wait_started("slow-read")
     store.block_get = True
@@ -435,7 +639,9 @@ async def test_deadline_covers_store_observation_without_unbounded_fallback() ->
 async def test_deadline_reports_when_no_record_was_observed() -> None:
     store = _BlockingStore(block_records=True)
     deadlines = FakeOperationDeadlineFactory()
-    coordinator = OperationCoordinator(FakeOperationRunner(), store, deadline_factory=deadlines)
+    coordinator = OperationCoordinator(
+        FakeOperationRunner(), store, deadline_factory=deadlines, waiter=AsyncioOperationWaiter()
+    )
 
     waiting = asyncio.create_task(coordinator.await_result("unknown", 5))
     await arrival(store.entered.wait(), waiting)
@@ -454,6 +660,7 @@ async def test_cancellation_deadline_records_terminal_state() -> None:
         InMemoryOperationStore(),
         deadline_factory=deadlines,
         policy=OperationPolicy(cancellation_timeout_s=3),
+        waiter=AsyncioOperationWaiter(),
     )
     await coordinator.submit(_request("stuck-cancel"))
     await runner.started.wait()
@@ -476,6 +683,7 @@ async def test_close_deadline_interrupts_when_runner_cancel_is_stuck() -> None:
         InMemoryOperationStore(),
         deadline_factory=deadlines,
         policy=OperationPolicy(cancellation_timeout_s=3),
+        waiter=AsyncioOperationWaiter(),
     )
     await coordinator.submit(_request("stuck-close"))
     await runner.started.wait()
@@ -492,7 +700,12 @@ async def test_close_deadline_interrupts_when_runner_cancel_is_stuck() -> None:
 @pytest.mark.asyncio
 async def test_close_submit_race_finishes_accepted_work_and_closes_admission() -> None:
     store = _BlockingStore(block_create=True)
-    coordinator = OperationCoordinator(FakeOperationRunner(), store)
+    coordinator = OperationCoordinator(
+        FakeOperationRunner(),
+        store,
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     submitting = asyncio.create_task(coordinator.submit(_request("submit-race")))
     await arrival(store.entered.wait(), submitting)
     closing = asyncio.create_task(coordinator.close())
@@ -509,7 +722,12 @@ async def test_close_submit_race_finishes_accepted_work_and_closes_admission() -
 @pytest.mark.asyncio
 async def test_reusing_retired_key_never_allows_overlap() -> None:
     runner = FakeOperationRunner()
-    coordinator = OperationCoordinator(runner, InMemoryOperationStore())
+    coordinator = OperationCoordinator(
+        runner,
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
 
     for index in range(20):
         operation_id = f"reuse-{index}"
@@ -538,7 +756,12 @@ class _StoppedRunner:
 @pytest.mark.asyncio
 async def test_work_ended_by_a_run_stop_is_interrupted_and_wakes_its_awaiter() -> None:
     """Regression (chaos seed 4025): a stopped profiler turn left its operation running forever."""
-    coordinator = OperationCoordinator(_StoppedRunner(), InMemoryOperationStore())
+    coordinator = OperationCoordinator(
+        _StoppedRunner(),
+        InMemoryOperationStore(),
+        deadline_factory=loop_operation_deadline,
+        waiter=AsyncioOperationWaiter(),
+    )
     await coordinator.submit(_request("stopped"))
 
     completed = await coordinator.await_result("stopped", 10)
@@ -553,7 +776,9 @@ async def test_host_terminal_wait_never_polls_and_does_not_replay(terminal: str)
     """A host dependency wait follows one terminal signal, including restart interruption."""
     runner = FakeOperationRunner()
     store = InMemoryOperationStore()
-    coordinator = OperationCoordinator(runner, store, waiter=ImmediateTimeoutWaiter())
+    coordinator = OperationCoordinator(
+        runner, store, waiter=ImmediateTimeoutWaiter(), deadline_factory=loop_operation_deadline
+    )
     await coordinator.submit(_request("host-dependency"))
     await runner.wait_started("host-dependency")
     waiting = asyncio.create_task(coordinator.wait_result("host-dependency"))
@@ -569,9 +794,54 @@ async def test_host_terminal_wait_never_polls_and_does_not_replay(terminal: str)
     result = await waiting
     assert result.state is expected
     restarted_runner = FakeOperationRunner()
-    restarted = OperationCoordinator(restarted_runner, store, waiter=ImmediateTimeoutWaiter())
+    restarted = OperationCoordinator(
+        restarted_runner,
+        store,
+        waiter=ImmediateTimeoutWaiter(),
+        deadline_factory=loop_operation_deadline,
+    )
     assert (await restarted.wait_result("host-dependency")).state is expected
     assert runner.started == ["host-dependency"]
     assert restarted_runner.started == []
     await restarted.close()
     await coordinator.close()
+
+
+class _SlowUnwindRunner(FakeOperationRunner):
+    """A runner whose task needs several event-loop turns to unwind after cancellation."""
+
+    async def run(self, request: OperationRequest) -> JsonValue:
+        try:
+            return await super().run(request)
+        finally:
+            for _ in range(5):
+                await yield_now()
+
+
+@pytest.mark.asyncio
+@settings(deadline=None, max_examples=examples(pr=20, nightly=60))
+@given(turns_before_caller_cancelled=st.integers(min_value=0, max_value=16), closing=st.booleans())
+async def test_cancelling_the_canceller_never_strands_a_running_record(
+    turns_before_caller_cancelled: int, *, closing: bool
+) -> None:
+    runner = _SlowUnwindRunner()
+    store = InMemoryOperationStore()
+    coordinator = OperationCoordinator(
+        runner, store, deadline_factory=loop_operation_deadline, waiter=AsyncioOperationWaiter()
+    )
+    await coordinator.submit(_request("op"))
+    await runner.wait_started("op")
+    stopping = asyncio.create_task(coordinator.close() if closing else coordinator.cancel("op"))
+    for _ in range(turns_before_caller_cancelled):
+        await yield_now()
+    stopping.cancel()
+    await asyncio.gather(stopping, return_exceptions=True)
+
+    for _ in range(50):
+        await yield_now()
+
+    # Either the stop never began (the runner is still live) or it ran to the end: a RUNNING
+    # record with no work behind it would hang every waiter forever.
+    record = await store.get("op")
+    assert record is not None
+    assert record.state.terminal or "op" in runner.active

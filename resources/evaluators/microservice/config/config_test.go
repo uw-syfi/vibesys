@@ -118,3 +118,16 @@ func TestLoadPreservesExplicitZeroFixtureSeed(t *testing.T) {
 		t.Fatalf("explicit zero fixture seed was rewritten: %+v", workload.Load)
 	}
 }
+
+func TestLoadAcceptsTailLatencyObjectives(t *testing.T) {
+	for _, metric := range []string{"latency_ms.p95", "latency_ms.p99"} {
+		contents := strings.Replace(validWorkload, `metric = "latency_ms.p50"`, `metric = "`+metric+`"`, 1)
+		if _, err := Load(writeWorkload(t, contents), ""); err != nil {
+			t.Fatalf("%s rejected: %v", metric, err)
+		}
+	}
+	contents := strings.Replace(validWorkload, `metric = "latency_ms.p50"`, `metric = "latency_ms.p90"`, 1)
+	if _, err := Load(writeWorkload(t, contents), ""); err == nil || !strings.Contains(err.Error(), "objective.metric") {
+		t.Fatalf("expected objective.metric error for latency_ms.p90, got %v", err)
+	}
+}

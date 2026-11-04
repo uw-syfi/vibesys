@@ -24,20 +24,22 @@ starts over from there.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 from vs_core._ids import IdScheme
 from vs_core._registry import ContractError, OperationRegistration, OperationRegistry
 from vs_core.types.common import OperationSchemaRef, StrategyId
-from vs_core.types.strategy import SearchDeclaration
+from vs_core.types.search import StopLifted
+from vs_core.types.strategy import Finish, SearchDeclaration, WakeAt
 
 from ._defs import FlowDef
 from ._errors import FlowCodeChanged
+from ._labels import SpanKind, declared
 from ._resource import kit_of
 from ._roles import Role, with_models
 from ._run import Wiring, _Run
-from ._state import FlowState, Step, Waiting, digest, key, recorded
-from ._winner import NoWinner, conclude
+from ._state import FlowChanges, FlowState, Step, Waiting, digest, key, recorded
+from ._winner import NoWinner, Uncompared, conclude
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -50,9 +52,10 @@ if TYPE_CHECKING:
     from vs_core.types.strategy import Decision
 
     from ._flow import Flow
+    from ._spans import RunTrace
     from ._state import LiveFlows
 
-type Root[C] = Callable[[Flow, C], Coroutine[Any, Any, NoWinner | None]]
+type Root[C] = Callable[[Flow, C], Coroutine[Any, Any, NoWinner | Uncompared | None]]
 
 _CAPABILITIES = frozenset({"park", "interrupt", "steer", "suspend", "profile-capture"})
 
@@ -69,6 +72,10 @@ class SearchDef[C]:
     """The agents the search asks: the only ones ``ctx.agents.session`` accepts."""
     owned: tuple[OperationRegistration, ...] = ()
     """Operations other libraries' owners perform for the search (``ctx.owners.perform``)."""
+    snapshot: type[Any] | None = None
+    """What the root may checkpoint besides its config, and is restarted from (``search``)."""
+    spans: tuple[SpanKind, ...] = ()
+    """The kinds of span the search labels (``ctx.label``, ``label=`` on an aspect call)."""
 
     @property
     def ids(self) -> IdScheme:
@@ -94,7 +101,7 @@ class SearchDef[C]:
     def declaration(self) -> SearchDeclaration:
         """What the host must provide for this search, derived from the registration."""
         required, optional = (), ()
-        ops = self.operations
+        ops, ids = self.operations, self.ids
         if ops is not None:
             kinds = ("render_role_artifacts", "verify_parent_revision", "interpret_evidence")
             required = tuple(ops.schema_ref(f"{ops.namespace}.{k}") for k in kinds)
@@ -109,6 +116,9 @@ class SearchDef[C]:
             required_operations=required,
             optional_operations=optional,
             optional=frozenset(_CAPABILITIES),  # ty: ignore[invalid-argument-type]
+            roles=tuple(
+                sorted({ids.role_id(role.identity) for role in self.roles}, key=lambda r: r.root)
+            ),
         )
 
     @property
@@ -121,13 +131,18 @@ class SearchDef[C]:
         return FlowDriver(self, config, registry)
 
 
+class Declarations(TypedDict, total=False):
+    """What a search declares beside its name and config (see ``search``)."""
+
+    operations: StrategyOperations | None
+    roles: tuple[Role, ...]
+    owned: tuple[OperationRegistration, ...]
+    spans: tuple[SpanKind, ...]
+    snapshot: type[Any] | None
+
+
 def search[C](
-    name: str,
-    *,
-    config: type[C],
-    operations: StrategyOperations | None = None,
-    roles: tuple[Role, ...] = (),
-    owned: tuple[OperationRegistration, ...] = (),
+    name: str, *, config: type[C], **declared_: Unpack[Declarations]
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """Register ``root`` as the search ``name``, run on a ``config`` model.
 
@@ -136,15 +151,30 @@ def search[C](
     the verification, evidence and retention of workspaces and measurements, and the context
     types of the prompts. ``owned`` are the operations another library's owner performs
     for the search (an issue board, say): their codec is registered, the host must provide an
-    owner for each, and a flow asks one with ``ctx.owners.perform``.
+    owner for each, and a flow asks one with ``ctx.owners.perform``. ``spans`` are the kinds of
+    span the search labels: each with its attribute schema, verdicts and link relations.
+
+    ``snapshot`` is a model the root may checkpoint besides its config: what it knows of the
+    run, so a restart after a code change resumes it with that knowledge. The root then takes
+    ``config | snapshot``: the config when the run starts, its latest checkpoint after a
+    restart. Neither model may decode the other's JSON (give the snapshot a ``kind``).
     """
+    operations = declared_.get("operations")
+    roles = declared_.get("roles", ())
+    owned = declared_.get("owned", ())
+    spans = declared_.get("spans", ())
+    snapshot = declared_.get("snapshot")
     names = [role.name for role in roles]
     if len(set(names)) != len(names):
         message = f"roles of search {name!r} must have distinct names: {sorted(names)}"
         raise ContractError(("roles",), message)
 
+    declared(spans)  # two kinds with one name are refused at registration
+
     def register(root: Root[C]) -> SearchDef[C]:
-        return SearchDef(name, config, root, operations, roles, owned)
+        return SearchDef(
+            name, config, root, operations, roles, owned, snapshot=snapshot, spans=spans
+        )
 
     return register
 
@@ -171,13 +201,17 @@ class FlowDriver[C]:
             definition.ids,
             definition.owned,
             {role.name: role for role in definition.roles},
+            declared(definition.spans),
         )
         root = definition.root
 
         async def supervised(ctx: Flow, config: C) -> None:
             await conclude(kit_of(ctx), await root(ctx, config))
 
-        self._root = FlowDef("root", supervised, type(config))
+        resumes = (
+            type(config) if definition.snapshot is None else definition.snapshot | type(config)
+        )
+        self._root = FlowDef("root", supervised, resumes)
         self._cached: tuple[tuple[int, str], _Run] | None = None
 
     def close(self) -> None:
@@ -212,37 +246,120 @@ class FlowDriver[C]:
     ) -> tuple[FlowState, list[Decision]]:
         """Deliver ``event`` to the flows it unblocks and return what they decided."""
         restarted: list[Decision] = []
+        lifting = isinstance(event, StopLifted)
         try:
             run = self._runtime(state)
         except FlowCodeChanged:
-            state, run, restarted = self._restart(state, view)
+            state, run, restarted = self._restart(state, view, lifted=lifting)
         self._cached = None  # a failed update leaves the runtime half-way: never reuse it
         journaled, kept = recorded(event, self._registry)
         item = journaled or kept
         if item is None:
             raise ContractError(("event",), "an event is journaled as itself or as a record")
+        if lifting and run.concluded and (run.stop is not None or event.new_epoch):
+            # The search ended the run, and what ended it is gone: the stop it answered is lifted,
+            # or the run was reopened and core forgot its ending. No flow is left to take the
+            # lift, so every flow starts again from its latest checkpoint, with the stop taken
+            # back. A run that was only paused, or that concluded for its own reasons while it
+            # was, goes on as it was: its ending is still the search's to propose.
+            state, run, restarting = self._restart(state, view, lifted=True, from_start=True)
+            restarted.extend(restarting)
         decisions = run.feed(item, view, None)
         step = Step(
             event=journaled,
             recorded=kept,
             reads=run.reads,
             digest=digest(state.journal[-1].digest, item, run.reads, decisions),
+            at=run.trace.at,
         )
         new = state.model_copy(
             update={
                 "journal": (*state.journal, step),
                 "live": run.checkpoint(),
                 "dropped": tuple(run.dropped),
+                "restart_settled": tuple(run.restart_settled),
             }
         )
         self._cached = (key(new), run)
         return new, [*restarted, *decisions]
+
+    def awaits(self, state: FlowState, decision: Decision) -> bool:
+        """Whether a flow of ``state`` still waits for the answer to ``decision``.
+
+        A restart gives the flows a new incarnation that asks again for what it needs, so a
+        decision the dead one made and core never took is no longer waited for.
+        """
+        if isinstance(decision, WakeAt):
+            return True
+        identifier = (
+            decision.decision_id if isinstance(decision, Finish) else decision.request.decision_id
+        )
+        return self._runtime(state).awaits(identifier)
+
+    def changes(self, before: FlowState, after: FlowState) -> bytes | None:
+        """What ``after`` adds to ``before``, for the log; None when it does not continue it.
+
+        A restart rebuilds the journal from a checkpoint, so its state is not a continuation
+        and the log keeps all of it.
+        """
+        seen = len(before.journal)
+        continues = (
+            len(after.journal) >= seen
+            and after.journal[seen - 1].digest == before.journal[-1].digest
+            and (after.base is before.base or after.base == before.base)
+        )
+        if not continues:
+            return None
+        before_counts = {(i.path, i.label): i.count for i in before.live.issued}
+        gained = FlowChanges(
+            steps=after.journal[seen:],
+            dropped=after.dropped,
+            restart_settled=after.restart_settled,
+            issued=tuple(
+                i for i in after.live.issued if before_counts.get((i.path, i.label)) != i.count
+            ),
+            published=(
+                after.live.published if after.live.published != before.live.published else None
+            ),
+        )
+        return gained.model_dump_json().encode()
+
+    def extend(self, state: FlowState, changes: bytes) -> FlowState:
+        """``state`` with ``changes`` (from ``changes``) applied."""
+        return state.extended((changes,))
+
+    def resume(self, state: FlowState) -> FlowState:
+        """``state`` as the process that logged it left it: where the flows are now.
+
+        The log keeps ``live`` only at checkpoints, so the journal is replayed (with its digest
+        guard) and the flows' snapshots are read from the replay. A journal the code cannot
+        replay any more is returned as it is: the next ``update`` restarts the flows from the
+        checkpoint ``live`` still holds.
+        """
+        try:
+            run = self._runtime(state)
+        except FlowCodeChanged:
+            return state
+        resumed = state.model_copy(
+            update={
+                "live": run.checkpoint(),
+                "dropped": tuple(run.dropped),
+                "restart_settled": tuple(run.restart_settled),
+            }
+        )
+        self._cached = (key(resumed), run)
+        return resumed
 
     @staticmethod
     def published[M: BaseModel](state: FlowState, model: type[M]) -> M | None:
         """The record the flows last published (``ctx.publish``), or None if none yet."""
         text = state.live.published
         return None if text is None else model.model_validate_json(text)
+
+    @staticmethod
+    def trace(state: FlowState) -> RunTrace:
+        """The run's spans in ``state``: every flow task and awaited operation so far."""
+        return state.live.trace
 
     def waiting(self, state: FlowState) -> tuple[Waiting, ...]:
         """What each suspended flow waits for in ``state``: its sources, as data."""
@@ -263,13 +380,16 @@ class FlowDriver[C]:
         decisions: list[Decision],
     ) -> FlowState:
         """The state whose journal has just its first step: the start of the flows."""
-        first = Step(reads=run.reads, digest=digest("", None, run.reads, decisions))
+        first = Step(
+            reads=run.reads, digest=digest("", None, run.reads, decisions), at=run.trace.at
+        )
         state = FlowState(
             schema_version=1,
             facts=facts,
             journal=(first,),
             live=run.checkpoint(),
             base=base,
+            restart_settled=tuple(run.restart_settled),
         )
         self._cached = (key(state), run)
         return state
@@ -285,11 +405,11 @@ class FlowDriver[C]:
             item = step.event or step.recorded
             try:
                 if item is not None:
-                    decisions = run.feed(item, None, step.reads)
+                    decisions = run.feed(item, None, step.reads, step.at)
                 elif state.base is None:
-                    decisions = run.start(None, step.reads)
+                    decisions = run.start(None, step.reads, step.at)
                 else:
-                    decisions = run.restore(state.base, None, step.reads)
+                    decisions = run.restore(state.base, None, step.reads, step.at)
             except FlowCodeChanged as changed:
                 raise FlowCodeChanged(index) from changed
             if digest(before, item, step.reads, decisions) != step.digest:
@@ -297,13 +417,28 @@ class FlowDriver[C]:
             before = step.digest
         return run
 
-    def _restart(self, state: FlowState, view: RunView) -> tuple[FlowState, _Run, list[Decision]]:
-        """Start every running flow again from its latest snapshot, with a fresh journal."""
-        if any(live.name is None for live in state.live.flows):
-            raise FlowCodeChanged(0)  # a flow without a registered name cannot be restarted
+    def _restart(
+        self, state: FlowState, view: RunView, *, lifted: bool = False, from_start: bool = False
+    ) -> tuple[FlowState, _Run, list[Decision]]:
+        """Start every running flow again from its latest snapshot, with a fresh journal.
+
+        A task that is not a registered flow has no snapshot to start from; ``restore`` drops it
+        and leaves it to its parent, which restarts from its own snapshot, to start again.
+        ``lifted`` starts them with the stop that stood taken back (a resume lifted it).
+        ``from_start`` is a restart by the code that recorded the state, which starts a flow
+        that never checkpointed from the argument it began with: that argument becomes the
+        snapshot the restart records for it, so the journal of the restart replays as it ran.
+        """
+        live = state.live.model_copy(update={"stop": None}) if lifted else state.live
+        if from_start:
+            flows = tuple(
+                flow.model_copy(update={"checkpointed": True}) if flow.name is not None else flow
+                for flow in live.flows
+            )
+            live = live.model_copy(update={"flows": flows})
         run = self._new_run(state.facts)
-        decisions = run.restore(state.live, view, None)
-        restarted = self._first_state(run, state.facts, state.live, decisions)
+        decisions = run.restore(live, view, None)
+        restarted = self._first_state(run, state.facts, live, decisions)
         return restarted, run, decisions
 
 

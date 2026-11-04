@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
+
+from vs_sandbox.api import CaptureExecutionIdentity, CaptureExecutionKind
+from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from vs_runtime._run_environment import RunEnvironmentSession, RunEnvironmentView
-    from vs_sandbox.api import CommandRunner
+    from vs_sandbox.api import CaptureCommandRunner, CommandRunner
 
 
 class HostBroker(Protocol):
@@ -28,7 +30,16 @@ class BrokeredRunEnvironmentSession:
 
     delegate: RunEnvironmentSession
     brokers: tuple[HostBroker, ...]
-    _closed: bool = False
+    capture_override: CaptureCommandRunner | None = None
+    _ownership: ReleaseStack = field(init=False, repr=False)
+    _close: CloseOnce = field(default_factory=CloseOnce, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Record every owned close once, in construction order."""
+        self._ownership = ReleaseStack()
+        for broker in self.brokers:
+            self._ownership.callback(broker.close)
+        self._ownership.callback(self.delegate.close)
 
     @property
     def sandbox(self) -> CommandRunner:
@@ -46,6 +57,23 @@ class BrokeredRunEnvironmentSession:
     def view(self, value: RunEnvironmentView) -> None:
         self.delegate.view = value
 
+    @property
+    def capture_commands(self) -> CaptureCommandRunner:
+        """Use the role-specific override, otherwise the delegate's runner."""
+        if self.capture_override is not None:
+            return self.capture_override
+        return self.delegate.capture_commands
+
+    @property
+    def capture_execution(self) -> CaptureExecutionIdentity | None:
+        """Return a durable identity only for the independently recoverable runner."""
+        if self.capture_override is None:
+            return None
+        return CaptureExecutionIdentity(
+            kind=CaptureExecutionKind.SLURM_GPU,
+            execution_id=self.capture_override.id,
+        )
+
     def __enter__(self) -> BrokeredRunEnvironmentSession:
         return self
 
@@ -53,14 +81,9 @@ class BrokeredRunEnvironmentSession:
         self.close()
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        """Release every owner; retry only the steps whose earlier close failed."""
         # Reverse construction order: the brokers were started first, so they
         # close last. The editor stops first, which ends every connection it held
-        # and cancels the jobs those connections asked for. Every close runs even
-        # when an earlier one fails.
-        with ExitStack() as stack:
-            for broker in self.brokers:
-                stack.callback(broker.close)
-            stack.callback(self.delegate.close)
+        # and cancels the jobs those connections asked for. Every remaining close
+        # runs even when an earlier one fails.
+        self._close.run(self._ownership.close)

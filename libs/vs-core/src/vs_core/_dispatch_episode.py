@@ -35,7 +35,6 @@ from .types.records import (
     CancelOwnedResource,
     ExecuteRegisteredOperation,
     InspectRequest,
-    RecoveryPhase,
     RequestPhase,
     request_lifecycle,
 )
@@ -289,12 +288,7 @@ def episode_ended(state: EpisodeFacts, request: Request) -> bool:
     a later admission replaced its own. Cleanup kinds are left out because their authority
     is recorded after they are prepared (a release edge, a committed stop), so a refusal to
     dispatch one now says nothing about later. Such a request is never reported as ended.
-
-    While recovery runs the answer is always no: the recovery barrier inspects every
-    prepared request and decides what becomes of it, and core does not pre-empt that check.
     """
-    if state.records.recovery.phase != RecoveryPhase.READY:
-        return False
     if isinstance(request, InspectRequest):
         return _inspection_moot(state, request)
     return not isinstance(request, _CLEANUP_KINDS) and not dispatch_episode_current(state, request)
@@ -306,7 +300,7 @@ def _inspection_moot(state: EpisodeFacts, request: InspectRequest) -> bool:
     Core ends a prepared request of an ended episode itself (provably unaccepted). An
     inspection prepared meanwhile would report a second, conflicting first observation.
     """
-    target = next((row for row in state.records.records if row.request_id == request.target), None)
+    target = state.records.record(request.target)
     observation = None if target is None else target.observation
     return (
         target is not None

@@ -8,14 +8,21 @@ accepted fits the record, and the accepted entries alone always make a valid pla
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import ValidationError
+from tests.vibesys.orchestration.dynamic._host import TERMS
 from tests.vibesys.orchestration.dynamic._values import (
+    BASE,
+    combine_entry,
+    finished_merge,
     finished_profile,
     hypothesis_record,
     implement_entry,
+    merge_entry,
     portfolio,
     portfolios,
     profile_entry,
@@ -25,6 +32,7 @@ from tests.vibesys.orchestration.dynamic._values import (
 )
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
+from vibesys.metrics import MetricRow
 from vibesys.orchestration.dynamic.models import (
     PlannerHypothesisUpdate,
     PortfolioPlan,
@@ -33,6 +41,7 @@ from vibesys.orchestration.dynamic.models import (
 )
 from vibesys.orchestration.dynamic.search.api import (
     HypothesisRecord,
+    MainMeasurement,
     ParentSnapshot,
     PlanCheck,
     ViolationCode,
@@ -41,6 +50,9 @@ from vibesys.orchestration.dynamic.search.api import (
     validate,
 )
 from vs_sim.api.testing import examples
+
+if TYPE_CHECKING:
+    from vs_core.api.search import TaskTerms
 
 CAPACITY = 4
 
@@ -54,11 +66,26 @@ class Record:
     profiles: list[str] = field(default_factory=list)
     parents: list[ParentSnapshot] = field(default_factory=list)
     offer: ProfileOffer | None = None
+    repairable: frozenset[str] | None = None
+    """The failed plan steps a reply may continue, in a run the task's plan decides."""
+    ranks: bool = False
+    """Whether the run lets the reply order its evaluations."""
+    merges: list[str] = field(default_factory=list)
+    """The IDs of finished merges; a parent named by one is a merged main."""
+    merged: list[tuple[str, str]] = field(default_factory=list)
+    """The (hypothesis, revision) candidates a merge brought into main."""
+    main_value: float | None = None
+    """Main's measured headline throughput; None leaves main at the input, which has none."""
+    pending: bool = False
+    """Whether the input's measurement is still pending (a record restored before it landed)."""
+    terms: TaskTerms = TERMS
 
 
 def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> PlanCheck:
     """Validate ``plan`` against a run record set up as ``record`` says."""
-    run = run_record()
+    run = run_record(terms=record.terms)
+    if record.pending:
+        run.baseline = run.main.baseline = None
     for item in record.hypotheses:
         run.hypotheses[item.hypothesis_id] = item
     run.accepted.extend(
@@ -68,9 +95,16 @@ def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> Plan
     run.finished_work.extend(
         finished_profile(identifier, index) for index, identifier in enumerate(record.profiles, 90)
     )
+    run.finished_work.extend(
+        finished_merge(identifier, index) for index, identifier in enumerate(record.merges, 80)
+    )
+    run.main.merged = set(record.merged)
+    if record.main_value is not None:
+        row = MetricRow(name="throughput", value=record.main_value, direction="max")
+        run.main.measurement = MainMeasurement(revision=BASE, merge_id="m0", metrics=(row,))
     run.parents = tuple(record.parents)
-    world = run.world()
-    return validate(plan, world.ledger, run.offered(), capacity=capacity, offer=record.offer)
+    ledger = replace(run.world().ledger, repairable=record.repairable, ranks=record.ranks)
+    return validate(plan, ledger, run.offered(), capacity=capacity, offer=record.offer)
 
 
 def codes(result: PlanCheck) -> list[ViolationCode]:
@@ -91,6 +125,7 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
         "a", HypothesisOutcome.INCONCLUSIVE, strategy=HypothesisStrategy.ABANDONED
     )
     parented = Record(parents=[GOOD_PARENT])
+    unchecked = TERMS.model_copy(update={"accuracy_stage": None})
     unsupported = ProfileOffer(fields=())
     return {
         ViolationCode.OVER_CAPACITY: (
@@ -188,6 +223,73 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             Record(hypotheses=[hypothesis_record("a")]),
             "hypothesis_updates.0.hypothesis_id",
         ),
+        ViolationCode.OUTSIDE_PLAN: (
+            portfolio(implement_entry("n")),
+            Record(hypotheses=[FINISHED_A], repairable=frozenset({"a"})),
+            "workstreams.0",
+        ),
+        ViolationCode.MERGE_ID_USED: (
+            portfolio(merge_entry("a", "b")),
+            Record(hypotheses=[FINISHED_A], parents=[GOOD_PARENT]),
+            "workstreams.0.merge_id",
+        ),
+        ViolationCode.MERGE_IN_FLIGHT: (
+            portfolio(merge_entry("m1", "b"), merge_entry("m2", "b")),
+            parented,
+            "workstreams.1.kind",
+        ),
+        ViolationCode.MERGE_CANDIDATE_REPEATED: (
+            portfolio(merge_entry("m", "b", "b")),
+            parented,
+            "workstreams.0.candidates.1",
+        ),
+        ViolationCode.MERGE_CANDIDATE_IS_MAIN: (
+            portfolio(merge_entry("m2", "m1")),
+            Record(parents=[snapshot("m1", 1, value=10.0)], merges=["m1"]),
+            "workstreams.0.candidates.0",
+        ),
+        ViolationCode.MERGE_CANDIDATE_MERGED: (
+            portfolio(merge_entry("m", "b")),
+            Record(parents=[GOOD_PARENT], merged=[("b", "b-r1")]),
+            "workstreams.0.candidates.0",
+        ),
+        ViolationCode.MERGE_CANDIDATE_NOT_BETTER: (
+            portfolio(merge_entry("m", "b")),
+            Record(parents=[GOOD_PARENT], main_value=10.0),
+            "workstreams.0.candidates.0",
+        ),
+        ViolationCode.MERGE_BASELINE_PENDING: (
+            portfolio(merge_entry("m", "b")),
+            Record(parents=[GOOD_PARENT], pending=True),
+            "workstreams.0.candidates.0",
+        ),
+        ViolationCode.MERGE_UNCHECKABLE: (
+            portfolio(merge_entry("m", "b")),
+            Record(parents=[GOOD_PARENT], terms=unchecked),
+            "workstreams.0.kind",
+        ),
+        ViolationCode.COMBINE_PARENT_REPEATED: (
+            portfolio(
+                combine_entry("k", ("b", "b-r1"), ("c", "c-r1"), ("b", "b-r2")),
+            ),
+            Record(parents=[GOOD_PARENT, snapshot("b", 2), snapshot("c", 1)]),
+            "workstreams.0.parents.2.hypothesis_id",
+        ),
+        ViolationCode.EXPECTATION_UNKNOWN: (
+            portfolio(implement_entry("n"), expected=("n", "z")),
+            Record(),
+            "handoff.expectations.1.work_id",
+        ),
+        ViolationCode.RANKING_UNKNOWN: (
+            portfolio(implement_entry("n"), order=("n", "z")),
+            Record(hypotheses=[FINISHED_A], ranks=True),
+            "evaluation_order.1",
+        ),
+        ViolationCode.RANKING_DUPLICATE: (
+            portfolio(implement_entry("n"), order=("a", "n", "a")),
+            Record(hypotheses=[FINISHED_A], ranks=True),
+            "evaluation_order.2",
+        ),
     }
 
 
@@ -215,6 +317,15 @@ def test_a_broken_rule_is_named_by_its_code_at_the_field_the_planner_must_fix(
     assert not result.valid
 
 
+def test_a_merge_is_never_a_repair_of_a_failed_plan() -> None:
+    result = check(
+        portfolio(merge_entry("m", "b")),
+        Record(hypotheses=[FINISHED_A], parents=[GOOD_PARENT], repairable=frozenset({"a"})),
+    )
+    assert codes(result) == [ViolationCode.OUTSIDE_PLAN]
+    assert _where(result.violations[0].path) == "workstreams.0"
+
+
 def test_a_plan_that_breaks_no_rule_is_accepted_whole_in_order() -> None:
     plan = portfolio(
         implement_entry("n"),
@@ -232,6 +343,35 @@ def test_a_plan_that_breaks_no_rule_is_accepted_whole_in_order() -> None:
     assert [(item.hypothesis_id, item.disposition) for item in result.updates] == [
         ("c", HypothesisStrategy.ABANDONED)
     ]
+
+
+def test_a_run_that_ranks_evaluations_takes_the_replys_order_of_known_and_planned_ids() -> None:
+    plan = portfolio(implement_entry("n"), order=("n", "a"))
+    result = check(plan, Record(hypotheses=[FINISHED_A], ranks=True))
+    assert result.valid
+    assert result.ranking == ("n", "a")
+    assert check(portfolio(implement_entry("n")), Record(ranks=True)).ranking is None
+
+
+def test_a_ranking_may_name_a_merge_whose_commit_waits_for_its_measurement() -> None:
+    """A merge's commit is queued for its trusted measurement like a candidate, under its ID."""
+    plan = portfolio(implement_entry("n"), order=("m1", "n"))
+    result = check(plan, Record(merges=["m1"], ranks=True))
+    assert result.valid, result.violations
+    assert result.ranking == ("m1", "n")
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(order=st.lists(st.sampled_from(["a", "n", "z"]), max_size=4).map(tuple))
+def test_a_run_that_picks_the_newest_ignores_any_order_the_reply_gives(
+    order: tuple[str, ...],
+) -> None:
+    """The order is read only when the run lets the orchestrator rank; a reply that gives one
+    anyway, known IDs or not, is not sent back for it."""
+    result = check(portfolio(implement_entry("n"), order=order), Record(hypotheses=[FINISHED_A]))
+    assert result.valid, result.violations
+    assert result.ranking is None
+    assert [item.work_id for item in result.accepted] == ["n"]
 
 
 @st.composite
@@ -255,7 +395,44 @@ def records(draw: st.DrawFn) -> Record:
         for n in range(1, draw(st.integers(0, 3)) + 1)
     ]
     offer = draw(st.none() | st.just(ProfileOffer(fields=tuple(ProfileField))))
-    return Record(hypotheses, running, profiles, parents, offer)
+    left = [item for item in spare if item not in profiles]
+    merges = draw(st.lists(st.sampled_from(left), unique=True, max_size=2)) if left else []
+    revisions = [(item.hypothesis_id, item.revision.revision_id.root) for item in parents]
+    merged = draw(st.lists(st.sampled_from(revisions), unique=True)) if revisions else []
+    return Record(
+        hypotheses,
+        running,
+        profiles,
+        parents,
+        offer,
+        merges=merges,
+        merged=merged,
+        main_value=draw(st.none() | st.sampled_from([1.0, 5.0, 9.0])),
+        terms=draw(st.sampled_from([TERMS, TERMS.model_copy(update={"accuracy_stage": None})])),
+    )
+
+
+def _mergeable(record: Record) -> set[str]:
+    """The hypotheses a merge may name, by the rule restated independently of the search.
+
+    A candidate is a hypothesis's latest offered revision; it is mergeable when the task has an
+    accuracy check, it is no merged main, it was not merged, and it beats main's throughput.
+    """
+    if record.terms.accuracy_stage is None:
+        return set()
+    latest: dict[str, ParentSnapshot] = {}
+    for item in record.parents:
+        known = latest.get(item.hypothesis_id)
+        if known is None or item.submission_index > known.submission_index:
+            latest[item.hypothesis_id] = item
+    found = set()
+    for identifier, item in latest.items():
+        value = item.benchmark.metrics[0].value if item.benchmark else None
+        better = record.main_value is None or (value is not None and value > record.main_value)
+        merged = (identifier, item.revision.revision_id.root) in record.merged
+        if identifier not in record.merges and not merged and better:
+            found.add(identifier)
+    return found
 
 
 def _entry_positions(result: PlanCheck) -> set[int]:
@@ -277,7 +454,10 @@ def test_what_is_accepted_fits_the_record_and_alone_makes_a_valid_plan(
     accepted = [item.work_id for item in result.accepted]
     assert len(accepted) == len(set(accepted)) <= capacity
     known = {item.hypothesis_id: item for item in record.hypotheses}
+    mergeable = _mergeable(record)
     for item in result.accepted:
+        if item.kind is WorkKind.MERGE:
+            assert set(item.candidates) <= mergeable, (item.candidates, mergeable)
         if item.kind is WorkKind.PROFILE:
             assert record.offer is not None
             assert item.work_id not in known
@@ -321,3 +501,148 @@ def _kept_updates(plan: PortfolioPlan, result: PlanCheck) -> tuple[PlannerHypoth
             seen.add(update.hypothesis_id)
             chosen.append(update)
     return tuple(chosen)
+
+
+# -- combining retained candidates ---------------------------------------------------------------
+
+COMBINE_ID = "k"
+MAX_PARTS = 8
+"""The most parts one combine may name."""
+_PART_VALUES = st.none() | st.sampled_from([1.0, 5.0, 9.0])
+"""Each part's own headline: often below main's, since a part that lost alone may be combined."""
+
+
+@dataclass(frozen=True)
+class CombineCase:
+    """A combine entry as the planner wrote it, the record it is checked against, and the rule."""
+
+    entry: dict[str, object]
+    record: Record
+    picks: tuple[tuple[str, str], ...]
+    valid: bool
+    """Whether the entry breaks no rule: 2 to 8 distinct offered exact parts, no unknown key, a
+    new ID. Restated here independently of the search; how the parts measure never matters."""
+
+
+@st.composite
+def combine_cases(draw: st.DrawFn) -> CombineCase:
+    """A combine of distinct offered parts, then at most one way of breaking it: an unoffered
+    revision, an unknown hypothesis, a repeated part, too few or too many parts, a used ID or an
+    unknown key; over a record whose parts beat main or not."""
+    names = draw(
+        st.lists(st.sampled_from("abcdefghij"), unique=True, min_size=2, max_size=MAX_PARTS + 1)
+    )
+    parents = [
+        snapshot(name, ordinal, value=draw(_PART_VALUES))
+        for name in names
+        for ordinal in range(1, draw(st.integers(1, 2)) + 1)
+    ]
+    offered = [(item.hypothesis_id, item.revision.revision_id.root) for item in parents]
+    chosen = draw(st.lists(st.sampled_from(names), unique=True, min_size=2, max_size=len(names)))
+    picks = [
+        draw(st.sampled_from([pair for pair in offered if pair[0] == name])) for name in chosen
+    ]
+    breaking = draw(
+        st.sampled_from(
+            ["unoffered", None, "unknown", None, "repeat", None, "drop", "used", "entry", "part"]
+        )
+    )
+    if picks and breaking == "unoffered":
+        index = draw(st.integers(0, len(picks) - 1))
+        picks[index] = (picks[index][0], "nope")
+    elif breaking == "unknown":
+        picks.insert(draw(st.integers(0, len(picks))), ("zz", "zz-r1"))
+    elif picks and breaking == "repeat":
+        picks.insert(draw(st.integers(0, len(picks))), draw(st.sampled_from(picks)))
+    elif picks and breaking == "drop":
+        picks = picks[: draw(st.integers(0, 1))]
+    identifier = draw(st.sampled_from(names)) if breaking == "used" else COMBINE_ID
+    parts: list[dict[str, object]] = [
+        {"hypothesis_id": name, "revision": revision} for name, revision in picks
+    ]
+    unknown = breaking if breaking in {"entry", "part"} else None
+    if unknown == "part" and parts:
+        parts[draw(st.integers(0, len(parts) - 1))]["weight"] = 1
+    entry: dict[str, object] = {
+        "kind": "combine",
+        "hypothesis_id": identifier,
+        "title": "both halves",
+        "hypothesis": "the halves were designed to work together",
+        "parents": parts,
+        "instructions": "apply in order",
+        "watch_for": "both touch the scheduler",
+        "pass_criteria": "faster than the best part",
+    }
+    if unknown == "entry":
+        entry["weight"] = 1
+    hypotheses = [hypothesis_record(name, HypothesisOutcome.INCONCLUSIVE) for name in names]
+    stray = unknown == "entry" or (unknown == "part" and bool(parts))
+    valid = (
+        not stray
+        and 2 <= len(picks) <= MAX_PARTS
+        and all(pick in offered for pick in picks)
+        and len({name for name, _ in picks}) == len(picks)
+        and identifier not in names
+    )
+    main_value = draw(st.none() | st.sampled_from([1.0, 5.0, 9.0]))
+    return CombineCase(
+        entry,
+        Record(hypotheses=hypotheses, parents=parents, main_value=main_value),
+        tuple(picks),
+        valid,
+    )
+
+
+def _parsed(reply: dict[str, object]) -> PortfolioPlan | list[tuple[str | int, ...]]:
+    """The reply as the planning call parses it, or the paths of what the schema rejected."""
+    try:
+        return PortfolioPlan.model_validate(reply)
+    except ValidationError as error:
+        return [tuple(item["loc"]) for item in error.errors()]
+
+
+def _rejected_at(paths: list[tuple[str | int, ...]]) -> bool:
+    """Whether a schema rejection names the unknown key or the parts list it is about.
+
+    The list itself may also be reported short, since the one entry it held was rejected.
+    """
+    named = {"weight", "parents"}
+    return all(
+        path[:2] == ("workstreams", 0) or path == ("workstreams",) for path in paths
+    ) and any(named & {str(step) for step in path} for path in paths)
+
+
+@settings(max_examples=examples(pr=40, nightly=400), deadline=None, derandomize=True, database=None)
+@given(case=combine_cases())
+def test_a_combine_is_scheduled_exactly_when_its_parts_are_distinct_offered_exact_revisions(
+    case: CombineCase,
+) -> None:
+    """Parse and validate as the planning call does: accepted iff the restated rule holds.
+
+    Main's measurement and each part's value vary, and never decide: a combine has no
+    beats-main bar, since parts that lost or tied alone are what it is for.
+    """
+    reply: dict[str, object] = {
+        "reasoning": "combine",
+        "workstreams": [case.entry],
+        "handoff": {"expectations": [], "doubts": []},
+    }
+    plan = _parsed(reply)
+    if not isinstance(plan, PortfolioPlan):
+        assert not case.valid, plan
+        assert _rejected_at(plan), plan
+        return
+    result = check(plan, case.record)
+    assert result.valid == case.valid, result.violations
+    if case.valid:
+        (accepted,) = result.accepted
+        assert accepted.work_id == case.entry["hypothesis_id"]
+        assert accepted.kind is WorkKind.IMPLEMENT  # a combine is an implement of a new hypothesis
+        assert accepted.parent_hypothesis_id is None  # it starts from main
+        parts = [(item.hypothesis_id, item.revision) for item in accepted.combine]
+        assert parts == list(case.picks)
+        return
+    assert result.accepted == ()
+    for item in result.violations:
+        assert item.path[:2] == ("workstreams", 0), item
+        assert len(item.path) >= 3, item  # names the field to fix, not just the entry

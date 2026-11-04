@@ -67,12 +67,17 @@ def registered_yield() -> tuple[core.CoreState, core.Continuation]:
             "registry": codec.descriptors,
             "run": state.run.model_copy(
                 update={
-                    "receipts": (receipt,),
+                    "receipts": (receipt, *state.run.receipts),
                     "capabilities": core.Capabilities(operations=codec.descriptors),
                 }
             ),
             "records": state.records.model_copy(
-                update={"records": (record.model_copy(update={"request": request}),)}
+                update={
+                    "records": (
+                        record.model_copy(update={"request": request}),
+                        *state.records.records[1:],
+                    )
+                }
             ),
             "sessions": state.sessions.model_copy(
                 update={
@@ -227,7 +232,7 @@ def test_registered_continuation_authority_requires_exact_run_declaration(
             "run": state.run.model_copy(
                 update={
                     "capabilities": core.Capabilities(operations=descriptors),
-                    "receipts": (receipt,),
+                    "receipts": (receipt, *state.run.receipts[1:]),
                 }
             ),
         }

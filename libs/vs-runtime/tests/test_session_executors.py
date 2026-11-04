@@ -31,7 +31,7 @@ from vs_core.api import ArtifactId, ArtifactRef, CancelTurn, DispatchTurn, Obser
 from vs_runtime.api import AgentRole, ArtifactStore, RuntimeContractError, WorkspaceAccess
 from vs_runtime.api.core import (
     ExecutionResult,
-    ReceiptStore,
+    KeyedDocuments,
     ResolverInputs,
     SessionExecutors,
     StoreWorkspaceReceipts,
@@ -44,14 +44,18 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
     AgentExecutionStarted,
     AgentExecutionStatus,
+    create_run_control_channel,
 )
-from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink
+from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink, FakeRunControlEventSink
+from vs_sim.api.testing import Gate, InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
     from vs_core.api import RequestBase
+    from vs_runtime.api.infrastructure import RunControlChannel
+    from vs_sim.api import BlockingRunner
 
 WRITTEN = "candidate.py"
 
@@ -87,6 +91,8 @@ class Run:
     lifecycle: FakeAgentExecutionLifecycleSink = field(
         default_factory=FakeAgentExecutionLifecycleSink
     )
+    blocking: BlockingRunner = field(default_factory=InlineBlockingRunner)
+    control: RunControlChannel | None = None
     executors: SessionExecutors = field(init=False)
     artifacts: ArtifactStore = field(init=False)
 
@@ -97,7 +103,7 @@ class Run:
         """A host: fresh workspaces and executors over the same disk and journal."""
         if len(self.env.hosts) > 1 or hasattr(self, "executors"):
             self.env.start_host()
-        store = ReceiptStore(self.env.receipts_namespace())
+        store = KeyedDocuments(self.env.receipts_namespace(), threads=SimThreads())
         artifacts = ArtifactStore(self.env.project.state.local_namespace(RUN_ID, "artifacts"))
         self.artifacts = artifacts
 
@@ -110,6 +116,7 @@ class Run:
             )
 
         inputs = ResolverInputs(
+            control=self.control,
             roles=(
                 AgentRole(
                     id=ROLE.root,
@@ -127,14 +134,23 @@ class Run:
             session_spec=spec,
         )
         client = report_turns(
-            AgentClient(FakeProvider(answer={"value": 7}, on_turn=self.provider.on_turn)),
+            AgentClient(
+                FakeProvider(
+                    answer={"value": 7}, on_turn=self.provider.on_turn, threads=SimThreads()
+                ),
+                clock=ManualClock(),
+                threads=SimThreads(),
+            ),
             self.lifecycle,
+            control=self.control,
         )
         self.executors = open_session_requests(
             inputs,
             client=client,
             invocation_slot=self.journal,
             store=store,
+            blocking=self.blocking,
+            threads=SimThreads(),
         )
 
     def dispatch(self) -> DispatchTurn:
@@ -252,3 +268,61 @@ async def test_each_dispatched_turn_is_one_start_and_one_finish_and_a_replay_add
     await run.execute(request)
     # A sealed turn replays; an unknown one is inspected, never re-dispatched.
     assert len(run.lifecycle.events) == 2
+
+
+class _PreparationBoundary:
+    """Faithfully execute blocking calls, holding one selected preparation boundary."""
+
+    def __init__(self, boundary: int | None = None) -> None:
+        self.boundary = boundary
+        self.calls = 0
+        self.arrived = Gate()
+        self.release = Gate()
+
+    async def run[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        self.calls += 1
+        if self.calls == self.boundary:
+            self.arrived.open()
+            await self.release.wait()
+        return await InlineBlockingRunner().run(function, *args, **kwargs)
+
+
+async def test_pause_drain_cancels_every_admitted_preparation_boundary(tmp_path: Path) -> None:
+    baseline = tmp_path / "baseline"
+    baseline.mkdir()
+    counter = _PreparationBoundary()
+    with open_workspace_env(baseline) as env:
+        run = Run(env, Provider(env), blocking=counter)
+        await run.execute(ensure_request())
+        before = counter.calls
+        await run.execute(run.dispatch())
+        boundaries = counter.calls - before
+        for host in env.hosts:
+            await host.close()
+    assert boundaries > 1
+    for boundary in range(1, boundaries + 1):
+        root = tmp_path / str(boundary)
+        root.mkdir()
+        runner = _PreparationBoundary()
+        control = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+        with open_workspace_env(root) as env:
+            run = Run(env, Provider(env), blocking=runner, control=control)
+            await run.execute(ensure_request())
+            runner.boundary = runner.calls + boundary
+            dispatch = asyncio.create_task(run.execute(run.dispatch()))
+            await runner.arrived.wait(dispatch)
+            control.land_park()
+            runner.release.open()
+            result = await dispatch
+            if run.provider.turns:
+                # Settlement follows an execution that already crossed its boundary.
+                assert status(result) is not ObservationStatus.CANCELLED
+            else:
+                assert status(result) is ObservationStatus.CANCELLED
+                assert run.lifecycle.events == []
+                assert "pause drain" in result.observation.observation.diagnostic
+                saved = run.journal.load_optional()
+                assert saved is not None
+                assert all(record.interrupted for record in saved.invocations.values())
+            for host in env.hosts:
+                await host.close()

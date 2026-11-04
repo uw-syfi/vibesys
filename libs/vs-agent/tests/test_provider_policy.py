@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 import agentshim
 
 from vibesys.constants import PROJECT_ROOT
-from vs_agent.api import SHIPPED_PROVIDERS
+from vs_agent.api import CLI_VERSIONS, DOCKER_PROVIDER_ENV, SHIPPED_PROVIDERS
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -40,7 +40,6 @@ _ALLOWED_LITERALS_BY_PATH: dict[str, frozenset[str] | None] = {
     "libs/vs-agent/src/vs_agent/provider_profiles.py": None,
     # The chat model picker's suggestion catalog is keyed by shipped provider.
     # It is a list of model names to offer, not a behavior branch.
-    "src/server/chat/options.py": None,
     # Test fakes that script one provider's wire format (a Claude peer, the
     # profile a scripted session borrows, a Codex-shaped spec default). They
     # are not production behavior branches.
@@ -98,3 +97,14 @@ def test_no_bare_provider_literals_outside_the_allowlist() -> None:
 def test_shipped_providers_are_registered_with_agentshim() -> None:
     """VibeSys cannot ship a provider the library does not know about."""
     assert set(SHIPPED_PROVIDERS) <= set(agentshim.provider_names())
+
+
+def test_every_shipped_provider_has_a_container_cli_pin_and_no_other_does() -> None:
+    """A provider added to ``SHIPPED_PROVIDERS`` also needs its agent-image CLI pin.
+
+    ``CLI_VERSIONS`` is written by hand beside ``SHIPPED_PROVIDERS``; without
+    this, a new provider passes ``AgentSpec`` validation and then finds no CLI
+    in the agent container.
+    """
+    assert set(CLI_VERSIONS) == set(SHIPPED_PROVIDERS)
+    assert set(DOCKER_PROVIDER_ENV) == set(SHIPPED_PROVIDERS)

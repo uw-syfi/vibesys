@@ -1,0 +1,3 @@
+[[objective]]
+name = "latency_ms.p50"
+direction = "min"

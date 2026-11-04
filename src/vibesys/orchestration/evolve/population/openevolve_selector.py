@@ -28,10 +28,11 @@ import json
 import random
 import uuid
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from openevolve.config import DatabaseConfig
 from openevolve.database import Program, ProgramDatabase
+from pydantic import TypeAdapter
 
 from vibesys.orchestration.evolve.population.models import (
     Individual,
@@ -51,6 +52,7 @@ __all__ = ["admit", "objective_signature", "select"]
 
 _INDIVIDUAL_ID = "vibesys_individual_id"
 _COMMIT = "vibesys_commit"
+_JSON_OBJECT: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
 
 
 def objective_signature(space: MetricSpace) -> tuple[_PersistedObjective, ...]:
@@ -99,7 +101,7 @@ def _load_files(database: ProgramDatabase, files: dict[str, str]) -> None:
     saved_islands: list[list[str]] = []
     metadata_text = files.get("metadata.json")
     if metadata_text is not None:
-        metadata = json.loads(metadata_text)
+        metadata = _JSON_OBJECT.validate_json(metadata_text)
         database.island_feature_maps = metadata.get(
             "island_feature_maps", [{} for _ in range(database.config.num_islands)]
         )
@@ -119,7 +121,7 @@ def _load_files(database: ProgramDatabase, files: dict[str, str]) -> None:
     for relative, content in files.items():
         if relative == "metadata.json":
             continue
-        program = Program.from_dict(json.loads(content))
+        program = Program.from_dict(_JSON_OBJECT.validate_json(content))
         database.programs[program.id] = program
     database._reconstruct_islands(saved_islands)  # noqa: SLF001  # LW-040048 [SLF001]; this test reads one private attribute to check internal wiring that has no public accessor.
     if len(database.island_generations) != len(database.islands):

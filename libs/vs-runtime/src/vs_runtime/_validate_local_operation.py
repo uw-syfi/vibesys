@@ -1,4 +1,4 @@
-"""Owner of local validation, over the public ``Workspaces`` and ``Commands`` interfaces.
+"""Owner of local validation, over the public ``Workspaces`` and ``LocalValidator`` interfaces.
 
 An agent writes a recipe file (bounded trusted commands that check its own candidate) and
 reports its path. The strategy asks for the recipes to run against the candidate's retained
@@ -27,7 +27,6 @@ from vs_runtime._local_validation import (
     FrameworkValidationResult,
     LocalValidationRecipeError,
     check_recipe_artifact_path,
-    run_local_validation,
 )
 from vs_runtime._operation_catalog import Inspection, NotApplied
 
@@ -37,7 +36,8 @@ if TYPE_CHECKING:
     from vs_core.api import OperationRequest, RevisionRef
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._core_requests import ExecutionContext
-    from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
+    from vs_runtime._local_validation import LocalValidationEvents, LocalValidator
+    from vs_runtime.contracts import RevisionLedger, Workspaces
 
 # Where the report is written inside the throwaway workspace before it is stored.
 _REPORT_LOCATION = "validation-report.json"
@@ -53,20 +53,22 @@ class ValidateRequest(Protocol):
 class ValidateLocalOwner:
     """Run an agent-authored recipe file in an isolated workspace at a retained revision."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-731907 [PLR0913]; the owner's five collaborators are independent seams a config object would only rename.
         self,
         workspaces: Workspaces,
-        commands: Commands,
+        validator: LocalValidator,
         ledger: RevisionLedger,
         commit_of: Callable[[RevisionRef], str | None],
         store: ArtifactStore,
+        events: LocalValidationEvents | None = None,
     ) -> None:
-        """Bind the workspaces, the command runner, the retention ledger, the encoding and the store."""
+        """Bind the workspaces, the recipe runner, the retention ledger, the encoding and the store."""
         self._workspaces = workspaces
-        self._commands = commands
+        self._validator = validator
         self._ledger = ledger
         self._commit_of = commit_of
         self._store = store
+        self._events = events
 
     async def execute(
         self, request: OperationRequest, context: ExecutionContext
@@ -102,11 +104,11 @@ class ValidateLocalOwner:
         )
         try:
             try:
-                results = await run_local_validation(
-                    self._commands,
+                results = await self._validator.run(
                     candidate,
                     recipe_artifact=asked.recipe_artifact,
                     report_location=_REPORT_LOCATION,
+                    events=self._events,
                 )
             except LocalValidationRecipeError as error:
                 return _unusable(str(error))

@@ -45,6 +45,7 @@ from vs_project.api import StateNamespace
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore
 from vs_runtime.api.core import (
+    BOARD_KEY,
     Applied,
     BoardTexts,
     Cancelled,
@@ -52,6 +53,7 @@ from vs_runtime.api.core import (
     Indeterminate,
     Inspection,
     IssueBoardOwner,
+    KeyedWrite,
     NotApplied,
     OperationCatalog,
     OperationEntry,
@@ -59,8 +61,10 @@ from vs_runtime.api.core import (
     RenderArtifactsOwner,
     VerifyRevisionOwner,
     build_operation_catalog,
+    read_or_keyed,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
+from vs_sim.api.testing import ManualClock, SimThreads
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 
@@ -260,7 +264,9 @@ def _board_entry(tracker: FakeIssueTracker, progress: MemoryProgressLog) -> Oper
     """The apply registration of the issue board, served by the real owner over fakes."""
     texts: BoardTexts = _BoardTexts()
     apply = board_operation_registrations()[1]
-    return OperationEntry.owned(apply, IssueBoardOwner(tracker, progress, texts))
+    return OperationEntry.owned(
+        apply, IssueBoardOwner(tracker, progress, texts), read_or_keyed(apply, BOARD_KEY)
+    )
 
 
 def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario, ...]:
@@ -274,12 +280,13 @@ def scenarios(root: Path, namespace: StateNamespace) -> tuple[OperationScenario,
     workspace = FakeWorkspace(path=root / "workspace", known_revisions={"abc"})
     workspaces = FakeWorkspaces(workspace)
     artifacts = root_artifacts(namespace)
-    board = FakeIssueTracker()
+    board = FakeIssueTracker(clock=ManualClock(), threads=SimThreads())
     echo_entry = OperationEntry.owned(
         _registration(
             "test.echo", EchoRequest, EchoOutcome, LifecycleClass.IDEMPOTENT_WRITE, cancel=True
         ),
         EchoOwner(log),
+        KeyedWrite("the request text, which the effect log holds"),
     )
     built = build_operation_catalog(
         {

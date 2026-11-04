@@ -4,7 +4,7 @@ A serial strategy runs one attempt after another in the run's own root directory
 each attempt with a `DiscardWorkspace`; the next attempt is granted the root, and its tree
 must be the plan's base again, with the run's declared artifact directory kept.
 
-Every durable write goes through one `ReceiptStore`, so a store that raises at its n-th
+Every durable write goes through one `KeyedDocuments`, so a store that raises at its n-th
 operation models a host that died between two durable writes. The restore of the root tree is
 a sequence of Git steps (reset the index, clean untracked and ignored files, restore tracked
 files), and a repository wrapper that raises at the n-th step models a host that died before,
@@ -35,12 +35,13 @@ from vs_core.api import (
 )
 from vs_runtime.api.core import (
     ExecutionResult,
-    ReceiptStore,
+    KeyedDocuments,
+    ReceiptEvidenceLedger,
     RuntimeWorkspaceRequests,
     StoreWorkspaceReceipts,
     revision_ref,
 )
-from vs_sim.api.testing import examples, swept
+from vs_sim.api.testing import InlineBlockingRunner, SimThreads, examples, swept
 
 from .test_session_access import HostDied
 from .test_workspace_requests import (
@@ -64,7 +65,7 @@ if TYPE_CHECKING:
 # (`--depth=nightly`) searches deeper.
 
 _ROOT = WorkspaceMode.EXCLUSIVE_ROOT
-_ARTIFACT_DIR = "roadmap"
+_ARTIFACT_DIR = "profile"
 _PLAN = f"{_ARTIFACT_DIR}/plan.md"
 _NEVER = 10**6
 _WRITES_PER_REQUEST = 9
@@ -81,11 +82,11 @@ _LEFTOVERS = (
 """Files an attempt may leave: untracked ones and ones the ignore rules hide."""
 
 
-class MortalStore(ReceiptStore):
+class MortalStore(KeyedDocuments):
     """A real store that raises at the n-th durable operation while armed."""
 
     def __init__(self, env: WorkspaceEnv) -> None:
-        super().__init__(env.receipts_namespace())
+        super().__init__(env.receipts_namespace(), SimThreads())
         self.dies_at = _NEVER
         self.operations = 0
 
@@ -150,10 +151,15 @@ class Host:
 
     env: WorkspaceEnv
     crash: RestoreCrash = field(default_factory=RestoreCrash)
-    epoch: int = 1
 
-    def executor(self, store: ReceiptStore) -> RuntimeWorkspaceRequests:
-        return RuntimeWorkspaceRequests(self.env.hosts[-1], store, SettledRunInvocations())
+    def executor(self, store: KeyedDocuments) -> RuntimeWorkspaceRequests:
+        return RuntimeWorkspaceRequests(
+            self.env.hosts[-1],
+            store,
+            SettledRunInvocations(),
+            blocking=InlineBlockingRunner(),
+            evidence=ReceiptEvidenceLedger(store),
+        )
 
     async def run(
         self, request: Request, *, dies_at: int = _NEVER, restore_dies_at: int = _NEVER
@@ -167,7 +173,6 @@ class Host:
         try:
             return await self._execute(self.executor(store), request)
         except HostDied:
-            self.epoch += 1
             self.crash.disarm()
             return await self._execute(self.executor(MortalStore(self.env)), request)
         finally:
@@ -176,7 +181,7 @@ class Host:
     async def _execute(
         self, executor: RuntimeWorkspaceRequests, request: Request
     ) -> ExecutionResult:
-        outcome = await executor.execute(request, _context(request, epoch=self.epoch))
+        outcome = await executor.execute(request, _context(request))
         assert isinstance(outcome, ExecutionResult), outcome
         return outcome
 

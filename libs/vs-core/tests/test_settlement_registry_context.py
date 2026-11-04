@@ -40,7 +40,6 @@ def settlement_context(state: core.CoreState) -> core.SettlementContext:
 def envelope(state: core.CoreState) -> core.RunEnvelope[core.StrategyState]:
     return core.RunEnvelope[core.StrategyState](
         schema_version=core.ENVELOPE_SCHEMA_VERSION,
-        fence=core.HostFence(host_id=core.HostId(root="host"), epoch=0),
         strategy_id=state.run.declaration.strategy_id,
         state_schema=state.run.declaration.state_schema,
         core=state,

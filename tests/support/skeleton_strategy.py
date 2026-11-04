@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 import vs_core.api as core
 from vs_core.api.search import (
@@ -24,6 +24,7 @@ from vs_core.api.search import (
     NoWinner,
     Role,
     TurnFinished,
+    Uncompared,
     search,
 )
 
@@ -34,11 +35,21 @@ ATTEMPT = core.AttemptRef(attempt_id=core.AttemptId(root="attempt-0"), generatio
 DIGEST = "ab" * 32
 
 
-class Implementation(BaseModel):
-    """The implementer's structured reply: the commit it made in its workspace."""
+class Implementation(core.RevisionReply):
+    """The implementer's structured reply: the commit it made in its workspace.
+
+    A revision reply, as every implementer's is: core holds it until the turn's checkpoint is
+    recorded, so the revision it names is known to core before the strategy measures it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     commit: str
     waiting: bool = False
+
+    def produces_revision(self) -> bool:
+        """Only a reply that names a commit leaves work for core to checkpoint."""
+        return bool(self.commit)
 
 
 IMPLEMENTER = core.IdScheme("skeleton").role_id("implementer")
@@ -76,6 +87,7 @@ OPERATIONS = core.StrategyOperations("skeleton", Render, Verify, Interpret)
 
 IMPLEMENTER_ROLE = Role(
     name="implementer",
+    title="Implementer",
     prompt="skeleton.j2",
     reply=Implementation,
     access=core.Access.WRITE_CANDIDATE,
@@ -99,6 +111,9 @@ class SkeletonConfig(core.Value):
 
     measured: bool = True
     keeps_candidate: bool = True
+    compared: bool = False
+    """The final check of the candidate is compared with its base, and its verdict awaits the
+    comparison (`ctx.evaluation.measure_compared`), as a search that reads comparisons does."""
     cancels_after_start: bool = False
     probe: bool = False
     fails: bool = False
@@ -111,6 +126,12 @@ class SkeletonConfig(core.Value):
     """Measure the baseline, then end with no winner: no attempt is run."""
     abandons: bool = False
     """Open the one attempt, then end with no winner: the attempt budget is spent, nothing kept."""
+    fails_after_choice: bool = False
+    """Adopt the retained choice but report failure, preserving the best partial result."""
+    uncompared: bool = False
+    """Adopt the retained choice, said never to be compared with the input (``Uncompared``)."""
+    waits_for_stop_after_choice: bool = False
+    """After choosing, wait for the run to be stopped, then say the choice was never compared."""
     turns: int = 1
     """How many implementer turns the attempt asks in one session, one after another."""
     peers: int = 0
@@ -118,18 +139,28 @@ class SkeletonConfig(core.Value):
 
 
 def measurement(
-    candidate: core.RevisionRef, purpose: Literal["baseline", "official"], *, now_at: float = 0.0
+    candidate: core.RevisionRef,
+    purpose: Literal["baseline", "official"],
+    *,
+    now_at: float = 0.0,
+    facts: core.RunFacts | None = None,
 ) -> core.MeasurementPlan:
     """An accuracy-then-benchmark plan of one exact revision, ``now_at`` seconds into the clock."""
+    evaluator_digest = DIGEST if facts is None else facts.evaluator_digest
+    workload_digest = DIGEST if facts is None else facts.workload_digest
+    environment_digest = DIGEST if facts is None else facts.environment_digest
     return core.MeasurementPlan(
         purpose=purpose,
         candidate=candidate,
-        evaluator_digest=DIGEST,
-        workload_digest=DIGEST,
-        environment_digest=DIGEST,
-        stages=tuple(
-            core.MeasurementStage(stage_id=name, execution_budget=10.0)
-            for name in ("accuracy", "benchmark")
+        evaluator_digest=evaluator_digest,
+        workload_digest=workload_digest,
+        environment_digest=environment_digest,
+        # Each stage waits for the one before it, as every recipe-built plan does.
+        stages=(
+            core.MeasurementStage(stage_id="accuracy", execution_budget=10.0),
+            core.MeasurementStage(
+                stage_id="benchmark", depends_on=("accuracy",), execution_budget=10.0
+            ),
         ),
         policy="ordered",
         recipe=core.ArtifactRef(artifact_id=core.ArtifactId(root="recipe"), digest=DIGEST),
@@ -158,8 +189,20 @@ async def measure(
     workspace: core.Workspace | None = None,
 ) -> NoWinner | None:
     """Measure ``revision``; a failed measurement is the reason the run has no winner."""
-    plan = measurement(revision, purpose, now_at=_origin(ctx, config))
-    match await ctx.evaluation.measure(plan, workspace=workspace, within=_MEASURE_SECONDS):
+    plan = measurement(
+        revision,
+        purpose,
+        now_at=_origin(ctx, config),
+        facts=ctx.facts,
+    )
+    found = (
+        await ctx.evaluation.measure_compared(plan, workspace=workspace, within=_MEASURE_SECONDS)
+        if config.compared and purpose == "official"
+        else await ctx.evaluation.measure(plan, workspace=workspace, within=_MEASURE_SECONDS)
+    )
+    if isinstance(found, core.Compared):
+        found = found.result
+    match found:
         case Failed() as failed:
             return NoWinner(reason=f"measurement {failed.reason}")
         case core.MeasurementResult(failure=failure) if failure is not None:
@@ -273,8 +316,9 @@ async def _bare(ctx: Flow, config: SkeletonConfig) -> _Ended | None:
     operations=OPERATIONS,
     roles=(IMPLEMENTER_ROLE,),
 )
-async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
+async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | Uncompared | None:
     """Play the scenario ``config`` names; the framework adopts the chosen winner."""
+    ctx.checkpoint(config)  # a run the operator stopped restarts from here once a resume reopens it
     if config.fails:
         return NoWinner(reason="scripted")
     if (ended := await _bare(ctx, config)) is not None:
@@ -291,7 +335,16 @@ async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
     # with accepted evidence for that candidate. Without a measurement the input is all there is.
     eligible = [kept for kept in ctx.workspaces.kept() if kept.settlement.eligible]
     ctx.choose(eligible[0] if eligible else INPUT)
-    return None
+    if config.waits_for_stop_after_choice:
+        await ctx.first(ctx.stopped)
+    return _after_choice(config)
+
+
+def _after_choice(config: SkeletonConfig) -> NoWinner | Uncompared | None:
+    """How the scenario ends once it chose: plainly, failed with its choice kept, or uncompared."""
+    if config.uncompared or config.waits_for_stop_after_choice:
+        return Uncompared()
+    return NoWinner(reason="out of rounds", keep_choice=True) if config.fails_after_choice else None
 
 
 DECLARATION = skeleton.declaration
@@ -354,6 +407,21 @@ class SkeletonStrategy(core.Value):
     def abandoning(cls) -> SkeletonStrategy:
         """Open the one attempt the budget allows, then end with no winner and nothing kept."""
         return cls(config=SkeletonConfig(measured=False, abandons=True))
+
+    @classmethod
+    def failing_after_choice(cls) -> SkeletonStrategy:
+        """Keep and adopt a verified candidate, then return the strategy's failed outcome."""
+        return cls(config=SkeletonConfig(fails_after_choice=True))
+
+    @classmethod
+    def uncompared_after_choice(cls) -> SkeletonStrategy:
+        """Keep and adopt a verified candidate the search says it never compared with the input."""
+        return cls(config=SkeletonConfig(uncompared=True))
+
+    @classmethod
+    def uncompared_until_stopped(cls) -> SkeletonStrategy:
+        """Adopt a verified candidate never compared with the input, then wait for a stop."""
+        return cls(config=SkeletonConfig(waits_for_stop_after_choice=True))
 
     @classmethod
     def idle(cls) -> SkeletonStrategy:
