@@ -10,7 +10,7 @@ MLX *does* have streams — `mx.new_stream`, `mx.default_stream`, the `mx.stream
 
 The reason is that MLX is **already deferred by default** and **inserts cross-stream dependencies automatically**. Operations build a graph; nothing executes until something forces materialization, and the runtime orders work across streams for you. The overlap the CUDA design constructs by hand with explicit `wait_stream` ordering is what lazy evaluation plus automatic dependency tracking already provides.
 
-Hand-rolling a two-stream pipeline therefore adds bookkeeping without adding overlap. Reach for `mx.stream()` when you genuinely want independent work on separate queues (e.g. overlapping an unrelated encoder), not to rebuild the decode pipeline.
+Hand-rolling a two-stream pipeline therefore adds bookkeeping without adding overlap. Reach for `mx.stream()` when you genuinely want independent work on separate queues (e.g. overlapping an unrelated encoder), not to rebuild the decode pipeline. Splitting one operator across `mx.cpu` and `mx.gpu` can be an exception: depending on the OS and MLX version, the scheduler can serialize it unless the input is materialized first; see [`cpu-gpu-co-execution.md`](cpu-gpu-co-execution.md).
 
 ## The actual lever: where you evaluate
 
