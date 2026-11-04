@@ -438,13 +438,15 @@ The scheduler of one daemon keeps its own jobs apart. A lease keeps the jobs of 
 other users' daemons on the same machine, and daemons on other machines that share an ssh host.
 
 - Before a job that holds a resource alone starts, the daemon takes that resource's lease where
-  every daemon sharing it looks. Jobs claim `placement:default` today, which stands for the one
-  placement of a config of one, and its lease is the machine that placement runs containers on.
-  For a `local` placement, that is a `flock` on `/var/tmp/vibesys-leases/machine.lock`, a sticky
-  directory every user may add to. For an `ssh` placement, it is the same file on the engine's
-  machine, held by a shell there over ssh. A `slurm` placement takes none, since Slurm's exclusive
-  allocation arbitrates, and nor does a config of several placements, until jobs claim the
-  placement they run on. A claim that shares its resource takes no lease.
+  every daemon sharing it looks. A placement's slots (`placement:<name>`) are leased as the machine
+  its engine runs on: for a `local` placement, a `flock` on `/var/tmp/vibesys-leases/machine.lock`,
+  a sticky directory every user may add to; for an `ssh` placement, the same file on the engine's
+  machine, held by a shell there over ssh. So the measures of every placement on one machine, of
+  one daemon or of several, take turns. Host jobs that claim a slot of their own (`host`) take this
+  machine's lease. A Kubernetes cluster a placement gives is leased in the cluster (below). GPUs
+  take no lease of their own, since their machine's lease covers them, and a `slurm` placement takes
+  none, since Slurm's exclusive allocation arbitrates. A claim that shares its resource takes no
+  lease.
 - A lease another holds keeps the job queued, starting nothing. The job keeps its turn, so the
   daemon's shared jobs wait behind it and do not disturb the other's measure. `jobs` names the
   holder: `waiting: needs placement:default alone, leased by bob on host-a (pid 4242), job 7f3a`.
@@ -462,8 +464,10 @@ other users' daemons on the same machine, and daemons on other machines that sha
 A `Kubernetes` lease (`internal/lease/kubelease`) is a `Lease` object in the cluster, renewed by
 its holder and taken over once it expires, so a holder that died blocks the cluster for at most a
 duration (60 seconds). The daemons judge expiry by their own clocks, which must agree to well within
-the duration. Wiring it to a placement's Kubernetes resource follows the placements of the operator
-config.
+the duration. The daemon writes the lease `vibesys-cluster` in the `default` namespace with
+`kubectl` on the engine's machine, through the placement's kubeconfig, as the Kubernetes resource
+reads the cluster, so the daemons of every machine whose placements give one cluster take turns at
+it.
 
 `jobs` prints why each queued job waits, under its line:
 

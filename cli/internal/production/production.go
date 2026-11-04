@@ -118,6 +118,9 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
+	logf := func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
+	}
 	hold, err := p.daemonMachine(dir, clk)
 	if err != nil {
 		return err
@@ -131,9 +134,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 		Clock:     clk,
 		Ready:     ready,
 		Machine:   hold,
-		Logf: func(format string, args ...any) {
-			fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
-		},
+		Logf:      logf,
 		Runtime: daemon.Runtime{
 			Stores: filestores.New(index, app.Rules(task.DefaultSamples), owner),
 			Supervisors: host.New(host.Config{
@@ -152,7 +153,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			Repositories: gitrepo.System{},
 			Tasks:        gitwork.Tasks{},
 			Scheduler:    scheduler,
-			Leasing:      p.leasingOf(op),
+			Leasing:      p.leasingOf(op, machines.claims, clk, logf),
 			Neighbors:    neighborsOf,
 		},
 	})
