@@ -10,7 +10,47 @@
 - **2026-10-08** — [VibeSys on AMD MI300A](https://syfi.cs.washington.edu/blog/2026-10-08-qwen35-mi300a/): an agent-built Qwen3.5-397B engine achieves 2.3× the goodput of tuned SGLang.
 - **2026-05-12** — [Introducing VibeServe](https://syfi.cs.washington.edu/blog/2026-05-12-introducing-vibeserve/): let AI agents write your serving stack. [Paper](https://arxiv.org/abs/2605.06068).
 
+## About VibeSys
+
+VibeSys explores a broader approach to systems development: use application
+requirements, workload characteristics, and hardware capabilities as the inputs
+to an agentic search process that creates a purpose-built system. Each target
+defines its own implementation contract, correctness checks, and performance
+benchmark, allowing VibeSys to work across domains rather than assuming a single
+runtime, programming language, or deployment shape.
+
+One of VibeSys's first initiatives is [**VibeServe**](https://arxiv.org/abs/2605.06068), which asks whether AI agents
+can generate a bespoke LLM serving system for each model, workload, and hardware
+target. The figures, blog post, and paper below document that initiative.
+
+<p align="center">
+  <img src="docs/figures/idea.png" width="85%" alt="Generic serving today vs. VibeServe's per-target bespoke systems">
+</p>
+
+## Quickstart
+
+VibeSys is available as a plugin for Claude Code and Codex. In Claude Code, for example:
+
+```bash
+claude plugin marketplace add uw-syfi/vibesys
+claude plugin install vibesys@vibesys
+# Install additional plugins for domain-specific knowledge
+claude plugin install vibesys-llm-serving@vibesys
+```
+
+Then ask your agent to create a task describing your optimization goal and correctnes criteria, and start the optimization:
+
+```text
+/vibesys:create-task
+/vibesys:optimize <task>
+```
+
+See the [skills installation guide](skills/README.md#install) for Codex,
+`npx skills`, and domain plugins for databases, microservices, and kernels.
+
 ## Performance highlights
+
+Below are some recent optimization results from running VibeSys. Click on the images to see blog posts detailing the results.
 
 <table>
   <tr>
@@ -35,41 +75,10 @@
         <img src="docs/figures/qwen38-flash-next-trainium2.png" width="450" alt="Qwen3.8-Flash-Next on sixteen Trainium2 chips: throughput improves across twelve optimization rounds">
       </a>
       <br><strong>Qwen3.8-Flash-Next · 16× Trainium2</strong><br>
-      <strong>3.1× the starting engine</strong> · guided by ServingStudio
+      <strong>3.1× the starting engine</strong>
     </td>
   </tr>
 </table>
-
-Figures from the linked posts; workloads, correctness checks, and comparison
-baselines differ across experiments. Click a graph for the full results.
-
-## About VibeSys
-
-One of VibeSys's first initiatives is **VibeServe**, which asks whether AI agents
-can generate a bespoke LLM serving system for each model, workload, and hardware
-target. The figures, blog post, and paper below document that initiative.
-
-<p align="center">
-  <img src="docs/figures/idea.png" width="85%" alt="Generic serving today vs. VibeServe's per-target bespoke systems">
-</p>
-
-## Introduction
-
-VibeSys explores a broader approach to systems development: use application
-requirements, workload characteristics, and hardware capabilities as the inputs
-to an agentic search process that creates a purpose-built system. Each target
-defines its own implementation contract, correctness checks, and performance
-benchmark, allowing VibeSys to work across domains rather than assuming a single
-runtime, programming language, or deployment shape.
-
-The framework is organized as a multi-agent optimization loop. An outer loop
-plans the search over system designs using persistent state such as issues,
-memory, and git history, while an inner loop implements candidates, validates
-correctness against target-specific requirements, and measures performance on
-the target workload and hardware. VibeServe is the first substantial initiative
-built on this approach; its serving-focused results include predicted-output
-decoding, hybrid prompt caching, streaming ASR, constrained JSON decoding,
-multimodal inference, and Apple Silicon deployment.
 
 ## Architecture
 
@@ -100,31 +109,6 @@ The framework factors the work along two axes:
 Each round is recorded in git and a framework-owned audit. Provisional rounds
 remain explicitly unreviewed; only judge-approved candidates receive official
 accuracy and performance results.
-
-## Quickstart
-
-Install the optimization loop and a domain plugin from our top-level
-[`skills/`](skills/README.md) directory. In Claude Code, for example:
-
-```bash
-claude plugin marketplace add uw-syfi/vibesys
-claude plugin install vibesys@vibesys
-claude plugin install vibesys-llm-serving@vibesys
-```
-
-The skills check for the measurement CLI and, if it is missing, ask your permission
-to install it before continuing.
-
-Then ask your agent to create a task describing your system, workload, hardware,
-correctness checks, and performance benchmark, and start the optimization:
-
-```text
-/vibesys:create-task
-/vibesys:optimize <task>
-```
-
-See the [skills installation guide](skills/README.md#install) for Codex,
-`npx skills`, and domain plugins for databases, microservices, and kernels.
 
 ## Citation
 
