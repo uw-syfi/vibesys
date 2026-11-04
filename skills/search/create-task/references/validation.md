@@ -24,8 +24,8 @@ vibesys-cli show <base> --json
 - One sample over a few minutes makes every comparison slow; shrink the workload while it still
   exercises the same path.
 - Set `relative_noise` in `objectives.toml` to the spread you saw, rounded up, if you declare it.
-  For several objectives, read the spread of each from `show` and use the largest one, since the
-  `[pareto]` floor is shared. That edit changes the task's version: measure the base again after it.
+  For several objectives, read the spread of each from `show` and give each objective its own
+  `relative_noise`, with the `[pareto]` one as the default for those that declare none. That edit changes the task's version: measure the base again after it.
 - A service-style task also shows its cleanup here: after the check and the samples, nothing the
   wrapper created (a namespace, a pod, a process) is left running.
 

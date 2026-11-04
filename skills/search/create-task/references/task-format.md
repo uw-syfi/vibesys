@@ -91,8 +91,23 @@ With `relative_noise`, `compare` needs a gain above two standard errors of the r
 noise never taken below the floor. Without it, `compare` uses Welch's t test and answers
 `inconclusive` until each side has three samples that are not all equal. Declare the floor from
 the spread you measured (validation.md), not from hope: too low promotes noise, too high hides
-real gains. In a multi-objective task the `[pareto]` floor applies to every objective, so set it
-from the noisiest objective's spread (validation.md).
+real gains. Objectives of one task differ in spread (a throughput and a tail latency rarely
+agree), so in a multi-objective task an `[[objective]]` may carry its own `relative_noise`, which
+replaces the `[pareto]` one for that objective only:
+
+```toml
+[[objective]]
+name = "p99_ms"
+direction = "min"
+relative_noise = 0.15       # this objective's floor
+
+[pareto]
+relative_noise = 0.03       # the floor of every objective that declares none
+```
+
+The value is at least 0 and below 1; `0` declares no floor for that objective, so Welch's t test
+judges it. It is refused in a task that is not multi-objective. Set each floor from that
+objective's own measured spread (validation.md).
 
 ## Services, clusters and remote hardware
 

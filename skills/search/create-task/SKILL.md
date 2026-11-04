@@ -68,7 +68,7 @@ Commit the task on a branch (`git switch -c vibesys-task/<task>`) and run the re
 validation.md, all through `vibesys-cli` jobs:
 
 1. The base passes the check, and five samples measure with a spread you can live with. Each
-   objective's spread sets the noise floor you declare.
+   objective's spread sets that objective's own noise floor.
 2. Each mutant (a broken or cheating variant of the code, committed on a throwaway branch) fails
    the check. Delete the throwaway branches afterwards.
 3. A deliberate small slowdown is reported `worse` by `vibesys-cli compare`, so a real change
