@@ -227,14 +227,52 @@ func daemonForget(ctx context.Context, d deps, args []string) int {
 // daemonRun is the daemon process. A client starts it with the readiness pipe on its descriptor;
 // started by hand there is none, and it is simply a daemon in the foreground.
 func daemonRun(ctx context.Context, d deps) int {
-	if err := d.process.RunDaemon(ctx, readyPipe()); err != nil {
-		if errors.Is(err, production.ErrAlreadyRunning) {
-			return exitOK
-		}
+	var ready io.WriteCloser
+	held := &failureLast{}
+	if pipe := readyPipe(); pipe != nil {
+		held.pipe = pipe
+		ready = held
+	}
+	err := d.process.RunDaemon(ctx, ready)
+	if err != nil && !errors.Is(err, production.ErrAlreadyRunning) {
 		fmt.Fprintf(d.stderr, "vibesys-cli: %v\n", err)
+	}
+	// The client that started this daemon reads its log once the pipe closes without a byte, so the
+	// failure is written first.
+	held.release()
+	if err != nil && !errors.Is(err, production.ErrAlreadyRunning) {
 		return exitFailed
 	}
 	return exitOK
+}
+
+// failureLast is the readiness pipe as the daemon is given it: a close after the ready byte, which
+// says the daemon serves, closes the pipe at once, and a close without one, which says it failed,
+// waits for release, once the failure is in the daemon's log.
+type failureLast struct {
+	pipe    io.WriteCloser
+	wrote   bool
+	pending bool
+}
+
+func (f *failureLast) Write(p []byte) (int, error) {
+	f.wrote = f.wrote || len(p) > 0
+	return f.pipe.Write(p)
+}
+
+func (f *failureLast) Close() error {
+	if f.wrote {
+		return f.pipe.Close()
+	}
+	f.pending = true
+	return nil
+}
+
+// release closes a pipe whose close waited for it.
+func (f *failureLast) release() {
+	if f.pending {
+		_ = f.pipe.Close()
+	}
 }
 
 // readyPipe is the readiness pipe a parent passed, or nil when the process was not started with one.

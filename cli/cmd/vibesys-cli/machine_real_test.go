@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 )
@@ -129,4 +133,56 @@ func TestRealASandboxDaemonRunsBesideTheDaemonAndIsListed(t *testing.T) {
 	if r := m.cliWith(main, "daemon", "status"); strings.Contains(r.stdout, "sandbox\t") {
 		t.Fatalf("a sandbox that stopped is still listed:\n%s", r.stdout)
 	}
+}
+
+// A daemon that fails after it was given its readiness pipe has written why to its log by the time
+// the pipe closes without a byte, since the client that started it reads the log then.
+func TestRealADaemonThatFailsHasSaidWhyWhenItsPipeCloses(t *testing.T) {
+	m := newMachine(t)
+	env := m.daemonAt("rt-refused", false)
+	machineDir, err := runtimedir.OpenMachine(filepath.Join(m.root, "machine"), os.Getuid(), anyFS{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := &cliv1.MachineDaemon{Pid: uint32(os.Getpid()), RuntimeDir: "/run/holder/vibesys-cli", Version: "held"}
+	claim, err := machineDir.Claim(t.Context(), clock.Immediate{}, holder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer claim.Release()
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	logPath := filepath.Join(m.root, "daemon.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer logFile.Close()
+	cmd := exec.Command(self, "daemon", "run")
+	cmd.Dir = m.repo
+	cmd.Env = append(append(os.Environ(), roleVar+"="+roleCLI, "HOME="+filepath.Join(m.root, "home")), env...)
+	cmd.Stdout, cmd.Stderr, cmd.ExtraFiles = logFile, logFile, []*os.File{w}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	if n, _ := io.ReadFull(r, make([]byte, 1)); n != 0 {
+		t.Fatal("the refused daemon said it served")
+	}
+	said, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(said), "holds this machine") || !strings.Contains(string(said), "/run/holder/vibesys-cli") {
+		t.Fatalf("when the pipe closed, the log said %q; want the refusal naming the holder", said)
+	}
+	_ = cmd.Wait()
 }
