@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/production"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
@@ -69,11 +70,10 @@ func (m *machine) sweep() {
 	defer cancel()
 	for _, pid := range pids {
 		for alive(pid) {
-			if ctx.Err() != nil {
+			if !clock.Sleep(ctx, clock.System{}, 10*time.Millisecond) {
 				m.t.Errorf("process %d of %s is still there after SIGKILL", pid, m.root)
 				return
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
