@@ -30,11 +30,14 @@ you cannot find, in one round of questions, in their words, each with your propo
 
 1. **Scope:** which code may change, and what must not (public interfaces, file formats, dependencies).
 2. **Workload:** the inputs that stand for real use, their size, and a fixed seed.
-3. **Metric:** one number, its unit, its direction (`max` or `min`), and how the benchmark computes it.
+3. **Metric:** one number, its unit, its direction (`max` or `min`), and how the benchmark computes
+   it. When the user names several numbers that matter together, each is an objective: a
+   multi-objective task (task-format.md) with `result_protocol = 2`.
 4. **Correct:** what a candidate must still do, checked against a reference the candidate cannot
    change (a frozen copy of today's code, golden outputs, or an invariant checker).
-5. **Environment:** host or a Dockerfile, the hardware backend, and what one sample may cost in
-   time (aim for 10 seconds to a few minutes).
+5. **Environment:** host or a Dockerfile, the hardware backend, the resources a job needs from
+   the operator's placement (`[environment] needs`: a GPU, a Kubernetes cluster, shared
+   mounts), and what one sample may cost in time (aim for 10 seconds to a few minutes).
 6. **Rules:** what counts as cheating here (caching across samples, special-casing the
    benchmark's inputs, skipping work the checker does not see).
 
@@ -49,6 +52,9 @@ the CLI refuses an unknown key.
   the task's version (a digest of its files) changes when they do.
 - The checker compares the candidate with the reference, not with itself, and exits 0 only on a
   pass. It covers what the benchmark exercises and the edge cases the workload skips.
+- A server on a cluster is exercised by a trusted wrapper that builds, pushes and deploys the
+  candidate into a fresh namespace, runs the load generator in the cluster and cleans up on every
+  exit (task-format.md).
 - The benchmark runs the same workload every time, warms up before it times, and writes one JSON
   object with the metric to the path it is given.
 - Add `/.vibesys-state/` to the repository's `.gitignore`: the CLI keeps its store there, and a
@@ -61,7 +67,8 @@ the CLI refuses an unknown key.
 Commit the task on a branch (`git switch -c vibesys-task/<task>`) and run the recipes in
 validation.md, all through `vibesys-cli` jobs:
 
-1. The base passes the check, and five samples measure with a spread you can live with.
+1. The base passes the check, and five samples measure with a spread you can live with. Each
+   objective's spread sets the noise floor you declare.
 2. Each mutant (a broken or cheating variant of the code, committed on a throwaway branch) fails
    the check. Delete the throwaway branches afterwards.
 3. A deliberate small slowdown is reported `worse` by `vibesys-cli compare`, so a real change
@@ -74,7 +81,8 @@ makes every saved result incomparable, so every fix happens now.
 
 Tell the user, in plain words: what the task optimizes and checks, the base number with its
 samples and spread, what the mutants showed, any fact you assumed instead of asked, and the
-command to start: `/vibesys:optimize <task>`. Leave the task committed on its branch; the user
+command to start: `/vibesys:optimize <task>`, with the placement the operator should select
+(`VIBESYS_PLACEMENT`) when the task needs a resource only some placements offer. Leave the task committed on its branch; the user
 decides where it merges. The optimization starts from a commit that contains the task.
 
 ## Rules

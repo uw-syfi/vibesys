@@ -15,7 +15,9 @@ installs and checks the CLI (`vibesys:optimize`).
 started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
 set; export it as the absolute path of the vibesys-cli to use`.
 
-Every call takes the context flags your brief names: `--task`, `--run`, `--harness` and `--agent`.
+Every call takes the context flags your brief names: `--task`, `--run`, `--harness`, `--agent`
+and, when the brief names one, `--placement`. A job on another placement is a different
+measurement: results under different placements are never compared or reused.
 All worktrees of the repository share one store per task, so a call from your worktree sees the
 jobs and results of every other agent. The examples leave them out. Add `--json` wherever you parse the output. Detail on jobs,
 exit codes and slow runs: [jobs.md](references/jobs.md).
@@ -40,8 +42,10 @@ Each prints a job id and returns at once. Useful flags: `--plan <n>` links the j
 `--no-cache` and `--recheck` force fresh work; only a reason to doubt a saved result justifies
 them. Use the task's own commands through `check` and `measure`; do not rebuild them by hand.
 
-Everything that puts load on the machine goes through a job, so the queue runs one at a time and
-the numbers stay clean. Do not start a benchmark, a profiler or a server in your own shell.
+Everything that puts load on the machine goes through a job, so the daemon decides what runs
+together and the numbers stay clean: a measure job holds its placement alone, while checks and
+command jobs may share it up to the placement's `max_jobs`. Do not start a benchmark, a profiler
+or a server in your own shell.
 
 ## Wait
 

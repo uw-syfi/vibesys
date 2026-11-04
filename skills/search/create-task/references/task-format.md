@@ -25,10 +25,13 @@ commands run into the task directory.
 
 ```toml
 version = 1
-backends = ["cpu"]            # one backend; containers get no GPU yet
+backends = ["cpu"]            # one backend; a "cuda" task needs a placement with a gpu resource
 
 [agent]
 domain = "generic"            # which domain skills fit; held as data
+
+[environment]                 # optional
+needs = ["kubernetes"]        # resources a job needs: any of gpu, kubernetes, mounts
 
 [build]                       # optional; runs first, in the clean checkout
 command = ["make", "-j8"]
@@ -54,11 +57,17 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
 - `[check]` may stand for `[accuracy]` and `[measure]` for `[benchmark]`, never both.
 - Refused by the CLI: `[evaluator]`, `entrypoint` or `args` in a command section,
   `requires_accuracy = false`, more than one backend, `[environment.modal]`, and in docker
-  `docker_in_docker = true` or an accelerator backend.
+  `docker_in_docker = true` or an accelerator backend other than `cuda`.
 - Accepted and not read by the CLI: `[agent]`, `[catalogue]`, `[profile]`, `[profile_guided]`,
   `[resources]`, `[workspace]`, `[plan]`, `[[comparison]]`.
 - A benchmark may instead speak the evaluator record stream with `result_protocol = 2` in
-  `[benchmark]`, and no `[benchmark.result]`. Use it only when the project already does.
+  `[benchmark]`, and no `[benchmark.result]`. Use it when the project already does, and for a
+  multi-objective task (below).
+- `[environment] needs` names the operator-config resources every job of the task needs. The
+  operator runs jobs on named placements, each offering some resources; a job on a placement
+  that lacks a needed one is refused before anything is built, naming the placement and the
+  resource. Declare a resource only when the task cannot run without it, and never name a
+  placement, a host or a path in the task: those belong to the operator.
 
 ## `objectives.toml`
 
@@ -71,13 +80,21 @@ direction = "max"           # or "min"
 relative_noise = 0.02       # optional: the relative spread of one run
 ```
 
+A task is multi-objective when `objectives.toml` declares more than one `[[objective]]` and has a
+`[pareto]` section. It then reports with `result_protocol = 2`, so that every sample reports every
+objective; a sample that leaves one out fails the measure job. `compare` judges each objective and
+combines them: `better` needs a gain on some objective and a loss on none, and a gain on one with
+a loss on another is `tradeoff`. `promote` refuses a `tradeoff`. Name the objectives in
+`OBJECTIVE.md` with the trade the user accepts, if any.
+
 With `relative_noise`, `compare` needs a gain above two standard errors of the ratio, with the
 noise never taken below the floor. Without it, `compare` uses Welch's t test and answers
 `inconclusive` until each side has three samples that are not all equal. Declare the floor from
 the spread you measured (validation.md), not from hope: too low promotes noise, too high hides
-real gains.
+real gains. In a multi-objective task the `[pareto]` floor applies to every objective, so set it
+from the noisiest objective's spread (validation.md).
 
-## Services and remote hardware
+## Services, clusters and remote hardware
 
 The check and the benchmark are plain commands; the CLI starts no service for them. A task whose
 code is a server ships a trusted wrapper in the task directory that builds the candidate, starts
@@ -85,13 +102,28 @@ it through a contract the candidate implements (a start script, a port, a readin
 waits for it, runs the checker or the load generator against it, and stops its whole process
 group on every exit. Say the contract in `OBJECTIVE.md`.
 
-Jobs run on the machine of the CLI's daemon, and docker jobs get no accelerator. When the
-hardware is another machine, the wrapper copies the clean checkout there (by commit, so a check
-and the samples of one commit can share a build), runs under that machine's scheduler if it has
-one, copies the result file back, and cancels the remote work when it receives SIGTERM. Read the
-host from an environment variable, never from the repository. Jobs inherit the daemon's
-environment, not the submitting shell's: set the variable, then `vibesys-cli daemon restart`. The
-clean checkouts go under the daemon's `TMPDIR`; point it at a local disk when `/tmp` is a network
+**On Kubernetes.** A service-style task that deploys to a cluster declares
+`[environment] needs = ["kubernetes"]`. A job container then has the cluster's kubeconfig
+read-only at `/vibesys/kubeconfig` (`KUBECONFIG` names it), the network mode the operator chose,
+and, when the operator names them, `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER`. The wrapper
+is trusted code in the task directory, so a candidate never edits it. It builds the candidate's
+image with the builder, pushes it to the registry, creates a fresh namespace for the job,
+deploys the candidate into it, waits for readiness, runs the load generator inside the cluster
+(so the number does not include the path from the job container), and writes the result file.
+It deletes the namespace on every exit, SIGTERM included: the CLI manages no cluster and
+cleans up nothing in it. Take the registry and builder addresses from those variables, never from
+the repository, and fail with a message that names a missing one. Results under different
+placements or clusters are never compared, so a task needs one cluster for its whole run.
+
+**On other hardware.** A docker job runs on the placement the operator selected (this machine, an
+ssh host or a Slurm allocation) and gets the GPUs that placement's `gpu` resource gives; the task
+declares `needs = ["gpu"]` if it must have them. When the hardware is a machine the CLI cannot
+use as a placement, the wrapper copies the clean checkout there (by commit, so a check and the
+samples of one commit can share a build), runs under that machine's scheduler if it has one,
+copies the result file back, and cancels the remote work when it receives SIGTERM. Read the host
+from an environment variable, never from the repository. Jobs inherit the daemon's environment,
+not the submitting shell's: set the variable, then `vibesys-cli daemon restart`. The clean
+checkouts go under the daemon's `TMPDIR`; point it at a local disk when `/tmp` is a network
 mount.
 
 ## `Dockerfile`

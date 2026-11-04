@@ -3,6 +3,11 @@
 Each recipe is a job, so the result is what the optimization will see. Pass `--task <task>` to
 every call. Wait as `vibesys:measure` says and branch on the exit code.
 
+Validate on the placement the optimization will use: results under different placements are
+never compared, and a task that needs a resource is refused on a placement without it. If the
+task declares `needs`, check `vibesys-cli submit check` is not refused before anything else; a
+refusal names the placement and the missing resource, which is the operator's to fix.
+
 ## The base
 
 ```
@@ -19,7 +24,10 @@ vibesys-cli show <base> --json
 - One sample over a few minutes makes every comparison slow; shrink the workload while it still
   exercises the same path.
 - Set `relative_noise` in `objectives.toml` to the spread you saw, rounded up, if you declare it.
-  That edit changes the task's version: measure the base again after it.
+  For several objectives, read the spread of each from `show` and use the largest one, since the
+  `[pareto]` floor is shared. That edit changes the task's version: measure the base again after it.
+- A service-style task also shows its cleanup here: after the check and the samples, nothing the
+  wrapper created (a namespace, a pod, a process) is left running.
 
 ## Mutants
 
@@ -42,6 +50,8 @@ vibesys-cli submit check HEAD --wait --json
 
 Each must exit 1 with a failed check. A mutant that passes is a hole: strengthen the checker,
 commit the task again, and rerun every recipe from the base, since the task's version changed.
+For a multi-objective task, add a mutant that trades one objective for another (faster, but a
+worse second objective): `compare` must answer `tradeoff`, not `better`.
 Delete the mutant branches when done (`git branch -D`). Their jobs stay in the store, harmless.
 
 ## Sensitivity

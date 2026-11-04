@@ -14,8 +14,8 @@ Worktree: <absolute path>      Branch: <branch or detached>      Base commit: <f
 First run: cd <worktree> && git rev-parse --show-toplevel && git branch --show-current
 Confirm both match before you change anything (an empty branch name means detached HEAD).
 Work only in this worktree.
-CLI context: add `--task <task> --run <run id> --harness <harness> --agent <your role>` to every
-  vibesys-cli call. Every agent sees your jobs through jobs, show and compare.
+CLI context: add `--task <task> --run <run id> --harness <harness> --agent <your role>` (and
+  `--placement <name>` when the lead's context line has one) to every vibesys-cli call. Every agent sees your jobs through jobs, show and compare.
 Task: .vibesys/tasks/<task>/ (read OBJECTIVE.md).
 Plan: <n>      Budget: <at most this many measure jobs, samples and command jobs>
 Load these skills first: <the matching vibesys skill>, vibesys:commit, vibesys:measure, and
