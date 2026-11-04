@@ -15,9 +15,7 @@ installs and checks the CLI (`vibesys:optimize`).
 started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
 set; export it as the absolute path of the vibesys-cli to use`.
 
-Every call takes the context flags your brief names: `--task`, `--run`, `--harness`, `--agent`
-and, when the brief names one, `--placement`. A job on another placement is a different
-measurement: results under different placements are never compared or reused.
+Every call takes the context flags your brief names: `--task`, `--run`, `--harness` and `--agent`.
 All worktrees of the repository share one store per task, so a call from your worktree sees the
 jobs and results of every other agent. The examples leave them out. Add `--json` wherever you parse the output. Detail on jobs,
 exit codes and slow runs: [jobs.md](references/jobs.md).

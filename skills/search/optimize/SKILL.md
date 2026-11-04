@@ -39,11 +39,9 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    say why, creating nothing, when tracked files have uncommitted changes (the base must be a
    commit) or the first `vibesys-cli submit` fails with a message about the task: it says what the CLI
    cannot run. A broken task is the user's to fix, never yours (Rules). Leave the environment
-   (`--env`) to the task unless the user chose one. When the task's `vibesys.input.toml` has
-   `[environment] needs`, the operator's placement must offer every resource named. The
-   placement comes from `VIBESYS_PLACEMENT` in your environment (unset: the only placement that
-   offers everything the task needs). A refusal naming the placement and a missing resource is the
-   operator's to fix: stop and say so; never change the configuration or pick another placement.
+   (`--env`) to the task unless the user chose one. When the CLI refuses
+   the task (for example, no placement offers a resource the task needs), stop and report the
+   refusal as printed; never change the CLI's or the machine's configuration.
 3. From `vibesys.input.toml`, check that the domain skills the task needs are available, per
    [domain-plugins.md](references/domain-plugins.md). If one is not listed among your skills, stop
    and print its install commands from there; do not plan without it.
@@ -53,8 +51,7 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    `unmeasured`: read [from-scratch.md](references/from-scratch.md) and create nothing else
    until it says to. Otherwise it gets the result branch `vibesys/result/<task>` at the base
    commit, and a context line you reuse in every brief: `--task <task> --run <run id> --harness
-   <harness>`, plus `--placement <name>` when `VIBESYS_PLACEMENT` is set. Results under different
-   placements are never compared, so one run uses one placement throughout. Every worktree of the repository shares the task's one store, so each agent sees
+   <harness>`. Every worktree of the repository shares the task's one store, so each agent sees
    the others' jobs.
 5. If `vibesys-cli show <base>` lists no measure result, measure the base with
    `vibesys-cli submit measure <base> --samples 5`, as a tracked background `wait`

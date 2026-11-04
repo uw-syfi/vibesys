@@ -68,9 +68,7 @@ Cheap index of all plans, without reading bodies: `vibesys-cli plan list --json`
    running agents.
 3. Relaunch or park every plan whose agent is gone, and comment why. A job that is still queued
    or running needs no resubmission.
-4. Resume on the same placement the run used (`VIBESYS_PLACEMENT`, from the lead's context line):
-   results under different placements are never compared.
-5. After a long gap or a change of environment, re-measure the head as a control
+4. After a long gap or a change of environment, re-measure the head as a control
    (`submit measure <head> --no-cache`).
 
 ## Housekeeping

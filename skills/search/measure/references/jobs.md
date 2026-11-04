@@ -20,8 +20,7 @@ another job. A queued job is therefore not stuck: `vibesys-cli jobs` prints unde
 for instance that it needs the placement alone and which jobs hold it, or which earlier job it is
 behind. A waiting job keeps its turn, and a wait on a job that can never run ends with why (exit
 4). Read the reason before you resubmit or cancel; the jobs that hold the placement are other
-agents' work. Do not select a placement yourself: use the one your brief names, and report a
-refusal ("placement ... has no resource ...") as the CLI printed it.
+agents' work. Report a refusal as the CLI printed it.
 
 ## States
 

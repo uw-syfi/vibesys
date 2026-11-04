@@ -3,10 +3,8 @@
 Each recipe is a job, so the result is what the optimization will see. Pass `--task <task>` to
 every call. Wait as `vibesys:measure` says and branch on the exit code.
 
-Validate on the placement the optimization will use: results under different placements are
-never compared, and a task that needs a resource is refused on a placement without it. If the
-task declares `needs`, check `vibesys-cli submit check` is not refused before anything else; a
-refusal names the placement and the missing resource, which is the operator's to fix.
+If the task declares `needs`, check that the first `vibesys-cli submit check` is not refused for a
+missing resource before anything else; a refusal names it and is the operator's to fix.
 
 ## The base
 

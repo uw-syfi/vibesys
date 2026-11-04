@@ -81,8 +81,7 @@ makes every saved result incomparable, so every fix happens now.
 
 Tell the user, in plain words: what the task optimizes and checks, the base number with its
 samples and spread, what the mutants showed, any fact you assumed instead of asked, and the
-command to start: `/vibesys:optimize <task>`, with the placement the operator should select
-(`VIBESYS_PLACEMENT`) when the task needs a resource only some placements offer. Leave the task committed on its branch; the user
+command to start: `/vibesys:optimize <task>`. Leave the task committed on its branch; the user
 decides where it merges. The optimization starts from a commit that contains the task.
 
 ## Rules

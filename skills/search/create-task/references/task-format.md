@@ -25,7 +25,7 @@ commands run into the task directory.
 
 ```toml
 version = 1
-backends = ["cpu"]            # one backend; a "cuda" task needs a placement with a gpu resource
+backends = ["cpu"]            # one backend; a "cuda" task needs the gpu resource
 
 [agent]
 domain = "generic"            # which domain skills fit; held as data
@@ -63,10 +63,8 @@ metric = "requests_per_sec"       # the top-level field of that JSON file
 - A benchmark may instead speak the evaluator record stream with `result_protocol = 2` in
   `[benchmark]`, and no `[benchmark.result]`. Use it when the project already does, and for a
   multi-objective task (below).
-- `[environment] needs` names the operator-config resources every job of the task needs. The
-  operator runs jobs on named placements, each offering some resources; a job on a placement
-  that lacks a needed one is refused before anything is built, naming the placement and the
-  resource. Declare a resource only when the task cannot run without it, and never name a
+- `[environment] needs` names the operator-config resources every job of the task needs. A job that
+  cannot get a needed resource is refused before anything is built, naming it. Declare a resource only when the task cannot run without it, and never name a
   placement, a host or a path in the task: those belong to the operator.
 
 ## `objectives.toml`
@@ -127,11 +125,10 @@ deploys the candidate into it, waits for readiness, runs the load generator insi
 (so the number does not include the path from the job container), and writes the result file.
 It deletes the namespace on every exit, SIGTERM included: the CLI manages no cluster and
 cleans up nothing in it. Take the registry and builder addresses from those variables, never from
-the repository, and fail with a message that names a missing one. Results under different
-placements or clusters are never compared, so a task needs one cluster for its whole run.
+the repository, and fail with a message that names a missing one. A task uses one cluster
+for its whole run.
 
-**On other hardware.** A docker job runs on the placement the operator selected (this machine, an
-ssh host or a Slurm allocation) and gets the GPUs that placement's `gpu` resource gives; the task
+**On other hardware.** A docker job gets the GPUs the operator's `gpu` resource gives; the task
 declares `needs = ["gpu"]` if it must have them. When the hardware is a machine the CLI cannot
 use as a placement, the wrapper copies the clean checkout there (by commit, so a check and the
 samples of one commit can share a build), runs under that machine's scheduler if it has one,
