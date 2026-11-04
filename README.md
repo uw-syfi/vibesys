@@ -79,11 +79,8 @@ claude plugin install vibesys@vibesys
 claude plugin install vibesys-llm-serving@vibesys
 ```
 
-Install the measurement CLI used by the skills:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/cli/install.sh | sh
-```
+The skills check for the measurement CLI and, if it is missing, ask your permission
+to install it before continuing.
 
 Then ask your agent to create a task describing your system, workload, hardware,
 correctness checks, and performance benchmark, and start the optimization:

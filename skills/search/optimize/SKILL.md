@@ -11,8 +11,8 @@ git, so a context limit or a stop costs nothing: resume by reading the state.
 
 **Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
 `PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
-started by the orchestrator sets it. If it is unset or empty, stop and say `VIBESYS_CLI is not
-set; export it as the absolute path of the vibesys-cli to use`.
+started by the orchestrator sets it. Before invoking the CLI, follow [CLI setup](#cli-setup)
+and pass the selected absolute path to every subagent and background command.
 
 Arguments: `<task>` and `--fanout N`, the most subagents running at once (default 3). Planners,
 workers, profilers, combiners and judges all count; a judge takes a slot too. A repository with no
@@ -27,14 +27,14 @@ Harness-specific mechanics (subagents, background tasks, scheduling): when `VIBE
 in your environment, read `references/harness/vibesys-orchestrator.md`; otherwise read
 `references/harness/<harness>.md` for the harness you are running in.
 
+## CLI setup
+
+Before task creation or optimization, follow [CLI setup](references/cli-setup.md).
+It selects a working CLI or installs one only after explicit user approval.
+
 ## Start
 
-1. Run `"$VIBESYS_CLI" --version`. If `VIBESYS_CLI` is unset or the command fails, stop and tell
-   the user to install the CLI with
-   `curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/cli/install.sh | sh`
-   (it installs to `~/.local/bin`) and to export `VIBESYS_CLI` as the absolute path of the build to
-   use, then run you again. It is the only
-   thing this plugin needs besides git. `vibesys-cli upgrade` updates it.
+1. Complete [CLI setup](#cli-setup), including user approval before any installation.
 2. Read `.vibesys/tasks/<task>/OBJECTIVE.md`, `vibesys.input.toml` and `objectives.toml`. Stop and
    say why, creating nothing, when tracked files have uncommitted changes (the base must be a
    commit) or the first `vibesys-cli submit` fails with a message about the task: it says what the CLI
