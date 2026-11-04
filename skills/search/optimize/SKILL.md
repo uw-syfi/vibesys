@@ -39,7 +39,9 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
    say why, creating nothing, when tracked files have uncommitted changes (the base must be a
    commit) or the first `vibesys-cli submit` fails with a message about the task: it says what the CLI
    cannot run. A broken task is the user's to fix, never yours (Rules). Leave the environment
-   (`--env`) to the task unless the user chose one.
+   (`--env`) to the task unless the user chose one. When the CLI refuses
+   the task (for example, no placement offers a resource the task needs), stop and report the
+   refusal as printed; never change the CLI's or the machine's configuration.
 3. From `vibesys.input.toml`, check that the domain skills the task needs are available, per
    [domain-plugins.md](references/domain-plugins.md). If one is not listed among your skills, stop
    and print its install commands from there; do not plan without it.
@@ -105,8 +107,11 @@ in your environment, read `references/harness/vibesys-orchestrator.md`; otherwis
   (`current.result.measure.value`), never one you computed from samples. If `result` exits 1, there
   is none: submit `vibesys-cli submit measure <head SHA> --no-cache` and report after that lands.
   Before the first promotion the headline is the `measure.value` of `vibesys-cli show <base> --json`.
-- Workers may submit their own jobs; the CLI runs them one at a time, first come first served. Give
-  each brief a budget in samples and jobs, and look at `vibesys-cli jobs` before you fund more.
+- Workers may submit their own jobs. The daemon may run several at once, but a measure job holds
+  its placement alone, so measures still queue behind each other and behind running checks.
+  `vibesys-cli jobs` says under each queued job why it waits; a queued job with a reason is
+  waiting its turn, not stuck. Give each brief a budget in samples and jobs, and look at
+  `vibesys-cli jobs` before you fund more.
 - Run fully autonomously and never block on a question to the user, unless the user asked to be
   consulted. Decide, write the decision into the plan, keep going, and report it in the next
   report so the user can reverse it.

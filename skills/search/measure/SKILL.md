@@ -40,8 +40,10 @@ Each prints a job id and returns at once. Useful flags: `--plan <n>` links the j
 `--no-cache` and `--recheck` force fresh work; only a reason to doubt a saved result justifies
 them. Use the task's own commands through `check` and `measure`; do not rebuild them by hand.
 
-Everything that puts load on the machine goes through a job, so the queue runs one at a time and
-the numbers stay clean. Do not start a benchmark, a profiler or a server in your own shell.
+Everything that puts load on the machine goes through a job, so the daemon decides what runs
+together and the numbers stay clean: a measure job holds its placement alone, while checks and
+command jobs may share it up to the placement's `max_jobs`. Do not start a benchmark, a profiler
+or a server in your own shell.
 
 ## Wait
 

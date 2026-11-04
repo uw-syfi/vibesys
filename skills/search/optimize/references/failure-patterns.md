@@ -39,8 +39,10 @@ winner, or state why not in the next report. Re-decide after an item returns or 
 submission. Exit 4 is no answer, not a failed job. Run `vibesys-cli jobs --json` or `show` first;
 the job may be finished, queued or still running.
 
-**Piling up the queue.** Several workers each submitting measures at once; the last waits an hour.
-Give each brief a budget, and read `vibesys-cli jobs` before you fund more.
+**Piling up the queue.** Several workers each submitting measures at once; the last waits an hour,
+since a measure holds its placement alone however many jobs the daemon runs at once. Give each
+brief a budget, and read `vibesys-cli jobs` (it says why each queued job waits) before you fund
+more.
 
 **Long waits in the foreground.** A 25-minute `wait` in your own turn. Use the tracked background
 recipe in `vibesys:measure` and go back to the other slots.

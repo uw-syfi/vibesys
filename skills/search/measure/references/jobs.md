@@ -2,8 +2,8 @@
 
 ## What the CLI does for you
 
-The CLI reads the task from the commit, builds and runs it in a clean checkout, runs one job at a
-time for the machine, saves a result only with its samples and a passing check, and answers a
+The CLI reads the task from the commit, builds and runs it in a clean checkout, starts jobs as the
+placement's capacity allows, saves a result only with its samples and a passing check, and answers a
 repeat of a job it already has from the saved result. A second submission of the same job joins
 the one in the queue; the submit response's `disposition` says `CREATED`, `JOINED` or `REUSED`.
 `submit command` jobs are never reused or joined.
@@ -11,6 +11,16 @@ the one in the queue; the submit response's `disposition` says `CREATED`, `JOINE
 You therefore do not take a measurement slot, serialize your own runs, clean a worktree, start a
 service by hand or record a sample. If a step seems missing, ask the CLI (`vibesys-cli --help`)
 before writing a script.
+
+## Waiting jobs
+
+The daemon may run several jobs at once (the operator's `max_jobs`, ordered `fifo` or
+`fair-share`), but a measure job holds the whole placement, so a benchmark sample never runs beside
+another job. A queued job is therefore not stuck: `vibesys-cli jobs` prints under it why it waits,
+for instance that it needs the placement alone and which jobs hold it, or which earlier job it is
+behind. A waiting job keeps its turn, and a wait on a job that can never run ends with why (exit
+4). Read the reason before you resubmit or cancel; the jobs that hold the placement are other
+agents' work. Report a refusal as the CLI printed it.
 
 ## States
 
