@@ -430,4 +430,6 @@ func newLostProcess() *lostProcess {
 
 func (p *lostProcess) Exited() <-chan environment.Exit { return p.exited }
 
+func (*lostProcess) Terminate() {}
+
 func (*lostProcess) Kill() {}

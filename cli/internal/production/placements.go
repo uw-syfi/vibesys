@@ -57,8 +57,10 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 	providers := map[string]*docker.Provider{}
 	out := machines{claims: map[string][]core.Claim{}}
 	names := slices.Sorted(maps.Keys(op.GetPlacements()))
+	// Zero is the default grace: the environments take it from environment.DefaultGrace.
+	grace := seconds(op.GetStopGraceSeconds(), 0)
 	for _, name := range names {
-		provider, err := p.placement(clk, dir, containerKey, local, name, op.GetPlacements()[name])
+		provider, err := p.placement(clk, dir, containerKey, local, name, op.GetPlacements()[name], grace)
 		if err != nil {
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
@@ -66,7 +68,7 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 		out.offers = append(out.offers, provider.Offer())
 		out.claims[name] = provider.Claims()
 	}
-	onHost := hostenv.New(hostenv.Config{Backend: local, Timers: clk})
+	onHost := hostenv.New(hostenv.Config{Backend: local, Timers: clk, Grace: grace})
 	out.environments = environment.Kinds{
 		core.EnvironmentHost: func(environment.Target) (environment.Environment, error) { return onHost, nil },
 		core.EnvironmentDocker: func(t environment.Target) (environment.Environment, error) {
@@ -93,11 +95,11 @@ func scopeOf(key, name string) string {
 }
 
 // placement makes the docker environments of one placement.
-func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, local *cpu.Backend, name string, pl *cliv1.Placement) (*docker.Provider, error) {
+func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey string, local *cpu.Backend, name string, pl *cliv1.Placement, grace time.Duration) (*docker.Provider, error) {
 	scope := scopeOf(dir.Path(), name)
 	cfg := docker.Config{
 		Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
-		User: docker.User{UID: p.UID, GID: p.GID}, Placement: name,
+		User: docker.User{UID: p.UID, GID: p.GID}, Placement: name, Grace: grace,
 	}
 	engineCfg := dockercli.Config{Timers: clk}
 	var shell remote.Shell = remote.Local{}

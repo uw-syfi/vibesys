@@ -25,6 +25,15 @@ message OperatorConfig {
 
   // How the daemon shares the placements between jobs.
   Scheduler scheduler = 5;
+
+  // How long a job's commands get to clean up after a cancel or the time limit asks them to
+  // terminate (SIGTERM), before they are killed, for the host and for every placement. A command
+  // that traps SIGTERM can remove what it made outside the machine, such as a Kubernetes
+  // namespace. At most 240 seconds, which the daemon's wait for a stopped command outlasts. Unset means 30 seconds.
+  optional double stop_grace_seconds = 6 [(buf.validate.field).double = {
+    gte: 0.001
+    lte: 240
+  }];
 }
 
 // Scheduler is how the daemon shares the placements between the jobs that wait.

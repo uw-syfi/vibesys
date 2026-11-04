@@ -68,6 +68,7 @@ func Run(t *testing.T, rig Rig) {
 		{"a command runs in the working directory with its output in order", caseOutput},
 		{"a command reports its exit code, 128 plus the signal, and 127 when it does not exist", caseExitCodes},
 		{"killing a process ends it with an unknown outcome, not a code", caseKill},
+		{"terminating a process delivers SIGTERM to its command and leaves the container running", caseTerminate},
 		{"removing a container ends everything in it", caseRemoveEndsProcesses},
 		{"a command whose container was removed is lost, not exited", caseLost},
 		{"closing a container stops its processes and leaves it to be removed", caseClose},
@@ -370,6 +371,36 @@ func caseKill(h *harness) {
 		}
 	case <-h.ctx.Done():
 		h.t.Fatal("a killed process never reported its end")
+	}
+}
+
+func caseTerminate(h *harness) {
+	c, spec := h.start()
+	proc, err := c.Start(h.world.Argv(envtest.Program{
+		envtest.Alive("main"), envtest.OnTerm(envtest.Mark("cleanup")),
+		envtest.Child(envtest.Alive("child"), envtest.Hold(envtest.Forever)), envtest.Mark("up"), envtest.Hold(envtest.Forever),
+	}), io.Discard)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	h.reached("up")
+	h.reached(envtest.AliveMark("child"))
+	proc.Terminate()
+	select {
+	case exit := <-proc.Exited():
+		if exit.Code != 0 || exit.Kind != "" || exit.Err != nil {
+			h.t.Errorf("a terminated process that cleaned up ended %+v, want code 0", exit)
+		}
+	case <-h.ctx.Done():
+		h.t.Fatal("a terminated process never reported its end")
+	}
+	if !h.world.Marked("cleanup") {
+		h.t.Errorf("the command never ran its cleanup: Terminate did not deliver SIGTERM to it")
+	}
+	h.gone("main", "child")
+	// The container outlives the request: removing it is the caller's, after the grace period.
+	if got := h.names(docker.Labels{labelCase: h.id}); !slices.Contains(got, spec.Name) {
+		h.t.Errorf("containers %v after Terminate, want %s to be still there", got, spec.Name)
 	}
 }
 

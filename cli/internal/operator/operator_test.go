@@ -150,6 +150,8 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"no CPUs":                              {strings.Replace(slurmConfig, "[slurm]", "[slurm]\ncpus = 0", 1), "cpus"},
 		"a memory with no unit":                {strings.Replace(slurmConfig, "[slurm]", "[slurm]\nmemory = \"32\"", 1), "memory"},
 		"a memory Docker reads another way":    {strings.Replace(slurmConfig, "[slurm]", "[slurm]\nmemory = \"32GB\"", 1), "memory"},
+		"a zero stop grace":                    {"stop_grace_seconds = 0\n", "stop_grace_seconds"},
+		"a stop grace the daemon's wait ends":  {"stop_grace_seconds = 241\n", "stop_grace_seconds"},
 		"both shapes":                          {placementsConfig + "[docker]\ngpus = \"all\"\n", "[placements.*]"},
 		"a placement with no kind":             {"[placements.x]\nmax_jobs = 2\n", "kind"},
 		"a placement name in upper case":       {"[placements.X]\nkind = \"local\"\n", "placements"},
@@ -189,6 +191,26 @@ remote_workspace_root = "/home/u/vibesys-cli"
 
 // The scheduler runs one job at a time on each placement, the oldest first, unless the config says
 // otherwise. The earlier shape's scheduler.max_jobs is the max_jobs of its one placement.
+// stop_grace_seconds is read in every shape of the file, and is unset when the file does not say.
+func TestTheStopGraceSurvivesEveryShapeOfTheFile(t *testing.T) {
+	for name, text := range map[string]string{
+		"no placements":     "stop_grace_seconds = 12.5\n",
+		"placements":        "stop_grace_seconds = 12.5\n" + placementsConfig,
+		"the earlier shape": "stop_grace_seconds = 12.5\n" + slurmConfig,
+		"a scheduler first": "stop_grace_seconds = 12.5\n[scheduler]\nmax_jobs = 2\n[docker]\ngpus = \"all\"\n",
+	} {
+		c, err := operator.Parse([]byte(text))
+		if err != nil || c.StopGraceSeconds == nil || c.GetStopGraceSeconds() != 12.5 {
+			t.Errorf("%s: stop_grace_seconds %v, %v; want 12.5", name, c.GetStopGraceSeconds(), err)
+		}
+	}
+	for _, text := range []string{"", slurmConfig, placementsConfig} {
+		if c, err := operator.Parse([]byte(text)); err != nil || c.StopGraceSeconds != nil {
+			t.Errorf("%q: %v, %v; want the grace unset", text, c.StopGraceSeconds, err)
+		}
+	}
+}
+
 func TestTheSchedulerDefaultsToOneJobAtATime(t *testing.T) {
 	type want struct {
 		policy  string

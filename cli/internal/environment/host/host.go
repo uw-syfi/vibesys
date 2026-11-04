@@ -22,10 +22,14 @@ type Config struct {
 	// Backend describes the machine: what the fingerprint is made of.
 	Backend backend.Backend
 	// Timers makes every timeout and pause Run waits on. The first timer a Run arms is the
-	// execution's limit, with the duration of its Timeout; later ones are pauses between probes.
+	// execution's limit, with the duration of its Timeout; later ones are pauses between probes, and the grace period armed when the limit is reached or the
+	// caller cancels.
 	Timers clock.Timers
 	// ProbePause is the pause between two probes. Zero means DefaultProbePause.
 	ProbePause time.Duration
+	// Grace is how long the commands get, after a cancel or the limit asks them to terminate, to
+	// clean up before they are killed. Zero means environment.DefaultGrace.
+	Grace time.Duration
 }
 
 // Environment is the host environment. Create it with New.
@@ -33,6 +37,7 @@ type Environment struct {
 	backend backend.Backend
 	timers  clock.Timers
 	pause   time.Duration
+	grace   time.Duration
 }
 
 var _ environment.Environment = (*Environment)(nil)
@@ -43,7 +48,11 @@ func New(cfg Config) *Environment {
 	if pause <= 0 {
 		pause = DefaultProbePause
 	}
-	return &Environment{backend: cfg.Backend, timers: cfg.Timers, pause: pause}
+	grace := cfg.Grace
+	if grace <= 0 {
+		grace = environment.DefaultGrace
+	}
+	return &Environment{backend: cfg.Backend, timers: cfg.Timers, pause: pause, grace: grace}
 }
 
 // Kind implements environment.Environment.

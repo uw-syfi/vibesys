@@ -6,6 +6,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
@@ -65,7 +66,11 @@ type Exit struct {
 type Process interface {
 	// Exited receives once, when the group's leader has ended.
 	Exited() <-chan Exit
-	// Kill ends the whole group.
+	// Terminate asks the whole group to stop, with SIGTERM, and returns at once. A command that
+	// traps it can clean up what it holds outside the machine; one that ignores it is ended by
+	// Kill. It is a request and no end: only Kill ends the group.
+	Terminate()
+	// Kill ends the whole group, at once, whatever is left of it.
 	Kill()
 }
 
@@ -86,6 +91,35 @@ type Events struct {
 	// Pause returns a channel closed after the pause between two readiness probes, and the
 	// function that releases it.
 	Pause func() (fired <-chan struct{}, stop func())
+	// Grace returns a channel closed when the grace period ends, and the function that releases
+	// it. It is armed when the limit is reached or the caller cancels, after the processes were
+	// asked to terminate. Nil gives no grace: the caller kills the groups at once.
+	Grace func() (fired <-chan struct{}, stop func())
+}
+
+// DefaultGrace is how long the commands of an execution get to clean up after they are asked to
+// terminate, when the limit is reached or the caller cancels, before they are killed.
+const DefaultGrace = 30 * time.Second
+
+// terminate asks the processes to stop and waits until their leaders have exited or the grace
+// period is over, whichever is first. It ends nothing: the caller kills what is left. Leaders
+// that exited have their exit consumed, which no one reads after the execution is decided.
+func (ev Events) terminate(procs ...Process) {
+	if ev.Grace == nil {
+		return
+	}
+	for _, p := range procs {
+		p.Terminate()
+	}
+	fired, stop := ev.Grace()
+	defer stop()
+	for _, p := range procs {
+		select {
+		case <-p.Exited():
+		case <-fired:
+			return
+		}
+	}
 }
 
 // Execute decides how an execution ends from what its processes and the events do: it starts the
@@ -109,12 +143,14 @@ func Execute(x core.Execution, l Launcher, ev Events, out io.Writer) core.Attemp
 		return core.NotStarted{Failure: core.AsFailure(err)}
 	}
 	var serviceExited <-chan Exit
+	var running []Process // the groups a limit or a cancel asks to terminate
 	if s := x.Service; s != nil {
 		svc, err := l.Start(s.Argv, out)
 		if err != nil {
 			return failed(err)
 		}
 		started = true
+		running = append(running, svc)
 		serviceExited = svc.Exited()
 		if len(s.Probe) > 0 {
 			if ended, err := awaitReady(l, s.Probe, svc, ev); err != nil {
@@ -129,6 +165,7 @@ func Execute(x core.Execution, l Launcher, ev Events, out io.Writer) core.Attemp
 		return failed(err)
 	}
 	started = true
+	running = append([]Process{main}, running...)
 	select {
 	case st := <-main.Exited():
 		return exited(st)
@@ -141,8 +178,10 @@ func Execute(x core.Execution, l Launcher, ev Events, out io.Writer) core.Attemp
 			return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecServiceExited}}
 		}
 	case <-ev.Limit:
+		ev.terminate(running...)
 		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecTimedOut}}
 	case <-ev.Cancelled:
+		ev.terminate(running...)
 		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
 	}
 }
@@ -181,9 +220,11 @@ func awaitReady(l Launcher, probe []string, svc Process, ev Events) (*core.ExecO
 			return end(core.ExecServiceExited)
 		case <-ev.Limit:
 			p.Kill()
+			ev.terminate(svc)
 			return end(core.ExecServiceNotReady)
 		case <-ev.Cancelled:
 			p.Kill()
+			ev.terminate(svc)
 			return end(core.ExecCancelled)
 		}
 		pause, stop := ev.Pause()
@@ -195,9 +236,11 @@ func awaitReady(l Launcher, probe []string, svc Process, ev Events) (*core.ExecO
 			return end(core.ExecServiceExited)
 		case <-ev.Limit:
 			stop()
+			ev.terminate(svc)
 			return end(core.ExecServiceNotReady)
 		case <-ev.Cancelled:
 			stop()
+			ev.terminate(svc)
 			return end(core.ExecCancelled)
 		}
 	}

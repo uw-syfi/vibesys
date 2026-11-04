@@ -160,6 +160,12 @@ func (w *ShellWorld) render(b *strings.Builder, p Program) {
 			w.must("wake", AliveMark(s.Name), os.O_RDWR)
 			fmt.Fprintf(b, "exec 9>%s\n", quote(w.path("alive", s.Name)))
 			fmt.Fprintf(b, ": >> %s\nprintf '\\n' 1<>%s\n", quote(w.path("mark", AliveMark(s.Name))), quote(w.path("wake", AliveMark(s.Name))))
+		case OpOnTerm:
+			var handler strings.Builder
+			w.render(&handler, s.Body)
+			fmt.Fprintf(b, "trap %s TERM\n", quote(handler.String()+"exit 0\n"))
+		case OpIgnoreTerm:
+			b.WriteString("trap '' TERM\n")
 		case OpUnlessFlag:
 			fmt.Fprintf(b, "[ -e %s ] || exit 1\n", quote(w.path("flag", s.Name)))
 		default:

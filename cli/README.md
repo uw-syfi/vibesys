@@ -630,6 +630,27 @@ refused with the reason.
 - The docker program must be on the `PATH` of the daemon, and the user must be allowed to use it,
   on the machine the operator config places the engine on.
 
+### Stopping a command
+
+When a job is cancelled or reaches its time limit, the CLI first sends SIGTERM and then, after a
+grace period, kills what is left, so that a task's trusted wrapper can clean up what it made outside
+the machine, such as a Kubernetes namespace. On the host SIGTERM goes to the command's whole process
+group; in a container it goes to every process but the container's first, which only waits. The
+run then waits until the commands have ended or the grace period (`stop_grace_seconds`, 30 seconds
+by default) is over, whichever is first, and then ends the group with SIGKILL on the host and removes
+the container with `docker rm --force` as before. This holds for a command and for its `--service`
+(both are asked at once), for the docker and the host environments, and for the ssh and slurm
+placements, whose containers are reached through the same docker calls; a slurm allocation is
+cancelled only after the container is removed. Output written while the commands clean up is kept in
+the job's log. The grace is spent after the time limit, not inside it, and the largest grace is
+shorter than the daemon's five minutes' wait for a stopped job to end.
+
+What it does not do: every process of the group gets SIGTERM, so a helper the wrapper starts for
+its cleanup (such as `kubectl`) is asked to stop too, unless it handles or ignores the signal, as a
+wrapper does with `trap '' TERM` before it starts the helper. Nothing sends SIGTERM when the supervisor or the daemon is killed: the commands are then
+killed at once, as the guard of the host environment and the container's removal always did, and a
+probe of a service's readiness is killed at once and is not asked to terminate.
+
 ### The operator config
 
 Settings about the machine belong to whoever runs the CLI, never to a task. They are read from
@@ -666,6 +687,7 @@ devices = "all"
 | Key | Meaning |
 | --- | --- |
 | `[scheduler] policy` | Which job starts next: `fifo` (default) or `fair-share`. |
+| `stop_grace_seconds` | How long a job's commands get to clean up after a cancel or the time limit asks them to terminate, before they are killed, on the host and on every placement (30 by default, at most 240). See "Stopping a command". |
 | `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
 | `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh) or `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`). A name is lower-case letters, digits, `_` and `-`. |
 | `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it. More than 1 needs kind `local`, since another machine stages and sweeps one job at a time. |

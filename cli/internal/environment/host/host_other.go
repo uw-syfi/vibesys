@@ -21,6 +21,7 @@ type Config struct {
 	Backend    backend.Backend
 	Timers     clock.Timers
 	ProbePause time.Duration
+	Grace      time.Duration
 }
 
 // Environment is the host environment, which this operating system cannot provide.

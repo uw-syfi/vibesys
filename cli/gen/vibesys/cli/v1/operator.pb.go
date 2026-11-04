@@ -96,9 +96,14 @@ type OperatorConfig struct {
 	Remote *RemoteSettings `protobuf:"bytes,3,opt,name=remote,proto3" json:"remote,omitempty"`
 	Slurm  *SlurmSettings  `protobuf:"bytes,4,opt,name=slurm,proto3" json:"slurm,omitempty"`
 	// How the daemon shares the placements between jobs.
-	Scheduler     *Scheduler `protobuf:"bytes,5,opt,name=scheduler,proto3" json:"scheduler,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Scheduler *Scheduler `protobuf:"bytes,5,opt,name=scheduler,proto3" json:"scheduler,omitempty"`
+	// How long a job's commands get to clean up after a cancel or the time limit asks them to
+	// terminate (SIGTERM), before they are killed, for the host and for every placement. A command
+	// that traps SIGTERM can remove what it made outside the machine, such as a Kubernetes
+	// namespace. At most 240 seconds, which the daemon's wait for a stopped command outlasts. Unset means 30 seconds.
+	StopGraceSeconds *float64 `protobuf:"fixed64,6,opt,name=stop_grace_seconds,json=stopGraceSeconds,proto3,oneof" json:"stop_grace_seconds,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *OperatorConfig) Reset() {
@@ -164,6 +169,13 @@ func (x *OperatorConfig) GetScheduler() *Scheduler {
 		return x.Scheduler
 	}
 	return nil
+}
+
+func (x *OperatorConfig) GetStopGraceSeconds() float64 {
+	if x != nil && x.StopGraceSeconds != nil {
+		return *x.StopGraceSeconds
+	}
+	return 0
 }
 
 // Scheduler is how the daemon shares the placements between the jobs that wait.
@@ -768,7 +780,7 @@ var File_vibesys_cli_v1_operator_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/cli/v1/operator.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\"\xbe\x03\n" +
+	"\x1dvibesys/cli/v1/operator.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\"\xa1\x04\n" +
 	"\x0eOperatorConfig\x12v\n" +
 	"\n" +
 	"placements\x18\x01 \x03(\v2..vibesys.cli.v1.OperatorConfig.PlacementsEntryB&\xbaH#\x9a\x01 \"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$R\n" +
@@ -776,10 +788,12 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x06docker\x18\x02 \x01(\v2\x1c.vibesys.cli.v1.LegacyDockerR\x06docker\x126\n" +
 	"\x06remote\x18\x03 \x01(\v2\x1e.vibesys.cli.v1.RemoteSettingsR\x06remote\x123\n" +
 	"\x05slurm\x18\x04 \x01(\v2\x1d.vibesys.cli.v1.SlurmSettingsR\x05slurm\x127\n" +
-	"\tscheduler\x18\x05 \x01(\v2\x19.vibesys.cli.v1.SchedulerR\tscheduler\x1aX\n" +
+	"\tscheduler\x18\x05 \x01(\v2\x19.vibesys.cli.v1.SchedulerR\tscheduler\x12J\n" +
+	"\x12stop_grace_seconds\x18\x06 \x01(\x01B\x17\xbaH\x14\x12\x12\x19\x00\x00\x00\x00\x00\x00n@)\xfc\xa9\xf1\xd2MbP?H\x00R\x10stopGraceSeconds\x88\x01\x01\x1aX\n" +
 	"\x0fPlacementsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12/\n" +
-	"\x05value\x18\x02 \x01(\v2\x19.vibesys.cli.v1.PlacementR\x05value:\x028\x01\"u\n" +
+	"\x05value\x18\x02 \x01(\v2\x19.vibesys.cli.v1.PlacementR\x05value:\x028\x01B\x15\n" +
+	"\x13_stop_grace_seconds\"u\n" +
 	"\tScheduler\x12$\n" +
 	"\x06policy\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\x06policy\x88\x01\x01\x12*\n" +
 	"\bmax_jobs\x18\x02 \x01(\rB\n" +
@@ -903,6 +917,7 @@ func file_vibesys_cli_v1_operator_proto_init() {
 	if File_vibesys_cli_v1_operator_proto != nil {
 		return
 	}
+	file_vibesys_cli_v1_operator_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_cli_v1_operator_proto_msgTypes[1].OneofWrappers = []any{}
 	file_vibesys_cli_v1_operator_proto_msgTypes[4].OneofWrappers = []any{}
 	type x struct{}

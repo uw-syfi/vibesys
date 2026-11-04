@@ -58,6 +58,12 @@ func render(p envtest.Program) []string {
 			out = append(out, "}")
 		case envtest.OpAlive:
 			out = append(out, "alive", s.Name)
+		case envtest.OpOnTerm:
+			out = append(out, "on-term", "{")
+			out = append(out, render(s.Body)...)
+			out = append(out, "}")
+		case envtest.OpIgnoreTerm:
+			out = append(out, "ignore-term")
 		case envtest.OpUnlessFlag:
 			out = append(out, "unless-flag", s.Name)
 		default:
