@@ -157,7 +157,7 @@ var rules = map[string][]string{
 		"internal/backend/nvidia", "internal/environment/docker/machine", "internal/environment/slurm",
 		"internal/operator", "internal/remote", "internal/schedule", "internal/schedule/policy/fairshare",
 		"internal/schedule/policy/fifo", "gen/", "internal/resource", "internal/resource/gpu",
-		"internal/resource/kubernetes", "internal/resource/mounts", "internal/lease", "internal/lease/hostlease",
+		"internal/resource/kubernetes", "internal/resource/mounts", "internal/lease", "internal/lease/hostlease", "internal/lease/kubelease",
 		"internal/lease/locallease", "internal/neighbors",
 	},
 
