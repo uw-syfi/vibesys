@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -96,6 +97,10 @@ type Task struct {
 	// docker_in_docker = true. A container run by this build has no container runtime in it, so
 	// a docker environment refuses the task instead of running it without what it needs.
 	NestedDocker bool
+	// Needs are the resources a docker job of the task needs its placement to give its container,
+	// from [environment] needs, each once, in the order written. A placement that lacks one does
+	// not run the task's docker jobs.
+	Needs []core.ResourceKind
 	// Build runs first, when the task has one.
 	Build     *Command
 	Check     Command
@@ -182,6 +187,35 @@ func nestedDocker(environment map[string]any) (bool, error) {
 		return false, invalid("%s: [environment] docker_in_docker must be true or false, got %v", ManifestName, v)
 	}
 	return b, nil
+}
+
+// needs reads [environment] needs: a list of resource kinds, each named once. A name that is not
+// a kind is refused, naming the kinds there are, instead of being read as no need.
+func needs(environment map[string]any) ([]core.ResourceKind, error) {
+	v, ok := environment["needs"]
+	if !ok {
+		return nil, nil
+	}
+	list, ok := v.([]any)
+	if !ok {
+		return nil, invalid("%s: [environment] needs must be a list of resource names, got %v", ManifestName, v)
+	}
+	var out []core.ResourceKind
+	for i, item := range list {
+		name, ok := item.(string)
+		if !ok {
+			return nil, invalid("%s: [environment] needs[%d] must be a resource name, got %v", ManifestName, i, item)
+		}
+		kind, err := core.ParseResourceKind(name)
+		if err != nil {
+			return nil, invalid("%s: [environment] needs[%d]: %v", ManifestName, i, core.AsFailure(err).Message)
+		}
+		if slices.Contains(out, kind) {
+			return nil, invalid("%s: [environment] needs names %q twice", ManifestName, name)
+		}
+		out = append(out, kind)
+	}
+	return out, nil
 }
 
 func readOptional(fsys fs.FS, name string) ([]byte, error) {
@@ -412,6 +446,9 @@ func build(name string, m manifest, o objectivesFile) (Task, error) {
 		return Task{}, err
 	}
 	t.NestedDocker = nested
+	if t.Needs, err = needs(m.Environment); err != nil {
+		return Task{}, err
+	}
 	backend, err := backendOf(m.Backends)
 	if err != nil {
 		return Task{}, err

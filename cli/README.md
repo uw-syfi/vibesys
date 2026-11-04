@@ -94,7 +94,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 is migrated to version 3 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 or 3 is migrated to version 4 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, and version 4 a job's placement); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
@@ -125,7 +125,11 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/environment/slurm/` | The Slurm placement: an `Allocator` that runs a container's first process and every image build under `srun`, and an `Engine` that removes a container and then cancels and confirms the end of its allocation, and sweeps the allocations a dead run left. Passes the environment contract suite over the fake engine. |
 | `internal/remote/` | Running programs on a machine and copying directories to and from it: this one, or another over ssh and rsync. An exit code that is ssh's own is never taken for the program's. |
 | `internal/backend/nvidia/` | The GPU facts of a machine (model, count, driver, the driver's CUDA version) for a fingerprint, read with `nvidia-smi`. |
-| `internal/operator/` | The operator config (`cli.toml`): where the Docker engine runs, which GPUs a container gets, and the read-only mounts. |
+| `internal/operator/` | The operator config (`cli.toml`), decoded into `OperatorConfig` in `operator.proto` with unknown keys refused by name: its named placements, each placement's kind and sections, and a file of the earlier shape read as the placement `default`. What a kind's section means is that kind's package's business. |
+| `internal/resource/` | `Resource`: what a placement gives every container (`Kind`, `Claims` for scheduling, `Fingerprint`, and `Attach`, the mounts, variables, network and GPUs a container is made with), and the contract suite in `resourcetest/` every resource passes, with the Fake in `fakeresource/` (tests only). |
+| `internal/resource/gpu/` | The `gpu` resource: GPUs passed with `--gpus`, or by a runtime that reads `NVIDIA_VISIBLE_DEVICES`; its fingerprint is the GPUs' facts. |
+| `internal/resource/kubernetes/` | The `kubernetes` resource: a cluster's kubeconfig mounted read-only at `KUBECONFIG`, the network mode that reaches it, and the registry and builder addresses; its fingerprint is the API server and its version, read with `kubectl`. |
+| `internal/resource/mounts/` | The `mounts` resource: read-only directories at `/vibesys/mounts/<name>`. |
 | `internal/wire/` | Translation between `core` types and the generated contract types, the version handshake, and typed refusals. |
 | `internal/supervisor/` | The supervisor as a domain type: it owns one job's command and its output, and reports the outcome. |
 | `internal/supervisor/rpc/` | The supervisor's gRPC server and client, over the additive `supervisor.proto`. |
@@ -137,7 +141,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/daemon/` | The daemon as a process: the gRPC server over `app`, the single-instance lock, the readiness signal, and a clean shutdown. |
 | `internal/daemon/daemontest/` | A daemon started in a test's process on a test directory. Tests only. |
 | `internal/client/` | What a command line calls: connect (starting the daemon under a lock when none runs), the version handshake, and `Wait`. It speaks the contract's messages and never imports `core`. |
-| `internal/production/` | The wiring of the shipped binary: which environment, stores and supervisors the daemon runs with. |
+| `internal/production/` | The wiring of the shipped binary: which environments (one docker environment per placement, with its resources), stores and supervisors the daemon runs with. The only package that names a concrete placement kind or resource kind. |
 | `internal/upgrade/` | `vibesys-cli upgrade`: the release asset names, a `Source` of releases (GitHub over HTTP, or the in-memory fake in `upgradetest/`), and the verify-then-rename install. |
 | `internal/sim/` | The whole-daemon simulation: the real `app`, server and client over Fakes, driven by a seed. Tests only; it has no product code. |
 | `internal/archcheck/` | The layer, layout, clock, goroutine and fuzzing rules below, as a check `go test` runs. |
@@ -184,6 +188,10 @@ Dependencies point one way: `cmd` and the shell packages, then interfaces, then 
 - Every exported `To*` decoder in `internal/wire` (what turns a peer's message into a domain value)
   is called by a fuzz target in `internal/wire/fuzz_test.go`, or is listed in `archcheck` with the
   reason a fuzz target already covers it.
+- A resource kind's package imports `resource` and `core` (and what it reads a machine with), never
+  another kind's, and only `production` imports a concrete kind. A string literal that spells
+  `kubernetes`, `slurm` or `nvidia`, in any case, appears only in the package that implements it and
+  in the decoding of the operator config (`operator`), so no other code branches on a concrete name.
 
 `internal/archcheck` enforces all of these. A new package needs an entry in its rules table in the
 same change, so an unlisted package fails the test instead of passing unchecked. Imports that only
@@ -204,16 +212,23 @@ default to the environment variables shown:
 | `--harness` | `VIBESYS_HARNESS` | The agent harness, such as `claude-code`. |
 | `--agent` | `VIBESYS_AGENT` | The agent making the call. |
 
+Each `submit` also takes `--placement`, which defaults to `VIBESYS_PLACEMENT`: the placement of the
+operator config a docker job runs on (see "The operator config"). Unset, the job runs on the one
+placement that gives every resource its task needs, and is refused, naming them, when none or
+several do. A host job has no placement.
+
 ### Environment
 
 These are all the environment names the CLI reads (through one `getenv`, which a test records).
-The orchestrator sets every one of them for the agents it launches, from the golden
-`proto/vibesys/cli/v1/conformance/identity_env.golden.json`, which the CLI's and the sidecar's tests
-both read; a name that is empty there is left unset in the agent's environment.
+The orchestrator sets every one of them for the agents it launches but `VIBESYS_PLACEMENT`, from the
+golden `proto/vibesys/cli/v1/conformance/identity_env.golden.json`, which the CLI's and the
+sidecar's tests both read; a name that is empty there is left unset in the agent's environment.
+`VIBESYS_PLACEMENT` is the operator's: an agent inherits it from the environment it was started in.
 
 | Name | Meaning |
 | --- | --- |
 | `VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_HARNESS`, `VIBESYS_AGENT` | The defaults of the context flags above. |
+| `VIBESYS_PLACEMENT` | The default of `--placement`. |
 | `XDG_RUNTIME_DIR` | Where the runtime directory is (see "The daemon and the supervisors"). Ignored unless it is an absolute path. |
 | `XDG_STATE_HOME` | Where the task index is: `$XDG_STATE_HOME/vibesys`, else `~/.local/state/vibesys`. Ignored unless it is an absolute path. |
 | `HOME` | The home directory the index falls back to. |
@@ -372,7 +387,8 @@ queued jobs start from `schedule`:
 
 - A job holds claims from its launch until its end is recorded: by default a slot of
   `placement:default`, and a measure job the whole placement, so a benchmark sample never runs
-  beside another job. The placement has `[scheduler] max_jobs` slots (1 by default).
+  beside another job. It has the `max_jobs` slots of the operator config's one placement (1 by
+  default); a config of several placements gives it one.
 - No resource is given past its capacity and an exclusive claim shares its resource with nothing,
   whatever the policy. The policy (`[scheduler] policy`) only orders the jobs that may start:
   `fifo` takes the oldest first, and `fair-share` takes the next job of the run (the run that first
@@ -509,13 +525,29 @@ refused with the reason.
 - Commands run in a container as the invoking user, in a clean checkout of the exact commit. The
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
-  no container runtime. A task for the `cuda` backend runs when the operator config passes GPUs
-  (`gpus` in `[docker]`), and is refused otherwise; other accelerator backends are refused.
+  no container runtime. A task for the `cuda` backend runs when its placement has a `gpu`
+  resource, and is refused otherwise; other accelerator backends are refused.
 - A container also gets the cache directory of the task's image at `/vibesys/cache`, kept across
-  commits and jobs, an empty `/vibesys/artifacts` that is kept with the job, and the operator's
-  read-only mounts at `/vibesys/mounts/<name>`. The variables `VIBESYS_CACHE_DIR`,
-  `VIBESYS_ARTIFACTS_DIR` and `VIBESYS_MOUNTS` name them. Why the task environment is shaped this
+  commits and jobs, and an empty `/vibesys/artifacts` that is kept with the job; the variables
+  `VIBESYS_CACHE_DIR` and `VIBESYS_ARTIFACTS_DIR` name them. Why the task environment is shaped this
   way is in [docs/contributing/cli-task-environment.md](../docs/contributing/cli-task-environment.md).
+- The container runs on a placement of the operator config and gets what each of its resources
+  attaches:
+
+  | Resource | What the container gets |
+  | --- | --- |
+  | `gpu` | The GPUs, by `--gpus`, or by the runtime with `NVIDIA_VISIBLE_DEVICES`. |
+  | `kubernetes` | The kubeconfig, read-only, at `/vibesys/kubeconfig`, with `KUBECONFIG` naming it; the network mode (`docker run --network`), such as `host` for a cluster whose API server listens on the machine's loopback address; `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER` when the config names them. The task deploys to the cluster and cleans up after itself; the daemon does not manage the cluster. |
+  | `mounts` | Each directory, read-only, at `/vibesys/mounts/<name>`, with `VIBESYS_MOUNTS` listing the names. |
+
+  A task names the resources its jobs need in its manifest, `[environment] needs = ["kubernetes"]`
+  (any of `gpu`, `kubernetes`, `mounts`), and a job on a placement that lacks one is refused before
+  anything is built, with `placement "<name>" has no resource "<kind>"`.
+- A result's environment fingerprint pins the placement (`placement`) and what identifies each
+  resource: the GPUs' model, count and driver, the cluster's server and version
+  (`kubernetes_server`, `kubernetes_version`), the mounts' names. Results from
+  different placements or resources are never compared, and a saved result or check pass is reused
+  only on the same ones.
 - Every container is named and labelled for the daemon that started it. A cancelled or timed out
   job removes its container, and the next job removes any container an earlier job left, for
   instance when the supervisor was killed. Containers that other tools started are never touched.
@@ -527,21 +559,53 @@ refused with the reason.
 Settings about the machine belong to whoever runs the CLI, never to a task. They are read from
 `$XDG_CONFIG_HOME/vibesys/cli.toml` (`~/.config/vibesys/cli.toml`), or the file
 `VIBESYS_CLI_CONFIG` names, when the daemon and each supervisor start; `daemon restart` applies a
-change. Unknown keys are refused. With no file, docker runs on this machine with no GPU.
+change. The schema is `OperatorConfig` in `proto/vibesys/cli/v1/operator.proto`; unknown keys and
+values its rules refuse are refused, naming the key. With no file, there is one placement,
+`default`, of kind `local`, with no resource.
+
+A file names its placements, each a table of its own:
+
+```toml
+[placements.local]
+kind = "local"
+max_jobs = 1
+[placements.local.resources.kubernetes]
+kubeconfig = "/home/me/.kube/kind-config"
+registry = "localhost:5001"
+builder = "tcp://127.0.0.1:1234"
+network = "host"
+
+[placements.a100]
+kind = "slurm"
+[placements.a100.remote]
+host = "host-a"
+remote_workspace_root = "/scratch/me/vibesys-cli"
+[placements.a100.slurm]
+partition = "a100"
+gres = "gpu:1"
+[placements.a100.resources.gpu]
+devices = "all"
+```
 
 | Key | Meaning |
 | --- | --- |
-| `[scheduler] max_jobs` | How many jobs run at once (1 by default). A measure job always runs alone. More than 1 needs `[docker] placement = "local"`, since another machine stages and sweeps one job at a time. |
 | `[scheduler] policy` | Which job starts next: `fifo` (default) or `fair-share`. |
-| `[docker] placement` | `local` (default), `ssh` (docker runs on `[remote] host`, reached over ssh) or `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`). |
-| `[docker] gpus` | A `docker --gpus` value such as `all`; empty passes no GPU, and a `cuda` task is refused. |
-| `[docker] runtime` | `nvidia` passes the GPUs with `--runtime nvidia` and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
-| `[docker.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`. |
-| `[remote] host`, `ssh_command`, `rsync_command` | The ssh destination and the programs that reach it. |
-| `[remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). |
-| `[slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | What an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
-| `[slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
+| `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
+| `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh) or `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`). A name is lower-case letters, digits, `_` and `-`. |
+| `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job always runs alone. More than 1 needs kind `local`, since another machine stages and sweeps one job at a time. Until the scheduler claims the placement each job runs on, a config of several placements runs one job at a time across them. |
+| `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh` and `slurm`: the ssh destination and the programs that reach it. |
+| `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). |
+| `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
+| `[placements.<name>.slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
+| `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
+| `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
+| `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`. |
 
+A file of the earlier shape is read as the one placement `default`, and needs no edit: `[docker]
+placement` is its kind, `[remote]` and `[slurm]` its sections, `[docker] gpus` and `runtime` its
+`gpu` resource and `[docker.mounts]` its `mounts` resource. A file holds one shape or the other.
+Each placement's containers have a scope of their own, and those of `default` keep the scope the
+daemon's one placement had.
 On another machine, a run's checkout and scratch directory are copied to `remote_workspace_root`
 and mounted at their local paths; the scratch directory and the artifacts are copied back when the
 command ends, and a copy that fails makes the command's ending unknown. Under `slurm`, a container
@@ -549,6 +613,9 @@ is removed and then its allocation is cancelled and confirmed ended, on every pa
 Docker daemon runs outside Slurm's cgroups; a run first cancels any allocation of its scope that a
 dead run left. The queue wait does not count against a command's timeout. The ssh host must be the
 node Docker runs on.
+
+A docker fingerprint holds the placement and its resources' facts, so a docker result saved by a
+build before placements is not compared with, or reused for, one of this build.
 
 A second daemon independent of the first takes its own `XDG_RUNTIME_DIR`, `XDG_STATE_HOME` and
 `VIBESYS_CLI_CONFIG`; its containers and Slurm jobs carry its own scope. Stores live in the

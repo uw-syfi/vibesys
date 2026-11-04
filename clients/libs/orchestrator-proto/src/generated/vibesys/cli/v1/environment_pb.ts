@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/environment.proto.
  */
 export const file_vibesys_cli_v1_environment: GenFile = /*@__PURE__*/
-  fileDesc("CiB2aWJlc3lzL2NsaS92MS9lbnZpcm9ubWVudC5wcm90bxIOdmliZXN5cy5jbGkudjEi+wEKFkVudmlyb25tZW50RmluZ2VycHJpbnQSLQoEa2luZBgBIAEoDjIfLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50S2luZBIsCgdiYWNrZW5kGAIgASgOMhsudmliZXN5cy5jbGkudjEuQmFja2VuZEtpbmQSFAoMaW1hZ2VfZGlnZXN0GAMgASgJEkAKBWZhY3RzGAQgAygLMjEudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludC5GYWN0c0VudHJ5GiwKCkZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJ4CgxNYWNoaW5lRmFjdHMSDwoHaG9zdF9pZBgBIAEoCRIKCgJvcxgCIAEoCRIMCgRhcmNoGAMgASgJEhEKCWNwdV9tb2RlbBgEIAEoCRIUCgxsb2dpY2FsX2NwdXMYBSABKA0SFAoMbWVtb3J5X2J5dGVzGAYgASgEIpEBCgtNYWNoaW5lTG9hZBIuCgpzYW1wbGVkX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIXCg9sb2FkX2F2ZXJhZ2VfMW0YAiABKAESGQoRY3B1X2J1c3lfZnJhY3Rpb24YAyABKAESHgoWbWVtb3J5X2F2YWlsYWJsZV9ieXRlcxgEIAEoBCprCg9FbnZpcm9ubWVudEtpbmQSIAocRU5WSVJPTk1FTlRfS0lORF9VTlNQRUNJRklFRBAAEhkKFUVOVklST05NRU5UX0tJTkRfSE9TVBABEhsKF0VOVklST05NRU5UX0tJTkRfRE9DS0VSEAIqogEKC0JhY2tlbmRLaW5kEhwKGEJBQ0tFTkRfS0lORF9VTlNQRUNJRklFRBAAEhQKEEJBQ0tFTkRfS0lORF9DUFUQARIVChFCQUNLRU5EX0tJTkRfQ1VEQRACEhUKEUJBQ0tFTkRfS0lORF9ST0NNEAMSFgoSQkFDS0VORF9LSU5EX01FVEFMEAQSGQoVQkFDS0VORF9LSU5EX1RSQUlOSVVNEAVCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("CiB2aWJlc3lzL2NsaS92MS9lbnZpcm9ubWVudC5wcm90bxIOdmliZXN5cy5jbGkudjEi+wEKFkVudmlyb25tZW50RmluZ2VycHJpbnQSLQoEa2luZBgBIAEoDjIfLnZpYmVzeXMuY2xpLnYxLkVudmlyb25tZW50S2luZBIsCgdiYWNrZW5kGAIgASgOMhsudmliZXN5cy5jbGkudjEuQmFja2VuZEtpbmQSFAoMaW1hZ2VfZGlnZXN0GAMgASgJEkAKBWZhY3RzGAQgAygLMjEudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludC5GYWN0c0VudHJ5GiwKCkZhY3RzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASJ4CgxNYWNoaW5lRmFjdHMSDwoHaG9zdF9pZBgBIAEoCRIKCgJvcxgCIAEoCRIMCgRhcmNoGAMgASgJEhEKCWNwdV9tb2RlbBgEIAEoCRIUCgxsb2dpY2FsX2NwdXMYBSABKA0SFAoMbWVtb3J5X2J5dGVzGAYgASgEIpEBCgtNYWNoaW5lTG9hZBIuCgpzYW1wbGVkX2F0GAEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIXCg9sb2FkX2F2ZXJhZ2VfMW0YAiABKAESGQoRY3B1X2J1c3lfZnJhY3Rpb24YAyABKAESHgoWbWVtb3J5X2F2YWlsYWJsZV9ieXRlcxgEIAEoBCprCg9FbnZpcm9ubWVudEtpbmQSIAocRU5WSVJPTk1FTlRfS0lORF9VTlNQRUNJRklFRBAAEhkKFUVOVklST05NRU5UX0tJTkRfSE9TVBABEhsKF0VOVklST05NRU5UX0tJTkRfRE9DS0VSEAIqogEKC0JhY2tlbmRLaW5kEhwKGEJBQ0tFTkRfS0lORF9VTlNQRUNJRklFRBAAEhQKEEJBQ0tFTkRfS0lORF9DUFUQARIVChFCQUNLRU5EX0tJTkRfQ1VEQRACEhUKEUJBQ0tFTkRfS0lORF9ST0NNEAMSFgoSQkFDS0VORF9LSU5EX01FVEFMEAQSGQoVQkFDS0VORF9LSU5EX1RSQUlOSVVNEAUqfAoMUmVzb3VyY2VLaW5kEh0KGVJFU09VUkNFX0tJTkRfVU5TUEVDSUZJRUQQABIVChFSRVNPVVJDRV9LSU5EX0dQVRABEhwKGFJFU09VUkNFX0tJTkRfS1VCRVJORVRFUxACEhgKFFJFU09VUkNFX0tJTkRfTU9VTlRTEANCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * EnvironmentFingerprint identifies the environment a result was taken in. Two results are
@@ -42,6 +42,9 @@ export type EnvironmentFingerprint = Message<"vibesys.cli.v1.EnvironmentFingerpr
   /**
    * Facts the environment pinned, by name: operating system, architecture, toolchain versions.
    * Equality is over the whole map, so the names an environment reports are part of its contract.
+   * A docker environment also pins the placement its containers run on ("placement") and what
+   * identifies each resource attached to them (such as "gpu_model" or "kubernetes_server"), so
+   * results from different placements or resources are never compared or reused.
    *
    * @generated from field: map<string, string> facts = 4;
    */
@@ -206,4 +209,46 @@ export enum BackendKind {
  */
 export const BackendKindSchema: GenEnum<BackendKind> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_environment, 1);
+
+/**
+ * ResourceKind is something a placement can give a job's container, and a task can need. It is
+ * closed: a new kind is a contract change. A task names one in vibesys.input.toml as the value's
+ * name without its prefix, in lower case ([environment] needs = ["kubernetes"]).
+ *
+ * @generated from enum vibesys.cli.v1.ResourceKind
+ */
+export enum ResourceKind {
+  /**
+   * @generated from enum value: RESOURCE_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * GPUs passed into the container.
+   *
+   * @generated from enum value: RESOURCE_KIND_GPU = 1;
+   */
+  GPU = 1,
+
+  /**
+   * Access to a Kubernetes cluster: its kubeconfig, the network that reaches it, and the addresses
+   * of the registry and image builder it pulls from.
+   *
+   * @generated from enum value: RESOURCE_KIND_KUBERNETES = 2;
+   */
+  KUBERNETES = 2,
+
+  /**
+   * Read-only directories of the engine's machine.
+   *
+   * @generated from enum value: RESOURCE_KIND_MOUNTS = 3;
+   */
+  MOUNTS = 3,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.ResourceKind.
+ */
+export const ResourceKindSchema: GenEnum<ResourceKind> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_environment, 2);
 

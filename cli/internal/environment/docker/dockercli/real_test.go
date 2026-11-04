@@ -108,7 +108,7 @@ func newProvider(timers clock.Timers, scope string, engine docker.Engine, docker
 	}
 	p, err := docker.New(docker.Config{
 		Engine: engine, Source: source{docker.Spec{Dockerfile: []byte(dockerfile)}}, Backend: cpuBackend(),
-		Timers: timers, IDs: dockercli.RandomIDs{}, Scope: scope,
+		Timers: timers, IDs: dockercli.RandomIDs{}, Scope: scope, Placement: "default",
 		User: docker.User{UID: os.Getuid(), GID: os.Getgid()},
 	})
 	if err != nil {

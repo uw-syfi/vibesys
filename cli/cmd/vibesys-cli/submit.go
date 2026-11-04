@@ -27,6 +27,9 @@ func submitCommand(ctx context.Context, d deps, args []string) int {
 	}
 }
 
+// envPlacement names the variable --placement defaults to.
+const envPlacement = "VIBESYS_PLACEMENT"
+
 // unavailable is a refusal the command makes before it calls the daemon.
 type unavailable struct{ message string }
 
@@ -39,6 +42,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 	fs, c := newFlags("submit "+kind, d)
 	var (
 		env     = fs.String("env", "", "the environment to run in: host or docker (default: the task's)")
+		place   = fs.String("placement", d.getenv(envPlacement), "the placement of the operator config a docker job runs on (default: the one that gives what the task needs)")
 		note    = fs.String("note", "", "a note to attach to the job")
 		noCache = fs.Bool("no-cache", false, "run the whole job again, with a fresh check, even when saved results answer it")
 		plan    = fs.Uint("plan", 0, "the number of a plan to link the job to")
@@ -78,7 +82,7 @@ func submitFlow(ctx context.Context, d deps, kind string, args []string) int {
 	if err != nil {
 		return fail(d, asJSON, err)
 	}
-	spec := &cliv1.JobSpec{Commit: string(commit), Environment: envKind}
+	spec := &cliv1.JobSpec{Commit: string(commit), Environment: envKind, Placement: *place}
 	if kind == "check" {
 		spec.Settings = &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}
 	} else {
@@ -94,6 +98,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("submit command", d)
 	var (
 		env     = fs.String("env", "", "the environment to run in: host or docker (default: the task's)")
+		place   = fs.String("placement", d.getenv(envPlacement), "the placement of the operator config a docker job runs on (default: the one that gives what the task needs)")
 		timeout = fs.Duration("timeout", 0, "the time limit of the command, such as 10m (default: the daemon's)")
 		service = fs.String("service", "", "a long-lived process to run the command against, split into words as a shell would, quotes kept")
 		probe   = fs.String("probe", "", "a command that succeeds when the service is ready, split as --service is")
@@ -151,7 +156,7 @@ func submitJob(ctx context.Context, d deps, args []string) int {
 	return send(ctx, d, asJSON, *wait, &cliv1.SubmitRequest{
 		Context: callCtx,
 		Spec: &cliv1.JobSpec{
-			Commit: string(commit), Environment: kind,
+			Commit: string(commit), Environment: kind, Placement: *place,
 			Settings: &cliv1.JobSpec_Command{Command: settings},
 		},
 		NoCache: *noCache, Note: *note, Plan: uint32(*plan),

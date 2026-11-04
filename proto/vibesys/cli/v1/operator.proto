@@ -1,0 +1,154 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// OperatorConfig is the operator config, cli.toml: the settings of the machines that run
+// vibesys-cli's jobs, which belong to whoever runs the CLI and never to a task. The TOML file is
+// decoded into this message by its field names, an enum value is written as its name without the
+// prefix in lower case, and a key this message has no field for is refused, naming the key.
+//
+// A file names its placements under [placements.<name>]. A file of the earlier shape, with
+// [docker], [remote] and [slurm] at the top, names one placement and is read as the placement
+// "default"; a file holds one shape or the other, never both. No file is the one placement
+// "default" of kind local, with no resource.
+message OperatorConfig {
+  // The placements, by name: where a docker job's container can run.
+  map<string, Placement> placements = 1 [(buf.validate.field).map.keys.string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$"];
+
+  // The earlier shape.
+  LegacyDocker docker = 2;
+  RemoteSettings remote = 3;
+  SlurmSettings slurm = 4;
+
+  // How the daemon shares the placements between jobs.
+  Scheduler scheduler = 5;
+}
+
+// Scheduler is how the daemon shares the placements between the jobs that wait.
+message Scheduler {
+  // The policy that orders the jobs that wait, by the name the daemon's wiring gives it. Unset means
+  // fifo.
+  optional string policy = 1 [(buf.validate.field).string.min_len = 1];
+  // How many jobs run at once on the one placement of the earlier shape. A file with placements sets
+  // max_jobs on each placement instead.
+  optional uint32 max_jobs = 2 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 1024
+  }];
+}
+
+// PlacementKind is where a placement's Docker engine runs containers.
+enum PlacementKind {
+  PLACEMENT_KIND_UNSPECIFIED = 0;
+  // The Docker engine of this machine.
+  PLACEMENT_KIND_LOCAL = 1;
+  // The Docker engine of another machine, reached by running docker over ssh.
+  PLACEMENT_KIND_SSH = 2;
+  // SSH, with every container, and every image build, inside an allocation of the machine's Slurm.
+  PLACEMENT_KIND_SLURM = 3;
+}
+
+// Placement is one place a docker job's container can run, and what it gives the container.
+message Placement {
+  PlacementKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // How many jobs may run on the placement at once. Zero means one.
+  uint32 max_jobs = 2 [(buf.validate.field).uint32.lte = 1024];
+  // The machine, for the ssh and slurm kinds.
+  RemoteSettings remote = 3;
+  // How an allocation is asked for, for the slurm kind.
+  SlurmSettings slurm = 4;
+  // What the placement gives every container it runs.
+  Resources resources = 5;
+}
+
+// RemoteSettings is the machine the engine runs on, for the ssh and slurm kinds.
+message RemoteSettings {
+  // An ssh destination or an alias of the user's ssh config, without options or whitespace.
+  string host = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_.@-]*$"];
+  // The programs, with arguments, that reach it. Unset means ssh and rsync.
+  repeated string ssh_command = 2 [(buf.validate.field).repeated.items.string.min_len = 1];
+  repeated string rsync_command = 3 [(buf.validate.field).repeated.items.string.min_len = 1];
+  // An absolute directory there, not /, that holds the copies of runs' directories and the caches.
+  string remote_workspace_root = 4 [(buf.validate.field).string.pattern = "^/.*[^/].*$"];
+}
+
+// SlurmSettings is how an allocation is asked for.
+message SlurmSettings {
+  string partition = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]*$"];
+  // What a measured container asks for; a build asks for no GRES.
+  string gres = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]*$"];
+  // When set, what an unmeasured container asks for instead of gres, such as a shard of a GPU.
+  string shared_gres = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]*$"];
+  // Gives a measured container, a benchmark sample, the whole node. Unset means true.
+  optional bool exclusive = 4;
+  // How many CPUs a build or an unmeasured container asks for. Unset means 8.
+  optional int32 cpus = 5 [(buf.validate.field).int32.gte = 1];
+  // The memory a build or an unmeasured container asks for, a size both Slurm and Docker read the
+  // same way, such as 32G.
+  string memory = 6 [(buf.validate.field).string.pattern = "^([1-9][0-9]*[KMGT])?$"];
+  // Passed to srun as they are, after the ones above. Each is an option.
+  repeated string srun_arguments = 7 [(buf.validate.field).repeated.items.string.pattern = "^-"];
+  // The pause between two reads of a job's state, and the bound on the wait for an allocation.
+  // Zero means the default.
+  double poll_interval_seconds = 8 [(buf.validate.field).double.gte = 0];
+  double queue_timeout_seconds = 9 [(buf.validate.field).double.gte = 0];
+}
+
+// Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind
+// is a table of its own: [placements.<name>.resources.<kind>].
+message Resources {
+  GpuResource gpu = 1;
+  KubernetesResource kubernetes = 2;
+  // Read-only directories of the engine's machine, by name: a container sees each at
+  // /vibesys/mounts/<name>. An empty table gives none.
+  map<string, string> mounts = 3 [
+    (buf.validate.field).map.keys.string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$",
+    (buf.validate.field).map.values.string.pattern = "^/[^:,\"\\n\\r]*$"
+  ];
+}
+
+// GpuResource passes GPUs into the container.
+message GpuResource {
+  // A docker --gpus value, such as "all" or "device=0,1".
+  string devices = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]+$"];
+  // When set, the container runtime that passes the devices instead of --gpus, with the devices in
+  // the runtime's variable.
+  string runtime = 2 [(buf.validate.field).string.pattern = "^[a-z0-9._-]*$"];
+}
+
+// KubernetesResource gives the container a Kubernetes cluster: its kubeconfig, read-only, at the
+// path KUBECONFIG names, the network that reaches the cluster, and the addresses of the registry
+// and the image builder the cluster's images go through.
+message KubernetesResource {
+  // An absolute path on the engine's machine of the kubeconfig file.
+  string kubeconfig = 1 [(buf.validate.field).string.pattern = "^/[^:,\"\\n\\r]*$"];
+  // The image registry the cluster pulls from, such as localhost:5001. The container gets it as
+  // VIBESYS_K8S_REGISTRY; empty sets nothing.
+  string registry = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9._:/@+-]*$"];
+  // The image builder's address, such as tcp://127.0.0.1:1234. The container gets it as
+  // VIBESYS_K8S_BUILDER; empty sets nothing.
+  string builder = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9._:/@+-]*$"];
+  // The container's network mode (docker run --network), such as "host" for a cluster whose API
+  // server listens on the machine's loopback address. Empty leaves the engine's default.
+  string network = 4 [(buf.validate.field).string.pattern = "^([A-Za-z0-9][A-Za-z0-9_.-]*)?$"];
+}
+
+// LegacyDocker is the [docker] section of the earlier shape.
+message LegacyDocker {
+  // Unspecified means local.
+  PlacementKind placement = 1 [(buf.validate.field).enum.defined_only = true];
+  // A docker --gpus value; empty passes none.
+  string gpus = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]*$"];
+  // When set, passes the GPUs with this runtime instead of --gpus. It needs gpus.
+  string runtime = 3 [(buf.validate.field).string.pattern = "^[a-z0-9._-]*$"];
+  map<string, string> mounts = 4 [
+    (buf.validate.field).map.keys.string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$",
+    (buf.validate.field).map.values.string.pattern = "^/[^:,\"\\n\\r]*$"
+  ];
+}

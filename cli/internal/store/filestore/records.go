@@ -35,7 +35,11 @@ import (
 // reads both, and migrates a store of version 2 by making the frontier directory and then writing
 // the format file at version 3, which a program of version 2 refuses to open from then on. The
 // records keep the version they were written with.
-const formatVersion = 3
+//
+// Version 4 adds the placement of a job's spec, which a version 3 program would refuse as unknown.
+// It only adds, so this program reads versions 2 to 4 and migrates a store of 2 or 3 the same way,
+// writing the format file at version 4 last.
+const formatVersion = 4
 
 // oldestFormat is the oldest version this program reads, and migrates a store of.
 const oldestFormat = 2
@@ -244,7 +248,7 @@ func jobFromMessage(m *cliv1.Job) (core.Job, error) {
 		return fail(err)
 	}
 	j := core.Job{
-		ID: core.JobID(m.GetId()), Spec: core.JobSpec{Commit: core.Commit(m.GetSpec().GetCommit()), Environment: env, Settings: settings},
+		ID: core.JobID(m.GetId()), Spec: core.JobSpec{Commit: core.Commit(m.GetSpec().GetCommit()), Environment: env, Placement: m.GetSpec().GetPlacement(), Settings: settings},
 		State: state, Key: core.JobKey(m.GetKey()), NoCache: m.GetNoCache(),
 		SubmittedAt: instant(m.GetSubmittedAt()), StartedAt: instantPtr(m.GetStartedAt()), FinishedAt: instantPtr(m.GetFinishedAt()),
 		CancelReason: m.GetCancelReason(), ResultJob: core.JobID(m.GetResultJobId()), CheckJob: core.JobID(m.GetCheckJobId()),

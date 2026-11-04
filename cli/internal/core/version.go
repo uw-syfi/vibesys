@@ -17,7 +17,10 @@ const (
 	//
 	// 3: WatchTask streams a task's state as facts, and the handshake accepts the orchestrator as
 	// a component. A daemon of 2 has neither, and rejects the component.
-	ProtocolVersion uint32 = 3
+	//
+	// 4: a submission names the placement its docker job runs on. A daemon of 3 would drop the
+	// field and run the job on its one placement, which is not what was asked.
+	ProtocolVersion uint32 = 4
 
 	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
 	// serves command lines and supervisors of 1: an older command line waits through Watch and
@@ -27,8 +30,9 @@ const (
 	// MinDaemonProtocolVersion is the oldest daemon the command line of this build works with. It
 	// is above MinProtocolVersion because the command line needs what 2 added, while a daemon of
 	// this build still serves older peers. It is at least WatchTaskSince, so a command line of this
-	// build, `daemon ensure` included, replaces a daemon that cannot serve WatchTask.
-	MinDaemonProtocolVersion uint32 = 3
+	// build, `daemon ensure` included, replaces a daemon that cannot serve WatchTask, and it is 4,
+	// so that it replaces one that would drop the placement of a submission.
+	MinDaemonProtocolVersion uint32 = 4
 )
 
 // WatchTaskSince is the protocol version that added WatchTask. It is the one definition of the

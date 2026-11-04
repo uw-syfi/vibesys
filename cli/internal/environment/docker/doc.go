@@ -11,9 +11,11 @@
 // of the image that is recorded with it.
 //
 // Besides the checkout, a container gets the cache directory of the task's image (CacheDir), an
-// empty artifacts directory when the caller gives one (ArtifactsDir), the operator's read-only
-// mounts (MountsDir), and the GPUs the operator passes. A Machine says where these come from: the
-// engine may run on another machine, and then a run's directories are copied there and back.
+// empty artifacts directory when the caller gives one (ArtifactsDir), and what each resource of
+// its placement attaches (internal/resource): GPUs, a cluster's kubeconfig and network, read-only
+// directories. A task that needs a resource the placement does not give is refused. A Machine says
+// where these come from: the engine may run on another machine, and then a run's directories are
+// copied there and back.
 //
 // The checkout is mounted at its own path and is the working directory, so a command written with
 // the checkout's path means the same thing here as on the host, and the commands run as the
@@ -49,6 +51,6 @@
 // dockerfake is the in-memory Fake. Both pass the contract in dockertest, and the environment
 // passes envtest's.
 //
-// It supports the CPU backend, and the CUDA backend when the operator passes GPUs. Any other
+// It supports the CPU backend, and the CUDA backend when the placement gives GPUs. Any other
 // accelerator is refused, not ignored.
 package docker

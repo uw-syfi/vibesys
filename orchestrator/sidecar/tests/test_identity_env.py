@@ -72,6 +72,8 @@ server_envs = st.dictionaries(
 
 def _value(launch: fx.LaunchSession, source: str) -> str:
     """What the golden says fills a name: a field of the launch, read independently of the sidecar."""
+    if not source:
+        return ""  # the orchestrator does not fill it: the agent inherits it, as `empty: keep` says
     if source == "harness":
         return {orch.HARNESS_CLAUDE_CODE: "claude-code", orch.HARNESS_CODEX: "codex"}[
             launch.harness

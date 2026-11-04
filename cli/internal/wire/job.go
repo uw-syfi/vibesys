@@ -102,7 +102,7 @@ func toServiceSpec(s *cliv1.ServiceSpec) *core.ServiceSpec {
 
 // JobSpec returns the contract's message for a job spec.
 func JobSpec(s core.JobSpec) *cliv1.JobSpec {
-	out := &cliv1.JobSpec{Commit: string(s.Commit), Environment: EnvironmentKind(s.Environment)}
+	out := &cliv1.JobSpec{Commit: string(s.Commit), Environment: EnvironmentKind(s.Environment), Placement: s.Placement}
 	switch settings := s.Settings.(type) {
 	case core.CheckSettings:
 		out.Settings = &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}
@@ -133,7 +133,12 @@ func ToJobSpec(field string, s *cliv1.JobSpec) (core.JobSpec, error) {
 	if err != nil {
 		return core.JobSpec{}, err
 	}
-	out := core.JobSpec{Commit: commit, Environment: env}
+	if p := s.GetPlacement(); p != "" {
+		if err := core.ValidPlacementName(p); err != nil {
+			return core.JobSpec{}, invalid("%s.placement: %v", field, err)
+		}
+	}
+	out := core.JobSpec{Commit: commit, Environment: env, Placement: s.GetPlacement()}
 	switch settings := s.GetSettings().(type) {
 	case *cliv1.JobSpec_Check:
 		out.Settings = core.CheckSettings{}

@@ -480,6 +480,10 @@ type JobSpec struct {
 	Commit string `protobuf:"bytes,1,opt,name=commit,proto3" json:"commit,omitempty"`
 	// The environment the caller asks for. Unspecified lets the task choose.
 	Environment EnvironmentKind `protobuf:"varint,2,opt,name=environment,proto3,enum=vibesys.cli.v1.EnvironmentKind" json:"environment,omitempty"`
+	// The placement of the operator config a docker job runs on: where its container runs. Empty in
+	// a submission lets the task's needed resources choose; a queued check or measure job holds the
+	// one chosen. A host job has none.
+	Placement string `protobuf:"bytes,3,opt,name=placement,proto3" json:"placement,omitempty"`
 	// Types that are valid to be assigned to Settings:
 	//
 	//	*JobSpec_Check
@@ -532,6 +536,13 @@ func (x *JobSpec) GetEnvironment() EnvironmentKind {
 		return x.Environment
 	}
 	return EnvironmentKind_ENVIRONMENT_KIND_UNSPECIFIED
+}
+
+func (x *JobSpec) GetPlacement() string {
+	if x != nil {
+		return x.Placement
+	}
+	return ""
 }
 
 func (x *JobSpec) GetSettings() isJobSpec_Settings {
@@ -1219,10 +1230,11 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\atimeout\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"E\n" +
 	"\x0fMeasureSettings\x12\x18\n" +
 	"\asamples\x18\x01 \x01(\rR\asamples\x12\x18\n" +
-	"\arecheck\x18\x02 \x01(\bR\arecheck\"\xa1\x02\n" +
+	"\arecheck\x18\x02 \x01(\bR\arecheck\"\xe5\x02\n" +
 	"\aJobSpec\x12\x16\n" +
 	"\x06commit\x18\x01 \x01(\tR\x06commit\x12A\n" +
-	"\venvironment\x18\x02 \x01(\x0e2\x1f.vibesys.cli.v1.EnvironmentKindR\venvironment\x125\n" +
+	"\venvironment\x18\x02 \x01(\x0e2\x1f.vibesys.cli.v1.EnvironmentKindR\venvironment\x12B\n" +
+	"\tplacement\x18\x03 \x01(\tB$\xbaH!r\x1f2\x1d^([a-z0-9][a-z0-9_-]{0,62})?$R\tplacement\x125\n" +
 	"\x05check\x18\n" +
 	" \x01(\v2\x1d.vibesys.cli.v1.CheckSettingsH\x00R\x05check\x12;\n" +
 	"\acommand\x18\v \x01(\v2\x1f.vibesys.cli.v1.CommandSettingsH\x00R\acommand\x12;\n" +

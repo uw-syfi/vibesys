@@ -37,8 +37,8 @@ func versionTwo(t *testing.T) *fsys.MemFS {
 	return image
 }
 
-// A store of version 2 opens as it was, and is a store of version 3 from then on: its format file
-// says 3, it holds a frontier, and a program of version 2 would refuse it. A crash at any step of
+// A store of version 2 opens as it was, and is a store of version 4 from then on: its format file
+// says 4, it holds a frontier, and a program of version 2 would refuse it. A crash at any step of
 // the migration leaves a store that the next Open migrates and that shows the same.
 func TestAStoreOfVersionTwoIsMigrated(t *testing.T) {
 	ref := versionTwo(t)
@@ -56,7 +56,7 @@ func TestAStoreOfVersionTwoIsMigrated(t *testing.T) {
 		mem.SetFault(fsys.Fault{At: step, Kind: fsys.FaultCrash})
 		opened, err := filestore.Open(stateDir, filestore.WithFS(mem))
 		if err == nil {
-			if got := unspaced(file(t, mem, "state/format")); got != `{"format":3}` {
+			if got := unspaced(file(t, mem, "state/format")); got != `{"format":4}` {
 				t.Fatalf("format file after the migration = %s", got)
 			}
 			if got := storetest.Observe(t, opened, runs...); !reflect.DeepEqual(got, want) {
@@ -72,9 +72,35 @@ func TestAStoreOfVersionTwoIsMigrated(t *testing.T) {
 			if got := storetest.Observe(t, again, runs...); !reflect.DeepEqual(got, want) {
 				t.Fatalf("after a crash at step %d (power loss %v) the store shows\n%+v\nwant\n%+v", step, power, got, want)
 			}
-			if got := unspaced(file(t, mem.CrashImage(power), "state/format")); got != `{"format":2}` && got != `{"format":3}` {
+			if got := unspaced(file(t, mem.CrashImage(power), "state/format")); got != `{"format":2}` && got != `{"format":4}` {
 				t.Fatalf("format file after a crash at step %d = %s", step, got)
 			}
 		}
+	}
+}
+
+// A store of version 3 opens as it was, and is a store of version 4 from then on: version 4 only
+// added a job's placement, so every record of version 3 reads as it was written.
+func TestAStoreOfVersionThreeIsMigrated(t *testing.T) {
+	mem := fsys.NewMemFS()
+	s := openOn(t, mem)
+	for _, o := range script() {
+		if err := o.run(t.Context(), s); err != nil {
+			t.Fatalf("%s: %v", o.name, err)
+		}
+	}
+	want := storetest.Observe(t, s, runs...)
+	image := mem.CrashImage(false)
+	for name, data := range image.Files() {
+		if strings.HasPrefix(string(data), "{") && !strings.HasSuffix(name, ".lock") {
+			image.Put(name, withVersion(data, "3"))
+		}
+	}
+	opened := openOn(t, image)
+	if got := unspaced(file(t, image, "state/format")); got != `{"format":4}` {
+		t.Fatalf("format file after the migration = %s", got)
+	}
+	if got := storetest.Observe(t, opened, runs...); !reflect.DeepEqual(got, want) {
+		t.Fatalf("a migrated store shows\n%+v\nwant\n%+v", got, want)
 	}
 }

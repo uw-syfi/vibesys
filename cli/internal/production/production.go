@@ -11,25 +11,17 @@ import (
 	"slices"
 	"strings"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/app/filestores"
-	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
-	"github.com/uw-syfi/vibesys/cli/internal/backend/nvidia"
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/daemon"
-	"github.com/uw-syfi/vibesys/cli/internal/environment"
-	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
-	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockercli"
-	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/machine"
-	hostenv "github.com/uw-syfi/vibesys/cli/internal/environment/host"
-	"github.com/uw-syfi/vibesys/cli/internal/environment/slurm"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/gitwork"
 	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
 	"github.com/uw-syfi/vibesys/cli/internal/operator"
-	"github.com/uw-syfi/vibesys/cli/internal/remote"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule/policy/fairshare"
@@ -108,12 +100,12 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
-	scheduler, err := schedulerOf(op.Scheduler)
+	scheduler, err := schedulerOf(op)
 	if err != nil {
 		return err
 	}
 	// The daemon runs no container: it only fingerprints the environments.
-	environments, err := p.machineEnvironments(op, clk, dir, dir.Path())
+	machines, err := p.machineEnvironments(op, clk, dir, dir.Path())
 	if err != nil {
 		return err
 	}
@@ -140,7 +132,8 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 				BinaryVersion: p.Version,
 				Timers:        clock.System{},
 			}),
-			Environments: environments,
+			Environments: machines.environments,
+			Placements:   machines.offers,
 			Branches:     gitrepo.System{},
 			Repositories: gitrepo.System{},
 			Tasks:        gitwork.Tasks{},
@@ -156,23 +149,32 @@ var policies = map[string]func() schedule.Policy{
 	fairshare.Name: fairshare.New,
 }
 
-// schedulerOf is how the operator config shares the machine: max_jobs slots of the one placement,
-// which a measure job takes alone, and the named policy.
-func schedulerOf(s operator.Scheduler) (app.Scheduler, error) {
-	newPolicy, ok := policies[s.Policy]
+// schedulerOf is how the operator config shares the machine: the named policy, and slots of the
+// one placement resource DefaultDemand claims, which a measure job takes alone. A config of one
+// placement gives it that placement's max_jobs. A config of several gives it one, so their jobs run
+// one at a time between them, until the demand claims the placement each job runs on.
+func schedulerOf(op *cliv1.OperatorConfig) (app.Scheduler, error) {
+	policy := op.GetScheduler().GetPolicy()
+	newPolicy, ok := policies[policy]
 	if !ok {
 		names := slices.Sorted(maps.Keys(policies))
 		return app.Scheduler{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
-			"the operator config: scheduler.policy: %q is not a policy (%s)", s.Policy, strings.Join(names, ", "))}
+			"the operator config: scheduler.policy: %q is not a policy (%s)", policy, strings.Join(names, ", "))}
+	}
+	slots := 1
+	if placements := op.GetPlacements(); len(placements) == 1 {
+		for _, pl := range placements {
+			slots = int(pl.GetMaxJobs())
+		}
 	}
 	return app.Scheduler{
-		Resources: []schedule.Resource{{ID: schedule.DefaultPlacement, Capacity: s.MaxJobs}},
+		Resources: []schedule.Resource{{ID: schedule.DefaultPlacement, Capacity: slots}},
 		Policy:    newPolicy(),
 		Demand:    schedule.DefaultDemand{},
 	}, nil
 }
 
-func (p Process) operator() (operator.Config, error) {
+func (p Process) operator() (*cliv1.OperatorConfig, error) {
 	return operator.Load(operator.Path(p.Getenv, p.Home), p.Getenv(operator.EnvConfig) != "")
 }
 
@@ -193,83 +195,16 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 	}
 	// The containers of this run are a scope of their own: the daemon may run other jobs beside it,
 	// and a run removes the containers of its scope that it does not own.
-	environments, err := p.machineEnvironments(op, clk, dir, runDir)
+	machines, err := p.machineEnvironments(op, clk, dir, runDir)
 	if err != nil {
 		return err
 	}
 	return host.Serve(ctx, runDir, host.Deps{
-		Environments:  environments,
+		Environments:  machines.environments,
 		Checkouts:     gitwork.Checkouts{},
 		Host:          supervisor.Host{Files: hostfs.OS{}, Clock: clk, Artifacts: filestore.ArtifactsDir},
 		BinaryVersion: p.Version,
 	}, ready)
-}
-
-// machineEnvironments are the environments this machine has: the host, and docker, whose engine
-// the operator config places on this machine, on another one over ssh, or on another one inside
-// Slurm allocations. The daemon fingerprints them and the supervisors run jobs in them, so both see
-// the same.
-//
-// Making the docker environment does not touch Docker or another machine: a machine without it
-// fails a docker job with a message that says so, and host jobs are unaffected. A config that cannot
-// be read stops the daemon, since a job run without what the operator asked for would mislead.
-//
-// What one daemon stages and builds is one scope, named by its runtime directory. On this machine
-// the containers of one run are a scope of their own, named by containerKey, the run's directory,
-// because the daemon may run several jobs at once there: a run sweeps away the containers of its
-// scope it does not own, which are what an earlier attempt of the same job left. Another machine
-// runs one job of the daemon at a time (operator.Parse refuses more), so there the containers and
-// the Slurm allocations stay in the daemon's scope, which a run sweeps whole.
-func (p Process) machineEnvironments(op operator.Config, clk clock.System, dir runtimedir.Dir, containerKey string) (environment.Environments, error) {
-	scope := docker.ScopeFor(dir.Path())
-	local := cpu.New(cpu.Host(), clk)
-	cfg := docker.Config{
-		Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
-		User: docker.User{UID: p.UID, GID: p.GID}, GPUs: docker.GPUs{Devices: op.Docker.GPUs, Runtime: op.Docker.Runtime},
-		Mounts: op.Docker.Mounts,
-	}
-	engineCfg := dockercli.Config{Timers: clk}
-	switch op.Docker.Placement {
-	case operator.Local:
-		cfg.Scope = docker.ScopeFor(containerKey)
-		cfg.Backend = local
-		cfg.Machine = machine.Local{CacheRoot: p.cacheRoot(), As: cfg.User}
-		cfg.GPUFacts = &nvidia.GPUs{Shell: remote.Local{}, Timers: clk}
-	default:
-		r := op.Remote
-		ssh := remote.SSH{Host: r.Host, Program: r.SSHCommand}
-		engineCfg.Shell = ssh
-		cfg.Backend = cpu.New(&remote.CPU{Shell: ssh, Timers: clk, Timeout: machine.CallTimeout}, clk)
-		cfg.Machine = &machine.Remote{Shell: ssh, Rsync: remote.Rsync{SSH: ssh, Program: r.RsyncCommand}, Root: r.WorkspaceRoot, Scope: scope, Timers: clk}
-		cfg.GPUFacts = &nvidia.GPUs{Shell: ssh, Timers: clk}
-		if s := op.Slurm; s != nil {
-			engineCfg.Allocator = slurm.Allocator{
-				Partition: s.Partition, Gres: s.Gres, SharedGres: s.SharedGres, Exclusive: s.Exclusive, CPUs: s.CPUs, Memory: s.Memory,
-				Arguments: s.SrunArguments, Builder: slurm.BuilderName(scope),
-			}
-			engineCfg.StartTimeout = s.QueueTimeout
-		}
-	}
-	engine, err := dockercli.New(engineCfg)
-	if err != nil {
-		return nil, err
-	}
-	cfg.Engine = engine
-	if s := op.Slurm; s != nil {
-		cfg.Engine = slurm.Engine{
-			Inner: engine, Scheduler: slurm.CLI{Shell: engineCfg.Shell, Timers: clk, Poll: s.PollInterval},
-			Builders: slurm.Buildx{Shell: engineCfg.Shell, Timers: clk, Name: slurm.BuilderName(scope)},
-		}
-	}
-	containers, err := docker.New(cfg)
-	if err != nil {
-		return nil, err
-	}
-	onHost := hostenv.New(hostenv.Config{Backend: local, Timers: clk})
-	return environment.Kinds{
-		core.EnvironmentHost:   func(environment.Target) (environment.Environment, error) { return onHost, nil },
-		core.EnvironmentDocker: containers.Environment,
-	}, nil
 }
 
 // cacheRoot is where docker jobs on this machine keep their caches: vibesys-cli in XDG_CACHE_HOME,

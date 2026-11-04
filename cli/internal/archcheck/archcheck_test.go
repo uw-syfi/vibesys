@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -216,7 +217,7 @@ func TestSupportPackagesAreImportedByTestsOnly(t *testing.T) {
 		"internal/environment/fakeenv", "internal/supervisor/suptest", "internal/daemon/daemontest",
 		"internal/store/storetest", "internal/environment/envtest", "internal/backend/backendtest",
 		"internal/environment/fakeenv/fakeworld", "internal/environment/docker/dockerfake",
-		"internal/environment/docker/dockertest",
+		"internal/environment/docker/dockertest", "internal/resource/resourcetest", "internal/resource/fakeresource",
 	}
 	var productDirs []string
 	for dir := range archcheck.Rules() {
@@ -613,5 +614,41 @@ func f(k cliv1.FailureKind) int {
 	missing := archcheck.Violations(switchOver(strings.Join(all[:len(all)-1], ", ")))
 	if !hasSwitchViolation(missing, "FAILURE_KIND_INTERNAL") {
 		t.Fatalf("a switch leaving INTERNAL out was not flagged: %v", missing)
+	}
+}
+
+// A string that spells a concrete placement kind, resource kind or vendor is refused outside the
+// package that implements it and the decoding of the files that name it, in any case; an import
+// path, a comment, a test and the allowed places are not.
+func TestConcreteNamesAreSpelledOnlyWhereTheyAreImplemented(t *testing.T) {
+	file := func(lit string) string {
+		return "package p\n\n// A comment may say kubernetes, slurm or nvidia.\nfunc f() string { return " + lit + " }\n"
+	}
+	for _, spelling := range archcheck.Spellings() {
+		for _, lit := range []string{strconv.Quote(spelling), strconv.Quote("the " + strings.ToUpper(spelling) + " way"), "`" + spelling + "`"} {
+			for _, at := range []string{"cli/internal/app/a.go", "cli/internal/environment/docker/a.go", "cli/internal/production/a.go", "cli/internal/core/a.go"} {
+				if got := archcheck.Violations(map[string]string{at: file(lit)}); !hasLine(got, at+": a string spells "+strconv.Quote(spelling)) {
+					t.Errorf("%s holding %s: %v, want the spelling refused", at, lit, got)
+				}
+			}
+		}
+	}
+	allowed := map[string]string{
+		"cli/internal/resource/kubernetes/a.go":     `"kubernetes"`,
+		"cli/internal/operator/a.go":                `"slurm and kubernetes"`,
+		"cli/internal/environment/slurm/a.go":       `"slurm"`,
+		"cli/internal/resource/gpu/a.go":            `"NVIDIA_VISIBLE_DEVICES"`,
+		"cli/internal/backend/nvidia/a.go":          `"nvidia-smi"`,
+		"cli/internal/core/placement.go":            `"kubernetes"`,
+		"cli/internal/environment/docker/a_test.go": `"nvidia"`,
+	}
+	for at, lit := range allowed {
+		if got := archcheck.Violations(map[string]string{at: file(lit)}); hasLine(got, "a string spells") {
+			t.Errorf("%s holding %s: %v, want it allowed", at, lit, got)
+		}
+	}
+	imports := "package p\n\nimport (\n\t_ \"" + module + "internal/environment/slurm\"\n\t_ \"" + module + "internal/resource/kubernetes\"\n)\n"
+	if got := archcheck.Violations(map[string]string{"cli/internal/production/a.go": imports}); hasLine(got, "a string spells") {
+		t.Errorf("production importing the packages: %v, want it allowed", got)
 	}
 }

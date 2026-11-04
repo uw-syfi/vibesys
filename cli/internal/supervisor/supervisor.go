@@ -298,7 +298,7 @@ func (s *Supervisor) executePlan(plan flow.Plan) lifecycle.Verdict {
 // target is what the environment is asked to run commands for: the job's task at its commit.
 func (s *Supervisor) target() environment.Target {
 	l := s.cfg.Launch
-	return environment.Target{Repository: l.Repository, Commit: l.Spec.Commit, Task: l.Task}
+	return environment.Target{Repository: l.Repository, Commit: l.Spec.Commit, Task: l.Task, Placement: l.Spec.Placement}
 }
 
 func commandEnded(a core.Attempt) lifecycle.Outcome {

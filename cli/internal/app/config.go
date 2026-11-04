@@ -60,6 +60,11 @@ type Config struct {
 	// the oldest first.
 	Scheduler Scheduler
 
+	// Placements are the placements of the operator config a docker job can run on, with the kinds
+	// of resource each gives. A docker job runs on the one it asks for, or on the one that gives
+	// what its task needs (core.ChoosePlacement). Empty leaves a job's request as it is.
+	Placements []core.PlacementOffer
+
 	// DefaultEnvironment is the kind a command job runs in when its submission leaves the
 	// environment unspecified. A check or a measure job's environment is decided by its task
 	// (core.ChooseEnvironment).
