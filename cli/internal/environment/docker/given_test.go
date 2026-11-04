@@ -117,7 +117,9 @@ func TestAContainerGetsTheGPUsAndTheFingerprintPinsThem(t *testing.T) {
 	}
 }
 
-func TestAGPUFactThatChangesChangesTheFingerprint(t *testing.T) {
+// Placements are interchangeable, so a fingerprint records the GPUs it ran with, for diagnosis, and
+// other GPUs leave the image's results comparable: the fact changes and equality does not.
+func TestAGPUFactThatChangesIsRecordedAndComparesTheSame(t *testing.T) {
 	base := newScene(t, options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendCUDA}, configure: withGPUs})
 	before, err := base.env.Fingerprint(context.Background())
 	if err != nil {
@@ -133,8 +135,11 @@ func TestAGPUFactThatChangesChangesTheFingerprint(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if after.Equal(before) {
-			t.Errorf("a different %s left the fingerprint as it was", name)
+		if after.Facts[name] != changed[name] {
+			t.Errorf("a different %s was recorded as %q, want %q", name, after.Facts[name], changed[name])
+		}
+		if !after.Equal(before) {
+			t.Errorf("a different %s made the image's results incomparable", name)
 		}
 	}
 }
