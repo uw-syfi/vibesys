@@ -112,7 +112,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/schedule/policy/fifo/`, `fairshare/` | The scheduling policies: `fifo` (oldest first) and `fair-share` (the run with the least recent use of what the job claims goes next). Only `production` names them. |
 | `internal/schedule/scheduletest/` | The one property-based contract suite every policy passes. Tests only. |
 | `internal/lease/` | `Leases`: where the daemons that share a resource take turns at holding it alone, and `Book`, where each resource is leased, which only `production` fills. |
-| `internal/lease/locallease/` | The leases of this machine: `flock` on files of a directory every user shares (`/var/tmp/vibesys-leases`). The kernel gives a lease back when its daemon dies. |
+| `internal/lease/locallease/` | The leases of this machine: `flock` on files of a directory every user shares on local disk (see "The daemon and the supervisors"). The kernel gives a lease back when its daemon dies. |
 | `internal/lease/hostlease/` | The leases of a machine reached over ssh: the same lock files there, held by a shell for as long as its connection lives. |
 | `internal/lease/kubelease/` | The leases of a Kubernetes cluster: `coordination.k8s.io` `Lease` objects, renewed every third of their duration and taken over once expired, through `kubectl`. `kubefake` is an API server in memory. |
 | `internal/lease/fakelease/`, `leasetest/` | A `Leases` in memory, and the one contract suite every `Leases` passes. Tests only. |
@@ -121,7 +121,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/clock/` | `Clock` and `Timers`, the only ways the daemon and the client read or wait on time. A test supplies its own and fires timers itself. |
 | `internal/owned/` | `Group`, the one way the daemon's packages start a goroutine: the group starts it and `Wait` joins it, so nothing outlives what started it. |
 | `internal/gitrepo/` | `Git`: a revision resolved to a full commit id, in the caller's checkout. `Resolver`: the repository a directory belongs to, through the common git directory, so every linked worktree of a repository resolves to one path. |
-| `internal/runtimedir/` | The per-user runtime directory (socket, locks, supervisor directories), its safety checks, and the advisory file locks. |
+| `internal/runtimedir/` | The per-user runtime directory (socket, locks, supervisor directories), its safety checks, the advisory file locks, and where the machine's directory of leases is (`ResolveLeases`). |
 | `internal/environment/fakeenv/` | A `Fake` `Environment`, a real implementation that runs scripted commands in memory. Tests only. |
 | `internal/environment/docker/` | The `docker` `Environment`: builds the task's Dockerfile into an image cached by content, runs a job's commands in one container over a clean checkout as the invoking user, and removes the container on every path. It decides over an `Engine`, the narrow interface to Docker. |
 | `internal/environment/docker/dockercli/` | The `Engine` that drives the `docker` program. The only place that touches a real Docker. Its tests against a real daemon carry the `docker` build tag. |
@@ -439,14 +439,23 @@ other users' daemons on the same machine, and daemons on other machines that sha
 
 - Before a job that holds a resource alone starts, the daemon takes that resource's lease where
   every daemon sharing it looks. A placement's slots (`placement:<name>`) are leased as the machine
-  its engine runs on: for a `local` placement, a `flock` on `/var/tmp/vibesys-leases/machine.lock`,
-  a sticky directory every user may add to; for an `ssh` placement, the same file on the engine's
-  machine, held by a shell there over ssh. So the measures of every placement on one machine, of
+  its engine runs on: for a `local` placement, a `flock` on `machine.lock` in this machine's
+  directory of leases; for an `ssh` placement, the same file on the engine's machine, held by a
+  shell there over ssh. So the measures of every placement on one machine, of
   one daemon or of several, take turns. Host jobs that claim a slot of their own (`host`) take this
   machine's lease. A Kubernetes cluster a placement gives is leased in the cluster (below). GPUs
   take no lease of their own, since their machine's lease covers them, and a `slurm` placement takes
   none, since Slurm's exclusive allocation arbitrates. A claim that shares its resource takes no
   lease.
+- The directory of leases is `vibesys-leases` in the first of `/run/lock`, `/var/tmp` and
+  `/dev/shm` that is sticky, writable by every user (mode 1777) and on local disk. It is made sticky
+  and writable by every user when it is not there. A parent on a network file system (judged as
+  the runtime directory is) is passed over: a lock there can outlive its crashed holder until the
+  server lets it go, and a directory the network shares is shared with other machines, whose leases
+  of the same names are other things. The order depends on the machine alone, never on the user or
+  the environment, so every user's daemon finds the same directory, and a machine reached over ssh
+  finds its own the same way, by `stat` there. A machine with none of them refuses to start the
+  daemon with an error that names each parent and why it was passed over.
 - A lease another holds keeps the job queued, starting nothing. The job keeps its turn, so the
   daemon's shared jobs wait behind it and do not disturb the other's measure. `jobs` names the
   holder: `waiting: needs placement:default alone, leased by bob on host-a (pid 4242), job 7f3a`.

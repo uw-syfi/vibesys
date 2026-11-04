@@ -30,14 +30,38 @@ import (
 type Host struct {
 	// Shell reaches the machine.
 	Shell remote.Shell
-	// Dir is the directory there.
-	Dir string
+	// Dir is the directory there. When it is empty, the directory is DirName in the first of
+	// Parents there that is sticky and writable by every user and whose file system type (stat -f)
+	// is none of NetworkTypes, as the daemons of that machine find theirs.
+	Dir          string
+	Parents      []string
+	DirName      string
+	NetworkTypes []uint32
 }
 
 var _ lease.Leases = Host{}
 
 // Where implements lease.Leases.
-func (h Host) Where() string { return h.Shell.Where() + " (" + h.Dir + ")" }
+func (h Host) Where() string {
+	if h.Dir != "" {
+		return h.Shell.Where() + " (" + h.Dir + ")"
+	}
+	return h.Shell.Where() + " (" + h.DirName + " in the first local one of " + strings.Join(h.Parents, ", ") + ")"
+}
+
+// resolve is the shell code that sets dir to the directory of leases when it is not given, or
+// answers why there is none.
+const resolve = `if [ -z "$dir" ]; then
+  why=""
+  for p in $parents; do
+    if [ "$(stat -L -c %a "$p" 2>/dev/null)" != 1777 ]; then why="$why; $p is not there, or not sticky and writable by every user"; continue; fi
+    t=$(stat -L -f -c %t "$p" 2>/dev/null) || { why="$why; $p cannot be checked"; continue; }
+    case " $network " in *" $t "*) why="$why; $p is on a network file system"; continue;; esac
+    dir="$p/$name"; break
+  done
+  [ -n "$dir" ] || { echo "error: no local directory of leases${why}"; exit 2; }
+fi
+`
 
 // script takes the lock of a key in a directory and holds it while its input is open. It answers
 // on its first line: "acquired", "held" followed by the holder's record, or "error: " and why.
@@ -47,8 +71,8 @@ func (h Host) Where() string { return h.Shell.Where() + " (" + h.Dir + ")" }
 // written through the open file (/proc/self/fd/9), so a link put in its place cannot turn the
 // write elsewhere. The shell waits with its own read, not a child, so the lock dies with it.
 const script = `set -u
-dir=$1 key=$2 rec=$3
-f="$dir/$key.lock"
+dir=$1 key=$2 rec=$3 parents=$4 name=$5 network=$6
+` + resolve + `f="$dir/$key.lock"
 if [ ! -d "$dir" ]; then
   if mkdir -p "$dir" 2>/dev/null; then chmod 1777 "$dir" 2>/dev/null; fi
 fi
@@ -78,7 +102,7 @@ func (h Host) Acquire(ctx context.Context, key lease.Key, holder core.LeaseHolde
 		return nil, err
 	}
 	// The lease lives past this call, so its process is not bound to ctx: Release and Lost end it.
-	cmd := h.Shell.Command(context.Background(), []string{"sh", "-c", script, "sh", h.Dir, string(key), string(rec)})
+	cmd := h.Shell.Command(context.Background(), []string{"sh", "-c", script, "sh", h.Dir, string(key), string(rec), strings.Join(h.Parents, " "), h.DirName, h.networkTypes()})
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -130,6 +154,15 @@ func (h Host) Acquire(ctx context.Context, key lease.Key, holder core.LeaseHolde
 		return nil, unavailable("%s did not answer for the lease %s: %s", h.Shell.Where(), key, why)
 	}
 	return nil, unavailable("taking the lease %s on %s: %s", key, h.Where(), why)
+}
+
+// networkTypes are the file system types stat -f prints, in hexadecimal, separated by spaces.
+func (h Host) networkTypes() string {
+	var out []string
+	for _, t := range h.NetworkTypes {
+		out = append(out, fmt.Sprintf("%x", t))
+	}
+	return strings.Join(out, " ")
 }
 
 // Lease is a lease of a machine: the shell there that holds its lock.

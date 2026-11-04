@@ -254,7 +254,7 @@ export type HeldLease = Message<"vibesys.cli.v1.HeldLease"> & {
   resource: string;
 
   /**
-   * The lease's name where it is kept, and that place, such as "this machine (/var/tmp/vibesys-leases)".
+   * The lease's name where it is kept, and that place, such as "this machine (/run/lock/vibesys-leases)".
    *
    * @generated from field: string key = 4;
    */

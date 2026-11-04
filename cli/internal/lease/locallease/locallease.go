@@ -1,7 +1,7 @@
 //go:build unix
 
 // Package locallease keeps the leases of this machine as advisory locks (flock) on files of one
-// directory that every user's daemon shares, such as /var/tmp/vibesys-leases. The operating
+// directory that every user's daemon shares, which runtimedir.ResolveLeases finds on local disk. The operating
 // system gives a lock back when the process that holds it dies, however it dies, so a crashed
 // holder never blocks anyone; a lease of this machine is never lost while its daemon lives.
 //
@@ -30,11 +30,6 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lease"
 )
-
-// DefaultDir is where the daemons of a machine keep their leases unless the operator config says
-// otherwise. It is on a local disk on every system that has it, survives a reboot no lease does,
-// and is shared by every user.
-const DefaultDir = "/var/tmp/vibesys-leases"
 
 // Dir is the leases of this machine, kept in a directory.
 type Dir struct {
