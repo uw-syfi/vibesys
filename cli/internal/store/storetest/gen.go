@@ -162,7 +162,8 @@ func (g *gen) metric() core.Metric {
 // objectives are the objectives of a multi-objective task, which a store holds whatever they
 // name: a store does not judge them.
 func (g *gen) objectives() core.Objectives {
-	return core.Objectives{Metrics: []core.Metric{g.metric(), g.metric()}, RelativeNoise: g.float()}
+	metrics := []core.Metric{g.metric(), g.metric()}
+	return core.Objectives{Metrics: metrics, RelativeNoise: g.float(), Noise: []core.ObjectiveNoise{{Name: metrics[1].Name, RelativeNoise: g.float()}}}
 }
 
 func (g *gen) objectiveVerdicts() []core.ObjectiveVerdict {

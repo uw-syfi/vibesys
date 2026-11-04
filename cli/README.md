@@ -652,7 +652,25 @@ nothing. Each saved measurement records the objectives, so `compare`, `promote` 
 decide from what was saved. Every other task is judged on its one metric, exactly as before.
 
 `compare` judges each objective with the same statistic as a single metric, under the `[pareto]`
-`relative_noise` as the noise floor (none declared is Welch's t test), and combines the verdicts:
+`relative_noise` as the noise floor (none declared is Welch's t test), and combines the verdicts.
+An objective may declare a floor of its own, which replaces the `[pareto]` one for that objective
+only, because objectives of one task differ in spread (throughput near 3%, p99 latency 10 to 19%):
+
+```toml
+[[objective]]
+name = "p99_ms"
+direction = "min"
+relative_noise = 0.15        # optional; overrides [pareto] relative_noise for this objective
+
+[pareto]
+relative_noise = 0.03        # the floor of every objective that declares none
+```
+
+The value is at least 0 and less than 1 (`0` declares no floor for that objective, so Welch's t
+test judges it); anything else, or a `relative_noise` in a task that is not multi-objective, is
+refused naming the objective. The floor is in `objectives.toml`, so it is part of the task version,
+and each measurement records it with its objectives: measurements judged under different floors
+are not pooled. A task with no per-objective value is judged exactly as before.
 
 | Overall | When |
 | --- | --- |

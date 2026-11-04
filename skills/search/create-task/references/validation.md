@@ -19,6 +19,9 @@ vibesys-cli show <base> --json
 - One sample over a few minutes makes every comparison slow; shrink the workload while it still
   exercises the same path.
 - Set `relative_noise` in `objectives.toml` to the spread you saw, rounded up, if you declare it.
+  For a multi-objective task, measure each objective's spread and set `relative_noise` on each
+  `[[objective]]` from its own (throughput and p99 latency rarely share one); the `[pareto]` value
+  is only the default for objectives that declare none.
   That edit changes the task's version: measure the base again after it.
 
 ## Mutants

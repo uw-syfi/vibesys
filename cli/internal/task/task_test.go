@@ -701,5 +701,74 @@ func TestNeedsAreReadAsWrittenAndRefusedWhenNotKinds(t *testing.T) {
 	}
 	if got, err := read(""); err != nil || got.Needs != nil {
 		t.Errorf("no needs: %v, %v", got.Needs, err)
+
+const noiseObjectives = `
+[[objective]]
+name = "latency_ms"
+direction = "min"
+relative_noise = %s
+
+[[objective]]
+name = "throughput"
+direction = "max"
+
+[pareto]
+relative_noise = 0.02
+`
+
+// An objective's own relative_noise is read, overrides the [pareto] floor for that objective
+// only, and is part of the task's version, so a task edited to change it is measured again.
+func TestAnObjectiveMayDeclareItsOwnNoiseFloor(t *testing.T) {
+	read := func(floor string) (task.Task, error) {
+		return task.Read(repo(taskFiles("p", protocol2Manifest, fmt.Sprintf(noiseObjectives, floor))), "p")
+	}
+	got, err := read("0.15")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Objectives.NoiseFor("latency_ms") != 0.15 || got.Objectives.NoiseFor("throughput") != 0.02 {
+		t.Errorf("floors %+v, want 0.15 for latency_ms and the default 0.02 for throughput", got.Objectives)
+	}
+	if zero, err := read("0"); err != nil || zero.Objectives.NoiseFor("latency_ms") != 0 || zero.Objectives.NoiseFor("throughput") != 0.02 {
+		t.Errorf("an explicit zero must declare no floor for that objective: %+v, %v", zero.Objectives, err)
+	}
+	other, err := read("0.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.Version == got.Version {
+		t.Error("changing an objective's relative_noise did not change the task version")
+	}
+	plain, err := task.Read(repo(taskFiles("p", protocol2Manifest, objectives2)), "p")
+	if err != nil || len(plain.Objectives.Noise) != 0 {
+		t.Errorf("a task with no per-objective floor has %+v, %v", plain.Objectives, err)
+	}
+}
+
+// Any value that is not a number of at least 0 and less than 1 is refused, naming the objective
+// and the key, wherever it is.
+func TestAnInvalidObjectiveNoiseFloorIsRefusedNamingTheObjective(t *testing.T) {
+	r := rand.New(rand.NewPCG(5, 6))
+	values := []string{"nan", "-nan", "inf", "-inf", "1", "1.0", "-0.001"}
+	for range 100 {
+		values = append(values, fmt.Sprintf("%g", -r.Float64()*10), fmt.Sprintf("%g", 1+r.Float64()*10))
+	}
+	for _, v := range values {
+		_, err := task.Read(repo(taskFiles("p", protocol2Manifest, fmt.Sprintf(noiseObjectives, v))), "p")
+		f := failureOf(t, err)
+		if f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, `"latency_ms"`) || !strings.Contains(f.Message, "relative_noise") {
+			t.Fatalf("%s: %v, want invalid input naming latency_ms and relative_noise", v, err)
+		}
+	}
+	for name, text := range map[string]string{
+		"no [pareto]":    "[[objective]]\nname = \"a\"\ndirection = \"max\"\nrelative_noise = 0.1\n[[objective]]\nname = \"b\"\ndirection = \"min\"\n",
+		"one objective":  strings.Replace(objectives, `direction = "max"`, "direction = \"max\"\nrelative_noise = 0.1\n[pareto]", 1),
+		"a string":       fmt.Sprintf(noiseObjectives, `"0.1"`),
+		"a misspelt key": "[[objective]]\nname = \"a\"\ndirection = \"max\"\nrelative_noize = 0.1\n",
+	} {
+		_, err := task.Read(repo(taskFiles("p", protocol2Manifest, text)), "p")
+		if err == nil {
+			t.Errorf("%s: accepted", name)
+		}
 	}
 }

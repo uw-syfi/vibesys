@@ -143,10 +143,13 @@ func Verdict(v core.Verdict) *cliv1.Verdict {
 // Objectives returns the contract's message for a measurement's objectives, and nil for the zero
 // Objectives of a single-metric task, so that its result is the message it always was.
 func Objectives(o core.Objectives) *cliv1.Objectives {
-	if len(o.Metrics) == 0 && o.RelativeNoise == 0 {
+	if len(o.Metrics) == 0 && o.RelativeNoise == 0 && len(o.Noise) == 0 {
 		return nil
 	}
 	out := &cliv1.Objectives{RelativeNoise: o.RelativeNoise}
+	for _, n := range o.Noise {
+		out.Noise = append(out.Noise, &cliv1.ObjectiveNoise{Name: n.Name, RelativeNoise: n.RelativeNoise})
+	}
 	for _, m := range o.Metrics {
 		out.Metrics = append(out.Metrics, &cliv1.Metric{Name: m.Name, Direction: direction(m.Direction)})
 	}
@@ -160,6 +163,9 @@ func toObjectives(field string, o *cliv1.Objectives, toDirection func(string, cl
 		return core.Objectives{}, nil
 	}
 	out := core.Objectives{RelativeNoise: o.GetRelativeNoise()}
+	for _, n := range o.GetNoise() {
+		out.Noise = append(out.Noise, core.ObjectiveNoise{Name: n.GetName(), RelativeNoise: n.GetRelativeNoise()})
+	}
 	for i, m := range o.GetMetrics() {
 		d, err := toDirection(fmt.Sprintf("%s.metrics[%d].direction", field, i), m.GetDirection())
 		if err != nil {

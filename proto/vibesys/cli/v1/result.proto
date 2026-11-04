@@ -35,6 +35,17 @@ message Objectives {
   // The task's [pareto] relative_noise, the noise floor every objective is compared under. Zero
   // means none.
   double relative_noise = 2;
+  // The objectives that declare a relative_noise of their own, which overrides the one above for
+  // that objective (zero is a floor of none). An objective absent here uses relative_noise. Each
+  // names an objective of metrics, once.
+  repeated ObjectiveNoise noise = 3;
+}
+
+// ObjectiveNoise is the noise floor one objective is compared under, set in the task's
+// objectives.toml as that objective's relative_noise.
+message ObjectiveNoise {
+  string name = 1;
+  double relative_noise = 2;
 }
 
 // CheckResult is a passed correctness check. A failed check saves no result: its job is `failed`
