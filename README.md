@@ -4,6 +4,39 @@
 
 **An agentic framework that generates bespoke systems from application requirements, workload characteristics, and the underlying hardware.**
 
+## News
+
+- **2026-11-04** — [VibeSys on Trainium](https://syfi.cs.washington.edu/blog/2026-11-04-vibesys-trainium/): agents build and tune Qwen3.8 serving engines on AWS Trainium2.
+- **2026-10-08** — [VibeSys on AMD MI300A](https://syfi.cs.washington.edu/blog/2026-10-08-qwen35-mi300a/): an agent-built Qwen3.5-397B engine achieves 2.3× the goodput of tuned SGLang.
+- **2026-05-12** — [Introducing VibeServe](https://syfi.cs.washington.edu/blog/2026-05-12-introducing-vibeserve/): let AI agents write your serving stack. [Paper](https://arxiv.org/abs/2605.06068).
+
+## Getting started
+
+### Install skills for your coding agent
+
+Start with our [Agent Skills](resources/skills/README.md) to give your coding
+agent knowledge of serving systems, hardware, and performance optimization.
+With [Node.js](https://nodejs.org/) installed, run this in your project directory:
+
+```bash
+npx skills add https://github.com/uw-syfi/vibesys/tree/main/resources/skills
+```
+
+Choose the skills and coding agent you want to use in the installer. For LLM
+serving, start with [`serving-systems`](resources/skills/serving-systems/README.md).
+Then ask your agent to optimize your system for your model, workload, and hardware,
+with explicit correctness checks and a performance benchmark.
+
+### Run the VibeSys optimization loop
+
+To have VibeSys coordinate implementation, correctness checks, and benchmarking,
+[install VibeSys and run your first task](#quickstart). Complete task definitions
+are available in [`examples/`](examples/), and the
+[running guide](docs/running-vibesys.md) covers setup and execution in detail.
+VibeSys includes the bundled skills for its agents.
+
+## About VibeSys
+
 One of VibeSys's first initiatives is **VibeServe**, which asks whether AI agents
 can generate a bespoke LLM serving system for each model, workload, and hardware
 target. The figures, blog post, and paper below document that initiative.
@@ -11,11 +44,6 @@ target. The figures, blog post, and paper below document that initiative.
 <p align="center">
   <img src="docs/figures/idea.png" width="85%" alt="Generic serving today vs. VibeServe's per-target bespoke systems">
 </p>
-
-## Updates
-
-- **2026-05** — VibeServe blog post: [Let AI Agents Write Your Serving Stack with VibeServe](https://syfi.cs.washington.edu/blog/2026-05-12-introducing-vibeserve/).
-- **2026-05** — Paper released on arXiv: [2605.06068](https://arxiv.org/abs/2605.06068).
 
 ## Introduction
 
