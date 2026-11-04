@@ -10,6 +10,39 @@
 - **2026-10-08** — [VibeSys on AMD MI300A](https://syfi.cs.washington.edu/blog/2026-10-08-qwen35-mi300a/): an agent-built Qwen3.5-397B engine achieves 2.3× the goodput of tuned SGLang.
 - **2026-05-12** — [Introducing VibeServe](https://syfi.cs.washington.edu/blog/2026-05-12-introducing-vibeserve/): let AI agents write your serving stack. [Paper](https://arxiv.org/abs/2605.06068).
 
+## Performance highlights
+
+<table>
+  <tr>
+    <td colspan="2" align="center">
+      <a href="https://syfi.cs.washington.edu/blog/2026-10-08-qwen35-mi300a/">
+        <img src="docs/figures/qwen35-397b-mi300a.png" width="900" alt="Qwen3.5-397B on four AMD MI300As: goodput improves across optimization rounds and exceeds tuned SGLang">
+      </a>
+      <br><strong>Qwen3.5-397B · 4× AMD MI300A</strong><br>
+      2,242 tok/s goodput · <strong>2.3× tuned SGLang</strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <a href="https://syfi.cs.washington.edu/blog/2026-11-04-vibesys-trainium/">
+        <img src="docs/figures/qwen38-27b-trainium2.png" width="450" alt="Qwen3.8-27B on one Trainium2 chip: throughput rises from 195 to 861 tokens per second across optimization rounds">
+      </a>
+      <br><strong>Qwen3.8-27B · 1× Trainium2</strong><br>
+      195 → 861 tok/s · <strong>4.4× the first working engine</strong>
+    </td>
+    <td width="50%" align="center">
+      <a href="https://syfi.cs.washington.edu/blog/2026-11-04-vibesys-trainium/">
+        <img src="docs/figures/qwen38-flash-next-trainium2.png" width="450" alt="Qwen3.8-Flash-Next on sixteen Trainium2 chips: throughput improves across twelve optimization rounds">
+      </a>
+      <br><strong>Qwen3.8-Flash-Next · 16× Trainium2</strong><br>
+      <strong>3.1× the starting engine</strong> · guided by ServingStudio
+    </td>
+  </tr>
+</table>
+
+Figures from the linked posts; workloads, correctness checks, and comparison
+baselines differ across experiments. Click a graph for the full results.
+
 ## About VibeSys
 
 One of VibeSys's first initiatives is **VibeServe**, which asks whether AI agents
