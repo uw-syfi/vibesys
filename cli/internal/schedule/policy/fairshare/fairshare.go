@@ -46,11 +46,24 @@ func (p Policy) Order(waiting []schedule.Candidate, usage schedule.Usage) []sche
 	}
 	used := map[core.RunID]map[schedule.ResourceID]int{}
 	use := func(run core.RunID, r schedule.ResourceID) int { return usage.Of(run, r) + used[run][r] }
-	score := func(c schedule.Candidate) float64 {
-		total := 0
-		for _, claim := range c.Claims {
-			total += use(c.Run, claim.Resource)
+	// A job's use is its run's use of what it would claim where the run has used least: a job
+	// that may run on several placements counts against the one it is least behind on.
+	cheapest := func(c schedule.Candidate) ([]schedule.Claim, int) {
+		var best []schedule.Claim
+		bestTotal := -1
+		for _, o := range c.Options {
+			total := 0
+			for _, claim := range o.Claims {
+				total += use(c.Run, claim.Resource)
+			}
+			if bestTotal < 0 || total < bestTotal {
+				best, bestTotal = o.Claims, total
+			}
 		}
+		return best, max(bestTotal, 0)
+	}
+	score := func(c schedule.Candidate) float64 {
+		_, total := cheapest(c)
 		return float64(total) / p.weight(c.Run)
 	}
 	out := make([]schedule.Candidate, 0, len(waiting))
@@ -76,7 +89,8 @@ func (p Policy) Order(waiting []schedule.Candidate, usage schedule.Usage) []sche
 		if used[run] == nil {
 			used[run] = map[schedule.ResourceID]int{}
 		}
-		for _, claim := range head.Claims {
+		claims, _ := cheapest(head)
+		for _, claim := range claims {
 			used[run][claim.Resource] += max(claim.Amount, 1)
 		}
 	}

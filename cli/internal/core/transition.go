@@ -40,7 +40,8 @@ func (s JobState) CanMoveTo(to JobState) bool {
 // else is FailureInvalidInput naming the field: a transition for another job, a move the state
 // machine does not allow, a missing time, or an effect that does not belong to the move:
 //
-//   - the environment is pinned by the move to running and by nothing else;
+//   - the environment is pinned by the move to running and by nothing else, and so is a new key
+//     for a check or measure job, which then runs under the key of the environment it pinned;
 //   - a result is saved by the move to succeeded and by nothing else, and a check or measure job
 //     cannot succeed without one: the result must be this job's, of this commit and key, taken in
 //     the pinned environment at the current schema version, and of the job's own kind. A
@@ -80,6 +81,9 @@ func (j Job) Apply(t Transition) (Job, error) {
 		pinned := *t.Environment
 		pinned.Facts = maps.Clone(pinned.Facts)
 		out.Environment = &pinned
+		if t.Key != "" {
+			out.Key = t.Key
+		}
 	case JobQueued:
 		past := PastAttempt{EndedAt: at, Cut: t.Cut}
 		if j.StartedAt != nil {
@@ -120,6 +124,10 @@ func checkEffects(j Job, kind JobKind, t Transition) error {
 		return failf(FailureInvalidInput, "transition: the move to running pins the environment, and none is set")
 	case t.To != JobRunning && t.Environment != nil:
 		return failf(FailureInvalidInput, "transition: the environment is set only by the move to running, not to %s", t.To)
+	case t.Key != "" && t.To != JobRunning:
+		return failf(FailureInvalidInput, "transition: a key is set only by the move to running, not to %s", t.To)
+	case t.Key != "" && kind == JobCommand:
+		return failf(FailureInvalidInput, "transition: a command job has no key")
 	case t.CancelReason != "" && t.To != JobCancelled:
 		return failf(FailureInvalidInput, "transition: a cancel reason goes with cancelled, not %s", t.To)
 	case t.ExitCode != nil && t.To != JobSucceeded && t.To != JobFailed:

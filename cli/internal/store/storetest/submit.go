@@ -94,6 +94,37 @@ func testSubmit(t *testing.T, newStore New) {
 		}
 	})
 
+	t.Run("a job that started under a new key is joined by that key, and saves its result under it", func(t *testing.T) {
+		e := newEnv(t, newStore)
+		first := e.submit(e.measure(1, "key-a", 3))
+		fp := pinned()
+		started, err := e.s.Transition(e.ctx, core.Transition{Job: first.Job.ID, From: core.JobQueued, To: core.JobRunning, At: e.now(), Environment: &fp, Key: "key-b"})
+		if err != nil || started.Key != "key-b" {
+			t.Fatalf("starting under key-b: %+v, %v", started, err)
+		}
+		again := e.submit(e.measure(1, "key-b", 3))
+		if again.Disposition != core.SubmitJoined || again.Job.ID != first.Job.ID {
+			t.Errorf("a submission of key-b = %s on %s, want joined on the running %s", again.Disposition, again.Job.ID, first.Job.ID)
+		}
+		res := e.resultFor(started, 1, 2, 3)
+		tr := core.Transition{Job: first.Job.ID, From: core.JobRunning, To: core.JobSucceeded, At: e.now(), Result: &res, CheckJob: res.Outcome.(core.MeasureOutcome).CheckJob}
+		if _, err := e.s.Transition(e.ctx, tr); err != nil {
+			t.Fatalf("finishing under key-b: %v", err)
+		}
+		if got := e.results(core.ResultFilter{Key: "key-b"}); len(got) != 1 || got[0].Job != first.Job.ID {
+			t.Errorf("results of key-b = %+v, want the job's", got)
+		}
+		for name, tr := range map[string]core.Transition{
+			"to another state":   {Job: again.Job.ID, From: core.JobSucceeded, To: core.JobFailed, At: e.now(), Key: "key-c"},
+			"of a command job":   {Job: e.submit(e.command(1, "x")).Job.ID, From: core.JobQueued, To: core.JobRunning, At: e.now(), Environment: &fp, Key: "key-c"},
+			"that is not a name": {Job: e.submit(e.check(2, "key-d")).Job.ID, From: core.JobQueued, To: core.JobRunning, At: e.now(), Environment: &fp, Key: "not a key"},
+		} {
+			if _, err := e.s.Transition(e.ctx, tr); kindOf(err) != string(core.FailureInvalidInput) {
+				t.Errorf("a new key %s: %v, want invalid input", name, err)
+			}
+		}
+	})
+
 	t.Run("joins by key and by nothing else", func(t *testing.T) {
 		e := newEnv(t, newStore)
 		a := e.submit(e.check(1, "key-a"))

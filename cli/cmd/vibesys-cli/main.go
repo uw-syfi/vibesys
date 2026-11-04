@@ -112,10 +112,12 @@ commands:
   daemon status|stop|restart                     manage the daemon
   upgrade                                        replace this binary with the newest release
 
-Every job and daemon command takes --json, and --repo, --task, --run, --harness and --agent, which
-default to the environment variables VIBESYS_REPO, VIBESYS_TASK, VIBESYS_RUN, VIBESYS_HARNESS and
-VIBESYS_AGENT. Each submit takes --placement, which defaults to VIBESYS_PLACEMENT: the placement of
-the operator config a docker job runs on.
+Every job and daemon command takes --json, and --repo, --task, --run, --harness, --agent and
+--placement, which default to the environment variables VIBESYS_REPO, VIBESYS_TASK, VIBESYS_RUN,
+VIBESYS_HARNESS, VIBESYS_AGENT and VIBESYS_PLACEMENT. --placement is the one placement of the
+operator config a docker job a submit queues may run on, and other commands ignore it. Unset, a job
+may run on any that gives what the task needs, and the daemon chooses the least loaded when it
+starts.
 Exit codes: 0 yes, 1 the answer is no (a job did not succeed, a refusal), 2 invalid input or a
 thing that does not exist, 3 a wait timed out, 4 no answer (no daemon, an internal failure, or an
 answer this build cannot read). The README lists every failure kind and wait outcome.

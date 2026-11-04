@@ -44,8 +44,9 @@ type Config struct {
 	// Machine is where the engine's containers run, as a run's files see it. Nil means Shared,
 	// as User: the engine runs on this machine and mounts the caller's directories.
 	Machine Machine
-	// Placement names the placement of the operator config these containers run on. It is part
-	// of every fingerprint, so results from two placements are never compared. It is required.
+	// Placement names the placement of the operator config these containers run on. Every
+	// fingerprint records it among its facts, for diagnosis; it takes no part in which results
+	// are compared, since placements are interchangeable. It is required.
 	Placement string
 	// Resources are what the placement gives every container, at most one of each kind: GPUs,
 	// a cluster, read-only directories. A task that needs a kind the placement does not give is

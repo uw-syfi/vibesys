@@ -31,7 +31,8 @@ type Environment interface {
 	MachineReader
 
 	// Fingerprint returns the environment's identity: what a result's comparability and a check
-	// pass's reuse are judged by. For docker it pins the exact image digest. It returns the same
+	// pass's reuse are judged by (core.Fingerprint.Equal). For docker it pins the exact image
+	// digest; where the container ran is recorded among its facts and does not count. It returns the same
 	// value for the same environment, and fails with core.FailureUnavailable when the
 	// environment cannot be reached.
 	Fingerprint(ctx context.Context) (core.Fingerprint, error)

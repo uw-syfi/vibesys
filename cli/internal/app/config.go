@@ -22,18 +22,21 @@ type Retry struct {
 }
 
 // Scheduler is how the daemon shares the machine between jobs: the resources jobs claim, the policy
-// that orders the jobs that wait, the filters that may hold one back, and the demand that says what
-// each job claims. With no resources the machine runs one job at a time (lifecycle.OneAtATime), and
-// with no demand each job claims as schedule.DefaultDemand says.
+// that orders the jobs that wait, the placer that chooses where each runs, the filters that may hold
+// one back, and the demand that says where each job may run and what it claims there. With no
+// resources the machine runs one job at a time (lifecycle.OneAtATime), with no placer a job starts
+// on the least loaded place it may run (schedule.LeastLoaded), and with no demand each job claims
+// as schedule.DefaultDemand says.
 type Scheduler struct {
 	Resources []schedule.Resource
 	Policy    schedule.Policy
+	Placer    schedule.Placer
 	Filters   []schedule.Filter
 	Demand    schedule.Demand
 }
 
 func (s Scheduler) machine() lifecycle.Scheduling {
-	return lifecycle.Scheduling{Resources: s.Resources, Policy: s.Policy, Filters: s.Filters}
+	return lifecycle.Scheduling{Resources: s.Resources, Policy: s.Policy, Placer: s.Placer, Filters: s.Filters}
 }
 
 // Config is what an App is made of. Clock, Stores, Environments and Supervisors are required, and
@@ -64,8 +67,10 @@ type Config struct {
 	Leasing Leasing
 
 	// Placements are the placements of the operator config a docker job can run on, with the kinds
-	// of resource each gives. A docker job runs on the one it asks for, or on the one that gives
-	// what its task needs (core.ChoosePlacement). Empty leaves a job's request as it is.
+	// of resource each gives. A submission is refused unless one of them gives what its task needs,
+	// or the one it is restricted to does (core.EligiblePlacements); which of them the job runs on
+	// is the scheduler's choice when it starts (Scheduler.Demand). Empty leaves a job's restriction
+	// as it is.
 	Placements []core.PlacementOffer
 
 	// DefaultTimeout is the time limit of a command that sets none.

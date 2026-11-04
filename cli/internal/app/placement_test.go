@@ -3,11 +3,13 @@ package app_test
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
@@ -17,10 +19,14 @@ import (
 
 // withNeeds is a task whose docker jobs need the resources.
 func (w *world) withNeeds(needs string) {
-	tree := tasktest.Scripted("task", passes, scores)
+	w.tasks.Put(string(call.Scope.Repository()), commit, needing(tasktest.Scripted("task", passes, scores), needs))
+}
+
+// needing is the task with docker jobs that need the resources.
+func needing(tree task.Tree, needs string) task.Tree {
 	manifest := task.TasksDir + "/task/" + task.ManifestName
 	tree[manifest] = task.File{Data: append(tree[manifest].Data, []byte("\n[environment]\nneeds = "+needs+"\n")...)}
-	w.tasks.Put(string(call.Scope.Repository()), commit, tree)
+	return tree
 }
 
 func newPlacementApp(w *world, offers []core.PlacementOffer, envs *targetRecorder) *app.App {
@@ -36,11 +42,12 @@ func newPlacementApp(w *world, offers []core.PlacementOffer, envs *targetRecorde
 	return a
 }
 
-// A docker job with no placement asked for runs on the one placement that gives what its task
-// needs: its spec records it and the environment is asked for it; one that asks for a placement
-// lacking a need, or for none when several fit, is refused, naming them, and queues nothing. A
-// host job has no placement, whatever was asked.
-func TestADockerJobRunsOnThePlacementThatGivesWhatItsTaskNeeds(t *testing.T) {
+// A docker job is refused only when no placement gives what its task needs, or when the one it is
+// restricted to lacks a need, naming them, and then it queues nothing. Several placements that fit
+// are no refusal: the job records its task's needs and no placement, since the scheduler chooses
+// one when it starts. Its key is taken on the first of them by name. A host job runs on no
+// placement, whatever it was restricted to.
+func TestADockerJobMayRunOnEveryPlacementThatGivesWhatItsTaskNeeds(t *testing.T) {
 	w := newWorld(t)
 	w.withNeeds(`["kubernetes"]`)
 	envs := &targetRecorder{Environments: fakeenv.Environments{
@@ -49,6 +56,7 @@ func TestADockerJobRunsOnThePlacementThatGivesWhatItsTaskNeeds(t *testing.T) {
 	a := newPlacementApp(w, []core.PlacementOffer{
 		{Name: "a100", Resources: []core.ResourceKind{core.ResourceGPU}},
 		{Name: "local", Resources: []core.ResourceKind{core.ResourceKubernetes, core.ResourceMounts}},
+		{Name: "remote", Resources: []core.ResourceKind{core.ResourceKubernetes}},
 	}, envs)
 	docker := func(placement string) core.JobSpec {
 		return core.JobSpec{Commit: commit, Environment: core.EnvironmentDocker, Placement: placement, Settings: core.CheckSettings{}}
@@ -57,8 +65,12 @@ func TestADockerJobRunsOnThePlacementThatGivesWhatItsTaskNeeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := envs.asked(); out.Job.Spec.Placement != "local" || len(got) == 0 || got[0].Placement != "local" {
-		t.Fatalf("the job's placement is %q and the environment was asked for %+v; want local", out.Job.Spec.Placement, got)
+	if got := envs.asked(); out.Job.Spec.Placement != "" || !slices.Equal(out.Job.Needs, []core.ResourceKind{core.ResourceKubernetes}) || len(got) == 0 || got[0].Placement != "local" {
+		t.Fatalf("the job is restricted to %q, needs %v, and the environment was asked for %+v; want no restriction, kubernetes, local", out.Job.Spec.Placement, out.Job.Needs, got)
+	}
+	restricted, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: docker("remote"), NoCache: true})
+	if err != nil || restricted.Job.Spec.Placement != "remote" {
+		t.Fatalf("a job restricted to remote: %+v, %v", restricted.Job.Spec, err)
 	}
 	_, err = a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: docker("a100")})
 	if err == nil {
@@ -68,20 +80,17 @@ func TestADockerJobRunsOnThePlacementThatGivesWhatItsTaskNeeds(t *testing.T) {
 		t.Errorf("asking for a100: %v, want a refusal naming a100 and kubernetes", err)
 	}
 	host, err := a.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Placement: "a100", Settings: core.CheckSettings{}}})
-	if err != nil || host.Job.Spec.Placement != "" {
-		t.Errorf("a host job: %+v, %v; want no placement", host.Job.Spec, err)
+	if err != nil || host.Job.Spec.Placement != "" || len(host.Job.Needs) != 0 {
+		t.Errorf("a host job: %+v needing %v, %v; want no placement and no needs", host.Job.Spec, host.Job.Needs, err)
 	}
 
 	w2 := newWorld(t)
-	w2.withNeeds(`[]`)
+	w2.withNeeds(`["gpu"]`)
 	envs2 := &targetRecorder{Environments: fakeenv.Environments{core.EnvironmentDocker: fakeenv.New(core.EnvironmentDocker, w2.gates)}}
-	b := newPlacementApp(w2, []core.PlacementOffer{{Name: "a100"}, {Name: "local"}}, envs2)
+	b := newPlacementApp(w2, []core.PlacementOffer{{Name: "local"}, {Name: "remote"}}, envs2)
 	_, err = b.Submit(ctxFor(t), app.SubmitRequest{Context: call, Spec: docker("")})
-	if err == nil {
-		t.Fatal("a job that two placements fit was accepted")
-	}
-	if f := core.AsFailure(err); f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "a100, local") {
-		t.Errorf("two placements that fit: %v, want a refusal naming both", err)
+	if f := core.AsFailure(err); err == nil || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "local, remote") {
+		t.Errorf("no placement that fits: %v, want a refusal naming the placements", err)
 	}
 	jobs, err := b.Jobs(ctxFor(t), scope, core.JobFilter{})
 	var nf *core.Failure
@@ -89,7 +98,100 @@ func TestADockerJobRunsOnThePlacementThatGivesWhatItsTaskNeeds(t *testing.T) {
 		t.Errorf("jobs = %v, %v; a refused submission queues nothing", jobs, err)
 	}
 	if got := envs2.asked(); len(got) != 0 {
-		t.Errorf("the environment was asked for %+v before a placement was chosen", got)
+		t.Errorf("the environment was asked for %+v before a placement was found", got)
+	}
+}
+
+// onPlacements is a docker environment per placement, each with gates of its own, whose
+// fingerprints differ only in the placement they name; and the host.
+type onPlacements struct {
+	host   *fakeenv.Environment
+	docker map[string]*fakeenv.Environment
+	gates  map[string]*fakeenv.MemoryGates
+}
+
+func newOnPlacements(w *world, names ...string) onPlacements {
+	out := onPlacements{host: w.env, docker: map[string]*fakeenv.Environment{}, gates: map[string]*fakeenv.MemoryGates{}}
+	for _, name := range names {
+		out.gates[name] = fakeenv.NewMemoryGates()
+		out.docker[name] = fakeenv.New(core.EnvironmentDocker, out.gates[name], fakeenv.WithFiles(w.files), fakeenv.WithFingerprint(core.Fingerprint{
+			Kind: core.EnvironmentDocker, Backend: core.BackendCPU, ImageDigest: "sha256:" + strings.Repeat("0", 64),
+			Facts: map[string]string{core.FactPlacement: name, "os": "fake"},
+		}))
+	}
+	return out
+}
+
+func (o onPlacements) Environment(kind core.EnvironmentKind, target environment.Target) (environment.Environment, error) {
+	if kind == core.EnvironmentHost {
+		return o.host, nil
+	}
+	if e, ok := o.docker[target.Placement]; ok {
+		return e, nil
+	}
+	return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "no placement " + target.Placement}
+}
+
+// Placements are interchangeable. Two measures that x and y each fit start at once, one on each,
+// though neither asked for one, while z, which lacks what the task needs, runs neither: each holds
+// its placement alone, so a check submitted then waits, naming a measure. Once the measures end the
+// check runs. Each measure records the placement it ran on.
+func TestTwoMeasuresRunAtOnceEachAloneOnItsOwnPlacement(t *testing.T) {
+	w := newWorld(t)
+	w.tasks.Put(string(call.Scope.Repository()), commit, needing(tasktest.Scripted("task", passes,
+		[]string{"mark", "benching", ";", "hold", "bench", ";", "emit", `{"ops": 7.5}`}), `["kubernetes"]`))
+	kube := []core.ResourceKind{core.ResourceKubernetes}
+	w.scheduler = app.Scheduler{
+		Resources: []schedule.Resource{
+			{ID: schedule.PlacementOf("x"), Capacity: 2}, {ID: schedule.PlacementOf("y"), Capacity: 2}, {ID: schedule.PlacementOf("z"), Capacity: 2}, {ID: "host", Capacity: 1},
+		},
+		Demand: schedule.PlacementDemand{Placements: map[string]schedule.Offered{"x": {Resources: kube}, "y": {Resources: kube}, "z": {}}, Host: "host"},
+	}
+	envs := newOnPlacements(w, "x", "y", "z")
+	a := newPlacementApp(w, []core.PlacementOffer{{Name: "x", Resources: kube}, {Name: "y", Resources: kube}, {Name: "z"}}, &targetRecorder{Environments: envs})
+	ctx := ctxFor(t)
+	submit := func(settings core.Settings) core.Job {
+		t.Helper()
+		out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: core.JobSpec{Commit: commit, Environment: core.EnvironmentDocker, Settings: settings}, NoCache: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.Job
+	}
+	first, second := submit(core.MeasureSettings{Samples: 1}), submit(core.MeasureSettings{Samples: 1})
+	for _, p := range []string{"x", "y"} {
+		if !envs.gates[p].Reached(ctx, "benching") {
+			t.Fatalf("no measure started on %s", p)
+		}
+	}
+	if n := envs.docker["x"].Active() + envs.docker["y"].Active(); n != 2 {
+		t.Fatalf("%d jobs run on x and y, want the two measures at once", n)
+	}
+	check := submit(core.CheckSettings{})
+	wait := a.Waits(scope, []core.JobID{check.ID})[check.ID]
+	if wait.Kind != core.WaitHeldExclusively || len(wait.Holders) != 1 || (wait.Holders[0].Job != first.ID && wait.Holders[0].Job != second.ID) {
+		t.Fatalf("the check waits as %+v; want a placement a measure holds alone", wait)
+	}
+	ran := map[string]core.JobID{}
+	for _, m := range []core.Job{first, second} {
+		got, err := a.Job(ctx, scope, m.ID)
+		if err != nil || got.Environment == nil {
+			t.Fatalf("measure %s: %+v, %v", m.ID, got, err)
+		}
+		ran[got.Environment.Placement()] = m.ID
+	}
+	if len(ran) != 2 || ran["x"] == "" || ran["y"] == "" {
+		t.Fatalf("the measures ran on %v, want one on x and one on y", ran)
+	}
+	for _, p := range []string{"x", "y"} {
+		envs.gates[p].Release("bench")
+	}
+	for _, m := range []core.Job{first, second} {
+		awaitState(t, a, m.ID, core.JobSucceeded)
+	}
+	awaitState(t, a, check.ID, core.JobSucceeded)
+	if envs.docker["z"].Fingerprinted() != 0 || envs.gates["z"].Marked("benching") {
+		t.Fatal("a job ran on z, which lacks what the task needs")
 	}
 }
 
@@ -107,7 +209,11 @@ func TestAMeasureHoldsItsPlacementAndClusterAloneWhileOtherPlacementsRun(t *test
 			{ID: schedule.PlacementOf("a"), Capacity: 2}, {ID: schedule.PlacementOf("b"), Capacity: 2},
 			{ID: schedule.PlacementOf("c"), Capacity: 2}, {ID: cluster.Resource, Capacity: 4}, {ID: "host", Capacity: 1},
 		},
-		Demand: schedule.PlacementDemand{Placements: map[string][]schedule.Claim{"a": {cluster}, "b": {cluster}}, Host: "host"},
+		Demand: schedule.PlacementDemand{Placements: map[string]schedule.Offered{
+			"a": {Resources: []core.ResourceKind{core.ResourceKubernetes}, Claims: []schedule.Claim{cluster}},
+			"b": {Resources: []core.ResourceKind{core.ResourceKubernetes}, Claims: []schedule.Claim{cluster}},
+			"c": {},
+		}, Host: "host"},
 	}
 	docker := fakeenv.New(core.EnvironmentDocker, w.gates, fakeenv.WithFiles(w.files))
 	envs := &targetRecorder{Environments: fakeenv.Environments{core.EnvironmentDocker: docker, core.EnvironmentHost: w.env}}
@@ -205,7 +311,7 @@ func TestACommandOfNoEnvironmentRunsWhereItsTaskRunsAndWaitsBehindAMeasure(t *te
 	w.withDockerfile(passes, []string{"mark", "benching", ";", "hold", "bench", ";", "emit", `{"ops": 7.5}`})
 	w.scheduler = app.Scheduler{
 		Resources: []schedule.Resource{{ID: schedule.PlacementOf("local"), Capacity: 2}, {ID: "host", Capacity: 2}},
-		Demand:    schedule.PlacementDemand{Host: "host"},
+		Demand:    schedule.PlacementDemand{Placements: map[string]schedule.Offered{"local": {}}, Host: "host"},
 	}
 	docker := fakeenv.New(core.EnvironmentDocker, w.gates, fakeenv.WithFiles(w.files))
 	envs := &targetRecorder{Environments: fakeenv.Environments{core.EnvironmentDocker: docker, core.EnvironmentHost: w.env}}

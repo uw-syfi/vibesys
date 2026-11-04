@@ -31,7 +31,9 @@ func invalid(format string, args ...any) *core.Failure {
 //
 // A check or a measure job is keyed first: the task is read as the submission's commit has it,
 // the environment is decided and fingerprinted, and the job's cache key is made (keyFlow). A
-// command job has no key; a docker one is given its placement (placeFlow).
+// command job has no key. A docker job of either is refused unless a placement gives what its task
+// needs (placeFlow), and records those needs, so that the scheduler starts it on any placement that
+// gives them.
 func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome, error) {
 	if req.Spec.Settings == nil {
 		return core.SubmitOutcome{}, invalid("spec: no job settings")
@@ -51,12 +53,12 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 	}
 	// A submission that cannot be keyed, such as one for a task its commit does not have, makes no
 	// store. Only a submission that can be queued does.
-	spec, key := req.Spec, core.JobKey("")
+	sub := core.Submission{Context: req.Context, Spec: req.Spec, NoCache: req.NoCache, Plan: req.Plan}
 	var err error
-	if spec.Settings.Kind() != core.JobCommand {
-		spec, key, err = a.keyFlow(ctx, req.Context, spec)
+	if sub.Spec.Settings.Kind() != core.JobCommand {
+		sub, err = a.keyFlow(ctx, sub)
 	} else {
-		spec, err = a.placeFlow(ctx, req.Context, spec)
+		sub, err = a.placeFlow(ctx, sub)
 	}
 	if err != nil {
 		return core.SubmitOutcome{}, err
@@ -67,7 +69,7 @@ func (a *App) Submit(ctx context.Context, req SubmitRequest) (core.SubmitOutcome
 		return core.SubmitOutcome{}, err
 	}
 	at := a.now()
-	sub := core.Submission{Context: req.Context, Spec: spec, Key: key, NoCache: req.NoCache, Plan: req.Plan, At: at}
+	sub.At = at
 	if req.Note != "" {
 		sub.Note = &core.Note{Text: req.Note, At: at, Agent: req.Context.Agent}
 	}

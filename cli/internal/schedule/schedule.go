@@ -10,10 +10,17 @@
 //   - the claims on a resource never add up to more than its capacity, and
 //   - an exclusive claim never shares its resource with any other claim.
 //
-// Around them it applies what it is given: a Policy orders the waiting jobs, and Filters may hold a
-// job back. A buggy policy or filter can be unfair, never unsafe. A job that waits keeps its turn:
-// a later job does not take a resource an earlier one waits for, so a job that needs a resource for
-// itself alone is not starved by a stream of jobs that share it.
+// A job may run in any of several places, its options: one per placement that gives what its task
+// needs, each with the claims the job holds while it runs there. Placements are interchangeable, so
+// where a job runs is decided here, when it starts, and not when it was submitted: a Placer ranks
+// the options a job could start on, and the job starts on the first of them the resources allow
+// (LeastLoaded, the least used placement first, ties by name).
+//
+// Around those rules it applies what it is given: a Policy orders the waiting jobs, a Placer ranks
+// where each may run, and Filters may hold a job back. A buggy policy, placer or filter can be
+// unfair, never unsafe. A job that waits keeps its turn on every place it may run: a later job does
+// not take a resource an earlier one waits for, so a job that needs a resource for itself alone is
+// not starved by a stream of jobs that share it.
 //
 // A job's exclusive claims may be leased too, so that the daemons that share a resource take turns
 // at it; the shell takes the leases. A job refused one waits, keeping its turn, naming the holder
@@ -24,6 +31,7 @@
 package schedule
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"time"
@@ -52,6 +60,16 @@ type Claim struct {
 	Exclusive bool
 }
 
+// Option is one place a job may run: the placement, empty for a job that runs on none of the
+// operator config's (a host job), and what the job claims while it runs there.
+type Option struct {
+	Placement string
+	Claims    []Claim
+}
+
+// Only is the one option of a job that runs in one place, on no named placement.
+func Only(claims ...Claim) []Option { return []Option{{Claims: slices.Clone(claims)}} }
+
 // ID names a job to the scheduler. It is opaque and unique among the holdings and the waiting.
 type ID string
 
@@ -65,8 +83,10 @@ type Holding struct {
 
 // Candidate is a job that waits to start.
 type Candidate struct {
-	ID     ID
-	Claims []Claim
+	ID ID
+	// Options are the places the job may run, each placement once (a later option of a placement
+	// named before is ignored). A job with none is refused.
+	Options []Option
 	// Run is the run the job's work is counted for, which fair policies share the resources by.
 	Run core.RunID
 	// Submitted and Seq are the job's place in the arrival order: by when it was submitted, then by
@@ -77,8 +97,9 @@ type Candidate struct {
 	// has started before, and its store has it running.
 	First bool
 	// Leased, when set, says a daemon other than this one, or another job, held the lease of one
-	// of the job's exclusive claims when the job last tried to take it. The job waits, keeping its
-	// turn, until the caller clears it to try again.
+	// of the job's exclusive claims when the job last tried to take it. The job does not start on
+	// an option that claims that resource, keeping its turn there, until the caller clears it to
+	// try again; it may start on another option.
 	Leased *LeasedOut
 }
 
@@ -109,12 +130,11 @@ type State struct {
 	Recent []Grant
 }
 
-// Remember returns the recent grants with the started candidates added, keeping the last
-// RecentGrants.
-func Remember(recent []Grant, started ...Candidate) []Grant {
+// Remember returns the recent grants with the started ones added, keeping the last RecentGrants.
+func Remember(recent []Grant, started ...Grant) []Grant {
 	out := slices.Clone(recent)
-	for _, c := range started {
-		out = append(out, Grant{Run: c.Run, Claims: slices.Clone(c.Claims)})
+	for _, g := range started {
+		out = append(out, Grant{Run: g.Run, Claims: slices.Clone(g.Claims)})
 	}
 	if len(out) > RecentGrants {
 		out = out[len(out)-RecentGrants:]
@@ -156,11 +176,68 @@ type Policy interface {
 	Order(waiting []Candidate, usage Usage) []Candidate
 }
 
-// Filter is a rule that may hold a job back that the resources would let start. held is what is
-// held at that moment, the jobs this Step started included. A Filter that says no gives the
-// reason, in words.
+// Filter is a rule that may hold a job back that the resources would let start on an option. held
+// is what is held at that moment, the jobs this Step started included. A Filter that says no gives
+// the reason, in words.
 type Filter interface {
-	Admit(c Candidate, held []Holding) (bool, string)
+	Admit(c Candidate, o Option, held []Holding) (bool, string)
+}
+
+// Load is how much of a resource is held at a moment of a Step, the jobs it started included, and
+// how much of it there is.
+type Load func(ResourceID) (used, capacity int)
+
+// Placer ranks the options of a job, the one to start it on first. It is given the options the
+// resources could ever grant, in the order the job has them, and returns the same options in its
+// order. Step starts the job on the first one the resources and the filters allow now, so a placer
+// decides where a job runs, never whether.
+type Placer interface {
+	Rank(options []Option, load Load) []Option
+}
+
+// LeastLoaded is the placer that starts a job where the least is used: the option whose fullest
+// resource is the least full, as a fraction of its capacity. Ties go to the placement whose name
+// sorts first, so the choice is a function of the state.
+type LeastLoaded struct{}
+
+// Rank implements Placer.
+func (LeastLoaded) Rank(options []Option, load Load) []Option {
+	type ranked struct {
+		o              Option
+		used, capacity int
+	}
+	rs := make([]ranked, len(options))
+	for i, o := range options {
+		rs[i] = ranked{o: o, capacity: 1}
+		for _, c := range o.Claims {
+			used, capacity := load(c.Resource)
+			capacity = max(capacity, 1)
+			// used/capacity > rs[i].used/rs[i].capacity, without division.
+			if used*rs[i].capacity > rs[i].used*capacity {
+				rs[i].used, rs[i].capacity = used, capacity
+			}
+		}
+	}
+	slices.SortStableFunc(rs, func(a, b ranked) int {
+		if c := cmp.Compare(a.used*b.capacity, b.used*a.capacity); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.o.Placement, b.o.Placement)
+	})
+	out := make([]Option, len(rs))
+	for i, r := range rs {
+		out[i] = r.o
+	}
+	return out
+}
+
+// Rules are how Step decides: the policy that orders the waiting jobs (nil is arrival order), the
+// placer that ranks where each may run (nil is LeastLoaded), and the filters that may hold one
+// back.
+type Rules struct {
+	Policy  Policy
+	Placer  Placer
+	Filters []Filter
 }
 
 // WaitReason is why a job waits.
@@ -183,8 +260,11 @@ type Decision interface {
 	decision()
 }
 
-// Start says the job may start now.
-type Start struct{ ID ID }
+// Start says the job may start now, on the option it names.
+type Start struct {
+	ID     ID
+	Option Option
+}
 
 // Wait says the job waits, and why.
 type Wait struct {
@@ -192,8 +272,9 @@ type Wait struct {
 	Reason WaitReason
 }
 
-// Refuse says the job's claims can never be granted: a resource that does not exist, or more of
-// one than there is. Detail says which.
+// Refuse says the job can never start: it may run nowhere, or the claims of every place it may run
+// can never be granted, naming a resource that does not exist or more of one than there is. Detail
+// says which.
 type Refuse struct {
 	ID     ID
 	Detail string
@@ -230,10 +311,10 @@ func ArrivalOrder(cs []Candidate) []Candidate {
 	return out
 }
 
-// Step decides, for every waiting job, whether it starts now. The decisions come in the order the
-// jobs were considered: the First ones in arrival order, then the rest in the policy's order. A nil
-// policy is arrival order.
-func Step(s State, p Policy, filters ...Filter) []Decision {
+// Step decides, for every waiting job, whether it starts now and where. The decisions come in the
+// order the jobs were considered: the First ones in arrival order, then the rest in the policy's
+// order.
+func Step(s State, rules Rules) []Decision {
 	arrived := ArrivalOrder(s.Waiting)
 	var first, rest []Candidate
 	for _, c := range arrived {
@@ -243,34 +324,37 @@ func Step(s State, p Policy, filters ...Filter) []Decision {
 			rest = append(rest, c)
 		}
 	}
-	if p != nil && len(rest) > 0 {
-		rest = permutation(rest, p.Order(slices.Clone(rest), UsageOf(s)))
+	if rules.Policy != nil && len(rest) > 0 {
+		rest = permutation(rest, rules.Policy.Order(slices.Clone(rest), UsageOf(s)), func(c Candidate) ID { return c.ID })
+	}
+	if rules.Placer == nil {
+		rules.Placer = LeastLoaded{}
 	}
 	b := newBook(s)
 	out := make([]Decision, 0, len(arrived))
 	for _, c := range append(first, rest...) {
-		out = append(out, b.decide(c, filters))
+		out = append(out, b.decide(c, rules))
 	}
 	return out
 }
 
-// permutation returns what the policy ordered, held to being the waiting jobs: each once, any it
-// dropped after the rest in arrival order, and any it made up left out.
-func permutation(waiting, ordered []Candidate) []Candidate {
-	byID := make(map[ID]Candidate, len(waiting))
-	for _, c := range waiting {
-		byID[c.ID] = c
+// permutation returns what a policy or a placer ordered, held to being the items it was given: each
+// once, any it dropped after the rest in the given order, and any it made up left out.
+func permutation[T any, K comparable](given, ordered []T, key func(T) K) []T {
+	byKey := make(map[K]T, len(given))
+	for _, c := range given {
+		byKey[key(c)] = c
 	}
-	seen := make(map[ID]bool, len(waiting))
-	out := make([]Candidate, 0, len(waiting))
+	seen := make(map[K]bool, len(given))
+	out := make([]T, 0, len(given))
 	for _, c := range ordered {
-		if have, ok := byID[c.ID]; ok && !seen[c.ID] {
-			seen[c.ID] = true
+		if have, ok := byKey[key(c)]; ok && !seen[key(c)] {
+			seen[key(c)] = true
 			out = append(out, have)
 		}
 	}
-	for _, c := range waiting {
-		if !seen[c.ID] {
+	for _, c := range given {
+		if !seen[key(c)] {
 			out = append(out, c)
 		}
 	}
@@ -336,41 +420,95 @@ func (b *book) hold(id ID, claims []Claim) {
 	}
 }
 
-func (b *book) decide(c Candidate, filters []Filter) Decision {
-	ns := needs(c.Claims)
+func (b *book) decide(c Candidate, rules Rules) Decision {
+	// The options the resources can ever grant, in the job's order, one for each placement.
+	var options []Option
+	refusal := "it may run on no placement that gives what its task needs"
+	for i, o := range c.Options {
+		if slices.ContainsFunc(c.Options[:i], func(p Option) bool { return p.Placement == o.Placement }) {
+			continue
+		}
+		if why := b.impossible(needs(o.Claims)); why != "" {
+			if len(options) == 0 {
+				refusal = why
+			}
+			continue
+		}
+		options = append(options, Option{Placement: o.Placement, Claims: slices.Clone(o.Claims)})
+	}
+	if len(options) == 0 {
+		return Refuse{ID: c.ID, Detail: refusal}
+	}
+	placement := func(o Option) string { return o.Placement }
+	ranked := permutation(options, rules.Placer.Rank(cloneOptions(options), b.load), placement)
+
+	var why WaitReason
+	for i, o := range ranked {
+		reason, ok := b.mayStart(c, o, rules.Filters)
+		if ok {
+			b.hold(c.ID, o.Claims)
+			b.held = append(b.held, Holding{ID: c.ID, Claims: slices.Clone(o.Claims), Run: c.Run})
+			return Start{ID: c.ID, Option: o}
+		}
+		if i == 0 {
+			why = reason
+		}
+	}
+	if why.Kind != core.WaitHeld {
+		for _, o := range options {
+			b.reserve(c.ID, needs(o.Claims))
+		}
+	}
+	return Wait{ID: c.ID, Reason: why}
+}
+
+func cloneOptions(os []Option) []Option {
+	out := make([]Option, len(os))
+	for i, o := range os {
+		out[i] = Option{Placement: o.Placement, Claims: slices.Clone(o.Claims)}
+	}
+	return out
+}
+
+// impossible says why claims with these needs can never be granted, or "".
+func (b *book) impossible(ns []need) string {
 	for _, n := range ns {
 		capacity, known := b.capacity[n.resource]
 		switch {
 		case !known:
-			return Refuse{ID: c.ID, Detail: fmt.Sprintf("no resource %q", n.resource)}
+			return fmt.Sprintf("no resource %q", n.resource)
 		case n.amount > capacity:
-			return Refuse{ID: c.ID, Detail: fmt.Sprintf("it claims %d of %s, which has %d", n.amount, n.resource, capacity)}
+			return fmt.Sprintf("it claims %d of %s, which has %d", n.amount, n.resource, capacity)
 		}
 	}
+	return ""
+}
+
+// mayStart says whether the job may start on the option now, or why it waits.
+func (b *book) mayStart(c Candidate, o Option, filters []Filter) (WaitReason, bool) {
+	ns := needs(o.Claims)
 	if why, blocked := b.blocked(ns); blocked {
-		b.reserve(c.ID, ns)
-		return Wait{ID: c.ID, Reason: why}
+		return why, false
 	}
 	for _, n := range ns {
 		if r := b.reserved[n.resource]; len(r) > 0 {
-			b.reserve(c.ID, ns)
-			return Wait{ID: c.ID, Reason: WaitReason{Kind: core.WaitBehind, Resource: n.resource, Blockers: slices.Clone(r)}}
+			return WaitReason{Kind: core.WaitBehind, Resource: n.resource, Blockers: slices.Clone(r)}, false
 		}
 	}
-	if l := c.Leased; l != nil {
-		b.reserve(c.ID, ns)
+	if l := c.Leased; l != nil && slices.ContainsFunc(ns, func(n need) bool { return n.resource == l.Resource }) {
 		holder := l.Holder
-		return Wait{ID: c.ID, Reason: WaitReason{Kind: core.WaitLeased, Resource: l.Resource, Elsewhere: &holder, Detail: l.Detail}}
+		return WaitReason{Kind: core.WaitLeased, Resource: l.Resource, Elsewhere: &holder, Detail: l.Detail}, false
 	}
 	for _, f := range filters {
-		if ok, why := f.Admit(c, slices.Clone(b.held)); !ok {
-			return Wait{ID: c.ID, Reason: WaitReason{Kind: core.WaitHeld, Detail: why}}
+		if ok, why := f.Admit(c, Option{Placement: o.Placement, Claims: slices.Clone(o.Claims)}, slices.Clone(b.held)); !ok {
+			return WaitReason{Kind: core.WaitHeld, Detail: why}, false
 		}
 	}
-	b.hold(c.ID, c.Claims)
-	b.held = append(b.held, Holding{ID: c.ID, Claims: slices.Clone(c.Claims), Run: c.Run})
-	return Start{ID: c.ID}
+	return WaitReason{}, true
 }
+
+// load is how much of a resource is held now, and how much there is.
+func (b *book) load(r ResourceID) (used, capacity int) { return b.used[r], b.capacity[r] }
 
 // blocked says what the holdings keep a job with these needs from.
 func (b *book) blocked(ns []need) (WaitReason, bool) {
@@ -395,9 +533,9 @@ func (b *book) reserve(id ID, ns []need) {
 	}
 }
 
-// Demand says what a job claims while it runs.
+// Demand says where a job may run and what it claims there while it runs.
 type Demand interface {
-	Claims(job core.Job) []Claim
+	Options(job core.Job) []Option
 }
 
 // DefaultDemand is the demand of a daemon whose config names no placement: every job takes one
@@ -405,8 +543,8 @@ type Demand interface {
 // the whole placement.
 type DefaultDemand struct{}
 
-// Claims implements Demand.
-func (DefaultDemand) Claims(job core.Job) []Claim {
+// Options implements Demand.
+func (DefaultDemand) Options(job core.Job) []Option {
 	exclusive := job.Spec.Settings != nil && job.Spec.Settings.Kind() == core.JobMeasure
-	return []Claim{{Resource: DefaultPlacement, Amount: 1, Exclusive: exclusive}}
+	return Only(Claim{Resource: DefaultPlacement, Amount: 1, Exclusive: exclusive})
 }

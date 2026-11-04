@@ -20,7 +20,7 @@ import (
 // The config of no file is today's daemon: one slot of the placement "default", which host jobs
 // share, and fifo.
 func TestTheSchedulerOfNoConfigIsOneSlot(t *testing.T) {
-	s, err := schedulerOf(parse(t, ""), nil)
+	s, err := schedulerOf(parse(t, ""), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,7 +31,7 @@ func TestTheSchedulerOfNoConfigIsOneSlot(t *testing.T) {
 	if d, ok := s.Demand.(schedule.PlacementDemand); !ok || d.Host != schedule.DefaultPlacement {
 		t.Fatalf("the default demand is %+v", s.Demand)
 	}
-	s, err = schedulerOf(parse(t, "[scheduler]\npolicy = \"fair-share\"\nmax_jobs = 4\n"), nil)
+	s, err = schedulerOf(parse(t, "[scheduler]\npolicy = \"fair-share\"\nmax_jobs = 4\n"), nil, nil)
 	if _, ok := s.Policy.(fairshare.Policy); err != nil || !ok || s.Resources[0].Capacity != 4 {
 		t.Fatalf("fair-share with 4 jobs is %+v, %v", s, err)
 	}
@@ -43,7 +43,8 @@ func TestTheSchedulerOfNoConfigIsOneSlot(t *testing.T) {
 func TestEachPlacementAndWhatItsResourcesClaimIsAResource(t *testing.T) {
 	op := parse(t, "[placements.a]\nkind = \"local\"\nmax_jobs = 4\n[placements.b]\nkind = \"local\"\nmax_jobs = 2\n")
 	cluster := core.Claim{Resource: "kubernetes:m/k", Amount: 1}
-	s, err := schedulerOf(op, map[string][]core.Claim{"a": {cluster}, "b": {cluster}})
+	offers := []core.PlacementOffer{{Name: "a", Resources: []core.ResourceKind{core.ResourceKubernetes}}, {Name: "b", Resources: []core.ResourceKind{core.ResourceKubernetes}}}
+	s, err := schedulerOf(op, offers, map[string][]core.Claim{"a": {cluster}, "b": {cluster}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,13 +55,13 @@ func TestEachPlacementAndWhatItsResourcesClaimIsAResource(t *testing.T) {
 		t.Fatalf("resources %+v, want %+v", s.Resources, want)
 	}
 	d := s.Demand.(schedule.PlacementDemand)
-	if d.Host != hostResource || len(d.Placements["a"]) != 1 || d.Placements["a"][0].Resource != "kubernetes:m/k" {
+	if a := d.Placements["a"]; d.Host != hostResource || len(a.Claims) != 1 || a.Claims[0].Resource != "kubernetes:m/k" || !slices.Equal(a.Resources, offers[0].Resources) {
 		t.Fatalf("demand %+v", d)
 	}
 }
 
 func TestAnUnknownPolicyIsRefusedNamingThePolicies(t *testing.T) {
-	_, err := schedulerOf(parse(t, "[scheduler]\npolicy = \"lottery\"\n"), nil)
+	_, err := schedulerOf(parse(t, "[scheduler]\npolicy = \"lottery\"\n"), nil, nil)
 	var f *core.Failure
 	if !errors.As(err, &f) || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "scheduler.policy") || !strings.Contains(f.Message, "fair-share, fifo") {
 		t.Fatalf("an unknown policy: %v", err)

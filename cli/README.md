@@ -94,7 +94,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/store/` | `Store`: the logical interface to results, events, logs, job state, plans, promotions and the frontier. No paths, no formats. |
 | `internal/store/ledger/` | The decisions every `Store` shares (what a submission joins or reuses, numbering, what a value may hold), as a pure `Ledger`, and the `Engine` that runs one over a `Backend`. It asks `core` whether a transition is legal (`Job.Apply`) and whether a submission joins a job (`CanJoin`). |
 | `internal/store/memstore/` | In-memory `Store` for tests. The same `Engine` as `filestore`, with a backend in memory. |
-| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 or 3 is migrated to version 4 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, and version 4 a job's placement); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
+| `internal/store/filestore/` | The only code that knows the on-disk layout. Every file is protojson of a message in `store.proto`, so no hand-kept record format exists. A store of format version 2 to 4 is migrated to version 5 when it is opened (version 3 only added the frontier and fields that a version 2 program would refuse, version 4 a job's placement, and version 5 a job's needs and task version); a docker result of version 4 or older is keyed again when it is read, as where it ran left the cache key in version 5 (see "Placements are interchangeable"); a store of any other version is refused. Its package comment states the layout, the commit protocol and the filesystem operations it relies on. |
 | `internal/store/filestore/fsys/` | The slice of a filesystem `filestore` uses, the operating system's implementation, and an in-memory one that models what a crash keeps and fails or dies at any write step. |
 | `internal/store/storetest/` | The one contract suite every `Store` passes, and a differential driver that compares stores. |
 | `internal/environment/` | `Environment`: where a job's commands run (`host`, `docker`), and `Registry`, the environments a build has by kind. |
@@ -219,13 +219,15 @@ default to the environment variables shown:
 | `--run` | `VIBESYS_RUN` | The id of the optimization run. |
 | `--harness` | `VIBESYS_HARNESS` | The agent harness, such as `claude-code`. |
 | `--agent` | `VIBESYS_AGENT` | The agent making the call. |
+| `--placement` | `VIBESYS_PLACEMENT` | `submit` only, ignored by the other commands: the one placement of the operator config a docker job may run on. |
 
-Each `submit` also takes `--placement`, which defaults to `VIBESYS_PLACEMENT`: the placement of the
-operator config a docker job runs on (see "The operator config"). Unset, the job runs on the one
-placement that gives every resource its task needs, and is refused, naming them, when none or
-several do. A host job has no placement: one inherited from `VIBESYS_PLACEMENT` is dropped, and
-`--placement` given beside `--env host` is refused, naming the flag. Without `--env`, every job runs
-where the task's check and measure run (see "Running in docker"), a command job too.
+Unset, `--placement` lets a docker job run on any placement that gives every resource its task
+needs, and the daemon chooses one when the job starts (see "Placements are interchangeable"). Set,
+it restricts the job to that one placement, and a submission is refused, naming the placement, when
+the config has no such placement or it lacks a need. A submission no placement can run is refused,
+naming what is missing. A host job has no placement: one inherited from `VIBESYS_PLACEMENT` is
+dropped, and `--placement` given beside `--env host` is refused, naming the flag. Without `--env`,
+every job runs where the task's check and measure run (see "Running in docker"), a command job too.
 
 ### Environment
 
@@ -238,7 +240,7 @@ sidecar's tests both read; a name that is empty there is left unset in the agent
 | Name | Meaning |
 | --- | --- |
 | `VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_HARNESS`, `VIBESYS_AGENT` | The defaults of the context flags above. |
-| `VIBESYS_PLACEMENT` | The default of `--placement`. |
+| `VIBESYS_PLACEMENT` | The default of `--placement`, an optional restriction an operator sets at a run's start. |
 | `XDG_RUNTIME_DIR` | Where the runtime directory is (see "The daemon and the supervisors"). Ignored unless it is an absolute path. |
 | `VIBESYS_CLI_SANDBOX` | `1` makes the daemon a sandbox daemon, beside the one that holds the machine, in the runtime directory of `XDG_RUNTIME_DIR`, which it needs (see "The daemon and the supervisors"). Any other value is refused. |
 | `XDG_STATE_HOME` | Where the task index is: `$XDG_STATE_HOME/vibesys`, else `~/.local/state/vibesys`. Ignored unless it is an absolute path. |
@@ -414,6 +416,13 @@ Each running job has its own supervisor process. It owns the job's process group
 job's output, so it outlives the daemon. The daemon takes each decision from `lifecycle`, and which
 queued jobs start from `schedule`:
 
+- A docker job may run on every placement that gives each resource its task needs, or on the one
+  `--placement` restricts it to, and the scheduler chooses among them when it starts it: the least
+  loaded, by the fraction of its slots and of what its resources claim that is held, and of those
+  as loaded, the one whose name sorts first. So two measures with two idle placements run at
+  once, each alone on its own. The choice is the scheduler's `Placer`, behind the same safety
+  rules as the policy: it can only pick among the job's options, and a job that may start on none
+  waits. A job that started stays where it started, and a job no placement fits is refused.
 - A job holds claims from its launch until its end is recorded. A docker job claims a slot of
   `placement:<name>`, the placement it runs on, which has the placement's `max_jobs` slots, and
   what the placement's resources claim: `kubernetes:<machine><kubeconfig>` for a cluster and
@@ -421,8 +430,7 @@ queued jobs start from `schedule`:
   job claims a slot of `placement:default` when that placement is local, and otherwise of `host`,
   one slot of its own. A measure job claims each of them whole, so a benchmark sample never runs
   beside another job of its placement or of another placement on its cluster or GPUs, while the
-  jobs of other placements run. A command job's placement is decided when it is submitted, as a
-  check's is.
+  jobs of other placements run. A command job chooses its placement as a check does.
 - No resource is given past its capacity and an exclusive claim shares its resource with nothing,
   whatever the policy. The policy (`[scheduler] policy`) only orders the jobs that may start:
   `fifo` takes the oldest first, and `fair-share` takes the next job of the run (the run that first
@@ -598,8 +606,8 @@ refused with the reason.
   no file of the candidate. The image is tagged by a digest of those files, so it is built again
   exactly when a file of the task changes. The first `submit` of a task builds the image before the
   job is queued, so that submission takes as long as the build. The image digest is recorded with
-  each result and is part of what makes two results comparable, so results from different images
-  are never mixed.
+  each result and is what makes two docker results comparable, with the backend, so results from
+  different images are never mixed.
 - Commands run in a container as the invoking user, in a clean checkout of the exact commit. The
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
@@ -619,13 +627,14 @@ refused with the reason.
   | `mounts` | Each directory, read-only, at `/vibesys/mounts/<name>`, with `VIBESYS_MOUNTS` listing the names. |
 
   A task names the resources its jobs need in its manifest, `[environment] needs = ["kubernetes"]`
-  (any of `gpu`, `kubernetes`, `mounts`), and a job on a placement that lacks one is refused before
-  anything is built, with `placement "<name>" has no resource "<kind>"`.
-- A result's environment fingerprint pins the placement (`placement`) and what identifies each
-  resource: the GPUs' model, count and driver, the cluster's server and version
-  (`kubernetes_server`, `kubernetes_version`), the mounts' names. Results from
-  different placements or resources are never compared, and a saved result or check pass is reused
-  only on the same ones.
+  (any of `gpu`, `kubernetes`, `mounts`). A job runs only on a placement that gives them all, and
+  one restricted to a placement that lacks one is refused before anything is built, with
+  `placement "<name>" has no resource "<kind>"`.
+- A result's environment fingerprint records where it was taken, for telling where a number came
+  from: the placement (`placement`), the machine, and what identifies each resource: the GPUs'
+  model, count and driver, the cluster's server and version (`kubernetes_server`,
+  `kubernetes_version`), the mounts' names. `show` and `jobs` name the placement. None of it decides
+  which results are compared or reused (see "Placements are interchangeable").
 - Every container is named and labelled for the daemon that started it. A cancelled or timed out
   job removes its container, and the next job removes any container an earlier job left, for
   instance when the supervisor was killed. Containers that other tools started are never touched.
@@ -714,8 +723,26 @@ Docker daemon runs outside Slurm's cgroups; a run first cancels any allocation o
 dead run left. The queue wait does not count against a command's timeout. The ssh host must be the
 node Docker runs on.
 
-A docker fingerprint holds the placement and its resources' facts, so a docker result saved by a
-build before placements is not compared with, or reused for, one of this build.
+### Placements are interchangeable
+
+Where a sample ran does not decide which results are compared, pooled or reused. Comparison,
+promotion, the frontier, check-pass and sample reuse and the cache key all go by what defines the
+measurement: the commit, the task version, the schema version, and the environment's kind, backend
+and image digest. The placement, the machine and the resources' facts are recorded with each result
+and take no part. A difference between placements is noise that the noise floor and repeated
+samples absorb; a task whose number depends on the hardware pins it through its needs, or an
+operator through `VIBESYS_PLACEMENT`.
+
+A job is keyed when it is submitted with the image digest of the first placement it may run on, by
+name. When the engine of the placement it starts on built the image to another digest, the job runs
+and saves its result under the key of that digest. A job whose task changed while it waited fails
+instead, since its submitter asked for a result of the task as it was.
+
+A store of a build before this one keyed docker results by their placement and machine as well, so
+the same commit and image measured on two placements had two keys. Such a result is keyed again
+when it is read, as is the job that saved it, so the results of every placement pool and are reused.
+A host environment's facts still identify it: its results are compared only on a host with the same
+operating system, architecture, CPU model and CPU count.
 
 A sandbox daemon (see "The daemon and the supervisors") also takes its own `XDG_STATE_HOME` and
 `VIBESYS_CLI_CONFIG` when it should not share the first daemon's index or operator config. Stores

@@ -53,6 +53,9 @@ type world struct {
 	scheduling lifecycle.Scheduling
 	workOf     func(*rand.Rand) lifecycle.Work
 	work       map[lifecycle.Ref]lifecycle.Work
+	// on is the placement the machine launched each job on, which it forgets in a crash, and ranOn
+	// the one its store records it running on, which a restart finds.
+	on, ranOn map[lifecycle.Ref]string
 }
 
 func newWorld(t *testing.T, seed uint64, stores int) *world {
@@ -61,6 +64,7 @@ func newWorld(t *testing.T, seed uint64, stores int) *world {
 		store: map[lifecycle.Ref]core.JobState{}, at: map[lifecycle.Ref]time.Time{},
 		sup: map[lifecycle.Ref]*supervisor{}, dirs: map[lifecycle.Ref]bool{},
 		moves: map[lifecycle.Ref]int{}, stores: stores, next: map[lifecycle.StoreID]int{},
+		on: map[lifecycle.Ref]string{}, ranOn: map[lifecycle.Ref]string{},
 	}
 }
 
@@ -114,6 +118,10 @@ func (w *world) checkRequest(req lifecycle.Request) {
 			w.fail("launch of %v, which is %q in its store", req.Ref, got)
 		}
 		w.launches = append(w.launches, req.Ref)
+		if work := w.work[req.Ref]; len(work.Options) > 0 && !slices.ContainsFunc(work.Options, func(o schedule.Option) bool { return o.Placement == req.Placement }) {
+			w.fail("launch of %v on %q, where it may not run: %+v", req.Ref, req.Placement, work.Options)
+		}
+		w.on[req.Ref] = req.Placement
 		w.checkLeases(req.Ref, req.Leases)
 	case lifecycle.Adopt:
 		w.checkLeases(req.Ref, req.Leases)
@@ -182,17 +190,7 @@ func (w *world) userCancel() {
 func (w *world) checkLeases(ref lifecycle.Ref, leases []schedule.ResourceID) {
 	w.t.Helper()
 	var want []schedule.ResourceID
-	claims := w.work[ref].Claims
-	if len(claims) == 0 {
-		resources := w.scheduling.Resources
-		if !w.scheduled {
-			resources = lifecycle.OneAtATime().Resources
-		}
-		for _, r := range resources {
-			claims = append(claims, schedule.Claim{Resource: r.ID, Amount: 1, Exclusive: true})
-		}
-	}
-	for _, c := range claims {
+	for _, c := range w.heldBy(ref) {
 		if c.Exclusive && !slices.Contains(want, c.Resource) {
 			want = append(want, c.Resource)
 		}
@@ -223,6 +221,7 @@ func (w *world) answer(healthy bool) bool {
 			return true
 		}
 		w.store[req.Ref] = core.JobRunning
+		w.ranOn[req.Ref] = req.Placement
 		w.dirs[req.Ref] = true
 		w.sup[req.Ref] = &supervisor{alive: true}
 		w.feed(lifecycle.Launched{Ref: req.Ref})
@@ -411,6 +410,7 @@ func (w *world) crash() {
 		w.state = lifecycle.RecoveringWith(w.scheduling)
 	}
 	w.pending = nil
+	clear(w.on)
 }
 
 func (w *world) recoverAll(upTo int) {
@@ -430,10 +430,24 @@ func (w *world) recoverAll(upTo int) {
 		events++
 		var finding lifecycle.Finding = lifecycle.NoSuchJob{}
 		if state := w.store[ref]; state != "" {
-			finding = lifecycle.JobIn{State: state, SubmittedAt: w.at[ref], Work: w.work[ref]}
+			finding = lifecycle.JobIn{State: state, SubmittedAt: w.at[ref], Work: w.workFound(ref)}
 		}
 		w.feed(lifecycle.Recovered{Ref: ref, Finding: finding, Supervisor: presence, At: w.tick()})
 	}
+}
+
+// workFound is a job's work as a restart reads it from its store: a job its store has running may
+// run only on the placement the store records it on.
+func (w *world) workFound(ref lifecycle.Ref) lifecycle.Work {
+	work := w.work[ref]
+	p, ran := w.ranOn[ref]
+	if w.store[ref] != core.JobRunning || !ran || len(work.Options) < 2 {
+		return work
+	}
+	i := slices.IndexFunc(work.Options, func(o schedule.Option) bool { return o.Placement == p })
+	work.Options = work.Options[i : i+1]
+	w.work[ref] = work
+	return work
 }
 
 // Recovery is replay: a restart at any point, including in the middle of a restart, ends with

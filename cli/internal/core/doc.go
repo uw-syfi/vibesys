@@ -19,9 +19,10 @@
 //   - plan.go: the plan statuses and which of them close a plan, and the checks on a plan's title,
 //     body and comments.
 //   - environment.go: ChooseEnvironment, the rule from a task's backend and setup to a run
-//     environment.
-//   - placement.go: the resource kinds, the claims a job holds, and ChoosePlacement, the rule from
-//     a task's needs and the placements of the operator config to the one a docker job runs on.
+//     environment, and Fingerprint.Equal, what makes two environments the same one.
+//   - placement.go: the resource kinds, the claims a job holds, and EligiblePlacements, the rule
+//     from a task's needs and the placements of the operator config to those a docker job may run
+//     on.
 //
 // It imports only the standard library and performs no I/O, reads no clock and starts no
 // goroutines. Time arrives as a value. These types are one of two separate models: the

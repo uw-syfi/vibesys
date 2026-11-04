@@ -61,13 +61,17 @@ func TestEveryResourceAMeasureHoldsAloneIsLeasedWhereItIs(t *testing.T) {
 	p := Process{UID: 1000}
 	for _, text := range configs {
 		op, claims := parse(t, text), claimsOf(t, text)
-		s, err := schedulerOf(op, claims)
+		s, err := schedulerOf(op, nil, claims)
 		if err != nil {
 			t.Fatal(err)
 		}
 		book := p.leasingOf(op, leasesDir, claims, clock.System{}, nil).Book
 		measure := func(env core.EnvironmentKind, placement string) []schedule.Claim {
-			return s.Demand.Claims(core.Job{Spec: core.JobSpec{Environment: env, Placement: placement, Settings: core.MeasureSettings{}}})
+			options := s.Demand.Options(core.Job{Spec: core.JobSpec{Environment: env, Placement: placement, Settings: core.MeasureSettings{}}})
+			if len(options) != 1 {
+				t.Fatalf("a measure of %s restricted to %q may run on %+v, want there alone", env, placement, options)
+			}
+			return options[0].Claims
 		}
 		jobs := map[string][]schedule.Claim{"a host job": measure(core.EnvironmentHost, "")}
 		for name := range op.GetPlacements() {

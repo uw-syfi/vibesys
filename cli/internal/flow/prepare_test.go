@@ -1,6 +1,7 @@
 package flow_test
 
 import (
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"strings"
@@ -35,7 +36,7 @@ func keyFor(t *testing.T, kind core.JobKind, settings core.Settings, tk task.Tas
 
 func queued(t *testing.T, settings core.Settings, tk task.Task, env core.Fingerprint) core.Job {
 	return core.Job{
-		ID: "j9", State: core.JobQueued, Key: keyFor(t, settings.Kind(), settings, tk, commit, env),
+		ID: "j9", State: core.JobQueued, Key: keyFor(t, settings.Kind(), settings, tk, commit, env), TaskVersion: tk.Version,
 		Spec: core.JobSpec{Commit: commit, Environment: core.EnvironmentHost, Settings: settings},
 	}
 }
@@ -54,21 +55,31 @@ func TestACheckJobAlwaysRunsItsCheck(t *testing.T) {
 	}
 }
 
-func TestAChangedTaskOrEnvironmentFailsAJobThatWaited(t *testing.T) {
+// A job that starts in another environment than it was keyed in, such as on a placement whose
+// engine built the task's image to another digest, runs under the key of what it runs in now, and
+// the cache answers it from what was saved under that key alone. So does a job of an older store,
+// which records no task version, whose task changed while it waited.
+func TestAJobRunsUnderTheKeyOfWhereItStarts(t *testing.T) {
 	tk := theTask()
-	job := queued(t, core.MeasureSettings{}, tk, print_)
+	job := queued(t, core.MeasureSettings{Samples: 3}, tk, print_)
+	older := job
+	older.TaskVersion = ""
 	newer := tk
 	newer.Version = "tv2"
 	moved := print_
 	moved.Facts = map[string]string{"os": "darwin"}
 	for name, in := range map[string]flow.Starting{
-		"the task":        {Job: job, Task: newer, Environment: print_},
-		"the environment": {Job: job, Task: tk, Environment: moved},
+		"the task of an older job": {Job: older, Task: newer, Environment: print_},
+		"the environment":          {Job: job, Task: tk, Environment: moved},
 	} {
-		_, err := flow.Prepare(in)
-		f, ok := err.(*core.Failure)
-		if !ok || f.Kind != core.FailureEnvironmentMismatch || !strings.Contains(f.Message, "j9") {
-			t.Errorf("%s changed: %v", name, err)
+		want := keyFor(t, core.JobMeasure, job.Spec.Settings, in.Task, commit, in.Environment)
+		in.Saved = []core.Result{
+			{Job: "j1", Key: job.Key, Commit: commit, RecordedAt: epoch, Outcome: core.MeasureOutcome{Samples: []float64{1, 2, 3}, CheckJob: "j1"}},
+			{Job: "j2", Key: want, Commit: commit, RecordedAt: epoch, Outcome: core.MeasureOutcome{Samples: []float64{1}, CheckJob: "j2"}},
+		}
+		p, err := flow.Prepare(in)
+		if err != nil || p.Key != want || !p.Environment.Equal(in.Environment) || p.Samples != 2 {
+			t.Errorf("%s changed: %+v, %v; want key %s and the 2 samples it lacks", name, p, err, want)
 		}
 	}
 	for name, job := range map[string]core.Job{
@@ -77,6 +88,26 @@ func TestAChangedTaskOrEnvironmentFailsAJobThatWaited(t *testing.T) {
 	} {
 		if _, err := flow.Prepare(flow.Starting{Job: job, Task: tk, Environment: print_}); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// A job whose task changed while it waited fails, wherever it starts: its submitter asked for a
+// result of the task as it was.
+func TestAJobWhoseTaskChangedWhileItWaitedFails(t *testing.T) {
+	tk := theTask()
+	newer := tk
+	newer.Version = "tv2"
+	moved := print_
+	moved.Facts = map[string]string{"os": "darwin"}
+	for _, settings := range []core.Settings{core.CheckSettings{}, core.MeasureSettings{Samples: 3}} {
+		job := queued(t, settings, tk, print_)
+		for _, env := range []core.Fingerprint{print_, moved} {
+			_, err := flow.Prepare(flow.Starting{Job: job, Task: newer, Environment: env})
+			var f *core.Failure
+			if !errors.As(err, &f) || f.Kind != core.FailureEnvironmentMismatch || !strings.Contains(f.Message, "tv2") {
+				t.Errorf("a %s job of a changed task: %v, want an environment mismatch naming the version", settings.Kind(), err)
+			}
 		}
 	}
 }

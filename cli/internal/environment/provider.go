@@ -16,8 +16,8 @@ type Target struct {
 	Commit core.Commit
 	// Task is the name of the task, a directory of .vibesys/tasks.
 	Task string
-	// Placement is the placement of the operator config a docker job runs on, decided before the
-	// job runs (core.ChoosePlacement). The host has none.
+	// Placement is the placement of the operator config a docker job runs on, the one the
+	// scheduler chose among those it may run on when it started. The host has none.
 	Placement string
 }
 

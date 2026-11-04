@@ -191,8 +191,10 @@ func (ResourceKind) EnumDescriptor() ([]byte, []int) {
 }
 
 // EnvironmentFingerprint identifies the environment a result was taken in. Two results are
-// comparable, and a check pass is reusable, only when their fingerprints are equal. It is part of
-// the cache key.
+// comparable, and a check pass is reusable, only when their fingerprints are equal, and the cache
+// key takes the fingerprint as equality compares it. A docker environment is its kind, backend and
+// image digest: the image pins every program a job runs, so where its container ran is no part of
+// it. A host environment is its kind, backend and facts.
 type EnvironmentFingerprint struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Kind    EnvironmentKind        `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.cli.v1.EnvironmentKind" json:"kind,omitempty"`
@@ -200,10 +202,12 @@ type EnvironmentFingerprint struct {
 	// The exact image digest ("sha256:..."), set for the docker environment and empty for host.
 	ImageDigest string `protobuf:"bytes,3,opt,name=image_digest,json=imageDigest,proto3" json:"image_digest,omitempty"`
 	// Facts the environment pinned, by name: operating system, architecture, toolchain versions.
-	// Equality is over the whole map, so the names an environment reports are part of its contract.
-	// A docker environment also pins the placement its containers run on ("placement") and what
-	// identifies each resource attached to them (such as "gpu_model" or "kubernetes_server"), so
-	// results from different placements or resources are never compared or reused.
+	// A host environment's facts identify it: equality is over the whole map, so the names it reports
+	// are part of its contract. A docker environment's facts say where its container ran, for
+	// diagnosis, and take no part in equality or the cache key: the machine, the placement of the
+	// operator config ("placement") and what identifies each resource attached to it (such as
+	// "gpu_model" or "kubernetes_server"). Placements are interchangeable, so results taken on
+	// different placements are compared and reused.
 	Facts         map[string]string `protobuf:"bytes,4,rep,name=facts,proto3" json:"facts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

@@ -451,8 +451,8 @@ func (w *world) scheduler() app.Scheduler {
 // alone.
 type simDemand struct{ w *world }
 
-func (d simDemand) Claims(job core.Job) []schedule.Claim {
-	return []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: d.w.isAlone(tokenOf(job))}}
+func (d simDemand) Options(job core.Job) []schedule.Option {
+	return schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: d.w.isAlone(tokenOf(job))})
 }
 
 func (w *world) isAlone(token string) bool {

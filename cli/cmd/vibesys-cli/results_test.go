@@ -508,3 +508,25 @@ func TestAMeasurementsValueIsTheMeanCompareUses(t *testing.T) {
 		t.Fatalf("show = %q lacks the value", text.stdout)
 	}
 }
+
+// Placements are interchangeable, so measure jobs of one commit and image that ran on two
+// placements pool into one measurement; show names where its samples were taken, each placement
+// once, and where a check passed.
+func TestShowSaysWhereTheSamplesWereTaken(t *testing.T) {
+	c := newResultsCLI(t)
+	on := func(placement string) core.Fingerprint {
+		return core.Fingerprint{Kind: core.EnvironmentDocker, Backend: core.BackendCPU, ImageDigest: "sha256:" + strings.Repeat("ab", 32),
+			Facts: map[string]string{core.FactPlacement: placement, "os": "linux"}}
+	}
+	check := storetest.SeedCheckIn(t, c.store, rev(1), c.clk.Now(), on("b"), "v1")
+	for _, p := range []string{"b", "a", "b"} {
+		c.clk.Advance(time.Minute)
+		storetest.SeedMeasurement(t, c.store, storetest.Measurement{Commit: rev(1), Samples: []float64{100, 102}, At: c.clk.Now(), Environment: on(p), CheckJob: check.Job})
+	}
+	r := c.run(withTask("show", "c1")...)
+	mustExit(t, r, exitOK, "show c1")
+	lines := strings.Split(strings.TrimSuffix(r.stdout, "\n"), "\n")
+	if len(lines) != 2 || !strings.HasSuffix(lines[0], "\ton b") || !strings.Contains(lines[1], "over 6 samples") || !strings.HasSuffix(lines[1], "\ton b, a") {
+		t.Fatalf("show = %q, want the check on b and one measurement of 6 samples on b, a", r.stdout)
+	}
+}

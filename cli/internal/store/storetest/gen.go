@@ -240,7 +240,18 @@ func (g *gen) job() core.Job {
 		Notes: []core.Note{g.note(), g.note()}, Plans: []core.PlanNumber{core.PlanNumber(1 + g.r.Uint32()), 2},
 		SubmittedAt: g.instant(), StartedAt: &started, FinishedAt: &finished, CancelReason: g.text(), ExitCode: &code,
 		ResultJob: core.JobID(g.name()), CheckJob: core.JobID(g.name()), Attempts: g.attempts(), Submitters: g.submitters(),
+		Needs: g.needs(), TaskVersion: g.name(),
 	}
+}
+
+// needs is one or more resource kinds, each once, in an order drawn at random.
+func (g *gen) needs() []core.ResourceKind {
+	kinds := core.ResourceKinds()
+	out := make([]core.ResourceKind, 0, len(kinds))
+	for _, i := range g.r.Perm(len(kinds))[:1+g.pick(len(kinds))] {
+		out = append(out, kinds[i])
+	}
+	return out
 }
 
 // details is one event detail of every kind a command records.
@@ -340,6 +351,10 @@ func (g *gen) transitionFor(job core.Job, at time.Time) core.Transition {
 			fp = core.Fingerprint{Kind: core.EnvironmentDocker, Backend: core.BackendCPU, ImageDigest: g.text()}
 		}
 		tr.Environment = &fp
+	}
+	if (tr.To == core.JobRunning && g.pick(4) == 0) || g.pick(20) == 0 {
+		// A new key, which only the start of a check or a measure job may carry.
+		tr.Key = core.JobKey(g.name())
 	}
 	if (tr.To == core.JobSucceeded && g.pick(6) != 0) || g.pick(12) == 0 {
 		var res core.Result

@@ -6,7 +6,7 @@
 // ([environment] needs = ["kubernetes"]).
 //
 // The fingerprint is the cluster's API server address and version, read with kubectl on the
-// engine's machine, so results taken against another cluster are never compared.
+// engine's machine, and recorded with each result to tell which cluster it was taken against.
 //
 // The daemon gives a job the cluster and does not manage it: what the job deploys, and cleaning it
 // up, is the task's.

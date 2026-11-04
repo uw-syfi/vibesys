@@ -485,9 +485,10 @@ type JobSpec struct {
 	Commit string `protobuf:"bytes,1,opt,name=commit,proto3" json:"commit,omitempty"`
 	// The environment the caller asks for. Unspecified lets the task choose.
 	Environment EnvironmentKind `protobuf:"varint,2,opt,name=environment,proto3,enum=vibesys.cli.v1.EnvironmentKind" json:"environment,omitempty"`
-	// The placement of the operator config a docker job runs on: where its container runs. Empty in
-	// a submission lets the task's needed resources choose; a queued check or measure job holds the
-	// one chosen. A host job has none.
+	// The one placement of the operator config a docker job may run on, where its container runs.
+	// Empty lets it run on any placement that gives every resource its task needs, which the
+	// scheduler chooses when the job starts; the placement it ran on is a fact of its environment. A
+	// host job has none.
 	Placement string `protobuf:"bytes,3,opt,name=placement,proto3" json:"placement,omitempty"`
 	// Types that are valid to be assigned to Settings:
 	//
@@ -841,7 +842,9 @@ type Job struct {
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Spec  *JobSpec               `protobuf:"bytes,2,opt,name=spec,proto3" json:"spec,omitempty"`
 	State JobState               `protobuf:"varint,3,opt,name=state,proto3,enum=vibesys.cli.v1.JobState" json:"state,omitempty"`
-	// The cache key. Empty for command jobs, which are never cached.
+	// The cache key. Empty for command jobs, which are never cached. A job that starts in another
+	// environment than it was keyed in, such as on a placement whose engine built the task's image to
+	// another digest, takes the key of the environment it starts in.
 	Key string `protobuf:"bytes,4,opt,name=key,proto3" json:"key,omitempty"`
 	// The environment the job runs in, pinned when it starts. Unset while queued.
 	Environment *EnvironmentFingerprint `protobuf:"bytes,5,opt,name=environment,proto3" json:"environment,omitempty"`
@@ -868,7 +871,14 @@ type Job struct {
 	// Everyone who submitted the job, one entry for each distinct (run_id, agent), oldest first. A
 	// submission that joins a job or is answered from it adds its caller here, also when the job is
 	// final, and changes nothing else.
-	Submitters    []*Submitter `protobuf:"bytes,17,rep,name=submitters,proto3" json:"submitters,omitempty"`
+	Submitters []*Submitter `protobuf:"bytes,17,rep,name=submitters,proto3" json:"submitters,omitempty"`
+	// The resources the task at the job's commit needs of the placement a docker job runs on,
+	// decided when it was submitted, each once. Only a placement that gives them all runs it.
+	Needs []ResourceKind `protobuf:"varint,18,rep,packed,name=needs,proto3,enum=vibesys.cli.v1.ResourceKind" json:"needs,omitempty"`
+	// The version of the task a check or measure job was submitted for. The job runs only if the
+	// task is still at it when the job starts. Empty for a command job, and for a job saved before
+	// this field was, which runs the task as it is when it starts.
+	TaskVersion   string `protobuf:"bytes,19,opt,name=task_version,json=taskVersion,proto3" json:"task_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1020,6 +1030,20 @@ func (x *Job) GetSubmitters() []*Submitter {
 		return x.Submitters
 	}
 	return nil
+}
+
+func (x *Job) GetNeeds() []ResourceKind {
+	if x != nil {
+		return x.Needs
+	}
+	return nil
+}
+
+func (x *Job) GetTaskVersion() string {
+	if x != nil {
+		return x.TaskVersion
+	}
+	return ""
 }
 
 // LeaseHolder is who holds the lease of a resource: a daemon's user, machine and process, and the
@@ -1347,7 +1371,7 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\bended_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12D\n" +
 	"\x10cut_before_start\x18\x03 \x01(\x0e2\x18.vibesys.cli.v1.CutCauseH\x00R\x0ecutBeforeStart\x12B\n" +
 	"\x0fcut_mid_command\x18\x04 \x01(\x0e2\x18.vibesys.cli.v1.CutCauseH\x00R\rcutMidCommandB\x05\n" +
-	"\x03end\"\xed\x05\n" +
+	"\x03end\"\xe1\x06\n" +
 	"\x03Job\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x04spec\x18\x02 \x01(\v2\x17.vibesys.cli.v1.JobSpecR\x04spec\x12.\n" +
@@ -1371,7 +1395,9 @@ const file_vibesys_cli_v1_job_proto_rawDesc = "" +
 	"\battempts\x18\x10 \x03(\v2\x17.vibesys.cli.v1.AttemptR\battempts\x129\n" +
 	"\n" +
 	"submitters\x18\x11 \x03(\v2\x19.vibesys.cli.v1.SubmitterR\n" +
-	"submittersB\f\n" +
+	"submitters\x12E\n" +
+	"\x05needs\x18\x12 \x03(\x0e2\x1c.vibesys.cli.v1.ResourceKindB\x11\xbaH\x0e\x92\x01\v\x18\x01\"\a\x82\x01\x04\x10\x01 \x00R\x05needs\x12+\n" +
+	"\ftask_version\x18\x13 \x01(\tB\b\xbaH\x05r\x03\x18\x80\x02R\vtaskVersionB\f\n" +
 	"\n" +
 	"_exit_code\"\x90\x01\n" +
 	"\vLeaseHolder\x12\x12\n" +
@@ -1461,6 +1487,7 @@ var file_vibesys_cli_v1_job_proto_goTypes = []any{
 	(EnvironmentKind)(0),           // 18: vibesys.cli.v1.EnvironmentKind
 	(*timestamppb.Timestamp)(nil),  // 19: google.protobuf.Timestamp
 	(*EnvironmentFingerprint)(nil), // 20: vibesys.cli.v1.EnvironmentFingerprint
+	(ResourceKind)(0),              // 21: vibesys.cli.v1.ResourceKind
 }
 var file_vibesys_cli_v1_job_proto_depIdxs = []int32{
 	5,  // 0: vibesys.cli.v1.CommandSettings.service:type_name -> vibesys.cli.v1.ServiceSpec
@@ -1484,17 +1511,18 @@ var file_vibesys_cli_v1_job_proto_depIdxs = []int32{
 	19, // 18: vibesys.cli.v1.Job.finished_at:type_name -> google.protobuf.Timestamp
 	11, // 19: vibesys.cli.v1.Job.attempts:type_name -> vibesys.cli.v1.Attempt
 	10, // 20: vibesys.cli.v1.Job.submitters:type_name -> vibesys.cli.v1.Submitter
-	19, // 21: vibesys.cli.v1.LeaseHolder.since:type_name -> google.protobuf.Timestamp
-	0,  // 22: vibesys.cli.v1.WaitHolder.kind:type_name -> vibesys.cli.v1.JobKind
-	3,  // 23: vibesys.cli.v1.WaitReason.kind:type_name -> vibesys.cli.v1.WaitKind
-	14, // 24: vibesys.cli.v1.WaitReason.holders:type_name -> vibesys.cli.v1.WaitHolder
-	13, // 25: vibesys.cli.v1.WaitReason.elsewhere:type_name -> vibesys.cli.v1.LeaseHolder
-	15, // 26: vibesys.cli.v1.JobWait.reason:type_name -> vibesys.cli.v1.WaitReason
-	27, // [27:27] is the sub-list for method output_type
-	27, // [27:27] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	21, // 21: vibesys.cli.v1.Job.needs:type_name -> vibesys.cli.v1.ResourceKind
+	19, // 22: vibesys.cli.v1.LeaseHolder.since:type_name -> google.protobuf.Timestamp
+	0,  // 23: vibesys.cli.v1.WaitHolder.kind:type_name -> vibesys.cli.v1.JobKind
+	3,  // 24: vibesys.cli.v1.WaitReason.kind:type_name -> vibesys.cli.v1.WaitKind
+	14, // 25: vibesys.cli.v1.WaitReason.holders:type_name -> vibesys.cli.v1.WaitHolder
+	13, // 26: vibesys.cli.v1.WaitReason.elsewhere:type_name -> vibesys.cli.v1.LeaseHolder
+	15, // 27: vibesys.cli.v1.JobWait.reason:type_name -> vibesys.cli.v1.WaitReason
+	28, // [28:28] is the sub-list for method output_type
+	28, // [28:28] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_job_proto_init() }

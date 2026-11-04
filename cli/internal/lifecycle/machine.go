@@ -90,9 +90,12 @@ type entry struct {
 	attempts      int
 	policy        core.RerunPolicy
 	spawnFailures int
-	// work is what the job claims while it holds the machine, as its store says. A job the machine
+	// work is where the job may run and what it claims there, as its store says. A job the machine
 	// was never told the work of claims the whole machine.
 	work Work
+	// placed is the option the scheduler started the job on, which it holds until its end is
+	// recorded. It is nil for a job the scheduler has not started since it was last queued.
+	placed *schedule.Option
 	// wait is why the scheduler did not start the job at the last step, when it is queued or parked
 	// and did not start, and refused says its claims can never be granted.
 	wait    schedule.WaitReason
@@ -103,23 +106,27 @@ type entry struct {
 	leased *schedule.LeasedOut
 }
 
-// Work is what a job asks of the machine, as the shell read it from the job: the claims it holds
-// from its launch until its end is recorded, the run its use is counted for, and its kind, which
-// says what it is to whoever reads why another job waits. Work with no claims is work the machine
-// was not told, and claims every resource for the job alone.
+// Work is what a job asks of the machine, as the shell read it from the job: the places it may run,
+// each with the claims it holds there from its launch until its end is recorded (a job that
+// started may run only where it started), the run its use is counted for, and its kind, which says
+// what it is to whoever reads why another job waits. Work with no options and no kind is work the
+// machine was not told, and claims every resource for the job alone; told work with no options may
+// run nowhere, and the scheduler refuses it.
 type Work struct {
-	Claims []schedule.Claim
-	Run    core.RunID
-	Kind   core.JobKind
+	Options []schedule.Option
+	Run     core.RunID
+	Kind    core.JobKind
 }
 
-func (w Work) told() bool { return len(w.Claims) > 0 }
+func (w Work) told() bool { return len(w.Options) > 0 || w.Kind != "" }
 
 // Scheduling is how the machine is shared: the resources jobs claim, the policy that orders the
-// jobs that wait, and the filters that may hold one back. A nil policy is arrival order.
+// jobs that wait, the placer that chooses where each runs, and the filters that may hold one back.
+// A nil policy is arrival order, and a nil placer schedule.LeastLoaded.
 type Scheduling struct {
 	Resources []schedule.Resource
 	Policy    schedule.Policy
+	Placer    schedule.Placer
 	Filters   []schedule.Filter
 }
 
@@ -477,12 +484,14 @@ type Request interface {
 }
 
 // LaunchRequest asks for a supervisor for the job, the store to record it running, and the
-// supervisor to start. The answer is Launched or LaunchFailed. Leases are the resources the job
-// holds alone: before anything else the shell takes the lease of each that other daemons share,
-// and answers LeaseRefused, having started nothing, when another holds one.
+// supervisor to start. The answer is Launched or LaunchFailed. Placement is where the scheduler
+// started it: the placement its docker job runs on, empty for one that runs on none. Leases are the
+// resources the job holds alone there: before anything else the shell takes the lease of each that
+// other daemons share, and answers LeaseRefused, having started nothing, when another holds one.
 type LaunchRequest struct {
-	Ref    Ref
-	Leases []schedule.ResourceID
+	Ref       Ref
+	Placement string
+	Leases    []schedule.ResourceID
 }
 
 // Adopt asks the shell to attach to the job's supervisor, start it if it is still parked, and
@@ -880,7 +889,7 @@ func (s *State) place(e Recovered, kept entry, phase Phase) {
 			kept.work = f.Work
 		}
 	}
-	kept.phase, kept.waiting, kept.holds, kept.parked = phase, false, false, false
+	kept.phase, kept.waiting, kept.holds, kept.parked, kept.placed = phase, false, false, false, nil
 	// No retry is owed to a job placed afresh, so one refused a lease tries again in its turn.
 	kept.leased = nil
 	if phase != PhaseInDoubt {
@@ -1018,7 +1027,7 @@ func (s *State) discarded(e Discarded) []Request {
 	if i < 0 || s.entries[i].phase != PhaseDiscarding {
 		return nil
 	}
-	s.entries[i].phase = PhaseQueued
+	s.entries[i].phase, s.entries[i].placed = PhaseQueued, nil
 	if s.entries[i].cancelAsked {
 		return s.cancelQueuedJob(e.Ref, e.At)
 	}
@@ -1083,7 +1092,7 @@ func (s *State) leaseRefused(e LeaseRefused) []Request {
 	if cur.cancelAsked {
 		return s.settle(e.Ref, cancelQueued(e.Ref.Job, cur.cancelReason, e.At))
 	}
-	cur.phase = PhaseQueued
+	cur.phase, cur.placed = PhaseQueued, nil
 	cur.leased = &schedule.LeasedOut{Resource: e.Resource, Holder: e.Holder, Detail: e.Detail}
 	return s.awaitRetry(i)
 }
@@ -1288,25 +1297,28 @@ func (s *State) schedule() []Request {
 	for _, e := range s.entries {
 		switch {
 		case e.holdsMachine():
-			st.Holdings = append(st.Holdings, schedule.Holding{ID: idOf(e.ref), Claims: s.claimsOf(e), Run: e.work.Run})
+			st.Holdings = append(st.Holdings, schedule.Holding{ID: idOf(e.ref), Claims: s.heldClaims(e), Run: e.work.Run})
 		case e.parked:
 			st.Waiting = append(st.Waiting, s.candidate(e, true))
 		case e.phase == PhaseQueued && !s.storeBlocked(e.ref.Store):
 			st.Waiting = append(st.Waiting, s.candidate(e, false))
 		}
 	}
-	for _, d := range schedule.Step(st, s.scheduling.Policy, s.scheduling.Filters...) {
+	rules := schedule.Rules{Policy: s.scheduling.Policy, Placer: s.scheduling.Placer, Filters: s.scheduling.Filters}
+	for _, d := range schedule.Step(st, rules) {
 		i := slices.IndexFunc(s.entries, func(e entry) bool { return idOf(e.ref) == d.Target() })
 		cur := &s.entries[i]
 		switch d := d.(type) {
 		case schedule.Start:
-			s.recent = schedule.Remember(s.recent, s.candidate(*cur, cur.parked))
+			placed := d.Option
+			cur.placed = &placed
+			s.recent = schedule.Remember(s.recent, schedule.Grant{Run: cur.work.Run, Claims: placed.Claims})
 			if cur.parked {
 				reqs = append(reqs, s.adopt(i))
 				continue
 			}
 			cur.phase = PhaseLaunching
-			reqs = append(reqs, LaunchRequest{Ref: cur.ref, Leases: s.leasesOf(*cur)})
+			reqs = append(reqs, LaunchRequest{Ref: cur.ref, Placement: placed.Placement, Leases: s.leasesOf(*cur)})
 		case schedule.Wait:
 			cur.wait, cur.waits = d.Reason, true
 		case schedule.Refuse:
@@ -1328,13 +1340,13 @@ func (s *State) resources() []schedule.Resource {
 func idOf(ref Ref) schedule.ID { return schedule.ID(ref.String()) }
 
 func (s *State) candidate(e entry, first bool) schedule.Candidate {
-	return schedule.Candidate{ID: idOf(e.ref), Claims: s.claimsOf(e), Run: e.work.Run, Submitted: e.submittedAt, Seq: e.seq, First: first, Leased: e.leased}
+	return schedule.Candidate{ID: idOf(e.ref), Options: s.optionsOf(e), Run: e.work.Run, Submitted: e.submittedAt, Seq: e.seq, First: first, Leased: e.leased}
 }
 
 // leasesOf is the resources a job holds alone, each once and in order: those whose leases it takes.
 func (s *State) leasesOf(e entry) []schedule.ResourceID {
 	var out []schedule.ResourceID
-	for _, c := range s.claimsOf(e) {
+	for _, c := range s.heldClaims(e) {
 		if c.Exclusive && !slices.Contains(out, c.Resource) {
 			out = append(out, c.Resource)
 		}
@@ -1343,15 +1355,42 @@ func (s *State) leasesOf(e entry) []schedule.ResourceID {
 	return out
 }
 
-// claimsOf is what a job claims: its work's claims, or, for a job whose work the machine was not
-// told, every resource for itself alone.
-func (s *State) claimsOf(e entry) []schedule.Claim {
+// optionsOf is where a job may run: its work's options, or, for a job whose work the machine was
+// not told, anywhere, holding every resource for itself alone.
+func (s *State) optionsOf(e entry) []schedule.Option {
 	if e.work.told() {
-		return e.work.Claims
+		return e.work.Options
 	}
 	out := make([]schedule.Claim, 0, len(s.scheduling.Resources))
 	for _, r := range s.resources() {
 		out = append(out, schedule.Claim{Resource: r.ID, Amount: 1, Exclusive: true})
+	}
+	return schedule.Only(out...)
+}
+
+// heldClaims is what a job holds while it holds the machine: the claims of the option the scheduler
+// started it on, or, for a job the machine holds without having started it (one that runs, or
+// might, as a restart found it), the claims of every place it may run, which is the one it started
+// on for a job whose store says where.
+func (s *State) heldClaims(e entry) []schedule.Claim {
+	if e.placed != nil {
+		return e.placed.Claims
+	}
+	options := s.optionsOf(e)
+	if len(options) == 1 {
+		return options[0].Claims
+	}
+	// Of a resource two places claim, it holds the most either claims.
+	var out []schedule.Claim
+	for _, o := range options {
+		for _, c := range o.Claims {
+			i := slices.IndexFunc(out, func(h schedule.Claim) bool { return h.Resource == c.Resource })
+			if i < 0 {
+				out = append(out, c)
+				continue
+			}
+			out[i].Amount, out[i].Exclusive = max(out[i].Amount, c.Amount), out[i].Exclusive || c.Exclusive
+		}
 	}
 	return out
 }

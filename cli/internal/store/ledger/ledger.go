@@ -181,6 +181,8 @@ func (l *Ledger) Submit(sub core.Submission) (Change, core.SubmitOutcome, error)
 		Spec:        sub.Spec,
 		State:       core.JobQueued,
 		Key:         sub.Key,
+		Needs:       slices.Clone(sub.Needs),
+		TaskVersion: sub.TaskVersion,
 		NoCache:     sub.NoCache,
 		SubmittedAt: sub.At,
 	}, sub)
@@ -266,6 +268,11 @@ func (l *Ledger) Transition(t core.Transition) (Change, core.Job, error) {
 	t, err := Hold("transition", t)
 	if err != nil {
 		return nil, none, err
+	}
+	if t.Key != "" {
+		if err := CheckName("transition.Key", string(t.Key)); err != nil {
+			return nil, none, err
+		}
 	}
 	i, ok := l.jobIndex[t.Job]
 	if !ok {
@@ -464,6 +471,12 @@ func (l *Ledger) Apply(c Change) {
 func (l *Ledger) putJob(job core.Job) {
 	n, _ := JobNumber(job.ID)
 	if int(n) <= len(l.jobs) {
+		// A job that started in another environment than it was keyed in runs under a new key, and
+		// a submission of that key may join it.
+		if old := l.jobs[n-1].Key; job.Key != old && job.Key != "" && !slices.Contains(l.byKey[job.Key], int(n-1)) {
+			l.byKey[job.Key] = append(l.byKey[job.Key], int(n-1))
+			slices.Sort(l.byKey[job.Key])
+		}
 		l.jobs[n-1] = job
 		return
 	}

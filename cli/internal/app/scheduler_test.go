@@ -13,10 +13,10 @@ import (
 // machine for itself, as a measure does.
 type commandsAlone struct{}
 
-func (commandsAlone) Claims(job core.Job) []schedule.Claim {
+func (commandsAlone) Options(job core.Job) []schedule.Option {
 	c, _ := job.Spec.Settings.(core.CommandSettings)
 	alone := len(c.Argv) > 1 && c.Argv[1] == "alone"
-	return []schedule.Claim{{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: alone}}
+	return schedule.Only(schedule.Claim{Resource: schedule.DefaultPlacement, Amount: 1, Exclusive: alone})
 }
 
 // A daemon of four slots runs three commands at once, holds back one that needs the machine alone

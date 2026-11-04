@@ -10,11 +10,11 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
-// Over random placements, needs and requests: a requested placement is chosen exactly when the
-// config has it and it gives every need; with none requested, the one placement that gives every
-// need is chosen, and none or several is a refusal that names them. A choice is never empty, and a
-// refusal is always invalid input.
-func TestThePlacementChosenGivesWhatTheTaskNeeds(t *testing.T) {
+// Over random placements, needs and restrictions: the eligible placements are exactly the offers
+// that give every need, sorted by name, or the one a restriction names when the config has it and
+// it gives every need. Several eligible placements are no refusal; none is, and so is a
+// restriction the config lacks or that lacks a need, each as invalid input that says why.
+func TestTheEligiblePlacementsAreThoseThatGiveWhatTheTaskNeeds(t *testing.T) {
 	r := rand.New(rand.NewPCG(9, 10))
 	kinds := core.ResourceKinds()
 	subset := func() []core.ResourceKind {
@@ -28,46 +28,40 @@ func TestThePlacementChosenGivesWhatTheTaskNeeds(t *testing.T) {
 	}
 	for range 5000 {
 		var offers []core.PlacementOffer
-		for i := range r.IntN(4) {
+		for _, i := range r.Perm(r.IntN(4)) {
 			offers = append(offers, core.PlacementOffer{Name: fmt.Sprintf("p%d", i), Resources: subset()})
 		}
 		needs := subset()
-		requested := []string{"", "", "p0", "p1", "p3", "nope"}[r.IntN(6)]
-		got, err := core.ChoosePlacement(offers, needs, requested)
+		restriction := []string{"", "", "p0", "p1", "p3", "nope"}[r.IntN(6)]
+		got, err := core.EligiblePlacements(offers, needs, restriction)
 		var fit []string
 		for _, o := range offers {
 			if o.Lacks(needs) == "" {
 				fit = append(fit, o.Name)
 			}
 		}
-		at := slices.IndexFunc(offers, func(o core.PlacementOffer) bool { return o.Name == requested })
-		var wantOK bool
-		switch {
-		case requested != "":
-			wantOK = at >= 0 && offers[at].Lacks(needs) == ""
-		default:
-			wantOK = len(fit) == 1
+		slices.Sort(fit)
+		at := slices.IndexFunc(offers, func(o core.PlacementOffer) bool { return o.Name == restriction })
+		want := fit
+		if restriction != "" {
+			want = nil
+			if at >= 0 && offers[at].Lacks(needs) == "" {
+				want = []string{restriction}
+			}
 		}
-		if (err == nil) != wantOK {
-			t.Fatalf("offers %+v, needs %v, requested %q: %q, %v; want ok=%v", offers, needs, requested, got, err, wantOK)
+		if (err == nil) != (len(want) > 0) || !slices.Equal(got, want) {
+			t.Fatalf("offers %+v, needs %v, restriction %q: %q, %v; want %q", offers, needs, restriction, got, err, want)
 		}
 		if err != nil {
 			f := core.AsFailure(err)
 			if f.Kind != core.FailureInvalidInput {
 				t.Fatalf("a refusal of kind %s: %v", f.Kind, err)
 			}
-			if requested != "" && at >= 0 {
-				if want := fmt.Sprintf("placement %q has no resource %q", requested, offers[at].Lacks(needs)); !strings.Contains(f.Message, want) {
+			if restriction != "" && at >= 0 {
+				if want := fmt.Sprintf("placement %q has no resource %q", restriction, offers[at].Lacks(needs)); !strings.Contains(f.Message, want) {
 					t.Fatalf("%v, want it to say %s", err, want)
 				}
 			}
-			if requested == "" && len(fit) > 1 && !strings.Contains(f.Message, strings.Join(fit, ", ")) {
-				t.Fatalf("%v, want it to name %v", err, fit)
-			}
-			continue
-		}
-		if got == "" || (requested != "" && got != requested) || (requested == "" && got != fit[0]) {
-			t.Fatalf("offers %+v, needs %v, requested %q: chose %q", offers, needs, requested, got)
 		}
 	}
 }

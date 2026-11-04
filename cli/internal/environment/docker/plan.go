@@ -69,9 +69,6 @@ const (
 
 	EnvCacheDir     = "VIBESYS_CACHE_DIR"
 	EnvArtifactsDir = "VIBESYS_ARTIFACTS_DIR"
-
-	// FactPlacement is the fingerprint fact that names the placement.
-	FactPlacement = "placement"
 )
 
 // cacheKey names the cache directory of a task's image: the task and the image, so the cache is
@@ -112,7 +109,7 @@ func refusal(spec Spec, placement core.PlacementOffer) error {
 	}
 	if lack := placement.Lacks(spec.Needs); lack != "" {
 		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
-			"placement %q has no resource %q, which the task needs; give it one in the operator config, or run the job on a placement that has one with --placement", placement.Name, lack)}
+			"placement %q has no resource %q, which the task needs; give it one in the operator config, or let the job run on any placement that has one by not restricting it with --placement", placement.Name, lack)}
 	}
 	switch backend := backendOf(spec); {
 	case backend == core.BackendCUDA && placement.Lacks([]core.ResourceKind{core.ResourceGPU}) != "":
@@ -125,19 +122,19 @@ func refusal(spec Spec, placement core.PlacementOffer) error {
 	return nil
 }
 
-// facts are the fingerprint facts that identify the machine the container runs on, the platform
-// of its image, and the placement. Results taken in the same image, on the same placement, on
-// machines with the same operating system, architecture, CPU model and CPU count, and with the
-// same resources (which add their own facts), are comparable; the machine's name and memory do not
-// count.
+// facts are the fingerprint facts that say where the container ran: the machine, the platform of
+// its image, and the placement (core.FactPlacement); the resources add their own. They are kept
+// with each result to tell where a sample came from, and take no part in which results are
+// compared or reused: placements are interchangeable, so that is decided by the image digest and
+// the backend alone (core.Fingerprint.Equal).
 func facts(m core.MachineFacts, img Image, placement string) map[string]string {
 	return map[string]string{
-		"os":             m.OS,
-		"arch":           m.Arch,
-		"cpu_model":      m.CPUModel,
-		"logical_cpus":   strconv.FormatUint(uint64(m.LogicalCPUs), 10),
-		"image_platform": img.Platform,
-		FactPlacement:    placement,
+		"os":               m.OS,
+		"arch":             m.Arch,
+		"cpu_model":        m.CPUModel,
+		"logical_cpus":     strconv.FormatUint(uint64(m.LogicalCPUs), 10),
+		"image_platform":   img.Platform,
+		core.FactPlacement: placement,
 	}
 }
 

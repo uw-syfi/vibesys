@@ -571,3 +571,25 @@ func scopeAt(repo, task string) core.Scope {
 	}
 	return s
 }
+
+// Every command that takes the context of a call takes all of it, --placement included, from its
+// flags as from the environment, so one context line serves every command: a command with no use
+// for a flag, such as --placement outside submit, ignores it.
+func TestEveryCommandTakesTheWholeContext(t *testing.T) {
+	c := newCLI(t)
+	job := c.submit("true")
+	context := []string{"--run", "run-a", "--harness", "h", "--agent", "a", "--placement", "p"}
+	for _, line := range [][]string{
+		{"wait", job}, {"jobs"}, {"logs", job}, {"show", "HEAD"}, {"compare", "HEAD"}, {"result"}, {"note", job, "hi"}, {"cancel", job},
+		{"frontier", "list"}, {"plan", "list"}, {"daemon", "status"}, {"submit", "check", "HEAD"},
+	} {
+		r := c.run(append(withTask(line...), context...)...)
+		if strings.Contains(r.stderr, "not defined") {
+			t.Errorf("%v refused the context: %q", line, r.stderr)
+		}
+	}
+	c.env["VIBESYS_PLACEMENT"] = "p"
+	if r := c.run(withTask("jobs")...); r.code != exitOK {
+		t.Errorf("jobs with VIBESYS_PLACEMENT set: %+v", r)
+	}
+}

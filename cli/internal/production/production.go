@@ -114,7 +114,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
-	scheduler, err := schedulerOf(op, machines.claims)
+	scheduler, err := schedulerOf(op, machines.offers, machines.claims)
 	if err != nil {
 		return err
 	}
@@ -173,13 +173,15 @@ var policies = map[string]func() schedule.Policy{
 // hostResource is the resource host jobs claim when no local placement is the default one.
 const hostResource schedule.ResourceID = "host"
 
-// schedulerOf is how the operator config shares the machines: the named policy, a resource of
-// max_jobs slots for each placement, and one for each resource the placements' resources claim,
+// schedulerOf is how the operator config shares the machines: the named policy, a demand that lets
+// a docker job run on every placement that gives what its task needs (offers says what each gives),
+// a resource of max_jobs slots for each placement, and one for each resource the placements'
+// resources claim,
 // with room for every job of the placements that claim it, so that it bounds nothing but a measure,
 // which takes it whole. A host job runs on this machine beside the jobs of the local placement
 // "default" of the earlier shape, so it claims a slot of that placement; without one, host jobs
 // have a resource of one slot of their own.
-func schedulerOf(op *cliv1.OperatorConfig, claims map[string][]core.Claim) (app.Scheduler, error) {
+func schedulerOf(op *cliv1.OperatorConfig, offers []core.PlacementOffer, claims map[string][]core.Claim) (app.Scheduler, error) {
 	policy := op.GetScheduler().GetPolicy()
 	newPolicy, ok := policies[policy]
 	if !ok {
@@ -187,17 +189,22 @@ func schedulerOf(op *cliv1.OperatorConfig, claims map[string][]core.Claim) (app.
 		return app.Scheduler{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
 			"the operator config: scheduler.policy: %q is not a policy (%s)", policy, strings.Join(names, ", "))}
 	}
-	demand := schedule.PlacementDemand{Placements: map[string][]schedule.Claim{}}
+	demand := schedule.PlacementDemand{Placements: map[string]schedule.Offered{}}
 	var resources []schedule.Resource
 	shared := map[schedule.ResourceID]int{}
 	for _, name := range slices.Sorted(maps.Keys(op.GetPlacements())) {
 		slots := int(op.GetPlacements()[name].GetMaxJobs())
 		resources = append(resources, schedule.Resource{ID: schedule.PlacementOf(name), Capacity: slots})
+		var offered schedule.Offered
+		if i := slices.IndexFunc(offers, func(o core.PlacementOffer) bool { return o.Name == name }); i >= 0 {
+			offered.Resources = offers[i].Resources
+		}
 		for _, c := range claims[name] {
 			id := schedule.ResourceID(c.Resource)
-			demand.Placements[name] = append(demand.Placements[name], schedule.Claim{Resource: id, Amount: c.Amount, Exclusive: c.Exclusive})
+			offered.Claims = append(offered.Claims, schedule.Claim{Resource: id, Amount: c.Amount, Exclusive: c.Exclusive})
 			shared[id] += slots * max(c.Amount, 1)
 		}
+		demand.Placements[name] = offered
 	}
 	for _, id := range slices.Sorted(maps.Keys(shared)) {
 		resources = append(resources, schedule.Resource{ID: id, Capacity: shared[id]})
