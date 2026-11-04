@@ -19,8 +19,8 @@ type step struct {
 	body  []step
 }
 
-// parse splits a script at its ";" arguments and reads a `child { ... }` block as one step.
-// It reports false for braces that do not pair or that do not follow `child`.
+// parse splits a script at its ";" arguments and reads a `child { ... }` or `on-term { ... }` block as one step.
+// It reports false for braces that do not pair or that do not follow `child` or `on-term`.
 func parse(tokens []string) ([]step, bool) {
 	steps, _, ok := parseSteps(tokens, false)
 	return steps, ok
@@ -39,7 +39,7 @@ func parseSteps(tokens []string, nested bool) (steps []step, rest []string, ok b
 		case ";":
 			flush()
 		case "{":
-			if len(cur) != 1 || cur[0] != "child" {
+			if len(cur) != 1 || (cur[0] != "child" && cur[0] != "on-term") {
 				return nil, nil, false
 			}
 			body, after, ok := parseSteps(tokens[i+1:], true)
@@ -67,17 +67,39 @@ func parseSteps(tokens []string, nested bool) (steps []step, rest []string, ok b
 }
 
 // group is the processes of one process group: the leader's goroutine and the children it
-// started. Ending the group ends all of them, and waits for them.
+// started. Ending the group ends all of them, and waits for them. Terminating it delivers SIGTERM
+// to each of them: see signals.
 type group struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	termCtx context.Context // done once SIGTERM was delivered to the group
+	raise   context.CancelFunc
 }
 
 func newGroup() *group {
 	g := &group{}
 	g.ctx, g.cancel = context.WithCancel(context.Background())
+	g.termCtx, g.raise = context.WithCancel(g.ctx)
 	return g
+}
+
+// terminate delivers SIGTERM to every process of the group, and returns at once.
+func (g *group) terminate() { g.raise() }
+
+// signals is how one process of a group answers SIGTERM, as a shell does: the default is to die
+// with 143, `ignore-term` ignores it, and `on-term { ... }` runs its steps and then ends the
+// process with exit code 0, unless they end it first. A child starts with the default, and
+// keeps an ignored SIGTERM.
+type signals struct {
+	ignore bool
+	onTerm []step
+}
+
+// caught reports whether a SIGTERM has reached the process and it does not ignore it.
+func (g *group) caught(sig signals) bool {
+	return !sig.ignore && g.termCtx.Err() != nil && g.ctx.Err() == nil
 }
 
 func (g *group) end() {
@@ -111,11 +133,32 @@ func splitOutput(argv []string) (script []string, file string) {
 // run runs the steps as one process of the group g, writing to out, and to file for `emit`. It
 // returns when the process ends: by its own steps, or because the group ended.
 func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (core.ExecOutcome, error) {
+	return in.runWith(g, steps, out, file, signals{})
+}
+
+// runWith is run for a process that starts with the given way of answering SIGTERM.
+func (in *interpreter) runWith(g *group, steps []step, out io.Writer, file string, sig signals) (core.ExecOutcome, error) {
 	exited := func(code int) (core.ExecOutcome, error) {
 		return core.ExecOutcome{Kind: core.ExecExited, ExitCode: code}, nil
 	}
+	// terminated is how the process ends when SIGTERM reaches it.
+	terminated := func() (core.ExecOutcome, error) {
+		if sig.onTerm == nil {
+			return exited(128 + 15)
+		}
+		handler := sig
+		handler.onTerm, handler.ignore = nil, true // the handler is not interrupted by a second SIGTERM
+		out2, err := in.runWith(g, sig.onTerm, out, file, handler)
+		if err != nil || (out2.Kind == core.ExecExited && out2.ExitCode != 0) || (out2.Kind != core.ExecExited && out2.Kind != "") {
+			return out2, err
+		}
+		return exited(0)
+	}
 	points, hasPoints := in.gates.(Points)
 	for _, s := range steps {
+		if g.caught(sig) {
+			return terminated()
+		}
 		w := s.words
 		switch w[0] {
 		case "print", "warn":
@@ -135,7 +178,14 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 			if len(w) != 2 {
 				return exited(127)
 			}
-			if !in.gates.Wait(g.ctx, w[1]) {
+			waitCtx := g.ctx
+			if !sig.ignore {
+				waitCtx = g.termCtx // a SIGTERM interrupts the wait, as it does a shell's read
+			}
+			if !in.gates.Wait(waitCtx, w[1]) {
+				if g.caught(sig) {
+					return terminated()
+				}
 				if in.lostOnEnd != nil {
 					return core.ExecOutcome{}, in.lostOnEnd
 				}
@@ -157,7 +207,12 @@ func (in *interpreter) run(g *group, steps []step, out io.Writer, file string) (
 			}
 		case "child":
 			body := s.body
-			g.wg.Go(func() { _, _ = in.run(g, body, out, file) })
+			inherited := signals{ignore: sig.ignore}
+			g.wg.Go(func() { _, _ = in.runWith(g, body, out, file, inherited) })
+		case "on-term":
+			sig.onTerm = append([]step{}, s.body...)
+		case "ignore-term":
+			sig.ignore = true
 		case "exit":
 			code, err := strconv.Atoi(strings.Join(w[1:], ""))
 			if err != nil {
@@ -198,6 +253,9 @@ var _ environment.Process = (*process)(nil)
 
 // Exited implements environment.Process.
 func (p *process) Exited() <-chan environment.Exit { return p.exited }
+
+// Terminate implements environment.Process.
+func (p *process) Terminate() { p.g.terminate() }
 
 // Kill implements environment.Process.
 func (p *process) Kill() { p.g.end() }

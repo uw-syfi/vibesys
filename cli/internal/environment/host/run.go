@@ -70,6 +70,7 @@ func (r *run) execute() core.Attempt {
 		Limit:     r.limit,
 		Cancelled: r.ctx.Done(),
 		Pause:     func() (<-chan struct{}, func()) { return r.env.timers.Timeout(r.ctx, r.env.pause) },
+		Grace:     func() (<-chan struct{}, func()) { return r.env.timers.Timeout(r.ctx, r.env.grace) },
 	}, r.sink)
 }
 
@@ -158,6 +159,12 @@ func wait(cmd *exec.Cmd) environment.Exit {
 
 // Exited implements environment.Process.
 func (p *proc) Exited() <-chan environment.Exit { return p.exited }
+
+// Terminate implements environment.Process: it sends SIGTERM to the group.
+func (p *proc) Terminate() {
+	// As for Kill, the group no longer existing is the usual answer for a command that ended.
+	_ = syscall.Kill(-p.pgid, syscall.SIGTERM)
+}
 
 // Kill implements environment.Process: it ends the group, whatever is left of it.
 func (p *proc) Kill() {

@@ -22,7 +22,8 @@ type Config struct {
 	// Backend describes the machine the engine runs containers on: what the fingerprint is made of.
 	Backend backend.Backend
 	// Timers makes every timeout and pause Run waits on. The first timer a Run arms is the
-	// execution's limit, with the duration of its Timeout; later ones are pauses between probes.
+	// execution's limit, with the duration of its Timeout; later ones are pauses between probes, and the grace period armed when the limit is
+	// reached or the run is cancelled.
 	Timers clock.Timers
 	// IDs names the runs.
 	IDs IDs
@@ -36,6 +37,9 @@ type Config struct {
 	User User
 	// ProbePause is the pause between two probes. Zero means environment.DefaultProbePause.
 	ProbePause time.Duration
+	// Grace is how long the commands get, after a cancel or the limit asks them to terminate, to
+	// clean up before the container is removed. Zero means environment.DefaultGrace.
+	Grace time.Duration
 
 	// Machine is where the engine's containers run, as a run's files see it. Nil means Shared,
 	// as User: the engine runs on this machine and mounts the caller's directories.
@@ -99,6 +103,9 @@ func New(cfg Config) (*Provider, error) {
 	}
 	if cfg.ProbePause <= 0 {
 		cfg.ProbePause = environment.DefaultProbePause
+	}
+	if cfg.Grace <= 0 {
+		cfg.Grace = environment.DefaultGrace
 	}
 	return &Provider{cfg: cfg, build: make(chan struct{}, 1), active: map[string]struct{}{}}, nil
 }

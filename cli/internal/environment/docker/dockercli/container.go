@@ -21,8 +21,16 @@ const (
 	// readyLine is what the container's first process prints once it is up.
 	readyLine = "vs-ready"
 	// keeperScript is the container's first process: it says it is up and then waits for the end
-	// of its input, which is the caller going away.
-	keeperScript = "echo " + readyLine + "; while read -r _; do :; done"
+	// of its input, which is the caller going away. It ignores SIGTERM, which a stop sends to every
+	// process of the container (see terminateScript): the container must outlive the grace period
+	// the commands get to clean up.
+	keeperScript = "trap '' TERM; echo " + readyLine + "; while read -r _; do :; done"
+	// terminateScript asks every process of the container to terminate: the commands, their
+	// children and whatever else they started, which docker's own signalling cannot reach
+	// because they are not the container's first process. It is run in the container, and a
+	// process does not signal itself. The init that docker runs as the first process is never
+	// signalled.
+	terminateScript = "kill -s TERM -- -1"
 	// execWrapper runs the command with its standard error merged into its standard output.
 	execWrapper = `exec "$@" 2>&1`
 )
@@ -167,12 +175,17 @@ var _ docker.Container = (*handle)(nil)
 
 // proc is one command in the container.
 type proc struct {
+	h      *handle
 	cmd    *exec.Cmd
 	exited chan environment.Exit
 }
 
 // Exited implements environment.Process.
 func (p *proc) Exited() <-chan environment.Exit { return p.exited }
+
+// Terminate implements environment.Process: it sends SIGTERM to every process in the container.
+// The commands of a container share its processes, so asking one to stop asks all.
+func (p *proc) Terminate() { p.h.terminate() }
 
 // Kill implements environment.Process. It ends the docker client of the command at once; the
 // command itself ends no later than the container's removal, which `docker exec` cannot hasten.
@@ -200,10 +213,17 @@ func (h *handle) Start(argv []string, sink io.Writer) (environment.Process, erro
 	if err := cmd.Start(); err != nil {
 		return nil, unavailable("cannot run %q: %v; %s", h.e.program, err, hint)
 	}
-	p := &proc{cmd: cmd, exited: make(chan environment.Exit, 1)}
+	p := &proc{h: h, cmd: cmd, exited: make(chan environment.Exit, 1)}
 	h.procs = append(h.procs, p)
 	h.wg.Go(func() { p.exited <- h.finish(cmd.Wait(), stderr.String()) })
 	return p, nil
+}
+
+// terminate signals every process of the container with SIGTERM. A container that is gone, or an
+// engine that cannot be reached, is not an error here: the commands then end when the container
+// is removed, which the caller does after the grace period either way.
+func (h *handle) terminate() {
+	_, _ = h.e.call(context.Background(), "exec", "exec", h.name, "/bin/sh", "-c", terminateScript)
 }
 
 // finish says how a command ended, from how its docker client did.

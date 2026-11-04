@@ -97,6 +97,7 @@ func (r *run) prepareAndExecute() core.Attempt {
 		Limit:     limit,
 		Cancelled: r.ctx.Done(),
 		Pause:     func() (<-chan struct{}, func()) { return p.cfg.Timers.Timeout(r.ctx, p.cfg.ProbePause) },
+		Grace:     func() (<-chan struct{}, func()) { return p.cfg.Timers.Timeout(r.ctx, p.cfg.Grace) },
 	}, r.sink)
 }
 

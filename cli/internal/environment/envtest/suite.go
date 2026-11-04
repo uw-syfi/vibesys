@@ -13,6 +13,10 @@
 //
 //   - the timer an execution is limited by is the first it arms, with the duration of its Timeout;
 //     a pause between two readiness probes is a timer armed after the first
+//   - when the limit is reached or the caller cancels, the processes are first asked to terminate
+//     (SIGTERM) and get the grace period, environment.DefaultGrace, to clean up: the grace is the
+//     timer armed after the limit, the suite fires it, and a process that traps SIGTERM runs its
+//     cleanup before the run returns; one that ignores it is killed when the grace is over
 //   - the whole process group of the command and of the service ends on every path: an exit, the
 //     limit, a cancellation, a service that never became ready, and the death of the process that
 //     called Run
@@ -83,6 +87,11 @@ func Run(t *testing.T, rig Rig) {
 		{"the fingerprint is stable and pins the environment", caseFingerprint},
 		{"cancelling ends the run and its whole process group", caseCancel},
 		{"the limit ends the run and its whole process group", caseLimit},
+		{"cancelling asks the command to terminate and waits for its cleanup", caseCancelTerminates},
+		{"the limit asks the command to terminate and waits for its cleanup", caseLimitTerminates},
+		{"a command that ignores the request is killed when the grace period ends after a cancel", caseGraceEndsCancel},
+		{"a command that ignores the request is killed when the grace period ends after the limit", caseGraceEndsLimit},
+		{"the limit asks the service to terminate too", caseServiceLimitTerminates},
 		{"a normal exit ends the processes the command left behind", caseLeftovers},
 		{"the death of the caller ends the process group", caseCallerDies},
 		{"a service without a probe is ready at once and ends with the run", caseServiceNoProbe},
@@ -470,6 +479,98 @@ func caseLimit(h *harness) {
 	out := r.wait()
 	expect(h.t, out, core.ExecTimedOut)
 	h.gone("main", "child")
+}
+
+// graceTimer returns the timer the run armed for the grace period after the n timers before it.
+func (h *harness) graceTimer(n int) *Timer {
+	h.t.Helper()
+	timer := h.timer(n)
+	if timer.Duration != environment.DefaultGrace {
+		h.t.Fatalf("timer %d is for %v, want the grace period %v", n, timer.Duration, environment.DefaultGrace)
+	}
+	return timer
+}
+
+// cleaning is a tree whose main process cleans up when asked to terminate, and whose child does
+// not.
+func cleaning() Program {
+	return Program{Alive("main"), OnTerm(Mark("cleanup")), Child(Alive("child"), Hold(Forever)), Mark("up"), Hold(Forever)}
+}
+
+// stubborn is a tree whose main process ignores the request to terminate.
+func stubborn() Program {
+	return Program{Alive("main"), IgnoreTerm(), Child(Alive("child"), Hold(Forever)), Mark("up"), Hold(Forever)}
+}
+
+func caseCancelTerminates(h *harness) {
+	r := h.start(h.exec(cleaning()))
+	h.reached("up")
+	h.reached(AliveMark("child"))
+	r.cancel()
+	out := r.wait()
+	expect(h.t, out, core.ExecCancelled)
+	if !h.world.Marked("cleanup") {
+		h.t.Errorf("the command was ended without a chance to clean up: it was never asked to terminate")
+	}
+	h.graceTimer(2)
+	h.gone("main", "child")
+}
+
+func caseLimitTerminates(h *harness) {
+	r := h.start(h.exec(cleaning()))
+	h.reached("up")
+	h.reached(AliveMark("child"))
+	h.limitTimer().Fire()
+	out := r.wait()
+	expect(h.t, out, core.ExecTimedOut)
+	if !h.world.Marked("cleanup") {
+		h.t.Errorf("the command was ended without a chance to clean up: it was never asked to terminate")
+	}
+	h.graceTimer(2)
+	h.gone("main", "child")
+}
+
+// graceEnds shows that the grace period is all a command that ignores the request waits for: the
+// run is still open while it lasts, and ends the group when it is over.
+func graceEnds(h *harness, trigger func(r *running), kind core.ExecKind) {
+	r := h.start(h.exec(stubborn()))
+	h.reached("up")
+	h.reached(AliveMark("child"))
+	armed := h.timers.Armed()
+	trigger(r)
+	grace := h.graceTimer(armed + 1)
+	select {
+	case <-r.done:
+		h.t.Fatalf("the run ended before the grace period did, although the command ignores the request")
+	default:
+	}
+	grace.Fire()
+	expect(h.t, r.wait(), kind)
+	h.gone("main", "child")
+}
+
+func caseGraceEndsCancel(h *harness) {
+	graceEnds(h, func(r *running) { r.cancel() }, core.ExecCancelled)
+}
+
+func caseGraceEndsLimit(h *harness) {
+	graceEnds(h, func(*running) { h.limitTimer().Fire() }, core.ExecTimedOut)
+}
+
+func caseServiceLimitTerminates(h *harness) {
+	svc := Program{Alive("service"), OnTerm(Mark("service-cleanup")), Child(Alive("service-child"), Hold(Forever)), Mark("service-up"), Hold(Forever)}
+	r := h.start(h.withService(cleaning(), svc, nil))
+	h.reached("up")
+	h.reached("service-up")
+	h.reached(AliveMark("child"))
+	h.reached(AliveMark("service-child"))
+	h.limitTimer().Fire()
+	out := r.wait()
+	expect(h.t, out, core.ExecTimedOut)
+	if !h.world.Marked("cleanup") || !h.world.Marked("service-cleanup") {
+		h.t.Errorf("the command and its service were not both asked to terminate (command %v, service %v)", h.world.Marked("cleanup"), h.world.Marked("service-cleanup"))
+	}
+	h.gone("main", "child", "service", "service-child")
 }
 
 func caseLeftovers(h *harness) {

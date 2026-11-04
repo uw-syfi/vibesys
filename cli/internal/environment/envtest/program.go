@@ -16,6 +16,8 @@ const (
 	OpChild      Op = "child"       // run Body in a new process of the same group, in the background
 	OpAlive      Op = "alive"       // make this process observable: the test sees it end through Gone(Name)
 	OpUnlessFlag Op = "unless-flag" // exit with code 1 unless the test has set the flag Name
+	OpOnTerm     Op = "on-term"     // when SIGTERM reaches this process, run Body, then end with exit code 0 unless Body ends it
+	OpIgnoreTerm Op = "ignore-term" // ignore SIGTERM in this process, and in the children it starts after this
 )
 
 // Step is one step of a Program. Which fields mean something depends on Op.
@@ -67,6 +69,15 @@ func Alive(name string) Step { return Step{Op: OpAlive, Name: name} }
 
 // UnlessFlag ends the process with exit code 1 unless the test has set the flag.
 func UnlessFlag(name string) Step { return Step{Op: OpUnlessFlag, Name: name} }
+
+// OnTerm makes the process, when SIGTERM reaches it, run the body and then end with exit code 0,
+// unless the body ends it with another code. A process without it dies of SIGTERM, as a shell does:
+// with 143. It must come before the steps it is to interrupt. A child does not inherit it.
+func OnTerm(body ...Step) Step { return Step{Op: OpOnTerm, Body: body} }
+
+// IgnoreTerm makes the process ignore SIGTERM, so that only a kill ends it. The children it starts
+// afterwards ignore it too, as a shell's children do.
+func IgnoreTerm() Step { return Step{Op: OpIgnoreTerm} }
 
 // Forever is a point no test ever releases: a Hold at it never returns.
 const Forever = "forever"

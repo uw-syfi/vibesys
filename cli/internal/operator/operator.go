@@ -74,7 +74,7 @@ func invalid(format string, args ...any) error {
 // Parse reads and checks an operator config. The result names its placements only: one of the
 // earlier shape is the placement "default", and every placement's max_jobs is at least one. Its
 // scheduler names a policy, and no max_jobs: the earlier shape's scheduler.max_jobs is the max_jobs
-// of the placement "default".
+// of the placement "default". Its stop_grace_seconds is the file's, or unset.
 func Parse(data []byte) (*cliv1.OperatorConfig, error) {
 	c := &cliv1.OperatorConfig{}
 	if err := decode(data, c); err != nil {
@@ -87,6 +87,7 @@ func Parse(data []byte) (*cliv1.OperatorConfig, error) {
 	if sched == nil {
 		sched = &cliv1.Scheduler{}
 	}
+	grace := c.StopGraceSeconds
 	legacy := c.GetDocker() != nil || c.GetRemote() != nil || c.GetSlurm() != nil
 	named := len(c.GetPlacements()) > 0
 	switch {
@@ -99,7 +100,7 @@ func Parse(data []byte) (*cliv1.OperatorConfig, error) {
 		if err != nil {
 			return nil, err
 		}
-		c = &cliv1.OperatorConfig{Placements: map[string]*cliv1.Placement{DefaultPlacement: p}}
+		c = &cliv1.OperatorConfig{Placements: map[string]*cliv1.Placement{DefaultPlacement: p}, StopGraceSeconds: grace}
 	case !named:
 		c.Placements = map[string]*cliv1.Placement{DefaultPlacement: {Kind: cliv1.PlacementKind_PLACEMENT_KIND_LOCAL}}
 	}

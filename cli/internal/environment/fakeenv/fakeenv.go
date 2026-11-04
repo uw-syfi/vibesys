@@ -255,6 +255,7 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 		Limit:     limit,
 		Cancelled: ctx.Done(),
 		Pause:     func() (<-chan struct{}, func()) { return e.timers.Timeout(ctx, e.pause) },
+		Grace:     func() (<-chan struct{}, func()) { return e.timers.Timeout(ctx, environment.DefaultGrace) },
 	}, out)
 	l.end()
 	return environment.Finish(ctx, attempt, nil)

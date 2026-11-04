@@ -52,7 +52,7 @@ refused.
 | Concern | How |
 | --- | --- |
 | Identity of the environment | The image digest, plus the machine: architecture, CPU model and count, and, when GPUs are passed, GPU model, count, driver and the driver's CUDA version. Two results are comparable only when all of these are equal. |
-| Containment | One container per command run (a check, or one benchmark sample). The CLI removes it on every path: exit, timeout, cancel, and the death of the process that started it. |
+| Containment | One container per command run (a check, or one benchmark sample). The CLI removes it on every path: exit, timeout, cancel, and the death of the process that started it. A timeout or a cancel first sends SIGTERM to the command's processes and waits for them to end, up to `stop_grace_seconds` (30 by default), so a trusted wrapper can delete what it created outside the container; then the container is removed. |
 | Placement | Where the Docker engine runs: this machine, another machine over ssh, or another machine inside a Slurm allocation. Chosen in the operator config. |
 | GPU access | `docker run --gpus <value>`, or `--runtime nvidia` with `NVIDIA_VISIBLE_DEVICES`. Never CDI. |
 | Build cache | A directory per task image on the engine's machine, mounted at `/vibesys/cache` and kept across commits and jobs. |

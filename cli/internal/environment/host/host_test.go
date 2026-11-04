@@ -76,3 +76,43 @@ func TestACommandOnTheHostIsToldItsArtifactsDirectory(t *testing.T) {
 		t.Errorf("attempt %+v printed %q, want %q", a, out.String(), artifacts)
 	}
 }
+
+// The grace period the operator configures is the one a stop waits for, and the default is
+// environment.DefaultGrace.
+func TestTheConfiguredGraceIsWhatAStopWaitsFor(t *testing.T) {
+	for _, grace := range []time.Duration{0, 7 * time.Second} {
+		want := grace
+		if want == 0 {
+			want = environment.DefaultGrace
+		}
+		w := envtest.NewShellWorld(t)
+		timers := envtest.NewTimers()
+		env := host.New(host.Config{Backend: machine(), Timers: timers, Grace: grace})
+		ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+		runCtx, stop := context.WithCancel(ctx)
+		done := make(chan core.Attempt, 1)
+		go func() {
+			done <- env.Run(runCtx, core.Execution{
+				Checkout: checkout(t, w),
+				Argv:     w.Argv(envtest.Program{envtest.IgnoreTerm(), envtest.Mark("up"), envtest.Hold(envtest.Forever)}),
+				Timeout:  time.Hour,
+			}, nil)
+		}()
+		if !w.Reached(ctx, "up") {
+			t.Fatal("the command never started")
+		}
+		stop()
+		timer := timers.Await(ctx, 2)
+		if timer == nil || timer.Duration != want {
+			t.Fatalf("grace %v: the stop armed %+v, want a timer of %v", grace, timer, want)
+		}
+		timer.Fire()
+		select {
+		case a := <-done:
+			envtest.Ended(t, a)
+		case <-ctx.Done():
+			t.Fatal("the run did not end after the grace period")
+		}
+		cancel()
+	}
+}
