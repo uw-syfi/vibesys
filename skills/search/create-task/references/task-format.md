@@ -77,22 +77,6 @@ noise never taken below the floor. Without it, `compare` uses Welch's t test and
 the spread you measured (validation.md), not from hope: too low promotes noise, too high hides
 real gains.
 
-A task's objectives differ in spread, so one floor suits one of them at best. Give an objective
-its own `relative_noise` in its `[[objective]]` table to override the `[pareto]` value for that
-objective only (an objective that declares none uses the `[pareto]` floor):
-
-```toml
-[[objective]]
-name = "p99_ms"
-direction = "min"
-relative_noise = 0.15       # optional, at least 0 and less than 1
-
-[pareto]
-relative_noise = 0.03       # default for every objective without its own
-```
-
-A per-objective value needs `[pareto]` and more than one objective, or the file is refused.
-
 ## Services and remote hardware
 
 The check and the benchmark are plain commands; the CLI starts no service for them. A task whose
