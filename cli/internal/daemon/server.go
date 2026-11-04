@@ -21,6 +21,7 @@ type Server struct {
 	app       *app.App
 	binary    string
 	inherited Inherited
+	machine   Machine
 
 	// ctx is cancelled when the daemon is asked to stop. Every call is bound to it, so a call
 	// that waits for a job does not hold the daemon's shutdown.
@@ -37,6 +38,26 @@ var _ cliv1.DaemonServiceServer = (*Server)(nil)
 func NewServer(a *app.App, binaryVersion string, inherited Inherited) *Server {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{app: a, binary: binaryVersion, inherited: inherited, ctx: ctx, shutdown: cancel}
+}
+
+// Machine is how a daemon takes this machine for its user, the one daemon of the user on it, or
+// records itself as a sandbox daemon beside that one; and how it finds the sandbox daemons, which
+// its status lists so that none runs unseen.
+type Machine interface {
+	// Claim takes the machine, or records the sandbox daemon, until release. It fails when another
+	// daemon holds the machine, naming it.
+	Claim(ctx context.Context) (release func() error, err error)
+	// Sandbox says whether this daemon is a sandbox daemon.
+	Sandbox() bool
+	// Sandboxes are the sandbox daemons of the user on this machine that run.
+	Sandboxes() ([]*cliv1.MachineDaemon, error)
+}
+
+// WithMachine has the status report the machine: whether this daemon is a sandbox daemon, and the
+// sandbox daemons that run. Nil reports neither.
+func (s *Server) WithMachine(m Machine) *Server {
+	s.machine = m
+	return s
 }
 
 // Stopping is closed when the daemon has been asked to stop, by the Stop call or by Shutdown.
@@ -109,7 +130,7 @@ func (s *Server) WatchTask(req *cliv1.WatchTaskRequest, stream cliv1.DaemonServi
 // Status implements cliv1.DaemonServiceServer.
 func (s *Server) Status(context.Context, *cliv1.StatusRequest) (*cliv1.StatusResponse, error) {
 	st := s.app.Status()
-	return &cliv1.StatusResponse{
+	out := &cliv1.StatusResponse{
 		Versions:          wire.BuildVersions(s.binary, core.CurrentVersions()),
 		Pid:               uint32(os.Getpid()),
 		StartedAt:         timestamppb.New(st.StartedAt),
@@ -117,7 +138,16 @@ func (s *Server) Status(context.Context, *cliv1.StatusRequest) (*cliv1.StatusRes
 		RunningJobs:       uint32(st.Running),
 		Environment:       inheritedVariables(s.inherited.Environ),
 		CheckoutDirectory: s.inherited.CheckoutDirectory,
-	}, nil
+	}
+	if s.machine != nil {
+		out.Sandbox = s.machine.Sandbox()
+		sandboxes, err := s.machine.Sandboxes()
+		if err != nil {
+			return nil, wire.Error(fmt.Errorf("listing the sandbox daemons: %w", err))
+		}
+		out.Sandboxes = sandboxes
+	}
+	return out, nil
 }
 
 // Stop implements cliv1.DaemonServiceServer. Jobs that run have supervisors of their own and go

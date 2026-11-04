@@ -7,6 +7,7 @@ import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/frontier.proto";
 import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/machine.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/promote.proto";
 import "vibesys/cli/v1/result.proto";
@@ -115,6 +116,11 @@ message StatusResponse {
   repeated InheritedVariable environment = 6;
   // The directory clean checkouts of a job's commit are made in.
   string checkout_directory = 7;
+  // Whether this daemon is a sandbox daemon, which runs beside the daemon that holds the machine.
+  bool sandbox = 8;
+  // The sandbox daemons of the user on this machine that run, this one included, by runtime
+  // directory.
+  repeated MachineDaemon sandboxes = 9;
 }
 
 // InheritedVariable is one environment variable a job inherits from the daemon.

@@ -78,6 +78,14 @@ func daemonStatus(ctx context.Context, d deps, args []string) int {
 	}
 	fmt.Fprintf(d.stdout, "running\tpid %d\tversion %s\tqueued %d\trunning %d\n",
 		st.GetPid(), st.GetVersions().GetBinaryVersion(), st.GetQueuedJobs(), st.GetRunningJobs())
+	// A sandbox daemon says so, and every daemon names the sandbox daemons that run beside the one
+	// that holds the machine, so none runs unseen.
+	if st.GetSandbox() {
+		fmt.Fprintln(d.stdout, "role\tsandbox")
+	}
+	for _, sb := range st.GetSandboxes() {
+		fmt.Fprintf(d.stdout, "sandbox\tpid %d\truntime %s\tversion %s\n", sb.GetPid(), sb.GetRuntimeDir(), sb.GetVersion())
+	}
 	// What a job inherits: the checkout directory, then one line per variable, with its value
 	// only where the daemon shows it.
 	if dir := st.GetCheckoutDirectory(); dir != "" {

@@ -285,15 +285,21 @@ devices, so `--gpus all` (through the NVIDIA hook) or `--runtime nvidia` with
 backend is refused unless the operator config passes GPUs; other accelerator
 backends are refused.
 
-### One instance per user, and how to run a second one
+### One daemon per user per machine, and a sandbox beside it
 
-The daemon's runtime directory comes from `XDG_RUNTIME_DIR`, its task index
-from `XDG_STATE_HOME`, and the operator config from `VIBESYS_CLI_CONFIG`, so a
-second daemon with its own values of the three is independent of the first:
-its containers carry another scope label and its Slurm jobs another name. A
-task's store lives in the repository (`.vibesys-state/`) and every linked
-worktree of a repository shares it, so a second instance that must not touch a
-running one's store works in a separate clone.
+One daemon serves a user on a machine: it holds a lock in the user's machine
+directory (`/var/tmp/vibesys-cli-<uid>`, or `/run/user/<uid>` when `/var/tmp`
+is not on local disk), which no variable moves, and a daemon of another
+runtime directory is refused, naming it. Two daemons with their own
+runtime directories would otherwise each schedule as if they had the machine.
+A second one on purpose is a sandbox daemon: `VIBESYS_CLI_SANDBOX=1` with its
+own `XDG_RUNTIME_DIR`, and its own `XDG_STATE_HOME` and `VIBESYS_CLI_CONFIG`
+when it should not share the index or the operator config. Its containers
+carry another scope label and its Slurm jobs another name, and the daemon's
+status lists it while it runs. A task's store lives in the repository
+(`.vibesys-state/`) and every linked worktree of a repository shares it, so a
+second instance that must not touch a running one's store works in a separate
+clone.
 
 ## What is not done
 

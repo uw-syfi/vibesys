@@ -42,35 +42,8 @@ type Dir struct{ path string }
 // that is the user's but too open is made private. The paths in it must fit in a Unix socket
 // address.
 func Open(path string, uid int, fsys FS) (Dir, error) {
-	if !filepath.IsAbs(path) {
-		return Dir{}, invalid("the runtime directory %q must be an absolute path", path)
-	}
-	if err := os.MkdirAll(path, 0o700); err != nil {
-		return Dir{}, fmt.Errorf("creating the runtime directory: %w", err)
-	}
-	info, err := os.Lstat(path)
-	if err != nil {
+	if err := private(path, uid, fsys, "the runtime directory", "set XDG_RUNTIME_DIR to a directory on local disk"); err != nil {
 		return Dir{}, err
-	}
-	if !info.IsDir() {
-		return Dir{}, invalid("the runtime directory %q is not a directory (a link is not accepted)", path)
-	}
-	if st, ok := info.Sys().(*syscall.Stat_t); !ok || int(st.Uid) != uid {
-		return Dir{}, invalid("the runtime directory %q is not owned by the current user", path)
-	}
-	if info.Mode().Perm() != 0o700 {
-		if err := os.Chmod(path, 0o700); err != nil {
-			return Dir{}, fmt.Errorf("making the runtime directory private: %w", err)
-		}
-	}
-	network, err := fsys.IsNetwork(path)
-	if err != nil {
-		return Dir{}, fmt.Errorf("checking where the runtime directory is: %w", err)
-	}
-	if network {
-		return Dir{}, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
-			"the runtime directory %q is on a network file system, where sockets and locks are not reliable; "+
-				"set XDG_RUNTIME_DIR to a directory on local disk", path)}
 	}
 	d := Dir{path: path}
 	if n := len(d.Socket()); n > maxSocketPath {
@@ -81,6 +54,43 @@ func Open(path string, uid int, fsys FS) (Dir, error) {
 		return Dir{}, fmt.Errorf("creating the supervisor directory: %w", err)
 	}
 	return d, nil
+}
+
+// private makes the directory if it is missing and checks it: a real directory (not a link someone
+// else planted), owned by the user, private to them, and on local disk, where locks hold. A directory
+// that is the user's but too open is made private. what names it in an error, and way says what to do
+// about one on a network file system.
+func private(path string, uid int, fsys FS, what, way string) error {
+	if !filepath.IsAbs(path) {
+		return invalid("%s %q must be an absolute path", what, path)
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return fmt.Errorf("creating %s: %w", what, err)
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return invalid("%s %q is not a directory (a link is not accepted)", what, path)
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); !ok || int(st.Uid) != uid {
+		return invalid("%s %q is not owned by the current user", what, path)
+	}
+	if info.Mode().Perm() != 0o700 {
+		if err := os.Chmod(path, 0o700); err != nil {
+			return fmt.Errorf("making %s private: %w", what, err)
+		}
+	}
+	network, err := fsys.IsNetwork(path)
+	if err != nil {
+		return fmt.Errorf("checking where %s is: %w", what, err)
+	}
+	if network {
+		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
+			"%s %q is on a network file system, where sockets and locks are not reliable; %s", what, path, way)}
+	}
+	return nil
 }
 
 func invalid(format string, args ...any) *core.Failure {

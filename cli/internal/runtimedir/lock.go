@@ -89,5 +89,14 @@ const (
 	abandoned
 )
 
+// record replaces what the locked file holds with data.
+func (l *Lock) record(data []byte) error {
+	if err := l.f.Truncate(0); err != nil {
+		return err
+	}
+	_, err := l.f.WriteAt(data, 0)
+	return err
+}
+
 // Unlock drops the lock.
 func (l *Lock) Unlock() error { return l.f.Close() }

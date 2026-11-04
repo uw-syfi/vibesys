@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/uw-syfi/vibesys/cli/internal/production"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
@@ -116,8 +117,9 @@ func (m *machine) cliWith(env []string, args ...string) outcome {
 	cmd := exec.Command(self, args...)
 	cmd.Dir = m.repo
 	// The runtime files and the index are under the test's own directories, so the tool touches
-	// nothing of the user running the test.
-	cmd.Env = append(os.Environ(), roleVar+"="+roleCLI,
+	// nothing of the user running the test, and its daemon is a sandbox daemon, which holds no
+	// machine lock and which the user's daemon lists while it runs.
+	cmd.Env = append(os.Environ(), roleVar+"="+roleCLI, production.EnvSandbox+"=1",
 		"XDG_RUNTIME_DIR="+filepath.Join(m.root, "rt"), "HOME="+filepath.Join(m.root, "home"), "VIBESYS_TASK=bench")
 	cmd.Env = append(cmd.Env, env...)
 	var stdout, stderr bytes.Buffer

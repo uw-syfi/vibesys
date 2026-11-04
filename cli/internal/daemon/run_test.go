@@ -379,3 +379,70 @@ func mustScope(t *testing.T, repo, task string) core.Scope {
 	}
 	return s
 }
+
+// fakeMachine is a daemon.Machine: Claim fails with refusal when it is set, and otherwise counts
+// how often the claim is held.
+type fakeMachine struct {
+	refusal   error
+	sandbox   bool
+	sandboxes []*cliv1.MachineDaemon
+	held      *int
+}
+
+func (m fakeMachine) Claim(context.Context) (func() error, error) {
+	if m.refusal != nil {
+		return nil, m.refusal
+	}
+	*m.held++
+	return func() error { *m.held--; return nil }, nil
+}
+func (m fakeMachine) Sandbox() bool                              { return m.sandbox }
+func (m fakeMachine) Sandboxes() ([]*cliv1.MachineDaemon, error) { return m.sandboxes, nil }
+
+// A daemon that another daemon's machine lock refuses does not serve, says why, and leaves its
+// runtime directory free; one that takes the machine holds it until it stops.
+func TestADaemonTheMachineRefusesDoesNotServe(t *testing.T) {
+	dir := openDir(t)
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	refusal := &runtimedir.HeldError{Path: "/m/machine.lock", Holder: &cliv1.MachineDaemon{Pid: 7, RuntimeDir: "/run/a", Version: "v"}}
+	err = daemon.Run(ctxFor(t), daemon.Config{
+		Dir: dir, Version: "test", Clock: clock.System{}, Ready: w, Runtime: runtimeOf(t, supervisor.NewSurvivors()),
+		Machine: fakeMachine{refusal: refusal},
+	})
+	var held *runtimedir.HeldError
+	if !errors.As(err, &held) || !strings.Contains(err.Error(), "pid 7") {
+		t.Fatalf("Run = %v; want the machine's refusal", err)
+	}
+	if n, _ := r.Read(make([]byte, 1)); n != 0 {
+		t.Fatal("the refused daemon said it served")
+	}
+	lock, err := runtimedir.TryLock(dir.DaemonLock())
+	if err != nil {
+		t.Fatalf("the refused daemon kept its runtime directory: %v", err)
+	}
+	_ = lock.Unlock()
+}
+
+// The status says whether the daemon is a sandbox, and lists the sandbox daemons that run.
+func TestTheStatusListsTheSandboxDaemons(t *testing.T) {
+	a := app.New(app.Config{Clock: clock.System{}, Stores: memstores.New(app.Rules(5)), Environments: environment.None{},
+		Supervisors: supervisor.NewInProcess(fakeenv.Environments{}, &fakeenv.Checkouts{}, supervisor.NewSurvivors())})
+	if err := a.Start(ctxFor(t)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.Close)
+	sb := &cliv1.MachineDaemon{Pid: 9, RuntimeDir: "/tmp/s/vibesys-cli", Version: "v", Sandbox: true}
+	held := 0
+	st, err := daemon.NewServer(a, "test", daemon.Inherited{}).WithMachine(fakeMachine{sandbox: true, sandboxes: []*cliv1.MachineDaemon{sb}, held: &held}).Status(ctxFor(t), &cliv1.StatusRequest{})
+	if err != nil || !st.GetSandbox() || len(st.GetSandboxes()) != 1 || st.GetSandboxes()[0].GetPid() != 9 {
+		t.Fatalf("status %v, %v", st, err)
+	}
+	st, err = daemon.NewServer(a, "test", daemon.Inherited{}).Status(ctxFor(t), &cliv1.StatusRequest{})
+	if err != nil || st.GetSandbox() || len(st.GetSandboxes()) != 0 {
+		t.Fatalf("status with no machine %v, %v", st, err)
+	}
+}

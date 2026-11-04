@@ -46,6 +46,10 @@ type Process struct {
 	UID  int
 	GID  int
 	Home string
+	// MachineDir is the user's machine directory, where the one daemon of the user on this machine
+	// holds its lock. Empty is runtimedir.ResolveMachine's, which no variable moves; a test of two
+	// daemons sets a directory of its own.
+	MachineDir string
 }
 
 // RuntimePath is where the user's runtime directory is: under XDG_RUNTIME_DIR when it is an
@@ -65,6 +69,11 @@ const daemonName = "vibesysd"
 // ClientOptions returns how a client reaches the daemon, starting it from this binary when none
 // runs.
 func (p Process) ClientOptions() (client.Options, error) {
+	// A sandbox's commands reach the sandbox daemon only: one set to reach the daemon that holds
+	// the machine is refused here, before it does.
+	if _, err := p.sandbox(); err != nil {
+		return client.Options{}, err
+	}
 	dir, err := p.RuntimeDir()
 	if err != nil {
 		return client.Options{}, err
@@ -109,6 +118,10 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
+	hold, err := p.daemonMachine(dir, clk)
+	if err != nil {
+		return err
+	}
 	return daemon.Run(ctx, daemon.Config{
 		Dir:     dir,
 		Version: p.Version,
@@ -117,6 +130,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 		Inherited: daemon.Inherited{Environ: p.Environ(), CheckoutDirectory: gitwork.Checkouts{}.Dir()},
 		Clock:     clk,
 		Ready:     ready,
+		Machine:   hold,
 		Logf: func(format string, args ...any) {
 			fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
 		},
