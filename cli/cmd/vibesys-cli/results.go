@@ -42,12 +42,12 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, c.json, err)
 	}
-	commit, err := d.git.Commit(ctx, callCtx.GetRepository(), positional[0])
+	commit, err := d.commit(ctx, callCtx, positional[0])
 	if err != nil {
 		return fail(d, c.json, err)
 	}
 	return withClient(ctx, d, c.json, func(cl *client.Client) int {
-		resp, err := cl.Show(ctx, &cliv1.ShowRequest{Context: callCtx, Commit: string(commit)})
+		resp, err := cl.Show(ctx, &cliv1.ShowRequest{Context: callCtx, Commit: commit})
 		if err != nil {
 			return fail(d, c.json, err)
 		}
@@ -56,7 +56,7 @@ func showCommand(ctx context.Context, d deps, args []string) int {
 			return exitOK
 		}
 		if len(resp.GetResults()) == 0 {
-			fmt.Fprintf(d.stdout, "no results for %s\n", shortCommit(string(commit)))
+			fmt.Fprintf(d.stdout, "no results for %s\n", shortCommit(commit))
 		}
 		// A commit's measurements are printed pooled, one line per kind, as compare counts them:
 		// a measure job that topped up an earlier one is part of the same measurement.
@@ -92,17 +92,17 @@ func compareCommand(ctx context.Context, d deps, args []string) int {
 		return fail(d, c.json, err)
 	}
 	req := &cliv1.CompareRequest{Context: callCtx}
-	commit, err := d.git.Commit(ctx, callCtx.GetRepository(), positional[0])
+	commit, err := d.commit(ctx, callCtx, positional[0])
 	if err != nil {
 		return fail(d, c.json, err)
 	}
-	req.Commit = string(commit)
+	req.Commit = commit
 	if *against != "" {
-		other, err := d.git.Commit(ctx, callCtx.GetRepository(), *against)
+		other, err := d.commit(ctx, callCtx, *against)
 		if err != nil {
 			return fail(d, c.json, err)
 		}
-		req.Against = string(other)
+		req.Against = other
 	}
 	return withClient(ctx, d, c.json, func(cl *client.Client) int {
 		resp, err := cl.Compare(ctx, req)
@@ -141,12 +141,12 @@ func promoteCommand(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, c.json, err)
 	}
-	commit, err := d.git.Commit(ctx, callCtx.GetRepository(), positional[0])
+	commit, err := d.commit(ctx, callCtx, positional[0])
 	if err != nil {
 		return fail(d, c.json, err)
 	}
 	return withClient(ctx, d, c.json, func(cl *client.Client) int {
-		resp, err := cl.Promote(ctx, &cliv1.PromoteRequest{Context: callCtx, Commit: string(commit)})
+		resp, err := cl.Promote(ctx, &cliv1.PromoteRequest{Context: callCtx, Commit: commit})
 		if err != nil {
 			return fail(d, c.json, err)
 		}
@@ -179,7 +179,7 @@ func promoteCommand(ctx context.Context, d deps, args []string) int {
 			}
 			return code
 		}
-		fmt.Fprintf(d.stdout, "refused %s\n", shortCommit(string(commit)))
+		fmt.Fprintf(d.stdout, "refused %s\n", shortCommit(commit))
 		for _, reason := range resp.GetRefused().GetReasons() {
 			fmt.Fprintf(d.stdout, "  %s: %s\n", refusalName(reason.GetKind()), reason.GetMessage())
 			if v := reason.GetVerdict(); v != nil {

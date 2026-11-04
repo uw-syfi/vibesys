@@ -171,11 +171,11 @@ func jobsCommand(ctx context.Context, d deps, args []string) int {
 	}
 	req := &cliv1.ListJobsRequest{Context: callCtx, States: states, Kind: jobKind, NoteContains: *contains}
 	if *commit != "" {
-		full, err := d.git.Commit(ctx, callCtx.GetRepository(), *commit)
+		full, err := d.commit(ctx, callCtx, *commit)
 		if err != nil {
 			return fail(d, c.json, err)
 		}
-		req.Commit = string(full)
+		req.Commit = full
 	}
 	cl, err := connect(ctx, d)
 	if err != nil {

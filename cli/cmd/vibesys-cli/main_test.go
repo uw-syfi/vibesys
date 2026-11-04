@@ -36,13 +36,15 @@ type cli struct {
 	files map[string]string
 	// cannotStart is a machine on which no daemon can be started.
 	cannotStart bool
+	// cwd is the directory the command runs in, /repo unless a test moves it.
+	cwd string
 }
 
 func newCLI(t *testing.T) *cli {
 	t.Helper()
 	w := daemontest.NewWorld(t)
 	// The command line and the daemon see one set of repositories, as they do on one machine.
-	c := &cli{t: t, world: w, timers: clock.NewManualTimers(), git: w.Git, env: map[string]string{}, files: map[string]string{}}
+	c := &cli{t: t, world: w, timers: clock.NewManualTimers(), git: w.Git, env: map[string]string{}, files: map[string]string{}, cwd: "/repo"}
 	c.git.AddRepo("/repo", map[string]core.Commit{"HEAD": full, "main": full})
 	dir := daemontest.RuntimeDir(t)
 	c.starter = &daemontest.Starter{Dir: dir, Version: version, Runtime: c.world.Runtime}
@@ -62,7 +64,7 @@ func (c *cli) run(args ...string) result {
 	d := deps{
 		stdout: &stdout, stderr: &stderr,
 		getenv: func(k string) string { return c.env[k] },
-		cwd:    "/repo",
+		cwd:    c.cwd,
 		git:    c.git,
 		stdin:  strings.NewReader(c.stdin),
 		readFile: func(path string) ([]byte, error) {

@@ -412,7 +412,7 @@ func TestResultCommandsRefuseBadArgumentsBeforeTheDaemon(t *testing.T) {
 // move its result branch.
 func TestTwoWorktreesOfARepositoryShareItsStore(t *testing.T) {
 	c := newResultsCLI(t)
-	c.git.AddWorktree("/worktrees/feature", "/repo")
+	c.git.AddWorktree("/worktrees/feature", "/repo", nil)
 	c.measured(0, level)
 	c.measured(1, win)
 	inMain := c.submit("exit", "0")
@@ -432,6 +432,61 @@ func TestTwoWorktreesOfARepositoryShareItsStore(t *testing.T) {
 	mustExit(t, c.run(withTask("promote", "c1", "--repo", "/worktrees/feature")...), exitOK, "promote in the linked worktree")
 	if c.branchAt() != rev(1) {
 		t.Fatalf("the main repository's branch is at %.7s", c.branchAt())
+	}
+}
+
+// An agent works in its own linked worktree with VIBESYS_REPO naming the main checkout. A
+// revision it names reads as its worktree has it: HEAD and HEAD~1 are the worktree's, from any
+// directory in it, for show, compare, submit and promote alike, while a full commit and a branch
+// name the same commit as anywhere. A caller outside the repository reads the main checkout, as
+// before. Resolving HEAD in the main checkout would measure and promote a commit the agent never
+// made.
+func TestARevisionReadsAsTheCallersWorktreeHasIt(t *testing.T) {
+	c := newResultsCLI(t)
+	c.git.AddWorktree("/worktrees/agent", "/repo", map[string]core.Commit{"HEAD": rev(2), "@": rev(2), "HEAD~1": rev(1)})
+	c.env["VIBESYS_REPO"] = "/repo"
+	c.measured(0, level)
+	inMain := c.measured(1, level)
+	inAgent := c.measured(2, win)
+	c.measured(4, lose)
+
+	shows := map[string]struct {
+		cwd, revision string
+		want          string
+	}{
+		"HEAD in the worktree":                 {"/worktrees/agent", "HEAD", string(inAgent.Job)},
+		"HEAD deeper in the worktree":          {"/worktrees/agent/sub/dir", "HEAD", string(inAgent.Job)},
+		"@ in the worktree":                    {"/worktrees/agent", "@", string(inAgent.Job)},
+		"HEAD~1 in the worktree":               {"/worktrees/agent", "HEAD~1", string(inMain.Job)},
+		"a full commit in the worktree":        {"/worktrees/agent", string(rev(1)), string(inMain.Job)},
+		"a branch in the worktree":             {"/worktrees/agent", "c1", string(inMain.Job)},
+		"HEAD in the main checkout":            {"/repo", "HEAD", "no results for " + string(full)[:12]},
+		"HEAD outside the repository":          {"/elsewhere", "HEAD", "no results for " + string(full)[:12]},
+		"a branch outside the repository":      {"/elsewhere", "c2", string(inAgent.Job)},
+		"a full commit outside the repository": {"/elsewhere", string(rev(4)), "mean 80.4 over 5 samples"},
+	}
+	for name, tc := range shows {
+		c.cwd = tc.cwd
+		r := c.run(withTask("show", tc.revision)...)
+		if r.code != exitOK || !strings.Contains(r.stdout, tc.want) {
+			t.Errorf("%s: show %s from %s = %+v, want %q", name, tc.revision, tc.cwd, r, tc.want)
+		}
+	}
+
+	c.cwd = "/worktrees/agent"
+	r := c.run(withTask("compare", "HEAD", "--against", "HEAD~1")...)
+	if r.code != exitOK || !strings.Contains(r.stdout, "better\t"+shortCommit(string(rev(2)))+" vs "+shortCommit(string(rev(1)))) {
+		t.Fatalf("compare HEAD --against HEAD~1 in the worktree = %+v", r)
+	}
+	r = c.run(withTask("submit", "command", "HEAD", "--env", "host", "--", "exit", "0")...)
+	mustExit(t, r, exitOK, "submit HEAD in the worktree")
+	submitted := strings.Fields(r.stdout)[0]
+	if listed := c.run(withTask("jobs", "--commit", "c2")...); !strings.Contains(listed.stdout, submitted) {
+		t.Fatalf("submit HEAD in the worktree queued %s, not of the worktree's HEAD: jobs --commit c2 = %+v", submitted, listed)
+	}
+	mustExit(t, c.run(withTask("promote", "HEAD")...), exitOK, "promote HEAD in the worktree")
+	if c.branchAt() != rev(2) {
+		t.Fatalf("promote HEAD in the worktree moved the branch to %.7s, want the worktree's HEAD %.7s", c.branchAt(), rev(2))
 	}
 }
 

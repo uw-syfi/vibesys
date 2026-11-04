@@ -30,7 +30,7 @@ type deps struct {
 	getenv         func(string) string
 	// cwd is the directory the command runs in.
 	cwd string
-	git gitrepo.Git
+	git gitrepo.Revisions
 	// stdin and readFile are where a command reads text given as "-" or as a file.
 	stdin    io.Reader
 	readFile func(string) ([]byte, error)

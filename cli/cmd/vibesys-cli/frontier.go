@@ -47,12 +47,12 @@ func frontierAdd(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, c.json, err)
 	}
-	commit, err := d.git.Commit(ctx, callCtx.GetRepository(), positional[0])
+	commit, err := d.commit(ctx, callCtx, positional[0])
 	if err != nil {
 		return fail(d, c.json, err)
 	}
 	return withClient(ctx, d, c.json, func(cl *client.Client) int {
-		resp, err := cl.AddToFrontier(ctx, &cliv1.AddToFrontierRequest{Context: callCtx, Commit: string(commit)})
+		resp, err := cl.AddToFrontier(ctx, &cliv1.AddToFrontierRequest{Context: callCtx, Commit: commit})
 		if err != nil {
 			return fail(d, c.json, err)
 		}
@@ -66,7 +66,7 @@ func frontierAdd(ctx context.Context, d deps, args []string) int {
 			fmt.Fprintln(d.stderr, unreadAnswer)
 			return code
 		}
-		fmt.Fprint(d.stdout, describeFrontierDecision(decision, string(commit)))
+		fmt.Fprint(d.stdout, describeFrontierDecision(decision, commit))
 		return code
 	})
 }

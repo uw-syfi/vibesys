@@ -19,16 +19,16 @@ type Fake struct {
 	repos map[string]map[string]core.Commit
 	// worktrees maps a linked worktree's root to its repository's.
 	worktrees map[string]string
+	// own maps a linked worktree's root to the revisions it reads differently from its repository,
+	// such as HEAD and what is relative to it.
+	own map[string]map[string]core.Commit
 }
 
-var (
-	_ Git      = (*Fake)(nil)
-	_ Resolver = (*Fake)(nil)
-)
+var _ Revisions = (*Fake)(nil)
 
 // NewFake returns a Fake with no repository.
 func NewFake() *Fake {
-	return &Fake{repos: map[string]map[string]core.Commit{}, worktrees: map[string]string{}}
+	return &Fake{repos: map[string]map[string]core.Commit{}, worktrees: map[string]string{}, own: map[string]map[string]core.Commit{}}
 }
 
 // AddRepo makes a repository at the absolute path, whose revisions are the given names for
@@ -40,25 +40,29 @@ func (f *Fake) AddRepo(path string, revisions map[string]core.Commit) {
 }
 
 // AddWorktree makes path a linked worktree of the repository at repo, which must have been added.
-// It reads the repository's revisions, as a linked worktree shares them.
-func (f *Fake) AddWorktree(path, repo string) {
+// It reads the repository's revisions, as a linked worktree shares its branches and commits, except
+// those in own, which it reads as its own, as git reads HEAD and HEAD~1 in each worktree. own may
+// be nil.
+func (f *Fake) AddWorktree(path, repo string, own map[string]core.Commit) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.worktrees[filepath.Clean(path)] = filepath.Clean(repo)
+	f.own[filepath.Clean(path)] = own
 }
 
-// repoOf returns the repository that contains dir, through a worktree when dir is in one.
-func (f *Fake) repoOf(dir string) (string, bool) {
+// repoOf returns the repository that contains dir, through a worktree when dir is in one, and the
+// root of the work tree that contains dir.
+func (f *Fake) repoOf(dir string) (repo, workTree string, ok bool) {
 	for d := filepath.Clean(dir); ; d = filepath.Dir(d) {
 		if _, ok := f.repos[d]; ok {
-			return d, true
+			return d, d, true
 		}
 		if repo, ok := f.worktrees[d]; ok {
 			_, known := f.repos[repo]
-			return repo, known
+			return repo, d, known
 		}
 		if d == filepath.Dir(d) {
-			return "", false
+			return "", "", false
 		}
 	}
 }
@@ -69,7 +73,7 @@ func (f *Fake) Resolve(_ context.Context, dir string) (core.Repository, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if filepath.IsAbs(dir) {
-		if repo, ok := f.repoOf(dir); ok {
+		if repo, _, ok := f.repoOf(dir); ok {
 			return core.Repository(repo), nil
 		}
 	}
@@ -80,9 +84,12 @@ func (f *Fake) Resolve(_ context.Context, dir string) (core.Repository, error) {
 func (f *Fake) Commit(_ context.Context, dir, revision string) (core.Commit, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	repository, ok := f.repoOf(dir)
+	repository, workTree, ok := f.repoOf(dir)
 	if !ok {
 		return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("%s is not in a repository", dir)}
+	}
+	if c, ok := f.own[workTree][revision]; ok {
+		return c, nil
 	}
 	revs := f.repos[repository]
 	if c, ok := revs[revision]; ok {
