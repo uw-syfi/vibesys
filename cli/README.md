@@ -742,7 +742,7 @@ hf = "/shared/hf-cache"
 | `[placements.<name>.slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
 | `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for `gres` and, with `exclusive`, the whole node when it measures, and `shared_gres` (or `gres`), `cpus` and `memory` when it does not. |
 | `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`), which only runs SIFs. |
-| `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF (3600 by default). See "The apptainer placement". |
+| `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF (3600 by default). See "The apptainer placement". |
 | `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
 | `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
@@ -775,7 +775,9 @@ start without it, saying to install it.
   which version, converted it), unless the cluster has the image's SIF, `docker save` streams the
   image into a directory of its own under `local_scratch_dir`, which also holds Apptainer's
   temporary files (`APPTAINER_TMPDIR`, `APPTAINER_CACHEDIR`) and is removed when the conversion
-  ends. The directory's file system is checked first for the image unpacked (as `docker image ls`
+  ends; the SIF is renamed from it to `sif/<digest>.sif` under `local_scratch_dir`, where it is
+  kept until the cluster has it. A run that finds a SIF kept there copies it and converts nothing.
+  The directory's file system is checked first for the image unpacked (as `docker image ls`
   reports it) and its archive and SIF (each about the image's stored layers); when it has too
   little, the run fails before its command naming the space needed, the directory, and the space
   there is. A 47 GB ROCm image converts in about ten minutes to an 11 GB SIF.
@@ -784,16 +786,23 @@ start without it, saying to install it.
   (`flock`, which the machine lets go of when the process ends, however it ends). A job that finds
   it held says in its log that another process of this machine is converting the image, tries
   again every `[slurm] poll_interval_seconds` (5 by default) for up to `convert_timeout_seconds`,
-  and then uses the SIF the other copied, or converts the image itself when the other failed. The lock files stay, one per image converted.
+  and then uses the SIF the other copied, or carries on where the other stopped: it copies the SIF
+  the other kept, or converts the image itself. The lock files stay, one per image converted.
   Conversions of different images still run at once, and the check of the free space does not count
   what the others are about to write, so two that start together can each find room for itself and
   not for both.
-- The SIF is copied over ssh to `images/<digest>.sif` under `remote_workspace_root`, with
-  `images/<digest>.sif.built-by` beside it naming what converted it. The copy is written to a file
-  of its own and renamed into place once its size is what was sent, so daemons of different
-  machines that copy one image at once each publish a whole file, and a copy cut short, or a
-  conversion that fails, leaves none. Every later run, of any daemon, finds it there.
-  `convert_timeout_seconds` bounds the conversion and the copy.
+- Once the conversion has ended, the SIF is copied over ssh to `images/<digest>.sif` under
+  `remote_workspace_root`, with `images/<digest>.sif.built-by` beside it naming what converted it:
+  no connection waits on the conversion. The copy is written to a file of its own and renamed into
+  place once its size is what was sent, so daemons of different machines that copy one image at
+  once each publish a whole file, and a copy cut short, or a conversion that fails, leaves none.
+  A copy whose ssh connection fails (ssh's exit status 255) is made again after `[slurm]
+  poll_interval_seconds`, up to 3 copies in all, each said in the job's log; a copy that fails
+  otherwise, or the third time, fails the run and leaves the SIF kept here for the next run of the
+  image. Once the cluster has the SIF, the one kept here is removed; one kept for more than a day
+  (its copies failed, and no run of its image came since) is removed by the next conversion. Every
+  later run, of any daemon, finds the SIF on the cluster. `convert_timeout_seconds` bounds the
+  conversion and the copy together.
 - A run's first container is a batch allocation of its own (`sbatch --parsable --no-requeue`, or the
   site's `submit_command`, with the `[slurm]` options and `submit_arguments`), named by the
   container and commented with the daemon's scope. Its time limit is the command's limit and 10

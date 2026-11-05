@@ -2,8 +2,9 @@
 
 // Package localsif is the apptainer.Converter of the caller's machine: its apptainer program,
 // found on PATH, builds a SIF of a docker archive in a directory of its own under the operator's
-// local scratch directory, with APPTAINER_TMPDIR and APPTAINER_CACHEDIR there too, and removes the
-// directory when it ends.
+// local scratch directory, with APPTAINER_TMPDIR and APPTAINER_CACHEDIR there too, renames the SIF
+// into the scratch directory's sif directory, where it is kept, and removes its own directory when
+// it ends.
 package localsif
 
 import (
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -82,8 +84,8 @@ func (c *Converter) Lock(ctx context.Context, dir, name string) (io.Closer, erro
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if name == "" || strings.ContainsRune(name, '/') || name == "." || name == ".." {
-		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("localsif: the lock name %q is not a file name", name)}
+	if err := checkName(name); err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, unavailable("cannot make the scratch directory %s: %v", dir, err)
@@ -111,31 +113,39 @@ func (c *Converter) Lock(ctx context.Context, dir, name string) (io.Closer, erro
 	}
 }
 
+// keptDir is the directory under the scratch directory that keeps the SIFs.
+const keptDir = "sif"
+
 // buildScript builds the SIF of the docker archive on its standard input with the apptainer
-// program $2, in a directory of its own under $1, and writes the SIF on its standard output once
-// it is whole; apptainer's own output goes to standard error. The directory is removed when the
-// script ends, however it ends but killed outright; what a killed build left is removed by a later
-// one after a day.
+// program $2, in a directory of its own under $1, and renames it to $1/sif/$3 once it is whole;
+// apptainer's own output goes to standard error. The directory is removed when the script ends,
+// however it ends but killed outright; what a killed build left is removed by a later one after a
+// day, and so is a kept SIF.
 const buildScript = `set -eu
 find "$1" -maxdepth 1 -name 'vibesys-sif.*' -mmin +1440 -exec rm -rf {} + 2>/dev/null || true
+mkdir -p "$1/sif"
+find "$1/sif" -maxdepth 1 -type f -mmin +1440 -exec rm -f {} + 2>/dev/null || true
 d=$(mktemp -d "$1/vibesys-sif.XXXXXX")
 trap 'rm -rf "$d"' EXIT
 trap 'exit 1' HUP INT TERM
 mkdir "$d/tmp" "$d/cache"
 cat > "$d/image.tar"
 APPTAINER_TMPDIR="$d/tmp" APPTAINER_CACHEDIR="$d/cache" "$2" build --force "$d/image.sif" "docker-archive:$d/image.tar" >&2
-cat "$d/image.sif"`
+mv -f "$d/image.sif" "$1/sif/$3"`
 
 // Build implements apptainer.Converter. A cancelled build is sent SIGTERM, every process of it,
 // so that it removes its directory, and is killed after stopGrace.
-func (c *Converter) Build(ctx context.Context, dir string, archive io.Reader, sif io.Writer) error {
+func (c *Converter) Build(ctx context.Context, dir string, archive io.Reader, name string) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return unavailable("cannot make the scratch directory %s: %v", dir, err)
 	}
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", buildScript, "vs-sif", dir, c.program)
-	cmd.Stdin, cmd.Stdout = archive, sif
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", buildScript, "vs-sif", dir, c.program, name)
+	cmd.Stdin = archive
 	errs := &tail{}
-	cmd.Stderr = errs
+	cmd.Stdout, cmd.Stderr = errs, errs
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM) }
 	cmd.WaitDelay = stopGrace
@@ -147,6 +157,46 @@ func (c *Converter) Build(ctx context.Context, dir string, archive io.Reader, si
 		return context.Cause(ctx)
 	}
 	return unavailable("%s build failed (%v): %s", c.program, err, errs.String())
+}
+
+// Open implements apptainer.Converter.
+func (c *Converter) Open(ctx context.Context, dir, name string) (io.ReadCloser, bool, error) {
+	if err := checkName(name); err != nil {
+		return nil, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	f, err := os.Open(filepath.Join(dir, keptDir, name))
+	switch {
+	case err == nil:
+		return f, true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, false, nil
+	default:
+		return nil, false, unavailable("cannot open the kept SIF: %v", err)
+	}
+}
+
+// Remove implements apptainer.Converter.
+func (c *Converter) Remove(ctx context.Context, dir, name string) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(dir, keptDir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return unavailable("cannot remove the kept SIF: %v", err)
+	}
+	return nil
+}
+
+func checkName(name string) error {
+	if name == "" || strings.ContainsRune(name, '/') || name == "." || name == ".." {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("localsif: %q is not a file name", name)}
+	}
+	return nil
 }
 
 // Describe implements apptainer.Converter: what the program says of its version, and where it is.

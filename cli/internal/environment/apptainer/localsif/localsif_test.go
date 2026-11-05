@@ -3,11 +3,12 @@
 package localsif_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -51,32 +52,61 @@ func ctx(t *testing.T) context.Context {
 	return c
 }
 
-// A build writes the SIF of the archive, built in a directory of its own under the scratch
-// directory with apptainer's temporary files there, and leaves nothing behind; a directory a killed
-// build left a day ago is removed, and one of now is not.
-func TestABuildWritesTheSIFAndLeavesNothing(t *testing.T) {
+// A build keeps the SIF of the archive in the scratch directory, built in a directory of its own
+// with apptainer's temporary files there, and leaves nothing else behind; a directory a killed
+// build left a day ago is removed, and so is a SIF kept a day ago, and ones of now are not. A kept
+// SIF is opened until it is removed.
+func TestABuildKeepsTheSIFAndLeavesNothingElse(t *testing.T) {
 	c := onPath(t)
 	dir := filepath.Join(t.TempDir(), "scratch")
 	stale, fresh := filepath.Join(dir, "vibesys-sif.old"), filepath.Join(dir, "vibesys-sif.new")
-	for _, d := range []string{stale, fresh} {
+	staleSIF, freshSIF := filepath.Join(dir, "sif", "old.sif"), filepath.Join(dir, "sif", "new.sif")
+	for _, d := range []string{stale, fresh, filepath.Join(dir, "sif")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
+	for _, f := range []string{staleSIF, freshSIF} {
+		if err := os.WriteFile(f, []byte("a SIF"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	old := time.Unix(1_000_000_000, 0)
-	if err := os.Chtimes(stale, old, old); err != nil {
+	for _, p := range []string{stale, staleSIF} {
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok, err := c.Open(ctx(t), dir, "image.sif"); ok || err != nil {
+		t.Fatalf("a SIF never built opened: %v, %v", ok, err)
+	}
+	if err := c.Build(ctx(t), dir, strings.NewReader("a docker archive\n"), "image.sif"); err != nil {
 		t.Fatal(err)
 	}
-	var sif bytes.Buffer
-	if err := c.Build(ctx(t), dir, strings.NewReader("a docker archive\n"), &sif); err != nil {
-		t.Fatal(err)
+	r, ok, err := c.Open(ctx(t), dir, "image.sif")
+	if err != nil || !ok {
+		t.Fatalf("the kept SIF: %v, %v", ok, err)
 	}
-	if sif.String() != "SIF of a docker archive\n" {
-		t.Errorf("sif %q", sif.String())
+	sif, _ := io.ReadAll(r)
+	_ = r.Close()
+	if string(sif) != "SIF of a docker archive\n" {
+		t.Errorf("sif %q", sif)
 	}
 	entries, _ := os.ReadDir(dir)
-	if len(entries) != 1 || entries[0].Name() != "vibesys-sif.new" {
-		t.Errorf("left in the scratch directory: %v", entries)
+	if names := entryNames(entries); !slices.Equal(names, []string{"sif", "vibesys-sif.new"}) {
+		t.Errorf("left in the scratch directory: %v", names)
+	}
+	kept, _ := os.ReadDir(filepath.Join(dir, "sif"))
+	if names := entryNames(kept); !slices.Equal(names, []string{"image.sif", "new.sif"}) {
+		t.Errorf("kept: %v", names)
+	}
+	for range 2 {
+		if err := c.Remove(ctx(t), dir, "image.sif"); err != nil {
+			t.Errorf("remove: %v", err)
+		}
+	}
+	if _, ok, err := c.Open(ctx(t), dir, "image.sif"); ok || err != nil {
+		t.Errorf("a removed SIF opened: %v, %v", ok, err)
 	}
 	free, err := c.Free(ctx(t), filepath.Join(dir, "made"))
 	if err != nil || free <= 0 {
@@ -84,21 +114,29 @@ func TestABuildWritesTheSIFAndLeavesNothing(t *testing.T) {
 	}
 }
 
-// A build of what is not an archive fails saying what apptainer said, writes no SIF, and leaves
+func entryNames(entries []os.DirEntry) []string {
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// A build of what is not an archive fails saying what apptainer said, keeps no SIF, and leaves
 // nothing behind.
 func TestAFailedBuildSaysWhyAndLeavesNothing(t *testing.T) {
 	c := onPath(t)
 	dir := t.TempDir()
-	var sif bytes.Buffer
-	err := c.Build(ctx(t), dir, strings.NewReader("not an archive\n"), &sif)
+	err := c.Build(ctx(t), dir, strings.NewReader("not an archive\n"), "image.sif")
 	if err == nil || !strings.Contains(err.Error(), "FATAL: not a docker archive") {
 		t.Errorf("build: %v", err)
 	}
-	if sif.Len() != 0 {
-		t.Errorf("a failed build wrote %q", sif.String())
+	if _, ok, err := c.Open(ctx(t), dir, "image.sif"); ok || err != nil {
+		t.Errorf("a failed build kept a SIF: %v, %v", ok, err)
 	}
-	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
-		t.Errorf("left in the scratch directory: %v", entries)
+	kept, _ := os.ReadDir(filepath.Join(dir, "sif"))
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 || len(kept) != 0 {
+		t.Errorf("left in the scratch directory: %v, and kept %v", entryNames(entries), entryNames(kept))
 	}
 }
 

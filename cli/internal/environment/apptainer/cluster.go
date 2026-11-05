@@ -8,9 +8,10 @@
 //
 //   - The images are built by the caller's own Docker, as everywhere, and each is converted to a SIF
 //     on the caller's machine with its apptainer program, in a local directory checked first for
-//     room for the image unpacked, and the SIF is copied to the cluster once, named by its digest
-//     (images/<hex>.sif under the remote root): a run that finds it there converts and copies
-//     nothing. The publishers of one image on one machine convert it one at a time, under a lock of
+//     room for the image unpacked, where the SIF is kept until it is copied to the cluster, once
+//     the conversion has ended, named by its digest (images/<hex>.sif under the remote root): a
+//     run that finds it there converts and copies nothing. A copy that loses its connection is
+//     made again, a bounded number of times, and a SIF never copied is kept for the next run. The publishers of one image on one machine convert it one at a time, under a lock of
 //     the machine, and a publisher that waited uses the SIF of the one it waited for. It is
 //     published whole by a rename, so publishers of different machines at once each write a file of
 //     their own and one of them wins. The cluster's apptainer only runs SIFs.
@@ -53,7 +54,8 @@ type Cluster interface {
 	Read(ctx context.Context, path string) ([]byte, bool, error)
 	// Publish makes the path a file of what r gives, whole: a copy that r or the transport cuts
 	// short leaves the path as it was. Publishers of one path at once each write a file of their
-	// own, and the path is one of them, whole.
+	// own, and the path is one of them, whole. A copy whose connection to the cluster failed
+	// returns an error that wraps ErrConnectionLost.
 	Publish(ctx context.Context, path string, r io.Reader) error
 
 	// Submit asks for a batch allocation that holds one node until it is cancelled or its time

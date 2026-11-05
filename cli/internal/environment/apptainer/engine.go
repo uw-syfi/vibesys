@@ -450,14 +450,24 @@ func (e *Engine) sifPath(image string) string {
 // person.
 const BuiltBy = ".built-by"
 
+// CopyAttempts bounds the copies of a SIF to the cluster that each lose their connection to it.
+const CopyAttempts = 3
+
 // publish returns the image's SIF on the cluster, converting the image on this machine and copying
 // the SIF there unless the cluster has it.
 //
 // The publishers of one image on this machine, in this process or others, convert it one at a
 // time, under the image's lock of the Converter: one that finds the lock held says so to log and
-// waits for it, then uses the SIF the holder published, or converts the image itself when the
-// holder failed. Publishers on different machines each convert the image, and the cluster keeps
-// one of their SIFs, whole.
+// waits for it, then uses the SIF the holder published, or carries on from where the holder
+// stopped. Publishers on different machines each convert the image, and the cluster keeps one of
+// their SIFs, whole.
+//
+// The conversion and the copy are two steps, bounded together by ConvertTimeout. The conversion
+// keeps the SIF in the local directory, so a copy is made only once there is a SIF to send, and a
+// copy that fails does not lose the conversion: a copy that loses its connection to the cluster is
+// made again, up to CopyAttempts, and a later publisher of the image copies the SIF kept here
+// instead of converting the image again. The kept SIF is removed once the cluster has it, or by
+// the next conversion of this machine once it is a day old.
 func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (string, error) {
 	sif := e.sifPath(image)
 	has, err := e.cfg.Cluster.Has(ctx, sif)
@@ -469,11 +479,45 @@ func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (stri
 		return "", err
 	}
 	defer func() { _ = lock.Close() }()
+	kept := path.Base(sif)
 	// A holder this publisher waited for may have published the SIF.
 	if has, err := e.cfg.Cluster.Has(ctx, sif); err != nil || has {
+		if has {
+			e.evict(ctx, image, kept, log)
+		}
 		return sif, err
 	}
-	return e.convert(ctx, image, sif, log)
+	ctx, stop := clock.Deadline(ctx, e.cfg.Timers, e.cfg.ConvertTimeout)
+	defer stop()
+	by, err := e.cfg.Converter.Describe(ctx)
+	if err != nil {
+		return "", err
+	}
+	err = e.keep(ctx, image, kept, by, log)
+	if err == nil {
+		err = e.copy(ctx, sif, func(ctx context.Context) (io.ReadCloser, error) {
+			r, ok, err := e.cfg.Converter.Open(ctx, e.cfg.LocalDir, kept)
+			if err == nil && !ok {
+				err = unavailable("the SIF of the image %s kept in %s is gone", image, e.cfg.LocalDir)
+			}
+			return r, err
+		}, log)
+	}
+	if err == nil {
+		err = e.copy(ctx, sif+BuiltBy, func(context.Context) (io.ReadCloser, error) {
+			return io.NopCloser(strings.NewReader(by + "\n")), nil
+		}, log)
+	}
+	if err != nil {
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			return "", unavailable("converting the image %s to a SIF on this machine and copying it did not end within %v "+
+				"([apptainer] convert_timeout_seconds)", image, e.cfg.ConvertTimeout)
+		}
+		return "", err
+	}
+	_, _ = fmt.Fprintf(log, "[apptainer] %s is %s, built by %s\n", image, sif, by)
+	e.evict(ctx, image, kept, log)
+	return sif, nil
 }
 
 // lockConversion takes the lock of the image's conversions on this machine, trying again after
@@ -511,42 +555,42 @@ func (e *Engine) lockConversion(ctx context.Context, image string, log io.Writer
 	}
 }
 
-// convert converts the image on this machine and copies its SIF to the cluster: docker save streams
-// the archive into the converter, and the SIF it builds streams to the cluster, published whole by
-// a rename, so a conversion cut short leaves no SIF there. The conversion is checked first against
-// the space of the local directory, and bounded by ConvertTimeout. What converted it goes to log,
-// and to a file beside the SIF.
+// keep makes the image's SIF kept in the local directory under the name, converting the image
+// unless the directory keeps it from an earlier conversion. The conversion is checked first
+// against the space of the local directory: docker save streams the archive into the converter.
 //
 // The check of the space does not count what conversions of other images in progress on this
 // machine are about to write: two of them that start together may each find room for itself and
 // not for both.
-func (e *Engine) convert(ctx context.Context, image, sif string, log io.Writer) (string, error) {
+func (e *Engine) keep(ctx context.Context, image, name, by string, log io.Writer) error {
+	r, ok, err := e.cfg.Converter.Open(ctx, e.cfg.LocalDir, name)
+	if err != nil {
+		return fmt.Errorf("reading the SIF of the image %s kept in %s: %w", image, e.cfg.LocalDir, err)
+	}
+	if ok {
+		_ = r.Close()
+		_, _ = fmt.Fprintf(log, "[apptainer] using the SIF of %s that an earlier conversion kept in %s\n", image, e.cfg.LocalDir)
+		return nil
+	}
 	unpacked, stored, err := e.cfg.Export.Sizes(ctx, image)
 	if err != nil {
-		return "", fmt.Errorf("reading the size of the image %s: %w", image, err)
+		return fmt.Errorf("reading the size of the image %s: %w", image, err)
 	}
 	free, err := e.cfg.Converter.Free(ctx, e.cfg.LocalDir)
 	if err != nil {
-		return "", fmt.Errorf("reading the free space of %s: %w", e.cfg.LocalDir, err)
+		return fmt.Errorf("reading the free space of %s: %w", e.cfg.LocalDir, err)
 	}
 	// Apptainer unpacks the image's tree beside its archive and writes the SIF there; the archive and
 	// the SIF each hold the image's files compressed, about as its layers are stored.
 	if need := unpacked + 2*stored; free < need {
-		return "", unavailable(
+		return unavailable(
 			"converting the image %s to a SIF on this machine needs about %s free in %s (the image's %s unpacked, and its archive "+
 				"and its SIF, about %s each), and its file system has %s free; free space there, or set [apptainer] "+
 				"local_scratch_dir to a directory of a file system with more",
 			image, Size(need), e.cfg.LocalDir, Size(unpacked), Size(stored), Size(free))
 	}
-	ctx, stop := clock.Deadline(ctx, e.cfg.Timers, e.cfg.ConvertTimeout)
-	defer stop()
-	by, err := e.cfg.Converter.Describe(ctx)
-	if err != nil {
-		return "", err
-	}
 	_, _ = fmt.Fprintf(log, "[apptainer] converting %s to a SIF on this machine with %s, in %s\n", image, by, e.cfg.LocalDir)
 	archive, archiveW := io.Pipe()
-	out, outW := io.Pipe()
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		err := e.cfg.Export.Save(ctx, image, archiveW)
@@ -555,27 +599,47 @@ func (e *Engine) convert(ctx context.Context, image, sif string, log io.Writer) 
 		}
 		archiveW.CloseWithError(err)
 	})
-	wg.Go(func() {
-		err := e.cfg.Converter.Build(ctx, e.cfg.LocalDir, archive, outW)
-		// A converter that stopped reading leaves the export nothing to write to.
-		archive.CloseWithError(errors.New("apptainer: the converter ended"))
-		if err != nil {
-			err = fmt.Errorf("converting the image %s to a SIF with %s: %w", image, by, err)
-		}
-		outW.CloseWithError(err)
-	})
-	err = e.cfg.Cluster.Publish(ctx, sif, out)
-	out.CloseWithError(errors.New("apptainer: the copy ended"))
+	err = e.cfg.Converter.Build(ctx, e.cfg.LocalDir, archive, name)
+	// A converter that stopped reading leaves the export nothing to write to.
+	archive.CloseWithError(errors.New("apptainer: the converter ended"))
 	wg.Wait()
 	if err != nil {
-		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
-			return "", unavailable("converting the image %s to a SIF on this machine and copying it did not end within %v "+
-				"([apptainer] convert_timeout_seconds)", image, e.cfg.ConvertTimeout)
-		}
-		return "", err
+		return fmt.Errorf("converting the image %s to a SIF with %s: %w", image, by, err)
 	}
-	_, _ = fmt.Fprintf(log, "[apptainer] %s is %s, built by %s\n", image, sif, by)
-	return sif, e.cfg.Cluster.Publish(ctx, sif+BuiltBy, strings.NewReader(by+"\n"))
+	return nil
+}
+
+// copy publishes what open gives at the path of the cluster, opening it again for each attempt. A
+// copy that loses its connection to the cluster is made again after a Poll, up to CopyAttempts in
+// all, each said to log.
+func (e *Engine) copy(ctx context.Context, p string, open func(context.Context) (io.ReadCloser, error), log io.Writer) error {
+	for attempt := 1; ; attempt++ {
+		r, err := open(ctx)
+		if err != nil {
+			return err
+		}
+		err = e.cfg.Cluster.Publish(ctx, p, r)
+		_ = r.Close()
+		if err == nil || !errors.Is(err, ErrConnectionLost) || ctx.Err() != nil {
+			return err
+		}
+		if attempt == CopyAttempts {
+			return fmt.Errorf("the copy to %s lost its connection to the cluster %d times; the last: %w", p, CopyAttempts, err)
+		}
+		_, _ = fmt.Fprintf(log, "[apptainer] the copy to %s lost its connection to the cluster (%v); copying again, attempt %d of %d\n",
+			p, err, attempt+1, CopyAttempts)
+		if !clock.Sleep(ctx, e.cfg.Timers, e.cfg.Poll) {
+			return ctx.Err()
+		}
+	}
+}
+
+// evict removes the image's SIF kept in the local directory, which the cluster has. A SIF that
+// stays is removed by a later conversion once it is a day old.
+func (e *Engine) evict(ctx context.Context, image, name string, log io.Writer) {
+	if err := e.cfg.Converter.Remove(ctx, e.cfg.LocalDir, name); err != nil {
+		_, _ = fmt.Fprintf(log, "[apptainer] the SIF of %s kept in %s, which the cluster has, was not removed: %v\n", image, e.cfg.LocalDir, err)
+	}
 }
 
 // Size writes a number of bytes for a person.

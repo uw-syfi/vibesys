@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -651,6 +652,114 @@ func TestAWaitForAnotherConversionIsBounded(t *testing.T) {
 	}
 	if held := machine.converter.Held(); len(held) != 0 {
 		t.Errorf("locks held after: %v", held)
+	}
+}
+
+// losingCopies makes the first n copies to the cluster lose their connection, as ssh's exit 255
+// does, and counts every copy.
+func losingCopies(cluster *clusterfake.Cluster, n int, err error) *atomic.Int64 {
+	var copies atomic.Int64
+	cluster.SetFaults(func(op string) error {
+		if op != "publish" {
+			return nil
+		}
+		if copies.Add(1) <= int64(n) {
+			return err
+		}
+		return nil
+	})
+	return &copies
+}
+
+// lost is a copy's failure whose connection to the cluster was lost.
+var lost = fmt.Errorf("%w (%w)", &core.Failure{Kind: core.FailureUnavailable, Message: "copying failed: exit status 255"}, apptainer.ErrConnectionLost)
+
+// A copy of a SIF that loses its connection to the cluster is made again, on the engine's poll, of
+// the SIF the conversion kept, each attempt said in the build's log, and the image is converted
+// once. Once the cluster has the SIF, the kept one is removed.
+func TestACopyThatLosesItsConnectionIsMadeAgain(t *testing.T) {
+	for losses := 1; losses < apptainer.CopyAttempts; losses++ {
+		t.Run(fmt.Sprint(losses), func(t *testing.T) {
+			w := fakeworld.New()
+			cluster := clusterfake.New(w.MemoryGates)
+			converter := clusterfake.NewConverter()
+			r := newRig(t, w, cluster, setup{converter: converter, engineTimers: clock.Immediate{Longest: apptainer.DefaultPoll}})
+			copies := losingCopies(cluster, losses, lost)
+			sif := sifOf(imageID(t))
+			log, err := build(context.Background(), r)
+			if err != nil {
+				t.Fatalf("the build: %v", err)
+			}
+			if n := strings.Count(log, "lost its connection to the cluster"); n != losses {
+				t.Errorf("the build's log says %d copies lost their connection, want %d: %q", n, losses, log)
+			}
+			if got := copies.Load(); got != int64(losses)+2 {
+				t.Errorf("%d copies, want %d of the SIF and one of what built it", got, losses+2)
+			}
+			if builds := converter.Builds(); len(builds) != 1 {
+				t.Errorf("builds %v, want one", builds)
+			}
+			if got, _ := cluster.File(sif); !bytes.Equal(got, clusterfake.SIF(dockerfake.Archive(imageID(t)))) {
+				t.Errorf("the SIF %q is not the image's", got)
+			}
+			if kept := converter.Kept(); len(kept) != 0 {
+				t.Errorf("kept after the copy: %v", kept)
+			}
+		})
+	}
+}
+
+// A copy that loses its connection CopyAttempts times fails the build saying so, and keeps the
+// SIF on this machine: the next publisher of the image, of another process, copies it without
+// converting the image again, and then removes it.
+func TestASIFNeverCopiedIsKeptForTheNextPublisher(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	converter := clusterfake.NewConverter()
+	timers := clock.Immediate{Longest: apptainer.DefaultPoll}
+	sif := sifOf(imageID(t))
+	copies := losingCopies(cluster, apptainer.CopyAttempts, lost)
+	_, err := build(context.Background(), newRig(t, w, cluster, setup{process: 0, converter: converter, engineTimers: timers}))
+	if err == nil || !errors.Is(err, apptainer.ErrConnectionLost) || !strings.Contains(err.Error(), fmt.Sprintf("%d times", apptainer.CopyAttempts)) {
+		t.Fatalf("the build: %v, want one saying the copy lost its connection %d times", err, apptainer.CopyAttempts)
+	}
+	if got := copies.Load(); got != apptainer.CopyAttempts {
+		t.Errorf("%d copies, want %d", got, apptainer.CopyAttempts)
+	}
+	if kept := converter.Kept(); len(kept) != 1 {
+		t.Fatalf("kept %v, want the SIF", kept)
+	}
+	cluster.SetFaults(nil)
+	log, err := build(context.Background(), newRig(t, w, cluster, setup{process: 1, converter: converter, engineTimers: timers}))
+	if err != nil {
+		t.Fatalf("the next build: %v", err)
+	}
+	if builds := converter.Builds(); len(builds) != 1 {
+		t.Errorf("builds %v, want the first only", builds)
+	}
+	if !strings.Contains(log, "earlier conversion kept") {
+		t.Errorf("the next build's log %q does not say it used the kept SIF", log)
+	}
+	if got, _ := cluster.File(sif); !bytes.Equal(got, clusterfake.SIF(dockerfake.Archive(imageID(t)))) {
+		t.Errorf("the SIF %q is not the image's", got)
+	}
+	if kept := converter.Kept(); len(kept) != 0 {
+		t.Errorf("kept after the copy: %v", kept)
+	}
+}
+
+// A copy that fails for another reason than its connection is not made again.
+func TestACopyThatFailsOtherwiseIsNotMadeAgain(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	r := newRig(t, w, cluster, setup{engineTimers: clock.Immediate{Longest: apptainer.DefaultPoll}})
+	full := &core.Failure{Kind: core.FailureUnavailable, Message: "No space left on device"}
+	copies := losingCopies(cluster, apptainer.CopyAttempts, full)
+	if _, err := build(context.Background(), r); err == nil || !strings.Contains(err.Error(), full.Message) {
+		t.Errorf("the build: %v, want %v", err, full)
+	}
+	if got := copies.Load(); got != 1 {
+		t.Errorf("%d copies, want one", got)
 	}
 }
 

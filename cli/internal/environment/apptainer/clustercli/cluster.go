@@ -203,7 +203,11 @@ func (c *Cluster) Publish(ctx context.Context, p string, r io.Reader) error {
 		if count.err != nil {
 			return fmt.Errorf("copying to %s: %w", p, count.err)
 		}
-		return unavailable("copying to %s on %s failed: %v %s", p, c.cfg.Shell.Where(), err, clip(errb.String()))
+		failed := unavailable("copying to %s on %s failed: %v %s", p, c.cfg.Shell.Where(), err, clip(errb.String()))
+		if exit := (*exec.ExitError)(nil); errors.As(err, &exit) && c.cfg.Shell.Lost(exit.ExitCode()) {
+			return fmt.Errorf("%w (%w)", failed, apptainer.ErrConnectionLost)
+		}
+		return failed
 	}
 	if size != strconv.FormatInt(count.n, 10) {
 		_, _ = c.sh(ctx, CallTimeout, removeScript, tmp)

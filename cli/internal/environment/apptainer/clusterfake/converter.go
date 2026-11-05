@@ -1,6 +1,7 @@
 package clusterfake
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,19 +18,22 @@ import (
 )
 
 // Converter is an apptainer.Converter kept in memory. Its SIF of an archive is SIF(archive). It is
-// no more forgiving than the real one: an empty archive fails, and a Build that fails writes no
-// SIF. It is safe for concurrent use.
+// no more forgiving than the real one: an empty archive fails, and a Build that fails keeps no SIF.
+// It never ages, so it keeps a SIF until it is removed. It is safe for concurrent use.
 type Converter struct {
 	mu     sync.Mutex
 	free   int64
 	builds []string // the directory of each build that finished
 	fail   func(op string) error
-	held   map[string]bool // the locks held, by their path
+	held   map[string]bool   // the locks held, by their path
+	kept   map[string][]byte // the SIFs kept, by their path
 }
 
 // NewConverter returns a converter with a petabyte free in every directory. It is one machine's:
 // the engines of the processes of one machine share it, and its locks.
-func NewConverter() *Converter { return &Converter{free: 1 << 50, held: map[string]bool{}} }
+func NewConverter() *Converter {
+	return &Converter{free: 1 << 50, held: map[string]bool{}, kept: map[string][]byte{}}
+}
 
 // Version is what the fake says it is.
 const Version = "apptainer version 1.4.5 (fake)"
@@ -47,7 +51,7 @@ func (c *Converter) SetFree(free int64) {
 	c.free = free
 }
 
-// SetFaults makes the calls named by op ("free", "build", "describe", "lock") fail with what f returns.
+// SetFaults makes the calls named by op ("free", "build", "open", "remove", "describe", "lock") fail with what f returns.
 func (c *Converter) SetFaults(f func(op string) error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -92,10 +96,13 @@ func (c *Converter) Free(ctx context.Context, dir string) (int64, error) {
 	return c.free, nil
 }
 
-// Build implements apptainer.Converter: it reads the whole archive, then writes its SIF.
-func (c *Converter) Build(ctx context.Context, dir string, archive io.Reader, sif io.Writer) error {
+// Build implements apptainer.Converter: it reads the whole archive, then keeps its SIF.
+func (c *Converter) Build(ctx context.Context, dir string, archive io.Reader, name string) error {
 	data, err := io.ReadAll(archive)
 	if err != nil {
+		return err
+	}
+	if err := checkName(name); err != nil {
 		return err
 	}
 	if err := c.fault(ctx, "build"); err != nil {
@@ -104,12 +111,55 @@ func (c *Converter) Build(ctx context.Context, dir string, archive io.Reader, si
 	if len(data) == 0 {
 		return &core.Failure{Kind: core.FailureUnavailable, Message: "clusterfake: FATAL: the archive is empty"}
 	}
-	if _, err := sif.Write(SIF(data)); err != nil {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.kept[path.Join(dir, name)] = SIF(data)
+	c.builds = append(c.builds, dir)
+	return nil
+}
+
+// Open implements apptainer.Converter.
+func (c *Converter) Open(ctx context.Context, dir, name string) (io.ReadCloser, bool, error) {
+	if err := checkName(name); err != nil {
+		return nil, false, err
+	}
+	if err := c.fault(ctx, "open"); err != nil {
+		return nil, false, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	data, ok := c.kept[path.Join(dir, name)]
+	if !ok {
+		return nil, false, nil
+	}
+	return io.NopCloser(bytes.NewReader(data)), true, nil
+}
+
+// Remove implements apptainer.Converter.
+func (c *Converter) Remove(ctx context.Context, dir, name string) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
+	if err := c.fault(ctx, "remove"); err != nil {
 		return err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.builds = append(c.builds, dir)
+	delete(c.kept, path.Join(dir, name))
+	return nil
+}
+
+// Kept returns the path (the directory joined with the name) of every SIF kept, sorted.
+func (c *Converter) Kept() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Sorted(maps.Keys(c.kept))
+}
+
+func checkName(name string) error {
+	if name == "" || strings.ContainsRune(name, '/') || name == "." || name == ".." {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: "clusterfake: " + name + " is not a file name"}
+	}
 	return nil
 }
 
@@ -126,8 +176,8 @@ func (c *Converter) Lock(ctx context.Context, dir, name string) (io.Closer, erro
 	if err := c.fault(ctx, "lock"); err != nil {
 		return nil, err
 	}
-	if name == "" || strings.ContainsRune(name, '/') || name == "." || name == ".." {
-		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "clusterfake: the lock name " + name + " is not a file name"}
+	if err := checkName(name); err != nil {
+		return nil, err
 	}
 	p := path.Join(dir, name)
 	c.mu.Lock()

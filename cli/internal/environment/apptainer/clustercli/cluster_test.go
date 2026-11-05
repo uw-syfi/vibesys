@@ -65,14 +65,19 @@ echo "$*" >> "$(dirname "$0")/scancel.log"
 `
 
 // shell runs programs here, finding the fakes first, and takes an exit code of 255 for the
-// transport's when lost255 is set, as ssh's is.
+// transport's when lost255 is set, as ssh's is. With exit set, every program reads its input and
+// exits with that code instead, as a connection that drops does.
 type shell struct {
 	bin     string
 	lost255 bool
 	env     []string
+	exit    string
 }
 
 func (s shell) Command(ctx context.Context, argv []string) *exec.Cmd {
+	if s.exit != "" {
+		argv = []string{"/bin/sh", "-c", "cat > /dev/null; exit " + s.exit}
+	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	if p, err := exec.LookPath(filepath.Join(s.bin, argv[0])); err == nil && !strings.Contains(argv[0], "/") {
 		cmd = exec.CommandContext(ctx, p, argv[1:]...)
@@ -180,6 +185,23 @@ func TestACopyCutShortLeavesNothing(t *testing.T) {
 	}
 	if names := entries(t, dir); !slices.Equal(names, []string{"a.tar.gz"}) {
 		t.Errorf("files %v: a part of the copy was left", names)
+	}
+}
+
+// A copy whose transport exits as ssh does when its connection drops is lost, and may be made
+// again; one whose program failed, or whose 255 is not the transport's, is not.
+func TestACopyWhoseConnectionDropsIsLost(t *testing.T) {
+	for _, c := range []struct {
+		exit    string
+		lost255 bool
+		lost    bool
+	}{{"255", true, true}, {"255", false, false}, {"1", true, false}} {
+		sh := newShell(t)
+		sh.exit, sh.lost255 = c.exit, c.lost255
+		err := newCluster(t, sh).Publish(ctx(t), "/shared/vibesys/images/x.sif", strings.NewReader("a SIF"))
+		if err == nil || errors.Is(err, apptainer.ErrConnectionLost) != c.lost {
+			t.Errorf("exit %s (lost255 %v): %v, want lost %v", c.exit, c.lost255, err, c.lost)
+		}
 	}
 }
 
