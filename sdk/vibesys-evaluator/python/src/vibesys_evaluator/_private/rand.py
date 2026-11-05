@@ -12,6 +12,13 @@ a string with no integer after it is closed with ``state = finalize(pending)``
 (``mix`` with stream ``2**64 - 1``). ``child(*more)`` is the stream of
 ``Rand(seed, *labels, *more)``: it depends on the parent's labels only, never
 on how much the parent has drawn.
+
+Every draw is computed with IEEE 754 double operations that are exact or
+correctly rounded (``+ - * /``, ``sqrt``, ``ldexp``, ``frexp``), never with the
+platform's ``pow``, ``exp`` or ``log``, so a stream is the same on every
+platform and in the Go SDK's ``workload.Rand`` (checked by
+``fixtures/rand.json``). A Zipf exponent other than 1, 1/2 and 3/4 uses
+``exp(-s log k)`` with the fdlibm algorithms below.
 """
 
 from __future__ import annotations
@@ -99,7 +106,68 @@ def _zipf_weight(rank: int, s: float) -> float:
         return 1.0 / math.sqrt(k)
     if s == _THREE_QUARTERS:
         return 1.0 / (math.sqrt(k) * math.sqrt(math.sqrt(k)))
-    return k**-s
+    return _exp(-s * _log(k))
+
+
+# fdlibm's e_log.c and e_exp.c (as Go's math package ports them), for finite x > 0 and finite x:
+# the same operations in the same order in Go's workload.Rand, so the results are bit-identical.
+_LN2_HI = 6.93147180369123816490e-01
+_LN2_LO = 1.90821492927058770002e-10
+_LOG2E = 1.44269504088896338700e00
+_SQRT_HALF = 7.07106781186547524401e-01
+_L = (
+    6.666666666666735130e-01,
+    3.999999999940941908e-01,
+    2.857142874366239149e-01,
+    2.222219843214978396e-01,
+    1.818357216161805012e-01,
+    1.531383769920937332e-01,
+    1.479819860511658591e-01,
+)
+_P = (
+    1.66666666666666657415e-01,
+    -2.77777777770155933842e-03,
+    6.61375632143793436117e-05,
+    -1.65339022054652515390e-06,
+    4.13813679705723846039e-08,
+)
+_EXP_OVERFLOW = 7.09782712893383973096e02
+_EXP_UNDERFLOW = -7.45133219101941108420e02
+_NEAR_ZERO = 1.0 / (1 << 28)
+
+
+def _log(x: float) -> float:
+    f1, ki = math.frexp(x)
+    if f1 < _SQRT_HALF:
+        f1 *= 2
+        ki -= 1
+    f = f1 - 1
+    k = float(ki)
+    s = f / (2 + f)
+    s2 = s * s
+    s4 = s2 * s2
+    t1 = s2 * (_L[0] + s4 * (_L[2] + s4 * (_L[4] + s4 * _L[6])))
+    t2 = s4 * (_L[1] + s4 * (_L[3] + s4 * _L[5]))
+    r = t1 + t2
+    hfsq = 0.5 * f * f
+    return k * _LN2_HI - ((hfsq - (s * (hfsq + r) + k * _LN2_LO)) - f)
+
+
+def _exp(x: float) -> float:
+    if x > _EXP_OVERFLOW:
+        return math.inf
+    if x < _EXP_UNDERFLOW:
+        return 0.0
+    if -_NEAR_ZERO < x < _NEAR_ZERO:
+        return 1 + x
+    k = int(_LOG2E * x - 0.5) if x < 0 else int(_LOG2E * x + 0.5)
+    hi = x - k * _LN2_HI
+    lo = k * _LN2_LO
+    r = hi - lo
+    t = r * r
+    c = r - t * (_P[0] + t * (_P[1] + t * (_P[2] + t * (_P[3] + t * _P[4]))))
+    y = 1 - ((lo - (r * c) / (2 - c)) - hi)
+    return math.ldexp(y, k)
 
 
 class Rand:
