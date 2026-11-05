@@ -2,6 +2,7 @@ package task_test
 
 import (
 	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -33,5 +34,25 @@ func TestATreeIsAFileSystem(t *testing.T) {
 	}
 	if err := fstest.TestFS(task.Tree{}); err != nil {
 		t.Fatal(err)
+	}
+	// With links, which it follows when it opens a path and shows as links when it lists or
+	// Lstats one, as a directory does.
+	files[".vibesys/tasks/t/again.sh"] = task.File{Link: "check.sh"}
+	files[".vibesys/tasks/t/source"] = task.File{Link: "../../../src"}
+	if err := fstest.TestFS(files, ".vibesys/tasks/t/again.sh", ".vibesys/tasks/t/source"); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := fs.ReadFile(files, ".vibesys/tasks/t/source/main.c"); err != nil || string(data) != string(files["src/main.c"].Data) {
+		t.Errorf("reading through a link to a directory: %q, %v", data, err)
+	}
+	if target, err := fs.ReadLink(files, ".vibesys/tasks/t/again.sh"); err != nil || target != "check.sh" {
+		t.Errorf("ReadLink = %q, %v", target, err)
+	}
+	if info, err := fs.Lstat(files, ".vibesys/tasks/t/again.sh"); err != nil || info.Mode().Type() != fs.ModeSymlink {
+		t.Errorf("Lstat = %v, %v; want a link", info, err)
+	}
+	files["out"] = task.File{Link: "../elsewhere"}
+	if _, err := files.Open("out"); err == nil {
+		t.Error("a link out of the tree was followed")
 	}
 }

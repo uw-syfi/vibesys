@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"math"
 	"path"
 	"slices"
@@ -85,8 +86,9 @@ type Task struct {
 	// Files are the files Version names, by path from the task's directory (VersionedFiles).
 	Files map[string]string
 	// Context is the content of the same files when the task has a Dockerfile: its image's build
-	// context, which with Version pins the image the jobs run in. It is nil when HasDockerfile is
-	// false.
+	// context, which with Version pins the image the jobs run in. Its symbolic links are kept as
+	// links, and each leads to a file or a directory of the context: Read refuses a task with
+	// a Dockerfile whose links do not. It is nil when HasDockerfile is false.
 	Context Tree
 	Backend core.BackendKind
 	// HasDockerfile says the task ships a Dockerfile, so its jobs run in docker.
@@ -170,9 +172,38 @@ func Read(fsys fs.FS, name string) (Task, error) {
 	t.Files = fingerprints(tree)
 	t.Version = versionOf(t.Files)
 	if t.HasDockerfile {
+		if err := imageLinks(name, dir, tree); err != nil {
+			return Task{}, err
+		}
 		t.Context = tree
 	}
 	return t, nil
+}
+
+// imageLinks refuses a task whose image would lose a symbolic link of its directory. The image is
+// built from the task's directory alone, so a link in it is kept as a link and works there only
+// when it leads, link by link, to a file or a directory of the task: an absolute link, one that
+// leaves the directory, or one to a file the commit does not have (a generated file, say) would
+// be a link to nothing in the image, and a command would meet it only as a missing file. A task
+// with no Dockerfile runs in the checkout, where git makes each link as the commit holds it, so
+// its links are not checked.
+func imageLinks(name, dir string, tree Tree) error {
+	for _, rel := range slices.Sorted(maps.Keys(tree)) {
+		if !tree[rel].IsLink() {
+			continue
+		}
+		if _, err := tree.resolve(rel); err != nil {
+			var bad *linkError
+			if !errors.As(err, &bad) {
+				return err
+			}
+			return invalid("task %q: %s/%s is a symbolic link to %q, which %s. The task's image is built from %s alone, so "+
+				"a link there must lead to a file or a directory of it; make the link relative to one, commit the file itself, "+
+				"or have the task's commands write it when they run",
+				name, dir, bad.Path, bad.Target, bad.why("the task directory"), dir)
+		}
+	}
+	return nil
 }
 
 // nestedDocker reads [environment] docker_in_docker. The section is otherwise held as data, but
@@ -243,8 +274,9 @@ func Version(fsys fs.FS, dir string) (string, error) {
 }
 
 // VersionedFiles returns the files under dir that the task's version names: every regular file
-// that is not Generated, by its path from dir, with a fingerprint of its executable bit and
-// content. Two trees have one version exactly when they have equal VersionedFiles.
+// and symbolic link that is not Generated, by its path from dir, with a fingerprint of a file's
+// executable bit and content or of a link's target. Two trees have one version exactly when they
+// have equal VersionedFiles. A file of any other kind (a device, a socket) is refused.
 func VersionedFiles(fsys fs.FS, dir string) (map[string]string, error) {
 	tree, err := versioned(fsys, dir)
 	if err != nil {
@@ -273,12 +305,20 @@ func versioned(fsys fs.FS, dir string) (Tree, error) {
 		if Generated(rel) {
 			return nil
 		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			target, err := fs.ReadLink(fsys, p)
+			if err != nil {
+				return err
+			}
+			files[rel] = File{Link: target}
+			return nil
+		}
 		info, err := d.Info()
 		if err != nil {
 			return err
 		}
 		if !info.Mode().IsRegular() {
-			return nil
+			return fmt.Errorf("%s is a %v and not a file, a directory or a symbolic link, which a task cannot hold", p, info.Mode().Type())
 		}
 		data, err := fs.ReadFile(fsys, p)
 		if err != nil {
@@ -293,15 +333,20 @@ func versioned(fsys fs.FS, dir string) (Tree, error) {
 	return files, nil
 }
 
-// fingerprints are the files' executable bits and content digests, as VersionedFiles names them.
+// fingerprints are the files' executable bits and content digests, and the links' target digests,
+// as VersionedFiles names them. A regular file's fingerprint is what it was before links were
+// versioned, so a task with no link keeps its version.
 func fingerprints(tree Tree) map[string]string {
 	files := make(map[string]string, len(tree))
 	for p, f := range tree {
-		exec := "-"
-		if f.Executable {
-			exec = "x"
+		kind, content := "-", f.Data
+		switch {
+		case f.IsLink():
+			kind, content = "l", []byte(f.Link)
+		case f.Executable:
+			kind = "x"
 		}
-		files[p] = fmt.Sprintf("%s %x", exec, sha256.Sum256(f.Data))
+		files[p] = fmt.Sprintf("%s %x", kind, sha256.Sum256(content))
 	}
 	return files
 }

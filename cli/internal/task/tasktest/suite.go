@@ -130,6 +130,76 @@ func Run(t *testing.T, rig Rig) {
 			t.Errorf("task = %+v, %v", got, err)
 		}
 	})
+	t.Run("a task's image keeps a symbolic link that leads to a file of the task", func(t *testing.T) {
+		dir := task.TasksDir + "/t/"
+		files := with(Files("t"), func(f task.Tree) {
+			f[dir+"Dockerfile"] = task.File{Data: []byte("FROM scratch\n")}
+			f[dir+"k8s/manifest.yaml"] = task.File{Data: []byte("kind: List\n")}
+			f[dir+"k8s/deployed.yaml"] = task.File{Link: "manifest.yaml"}
+			f[dir+"conf"] = task.File{Link: "k8s"}
+			f[dir+"up/check.sh"] = task.File{Link: "../check.sh"}
+		})
+		src, repo, commit := rig.Make(t, files)
+		got, err := src.Task(ctx, repo, commit, "t")
+		if err != nil {
+			t.Fatalf("Task: %v", err)
+		}
+		for rel, want := range map[string]string{"k8s/deployed.yaml": "manifest.yaml", "conf": "k8s", "up/check.sh": "../check.sh"} {
+			if f, ok := got.Context[rel]; !ok || f.Link != want || len(f.Data) != 0 {
+				t.Errorf("the image's context has %s as %+v (there: %v), want a link to %q", rel, f, ok, want)
+			}
+		}
+		moved := with(files, func(f task.Tree) { f[dir+"k8s/deployed.yaml"] = task.File{Link: "../check.sh"} })
+		if v := version(t, moved); v == got.Version {
+			t.Error("a link's new target did not change the version")
+		}
+	})
+	t.Run("a task's image refuses a symbolic link that would lead to nothing in it, and says why", func(t *testing.T) {
+		dir := task.TasksDir + "/t/"
+		// Each case's links, and the link the refusal names with what it says of it.
+		for _, c := range []struct {
+			name      string
+			links     map[string]string
+			bad, says string
+		}{
+			{"absolute", map[string]string{"k8s/deployed.yaml": "/tmp/hotel-k8s-deploy/manifest.yaml"}, "k8s/deployed.yaml", "absolute"},
+			{"escaping", map[string]string{"k8s/deployed.yaml": "../../../../src/main.c"}, "k8s/deployed.yaml", "outside the task directory"},
+			{"escaping through a link", map[string]string{"k8s/deployed.yaml": "../src/main.c", "src": "../../../src"}, "src", "outside the task directory"},
+			{"dangling", map[string]string{"k8s/deployed.yaml": "generated.yaml"}, "k8s/deployed.yaml", "points at nothing"},
+			{"a cycle", map[string]string{"a": "b", "b": "a"}, "a", "cycle"},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				src, repo, commit := rig.Make(t, with(Files("t"), func(f task.Tree) {
+					f[dir+"Dockerfile"] = task.File{Data: []byte("FROM scratch\n")}
+					for rel, target := range c.links {
+						f[dir+rel] = task.File{Link: target}
+					}
+				}))
+				_, err := src.Task(ctx, repo, commit, "t")
+				var f *core.Failure
+				if !errors.As(err, &f) || f.Kind != core.FailureInvalidInput {
+					t.Fatalf("err = %v, want invalid input", err)
+				}
+				for _, want := range []string{dir + c.bad, c.says} {
+					if !strings.Contains(f.Message, want) {
+						t.Errorf("the refusal %q does not say %q", f.Message, want)
+					}
+				}
+			})
+		}
+	})
+	t.Run("a task with no image keeps any symbolic link in its version", func(t *testing.T) {
+		dir := task.TasksDir + "/t/"
+		linked := with(Files("t"), func(f task.Tree) { f[dir+"deployed.yaml"] = task.File{Link: "/tmp/deployed.yaml"} })
+		src, repo, commit := rig.Make(t, linked)
+		got, err := src.Task(ctx, repo, commit, "t")
+		if err != nil {
+			t.Fatalf("a task that runs in its checkout was refused for a link git makes there: %v", err)
+		}
+		if got.Version == version(t, Files("t")) {
+			t.Error("a link did not change the version")
+		}
+	})
 	t.Run("a task or a commit that is not there is not found", func(t *testing.T) {
 		src, repo, commit := rig.Make(t, Files("t"))
 		for name, call := range map[string]func() error{
