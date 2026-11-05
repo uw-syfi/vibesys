@@ -28,10 +28,11 @@ type shape struct {
 	linked    bool // a measure job links a saved pass instead of running the check
 	protocol2 bool
 	samples   uint32
+	candidate bool // a task of two images: the job builds the candidate's image first
 }
 
 func (s shape) String() string {
-	return fmt.Sprintf("%s/build=%v/linked=%v/protocol2=%v/samples=%d", s.kind, s.build, s.linked, s.protocol2, s.samples)
+	return fmt.Sprintf("%s/build=%v/linked=%v/protocol2=%v/samples=%d/candidate=%v", s.kind, s.build, s.linked, s.protocol2, s.samples, s.candidate)
 }
 
 func (s shape) plan() flow.Plan {
@@ -42,6 +43,12 @@ func (s shape) plan() flow.Plan {
 	}
 	if s.build {
 		p.Build = &task.Command{Argv: []string{"make"}, Timeout: time.Minute}
+	}
+	if s.candidate {
+		p.Candidate = &task.Candidate{
+			Build: core.CandidateBuild{Dockerfile: "serve/Dockerfile", Context: "serve"},
+			Serve: []string{"${PROJECT_ROOT}/serve.sh", "--port", "${PORT}"}, Ready: "/health", StartupTimeout: 2 * time.Minute,
+		}
 	}
 	if s.kind == core.JobMeasure {
 		p.Samples = s.samples
@@ -60,6 +67,9 @@ func (s shape) plan() flow.Plan {
 func shapes() []shape {
 	out := []shape{
 		{kind: core.JobCheck}, {kind: core.JobCheck, build: true},
+		{kind: core.JobCheck, candidate: true},
+		{kind: core.JobMeasure, protocol2: true, samples: 1, candidate: true},
+		{kind: core.JobMeasure, protocol2: true, linked: true, samples: 3, candidate: true},
 	}
 	for _, build := range []bool{false, true} {
 		for _, linked := range []bool{false, true} {
@@ -129,6 +139,11 @@ func (w *world) answer(n int, r flow.Request) flow.Event {
 		return flow.Observed{}
 	}
 	switch r := r.(type) {
+	case flow.BuildCandidate:
+		if f == cannotRun {
+			return flow.NotRan{Failure: core.Failure{Kind: core.FailureInvalidInput, Message: "the first FROM is not allowed"}}
+		}
+		return flow.CandidateBuilt{Image: candidateImage}
 	case flow.Checkout:
 		if f == noCheckout {
 			return flow.CheckoutFailed{Failure: core.Failure{Kind: core.FailureNotFound, Message: "no such commit"}}
@@ -186,6 +201,8 @@ func stageOf(r flow.Request) flow.Stage {
 		return flow.StageCheckout
 	case flow.Observe:
 		return flow.StageObserve
+	case flow.BuildCandidate:
+		return flow.StageCandidate
 	case flow.Run:
 		return r.Stage
 	}
@@ -197,6 +214,9 @@ func expected(p flow.Plan) []flow.Stage {
 	out := []flow.Stage{flow.StageCheckout}
 	if p.Build != nil {
 		out = append(out, flow.StageBuild)
+	}
+	if p.Candidate != nil {
+		out = append(out, flow.StageCandidate)
 	}
 	if p.RunsCheck() {
 		out = append(out, flow.StageCheck)
@@ -277,6 +297,7 @@ func checkRun(t *testing.T, label string, p flow.Plan, w *world, v flow.Verdict)
 		if f.Machine.HostID != "host-a" || f.Load.SampledAt.IsZero() {
 			fail("a pass records the machine: %+v %+v", f.Machine, f.Load)
 		}
+		checkCandidate(p, w, f, fail)
 		// What it would save is accepted by the same rule every store applies.
 		at := epoch.Add(time.Hour)
 		res := p.Record("j-run", commit, f, at)
@@ -366,9 +387,75 @@ func TestAFaultAtEveryStepEndsTheJobThereAndSavesNothing(t *testing.T) {
 
 // applies says whether a fault can happen at a stage: only a command exits, only a benchmark
 // writes a file, only a checkout is refused. A cancel and a wrong answer can come at any step.
+var candidateImage = core.CandidateImage{ID: "sha256:" + strings.Repeat("c", 64), Tag: "vibesys-candidate:t-cccc"}
+
+// checkCandidate checks a pass of a task of two images: every command ran beside the server of
+// the image the job built, from the checkout, and the result records that image, which is not
+// part of the key the result is saved under.
+func checkCandidate(p flow.Plan, w *world, f flow.Findings, fail func(string, ...any)) {
+	if p.Candidate == nil {
+		if f.CandidateImage != "" {
+			fail("a task of one image records a candidate image")
+		}
+		return
+	}
+	if f.CandidateImage != candidateImage.ID {
+		fail("the result records %q, the job built %q", f.CandidateImage, candidateImage.ID)
+	}
+	for _, r := range w.asked {
+		run, ok := r.(flow.Run)
+		if !ok {
+			continue
+		}
+		c := run.Candidate
+		if c == nil || c.Image != candidateImage.ID || c.Serve == nil {
+			fail("the %s step ran without the candidate: %+v", run.Stage, c)
+		}
+		if got := strings.Join(c.Serve.Argv, " "); got != "/work/checkout/serve.sh --port ${PORT}" || c.Serve.Ready != "/health" {
+			fail("the %s step serves %q at %q", run.Stage, got, c.Serve.Ready)
+		}
+		if run.Timeout < p.Candidate.StartupTimeout {
+			fail("the %s step's limit %v leaves no time for the server to start", run.Stage, run.Timeout)
+		}
+	}
+	res := p.Record("j-run", commit, f, epoch)
+	if res.CandidateImage != candidateImage.ID || res.Key != p.Key {
+		fail("the result is %+v", res)
+	}
+}
+
+// A server that is never ready, or that exits, stops the job in the step it served, with the
+// end of the server's output in the reason.
+func TestAServerThatFailsStopsTheJobWithItsLog(t *testing.T) {
+	p := shape{kind: core.JobCheck, candidate: true}.plan()
+	for _, kind := range []core.ExecKind{core.ExecServiceNotReady, core.ExecServiceExited} {
+		state, req, err := flow.Start(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		events := []flow.Event{
+			flow.CheckedOut{Dir: "/work/checkout", Scratch: "/work/scratch"},
+			flow.CandidateBuilt{Image: candidateImage},
+			flow.Ran{Exec: core.ExecOutcome{Kind: kind}, Started: epoch, Ended: epoch.Add(time.Second), ServiceLog: "CUDA out of memory\n"},
+		}
+		for _, e := range events {
+			if req == nil {
+				t.Fatalf("%s: the job ended early: %+v", kind, state.Verdict())
+			}
+			state, req = flow.Step(state, e)
+		}
+		v, ok := state.Verdict().(flow.Stopped)
+		if !ok || v.Stage != flow.StageCheck || !strings.Contains(v.Reason, "CUDA out of memory") || !strings.Contains(v.Reason, "server") {
+			t.Fatalf("%s: verdict %+v", kind, state.Verdict())
+		}
+	}
+}
+
 func applies(f fault, s flow.Stage) bool {
 	switch f {
-	case exitsNonZero, timesOut, cancelledRun, unknownEnding, cannotRun:
+	case cannotRun:
+		return s == flow.StageBuild || s == flow.StageCandidate || s == flow.StageCheck || s == flow.StageBenchmark
+	case exitsNonZero, timesOut, cancelledRun, unknownEnding:
 		return s == flow.StageBuild || s == flow.StageCheck || s == flow.StageBenchmark
 	case noFile, badFile, unreadable:
 		return s == flow.StageBenchmark
@@ -559,7 +646,9 @@ func TestSeededRandomRunsKeepEveryInvariant(t *testing.T) {
 // The machine does not trust its shell: whatever events it is given, in whatever order, it stops
 // after a bounded number of steps with a coherent verdict, and a verdict is final.
 func randomEvent(r *rand.Rand) flow.Event {
-	switch r.IntN(9) {
+	switch r.IntN(10) {
+	case 7:
+		return flow.CandidateBuilt{Image: candidateImage}
 	case 0:
 		return flow.CheckedOut{Dir: "/d", Scratch: "/s"}
 	case 1:
@@ -593,7 +682,7 @@ func runRandomEvents(t *testing.T, seed uint64, shapeIndex int) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bound := 4 + 2*int(p.Samples) + 2
+	bound := 5 + 2*int(p.Samples) + 2
 	steps := 0
 	for req != nil {
 		if steps++; steps > bound {

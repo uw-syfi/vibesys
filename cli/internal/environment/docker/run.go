@@ -187,7 +187,7 @@ func (r *run) canServe() error {
 	p := r.e.p
 	if p.cfg.Probe == "" {
 		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
-			"docker: the placement %q has no program to probe a candidate's server with, so it runs no task of two images", p.cfg.Placement)}
+			"docker: the placement %q has no program to probe a candidate's server with, so it runs no task of two images: it needs a static Linux build of vibesys-cli, as a release is (CGO_ENABLED=0)", p.cfg.Placement)}
 	}
 	given, err := r.attachments()
 	if err != nil {

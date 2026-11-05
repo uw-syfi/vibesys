@@ -5,6 +5,7 @@ import (
 	"maps"
 	"path"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"time"
@@ -87,13 +88,28 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 }
 
 // probe is the program a local placement's containers probe a candidate's server with: this
-// binary, which is static, when it is built for Linux, where the containers run it. A binary of
-// another system has none, and its placements run no task of two images.
+// binary, when it is a static build for Linux, as a release is, since the containers run it
+// whatever libraries their image has. Any other build has none, and its placements run no task
+// of two images.
 func (p Process) probe() string {
-	if runtime.GOOS != "linux" || !path.IsAbs(p.Executable) {
+	if runtime.GOOS != "linux" || !path.IsAbs(p.Executable) || !static() {
 		return ""
 	}
 	return p.Executable
+}
+
+// static reports whether this binary was built without cgo, so that it links no C library.
+func static() bool {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return false
+	}
+	for _, s := range info.Settings {
+		if s.Key == "CGO_ENABLED" {
+			return s.Value == "0"
+		}
+	}
+	return false
 }
 
 // TaskSchemas names the task schema versions this build reads, as --version prints them.

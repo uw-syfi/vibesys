@@ -158,6 +158,11 @@ func TestInvalidArgumentsAreRefusedBeforeTheDaemon(t *testing.T) {
 		{"empty command", withTask("submit", "command", "HEAD", "--"), "after --"},
 		{"no commit", withTask("submit", "command", "--", "true"), "one commit"},
 		{"bad env", withTask("submit", "command", "HEAD", "--env", "vm", "--", "true"), "--env"},
+		{"an unended wrap", withTask("submit", "command", "HEAD", "--wrap", "nsys 'profile", "--", "true"), "--wrap"},
+		{"profile with no commit", withTask("submit", "profile"), "one commit"},
+		{"profile with a command", withTask("submit", "profile", "HEAD", "--", "true"), "no command after --"},
+		{"profile with an unended wrap", withTask("submit", "profile", "HEAD", "--wrap", "nsys \\"), "--wrap"},
+		{"profile with a negative timeout", withTask("submit", "profile", "HEAD", "--timeout=-1s"), "--timeout"},
 		{"check with a command", withTask("submit", "check", "HEAD", "--", "true"), "own commands"},
 		{"check with samples", withTask("submit", "check", "HEAD", "--samples", "3"), "--samples"},
 		{"check with recheck", withTask("submit", "check", "HEAD", "--recheck"), "--recheck"},
@@ -201,6 +206,19 @@ func TestSubmitWaitAndLogs(t *testing.T) {
 		t.Fatalf("wait = %+v", r)
 	}
 	if r := c.run(withTask("logs", id)...); r.code != exitOK || r.stdout != "hello\n" {
+		t.Fatalf("logs = %+v", r)
+	}
+}
+
+// --wrap puts its words in front of the command when there is no --service.
+func TestSubmitCommandWrapsTheCommand(t *testing.T) {
+	c := newCLI(t)
+	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--wrap", "print wrapped ;", "--wait", "--", "print", "hello")...)
+	if r.code != exitOK {
+		t.Fatalf("submit = %+v", r)
+	}
+	id := strings.Fields(r.stdout)[0]
+	if r := c.run(withTask("logs", id)...); r.code != exitOK || r.stdout != "wrapped\nhello\n" {
 		t.Fatalf("logs = %+v", r)
 	}
 }

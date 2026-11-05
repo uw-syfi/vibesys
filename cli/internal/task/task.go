@@ -631,7 +631,11 @@ func checkPlaceholders(c Command, also ...string) error {
 			if end < 0 {
 				end = len(rest) - i - 1
 			}
-			return unsupported("%s: the placeholder %s is not supported here; only %s is", ManifestName, rest[i:i+end+1], strings.Join(allowed, " and "))
+			verb := "is"
+			if len(allowed) > 1 {
+				verb = "are"
+			}
+			return unsupported("%s: the placeholder %s is not supported here; only %s %s", ManifestName, rest[i:i+end+1], strings.Join(allowed, " and "), verb)
 		}
 	}
 	return nil
