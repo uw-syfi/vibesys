@@ -355,6 +355,18 @@ func node(t *testing.T, sh shell) apptainer.Node {
 	return newCluster(t, sh).Node("77")
 }
 
+// announced is a writer that closes up at its first write.
+type announced struct {
+	once sync.Once
+	up   chan struct{}
+}
+
+// Write implements io.Writer.
+func (a *announced) Write(p []byte) (int, error) {
+	a.once.Do(func() { close(a.up) })
+	return len(p), nil
+}
+
 func wait(t *testing.T, p environment.Process) environment.Exit {
 	t.Helper()
 	select {
@@ -429,12 +441,20 @@ func TestASignalReachesTheBoxsProcesses(t *testing.T) {
 	sh := newShell(t)
 	n := node(t, sh)
 	name := fmt.Sprintf("vibesys-cli-sig%d", os.Getpid())
+	// A process exists to be signalled only once it has run: a box's process says so, and the test
+	// waits for that, since a signal sent before the process starts reaches nothing.
 	start := func(box string) environment.Process {
-		p, err := n.Start(apptainer.Box{Name: box, Image: "/shared/x.sif"}, []string{"/bin/sh", "-c", "exec sleep 600"}, io.Discard)
+		up := &announced{up: make(chan struct{})}
+		p, err := n.Start(apptainer.Box{Name: box, Image: "/shared/x.sif"}, []string{"/bin/sh", "-c", "echo up; exec sleep 600"}, up)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(p.Kill)
+		select {
+		case <-up.up:
+		case <-ctx(t).Done():
+			t.Fatalf("the process of %s never started", box)
+		}
 		return p
 	}
 	a, other := start(name), start(name+"-other")
