@@ -101,7 +101,7 @@ func TestNoTwoJobsRunWithOneClusterAtOnce(t *testing.T) {
 		claims := map[string][]core.Claim{}
 		var offers []core.PlacementOffer
 		for _, name := range slices.Sorted(maps.Keys(op.GetPlacements())) {
-			rs, err := resources(op.GetPlacements()[name].GetResources(), remote.Local{}, "local", clock.System{})
+			rs, err := resources(op.GetPlacements()[name].GetResources(), remote.Local{}, "local", "local", clock.System{}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
