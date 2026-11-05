@@ -11,19 +11,27 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/lease"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
 
 // Config configures New. Every field but ProbePause is required.
 type Config struct {
 	Engine Engine
+	// Builds is where the processes that build on the engine take turns at building one image:
+	// the leases of the engine's machine, which every process that reaches the engine there
+	// shares, of this machine or another (ensure).
+	Builds lease.Leases
+	// Holder is who this process is, as one that waits for its build is told.
+	Holder core.LeaseHolder
 	// Source reads the files of a task at a commit.
 	Source Source
 	// Backend describes the machine the engine runs containers on: what the fingerprint is made of.
 	Backend backend.Backend
 	// Timers makes every timeout and pause Run waits on. The first timer a Run arms is the
-	// execution's limit, with the duration of its Timeout; later ones are pauses between probes, and the grace period armed when the limit is
-	// reached or the run is cancelled.
+	// execution's limit, with the duration of its Timeout, unless the Run first waits for another
+	// process's build of its image, whose pauses (BuildPoll) come before it; later ones are pauses
+	// between probes, and the grace period armed when the limit is reached or the run is cancelled.
 	Timers clock.Timers
 	// IDs names the runs.
 	IDs IDs
@@ -84,6 +92,8 @@ func New(cfg Config) (*Provider, error) {
 	switch {
 	case cfg.Engine == nil:
 		return nil, missing("Engine")
+	case cfg.Builds == nil:
+		return nil, missing("Builds")
 	case cfg.Source == nil:
 		return nil, missing("Source")
 	case cfg.Backend == nil:
@@ -217,8 +227,10 @@ func (e *env) Machine(ctx context.Context) (core.MachineFacts, error) {
 func (e *env) Load(ctx context.Context) (core.MachineLoad, error) { return e.p.cfg.Backend.Load(ctx) }
 
 // image returns the image the task's files build on the engine's local images of its bases. An
-// image the engine already has under their tag (buildKey) is not built again. Builds are one at a time, so that a Fingerprint and a Run that ask for
-// the same image build it once; the build's progress goes to log.
+// image the engine already has under their tag (buildKey) is not built again. The builds of one
+// process are one at a time, and those of processes that share the engine take turns per image
+// (ensure), so that a Fingerprint and a Run, or two jobs, that ask for the same image build it
+// once; the build's progress goes to log.
 func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, error) {
 	select {
 	case p.build <- struct{}{}:
@@ -234,18 +246,7 @@ func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, 
 	if err != nil {
 		return Image{}, err
 	}
-	tag := imageTag(buildKey(buildContext, bases))
-	if img, ok, err := p.cfg.Engine.Image(ctx, tag); err != nil || ok {
-		return checked(img, err)
-	}
-	if err := p.cfg.Engine.Build(ctx, BuildSpec{Tag: tag, Context: buildContext, Labels: Labels{LabelOwner: Owner}}, log); err != nil {
-		return Image{}, err
-	}
-	img, ok, err := p.cfg.Engine.Image(ctx, tag)
-	if err == nil && !ok {
-		err = &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: the engine built %s and does not have it", tag)}
-	}
-	return checked(img, err)
+	return p.ensure(ctx, imageTag(buildKey(buildContext, bases)), buildContext, "", log)
 }
 
 // bases looks up the engine's local image of each image the Dockerfile builds on (baseRefs).

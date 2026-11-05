@@ -15,6 +15,9 @@
 //     client started stop, as the real engine's do when their input closes, and stay until a
 //     later process removes them.
 //   - Daemon.Plant adds a container nobody here started, and Daemon.Prune empties the images.
+//   - HeldBuilds holds each build at a gate until the test lets it end, so two builds of one tag
+//     can overlap; the one that ends second fails as Docker's containerd image store fails it,
+//     with "already exists".
 //
 // The fake is held to the same engine contract as the real engine (dockertest), so a behavior a
 // test relies on here is one the real engine has.

@@ -83,7 +83,7 @@ var rules = map[string][]string{
 	// The docker environment decides what to run and how it ends; an engine is the only thing that
 	// talks to Docker. The real engine drives the docker program, the fake keeps a daemon in
 	// memory, and one contract suite holds both to the same behavior.
-	"internal/environment/docker":           {"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/resource", "internal/task"},
+	"internal/environment/docker":           {"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/lease", "internal/resource", "internal/task"},
 	"internal/environment/docker/dockercli": {"internal/clock", "internal/core", "internal/environment", "internal/environment/docker", "internal/remote"},
 	// Where a docker engine's containers find a run's directories: this machine, or copies on one
 	// reached over ssh.
@@ -228,7 +228,7 @@ var testRules = map[string][]string{
 	"internal/environment/host":    {"internal/backend/cpu", "internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/environment/slurm": {
 		"internal/backend/cpu", "internal/environment", "internal/environment/docker/dockerfake",
-		"internal/environment/envtest", "internal/environment/fakeenv/fakeworld",
+		"internal/environment/envtest", "internal/environment/fakeenv/fakeworld", "internal/lease/fakelease",
 	},
 	"internal/environment/docker/machine": {"internal/environment/envtest"},
 	"internal/remote":                     {"internal/environment/envtest"},
@@ -237,7 +237,7 @@ var testRules = map[string][]string{
 	"internal/environment/apptainer": {
 		"internal/backend/amd", "internal/environment/apptainer/clusterfake",
 		"internal/environment/docker/dockerfake", "internal/environment/docker/dockertest", "internal/environment/envtest",
-		"internal/environment/fakeenv", "internal/environment/fakeenv/fakeworld", "internal/resource",
+		"internal/environment/fakeenv", "internal/environment/fakeenv/fakeworld", "internal/lease/fakelease", "internal/resource",
 		"internal/resource/rocm", "internal/task",
 	},
 	"internal/environment/apptainer/clustercli": {"internal/environment/envtest"},
@@ -246,14 +246,14 @@ var testRules = map[string][]string{
 	"internal/resource/kubernetes":              {"internal/resource/resourcetest"},
 	"internal/resource/fakeresource":            {"internal/resource/resourcetest"},
 	"internal/environment/docker": {
-		"internal/resource/fakeresource",
+		"internal/resource/fakeresource", "internal/lease", "internal/lease/fakelease",
 		"internal/backend/cpu", "internal/clock", "internal/environment/docker/dockerfake",
 		"internal/environment/docker/dockertest", "internal/environment/envtest", "internal/environment/fakeenv",
 		"internal/environment/fakeenv/fakeworld", "internal/task", "internal/task/tasktest",
 	},
 	"internal/environment/docker/dockercli": {
 		"internal/backend", "internal/backend/cpu", "internal/clock", "internal/environment/docker/dockertest",
-		"internal/environment/envtest", "internal/resource", "internal/resource/fakeresource",
+		"internal/environment/envtest", "internal/lease/fakelease", "internal/resource", "internal/resource/fakeresource",
 	},
 	"internal/environment/docker/dockerfake": {
 		"internal/environment/docker/dockertest", "internal/environment/envtest", "internal/environment/fakeenv/fakeworld",

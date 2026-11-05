@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/uw-syfi/vibesys/cli/internal/lease/fakelease"
 	"math/rand/v2"
 	"slices"
 	"strings"
@@ -215,7 +216,7 @@ func TestAnErrorOfTheSourceStopsTheRunBeforeAnythingStarts(t *testing.T) {
 	p, err := docker.New(docker.Config{
 		Engine:  d.Connect(),
 		Source:  dockerfake.Source(func(context.Context, environment.Target) (docker.Spec, error) { return docker.Spec{}, missing }),
-		Backend: cpuBackend(), Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: "test", Placement: "default",
+		Backend: cpuBackend(), Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: "test", Placement: "default", Builds: (&fakelease.Place{}).Daemon(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -237,12 +238,14 @@ func TestConfigIsValidated(t *testing.T) {
 	good := docker.Config{
 		Engine: dockerfake.NewDaemon(w.MemoryGates).Connect(), Source: dockerfake.Fixed(docker.Spec{}), Backend: cpuBackend(),
 		Timers: envtest.NewTimers(), IDs: dockerfake.NewIDs(1), Scope: "test", Placement: "default",
+		Builds: (&fakelease.Place{}).Daemon(),
 	}
 	if _, err := docker.New(good); err != nil {
 		t.Fatal(err)
 	}
 	cases := map[string]func(*docker.Config){
 		"Engine":    func(c *docker.Config) { c.Engine = nil },
+		"Builds":    func(c *docker.Config) { c.Builds = nil },
 		"Source":    func(c *docker.Config) { c.Source = nil },
 		"Backend":   func(c *docker.Config) { c.Backend = nil },
 		"Timers":    func(c *docker.Config) { c.Timers = nil },
@@ -401,7 +404,7 @@ func TestTwoRunsThatShareAnIDAreNotBothAllowed(t *testing.T) {
 	d := dockerfake.NewDaemon(w.MemoryGates)
 	p, err := docker.New(docker.Config{
 		Engine: d.Connect(), Source: dockerfake.Fixed(docker.Spec{Dockerfile: []byte(simpleDockerfile)}), Backend: cpuBackend(),
-		Timers: envtest.NewTimers(), IDs: sameID{}, Scope: "test", Placement: "default",
+		Timers: envtest.NewTimers(), IDs: sameID{}, Scope: "test", Placement: "default", Builds: (&fakelease.Place{}).Daemon(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -442,7 +445,7 @@ func TestARunIDThatCannotNameAContainerIsRefused(t *testing.T) {
 		d := dockerfake.NewDaemon(w.MemoryGates)
 		p, _ := docker.New(docker.Config{
 			Engine: d.Connect(), Source: dockerfake.Fixed(docker.Spec{Dockerfile: []byte(simpleDockerfile)}), Backend: cpuBackend(),
-			Timers: envtest.NewTimers(), IDs: fixedID(id), Scope: "test", Placement: "default",
+			Timers: envtest.NewTimers(), IDs: fixedID(id), Scope: "test", Placement: "default", Builds: (&fakelease.Place{}).Daemon(),
 		})
 		e, _ := p.Environment(environment.Target{Task: "t"})
 		a := e.Run(context.Background(), core.Execution{Checkout: checkout(t), Argv: []string{"print", "x"}, Timeout: time.Hour}, nil)

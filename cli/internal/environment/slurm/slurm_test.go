@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/uw-syfi/vibesys/cli/internal/lease/fakelease"
 	"io"
 	"os"
 	"os/exec"
@@ -73,7 +74,7 @@ func provider(t testing.TB, engine docker.Engine, timers clock.Timers) *docker.P
 	p, err := docker.New(docker.Config{
 		Engine: engine, Source: dockerfake.Fixed(docker.Spec{Dockerfile: []byte("FROM busybox:1.36.1\n")}),
 		Backend: cpu.New(cpu.NewFakeSystem(facts), clock.NewManual(time.Unix(1, 0), time.Millisecond)),
-		Timers:  timers, IDs: dockerfake.NewIDs(1), Scope: "test", Placement: "default", User: docker.User{UID: 1002, GID: 1002},
+		Timers:  timers, IDs: dockerfake.NewIDs(1), Scope: "test", Placement: "default", User: docker.User{UID: 1002, GID: 1002}, Builds: (&fakelease.Place{}).Daemon(),
 	})
 	if err != nil {
 		t.Fatal(err)

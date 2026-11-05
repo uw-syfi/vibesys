@@ -654,7 +654,18 @@ refused with the reason.
   build cache. A reference that names a variable with no default is not looked up, and a change of
   its image is not seen. The candidate's image of a task of two images is named the same way, by
   the digest of its files and its Dockerfile's bases (`vibesys-candidate:<task>-<key>`). The first `submit` of a task builds the image before the
-  job is queued, so that submission takes as long as the build. The image digest is recorded with
+  job is queued, so that submission takes as long as the build.
+- Two jobs that need one image build it once, whichever processes run them. A process that finds
+  no image under the tag takes a lease for the tag's builds in the directory of leases of the
+  machine whose Docker builds it (`vibesys-image-build-<nn>`, one of 256 the tags share): this
+  machine's for a `local` or `apptainer` placement, the engine's machine, over ssh, for an `ssh`
+  or Slurm one. One that finds the lease held says in its log who holds it, tries again every 5
+  seconds for as long as it would itself build, then uses the image the holder built, or builds it
+  when the holder did not. Builders that share no directory of leases, such as a sandbox daemon and
+  the real one, or two machines whose Docker builds on a third without a lease there, can still
+  build one tag at once; under the containerd image store the build that ends second fails with
+  `already exists`. A build that fails while the engine then has an image under its tag uses that
+  image, which is of the same files and bases, so losing that race fails no job. The image digest is recorded with
   each result and is what makes two docker results comparable, with the backend, so results from
   different images are never mixed.
 - Commands run in a container as the invoking user, in a clean checkout of the exact commit. The

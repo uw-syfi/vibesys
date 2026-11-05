@@ -109,8 +109,16 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
+	hold, err := p.daemonMachine(dir, clk)
+	if err != nil {
+		return err
+	}
+	scope, err := leaseScopeOf(hold.Sandbox(), dir, func() (string, error) { return runtimedir.ResolveLeases(runtimedir.System()) })
+	if err != nil {
+		return err
+	}
 	// The daemon runs no container: it only fingerprints the environments.
-	machines, err := p.machineEnvironments(op, clk, dir, dir.Path())
+	machines, err := p.machineEnvironments(op, clk, dir, dir.Path(), scope)
 	if err != nil {
 		return err
 	}
@@ -120,14 +128,6 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	}
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
-	}
-	hold, err := p.daemonMachine(dir, clk)
-	if err != nil {
-		return err
-	}
-	scope, err := leaseScopeOf(hold.Sandbox(), dir, func() (string, error) { return runtimedir.ResolveLeases(runtimedir.System()) })
-	if err != nil {
-		return err
 	}
 	return daemon.Run(ctx, daemon.Config{
 		Dir:     dir,
@@ -239,7 +239,13 @@ func (p Process) RunSupervisor(ctx context.Context, runDir string, ready io.Writ
 	}
 	// The containers of this run are a scope of their own: the daemon may run other jobs beside it,
 	// and a run removes the containers of its scope that it does not own.
-	machines, err := p.machineEnvironments(op, clk, dir, runDir)
+	// Its builds take turns with those of the daemon's other jobs, and of every daemon that shares
+	// an engine's machine, in the daemon's leases.
+	scope, err := p.leaseScope(dir)
+	if err != nil {
+		return err
+	}
+	machines, err := p.machineEnvironments(op, clk, dir, runDir, scope)
 	if err != nil {
 		return err
 	}

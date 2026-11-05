@@ -502,7 +502,11 @@ built from the task directory, as before, and the candidate image from the
 candidate's commit, never from a working tree. It is named
 `vibesys-candidate:<task>-<digest>`, the digest being that of its Dockerfile
 and the files of its context that its `.dockerignore` keeps, and is built only
-when the engine lacks it. A failed build fails the job before anything runs,
+when the engine lacks it. The processes that build on one engine take turns at
+a tag, under a lease in the leases of the engine's machine, so two jobs of one
+commit started together build its image once; a build that loses a race with
+a builder that takes no such lease uses the image the winner made under the
+tag. A failed build fails the job before anything runs,
 with the end of the build's output. The image's id is recorded with each result
 (`Result.candidate_image`) and is not part of the result's key: the commit
 already names the candidate, and a rebuild of the same commit that makes

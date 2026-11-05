@@ -23,7 +23,7 @@ func TestEveryPlacementKindIsWired(t *testing.T) {
 	p := withApptainer(t)
 	for _, text := range configs {
 		op := parse(t, text)
-		m, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
+		m, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key", leaseScope{local: t.TempDir(), remoteName: runtimedir.LeaseDirName})
 		if err != nil {
 			t.Fatalf("config %q: %v", text, err)
 		}
@@ -88,7 +88,7 @@ exclusive = false
 // excludes every other job of its own placement, and waits for one that runs there.
 func TestAMeasureHoldsTheGPUsOfItsOwnApptainerPlacementOnly(t *testing.T) {
 	op := parse(t, twoSlices)
-	m, err := withApptainer(t).machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
+	m, err := withApptainer(t).machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key", leaseScope{local: t.TempDir(), remoteName: runtimedir.LeaseDirName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestAMeasureHoldsTheGPUsOfItsOwnApptainerPlacementOnly(t *testing.T) {
 func TestAnApptainerPlacementNeedsApptainerHere(t *testing.T) {
 	p := Process{UID: 1000, GID: 1000, Home: "/home/u", Executable: "/usr/bin/vibesys-cli", Getenv: func(string) string { return "" }}
 	op := parse(t, configs[len(configs)-2])
-	_, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
+	_, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key", leaseScope{local: t.TempDir(), remoteName: runtimedir.LeaseDirName})
 	if err == nil || !strings.Contains(err.Error(), "install Apptainer") {
 		t.Errorf("without apptainer: %v", err)
 	}

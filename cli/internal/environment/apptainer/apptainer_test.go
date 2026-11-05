@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/uw-syfi/vibesys/cli/internal/lease/fakelease"
 	"io"
 	"path"
 	"runtime"
@@ -102,7 +103,7 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 	}
 	cfg := docker.Config{
 		Engine: eng, Source: dockerfake.Fixed(docker.Spec{Dockerfile: []byte(dockerfile)}), Backend: eng.Backend(),
-		Timers: o.timers, IDs: dockerfake.NewIDs(o.process), Scope: o.scope, Placement: "default",
+		Timers: o.timers, IDs: dockerfake.NewIDs(o.process), Scope: o.scope, Placement: "default", Builds: (&fakelease.Place{}).Daemon(),
 		User: docker.User{UID: 1000, GID: 1000},
 	}
 	if o.configure != nil {

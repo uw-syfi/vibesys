@@ -39,10 +39,7 @@ import (
 // scope says where each kind of lease is kept, so that a sandbox daemon's are its own. claims are what the resources of each placement claim, by
 // placement name, as the scheduler has them.
 func (p Process) leasingOf(op *cliv1.OperatorConfig, scope leaseScope, claims map[string][]core.Claim, clk clock.System, logf func(string, ...any)) app.Leasing {
-	holder := core.LeaseHolder{User: userName(p.UID), PID: os.Getpid()}
-	if host, err := os.Hostname(); err == nil {
-		holder.Host = host
-	}
+	holder := p.holder()
 	here := locallease.Dir{Path: scope.local}
 	book := lease.Map{string(hostResource): {Leases: here, Key: machineKey}}
 	for _, name := range slices.Sorted(maps.Keys(op.GetPlacements())) {
@@ -74,6 +71,25 @@ func (p Process) leasingOf(op *cliv1.OperatorConfig, scope leaseScope, claims ma
 		}
 	}
 	return app.Leasing{Book: book, Holder: holder}
+}
+
+// holder is this process, as the holder of a lease.
+func (p Process) holder() core.LeaseHolder {
+	holder := core.LeaseHolder{User: userName(p.UID), PID: os.Getpid()}
+	if host, err := os.Hostname(); err == nil {
+		holder.Host = host
+	}
+	return holder
+}
+
+// leaseScope is the scope of this process's daemon, whose runtime directory is dir: the daemon's
+// and its supervisors' are one.
+func (p Process) leaseScope(dir runtimedir.Dir) (leaseScope, error) {
+	sandbox, err := p.sandbox()
+	if err != nil {
+		return leaseScope{}, err
+	}
+	return leaseScopeOf(sandbox, dir, func() (string, error) { return runtimedir.ResolveLeases(runtimedir.System()) })
 }
 
 // leaseScope is where a daemon keeps each kind of lease. A production daemon's are shared by every

@@ -67,6 +67,7 @@ type Daemon struct {
 	gates        fakeenv.Gates
 	reproducible bool
 	attested     bool
+	held         bool
 
 	mu       sync.Mutex
 	faults   Faults
@@ -95,6 +96,14 @@ func NonReproducibleBuilds() Option { return func(d *Daemon) { d.reproducible = 
 // another build of the same Dockerfile, as BuildKit's attestations do under the containerd image
 // store, where an image's ID is the digest of its index.
 func AttestedBuilds() Option { return func(d *Daemon) { d.attested = true } }
+
+// HeldBuilds makes each build wait, before it stores its image, at the gate BuildGate(n), n being
+// how many builds the daemon had started before it, counting this one, so that a test can hold a
+// build while another one of the same tag runs and ends.
+func HeldBuilds() Option { return func(d *Daemon) { d.held = true } }
+
+// BuildGate names the gate the nth build waits at under HeldBuilds.
+func BuildGate(n int) string { return fmt.Sprintf("build %d", n) }
 
 // NewDaemon returns an empty daemon whose containers run scripts that wait at the gates.
 func NewDaemon(gates fakeenv.Gates, opts ...Option) *Daemon {
@@ -289,6 +298,20 @@ func (c *Client) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	}
 	c.d.mu.Lock()
 	c.d.builds++
+	n := c.d.builds
+	_, existed := c.d.images[spec.Tag]
+	c.d.mu.Unlock()
+	if c.d.held && !c.d.gates.Wait(ctx, BuildGate(n)) {
+		return ctx.Err()
+	}
+	c.d.mu.Lock()
+	// A build stores its image under its tag at its end. Docker's containerd image store refuses
+	// that when another build made an image of the tag while this one ran.
+	if _, now := c.d.images[spec.Tag]; now && !existed {
+		c.d.mu.Unlock()
+		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("docker: building the task's image failed (exit 1); "+
+			"the end of the build's output:\nERROR: failed to build: failed to solve: image %q: already exists", "docker.io/library/"+spec.Tag)}
+	}
 	// The image is what its context makes on the daemon's local image of each base, as docker
 	// builds FROM a local image when it has one.
 	seed := slices.Clone(spec.Context)
@@ -298,11 +321,11 @@ func (c *Client) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 		}
 	}
 	if !c.d.reproducible {
-		seed = fmt.Appendf(seed, "\nbuild %d", c.d.builds)
+		seed = fmt.Appendf(seed, "\nbuild %d", n)
 	}
 	content := sha256.Sum256(append([]byte("content of "), seed...))
 	if c.d.attested {
-		seed = fmt.Appendf(slices.Clone(seed), "\nattestation of build %d", c.d.builds)
+		seed = fmt.Appendf(slices.Clone(seed), "\nattestation of build %d", n)
 	}
 	sum := sha256.Sum256(seed)
 	id := "sha256:" + hex.EncodeToString(sum[:])

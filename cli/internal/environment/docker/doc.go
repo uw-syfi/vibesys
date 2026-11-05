@@ -11,6 +11,11 @@
 // GPUs, and the container is made from that digest and not from the tag, so a result is a result
 // of the image that is recorded with it.
 //
+// The processes that build on one engine, of every daemon that reaches its machine, build one
+// image once: a build takes the tag's lease in Config.Builds, and one that finds it held waits for
+// it and uses what the holder built. A build that fails while the engine then has an image under
+// the tag lost a race with a builder that took no lease there, and uses that image.
+//
 // Besides the checkout, a container gets the cache directory of the task's image (CacheDir), an
 // empty artifacts directory when the caller gives one (ArtifactsDir), and what each resource of
 // its placement attaches (internal/resource): GPUs, a cluster's kubeconfig and network, read-only

@@ -3,6 +3,8 @@ package docker_test
 import (
 	"context"
 	"fmt"
+	"github.com/uw-syfi/vibesys/cli/internal/lease"
+	"github.com/uw-syfi/vibesys/cli/internal/lease/fakelease"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -41,6 +43,8 @@ type options struct {
 	process uint32
 	backend backend.Backend
 	timers  clock.Timers
+	// builds is the leases of the builds; nil gives the rig a place of its own.
+	builds lease.Leases
 	// configure, when set, changes the config before the provider is made.
 	configure func(*docker.Config)
 }
@@ -56,11 +60,15 @@ func newRig(t testing.TB, daemon *dockerfake.Daemon, o options) *rig {
 	if o.timers == nil {
 		o.timers = envtest.NewTimers()
 	}
+	if o.builds == nil {
+		o.builds = (&fakelease.Place{}).Daemon()
+	}
 	client := daemon.Connect()
 	ids := dockerfake.NewIDs(o.process)
 	cfg := docker.Config{
 		Engine: client, Source: dockerfake.Fixed(o.spec), Backend: o.backend, Timers: o.timers,
 		IDs: ids, Scope: "test", Placement: "default", User: docker.User{UID: 1000, GID: 1000},
+		Builds: o.builds,
 	}
 	if o.configure != nil {
 		o.configure(&cfg)
