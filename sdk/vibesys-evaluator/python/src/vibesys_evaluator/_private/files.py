@@ -7,6 +7,7 @@ name the file and the field.
 
 from __future__ import annotations
 
+import gzip
 from typing import IO, TYPE_CHECKING, TypeVar
 
 import protovalidate
@@ -104,12 +105,23 @@ class DelimitedReader:
         Raises:
             SchemaFileError: The file is missing, empty or of another kind or version.
         """
-        self._where = str(path)
         try:
             data = path.read_bytes()
         except OSError as error:
             msg = f"{path}: cannot read ({error.strerror})"
             raise SchemaFileError(msg) from error
+        self._open(data, str(path), kind)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, where: str, kind: pb.FileKind) -> DelimitedReader:
+        """Read a file's contents already in memory; ``where`` names it in errors."""
+        reader = cls.__new__(cls)
+        reader._open(data, where, kind)
+        return reader
+
+    def _open(self, data: bytes, where: str, kind: pb.FileKind) -> None:
+        path = where
+        self._where = where
         self._frames = _frames(data, self._where)
         header = self._next(pb.FileHeader)
         if header is None:
@@ -156,6 +168,17 @@ def read_summary(path: Path) -> pb.PhaseSummary:
 def read_results(path: Path) -> list[pb.OperationResult]:
     """Every ``OperationResult`` of a results file, in completion order."""
     return list(DelimitedReader(path, pb.FileKind.RESULTS).rest(pb.OperationResult))
+
+
+def read_results_gz(path: Path) -> list[pb.OperationResult]:
+    """Every ``OperationResult`` of a gzip-compressed results file (a phase's artifact)."""
+    try:
+        data = gzip.decompress(path.read_bytes())
+    except (OSError, EOFError) as error:
+        msg = f"{path}: cannot read ({error})"
+        raise SchemaFileError(msg) from error
+    reader = DelimitedReader.from_bytes(data, str(path), pb.FileKind.RESULTS)
+    return list(reader.rest(pb.OperationResult))
 
 
 def write_message(path: Path, message: Message) -> None:

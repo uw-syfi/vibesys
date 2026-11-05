@@ -85,10 +85,14 @@ dev = [
     "chardet<6",
     "check-wheel-contents",
     "diff-cover",
+    # vibesys-evaluator's public API checks (scripts/check_vibesys_evaluator_api.py): the
+    # snapshot is generated with griffe, and pyright --verifytypes checks its typing.
+    "griffe==1.15.0",
     "hypothesis",
     "tach==0.35.1",
     "matplotlib>=3.10.8",
     "pytest",
+    "pyright[nodejs]==1.1.408",
     "protobuf==6.33.5",
     "pytest-asyncio",
     "pytest-cov",
@@ -112,7 +116,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "scripts/published_skills/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "skills/search/commit/tests"]
+testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "scripts/published_skills/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "sdk/vibesys-evaluator/python/tests", "skills/search/commit/tests"]
 # Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
 sim_smoke_slow = ["libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`

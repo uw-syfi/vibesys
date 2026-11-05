@@ -127,7 +127,7 @@ class Versions(Generic[K, V]):
         )
         values: list[V] = [] if settled is not None else [default]
         for w, began in writes:
-            if began >= end:
+            if began > end:
                 continue
             overwritten = settled is not None and w.ok and w.end is not None and w.end <= settled
             if not overwritten and w.value not in values:

@@ -15,8 +15,11 @@ import struct
 import zlib
 from dataclasses import dataclass, field
 
+# The V2 cookie bases; writers OR in 0x10 (8-byte words) and readers mask the 0xF0 bits off.
 _V2_COOKIE = 0x1C849303
 _V2_COMPRESSED_COOKIE = 0x1C849304
+_WORD_SIZE_BITS = 0x10
+_COOKIE_MASK = ~0xF0
 # cookie, counts length, normalizing offset, digits, lowest, highest, integer-to-double ratio
 _HEADER = struct.Struct(">iiiiqqd")
 _HEADER_SIZE = _HEADER.size
@@ -132,7 +135,7 @@ def decode(data: bytes) -> Histogram:
         msg = "histogram: too short"
         raise HistogramError(msg)
     cookie, length = _PREFIX.unpack(data[: _PREFIX.size])
-    if cookie != _V2_COMPRESSED_COOKIE:
+    if cookie & _COOKIE_MASK != _V2_COMPRESSED_COOKIE:
         msg = f"histogram: cookie {cookie:#x} is not the compressed V2 cookie"
         raise HistogramError(msg)
     try:
@@ -146,7 +149,7 @@ def decode(data: bytes) -> Histogram:
     cookie, counts_length, _offset, digits, lowest, highest, _ratio = _HEADER.unpack(
         payload[:_HEADER_SIZE]
     )
-    if cookie != _V2_COOKIE:
+    if cookie & _COOKIE_MASK != _V2_COOKIE:
         msg = f"histogram: inner cookie {cookie:#x} is not the V2 cookie"
         raise HistogramError(msg)
     histogram = Histogram(lowest=lowest, highest=highest, significant_figures=digits)
@@ -182,7 +185,7 @@ def encode(histogram: Histogram) -> bytes:
             zeros = 0
         body += _zigzag(count)
     header = _HEADER.pack(
-        _V2_COOKIE,
+        _V2_COOKIE | _WORD_SIZE_BITS,
         len(body),
         0,
         histogram.significant_figures,
@@ -191,7 +194,7 @@ def encode(histogram: Histogram) -> bytes:
         1.0,
     )
     compressed = zlib.compress(header + bytes(body))
-    return _PREFIX.pack(_V2_COMPRESSED_COOKIE, len(compressed)) + compressed
+    return _PREFIX.pack(_V2_COMPRESSED_COOKIE | _WORD_SIZE_BITS, len(compressed)) + compressed
 
 
 def _zigzag(value: int) -> bytes:
