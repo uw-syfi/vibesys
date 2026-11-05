@@ -29,7 +29,7 @@ GO_GENERATOR = os.environ.get("KV_GO_GENERATOR", "")
 
 
 def _benchmark(run: vse.Run) -> None:
-    closed = run.closed_loop(clients=4, secs=1, warmup=0.5)
+    closed = run.closed_loop(clients=16, secs=1, warmup=0.5)  # 16 x 20 ops/s at SERVICE_SECS
     opened = run.open_loop(rate=0.5 * closed.ops_per_sec, secs=1, warmup=0.5, arrivals="uniform")
     run.report({"operations_per_second": closed.ops_per_sec, "latency_ms.p99": opened.p99_ms})
 

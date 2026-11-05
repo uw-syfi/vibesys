@@ -91,9 +91,18 @@ def go_generator(tmp_path_factory: pytest.TempPathFactory) -> Path:
     )
 
 
+# Each answer takes this long, as a real service's would. The open loop's send-lag guard
+# allows the larger of 10% of latency p99 and 1 ms; at ~1 ms answers the 1 ms floor is all
+# a busy CI runner's scheduling jitter gets, and the [go] sample failed on 2.7 ms of lag
+# with nothing wrong. At 50 ms the guard allows about 5 ms and still fails a loadgen that
+# is really late.
+SERVICE_SECS = 0.05
+
+
 @contextmanager
 def _serving(service: kv.KvService) -> Iterator[str]:
     lock = threading.Lock()
+    service_time = threading.Event()  # never set: wait() is the service time
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -116,6 +125,7 @@ def _serving(service: kv.KvService) -> Iterator[str]:
         def _answer(self) -> None:
             body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
             headers = {name.lower(): value for name, value in self.headers.items()}
+            service_time.wait(SERVICE_SECS)
             with lock:
                 status, response = service.handle(self.command, self.path, headers, body)
             self.send_response(status)
