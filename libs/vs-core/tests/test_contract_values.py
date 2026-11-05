@@ -143,15 +143,17 @@ def evidence_row(
 @given(
     kind=st.sampled_from(list(core.EvidenceKind)),
     status=st.sampled_from([core.ObservationStatus.SUCCEEDED, core.ObservationStatus.FAILED]),
-    flaws=st.sets(st.sampled_from(["self-report", "no-receipt", "other-candidate", "twin"])),
+    flaws=st.sets(st.sampled_from(["self-report", "no-receipt", "other-candidate"])),
+    with_twin=st.booleans(),
 )
-@example(
+@example(  # a second successful run leaves the first record as the proof
     kind=core.EvidenceKind.CORRECTNESS,
     status=core.ObservationStatus.SUCCEEDED,
-    flaws={"twin"},
+    flaws=set(),
+    with_twin=True,
 )
 def test_accuracy_proof_is_the_first_trusted_accepted_successful_correctness_record(
-    kind: core.EvidenceKind, status: core.ObservationStatus, flaws: set[str]
+    *, kind: core.EvidenceKind, status: core.ObservationStatus, flaws: set[str], with_twin: bool
 ) -> None:
     baseline = core.initial_state().run.facts.baseline
     updates: dict[str, object] = {"kind": kind, "status": status}
@@ -162,15 +164,11 @@ def test_accuracy_proof_is_the_first_trusted_accepted_successful_correctness_rec
     row = evidence_row("e", receipt="no-receipt" not in flaws, updates=updates)
     twin = evidence_row("e", request="r2", receipt="no-receipt" not in flaws, updates=updates)
     rows = (row, twin)
-    state = core.EvaluationState(evidence=rows if "twin" in flaws else rows[:1])
+    state = core.EvaluationState(evidence=rows if with_twin else rows[:1])
     qualifies = (
         kind == core.EvidenceKind.CORRECTNESS and status == core.ObservationStatus.SUCCEEDED
-    ) and not (flaws - {"twin"})
+    ) and not flaws
     assert state.accuracy_proof(baseline) == (row if qualifies else None)
-    passed = evidence_row("e", updates={"status": core.ObservationStatus.SUCCEEDED})
-    failed = evidence_row("e", request="r2", updates={"status": core.ObservationStatus.FAILED})
-    assert core.EvaluationState(evidence=(passed, failed)).accuracy_proof(baseline) is None
-    assert core.EvaluationState(evidence=(failed, passed)).accuracy_proof(baseline) is None
     for item in state.evidence:
         assert state.evidence_for(item.key) == item
     missing = row.key.model_copy(update={"source_request": core.RequestId(root="x")})
@@ -199,6 +197,18 @@ def test_a_framework_measurement_is_trusted_whoever_requested_it(
         ),
         max_size=5,
     )
+)
+@example(  # a revision that passed once and failed once has no proof, in either order
+    rows=[
+        ("official", core.EvidenceKind.CORRECTNESS, core.ObservationStatus.SUCCEEDED, True),
+        ("official", core.EvidenceKind.CORRECTNESS, core.ObservationStatus.FAILED, True),
+    ]
+)
+@example(
+    rows=[
+        ("official", core.EvidenceKind.CORRECTNESS, core.ObservationStatus.FAILED, True),
+        ("official", core.EvidenceKind.CORRECTNESS, core.ObservationStatus.SUCCEEDED, True),
+    ]
 )
 def test_every_run_of_a_revision_counts_toward_its_accuracy_proof(
     rows: list[tuple[str, core.EvidenceKind, core.ObservationStatus, bool]],
