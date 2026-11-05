@@ -35,10 +35,10 @@ install in place.
 | `VIBESYS_CLI_INSTALL_DIR=/path` | Install there instead of `~/.local/bin`. |
 | `VIBESYS_CLI_RELEASES_URL=https://host/path` | Read release assets from a mirror. The default is `https://github.com/uw-syfi/vibesys/releases/download`. |
 
-Check what you installed:
+Check what you installed, and the task schema versions it reads:
 
 ```sh
-vibesys-cli --version
+vibesys-cli --version    # vibesys-cli v0.x.y (task schemas 0.1, 0.2)
 ```
 
 The checksum guards against a damaged or truncated download. To check that a binary was built by
@@ -131,6 +131,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/environment/slurm/` | The Slurm placement: an `Allocator` that runs a container's first process and every image build under `srun`, and an `Engine` that removes a container and then cancels and confirms the end of its allocation, and sweeps the allocations a dead run left. Passes the environment contract suite over the fake engine. |
 | `internal/remote/` | Running programs on a machine and copying directories to and from it: this one, or another over ssh and rsync. An exit code that is ssh's own is never taken for the program's. |
 | `internal/backend/nvidia/` | The GPU facts of a machine (model, count, driver, the driver's CUDA version) for a fingerprint, read with `nvidia-smi`. |
+| `internal/tomlproto/` | Decoding TOML into a proto message by its field names, refusing an unknown key by name, and a key newer than the schema version the file declares (`task_schema_since_minor`). The task manifest and the operator config are read with it. |
 | `internal/operator/` | The operator config (`cli.toml`), decoded into `OperatorConfig` in `operator.proto` with unknown keys refused by name: its named placements, each placement's kind and sections, and a file of the earlier shape read as the placement `default`. What a kind's section means is that kind's package's business. |
 | `internal/resource/` | `Resource`: what a placement gives every container (`Kind`, `Claims` for scheduling, `Fingerprint`, and `Attach`, the mounts, variables, network and GPUs a container is made with), and the contract suite in `resourcetest/` every resource passes, with the Fake in `fakeresource/` (tests only). |
 | `internal/resource/gpu/` | The `gpu` resource: GPUs passed with `--gpus`, or by a runtime that reads `NVIDIA_VISIBLE_DEVICES`; its fingerprint is the GPUs' facts. |
@@ -254,7 +255,8 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | --- | --- |
 | `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan` and `--env`. |
 | `submit measure <commit> [--samples n] [--recheck] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted). Saved samples count: only the missing ones run. Flags as for `check`. |
-| `submit command <commit> [flags] -- <argv...>` | Queue a job and print its id. Returns at once; `--wait` blocks as `wait` does. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service` and `--probe`. A revision is resolved to a full commit id. `--service` and `--probe` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. |
+| `submit command <commit> [flags] -- <argv...>` | Queue a job and print its id. Returns at once; `--wait` blocks as `wait` does. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service`, `--probe` and `--wrap`. A revision is resolved to a full commit id. `--service`, `--probe` and `--wrap` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. `--wrap` is put in front of `--service` when it is given, and of the command otherwise. For a task of two images the command runs in the candidate's image. |
+| `submit profile <commit> [--wrap prefix] [flags]` | For a task of two images: start the candidate's server under the prefix (such as a profiler's command line) and drive it with the task's `[profile]` command. A command job: never cached or scored, its artifacts kept with it. Also `--timeout`, `--note`, `--plan`, `--wait`. |
 | `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. The daemon decides how the wait ended and keeps the timeout. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
 | `note <job> <text>` | Add a note to a job in any state. |
@@ -591,6 +593,13 @@ ways: it writes a JSON file at the path given after the flag in `[benchmark.resu
 `result_protocol = 2` in `[benchmark]`, a stream of evaluator records at the path given after
 `--vs-output`. Tasks that declare an `[evaluator]` or an `entrypoint` are refused: their commands
 belong to an evaluator package. `${PROJECT_ROOT}` in a command is the checkout's root.
+
+A manifest declares its task schema as `version = "0.1"` (one image) or `version = "0.2"` (two
+images: `TaskManifestV02` in `proto/vibesys/cli/v1/task.proto`). A 0.2 task builds the candidate's
+image from the commit's `[candidate]` Dockerfile, runs its server in that image with the placement's
+GPUs, and runs each command in the task's image beside it, at `VIBESYS_SERVICE_URL`; the
+candidate's image is recorded with each result and is not part of its key. See
+[the task environment](../docs/contributing/cli-task-environment.md) for the keys and the decisions.
 
 The lifecycle commands above work end to end against a `fakeenv` in tests, and the check and measure
 flows run on the same fake in `app` and `daemontest`, so a test of the whole daemon needs no

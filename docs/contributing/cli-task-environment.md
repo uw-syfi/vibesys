@@ -42,10 +42,77 @@ A task is three things in `.vibesys/tasks/<task>/`:
      path after `--vs-output`.
    - Each has a `timeout_seconds`.
 
-The manifest has no notion of a server, a step graph or a background process:
-those are a script's business, inside one container. The older `[evaluator]`
-and `entrypoint` forms belong to the Python evaluator package and stay
-refused.
+The manifest declares the task schema it is written in, as a quoted
+`MAJOR.MINOR` string: `version = "0.1"` for the single-image format above, or
+`version = "0.2"` for a task of two images (below). In 0.1 the manifest has no
+notion of a server, a step graph or a background process: those are a script's
+business, inside one container. The older `[evaluator]` and `entrypoint` forms
+belong to the Python evaluator package and stay refused.
+
+### A task of two images (schema 0.2)
+
+Schema 0.2 splits the judge from the candidate. The task's `Dockerfile` still
+builds the task image, which runs the check, the benchmark and the profile
+load. The candidate's commit builds a second image, the candidate image, from
+a Dockerfile and context it names, and its server runs there:
+
+```toml
+version = "0.2"
+backends = ["cuda"]
+
+[agent]
+domain = "model-serving"
+
+[candidate]
+dockerfile = "serve/Dockerfile"      # in the candidate's checkout
+context = "serve"                    # its .dockerignore is honored
+serve = ["python", "${PROJECT_ROOT}/serve/server.py", "--port", "${PORT}"]
+ready = "/health"                    # polled until it answers 2xx
+startup_timeout_seconds = 600
+allowed_bases = ["vllm/vllm-openai:v0.6.3"]   # optional: the first FROM must be one
+
+[accuracy]
+command = ["python", "/task/check.py"]
+timeout_seconds = 1800
+
+[benchmark]
+command = ["python", "/task/bench.py"]
+timeout_seconds = 3600
+result_protocol = 2
+
+[profile]
+command = ["python", "/task/bench.py", "--short"]
+timeout_seconds = 900
+
+[environment]
+needs = ["gpu", "mounts"]
+```
+
+The schema is `TaskManifestV02` in `proto/vibesys/cli/v1/task.proto`, the only
+definition of its keys; the CLI decodes the TOML into it and refuses an
+unknown key by name. Its keys are every key of 0.1, with the same meaning,
+except `[evaluator]` and a command's `entrypoint` and `args`, which it refuses
+by name, plus `[candidate]`; and `[profile]` holds a command:
+
+- `version`, `backends`, `metric`;
+- `[agent]` `domain` and `interface`;
+- `[build]`, `[accuracy]` (or `[check]`), `[benchmark]` (or `[measure]`) and
+  `[profile]`, each with `command` and `timeout_seconds`; the benchmark also
+  has `result_protocol`, `[benchmark.result]` (`json_argument`, `metric`) and
+  `requires_accuracy`;
+- `[candidate]` `dockerfile`, `context`, `serve`, `ready`,
+  `startup_timeout_seconds` and `allowed_bases`;
+- `[environment]` `needs`, `docker_in_docker` and `modal` (refused, as in 0.1);
+- `[profile_guided]`, `[resources]`, `[workspace]`, `[plan]`, `[catalogue]` and
+  `[[comparison]]`, accepted without being read, as in 0.1.
+
+Every command of a job then runs in two containers: the candidate's server
+(`serve`, from the checkout's root, with `${PORT}` replaced by the port of the
+job) in the candidate image, and the command in the task image, joined to the
+server's network namespace, with `VIBESYS_SERVICE_URL=http://127.0.0.1:<port>`.
+`submit profile <commit> --wrap '<prefix>'` starts the server under the prefix,
+such as a profiler's command line, and drives it with `[profile]`; it is a
+command job, never cached or scored, and its artifacts are kept with it.
 
 ## What the CLI owns
 
@@ -304,7 +371,83 @@ status lists it while it runs. A task's store lives in the repository
 second instance that must not touch a running one's store works in a separate
 clone.
 
+### Two images, two containers, one network
+
+The judge must not be the candidate's to change, and the candidate's server
+may need a stack the judge does not (a serving framework, a CUDA build). One
+image could not give both: either the candidate edits the image that judges it,
+or the judge's image carries every candidate's stack. So the task image is
+built from the task directory, as before, and the candidate image from the
+candidate's commit, never from a working tree. It is named
+`vibesys-candidate:<task>-<digest>`, the digest being that of its Dockerfile
+and the files of its context that its `.dockerignore` keeps, and is built only
+when the engine lacks it. A failed build fails the job before anything runs,
+with the end of the build's output. The image's id is recorded with each result
+(`Result.candidate_image`) and is not part of the result's key: the commit
+already names the candidate, and a rebuild of the same commit that makes
+another image (a base that moved) answers from the saved result.
+
+The two containers share a network namespace (`--network container:<server>`),
+so the server is at `127.0.0.1` and nothing listens beyond the job. The port is
+taken from the job's run id. The server's readiness is polled from the task's
+container by the CLI's own binary, mounted read-only at
+`/vibesys/bin/vibesys-cli` and run as `vibesys-cli probe-ready <url>`: the task
+image needs no HTTP client, and only a static build can run whatever the image
+holds, so a placement of a build with cgo (a developer's `go build`) or of
+another system refuses tasks of two images, naming why. A server that is not
+ready within `startup_timeout_seconds`, or that exits, fails the step with the
+last lines of the server's output. Both containers are stopped on every path,
+the command's first: SIGTERM, the grace period, then removal.
+
+The placement's resources are shared by what each container is for, from
+`[environment] needs`:
+
+| Resource | Candidate's container | Task's container |
+| --- | --- | --- |
+| `gpu` | yes, with the variables that pass the GPUs | no |
+| `mounts` | yes, read-only (model weights) | yes, read-only (tokenizer files) |
+| `kubernetes` | no | yes |
+
+A resource that sets a network mode (a `kubernetes` cluster reached over the
+host's network) cannot be given to either container, since the task's joins
+the server's network; such a placement refuses tasks of two images, naming the
+mode. The decisions live in the pure flow (`flow.BuildCandidate`, then each
+`flow.Run` with its candidate) and in the docker environment's per-container
+specs; a Slurm or Apptainer placement implements the same `Environment`
+(`Candidate`, and a run of two containers in one allocation that share a
+network namespace) without a change to the flow.
+
+### Task schema versions are MAJOR.MINOR, and 0.x is frozen
+
+A manifest declares its schema as a string, `version = "0.2"`. The integer
+`version = 1` of the earliest tasks is refused, saying to write `"0.1"`: a
+number would read as a float or an int depending on how it was written. While
+the major version is 0, every minor version is a format of its own: the CLI
+reads exactly the versions it has (`vibesys-cli --version` lists them),
+refuses a newer one saying to run `vibesys-cli upgrade`, and refuses a
+malformed one (`"2"`, `"2.x"`, `"02.0"`). From 1.0 a minor version only adds
+optional keys: a reader of M.N reads M.0 to M.N, and a file that declares M.K
+may set only the keys of M.0 to M.K (each field carries
+`task_schema_since_minor`). A major version is a new message beside the old.
+
+`./scripts/check_task_schema.sh`, in the proto check group beside
+`buf breaking`, compares the schemas with the merge base: any change to a 0.x
+schema fails; from 1.0, every field declares its minor version, a field added
+since the base declares the current minor version, the minor version must rise
+when fields are added, and a changed protovalidate rule fails ("tightening
+needs a new major; loosening needs a reviewed waiver"). `buf breaking` already
+refuses a renamed or removed field.
+
+Schema 0.1 has no message in `task.proto` yet: its reader is the earlier Go
+reader, unchanged. Moving it into a `TaskManifestV01` message is left for
+later; until then the check covers 0.2 and every later schema.
+
 ## What is not done
+
+- Tasks of two images on ssh and Slurm placements: they have no probe program
+  yet and refuse such tasks. Section 2 of the plan gives them one, runs both
+  containers in one allocation, and shares the network namespace there.
+- Schema 0.1 as a proto message (above).
 
 - Multi-node Slurm clusters, where the ssh host is a login node: images, exec
   and removal would have to go through `srun --overlap` into the allocation, and
