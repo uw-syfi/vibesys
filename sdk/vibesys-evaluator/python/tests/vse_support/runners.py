@@ -1,6 +1,6 @@
 """In-process implementations of the deploy interface, for the deterministic tests.
 
-``InProcessDeployer`` stands where ``deploy.k8s`` (or the local runner)
+``InProcessDeployer`` stands where ``microservices.k8s`` (or the local runner)
 stands: it "deploys" by seeding an in-memory service and runs each phase by
 calling the phase pod's entry point in this process, with the Fake loadgen.
 The files crossing the interface are the real ones.
@@ -16,15 +16,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 # test-isolation: the deploy interface and the phase pod's entry point are private seams
-# of the package; these Fakes implement them as deploy.k8s does.
-from vibesys_evaluator._private.deploy import (
+# of the package; these Fakes implement them as microservices.k8s does.
+from vibesys_evaluator.microservices._private.deploy import (
     PHASE_INPUT_FILE,
     DeployContext,
     DeployError,
     PhaseJob,
     PhaseRunError,
 )
-from vibesys_evaluator._private.phase import PhaseError, PodTask, run_pod
+from vibesys_evaluator.microservices._private.phase import PhaseError, PodTask, run_pod
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator

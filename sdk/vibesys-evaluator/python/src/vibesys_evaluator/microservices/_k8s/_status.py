@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
 
-    from vibesys_evaluator.deploy._k8s._api import Namespace, Pod, PodStats, Workload
+    from vibesys_evaluator.microservices._k8s._api import Namespace, Pod, PodStats, Workload
 
 # Namespaces of this package's tasks are hk8s-<slug>-<token>: the clusters it was built
 # for keep per-task namespaces under this prefix. A namespace carries the task label

@@ -26,8 +26,6 @@ import shutil
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from vibesys_evaluator._private.calls import Call, Response
-from vibesys_evaluator._private.deploy import PHASE_INPUT_FILE, PHASE_OUTPUT_FILE
 from vibesys_evaluator._private.files import (
     DelimitedWriter,
     iter_results,
@@ -38,16 +36,18 @@ from vibesys_evaluator._private.files import (
 from vibesys_evaluator._private.http import Request, planned, request_info
 from vibesys_evaluator._private.loadgen import STEP_TIMEOUT_SECS, PhaseFiles, phase_args
 from vibesys_evaluator._private.rand import Rand
-from vibesys_evaluator._private.workload import checked_share
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
+from vibesys_evaluator.microservices._private.calls import Call, Response
+from vibesys_evaluator.microservices._private.deploy import PHASE_INPUT_FILE, PHASE_OUTPUT_FILE
+from vibesys_evaluator.microservices._private.workload import checked_share
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
     from pathlib import Path
 
     from vibesys_evaluator._private.loadgen import Loadgen
-    from vibesys_evaluator._private.workload import Operation, Workload
+    from vibesys_evaluator.microservices._private.workload import Operation, Workload
 
 #: The results file left in the work directory (gzip of the loadgen file, kept as an artifact).
 RESULTS_FILE = "results.binpb.gz"

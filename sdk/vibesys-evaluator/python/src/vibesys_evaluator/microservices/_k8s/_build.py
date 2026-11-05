@@ -19,7 +19,7 @@ from typing import IO, TYPE_CHECKING, Protocol
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vibesys_evaluator.deploy._k8s._clock import Clock
+    from vibesys_evaluator.microservices._k8s._clock import Clock
 
 # Files tools generate are not part of a context's identity (vibesys-cli leaves them out of
 # the task version for the same reason).

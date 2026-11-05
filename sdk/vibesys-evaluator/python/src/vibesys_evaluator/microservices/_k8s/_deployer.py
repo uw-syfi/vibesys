@@ -16,22 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from vibesys_evaluator._private.deploy import (
-    PHASE_INPUT_FILE,
-    PHASE_LOG_FILE,
-    DeployContext,
-    DeployError,
-    PhaseJob,
-    PhaseRunError,
-    TaskCommand,
-)
 from vibesys_evaluator._private.files import DelimitedWriter, SchemaFileError, phase_input
 from vibesys_evaluator._private.http import step_message
-from vibesys_evaluator._private.phase import plan_size
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
-from vibesys_evaluator.deploy._k8s._build import BuildctlBuilder
-from vibesys_evaluator.deploy._k8s._clock import SystemClock
-from vibesys_evaluator.deploy._k8s._deployment import (
+from vibesys_evaluator.microservices._k8s._build import BuildctlBuilder
+from vibesys_evaluator.microservices._k8s._clock import SystemClock
+from vibesys_evaluator.microservices._k8s._deployment import (
     AppSource,
     Cluster,
     Deployment,
@@ -42,14 +32,24 @@ from vibesys_evaluator.deploy._k8s._deployment import (
     ctl,
     deploy,
 )
-from vibesys_evaluator.deploy._k8s._kubectl import KubectlAPI
-from vibesys_evaluator.deploy._k8s._pods import WORK_DIR, Role
+from vibesys_evaluator.microservices._k8s._kubectl import KubectlAPI
+from vibesys_evaluator.microservices._k8s._pods import WORK_DIR, Role
+from vibesys_evaluator.microservices._private.deploy import (
+    PHASE_INPUT_FILE,
+    PHASE_LOG_FILE,
+    DeployContext,
+    DeployError,
+    PhaseJob,
+    PhaseRunError,
+    TaskCommand,
+)
+from vibesys_evaluator.microservices._private.phase import plan_size
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
 
-    from vibesys_evaluator.deploy.k8s import App
-    from vibesys_evaluator.service import Step
+    from vibesys_evaluator.microservices import Step
+    from vibesys_evaluator.microservices.k8s import App
 
 NAMESPACE_VARIABLE = "VIBESYS_EVALUATOR_NAMESPACE"  # the sample `ctl` acts on
 NAMESPACE_FILE = "namespace.txt"
@@ -132,7 +132,7 @@ class KubePhaseRunner:
 
 
 class KubeDeployer:
-    """Brings an App up in a fresh namespace per sample (the `Deployer` of `deploy.k8s`)."""
+    """Brings an App up in a fresh namespace per sample (the `Deployer` of `microservices.k8s`)."""
 
     def __init__(
         self,

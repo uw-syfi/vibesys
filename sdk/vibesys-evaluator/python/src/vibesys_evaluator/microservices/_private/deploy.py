@@ -1,7 +1,7 @@
 """The deploy layer's interface: bring up the system under test and run phases in it.
 
 The orchestrator (``main``) depends only on this module; each deploy kind
-(``deploy.k8s``, and the local runner the tests use) implements it. A
+(``microservices.k8s``, and the local runner the tests use) implements it. A
 ``Deployer`` brings the system up and hands out a ``PhaseRunner`` for as long
 as the system is up; the runner runs one phase of the task's own script next
 to the system (in Kubernetes, a pod of the task image in the namespace) and
@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
+
+from vibesys_evaluator._private.sample import SampleError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -34,7 +36,7 @@ PHASE_OUTPUT_FILE = "output.binpb"
 PHASE_LOG_FILE = "phase.log"
 
 
-class DeployError(Exception):
+class DeployError(SampleError):
     """The system under test could not be brought up or torn down.
 
     The message is what the sample's error record says: name the step and
@@ -42,7 +44,7 @@ class DeployError(Exception):
     """
 
 
-class PhaseRunError(Exception):
+class PhaseRunError(SampleError):
     """A phase command did not finish: it exited non-zero, timed out or could not start.
 
     The message names the phase and carries the tail of its log.

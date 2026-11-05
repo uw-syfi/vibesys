@@ -12,20 +12,29 @@ import json
 import weakref
 from typing import TYPE_CHECKING
 
-from vibesys_evaluator import Call, Rand, Versions
-
 # test-isolation: generation is the phase pod's private step; its output is the schema's file.
 from vibesys_evaluator._private.files import read_requests
-from vibesys_evaluator._private.phase import build_model, check, generate, plan_size
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
-from vibesys_evaluator.service import Operation, Request, Workload, post, put, ref
+from vibesys_evaluator.microservices import (
+    Call,
+    Operation,
+    Request,
+    Versions,
+    Workload,
+    post,
+    put,
+    ref,
+)
+from vibesys_evaluator.microservices._private.phase import build_model, check, generate, plan_size
 
 from .vse_support import kv
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+
+    from vibesys_evaluator import Rand
 
 
 def _phase(

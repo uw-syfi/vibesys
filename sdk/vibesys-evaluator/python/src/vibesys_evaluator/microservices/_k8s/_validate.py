@@ -1,4 +1,4 @@
-"""Field checks of `deploy.k8s.App`, and the parsers the deploy layer shares with them."""
+"""Field checks of `microservices.k8s.App`, and the parsers the deploy layer shares with them."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from vibesys_evaluator.deploy.k8s import App
+    from vibesys_evaluator.microservices.k8s import App
 
 NAME = re.compile(r"^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$")
 DNS_LABEL = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")

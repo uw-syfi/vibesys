@@ -12,9 +12,9 @@ from vibesys_evaluator._private.typevars import D, M
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vibesys_evaluator._private.calls import Call
     from vibesys_evaluator._private.http import Request
     from vibesys_evaluator._private.rand import Rand
+    from vibesys_evaluator.microservices._private.calls import Call
 
 _NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 #: The share of a read-only operation's responses that are checked by default.

@@ -10,7 +10,7 @@ import tempfile
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from vibesys_evaluator.deploy._k8s._api import (
+from vibesys_evaluator.microservices._k8s._api import (
     ConflictError,
     ExecResult,
     KubeError,

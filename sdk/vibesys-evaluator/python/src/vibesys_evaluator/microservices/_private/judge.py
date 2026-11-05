@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys_evaluator._private.hdr import HistogramError, decode
-from vibesys_evaluator._private.results import PhaseResult
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
+from vibesys_evaluator.microservices._private.results import PhaseResult
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

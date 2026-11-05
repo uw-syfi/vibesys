@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys_evaluator._private.deploy import (
+from vibesys_evaluator.microservices._private.deploy import (
     PHASE_INPUT_FILE,
     PHASE_LOG_FILE,
     DeployError,
@@ -26,7 +26,7 @@ from vibesys_evaluator._private.deploy import (
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
 
-    from vibesys_evaluator._private.deploy import DeployContext, PhaseJob, TaskCommand
+    from vibesys_evaluator.microservices._private.deploy import DeployContext, PhaseJob, TaskCommand
 
 _LOG_TAIL = 3000
 _SEED_TIMEOUT_SECS = 600.0

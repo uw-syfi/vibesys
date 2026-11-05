@@ -18,8 +18,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vibesys_evaluator._private.deploy import DeployError
-from vibesys_evaluator.deploy._k8s._api import (
+from vibesys_evaluator.microservices._k8s._api import (
     ConflictError,
     ExecResult,
     KubeAPI,
@@ -30,15 +29,15 @@ from vibesys_evaluator.deploy._k8s._api import (
     PodStats,
     Workload,
 )
-from vibesys_evaluator.deploy._k8s._build import (
+from vibesys_evaluator.microservices._k8s._build import (
     Build,
     BuildctlBuilder,
     Builder,
     BuildError,
     tree_digest,
 )
-from vibesys_evaluator.deploy._k8s._clock import Clock, FakeClock, SystemClock
-from vibesys_evaluator.deploy._k8s._deployer import (
+from vibesys_evaluator.microservices._k8s._clock import Clock, FakeClock, SystemClock
+from vibesys_evaluator.microservices._k8s._deployer import (
     KubeDeployer,
     KubePhaseRunner,
     control,
@@ -46,7 +45,7 @@ from vibesys_evaluator.deploy._k8s._deployer import (
     probe_plan,
     run_control,
 )
-from vibesys_evaluator.deploy._k8s._deployment import (
+from vibesys_evaluator.microservices._k8s._deployment import (
     AppSource,
     Cluster,
     Deployment,
@@ -58,16 +57,22 @@ from vibesys_evaluator.deploy._k8s._deployment import (
     deploy,
     sweep,
 )
-from vibesys_evaluator.deploy._k8s._fake import FakeBuilder, FakeKube, Outcome
-from vibesys_evaluator.deploy._k8s._kubectl import KubectlAPI
-from vibesys_evaluator.deploy._k8s._manifest import ALLOWED_KINDS, ManifestError, Rendered, render
-from vibesys_evaluator.deploy._k8s._pods import SIZES, WORK_DIR, Role
-from vibesys_evaluator.deploy._k8s._status import (
+from vibesys_evaluator.microservices._k8s._fake import FakeBuilder, FakeKube, Outcome
+from vibesys_evaluator.microservices._k8s._kubectl import KubectlAPI
+from vibesys_evaluator.microservices._k8s._manifest import (
+    ALLOWED_KINDS,
+    ManifestError,
+    Rendered,
+    render,
+)
+from vibesys_evaluator.microservices._k8s._pods import SIZES, WORK_DIR, Role
+from vibesys_evaluator.microservices._k8s._status import (
     CREATED_LABEL,
     JOB_LABEL,
     NAMESPACE_PREFIX,
     TASK_LABEL,
 )
+from vibesys_evaluator.microservices._private.deploy import DeployError
 
 if TYPE_CHECKING:
     __all__ = [

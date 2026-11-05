@@ -15,17 +15,23 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from vibesys_evaluator._private.deploy import DeployError
-from vibesys_evaluator.deploy._k8s import _build, _manifest, _pods, _status, _validate
-from vibesys_evaluator.deploy._k8s._api import ConflictError, KubeAPI, KubeError, NotFoundError, Pod
-from vibesys_evaluator.deploy._k8s._pods import Role
+from vibesys_evaluator.microservices._k8s import _build, _manifest, _pods, _status, _validate
+from vibesys_evaluator.microservices._k8s._api import (
+    ConflictError,
+    KubeAPI,
+    KubeError,
+    NotFoundError,
+    Pod,
+)
+from vibesys_evaluator.microservices._k8s._pods import Role
+from vibesys_evaluator.microservices._private.deploy import DeployError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from types import TracebackType
 
-    from vibesys_evaluator.deploy._k8s._clock import Clock
-    from vibesys_evaluator.deploy.k8s import App
+    from vibesys_evaluator.microservices._k8s._clock import Clock
+    from vibesys_evaluator.microservices.k8s import App
 
 WAIT_SECS = 300.0  # data tier, all replicas, a pod's start, a restart
 SEED_SECS = 1200.0

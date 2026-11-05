@@ -14,12 +14,12 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Generic, Literal
 
 from vibesys_evaluator._private.typevars import D
-from vibesys_evaluator.deploy._k8s import _validate
+from vibesys_evaluator.microservices._k8s import _validate
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from vibesys_evaluator.service import Step
+    from vibesys_evaluator.microservices import Step
 
 __all__ = ["App"]
 

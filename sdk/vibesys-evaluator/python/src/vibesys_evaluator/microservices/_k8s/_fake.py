@@ -16,8 +16,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from vibesys_evaluator.deploy._k8s import _build, _pods
-from vibesys_evaluator.deploy._k8s._api import (
+from vibesys_evaluator.microservices._k8s import _build, _pods
+from vibesys_evaluator.microservices._k8s._api import (
     ConflictError,
     ExecResult,
     KubeError,
@@ -32,7 +32,7 @@ from vibesys_evaluator.deploy._k8s._api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vibesys_evaluator.deploy._k8s._clock import FakeClock
+    from vibesys_evaluator.microservices._k8s._clock import FakeClock
 
 
 @dataclass(frozen=True)

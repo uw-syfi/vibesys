@@ -1,4 +1,4 @@
-"""``Metric``, ``PhaseResult`` and ``Validity``: plain data of a benchmark's outcome and rules."""
+"""``Metric`` and ``Validity``: plain data of a benchmark's outcome and rules."""
 
 from __future__ import annotations
 
@@ -30,21 +30,6 @@ class Metric:
         if not isinstance(self.unit, str):
             msg = f"Metric unit is a string, got {self.unit!r}"
             raise TypeError(msg)
-
-
-@dataclass(frozen=True, kw_only=True)
-class PhaseResult:
-    """What one phase measured in its window.
-
-    Attributes:
-        ops_per_sec: Operations completed in the window divided by its length.
-        p50_ms: The median latency, milliseconds.
-        p99_ms: The 99th percentile latency, milliseconds.
-    """
-
-    ops_per_sec: float
-    p50_ms: float
-    p99_ms: float
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -12,7 +12,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 # test-isolation: the dataset file is written by main()'s private benchmark command.
-from vibesys_evaluator._private.dataset import DatasetError, digest, encode
+from vibesys_evaluator.microservices._private.dataset import DatasetError, digest, encode
 
 from .vse_support import kv
 

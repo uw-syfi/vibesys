@@ -10,8 +10,8 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vibesys_evaluator._private.cli import Stopped
-from vibesys_evaluator.deploy._k8s import (
+from vibesys_evaluator._private.sample import Stopped
+from vibesys_evaluator.microservices._k8s import (
     WORK_DIR,
     DeployError,
     Deployment,
@@ -25,8 +25,8 @@ from vibesys_evaluator.deploy._k8s import (
     deploy,
     tree_digest,
 )
-from vibesys_evaluator.deploy._k8s._deployment import PodOutOfMemoryError
-from vibesys_evaluator.deploy._k8s._kubectl import parse_pod
+from vibesys_evaluator.microservices._k8s._deployment import PodOutOfMemoryError
+from vibesys_evaluator.microservices._k8s._kubectl import parse_pod
 
 from .k8s_world import SEED, World, make_app, make_world
 
