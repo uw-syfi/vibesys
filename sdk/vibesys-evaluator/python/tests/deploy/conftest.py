@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from k8s_world import World, make_world
+
+from .k8s_world import World, make_world
 
 if TYPE_CHECKING:
     from pathlib import Path

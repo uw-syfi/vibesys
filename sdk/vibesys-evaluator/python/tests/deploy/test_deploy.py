@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from k8s_world import SEED, World, make_app, make_world
 
 from vibesys_evaluator._private.cli import Stopped
 from vibesys_evaluator.deploy._k8s import (
@@ -26,6 +25,8 @@ from vibesys_evaluator.deploy._k8s import (
     deploy,
     tree_digest,
 )
+
+from .k8s_world import SEED, World, make_app, make_world
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence

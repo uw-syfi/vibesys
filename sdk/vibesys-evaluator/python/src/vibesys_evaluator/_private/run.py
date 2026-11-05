@@ -14,8 +14,9 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 from vibesys_evaluator._private.deploy import PHASE_OUTPUT_FILE, PhaseJob
-from vibesys_evaluator._private.files import SchemaFileError, read_message
+from vibesys_evaluator._private.files import SchemaFileError, read_message, read_results_gz
 from vibesys_evaluator._private.judge import Exhausted, Failed, judge
+from vibesys_evaluator._private.phase import RESULTS_FILE
 from vibesys_evaluator._private.records import Partial, RecordError
 from vibesys_evaluator._private.results import PhaseResult, finite
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
@@ -80,6 +81,16 @@ def _warmup(value: float) -> float:
     return float(value)
 
 
+def _sent_rate(results: Path) -> float:
+    """The rate a phase started operations at, from its results file (0 with fewer than two)."""
+    try:
+        starts = sorted(r.start_unix_nanos for r in read_results_gz(results))
+    except SchemaFileError:
+        return 0.0
+    span = (starts[-1] - starts[0]) / 1e9 if starts else 0.0
+    return (len(starts) - 1) / span if span > 0 else 0.0
+
+
 class PhaseDriver:
     """Runs the sample's phases in order and keeps its write history."""
 
@@ -132,11 +143,12 @@ class PhaseDriver:
             if isinstance(verdict, Failed):
                 msg = f"phase {index} ({load.describe()}): {verdict.reason}"
                 raise BenchmarkError(msg, partial=self.partial)
-            bound = max(RETRY_BOUND_FACTOR * load.max_ops_per_sec, RETRY_RATE_MARGIN * verdict.rate)
+            rate = max(verdict.rate, _sent_rate(self._artifacts / f"phase-{index}" / RESULTS_FILE))
+            bound = max(RETRY_BOUND_FACTOR * load.max_ops_per_sec, RETRY_RATE_MARGIN * rate)
             if attempt == 0:
                 self._log(
                     f"phase {index} ran out of its plan of {load.max_ops_per_sec:.0f} ops/s at "
-                    f"{verdict.rate:.0f} ops/s; running it again planned for {bound:.0f} ops/s"
+                    f"{rate:.0f} ops/s; running it again planned for {bound:.0f} ops/s"
                 )
                 load = replace(load, max_ops_per_sec=math.ceil(bound))
         msg = (

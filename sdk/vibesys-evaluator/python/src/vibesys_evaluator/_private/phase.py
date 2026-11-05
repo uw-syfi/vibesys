@@ -203,11 +203,8 @@ def _call(result: pb.OperationResult, info: dict[str, Any]) -> Call:
 
 
 def _in_window(result: pb.OperationResult, summary: pb.PhaseSummary) -> bool:
-    at = (
-        result.scheduled_unix_nanos
-        if summary.model == pb.LoadModel.OPEN
-        else result.start_unix_nanos
-    )
+    """Whether loadgen counts the operation in the window: it was scheduled in it."""
+    at = result.scheduled_unix_nanos
     return summary.window_start_unix_nanos <= at < summary.window_end_unix_nanos
 
 
@@ -238,7 +235,11 @@ class _Checked:
 def _writes(
     operations: Sequence[Operation[Any]], plan: Plan, results: Sequence[pb.OperationResult]
 ) -> list[phase_pb.HistoryEntry]:
-    """This phase's sent writes, in the order of ``results``."""
+    """This phase's sent writes, in the order of ``results``.
+
+    An operation loadgen never sent (start 0: due but not started before the
+    phase's deadline) cannot have taken effect, so it is not a write.
+    """
     return [
         phase_pb.HistoryEntry(
             operation=operation.name,
@@ -249,7 +250,8 @@ def _writes(
             steps=list(result.steps),
         )
         for result in results
-        if (operation := operations[plan.operations[result.index]]).apply is not None
+        if result.start_unix_nanos != 0
+        and (operation := operations[plan.operations[result.index]]).apply is not None
     ]
 
 

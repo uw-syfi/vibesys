@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from k8s_world import make_app
+
+from .k8s_world import make_app
 
 
 def test_a_valid_app_freezes_its_collections() -> None:

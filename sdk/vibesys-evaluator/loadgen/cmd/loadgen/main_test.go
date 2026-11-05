@@ -18,8 +18,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
-	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/build"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/files"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/messages"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/version"
 )
 
@@ -112,8 +112,8 @@ func TestUnrunnablePlansExitTwoWithoutASummary(t *testing.T) {
 	defer server.Close()
 	names := []string{"op"}
 	for name, data := range map[string][]byte{
-		"schema version 2": build.RequestsFileVersion(files.Binpb, 2, names, build.Op(0, build.Get("/"))),
-		"unknown ref":      build.RequestsFile(files.Binpb, names, build.Op(0, build.Get("/", build.Raw("nope")))),
+		"schema version 2": messages.RequestsFileVersion(files.Binpb, 2, names, messages.Op(0, messages.Get("/"))),
+		"unknown ref":      messages.RequestsFile(files.Binpb, names, messages.Op(0, messages.Get("/", messages.Raw("nope")))),
 		"not a plan":       []byte("garbage"),
 	} {
 		f := writeRequests(t, data)
@@ -143,14 +143,14 @@ func TestClosedPhaseEndToEndReportsExhaustion(t *testing.T) {
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	login := build.CaptureJSON(build.Post(build.Text(`{}`), "/login"), "token", "/token")
-	me := build.Header(build.Get("/me"), "Authorization", "Bearer ", build.Raw("token"))
+	login := messages.CaptureJSON(messages.Post(messages.Text(`{}`), "/login"), "token", "/token")
+	me := messages.Header(messages.Get("/me"), "Authorization", "Bearer ", messages.Raw("token"))
 	var ops []*pb.PlannedOperation
 	for range 50 {
-		ops = append(ops, build.Op(0, login, me))
+		ops = append(ops, messages.Op(0, login, me))
 	}
 	for _, format := range []files.Format{files.Binpb, files.JSON} {
-		f := writeRequests(t, build.RequestsFile(format, []string{"login_me"}, ops...))
+		f := writeRequests(t, messages.RequestsFile(format, []string{"login_me"}, ops...))
 		code, _, stderr := invoke(t, "closed", "--target", server.URL, "--clients", "4", "--secs", "1", "--warmup", "0",
 			"--requests", f.requests, "--results", f.results, "--summary", f.summary, "--format", formatName(format))
 		if code != exitOK {
@@ -179,9 +179,9 @@ func TestOpenPhaseEndToEnd(t *testing.T) {
 	defer server.Close()
 	var ops []*pb.PlannedOperation
 	for range 400 {
-		ops = append(ops, build.Op(0, build.Get("/")))
+		ops = append(ops, messages.Op(0, messages.Get("/")))
 	}
-	f := writeRequests(t, build.RequestsFile(files.Binpb, []string{"get"}, ops...))
+	f := writeRequests(t, messages.RequestsFile(files.Binpb, []string{"get"}, ops...))
 	code, _, stderr := invoke(t, "open", "--target", server.URL, "--rate", "200", "--seed", "3", "--secs", "1", "--warmup", "0.5",
 		"--min-sustained", "0.5", "--requests", f.requests, "--results", f.results, "--summary", f.summary)
 	if code != exitOK {
@@ -197,7 +197,7 @@ func TestOpenPhaseEndToEnd(t *testing.T) {
 func TestResultsThatCannotBeWrittenExitOne(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	defer server.Close()
-	f := writeRequests(t, build.RequestsFile(files.Binpb, []string{"get"}, build.Op(0, build.Get("/"))))
+	f := writeRequests(t, messages.RequestsFile(files.Binpb, []string{"get"}, messages.Op(0, messages.Get("/"))))
 	code, _, _ := invoke(t, "closed", "--target", server.URL, "--clients", "1", "--secs", "0.1", "--warmup", "0",
 		"--requests", f.requests, "--results", filepath.Join(f.results, "missing", "dir"), "--summary", f.summary)
 	if code != exitFailure {
@@ -214,7 +214,7 @@ func TestProbeWaitsForReadinessAndFailsAtTheDeadline(t *testing.T) {
 		}
 	}))
 	defer ready.Close()
-	f := writeRequests(t, build.RequestsFile(files.Binpb, []string{"health"}, build.Op(0, build.Get("/health"))))
+	f := writeRequests(t, messages.RequestsFile(files.Binpb, []string{"health"}, messages.Op(0, messages.Get("/health"))))
 	if code, _, stderr := invoke(t, "probe", "--target", ready.URL, "--requests", f.requests, "--rounds", "2", "--deadline", "30"); code != exitOK {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}

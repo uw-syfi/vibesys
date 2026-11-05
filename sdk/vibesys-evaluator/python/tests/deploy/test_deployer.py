@@ -6,7 +6,6 @@ import dataclasses
 from typing import TYPE_CHECKING
 
 import pytest
-from k8s_world import World, make_app
 
 from vibesys_evaluator._private.deploy import (
     PHASE_INPUT_FILE,
@@ -21,6 +20,8 @@ from vibesys_evaluator._private.files import DelimitedReader
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator.deploy._k8s import WORK_DIR, KubeDeployer, Outcome, probe_plan, run_control
 from vibesys_evaluator.service import get
+
+from .k8s_world import World, make_app
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence

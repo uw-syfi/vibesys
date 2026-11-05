@@ -6,9 +6,10 @@ import pytest
 import yaml
 from hypothesis import given
 from hypothesis import strategies as st
-from k8s_world import MANIFEST
 
 from vibesys_evaluator.deploy._k8s import ALLOWED_KINDS, ManifestError, render
+
+from .k8s_world import MANIFEST
 
 IMAGES = {"APP_IMAGE": "registry:5000/vse/shop/app:0123456789abcdef"}
 

@@ -13,11 +13,11 @@ import (
 	"time"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
-	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/build"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/call"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/cpu"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/engine"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/files"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/messages"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/plan"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/results"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/summary"
@@ -151,7 +151,7 @@ func (m measurer) trial(rate float64) (bool, *pb.PhaseSummary, error) {
 }
 
 func nullPlan(count int) (*plan.Plan, error) {
-	p, err := plan.New([]string{"null"}, []*pb.PlannedOperation{build.Op(0, build.Get("/"))})
+	p, err := plan.New([]string{"null"}, []*pb.PlannedOperation{messages.Op(0, messages.Get("/"))})
 	if err != nil {
 		return nil, err
 	}

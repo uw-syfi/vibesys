@@ -140,6 +140,11 @@ def judge(
         window = (summary.window_end_unix_nanos - summary.window_start_unix_nanos) / 1e9
         sent_rate = summary.sent / window if window > 0 else 0.0
         return Exhausted(rate=max(summary.offered_rate, summary.achieved_rate, sent_rate))
+    if summary.exhausted:  # an open loop's plan is sized with a margin over its arrivals
+        return Failed(
+            reason=f"the open loop's plan ran out before the window ended "
+            f"({summary.sent} operations sent at {summary.target_rate:g}/s)"
+        )
     p99_ms = _ms(summary.latency, 99.0)
     reason = _guard(summary, p99_ms, validity) or _rules(output, summary, validity, operations)
     if reason is not None:

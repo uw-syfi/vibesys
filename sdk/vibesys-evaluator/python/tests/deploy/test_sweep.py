@@ -7,9 +7,10 @@ from pathlib import Path
 
 from hypothesis import given
 from hypothesis import strategies as st
-from k8s_world import make_app, make_world
 
 from vibesys_evaluator.deploy._k8s import CREATED_LABEL, TASK_LABEL, sweep
+
+from .k8s_world import make_app, make_world
 
 TTL = 3600 + 600  # the task's longest timeout_seconds plus the margin
 

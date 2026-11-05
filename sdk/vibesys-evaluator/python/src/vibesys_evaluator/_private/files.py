@@ -1,5 +1,9 @@
 """The schema's files: length-delimited ``loadgen.proto`` streams and single ``phase.proto`` messages.
 
+A ``loadgen.proto`` file is length-delimited binary (``binpb``, what the
+package writes and loadgen writes by default) or proto3 JSON, one message per
+line (``json``, loadgen's ``--format json`` for debugging); both read alike.
+
 Every file read is validated (protovalidate) here, at the boundary, so the
 rest of the package works on messages that hold the schema's rules; errors
 name the file and the field.
@@ -7,7 +11,8 @@ name the file and the field.
 
 from __future__ import annotations
 
-from typing import IO, TYPE_CHECKING, TypeVar
+import gzip
+from typing import IO, TYPE_CHECKING, Literal, TypeVar
 
 import protovalidate
 
@@ -23,6 +28,7 @@ if TYPE_CHECKING:
 SCHEMA_VERSION = 1
 WRITER = "vibesys-evaluator 0.1.0"
 _T = TypeVar("_T", bound="Message")
+Format = Literal["binpb", "json"]
 _CONTINUE = 0x80  # LEB128: a byte below it ends a varint
 _MAX_SHIFT = 63
 
@@ -98,28 +104,46 @@ def _frames(data: bytes, where: str) -> Iterator[memoryview]:
 class DelimitedReader:
     """Reads a length-delimited file: its header first, then messages of one type."""
 
-    def __init__(self, path: Path, kind: pb.FileKind) -> None:
+    def __init__(self, path: Path, kind: pb.FileKind, *, file_format: Format = "binpb") -> None:
         """Read ``path`` whole and check that its header says ``kind`` and schema version 1.
 
         Raises:
             SchemaFileError: The file is missing, empty or of another kind or version.
         """
-        self._where = str(path)
         try:
             data = path.read_bytes()
         except OSError as error:
             msg = f"{path}: cannot read ({error.strerror})"
             raise SchemaFileError(msg) from error
-        self._frames = _frames(data, self._where)
+        self._format = file_format
+        self._open(data, str(path), kind)
+
+    @classmethod
+    def from_bytes(cls, data: bytes, where: str, kind: pb.FileKind) -> DelimitedReader:
+        """Read a file's contents already in memory; ``where`` names it in errors."""
+        reader = cls.__new__(cls)
+        reader._format = "binpb"
+        reader._open(data, where, kind)
+        return reader
+
+    def _open(self, data: bytes, where: str, kind: pb.FileKind) -> None:
+        path = where
+        self._where = where
+        self._frames: Iterator[memoryview | str] = (
+            _frames(data, self._where) if self._format == "binpb" else _lines(data, self._where)
+        )
         header = self._next(pb.FileHeader)
         if header is None:
             msg = f"{path}: empty file, expected a {kind.name.lower()} file"
             raise SchemaFileError(msg)
         if header.schema_version != SCHEMA_VERSION:
-            msg = f"{path}: schema version {header.schema_version}; this reader implements {SCHEMA_VERSION}"
+            msg = (
+                f"{path}: unsupported schema version {header.schema_version} "
+                f"(this reader implements {SCHEMA_VERSION})"
+            )
             raise SchemaFileError(msg)
         if header.kind != kind:
-            msg = f"{path}: a {header.kind.name.lower()} file, expected {kind.name.lower()}"
+            msg = f"{path}: FileHeader.kind is {header.kind.name}, expected {kind.name}"
             raise SchemaFileError(msg)
         self.header = header
 
@@ -128,7 +152,11 @@ class DelimitedReader:
         if frame is None:
             return None
         try:
-            message = message_type.from_binary(frame)
+            message = (
+                message_type.from_json(frame)
+                if isinstance(frame, str)
+                else message_type.from_binary(frame)
+            )
         except (ValueError, TypeError) as error:
             msg = f"{self._where}: cannot decode a {message_type.__name__} ({error})"
             raise SchemaFileError(msg) from error
@@ -148,6 +176,61 @@ class DelimitedReader:
             yield message
 
 
+def _lines(data: bytes, where: str) -> Iterator[str]:
+    try:
+        text = data.decode()
+    except UnicodeDecodeError as error:
+        msg = f"{where}: not UTF-8 JSON lines ({error})"
+        raise SchemaFileError(msg) from error
+    yield from (line for line in text.splitlines() if line.strip())
+
+
+def _captured(operation: pb.PlannedOperation, where: str) -> None:
+    """Every ref of a step names a capture of an earlier step of the operation."""
+    captured: set[str] = set()
+    for step in operation.steps:
+        for name in _refs(step):
+            if name not in captured:
+                msg = f"{where}: ref {name!r} names no capture of an earlier step"
+                raise SchemaFileError(msg)
+        captured.update(capture.name for capture in step.captures)
+
+
+def _refs(step: pb.Step) -> Iterator[str]:
+    call = step.call.value if step.call is not None else None
+    if not isinstance(call, pb.HttpCall):
+        return
+    templates = [call.path, *(p.value for p in call.query), *(p.value for p in call.headers)]
+    if call.body is not None:
+        body = call.body.value
+        if isinstance(body, pb.Template):
+            templates.append(body)
+        elif isinstance(body, pb.Form):
+            templates.extend(f.value for f in body.fields)
+    for template in templates:
+        for part in template.parts if template is not None else ():
+            if part.part is not None and isinstance(part.part.value, pb.Ref):
+                yield part.part.value.name
+
+
+def read_requests(
+    path: Path, *, file_format: Format = "binpb"
+) -> tuple[pb.RequestsHeader, list[pb.PlannedOperation]]:
+    """A requests file, with the rules loadgen holds a plan to (count, refs)."""
+    reader = DelimitedReader(path, pb.FileKind.REQUESTS, file_format=file_format)
+    header = reader.one(pb.RequestsHeader)
+    operations = list(reader.rest(pb.PlannedOperation))
+    if header.count != len(operations):
+        msg = (
+            f"{path}: RequestsHeader.count is {header.count} "
+            f"but the file holds {len(operations)} operations"
+        )
+        raise SchemaFileError(msg)
+    for index, operation in enumerate(operations):
+        _captured(operation, f"{path}: operation {index}")
+    return header, operations
+
+
 def read_summary(path: Path) -> pb.PhaseSummary:
     """The ``PhaseSummary`` of a summary file."""
     return DelimitedReader(path, pb.FileKind.SUMMARY).one(pb.PhaseSummary)
@@ -156,6 +239,17 @@ def read_summary(path: Path) -> pb.PhaseSummary:
 def read_results(path: Path) -> list[pb.OperationResult]:
     """Every ``OperationResult`` of a results file, in completion order."""
     return list(DelimitedReader(path, pb.FileKind.RESULTS).rest(pb.OperationResult))
+
+
+def read_results_gz(path: Path) -> list[pb.OperationResult]:
+    """Every ``OperationResult`` of a gzip-compressed results file (a phase's artifact)."""
+    try:
+        data = gzip.decompress(path.read_bytes())
+    except (OSError, EOFError) as error:
+        msg = f"{path}: cannot read ({error})"
+        raise SchemaFileError(msg) from error
+    reader = DelimitedReader.from_bytes(data, str(path), pb.FileKind.RESULTS)
+    return list(reader.rest(pb.OperationResult))
 
 
 def write_message(path: Path, message: Message) -> None:
