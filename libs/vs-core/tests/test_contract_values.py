@@ -1,7 +1,7 @@
 """Typed contract values: digest scheme, descendant manifest and retained selections."""
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -145,7 +145,12 @@ def evidence_row(
     status=st.sampled_from([core.ObservationStatus.SUCCEEDED, core.ObservationStatus.FAILED]),
     flaws=st.sets(st.sampled_from(["self-report", "no-receipt", "other-candidate", "twin"])),
 )
-def test_accuracy_proof_is_the_unique_trusted_accepted_successful_correctness_record(
+@example(
+    kind=core.EvidenceKind.CORRECTNESS,
+    status=core.ObservationStatus.SUCCEEDED,
+    flaws={"twin"},
+)
+def test_accuracy_proof_is_the_first_trusted_accepted_successful_correctness_record(
     kind: core.EvidenceKind, status: core.ObservationStatus, flaws: set[str]
 ) -> None:
     baseline = core.initial_state().run.facts.baseline
@@ -160,8 +165,12 @@ def test_accuracy_proof_is_the_unique_trusted_accepted_successful_correctness_re
     state = core.EvaluationState(evidence=rows if "twin" in flaws else rows[:1])
     qualifies = (
         kind == core.EvidenceKind.CORRECTNESS and status == core.ObservationStatus.SUCCEEDED
-    ) and not flaws
+    ) and not (flaws - {"twin"})
     assert state.accuracy_proof(baseline) == (row if qualifies else None)
+    passed = evidence_row("e", updates={"status": core.ObservationStatus.SUCCEEDED})
+    failed = evidence_row("e", request="r2", updates={"status": core.ObservationStatus.FAILED})
+    assert core.EvaluationState(evidence=(passed, failed)).accuracy_proof(baseline) is None
+    assert core.EvaluationState(evidence=(failed, passed)).accuracy_proof(baseline) is None
     for item in state.evidence:
         assert state.evidence_for(item.key) == item
     missing = row.key.model_copy(update={"source_request": core.RequestId(root="x")})
