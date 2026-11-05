@@ -323,9 +323,11 @@ func TestFixturesAreCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		// check_histograms.py is the hand-written Python check of these fixtures.
-		if _, ok := generated[entry.Name()]; !ok && entry.Name() != "check_histograms.py" {
-			t.Errorf("%s is not a generated fixture; remove it", entry.Name())
+		// check_histograms.py is the hand-written Python check of these fixtures;
+		// __pycache__ is what running it leaves behind.
+		name := entry.Name()
+		if _, ok := generated[name]; !ok && name != "check_histograms.py" && name != "__pycache__" {
+			t.Errorf("%s is not a generated fixture; remove it", name)
 		}
 	}
 	for name, want := range generated {
