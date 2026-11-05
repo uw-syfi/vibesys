@@ -12,6 +12,7 @@ name the file and the field.
 from __future__ import annotations
 
 import gzip
+import importlib.metadata
 from typing import IO, TYPE_CHECKING, Literal, TypeVar
 
 import protovalidate
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from protobuf import Message
 
 SCHEMA_VERSION = 1
-WRITER = "vibesys-evaluator 0.1.0"
+WRITER = f"vibesys-evaluator {importlib.metadata.version('vibesys-evaluator')}"
 _T = TypeVar("_T", bound="Message")
 Format = Literal["binpb", "json"]
 _CONTINUE = 0x80  # LEB128: a byte below it ends a varint
