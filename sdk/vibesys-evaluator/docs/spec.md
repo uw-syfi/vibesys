@@ -457,7 +457,7 @@ it.
 A task's `bench.py` passes its `check`, `benchmark` and `profile` functions
 to the core's `main`; `profile` runs a smoke replay, the load a profiler
 records, and is never scored. Example:
-`examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/agentx-cli/` in the
+`examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/agentx/` in the
 repository, and [`examples/agentx-llm/bench.py`](../examples/agentx-llm/bench.py).
 
 ## Versioning

@@ -140,7 +140,7 @@ def test_a_damaged_golden_file_is_refused_naming_what_is_wrong(
 
 def test_the_tasks_golden_file_loads() -> None:
     repo = Path(__file__).resolve().parents[5]
-    task = repo / "examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/agentx-cli/golden.json"
+    task = repo / "examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/agentx/golden.json"
     golden = load(task)
     assert golden.model == "Qwen/Qwen3.5-9B"
     assert len(golden.cases) == 12
