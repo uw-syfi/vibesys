@@ -3,7 +3,8 @@
 A ``Workload`` is a model and a weighted mix of ``Operation``s. Each
 operation's ``build(model, rand)`` returns a ``Request`` of one or more
 ``Step``s (``get``, ``post``, ``put``); a later step can send a value an
-earlier one captured (``ref``, a ``Template``). Checks and applies see each
+earlier one captured (``ref``, a ``Template``). A ``Generator`` stands for a
+workload written in another language (the Go SDK, ``loadgen/workload``). Checks and applies see each
 operation as a ``Call`` with its ``Response``s; ``Versions`` says what a read
 may show. The task's ``benchmark(run)`` composes load phases
 (``Run.closed_loop``, ``Run.open_loop``), each returning a ``PhaseResult``.
@@ -23,7 +24,7 @@ from vibesys_evaluator.microservices._private import entry
 from vibesys_evaluator.microservices._private.calls import Call, Response, Versions
 from vibesys_evaluator.microservices._private.results import PhaseResult
 from vibesys_evaluator.microservices._private.run import Run
-from vibesys_evaluator.microservices._private.workload import Operation, Workload
+from vibesys_evaluator.microservices._private.workload import Generator, Operation, Workload
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "Call",
+    "Generator",
     "Operation",
     "PhaseResult",
     "Request",
@@ -55,17 +57,18 @@ def main(
     *,
     dataset: Callable[[], D],
     system: App[D],
-    workload: Workload[D, M],
+    workload: Workload[D, M] | Generator,
     benchmark: Callable[[Run], None],
     metrics: Mapping[str, Metric],
     validity: Validity | None = None,
 ) -> NoReturn:
-    """Run the task script's command (``benchmark``, ``phase``, ``seed`` or ``ctl``) and exit.
+    """Run the task script's command (``benchmark``, ``phase``, ``generate``, ``check``, ``seed`` or ``ctl``) and exit.
 
     Args:
         dataset: Builds the initial data; a pure function of the task's constants.
         system: The system under test.
-        workload: The operations and their model.
+        workload: The operations and their model, or the ``Generator`` command
+            of a workload written in Go.
         benchmark: The scoring definition: runs load phases on ``run`` and calls ``run.report``.
         metrics: The metrics ``run.report`` reports, by name.
         validity: When a phase is a measurement; ``Validity()`` when None.

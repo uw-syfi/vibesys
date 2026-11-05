@@ -43,7 +43,6 @@ from vibesys_evaluator.microservices._private.deploy import (
     PhaseRunError,
     TaskCommand,
 )
-from vibesys_evaluator.microservices._private.phase import plan_size
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
@@ -68,15 +67,11 @@ def connect(env: Environment, log: Callable[[str], None]) -> Cluster:
 
 
 def probe_plan(steps: Sequence[Step]) -> bytes:
-    """The ready steps as a loadgen requests file: one operation per step, in order."""
+    """The ready steps as a recorded request stream for ``loadgen probe``: one operation per step."""
     buffer = io.BytesIO()
     writer = DelimitedWriter(buffer)
     writer.write_header(pb.FileKind.REQUESTS)
-    writer.write(
-        pb.RequestsHeader(
-            operation_names=[f"ready_{n}" for n in range(len(steps))], count=len(steps)
-        )
-    )
+    writer.write(pb.RequestsHeader(operation_names=[f"ready_{n}" for n in range(len(steps))]))
     for n, step in enumerate(steps):
         writer.write(
             pb.PlannedOperation(operation=n, steps=[step_message(step)], keep_bodies=False)
@@ -85,17 +80,18 @@ def probe_plan(steps: Sequence[Step]) -> bytes:
 
 
 def _out_of_memory(job: PhaseJob, error: PodOutOfMemoryError) -> str:
-    """What an OOMKilled phase pod means: the plan size, the limit, and what to change."""
+    """What an OOMKilled phase pod means: the limit, the phase, and what to change."""
     try:
-        ops = f"{plan_size(phase_input(job.phase_input, job.name)):,} operations"
+        phase = phase_input(job.phase_input, job.name)
+        span = f"a phase of {phase.warmup_secs:g} s warmup and {phase.secs:g} s window"
     except SchemaFileError:
-        ops = "an unknown number of operations"
+        span = "a phase"
     return (
         f"{job.name}: the phase pod ran out of memory (OOMKilled at its {error.limit} limit) "
-        f"with a plan of {ops}. The plan, the workload's model and the results of the "
-        "sampled operations and writes must fit in the pod: lower the closed loop's "
-        "max_ops_per_sec (or the open loop's rate x window), sample fewer large responses, "
-        f"or shrink the model. {error}"
+        f"in {span}. loadgen holds only its buffer of the request stream; what must fit is the "
+        "generator's dataset and model (with the history it replays) and the results of the "
+        "sampled operations and writes the check keeps: shrink the model, sample fewer large "
+        f"responses (Operation.sample), or shorten the window. {error}"
     )
 
 

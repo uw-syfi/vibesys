@@ -1,15 +1,14 @@
-// Package engine runs one phase: it sends a prefix of the plan in plan order, closed loop (a fixed
-// number of clients) or open loop (operations at arrival times, whatever the responses), grants
-// exclusive keys in plan order, and hands every result to a sink and to the summary. Nothing is
-// read or validated here; the plan arrives validated and whole, and a sender compiles each
-// operation from its bytes as it takes it (before it is due, in the open loop).
+// Package engine runs one phase: it takes operations from a Source in stream order and sends
+// them, closed loop (a fixed number of clients) or open loop (operations at arrival times,
+// whatever the responses), grants exclusive keys in stream order, and hands every result to a
+// sink and to the summary. Nothing is read, parsed or validated here; operations arrive
+// compiled, and the time a sender waits for one is recorded as the generator's.
 package engine
 
 import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
@@ -85,6 +84,14 @@ func (c Config) Validate() error {
 	return nil
 }
 
+// Source hands out operations in stream order; plan.Stream is the implementation (plan.Repeat
+// the selftest's). Take returns the next one and how long the caller waited for it; an error
+// ends the phase.
+type Source interface {
+	Names() []string
+	Take(ctx context.Context) (*plan.Op, time.Duration, error)
+}
+
 // Sender sends one operation; call.Client is the implementation.
 type Sender interface {
 	Do(ctx context.Context, op *plan.Op) call.Outcome
@@ -105,8 +112,8 @@ type Outcome struct {
 const lead = 20 * time.Millisecond
 
 // Run runs one phase. It returns once every operation it took has finished, at most the request
-// timeout after the window ends; ctx cancels it early.
-func Run(ctx context.Context, config Config, p *plan.Plan, sender Sender, sink Sink) (Outcome, error) {
+// timeout after the window ends; ctx cancels it early, and a Source error ends it with that error.
+func Run(ctx context.Context, config Config, source Source, sender Sender, sink Sink) (Outcome, error) {
 	if err := config.Validate(); err != nil {
 		return Outcome{}, err
 	}
@@ -115,19 +122,16 @@ func Run(ctx context.Context, config Config, p *plan.Plan, sender Sender, sink S
 	deadline := time.Unix(0, window.End).Add(config.Timeout)
 	phaseCtx, cancel := context.WithDeadline(ctx, deadline)
 	defer cancel()
+	failCtx, fail := context.WithCancelCause(phaseCtx)
+	defer fail(nil)
 	r := &runner{
-		ctx:    phaseCtx,
-		plan:   p,
+		ctx:    failCtx,
+		fail:   fail,
+		source: source,
 		sender: sender,
 		sink:   sink,
 		window: window,
-		agg:    summary.New(window, p.Names),
-		gates:  make([]chan struct{}, p.Len()),
-	}
-	for i := range p.Len() {
-		if p.Gated(i) {
-			r.gates[i] = make(chan struct{})
-		}
+		agg:    summary.New(window, source.Names()),
 	}
 	meter := startMeter(window)
 	defer meter.stop()
@@ -136,14 +140,17 @@ func Run(ctx context.Context, config Config, p *plan.Plan, sender Sender, sink S
 	case Closed:
 		phase.Model = pb.LoadModel_LOAD_MODEL_CLOSED
 		phase.Clients = uint32(load.Clients)
-		phase.Exhausted, phase.ExhaustedAt = r.closed(t0, load.Clients)
+		r.closed(t0, load.Clients)
 	case Open:
 		phase.Model = pb.LoadModel_LOAD_MODEL_OPEN
 		phase.TargetRate = load.Rate
 		phase.MinSustained = load.MinSustained
-		phase.Exhausted, phase.Saturated = r.open(t0, load)
+		phase.Saturated = r.open(t0, load)
 	}
 	if err := ctx.Err(); err != nil {
+		return Outcome{}, err
+	}
+	if err := context.Cause(failCtx); err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		return Outcome{}, err
 	}
 	phase.CPUFraction = meter.fraction()
@@ -152,24 +159,35 @@ func Run(ctx context.Context, config Config, p *plan.Plan, sender Sender, sink S
 
 type runner struct {
 	ctx    context.Context
-	plan   *plan.Plan
+	fail   context.CancelCauseFunc
+	source Source
 	sender Sender
 	sink   Sink
 	window summary.Window
-	gates  []chan struct{}
 
 	mu  sync.Mutex
 	agg *summary.Aggregator
 }
 
-// closed runs a closed loop and reports whether the plan ran out before the window ended and, if
-// it did, when the loop stopped: the end of its last operation, since every client returns once
-// its operation is done and it finds the plan empty.
-func (r *runner) closed(t0 time.Time, clients int) (bool, int64) {
-	var next atomic.Uint64
-	var exhausted atomic.Bool
+// take takes the next operation within ctx; a Source error ends the phase (r.ctx's cause).
+func (r *runner) take(ctx context.Context) (*plan.Op, time.Duration, bool) {
+	op, waited, err := r.source.Take(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			r.fail(err)
+		}
+		return nil, waited, false
+	}
+	return op, waited, true
+}
+
+// closed runs a closed loop: each client takes the next operation as soon as its previous one
+// finished, until the window ends.
+func (r *runner) closed(t0 time.Time, clients int) {
 	end := time.Unix(0, r.window.End)
-	count := r.plan.Len()
+	// No client takes an operation after the window: a wait for the generator ends with it.
+	takeCtx, cancel := context.WithDeadline(r.ctx, end)
+	defer cancel()
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for range clients {
@@ -178,39 +196,38 @@ func (r *runner) closed(t0 time.Time, clients int) (bool, int64) {
 			defer wg.Done()
 			<-start
 			for r.ctx.Err() == nil {
+				if !time.Now().Before(end) {
+					return
+				}
+				op, waited, ok := r.take(takeCtx)
+				if !ok {
+					return
+				}
+				// Due when the client has it: the wait for the generator is its own, not latency.
 				now := time.Now()
 				if !now.Before(end) {
+					r.release(op) // taken too late: never sent, not a result
 					return
 				}
-				index := next.Add(1) - 1
-				if index >= count {
-					exhausted.Store(true)
-					return
-				}
-				// Taking an operation includes compiling it: it is scheduled once ready to send.
-				op := r.plan.Op(index)
-				taken := time.Now()
-				r.run(op, taken, taken)
+				r.run(op, now, now, waited)
 			}
 		}()
 	}
 	sleepUntil(r.ctx, t0)
 	close(start)
 	wg.Wait()
-	if !exhausted.Load() {
-		return false, 0
-	}
-	return true, time.Now().UnixNano()
 }
 
 type job struct {
-	index     uint64
+	op        *plan.Op
 	scheduled time.Time
+	waited    time.Duration
 }
 
-// open runs an open loop and reports whether the plan ran out before the window ended, and how
-// many of the window's operations were due while every sender was busy (saturated).
-func (r *runner) open(t0 time.Time, load Open) (bool, uint64) {
+// open runs an open loop: operations at their arrival times until the window ends. It returns how
+// many of the window's operations were due while every sender was busy (saturated): their wait
+// is the application holding the senders, unlike a wait for the generator, which is the take's.
+func (r *runner) open(t0 time.Time, load Open) uint64 {
 	var saturated uint64
 	arrivals := NewArrivals(load.Arrivals, load.Rate, load.Seed)
 	work := make(chan job)
@@ -220,24 +237,26 @@ func (r *runner) open(t0 time.Time, load Open) (bool, uint64) {
 		go func() {
 			defer wg.Done()
 			for item := range work {
-				op := r.plan.Op(item.index) // in the time the operation is handed over early
 				waitUntil(r.ctx, item.scheduled)
-				r.run(op, item.scheduled, time.Now())
+				r.run(item.op, item.scheduled, time.Now(), item.waited)
 			}
 		}()
 	}
 	defer wg.Wait()
 	defer close(work)
 	end := time.Unix(0, r.window.End)
-	count := r.plan.Len()
-	for index := range count {
+	for {
 		scheduled := t0.Add(arrivals())
 		if !scheduled.Before(end) {
-			return false, saturated
+			return saturated
 		}
 		// Hand the operation to a sender a little early; the sender waits for the exact time.
 		sleepUntil(r.ctx, scheduled.Add(-ahead))
-		item := job{index: index, scheduled: scheduled}
+		op, waited, ok := r.take(r.ctx)
+		if !ok {
+			return saturated
+		}
+		item := job{op: op, scheduled: scheduled, waited: waited}
 		select {
 		case work <- item:
 			continue
@@ -251,39 +270,50 @@ func (r *runner) open(t0 time.Time, load Open) (bool, uint64) {
 		case work <- item:
 		case <-r.ctx.Done():
 			// The phase's deadline passed with operations still due: they were never sent.
-			r.abandon(index, scheduled, arrivals, t0, end)
-			return false, saturated
+			r.abandon(op, scheduled, arrivals, t0, end)
+			return saturated
 		}
 	}
-	return t0.Add(arrivals()).Before(end), saturated
 }
 
-// abandon records the operations due in the window from index on as never sent.
-func (r *runner) abandon(index uint64, scheduled time.Time, arrivals func() time.Duration, t0, end time.Time) {
+// abandonWait bounds how long the abandoned operations wait for the generator.
+const abandonWait = time.Second
+
+// abandon records op and the operations due after it in the window as never sent, as far as the
+// generator has them ready.
+func (r *runner) abandon(op *plan.Op, scheduled time.Time, arrivals func() time.Duration, t0, end time.Time) {
 	now := time.Now().UnixNano()
-	for ; index < r.plan.Len() && scheduled.Before(end); index++ {
+	ctx, cancel := context.WithTimeout(context.Background(), abandonWait)
+	defer cancel()
+	for scheduled.Before(end) {
+		r.release(op)
 		r.finish(&pb.OperationResult{
-			Index:              index,
-			Operation:          r.plan.Operation(index),
+			Index:              op.Index,
+			Operation:          op.Operation,
 			ScheduledUnixNanos: scheduled.UnixNano(),
 			EndUnixNanos:       now,
 			Error:              pb.ErrorKind_ERROR_KIND_CANCELLED,
-		}, 0)
+		}, 0, 0)
 		scheduled = t0.Add(arrivals())
+		var err error
+		if op, _, err = r.source.Take(ctx); err != nil {
+			return
+		}
 	}
 }
 
-// run sends one operation taken at picked (scheduled is when it was due).
-func (r *runner) run(op *plan.Op, scheduled, picked time.Time) {
+// run sends one operation taken at picked (scheduled is when it was due, waited how long the
+// sender waited for the generator).
+func (r *runner) run(op *plan.Op, scheduled, picked time.Time, waited time.Duration) {
 	result := &pb.OperationResult{Index: op.Index, Operation: op.Operation, ScheduledUnixNanos: scheduled.UnixNano()}
-	if op.After >= 0 {
+	if op.Prev != nil {
 		select {
-		case <-r.gates[op.After]:
+		case <-op.Prev:
 		case <-r.ctx.Done():
 			result.EndUnixNanos = time.Now().UnixNano()
 			result.Error = pb.ErrorKind_ERROR_KIND_CANCELLED
 			r.release(op)
-			r.finish(result, 0)
+			r.finish(result, 0, waited)
 			return
 		}
 	}
@@ -293,19 +323,19 @@ func (r *runner) run(op *plan.Op, scheduled, picked time.Time) {
 	result.EndUnixNanos = outcome.End.UnixNano()
 	result.Steps = outcome.Steps
 	result.Error = outcome.Error
-	r.finish(result, picked.UnixNano())
+	r.finish(result, picked.UnixNano(), waited)
 }
 
 func (r *runner) release(op *plan.Op) {
-	if op.Gated {
-		close(r.gates[op.Index])
+	if op.Done != nil {
+		close(op.Done)
 	}
 }
 
-func (r *runner) finish(result *pb.OperationResult, picked int64) {
+func (r *runner) finish(result *pb.OperationResult, picked int64, waited time.Duration) {
 	r.sink.Put(result)
 	r.mu.Lock()
-	r.agg.Add(summary.Record{Result: result, Picked: picked})
+	r.agg.Add(summary.Record{Result: result, Picked: picked, GeneratorWait: waited})
 	r.mu.Unlock()
 }
 

@@ -13,6 +13,10 @@
    complete type.
 4. Each example under ``examples/`` imports and type-checks (pyright, basic)
    against the package.
+5. The Go SDK's snapshot ``api/go-workload.txt`` (``go doc -all`` of
+   ``loadgen/workload``; its Go test ``TestAPISnapshotIsCurrent`` keeps it equal
+   to the code) loses no line of the last release's: a removed or changed
+   declaration is a break. Skipped, with a note, until a release has it.
 
 Usage:
     uv run python scripts/check_vibesys_evaluator_api.py [--write]
@@ -41,6 +45,7 @@ REPO = Path(__file__).resolve().parent.parent
 SDK = REPO / "sdk" / "vibesys-evaluator"
 SRC = SDK / "python" / "src"
 SNAPSHOT = SDK / "api" / "public-api.txt"
+GO_SNAPSHOT = SDK / "api" / "go-workload.txt"
 EXAMPLES = SDK / "examples"
 PACKAGE = "vibesys_evaluator"
 #: The public modules, in the snapshot's order.
@@ -238,6 +243,31 @@ def _approved_break(tag: str) -> str | None:
     return f"{approval['reason']} (approved by {approval['approved_by']})"
 
 
+def check_go_release() -> bool:
+    """The Go snapshot keeps every line of the last release's; True when nothing is removed."""
+    tag = _last_release()
+    path = GO_SNAPSHOT.relative_to(REPO).as_posix()
+    git = shutil.which("git") or "git"
+    released = (
+        _run([git, "show", f"{tag}:{path}"], cwd=REPO, capture_output=True) if tag else None
+    )
+    if released is None or released.returncode != 0:
+        print(f"go api: no release has {path} yet; skipped")
+        return True
+    current = set(GO_SNAPSHOT.read_text().splitlines())
+    removed = [line for line in released.stdout.splitlines() if line.strip() and line not in current]
+    if not removed:
+        print(f"go api: every declaration of {tag} is kept")
+        return True
+    print(f"go api: lines of {tag}'s {path} that changed or went away:")
+    print("\n".join(f"  {line}" for line in removed))
+    print(
+        "A breaking change of the Go SDK needs the user's approval first "
+        "(sdk/vibesys-evaluator/AGENTS.md)."
+    )
+    return False
+
+
 def _pyright(
     *args: str, cwd: Path, env: dict[str, str] | None = None
 ) -> subprocess.CompletedProcess[str]:
@@ -334,6 +364,7 @@ def main() -> int:
     results = [
         check_snapshot(write=args.write),
         check_release(),
+        check_go_release(),
         check_verifytypes(),
         check_examples(),
     ]

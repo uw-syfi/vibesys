@@ -4,17 +4,20 @@
 // 	protoc        (unknown)
 // source: vibesys/evaluator/v1/loadgen.proto
 
-// The files the vibesys-evaluator Python package and loadgen (its native load
-// generator, sdk/vibesys-evaluator/loadgen) exchange for one phase: the
-// requests file (written by Python before the phase), the results file and the
-// summary file (written by loadgen). See sdk/vibesys-evaluator/docs/spec.md.
+// What a phase's request generator and loadgen (the native load generator,
+// sdk/vibesys-evaluator/loadgen) exchange, and the files loadgen writes for the
+// vibesys-evaluator front ends: the request stream (a generator's standard
+// output, read by loadgen while the phase runs), the results file and the
+// summary file. See sdk/vibesys-evaluator/docs/spec.md.
 //
-// Encoding. Each file is a sequence of length-delimited messages (a varint
-// length, then the message; the binpb format), or proto3 JSON, one message per
-// line, for debugging (--format json). The first message of every file is a
-// FileHeader; what follows depends on its kind:
+// Encoding. Each stream or file is a sequence of length-delimited messages (a
+// varint length, then the message; the binpb format), or for files proto3 JSON,
+// one message per line, for debugging (--format json). The request stream is
+// always binpb. The first message of every stream and file is a FileHeader;
+// what follows depends on its kind:
 //
-//   requests:     FileHeader, RequestsHeader, PlannedOperation...
+//   requests:     FileHeader, RequestsHeader, PlannedOperation...  (a stream: no end
+//                 while loadgen reads it; loadgen probe reads a finite one to its end)
 //   results:      FileHeader, OperationResult...   (in completion order)
 //   summary:      FileHeader, PhaseSummary
 //   selftest:     FileHeader, SelftestResult
@@ -501,19 +504,14 @@ func (x *FileHeader) GetWriter() string {
 	return ""
 }
 
-// RequestsHeader follows the FileHeader of a requests file.
+// RequestsHeader follows the FileHeader of a request stream.
 type RequestsHeader struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Operation names; PlannedOperation.operation and the summaries index into
 	// this list. Names are unique.
 	OperationNames []string `protobuf:"bytes,1,rep,name=operation_names,json=operationNames,proto3" json:"operation_names,omitempty"`
-	// The number of PlannedOperation messages that follow; a file with another
-	// number is rejected. Both loops send a prefix of the plan, in plan order: the
-	// operations due before the window ends. A plan that runs out before the
-	// window ends is reported as exhausted (PhaseSummary.exhausted).
-	Count         uint64 `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *RequestsHeader) Reset() {
@@ -553,23 +551,17 @@ func (x *RequestsHeader) GetOperationNames() []string {
 	return nil
 }
 
-func (x *RequestsHeader) GetCount() uint64 {
-	if x != nil {
-		return x.Count
-	}
-	return 0
-}
-
 // PlannedOperation is one logical operation: one or more steps sent in order
-// on one client, counted as one operation with one latency.
+// on one client, counted as one operation with one latency. Its position in the
+// stream, from 0, is its index (OperationResult.index).
 type PlannedOperation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Index into RequestsHeader.operation_names.
 	Operation uint32  `protobuf:"varint,1,opt,name=operation,proto3" json:"operation,omitempty"`
 	Steps     []*Step `protobuf:"bytes,2,rep,name=steps,proto3" json:"steps,omitempty"`
 	// Operations with the same non-empty key never run at the same time; loadgen
-	// grants the key in plan order, so operations on one key are applied in plan
-	// order. Time spent waiting for the key counts as latency.
+	// grants the key in stream order, so operations on one key are applied in
+	// stream order. Time spent waiting for the key counts as latency.
 	ExclusiveKey string `protobuf:"bytes,3,opt,name=exclusive_key,json=exclusiveKey,proto3" json:"exclusive_key,omitempty"`
 	// Keep every response body in the results file. Otherwise only a digest and
 	// the length are kept (the operation is outside the validation sample).
@@ -638,7 +630,7 @@ func (x *PlannedOperation) GetKeepBodies() bool {
 
 // Step is one call. A step may use values captured from the responses of
 // earlier steps of the same operation (Template.Part.ref); a Ref to a name that
-// no earlier step of the operation captures is rejected with the plan. An
+// no earlier step of the operation captures fails the phase (exit 2). An
 // operation stops at its first failed step: the later steps are not sent and
 // have no StepResult.
 type Step struct {
@@ -981,8 +973,8 @@ func (x *Param) GetValue() *Template {
 }
 
 // ThriftCall is reserved for a Thrift driver. It is not designed yet; a
-// loadgen whose Capabilities do not list CALL_KIND_THRIFT rejects a requests
-// file that uses it.
+// loadgen whose Capabilities do not list CALL_KIND_THRIFT rejects a stream that
+// uses it.
 type ThriftCall struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1219,11 +1211,11 @@ func (*Capture_Header) isCapture_Source() {}
 // start 0 and no steps: it was never sent.
 type OperationResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The position of the PlannedOperation in the requests file, from 0.
+	// The position of the PlannedOperation in the request stream, from 0.
 	Index     uint64 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
 	Operation uint32 `protobuf:"varint,2,opt,name=operation,proto3" json:"operation,omitempty"`
 	// When the operation was due: its arrival time (open loop), or the time a
-	// client took it from the plan (closed loop). Latency is end - scheduled in
+	// client took it from the stream (closed loop). Latency is end - scheduled in
 	// both: in a closed loop it differs from end - start only by the wait for the
 	// exclusive key, which counts as latency.
 	ScheduledUnixNanos int64 `protobuf:"varint,3,opt,name=scheduled_unix_nanos,json=scheduledUnixNanos,proto3" json:"scheduled_unix_nanos,omitempty"`
@@ -1670,12 +1662,9 @@ type PhaseSummary struct {
 	// request timeout); counted in completed, not in the throughput.
 	Spilled uint64 `protobuf:"varint,10,opt,name=spilled,proto3" json:"spilled,omitempty"`
 	// The rate operations were sent at (operations whose first step started in
-	// the window, divided by the time the window ran), and the rate they
-	// completed at within the window (completed - spilled, divided by the same
-	// time), operations/s. A closed loop's throughput is achieved_rate. The time
-	// the window ran is its length, except for an exhausted closed loop, whose
-	// clients stopped when the plan ran out: there it is from the window's start
-	// to exhausted_unix_nanos (0 when the plan ran out before the window).
+	// the window, divided by its length), and the rate they completed at within
+	// the window (completed - spilled, divided by its length), operations/s. A
+	// closed loop's throughput is achieved_rate.
 	OfferedRate  float64 `protobuf:"fixed64,11,opt,name=offered_rate,json=offeredRate,proto3" json:"offered_rate,omitempty"`
 	AchievedRate float64 `protobuf:"fixed64,12,opt,name=achieved_rate,json=achievedRate,proto3" json:"achieved_rate,omitempty"`
 	// Send lag: the time a sent operation waited for a free sender after it was
@@ -1690,9 +1679,6 @@ type PhaseSummary struct {
 	// Open loop: offered_rate reached the Python side's min_sustained_ratio of
 	// target_rate (passed as --min-sustained). Closed loop: true.
 	Sustained bool `protobuf:"varint,17,opt,name=sustained,proto3" json:"sustained,omitempty"`
-	// The plan ran out before the window ended (no operation was left to take
-	// or to schedule); the phase is not a measurement.
-	Exhausted bool `protobuf:"varint,18,opt,name=exhausted,proto3" json:"exhausted,omitempty"`
 	// The latency (end - scheduled) of every operation of the window that
 	// succeeded, and per operation (OperationSummary). Failed operations are in
 	// errors, not in the latency.
@@ -1702,18 +1688,18 @@ type PhaseSummary struct {
 	// was written slower than operations completed; they are in the results file
 	// all the same. Diagnosis only.
 	ResultsSpilled uint64 `protobuf:"varint,21,opt,name=results_spilled,json=resultsSpilled,proto3" json:"results_spilled,omitempty"`
-	// Closed loop, exhausted: when the loop stopped, the end of the last
-	// operation (every planned operation had been taken), Unix nanoseconds; 0
-	// otherwise. The rate the loop sent at over the whole phase is
-	// the plan's count divided by this minus the phase's start (window start
-	// minus --warmup).
-	ExhaustedUnixNanos int64 `protobuf:"varint,22,opt,name=exhausted_unix_nanos,json=exhaustedUnixNanos,proto3" json:"exhausted_unix_nanos,omitempty"`
 	// Open loop: operations of the window that were due while every one of the
 	// --max-in-flight senders was busy, so they waited for one to finish. Their
 	// send lag is the application holding the senders (its responses were slow),
 	// not loadgen falling behind; their latency (end - scheduled) includes the
-	// wait. Closed loop: 0.
-	Saturated     uint64 `protobuf:"varint,23,opt,name=saturated,proto3" json:"saturated,omitempty"`
+	// wait. A wait for the request generator is not this (GeneratorStats.waited).
+	// Closed loop: 0.
+	Saturated uint64 `protobuf:"varint,23,opt,name=saturated,proto3" json:"saturated,omitempty"`
+	// The operation names of the stream (RequestsHeader.operation_names), which
+	// OperationSummary.operation and OperationResult.operation index into.
+	OperationNames []string `protobuf:"bytes,24,rep,name=operation_names,json=operationNames,proto3" json:"operation_names,omitempty"`
+	// How the request generator kept up (GeneratorStats).
+	Generator     *GeneratorStats `protobuf:"bytes,25,opt,name=generator,proto3" json:"generator,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1867,13 +1853,6 @@ func (x *PhaseSummary) GetSustained() bool {
 	return false
 }
 
-func (x *PhaseSummary) GetExhausted() bool {
-	if x != nil {
-		return x.Exhausted
-	}
-	return false
-}
-
 func (x *PhaseSummary) GetLatency() *HdrHistogram {
 	if x != nil {
 		return x.Latency
@@ -1895,13 +1874,6 @@ func (x *PhaseSummary) GetResultsSpilled() uint64 {
 	return 0
 }
 
-func (x *PhaseSummary) GetExhaustedUnixNanos() int64 {
-	if x != nil {
-		return x.ExhaustedUnixNanos
-	}
-	return 0
-}
-
 func (x *PhaseSummary) GetSaturated() uint64 {
 	if x != nil {
 		return x.Saturated
@@ -1909,9 +1881,131 @@ func (x *PhaseSummary) GetSaturated() uint64 {
 	return 0
 }
 
+func (x *PhaseSummary) GetOperationNames() []string {
+	if x != nil {
+		return x.OperationNames
+	}
+	return nil
+}
+
+func (x *PhaseSummary) GetGenerator() *GeneratorStats {
+	if x != nil {
+		return x.Generator
+	}
+	return nil
+}
+
+// GeneratorStats is how the request generator kept up with loadgen. loadgen
+// keeps a buffer of decoded operations (--buffer) between the stream and the
+// senders, fills it before t0, and refills it while the phase runs; an
+// operation waits for the generator when the buffer is empty as a sender (a
+// closed-loop client, or the open loop's scheduler when the operation is due)
+// takes it. A generator that keeps up leaves no operation waiting.
+type GeneratorStats struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Operations read from the stream, in all (taken or still buffered).
+	Read uint64 `protobuf:"varint,1,opt,name=read,proto3" json:"read,omitempty"`
+	// Of the window's operations (as in PhaseSummary's counts): those that
+	// waited for the generator, and the wait of every one (0 for most).
+	Waited        uint64        `protobuf:"varint,2,opt,name=waited,proto3" json:"waited,omitempty"`
+	Wait          *HdrHistogram `protobuf:"bytes,3,opt,name=wait,proto3" json:"wait,omitempty"`
+	MaxWaitMicros int64         `protobuf:"varint,4,opt,name=max_wait_micros,json=maxWaitMicros,proto3" json:"max_wait_micros,omitempty"`
+	// The rate the generator and loadgen's decoding produced operations at while
+	// the buffer had room (time blocked on a full buffer excluded, from the first
+	// operation on), operations/s: what the generator can sustain. 0 when no
+	// operation was read.
+	Rate float64 `protobuf:"fixed64,5,opt,name=rate,proto3" json:"rate,omitempty"`
+	// From loadgen's start to a full buffer (the generator's start-up: its
+	// dataset, model and history replay), seconds; before t0.
+	ReadySecs float64 `protobuf:"fixed64,6,opt,name=ready_secs,json=readySecs,proto3" json:"ready_secs,omitempty"`
+	// The buffer's capacity, operations (--buffer).
+	Buffer        uint32 `protobuf:"varint,7,opt,name=buffer,proto3" json:"buffer,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GeneratorStats) Reset() {
+	*x = GeneratorStats{}
+	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GeneratorStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GeneratorStats) ProtoMessage() {}
+
+func (x *GeneratorStats) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GeneratorStats.ProtoReflect.Descriptor instead.
+func (*GeneratorStats) Descriptor() ([]byte, []int) {
+	return file_vibesys_evaluator_v1_loadgen_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GeneratorStats) GetRead() uint64 {
+	if x != nil {
+		return x.Read
+	}
+	return 0
+}
+
+func (x *GeneratorStats) GetWaited() uint64 {
+	if x != nil {
+		return x.Waited
+	}
+	return 0
+}
+
+func (x *GeneratorStats) GetWait() *HdrHistogram {
+	if x != nil {
+		return x.Wait
+	}
+	return nil
+}
+
+func (x *GeneratorStats) GetMaxWaitMicros() int64 {
+	if x != nil {
+		return x.MaxWaitMicros
+	}
+	return 0
+}
+
+func (x *GeneratorStats) GetRate() float64 {
+	if x != nil {
+		return x.Rate
+	}
+	return 0
+}
+
+func (x *GeneratorStats) GetReadySecs() float64 {
+	if x != nil {
+		return x.ReadySecs
+	}
+	return 0
+}
+
+func (x *GeneratorStats) GetBuffer() uint32 {
+	if x != nil {
+		return x.Buffer
+	}
+	return 0
+}
+
 // Capabilities is what `loadgen --capabilities` prints (one message, in the
 // chosen format): what this build implements, so the Python side can refuse
-// a plan it cannot run before deploying anything.
+// a phase it cannot run before deploying anything.
 type Capabilities struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	LoadgenVersion string                 `protobuf:"bytes,1,opt,name=loadgen_version,json=loadgenVersion,proto3" json:"loadgen_version,omitempty"`
@@ -1923,13 +2017,16 @@ type Capabilities struct {
 	Arrivals         []Arrivals    `protobuf:"varint,6,rep,packed,name=arrivals,proto3,enum=vibesys.evaluator.v1.Arrivals" json:"arrivals,omitempty"`
 	ExclusiveKeys    bool          `protobuf:"varint,7,opt,name=exclusive_keys,json=exclusiveKeys,proto3" json:"exclusive_keys,omitempty"`
 	RefEncodings     []RefEncoding `protobuf:"varint,8,rep,packed,name=ref_encodings,json=refEncodings,proto3,enum=vibesys.evaluator.v1.RefEncoding" json:"ref_encodings,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// The phase commands read the request stream of a generator command (after
+	// "--") and report GeneratorStats; the only request input of a phase.
+	RequestStream bool `protobuf:"varint,9,opt,name=request_stream,json=requestStream,proto3" json:"request_stream,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Capabilities) Reset() {
 	*x = Capabilities{}
-	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[17]
+	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1941,7 +2038,7 @@ func (x *Capabilities) String() string {
 func (*Capabilities) ProtoMessage() {}
 
 func (x *Capabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[17]
+	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1954,7 +2051,7 @@ func (x *Capabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Capabilities.ProtoReflect.Descriptor instead.
 func (*Capabilities) Descriptor() ([]byte, []int) {
-	return file_vibesys_evaluator_v1_loadgen_proto_rawDescGZIP(), []int{17}
+	return file_vibesys_evaluator_v1_loadgen_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Capabilities) GetLoadgenVersion() string {
@@ -2013,6 +2110,13 @@ func (x *Capabilities) GetRefEncodings() []RefEncoding {
 	return nil
 }
 
+func (x *Capabilities) GetRequestStream() bool {
+	if x != nil {
+		return x.RequestStream
+	}
+	return false
+}
+
 // SelftestResult is what `loadgen selftest` writes: its limits on this pod,
 // measured against an in-process HTTP server that answers at once (the server
 // shares loadgen's process and CPUs, so the limits are conservative).
@@ -2035,7 +2139,7 @@ type SelftestResult struct {
 
 func (x *SelftestResult) Reset() {
 	*x = SelftestResult{}
-	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[18]
+	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2047,7 +2151,7 @@ func (x *SelftestResult) String() string {
 func (*SelftestResult) ProtoMessage() {}
 
 func (x *SelftestResult) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[18]
+	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2060,7 +2164,7 @@ func (x *SelftestResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelftestResult.ProtoReflect.Descriptor instead.
 func (*SelftestResult) Descriptor() ([]byte, []int) {
-	return file_vibesys_evaluator_v1_loadgen_proto_rawDescGZIP(), []int{18}
+	return file_vibesys_evaluator_v1_loadgen_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SelftestResult) GetMaxRate() float64 {
@@ -2112,7 +2216,7 @@ type Template_Part struct {
 
 func (x *Template_Part) Reset() {
 	*x = Template_Part{}
-	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[19]
+	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2124,7 +2228,7 @@ func (x *Template_Part) String() string {
 func (*Template_Part) ProtoMessage() {}
 
 func (x *Template_Part) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[19]
+	mi := &file_vibesys_evaluator_v1_loadgen_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2191,10 +2295,9 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\x0eschema_version\x18\x01 \x01(\rB\a\xbaH\x04*\x02(\x01R\rschemaVersion\x12>\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1e.vibesys.evaluator.v1.FileKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1f\n" +
-	"\x06writer\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06writer\"\x80\x01\n" +
+	"\x06writer\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06writer\"n\n" +
 	"\x0eRequestsHeader\x12O\n" +
-	"\x0foperation_names\x18\x01 \x03(\tB&\xbaH#\x92\x01 \b\x01\x18\x01\"\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$R\x0eoperationNames\x12\x1d\n" +
-	"\x05count\x18\x02 \x01(\x04B\a\xbaH\x042\x02(\x01R\x05count\"\xbe\x01\n" +
+	"\x0foperation_names\x18\x01 \x03(\tB&\xbaH#\x92\x01 \b\x01\x18\x01\"\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$R\x0eoperationNamesJ\x04\b\x02\x10\x03R\x05count\"\xbe\x01\n" +
 	"\x10PlannedOperation\x12\x1c\n" +
 	"\toperation\x18\x01 \x01(\rR\toperation\x12<\n" +
 	"\x05steps\x18\x02 \x03(\v2\x1a.vibesys.evaluator.v1.StepB\n" +
@@ -2272,7 +2375,8 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\toperation\x18\x01 \x01(\rR\toperation\x12\x1c\n" +
 	"\tcompleted\x18\x02 \x01(\x04R\tcompleted\x12\x16\n" +
 	"\x06errors\x18\x03 \x01(\x04R\x06errors\x12D\n" +
-	"\alatency\x18\x04 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\alatency\"\xbd\t\n" +
+	"\alatency\x18\x04 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\alatency\"\x86\n" +
+	"\n" +
 	"\fPhaseSummary\x12A\n" +
 	"\x05model\x18\x01 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05model\x121\n" +
@@ -2293,18 +2397,27 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\x13max_send_lag_micros\x18\x0e \x01(\x03B\a\xbaH\x04\"\x02(\x00R\x10maxSendLagMicros\x12I\n" +
 	"\x0eexclusive_wait\x18\x0f \x01(\v2\".vibesys.evaluator.v1.HdrHistogramR\rexclusiveWait\x12B\n" +
 	"\x14loadgen_cpu_fraction\x18\x10 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x12loadgenCpuFraction\x12\x1c\n" +
-	"\tsustained\x18\x11 \x01(\bR\tsustained\x12\x1c\n" +
-	"\texhausted\x18\x12 \x01(\bR\texhausted\x12D\n" +
+	"\tsustained\x18\x11 \x01(\bR\tsustained\x12D\n" +
 	"\alatency\x18\x13 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\alatency\x12F\n" +
 	"\n" +
 	"operations\x18\x14 \x03(\v2&.vibesys.evaluator.v1.OperationSummaryR\n" +
 	"operations\x12'\n" +
-	"\x0fresults_spilled\x18\x15 \x01(\x04R\x0eresultsSpilled\x129\n" +
-	"\x14exhausted_unix_nanos\x18\x16 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\x12exhaustedUnixNanos\x12\x1c\n" +
-	"\tsaturated\x18\x17 \x01(\x04R\tsaturated\x1a?\n" +
+	"\x0fresults_spilled\x18\x15 \x01(\x04R\x0eresultsSpilled\x12\x1c\n" +
+	"\tsaturated\x18\x17 \x01(\x04R\tsaturated\x12'\n" +
+	"\x0foperation_names\x18\x18 \x03(\tR\x0eoperationNames\x12J\n" +
+	"\tgenerator\x18\x19 \x01(\v2$.vibesys.evaluator.v1.GeneratorStatsB\x06\xbaH\x03\xc8\x01\x01R\tgenerator\x1a?\n" +
 	"\x11ErrorsByKindEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\x8c\x04\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01J\x04\b\x12\x10\x13J\x04\b\x16\x10\x17R\texhaustedR\x14exhausted_unix_nanos\"\x9c\x02\n" +
+	"\x0eGeneratorStats\x12\x12\n" +
+	"\x04read\x18\x01 \x01(\x04R\x04read\x12\x16\n" +
+	"\x06waited\x18\x02 \x01(\x04R\x06waited\x12>\n" +
+	"\x04wait\x18\x03 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\x04wait\x12/\n" +
+	"\x0fmax_wait_micros\x18\x04 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\rmaxWaitMicros\x12$\n" +
+	"\x04rate\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x04rate\x12/\n" +
+	"\n" +
+	"ready_secs\x18\x06 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\treadySecs\x12\x16\n" +
+	"\x06buffer\x18\a \x01(\rR\x06buffer\"\xb3\x04\n" +
 	"\fCapabilities\x120\n" +
 	"\x0floadgen_version\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x0eloadgenVersion\x125\n" +
 	"\x12min_schema_version\x18\x02 \x01(\rB\a\xbaH\x04*\x02(\x01R\x10minSchemaVersion\x125\n" +
@@ -2313,7 +2426,8 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\x06models\x18\x05 \x03(\x0e2\x1f.vibesys.evaluator.v1.LoadModelB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\x06models\x12K\n" +
 	"\barrivals\x18\x06 \x03(\x0e2\x1e.vibesys.evaluator.v1.ArrivalsB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\barrivals\x12%\n" +
 	"\x0eexclusive_keys\x18\a \x01(\bR\rexclusiveKeys\x12W\n" +
-	"\rref_encodings\x18\b \x03(\x0e2!.vibesys.evaluator.v1.RefEncodingB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\frefEncodings\"\xaf\x02\n" +
+	"\rref_encodings\x18\b \x03(\x0e2!.vibesys.evaluator.v1.RefEncodingB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\frefEncodings\x12%\n" +
+	"\x0erequest_stream\x18\t \x01(\bR\rrequestStream\"\xaf\x02\n" +
 	"\x0eSelftestResult\x12+\n" +
 	"\bmax_rate\x18\x01 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00R\amaxRate\x12O\n" +
 	"\radded_latency\x18\x02 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\faddedLatency\x129\n" +
@@ -2373,7 +2487,7 @@ func file_vibesys_evaluator_v1_loadgen_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_evaluator_v1_loadgen_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
-var file_vibesys_evaluator_v1_loadgen_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_vibesys_evaluator_v1_loadgen_proto_msgTypes = make([]protoimpl.MessageInfo, 22)
 var file_vibesys_evaluator_v1_loadgen_proto_goTypes = []any{
 	(FileKind)(0),            // 0: vibesys.evaluator.v1.FileKind
 	(HttpMethod)(0),          // 1: vibesys.evaluator.v1.HttpMethod
@@ -2399,10 +2513,11 @@ var file_vibesys_evaluator_v1_loadgen_proto_goTypes = []any{
 	(*HdrHistogram)(nil),     // 21: vibesys.evaluator.v1.HdrHistogram
 	(*OperationSummary)(nil), // 22: vibesys.evaluator.v1.OperationSummary
 	(*PhaseSummary)(nil),     // 23: vibesys.evaluator.v1.PhaseSummary
-	(*Capabilities)(nil),     // 24: vibesys.evaluator.v1.Capabilities
-	(*SelftestResult)(nil),   // 25: vibesys.evaluator.v1.SelftestResult
-	(*Template_Part)(nil),    // 26: vibesys.evaluator.v1.Template.Part
-	nil,                      // 27: vibesys.evaluator.v1.PhaseSummary.ErrorsByKindEntry
+	(*GeneratorStats)(nil),   // 24: vibesys.evaluator.v1.GeneratorStats
+	(*Capabilities)(nil),     // 25: vibesys.evaluator.v1.Capabilities
+	(*SelftestResult)(nil),   // 26: vibesys.evaluator.v1.SelftestResult
+	(*Template_Part)(nil),    // 27: vibesys.evaluator.v1.Template.Part
+	nil,                      // 28: vibesys.evaluator.v1.PhaseSummary.ErrorsByKindEntry
 }
 var file_vibesys_evaluator_v1_loadgen_proto_depIdxs = []int32{
 	0,  // 0: vibesys.evaluator.v1.FileHeader.kind:type_name -> vibesys.evaluator.v1.FileKind
@@ -2418,7 +2533,7 @@ var file_vibesys_evaluator_v1_loadgen_proto_depIdxs = []int32{
 	12, // 10: vibesys.evaluator.v1.HttpCall.form:type_name -> vibesys.evaluator.v1.Form
 	13, // 11: vibesys.evaluator.v1.Form.fields:type_name -> vibesys.evaluator.v1.Param
 	15, // 12: vibesys.evaluator.v1.Param.value:type_name -> vibesys.evaluator.v1.Template
-	26, // 13: vibesys.evaluator.v1.Template.parts:type_name -> vibesys.evaluator.v1.Template.Part
+	27, // 13: vibesys.evaluator.v1.Template.parts:type_name -> vibesys.evaluator.v1.Template.Part
 	2,  // 14: vibesys.evaluator.v1.Ref.encoding:type_name -> vibesys.evaluator.v1.RefEncoding
 	19, // 15: vibesys.evaluator.v1.OperationResult.steps:type_name -> vibesys.evaluator.v1.StepResult
 	3,  // 16: vibesys.evaluator.v1.OperationResult.error:type_name -> vibesys.evaluator.v1.ErrorKind
@@ -2426,22 +2541,24 @@ var file_vibesys_evaluator_v1_loadgen_proto_depIdxs = []int32{
 	3,  // 18: vibesys.evaluator.v1.StepResult.error:type_name -> vibesys.evaluator.v1.ErrorKind
 	21, // 19: vibesys.evaluator.v1.OperationSummary.latency:type_name -> vibesys.evaluator.v1.HdrHistogram
 	4,  // 20: vibesys.evaluator.v1.PhaseSummary.model:type_name -> vibesys.evaluator.v1.LoadModel
-	27, // 21: vibesys.evaluator.v1.PhaseSummary.errors_by_kind:type_name -> vibesys.evaluator.v1.PhaseSummary.ErrorsByKindEntry
+	28, // 21: vibesys.evaluator.v1.PhaseSummary.errors_by_kind:type_name -> vibesys.evaluator.v1.PhaseSummary.ErrorsByKindEntry
 	21, // 22: vibesys.evaluator.v1.PhaseSummary.send_lag:type_name -> vibesys.evaluator.v1.HdrHistogram
 	21, // 23: vibesys.evaluator.v1.PhaseSummary.exclusive_wait:type_name -> vibesys.evaluator.v1.HdrHistogram
 	21, // 24: vibesys.evaluator.v1.PhaseSummary.latency:type_name -> vibesys.evaluator.v1.HdrHistogram
 	22, // 25: vibesys.evaluator.v1.PhaseSummary.operations:type_name -> vibesys.evaluator.v1.OperationSummary
-	6,  // 26: vibesys.evaluator.v1.Capabilities.calls:type_name -> vibesys.evaluator.v1.CallKind
-	4,  // 27: vibesys.evaluator.v1.Capabilities.models:type_name -> vibesys.evaluator.v1.LoadModel
-	5,  // 28: vibesys.evaluator.v1.Capabilities.arrivals:type_name -> vibesys.evaluator.v1.Arrivals
-	2,  // 29: vibesys.evaluator.v1.Capabilities.ref_encodings:type_name -> vibesys.evaluator.v1.RefEncoding
-	21, // 30: vibesys.evaluator.v1.SelftestResult.added_latency:type_name -> vibesys.evaluator.v1.HdrHistogram
-	16, // 31: vibesys.evaluator.v1.Template.Part.ref:type_name -> vibesys.evaluator.v1.Ref
-	32, // [32:32] is the sub-list for method output_type
-	32, // [32:32] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	24, // 26: vibesys.evaluator.v1.PhaseSummary.generator:type_name -> vibesys.evaluator.v1.GeneratorStats
+	21, // 27: vibesys.evaluator.v1.GeneratorStats.wait:type_name -> vibesys.evaluator.v1.HdrHistogram
+	6,  // 28: vibesys.evaluator.v1.Capabilities.calls:type_name -> vibesys.evaluator.v1.CallKind
+	4,  // 29: vibesys.evaluator.v1.Capabilities.models:type_name -> vibesys.evaluator.v1.LoadModel
+	5,  // 30: vibesys.evaluator.v1.Capabilities.arrivals:type_name -> vibesys.evaluator.v1.Arrivals
+	2,  // 31: vibesys.evaluator.v1.Capabilities.ref_encodings:type_name -> vibesys.evaluator.v1.RefEncoding
+	21, // 32: vibesys.evaluator.v1.SelftestResult.added_latency:type_name -> vibesys.evaluator.v1.HdrHistogram
+	16, // 33: vibesys.evaluator.v1.Template.Part.ref:type_name -> vibesys.evaluator.v1.Ref
+	34, // [34:34] is the sub-list for method output_type
+	34, // [34:34] is the sub-list for method input_type
+	34, // [34:34] is the sub-list for extension type_name
+	34, // [34:34] is the sub-list for extension extendee
+	0,  // [0:34] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_evaluator_v1_loadgen_proto_init() }
@@ -2466,7 +2583,7 @@ func file_vibesys_evaluator_v1_loadgen_proto_init() {
 		(*StepResult_Body)(nil),
 		(*StepResult_Digest)(nil),
 	}
-	file_vibesys_evaluator_v1_loadgen_proto_msgTypes[19].OneofWrappers = []any{
+	file_vibesys_evaluator_v1_loadgen_proto_msgTypes[20].OneofWrappers = []any{
 		(*Template_Part_Literal)(nil),
 		(*Template_Part_Ref)(nil),
 	}
@@ -2476,7 +2593,7 @@ func file_vibesys_evaluator_v1_loadgen_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_evaluator_v1_loadgen_proto_rawDesc), len(file_vibesys_evaluator_v1_loadgen_proto_rawDesc)),
 			NumEnums:      7,
-			NumMessages:   21,
+			NumMessages:   22,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

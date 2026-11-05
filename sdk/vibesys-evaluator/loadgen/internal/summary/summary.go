@@ -6,6 +6,9 @@ package summary
 import (
 	"encoding/base64"
 	"fmt"
+	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	hdr "github.com/HdrHistogram/hdrhistogram-go"
 
@@ -31,10 +34,12 @@ func (w Window) Secs() float64 { return float64(w.End-w.Start) / 1e9 }
 func (w Window) Contains(t int64) bool { return t >= w.Start && t < w.End }
 
 // Record is one result plus when a sender took it up (after any send lag, before any wait for its
-// exclusive key); Picked is 0 for an operation that was never sent.
+// exclusive key; Picked is 0 for an operation that was never sent) and how long the sender waited
+// for the generator to produce it.
 type Record struct {
-	Result *pb.OperationResult
-	Picked int64
+	Result        *pb.OperationResult
+	Picked        int64
+	GeneratorWait time.Duration
 }
 
 // Aggregator accumulates records. It is not safe for concurrent use.
@@ -47,7 +52,10 @@ type Aggregator struct {
 	perOpErrors   []uint64
 	sendLag       *hdr.Histogram
 	exclusiveWait *hdr.Histogram
+	generatorWait *hdr.Histogram
 	maxLagNanos   int64
+	maxGenNanos   int64
+	genWaited     uint64
 	sent          uint64
 	started       uint64
 	completed     uint64
@@ -65,6 +73,7 @@ func New(window Window, names []string) *Aggregator {
 		latency:       newHistogram(),
 		sendLag:       newHistogram(),
 		exclusiveWait: newHistogram(),
+		generatorWait: newHistogram(),
 		perOp:         make([]*hdr.Histogram, len(names)),
 		perOpDone:     make([]uint64, len(names)),
 		perOpErrors:   make([]uint64, len(names)),
@@ -96,6 +105,12 @@ func (a *Aggregator) Add(r Record) {
 	}
 	op := result.GetOperation()
 	a.completed++
+	wait := r.GeneratorWait.Nanoseconds()
+	record(a.generatorWait, wait)
+	a.maxGenNanos = max(a.maxGenNanos, wait)
+	if wait > 0 {
+		a.genWaited++
+	}
 	a.perOpDone[op]++
 	failed := result.GetError() != pb.ErrorKind_ERROR_KIND_UNSPECIFIED
 	if failed {
@@ -130,23 +145,12 @@ type Phase struct {
 	Clients      uint32
 	CPUFraction  float64
 	MinSustained float64
-	Exhausted    bool
-	// ExhaustedAt is when an exhausted closed loop stopped (its last operation's end), Unix
-	// nanoseconds; 0 otherwise.
-	ExhaustedAt int64
 	// Saturated counts the open loop's window operations that waited for a busy sender.
 	Saturated      uint64
 	ResultsSpilled uint64
-}
-
-// ranSecs is how long the window ran: its length, or for an exhausted closed loop the part of
-// it before the loop stopped (0 when it stopped before the window).
-func (a *Aggregator) ranSecs(phase Phase) float64 {
-	if phase.Model != pb.LoadModel_LOAD_MODEL_CLOSED || !phase.Exhausted || phase.ExhaustedAt == 0 {
-		return a.window.Secs()
-	}
-	end := min(phase.ExhaustedAt, a.window.End)
-	return max(float64(end-a.window.Start)/1e9, 0)
+	// Generator is the stream's own GeneratorStats (read, rate, ready_secs, buffer); the
+	// summary adds the senders' waits.
+	Generator *pb.GeneratorStats
 }
 
 func rate(count uint64, secs float64) float64 {
@@ -158,7 +162,7 @@ func rate(count uint64, secs float64) float64 {
 
 // Summary returns the PhaseSummary of the records added so far.
 func (a *Aggregator) Summary(phase Phase) (*pb.PhaseSummary, error) {
-	secs := a.ranSecs(phase)
+	secs := a.window.Secs()
 	summary := &pb.PhaseSummary{
 		Model:                phase.Model,
 		TargetRate:           phase.TargetRate,
@@ -174,11 +178,16 @@ func (a *Aggregator) Summary(phase Phase) (*pb.PhaseSummary, error) {
 		AchievedRate:         rate(a.ended, secs),
 		MaxSendLagMicros:     max(a.maxLagNanos/1000, 0),
 		LoadgenCpuFraction:   max(phase.CPUFraction, 0),
-		Exhausted:            phase.Exhausted,
-		ExhaustedUnixNanos:   max(phase.ExhaustedAt, 0),
 		Saturated:            phase.Saturated,
 		ResultsSpilled:       phase.ResultsSpilled,
+		OperationNames:       a.names,
 	}
+	generator := &pb.GeneratorStats{}
+	if phase.Generator != nil {
+		generator = proto.Clone(phase.Generator).(*pb.GeneratorStats)
+	}
+	generator.Waited = a.genWaited
+	generator.MaxWaitMicros = max(a.maxGenNanos/1000, 0)
 	summary.Sustained = phase.Model != pb.LoadModel_LOAD_MODEL_OPEN || summary.GetOfferedRate() >= phase.MinSustained*phase.TargetRate
 	var err error
 	if summary.SendLag, err = Encode(a.sendLag); err != nil {
@@ -190,6 +199,10 @@ func (a *Aggregator) Summary(phase Phase) (*pb.PhaseSummary, error) {
 	if summary.Latency, err = Encode(a.latency); err != nil {
 		return nil, err
 	}
+	if generator.Wait, err = Encode(a.generatorWait); err != nil {
+		return nil, err
+	}
+	summary.Generator = generator
 	for i := range a.names {
 		latency, err := Encode(a.perOp[i])
 		if err != nil {

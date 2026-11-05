@@ -8,7 +8,7 @@ in virtual time.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, Unpack
 
 import pytest
 
@@ -26,7 +26,7 @@ from vs_evaluator_protocol.api import Measurement, parse_records, read_measureme
 
 from .vse_support import kv
 from .vse_support.fake_loadgen import FakeLoadgen
-from .vse_support.runners import InProcessDeployer, InProcessRunner
+from .vse_support.runners import GENERATOR, InProcessDeployer, InProcessGenerator, InProcessRunner
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -52,18 +52,29 @@ def _task(
     )
 
 
-def _deployer(
-    task: Task, service: kv.KvService, loadgen: FakeLoadgen | None = None
-) -> InProcessDeployer:
-    """The in-process deploy layer, with ``loadgen`` (a default Fake) against ``service``."""
+class _Fake(TypedDict, total=False):
+    """Options of the Fake loadgen."""
+
+    cpu_fraction: float
+    send_lag_micros: int
+    never_sent_every: int
+    generator_waited: int
+    step_micros: int
+    senders_saturated: bool
+
+
+def _deployer(task: Task, service: kv.KvService, **fake: Unpack[_Fake]) -> InProcessDeployer:
+    """The in-process deploy layer, with a Fake loadgen (``fake``: its options) against ``service``."""
     data = kv.Data()
+    generator = InProcessGenerator(task)
     runner = InProcessRunner(
         task=PodTask(
             dataset=task.dataset,
-            workload=task.workload,
+            generator=GENERATOR,
             min_sustained_ratio=task.validity.min_sustained_ratio,
         ),
-        loadgen=loadgen or FakeLoadgen(app=service.handle),
+        loadgen=FakeLoadgen(app=service.handle, generator=generator, **fake),
+        commands=generator,
     )
     return InProcessDeployer(runner=runner, seed=lambda: kv.seed_service(service, data))
 
@@ -167,17 +178,13 @@ def test_status_errors_count_against_the_error_rate(tmp_path: Path) -> None:
 
 
 def test_a_saturated_loadgen_fails_the_sample(tmp_path: Path) -> None:
-    deployer = _deployer(
-        _task(), service := kv.KvService(), FakeLoadgen(app=service.handle, cpu_fraction=0.95)
-    )
+    deployer = _deployer(_task(), kv.KvService(), cpu_fraction=0.95)
     _, text = _sample(tmp_path, _task(), deployer)
     assert "may be the bottleneck" in _error(text)
 
 
 def test_late_sending_fails_an_open_loop(tmp_path: Path) -> None:
-    deployer = _deployer(
-        _task(), service := kv.KvService(), FakeLoadgen(app=service.handle, send_lag_micros=5000)
-    )
+    deployer = _deployer(_task(), kv.KvService(), send_lag_micros=5000)
     _, text = _sample(tmp_path, _task(), deployer)
     message = _error(text)
     assert "phase 1" in message
@@ -189,41 +196,61 @@ def test_late_sending_of_an_application_holding_every_sender_is_its_latency(
 ) -> None:
     # Lag from senders all busy with slow responses is the application's queue, which the
     # latency (end - scheduled) already charges it for: not a loadgen verdict.
-    service = kv.KvService()
-    loadgen = FakeLoadgen(app=service.handle, send_lag_micros=5000, senders_saturated=True)
-    code, text = _sample(tmp_path, _task(), _deployer(_task(), service, loadgen))
+    deployer = _deployer(_task(), kv.KvService(), send_lag_micros=5000, senders_saturated=True)
+    code, text = _sample(tmp_path, _task(), deployer)
     assert code == 0, text
     assert _read(text).values is not None
 
 
-def _closed_only(run: ms.Run) -> None:
-    phase = run.closed_loop(clients=4, secs=1, warmup=0.5, max_ops_per_sec=50)
-    run.report({"operations_per_second": phase.ops_per_sec, "latency_ms.p99": phase.p99_ms})
-
-
-def test_an_exhausted_closed_loop_is_retried_once_with_a_larger_plan(tmp_path: Path) -> None:
-    task = _task(benchmark=_closed_only)
-    deployer = _deployer(task, kv.KvService())
-    code, text = _sample(tmp_path, task, deployer)
-    first, second = (phase_pb.PhaseInput.from_binary(j.phase_input) for j in deployer.runner.jobs)
-    assert code == 0, text
-    assert first.max_ops_per_sec == 50
-    # Sized from the rate it sent at until the plan ran out: 4 clients at 20 ms an operation.
-    assert second.max_ops_per_sec >= 2.0 * 200 * 0.95
-    assert second.phase_index == 1
-    assert len(second.history) > 0  # the exhausted attempt's writes stay in the history
-
-
-def test_a_plan_exhausted_twice_fails_naming_the_bound(tmp_path: Path) -> None:
-    task = _task(benchmark=_closed_only)
-    service = kv.KvService()
-    speeding_up = FakeLoadgen(app=service.handle, step_micros_by_run=[10_000, 500])
-    deployer = _deployer(task, service, speeding_up)
-    code, text = _sample(tmp_path, task, deployer)
+def test_busy_senders_do_not_excuse_a_generator_that_falls_behind(tmp_path: Path) -> None:
+    # Saturation (every sender busy) is the application's latency; starvation (waiting for the
+    # generator) is not, and still fails the sample, naming the generator's rate.
+    deployer = _deployer(
+        _task(), kv.KvService(), send_lag_micros=5000, senders_saturated=True, generator_waited=50
+    )
+    _, text = _sample(tmp_path, _task(), deployer)
     message = _error(text)
-    assert code == 1
-    assert "twice" in message
-    assert "raise max_ops_per_sec" in message
+    assert "generator fell behind" in message
+    assert "12345 ops/s" in message
+
+
+def test_a_generator_that_falls_behind_fails_the_sample_naming_its_rate(tmp_path: Path) -> None:
+    deployer = _deployer(_task(), kv.KvService(), generator_waited=50)
+    _, text = _sample(tmp_path, _task(), deployer)
+    message = _error(text)
+    assert "phase 0" in message
+    assert "generator fell behind" in message
+    assert "12345 ops/s" in message
+
+
+def test_a_closed_loop_reads_as_much_of_the_stream_as_its_clients_take(tmp_path: Path) -> None:
+    fast = _task(benchmark=_closed_only)
+    # 4 clients at 2 ms an operation: 3000 operations, far past the Fake's first read of the
+    # stream; the phase is sized by nothing but its clients.
+    deployer = _deployer(fast, kv.KvService(), step_micros=1000)
+    code, text = _sample(tmp_path, fast, deployer)
+    assert code == 0, text
+    output = phase_pb.PhaseOutput.from_binary(
+        (tmp_path / "artifacts/phase-0/output.binpb").read_bytes()
+    )
+    assert output.summary is not None
+    assert output.summary.generator is not None
+    assert output.summary.generator.read >= output.summary.completed >= 1_900
+
+
+def test_the_generator_runs_generate_under_loadgen_then_check(tmp_path: Path) -> None:
+    deployer = _deployer(_task(), kv.KvService())
+    _sample(tmp_path, _task(), deployer)
+    commands = [run[0] for run in deployer.runner.commands.runs]
+    assert commands[-1] == "check"
+    assert set(commands) == {"generate", "check"}
+    first = deployer.runner.commands.runs[0]
+    assert first[first.index("--dataset") + 1].endswith("dataset.json")
+
+
+def _closed_only(run: ms.Run) -> None:
+    phase = run.closed_loop(clients=4, secs=1, warmup=0.5)
+    run.report({"operations_per_second": phase.ops_per_sec, "latency_ms.p99": phase.p99_ms})
 
 
 @pytest.mark.parametrize(
@@ -336,9 +363,7 @@ def test_a_malformed_sample_seed_is_an_error(tmp_path: Path) -> None:
 def test_operations_never_sent_are_errors_and_not_writes(tmp_path: Path) -> None:
     # Every fifth operation is not sent: 80% sustained, 20% errors.
     lenient = _task(validity=vse.Validity(max_error_rate=0.5, min_sustained_ratio=0.5))
-    deployer = _deployer(
-        lenient, service := kv.KvService(), FakeLoadgen(app=service.handle, never_sent_every=5)
-    )
+    deployer = _deployer(lenient, kv.KvService(), never_sent_every=5)
     code, text = _sample(tmp_path, lenient, deployer)
     assert code == 0, text
     output = phase_pb.PhaseOutput.from_binary(
