@@ -370,8 +370,7 @@ func describeResult(r *cliv1.Result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\t", r.GetJobId())
 	if m := r.GetMeasure(); m != nil {
-		fmt.Fprintf(&b, "measure\t%s (%s)\tmean %s over %d samples\tcheck %s", m.GetMetric().GetName(),
-			lower("DIRECTION_", m.GetMetric().GetDirection().String()), number(m.GetValue()), len(m.GetSamples()), m.GetCheckJobId())
+		fmt.Fprintf(&b, "measure\t%s\tcheck %s", strings.Join(headlines(m), "\t"), m.GetCheckJobId())
 	} else {
 		b.WriteString("check\tpassed")
 	}
@@ -380,4 +379,37 @@ func describeResult(r *cliv1.Result) string {
 		fmt.Fprintf(&b, "\ton %s", p)
 	}
 	return b.String()
+}
+
+// headlines is a measurement's headline number on each objective, rounded, in the order the task
+// declares them, as compare and frontier list name them: its one metric for a single-metric task.
+// The scored metric's number is the measurement's value, and every other objective's is the value
+// of the observation of its name. An objective with no samples, or whose samples came from a
+// daemon too old to give their headline, says so in place of a number.
+func headlines(m *cliv1.MeasureResult) []string {
+	objectives := m.GetObjectives().GetMetrics()
+	if len(objectives) == 0 {
+		objectives = []*cliv1.Metric{m.GetMetric()}
+	}
+	out := make([]string, len(objectives))
+	for i, o := range objectives {
+		out[i] = fmt.Sprintf("%s (%s)\t%s", o.GetName(), lower("DIRECTION_", o.GetDirection().String()), headline(m, o.GetName()))
+	}
+	return out
+}
+
+// headline is the number headlines prints for the named objective of a measurement.
+func headline(m *cliv1.MeasureResult, name string) string {
+	if name == m.GetMetric().GetName() {
+		return fmt.Sprintf("mean %s over %d samples", number(m.GetValue()), len(m.GetSamples()))
+	}
+	i := slices.IndexFunc(m.GetObservations(), func(ob *cliv1.Observation) bool { return ob.GetName() == name })
+	if i < 0 || len(m.GetObservations()[i].GetValues()) == 0 {
+		return "no samples"
+	}
+	ob := m.GetObservations()[i]
+	if ob.Value == nil {
+		return fmt.Sprintf("%d samples, no headline from this daemon", len(ob.GetValues()))
+	}
+	return fmt.Sprintf("mean %s over %d samples", number(ob.GetValue()), len(ob.GetValues()))
 }
