@@ -240,6 +240,13 @@ func settingsFromMessage(s *cliv1.JobSpec) (core.Settings, error) {
 			}
 			out.Timeout = timeout.AsDuration()
 		}
+		var err error
+		if out.Profile, err = wire.ToProfileRequest("command.profile", settings.Command.GetProfile()); err != nil {
+			return nil, err
+		}
+		if out.Candidate, err = wire.ToCommandCandidate("command.candidate", settings.Command.GetCandidate()); err != nil {
+			return nil, err
+		}
 		return out, nil
 	case *cliv1.JobSpec_Measure:
 		return core.MeasureSettings{Samples: settings.Measure.GetSamples(), Recheck: settings.Measure.GetRecheck()}, nil
@@ -353,7 +360,7 @@ func resultFromMessage(m *cliv1.Result) (core.Result, error) {
 			SampledAt: instant(m.GetLoad().GetSampledAt()), LoadAverage1m: m.GetLoad().GetLoadAverage_1M(),
 			CPUBusyFraction: m.GetLoad().GetCpuBusyFraction(), MemoryAvailableBytes: m.GetLoad().GetMemoryAvailableBytes(),
 		},
-		RecordedAt: instant(m.GetRecordedAt()),
+		RecordedAt: instant(m.GetRecordedAt()), CandidateImage: m.GetCandidateImage(),
 	}
 	switch o := m.GetOutcome().(type) {
 	case *cliv1.Result_Check:

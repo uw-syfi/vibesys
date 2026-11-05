@@ -79,7 +79,8 @@ func commandCandidate(c *core.CommandCandidate) *cliv1.CandidateSetup {
 	return out
 }
 
-func toCommandCandidate(field string, c *cliv1.CandidateSetup) (*core.CommandCandidate, error) {
+// ToCommandCandidate reads the candidate of a command job, nil when it has none.
+func ToCommandCandidate(field string, c *cliv1.CandidateSetup) (*core.CommandCandidate, error) {
 	if c == nil {
 		return nil, nil
 	}
@@ -105,7 +106,8 @@ func profileRequest(p *core.ProfileRequest) *cliv1.ProfileRequest {
 	return &cliv1.ProfileRequest{Wrap: slices.Clone(p.Wrap)}
 }
 
-func toProfileRequest(field string, p *cliv1.ProfileRequest) (*core.ProfileRequest, error) {
+// ToProfileRequest reads the profile request of a command job, nil when it is not a profile.
+func ToProfileRequest(field string, p *cliv1.ProfileRequest) (*core.ProfileRequest, error) {
 	if p == nil {
 		return nil, nil
 	}

@@ -160,11 +160,11 @@ func ToJobSpec(field string, s *cliv1.JobSpec) (core.JobSpec, error) {
 }
 
 func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSettings, error) {
-	profile, err := toProfileRequest(field+".profile", c.GetProfile())
+	profile, err := ToProfileRequest(field+".profile", c.GetProfile())
 	if err != nil {
 		return core.CommandSettings{}, err
 	}
-	candidate, err := toCommandCandidate(field+".candidate", c.GetCandidate())
+	candidate, err := ToCommandCandidate(field+".candidate", c.GetCandidate())
 	if err != nil {
 		return core.CommandSettings{}, err
 	}
