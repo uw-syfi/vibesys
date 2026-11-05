@@ -10,9 +10,11 @@ syntax = "proto3";
 // line, for debugging (--format json). The first message of every file is a
 // FileHeader; what follows depends on its kind:
 //
-//   requests: FileHeader, RequestsHeader, PlannedOperation...
-//   results:  FileHeader, OperationResult...   (in completion order)
-//   summary:  FileHeader, PhaseSummary
+//   requests:     FileHeader, RequestsHeader, PlannedOperation...
+//   results:      FileHeader, OperationResult...   (in completion order)
+//   summary:      FileHeader, PhaseSummary
+//   selftest:     FileHeader, SelftestResult
+//   capabilities: FileHeader, Capabilities          (loadgen --capabilities, on stdout)
 //
 // Within v1 changes are additive only (`buf breaking`); a reader rejects a
 // file whose schema_version it does not implement.
@@ -28,6 +30,8 @@ enum FileKind {
   FILE_KIND_REQUESTS = 1;
   FILE_KIND_RESULTS = 2;
   FILE_KIND_SUMMARY = 3;
+  FILE_KIND_SELFTEST = 4;
+  FILE_KIND_CAPABILITIES = 5;
 }
 
 // FileHeader is the first message of every file.
@@ -53,9 +57,10 @@ message RequestsHeader {
       string: {pattern: "^[a-z][a-z0-9_]{0,62}$"}
     }
   }];
-  // The number of PlannedOperation messages that follow. An open loop sends
-  // exactly this many; a closed loop sends a prefix and fails the phase as
-  // exhausted if it runs out before the window ends.
+  // The number of PlannedOperation messages that follow; a file with another
+  // number is rejected. Both loops send a prefix of the plan, in plan order: the
+  // operations due before the window ends. A plan that runs out before the
+  // window ends is reported as exhausted (PhaseSummary.exhausted).
   uint64 count = 2 [(buf.validate.field).uint64.gte = 1];
 }
 
@@ -78,7 +83,10 @@ message PlannedOperation {
 }
 
 // Step is one call. A step may use values captured from the responses of
-// earlier steps of the same operation (Template.Part.ref).
+// earlier steps of the same operation (Template.Part.ref); a Ref to a name that
+// no earlier step of the operation captures is rejected with the plan. An
+// operation stops at its first failed step: the later steps are not sent and
+// have no StepResult.
 message Step {
   oneof call {
     option (buf.validate.oneof).required = true;
@@ -111,7 +119,10 @@ enum HttpMethod {
 }
 
 // HttpCall is one HTTP/1.1 request to the phase's target (--target). Query
-// and form values are URL-encoded by loadgen after the templates are filled.
+// and form values are URL-encoded by loadgen after the templates are filled;
+// the path is sent as filled. loadgen sets Content-Type only for a form body
+// (application/x-www-form-urlencoded) without a Content-Type header; a text or
+// raw body carries the Content-Type its headers give.
 message HttpCall {
   HttpMethod method = 1 [(buf.validate.field).enum = {
     defined_only: true
@@ -170,7 +181,8 @@ enum RefEncoding {
   REF_ENCODING_RAW = 1;
   // As the inside of a JSON string literal (escaped, without the quotes).
   REF_ENCODING_JSON_STRING = 2;
-  // As a JSON value: the captured JSON text itself.
+  // As a JSON value: the captured JSON text itself, with the quotes of a
+  // string (a header value is inserted as a JSON string).
   REF_ENCODING_JSON_VALUE = 3;
 }
 
@@ -213,15 +225,19 @@ enum ErrorKind {
   ERROR_KIND_CANCELLED = 5;
 }
 
-// OperationResult is the outcome of one PlannedOperation that loadgen started.
-// Times are Unix nanoseconds of the loadgen pod's clock.
+// OperationResult is the outcome of one PlannedOperation that loadgen took.
+// Times are Unix nanoseconds of the loadgen pod's clock. An open-loop operation
+// that was due in the window but could not be started before the phase's
+// deadline (the window's end plus --timeout) is recorded with error CANCELLED,
+// start 0 and no steps: it was never sent.
 message OperationResult {
   // The position of the PlannedOperation in the requests file, from 0.
   uint64 index = 1;
   uint32 operation = 2;
   // When the operation was due: its arrival time (open loop), or the time a
-  // client became free to send it (closed loop). Latency is end - scheduled
-  // (open) and end - start (closed).
+  // client took it from the plan (closed loop). Latency is end - scheduled in
+  // both: in a closed loop it differs from end - start only by the wait for the
+  // exclusive key, which counts as latency.
   int64 scheduled_unix_nanos = 3;
   // When its first step was sent (after any wait for the exclusive key).
   int64 start_unix_nanos = 4;
@@ -277,7 +293,10 @@ enum Arrivals {
 
 // HdrHistogram is an HDR histogram of durations in microseconds, in the
 // standard compressed V2 encoding that the Go and Python HdrHistogram
-// libraries read and write.
+// libraries read and write. `encoded` holds the encoding's bytes (cookie, then
+// the zlib stream), not the base64 text those libraries' encode functions
+// return: Python reads it with HdrHistogram.decode(base64.b64encode(encoded)).
+// A value above highest_trackable_micros is recorded as that value.
 message HdrHistogram {
   int64 lowest_trackable_micros = 1 [(buf.validate.field).int64.gte = 1];
   int64 highest_trackable_micros = 2 [(buf.validate.field).int64.gt = 1];
@@ -323,8 +342,10 @@ message PhaseSummary {
   // Operations started in the window that completed after it (bounded by the
   // request timeout); counted in completed, not in the throughput.
   uint64 spilled = 10;
-  // The rate operations were sent at, and the rate they completed at within
-  // the window, operations/s. A closed loop's throughput is achieved_rate.
+  // The rate operations were sent at (operations whose first step started in
+  // the window, divided by its length), and the rate they completed at within
+  // the window (completed - spilled, divided by its length), operations/s. A
+  // closed loop's throughput is achieved_rate.
   double offered_rate = 11 [(buf.validate.field).double.finite = true];
   double achieved_rate = 12 [(buf.validate.field).double.finite = true];
   // Send lag: start - scheduled, the time an operation waited for a free
@@ -341,12 +362,16 @@ message PhaseSummary {
   // Open loop: offered_rate reached the Python side's min_sustained_ratio of
   // target_rate (passed as --min-sustained). Closed loop: true.
   bool sustained = 17;
-  // Closed loop: the plan ran out before the window ended; the phase is not
-  // a measurement.
+  // The plan ran out before the window ended (no operation was left to take
+  // or to schedule); the phase is not a measurement.
   bool exhausted = 18;
   // The latency of every operation, and of each operation.
   HdrHistogram latency = 19 [(buf.validate.field).required = true];
   repeated OperationSummary operations = 20;
+  // Results that went through loadgen's spill file because the results file
+  // was written slower than operations completed; they are in the results file
+  // all the same. Diagnosis only.
+  uint64 results_spilled = 21;
 }
 
 // CallKind is a kind of Step.call.
@@ -384,10 +409,11 @@ message Capabilities {
 }
 
 // SelftestResult is what `loadgen selftest` writes: its limits on this pod,
-// measured against an in-process HTTP server that answers at once.
+// measured against an in-process HTTP server that answers at once (the server
+// shares loadgen's process and CPUs, so the limits are conservative).
 message SelftestResult {
-  // The highest open-loop rate it sustained with send lag below its guard,
-  // operations/s.
+  // The highest open-loop rate it sustained (offered rate at least 99% of the
+  // target, p99 send lag at most 1 ms), operations/s.
   double max_rate = 1 [(buf.validate.field).double = {
     gt: 0
     finite: true
@@ -395,4 +421,15 @@ message SelftestResult {
   // The latency it adds at half that rate.
   HdrHistogram added_latency = 2 [(buf.validate.field).required = true];
   double loadgen_cpu_fraction = 3 [(buf.validate.field).double.finite = true];
+  // The CPUs loadgen may use (its cgroup quota, or the machine's CPUs), so the
+  // rate per CPU is max_rate / cpus.
+  double cpus = 4 [(buf.validate.field).double = {
+    gt: 0
+    finite: true
+  }];
+  // The rate added_latency and loadgen_cpu_fraction were measured at.
+  double added_latency_rate = 5 [(buf.validate.field).double = {
+    gt: 0
+    finite: true
+  }];
 }
