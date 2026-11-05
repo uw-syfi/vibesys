@@ -23,7 +23,7 @@ import heapq
 import io
 import itertools
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Buffer, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
@@ -111,8 +111,8 @@ class Capped(io.BytesIO):
         super().__init__()
         self.cap = cap
 
-    def write(self, data: bytes | bytearray | memoryview, /) -> int:  # type: ignore[override]
-        if self.tell() + len(data) > self.cap:
+    def write(self, data: Buffer, /) -> int:
+        if self.tell() + memoryview(data).nbytes > self.cap:
             raise BrokenPipeError
         return super().write(data)
 
