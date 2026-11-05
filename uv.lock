@@ -3172,12 +3172,14 @@ source = { editable = "sdk/vibesys-evaluator/python" }
 dependencies = [
     { name = "protobuf-py" },
     { name = "protovalidate" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "protovalidate", specifier = "==2.0.0" },
+    { name = "pyyaml", specifier = "==6.0.3" },
 ]
 
 [[package]]

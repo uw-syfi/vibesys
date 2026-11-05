@@ -8,11 +8,13 @@ version = "0.1.0"
 description = "Build VibeSys benchmark evaluators for services: workloads, phases, validation"
 requires-python = ">=3.12"
 license = "MIT"
-# The schema's generated Python types (protoc-gen-py) and their validation. Nothing else:
-# the package runs in every task image, and the task's own code brings its own clients.
+# The schema's generated Python types (protoc-gen-py) and their validation, and a YAML
+# parser for the tasks' Kubernetes manifests (deploy.k8s). Nothing else: the package runs in
+# every task image, and the task's own code brings its own clients.
 dependencies = [
     "protobuf-py==0.6.0",
     "protovalidate==2.0.0",
+    "pyyaml==6.0.3",
 ]
 
 [tool.setuptools.packages.find]
