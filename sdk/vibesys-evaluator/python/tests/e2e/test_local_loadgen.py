@@ -232,7 +232,7 @@ def _phase_input(path: Path) -> Path:
 
 def _stream(argv: list[str], env: dict[str, str]) -> bytes:
     """The first ``STREAM_BYTES`` of a generator's stream; then the stream is closed, as loadgen does."""
-    # lint-waiver: LW-150404 [S603]; argv is this test's script or the Go generator it built.
+    # lint-waiver: LW-150407 [S603]; argv is this test's script or the Go generator it built.
     with subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as child:  # noqa: S603
         assert child.stdout is not None
         data = child.stdout.read(STREAM_BYTES)
