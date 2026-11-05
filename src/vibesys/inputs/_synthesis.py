@@ -137,7 +137,7 @@ def _build_manifest_dict(spec: SynthesizedInputSpec) -> dict[str, object]:
         }
 
     manifest: dict[str, object] = {
-        "version": 1,
+        "version": "0.1",
         "agent": {"domain": str(spec.domain)},
         "accuracy": accuracy,
         "benchmark": benchmark,
@@ -156,7 +156,7 @@ def _render_manifest_toml(spec: SynthesizedInputSpec) -> str:
     same shape is validated eagerly via :func:`_build_manifest_dict`.
     """
     lines: list[str] = [
-        "version = 1",
+        'version = "0.1"',
         "",
         "[agent]",
         f"domain = {_toml_string(str(spec.domain))}",

@@ -1569,7 +1569,7 @@ def test_isolated_environment_enforces_project_path_policy(
     (project / ".git").mkdir(parents=True)
     (project / ".state" / "local").mkdir(parents=True)
     (project / ".state" / "project.json").write_text("{}\n")
-    (project / "vibesys.input.toml").write_text("version = 1\n")
+    (project / "vibesys.input.toml").write_text('version = "0.1"\n')
     (project / "agent.toml").write_text("[model]\nname = 'private'\n")
     policy = ProjectPathPolicy(
         read_only_paths=(".git", ".state", "vibesys.input.toml"),

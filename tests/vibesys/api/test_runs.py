@@ -68,7 +68,7 @@ def request_template(tmp_path: Path) -> RunRequest:
     (root / "queue.py").write_text("VALUE = 1\n")
     write_task(
         root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
         objective="Improve the queue.\n",
     )
@@ -270,7 +270,7 @@ def _run_keeping_a_candidate(
     """Run ``strategy`` publicly over a task whose benchmark passes; its one turn commits."""
     write_task(
         request_template.project_root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n'
         '[benchmark]\ncommand = ["true"]\nresult_protocol = 2\n',
         objective="Improve the queue.\n",

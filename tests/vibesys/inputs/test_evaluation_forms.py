@@ -31,7 +31,7 @@ def _command(entrypoint: str, args: list[str], timeout: int | None) -> dict[str,
 
 def _base() -> dict[str, object]:
     return {
-        "version": 1,
+        "version": "0.1",
         "agent": {"domain": "generic"},
         "evaluator": {"name": "vibesys-evaluator-queue", "version": "0.1.0"},
     }

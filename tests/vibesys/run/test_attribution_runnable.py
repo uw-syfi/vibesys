@@ -77,7 +77,7 @@ def _request(root: Path, environment: str, loop: str, command: list[str]) -> Run
     project.mkdir(exist_ok=True)
     write_task(
         project,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
     )
     spec = RunEnvironmentSpec(environment)

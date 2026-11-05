@@ -40,7 +40,7 @@ def write_project(root: Path) -> None:
     (root / "benchmark.py").write_text("print('ok')\n")
     write_task(
         root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n'
         f"[benchmark]\ncommand = {json.dumps(['python', 'benchmark.py'])}\n",
         objective="Make the queue faster.\n",

@@ -47,7 +47,7 @@ def _write_project(root: Path) -> None:
     (root / "progress.md").write_text("round 1: baseline\n")
     write_task(
         root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
         objective="Improve the queue.\n",
     )

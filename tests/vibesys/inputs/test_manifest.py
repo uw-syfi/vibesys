@@ -20,6 +20,7 @@ from vibesys.inputs import (
     InputManifest,
     InputManifestParseError,
     WorkspaceSource,
+    load_input_manifest,
     load_task,
     render_input_manifest,
 )
@@ -138,7 +139,7 @@ def test_benchmark_result_rejects_invalid_fields(fields: dict[str, str], message
 def test_benchmark_result_protocol_round_trips_at_the_benchmark_table() -> None:
     manifest = InputManifest.model_validate(
         {
-            "version": 1,
+            "version": "0.1",
             "agent": {"domain": "generic"},
             "accuracy": {"command": ["python", "acc.py"]},
             "benchmark": {
@@ -154,7 +155,7 @@ def test_benchmark_result_protocol_round_trips_at_the_benchmark_table() -> None:
     assert (
         rendered
         == """\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"
@@ -183,7 +184,7 @@ def test_benchmark_contract_alternatives_round_trip_through_manifest_toml(
         benchmark["result_protocol"] = contract
     manifest = InputManifest.model_validate(
         {
-            "version": 1,
+            "version": "0.1",
             "agent": {"domain": "generic"},
             "accuracy": {"command": ["python", "acc.py"]},
             "benchmark": benchmark,
@@ -197,7 +198,7 @@ def test_benchmark_contract_alternatives_round_trip_through_manifest_toml(
 
 def _manifest(overrides: dict[str, Any]) -> dict[str, Any]:
     document: dict[str, Any] = {
-        "version": 1,
+        "version": "0.1",
         "agent": {"domain": "generic"},
         "accuracy": {"command": ["python", "acc.py"]},
         "benchmark": {"command": ["python", "bench.py"]},
@@ -234,6 +235,43 @@ def test_manifest_rejects_inconsistent_cross_references(
         InputManifest.model_validate(_manifest(overrides))
 
 
+def test_integer_version_1_is_refused_naming_the_string_version() -> None:
+    with pytest.raises(
+        ValidationError, match=r'version = 1 is no longer .* write version = "0\.1"'
+    ):
+        InputManifest.model_validate(_manifest({"version": 1}))
+
+
+def test_a_two_image_task_is_refused_pointing_at_vibesys_cli() -> None:
+    with pytest.raises(ValidationError, match=r"'0\.2' is not one this VibeSys reads.*vibesys-cli"):
+        InputManifest.model_validate(_manifest({"version": "0.2"}))
+
+
+_OTHER_VERSIONS = st.one_of(
+    st.text(max_size=8).filter(lambda value: value != "0.1"),
+    st.integers().filter(lambda value: value != 1),
+    st.floats(allow_nan=False),
+    st.booleans(),
+)
+
+
+@given(version=_OTHER_VERSIONS)
+def test_every_version_but_0_1_is_refused_naming_it(version: object) -> None:
+    with pytest.raises(ValidationError) as raised:
+        InputManifest.model_validate(_manifest({"version": version}))
+    assert repr(version) in str(raised.value)
+    assert "vibesys-cli" in str(raised.value)
+
+
+def test_load_input_manifest_names_the_file_and_the_version(tmp_path: Path) -> None:
+    write_task(
+        tmp_path,
+        _VALID_TOML.replace('version = "0.1"', 'version = "0.2"').format(benchmark="python"),
+    )
+    with pytest.raises(InputManifestParseError, match=r"'0\.2'.*vibesys-cli"):
+        load_input_manifest(task_path(tmp_path) / "vibesys.input.toml")
+
+
 _PLAIN_PATH = st.lists(
     st.text(alphabet="abcXYZ019_-.", min_size=1, max_size=6).filter(
         lambda part: part not in {".", ".."}
@@ -268,7 +306,7 @@ def test_an_unread_path_that_is_not_plain_is_rejected_naming_it(path: str) -> No
         InputManifest.model_validate(_manifest({"workspace": {"unread": [path]}}))
 
 
-_VALID_TOML = """version = 1
+_VALID_TOML = """version = "0.1"
 [agent]
 domain = "generic"
 [accuracy]
@@ -430,7 +468,7 @@ def test_profile_workload_is_a_strict_trusted_command_roundtrip(
 ) -> None:
     manifest = InputManifest.model_validate(
         {
-            "version": 1,
+            "version": "0.1",
             "agent": {"domain": "generic"},
             "accuracy": {"command": ["python", "accuracy.py"]},
             "benchmark": {"entrypoint": "request-factory-adapter", "args": ["benchmark/run.py"]},

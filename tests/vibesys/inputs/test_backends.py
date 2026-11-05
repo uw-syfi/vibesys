@@ -18,7 +18,7 @@ _BACKENDS = st.lists(st.sampled_from(list(ComputeBackend)), max_size=5, unique=T
 
 def _manifest(**fields: object) -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": "0.1",
         "agent": {"domain": "generic"},
         "accuracy": {"command": ["check"]},
         "benchmark": {"command": ["measure"]},

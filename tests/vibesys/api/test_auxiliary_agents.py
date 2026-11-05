@@ -172,7 +172,7 @@ def _request(tmp_path: Path) -> tuple[RunRequest, OrchestrationRegistry]:
     input_root.mkdir()
     write_task(
         input_root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
         objective="Test auxiliary agents.\n",
     )

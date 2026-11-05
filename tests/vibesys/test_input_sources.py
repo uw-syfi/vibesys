@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.example_registry import is_cli_task
 from tests.support.task_project import task_path, write_task
 
 from vibesys.inputs import (
@@ -30,6 +31,8 @@ def example_input_bundles(repo_root: Path) -> tuple[InputBundle, ...]:
     manifests = sorted((repo_root / "examples").glob(f"**/{MANIFEST_NAME}"))
     bundles: list[InputBundle] = []
     for manifest in manifests:
+        if is_cli_task(manifest):
+            continue
         project = Project.discover(manifest)
         task = next(
             task for task in project.discover_tasks() if task.manifest_path == manifest.resolve()
@@ -46,7 +49,7 @@ def _write_bundle(project_root: Path, manifest_blocks: str = "", domain: str = "
     write_task(
         project_root,
         f"""
-version = 1
+version = "0.1"
 
 [agent]
 domain = "{domain}"
@@ -99,7 +102,7 @@ def test_repository_task_exposes_its_optional_dockerfile(tmp_path: Path) -> None
     task_root.mkdir(parents=True)
     (task_root / "OBJECTIVE.md").write_text("Build a queue.\n", encoding="utf-8")
     (task_root / "vibesys.input.toml").write_text(
-        """version = 1
+        """version = "0.1"
 
 [agent]
 domain = "generic"

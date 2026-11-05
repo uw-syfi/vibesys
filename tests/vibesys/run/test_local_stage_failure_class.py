@@ -177,7 +177,7 @@ def _write_project(root: Path) -> None:
     (root / "benchmark.py").write_text("print('unused: the sandbox is a Fake')\n")
     write_task(
         root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         f"[accuracy]\ncommand = {json.dumps([_ACCURACY])}\n"
         f"[benchmark]\ncommand = {json.dumps(_BENCHMARK.split())}\n"
         '[benchmark.result]\njson_argument = "--output-json"\nmetric = "throughput"\n',

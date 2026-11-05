@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import configparser
 import os
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,17 @@ def load_registry() -> Registry:
 def example_root(entry: ExampleEntry) -> Path:
     """Absolute root of a registered example in this checkout."""
     return REPO_ROOT / entry.path
+
+
+#: Task schema versions only vibesys-cli reads (the two-image format). This app refuses them,
+#: so the checks that read a task through this app's reader cover only the other tasks.
+CLI_SCHEMA_VERSIONS = frozenset({"0.2"})
+
+
+def is_cli_task(manifest: Path) -> bool:
+    """Whether the task at ``manifest`` is written for vibesys-cli rather than this app."""
+    version = tomllib.loads(manifest.read_text(encoding="utf-8")).get("version")
+    return version in CLI_SCHEMA_VERSIONS
 
 
 def require_external_repos() -> bool:

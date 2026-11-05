@@ -52,7 +52,7 @@ def test_repository_task_policy_does_not_protect_legacy_root_names(tmp_path: Pat
     task = project / ".vibesys" / "tasks" / "latency"
     task.mkdir(parents=True)
     (task / "OBJECTIVE.md").write_text("Optimize latency.\n")
-    (task / "vibesys.input.toml").write_text("version = 1\n")
+    (task / "vibesys.input.toml").write_text('version = "0.1"\n')
     for name in ("benchmark", "reference", "accuracy_checker"):
         (project / name).mkdir()
 

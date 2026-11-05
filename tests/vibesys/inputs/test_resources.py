@@ -15,7 +15,7 @@ from vs_project.api import RunResourceRequest
 def _manifest(resources: object) -> InputManifest:
     return InputManifest.model_validate(
         {
-            "version": 1,
+            "version": "0.1",
             "agent": {"domain": DomainName.GENERIC},
             "accuracy": {"command": ("python", "check.py")},
             "benchmark": {"command": ("python", "benchmark.py")},
@@ -28,7 +28,7 @@ def _manifest(resources: object) -> InputManifest:
 def _entrypoint_manifest() -> InputManifest:
     return InputManifest.model_validate(
         {
-            "version": 1,
+            "version": "0.1",
             "agent": {"domain": DomainName.GENERIC},
             "accuracy": {"entrypoint": "accuracy.py"},
             "benchmark": {"entrypoint": "benchmark.py"},
