@@ -16,6 +16,7 @@ resolution-markers = [
 [manifest]
 members = [
     "vibesys",
+    "vibesys-evaluator",
     "vs-agent",
     "vs-async-ops",
     "vs-bench",
@@ -3087,6 +3088,7 @@ dev = [
     { name = "twine" },
     { name = "ty" },
     { name = "types-protobuf" },
+    { name = "vibesys-evaluator" },
     { name = "vs-bench" },
     { name = "vs-dst" },
 ]
@@ -3149,6 +3151,7 @@ dev = [
     { name = "twine" },
     { name = "ty", specifier = "==0.0.75" },
     { name = "types-protobuf", specifier = "==7.35.1.20260906" },
+    { name = "vibesys-evaluator", editable = "sdk/vibesys-evaluator/python" },
     { name = "vs-bench", editable = "sdk/vs-bench" },
     { name = "vs-dst", editable = "libs/vs-dst" },
 ]
@@ -3160,6 +3163,21 @@ test = [
     { name = "hypothesis" },
     { name = "pytest" },
     { name = "pytest-cov" },
+]
+
+[[package]]
+name = "vibesys-evaluator"
+version = "0.1.0"
+source = { editable = "sdk/vibesys-evaluator/python" }
+dependencies = [
+    { name = "protobuf-py" },
+    { name = "protovalidate" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "protobuf-py", specifier = "==0.6.0" },
+    { name = "protovalidate", specifier = "==2.0.0" },
 ]
 
 [[package]]
