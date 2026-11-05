@@ -39,6 +39,11 @@
 	path = examples/microservices/repositories/masa
 	url = https://github.com/vibesys-playground/masa.git
 	branch = vibesys
+	# Its own submodules clone over ssh (git@github.com:pennsail/rajomon,
+	# vic-lsh/alibaba-clusterdata); an installer with no ssh, such as a job
+	# container running `uv sync` on a git source, failed there. An example
+	# repository is nothing the installed package needs.
+	update = none
 	shallow = true
 [submodule "examples/model-serving/repositories/vllm"]
 	path = examples/model-serving/repositories/vllm
