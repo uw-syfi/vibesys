@@ -397,11 +397,9 @@ def benchmark(run: vse.Run) -> None:
     """Closed-loop capacity (2 trials), then p99 at 0.7x of it (3 open-loop trials).
 
     The open phases see every compose and follow change of the closed ones:
-    the run's history carries them (see Model). The plan bound for the
-    closed loop is lower than the default: this application is slower, and a
-    smaller plan is generated faster.
+    the run's history carries them (see Model).
     """
-    closed = [run.closed_loop(clients=32, secs=20, warmup=10, max_ops_per_sec=10_000) for _ in range(2)]
+    closed = [run.closed_loop(clients=32, secs=20, warmup=10) for _ in range(2)]
     throughput = statistics.median(phase.ops_per_sec for phase in closed)
     opened = [run.open_loop(rate=0.7 * throughput, secs=60, warmup=10, arrivals="uniform")
               for _ in range(3)]
