@@ -6,24 +6,22 @@
 //
 // What a container is here:
 //
-//   - The images are built by the caller's own Docker, as everywhere. Before a container of an image
-//     starts, the image is copied to the shared file system as a compressed docker archive named by
-//     its digest (images/<hex>.tar.gz under the remote root), once: a run that finds it there, or
-//     its converted SIF, copies nothing. It is published whole by a rename, so publishers at once
-//     each write a file of their own and one of them wins.
+//   - The images are built by the caller's own Docker, as everywhere, and each is converted to a SIF
+//     on the caller's machine with its apptainer program, in a local directory checked first for
+//     room for the image unpacked, and the SIF is copied to the cluster once, named by its digest
+//     (images/<hex>.sif under the remote root): a run that finds it there converts and copies
+//     nothing. It is published whole by a rename, so publishers at once each write a file of their
+//     own and one of them wins. The cluster's apptainer only runs SIFs.
 //   - A run's first container is a batch allocation of its own (sbatch, or the site's command that
 //     wraps it), named by the container and commented with the scope, never requeued. Once it runs,
 //     a holding process is started on its node, whose input the caller keeps: when the caller closes
 //     it, or dies, the holder cancels the allocation. The second container of a task of two images
 //     joins the first one's allocation, so both run on one node and share its network.
-//   - The node reads its own facts and load, which is what the environment records of the machine,
-//     and converts the archive to a SIF in its own scratch directory, after checking there is room
-//     for it, then publishes the SIF beside the archive (images/<hex>.sif), where the next run finds
-//     it: a shared file system that cannot hold a SIF's build is never written to while one builds.
+//   - The node reads its own facts and load, which is what the environment records of the machine.
 //   - A container's processes are steps of the allocation (srun --overlap) that run apptainer exec
-//     of the SIF with a clean environment, the container's mounts bound, a private /tmp that is its
-//     home, and a variable naming the container in every process, by which every one of them is sent
-//     SIGTERM to stop and SIGKILL to be removed.
+//     of the image, read-only, with a clean environment, the container's mounts bound, a private
+//     /tmp that is its home, and a variable naming the container in every process, by which every
+//     one of them is sent SIGTERM to stop and SIGKILL to be removed.
 //   - Removing a run's first container cancels its allocation by name and confirms that it ended
 //     (squeue, then sacct); a run first removes what a dead run of its scope left, which is every
 //     allocation of the scope that no live run owns.
@@ -113,12 +111,6 @@ type Node interface {
 	Hold(ctx context.Context) (io.Closer, error)
 	// Read runs each script with /bin/sh on the node and returns what each printed, by its name.
 	Read(ctx context.Context, scripts map[string]string) (map[string]string, error)
-	// Scratch returns how many bytes are free in the node's own scratch directory, where Convert
-	// builds.
-	Scratch(ctx context.Context) (int64, error)
-	// Convert builds a SIF of the compressed docker archive in the node's scratch directory and
-	// publishes it at sif, whole, as Publish does.
-	Convert(ctx context.Context, archive, sif string) error
 	// Port returns a TCP port on which no process of the node listens now.
 	Port(ctx context.Context) (int, error)
 	// Start starts argv in a container of the box on the node, with its standard output and
@@ -143,7 +135,7 @@ const (
 type Box struct {
 	// Name names the box; every one of its processes carries it, in EnvBox.
 	Name string
-	// Image is the path of the SIF on the shared file system.
+	// Image is the path of the SIF on the shared file system, run read-only.
 	Image string
 	// Dir is the working directory of every process.
 	Dir string

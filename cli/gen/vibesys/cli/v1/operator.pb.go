@@ -533,10 +533,16 @@ type ApptainerSettings struct {
 	// Passed to the submit command after the options the CLI sets, such as an account (--account=x) or
 	// a QOS a site requires on every job. Each is an option.
 	SubmitArguments []string `protobuf:"bytes,2,rep,name=submit_arguments,json=submitArguments,proto3" json:"submit_arguments,omitempty"`
-	// The apptainer program of the compute nodes. Unset means apptainer.
-	Program       string `protobuf:"bytes,3,opt,name=program,proto3" json:"program,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// The apptainer program of the compute nodes, which runs the SIFs. Unset means apptainer.
+	Program string `protobuf:"bytes,3,opt,name=program,proto3" json:"program,omitempty"`
+	// The absolute directory of this machine where an image is converted to a SIF by this machine's
+	// apptainer (on the daemon's PATH): the archive, the image unpacked (APPTAINER_TMPDIR) and the
+	// SIF. Unset means apptainer/ under the user's cache directory.
+	LocalScratchDir string `protobuf:"bytes,4,opt,name=local_scratch_dir,json=localScratchDir,proto3" json:"local_scratch_dir,omitempty"`
+	// The bound on converting one image and copying its SIF to the cluster. Zero means an hour.
+	ConvertTimeoutSeconds float64 `protobuf:"fixed64,5,opt,name=convert_timeout_seconds,json=convertTimeoutSeconds,proto3" json:"convert_timeout_seconds,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ApptainerSettings) Reset() {
@@ -588,6 +594,20 @@ func (x *ApptainerSettings) GetProgram() string {
 		return x.Program
 	}
 	return ""
+}
+
+func (x *ApptainerSettings) GetLocalScratchDir() string {
+	if x != nil {
+		return x.LocalScratchDir
+	}
+	return ""
+}
+
+func (x *ApptainerSettings) GetConvertTimeoutSeconds() float64 {
+	if x != nil {
+		return x.ConvertTimeoutSeconds
+	}
+	return 0
 }
 
 // Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind
@@ -960,11 +980,13 @@ const file_vibesys_cli_v1_operator_proto_rawDesc = "" +
 	"\x15queue_timeout_seconds\x18\t \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x13queueTimeoutSecondsB\f\n" +
 	"\n" +
 	"_exclusiveB\a\n" +
-	"\x05_cpus\"\xb9\x01\n" +
+	"\x05_cpus\"\xc2\x02\n" +
 	"\x11ApptainerSettings\x123\n" +
 	"\x0esubmit_command\x18\x01 \x03(\tB\f\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01R\rsubmitCommand\x129\n" +
 	"\x10submit_arguments\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\"\x06r\x042\x02^-R\x0fsubmitArguments\x124\n" +
-	"\aprogram\x18\x03 \x01(\tB\x1a\xbaH\x17r\x152\x13^[A-Za-z0-9_./+-]*$R\aprogram\"\xe6\x02\n" +
+	"\aprogram\x18\x03 \x01(\tB\x1a\xbaH\x17r\x152\x13^[A-Za-z0-9_./+-]*$R\aprogram\x12?\n" +
+	"\x11local_scratch_dir\x18\x04 \x01(\tB\x13\xbaH\x10r\x0e2\f^(/.*[^/])?$R\x0flocalScratchDir\x12F\n" +
+	"\x17convert_timeout_seconds\x18\x05 \x01(\x01B\x0e\xbaH\v\x12\t)\x00\x00\x00\x00\x00\x00\x00\x00R\x15convertTimeoutSeconds\"\xe6\x02\n" +
 	"\tResources\x12-\n" +
 	"\x03gpu\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.GpuResourceR\x03gpu\x12B\n" +
 	"\n" +

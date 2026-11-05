@@ -7,8 +7,8 @@
 // srun step started with --jobid and --overlap from the login node runs on the job's node beside
 // its other steps and propagates its command's exit code; a step reads the standard input srun
 // was given; apptainer exec passes APPTAINERENV_ variables into a clean environment, binds read-only
-// with :ro, and gives the node's AMD GPUs with --rocm; and apptainer build converts an uncompressed
-// docker archive.
+// with :ro, mounts none of the site's bind paths with --no-mount bind-paths, and gives the node's
+// AMD GPUs with --rocm. The cluster's apptainer only runs SIFs; none is built on it.
 package clustercli
 
 import (
@@ -37,8 +37,6 @@ import (
 const (
 	// CallTimeout bounds a call that should answer at once.
 	CallTimeout = apptainer.CallTimeout
-	// ConvertTimeout bounds the conversion of an image to a SIF on a node.
-	ConvertTimeout = 30 * time.Minute
 	// DefaultPoll is the pause between two reads of a cancelled job's state.
 	DefaultPoll = 5 * time.Second
 )

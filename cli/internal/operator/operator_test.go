@@ -182,6 +182,9 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"an empty submit command":                   {strings.Replace(apptainerPlacement, `submit_command = ["/opt/site/bin/sbatch-wrapper"]`, `submit_command = [""]`, 1), "submit_command"},
 		"a submit argument not a flag":              {strings.Replace(apptainerPlacement, `"--account=acct-a"`, `"acct-a"`, 1), "submit_arguments"},
 		"an apptainer program with a space":         {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nprogram = \"apptainer --debug\"", 1), "program"},
+		"a relative local scratch directory":        {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nlocal_scratch_dir = \"scratch\"", 1), "local_scratch_dir"},
+		"a choice of where to convert":              {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nconvert = \"node\"", 1), "placements.mi210.apptainer.convert"},
+		"a negative conversion bound":               {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nconvert_timeout_seconds = -1", 1), "convert_timeout_seconds"},
 		"an unknown rocm key":                       {strings.Replace(apptainerPlacement, "[placements.mi210.resources.rocm]", "[placements.mi210.resources.rocm]\ndevices = \"all\"", 1), "placements.mi210.resources.rocm.devices"},
 	}
 	for name, c := range cases {
@@ -232,6 +235,13 @@ func TestAnApptainerPlacementIsRead(t *testing.T) {
 	c, err = operator.Parse([]byte(text))
 	if err != nil || c.GetPlacements()["mi210"].GetApptainer() != nil {
 		t.Errorf("without an apptainer section: %v, %v", c, err)
+	}
+	text = strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]",
+		"[placements.mi210.apptainer]\nlocal_scratch_dir = \"/scratch/me\"\nconvert_timeout_seconds = 7200", 1)
+	c, err = operator.Parse([]byte(text))
+	a := c.GetPlacements()["mi210"].GetApptainer()
+	if err != nil || a.GetLocalScratchDir() != "/scratch/me" || a.GetConvertTimeoutSeconds() != 7200 {
+		t.Errorf("the conversion's settings: %v, %v", a, err)
 	}
 }
 

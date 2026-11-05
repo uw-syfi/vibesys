@@ -100,6 +100,7 @@ var rules = map[string][]string{
 		"internal/clock", "internal/core", "internal/environment", "internal/environment/apptainer",
 		"internal/environment/docker", "internal/environment/slurm", "internal/remote",
 	},
+	"internal/environment/apptainer/localsif": {"internal/core", "internal/environment/apptainer"},
 	"internal/environment/apptainer/clusterfake": {
 		"internal/core", "internal/environment", "internal/environment/apptainer", "internal/environment/docker",
 		"internal/environment/fakeenv",
@@ -179,6 +180,7 @@ var rules = map[string][]string{
 		"internal/resource/kubernetes", "internal/resource/mounts", "internal/lease", "internal/lease/hostlease", "internal/lease/kubelease",
 		"internal/lease/locallease", "internal/neighbors",
 		"internal/backend/amd", "internal/resource/rocm", "internal/environment/apptainer", "internal/environment/apptainer/clustercli",
+		"internal/environment/apptainer/localsif",
 	},
 
 	// Replacing the running binary with a newer release.
@@ -232,6 +234,7 @@ var testRules = map[string][]string{
 		"internal/resource/rocm", "internal/task",
 	},
 	"internal/environment/apptainer/clustercli": {"internal/environment/envtest"},
+	"internal/environment/apptainer/localsif":   {"internal/environment/envtest"},
 	"internal/resource/mounts":                  {"internal/resource/resourcetest"},
 	"internal/resource/kubernetes":              {"internal/resource/resourcetest"},
 	"internal/resource/fakeresource":            {"internal/resource/resourcetest"},

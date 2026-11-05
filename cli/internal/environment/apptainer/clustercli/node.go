@@ -140,52 +140,6 @@ func (n *node) Read(ctx context.Context, scripts map[string]string) (map[string]
 	return got, nil
 }
 
-// scratchScript prints the KiB free in the node's scratch directory, where convertScript builds.
-const scratchScript = `df -Pk "${TMPDIR:-/tmp}" | awk 'NR == 2 { print $4 }'`
-
-// Scratch implements apptainer.Node.
-func (n *node) Scratch(ctx context.Context) (int64, error) {
-	out, err := n.run(ctx, CallTimeout, scratchScript)
-	if err != nil {
-		return 0, fmt.Errorf("reading the scratch space of the node of the job %s: %w", n.job, err)
-	}
-	kib, err := strconv.ParseInt(strings.TrimSpace(out), 10, 64)
-	if err != nil || kib < 0 {
-		return 0, unavailable("the node of the job %s does not say its free scratch space: %q", n.job, clip(out))
-	}
-	return kib << 10, nil
-}
-
-// convertScript builds a SIF of the compressed docker archive $1 in the node's scratch directory,
-// with the apptainer program $3, and publishes it at $2 by a rename of a copy of its own. apptainer
-// build reads an uncompressed archive only, so the archive is unpacked first.
-const convertScript = `set -eu
-s="${TMPDIR:-/tmp}/vibesys-convert.$$"
-t="$2.tmp.$(hostname).$$"
-trap 'rm -rf "$s"; rm -f "$t"' EXIT
-trap 'exit 1' HUP INT TERM
-mkdir -p "$s/tmp" "$s/cache"
-gzip -dc "$1" > "$s/image.tar"
-if ! APPTAINER_TMPDIR="$s/tmp" APPTAINER_CACHEDIR="$s/cache" "$3" build --force "$s/image.sif" "docker-archive:$s/image.tar" > "$s/log" 2>&1; then
-  tail -n 20 "$s/log" >&2
-  exit 1
-fi
-cp "$s/image.sif" "$t"
-mv -f "$t" "$2"`
-
-// Convert implements apptainer.Node.
-func (n *node) Convert(ctx context.Context, archive, sif string) error {
-	for _, p := range []string{archive, sif} {
-		if err := checkPath(p); err != nil {
-			return err
-		}
-	}
-	if _, err := n.run(ctx, ConvertTimeout, convertScript, archive, sif, n.c.cfg.Program); err != nil {
-		return fmt.Errorf("on the node of the job %s: %w", n.job, err)
-	}
-	return nil
-}
-
 // portsScript prints the node's TCP sockets, whose local ports are taken.
 const portsScript = `cat /proc/net/tcp /proc/net/tcp6 2>/dev/null; exit 0`
 
@@ -267,8 +221,14 @@ const wrapper = `printf '%s\n' ` + startMarker + ` >&2; exec "$@" 2>&1`
 
 // StepArgv is what runs argv in a container of the box, as a step: env sets the box's variables
 // for the container (APPTAINERENV_), stepScript makes its home and passes the GPUs, and apptainer
-// exec runs the wrapper in the SIF with a clean environment, the box's mounts, no other mount of
-// the node's but its home at /tmp, and the box's directory as its working directory.
+// exec runs the wrapper in the image with a clean environment, the box's mounts, no other mount of
+// the node's but its home at /tmp, and the box's directory as its working directory. The site's
+// bind paths are not mounted (--no-mount bind-paths): a site binds its shared file system into
+// every container, read-write, which would let a container write the images, a sandbox's tree
+// among them, and every other run's directories. Of the bind paths apptainer itself sets, the
+// node's /etc/hosts is bound back, read-only, since an image's own is empty and a server and its
+// client find each other at localhost. The image itself is read-only, a sandbox too, since
+// apptainer mounts one read-only without --writable.
 func (n *node) StepArgv(box apptainer.Box, argv []string) ([]string, error) {
 	if box.Name == "" || strings.ContainsAny(box.Name, "/\n\x00 ") {
 		return nil, invalid("%q is not a box name", box.Name)
@@ -289,7 +249,7 @@ func (n *node) StepArgv(box apptainer.Box, argv []string) ([]string, error) {
 	if box.ROCm {
 		gpus = "1"
 	}
-	args := []string{"/bin/sh", "-c", stepScript, "vs-step", box.Name, gpus, n.c.cfg.Program, "--cleanenv", "--no-mount", "tmp,cwd"}
+	args := []string{"/bin/sh", "-c", stepScript, "vs-step", box.Name, gpus, n.c.cfg.Program, "--cleanenv", "--no-mount", "tmp,cwd,bind-paths", "--bind", "/etc/hosts:/etc/hosts:ro"}
 	if box.Dir != "" {
 		args = append(args, "--pwd", box.Dir)
 	}

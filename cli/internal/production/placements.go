@@ -19,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clustercli"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/localsif"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockercli"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/machine"
@@ -200,6 +201,11 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cli
 	if err != nil {
 		return nil, err
 	}
+	// The images are converted to SIFs here, where Docker built them; the cluster only runs them.
+	converter, err := localsif.New(p.Getenv("PATH"))
+	if err != nil {
+		return nil, err
+	}
 	ssh := remote.SSH{Host: pl.GetRemote().GetHost(), Program: orDefault(pl.GetRemote().GetSshCommand(), "ssh")}
 	s, a := pl.GetSlurm(), pl.GetApptainer()
 	cluster, err := clustercli.New(clustercli.Config{
@@ -225,7 +231,8 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cli
 			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusive,
 			CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),
 		},
-		NodeScripts: scripts,
+		NodeScripts: scripts, Converter: converter, LocalDir: p.localScratch(a),
+		ConvertTimeout: seconds(a.GetConvertTimeoutSeconds(), apptainer.DefaultConvertTimeout),
 	})
 	if err != nil {
 		return nil, err
@@ -285,6 +292,19 @@ func orDefault(argv []string, program string) []string {
 		return []string{program}
 	}
 	return argv
+}
+
+// localScratch is where this machine converts an apptainer placement's images: the config's
+// directory, or apptainer/ under the user's cache directory (XDG_CACHE_HOME, or ~/.cache).
+func (p Process) localScratch(a *cliv1.ApptainerSettings) string {
+	if dir := a.GetLocalScratchDir(); dir != "" {
+		return dir
+	}
+	cache := p.Getenv("XDG_CACHE_HOME")
+	if !path.IsAbs(cache) {
+		cache = path.Join(p.Home, ".cache")
+	}
+	return path.Join(cache, "vibesys-cli", "apptainer")
 }
 
 // seconds is a wait the config gives in seconds, or the default when it gives none.

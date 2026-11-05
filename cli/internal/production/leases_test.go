@@ -38,6 +38,8 @@ var configs = []string{
 		"[placements.b]\nkind = \"ssh\"\n[placements.b.remote]\nhost = \"host-b\"\nremote_workspace_root = \"/w\"\n[placements.b.resources.kubernetes]\nkubeconfig = \"/k\"\n",
 	"[placements.mi210]\nkind = \"apptainer\"\n[placements.mi210.remote]\nhost = \"login\"\nremote_workspace_root = \"/w\"\n[placements.mi210.slurm]\npartition = \"gpu\"\n" +
 		"[placements.mi210.resources.rocm]\n",
+	"[placements.mi300]\nkind = \"apptainer\"\n[placements.mi300.remote]\nhost = \"login\"\nremote_workspace_root = \"/w\"\n[placements.mi300.slurm]\npartition = \"gpu\"\n" +
+		"[placements.mi300.apptainer]\nlocal_scratch_dir = \"/scratch/me\"\nconvert_timeout_seconds = 5400\n",
 }
 
 // claimsOf are what the resources of each placement claim, as machineEnvironments has them: the

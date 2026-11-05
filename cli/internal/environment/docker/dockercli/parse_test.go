@@ -155,3 +155,32 @@ func TestStartFailureTellsWhatWentWrongByKind(t *testing.T) {
 		}
 	}
 }
+
+// A size docker writes is read up to the byte it names, rounded up, in decimal units; any other
+// text is refused.
+func TestParseSizeReadsDockersSizes(t *testing.T) {
+	for in, want := range map[string]int64{
+		"0B": 0, "512B": 512, "1kB": 1000, "437MB": 437_000_000, "1.66GB": 1_660_000_000, "46.8GB": 46_800_000_000,
+		"2TB": 2e12, "1PB": 1e15, " 3.5kB\n": 3500, "0.0001kB": 1,
+	} {
+		if got, err := ParseSize(in); err != nil || got != want {
+			t.Errorf("ParseSize(%q) = %d, %v, want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "MB", "-1MB", "1.2", "1 GiB", "N/A", "1KB", "x5B", "InfB", "NaNMB", "1e300PB"} {
+		if _, err := ParseSize(in); err == nil {
+			t.Errorf("ParseSize(%q) read a size", in)
+		}
+	}
+}
+
+func FuzzParseSize(f *testing.F) {
+	for _, s := range []string{"437MB", "1.66GB", "0B", "1e3kB"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		if n, err := ParseSize(s); err == nil && n < 0 {
+			t.Errorf("ParseSize(%q) = %d", s, n)
+		}
+	})
+}

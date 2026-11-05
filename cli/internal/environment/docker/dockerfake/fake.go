@@ -311,6 +311,31 @@ func (c *Client) Save(ctx context.Context, image string, w io.Writer) error {
 // Archive is the archive Save writes of the image with the ID.
 func Archive(id string) []byte { return []byte("docker archive of " + id + "\n") }
 
+// UnpackedFactor is how many times larger than its archive an image of the fake is unpacked: the
+// layers of an archive are compressed.
+const UnpackedFactor = 4
+
+// Sizes returns the sizes of the image, found by its ID or a tag: unpacked, UnpackedFactor times
+// its archive's, and stored, its archive's.
+func (c *Client) Sizes(ctx context.Context, image string) (unpacked, stored int64, err error) {
+	fault, err := c.enter(ctx, Call{OpSave, image})
+	if err != nil {
+		return 0, 0, err
+	}
+	if fault != nil {
+		return 0, 0, fault.Err
+	}
+	c.d.mu.Lock()
+	defer c.d.mu.Unlock()
+	for tag, img := range c.d.images {
+		if tag == image || img.ID == image {
+			n := int64(len(Archive(img.ID)))
+			return UnpackedFactor * n, n, nil
+		}
+	}
+	return 0, 0, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
+}
+
 // Containers implements docker.Engine.
 func (c *Client) Containers(ctx context.Context, match docker.Labels) ([]string, error) {
 	fault, err := c.enter(ctx, Call{OpContainers, labelsKey(match)})

@@ -2,7 +2,6 @@ package apptainer_test
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -30,6 +29,7 @@ import (
 
 const (
 	root          = "/shared/vibesys"
+	localDir      = "/local/scratch"
 	scope         = "test"
 	dockerfile    = "FROM busybox:1.36.1\n"
 	probeProgram  = "/probe/vibesys-cli"
@@ -46,6 +46,11 @@ type setup struct {
 	process              uint32
 	scripts              map[string]string
 	configure            func(*docker.Config)
+	// converter is the machine's apptainer; nil is one of the rig's own with room for any image.
+	converter *clusterfake.Converter
+	// scope is the rig's; empty is the tests' scope. A scope is one process's: a run sweeps what
+	// every other process of its scope left, as a dead one's.
+	scope string
 }
 
 // rig is one process's docker environment over the apptainer engine, on a cluster it shares with
@@ -67,20 +72,26 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 	if o.engineTimers == nil {
 		o.engineTimers = envtest.NewTimers()
 	}
+	if o.scope == "" {
+		o.scope = scope
+	}
+	if o.converter == nil {
+		o.converter = clusterfake.NewConverter()
+	}
 	local := dockerfake.NewDaemon(w.MemoryGates).Connect()
 	client := cluster.Connect()
 	eng, err := apptainer.New(apptainer.Config{
-		Local: local, Export: local, Cluster: client, Root: root, Scope: scope,
+		Local: local, Export: local, Cluster: client, Root: root, Scope: o.scope,
 		Timers: o.engineTimers, Clock: clock.NewManual(time.Unix(1_700_000_000, 0), time.Second),
 		Sizing:      apptainer.Sizing{Partition: "part-a", Arguments: []string{"--account=acct-a"}},
-		NodeScripts: o.scripts,
+		NodeScripts: o.scripts, Converter: o.converter, LocalDir: localDir,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg := docker.Config{
 		Engine: eng, Source: dockerfake.Fixed(docker.Spec{Dockerfile: []byte(dockerfile)}), Backend: eng.Backend(),
-		Timers: o.timers, IDs: dockerfake.NewIDs(o.process), Scope: scope, Placement: "default",
+		Timers: o.timers, IDs: dockerfake.NewIDs(o.process), Scope: o.scope, Placement: "default",
 		User: docker.User{UID: 1000, GID: 1000},
 	}
 	if o.configure != nil {
@@ -193,7 +204,7 @@ func TestARunHasAnAllocationOfItsOwnThatEndsWithIt(t *testing.T) {
 		t.Fatalf("allocations %+v, want one", sub)
 	}
 	got := sub[0]
-	if !strings.HasPrefix(got.Name, apptainer.JobPrefix) || got.Comment != scope || got.Limit != limit+apptainer.Margin {
+	if !strings.HasPrefix(got.Name, apptainer.JobPrefix) || got.Comment != scope || got.Limit != limit+apptainer.StopMargin {
 		t.Errorf("allocation %+v", got)
 	}
 	if !slices.Contains(got.Options, "--partition=part-a") || got.Options[len(got.Options)-1] != "--account=acct-a" {
@@ -309,20 +320,6 @@ func TestALostStepIsNeverTheCommandsExit(t *testing.T) {
 	nothingLeft(t, cluster)
 }
 
-func gzipped(t testing.TB, data []byte) []byte {
-	t.Helper()
-	var b bytes.Buffer
-	gz, err := gzip.NewWriterLevel(&b, gzip.BestSpeed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = gz.Write(data)
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return b.Bytes()
-}
-
 // imageID is the ID the fake builds the rigs' task image with.
 func imageID(t testing.TB) string {
 	t.Helper()
@@ -335,95 +332,201 @@ func imageID(t testing.TB) string {
 	return f.ImageDigest
 }
 
-func imagePaths(id string) (archive, size, sif string) {
-	base := path.Join(root, "images", strings.TrimPrefix(id, "sha256:"))
-	return base + ".tar.gz", base + ".size", base + ".sif"
+// imagesOn are the files of the cluster's images directory.
+func imagesOn(c *clusterfake.Cluster) []string {
+	var out []string
+	for _, f := range c.Files() {
+		if strings.HasPrefix(f, root+"/images/") {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
-// An image is copied to the cluster once, whole, named by its digest, with its size beside it, and
-// converted once: a later run of another process copies and converts nothing, and a run that finds
-// only the SIF copies nothing either.
-func TestAnImageIsCopiedAndConvertedOnce(t *testing.T) {
+// sifOf is where the cluster keeps the SIF of the image.
+func sifOf(id string) string {
+	return path.Join(root, "images", strings.TrimPrefix(id, "sha256:")+".sif")
+}
+
+// An image is converted to a SIF on this machine, in its local directory, and the SIF is copied to
+// the cluster once, named by its digest, with what built it beside it; the containers run it. A
+// later run of another process converts and copies nothing, and nothing but the SIF and what built
+// it is put on the cluster: no archive.
+func TestAnImageIsConvertedHereAndItsSIFCopiedOnce(t *testing.T) {
 	w := fakeworld.New()
 	cluster := clusterfake.New(w.MemoryGates)
+	converter := clusterfake.NewConverter()
 	id := imageID(t)
-	archive, size, sif := imagePaths(id)
+	sif := sifOf(id)
 	for process := range uint32(3) {
-		r := newRig(t, w, cluster, setup{process: process})
+		r := newRig(t, w, cluster, setup{process: process, converter: converter})
 		a, _ := run(t, r.env, "exit", "0")
 		exited(t, a, 0)
 	}
-	if n := cluster.Published(archive); n != 1 {
-		t.Errorf("the archive was published %d times, want once", n)
+	if builds := converter.Builds(); !slices.Equal(builds, []string{localDir}) {
+		t.Errorf("builds in %v, want one in %s", builds, localDir)
 	}
-	if n := cluster.Converts(); n != 1 {
-		t.Errorf("%d conversions, want one", n)
+	if n := cluster.Published(sif); n != 1 {
+		t.Errorf("the SIF was published %d times, want once", n)
 	}
-	got, _ := cluster.File(archive)
-	if !bytes.Equal(got, gzipped(t, dockerfake.Archive(id))) {
-		t.Errorf("the archive is not the image's, compressed")
+	if got, _ := cluster.File(sif); !bytes.Equal(got, clusterfake.SIF(dockerfake.Archive(id))) {
+		t.Errorf("the SIF %q is not the image's", got)
 	}
-	if got, _ := cluster.File(size); strings.TrimSpace(string(got)) != fmt.Sprint(len(dockerfake.Archive(id))) {
-		t.Errorf("size file %q", got)
+	if got, _ := cluster.File(sif + apptainer.BuiltBy); strings.TrimSpace(string(got)) != clusterfake.Version {
+		t.Errorf("built by %q", got)
 	}
+	if files := imagesOn(cluster); !slices.Equal(files, []string{sif, sif + apptainer.BuiltBy}) {
+		t.Errorf("files on the cluster %v", files)
+	}
+	for _, b := range cluster.Started() {
+		if b.Image != sif {
+			t.Errorf("a container ran %s, want %s", b.Image, sif)
+		}
+	}
+	nothingLeft(t, cluster)
+}
 
-	// A cluster that has the SIF and no archive needs no copy.
-	other := clusterfake.New(w.MemoryGates)
-	other.Put(sif, []byte("a SIF"))
-	r := newRig(t, w, other, setup{})
-	a, _ := run(t, r.env, "exit", "0")
-	exited(t, a, 0)
-	if n := other.Published(archive); n != 0 || other.Converts() != 0 {
-		t.Errorf("published %d archives and converted %d times with the SIF there", n, other.Converts())
+// An image built for a run is converted as part of its build, whose log says what converted it,
+// with its version.
+func TestTheBuildsLogSaysWhatConvertedTheImage(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	r := newRig(t, w, cluster, setup{})
+	buildContext, err := docker.Context(docker.Spec{Dockerfile: []byte(dockerfile)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var log bytes.Buffer
+	if err := r.engine.Build(context.Background(), docker.BuildSpec{Tag: "vibesys-task:x", Context: buildContext}, &log); err != nil {
+		t.Fatal(err)
+	}
+	img, ok, err := r.engine.Image(context.Background(), "vibesys-task:x")
+	if err != nil || !ok {
+		t.Fatalf("image %v, %v", ok, err)
+	}
+	if !strings.Contains(log.String(), clusterfake.Version) || !strings.Contains(log.String(), sifOf(img.ID)) {
+		t.Errorf("the build's log %q does not say what converted the image to what", log.String())
+	}
+	if _, ok := cluster.File(sifOf(img.ID)); !ok {
+		t.Error("the build copied no SIF to the cluster")
 	}
 }
 
-// Runs of several processes at once, on a cluster that has none of the image, each run, and the
-// cluster ends with one whole archive and a SIF of it.
+// Runs of several processes at once, on machines of their own and of scopes of their own, on a
+// cluster that has no SIF of the image, each run, and the cluster ends with one whole SIF.
 func TestRunsOfSeveralProcessesAtOnceShareTheImage(t *testing.T) {
 	w := fakeworld.New()
 	cluster := clusterfake.New(w.MemoryGates)
 	id := imageID(t)
-	archive, _, sif := imagePaths(id)
 	var wg sync.WaitGroup
 	attempts := make([]core.Attempt, 4)
 	for i := range attempts {
-		r := newRig(t, w, cluster, setup{process: uint32(i)})
+		r := newRig(t, w, cluster, setup{process: uint32(i), scope: fmt.Sprintf("scope-%d", i)})
 		wg.Go(func() { attempts[i], _ = run(t, r.env, "exit", "0") })
 	}
 	wg.Wait()
 	for _, a := range attempts {
 		exited(t, a, 0)
 	}
-	got, _ := cluster.File(archive)
-	if !bytes.Equal(got, gzipped(t, dockerfake.Archive(id))) {
-		t.Error("the archive is not whole")
-	}
-	if _, ok := cluster.File(sif); !ok {
-		t.Error("no SIF")
+	if got, _ := cluster.File(sifOf(id)); !bytes.Equal(got, clusterfake.SIF(dockerfake.Archive(id))) {
+		t.Errorf("the SIF %q is not whole", got)
 	}
 	nothingLeft(t, cluster)
 }
 
-// A node whose scratch space cannot hold the conversion fails the run before its command, naming
-// the space needed and the space there is, and converts nothing.
-func TestTooLittleScratchSpaceFailsTheRunNamingTheSpace(t *testing.T) {
+// A conversion needs the image unpacked, and its archive and SIF, each about as large as its
+// stored layers, free in the local directory: with exactly that it runs, and with a byte less the
+// run fails before its command, naming the space needed, the directory and the space there is,
+// and nothing is converted or copied.
+func TestAConversionIsCheckedAgainstTheLocalDirectorysSpace(t *testing.T) {
+	n := int64(len(dockerfake.Archive(imageID(t))))
+	need := dockerfake.UnpackedFactor*n + 2*n
 	w := fakeworld.New()
+	converter := clusterfake.NewConverter()
+	converter.SetFree(need)
 	cluster := clusterfake.New(w.MemoryGates)
-	cluster.SetScratch(10)
-	r := newRig(t, w, cluster, setup{})
-	a, _ := run(t, r.env, "mark", "ran")
+	a, _ := run(t, newRig(t, w, cluster, setup{converter: converter}).env, "exit", "0")
+	exited(t, a, 0)
+
+	w = fakeworld.New()
+	converter = clusterfake.NewConverter()
+	converter.SetFree(need - 1)
+	cluster = clusterfake.New(w.MemoryGates)
+	a, _ = run(t, newRig(t, w, cluster, setup{converter: converter}).env, "mark", "ran")
 	f := failure(t, a)
-	need := apptainer.Size(int64(apptainer.ScratchFactor * len(dockerfake.Archive(imageID(t)))))
-	for _, want := range []string{"needs about " + need, apptainer.Size(10) + " free"} {
+	for _, want := range []string{"needs about " + apptainer.Size(need), localDir, apptainer.Size(need-1) + " free", "local_scratch_dir"} {
 		if !strings.Contains(f.Message, want) {
 			t.Errorf("failure %q lacks %q", f.Message, want)
 		}
 	}
-	if f.Kind != core.FailureUnavailable || w.Marked("ran") || cluster.Converts() != 0 {
-		t.Errorf("failure %+v, ran %v, converts %d", f, w.Marked("ran"), cluster.Converts())
+	if f.Kind != core.FailureUnavailable || w.Marked("ran") || len(converter.Builds()) != 0 || len(imagesOn(cluster)) != 0 {
+		t.Errorf("failure %+v, ran %v, builds %v, files %v", f, w.Marked("ran"), converter.Builds(), imagesOn(cluster))
 	}
 	nothingLeft(t, cluster)
+}
+
+// A conversion that fails, or that does not end within its bound, fails the run before its command
+// saying why, and leaves no SIF on the cluster, so the next run converts again.
+func TestAFailedConversionLeavesNoSIF(t *testing.T) {
+	cases := []struct {
+		name  string
+		fault error
+		// engineTimers fire the conversion's bound at once, and nothing else.
+		timers clock.Timers
+		want   string
+	}{
+		{"failed", &core.Failure{Kind: core.FailureUnavailable, Message: "FATAL: unpacking failed"}, nil, "FATAL: unpacking failed"},
+		{"too slow", clusterfake.ErrHang, clock.Exactly{D: apptainer.DefaultConvertTimeout, Others: envtest.NewTimers()}, "convert_timeout_seconds"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := fakeworld.New()
+			cluster := clusterfake.New(w.MemoryGates)
+			converter := clusterfake.NewConverter()
+			converter.SetFaults(func(op string) error {
+				if op == "build" {
+					return c.fault
+				}
+				return nil
+			})
+			r := newRig(t, w, cluster, setup{converter: converter, engineTimers: c.timers})
+			a, _ := run(t, r.env, "mark", "ran")
+			f := failure(t, a)
+			if !strings.Contains(f.Message, c.want) || w.Marked("ran") {
+				t.Errorf("failure %q, want one saying %q; ran %v", f.Message, c.want, w.Marked("ran"))
+			}
+			if files := imagesOn(cluster); len(files) != 0 {
+				t.Errorf("files on the cluster %v", files)
+			}
+			nothingLeft(t, cluster)
+		})
+	}
+}
+
+// An engine needs a converter and an absolute local directory.
+func TestAnEngineNeedsAConverterAndALocalDirectory(t *testing.T) {
+	w := fakeworld.New()
+	local := dockerfake.NewDaemon(w.MemoryGates).Connect()
+	base := apptainer.Config{
+		Local: local, Export: local, Cluster: clusterfake.New(w.MemoryGates).Connect(), Root: root, Scope: scope,
+		Timers: envtest.NewTimers(), Clock: clock.NewManual(time.Unix(1_700_000_000, 0), time.Second),
+		Converter: clusterfake.NewConverter(), LocalDir: localDir,
+	}
+	if _, err := apptainer.New(base); err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*apptainer.Config){
+		"no converter": func(c *apptainer.Config) { c.Converter = nil },
+		"relative":     func(c *apptainer.Config) { c.LocalDir = "scratch" },
+		"root":         func(c *apptainer.Config) { c.LocalDir = "/" },
+	} {
+		cfg := base
+		change(&cfg)
+		_, err := apptainer.New(cfg)
+		if f := core.AsFailure(err); err == nil || f.Kind != core.FailureInvalidInput {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
 }
 
 // The machine and its load are read on the node, inside the allocation: before a process of the

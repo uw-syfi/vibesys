@@ -52,6 +52,15 @@ func TestAnImageIsSavedAsADockerArchive(t *testing.T) {
 	if !manifest {
 		t.Error("the archive has no manifest.json")
 	}
+	// The image's sizes are read, its content stored no larger than it is unpacked, give or take
+	// the listing's rounding; an image that is not there has none.
+	unpacked, stored, err := engine.Sizes(ctx, tag)
+	if err != nil || unpacked <= 0 || stored <= 0 || float64(stored) > 1.01*float64(unpacked) {
+		t.Errorf("unpacked %d, stored %d, %v", unpacked, stored, err)
+	}
+	if _, _, err := engine.Sizes(ctx, "vibesys-cli-contract-save:no-such-"+randomHex(6)); err == nil {
+		t.Error("an image that is not there has an unpacked size")
+	}
 	err = engine.Save(ctx, "vibesys-cli-contract-save:no-such-"+randomHex(6), io.Discard)
 	var f *core.Failure
 	if !errors.As(err, &f) || f.Kind != core.FailureUnavailable {

@@ -5,14 +5,15 @@
 // connections.
 //
 // It is no more forgiving than a real cluster: a step of a job that does not run starts nothing, a
-// box whose SIF is not on the shared file system cannot start a process, a file published from a
-// stream that was cut short is not there, and a conversion needs the archive to be there.
+// box whose SIF is not on the shared file system cannot start a process, and a file published from
+// a stream that was cut short is not there.
+//
+// Converter is the caller's machine's apptainer program, kept in memory: its SIF of an archive
+// names the archive's digest, and a test sets its free space and makes it fail.
 package clusterfake
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"maps"
@@ -47,12 +48,10 @@ type Cluster struct {
 	jobs      map[string]*job
 	ids       int
 	ports     int
-	scratch   int64
 	says      map[string]string
 	queued    int // how many reads of its state a new job waits for before it runs
 	ends      bool
 	fail      func(op string) error
-	converts  int
 	started   []apptainer.Box
 	submitted []apptainer.Allocation
 }
@@ -78,7 +77,7 @@ type box struct {
 func New(gates fakeenv.Gates) *Cluster {
 	return &Cluster{
 		gates: gates, files: map[string][]byte{}, published: map[string]int{}, jobs: map[string]*job{},
-		scratch: 100 << 30, says: maps.Clone(Machine),
+		says: maps.Clone(Machine),
 	}
 }
 
@@ -90,13 +89,6 @@ func (c *Cluster) Queue(n int, ends bool) {
 	c.queued, c.ends = n, ends
 }
 
-// SetScratch sets the bytes free in every node's scratch directory.
-func (c *Cluster) SetScratch(free int64) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.scratch = free
-}
-
 // Say sets what every node prints for the script of the name.
 func (c *Cluster) Say(script, out string) {
 	c.mu.Lock()
@@ -105,8 +97,8 @@ func (c *Cluster) Say(script, out string) {
 }
 
 // SetFaults makes the calls named by op fail with what f returns, or none with nil. The ops are
-// "has", "read", "publish", "submit", "state", "jobs", "cancel", "hold", "readnode", "scratch",
-// "convert", "port", "start" and "signal".
+// "has", "read", "publish", "submit", "state", "jobs", "cancel", "hold", "readnode", "port", "start"
+// and "signal".
 func (c *Cluster) SetFaults(f func(op string) error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -131,6 +123,13 @@ func (c *Cluster) File(path string) ([]byte, bool) {
 	return slices.Clone(data), ok
 }
 
+// Files returns the paths of the shared file system's files, sorted.
+func (c *Cluster) Files() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Sorted(maps.Keys(c.files))
+}
+
 // Put writes a file of the shared file system, as something other than the engine did.
 func (c *Cluster) Put(path string, data []byte) {
 	c.mu.Lock()
@@ -150,13 +149,6 @@ func (c *Cluster) Started() []apptainer.Box {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return slices.Clone(c.started)
-}
-
-// Converts returns how many SIFs the nodes built.
-func (c *Cluster) Converts() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.converts
 }
 
 // Submitted returns the allocations asked for, in order.
@@ -453,35 +445,6 @@ func (n *node) Read(ctx context.Context, scripts map[string]string) (map[string]
 		out[name] = c.says[name]
 	}
 	return out, nil
-}
-
-// Scratch implements apptainer.Node.
-func (n *node) Scratch(ctx context.Context) (int64, error) {
-	if _, err := n.enter(ctx, "scratch"); err != nil {
-		return 0, err
-	}
-	n.cl.c.mu.Lock()
-	defer n.cl.c.mu.Unlock()
-	return n.cl.c.scratch, nil
-}
-
-// Convert implements apptainer.Node: the SIF is named by the archive it was built from.
-func (n *node) Convert(ctx context.Context, archive, sif string) error {
-	if _, err := n.enter(ctx, "convert"); err != nil {
-		return err
-	}
-	c := n.cl.c
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	data, ok := c.files[archive]
-	if !ok {
-		return &core.Failure{Kind: core.FailureUnavailable, Message: "clusterfake: no archive at " + archive}
-	}
-	sum := sha256.Sum256(data)
-	c.files[sif] = []byte("sif of " + hex.EncodeToString(sum[:]))
-	c.published[sif]++
-	c.converts++
-	return nil
 }
 
 // Port implements apptainer.Node.

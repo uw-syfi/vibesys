@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clustercli"
@@ -40,17 +39,10 @@ done
 `
 
 // fakeApptainer runs a container here: exec records its options and runs the command with the
-// APPTAINERENV_ variables set, and build copies the archive it is given.
+// APPTAINERENV_ variables set.
 const fakeApptainer = `#!/bin/sh
 log="$(dirname "$0")/apptainer.log"
 verb="$1"; shift
-if [ "$verb" = build ]; then
-  [ "$1" = --force ] && shift
-  out="$1"; src="${2#docker-archive:}"
-  grep -q '^a docker archive$' "$src" || { echo "FATAL: not an archive" >&2; exit 255; }
-  cp "$src" "$out"
-  exit 0
-fi
 echo "$*" >> "$log"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -361,7 +353,7 @@ func TestABoxsProcessRunsTheCommandInTheContainer(t *testing.T) {
 		t.Errorf("output %q", got)
 	}
 	log, _ := os.ReadFile(filepath.Join(sh.bin, "apptainer.log"))
-	for _, want := range []string{"--cleanenv", "--no-mount tmp,cwd", "--pwd /work", "--bind /shared/run:/work ", "--bind /shared/model:/model:ro", "--rocm", sif + " /bin/sh"} {
+	for _, want := range []string{"--cleanenv", "--no-mount tmp,cwd,bind-paths --bind /etc/hosts:/etc/hosts:ro", "--pwd /work", "--bind /shared/run:/work ", "--bind /shared/model:/model:ro", "--rocm", sif + " /bin/sh"} {
 		if !strings.Contains(string(log), want) {
 			t.Errorf("apptainer exec %q lacks %q", log, want)
 		}
@@ -456,57 +448,15 @@ func TestClosingTheHoldCancelsTheAllocation(t *testing.T) {
 	}
 }
 
-// A node is read script by script, its scratch space is what df says, and an archive is converted
-// to a SIF that is published whole.
-func TestANodeIsReadAndConverts(t *testing.T) {
-	sh := newShell(t)
-	tmp := t.TempDir()
-	sh.env = []string{"TMPDIR=" + tmp}
-	c := newCluster(t, sh)
-	n := c.Node("77")
-	got, err := n.Read(ctx(t), map[string]string{"a": "echo one; echo ==driver==", "b": "echo two >&2; exit 4", "c": "printf 'three'"})
+// A node is read script by script, each script's output by its name, and a script that fails says
+// nothing.
+func TestANodeIsReadScriptByScript(t *testing.T) {
+	c := newCluster(t, newShell(t))
+	got, err := c.Node("77").Read(ctx(t), map[string]string{"a": "echo one; echo ==driver==", "b": "echo two >&2; exit 4", "c": "printf 'three'"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := map[string]string{"a": "one\n==driver==\n", "b": "", "c": "three\n"}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("read %q, want %q", got, want)
-	}
-	free, err := n.Scratch(ctx(t))
-	if err != nil || free <= 0 {
-		t.Errorf("scratch %d, %v", free, err)
-	}
-	dir := t.TempDir()
-	archive, sif := filepath.Join(dir, "x.tar.gz"), filepath.Join(dir, "x.sif")
-	var gz bytes.Buffer
-	cmd := exec.Command("gzip", "-c")
-	cmd.Stdin, cmd.Stdout = strings.NewReader("a docker archive\n"), &gz
-	if err := cmd.Run(); err != nil {
-		t.Fatal(err)
-	}
-	if err := c.Publish(ctx(t), archive, &gz); err != nil {
-		t.Fatal(err)
-	}
-	if err := n.Convert(ctx(t), archive, sif); err != nil {
-		t.Fatal(err)
-	}
-	if data, _ := os.ReadFile(sif); string(data) != "a docker archive\n" {
-		t.Errorf("sif %q", data)
-	}
-	if names := entries(t, dir); !slices.Equal(names, []string{"x.sif", "x.tar.gz"}) {
-		t.Errorf("files %v", names)
-	}
-	if names := entries(t, tmp); len(names) != 0 {
-		t.Errorf("scratch left: %v", names)
-	}
-	// An archive apptainer cannot read fails the conversion with what it said.
-	if err := c.Publish(ctx(t), archive, strings.NewReader("not gzip")); err != nil {
-		t.Fatal(err)
-	}
-	err = n.Convert(ctx(t), archive, filepath.Join(dir, "y.sif"))
-	if f := core.AsFailure(err); err == nil || f.Kind != core.FailureUnavailable {
-		t.Errorf("converting a broken archive: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "y.sif")); err == nil {
-		t.Error("a broken archive was published as a SIF")
 	}
 }

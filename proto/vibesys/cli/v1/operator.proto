@@ -126,8 +126,14 @@ message ApptainerSettings {
   // Passed to the submit command after the options the CLI sets, such as an account (--account=x) or
   // a QOS a site requires on every job. Each is an option.
   repeated string submit_arguments = 2 [(buf.validate.field).repeated.items.string.pattern = "^-"];
-  // The apptainer program of the compute nodes. Unset means apptainer.
+  // The apptainer program of the compute nodes, which runs the SIFs. Unset means apptainer.
   string program = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_./+-]*$"];
+  // The absolute directory of this machine where an image is converted to a SIF by this machine's
+  // apptainer (on the daemon's PATH): the archive, the image unpacked (APPTAINER_TMPDIR) and the
+  // SIF. Unset means apptainer/ under the user's cache directory.
+  string local_scratch_dir = 4 [(buf.validate.field).string.pattern = "^(/.*[^/])?$"];
+  // The bound on converting one image and copying its SIF to the cluster. Zero means an hour.
+  double convert_timeout_seconds = 5 [(buf.validate.field).double.gte = 0];
 }
 
 // Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind

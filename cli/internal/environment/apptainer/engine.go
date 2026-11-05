@@ -1,7 +1,6 @@
 package apptainer
 
 import (
-	"compress/gzip"
 	"context"
 	"errors"
 	"fmt"
@@ -30,22 +29,23 @@ const (
 	CallTimeout = 2 * time.Minute
 )
 
-// Margin is added to a container's limit to make its allocation's time limit: the time it may take
-// to convert its images to SIFs on the node, and the stop after the limit. The allocation is a
-// backstop: the environment ends the commands first.
-const Margin = 40 * time.Minute
+// DefaultConvertTimeout bounds the conversion of an image and the copy of its SIF when Config sets
+// no bound.
+const DefaultConvertTimeout = time.Hour
+
+// StopMargin is added to a container's limit to make its allocation's time limit: the stop after
+// the limit. The allocation is a backstop: the environment ends the commands first.
+const StopMargin = 10 * time.Minute
 
 // NoLimit is the time limit of an allocation whose container was given none.
 const NoLimit = 24 * time.Hour
 
-// ScratchFactor is how many times its archive's unpacked size converting an image needs of the
-// node's scratch space: the unpacked archive, the image's file tree Apptainer builds from it, and
-// the SIF it writes.
-const ScratchFactor = 3
-
-// Exporter writes a local image as a docker archive (docker save).
+// Exporter writes a local image as a docker archive (docker save), and says how large the image is
+// unpacked and stored, as the local engine has it: stored, its layers are compressed under Docker's
+// default containerd image store, about the size of its archive.
 type Exporter interface {
 	Save(ctx context.Context, image string, w io.Writer) error
+	Sizes(ctx context.Context, image string) (unpacked, stored int64, err error)
 }
 
 // Sizing is what an allocation asks for, by what its container runs.
@@ -120,6 +120,13 @@ type Config struct {
 	Sizing Sizing
 	// NodeScripts are scripts each node runs with its facts, whose output Facts reads by name.
 	NodeScripts map[string]string
+	// Converter converts the images to SIFs on this machine.
+	Converter Converter
+	// LocalDir is the absolute directory of this machine a conversion writes in.
+	LocalDir string
+	// ConvertTimeout bounds an image's conversion and the copy of its SIF; zero is
+	// DefaultConvertTimeout.
+	ConvertTimeout time.Duration
 }
 
 // Engine is the docker.Engine of a cluster. Create it with New. It is safe for concurrent use.
@@ -173,6 +180,15 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.QueueTimeout <= 0 {
 		cfg.QueueTimeout = DefaultQueueTimeout
 	}
+	if cfg.ConvertTimeout <= 0 {
+		cfg.ConvertTimeout = DefaultConvertTimeout
+	}
+	switch {
+	case cfg.Converter == nil:
+		return nil, missing("Converter")
+	case !path.IsAbs(cfg.LocalDir) || path.Clean(cfg.LocalDir) == "/":
+		return nil, invalid("the local conversion directory %q is not an absolute directory other than /", cfg.LocalDir)
+	}
 	return &Engine{cfg: cfg, boxes: map[string]*box{}}, nil
 }
 
@@ -195,9 +211,19 @@ func (e *Engine) Image(ctx context.Context, ref string) (docker.Image, bool, err
 	return e.cfg.Local.Image(ctx, ref)
 }
 
-// Build implements docker.Engine: the local engine builds.
+// Build implements docker.Engine: the local engine builds, and the image is converted to a SIF and
+// copied to the cluster as part of its build, so that the build's log says what converted it.
 func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer) error {
-	return e.cfg.Local.Build(ctx, spec, log)
+	if err := e.cfg.Local.Build(ctx, spec, log); err != nil {
+		return err
+	}
+	img, ok, err := e.cfg.Local.Image(ctx, spec.Tag)
+	if err != nil || !ok {
+		// The environment finds the image missing, and says so.
+		return err
+	}
+	_, err = e.publish(ctx, img.ID, log)
+	return err
 }
 
 // Containers implements docker.Engine: the containers of this engine that carry the labels, and,
@@ -293,8 +319,8 @@ func (e *Engine) forget(b *box) {
 
 // Start implements docker.Engine. A container whose network is another's joins that one's
 // allocation; any other asks for an allocation of its own and waits for it, which may take as long
-// as the queue does, up to QueueTimeout. Its image is copied to the cluster first when the cluster
-// has neither it nor its SIF, and converted on the node when the cluster has no SIF of it.
+// as the queue does, up to QueueTimeout. Its image is converted to a SIF on this machine and copied
+// to the cluster first, unless the cluster has the SIF.
 func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.Container, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
@@ -326,7 +352,8 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 	e.boxes[spec.Name] = b
 	e.mu.Unlock()
 
-	if err := e.publish(ctx, spec.Image); err != nil {
+	sif, err := e.publish(ctx, spec.Image, io.Discard)
+	if err != nil {
 		e.forget(b)
 		return nil, err
 	}
@@ -337,10 +364,6 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		}
 	}
 	node := e.cfg.Cluster.Node(b.job)
-	sif, err := e.convert(ctx, node, spec.Image)
-	if err != nil {
-		return nil, err
-	}
 	e.mu.Lock()
 	b.sif = sif
 	e.mu.Unlock()
@@ -355,7 +378,7 @@ func (e *Engine) allocate(ctx context.Context, b *box) error {
 		limit = b.spec.Limit
 	}
 	job, err := e.cfg.Cluster.Submit(ctx, Allocation{
-		Name: JobName(b.name), Comment: b.labels[docker.LabelScope], Limit: limit + Margin,
+		Name: JobName(b.name), Comment: b.labels[docker.LabelScope], Limit: limit + StopMargin,
 		Options: e.cfg.Sizing.Options(b.spec.Measured),
 	})
 	if err != nil {
@@ -418,90 +441,82 @@ func orUnknown(s string) string {
 	return s
 }
 
-// imagePaths are where the cluster keeps an image: its archive, the archive's unpacked size, which
-// is published after the archive and so says the archive is whole, and its SIF.
-func (e *Engine) imagePaths(image string) (archive, size, sif string) {
-	base := path.Join(e.cfg.Root, "images", strings.TrimPrefix(image, "sha256:"))
-	return base + ".tar.gz", base + ".size", base + ".sif"
+// sifPath is where the cluster keeps the image's SIF, named by its digest.
+func (e *Engine) sifPath(image string) string {
+	return path.Join(e.cfg.Root, "images", strings.TrimPrefix(image, "sha256:")+".sif")
 }
 
-// publish copies the image to the cluster, compressed, unless the cluster has it or its SIF.
-func (e *Engine) publish(ctx context.Context, image string) error {
-	archive, size, sif := e.imagePaths(image)
-	for _, p := range []string{sif, size} {
-		has, err := e.cfg.Cluster.Has(ctx, p)
-		if err != nil || has {
-			return err
-		}
-	}
-	pr, pw := io.Pipe()
-	var (
-		wg       sync.WaitGroup
-		unpacked int64
-	)
-	wg.Go(func() {
-		gz, _ := gzip.NewWriterLevel(pw, gzip.BestSpeed)
-		count := &counter{w: gz}
-		err := e.cfg.Export.Save(ctx, image, count)
-		if cerr := gz.Close(); err == nil {
-			err = cerr
-		}
-		unpacked = count.n
-		if err != nil {
-			err = fmt.Errorf("exporting the image %s: %w", image, err)
-		}
-		pw.CloseWithError(err)
-	})
-	err := e.cfg.Cluster.Publish(ctx, archive, pr)
-	pr.CloseWithError(errors.New("apptainer: the copy ended"))
-	wg.Wait()
-	if err != nil {
-		return err
-	}
-	return e.cfg.Cluster.Publish(ctx, size, strings.NewReader(strconv.FormatInt(unpacked, 10)+"\n"))
-}
+// BuiltBy is the suffix of the file beside a SIF that says what converted it, in one line for a
+// person.
+const BuiltBy = ".built-by"
 
-// counter counts what is written through it.
-type counter struct {
-	w io.Writer
-	n int64
-}
-
-func (c *counter) Write(p []byte) (int, error) {
-	n, err := c.w.Write(p)
-	c.n += int64(n)
-	return n, err
-}
-
-// convert returns the image's SIF on the cluster, converting it on the node when there is none,
-// after checking that the node's scratch space can hold the conversion.
-func (e *Engine) convert(ctx context.Context, node Node, image string) (string, error) {
-	archive, sizePath, sif := e.imagePaths(image)
+// publish returns the image's SIF on the cluster, converting the image on this machine and copying
+// the SIF there unless the cluster has it: docker save streams the archive into the converter, and
+// the SIF it builds streams to the cluster, published whole by a rename, so a conversion cut short
+// leaves no SIF there and publishers of one image at once each publish a whole one. The conversion
+// is checked first against the space of the local directory, and bounded by ConvertTimeout. What
+// converted it goes to log, and to a file beside the SIF.
+func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (string, error) {
+	sif := e.sifPath(image)
 	has, err := e.cfg.Cluster.Has(ctx, sif)
 	if err != nil || has {
 		return sif, err
 	}
-	text, ok, err := e.cfg.Cluster.Read(ctx, sizePath)
+	unpacked, stored, err := e.cfg.Export.Sizes(ctx, image)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("reading the size of the image %s: %w", image, err)
 	}
-	size, perr := strconv.ParseInt(strings.TrimSpace(string(text)), 10, 64)
-	if !ok || perr != nil || size < 0 {
-		return "", unavailable("the size of the image %s on the cluster (%s) is not a number of bytes: %q", image, sizePath, text)
-	}
-	free, err := node.Scratch(ctx)
+	free, err := e.cfg.Converter.Free(ctx, e.cfg.LocalDir)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("reading the free space of %s: %w", e.cfg.LocalDir, err)
 	}
-	if need := ScratchFactor * size; free < need {
+	// Apptainer unpacks the image's tree beside its archive and writes the SIF there; the archive and
+	// the SIF each hold the image's files compressed, about as its layers are stored.
+	if need := unpacked + 2*stored; free < need {
 		return "", unavailable(
-			"converting the image %s to a SIF needs about %s of the node's own scratch space (%d times the image's %s), and the node has %s free; "+
-				"run on a partition whose jobs have more scratch space, or free it", image, Size(need), ScratchFactor, Size(size), Size(free))
+			"converting the image %s to a SIF on this machine needs about %s free in %s (the image's %s unpacked, and its archive "+
+				"and its SIF, about %s each), and its file system has %s free; free space there, or set [apptainer] "+
+				"local_scratch_dir to a directory of a file system with more",
+			image, Size(need), e.cfg.LocalDir, Size(unpacked), Size(stored), Size(free))
 	}
-	if err := node.Convert(ctx, archive, sif); err != nil {
-		return "", fmt.Errorf("converting the image %s to a SIF: %w", image, err)
+	ctx, stop := clock.Deadline(ctx, e.cfg.Timers, e.cfg.ConvertTimeout)
+	defer stop()
+	by, err := e.cfg.Converter.Describe(ctx)
+	if err != nil {
+		return "", err
 	}
-	return sif, nil
+	_, _ = fmt.Fprintf(log, "[apptainer] converting %s to a SIF on this machine with %s, in %s\n", image, by, e.cfg.LocalDir)
+	archive, archiveW := io.Pipe()
+	out, outW := io.Pipe()
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		err := e.cfg.Export.Save(ctx, image, archiveW)
+		if err != nil {
+			err = fmt.Errorf("exporting the image %s: %w", image, err)
+		}
+		archiveW.CloseWithError(err)
+	})
+	wg.Go(func() {
+		err := e.cfg.Converter.Build(ctx, e.cfg.LocalDir, archive, outW)
+		// A converter that stopped reading leaves the export nothing to write to.
+		archive.CloseWithError(errors.New("apptainer: the converter ended"))
+		if err != nil {
+			err = fmt.Errorf("converting the image %s to a SIF with %s: %w", image, by, err)
+		}
+		outW.CloseWithError(err)
+	})
+	err = e.cfg.Cluster.Publish(ctx, sif, out)
+	out.CloseWithError(errors.New("apptainer: the copy ended"))
+	wg.Wait()
+	if err != nil {
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			return "", unavailable("converting the image %s to a SIF on this machine and copying it did not end within %v "+
+				"([apptainer] convert_timeout_seconds)", image, e.cfg.ConvertTimeout)
+		}
+		return "", err
+	}
+	_, _ = fmt.Fprintf(log, "[apptainer] %s is %s, built by %s\n", image, sif, by)
+	return sif, e.cfg.Cluster.Publish(ctx, sif+BuiltBy, strings.NewReader(by+"\n"))
 }
 
 // Size writes a number of bytes for a person.
@@ -510,7 +525,10 @@ func Size(n int64) string {
 	if n >= gib {
 		return fmt.Sprintf("%.1f GiB", float64(n)/gib)
 	}
-	return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	if n >= 1<<20 {
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 // handle is a started container, and a docker.Container.

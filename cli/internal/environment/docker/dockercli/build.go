@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -81,6 +83,65 @@ func (e *Engine) Save(ctx context.Context, image string, w io.Writer) error {
 		return unavailable("cannot run %q to save the image %s: %v; %s", e.program, image, err, hint)
 	}
 	return unavailable("docker save %s failed (exit %d): %s", image, exit.ExitCode(), clip(errs.last()))
+}
+
+// Sizes returns the size of the image unpacked, as `docker image ls` says it, and the size of its
+// content as the engine stores it, as `docker image inspect` says it. With the containerd image
+// store, Docker's default, the content is the layers compressed, about what `docker save` writes;
+// with the classic store it is the unpacked size again. The listing writes the unpacked size
+// rounded to three significant digits, which is exact enough to size a conversion by.
+func (e *Engine) Sizes(ctx context.Context, image string) (unpacked, stored int64, err error) {
+	if image == "" || strings.HasPrefix(image, "-") {
+		return 0, 0, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("dockercli: %q is not an image reference", image)}
+	}
+	res, err := e.call(ctx, "image inspect", "image", "inspect", "--format", "{{.Id}}\t{{.Size}}", image)
+	if err != nil {
+		return 0, 0, err
+	}
+	if res.code != 0 {
+		return 0, 0, failed("image inspect", res)
+	}
+	id, size, _ := strings.Cut(strings.TrimSpace(res.stdout), "\t")
+	stored, perr := strconv.ParseInt(size, 10, 64)
+	if perr != nil || stored < 0 {
+		return 0, 0, unavailable("docker image inspect says the image %s is %q bytes", image, size)
+	}
+	res, err = e.call(ctx, "image ls", "image", "ls", "--all", "--no-trunc", "--format", "{{.ID}}\t{{.Size}}")
+	if err != nil {
+		return 0, 0, err
+	}
+	if res.code != 0 {
+		return 0, 0, failed("image ls", res)
+	}
+	for _, line := range strings.Split(res.stdout, "\n") {
+		listed, size, found := strings.Cut(strings.TrimSpace(line), "\t")
+		if found && listed == id {
+			unpacked, err := ParseSize(size)
+			return unpacked, stored, err
+		}
+	}
+	return 0, 0, unavailable("docker image ls does not list the image %s", id)
+}
+
+// ParseSize reads a size as Docker writes it for a person, in decimal units: 437MB, 1.66GB.
+func ParseSize(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	units := []struct {
+		suffix string
+		scale  float64
+	}{{"PB", 1e15}, {"TB", 1e12}, {"GB", 1e9}, {"MB", 1e6}, {"kB", 1e3}, {"B", 1}}
+	for _, u := range units {
+		if num, ok := strings.CutSuffix(s, u.suffix); ok {
+			v, err := strconv.ParseFloat(num, 64)
+			n := math.Ceil(v * u.scale)
+			// Not NaN, and below 2^63, the first float64 an int64 cannot hold.
+			if err != nil || !(n >= 0 && n < math.MaxInt64) {
+				break
+			}
+			return int64(n), nil
+		}
+	}
+	return 0, unavailable("%q is not a size docker writes", s)
 }
 
 // BuildName is the unique name of a build of the tag, as an Allocator is given it: a build of one
