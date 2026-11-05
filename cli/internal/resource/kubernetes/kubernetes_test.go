@@ -155,3 +155,16 @@ func TestTheServerVersionIsReadFromKubectl(t *testing.T) {
 		}
 	}
 }
+
+// Every job that runs with the cluster holds it alone: the scheduler cannot budget what a job's pods
+// take of it, so two checks on one cluster could starve each other.
+func TestAJobHoldsTheClusterAlone(t *testing.T) {
+	k, err := kubernetes.New(config(kind()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []core.Claim{{Resource: "kubernetes:local" + kubeconfig, Amount: 1, Exclusive: true}}
+	if got := k.Claims(); !slices.Equal(got, want) {
+		t.Fatalf("Claims = %+v, want %+v", got, want)
+	}
+}

@@ -39,7 +39,7 @@ var configs = []string{
 }
 
 // claimsOf are what the resources of each placement claim, as machineEnvironments has them: the
-// GPUs and the cluster of the placement's machine.
+// GPUs and the cluster of the placement's machine, which every job holds alone.
 func claimsOf(t *testing.T, text string) map[string][]core.Claim {
 	t.Helper()
 	out := map[string][]core.Claim{}
@@ -52,7 +52,7 @@ func claimsOf(t *testing.T, text string) map[string][]core.Claim {
 			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceGPU) + ":" + where + "/all", Amount: 1})
 		}
 		if k := pl.GetResources().GetKubernetes(); k != nil {
-			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceKubernetes) + ":" + where + k.GetKubeconfig(), Amount: 1})
+			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceKubernetes) + ":" + where + k.GetKubeconfig(), Amount: 1, Exclusive: true})
 		}
 	}
 	return out
