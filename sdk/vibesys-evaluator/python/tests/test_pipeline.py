@@ -8,7 +8,6 @@ in virtual time.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -20,32 +19,42 @@ import vibesys_evaluator as vse
 from vibesys_evaluator._private.cli import Task, benchmark
 from vibesys_evaluator._private.deploy import TaskCommand
 from vibesys_evaluator._private.phase import PodTask
+from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
 from vs_evaluator_protocol.api import Measurement, parse_records, read_measurement
 
-from .support import kv
-from .support.fake_loadgen import FakeLoadgen
-from .support.runners import InProcessDeployer, InProcessRunner
+from .vse_support import kv
+from .vse_support.fake_loadgen import FakeLoadgen
+from .vse_support.runners import InProcessDeployer, InProcessRunner
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
 SCRIPT = TaskCommand(python="python3", script="/task/bench.py")
 
 
-def _task(**changes: object) -> Task:
-    task = Task(
+def _task(
+    *,
+    workload: kv.Workload[kv.Data, kv.Model] = kv.WORKLOAD,
+    benchmark: Callable[[vse.Run], None] = kv.benchmark,
+    metrics: Mapping[str, vse.Metric] = kv.METRICS,
+    validity: vse.Validity = vse.Validity(),  # noqa: B008  # LW-150406 [B008]; a frozen dataclass
+) -> Task:
+    return Task(
         dataset=kv.Data,
         system=kv.SYSTEM,
-        workload=kv.WORKLOAD,
-        benchmark=kv.benchmark,
-        metrics=kv.METRICS,
-        validity=vse.Validity(),
+        workload=workload,
+        benchmark=benchmark,
+        metrics=metrics,
+        validity=validity,
     )
-    return replace(task, **changes)  # type: ignore[arg-type]
 
 
-def _deployer(task: Task, service: kv.KvService, **loadgen: object) -> InProcessDeployer:
+def _deployer(
+    task: Task, service: kv.KvService, loadgen: FakeLoadgen | None = None
+) -> InProcessDeployer:
+    """The in-process deploy layer, with ``loadgen`` (a default Fake) against ``service``."""
     data = kv.Data()
     runner = InProcessRunner(
         task=PodTask(
@@ -53,7 +62,7 @@ def _deployer(task: Task, service: kv.KvService, **loadgen: object) -> InProcess
             workload=task.workload,
             min_sustained_ratio=task.validity.min_sustained_ratio,
         ),
-        loadgen=FakeLoadgen(app=service.handle, **loadgen),  # type: ignore[arg-type]
+        loadgen=loadgen or FakeLoadgen(app=service.handle),
     )
     return InProcessDeployer(runner=runner, seed=lambda: kv.seed_service(service, data))
 
@@ -157,13 +166,17 @@ def test_status_errors_count_against_the_error_rate(tmp_path: Path) -> None:
 
 
 def test_a_saturated_loadgen_fails_the_sample(tmp_path: Path) -> None:
-    deployer = _deployer(_task(), kv.KvService(), cpu_fraction=0.95)
+    deployer = _deployer(
+        _task(), service := kv.KvService(), FakeLoadgen(app=service.handle, cpu_fraction=0.95)
+    )
     _, text = _sample(tmp_path, _task(), deployer)
     assert "may be the bottleneck" in _error(text)
 
 
 def test_late_sending_fails_an_open_loop(tmp_path: Path) -> None:
-    deployer = _deployer(_task(), kv.KvService(), send_lag_micros=5000)
+    deployer = _deployer(
+        _task(), service := kv.KvService(), FakeLoadgen(app=service.handle, send_lag_micros=5000)
+    )
     _, text = _sample(tmp_path, _task(), deployer)
     message = _error(text)
     assert "phase 1" in message
@@ -189,7 +202,9 @@ def test_an_exhausted_closed_loop_is_retried_once_with_a_larger_plan(tmp_path: P
 
 def test_a_plan_exhausted_twice_fails_naming_the_bound(tmp_path: Path) -> None:
     task = _task(benchmark=_closed_only)
-    deployer = _deployer(task, kv.KvService(), step_micros_by_run=[10_000, 500])  # it speeds up
+    service = kv.KvService()
+    speeding_up = FakeLoadgen(app=service.handle, step_micros_by_run=[10_000, 500])
+    deployer = _deployer(task, service, speeding_up)
     code, text = _sample(tmp_path, task, deployer)
     message = _error(text)
     assert code == 1
@@ -302,3 +317,20 @@ def test_a_malformed_sample_seed_is_an_error(tmp_path: Path) -> None:
         script=SCRIPT,
     )
     assert "VIBESYS_SAMPLE_SEED" in _error(output.read_text())
+
+
+def test_operations_never_sent_are_errors_and_not_writes(tmp_path: Path) -> None:
+    # Every fifth operation is not sent: 80% sustained, 20% errors.
+    lenient = _task(validity=vse.Validity(max_error_rate=0.5, min_sustained_ratio=0.5))
+    deployer = _deployer(
+        lenient, service := kv.KvService(), FakeLoadgen(app=service.handle, never_sent_every=5)
+    )
+    code, text = _sample(tmp_path, lenient, deployer)
+    assert code == 0, text
+    output = phase_pb.PhaseOutput.from_binary(
+        (tmp_path / "artifacts/phase-1/output.binpb").read_bytes()
+    )
+    assert output.summary is not None
+    assert output.summary.errors_by_kind.get(int(pb.ErrorKind.CANCELLED), 0) > 0
+    assert output.writes
+    assert all(w.start_unix_nanos != 0 for w in output.writes)

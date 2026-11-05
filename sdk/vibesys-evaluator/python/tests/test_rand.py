@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys_evaluator import Rand
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Drawn by the Go generators' newRNG(seed, label, index) (evaluator/internal/dataset/random.go of
 # the DeathStarBench tasks): next(), intn(1000), float(), normal(), pick(the stay weights).
@@ -116,7 +121,7 @@ def test_zipf_favours_low_ranks() -> None:
 @pytest.mark.parametrize(
     ("call", "error"),
     [
-        pytest.param(lambda: Rand(1, 1.5), TypeError, id="float-label"),  # type: ignore[arg-type]
+        pytest.param(lambda: Rand(1, 1.5), TypeError, id="float-label"),  # ty: ignore[invalid-argument-type]
         pytest.param(lambda: Rand(1, -1), ValueError, id="negative-label"),
         pytest.param(lambda: Rand(1).below(0), ValueError, id="below-zero"),
         pytest.param(lambda: Rand(1).weighted([0, 0]), ValueError, id="zero-weights"),
@@ -124,6 +129,6 @@ def test_zipf_favours_low_ranks() -> None:
         pytest.param(lambda: Rand(1).zipf(0, 1.0), ValueError, id="zipf-empty"),
     ],
 )
-def test_invalid_arguments_are_refused(call: object, error: type[Exception]) -> None:
+def test_invalid_arguments_are_refused(call: Callable[[], object], error: type[Exception]) -> None:
     with pytest.raises(error):
-        call()  # type: ignore[operator]
+        call()

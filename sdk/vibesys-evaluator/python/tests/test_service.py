@@ -9,6 +9,8 @@ import pytest
 from vibesys_evaluator.service import Operation, Request, Template, Workload, get, post, ref
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vibesys_evaluator import Rand
 
 
@@ -51,14 +53,16 @@ def test_templates_concatenate_both_ways() -> None:
         pytest.param(lambda: Request(*[get("/x")] * 17), "1 to 16 steps", id="many-steps"),
     ],
 )
-def test_invalid_requests_are_refused_naming_the_part(build: object, match: str) -> None:
+def test_invalid_requests_are_refused_naming_the_part(
+    build: Callable[[], object], match: str
+) -> None:
     with pytest.raises(ValueError, match=match):
-        build()  # type: ignore[operator]
+        build()
 
 
 def test_a_request_takes_only_steps() -> None:
     with pytest.raises(TypeError, match="not a Step"):
-        Request("/x")  # type: ignore[arg-type]
+        Request("/x")  # ty: ignore[invalid-argument-type]
 
 
 @pytest.mark.parametrize(

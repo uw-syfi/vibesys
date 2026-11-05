@@ -19,23 +19,52 @@ from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
 from vibesys_evaluator.service import Operation, Request, Workload, post, put, ref
 
-from .support import kv
+from .vse_support import kv
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _phase(index: int = 0, **load: object) -> phase_pb.PhaseInput:
-    defaults: dict[str, object] = {
-        "sample_seed": 3,
-        "phase_index": index,
-        "model": pb.LoadModel.OPEN,
-        "rate": 50.0,
-        "arrivals": pb.Arrivals.UNIFORM,
-        "secs": 1.0,
-        "warmup_secs": 1.0,
-    }
-    return phase_pb.PhaseInput(**{**defaults, **load})  # type: ignore[arg-type]
+def _phase(
+    index: int = 0, *, rate: float = 50.0, secs: float = 1.0, warmup_secs: float = 1.0
+) -> phase_pb.PhaseInput:
+    """An open-loop phase input."""
+    return phase_pb.PhaseInput(
+        sample_seed=3,
+        phase_index=index,
+        model=pb.LoadModel.OPEN,
+        rate=rate,
+        arrivals=pb.Arrivals.UNIFORM,
+        secs=secs,
+        warmup_secs=warmup_secs,
+    )
+
+
+def _http(step: pb.Step) -> pb.HttpCall:
+    assert step.call is not None
+    assert isinstance(step.call.value, pb.HttpCall)
+    return step.call.value
+
+
+def _parts(template: pb.Template | None) -> list[str | pb.Ref]:
+    """A template's parts: literals as text, refs as ``Ref``."""
+    assert template is not None
+    parts: list[str | pb.Ref] = []
+    for part in template.parts:
+        assert part.part is not None
+        parts.append(part.part.value)
+    return parts
+
+
+def _ref(part: str | pb.Ref) -> pb.Ref:
+    assert isinstance(part, pb.Ref)
+    return part
+
+
+def _body(call: pb.HttpCall) -> tuple[str, bytes | pb.Template]:
+    assert call.body is not None
+    assert not isinstance(call.body.value, pb.Form)
+    return call.body.field, call.body.value
 
 
 def _plan(
@@ -63,7 +92,9 @@ def test_plan_sizes_follow_the_load() -> None:
     assert plan_size(_phase(rate=100.0, secs=10.0, warmup_secs=5.0)) == 1630
     assert (
         plan_size(
-            _phase(model=pb.LoadModel.CLOSED, max_ops_per_sec=200.0, secs=2.0, warmup_secs=1.0)
+            phase_pb.PhaseInput(
+                model=pb.LoadModel.CLOSED, max_ops_per_sec=200.0, secs=2.0, warmup_secs=1.0
+            )
         )
         == 600
     )
@@ -76,12 +107,8 @@ def test_the_mix_and_the_sample_follow_the_weights(tmp_path: Path) -> None:
     assert 0.15 < len(writes) / len(plan) < 0.25  # weight 20 of 100
     assert all(op.keep_bodies for op in writes)  # writes are always in the sample
     assert 0.4 < sum(op.keep_bodies for op in reads) / len(reads) < 0.6  # sample=0.5
-    assert all(
-        op.exclusive_key
-        == f"k{json.loads(op.steps[1].call.value.path.parts[0].part.value.split('k', 2)[-1] and '0')}"
-        or op.exclusive_key.startswith("k")
-        for op in writes
-    )
+    # a write's exclusive key is the key it puts
+    assert all(_parts(_http(op.steps[1]).path) == [f"/kv/{op.exclusive_key}"] for op in writes)
 
 
 def test_a_template_ref_is_encoded_for_where_it_is_used(tmp_path: Path) -> None:
@@ -102,31 +129,35 @@ def test_a_template_ref_is_encoded_for_where_it_is_used(tmp_path: Path) -> None:
         model=lambda d, _r: d, operations=[Operation(name="op", weight=1, build=build)]
     )
     first = _plan(tmp_path / "p", workload, _phase())[0]
-    login, use, raw = (s.call.value for s in first.steps)
-    assert login.body.field == "raw"  # no ref: sent as is
-    assert json.loads(login.body.value) == {"user": 'u"1'}
-    assert [(p.name, p.value.parts[0].part.value) for p in login.headers] == [
-        ("Content-Type", "application/json")
+    login, use, raw = (_http(s) for s in first.steps)
+    kind, body = _body(login)
+    assert kind == "raw"  # no ref: sent as is
+    assert isinstance(body, bytes)
+    assert json.loads(body) == {"user": 'u"1'}
+    assert [(p.name, _parts(p.value)) for p in login.headers] == [
+        ("Content-Type", ["application/json"])
     ]
     capture = first.steps[0].captures[0]
+    assert capture.source is not None
     assert (capture.name, capture.source.field, capture.source.value) == (
         "token",
         "json_pointer",
         "/token",
     )
-    text = use.body.value
-    assert use.body.field == "text"
-    kinds = [(p.part.field, p.part.value) for p in text.parts]
-    assert kinds[0] == ("literal", '{"token":"')
-    assert kinds[1][0] == "ref"
-    assert kinds[1][1].encoding == pb.RefEncoding.JSON_STRING
-    assert kinds[2] == ("literal", '","n":[1,null]}')
+    kind, text = _body(use)
+    assert kind == "text"
+    assert isinstance(text, pb.Template)
+    parts = _parts(text)
+    assert parts[0] == '{"token":"'
+    assert _ref(parts[1]).encoding == pb.RefEncoding.JSON_STRING
+    assert parts[2] == '","n":[1,null]}'
     header = next(p for p in use.headers if p.name == "Authorization")
-    assert [p.part.field for p in header.value.parts] == ["literal", "ref"]
-    assert header.value.parts[1].part.value.encoding == pb.RefEncoding.RAW
-    assert use.query[0].value.parts[0].part.value.encoding == pb.RefEncoding.RAW
+    literal, token = _parts(header.value)
+    assert literal == "Bearer "
+    assert _ref(token).encoding == pb.RefEncoding.RAW
+    assert _ref(_parts(use.query[0].value)[0]).encoding == pb.RefEncoding.RAW
     assert raw.method == pb.HttpMethod.PUT
-    assert raw.body.value == b"\x00"
+    assert _body(raw) == ("raw", b"\x00")
 
 
 def test_a_pending_write_is_seen_by_the_requests_built_after_it(tmp_path: Path) -> None:
@@ -150,5 +181,5 @@ def test_a_pending_write_is_seen_by_the_requests_built_after_it(tmp_path: Path) 
         ],
     )
     plan = _plan(tmp_path / "p", workload, _phase())
-    sent = [int(op.steps[0].call.value.query[0].value.parts[0].part.value) for op in plan]
+    sent = [int(str(_parts(_http(op.steps[0]).query[0].value)[0])) for op in plan]
     assert sent == list(range(1, len(plan) + 1))

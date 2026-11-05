@@ -218,7 +218,7 @@ files = [
   "tests/e2e/test_bundled_go_evaluator_offline.py",
   "tests/e2e/test_kvstore_default_gate_e2e.py",
 ]
-roots = ["sdk/vs-evaluator", "resources/evaluators"]
+roots = ["sdk/vs-evaluator", "sdk/vibesys-evaluator", "resources/evaluators"]
 
 [[components]]
 id = "agent_image"

@@ -97,6 +97,8 @@ class FakeLoadgen:
     step_micros_by_run: list[int] = field(default_factory=list)
     cpu_fraction: float = 0.1
     send_lag_micros: int = 0
+    #: Open loop: every n-th operation is due but never sent (CANCELLED, start 0); 0: none.
+    never_sent_every: int = 0
     runs: list[list[str]] = field(default_factory=list)
     #: The virtual clock: each run starts a second after the previous one ended.
     clock: int = T0
@@ -162,7 +164,8 @@ class FakeLoadgen:
                     )
                 )
                 return steps, pb.ErrorKind.CAPTURE, now
-            status, response = self.app(_METHODS[call.method], target, headers, body)  # type: ignore[arg-type]
+            sent = {name: value for name, value in headers.items() if value is not None}
+            status, response = self.app(_METHODS[call.method], target, sent, body)
             end = now + self.step_micros * 1000
             kept = (
                 Oneof("body", response)
@@ -233,10 +236,22 @@ class FakeLoadgen:
                 heapq.heappush(clients, (end, client))
         else:
             gap = 1e9 / options.rate
+            exhausted = t0 + int(len(plan) * gap) < window_end
             for index, op in enumerate(plan):
                 scheduled = t0 + int(index * gap)
                 if scheduled >= window_end:
                     break
+                if self.never_sent_every and index % self.never_sent_every == 0:
+                    results.append(
+                        pb.OperationResult(
+                            index=index,
+                            operation=op.operation,
+                            scheduled_unix_nanos=scheduled,
+                            end_unix_nanos=window_end,
+                            error=pb.ErrorKind.CANCELLED,
+                        )
+                    )
+                    continue
                 start = scheduled + self.send_lag_micros * 1000
                 steps, error, end = self._execute(op, start)
                 results.append(
@@ -274,22 +289,25 @@ class FakeLoadgen:
         per_op = {n: (_histogram(), [0, 0]) for n in range(len(header.operation_names))}
         sent = completed = errors = spilled = in_time = 0
         by_kind: dict[int, int] = {}
+        # As loadgen counts (internal/summary): an operation is the window's when it was
+        # scheduled in it; latency is end - scheduled, of successful operations only.
         for result in results:
-            at = result.start_unix_nanos if closed else result.scheduled_unix_nanos
-            if not window_start <= at < window_end:
+            if window_start <= result.start_unix_nanos < window_end:
+                sent += 1
+            if not window_start <= result.scheduled_unix_nanos < window_end:
                 continue
-            sent += 1
             completed += 1
-            micros = (result.end_unix_nanos - at) // 1000
-            latency.record(micros)
             lag.record((result.start_unix_nanos - result.scheduled_unix_nanos) // 1000)
             histogram, counts = per_op[result.operation]
-            histogram.record(micros)
             counts[0] += 1
             if result.error != pb.ErrorKind.UNSPECIFIED:
                 errors += 1
                 counts[1] += 1
                 by_kind[int(result.error)] = by_kind.get(int(result.error), 0) + 1
+            else:
+                micros = (result.end_unix_nanos - result.scheduled_unix_nanos) // 1000
+                latency.record(micros)
+                histogram.record(micros)
             if result.end_unix_nanos > window_end:
                 spilled += 1
             else:
