@@ -47,6 +47,18 @@ type Engine interface {
 	Start(ctx context.Context, spec ContainerSpec) (Container, error)
 }
 
+// Keeper is an Engine whose containers each wait for what they run in, such as a cluster's
+// allocation, and that can keep it for the job's next container instead of giving it up, so that
+// the next one does not wait again.
+type Keeper interface {
+	Engine
+	// Keep removes the container and ends everything in it, as Remove does, and keeps what it ran
+	// in for the next container this engine starts, when the container's spec said one follows
+	// (ContainerSpec.Later) and what it ran in can serve it. What is kept and not taken is given up
+	// by the engine within a bound of its own.
+	Keep(ctx context.Context, name string) error
+}
+
 // Container is a running container, and the way into it.
 type Container interface {
 	// Start starts argv as a process in the container, as the user and in the working directory
@@ -149,6 +161,11 @@ type ContainerSpec struct {
 	// in an allocation with a time limit of its own bounds the allocation by it; zero means the
 	// caller gave none.
 	Limit time.Duration
+	// Later is the summed Limit of the run's job's containers like this one that follow it
+	// (core.Execution.Later). An engine that places the container in an allocation may ask for
+	// one long enough for them too, and keep it for the next of them (Keeper); zero says none
+	// follows.
+	Later time.Duration
 	// Measured says the container's commands are timed: an engine that places the container in
 	// an allocation gives it the whole machine, and an unmeasured container only its share.
 	Measured bool
@@ -194,6 +211,8 @@ func (s ContainerSpec) Validate() error {
 		return invalid("%q is not a network mode", s.Network)
 	case s.Limit < 0:
 		return invalid("the limit %v is negative", s.Limit)
+	case s.Later < 0:
+		return invalid("the later containers' limit %v is negative", s.Later)
 	}
 	if err := checkPath("the working directory", s.Dir); err != nil {
 		return invalid("%v", err)

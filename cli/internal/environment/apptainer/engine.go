@@ -40,6 +40,11 @@ const StopMargin = 10 * time.Minute
 // NoLimit is the time limit of an allocation whose container was given none.
 const NoLimit = 24 * time.Hour
 
+// KeepTimeout bounds how long an allocation a container kept for the job's next one (Keep) waits
+// for it: one that no container takes by then is cancelled. The pause between two of a job's
+// containers is the copy of the run's directories back and forth.
+const KeepTimeout = 10 * time.Minute
+
 // Exporter writes a local image as a docker archive (docker save), says how large the image is
 // unpacked and stored, as the local engine has it (stored, its layers are compressed under Docker's
 // default containerd image store, about the size of its archive), and says what the image holds.
@@ -142,10 +147,23 @@ type Engine struct {
 
 	mu      sync.Mutex
 	boxes   map[string]*box // the containers this engine started, by name
+	kept    *kept           // the allocation a container kept for the next one, if any
 	reading *Reading        // the last node this process read
 }
 
-var _ docker.Engine = (*Engine)(nil)
+// kept is an allocation that runs no container, kept for the job's next one (Keep).
+type kept struct {
+	job    string    // its Slurm id
+	name   string    // its Slurm name
+	sizing string    // what it asked for (sizingKey)
+	ends   time.Time // when its time limit ends it, at the latest
+	hold   io.Closer
+	// taken is closed by whoever takes the allocation out of Engine.kept: a container, or the
+	// end of its wait.
+	taken chan struct{}
+}
+
+var _ docker.Keeper = (*Engine)(nil)
 
 // box is a container this engine started.
 type box struct {
@@ -153,6 +171,9 @@ type box struct {
 	labels docker.Labels
 	job    string // the allocation it runs in
 	owner  bool   // the allocation is its own
+	alloc  string // the Slurm name of its own allocation: its own, or a kept one's
+	sizing string // what its own allocation asked for (sizingKey)
+	ends   time.Time
 	spec   docker.ContainerSpec
 	sif    string
 	hold   io.Closer
@@ -253,14 +274,32 @@ func (e *Engine) Containers(ctx context.Context, match docker.Labels) ([]string,
 		if err != nil {
 			return nil, err
 		}
+		held := e.held()
 		for _, job := range jobs {
-			if name, ok := strings.CutPrefix(job, JobPrefix); ok && !slices.Contains(names, name) {
+			if name, ok := strings.CutPrefix(job, JobPrefix); ok && !slices.Contains(names, name) && !held[job] {
 				names = append(names, name)
 			}
 		}
 	}
 	slices.Sort(names)
 	return names, nil
+}
+
+// held are the Slurm names of the allocations this engine holds: its containers' own, and the
+// kept one. None of them is a leftover, whatever container it was named by.
+func (e *Engine) held() map[string]bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	out := map[string]bool{}
+	for _, b := range e.boxes {
+		if b.owner && !b.gone && b.alloc != "" {
+			out[b.alloc] = true
+		}
+	}
+	if e.kept != nil {
+		out[e.kept.name] = true
+	}
+	return out
 }
 
 func hasLabels(have, want docker.Labels) bool {
@@ -295,11 +334,87 @@ func (e *Engine) Remove(ctx context.Context, name string) error {
 		e.forget(b)
 		return nil
 	}
-	if err := e.cfg.Cluster.Cancel(ctx, JobName(name)); err != nil {
+	alloc := JobName(name)
+	if b != nil && b.alloc != "" {
+		alloc = b.alloc
+	}
+	if err := e.cfg.Cluster.Cancel(ctx, alloc); err != nil {
 		return fmt.Errorf("the allocation of %s was not confirmed ended: %w", name, err)
 	}
 	if b != nil {
 		e.forget(b)
+	}
+	return nil
+}
+
+// Keep implements docker.Keeper. A container of an allocation of its own whose spec said a
+// container of the job follows (docker.ContainerSpec.Later) has its processes killed, confirmed,
+// and its allocation is kept, held, for the next container this engine starts that asks for the
+// same sizing (Start). One that no container takes within KeepTimeout is cancelled. Any other
+// container, and one whose processes are not confirmed ended, is removed as Remove does.
+func (e *Engine) Keep(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	b := e.boxes[name]
+	keeps := b != nil && b.owner && !b.gone && b.hold != nil && b.spec.Later > 0
+	e.mu.Unlock()
+	if !keeps {
+		return e.Remove(ctx, name)
+	}
+	if err := e.cfg.Cluster.Node(b.job).Signal(ctx, name, SIGKILL); err != nil {
+		return e.Remove(ctx, name)
+	}
+	e.mu.Lock()
+	k := &kept{job: b.job, name: b.alloc, sizing: b.sizing, ends: b.ends, hold: b.hold, taken: make(chan struct{})}
+	// The hold is the kept allocation's now: closing the container leaves it.
+	b.hold = nil
+	old := e.kept
+	e.kept = k
+	if old != nil {
+		close(old.taken)
+	}
+	e.mu.Unlock()
+	e.forget(b)
+	if old != nil {
+		e.release(old)
+	}
+	wait, stop := e.cfg.Timers.Timeout(context.Background(), KeepTimeout)
+	go func() {
+		defer stop()
+		select {
+		case <-k.taken:
+		case <-wait:
+			if e.take(k) {
+				e.release(k)
+			}
+		}
+	}()
+	return nil
+}
+
+// take takes the kept allocation k out of the engine, and reports false when another took it first.
+func (e *Engine) take(k *kept) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.kept != k {
+		return false
+	}
+	e.kept = nil
+	close(k.taken)
+	return true
+}
+
+// release cancels a kept allocation that no container took, confirmed, within CallTimeout, and lets
+// its hold go, which cancels it too should the cancel fail.
+func (e *Engine) release(k *kept) error {
+	ctx, stop := clock.Deadline(context.Background(), e.cfg.Timers, CallTimeout)
+	defer stop()
+	err := e.cfg.Cluster.Cancel(ctx, k.name)
+	_ = k.hold.Close()
+	if err != nil {
+		return fmt.Errorf("the allocation %s, kept for a container that did not take it, was not confirmed ended: %w", k.job, err)
 	}
 	return nil
 }
@@ -371,7 +486,15 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		log = io.Discard
 	}
 	if !joins {
-		if err := e.allocate(ctx, b, log); err != nil {
+		reused, err := e.reuse(ctx, b, log)
+		if err != nil {
+			e.forget(b)
+			return nil, err
+		}
+		if !reused {
+			err = e.allocate(ctx, b, log)
+		}
+		if err != nil {
 			// The allocation may exist: the box stays known, so Remove cancels it.
 			return nil, err
 		}
@@ -383,16 +506,75 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 	return &handle{e: e, b: b, node: node}, nil
 }
 
-// allocate asks for the box's allocation, waits for it to run, saying to log what Slurm says of the
-// wait, holds it for this process, and reads its node.
-func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
-	limit := NoLimit
-	if b.spec.Limit > 0 {
-		limit = b.spec.Limit
+// sizingKey is what an allocation for the container asks for, as one string: two containers of one
+// key can run in one allocation, one after the other.
+func (e *Engine) sizingKey(spec docker.ContainerSpec) string {
+	return strings.Join(e.cfg.Sizing.Options(spec.Measured), "\x00")
+}
+
+// limitOf is the time limit of an allocation for the container: its limit, the later containers'
+// it may be kept for, and the margin for the stop.
+func limitOf(spec docker.ContainerSpec) time.Duration {
+	if spec.Limit <= 0 {
+		return NoLimit + StopMargin
 	}
+	return spec.Limit + spec.Later + StopMargin
+}
+
+// reuse places the box in the allocation a container of the job kept for it (Keep), and reports
+// whether it did. A kept allocation of another sizing, or with less time left than the box's limit
+// and the margin, is cancelled, and the box asks for one of its own. A kept allocation that Slurm
+// ended since is a job that lost its place: the box fails, saying so, rather than wait in the queue
+// again behind the samples it was kept for.
+func (e *Engine) reuse(ctx context.Context, b *box, log io.Writer) (bool, error) {
+	e.mu.Lock()
+	k := e.kept
+	e.mu.Unlock()
+	if k == nil || !e.take(k) {
+		return false, nil
+	}
+	sizing := e.sizingKey(b.spec)
+	left := k.ends.Sub(e.cfg.Clock.Now())
+	if need := limitOf(docker.ContainerSpec{Limit: b.spec.Limit}); k.sizing != sizing || left < need {
+		if k.sizing == sizing {
+			_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s kept for this container has %v of its time limit left, "+
+				"and the container needs %v; asking for another\n", k.job, left.Round(time.Second), need)
+		}
+		return false, e.release(k)
+	}
+	st, err := e.cfg.Cluster.State(ctx, k.job)
+	if err == nil && st.Phase != Running {
+		err = unavailable("the allocation %s that the job kept for its next container ended before it ran it (Slurm says %s), "+
+			"so the job lost its place on the node; submit the job again", k.job, orUnknown(st.Name))
+	}
+	if err != nil {
+		if rerr := e.release(k); rerr != nil {
+			err = errors.Join(err, rerr)
+		}
+		return false, err
+	}
+	e.mu.Lock()
+	b.job, b.alloc, b.sizing, b.ends, b.hold = k.job, k.name, k.sizing, k.ends, k.hold
+	e.mu.Unlock()
+	_, _ = fmt.Fprintf(log, "[apptainer] the container %s runs in the allocation %s, which the job's last container kept, on %s\n",
+		b.name, k.job, orUnknown(st.Node))
+	return true, nil
+}
+
+// allocate asks for the box's allocation, waits for it to run, saying to log what Slurm says of the
+// wait, holds it for this process, and reads its node. The allocation's time limit covers the
+// later containers of the job it may be kept for (limitOf).
+func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
+	limit := limitOf(b.spec)
+	sizing := e.cfg.Sizing.Options(b.spec.Measured)
+	e.mu.Lock()
+	b.alloc, b.sizing = JobName(b.name), e.sizingKey(b.spec)
+	e.mu.Unlock()
+	// Slurm counts the limit from the start, which is after the last read that found the job
+	// queued, or after now when none does.
+	start := e.cfg.Clock.Now()
 	job, err := e.cfg.Cluster.Submit(ctx, Allocation{
-		Name: JobName(b.name), Comment: b.labels[docker.LabelScope], Limit: limit + StopMargin,
-		Options: e.cfg.Sizing.Options(b.spec.Measured),
+		Name: JobName(b.name), Comment: b.labels[docker.LabelScope], Limit: limit, Options: sizing,
 	})
 	if err != nil {
 		return err
@@ -400,9 +582,16 @@ func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
 	e.mu.Lock()
 	b.job = job
 	e.mu.Unlock()
-	if err := e.await(ctx, job, log); err != nil {
+	queued, err := e.await(ctx, job, log)
+	if err != nil {
 		return err
 	}
+	if queued.After(start) {
+		start = queued
+	}
+	e.mu.Lock()
+	b.ends = start.Add(limit)
+	e.mu.Unlock()
 	node := e.cfg.Cluster.Node(job)
 	hold, err := node.Hold(ctx)
 	if err != nil {
@@ -419,15 +608,19 @@ func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
 // start) goes to log when the wait begins and whenever it changes, and its node and the length of
 // the wait once it runs, so that the run's log says why nothing ran yet. A job that runs at once
 // writes nothing.
-func (e *Engine) await(ctx context.Context, job string, log io.Writer) error {
+//
+// It returns when the last read that found the job queued began, or the zero time when none did.
+func (e *Engine) await(ctx context.Context, job string, log io.Writer) (time.Time, error) {
 	limit, stop := e.cfg.Timers.Timeout(ctx, e.cfg.QueueTimeout)
 	defer stop()
 	since := e.cfg.Clock.Now()
 	var said *JobState
+	var queuedAt time.Time
 	for {
+		read := e.cfg.Clock.Now()
 		st, err := e.cfg.Cluster.State(ctx, job)
 		if err != nil {
-			return err
+			return time.Time{}, err
 		}
 		switch st.Phase {
 		case Running:
@@ -435,14 +628,15 @@ func (e *Engine) await(ctx context.Context, job string, log io.Writer) error {
 				_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s runs on %s, after %v in Slurm's queue\n",
 					job, orUnknown(st.Node), e.cfg.Clock.Now().Sub(since).Round(time.Second))
 			}
-			return nil
+			return queuedAt, nil
 		case Queued:
+			queuedAt = read
 			if said == nil || st.Name != said.Name || st.Reason != said.Reason || st.Start != said.Start {
 				_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s waits in Slurm's queue: %s\n", job, queued(st))
 				said = &st
 			}
 		case Ended:
-			return unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
+			return time.Time{}, unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
 		}
 		pause, stopPause := e.cfg.Timers.Timeout(ctx, e.cfg.Poll)
 		select {
@@ -454,10 +648,10 @@ func (e *Engine) await(ctx context.Context, job string, log io.Writer) error {
 			if st.Reason != "" {
 				why += ", " + st.Reason
 			}
-			return unavailable("the allocation %s did not start within %v (Slurm says %s); it is cancelled", job, e.cfg.QueueTimeout, why)
+			return time.Time{}, unavailable("the allocation %s did not start within %v (Slurm says %s); it is cancelled", job, e.cfg.QueueTimeout, why)
 		case <-ctx.Done():
 			stopPause()
-			return ctx.Err()
+			return time.Time{}, ctx.Err()
 		}
 	}
 }

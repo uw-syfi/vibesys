@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -54,6 +55,8 @@ type setup struct {
 	// scope is the rig's; empty is the tests' scope. A scope is one process's: a run sweeps what
 	// every other process of its scope left, as a dead one's.
 	scope string
+	// sizing is what the allocations ask for; nil is a partition and an argument of the operator's.
+	sizing *apptainer.Sizing
 }
 
 // rig is one process's docker environment over the apptainer engine, on a cluster it shares with
@@ -65,6 +68,7 @@ type rig struct {
 	engine   *apptainer.Engine
 	provider *docker.Provider
 	env      environment.Environment
+	clock    *clock.Manual // the engine's
 }
 
 func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o setup) *rig {
@@ -81,12 +85,16 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 	if o.converter == nil {
 		o.converter = clusterfake.NewConverter()
 	}
+	if o.sizing == nil {
+		o.sizing = &apptainer.Sizing{Partition: "part-a", Arguments: []string{"--account=acct-a"}}
+	}
 	local := dockerfake.NewDaemon(w.MemoryGates, o.daemon...).Connect()
 	client := cluster.Connect()
+	clk := clock.NewManual(time.Unix(1_700_000_000, 0), time.Second)
 	eng, err := apptainer.New(apptainer.Config{
 		Local: local, Export: local, Cluster: client, Root: root, Scope: o.scope,
-		Timers: o.engineTimers, Clock: clock.NewManual(time.Unix(1_700_000_000, 0), time.Second),
-		Sizing:      apptainer.Sizing{Partition: "part-a", Arguments: []string{"--account=acct-a"}},
+		Timers: o.engineTimers, Clock: clk,
+		Sizing:      *o.sizing,
 		NodeScripts: o.scripts, Converter: o.converter, LocalDir: localDir,
 	})
 	if err != nil {
@@ -108,7 +116,7 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &rig{cluster: cluster, client: client, local: local, engine: eng, provider: p, env: e}
+	return &rig{cluster: cluster, client: client, local: local, engine: eng, provider: p, env: e, clock: clk}
 }
 
 var checkouts sync.Map
@@ -976,6 +984,15 @@ func candidateRun(t *testing.T, serve, command []string, act func(*envtest.Timer
 	w := fakeworld.New()
 	cluster := clusterfake.New(w.MemoryGates)
 	timers := envtest.NewTimers()
+	r, x := candidateRig(t, w, cluster, timers, serve, command)
+	a, out := pumped(t, r, timers, x, act)
+	return a, out, cluster
+}
+
+// candidateRig is a rig of a task of two images, and an execution of command beside a server that
+// runs serve.
+func candidateRig(t *testing.T, w fakeworld.World, cluster *clusterfake.Cluster, timers *envtest.Timers, serve, command []string) (*rig, core.Execution) {
+	t.Helper()
 	r := newRig(t, w, cluster, setup{timers: timers, configure: func(c *docker.Config) {
 		c.Candidates, c.Probe, c.ProbePause = candidateFiles{}, probeProgram, probePause
 	}})
@@ -985,10 +1002,18 @@ func candidateRun(t *testing.T, serve, command []string, act func(*envtest.Timer
 	if err != nil {
 		t.Fatal(err)
 	}
-	x := core.Execution{
+	return r, core.Execution{
 		Checkout: checkout(t), Argv: command, Timeout: limit,
 		Candidate: &core.CandidateRun{Image: img.ID, Serve: &core.CandidateServe{Argv: serve, Ready: "/health", StartupTimeout: startup}},
 	}
+}
+
+// pumped runs x on the rig, firing the probes' pauses as they are armed, and act once the run
+// started.
+func pumped(t *testing.T, r *rig, timers *envtest.Timers, x core.Execution, act func(*envtest.Timers)) (core.Attempt, string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
 	var (
 		wg  sync.WaitGroup
 		out bytes.Buffer
@@ -1014,7 +1039,41 @@ func candidateRun(t *testing.T, serve, command []string, act func(*envtest.Timer
 		act(timers)
 	}
 	wg.Wait()
-	return a, out.String(), cluster
+	return a, out.String()
+}
+
+// The samples of a task of two images share one allocation too, each with a fresh server of its
+// own: the next sample's server starts in a new container once the last one's is gone.
+func TestTheSamplesOfATaskOfTwoImagesShareOneAllocationWithAFreshServerEach(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	timers := envtest.NewTimers()
+	r, x := candidateRig(t, w, cluster, timers, []string{"ready", ";", "hold", "forever"}, []string{"print", "done"})
+	x.Measured = true
+	const samples = 2
+	for i := range samples {
+		x.Later = time.Duration(samples-1-i) * x.Timeout
+		x.Checkout = checkout(t)
+		a, out := pumped(t, r, timers, x, nil)
+		exited(t, a, 0)
+		if !strings.Contains(out, "done") {
+			t.Errorf("sample %d output %q", i, out)
+		}
+		if running := cluster.Running(); len(running) != 0 {
+			t.Fatalf("after sample %d the processes %v are left", i, running)
+		}
+	}
+	if n := len(cluster.Submitted()); n != 1 {
+		t.Errorf("%d allocations for %d samples, want one", n, samples)
+	}
+	boxes := map[string]bool{}
+	for _, b := range cluster.Started() {
+		boxes[b.Name] = true
+	}
+	if len(boxes) != 2*samples {
+		t.Errorf("boxes %v, want a server's and a command's for each sample", boxes)
+	}
+	nothingLeft(t, cluster)
 }
 
 // fire fires the first timer armed for d.
@@ -1089,4 +1148,192 @@ func TestTheEngineRefusesWhatANodeCannotGive(t *testing.T) {
 	if len(cluster.Submitted()) != 0 {
 		t.Error("a refused container asked for an allocation")
 	}
+}
+
+// sample runs argv as a benchmark sample of a measure job with later of samples after it, under
+// ctx, in a checkout of its own.
+func sample(ctx context.Context, t testing.TB, e environment.Environment, later time.Duration, argv ...string) (core.Attempt, string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, envtest.Backstop)
+	defer cancel()
+	var out bytes.Buffer
+	a := e.Run(ctx, core.Execution{Checkout: checkout(t), Argv: argv, Timeout: limit, Measured: true, Later: later}, &out)
+	return a, out.String()
+}
+
+// A measure job's samples wait in Slurm's queue once: the first asks for an allocation long enough
+// for every sample, and each sample but the last leaves it, with no process of its container
+// left, to the next, which runs in a fresh container of its own there. The last cancels it.
+func TestAMeasureWaitsInTheQueueOnceForAllItsSamples(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	r := newRig(t, w, cluster, setup{})
+	const samples = 3
+	var outs []string
+	for i := range samples {
+		a, out := sample(context.Background(), t, r.env, time.Duration(samples-1-i)*limit, "print", fmt.Sprintf("sample %d", i))
+		exited(t, a, 0)
+		outs = append(outs, out)
+		if i < samples-1 {
+			if live := cluster.Live(); len(live) != 1 {
+				t.Fatalf("after sample %d the allocations %v, want the one kept", i, live)
+			}
+			if running := cluster.Running(); len(running) != 0 {
+				t.Fatalf("after sample %d the processes %v are left", i, running)
+			}
+		}
+	}
+	sub := cluster.Submitted()
+	if len(sub) != 1 || sub[0].Limit != samples*limit+apptainer.StopMargin {
+		t.Fatalf("allocations %+v, want one with the limit of every sample and the margin", sub)
+	}
+	if !strings.Contains(outs[1], "which the job's last container kept") || strings.Contains(outs[0], "kept") {
+		t.Errorf("outputs %q: a sample that runs in the kept allocation says so, and only one", outs)
+	}
+	boxes := map[string]bool{}
+	for _, b := range cluster.Started() {
+		boxes[b.Name] = true
+	}
+	if len(boxes) != samples {
+		t.Errorf("boxes %v, want a fresh container for each sample", boxes)
+	}
+	nothingLeft(t, cluster)
+}
+
+// A sample whose command does not exit 0, or that is cancelled, ends the job's samples: it gives
+// its allocation up, and the next run waits for one of its own.
+func TestASampleThatDoesNotEndCleanlyGivesItsAllocationUp(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(t *testing.T, w fakeworld.World, e environment.Environment)
+	}{
+		{"exits 1", func(t *testing.T, _ fakeworld.World, e environment.Environment) {
+			a, _ := sample(context.Background(), t, e, limit, "exit", "1")
+			exited(t, a, 1)
+		}},
+		{"cancelled", func(t *testing.T, w fakeworld.World, e environment.Environment) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var a core.Attempt
+			var wg sync.WaitGroup
+			wg.Go(func() { a, _ = sample(ctx, t, e, limit, "mark", "started", ";", "hold", "forever") })
+			reached, stop := context.WithTimeout(context.Background(), envtest.Backstop)
+			defer stop()
+			if !w.Reached(reached, "started") {
+				t.Fatal("the sample never started")
+			}
+			cancel()
+			wg.Wait()
+			if a != (core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}) {
+				t.Fatalf("attempt %+v, want cancelled", a)
+			}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := fakeworld.New()
+			cluster := clusterfake.New(w.MemoryGates)
+			r := newRig(t, w, cluster, setup{})
+			c.run(t, w, r.env)
+			nothingLeft(t, cluster)
+			a, _ := sample(context.Background(), t, r.env, 0, "exit", "0")
+			exited(t, a, 0)
+			if n := len(cluster.Submitted()); n != 2 {
+				t.Errorf("%d allocations, want the next run's own", n)
+			}
+			nothingLeft(t, cluster)
+		})
+	}
+}
+
+// A job whose kept allocation Slurm ended between two samples lost its place: the next sample
+// fails before its command, saying so, and does not wait in the queue again.
+func TestAJobWhoseKeptAllocationEndedFailsSayingSo(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	r := newRig(t, w, cluster, setup{})
+	a, _ := sample(context.Background(), t, r.env, limit, "exit", "0")
+	exited(t, a, 0)
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	if err := cluster.Connect().Cancel(ctx, cluster.Submitted()[0].Name); err != nil {
+		t.Fatal(err)
+	}
+	a, _ = sample(context.Background(), t, r.env, 0, "mark", "ran")
+	f := failure(t, a)
+	if !strings.Contains(f.Message, "lost its place") || !strings.Contains(f.Message, "CANCELLED") {
+		t.Errorf("failure %q, want one saying the job lost its allocation and what Slurm says of it", f.Message)
+	}
+	if w.Marked("ran") {
+		t.Error("the command ran")
+	}
+	if n := len(cluster.Submitted()); n != 1 {
+		t.Errorf("%d allocations, want none asked for after the lost one", n)
+	}
+	nothingLeft(t, cluster)
+}
+
+// A kept allocation serves only a container of the same sizing with time left for its limit and
+// the margin: another is cancelled, and the container asks for one of its own.
+func TestAKeptAllocationServesOnlyAContainerItFits(t *testing.T) {
+	cases := []struct {
+		name     string
+		measured bool
+		advance  time.Duration
+	}{
+		{"another sizing", false, 0},
+		{"too little time left", true, 2 * limit},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := fakeworld.New()
+			cluster := clusterfake.New(w.MemoryGates)
+			r := newRig(t, w, cluster, setup{sizing: &apptainer.Sizing{Partition: "part-a", Exclusive: true}})
+			a, _ := sample(context.Background(), t, r.env, 2*limit, "exit", "0")
+			exited(t, a, 0)
+			r.clock.Advance(c.advance)
+			ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+			defer cancel()
+			a = r.env.Run(ctx, core.Execution{Checkout: checkout(t), Argv: []string{"exit", "0"}, Timeout: limit, Measured: c.measured}, io.Discard)
+			exited(t, a, 0)
+			if n := len(cluster.Submitted()); n != 2 {
+				t.Errorf("%d allocations, want the second container's own", n)
+			}
+			nothingLeft(t, cluster)
+		})
+	}
+}
+
+// A kept allocation that no container takes within KeepTimeout is cancelled; so is one another
+// process of the scope finds, as what a dead run left.
+func TestAKeptAllocationNoContainerTakesIsCancelled(t *testing.T) {
+	t.Run("its bound", func(t *testing.T) {
+		w := fakeworld.New()
+		cluster := clusterfake.New(w.MemoryGates)
+		timers := envtest.NewTimers()
+		r := newRig(t, w, cluster, setup{engineTimers: timers})
+		a, _ := sample(context.Background(), t, r.env, limit, "exit", "0")
+		exited(t, a, 0)
+		if live := cluster.Live(); len(live) != 1 {
+			t.Fatalf("allocations %v, want the one kept", live)
+		}
+		fire(t, timers, apptainer.KeepTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+		defer cancel()
+		// The bound only guards against a hang: the release follows the timer at once.
+		for len(cluster.Live()) != 0 && ctx.Err() == nil {
+			runtime.Gosched()
+		}
+		nothingLeft(t, cluster)
+	})
+	t.Run("another process", func(t *testing.T) {
+		w := fakeworld.New()
+		cluster := clusterfake.New(w.MemoryGates)
+		r := newRig(t, w, cluster, setup{})
+		a, _ := sample(context.Background(), t, r.env, limit, "exit", "0")
+		exited(t, a, 0)
+		a, _ = run(t, newRig(t, w, cluster, setup{process: 1}).env, "exit", "0")
+		exited(t, a, 0)
+		nothingLeft(t, cluster)
+	})
 }

@@ -846,15 +846,28 @@ start without it, saying to install it.
 - A run's first container is a batch allocation of its own (`sbatch --parsable --no-requeue`, or the
   site's `submit_command`, with the `[slurm]` options and `submit_arguments`), named by the
   container and commented with the daemon's scope. Its time limit is the command's limit and 10
-  minutes for the stop. A holder step keeps it for the run: when the run ends, or the daemon dies
-  and its ssh connection with it, the holder cancels the allocation.
-- A run is one command of a job, so each command has an allocation of its own: a check job's
-  stages, and a measure's check and each of its benchmark samples, each wait in Slurm's queue
-  again. On a busy partition a measure can wait between its samples. While an allocation waits, the
-  run says why in the job's log, before its command's output: Slurm's state of the allocation, its
-  reason and its estimate of the start (`squeue -o %T|%r|%S`) when the wait begins and each time
-  one of them changes, and the node and how long it waited once it runs. A run whose allocation
-  runs at once writes nothing of it. `vibesys-cli jobs` shows such a job as running.
+  minutes for the stop, and, for a measure's benchmark sample, the limits of the samples after it
+  too. A holder step keeps it for the run: when the run ends, or the job's supervisor dies and its
+  ssh connection with it, the holder cancels the allocation.
+- A measure's benchmark samples wait in Slurm's queue once. A sample whose command exits 0, with
+  samples after it, has its container's processes killed, confirmed gone from the node, and keeps
+  the allocation for the next sample, which runs in a fresh container there (a fresh server, for a
+  task of two images) and says so in the job's log. The last sample cancels it, and so does a
+  sample that fails, times out or is cancelled. A kept allocation that no sample takes within 10
+  minutes is cancelled, and the next job's run cancels any its scope left. A kept allocation serves
+  only a container that asks for the same (`[slurm]` sizing of a measured container) and has its
+  limit and the 10 minutes left; another asks for one of its own. A kept allocation that Slurm
+  ended between two samples (preempted, its node failed) fails the job before the next sample,
+  saying that it lost its place, rather than wait in the queue again. Because the first sample asks for
+  the time of all of them, a partition whose `MaxTime` is shorter than the samples' limits together
+  refuses the allocation; the submit's error says so.
+- Every other command has an allocation of its own: a check job's stages, and a measure's build and
+  check, each wait in Slurm's queue, and a measure's first sample waits again after its check,
+  since only samples hand their allocation on (a check asks for less: no whole node). While an
+  allocation waits, the run says why in the job's log, before its command's output: Slurm's state
+  of the allocation, its reason and its estimate of the start (`squeue -o %T|%r|%S`) when the wait
+  begins and each time one of them changes, and the node and how long it waited once it runs. A
+  run whose allocation runs at once writes nothing of it. `vibesys-cli jobs` shows such a job as running.
 - The AMD GPUs a job gets are its allocation's: Slurm keeps two allocations off one GPU, and gives
   a measure the whole node with `[slurm] exclusive` (the default). So the GPUs are claimed per
   placement, `rocm:<placement>@<login node>`: a measure holds its own placement alone, and the

@@ -30,6 +30,10 @@ type Run struct {
 	// Candidate, for a task of two images, is the candidate's image and the server the command runs
 	// against. The Timeout covers the server's startup time as well as the command's own limit.
 	Candidate *core.CandidateRun
+	// Later is the summed Timeout of the job's runs of the same stage after this one: the
+	// benchmark samples still to come after this one, and zero for every other stage
+	// (core.Execution.Later).
+	Later time.Duration
 }
 
 // Observe asks for the machine's facts and its load now.
@@ -339,6 +343,7 @@ func (s State) nextSample() (State, Request) {
 	c := s.plan.Benchmark
 	r := s.run(StageBenchmark, c, out)
 	r.Argv = append(r.Argv, s.plan.Result.OutputFlag(), out)
+	r.Later = time.Duration(s.plan.Samples-uint32(len(s.samples))-1) * r.Timeout
 	return s, r
 }
 

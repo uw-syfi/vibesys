@@ -313,12 +313,26 @@ func started(stderr string) bool {
 
 // signalScript sends the signal $2 to every process of the node whose environment names the box
 // $1, read with one grep over every environment whose entries end with NUL. Another user's process
-// cannot be read, which is not an error.
-const signalScript = `for f in $(grep -lxz -- "` + apptainer.EnvBox + `=$1" /proc/[0-9]*/environ 2>/dev/null); do
+// cannot be read, which is not an error. After KILL it waits, a second at a time, for none of them
+// to be left, and exits 3 when some still are after killWait seconds: a process that has ended
+// and is not yet reaped has an empty environment.
+const signalScript = `match() { grep -lxz -- "` + apptainer.EnvBox + `=$1" /proc/[0-9]*/environ 2>/dev/null; }
+for f in $(match "$1"); do
   p=${f#/proc/}
   kill -s "$2" "${p%/environ}" 2>/dev/null
 done
+[ "$2" = KILL ] || exit 0
+i=0
+while [ -n "$(match "$1")" ]; do
+  i=$((i + 1))
+  if [ "$i" -gt ` + killWait + ` ]; then echo "processes of the box $1 are left after SIGKILL" >&2; exit 3; fi
+  sleep 1
+done
 exit 0`
+
+// killWait is how many seconds signalScript waits for the processes it killed to end, well within
+// CallTimeout.
+const killWait = "60"
 
 // Signal implements apptainer.Node.
 func (n *node) Signal(ctx context.Context, box string, sig apptainer.Signal) error {

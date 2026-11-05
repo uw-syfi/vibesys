@@ -24,6 +24,8 @@ func Validate(x core.Execution) error {
 		return invalid("no command to run")
 	case x.Timeout <= 0:
 		return invalid("the timeout must be positive, got %v", x.Timeout)
+	case x.Later < 0:
+		return invalid("the later executions' time must not be negative, got %v", x.Later)
 	case x.Checkout.Dir == "" || x.Checkout.Dir[0] != '/':
 		return invalid("the checkout directory must be an absolute path, got %q", x.Checkout.Dir)
 	case x.Scratch != "" && x.Scratch[0] != '/':

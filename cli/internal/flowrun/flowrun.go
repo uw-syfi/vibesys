@@ -123,7 +123,7 @@ func (s *Shell) run(ctx context.Context, r flow.Run) flow.Event {
 	n := s.runs
 	s.mu.Unlock()
 	_, _ = fmt.Fprintf(s.cfg.Output, "[%s] %s\n", r.Stage, strings.Join(r.Argv, " "))
-	x := core.Execution{Checkout: checkout, Scratch: scratch, Argv: r.Argv, Timeout: r.Timeout, Measured: r.Stage == flow.StageBenchmark, Candidate: r.Candidate}
+	x := core.Execution{Checkout: checkout, Scratch: scratch, Argv: r.Argv, Timeout: r.Timeout, Measured: r.Stage == flow.StageBenchmark, Candidate: r.Candidate, Later: r.Later}
 	if s.cfg.Artifacts != "" {
 		x.Artifacts = ArtifactsOf(s.cfg.Artifacts, n, r.Stage)
 		if err := s.cfg.Files.MakeDir(ctx, x.Artifacts); err != nil {

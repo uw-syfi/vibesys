@@ -29,6 +29,12 @@
 //   - Removing a run's first container cancels its allocation by name and confirms that it ended
 //     (squeue, then sacct); a run first removes what a dead run of its scope left, which is every
 //     allocation of the scope that no live run owns.
+//   - A container whose spec says containers of its job follow (docker.ContainerSpec.Later), such
+//     as a measure's benchmark sample, asks for an allocation long enough for them too, and Keep
+//     kills its processes, confirmed, and keeps the allocation, held, for the next container of
+//     the same sizing, which runs there and does not wait in the queue again. A kept allocation
+//     that Slurm ended fails that container; one no container takes within KeepTimeout is
+//     cancelled. The engine lives in the job's supervisor, so what it keeps is that job's.
 //   - An exit code that is the transport's own (ssh's 255), and a step that never started its
 //     command, are not the command's ending: the engine reports them as lost.
 package apptainer
@@ -128,7 +134,8 @@ type Node interface {
 	// command, or whose end the transport lost, reports an Exit whose Err is docker.ErrLost.
 	Start(box Box, argv []string, sink io.Writer) (environment.Process, error)
 	// Signal sends the signal to every process of the box's containers on the node. A box with no
-	// process is signalled.
+	// process is signalled. SIGKILL returns once none of them is left, and fails when some are
+	// after a bound of its own.
 	Signal(ctx context.Context, box string, sig Signal) error
 }
 

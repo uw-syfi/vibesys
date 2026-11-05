@@ -451,6 +451,20 @@ the resources, the stop) hold unchanged; only how a container exists differs.
   daemon dies and its ssh connection with it; the run also cancels by name and
   confirms with `squeue` then `sacct`, and a run sweeps its scope's leftovers
   by name.
+- A measure's benchmark samples share one allocation, so a busy partition
+  queues the job once and not before every sample. The flow tells each
+  sample how long the samples after it may run (`Execution.Later`); the first
+  asks for all of it, and a sample that exits 0 with samples after it hands
+  the allocation on (`docker.Keeper`): its container's processes are killed,
+  confirmed gone (the SIGKILL script waits for them), and the next sample
+  starts fresh containers in it. Every other ending, the last sample, and a
+  wait longer than `KeepTimeout` cancel it, and the holder still cancels it
+  when the supervisor dies. The engine is the job's supervisor's, so the
+  allocation is never another job's; a kept allocation is not a leftover to
+  the sweep of its own process, and is one to the next job's. A kept
+  allocation Slurm ended fails the next sample instead of queueing again.
+  The cost is a longer time limit on the first allocation, which a partition
+  with a shorter `MaxTime` refuses.
 - A container's processes carry a variable naming it, set inside the container
   only, by which SIGTERM and SIGKILL reach every one of them; the step itself is
   not signalled, so the grace works as under Docker.

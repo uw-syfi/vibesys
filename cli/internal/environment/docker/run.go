@@ -38,7 +38,7 @@ func (e *env) Run(ctx context.Context, x core.Execution, out io.Writer) core.Att
 	// A container that was not removed, or output that was not kept, makes the end of a command
 	// that ran one the environment cannot vouch for. Before any command ran, it only adds to why
 	// none did.
-	return environment.WithServiceLog(environment.Finish(ctx, attempt, r.end()), r.tail)
+	return environment.WithServiceLog(environment.Finish(ctx, attempt, r.end(r.keeps(attempt))), r.tail)
 }
 
 // box is a container of a run.
@@ -348,6 +348,7 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 		GPUs:     gpus,
 		Network:  given.Network,
 		Limit:    r.x.Timeout,
+		Later:    r.x.Later,
 		Measured: r.x.Measured,
 	}
 	if as == roleBeside {
@@ -420,16 +421,34 @@ func (r *run) mounts(staged Dirs) []Mount {
 	return mounts
 }
 
+// keeps says whether the run's containers leave what they ran in to the job's next run
+// (Keeper): only a run whose command exited 0, uncancelled, with a run of the job after it. Any
+// other ending ends the job's runs of this kind, or says nothing of them, so it gives everything
+// up.
+func (r *run) keeps(attempt core.Attempt) bool {
+	ended, ok := attempt.(core.Ended)
+	return ok && r.x.Later > 0 && r.ctx.Err() == nil &&
+		ended.Exec == core.ExecOutcome{Kind: core.ExecExited, ExitCode: 0}
+}
+
 // end removes the containers and everything in them, the command's before the server's, waits for
-// the engine's side of them to finish, and reports what it could not do. It runs on every path,
-// and nothing the caller does stops it.
-func (r *run) end() error {
+// the engine's side of them to finish, and reports what it could not do. With keep, an engine that
+// can keeps what they ran in for the job's next run, unless a removal failed first. It runs on
+// every path, and nothing the caller does stops it.
+func (r *run) end(keep bool) error {
 	var problems []error
+	keeper, canKeep := r.e.p.cfg.Engine.(Keeper)
+	keep = keep && canKeep
 	for i := len(r.boxes) - 1; i >= 0; i-- {
 		b := r.boxes[i]
 		if b.attempted {
 			// A cancelled context must not leave the container behind.
-			if err := r.e.p.cfg.Engine.Remove(context.WithoutCancel(r.ctx), b.name); err != nil {
+			remove := r.e.p.cfg.Engine.Remove
+			if keep {
+				remove = keeper.Keep
+			}
+			if err := remove(context.WithoutCancel(r.ctx), b.name); err != nil {
+				keep = false
 				problems = append(problems, fmt.Errorf("the container %s was not removed (%v); it stops by itself and the next run removes it", b.name, err))
 			}
 		}

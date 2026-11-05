@@ -263,6 +263,22 @@ func checkRun(t *testing.T, label string, p flow.Plan, w *world, v flow.Verdict)
 			fail("step %d is %s, want %s", i, stages[i], want[i])
 		}
 	}
+	// Each sample says how long the samples after it may run, and no other run says any.
+	samples := 0
+	for i, r := range w.asked {
+		run, ok := r.(flow.Run)
+		if !ok {
+			continue
+		}
+		var later time.Duration
+		if run.Stage == flow.StageBenchmark {
+			later = time.Duration(int(p.Samples)-samples-1) * run.Timeout
+			samples++
+		}
+		if run.Later != later {
+			fail("step %d (%s) says %v of later runs, want %v", i, run.Stage, run.Later, later)
+		}
+	}
 	if v == nil {
 		fail("a finished flow has a verdict")
 	}
