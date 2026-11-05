@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/frontier.proto.
  */
 export const file_vibesys_cli_v1_frontier: GenFile = /*@__PURE__*/
-  fileDesc("Ch12aWJlc3lzL2NsaS92MS9mcm9udGllci5wcm90bxIOdmliZXN5cy5jbGkudjEiTgoORnJvbnRpZXJNZW1iZXISDgoGY29tbWl0GAEgASgJEiwKCGFkZGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJYCg5PYmplY3RpdmVWYWx1ZRImCgZtZXRyaWMYASABKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSDQoFdmFsdWUYAiABKAESDwoHc2FtcGxlcxgDIAEoDSJvCg1Gcm9udGllckVudHJ5Ei4KBm1lbWJlchgBIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkZyb250aWVyTWVtYmVyEi4KBnZhbHVlcxgCIAMoCzIeLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZVZhbHVlIssBChVGcm9udGllclJlZnVzYWxSZWFzb24SMQoEa2luZBgBIAEoDjIjLnZpYmVzeXMuY2xpLnYxLkZyb250aWVyUmVmdXNhbEtpbmQSDwoHbWVzc2FnZRgCIAEoCRIOCgZtZW1iZXIYAyABKAkSKAoHdmVyZGljdBgEIAEoCzIXLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3QSNAoKb2JqZWN0aXZlcxgFIAMoCzIgLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZVZlcmRpY3QiSQoPRnJvbnRpZXJSZWZ1c2FsEjYKB3JlYXNvbnMYASADKAsyJS52aWJlc3lzLmNsaS52MS5Gcm9udGllclJlZnVzYWxSZWFzb24inAEKEUZyb250aWVyQWRtaXNzaW9uEi0KBWFkZGVkGAEgASgLMh4udmliZXN5cy5jbGkudjEuRnJvbnRpZXJNZW1iZXISDwoHZXZpY3RlZBgCIAMoCRIWCg5hbHJlYWR5X21lbWJlchgDIAEoCBIvCgdtZW1iZXJzGAQgAygLMh4udmliZXN5cy5jbGkudjEuRnJvbnRpZXJNZW1iZXIiiAEKEEZyb250aWVyRGVjaXNpb24SNQoIYWRtaXR0ZWQYASABKAsyIS52aWJlc3lzLmNsaS52MS5Gcm9udGllckFkbWlzc2lvbkgAEjIKB3JlZnVzZWQYAiABKAsyHy52aWJlc3lzLmNsaS52MS5Gcm9udGllclJlZnVzYWxIAEIJCgdvdXRjb21lKtECChNGcm9udGllclJlZnVzYWxLaW5kEiUKIUZST05USUVSX1JFRlVTQUxfS0lORF9VTlNQRUNJRklFRBAAEiQKIEZST05USUVSX1JFRlVTQUxfS0lORF9VTk1FQVNVUkVEEAESJwojRlJPTlRJRVJfUkVGVVNBTF9LSU5EX0NIRUNLX01JU1NJTkcQAhIjCh9GUk9OVElFUl9SRUZVU0FMX0tJTkRfRE9NSU5BVEVEEAMSJgoiRlJPTlRJRVJfUkVGVVNBTF9LSU5EX1dJVEhJTl9OT0lTRRAEEiYKIkZST05USUVSX1JFRlVTQUxfS0lORF9JTkNPTkNMVVNJVkUQBRIfChtGUk9OVElFUl9SRUZVU0FMX0tJTkRfU1RBTEUQBhIuCipGUk9OVElFUl9SRUZVU0FMX0tJTkRfRU5WSVJPTk1FTlRfTUlTTUFUQ0gQB0I5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_google_protobuf_timestamp, file_vibesys_cli_v1_result, file_vibesys_cli_v1_verdict]);
+  fileDesc("Ch12aWJlc3lzL2NsaS92MS9mcm9udGllci5wcm90bxIOdmliZXN5cy5jbGkudjEiTgoORnJvbnRpZXJNZW1iZXISDgoGY29tbWl0GAEgASgJEiwKCGFkZGVkX2F0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCJYCg5PYmplY3RpdmVWYWx1ZRImCgZtZXRyaWMYASABKAsyFi52aWJlc3lzLmNsaS52MS5NZXRyaWMSDQoFdmFsdWUYAiABKAESDwoHc2FtcGxlcxgDIAEoDSJvCg1Gcm9udGllckVudHJ5Ei4KBm1lbWJlchgBIAEoCzIeLnZpYmVzeXMuY2xpLnYxLkZyb250aWVyTWVtYmVyEi4KBnZhbHVlcxgCIAMoCzIeLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZVZhbHVlIssBChVGcm9udGllclJlZnVzYWxSZWFzb24SMQoEa2luZBgBIAEoDjIjLnZpYmVzeXMuY2xpLnYxLkZyb250aWVyUmVmdXNhbEtpbmQSDwoHbWVzc2FnZRgCIAEoCRIOCgZtZW1iZXIYAyABKAkSKAoHdmVyZGljdBgEIAEoCzIXLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3QSNAoKb2JqZWN0aXZlcxgFIAMoCzIgLnZpYmVzeXMuY2xpLnYxLk9iamVjdGl2ZVZlcmRpY3QiSQoPRnJvbnRpZXJSZWZ1c2FsEjYKB3JlYXNvbnMYASADKAsyJS52aWJlc3lzLmNsaS52MS5Gcm9udGllclJlZnVzYWxSZWFzb24irQEKEUZyb250aWVyQWRtaXNzaW9uEi0KBWFkZGVkGAEgASgLMh4udmliZXN5cy5jbGkudjEuRnJvbnRpZXJNZW1iZXISDwoHZXZpY3RlZBgCIAMoCRIWCg5hbHJlYWR5X21lbWJlchgDIAEoCBIvCgdtZW1iZXJzGAQgAygLMh4udmliZXN5cy5jbGkudjEuRnJvbnRpZXJNZW1iZXISDwoHcmV0aXJlZBgFIAMoCSKIAQoQRnJvbnRpZXJEZWNpc2lvbhI1CghhZG1pdHRlZBgBIAEoCzIhLnZpYmVzeXMuY2xpLnYxLkZyb250aWVyQWRtaXNzaW9uSAASMgoHcmVmdXNlZBgCIAEoCzIfLnZpYmVzeXMuY2xpLnYxLkZyb250aWVyUmVmdXNhbEgAQgkKB291dGNvbWUq0QIKE0Zyb250aWVyUmVmdXNhbEtpbmQSJQohRlJPTlRJRVJfUkVGVVNBTF9LSU5EX1VOU1BFQ0lGSUVEEAASJAogRlJPTlRJRVJfUkVGVVNBTF9LSU5EX1VOTUVBU1VSRUQQARInCiNGUk9OVElFUl9SRUZVU0FMX0tJTkRfQ0hFQ0tfTUlTU0lORxACEiMKH0ZST05USUVSX1JFRlVTQUxfS0lORF9ET01JTkFURUQQAxImCiJGUk9OVElFUl9SRUZVU0FMX0tJTkRfV0lUSElOX05PSVNFEAQSJgoiRlJPTlRJRVJfUkVGVVNBTF9LSU5EX0lOQ09OQ0xVU0lWRRAFEh8KG0ZST05USUVSX1JFRlVTQUxfS0lORF9TVEFMRRAGEi4KKkZST05USUVSX1JFRlVTQUxfS0lORF9FTlZJUk9OTUVOVF9NSVNNQVRDSBAHQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_vibesys_cli_v1_result, file_vibesys_cli_v1_verdict]);
 
 /**
  * FrontierMember is one commit on a task's frontier.
@@ -124,7 +124,7 @@ export type FrontierRefusalReason = Message<"vibesys.cli.v1.FrontierRefusalReaso
 
   /**
    * The overall verdict of the commit against the member, and the verdict on each objective. Set
-   * for DOMINATED, WITHIN_NOISE, INCONCLUSIVE and STALE.
+   * for DOMINATED, WITHIN_NOISE and INCONCLUSIVE.
    *
    * @generated from field: vibesys.cli.v1.Verdict verdict = 4;
    */
@@ -193,6 +193,14 @@ export type FrontierAdmission = Message<"vibesys.cli.v1.FrontierAdmission"> & {
    * @generated from field: repeated vibesys.cli.v1.FrontierMember members = 4;
    */
   members: FrontierMember[];
+
+  /**
+   * The members measured only under other task versions than the current one, which left the
+   * frontier: they belong to a task it no longer holds, and the commit was not compared with them.
+   *
+   * @generated from field: repeated string retired = 5;
+   */
+  retired: string[];
 };
 
 /**
@@ -280,14 +288,16 @@ export enum FrontierRefusalKind {
   INCONCLUSIVE = 5,
 
   /**
-   * The commit and the member named were measured under different task versions.
+   * The commit was measured only under other task versions than the task's current one: that of
+   * the task at the result branch head. The frontier holds the commits of the current version.
    *
    * @generated from enum value: FRONTIER_REFUSAL_KIND_STALE = 6;
    */
   STALE = 6,
 
   /**
-   * The commit and the member named were measured in different environments.
+   * The commit and the member named were measured, under the current task version, in different
+   * environments.
    *
    * @generated from enum value: FRONTIER_REFUSAL_KIND_ENVIRONMENT_MISMATCH = 7;
    */
