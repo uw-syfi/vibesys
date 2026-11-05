@@ -434,6 +434,11 @@ queued jobs start from `schedule`:
   one slot of its own. A measure job claims each of them whole, so a benchmark sample never runs
   beside another job of its placement or of another placement on its cluster or GPUs, while the
   jobs of other placements run. A command job chooses its placement as a check does.
+- A cluster is held alone by every job that runs with it, of every kind: each job deploys into
+  the cluster with CPU and memory the scheduler does not see, so two checks on one cluster could
+  starve each other's pods. So jobs on a placement that gives a cluster run one at a time whatever
+  its `max_jobs`, as do the jobs of every placement that gives the same cluster, and each takes the
+  cluster's lease (below). `max_jobs` still runs jobs side by side on a placement without one.
 - No resource is given past its capacity and an exclusive claim shares its resource with nothing,
   whatever the policy. The policy (`[scheduler] policy`) only orders the jobs that may start:
   `fifo` takes the oldest first, and `fair-share` takes the next job of the run (the run that first
@@ -456,7 +461,8 @@ other users' daemons on the same machine, and daemons on other machines that sha
   directory of leases; for an `ssh` placement, the same file on the engine's machine, held by a
   shell there over ssh. So the measures of every placement on one machine, of
   one daemon or of several, take turns. Host jobs that claim a slot of their own (`host`) take this
-  machine's lease. A Kubernetes cluster a placement gives is leased in the cluster (below). GPUs
+  machine's lease. A Kubernetes cluster a placement gives is leased in the cluster (below), by
+  every job that runs with it. GPUs
   take no lease of their own, since their machine's lease covers them, and a `slurm` placement takes
   none, since Slurm's exclusive allocation arbitrates. A claim that shares its resource takes no
   lease.

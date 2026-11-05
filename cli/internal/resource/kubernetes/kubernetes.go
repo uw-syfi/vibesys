@@ -103,9 +103,14 @@ func New(cfg Config) (*Kubernetes, error) {
 // Kind implements resource.Resource.
 func (*Kubernetes) Kind() core.ResourceKind { return core.ResourceKubernetes }
 
-// Claims implements resource.Resource: the cluster the kubeconfig of the machine names.
+// Claims implements resource.Resource: the cluster the kubeconfig of the machine names, held alone
+// by every job, of every kind, that runs with it. A job deploys what it runs into the cluster, with
+// CPU and memory the daemon does not see, so two jobs on one cluster can starve each other's pods
+// whatever the placement's max_jobs: a check that cannot schedule its pods fails as if the change
+// were wrong. The claim is exclusive, so the scheduler runs one job at a time on the cluster, and the
+// cluster is leased for every job, so the daemons that share it take turns too.
 func (k *Kubernetes) Claims() []core.Claim {
-	return []core.Claim{{Resource: string(core.ResourceKubernetes) + ":" + k.cfg.Machine + k.cfg.Kubeconfig, Amount: 1}}
+	return []core.Claim{{Resource: string(core.ResourceKubernetes) + ":" + k.cfg.Machine + k.cfg.Kubeconfig, Amount: 1, Exclusive: true}}
 }
 
 // Fingerprint implements resource.Resource: the API server's address and version.
