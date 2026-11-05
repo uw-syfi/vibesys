@@ -9,6 +9,7 @@ import (
 	"testing"
 	"testing/quick"
 	"time"
+	"unicode/utf8"
 
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
@@ -591,5 +592,46 @@ func TestEveryCommandTakesTheWholeContext(t *testing.T) {
 	c.env["VIBESYS_PLACEMENT"] = "p"
 	if r := c.run(withTask("jobs")...); r.code != exitOK {
 		t.Errorf("jobs with VIBESYS_PLACEMENT set: %+v", r)
+	}
+}
+
+// A command job whose argv carries an inline script takes one short line in jobs and in submit's
+// own output; --json still carries the whole argv.
+func TestJobsPrintsALongArgvOnOneShortLine(t *testing.T) {
+	c := newCLI(t)
+	script := strings.Repeat("import os, sys  # a script passed inline as one argument\n", 40) + strings.Repeat("x", 500)
+	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--", "print", script, ";", "exit", "0")...)
+	if r.code != exitOK {
+		t.Fatalf("submit = %+v", r)
+	}
+	id, _, _ := strings.Cut(r.stdout, "\t")
+	for _, out := range []string{r.stdout, c.run(withTask("jobs")...).stdout} {
+		var line string
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(l, id+"\t") {
+				line = l
+			}
+		}
+		if line == "" || !strings.Contains(line, "40 more lines, full argv in --json") || utf8.RuneCountInString(line) > 2*commandWidth {
+			t.Fatalf("job line = %q in %q; want one short line that says what it left out", line, out)
+		}
+	}
+	if j := c.run(withTask("jobs", "--json")...); !strings.Contains(j.stdout, strings.Repeat("x", 500)) {
+		t.Fatalf("jobs --json lost the argv: %q", j.stdout)
+	}
+}
+
+// Any argv prints on one line of bounded length, and an argv that already fits prints as it is.
+func TestCommandSummaryIsOneBoundedLine(t *testing.T) {
+	property := func(argv []string) bool {
+		got := commandSummary(argv)
+		joined := strings.Join(argv, " ")
+		fits := !strings.Contains(joined, "\n") && utf8.RuneCountInString(joined) <= commandWidth
+		return !strings.Contains(got, "\n") &&
+			utf8.RuneCountInString(got) <= commandWidth+len(" … (99999 more lines, full argv in --json)") &&
+			(got == joined) == fits
+	}
+	if err := quick.Check(property, &quick.Config{MaxCount: 2000}); err != nil {
+		t.Fatal(err)
 	}
 }
