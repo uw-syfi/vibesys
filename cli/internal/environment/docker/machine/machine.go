@@ -198,7 +198,7 @@ func (r *Remote) Program(ctx context.Context, local string) (string, error) {
 			"%s is a %s machine, and the program %s is built for %s", r.Shell.Where(), strings.TrimPrefix(said, "platform "), local, uname)}
 	}
 	tmp := fmt.Sprintf("%s.tmp-%d", dest, os.Getpid())
-	if err := r.Rsync.Push(ctx, local, tmp, false); err != nil {
+	if err := r.Rsync.PushFile(ctx, local, tmp); err != nil {
 		return "", fmt.Errorf("copying the program %s to %s: %w", path.Base(local), r.Shell.Where(), err)
 	}
 	if _, err := r.run(ctx, `chmod 0755 "$1" && mv -f "$1" "$2"`, tmp, dest); err != nil {
