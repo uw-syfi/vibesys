@@ -220,6 +220,13 @@ def check_verifytypes() -> bool:
         return False
     with tempfile.TemporaryDirectory() as scratch:
         venv = Path(scratch) / "venv"
+        # A copy is built, not the tree: setuptools leaves build/ and *.egg-info beside the source.
+        source = Path(scratch) / "python"
+        shutil.copytree(
+            SDK / "python",
+            source,
+            ignore=shutil.ignore_patterns("tests", "build", "*.egg-info", "__pycache__"),
+        )
         for argv in (
             [uv, "venv", "-q", "-p", sys.executable, str(venv)],
             [
@@ -229,7 +236,7 @@ def check_verifytypes() -> bool:
                 "-q",
                 "--python",
                 str(venv / "bin" / "python"),
-                str(SDK / "python"),
+                str(source),
             ],
         ):
             if _run(argv).returncode != 0:

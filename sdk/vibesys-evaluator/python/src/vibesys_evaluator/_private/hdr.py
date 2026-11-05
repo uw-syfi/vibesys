@@ -80,6 +80,12 @@ class Histogram:
         """The number of values recorded."""
         return sum(self.counts)
 
+    @property
+    def max(self) -> int:
+        """The highest value recorded, as the libraries report it (its bucket's highest); 0 if empty."""
+        last = max((i for i, c in enumerate(self.counts) if c), default=-1)
+        return self._highest_equivalent(self._value(last)) if last >= 0 else 0
+
     def _index(self, value: int) -> int:
         pow2ceiling = (value | self._sub_bucket_mask).bit_length()
         bucket = pow2ceiling - self._unit_magnitude - (self._sub_bucket_half_count_magnitude + 1)

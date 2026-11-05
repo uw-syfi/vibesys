@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 from vibesys_evaluator import Call, Rand, Versions
 
 # test-isolation: generation is the phase pod's private step; its output is the schema's file.
-from vibesys_evaluator._private.files import DelimitedReader
+from vibesys_evaluator._private.files import read_requests
 from vibesys_evaluator._private.phase import build_model, generate, plan_size
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
@@ -72,10 +72,8 @@ def _plan(
 ) -> list[pb.PlannedOperation]:
     data = kv.Data() if data is None else data
     generate(workload, build_model(workload, data, phase), phase, path)
-    reader = DelimitedReader(path, pb.FileKind.REQUESTS)
-    header = reader.one(pb.RequestsHeader)
-    plan = list(reader.rest(pb.PlannedOperation))
-    assert header.count == len(plan) == plan_size(phase)
+    header, plan = read_requests(path)  # as loadgen holds a plan: its count and refs
+    assert len(plan) == plan_size(phase)
     assert list(header.operation_names) == [op.name for op in workload.operations]
     return plan
 

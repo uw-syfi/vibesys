@@ -21,7 +21,7 @@ from urllib.parse import urlencode
 
 from protobuf import Oneof
 
-from vibesys_evaluator._private.files import DelimitedReader, DelimitedWriter
+from vibesys_evaluator._private.files import DelimitedWriter, SchemaFileError, read_requests
 from vibesys_evaluator._private.hdr import Histogram, encode
 from vibesys_evaluator._private.loadgen import LoadgenExit
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
@@ -121,13 +121,10 @@ class FakeLoadgen:
             options = parser.parse_args(list(args))
         except (argparse.ArgumentError, SystemExit) as error:
             return LoadgenExit(code=2, stderr=f"usage: {error}")
-        reader = DelimitedReader(Path(options.requests), pb.FileKind.REQUESTS)
-        header = reader.one(pb.RequestsHeader)
-        plan = list(reader.rest(pb.PlannedOperation))
-        if len(plan) != header.count:
-            return LoadgenExit(
-                code=2, stderr=f"header says {header.count} operations, file has {len(plan)}"
-            )
+        try:
+            header, plan = read_requests(Path(options.requests))
+        except SchemaFileError as error:
+            return LoadgenExit(code=2, stderr=str(error))
         return self._run(options, header, plan)
 
     def _execute(
