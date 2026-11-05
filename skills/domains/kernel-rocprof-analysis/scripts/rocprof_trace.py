@@ -53,6 +53,7 @@ Usage (through ``analyze.py trace``, or this file directly):
     rocprof_trace.py memory <report> [--window WINDOW]
     rocprof_trace.py graphs <report> [--window WINDOW]
     rocprof_trace.py host_idle <report> [--window WINDOW]
+    rocprof_trace.py completeness <report>
     rocprof_trace.py query <report> "<sql>"
     rocprof_trace.py summary <report> [--top N] [--window WINDOW]
 
@@ -62,6 +63,12 @@ to the trace's own earliest timestamp. Exclude a server's startup at capture
 time where you can (``--collection-period`` or roctx-driven regions); slice it
 here otherwise. ``query`` is not windowed (rocpd SQL runs against the whole
 export).
+
+A kernel trace cut short (the profiler stopped before it finished writing)
+is detected against the ``*_kernel_stats.csv`` beside it and by a last
+record without its newline; ``completeness`` prints the verdict as JSON, the
+timeline views print a warning, and whole-run kernel and family totals then
+come from the stats file. See "Trace completeness" below.
 """
 
 from __future__ import annotations
@@ -70,6 +77,7 @@ import argparse
 import contextlib
 import csv
 import io
+import json
 import math
 import re
 import sqlite3
@@ -599,7 +607,9 @@ class KernelBundle:
     kept (inside the requested ``window``, see ``resolve_window``);
     ``count_total`` is every event seen in the streaming pass regardless of
     ``window``, kept so callers can report "N of M dispatches" without a
-    second pass.
+    second pass; ``total_ns_all`` is their summed duration, and ``short_rows``
+    counts rows with fewer fields than the header (a record cut off mid-write),
+    which are skipped. Both feed ``trace_completeness``.
     """
 
     by_name: dict[str, dict] = field(default_factory=dict)
@@ -609,6 +619,8 @@ class KernelBundle:
     window_end: float = 0.0
     count: int = 0
     count_total: int = 0
+    total_ns_all: float = 0.0
+    short_rows: int = 0
     source: str = ""
 
 
@@ -641,13 +653,27 @@ class MemcpyBundle:
 
 
 def _iter_csv_reader(path: Path) -> Iterator[list[str]]:
+    """Yield the header, then every record; drop a last record the writer cut off mid-write.
+
+    A profiler stopped while writing leaves its last record cut at any byte, often with
+    every field present but one emptied or shortened, so it is never parsed.
+    """
+    cut = _ends_mid_record(path)
     with path.open("r", encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f)
         header = next(reader, None)
         if header is None:
             return
         yield header
-        yield from reader
+        yield from _all_but_last(reader) if cut else reader
+
+
+def _all_but_last(rows: Iterator[list[str]]) -> Iterator[list[str]]:
+    """Yield every row but the last, which the caller drops as a cut record."""
+    previous = next(rows, None)
+    for row in rows:
+        yield previous
+        previous = row
 
 
 def _in_window(start_ns: float, window: tuple[float, float] | None) -> bool:
@@ -671,6 +697,8 @@ def _build_kernel_bundle_from_csv(
     window_end = float("-inf")
     count = 0
     count_total = 0
+    total_ns_all = 0.0
+    short_rows = 0
     for path in files:
         with contextlib.closing(_iter_csv_reader(path)) as rows:
             header = next(rows, None)
@@ -683,14 +711,20 @@ def _build_kernel_bundle_from_csv(
             i_agent = _resolve_col(header, _AGENT_COLS)
             i_queue = _resolve_col(header, _QUEUE_COLS)
             i_corr = _resolve_col(header, _CORR_COLS)
+            if _ends_mid_record(path):
+                short_rows += 1  # the reader dropped the cut last record
             for row in rows:
+                if len(row) < len(header):
+                    short_rows += 1
+                    continue
                 count_total += 1
                 start = _numf(_at(row, i_start), field="Start_Timestamp")
+                end = _numf(_at(row, i_end), field="End_Timestamp")
+                dur = end - start if end > start else _numf(_at(row, i_dur), 0.0)
+                total_ns_all += dur
                 if not _in_window(start, window):
                     continue
                 name = (_at(row, i_name) or "?").strip()
-                end = _numf(_at(row, i_end), field="End_Timestamp")
-                dur = end - start if end > start else _numf(_at(row, i_dur), 0.0)
                 agent = _at(row, i_agent) or "0"
                 queue = _at(row, i_queue) or "0"
                 corr = _at(row, i_corr)
@@ -712,6 +746,8 @@ def _build_kernel_bundle_from_csv(
         window_end=window_end,
         count=count,
         count_total=count_total,
+        total_ns_all=total_ns_all,
+        short_rows=short_rows,
         source="trace",
     )
 
@@ -1120,6 +1156,187 @@ def _get_memcpy_bundle(
 
 
 # ---------------------------------------------------------------------------
+# Trace completeness: does the kernel trace hold every dispatch of the run?
+# ---------------------------------------------------------------------------
+#
+# rocprofv3 writes its trace files when the traced program exits. A job that
+# stops the program and kills it after a short grace can leave a multi-GB
+# trace cut short, while the small ``*_kernel_stats.csv`` beside it (written
+# from the same records) still counts every dispatch. Every timeline number
+# from a cut trace (capture window, GPU busy, idle gaps) describes only the
+# start of the run, so the check below runs before any of them is printed.
+
+TRACE_COMPLETE = "complete"
+TRACE_INCOMPLETE = "incomplete"
+TRACE_UNCHECKED = "unchecked"
+# The trace may miss this share of the stats file's dispatches and still count as complete.
+_TRACE_SHORTFALL_TOLERANCE = 0.01
+
+
+def _ends_mid_record(path: Path) -> bool:
+    """Whether a non-empty file's last byte is not a newline: its writer stopped mid-record."""
+    try:
+        with path.open("rb") as f:
+            f.seek(0, 2)
+            if f.tell() == 0:
+                return False
+            f.seek(-1, 2)
+            return f.read(1) != b"\n"
+    except OSError as exc:
+        diagnostic = f"could not read {path}: {exc}"
+        raise analysis_failed(diagnostic) from exc
+
+
+@dataclass(frozen=True)
+class TraceCompleteness:
+    """How much of the run's kernel dispatches the kernel trace holds.
+
+    ``status`` is ``complete`` or ``incomplete`` when a ``*_kernel_stats.csv``
+    gives the run's dispatch count, ``incomplete`` whenever a trace file ends
+    mid-record, and ``unchecked`` otherwise (no CSV kernel trace, or nothing
+    to compare it with).
+    """
+
+    status: str
+    trace_dispatches: int = 0
+    trace_kernel_ns: float = 0.0
+    stats_dispatches: int | None = None
+    stats_kernel_ns: float | None = None
+    cut_files: tuple[str, ...] = ()
+    short_rows: int = 0
+
+    def as_dict(self) -> dict[str, Any]:
+        """The record as plain JSON-ready values."""
+        return {
+            "status": self.status,
+            "trace_dispatches": self.trace_dispatches,
+            "trace_kernel_ns": self.trace_kernel_ns,
+            "stats_dispatches": self.stats_dispatches,
+            "stats_kernel_ns": self.stats_kernel_ns,
+            "cut_files": list(self.cut_files),
+            "short_rows": self.short_rows,
+        }
+
+
+def _completeness(disc: DiscoveredReport) -> TraceCompleteness:
+    if not disc.kernel_trace:
+        return TraceCompleteness(TRACE_UNCHECKED)
+    trace = _get_kernel_bundle(disc)
+    cut = tuple(str(f) for f in disc.kernel_trace if _ends_mid_record(f))
+    stats = _kernel_bundle_from_stats(disc).by_name if disc.kernel_stats else {}
+    stats_calls = sum(e["calls"] for e in stats.values()) if stats else None
+    stats_ns = sum(e["total_ns"] for e in stats.values()) if stats else None
+    short = stats_calls is not None and trace.count_total < stats_calls * (
+        1 - _TRACE_SHORTFALL_TOLERANCE
+    )
+    if cut or trace.short_rows or short:
+        status = TRACE_INCOMPLETE
+    elif stats_calls is not None:
+        status = TRACE_COMPLETE
+    else:
+        status = TRACE_UNCHECKED
+    return TraceCompleteness(
+        status=status,
+        trace_dispatches=trace.count_total,
+        trace_kernel_ns=trace.total_ns_all,
+        stats_dispatches=stats_calls,
+        stats_kernel_ns=stats_ns,
+        cut_files=cut,
+        short_rows=trace.short_rows,
+    )
+
+
+def trace_completeness(report: str) -> dict[str, Any]:
+    """Whether *report*'s kernel trace holds every dispatch, as a JSON-ready record.
+
+    Compares the trace's dispatch count and summed kernel time with the
+    ``*_kernel_stats.csv`` beside it, and checks that no trace file ends
+    mid-record. See ``TraceCompleteness`` for the fields.
+    """
+    return _completeness(discover(report)).as_dict()
+
+
+def _incomplete_warning(c: TraceCompleteness) -> str:
+    """The one-paragraph warning every timeline view prints for an incomplete trace."""
+    parts = []
+    if c.stats_dispatches:
+        share = c.trace_dispatches / c.stats_dispatches * 100
+        parts.append(
+            f"the kernel trace holds {c.trace_dispatches:,} of the {c.stats_dispatches:,} "
+            f"dispatches ({share:.1f}%) and {_fmt_ns(c.trace_kernel_ns)} of the "
+            f"{_fmt_ns(c.stats_kernel_ns or 0.0)} kernel time that *_kernel_stats.csv counts"
+        )
+    if c.cut_files or c.short_rows:
+        parts.append("a trace file ends mid-record (the profiler stopped while writing it)")
+    totals = (
+        "Whole-run kernel and family totals come from *_kernel_stats.csv."
+        if c.stats_dispatches is not None
+        else "No *_kernel_stats.csv is beside it, so every number covers only the traced part."
+    )
+    return (
+        "*** WARNING: INCOMPLETE TRACE -- " + "; ".join(parts) + ". The trace covers only the "
+        "start of the run: its capture window, GPU busy and idle numbers describe that part "
+        f"alone. {totals} Re-capture with a bounded window to see the timeline. ***"
+    )
+
+
+def _brief_incomplete_warning(c: TraceCompleteness) -> str:
+    held = (
+        f"{c.trace_dispatches / c.stats_dispatches * 100:.1f}% of the run's dispatches"
+        if c.stats_dispatches
+        else "a record cut off mid-write"
+    )
+    return (
+        f"*** INCOMPLETE TRACE (it holds {held}): per-event timeline numbers cover only "
+        "the start of the run. ***"
+    )
+
+
+def _print_incomplete_warning(disc: DiscoveredReport, ns: argparse.Namespace) -> None:
+    """Print the warning for an incomplete trace: in full, or one line inside ``summary``."""
+    c = _completeness(disc)
+    if c.status != TRACE_INCOMPLETE:
+        return
+    brief = getattr(ns, "brief_completeness", False)
+    print(_brief_incomplete_warning(c) if brief else _incomplete_warning(c))
+
+
+def _source_label(bundle: KernelBundle, trace: KernelBundle) -> str:
+    """The ``Kernel data source`` line's value; says why a trace was set aside."""
+    if bundle.source == "stats" and trace.source == "trace":
+        return "stats (*_kernel_stats.csv: the kernel trace is incomplete)"
+    return bundle.source
+
+
+def _totals_header(resolved: ResolvedWindow, bundle: KernelBundle, trace: KernelBundle) -> str:
+    """The ``window: ...`` line of a totals view, naming the stats file when it was used."""
+    if bundle.source == "stats" and trace.source == "trace":
+        calls = sum(e["calls"] for e in bundle.by_name.values())
+        return (
+            f"window: {resolved.label}, {calls} dispatches counted by *_kernel_stats.csv "
+            f"(the kernel trace holds {trace.count_total})"
+        )
+    return _window_header(resolved, trace.count, trace.count_total)
+
+
+def _totals_bundle(disc: DiscoveredReport, resolved: ResolvedWindow) -> KernelBundle:
+    """The bundle per-kernel totals come from: the stats file when the trace is incomplete.
+
+    Only for the whole run: a stats file has no timestamps, so an explicit
+    window always reads the trace (and the caller prints the warning).
+    """
+    bundle = _get_kernel_bundle(disc, resolved.bounds)
+    if (
+        resolved.bounds is None
+        and bundle.source == "trace"
+        and disc.kernel_stats
+        and _completeness(disc).status == TRACE_INCOMPLETE
+    ):
+        return _kernel_bundle_from_stats(disc)
+    return bundle
+
+
+# ---------------------------------------------------------------------------
 # Window resolution: 'all' / explicit 'start_s:end_s'
 # ---------------------------------------------------------------------------
 #
@@ -1216,7 +1433,7 @@ def kernel_time_totals(report: str, window: str | None = None) -> dict[str, floa
     """
     disc = discover(report)
     resolved = _resolve_window_for_report(disc, report, window)
-    agg, _source = _load_kernels(disc, resolved.bounds)
+    agg = _totals_bundle(disc, resolved).by_name
     return {name: entry["total_ns"] for name, entry in agg.items()}
 
 
@@ -1334,8 +1551,9 @@ def cmd_kernels(ns: argparse.Namespace) -> None:
     """Top GPU kernels by total execution time, with a library-family column."""
     disc = discover(ns.report)
     resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
-    bundle = _get_kernel_bundle(disc, resolved.bounds)
-    agg, source = bundle.by_name, bundle.source
+    trace = _get_kernel_bundle(disc, resolved.bounds)
+    bundle = _totals_bundle(disc, resolved)
+    agg, source = bundle.by_name, _source_label(bundle, trace)
     if not agg:
         print(  # noqa: T201  # LW-920024; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "(no kernel data found — no *_kernel_trace.csv or *_kernel_stats.csv under report path)"
@@ -1347,7 +1565,8 @@ def cmd_kernels(ns: argparse.Namespace) -> None:
     denom_ns = _gpu_busy_denominator_ns(bundle, total_ns)
     ranked = sorted(agg.items(), key=lambda kv: -kv[1]["total_ns"])[: ns.top]
 
-    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201  # LW-920025; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    _print_incomplete_warning(disc, ns)
+    print(_totals_header(resolved, bundle, trace))
     print(f"Kernel data source: {source}")  # noqa: T201  # LW-920026; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     header = f"{'Kernel':<44s} {'Family':<28s} {'Calls':>7s} {'Total':>9s} {'Avg':>9s} {'Min':>9s} {'Max':>9s} {'%GPU':>6s}"
     print(header)  # noqa: T201  # LW-920027; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
@@ -1411,8 +1630,9 @@ def cmd_families(ns: argparse.Namespace) -> None:
     """GPU time grouped by kernel-library family, flagging fallback-family hot spots."""
     disc = discover(ns.report)
     resolved = _resolve_window_for_report(disc, ns.report, getattr(ns, "window", None))
-    bundle = _get_kernel_bundle(disc, resolved.bounds)
-    agg, source = bundle.by_name, bundle.source
+    trace = _get_kernel_bundle(disc, resolved.bounds)
+    bundle = _totals_bundle(disc, resolved)
+    agg, source = bundle.by_name, _source_label(bundle, trace)
     if not agg:
         print(  # noqa: T201  # LW-920034; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             "(no kernel data found — no *_kernel_trace.csv or *_kernel_stats.csv under report path)"
@@ -1435,7 +1655,8 @@ def cmd_families(ns: argparse.Namespace) -> None:
     denom_ns = _gpu_busy_denominator_ns(bundle, total_ns)
     ordered = sorted(fam_totals.items(), key=lambda kv: -kv[1]["total_ns"])
 
-    print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201  # LW-920035; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
+    _print_incomplete_warning(disc, ns)
+    print(_totals_header(resolved, bundle, trace))
     print(f"Kernel data source: {source}")  # noqa: T201  # LW-920036; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     header = (
         f"{'Family':<32s} {'Calls':>8s} {'Total':>10s} {'%GPU':>6s}  {'Top kernel in family':<40s}"
@@ -1529,6 +1750,7 @@ def cmd_idle_gaps(ns: argparse.Namespace) -> None:
     total_idle = sum(g[3] for g in gaps)
     window_ns = bundle.window_end - bundle.window_start
 
+    _print_incomplete_warning(disc, ns)
     print(_window_header(resolved, bundle.count, bundle.count_total))  # noqa: T201  # LW-920047; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201  # LW-920048; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     print(f"GPU busy (union per agent/queue): {_fmt_ns(total_busy)}")  # noqa: T201  # LW-920049; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
@@ -1877,6 +2099,8 @@ def cmd_host_idle(ns: argparse.Namespace) -> None:
     window_ns, busy_ns = _activity_ns(kernel_bundle, bundles)
     busy_pct = busy_ns / window_ns * 100 if window_ns > 0 else 0.0
 
+    incomplete = _completeness(disc).status == TRACE_INCOMPLETE
+    _print_incomplete_warning(disc, ns)
     print(_window_header(resolved, kernel_bundle.count, kernel_bundle.count_total))  # noqa: T201  # LW-920105; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     print(f"Capture window: {_fmt_ns(window_ns)}")  # noqa: T201  # LW-920106; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     print(f"GPU kernel activity: {_fmt_ns(busy_ns)} ({busy_pct:.2f}% of window)")  # noqa: T201  # LW-920107; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
@@ -1893,7 +2117,37 @@ def cmd_host_idle(ns: argparse.Namespace) -> None:
     else:
         print(  # noqa: T201  # LW-920110; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
             f"\nVerdict: GPU active for {busy_pct:.1f}% of the capture window — trace looks valid."
+            if not incomplete
+            else f"\nVerdict: GPU active for {busy_pct:.1f}% of the traced part, but the trace "
+            "is INCOMPLETE: this says nothing about the rest of the run."
         )
+
+
+# ---------------------------------------------------------------------------
+# Subcommand: completeness
+# ---------------------------------------------------------------------------
+
+
+def cmd_completeness(ns: argparse.Namespace) -> None:
+    """Print the kernel trace's completeness record as JSON (see ``TraceCompleteness``)."""
+    print(json.dumps(trace_completeness(ns.report), indent=2))
+
+
+def cmd_completeness_text(ns: argparse.Namespace) -> None:
+    """The ``summary`` section: the completeness verdict and the counts behind it."""
+    c = _completeness(discover(ns.report))
+    print(f"status: {c.status}")
+    print(f"kernel trace: {c.trace_dispatches:,} dispatches, {_fmt_ns(c.trace_kernel_ns)}")
+    if c.stats_dispatches is not None:
+        print(
+            f"kernel stats: {c.stats_dispatches:,} dispatches, {_fmt_ns(c.stats_kernel_ns or 0.0)}"
+        )
+    for path in c.cut_files:
+        print(f"ends mid-record: {path}")
+    if c.short_rows:
+        print(f"short rows skipped: {c.short_rows}")
+    if c.status == TRACE_UNCHECKED:
+        print("(no *_kernel_stats.csv to compare the trace with; completeness not checked)")
 
 
 # ---------------------------------------------------------------------------
@@ -1971,8 +2225,16 @@ def cmd_summary(ns: argparse.Namespace) -> None:
     print("  ROCPROFV3 TRACE SUMMARY")  # noqa: T201  # LW-920120; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
     print("=" * 78)  # noqa: T201  # LW-920121; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
+    disc = discover(ns.report)
+    completeness = _completeness(disc)
+    if completeness.status == TRACE_INCOMPLETE:
+        print()
+        print(_incomplete_warning(completeness))
+    ns.brief_completeness = True
+
     sections = (
         ("Files", cmd_files),
+        ("Trace Completeness", cmd_completeness_text),
         ("Trace Validity (host-idle check)", cmd_host_idle),
         ("Top Kernels", cmd_kernels),
         ("Kernel Library Families", cmd_families),
@@ -2049,6 +2311,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_window_arg(p)
 
     p = sub.add_parser(
+        "completeness",
+        help="JSON: does the kernel trace hold every dispatch the stats file counts",
+    )
+    _add_report_arg(p)
+
+    p = sub.add_parser(
         "query", help="Run arbitrary SQL against a rocpd SQLite export (ROCm 7+ only)"
     )
     _add_report_arg(p)
@@ -2071,6 +2339,7 @@ _COMMANDS = {
     "memory": cmd_memory,
     "graphs": cmd_graphs,
     "host_idle": cmd_host_idle,
+    "completeness": cmd_completeness,
     "query": cmd_query,
     "summary": cmd_summary,
 }

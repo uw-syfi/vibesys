@@ -8,7 +8,7 @@ needs a GPU, ROCm or the VibeSys package (``compute analyze`` uses
 
 Usage:
     analyze.py trace    files|kernels|families|idle_gaps|cpu_overhead|memory|graphs|
-                        host_idle|query|summary <report> [options]
+                        host_idle|completeness|query|summary <report> [options]
     analyze.py counters list-sets|plan|report|triage [options]
     analyze.py att      plan|hotspots [options]
     analyze.py compute  doctor|analyze [options]

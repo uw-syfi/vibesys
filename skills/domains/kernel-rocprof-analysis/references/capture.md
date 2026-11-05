@@ -8,6 +8,7 @@ capture, and how to keep the profiler, the HIP runtime and the driver consistent
 - [Recipes](#recipes)
 - [Two kinds of capture job](#two-kinds-of-capture-job)
 - [Capture windows](#capture-windows)
+- [Complete and bounded captures](#complete-and-bounded-captures)
 - [What a capture leaves behind](#what-a-capture-leaves-behind)
 - [Version consistency](#version-consistency)
 - [When a capture comes back empty](#when-a-capture-comes-back-empty)
@@ -47,8 +48,10 @@ vibesys-cli submit profile <sha> --wrap 'python3 tools/capture.py timeline --hip
 ```
 
 The CLI starts the task's server command behind the prefix, waits until it is ready, runs the
-profile load, then stops the server with SIGTERM and waits before it kills it, so the profiler can
-flush. It never caches or scores the job, and copies the job's artifacts back. Use it first, and
+profile load, then stops the server with SIGTERM and waits a short stop grace (the operator's
+setting, 30 seconds unless changed) before it kills it, so the profiler can flush. A profiler still
+writing a large trace when the grace ends is killed mid-write: the job still exits 0, but the
+trace is cut short (see [Complete and bounded captures](#complete-and-bounded-captures)). It never caches or scores the job, and copies the job's artifacts back. Use it first, and
 for every capture you will compare with another.
 
 **A free-form capture** profiles a load you choose, in the candidate container: one request shape,
@@ -74,14 +77,44 @@ A server capture includes startup (weight load, warmup, KV-cache initialization)
 of the trace. Keep it out at capture time where you can; `analyze.py trace ... --window
 <start_s>:<end_s>` slices a timeline afterwards, in seconds from its first dispatch.
 
-- **A delay**: `--collection-period <delay_s>:<duration_s>` collects only from `delay_s` seconds
-  after the process starts, for `duration_s` seconds. It needs no engine change, but you must know
+- **A delay**: `capture.py`'s `--collection-period <delay_s>:<duration_s>` collects only from
+  `delay_s` seconds after the process starts, for `duration_s` seconds (it passes rocprofv3
+  `--collection-period <delay>:<duration>:1`, one window, in seconds). It needs no engine change, but you must know
   how long startup takes; read it from an earlier timeline or the job's log.
 - **roctx-driven regions**: `--selected-regions` collects only between `roctxProfilerResume` and
   `roctxProfilerPause` calls in the profiled program, so the engine opens the window itself once
   it is warm (the `serving-systems` skill's engine profiling conventions say how). It follows the
   load exactly, at the cost of an engine change. Check that the image's `rocprofv3 --help` lists
   the flag.
+
+## Complete and bounded captures
+
+rocprofv3 writes its trace files when the traced program exits. A whole-run CSV kernel trace of a
+server under minutes of load holds millions of dispatches and can reach gigabytes, more than the
+profiler writes within a short stop grace; it is then cut short, while the small
+`*_kernel_stats.csv` written from the same records is complete. Nothing in the job's exit status
+says so.
+
+- **Check before you trust a trace.** `analyze.py trace completeness <dir>` prints JSON whose
+  `status` is `complete`, `incomplete` or `unchecked` (no stats file to compare with). It compares
+  the trace's dispatch count with the stats file's and checks that the trace does not end
+  mid-record; `trace summary` and every timeline view print an `INCOMPLETE TRACE` warning. On an
+  incomplete trace, `kernels`, `families` and `compare timeline` take whole-run totals from the
+  stats file; capture window, GPU busy, idle gaps and host idle describe only the traced start.
+- **Take totals from the stats file.** Keep `--stats` (the `timeline` recipe sets it): per-kernel
+  calls and time over the whole run come from `*_kernel_stats.csv`, which stays small whatever the
+  run length.
+- **Bound the timeline.** Trace a window of steady load instead of the whole run:
+  `capture.py timeline --collection-period <delay_s>:<duration_s> --`, with a duration of tens of
+  seconds, after startup and warmup. Narrow it further with `--kernel-include`. Wrapping rocprofv3
+  directly, pass `--collection-period <delay>:<duration>:<repeat>` yourself (seconds unless
+  `--collection-period-unit` says otherwise). The flag's form has changed between ROCm releases:
+  read the image's `rocprofv3 --help` first, with a cheap `submit command <sha> -- rocprofv3
+  --help`.
+- **Mind the format.** CSV is what `analyze.py` reads, and it spends a line of text on every
+  dispatch; JSON is larger still. A bounded window is what keeps a CSV trace small. rocprofv3's
+  binary formats (`pftrace` for Perfetto, `otf2`, and `rocpd` from ROCm 7) avoid that text, but
+  `analyze.py` reads only a rocpd export, through `trace query`.
 
 ## What a capture leaves behind
 
@@ -122,6 +155,9 @@ a ROCm release that supports the node's driver; `capture.json` and `capture.py c
 node has.
 
 ## When a capture comes back empty
+
+A capture that comes back cut short rather than empty is in
+[Complete and bounded captures](#complete-and-bounded-captures).
 
 - **No trace files at all.** The program did not exit normally: a worker killed by its parent, a
   server that ignores SIGTERM, or `os._exit`. See the `serving-systems` skill's engine profiling

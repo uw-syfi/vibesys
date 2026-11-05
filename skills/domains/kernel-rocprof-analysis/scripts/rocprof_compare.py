@@ -58,7 +58,18 @@ def compare_timeline(report_a: str, report_b: str, *, top: int, window: str | No
     families_a = rocprof_trace.family_time_totals(report_a, window=window)
     families_b = rocprof_trace.family_time_totals(report_b, window=window)
 
-    lines = ["Family time deltas (b - a, nanoseconds):"]
+    whole_run = (window or rocprof_trace.WINDOW_ALL).strip().lower() == rocprof_trace.WINDOW_ALL
+    lines = []
+    for label, report in (("a", report_a), ("b", report_b)):
+        completeness = rocprof_trace.trace_completeness(report)
+        if completeness["status"] == rocprof_trace.TRACE_INCOMPLETE:
+            source = (
+                "whole-run totals below come from its *_kernel_stats.csv"
+                if completeness["stats_dispatches"] is not None and whole_run
+                else "its totals below cover only the traced part"
+            )
+            lines.append(f"*** WARNING: the kernel trace of {label} is INCOMPLETE; {source}. ***")
+    lines.append("Family time deltas (b - a, nanoseconds):")
     for name, va, vb, delta in delta_rows(families_a, families_b)[:top]:
         lines.append(f"  {name:<28} a={va:>14,.0f}  b={vb:>14,.0f}  delta={delta:>+14,.0f}")
     lines.append("\nTop kernel time deltas (b - a, nanoseconds):")

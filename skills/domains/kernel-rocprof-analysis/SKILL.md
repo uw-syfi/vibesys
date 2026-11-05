@@ -23,7 +23,7 @@ read `references/harness/<harness>.md` for the harness you are running in.
 
 | Group | Reads | Answers |
 | --- | --- | --- |
-| `trace` | a timeline capture directory | top kernels, kernel library families, GPU idle gaps, HIP launch overhead, memory copies, HIP graphs, whether the load was captured at all (`host_idle`), SQL on a rocpd export (`query`), all of it (`summary`) |
+| `trace` | a timeline capture directory | top kernels, kernel library families, GPU idle gaps, HIP launch overhead, memory copies, HIP graphs, whether the trace holds every dispatch (`completeness`, JSON), whether the load was captured at all (`host_idle`), SQL on a rocpd export (`query`), all of it (`summary`) |
 | `counters` | PMC pass directories | counter sets per architecture (`list-sets`, `plan`), per-kernel derived metrics (`report`), a bottleneck verdict per kernel (`triage`) |
 | `att` | a decoded thread-trace dispatch directory | the instructions and source lines that stall (`hotspots`) |
 | `compute` | a rocprof-compute workload directory | speed-of-light and roofline tables (`analyze`); the raw CSVs when `rocprof-compute` is not installed here |
@@ -37,9 +37,13 @@ Each step costs more and perturbs timing more than the one before, so take the n
 the previous one named a target. Recipes, job forms, costs and capture windows are in
 [capture.md](references/capture.md).
 
-1. **Timeline.** `capture.py timeline` records every kernel dispatch and memory copy. Read it with
-   `analyze.py trace summary`: confirm the load was captured (`host_idle`), then take the dominant
-   kernels' exact names from `kernels`. Library and JIT kernel names rarely match an operator name
+1. **Timeline.** `capture.py timeline` records every kernel dispatch and memory copy. Under a long
+   load, bound it with `--collection-period` so the trace stays small enough to be written in
+   full ([capture.md](references/capture.md#complete-and-bounded-captures)). Read it with
+   `analyze.py trace summary`: first check that the trace is complete (an `INCOMPLETE TRACE`
+   warning means the profiler was stopped before it finished writing, and the capture window,
+   busy and idle numbers then describe only the start of the run), confirm the load was captured
+   (`host_idle`), then take the dominant kernels' exact names from `kernels`. Library and JIT kernel names rarely match an operator name
    (a GEMM is `Cijk_...`, not `gemm`), so never guess a filter.
 2. **Counters**, on the kernels the timeline named. `analyze.py counters plan --arch <gfx> --sets
    <sets> --kernel <regex>` prints the counter names of each pass; each pass is one

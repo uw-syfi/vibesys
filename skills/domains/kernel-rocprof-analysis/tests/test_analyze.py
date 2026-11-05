@@ -304,3 +304,170 @@ def test_a_capture_compared_with_itself_has_no_deltas(capsys: pytest.CaptureFixt
     deltas = [line.rsplit("delta=", 1)[1] for line in out.splitlines() if "delta=" in line]
     assert deltas
     assert {delta.strip() for delta in deltas} == {"+0"}
+
+
+# ---------------------------------------------------------------------------
+# An incomplete kernel trace: cut short beside a stats file that counts every dispatch
+# ---------------------------------------------------------------------------
+
+_TRACE_HEADER = (
+    "Kind",
+    "Agent_Id",
+    "Queue_Id",
+    "Kernel_Name",
+    "Correlation_Id",
+    "Start_Timestamp",
+    "End_Timestamp",
+)
+
+
+def _write_kernel_stats(root: Path, events: list[tuple[str, int, int]]) -> dict[str, float]:
+    """Write the ``*_kernel_stats.csv`` rocprofv3 puts beside the trace; return its totals."""
+    calls: dict[str, list[int]] = {}
+    for name, _start, duration in events:
+        calls.setdefault(name, []).append(duration)
+    path = root / "host-a" / "1" / "1_kernel_stats.csv"
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            ["Name", "Calls", "TotalDurationNs", "AverageNs", "Percentage", "MinNs", "MaxNs"]
+        )
+        for name, durations in calls.items():
+            total = sum(durations)
+            row = [name, len(durations), total, total / len(durations), 0]
+            writer.writerow([*row, min(durations), max(durations)])
+    return {name: float(sum(durations)) for name, durations in calls.items()}
+
+
+def _trace_path(root: Path) -> Path:
+    return root / "host-a" / "1" / "1_kernel_trace.csv"
+
+
+# A comma in a kernel name makes rocprofv3 (and csv) quote it, so a cut can land inside quotes.
+_QUOTED_NAMES = st.sampled_from([GEMM, "triton_poi_fused_add_0", "void ck_tile::kentry<256, 2>(K)"])
+_QUOTED_DISPATCHES = st.lists(
+    st.tuples(_QUOTED_NAMES, st.integers(min_value=1, max_value=10_000), st.integers(0, 5_000)),
+    min_size=2,
+    max_size=30,
+)
+
+
+@given(dispatches=_QUOTED_DISPATCHES, data=st.data())
+def test_a_trace_cut_at_any_byte_is_reported_incomplete_and_totals_come_from_the_stats(
+    tmp_path_factory: pytest.TempPathFactory,
+    dispatches: list[tuple[str, int, int]],
+    data: st.DataObject,
+) -> None:
+    """Wherever the profiler stopped writing, the trace is flagged and the totals stay whole."""
+    root = tmp_path_factory.mktemp("cut")
+    events = _write_kernel_trace(root, dispatches)
+    expected = _write_kernel_stats(root, events)
+    trace = _trace_path(root)
+    raw = trace.read_bytes()
+    first_row_end = raw.index(b"\n") + 1
+    cut = data.draw(st.integers(first_row_end, len(raw) - 1), label="cut")
+    trace.write_bytes(raw[:cut])
+
+    record = rocprof_trace.trace_completeness(str(root))
+    assert record["status"] == rocprof_trace.TRACE_INCOMPLETE
+    assert record["stats_dispatches"] == len(events)
+    assert record["trace_dispatches"] < len(events) or record["cut_files"]
+    assert rocprof_trace.kernel_time_totals(str(root)) == pytest.approx(expected)
+
+
+@given(dispatches=_DISPATCHES)
+def test_a_whole_trace_beside_its_stats_is_complete(
+    tmp_path_factory: pytest.TempPathFactory, dispatches: list[tuple[str, int, int]]
+) -> None:
+    root = tmp_path_factory.mktemp("whole")
+    events = _write_kernel_trace(root, dispatches)
+    _write_kernel_stats(root, events)
+    record = rocprof_trace.trace_completeness(str(root))
+    assert record["status"] == rocprof_trace.TRACE_COMPLETE
+    assert record["trace_dispatches"] == record["stats_dispatches"] == len(events)
+    assert record["trace_kernel_ns"] == pytest.approx(record["stats_kernel_ns"])
+    assert record["cut_files"] == []
+
+
+def test_a_trace_without_a_stats_file_is_unchecked_unless_it_ends_mid_record(
+    tmp_path: Path,
+) -> None:
+    _write_kernel_trace(tmp_path, [(GEMM, 10, 0), (GEMM, 10, 5)])
+    assert rocprof_trace.trace_completeness(str(tmp_path))["status"] == "unchecked"
+    trace = _trace_path(tmp_path)
+    trace.write_bytes(trace.read_bytes()[:-3])
+    assert rocprof_trace.trace_completeness(str(tmp_path))["status"] == "incomplete"
+
+
+def _short_trace(root: Path) -> None:
+    """A run of 200 dispatches whose trace kept only the first 50, cut between records."""
+    events = _write_kernel_trace(root, [(GEMM, 1_000, 100)] * 200)
+    _write_kernel_stats(root, events)
+    trace = _trace_path(root)
+    lines = trace.read_bytes().splitlines(keepends=True)
+    trace.write_bytes(b"".join(lines[:51]))
+
+
+@pytest.mark.parametrize("command", ["summary", "idle_gaps", "host_idle", "kernels", "families"])
+def test_every_timeline_view_warns_about_an_incomplete_trace(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path, command: str
+) -> None:
+    _short_trace(tmp_path)
+    status, out, err = _run(capsys, "trace", command, tmp_path)
+    assert status == 0, err
+    assert "INCOMPLETE TRACE" in out
+    assert "25.0% of the run's dispatches" in out or "50 of the 200 dispatches" in out
+
+
+def test_kernels_of_an_incomplete_trace_count_every_dispatch_from_the_stats(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    _short_trace(tmp_path)
+    status, out, err = _run(capsys, "trace", "kernels", tmp_path)
+    assert status == 0, err
+    assert "Kernel data source: stats" in out
+    assert "Total kernel launches: 200" in out
+
+
+def test_completeness_prints_a_json_record(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    _short_trace(tmp_path)
+    status, out, err = _run(capsys, "trace", "completeness", tmp_path)
+    assert status == 0, err
+    record = json.loads(out)
+    assert record["status"] == "incomplete"
+    assert (record["trace_dispatches"], record["stats_dispatches"]) == (50, 200)
+
+
+def test_compare_warns_when_either_trace_is_incomplete(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    _short_trace(tmp_path)
+    status, out, err = _run(capsys, "compare", "timeline", FIXTURES / "timeline_a", tmp_path)
+    assert status == 0, err
+    assert "kernel trace of b is INCOMPLETE" in out
+    assert "kernel trace of a" not in out
+
+
+def test_a_complete_fixture_prints_no_warning(capsys: pytest.CaptureFixture[str]) -> None:
+    status, out, err = _run(capsys, "trace", "summary", FIXTURES / "timeline_a")
+    assert status == 0, err
+    assert "status: complete" in out
+    assert "INCOMPLETE" not in out
+
+
+@pytest.mark.parametrize(
+    "trace_name", ["100_hip_api_trace.csv", "100_memory_copy_trace.csv", "100_kernel_trace.csv"]
+)
+@given(data=st.data())
+def test_summary_reads_every_trace_kind_cut_at_any_byte(
+    tmp_path_factory: pytest.TempPathFactory, trace_name: str, data: st.DataObject
+) -> None:
+    """A record cut mid-write is dropped, never parsed: the analysis still runs."""
+    root = tmp_path_factory.mktemp("cut-kind")
+    shutil.copytree(FIXTURES / "timeline_a", root, dirs_exist_ok=True)
+    trace = root / "host-a" / "100" / trace_name
+    raw = trace.read_bytes()
+    trace.write_bytes(raw[: data.draw(st.integers(raw.index(b"\n") + 1, len(raw) - 1))])
+    assert cli.main(["trace", "summary", str(root)]) == 0
