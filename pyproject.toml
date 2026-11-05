@@ -224,7 +224,7 @@ copy_waivers = [
 # (`style/noExcessiveLinesPerFile`) at the same 2000-line ceiling.
 max_lines = 2000
 # Generated artifacts are guarded by the proto regenerate-and-diff check.
-generated = ["libs/vs-proto/src/vs_proto/_generated"]
+generated = ["libs/vs-proto/src/vs_proto/_generated", "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto"]
 
 # Directories scanned for `*.py`. Any path with a `tests` or `__pycache__`
 # component is skipped: long test modules are normal, and `clients/biome.json`
