@@ -305,3 +305,16 @@ This requires public corpus access and the pinned tokenizer (or its cached
 snapshot). Smoke results are unscored. Full measurements run for 15 minutes,
 plus dataset preparation, warmup and drain; see the task objective for the
 exact recipe and comparability limits.
+
+## AgentX task for vibesys-cli
+
+[`agentx-cli`](.vibesys/tasks/agentx-cli/OBJECTIVE.md) is the same workload as
+`agentx` in the two-image form (`version = "0.2"`) that only vibesys-cli runs;
+this app refuses it. The candidate's server runs in the image
+`engine/Dockerfile` builds from the candidate's commit (a ROCm 6.4 PyTorch base
+pinned by digest, Python packages pinned with hashes). The task image
+(`.vibesys/tasks/agentx-cli/Dockerfile`) is the `vibesys-evaluator-llm-serving`
+image plus the task directory; `bench.py` runs the golden gate (`check`), the
+scored AgentX replay (`benchmark`) and a smoke replay to profile (`profile`)
+against the server at `VIBESYS_SERVICE_URL`. The two tasks sit side by side
+until vibesys-cli replaces this app's runs.

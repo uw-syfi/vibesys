@@ -1,0 +1,30 @@
+# Qwen3.5-9B on one MI210, AgentX replay: the two-image task for vibesys-cli (schema 0.2).
+# The candidate's server runs in the image engine/Dockerfile builds from the candidate's
+# commit; this directory is the task image (Dockerfile here), which runs bench.py against
+# the server at VIBESYS_SERVICE_URL. The legacy Python app refuses this file; its task for
+# the same workload is ../agentx.
+version = "0.2"
+backends = ["rocm"]
+
+[candidate]
+dockerfile = "engine/Dockerfile"
+context = "engine"
+serve = [
+  "python3", "-m", "engine.server",
+  "--model", "Qwen/Qwen3.5-9B",
+  "--host", "127.0.0.1",
+  "--port", "${PORT}",
+  "--max-model-len", "262144",
+]
+ready = "/v1/models"
+startup_timeout_seconds = 1800
+
+[accuracy]
+command = ["python", "/task/bench.py", "check"]
+
+[benchmark]
+command = ["python", "/task/bench.py", "benchmark"]
+result_protocol = 2
+
+[profile]
+command = ["python", "/task/bench.py", "profile"]
