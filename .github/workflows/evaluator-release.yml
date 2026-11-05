@@ -32,18 +32,29 @@ jobs:
     if: startsWith(github.event.release.tag_name, 'evaluator-')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      # The Python checks import fixtures/check_histograms.py; a __pycache__ left in fixtures/
+      # fails loadgen's conformance test (TestFixturesAreCurrent), which allows only fixtures.
+      PYTHONDONTWRITEBYTECODE: "1"
     outputs:
       version: ${{ steps.version.outputs.version }}
       go_version: ${{ steps.version.outputs.go_version }}
       commit: ${{ steps.version.outputs.commit }}
       image_digest: ${{ steps.image.outputs.digest }}
     steps:
+      # The package tests run pytest, which dumps hung tests just before this job's timeout.
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
           submodules: false
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       # No dependency cache anywhere in this workflow: a cache written by another workflow run
       # must not reach what is published.
@@ -169,16 +180,11 @@ jobs:
           uv sync --frozen
           uv run --frozen python -m pytest "$PACKAGE_ROOT/python/tests" --no-cov
 
+      # The pull-request check (python_quality): api/public-api.txt regenerated with griffe and
+      # diffed, `griffe check` against the last release tag (the checkout has every tag),
+      # `pyright --verifytypes`, and the examples type-checking against the package.
       - name: Check the public API snapshot
-        run: |
-          snapshot="$PACKAGE_ROOT/api/public-api.txt"
-          generator="$PACKAGE_ROOT/api/generate.py"
-          if [[ ! -f "$generator" ]]; then
-            echo "::error::$generator, which regenerates $snapshot, is missing; the release cannot check the snapshot."
-            exit 1
-          fi
-          uv run --frozen python "$generator" --output "$RUNNER_TEMP/public-api.txt"
-          diff -u "$snapshot" "$RUNNER_TEMP/public-api.txt"
+        run: uv run --frozen python scripts/check_vibesys_evaluator_api.py
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -198,6 +204,8 @@ jobs:
           go vet ./...
           go test -race ./...
 
+      # The image installs the wheel verified above (the Dockerfile's `wheels` stage replaced by
+      # dist/evaluator), not one it builds itself.
       # The image is built once, here, into an OCI archive. The image job pushes these exact
       # blobs, so the digest recorded now is the digest published, and the smoke test below
       # runs what is published.
@@ -215,6 +223,7 @@ jobs:
           archive="$RUNNER_TEMP/image/vibesys-evaluator.oci.tar"
           docker buildx build --file "$PACKAGE_ROOT/image/Dockerfile" \
             --platform linux/amd64 --provenance=false --sbom=false --pull --no-cache \
+            --build-context wheels=dist/evaluator \
             --build-arg VIBESYS_EVALUATOR_VERSION="$GO_VERSION" \
             --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
             --label "org.opencontainers.image.revision=$COMMIT" \

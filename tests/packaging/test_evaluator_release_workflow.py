@@ -137,3 +137,18 @@ def test_the_go_module_tag_is_the_semver_of_the_release() -> None:
     )
     script = next(step["run"] for step in _steps() if step.get("id") == "version")
     assert "--go-module-version" in script
+
+
+def test_the_release_runs_the_api_check_that_pull_requests_run() -> None:
+    runs = [step.get("run", "") for step in _jobs()["verify"]["steps"]]
+    assert "uv run --frozen python scripts/check_vibesys_evaluator_api.py" in runs
+
+
+def test_the_image_installs_the_verified_wheel() -> None:
+    build = next(s["run"] for s in _jobs()["verify"]["steps"] if s.get("id") == "image")
+    assert "--build-context wheels=dist/evaluator" in build
+    assert '--build-arg VIBESYS_EVALUATOR_VERSION="$GO_VERSION"' in build
+
+
+def test_python_checks_leave_no_bytecode_among_the_fixtures() -> None:
+    assert _jobs()["verify"]["env"] == {"PYTHONDONTWRITEBYTECODE": "1"}
