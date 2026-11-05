@@ -18,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/storetest"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
 
 // The history of the repository the result tests use: base, then a line of commits on it, and a
@@ -46,6 +47,8 @@ type resultsRig struct {
 	branches *gitrepo.FakeBranches
 	app      *app.App
 	store    store.Store
+	// taskVersion is the version of the task every commit of the history has.
+	taskVersion string
 }
 
 func newBranches() *gitrepo.FakeBranches {
@@ -81,11 +84,19 @@ func newResultsRigWith(t *testing.T, w *world, b *gitrepo.FakeBranches, wrap fun
 	if wrap != nil {
 		stores = wrap(stores)
 	}
+	for _, c := range []core.Commit{base, cm(1), cm(2), cm(3), cm(4), cm(5), side} {
+		w.tasks.Put("/repo", c, tasktest.Files("task"))
+	}
+	tk, err := w.tasks.Task(context.Background(), "/repo", base, "task")
+	if err != nil {
+		t.Fatal(err)
+	}
 	a := app.New(app.Config{
 		Clock:        w.clock,
 		Stores:       stores,
 		Environments: fakeenv.Environments{core.EnvironmentHost: w.env},
 		Supervisors:  w.supervisors(),
+		Tasks:        w.taskSource(),
 		Branches:     seen,
 		Logf:         func(format string, args ...any) { t.Logf("daemon: "+format, args...) },
 	})
@@ -97,7 +108,7 @@ func newResultsRigWith(t *testing.T, w *world, b *gitrepo.FakeBranches, wrap fun
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &resultsRig{world: w, branches: b, app: a, store: st}
+	return &resultsRig{world: w, branches: b, app: a, store: st, taskVersion: tk.Version}
 }
 
 // measured saves a measurement of the commit, recorded now, resting on a check of its own.

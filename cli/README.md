@@ -821,14 +821,18 @@ objective in the order the task declares them, each verdict with its own numbers
 the branch only on an overall `better`, and refuses a `tradeoff` with the reason `tradeoff`; its
 refusal reasons and its promotion carry the same `objectives`.
 
-The frontier is the set of the task's commits that no member beats. `frontier add` judges the
-commit against each member with the comparison `compare` makes: it evicts a member it is `better`
-than, keeps one it is a `tradeoff` against, and is refused with every reason that applies, each
-naming the `member` it is about: `unmeasured`, `check_missing`, `dominated` (the member is better),
-`within_noise`, `inconclusive`, `stale` (measured under another task version) and
-`environment_mismatch`. A commit that is a member already is answered `already_member` and nothing
-changes. The JSON answer is `decision.admitted` (`added`, `evicted`, `already_member`, `members`)
-or `decision.refused.reasons`. A successful `promote` of a multi-objective commit offers it to the
+The frontier is the set of the task's commits that no member beats, under the task's current
+version: that of the task at the result branch head. Only measurements under that version count.
+`frontier add` judges the commit against each member with the comparison `compare` makes: it evicts
+a member it is `better` than, keeps one it is a `tradeoff` against, retires a member measured only
+under other task versions (a task switch starts the frontier afresh, and nothing is compared across
+versions), and is refused with every reason that applies: `unmeasured` (the commit or a member), `check_missing`, `stale`
+(the commit was measured only under another task version), and, each naming the `member` it is
+about, `dominated` (the member is better), `within_noise`, `inconclusive` and
+`environment_mismatch` (measured in another environment under the current version). A commit that is
+a member already is answered `already_member` and nothing changes. The JSON answer is
+`decision.admitted` (`added`, `evicted`, `retired`, `already_member`, `members`) or
+`decision.refused.reasons`. A successful `promote` of a multi-objective commit offers it to the
 frontier in the same way, and its answer's `frontier` field says what the frontier made of it; the
 promotion stands even when the frontier refuses the commit. The frontier takes the commit before
 the promotion is recorded, so a crash between the two leaves a frontier that is right, and the

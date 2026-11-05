@@ -37,9 +37,11 @@ const (
 	FrontierRefusalKind_FRONTIER_REFUSAL_KIND_WITHIN_NOISE FrontierRefusalKind = 4
 	// The samples cannot place the commit against the member named.
 	FrontierRefusalKind_FRONTIER_REFUSAL_KIND_INCONCLUSIVE FrontierRefusalKind = 5
-	// The commit and the member named were measured under different task versions.
+	// The commit was measured only under other task versions than the task's current one: that of
+	// the task at the result branch head. The frontier holds the commits of the current version.
 	FrontierRefusalKind_FRONTIER_REFUSAL_KIND_STALE FrontierRefusalKind = 6
-	// The commit and the member named were measured in different environments.
+	// The commit and the member named were measured, under the current task version, in different
+	// environments.
 	FrontierRefusalKind_FRONTIER_REFUSAL_KIND_ENVIRONMENT_MISMATCH FrontierRefusalKind = 7
 )
 
@@ -272,7 +274,7 @@ type FrontierRefusalReason struct {
 	// The member the reason is about. Empty for a reason about the commit alone.
 	Member string `protobuf:"bytes,3,opt,name=member,proto3" json:"member,omitempty"`
 	// The overall verdict of the commit against the member, and the verdict on each objective. Set
-	// for DOMINATED, WITHIN_NOISE, INCONCLUSIVE and STALE.
+	// for DOMINATED, WITHIN_NOISE and INCONCLUSIVE.
 	Verdict       *Verdict            `protobuf:"bytes,4,opt,name=verdict,proto3" json:"verdict,omitempty"`
 	Objectives    []*ObjectiveVerdict `protobuf:"bytes,5,rep,name=objectives,proto3" json:"objectives,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -398,7 +400,10 @@ type FrontierAdmission struct {
 	// The commit was a member already, and nothing changed.
 	AlreadyMember bool `protobuf:"varint,3,opt,name=already_member,json=alreadyMember,proto3" json:"already_member,omitempty"`
 	// The frontier after the change, in the order the members were admitted.
-	Members       []*FrontierMember `protobuf:"bytes,4,rep,name=members,proto3" json:"members,omitempty"`
+	Members []*FrontierMember `protobuf:"bytes,4,rep,name=members,proto3" json:"members,omitempty"`
+	// The members measured only under other task versions than the current one, which left the
+	// frontier: they belong to a task it no longer holds, and the commit was not compared with them.
+	Retired       []string `protobuf:"bytes,5,rep,name=retired,proto3" json:"retired,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -457,6 +462,13 @@ func (x *FrontierAdmission) GetAlreadyMember() bool {
 func (x *FrontierAdmission) GetMembers() []*FrontierMember {
 	if x != nil {
 		return x.Members
+	}
+	return nil
+}
+
+func (x *FrontierAdmission) GetRetired() []string {
+	if x != nil {
+		return x.Retired
 	}
 	return nil
 }
@@ -568,12 +580,13 @@ const file_vibesys_cli_v1_frontier_proto_rawDesc = "" +
 	"objectives\x18\x05 \x03(\v2 .vibesys.cli.v1.ObjectiveVerdictR\n" +
 	"objectives\"R\n" +
 	"\x0fFrontierRefusal\x12?\n" +
-	"\areasons\x18\x01 \x03(\v2%.vibesys.cli.v1.FrontierRefusalReasonR\areasons\"\xc4\x01\n" +
+	"\areasons\x18\x01 \x03(\v2%.vibesys.cli.v1.FrontierRefusalReasonR\areasons\"\xde\x01\n" +
 	"\x11FrontierAdmission\x124\n" +
 	"\x05added\x18\x01 \x01(\v2\x1e.vibesys.cli.v1.FrontierMemberR\x05added\x12\x18\n" +
 	"\aevicted\x18\x02 \x03(\tR\aevicted\x12%\n" +
 	"\x0ealready_member\x18\x03 \x01(\bR\ralreadyMember\x128\n" +
-	"\amembers\x18\x04 \x03(\v2\x1e.vibesys.cli.v1.FrontierMemberR\amembers\"\x9b\x01\n" +
+	"\amembers\x18\x04 \x03(\v2\x1e.vibesys.cli.v1.FrontierMemberR\amembers\x12\x18\n" +
+	"\aretired\x18\x05 \x03(\tR\aretired\"\x9b\x01\n" +
 	"\x10FrontierDecision\x12?\n" +
 	"\badmitted\x18\x01 \x01(\v2!.vibesys.cli.v1.FrontierAdmissionH\x00R\badmitted\x12;\n" +
 	"\arefused\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.FrontierRefusalH\x00R\arefusedB\t\n" +

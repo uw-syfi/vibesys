@@ -25,7 +25,7 @@ func (r *resultsRig) measuredOn(c core.Commit, tok, ttft float64) {
 	}
 	five := func(v float64) []float64 { return []float64{v, v, v, v, v} }
 	storetest.SeedMeasurement(r.t, st, storetest.Measurement{
-		Commit: c, Samples: five(tok), At: r.clk.Now(), Objectives: latencyTask,
+		Commit: c, Samples: five(tok), At: r.clk.Now(), Objectives: latencyTask, TaskVersion: r.taskVersion,
 		Others: []core.Observation{{Name: "ttft", Values: five(ttft)}},
 	})
 }
