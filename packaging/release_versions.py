@@ -35,6 +35,16 @@ def python_release_identity(raw: str, *, source: str) -> ReleaseIdentity:
     return _identity(match)
 
 
+def go_module_version(identity: ReleaseIdentity) -> str:
+    """Spell a release as a Go module semantic version, without the leading ``v``.
+
+    ``0.2.0`` stays ``0.2.0`` and the release candidate ``0.2.0rc1`` becomes ``0.2.0-rc.1``,
+    which semantic versioning orders before ``0.2.0`` as PEP 440 does.
+    """
+    base = f"{identity.major}.{identity.minor}.{identity.patch}"
+    return base if identity.rc is None else f"{base}-rc.{identity.rc}"
+
+
 def _identity(match: re.Match[str]) -> ReleaseIdentity:
     major, minor, patch, rc = match.groups()
     return ReleaseIdentity(int(major), int(minor), int(patch), None if rc is None else int(rc))

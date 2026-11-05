@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import zipfile
 from typing import TYPE_CHECKING
 
@@ -10,7 +11,10 @@ from check_release_version import (
     ReleaseVersionError,
     check_release_version,
 )
+from hypothesis import given
+from hypothesis import strategies as st
 from packaging.version import Version
+from release_versions import go_module_version, python_release_identity
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -128,3 +132,81 @@ def test_check_release_version_rejects_wheel_metadata_version_drift(tmp_path: Pa
 
     with pytest.raises(ReleaseVersionError, match="METADATA version"):
         check_release_version(None, source_root=tmp_path, wheel_dir=wheel_dir)
+
+
+def _write_evaluator_project(root: Path, *, python_version: str) -> None:
+    (root / "pyproject.toml").write_text(
+        f'[project]\nname = "vibesys-evaluator"\nversion = "{python_version}"\n'
+    )
+
+
+@pytest.mark.parametrize("python_version", ["0.1.0", "0.1.0rc1"])
+def test_evaluator_release_uses_its_tag_prefix_and_normalized_wheel_name(
+    tmp_path: Path, python_version: str
+) -> None:
+    _write_evaluator_project(tmp_path, python_version=python_version)
+    wheel_dir = tmp_path / "dist"
+    wheel_dir.mkdir()
+    wheel = wheel_dir / f"vibesys_evaluator-{python_version}-py3-none-any.whl"
+    with zipfile.ZipFile(wheel, "w") as archive:
+        archive.writestr(
+            f"vibesys_evaluator-{python_version}.dist-info/METADATA",
+            f"Metadata-Version: 2.4\nName: vibesys-evaluator\nVersion: {python_version}\n\n",
+        )
+
+    version = check_release_version(
+        f"refs/tags/evaluator-v{python_version}",
+        source_root=tmp_path,
+        wheel_dir=wheel_dir,
+        tag_prefix="refs/tags/evaluator-v",
+    )
+
+    assert version == Version(python_version)
+
+
+@pytest.mark.parametrize(
+    "tag",
+    [
+        # The main package's tag does not release the evaluator, nor the reverse.
+        "refs/tags/v0.1.0",
+        "refs/tags/cli-v0.1.0",
+        "refs/tags/evaluator-v",
+        "refs/tags/evaluator-v0.1.1",
+        "refs/tags/evaluator-v0.1.0-rc.1",
+    ],
+)
+def test_evaluator_release_rejects_other_tags(tmp_path: Path, tag: str) -> None:
+    _write_evaluator_project(tmp_path, python_version="0.1.0")
+
+    with pytest.raises(ReleaseVersionError):
+        check_release_version(tag, source_root=tmp_path, tag_prefix="refs/tags/evaluator-v")
+
+
+def test_evaluator_wheel_dir_rejects_the_unnormalized_wheel_name(tmp_path: Path) -> None:
+    _write_evaluator_project(tmp_path, python_version="0.1.0")
+    wheel_dir = tmp_path / "dist"
+    _write_wheels(wheel_dir)
+
+    with pytest.raises(
+        ReleaseVersionError, match=re.escape("vibesys_evaluator-0.1.0-py3-none-any.whl")
+    ):
+        check_release_version(None, source_root=tmp_path, wheel_dir=wheel_dir)
+
+
+@given(
+    major=st.integers(min_value=0, max_value=10**6),
+    minor=st.integers(min_value=0, max_value=10**6),
+    patch=st.integers(min_value=0, max_value=10**6),
+    rc=st.none() | st.integers(min_value=0, max_value=10**6),
+)
+def test_go_module_version_orders_and_spells_like_semver(
+    major: int, minor: int, patch: int, rc: int | None
+) -> None:
+    raw = f"{major}.{minor}.{patch}" + ("" if rc is None else f"rc{rc}")
+    go = go_module_version(python_release_identity(raw, source="test"))
+
+    base = f"{major}.{minor}.{patch}"
+    assert go == (base if rc is None else f"{base}-rc.{rc}")
+    # A Go module tag must be valid semver: the core is the PEP 440 release, a candidate is a
+    # dot-separated pre-release (so rc.10 orders after rc.9, as rc10 does after rc9 in PEP 440).
+    assert re.fullmatch(r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-rc\.(0|[1-9]\d*))?", go)

@@ -75,5 +75,13 @@ def test_publish_workflow_ignores_vibesys_cli_releases() -> None:
     assert isinstance(jobs, dict)
     assert jobs["publish"]["needs"] == "build"
     condition = jobs["build"]["if"]
-    assert "startsWith(github.event.release.tag_name, 'cli-')" in condition
+    assert "!startsWith(github.event.release.tag_name, 'cli-')" in condition
     assert "github.event_name != 'release'" in condition
+
+
+def test_publish_workflow_ignores_vibesys_evaluator_releases() -> None:
+    # evaluator-release.yml publishes evaluator-v<version> to its own PyPI project.
+    jobs = _publish_workflow()["jobs"]
+    assert isinstance(jobs, dict)
+    condition = jobs["build"]["if"]
+    assert "!startsWith(github.event.release.tag_name, 'evaluator-')" in condition

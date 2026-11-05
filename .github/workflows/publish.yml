@@ -21,16 +21,23 @@ on:
 permissions:
   contents: read
 
+# A release this workflow skips (see the build job) gets its own group, so it never displaces a
+# pending wheel release.
 concurrency:
-  group: ${{ github.event_name == 'release' && 'pypi-production' || github.ref }}
+  group: ${{ github.event_name == 'release' && !startsWith(github.event.release.tag_name, 'cli-') && !startsWith(github.event.release.tag_name, 'evaluator-') && 'pypi-production' || github.ref }}
   cancel-in-progress: false
 
 jobs:
   build:
     name: Build and verify universal wheel
-    # The repository also publishes vibesys-cli releases (cli-v<version> and the rolling cli-latest);
-    # those are not wheels. cli-release.yml builds them.
-    if: github.event_name != 'release' || !startsWith(github.event.release.tag_name, 'cli-')
+    # The repository also publishes vibesys-cli releases (cli-v<version> and the rolling cli-latest)
+    # and vibesys-evaluator releases (evaluator-v<version>); neither is this wheel.
+    # cli-release.yml and evaluator-release.yml build them.
+    if: >-
+      github.event_name != 'release' || (
+        !startsWith(github.event.release.tag_name, 'cli-') &&
+        !startsWith(github.event.release.tag_name, 'evaluator-')
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

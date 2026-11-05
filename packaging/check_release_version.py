@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import tomllib
 import zipfile
@@ -15,10 +16,12 @@ from packaging.version import Version
 from release_versions import (
     ReleaseIdentity,
     ReleaseVersionSyntaxError,
+    go_module_version,
     python_release_identity,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_TAG_PREFIX = "refs/tags/v"
 
 
 class ReleaseVersionError(RuntimeError):
@@ -40,28 +43,42 @@ def check_release_version(
     *,
     source_root: Path = REPO_ROOT,
     wheel_dir: Path | None = None,
+    tag_prefix: str = DEFAULT_TAG_PREFIX,
 ) -> Version:
-    """Return the canonical project version after checking every supplied source."""
+    """Return the canonical project version after checking every supplied source.
+
+    ``source_root`` holds the ``pyproject.toml`` of the distribution being released, and
+    ``tag_prefix`` is what its release tags start with before the version (``refs/tags/v`` for
+    ``vibesys``, ``refs/tags/evaluator-v`` for ``vibesys-evaluator``).
+    """
     source_root = source_root.resolve()
     project = tomllib.loads((source_root / "pyproject.toml").read_text()).get("project")
     if not isinstance(project, dict) or not isinstance(project.get("version"), str):
         _fail("pyproject.toml must declare project.version as a string")
+    if not isinstance(project.get("name"), str):
+        _fail("pyproject.toml must declare project.name as a string")
     python_raw = cast("str", project["version"])
     project_identity = _python_identity(python_raw, source="project.version")
     version = Version(python_raw)
 
     if tag is not None:
-        prefix = "refs/tags/v"
-        if not tag.startswith(prefix) or len(tag) == len(prefix):
-            _fail(f"Release tag must start with refs/tags/v, found {tag!r}")
-        tag_raw = tag.removeprefix(prefix)
+        if not tag.startswith(tag_prefix) or len(tag) == len(tag_prefix):
+            _fail(f"Release tag must start with {tag_prefix}, found {tag!r}")
+        tag_raw = tag.removeprefix(tag_prefix)
         tag_identity = _python_identity(tag_raw, source="release tag")
         if tag_identity != project_identity:
             _fail(f"Release tag version {tag_raw!r} does not match project version {python_raw!r}")
 
     if wheel_dir is not None:
-        _check_wheels(wheel_dir.resolve(), version=version)
+        _check_wheels(
+            wheel_dir.resolve(), distribution=cast("str", project["name"]), version=version
+        )
     return version
+
+
+def wheel_filename(distribution: str, version: Version) -> str:
+    """Name the one universal wheel of ``distribution`` (PEP 427, normalized name)."""
+    return f"{re.sub(r'[-_.]+', '_', distribution).lower()}-{version}-py3-none-any.whl"
 
 
 def _python_identity(raw: str, *, source: str) -> ReleaseIdentity:
@@ -71,8 +88,8 @@ def _python_identity(raw: str, *, source: str) -> ReleaseIdentity:
         raise ReleaseVersionError(str(exc)) from exc
 
 
-def _check_wheels(wheel_dir: Path, *, version: Version) -> None:
-    expected = {f"vibesys-{version}-py3-none-any.whl"}
+def _check_wheels(wheel_dir: Path, *, distribution: str, version: Version) -> None:
+    expected = {wheel_filename(distribution, version)}
     actual = {
         path.name for path in wheel_dir.iterdir() if path.is_file() and path.name != ".gitignore"
     }
@@ -110,6 +127,12 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--tag")
     parser.add_argument("--wheel-dir", type=Path)
     parser.add_argument("--source-root", type=Path, default=REPO_ROOT)
+    parser.add_argument("--tag-prefix", default=DEFAULT_TAG_PREFIX)
+    parser.add_argument(
+        "--go-module-version",
+        action="store_true",
+        help="print the version as a Go module semantic version (0.2.0rc1 -> 0.2.0-rc.1)",
+    )
     return parser.parse_args()
 
 
@@ -121,11 +144,15 @@ def main() -> int:
             args.tag,
             source_root=args.source_root,
             wheel_dir=args.wheel_dir,
+            tag_prefix=args.tag_prefix,
         )
     except (OSError, ValueError, ReleaseVersionError) as exc:
         print(f"release version check failed: {exc}", file=sys.stderr)
         return 1
-    print(version)
+    if args.go_module_version:
+        print(go_module_version(_python_identity(str(version), source="project.version")))
+    else:
+        print(version)
     return 0
 
 
