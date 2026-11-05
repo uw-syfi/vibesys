@@ -6,6 +6,8 @@ package engine_test
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -17,6 +19,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/call"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/engine"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/files"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/messages"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/plan"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/summary"
@@ -56,49 +59,86 @@ func serve(t *testing.T, handler http.HandlerFunc) *call.Client {
 	return client
 }
 
-// indexedPlan is count GETs of /op/<index>, optionally keyed.
-func indexedPlan(t *testing.T, count int, key func(int) string) *plan.Plan {
-	t.Helper()
-	return newIndexedPlan(t, count, key, false)
+// generator is a request stream of GETs of /op/<index>, optionally keyed, as a generator writes
+// it: endless unless limit > 0, each operation after pause.
+type generator struct {
+	key   func(int) string
+	limit int
+	pause time.Duration
+	keep  bool
+	// buffer is loadgen's buffer (--buffer); 256 when 0.
+	buffer int
 }
 
-// indexedPlanKeeping is indexedPlan with every response body kept.
-func indexedPlanKeeping(t *testing.T, count int) *plan.Plan {
+// source starts the generator on a pipe and opens the real stream over it.
+func (g generator) source(t *testing.T) *plan.Stream {
 	t.Helper()
-	return newIndexedPlan(t, count, nil, true)
-}
-
-func newIndexedPlan(t *testing.T, count int, key func(int) string, keep bool) *plan.Plan {
-	t.Helper()
-	ops := make([]*pb.PlannedOperation, count)
-	for i := range ops {
-		ops[i] = messages.Op(uint32(i%2), messages.Get("/op/"+strconv.Itoa(i)))
-		ops[i].KeepBodies = keep
-		if key != nil {
-			ops[i].ExclusiveKey = key(i)
+	read, write := io.Pipe()
+	go func() {
+		writer, err := files.NewWriter(write, files.Binpb, files.Header(pb.FileKind_FILE_KIND_REQUESTS, "test"))
+		if err == nil {
+			err = writer.Write(&pb.RequestsHeader{OperationNames: []string{"even", "odd"}})
 		}
+		for i := 0; err == nil && (g.limit == 0 || i < g.limit); i++ {
+			op := messages.Op(uint32(i%2), messages.Get("/op/"+strconv.Itoa(i)))
+			if g.key != nil {
+				op.ExclusiveKey = g.key(i)
+			}
+			op.KeepBodies = g.keep
+			if err = writer.Write(op); err == nil && g.pause > 0 {
+				err = writer.Flush()
+				time.Sleep(g.pause)
+			}
+		}
+		if err == nil {
+			err = writer.Flush()
+		}
+		_ = write.CloseWithError(err)
+	}()
+	buffer := g.buffer
+	if buffer == 0 {
+		buffer = 256
 	}
-	p, err := plan.New([]string{"even", "odd"}, ops)
+	stream, err := plan.OpenStream(read, buffer, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return p
+	t.Cleanup(func() {
+		stream.Stop()
+		_ = read.Close()
+		stream.Wait()
+	})
+	return stream
 }
 
-func run(t *testing.T, config engine.Config, p *plan.Plan, client *call.Client) (*pb.PhaseSummary, *collect) {
+func indexed(t *testing.T, key func(int) string) *plan.Stream {
+	return generator{key: key}.source(t)
+}
+
+func run(t *testing.T, config engine.Config, source *plan.Stream, client *call.Client) (*pb.PhaseSummary, *collect) {
 	t.Helper()
-	sink := &collect{}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute) // hang guard only
-	defer cancel()
-	outcome, err := engine.Run(ctx, config, p, client, sink)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := outcome.Aggregator.Summary(outcome.Phase)
+	s, sink, err := tryRun(config, source, client)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s, sink
+}
+
+func tryRun(config engine.Config, source *plan.Stream, client *call.Client) (*pb.PhaseSummary, *collect, error) {
+	sink := &collect{}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute) // hang guard only
+	defer cancel()
+	if err := source.WaitReady(ctx); err != nil {
+		return nil, nil, err
+	}
+	outcome, err := engine.Run(ctx, config, source, client, sink)
+	if err != nil {
+		return nil, nil, err
+	}
+	source.Stop()
+	outcome.Phase.Generator = source.Stats()
+	s, err := outcome.Aggregator.Summary(outcome.Phase)
+	return s, sink, err
 }
 
 func opIndex(r *http.Request) int {
@@ -128,7 +168,7 @@ func TestOpenLoopMeasuresFromScheduledTimeWhenTheServerStalls(t *testing.T) {
 		Load:   engine.Open{Rate: 100, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 1, MinSustained: 0.5},
 		Warmup: 0, Window: 1500 * time.Millisecond, Timeout: 5 * time.Second,
 	}
-	s, sink := run(t, config, indexedPlan(t, 400, nil), client)
+	s, sink := run(t, config, indexed(t, nil), client)
 	results := sink.byIndex()
 	// One sender: operation 41 (due 10 ms after 40) could start only when 40 ended.
 	next := results[stalled+1]
@@ -153,8 +193,9 @@ func TestOpenLoopMeasuresFromScheduledTimeWhenTheServerStalls(t *testing.T) {
 	}
 }
 
-// Closed loop: N clients each send the next operation of the plan when their last one completed,
-// so the plan's prefix is sent exactly once, at most N at a time, at about N / latency.
+// Closed loop: N clients each send the next operation of the stream when their last one
+// completed, so the stream's prefix is sent exactly once, at most N at a time, at about
+// N / latency, and the stream never runs out.
 func TestClosedLoopSendsAPrefixWithNClients(t *testing.T) {
 	const clients, serverTime = 4, 20 * time.Millisecond
 	var inFlight, peak atomic.Int64
@@ -171,8 +212,8 @@ func TestClosedLoopSendsAPrefixWithNClients(t *testing.T) {
 		inFlight.Add(-1)
 	})
 	config := engine.Config{Load: engine.Closed{Clients: clients}, Warmup: 200 * time.Millisecond, Window: time.Second, Timeout: 5 * time.Second}
-	s, sink := run(t, config, indexedPlan(t, 5000, nil), client)
-	if s.GetExhausted() || !s.GetSustained() || s.GetErrors() != 0 {
+	s, sink := run(t, config, indexed(t, nil), client)
+	if !s.GetSustained() || s.GetErrors() != 0 || s.GetGenerator().GetWaited() != 0 {
 		t.Fatalf("summary %v", s)
 	}
 	if peak.Load() > clients {
@@ -181,7 +222,7 @@ func TestClosedLoopSendsAPrefixWithNClients(t *testing.T) {
 	n := len(sink.results)
 	for i := range n {
 		if seen[i] != 1 {
-			t.Fatalf("operation %d sent %d times; the plan's prefix of %d must be sent once each", i, seen[i], n)
+			t.Fatalf("operation %d sent %d times; the stream's prefix of %d must be sent once each", i, seen[i], n)
 		}
 	}
 	// At most clients / serverTime = 200 ops/s; well above half of it unless the host is starved.
@@ -202,7 +243,7 @@ func TestOpenLoopIsNotSustainedWhenTheTargetCannotKeepUp(t *testing.T) {
 		Load:   engine.Open{Rate: 200, Arrivals: pb.Arrivals_ARRIVALS_POISSON, Seed: 7, MaxInFlight: 2, MinSustained: 0.95},
 		Warmup: 0, Window: time.Second, Timeout: 5 * time.Second,
 	}
-	s, _ := run(t, config, indexedPlan(t, 400, nil), client)
+	s, _ := run(t, config, indexed(t, nil), client)
 	if s.GetSustained() || s.GetOfferedRate() > 0.95*200 {
 		t.Fatalf("sustained %v at offered %v of 200", s.GetSustained(), s.GetOfferedRate())
 	}
@@ -218,15 +259,15 @@ func TestOpenLoopIsSustainedWhenTheTargetKeepsUp(t *testing.T) {
 		Load:   engine.Open{Rate: 200, Arrivals: pb.Arrivals_ARRIVALS_POISSON, Seed: 7, MaxInFlight: 64, MinSustained: 0.8},
 		Warmup: 100 * time.Millisecond, Window: time.Second, Timeout: 5 * time.Second,
 	}
-	s, _ := run(t, config, indexedPlan(t, 1000, nil), client)
-	if !s.GetSustained() || s.GetExhausted() || s.GetErrors() != 0 {
+	s, _ := run(t, config, indexed(t, nil), client)
+	if !s.GetSustained() || s.GetErrors() != 0 {
 		t.Fatalf("summary %v", s)
 	}
 }
 
-// Exclusive keys: operations with one key never overlap at the server and arrive in plan order,
-// in both loops, while operations on other keys proceed.
-func TestExclusiveKeysAreGrantedInPlanOrder(t *testing.T) {
+// Exclusive keys: operations with one key never overlap at the server and arrive in stream
+// order, in both loops, while operations on other keys proceed.
+func TestExclusiveKeysAreGrantedInStreamOrder(t *testing.T) {
 	const keys = 3
 	key := func(i int) string { return "k" + strconv.Itoa(i%keys) }
 	for _, load := range []engine.Load{
@@ -251,7 +292,7 @@ func TestExclusiveKeysAreGrantedInPlanOrder(t *testing.T) {
 			mu.Unlock()
 		})
 		config := engine.Config{Load: load, Window: 500 * time.Millisecond, Timeout: 5 * time.Second}
-		s, _ := run(t, config, indexedPlan(t, 2000, key), client)
+		s, _ := run(t, config, indexed(t, key), client)
 		mu.Lock()
 		if overlap {
 			t.Fatalf("%T: two operations with one key overlapped", load)
@@ -259,7 +300,7 @@ func TestExclusiveKeysAreGrantedInPlanOrder(t *testing.T) {
 		for k, indexes := range order {
 			for j := 1; j < len(indexes); j++ {
 				if indexes[j] != indexes[j-1]+keys {
-					t.Fatalf("%T: key %s served %v: not plan order", load, k, indexes[:j+1])
+					t.Fatalf("%T: key %s served %v: not stream order", load, k, indexes[:j+1])
 				}
 			}
 		}
@@ -270,24 +311,34 @@ func TestExclusiveKeysAreGrantedInPlanOrder(t *testing.T) {
 	}
 }
 
-// Running out of plan before the window ends is reported, not waited out.
-func TestExhaustedPlanIsReported(t *testing.T) {
+// A stream that ends while the phase runs fails it: a generator writes until loadgen stops.
+func TestAStreamThatEndsFailsThePhase(t *testing.T) {
 	client := serve(t, func(w http.ResponseWriter, r *http.Request) {})
 	for _, load := range []engine.Load{
 		engine.Closed{Clients: 2},
 		engine.Open{Rate: 100, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 8},
 	} {
-		config := engine.Config{Load: load, Warmup: 0, Window: time.Second, Timeout: 5 * time.Second}
-		s, sink := run(t, config, indexedPlan(t, 20, nil), client)
-		if !s.GetExhausted() || len(sink.results) != 20 {
-			t.Fatalf("%T: exhausted %v after %d results", load, s.GetExhausted(), len(sink.results))
+		config := engine.Config{Load: load, Window: 5 * time.Second, Timeout: 5 * time.Second}
+		source := generator{limit: 300}.source(t)
+		if _, _, err := tryRun(config, source, client); !errors.Is(err, plan.ErrStreamEnded) {
+			t.Fatalf("%T: %v, want %v", load, err, plan.ErrStreamEnded)
 		}
 	}
-	// A plan longer than the window needs is not exhausted, and only its due prefix is sent.
-	config := engine.Config{Load: engine.Open{Rate: 100, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 8}, Window: 500 * time.Millisecond, Timeout: 5 * time.Second}
-	s, sink := run(t, config, indexedPlan(t, 1000, nil), client)
-	if s.GetExhausted() || len(sink.results) != 50 {
-		t.Fatalf("exhausted %v with %d results, want 50", s.GetExhausted(), len(sink.results))
+}
+
+// A generator slower than the load shows as the senders' wait for it, with the rate it managed:
+// what the validity guard names. 5 ms an operation is at most 200 operations/s against a server
+// that answers at once; a buffer of 8 operations hides almost none of it.
+func TestASlowGeneratorIsMeasured(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) {})
+	config := engine.Config{Load: engine.Closed{Clients: 4}, Window: time.Second, Timeout: 5 * time.Second}
+	s, _ := run(t, config, generator{pause: 5 * time.Millisecond, buffer: 8}.source(t), client)
+	stats := s.GetGenerator()
+	if stats.GetWaited() < s.GetCompleted()/2 || stats.GetMaxWaitMicros() < 1000 {
+		t.Fatalf("waited %d of %d, max %d us", stats.GetWaited(), s.GetCompleted(), stats.GetMaxWaitMicros())
+	}
+	if stats.GetRate() <= 0 || stats.GetRate() > 400 || stats.GetRead() < s.GetCompleted() {
+		t.Fatalf("generator %v", stats)
 	}
 }
 
@@ -306,7 +357,7 @@ func TestOperationsNeverSentBeforeTheDeadlineAreCancelled(t *testing.T) {
 		Load:   engine.Open{Rate: 100, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 1},
 		Window: 300 * time.Millisecond, Timeout: 200 * time.Millisecond,
 	}
-	s, sink := run(t, config, indexedPlan(t, 100, nil), client)
+	s, sink := run(t, config, indexed(t, nil), client)
 	results := sink.byIndex()
 	if len(results) != 30 || s.GetCompleted() != 30 || s.GetErrors() != 30 {
 		t.Fatalf("%d results, summary %v", len(results), s)
@@ -345,38 +396,26 @@ func TestPoissonArrivalsAreSeeded(t *testing.T) {
 	}
 }
 
-// An exhausted closed loop's rates are over the time it ran, not the whole window: 40 operations
-// of 10 ms on 2 clients take about 200 ms of a 2 s window, so the rate is near 200/s, not 20/s.
-func TestExhaustedClosedLoopRatesCoverTheTimeItRan(t *testing.T) {
-	client := serve(t, func(w http.ResponseWriter, r *http.Request) { time.Sleep(10 * time.Millisecond) })
-	config := engine.Config{Load: engine.Closed{Clients: 2}, Window: 2 * time.Second, Timeout: 5 * time.Second}
-	s, _ := run(t, config, indexedPlan(t, 40, nil), client)
-	stopped := s.GetExhaustedUnixNanos()
-	if !s.GetExhausted() || stopped <= s.GetWindowStartUnixNanos() || stopped >= s.GetWindowEndUnixNanos() {
-		t.Fatalf("exhausted %v at %d, window [%d, %d)", s.GetExhausted(), stopped, s.GetWindowStartUnixNanos(), s.GetWindowEndUnixNanos())
-	}
-	ran := float64(stopped-s.GetWindowStartUnixNanos()) / 1e9
-	if want := 40 / ran; s.GetAchievedRate() < 0.99*want || s.GetAchievedRate() < 60 {
-		t.Fatalf("achieved %.1f ops/s over %.3f s, want %.1f (the whole window would give 20)", s.GetAchievedRate(), ran, want)
-	}
-}
-
 // An application that holds every sender (4 senders, 50 ms responses, 200 operations/s offered)
 // saturates the open loop: its late operations are counted as saturated, so the send lag is
-// attributed to the application. A fast application leaves the senders free and counts none.
+// attributed to the application. A fast application leaves the senders free and counts none, and
+// neither waits for a generator that keeps up: saturation and starvation are counted apart.
 func TestOpenLoopCountsOperationsDueWhileEverySenderIsBusy(t *testing.T) {
 	slow := serve(t, func(w http.ResponseWriter, r *http.Request) { time.Sleep(50 * time.Millisecond) })
 	config := engine.Config{
 		Load:   engine.Open{Rate: 200, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 4},
 		Window: time.Second, Timeout: 5 * time.Second,
 	}
-	s, _ := run(t, config, indexedPlan(t, 400, nil), slow)
+	s, _ := run(t, config, generator{}.source(t), slow)
 	if s.GetSaturated() < s.GetCompleted()/2 || s.GetMaxSendLagMicros() < 100_000 {
 		t.Fatalf("slow application: saturated %d of %d, max send lag %d us", s.GetSaturated(), s.GetCompleted(), s.GetMaxSendLagMicros())
 	}
+	if s.GetGenerator().GetWaited() > s.GetCompleted()/100 {
+		t.Fatalf("slow application: %d operations waited for the generator", s.GetGenerator().GetWaited())
+	}
 	fast := serve(t, func(w http.ResponseWriter, r *http.Request) {})
 	config.Load = engine.Open{Rate: 200, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 64}
-	s, _ = run(t, config, indexedPlan(t, 400, nil), fast)
+	s, _ = run(t, config, generator{}.source(t), fast)
 	if s.GetSaturated() > s.GetCompleted()/100 {
 		t.Fatalf("fast application: saturated %d of %d", s.GetSaturated(), s.GetCompleted())
 	}

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from .loadgen_pb import Arrivals, LoadModel, PhaseSummary, StepResult
 
 
-_PhaseInputFields: TypeAlias = Literal["sample_seed", "phase_index", "model", "clients", "max_ops_per_sec", "rate", "arrivals", "secs", "warmup_secs", "history"]
+_PhaseInputFields: TypeAlias = Literal["sample_seed", "phase_index", "model", "clients", "rate", "arrivals", "secs", "warmup_secs", "history"]
 
 class PhaseInput(Message[_PhaseInputFields]):
     """
@@ -53,10 +53,6 @@ class PhaseInput(Message[_PhaseInputFields]):
             ```proto
             uint32 clients = 4;
             ```
-        max_ops_per_sec:
-            ```proto
-            double max_ops_per_sec = 5;
-            ```
         rate:
             Open loop.
 
@@ -83,7 +79,7 @@ class PhaseInput(Message[_PhaseInputFields]):
             ```
     """
 
-    __slots__ = ("sample_seed", "phase_index", "model", "clients", "max_ops_per_sec", "rate", "arrivals", "secs", "warmup_secs", "history")
+    __slots__ = ("sample_seed", "phase_index", "model", "clients", "rate", "arrivals", "secs", "warmup_secs", "history")
 
     if TYPE_CHECKING:
 
@@ -94,7 +90,6 @@ class PhaseInput(Message[_PhaseInputFields]):
             phase_index: int = 0,
             model: LoadModel | None = None,
             clients: int = 0,
-            max_ops_per_sec: float = 0,
             rate: float = 0,
             arrivals: Arrivals | None = None,
             secs: float = 0,
@@ -107,7 +102,6 @@ class PhaseInput(Message[_PhaseInputFields]):
         phase_index: int
         model: LoadModel
         clients: int
-        max_ops_per_sec: float
         rate: float
         arrivals: Arrivals
         secs: float
@@ -226,7 +220,7 @@ class Violation(Message[_ViolationFields]):
         index: int
         message: str
 
-_PhaseOutputFields: TypeAlias = Literal["summary", "checked", "invalid", "violations", "writes", "generate_secs", "check_secs"]
+_PhaseOutputFields: TypeAlias = Literal["summary", "checked", "invalid", "violations", "writes", "check_secs"]
 
 class PhaseOutput(Message[_PhaseOutputFields]):
     """
@@ -263,19 +257,15 @@ class PhaseOutput(Message[_PhaseOutputFields]):
             ```proto
             repeated vibesys.evaluator.v1.HistoryEntry writes = 5;
             ```
-        generate_secs:
-            Seconds spent generating the plan and checking the sample (outside the window).
-
-            ```proto
-            double generate_secs = 6;
-            ```
         check_secs:
+            Seconds spent checking the sample (after the window).
+
             ```proto
             double check_secs = 7;
             ```
     """
 
-    __slots__ = ("summary", "checked", "invalid", "violations", "writes", "generate_secs", "check_secs")
+    __slots__ = ("summary", "checked", "invalid", "violations", "writes", "check_secs")
 
     if TYPE_CHECKING:
 
@@ -287,7 +277,6 @@ class PhaseOutput(Message[_PhaseOutputFields]):
             invalid: int = 0,
             violations: list[Violation] | None = None,
             writes: list[HistoryEntry] | None = None,
-            generate_secs: float = 0,
             check_secs: float = 0,
         ) -> None:
             pass
@@ -297,12 +286,71 @@ class PhaseOutput(Message[_PhaseOutputFields]):
         invalid: int
         violations: list[Violation]
         writes: list[HistoryEntry]
-        generate_secs: float
         check_secs: float
+
+_KeptOperationFields: TypeAlias = Literal["index", "operation", "info_json", "sampled"]
+
+class KeptOperation(Message[_KeptOperationFields]):
+    """
+    KeptOperation is what a generator remembers of one operation it generated
+    for its own check: the front ends write one per operation in the validation
+    sample and per write, length-delimited, into the --state directory that
+    `generate` and `check` share. loadgen never reads it.
+
+    ```proto
+    message vibesys.evaluator.v1.KeptOperation
+    ```
+
+    Attributes:
+        index:
+            The operation's position in the request stream, from 0.
+
+            ```proto
+            uint64 index = 1;
+            ```
+        operation:
+            Index into RequestsHeader.operation_names.
+
+            ```proto
+            uint32 operation = 2;
+            ```
+        info_json:
+            The Request's info, as a JSON object.
+
+            ```proto
+            string info_json = 3;
+            ```
+        sampled:
+            In the validation sample (its response is checked); a write that is not
+            sampled is kept for the history only.
+
+            ```proto
+            bool sampled = 4;
+            ```
+    """
+
+    __slots__ = ("index", "operation", "info_json", "sampled")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            index: int = 0,
+            operation: int = 0,
+            info_json: str = "",
+            sampled: bool = False,
+        ) -> None:
+            pass
+
+        index: int
+        operation: int
+        info_json: str
+        sampled: bool
 
 
 _DESC = file_desc(
-    b'\n vibesys/evaluator/v1/phase.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto\x1a"vibesys/evaluator/v1/loadgen.proto"\xd5\x03\n\nPhaseInput\x12\x1f\n\x0bsample_seed\x18\x01 \x01(\x04R\nsampleSeed\x12\x1f\n\x0bphase_index\x18\x02 \x01(\rR\nphaseIndex\x12A\n\x05model\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelR\x05modelB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x18\n\x07clients\x18\x04 \x01(\rR\x07clients\x12.\n\x0fmax_ops_per_sec\x18\x05 \x01(\x01R\x0cmaxOpsPerSecB\x07\xbaH\x04\x12\x02@\x01\x12\x1b\n\x04rate\x18\x06 \x01(\x01R\x04rateB\x07\xbaH\x04\x12\x02@\x01\x12D\n\x08arrivals\x18\x07 \x01(\x0e2\x1e.vibesys.evaluator.v1.ArrivalsR\x08arrivalsB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12$\n\x04secs\x18\x08 \x01(\x01R\x04secsB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x121\n\x0bwarmup_secs\x18\t \x01(\x01R\nwarmupSecsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12<\n\x07history\x18\n \x03(\x0b2".vibesys.evaluator.v1.HistoryEntryR\x07history"\x80\x02\n\x0cHistoryEntry\x12;\n\toperation\x18\x01 \x01(\tR\toperationB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x12\x1b\n\tinfo_json\x18\x02 \x01(\tR\x08infoJson\x12(\n\x10start_unix_nanos\x18\x03 \x01(\x03R\x0estartUnixNanos\x12$\n\x0eend_unix_nanos\x18\x04 \x01(\x03R\x0cendUnixNanos\x12\x0e\n\x02ok\x18\x05 \x01(\x08R\x02ok\x126\n\x05steps\x18\x06 \x03(\x0b2 .vibesys.evaluator.v1.StepResultR\x05steps"c\n\tViolation\x12\x1c\n\toperation\x18\x01 \x01(\tR\toperation\x12\x14\n\x05index\x18\x02 \x01(\x04R\x05index\x12"\n\x07message\x18\x03 \x01(\tR\x07messageB\x08\xbaH\x05r\x03\x18\xd0\x0f"\xca\x02\n\x0bPhaseOutput\x12<\n\x07summary\x18\x01 \x01(\x0b2".vibesys.evaluator.v1.PhaseSummaryR\x07summary\x12\x18\n\x07checked\x18\x02 \x01(\x04R\x07checked\x12\x18\n\x07invalid\x18\x03 \x01(\x04R\x07invalid\x12I\n\nviolations\x18\x04 \x03(\x0b2\x1f.vibesys.evaluator.v1.ViolationR\nviolationsB\x08\xbaH\x05\x92\x01\x02\x10\x14\x12:\n\x06writes\x18\x05 \x03(\x0b2".vibesys.evaluator.v1.HistoryEntryR\x06writes\x12#\n\rgenerate_secs\x18\x06 \x01(\x01R\x0cgenerateSecs\x12\x1d\n\ncheck_secs\x18\x07 \x01(\x01R\tcheckSecsB_Z]github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
+    b'\n vibesys/evaluator/v1/phase.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto\x1a"vibesys/evaluator/v1/loadgen.proto"\xbc\x03\n\nPhaseInput\x12\x1f\n\x0bsample_seed\x18\x01 \x01(\x04R\nsampleSeed\x12\x1f\n\x0bphase_index\x18\x02 \x01(\rR\nphaseIndex\x12A\n\x05model\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelR\x05modelB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x18\n\x07clients\x18\x04 \x01(\rR\x07clients\x12\x1b\n\x04rate\x18\x06 \x01(\x01R\x04rateB\x07\xbaH\x04\x12\x02@\x01\x12D\n\x08arrivals\x18\x07 \x01(\x0e2\x1e.vibesys.evaluator.v1.ArrivalsR\x08arrivalsB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12$\n\x04secs\x18\x08 \x01(\x01R\x04secsB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x121\n\x0bwarmup_secs\x18\t \x01(\x01R\nwarmupSecsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12<\n\x07history\x18\n \x03(\x0b2".vibesys.evaluator.v1.HistoryEntryR\x07historyJ\x04\x08\x05\x10\x06R\x0fmax_ops_per_sec"\x80\x02\n\x0cHistoryEntry\x12;\n\toperation\x18\x01 \x01(\tR\toperationB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x12\x1b\n\tinfo_json\x18\x02 \x01(\tR\x08infoJson\x12(\n\x10start_unix_nanos\x18\x03 \x01(\x03R\x0estartUnixNanos\x12$\n\x0eend_unix_nanos\x18\x04 \x01(\x03R\x0cendUnixNanos\x12\x0e\n\x02ok\x18\x05 \x01(\x08R\x02ok\x126\n\x05steps\x18\x06 \x03(\x0b2 .vibesys.evaluator.v1.StepResultR\x05steps"c\n\tViolation\x12\x1c\n\toperation\x18\x01 \x01(\tR\toperation\x12\x14\n\x05index\x18\x02 \x01(\x04R\x05index\x12"\n\x07message\x18\x03 \x01(\tR\x07messageB\x08\xbaH\x05r\x03\x18\xd0\x0f"\xba\x02\n\x0bPhaseOutput\x12<\n\x07summary\x18\x01 \x01(\x0b2".vibesys.evaluator.v1.PhaseSummaryR\x07summary\x12\x18\n\x07checked\x18\x02 \x01(\x04R\x07checked\x12\x18\n\x07invalid\x18\x03 \x01(\x04R\x07invalid\x12I\n\nviolations\x18\x04 \x03(\x0b2\x1f.vibesys.evaluator.v1.ViolationR\nviolationsB\x08\xbaH\x05\x92\x01\x02\x10\x14\x12:\n\x06writes\x18\x05 \x03(\x0b2".vibesys.evaluator.v1.HistoryEntryR\x06writes\x12\x1d\n\ncheck_secs\x18\x07 \x01(\x01R\tcheckSecsJ\x04\x08\x06\x10\x07R\rgenerate_secs"z\n\rKeptOperation\x12\x14\n\x05index\x18\x01 \x01(\x04R\x05index\x12\x1c\n\toperation\x18\x02 \x01(\rR\toperation\x12\x1b\n\tinfo_json\x18\x03 \x01(\tR\x08infoJson\x12\x18\n\x07sampled\x18\x04 \x01(\x08R\x07sampledB_Z]github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
     [
         validate_pb.desc(),
         loadgen_pb.desc(),
@@ -312,6 +360,7 @@ _DESC = file_desc(
         "HistoryEntry": HistoryEntry,
         "Violation": Violation,
         "PhaseOutput": PhaseOutput,
+        "KeptOperation": KeptOperation,
     },
 )
 

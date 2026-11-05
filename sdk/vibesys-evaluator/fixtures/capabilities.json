@@ -1,2 +1,2 @@
 {"schemaVersion":1,"kind":"FILE_KIND_CAPABILITIES","writer":"fixture"}
-{"loadgenVersion":"fixture","minSchemaVersion":1,"maxSchemaVersion":1,"calls":["CALL_KIND_HTTP"],"models":["LOAD_MODEL_CLOSED","LOAD_MODEL_OPEN"],"arrivals":["ARRIVALS_UNIFORM","ARRIVALS_POISSON"],"exclusiveKeys":true,"refEncodings":["REF_ENCODING_RAW","REF_ENCODING_JSON_STRING","REF_ENCODING_JSON_VALUE"]}
+{"loadgenVersion":"fixture","minSchemaVersion":1,"maxSchemaVersion":1,"calls":["CALL_KIND_HTTP"],"models":["LOAD_MODEL_CLOSED","LOAD_MODEL_OPEN"],"arrivals":["ARRIVALS_UNIFORM","ARRIVALS_POISSON"],"exclusiveKeys":true,"refEncodings":["REF_ENCODING_RAW","REF_ENCODING_JSON_STRING","REF_ENCODING_JSON_VALUE"],"requestStream":true}

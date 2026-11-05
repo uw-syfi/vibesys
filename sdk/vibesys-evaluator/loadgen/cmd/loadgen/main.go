@@ -1,4 +1,5 @@
-// Command loadgen sends a phase's planned requests and writes its results and summary; see
+// Command loadgen runs a phase: it starts the task's request generator, reads the request stream
+// from its standard output while it sends the requests, and writes the results and summary; see
 // sdk/vibesys-evaluator/docs/spec.md ("loadgen command line") and
 // proto/vibesys/evaluator/v1/loadgen.proto.
 //
@@ -13,9 +14,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
+	"sync"
 	"syscall"
 	"time"
 
@@ -39,8 +43,8 @@ const (
 	exitUsage   = 2
 )
 
-// gcPercent replaces Go's default of 100 unless GOGC is set: the plan dominates the live heap,
-// and a collection every few hundred milliseconds showed up as millisecond send lag.
+// gcPercent replaces Go's default of 100 unless GOGC is set: a collection every few hundred
+// milliseconds showed up as millisecond send lag.
 const gcPercent = 400
 
 func main() {
@@ -62,11 +66,11 @@ func (e usageError) Unwrap() error { return e.err }
 func usage(format string, args ...any) error { return usageError{fmt.Errorf(format, args...)} }
 
 const help = `usage:
-  loadgen closed   --target URL --clients N --secs S --warmup W --requests F --results F --summary F
-                   [--timeout S] [--format binpb|json]
+  loadgen closed   --target URL --clients N --secs S --warmup W --results F --summary F
+                   [--timeout S] [--buffer N] [--format binpb|json] -- GENERATOR [ARG...]
   loadgen open     --target URL --rate R [--arrivals uniform|poisson] [--seed N] [--max-in-flight N]
-                   [--min-sustained RATIO] --secs S --warmup W --requests F --results F --summary F
-                   [--timeout S] [--format binpb|json]
+                   [--min-sustained RATIO] --secs S --warmup W --results F --summary F
+                   [--timeout S] [--buffer N] [--format binpb|json] -- GENERATOR [ARG...]
   loadgen probe    --target URL --requests F --rounds N --deadline S [--timeout S] [--format binpb|json]
   loadgen selftest --summary F [--step-secs S] [--max-rate R] [--format binpb|json]
   loadgen --capabilities [--format binpb|json]
@@ -97,7 +101,7 @@ func dispatch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	}
 	switch args[0] {
 	case "closed", "open":
-		return phaseCommand(ctx, args[0], args[1:])
+		return phaseCommand(ctx, args[0], args[1:], stderr)
 	case "probe":
 		return probeCommand(ctx, args[1:])
 	case "selftest":
@@ -156,29 +160,41 @@ func seconds(value float64, name string) (time.Duration, error) {
 	return time.Duration(value * float64(time.Second)), nil
 }
 
-func phaseCommand(ctx context.Context, model string, args []string) error {
+// defaultBuffer is the operations loadgen decodes ahead of the senders (--buffer).
+const defaultBuffer = 8192
+
+func phaseCommand(ctx context.Context, model string, args []string, stderr io.Writer) error {
+	started := time.Now()
+	split := slices.Index(args, "--")
+	if split < 0 || split == len(args)-1 {
+		return usage("the generator command goes after \"--\"")
+	}
+	generator := args[split+1:]
 	set, format := newFlags(model)
 	target := set.String("target", "", "base URL of every step")
 	secs := set.Float64("secs", 0, "measurement window, seconds")
 	warmup := set.Float64("warmup", 0, "warmup before the window, seconds")
-	requests := set.String("requests", "", "requests file")
 	resultsPath := set.String("results", "", "results file to write")
 	summaryPath := set.String("summary", "", "summary file to write")
 	timeout := set.Float64("timeout", 10, "per-step timeout, seconds")
+	buffer := set.Int("buffer", defaultBuffer, "operations decoded ahead of the senders")
 	clients := set.Int("clients", 0, "closed loop: clients")
 	rate := set.Float64("rate", 0, "open loop: operations/s")
 	arrivals := set.String("arrivals", "poisson", "open loop: uniform or poisson")
 	seed := set.Uint64("seed", 0, "open loop: Poisson arrivals seed")
 	maxInFlight := set.Int("max-in-flight", 512, "open loop: concurrent operations")
 	minSustained := set.Float64("min-sustained", 0.95, "open loop: sustained when offered >= this x rate")
-	required := []string{"target", "secs", "warmup", "requests", "results", "summary"}
+	required := []string{"target", "secs", "warmup", "results", "summary"}
 	if model == "closed" {
 		required = append(required, "clients")
 	} else {
 		required = append(required, "rate")
 	}
-	if err := parse(set, args, required...); err != nil {
+	if err := parse(set, args[:split], required...); err != nil {
 		return err
+	}
+	if *buffer < 1 || *buffer > 1<<22 {
+		return usage("--buffer must be between 1 and %d", 1<<22)
 	}
 	var load engine.Load
 	conns := *clients
@@ -211,30 +227,112 @@ func phaseCommand(ctx context.Context, model string, args []string) error {
 		return usageError{err}
 	}
 	defer client.Close()
-	p, err := readPlan(*requests, format.format)
+	gen, err := startGenerator(ctx, generator, stderr)
 	if err != nil {
 		return err
 	}
-	summaryMessage, err := runPhase(ctx, config, p, client, *resultsPath, format.format)
+	defer gen.stop()
+	stream, err := plan.OpenStream(gen.out, *buffer, started)
 	if err != nil {
-		return err
+		return gen.failed(err)
+	}
+	// In reverse: stop the pipeline, close the stream (which ends the generator), then wait.
+	defer stream.Wait()
+	defer gen.stop()
+	defer stream.Stop()
+	if err := stream.WaitReady(ctx); err != nil {
+		return gen.failed(err)
+	}
+	summaryMessage, err := runPhase(ctx, config, stream, client, *resultsPath, format.format, func() *pb.GeneratorStats {
+		stream.Stop()
+		return stream.Stats()
+	})
+	if err != nil {
+		return gen.failed(err)
 	}
 	return writeFile(*summaryPath, format.format, pb.FileKind_FILE_KIND_SUMMARY, summaryMessage)
 }
 
+// generatorGrace is how long a generator has to exit after loadgen closed its stream.
+const generatorGrace = 10 * time.Second
+
+// generatorProcess is the running generator command: its stream on out, its log on loadgen's
+// standard error.
+type generatorProcess struct {
+	cmd  *exec.Cmd
+	out  *os.File
+	done chan error
+	argv []string
+	once sync.Once
+}
+
+func startGenerator(ctx context.Context, argv []string, stderr io.Writer) (*generatorProcess, error) {
+	read, write, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	// argv is the generator command the caller named after "--".
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd.Stdout = write
+	cmd.Stderr = stderr
+	cmd.WaitDelay = generatorGrace
+	if err := cmd.Start(); err != nil {
+		_ = read.Close()
+		_ = write.Close()
+		return nil, usage("cannot start the generator %q: %v", argv[0], err)
+	}
+	_ = write.Close()
+	g := &generatorProcess{cmd: cmd, out: read, done: make(chan error, 1), argv: argv}
+	go func() { g.done <- cmd.Wait() }()
+	return g, nil
+}
+
+// stop closes the stream, which ends the generator (a write to a closed pipe fails), and waits
+// for it to exit, killing it after generatorGrace. Its exit status no longer matters.
+func (g *generatorProcess) stop() {
+	g.once.Do(func() {
+		_ = g.out.Close()
+		select {
+		case <-g.done:
+		case <-time.After(generatorGrace):
+			_ = g.cmd.Process.Kill()
+			<-g.done
+		}
+	})
+}
+
+// failed is err, with the generator's exit status when it exited while loadgen read its stream.
+func (g *generatorProcess) failed(err error) error {
+	if errors.Is(err, plan.ErrStreamEnded) {
+		select {
+		case exit := <-g.done:
+			g.done <- exit
+			if exit != nil {
+				return fmt.Errorf("the generator %q failed (%v): %w", g.argv[0], exit, err)
+			}
+		case <-time.After(generatorGrace):
+		}
+	}
+	return err
+}
+
+// readPlan reads probe's ready steps: a finite request stream.
 func readPlan(path string, format files.Format) (*plan.Plan, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("--requests: %w", err)
 	}
-	p, err := plan.Parse(data, format)
+	defer func() { _ = file.Close() }()
+	p, err := plan.Read(file, format)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return p, nil
 }
 
-func runPhase(ctx context.Context, config engine.Config, p *plan.Plan, client *call.Client, resultsPath string, format files.Format) (*pb.PhaseSummary, error) {
+// runPhase runs the phase and folds its summary; stats stops the source and returns its own
+// GeneratorStats once the phase is over.
+func runPhase(ctx context.Context, config engine.Config, source engine.Source, client *call.Client, resultsPath string, format files.Format, stats func() *pb.GeneratorStats) (*pb.PhaseSummary, error) {
 	out, err := os.Create(resultsPath)
 	if err != nil {
 		return nil, fmt.Errorf("--results: %w", err)
@@ -244,7 +342,8 @@ func runPhase(ctx context.Context, config engine.Config, p *plan.Plan, client *c
 	if err != nil {
 		return nil, fmt.Errorf("--results: %w", err)
 	}
-	outcome, runErr := engine.Run(ctx, config, p, client, sink)
+	outcome, runErr := engine.Run(ctx, config, source, client, sink)
+	generator := stats()
 	spilled, closeErr := sink.Close()
 	if runErr != nil {
 		return nil, runErr
@@ -256,6 +355,7 @@ func runPhase(ctx context.Context, config engine.Config, p *plan.Plan, client *c
 		return nil, fmt.Errorf("write results: %w", err)
 	}
 	outcome.Phase.ResultsSpilled = spilled
+	outcome.Phase.Generator = generator
 	return outcome.Aggregator.Summary(outcome.Phase)
 }
 

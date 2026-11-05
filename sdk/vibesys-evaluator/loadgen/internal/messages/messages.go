@@ -84,19 +84,19 @@ func Exclusive(op *pb.PlannedOperation, key string) *pb.PlannedOperation {
 	return op
 }
 
-// RequestsFile encodes a whole requests file.
+// RequestsFile encodes a whole finite request stream.
 func RequestsFile(format files.Format, names []string, ops ...*pb.PlannedOperation) []byte {
 	return RequestsFileVersion(format, files.SchemaVersion, names, ops...)
 }
 
-// RequestsFileVersion encodes a requests file whose header claims a schema version.
+// RequestsFileVersion encodes a finite request stream whose header claims a schema version.
 func RequestsFileVersion(format files.Format, version uint32, names []string, ops ...*pb.PlannedOperation) []byte {
 	var out bytes.Buffer
 	header := files.Header(pb.FileKind_FILE_KIND_REQUESTS, "build")
 	header.SchemaVersion = version
 	writer, err := files.NewWriter(&out, format, header)
 	must(err)
-	must(writer.Write(&pb.RequestsHeader{OperationNames: names, Count: uint64(len(ops))}))
+	must(writer.Write(&pb.RequestsHeader{OperationNames: names}))
 	for _, op := range ops {
 		must(writer.Write(op))
 	}

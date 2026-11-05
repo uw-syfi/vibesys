@@ -1,16 +1,19 @@
 syntax = "proto3";
 
-// The files the vibesys-evaluator Python package and loadgen (its native load
-// generator, sdk/vibesys-evaluator/loadgen) exchange for one phase: the
-// requests file (written by Python before the phase), the results file and the
-// summary file (written by loadgen). See sdk/vibesys-evaluator/docs/spec.md.
+// What a phase's request generator and loadgen (the native load generator,
+// sdk/vibesys-evaluator/loadgen) exchange, and the files loadgen writes for the
+// vibesys-evaluator front ends: the request stream (a generator's standard
+// output, read by loadgen while the phase runs), the results file and the
+// summary file. See sdk/vibesys-evaluator/docs/spec.md.
 //
-// Encoding. Each file is a sequence of length-delimited messages (a varint
-// length, then the message; the binpb format), or proto3 JSON, one message per
-// line, for debugging (--format json). The first message of every file is a
-// FileHeader; what follows depends on its kind:
+// Encoding. Each stream or file is a sequence of length-delimited messages (a
+// varint length, then the message; the binpb format), or for files proto3 JSON,
+// one message per line, for debugging (--format json). The request stream is
+// always binpb. The first message of every stream and file is a FileHeader;
+// what follows depends on its kind:
 //
-//   requests:     FileHeader, RequestsHeader, PlannedOperation...
+//   requests:     FileHeader, RequestsHeader, PlannedOperation...  (a stream: no end
+//                 while loadgen reads it; loadgen probe reads a finite one to its end)
 //   results:      FileHeader, OperationResult...   (in completion order)
 //   summary:      FileHeader, PhaseSummary
 //   selftest:     FileHeader, SelftestResult
@@ -46,7 +49,7 @@ message FileHeader {
   string writer = 3 [(buf.validate.field).string.min_len = 1];
 }
 
-// RequestsHeader follows the FileHeader of a requests file.
+// RequestsHeader follows the FileHeader of a request stream.
 message RequestsHeader {
   // Operation names; PlannedOperation.operation and the summaries index into
   // this list. Names are unique.
@@ -57,15 +60,16 @@ message RequestsHeader {
       string: {pattern: "^[a-z][a-z0-9_]{0,62}$"}
     }
   }];
-  // The number of PlannedOperation messages that follow; a file with another
-  // number is rejected. Both loops send a prefix of the plan, in plan order: the
-  // operations due before the window ends. A plan that runs out before the
-  // window ends is reported as exhausted (PhaseSummary.exhausted).
-  uint64 count = 2 [(buf.validate.field).uint64.gte = 1];
+  // Removed with the requests file: a stream has no count. Both loops take
+  // operations in stream order until the window ends; a stream that ends while
+  // loadgen still reads it fails the phase.
+  reserved 2;
+  reserved "count";
 }
 
 // PlannedOperation is one logical operation: one or more steps sent in order
-// on one client, counted as one operation with one latency.
+// on one client, counted as one operation with one latency. Its position in the
+// stream, from 0, is its index (OperationResult.index).
 message PlannedOperation {
   // Index into RequestsHeader.operation_names.
   uint32 operation = 1;
@@ -74,8 +78,8 @@ message PlannedOperation {
     max_items: 16
   }];
   // Operations with the same non-empty key never run at the same time; loadgen
-  // grants the key in plan order, so operations on one key are applied in plan
-  // order. Time spent waiting for the key counts as latency.
+  // grants the key in stream order, so operations on one key are applied in
+  // stream order. Time spent waiting for the key counts as latency.
   string exclusive_key = 3 [(buf.validate.field).string.max_len = 256];
   // Keep every response body in the results file. Otherwise only a digest and
   // the length are kept (the operation is outside the validation sample).
@@ -84,7 +88,7 @@ message PlannedOperation {
 
 // Step is one call. A step may use values captured from the responses of
 // earlier steps of the same operation (Template.Part.ref); a Ref to a name that
-// no earlier step of the operation captures is rejected with the plan. An
+// no earlier step of the operation captures fails the phase (exit 2). An
 // operation stops at its first failed step: the later steps are not sent and
 // have no StepResult.
 message Step {
@@ -155,8 +159,8 @@ message Param {
 }
 
 // ThriftCall is reserved for a Thrift driver. It is not designed yet; a
-// loadgen whose Capabilities do not list CALL_KIND_THRIFT rejects a requests
-// file that uses it.
+// loadgen whose Capabilities do not list CALL_KIND_THRIFT rejects a stream that
+// uses it.
 message ThriftCall {}
 
 // Template is a text made of literal parts and captured values.
@@ -231,11 +235,11 @@ enum ErrorKind {
 // deadline (the window's end plus --timeout) is recorded with error CANCELLED,
 // start 0 and no steps: it was never sent.
 message OperationResult {
-  // The position of the PlannedOperation in the requests file, from 0.
+  // The position of the PlannedOperation in the request stream, from 0.
   uint64 index = 1;
   uint32 operation = 2;
   // When the operation was due: its arrival time (open loop), or the time a
-  // client took it from the plan (closed loop). Latency is end - scheduled in
+  // client took it from the stream (closed loop). Latency is end - scheduled in
   // both: in a closed loop it differs from end - start only by the wait for the
   // exclusive key, which counts as latency.
   int64 scheduled_unix_nanos = 3;
@@ -350,12 +354,9 @@ message PhaseSummary {
   // request timeout); counted in completed, not in the throughput.
   uint64 spilled = 10;
   // The rate operations were sent at (operations whose first step started in
-  // the window, divided by the time the window ran), and the rate they
-  // completed at within the window (completed - spilled, divided by the same
-  // time), operations/s. A closed loop's throughput is achieved_rate. The time
-  // the window ran is its length, except for an exhausted closed loop, whose
-  // clients stopped when the plan ran out: there it is from the window's start
-  // to exhausted_unix_nanos (0 when the plan ran out before the window).
+  // the window, divided by its length), and the rate they completed at within
+  // the window (completed - spilled, divided by its length), operations/s. A
+  // closed loop's throughput is achieved_rate.
   double offered_rate = 11 [(buf.validate.field).double.finite = true];
   double achieved_rate = 12 [(buf.validate.field).double.finite = true];
   // Send lag: the time a sent operation waited for a free sender after it was
@@ -373,9 +374,10 @@ message PhaseSummary {
   // Open loop: offered_rate reached the Python side's min_sustained_ratio of
   // target_rate (passed as --min-sustained). Closed loop: true.
   bool sustained = 17;
-  // The plan ran out before the window ended (no operation was left to take
-  // or to schedule); the phase is not a measurement.
-  bool exhausted = 18;
+  // Removed with the requests file: a stream does not run out (a stream that
+  // ends early fails the phase).
+  reserved 18;
+  reserved "exhausted";
   // The latency (end - scheduled) of every operation of the window that
   // succeeded, and per operation (OperationSummary). Failed operations are in
   // errors, not in the latency.
@@ -385,18 +387,53 @@ message PhaseSummary {
   // was written slower than operations completed; they are in the results file
   // all the same. Diagnosis only.
   uint64 results_spilled = 21;
-  // Closed loop, exhausted: when the loop stopped, the end of the last
-  // operation (every planned operation had been taken), Unix nanoseconds; 0
-  // otherwise. The rate the loop sent at over the whole phase is
-  // the plan's count divided by this minus the phase's start (window start
-  // minus --warmup).
-  int64 exhausted_unix_nanos = 22 [(buf.validate.field).int64.gte = 0];
+  // Removed with the requests file: a stream does not run out.
+  reserved 22;
+  reserved "exhausted_unix_nanos";
   // Open loop: operations of the window that were due while every one of the
   // --max-in-flight senders was busy, so they waited for one to finish. Their
   // send lag is the application holding the senders (its responses were slow),
   // not loadgen falling behind; their latency (end - scheduled) includes the
-  // wait. Closed loop: 0.
+  // wait. A wait for the request generator is not this (GeneratorStats.waited).
+  // Closed loop: 0.
   uint64 saturated = 23;
+  // The operation names of the stream (RequestsHeader.operation_names), which
+  // OperationSummary.operation and OperationResult.operation index into.
+  repeated string operation_names = 24;
+  // How the request generator kept up (GeneratorStats).
+  GeneratorStats generator = 25 [(buf.validate.field).required = true];
+}
+
+// GeneratorStats is how the request generator kept up with loadgen. loadgen
+// keeps a buffer of decoded operations (--buffer) between the stream and the
+// senders, fills it before t0, and refills it while the phase runs; an
+// operation waits for the generator when the buffer is empty as a sender (a
+// closed-loop client, or the open loop's scheduler when the operation is due)
+// takes it. A generator that keeps up leaves no operation waiting.
+message GeneratorStats {
+  // Operations read from the stream, in all (taken or still buffered).
+  uint64 read = 1;
+  // Of the window's operations (as in PhaseSummary's counts): those that
+  // waited for the generator, and the wait of every one (0 for most).
+  uint64 waited = 2;
+  HdrHistogram wait = 3 [(buf.validate.field).required = true];
+  int64 max_wait_micros = 4 [(buf.validate.field).int64.gte = 0];
+  // The rate the generator and loadgen's decoding produced operations at while
+  // the buffer had room (time blocked on a full buffer excluded, from the first
+  // operation on), operations/s: what the generator can sustain. 0 when no
+  // operation was read.
+  double rate = 5 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  // From loadgen's start to a full buffer (the generator's start-up: its
+  // dataset, model and history replay), seconds; before t0.
+  double ready_secs = 6 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  // The buffer's capacity, operations (--buffer).
+  uint32 buffer = 7;
 }
 
 // CallKind is a kind of Step.call.
@@ -408,7 +445,7 @@ enum CallKind {
 
 // Capabilities is what `loadgen --capabilities` prints (one message, in the
 // chosen format): what this build implements, so the Python side can refuse
-// a plan it cannot run before deploying anything.
+// a phase it cannot run before deploying anything.
 message Capabilities {
   string loadgen_version = 1 [(buf.validate.field).string.min_len = 1];
   // The schema versions it reads and writes, inclusive.
@@ -431,6 +468,9 @@ message Capabilities {
     defined_only: true
     not_in: [0]
   }];
+  // The phase commands read the request stream of a generator command (after
+  // "--") and report GeneratorStats; the only request input of a phase.
+  bool request_stream = 9;
 }
 
 // SelftestResult is what `loadgen selftest` writes: its limits on this pod,

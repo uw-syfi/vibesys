@@ -22,8 +22,8 @@ func Run(ctx context.Context, sender engine.Sender, p *plan.Plan, rounds int) er
 	if rounds < 1 {
 		return fmt.Errorf("--rounds must be at least 1")
 	}
-	for i := range p.Len() {
-		op := p.Op(i)
+	for i := range p.Ops {
+		op := &p.Ops[i]
 		for round := 1; round <= rounds; round++ {
 			last := ""
 			for {
