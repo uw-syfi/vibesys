@@ -1,0 +1,17 @@
+{
+  "metadata": {
+    "scenario": "agentx",
+    "submission_valid": true,
+    "submission_invalid_reasons": []
+  },
+  "was_cancelled": false,
+  "error_summary": [],
+  "request_count": {"unit": "requests", "avg": 1184},
+  "error_request_count": {"unit": "requests", "avg": 0},
+  "output_token_throughput": {"unit": "tokens/sec", "avg": 412.5},
+  "request_throughput": {"unit": "requests/sec", "avg": 1.31},
+  "request_latency": {"unit": "ms", "avg": 9120.0, "p50": 7310.0, "p90": 18250.0, "p99": 30111.0},
+  "time_to_first_token": {"unit": "ms", "avg": 702.0, "p50": 310.25, "p90": 1840.0, "p99": 5203.0},
+  "inter_token_latency": {"unit": "ms", "avg": 23.1, "p50": 21.5, "p90": 34.75, "p99": 61.0},
+  "plugin_metric_ignored": {"unit": "widgets", "avg": -1}
+}

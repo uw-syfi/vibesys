@@ -17,7 +17,7 @@ from vibesys.inputs import (
 def _manifest(profile_guided: object) -> InputManifest:
     return InputManifest.model_validate(
         {
-            "version": 1,
+            "version": "0.1",
             "agent": {"domain": "database"},
             "profile_guided": profile_guided,
             "accuracy": {"command": ["python", "check.py"]},

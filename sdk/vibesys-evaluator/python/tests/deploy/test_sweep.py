@@ -8,7 +8,7 @@ from pathlib import Path
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys_evaluator.deploy._k8s import CREATED_LABEL, TASK_LABEL, sweep
+from vibesys_evaluator.microservices._k8s import CREATED_LABEL, TASK_LABEL, sweep
 
 from .k8s_world import make_app, make_world
 

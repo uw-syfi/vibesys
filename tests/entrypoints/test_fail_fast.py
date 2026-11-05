@@ -20,7 +20,7 @@ def _input_project(root: Path) -> Path:
     root.mkdir()
     write_task(
         root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
         objective="Improve inference.\n",
     )

@@ -20,7 +20,7 @@ def _arguments(root: Path, profiler: ProfilerKind) -> list[str]:
     project.mkdir()
     write_task(
         project,
-        'version = 1\n[agent]\ndomain = "llm-serving"\n'
+        'version = "0.1"\n[agent]\ndomain = "llm-serving"\n'
         '[accuracy]\ncommand = ["python", "check.py"]\n'
         '[benchmark]\ncommand = ["python", "benchmark.py"]\n',
         objective="Reduce latency.\n",

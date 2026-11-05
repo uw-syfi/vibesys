@@ -49,7 +49,7 @@ def _write_input(root: Path, extra_manifest: str = "") -> Path:
     write_task(
         root,
         """\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"
@@ -132,7 +132,7 @@ def test_provision_project_preserves_benchmark_result_protocol(tmp_path: Path) -
     write_task(
         input_root,
         """\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"
@@ -206,7 +206,7 @@ def test_provision_project_keeps_a_packaged_evaluator_declaration(tmp_path: Path
     write_task(
         input_root,
         """\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"
@@ -435,7 +435,7 @@ def test_provision_project_preserves_repository_task_configuration(tmp_path: Pat
     (source / "src" / "server.py").write_text("VALUE = 1\n", encoding="utf-8")
     (task / "OBJECTIVE.md").write_text("Reduce latency.\n", encoding="utf-8")
     (task / "vibesys.input.toml").write_text(
-        """version = 1
+        """version = "0.1"
 
 [agent]
 domain = "generic"
@@ -512,7 +512,7 @@ def test_provision_project_rejects_a_root_manifest_project_without_tasks(tmp_pat
     input_root = tmp_path / "input"
     input_root.mkdir()
     (input_root / "OBJECTIVE.md").write_text("Make the candidate faster.\n")
-    (input_root / "vibesys.input.toml").write_text("version = 1\n")
+    (input_root / "vibesys.input.toml").write_text('version = "0.1"\n')
 
     with pytest.raises(ProjectLayoutError):
         _provision(input_root, tmp_path / "copy")

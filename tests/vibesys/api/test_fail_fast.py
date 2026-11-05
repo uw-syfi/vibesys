@@ -34,7 +34,7 @@ def _request(root: Path, domain: str) -> RunRequest:
     root.mkdir(parents=True)
     write_task(
         root,
-        f'version = 1\n[agent]\ndomain = "{domain}"\n'
+        f'version = "0.1"\n[agent]\ndomain = "{domain}"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
         objective="Improve inference.\n",
     )

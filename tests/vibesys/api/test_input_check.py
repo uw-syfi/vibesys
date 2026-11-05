@@ -113,7 +113,7 @@ def _request(root: Path, *, agent_backend: str = "stub") -> RunRequest:
     (root / "queue.py").write_text("VALUE = 1\n")
     write_task(
         root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["check-accuracy"]\n'
         '[benchmark]\ncommand = ["run-benchmark"]\nresult_protocol = 2\n',
         objective="Check the queue.\n",

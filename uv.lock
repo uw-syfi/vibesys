@@ -3226,7 +3226,7 @@ test = [
 
 [[package]]
 name = "vibesys-evaluator"
-version = "0.1.0rc2"
+version = "0.1.0rc3"
 source = { editable = "sdk/vibesys-evaluator/python" }
 dependencies = [
     { name = "protobuf-py" },

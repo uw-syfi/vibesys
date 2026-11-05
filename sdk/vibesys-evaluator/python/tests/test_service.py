@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys_evaluator.service import Operation, Request, Template, Workload, get, post, ref
+from vibesys_evaluator.microservices import Operation, Request, Template, Workload, get, post, ref
 
 if TYPE_CHECKING:
     from collections.abc import Callable

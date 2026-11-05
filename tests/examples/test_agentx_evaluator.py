@@ -19,13 +19,14 @@ from vs_evaluator_protocol.api import Measurement, parse_records, read_measureme
 
 ROOT = Path(__file__).parents[2]
 EVALUATOR = ROOT / "resources/evaluators/agentx/agentx_eval.py"
-PROJECT = ROOT / "examples/model-serving/qwen3.5-9b-mi210"
+PROJECT = ROOT / "examples/model-serving/qwen3.6-35b-a3b"
+TASK = "mi2104x-agentx"
 # run_path loads the standalone public CLI without modifying its globals or patching modules.
 API = SimpleNamespace(**runpy.run_path(str(EVALUATOR)))
 
 
 def parse_profile(argv: list[str]) -> object:
-    manifest = tomllib.loads((PROJECT / ".vibesys/tasks/agentx/vibesys.input.toml").read_text())
+    manifest = tomllib.loads((PROJECT / f".vibesys/tasks/{TASK}/vibesys.input.toml").read_text())
     return API.parse_args([*manifest["benchmark"]["args"], *argv])
 
 
@@ -65,7 +66,7 @@ class FakeProfileRunner:
 
 
 def test_task_matches_the_five_axis_qwen_frontier() -> None:
-    bundle = load_example_task(PROJECT, "agentx")
+    bundle = load_example_task(PROJECT, TASK)
     assert bundle.reference_path is not None
     metadata = json.loads((bundle.reference_path / "meta.json").read_text())
     args = bundle.manifest.benchmark.args
@@ -75,7 +76,7 @@ def test_task_matches_the_five_axis_qwen_frontier() -> None:
     assert bundle.manifest.evaluator.name == "vibesys-evaluator-agentx"
     assert bundle.manifest.benchmark.entrypoint == "agentx-v1"
     assert bundle.manifest.benchmark.result_protocol == 2
-    objectives = tomllib.loads((PROJECT / ".vibesys/tasks/agentx/objectives.toml").read_text())
+    objectives = tomllib.loads((PROJECT / f".vibesys/tasks/{TASK}/objectives.toml").read_text())
     assert {row["name"]: row["direction"] for row in objectives["objective"]} == {
         "output_tokens_per_s": "max",
         "ttft_p50_ms": "min",

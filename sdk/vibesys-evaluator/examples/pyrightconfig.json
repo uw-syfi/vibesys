@@ -2,7 +2,8 @@
   "include": [
     "kv-store",
     "hotel-k8s",
-    "social-network-k8s"
+    "social-network-k8s",
+    "agentx-llm"
   ],
   "executionEnvironments": [
     {
@@ -13,6 +14,9 @@
     },
     {
       "root": "social-network-k8s"
+    },
+    {
+      "root": "agentx-llm"
     }
   ],
   "typeCheckingMode": "standard",

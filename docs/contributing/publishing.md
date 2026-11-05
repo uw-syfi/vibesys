@@ -92,10 +92,14 @@ of the alias being replaced, a reader can see new binaries with old checksums fo
 ## vibesys-evaluator releases
 
 `vibesys-evaluator` is the package task writers build benchmark evaluators on. One version
-covers its three published parts, all built from one commit of `main`:
+covers its published parts, all built from one commit of `main`:
 
 - the wheel `vibesys-evaluator` on PyPI (one universal wheel, no sdist, like `vibesys`);
-- the image `ghcr.io/uw-syfi/vibesys-evaluator:<version>`, which task images build `FROM`;
+- one image per domain, which task images build `FROM`:
+  `ghcr.io/uw-syfi/vibesys-evaluator-microservices:<version>` (with loadgen, kubectl and
+  buildctl) and `ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:<version>` (with the AgentX
+  harness pinned by `sdk/vibesys-evaluator/image/llm-serving/uv.lock`), each a target of
+  `sdk/vibesys-evaluator/image/Dockerfile`;
 - the Go module tag `sdk/vibesys-evaluator/loadgen/v<semver>` for its load generator.
 
 `.github/workflows/evaluator-release.yml` releases them. `publish.yml` skips a release whose tag
@@ -116,12 +120,13 @@ Configure a pending Trusted Publisher on PyPI with this exact tuple:
 - Workflow filename: `evaluator-release.yml`
 - Environment: `pypi-evaluator`
 
-The image job pushes with the workflow's own token. GitHub creates the container package
-`vibesys-evaluator` on the first push and links it to this repository through the image's
+The image job pushes with the workflow's own token, one leg per domain image. GitHub creates
+the container packages `vibesys-evaluator-microservices` and `vibesys-evaluator-llm-serving` on
+the first push and links it to this repository through the image's
 `org.opencontainers.image.source` label; a package cannot be configured before it exists. After
-the first release (a release candidate is enough), open the package's settings, set its visibility
+the first release (a release candidate is enough), open each package's settings, set its visibility
 to public, and under "Manage Actions access" confirm that the `vibesys` repository has the Write
-role. Task images pull it without credentials only once it is public.
+role. Task images pull them without credentials only once they are public.
 
 ### Release flow
 
@@ -133,16 +138,17 @@ role. Task images pull it without credentials only once it is public.
    published release is the only trigger.
 3. The workflow refuses the release unless the tag's version equals `project.version` and the
    tagged commit is contained in `main`, and also when the release took the "latest" marker. It
-   then builds the wheel and the image without any write permission and verifies them: the wheel
+   then builds the wheel and the images without any write permission and verifies them: the wheel
    installs and imports in a clean environment, `pyright --verifytypes` passes on the installed
    package, the package's tests, its public API snapshot, the loadgen Go tests and the conformance
-   fixtures pass, and the image runs `loadgen --capabilities` with the release version and imports
-   the package.
+   fixtures pass, both images import the package at the release version, the microservices
+   image runs `loadgen --capabilities` with the release version, and the llm-serving image holds
+   the harness version the package replays with.
 4. The wheel that was verified is published by Trusted Publishing, from the only job that runs in
-   `pypi-evaluator`. Then the image that was verified is pushed by digest-preserving copy, so the
-   digest recorded at build time is the one published, and its build provenance is attested
-   (`gh attestation verify oci://ghcr.io/uw-syfi/vibesys-evaluator@<digest> --repo uw-syfi/vibesys`).
-   Last, the Go module tag is created on the same commit and the image reference with its digest
+   `pypi-evaluator`. Then each image that was verified is pushed by digest-preserving copy, so
+   the digest recorded at build time is the one published, and its build provenance is attested
+   (`gh attestation verify oci://ghcr.io/uw-syfi/vibesys-evaluator-<domain>@<digest> --repo uw-syfi/vibesys`).
+   Last, the Go module tag is created on the same commit and each image reference with its digest
    is added to the release notes. A release candidate's Go tag is the semantic version
    `v0.1.0-rc.1`.
 

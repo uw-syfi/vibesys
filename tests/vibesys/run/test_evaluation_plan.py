@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 def test_the_task_profile_command_reaches_the_trusted_evaluation_plan(tmp_path: Path) -> None:
     write_task(
         tmp_path,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n'
         '[profile]\ncommand = ["python", "profile.py", "--label", "queue run"]\n'
         "timeout_seconds = 37\n",

@@ -1,72 +1,50 @@
-"""vibesys-evaluator: build a VibeSys benchmark from a workload and phase primitives.
+"""vibesys-evaluator: the sample lifecycle every VibeSys task evaluator shares.
 
-A task's ``bench.py`` calls ``main`` with its dataset, system under test,
-workload, benchmark function, metrics and validity rules; see the package's
-``docs/spec.md`` and ``examples/``.
+The core knows no domain. A task's ``bench.py`` calls ``main`` with its
+metrics and its ``check``, ``benchmark`` and ``profile`` functions; each gets a
+``Run`` (its phases and its report). Domains add what their tasks need on top:
+``vibesys_evaluator.microservices`` (workloads over HTTP, load phases, deploys)
+and ``vibesys_evaluator.llm_serving`` (the candidate server, AgentX replay,
+golden accuracy checks). See the package's ``docs/spec.md`` and ``examples/``.
 """
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import TYPE_CHECKING, NoReturn
 
 from vibesys_evaluator._private import cli
-from vibesys_evaluator._private.calls import Call, Response, Versions
 from vibesys_evaluator._private.rand import Rand
-from vibesys_evaluator._private.results import Metric, PhaseResult, Validity
+from vibesys_evaluator._private.results import Metric, Validity
 from vibesys_evaluator._private.run import Run
-from vibesys_evaluator.deploy import _k8s
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
-    from vibesys_evaluator._private.typevars import D, M
-    from vibesys_evaluator.deploy.k8s import App
-    from vibesys_evaluator.service import Workload
-
-__all__ = [
-    "Call",
-    "Metric",
-    "PhaseResult",
-    "Rand",
-    "Response",
-    "Run",
-    "Validity",
-    "Versions",
-    "main",
-]
+__all__ = ["Metric", "Rand", "Run", "Validity", "main"]
 
 
 def main(
     *,
-    dataset: Callable[[], D],
-    system: App[D],
-    workload: Workload[D, M],
-    benchmark: Callable[[Run], None],
     metrics: Mapping[str, Metric],
-    validity: Validity = Validity(),  # noqa: B008  # LW-150401 [B008]; the default is a frozen dataclass.
-    # > The approved signature (api/public-api.txt) shows the default as Validity(); a module
-    # > constant would show its private name instead, and None would widen the type.
+    benchmark: Callable[[Run], None],
+    check: Callable[[Run], str | None] | None = None,
+    profile: Callable[[Run], None] | None = None,
 ) -> NoReturn:
-    """Run the task script's command (``benchmark``, ``phase``, ``seed`` or ``ctl``) and exit.
+    """Run the task script's command (``check``, ``benchmark`` or ``profile``) and exit.
+
+    ``benchmark --vs-output FILE`` writes result-protocol-2 records: ``hello``
+    with ``metrics``, then the result ``benchmark`` reports with
+    ``run.report`` or an error naming what failed. ``check`` exits 0 when the
+    function returns None and 1 with the reason it returns. ``profile`` runs
+    the load a profiler records; it is never scored.
 
     Args:
-        dataset: Builds the initial data; a pure function of the task's constants.
-        system: The system under test.
-        workload: The operations and their model.
-        benchmark: The scoring definition: runs phases on ``run`` and calls ``run.report``.
         metrics: The metrics ``run.report`` reports, by name.
-        validity: When a phase is a measurement.
+        benchmark: The scoring definition: runs phases and calls ``run.report``.
+        check: The correctness check: None when the system is correct, else what is wrong.
+        profile: The standard load to profile the system under.
     """
-    task = cli.Task(
-        dataset=dataset,
-        system=system,
-        workload=workload,
-        benchmark=benchmark,
-        metrics=metrics,
-        validity=validity,
-    )
-    cli.main(
-        task,
-        deployer=lambda: _k8s.deployer(system),
-        control=lambda argv: _k8s.control(system, argv),
-    )
+    task = cli.Task(metrics=metrics, benchmark=benchmark, check=check, profile=profile)
+    sys.exit(cli.run(task, sys.argv[1:], env=os.environ))

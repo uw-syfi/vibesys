@@ -138,7 +138,7 @@ class LoopInput:
         (root / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
         task = write_task(
             root,
-            'version = 1\n[agent]\ndomain = "generic"\n'
+            'version = "0.1"\n[agent]\ndomain = "generic"\n'
             '[accuracy]\ncommand = ["python", ".vibesys/tasks/default/accuracy.py"]\n'
             "timeout_seconds = 30\n"
             '[benchmark]\ncommand = ["python", ".vibesys/tasks/default/benchmark.py"]\n'

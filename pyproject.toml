@@ -371,10 +371,11 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.Outco
 # Template, Request, Run expose no attributes by design, see api/public-api.txt). Public
 # accessors would add API; a noqa on every such line would bury the code.
 "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_private/**" = ["SLF001"]
+"sdk/vibesys-evaluator/python/src/vibesys_evaluator/microservices/_private/**" = ["SLF001"]
 # TRY003: the deploy layer has one error type per boundary (DeployError, KubeError,
 # ManifestError, BuildError) whose messages name the step, object or field and say what to
 # fix (the package's error rule); a subclass per message would add dozens of one-use types.
-"sdk/vibesys-evaluator/python/src/vibesys_evaluator/deploy/**" = ["TRY003"]
+"sdk/vibesys-evaluator/python/src/vibesys_evaluator/microservices/_k8s/**" = ["TRY003"]
 # The real tier must be its own directory (sim_real_tiers) and shares the deterministic tests'
 # application (tests/vse_support): the tests directory is not an importable package, so the
 # parent-relative import is the only one that reaches it.

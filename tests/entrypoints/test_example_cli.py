@@ -25,7 +25,7 @@ def _task(project: Path, name: str) -> None:
     task = project / ".vibesys" / "tasks" / name
     task.mkdir(parents=True)
     (task / "OBJECTIVE.md").write_text("Make it fast.\n", encoding="utf-8")
-    (task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
+    (task / "vibesys.input.toml").write_text('version = "0.1"\n', encoding="utf-8")
 
 
 def _catalog(checkout: Path, examples: dict[str, tuple[str, ...]]) -> None:
@@ -56,7 +56,7 @@ def _pinned() -> dict[PurePosixPath, dict[str, str]]:
         EXTERNAL: {
             "README.md": "engine\n",
             ".vibesys/tasks/serve/OBJECTIVE.md": "Serve faster.\n",
-            ".vibesys/tasks/serve/vibesys.input.toml": "version = 1\n",
+            ".vibesys/tasks/serve/vibesys.input.toml": 'version = "0.1"\n',
         }
     }
 

@@ -28,6 +28,7 @@ from tests.support.example_registry import (
     REPO_ROOT,
     example_root,
     external_repo_missing,
+    is_cli_task,
     load_registry,
     require_external_repo_checkout,
     submodule_example_paths,
@@ -38,7 +39,7 @@ from tests.support.example_registry import (
 from entrypoints.cli import _run_validate
 from entrypoints.example_catalog import REGISTRY_RELATIVE, Check, ExampleEntry
 from vibesys.errors import ConfigurationError
-from vibesys.inputs import load_input_manifest, load_task
+from vibesys.inputs import InputManifestParseError, load_input_manifest, load_task
 from vibesys.run.project_policy import (
     build_project_path_policy,
     trusted_project_input_paths,
@@ -74,6 +75,15 @@ def _require_present(entry: ExampleEntry) -> None:
 
 def _tasks(entry: ExampleEntry) -> tuple[str, ...]:
     return tuple(task.name.value for task in Project.open(example_root(entry)).discover_tasks())
+
+
+def _app_tasks(entry: ExampleEntry) -> tuple[str, ...]:
+    """The tasks this app runs: every task but the ones written for vibesys-cli."""
+    return tuple(
+        task.name.value
+        for task in Project.open(example_root(entry)).discover_tasks()
+        if not is_cli_task(task.manifest_path)
+    )
 
 
 # --- registry completeness (fail closed) ------------------------------------
@@ -160,7 +170,7 @@ def test_ci_shards_the_cpu_check_and_requires_every_shard() -> None:
 def test_example_validates(entry: ExampleEntry, capsys: pytest.CaptureFixture[str]) -> None:
     _require_present(entry)
     failures: list[str] = []
-    for task in _tasks(entry):
+    for task in _app_tasks(entry):
         argv = [str(example_root(entry)), *(("--task", task) if task else ())]
         try:
             _run_validate(argv)
@@ -181,7 +191,7 @@ def test_tasks_build_what_their_evaluator_requires(entry: ExampleEntry) -> None:
     _require_present(entry)
     failures = [
         f"{entry.path} task={task}: {missing}"
-        for task in _tasks(entry)
+        for task in _app_tasks(entry)
         if (missing := load_task(example_root(entry), task).missing_build) is not None
     ]
     assert not failures, "\n".join(failures)
@@ -194,7 +204,7 @@ def test_every_task_declares_the_backends_it_targets(entry: ExampleEntry) -> Non
     _require_present(entry)
     undeclared = [
         f"{entry.path} task={task}: declare `backends = [...]` in its vibesys.input.toml"
-        for task in _tasks(entry)
+        for task in _app_tasks(entry)
         if not load_task(example_root(entry), task).declared_backends
     ]
     assert not undeclared, "\n".join(undeclared)
@@ -205,10 +215,22 @@ def test_every_task_declares_the_backends_it_targets(entry: ExampleEntry) -> Non
 )
 def test_every_task_describes_itself_to_the_catalogue(entry: ExampleEntry) -> None:
     """In-tree example metadata stays valid through the shipping manifest reader."""
-    for task in Project.open(example_root(entry)).discover_tasks():
-        assert load_input_manifest(task.manifest_path).catalogue is not None, (
-            f"{entry.path} task={task.name.value}: declare [catalogue] in {task.manifest_path}"
+    for task in _app_tasks(entry):
+        manifest = _manifest(entry, task)
+        assert load_input_manifest(manifest).catalogue is not None, (
+            f"{entry.path} task={task}: declare [catalogue] in {manifest}"
         )
+
+
+@pytest.mark.parametrize(
+    "entry", [pytest.param(e, id=e.path) for e in ENTRIES if not e.external_repo]
+)
+def test_this_app_refuses_every_cli_task_naming_vibesys_cli(entry: ExampleEntry) -> None:
+    """A task written for vibesys-cli never runs here as if it were an app task."""
+    for task in Project.open(example_root(entry)).discover_tasks():
+        if is_cli_task(task.manifest_path):
+            with pytest.raises(InputManifestParseError, match="vibesys-cli"):
+                load_input_manifest(task.manifest_path)
 
 
 @pytest.mark.parametrize(
@@ -225,7 +247,9 @@ def test_every_task_declares_which_way_its_objective_improves(entry: ExampleEntr
 @pytest.mark.parametrize("entry", [_param(e, Check.PATH_REFS) for e in ENTRIES])
 def test_command_path_references_exist(entry: ExampleEntry) -> None:
     _require_present(entry)
-    failures = [message for task in _tasks(entry) for message in _missing_references(entry, task)]
+    failures = [
+        message for task in _app_tasks(entry) for message in _missing_references(entry, task)
+    ]
     skip = entry.skip(Check.PATH_REFS)
     if skip:
         assert failures, (
@@ -385,7 +409,7 @@ def test_task_inputs_are_read_only_for_the_agent(entry: ExampleEntry, tmp_path: 
     )
 
     writable: list[str] = []
-    for task in _tasks(entry):
+    for task in _app_tasks(entry):
         writable.extend(
             f"{relative} (task {task})"
             for relative in sorted(_referenced_paths(entry, task))

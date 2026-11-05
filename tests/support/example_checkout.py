@@ -16,7 +16,7 @@ def example_task(project: Path, name: str) -> None:
     task = project / ".vibesys" / "tasks" / name
     task.mkdir(parents=True)
     (task / "OBJECTIVE.md").write_text("Make it fast.\n", encoding="utf-8")
-    (task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
+    (task / "vibesys.input.toml").write_text('version = "0.1"\n', encoding="utf-8")
 
 
 def example_checkout(root: Path) -> Path:

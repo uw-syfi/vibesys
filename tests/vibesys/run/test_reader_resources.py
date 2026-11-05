@@ -49,7 +49,7 @@ def _saved_run(root: Path, kind: str) -> RunRequest:
     root.mkdir()
     write_task(
         root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
         objective="Make it faster.\n",
     )

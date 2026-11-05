@@ -13,14 +13,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 import vibesys_evaluator as vse
+from vibesys_evaluator import microservices as ms
+from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
+from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
+from vibesys_evaluator.microservices._private.deploy import TaskCommand
 
 # test-isolation: main() exits and builds the k8s deployer; the sample's command is tested
 # through its private entry, with the deploy seam (the interface the k8s layer implements).
-from vibesys_evaluator._private.cli import Task, benchmark
-from vibesys_evaluator._private.deploy import TaskCommand
-from vibesys_evaluator._private.phase import PodTask
-from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
-from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
+from vibesys_evaluator.microservices._private.entry import Task, benchmark
+from vibesys_evaluator.microservices._private.phase import PodTask
 from vs_evaluator_protocol.api import Measurement, parse_records, read_measurement
 
 from .vse_support import kv
@@ -37,7 +38,7 @@ SCRIPT = TaskCommand(python="python3", script="/task/bench.py")
 def _task(
     *,
     workload: kv.Workload[kv.Data, kv.Model] = kv.WORKLOAD,
-    benchmark: Callable[[vse.Run], None] = kv.benchmark,
+    benchmark: Callable[[ms.Run], None] = kv.benchmark,
     metrics: Mapping[str, vse.Metric] = kv.METRICS,
     validity: vse.Validity = vse.Validity(),  # noqa: B008  # LW-150406 [B008]; a frozen dataclass
 ) -> Task:
@@ -195,7 +196,7 @@ def test_late_sending_of_an_application_holding_every_sender_is_its_latency(
     assert _read(text).values is not None
 
 
-def _closed_only(run: vse.Run) -> None:
+def _closed_only(run: ms.Run) -> None:
     phase = run.closed_loop(clients=4, secs=1, warmup=0.5, max_ops_per_sec=50)
     run.report({"operations_per_second": phase.ops_per_sec, "latency_ms.p99": phase.p99_ms})
 
@@ -242,7 +243,7 @@ def test_a_plan_exhausted_twice_fails_naming_the_bound(tmp_path: Path) -> None:
 def test_a_bad_report_is_the_samples_error(
     tmp_path: Path, values: dict[str, float], expected: str
 ) -> None:
-    def bench(run: vse.Run) -> None:
+    def bench(run: ms.Run) -> None:
         run.report(values)
 
     task = _task(benchmark=bench)
@@ -257,7 +258,7 @@ def test_a_benchmark_that_never_reports_is_an_error(tmp_path: Path) -> None:
 
 
 def test_reporting_twice_is_an_error(tmp_path: Path) -> None:
-    def bench(run: vse.Run) -> None:
+    def bench(run: ms.Run) -> None:
         values = {"operations_per_second": 1.0, "latency_ms.p99": 1.0}
         run.report(values)
         run.report(values)

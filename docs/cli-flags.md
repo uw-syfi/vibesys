@@ -806,7 +806,7 @@ The manifest declares direct commands or logical entry points from one exact
 evaluator package. Task commands run from the candidate repository root:
 
 ```toml
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"

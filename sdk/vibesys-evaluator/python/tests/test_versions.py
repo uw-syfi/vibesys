@@ -17,7 +17,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys_evaluator import Call, Versions
+from vibesys_evaluator.microservices import Call, Versions
 
 DEFAULT = -1
 

@@ -2,9 +2,11 @@
 
 The repository's root [`AGENTS.md`](../../AGENTS.md) applies here too. This
 package is what task writers build benchmark evaluators on: the Python
-package `vibesys_evaluator`, loadgen (the Go binary in `loadgen/` that sends the requests),
-the schema in `proto/vibesys/evaluator/v1/`, and the image
-`vibesys-evaluator`. The design is [`docs/spec.md`](docs/spec.md).
+package `vibesys_evaluator` (a domain-free core and the domains
+`microservices` and `llm_serving`), loadgen (the Go binary in `loadgen/` that sends the
+microservices requests), the schema in `proto/vibesys/evaluator/v1/`, and one image per
+domain, `vibesys-evaluator-microservices` and `vibesys-evaluator-llm-serving`. The design is
+[`docs/spec.md`](docs/spec.md).
 
 ## Public API rule
 
@@ -24,7 +26,9 @@ describes. Task writers depend on both through a pinned image.
   are computed); and any change to the `.proto` files that `buf breaking`
   reports or that changes a field's meaning. Enforced in CI by `griffe check`
   against the last release and `buf breaking`; the approval itself is this
-  rule, since no check can ask the user.
+  rule, since no check can ask the user. Record an approved break in
+  `api/approved-breaks.toml` (`against` the last release tag, `approved_by`,
+  `reason`); the API check accepts breaks against that release only.
 - **An additive change needs no approval, but must be used by an example**
   under `examples/` in the same PR. Every public name is used by at least
   one example. Unenforced until the examples run in CI (work package 6); a
@@ -54,7 +58,13 @@ describes. Task writers depend on both through a pinned image.
   types are generated from it and validated with protovalidate. Conformance
   fixtures in `fixtures/` are read and written by both sides' tests.
 - One version for the Python package, the Go module tag
-  (`sdk/vibesys-evaluator/loadgen/vX.Y.Z`) and the image.
+  (`sdk/vibesys-evaluator/loadgen/vX.Y.Z`) and the images.
+- The core (`vibesys_evaluator` outside a domain package) imports no domain,
+  and a domain imports the core and itself only; mechanisms in the core never
+  name a domain. Enforced by `python/tests/test_layering.py`.
+- A harness a domain wraps (such as `agentx-harness`) is pinned exactly in that
+  domain's image lock (`image/<domain>/`), and the domain refuses to run under
+  any other installed version.
 - Task-specific code (an application's operations, dataset, manifest) lives
   in the task or under `examples/`, never in the package.
 - Examples use generic names only: no private hostnames, paths or keys.

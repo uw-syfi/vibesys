@@ -137,7 +137,7 @@ def _write_project(
     )
     write_task(
         root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         f'[accuracy]\ncommand = ["{accuracy_command}"]\n'
         f"[benchmark]\ncommand = {json.dumps(benchmark_command)}\n"
         f"{result_contract}",

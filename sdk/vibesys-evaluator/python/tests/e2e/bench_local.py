@@ -13,12 +13,13 @@ import sys
 from pathlib import Path
 
 import vibesys_evaluator as vse
+from vibesys_evaluator import microservices as ms
+from vibesys_evaluator.microservices._private.deploy import TaskCommand
 
 # test-isolation: main() deploys with the k8s kind; this script swaps in the local kind
 # through main's private entry, keeping every command and file the same.
-from vibesys_evaluator._private.cli import Task, run
-from vibesys_evaluator._private.deploy import TaskCommand
-from vibesys_evaluator._private.local import LocalDeployer
+from vibesys_evaluator.microservices._private.entry import Task, run
+from vibesys_evaluator.microservices._private.local import LocalDeployer
 from vse_support import kv  # the tests directory is on PYTHONPATH
 
 # A real local server is far faster than the fake runner's 400 ops/s plan (more so when it
@@ -28,7 +29,7 @@ from vse_support import kv  # the tests directory is on PYTHONPATH
 LOCAL_MAX_OPS_PER_SEC = 50_000.0
 
 
-def _benchmark(run: vse.Run) -> None:
+def _benchmark(run: ms.Run) -> None:
     closed = run.closed_loop(clients=4, secs=1, warmup=0.5, max_ops_per_sec=LOCAL_MAX_OPS_PER_SEC)
     opened = run.open_loop(rate=0.5 * closed.ops_per_sec, secs=1, warmup=0.5, arrivals="uniform")
     run.report({"operations_per_second": closed.ops_per_sec, "latency_ms.p99": opened.p99_ms})

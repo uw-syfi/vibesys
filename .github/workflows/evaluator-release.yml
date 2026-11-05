@@ -1,7 +1,8 @@
 name: Build and publish vibesys-evaluator release
 
 # A published GitHub release whose tag is evaluator-v<version> releases vibesys-evaluator: the
-# wheel to PyPI, the image ghcr.io/uw-syfi/vibesys-evaluator:<version>, and the Go module tag
+# wheel to PyPI, one image per domain (ghcr.io/uw-syfi/vibesys-evaluator-microservices:<version>
+# and ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:<version>), and the Go module tag
 # sdk/vibesys-evaluator/loadgen/v<semver>, all from the same commit of main. The flow and the
 # one-time setup are in docs/contributing/publishing.md, "vibesys-evaluator releases".
 on:
@@ -21,12 +22,14 @@ concurrency:
 
 env:
   TAG: ${{ github.event.release.tag_name }}
-  IMAGE: ghcr.io/uw-syfi/vibesys-evaluator
+  # Each domain's image is $IMAGE_PREFIX-<domain>, built from the Dockerfile's target <domain>.
+  IMAGE_PREFIX: ghcr.io/uw-syfi/vibesys-evaluator
+  DOMAINS: microservices llm-serving
   PACKAGE_ROOT: sdk/vibesys-evaluator
 
 jobs:
   verify:
-    name: Build and verify the wheel and the image
+    name: Build and verify the wheel and the images
     # publish.yml skips every tag starting evaluator-; this workflow takes them all, and the
     # version check below refuses any that is not evaluator-v<canonical PEP 440 version>.
     if: startsWith(github.event.release.tag_name, 'evaluator-')
@@ -40,7 +43,8 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       go_version: ${{ steps.version.outputs.go_version }}
       commit: ${{ steps.version.outputs.commit }}
-      image_digest: ${{ steps.image.outputs.digest }}
+      digest_microservices: ${{ steps.image.outputs.digest_microservices }}
+      digest_llm_serving: ${{ steps.image.outputs.digest_llm_serving }}
     steps:
       # The package tests run pytest, which dumps hung tests just before this job's timeout.
       - name: Record when this job's cancel clock started
@@ -142,7 +146,8 @@ jobs:
           "${clean_env[@]}" EXPECTED_VERSION="$VERSION" EXPECTED_PREFIX="$venv" \
             "$venv/bin/python" -I -c '
           import importlib.metadata, os, pathlib
-          import vibesys_evaluator, vibesys_evaluator.deploy.k8s, vibesys_evaluator.service
+          import vibesys_evaluator, vibesys_evaluator.microservices.k8s
+          import vibesys_evaluator.llm_serving.agentx, vibesys_evaluator.llm_serving.golden
           where = pathlib.Path(vibesys_evaluator.__file__).resolve()
           assert where.is_relative_to(pathlib.Path(os.environ["EXPECTED_PREFIX"]).resolve()), where
           installed = importlib.metadata.version("vibesys-evaluator")
@@ -204,12 +209,12 @@ jobs:
           go vet ./...
           go test -race ./...
 
-      # The image installs the wheel verified above (the Dockerfile's `wheels` stage replaced by
+      # Each image installs the wheel verified above (the Dockerfile's `wheels` stage replaced by
       # dist/evaluator), not one it builds itself.
-      # The image is built once, here, into an OCI archive. The image job pushes these exact
+      # Each image is built once, here, into an OCI archive. The image job pushes these exact
       # blobs, so the digest recorded now is the digest published, and the smoke test below
       # runs what is published.
-      - name: Build the image
+      - name: Build the images
         id: image
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -220,47 +225,61 @@ jobs:
             --driver-opt image=moby/buildkit:v0.22.0@sha256:832fa7aa1eb3deb56fa62ae933bfa42dad9a83ff4824dbbaf173b49c722b59d0 \
             --use
           mkdir -p "$RUNNER_TEMP/image"
-          archive="$RUNNER_TEMP/image/vibesys-evaluator.oci.tar"
-          docker buildx build --file "$PACKAGE_ROOT/image/Dockerfile" \
-            --platform linux/amd64 --provenance=false --sbom=false --pull --no-cache \
-            --build-context wheels=dist/evaluator \
-            --build-arg VIBESYS_EVALUATOR_VERSION="$GO_VERSION" \
-            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
-            --label "org.opencontainers.image.revision=$COMMIT" \
-            --label "org.opencontainers.image.version=$VERSION" \
-            --output "type=oci,dest=$archive" "$PACKAGE_ROOT"
-          tar -xOf "$archive" index.json > "$RUNNER_TEMP/image/index.json"
-          test "$(jq '.manifests | length' "$RUNNER_TEMP/image/index.json")" -eq 1
-          test "$(jq -r '.manifests[0].mediaType' "$RUNNER_TEMP/image/index.json")" \
-            = application/vnd.oci.image.manifest.v1+json
-          digest="$(jq -r '.manifests[0].digest' "$RUNNER_TEMP/image/index.json")"
-          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-          echo "$digest" > "$RUNNER_TEMP/image/digest"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-          echo "Image digest: $digest"
+          for domain in $DOMAINS; do
+            archive="$RUNNER_TEMP/image/vibesys-evaluator-$domain.oci.tar"
+            docker buildx build --file "$PACKAGE_ROOT/image/Dockerfile" --target "$domain" \
+              --platform linux/amd64 --provenance=false --sbom=false --pull --no-cache \
+              --build-context wheels=dist/evaluator \
+              --build-arg VIBESYS_EVALUATOR_VERSION="$GO_VERSION" \
+              --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+              --label "org.opencontainers.image.revision=$COMMIT" \
+              --label "org.opencontainers.image.version=$VERSION" \
+              --output "type=oci,dest=$archive" "$PACKAGE_ROOT"
+            index="$RUNNER_TEMP/image/index-$domain.json"
+            tar -xOf "$archive" index.json > "$index"
+            test "$(jq '.manifests | length' "$index")" -eq 1
+            test "$(jq -r '.manifests[0].mediaType' "$index")" \
+              = application/vnd.oci.image.manifest.v1+json
+            digest="$(jq -r '.manifests[0].digest' "$index")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            echo "$digest" > "$RUNNER_TEMP/image/digest-$domain"
+            echo "digest_${domain//-/_}=$digest" >> "$GITHUB_OUTPUT"
+            echo "Image $domain digest: $digest"
+          done
 
-      - name: Smoke the image
+      - name: Smoke the images
         env:
           VERSION: ${{ steps.version.outputs.version }}
           GO_VERSION: ${{ steps.version.outputs.go_version }}
         run: |
           command -v skopeo > /dev/null
-          local_image="vibesys-evaluator-verify:$VERSION"
-          skopeo copy "oci-archive:$RUNNER_TEMP/image/vibesys-evaluator.oci.tar" \
-            "docker-daemon:$local_image"
+          for domain in $DOMAINS; do
+            skopeo copy "oci-archive:$RUNNER_TEMP/image/vibesys-evaluator-$domain.oci.tar" \
+              "docker-daemon:vibesys-evaluator-$domain-verify:$VERSION"
+            docker run --rm --network none -e EXPECTED_VERSION="$VERSION" \
+              "vibesys-evaluator-$domain-verify:$VERSION" python -c '
+          import importlib.metadata, os
+          import vibesys_evaluator
+          installed = importlib.metadata.version("vibesys-evaluator")
+          assert installed == os.environ["EXPECTED_VERSION"], installed
+          '
+          done
+          microservices="vibesys-evaluator-microservices-verify:$VERSION"
           # The capabilities file is a header line and then the Capabilities message.
-          docker run --rm --network none "$local_image" loadgen --capabilities --format json \
+          docker run --rm --network none "$microservices" loadgen --capabilities --format json \
             > "$RUNNER_TEMP/image/capabilities.json"
           loadgen_version="$(sed -n 2p "$RUNNER_TEMP/image/capabilities.json" | jq -r .loadgenVersion)"
           if [[ "$loadgen_version" != "$GO_VERSION" ]]; then
             echo "::error::loadgen in the image reports version '$loadgen_version', not $GO_VERSION: the image must stamp loadgen with the release version (build argument VIBESYS_EVALUATOR_VERSION)."
             exit 1
           fi
-          docker run --rm --network none -e EXPECTED_VERSION="$VERSION" "$local_image" python -c '
-          import importlib.metadata, os
-          import vibesys_evaluator, vibesys_evaluator.deploy.k8s
-          installed = importlib.metadata.version("vibesys-evaluator")
-          assert installed == os.environ["EXPECTED_VERSION"], installed
+          docker run --rm --network none "$microservices" python -c 'import vibesys_evaluator.microservices.k8s'
+          # The harness the image installs is the one the package replays with.
+          docker run --rm --network none "vibesys-evaluator-llm-serving-verify:$VERSION" python -c '
+          import importlib.metadata
+          from vibesys_evaluator.llm_serving import agentx
+          installed = importlib.metadata.version("agentx-harness")
+          assert installed == agentx.HARNESS_VERSION, installed
           '
 
       - name: Upload the verified wheel
@@ -276,8 +295,8 @@ jobs:
         with:
           name: evaluator-image
           path: |
-            ${{ runner.temp }}/image/vibesys-evaluator.oci.tar
-            ${{ runner.temp }}/image/digest
+            ${{ runner.temp }}/image/vibesys-evaluator-*.oci.tar
+            ${{ runner.temp }}/image/digest-*
           if-no-files-found: error
           retention-days: 7
 
@@ -312,11 +331,18 @@ jobs:
           attestations: true
 
   image:
-    name: Push and attest the image
+    name: Push and attest the ${{ matrix.domain }} image
     # After PyPI, so a release whose wheel was not published publishes nothing else either.
     needs: [verify, pypi]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # One leg per domain image; the two lists name the same domains as DOMAINS.
+    strategy:
+      fail-fast: false
+      matrix:
+        domain: [microservices, llm-serving]
+    env:
+      IMAGE: ghcr.io/uw-syfi/vibesys-evaluator-${{ matrix.domain }}
     # id-token and attestations sign the build provenance, as cli-release.yml does for its
     # binaries. This job's OIDC token cannot publish to PyPI: the Trusted Publisher requires the
     # pypi-evaluator environment, which only the pypi job runs in.
@@ -325,8 +351,6 @@ jobs:
       packages: write # push the image and its attestation to ghcr.io
       id-token: write # sign the build provenance
       attestations: write # record the attestation in the repository
-    outputs:
-      digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Download the verified image
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -338,10 +362,11 @@ jobs:
         id: push
         env:
           VERSION: ${{ needs.verify.outputs.version }}
-          VERIFIED_DIGEST: ${{ needs.verify.outputs.image_digest }}
+          VERIFIED_DIGEST: ${{ matrix.domain == 'microservices' && needs.verify.outputs.digest_microservices || needs.verify.outputs.digest_llm_serving }}
+          DOMAIN: ${{ matrix.domain }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(cat image/digest)" = "$VERIFIED_DIGEST"
+          test "$(cat "image/digest-$DOMAIN")" = "$VERIFIED_DIGEST"
           authfile="$RUNNER_TEMP/registry-auth.json"
           trap 'rm -f "$authfile"' EXIT
           printf '%s' "$GH_TOKEN" | skopeo login --authfile "$authfile" \
@@ -357,7 +382,7 @@ jobs:
             fi
           else
             skopeo copy --authfile "$authfile" --preserve-digests \
-              "oci-archive:image/vibesys-evaluator.oci.tar" "$destination"
+              "oci-archive:image/vibesys-evaluator-$DOMAIN.oci.tar" "$destination"
           fi
           pushed_digest="sha256:$(skopeo inspect --authfile "$authfile" --raw "$destination" | sha256sum | cut -d' ' -f1)"
           test "$pushed_digest" = "$VERIFIED_DIGEST"
@@ -384,7 +409,7 @@ jobs:
         run: docker logout ghcr.io
 
   go-tag:
-    name: Tag the Go module and record the image in the release
+    name: Tag the Go module and record the images in the release
     needs: [verify, image]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -416,14 +441,24 @@ jobs:
 
       # Editing the release keeps it off GitHub's "latest" marker, which belongs to the vibesys
       # Python releases (publishing.md).
-      - name: Record the image digest in the release notes
+      # Each image job pushed exactly the verified digest (it checks), so the verified digests
+      # are the published ones.
+      - name: Record the image digests in the release notes
         env:
           VERSION: ${{ needs.verify.outputs.version }}
-          DIGEST: ${{ needs.image.outputs.digest }}
+          DIGEST_MICROSERVICES: ${{ needs.verify.outputs.digest_microservices }}
+          DIGEST_LLM_SERVING: ${{ needs.verify.outputs.digest_llm_serving }}
         run: |
           gh release view "$TAG" --json body --jq .body > "$RUNNER_TEMP/notes.md"
-          line="Image: \`$IMAGE:$VERSION@$DIGEST\` (provenance: \`gh attestation verify oci://$IMAGE@$DIGEST --repo $GITHUB_REPOSITORY\`). Go module: \`$GO_TAG\`."
-          if ! grep -qF "$DIGEST" "$RUNNER_TEMP/notes.md"; then
-            printf '\n\n%s\n' "$line" >> "$RUNNER_TEMP/notes.md"
+          for domain in $DOMAINS; do
+            if [[ "$domain" == microservices ]]; then digest="$DIGEST_MICROSERVICES"; else digest="$DIGEST_LLM_SERVING"; fi
+            image="$IMAGE_PREFIX-$domain"
+            line="Image: \`$image:$VERSION@$digest\` (provenance: \`gh attestation verify oci://$image@$digest --repo $GITHUB_REPOSITORY\`)."
+            if ! grep -qF "$digest" "$RUNNER_TEMP/notes.md"; then
+              printf '\n\n%s\n' "$line" >> "$RUNNER_TEMP/notes.md"
+            fi
+          done
+          if ! grep -qF "Go module: \`$GO_TAG\`" "$RUNNER_TEMP/notes.md"; then
+            printf '\n\nGo module: \`%s\`.\n' "$GO_TAG" >> "$RUNNER_TEMP/notes.md"
           fi
           gh release edit "$TAG" --verify-tag --latest=false --notes-file "$RUNNER_TEMP/notes.md"

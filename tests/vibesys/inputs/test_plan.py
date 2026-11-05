@@ -31,7 +31,7 @@ if TYPE_CHECKING:
 
 DESIGN = "reference/README.md"
 BASE = {
-    "version": 1,
+    "version": "0.1",
     "agent": {"domain": "generic"},
     "accuracy": {"command": ["python", "accuracy.py"]},
     "benchmark": {"command": ["python", "benchmark.py"]},

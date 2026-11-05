@@ -1,0 +1,10 @@
+# The user's approval of the breaking changes since the release named in `against`
+# (sdk/vibesys-evaluator/AGENTS.md, "Public API rule"). scripts/check_vibesys_evaluator_api.py
+# prints griffe's breaks against that release and passes; once a newer release is tagged this
+# file no longer applies and the check says to delete it.
+against = "sdk/vibesys-evaluator/loadgen/v0.1.0-rc.2"
+approved_by = "the user, with the two-image task design (2026-11-05)"
+reason = """domain-free core: vibesys_evaluator keeps main (check|benchmark|profile), Run, Metric, \
+Validity and Rand; the microservice names move to vibesys_evaluator.microservices (from \
+vibesys_evaluator and vibesys_evaluator.service), with its own main, and deploy.k8s to \
+vibesys_evaluator.microservices.k8s"""

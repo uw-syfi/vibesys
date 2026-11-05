@@ -26,7 +26,7 @@ def _write_task(project: Path, name: str) -> Path:
     task = project / ".vibesys" / "tasks" / name
     task.mkdir(parents=True)
     (task / "OBJECTIVE.md").write_text("Make it fast.\n", encoding="utf-8")
-    (task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
+    (task / "vibesys.input.toml").write_text('version = "0.1"\n', encoding="utf-8")
     return task
 
 
@@ -204,7 +204,7 @@ def test_task_directory_symlink_cannot_escape_tasks_root(tmp_path: Path) -> None
     external_task = tmp_path / "external-task"
     external_task.mkdir()
     (external_task / "OBJECTIVE.md").write_text("Do work.\n", encoding="utf-8")
-    (external_task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
+    (external_task / "vibesys.input.toml").write_text('version = "0.1"\n', encoding="utf-8")
     (tasks_root / "escaped").symlink_to(external_task, target_is_directory=True)
 
     with pytest.raises(UnsafeProjectPathError, match="symlink"):

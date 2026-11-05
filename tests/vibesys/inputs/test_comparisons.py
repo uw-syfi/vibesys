@@ -61,7 +61,7 @@ def _manifest(*comparisons: dict[str, Any], interface: str | None = "service") -
     if interface is not None:
         agent["interface"] = interface
     return {
-        "version": 1,
+        "version": "0.1",
         "agent": agent,
         "accuracy": {"command": ["check"]},
         "benchmark": {"command": ["measure"]},
@@ -217,7 +217,7 @@ def test_comparisons_need_a_service_task(interface: str | None) -> None:
         InputManifest.model_validate(_manifest(_valid(), interface=interface))
 
 
-_TASK_TOML = """version = 1
+_TASK_TOML = """version = "0.1"
 [agent]
 domain = "generic"
 interface = "service"

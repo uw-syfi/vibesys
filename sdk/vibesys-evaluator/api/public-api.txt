@@ -1,16 +1,6 @@
-class vibesys_evaluator.Call  (*, info: Mapping[str, Any], start: float | None, end: float | None, ok: bool | None, responses: tuple[Response, ...]) -> None
-vibesys_evaluator.Call.end: float | None
-vibesys_evaluator.Call.info: Mapping[str, Any]
-vibesys_evaluator.Call.ok: bool | None
-vibesys_evaluator.Call.responses: tuple[Response, ...]
-vibesys_evaluator.Call.start: float | None
 class vibesys_evaluator.Metric  (*, unit: str, direction: Literal['max', 'min']) -> None
 vibesys_evaluator.Metric.direction: Literal['max', 'min']
 vibesys_evaluator.Metric.unit: str
-class vibesys_evaluator.PhaseResult  (*, ops_per_sec: float, p50_ms: float, p99_ms: float) -> None
-vibesys_evaluator.PhaseResult.ops_per_sec: float
-vibesys_evaluator.PhaseResult.p50_ms: float
-vibesys_evaluator.PhaseResult.p99_ms: float
 class vibesys_evaluator.Rand  (seed: int, *labels: str | int) -> None
 vibesys_evaluator.Rand.below(n: int) -> int
 vibesys_evaluator.Rand.child(*labels: str | int) -> Rand
@@ -18,49 +8,73 @@ vibesys_evaluator.Rand.normal() -> float
 vibesys_evaluator.Rand.random() -> float
 vibesys_evaluator.Rand.weighted(weights: Sequence[float]) -> int
 vibesys_evaluator.Rand.zipf(n: int, s: float) -> int
-class vibesys_evaluator.Response  (*, status: int, body: bytes) -> None
-vibesys_evaluator.Response.body: bytes
-vibesys_evaluator.Response.json() -> Any
-vibesys_evaluator.Response.status: int
 class vibesys_evaluator.Run  ()
-vibesys_evaluator.Run.closed_loop(*, clients: int, secs: float, warmup: float, max_ops_per_sec: float = 20000.0) -> PhaseResult
-vibesys_evaluator.Run.open_loop(*, rate: float, secs: float, warmup: float, arrivals: Literal['poisson', 'uniform'] = 'poisson') -> PhaseResult
+vibesys_evaluator.Run.phase(name: str) -> Path
 vibesys_evaluator.Run.report(values: Mapping[str, float]) -> None
 class vibesys_evaluator.Validity  (*, max_error_rate: float = 0.0, min_sustained_ratio: float = 0.95, min_ops_per_operation: int = 1) -> None
 vibesys_evaluator.Validity.max_error_rate: float
 vibesys_evaluator.Validity.min_ops_per_operation: int
 vibesys_evaluator.Validity.min_sustained_ratio: float
-class vibesys_evaluator.Versions(Generic[K, V])  (*, bound_secs: float = 1.0) -> None
-vibesys_evaluator.Versions.allowed(key: K, default: V, *, start: float, end: float) -> tuple[V, ...]
-vibesys_evaluator.Versions.latest(key: K, default: V) -> V
-vibesys_evaluator.Versions.write(key: K, value: V, call: Call) -> None
-vibesys_evaluator.main(*, dataset: Callable[[], D], system: App[D], workload: Workload[D, M], benchmark: Callable[[Run], None], metrics: Mapping[str, Metric], validity: Validity = Validity()) -> NoReturn
-class vibesys_evaluator.service.Operation(Generic[M])  (*, name: str, weight: float, build: Callable[[M, Rand], Request], check: Callable[[M, Call], str | None] | None = None, apply: Callable[[M, Call], None] | None = None, sample: float | None = None) -> None
-vibesys_evaluator.service.Operation.apply: Callable[[M, Call], None] | None
-vibesys_evaluator.service.Operation.build: Callable[[M, Rand], Request]
-vibesys_evaluator.service.Operation.check: Callable[[M, Call], str | None] | None
-vibesys_evaluator.service.Operation.name: str
-vibesys_evaluator.service.Operation.sample: float | None
-vibesys_evaluator.service.Operation.weight: float
-class vibesys_evaluator.service.Request  (*steps: Step, info: Mapping[str, Any] | None = None, exclusive: str | None = None) -> None
-class vibesys_evaluator.service.Step  ()
-class vibesys_evaluator.service.Template  ()
-vibesys_evaluator.service.Template.__add__(other: str | Template) -> Template
-vibesys_evaluator.service.Template.__radd__(other: str) -> Template
-class vibesys_evaluator.service.Workload(Generic[D, M])  (*, model: Callable[[D, Rand], M], operations: Sequence[Operation[M]]) -> None
-vibesys_evaluator.service.Workload.model: Callable[[D, Rand], M]
-vibesys_evaluator.service.Workload.operations: Sequence[Operation[M]]
-vibesys_evaluator.service.get(path: str | Template, *, query: Mapping[str, str | Template] | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
-vibesys_evaluator.service.post(path: str | Template, *, query: Mapping[str, str | Template] | None = None, form: Mapping[str, str | Template] | None = None, json: Any = None, body: bytes | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
-vibesys_evaluator.service.put(path: str | Template, *, query: Mapping[str, str | Template] | None = None, form: Mapping[str, str | Template] | None = None, json: Any = None, body: bytes | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
-vibesys_evaluator.service.ref(name: str) -> Template
-class vibesys_evaluator.deploy.k8s.App(Generic[D])  (*, name: str, manifest: str, images: Mapping[str, str], gateway: str, ready: Sequence[Step], data_tier: str = '', seed: Callable[[D], None] | None = None, restartable: Sequence[str] = (), caches: Mapping[str, Literal['memcached', 'redis']] = dict()) -> None
-vibesys_evaluator.deploy.k8s.App.caches: Mapping[str, Literal['memcached', 'redis']]
-vibesys_evaluator.deploy.k8s.App.data_tier: str
-vibesys_evaluator.deploy.k8s.App.gateway: str
-vibesys_evaluator.deploy.k8s.App.images: Mapping[str, str]
-vibesys_evaluator.deploy.k8s.App.manifest: str
-vibesys_evaluator.deploy.k8s.App.name: str
-vibesys_evaluator.deploy.k8s.App.ready: Sequence[Step]
-vibesys_evaluator.deploy.k8s.App.restartable: Sequence[str]
-vibesys_evaluator.deploy.k8s.App.seed: Callable[[D], None] | None
+vibesys_evaluator.main(*, metrics: Mapping[str, Metric], benchmark: Callable[[Run], None], check: Callable[[Run], str | None] | None = None, profile: Callable[[Run], None] | None = None) -> NoReturn
+class vibesys_evaluator.microservices.Call  (*, info: Mapping[str, Any], start: float | None, end: float | None, ok: bool | None, responses: tuple[Response, ...]) -> None
+vibesys_evaluator.microservices.Call.end: float | None
+vibesys_evaluator.microservices.Call.info: Mapping[str, Any]
+vibesys_evaluator.microservices.Call.ok: bool | None
+vibesys_evaluator.microservices.Call.responses: tuple[Response, ...]
+vibesys_evaluator.microservices.Call.start: float | None
+class vibesys_evaluator.microservices.Operation(Generic[M])  (*, name: str, weight: float, build: Callable[[M, Rand], Request], check: Callable[[M, Call], str | None] | None = None, apply: Callable[[M, Call], None] | None = None, sample: float | None = None) -> None
+vibesys_evaluator.microservices.Operation.apply: Callable[[M, Call], None] | None
+vibesys_evaluator.microservices.Operation.build: Callable[[M, Rand], Request]
+vibesys_evaluator.microservices.Operation.check: Callable[[M, Call], str | None] | None
+vibesys_evaluator.microservices.Operation.name: str
+vibesys_evaluator.microservices.Operation.sample: float | None
+vibesys_evaluator.microservices.Operation.weight: float
+class vibesys_evaluator.microservices.PhaseResult  (*, ops_per_sec: float, p50_ms: float, p99_ms: float) -> None
+vibesys_evaluator.microservices.PhaseResult.ops_per_sec: float
+vibesys_evaluator.microservices.PhaseResult.p50_ms: float
+vibesys_evaluator.microservices.PhaseResult.p99_ms: float
+class vibesys_evaluator.microservices.Request  (*steps: Step, info: Mapping[str, Any] | None = None, exclusive: str | None = None) -> None
+class vibesys_evaluator.microservices.Response  (*, status: int, body: bytes) -> None
+vibesys_evaluator.microservices.Response.body: bytes
+vibesys_evaluator.microservices.Response.json() -> Any
+vibesys_evaluator.microservices.Response.status: int
+class vibesys_evaluator.microservices.Run(vibesys_evaluator.Run)  ()
+vibesys_evaluator.microservices.Run.closed_loop(*, clients: int, secs: float, warmup: float, max_ops_per_sec: float = 20000.0) -> PhaseResult
+vibesys_evaluator.microservices.Run.open_loop(*, rate: float, secs: float, warmup: float, arrivals: Literal['poisson', 'uniform'] = 'poisson') -> PhaseResult
+class vibesys_evaluator.microservices.Step  ()
+class vibesys_evaluator.microservices.Template  ()
+vibesys_evaluator.microservices.Template.__add__(other: str | Template) -> Template
+vibesys_evaluator.microservices.Template.__radd__(other: str) -> Template
+class vibesys_evaluator.microservices.Versions(Generic[K, V])  (*, bound_secs: float = 1.0) -> None
+vibesys_evaluator.microservices.Versions.allowed(key: K, default: V, *, start: float, end: float) -> tuple[V, ...]
+vibesys_evaluator.microservices.Versions.latest(key: K, default: V) -> V
+vibesys_evaluator.microservices.Versions.write(key: K, value: V, call: Call) -> None
+class vibesys_evaluator.microservices.Workload(Generic[D, M])  (*, model: Callable[[D, Rand], M], operations: Sequence[Operation[M]]) -> None
+vibesys_evaluator.microservices.Workload.model: Callable[[D, Rand], M]
+vibesys_evaluator.microservices.Workload.operations: Sequence[Operation[M]]
+vibesys_evaluator.microservices.get(path: str | Template, *, query: Mapping[str, str | Template] | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
+vibesys_evaluator.microservices.main(*, dataset: Callable[[], D], system: App[D], workload: Workload[D, M], benchmark: Callable[[Run], None], metrics: Mapping[str, Metric], validity: Validity | None = None) -> NoReturn
+vibesys_evaluator.microservices.post(path: str | Template, *, query: Mapping[str, str | Template] | None = None, form: Mapping[str, str | Template] | None = None, json: Any = None, body: bytes | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
+vibesys_evaluator.microservices.put(path: str | Template, *, query: Mapping[str, str | Template] | None = None, form: Mapping[str, str | Template] | None = None, json: Any = None, body: bytes | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
+vibesys_evaluator.microservices.ref(name: str) -> Template
+class vibesys_evaluator.microservices.k8s.App(Generic[D])  (*, name: str, manifest: str, images: Mapping[str, str], gateway: str, ready: Sequence[Step], data_tier: str = '', seed: Callable[[D], None] | None = None, restartable: Sequence[str] = (), caches: Mapping[str, Literal['memcached', 'redis']] = dict()) -> None
+vibesys_evaluator.microservices.k8s.App.caches: Mapping[str, Literal['memcached', 'redis']]
+vibesys_evaluator.microservices.k8s.App.data_tier: str
+vibesys_evaluator.microservices.k8s.App.gateway: str
+vibesys_evaluator.microservices.k8s.App.images: Mapping[str, str]
+vibesys_evaluator.microservices.k8s.App.manifest: str
+vibesys_evaluator.microservices.k8s.App.name: str
+vibesys_evaluator.microservices.k8s.App.ready: Sequence[Step]
+vibesys_evaluator.microservices.k8s.App.restartable: Sequence[str]
+vibesys_evaluator.microservices.k8s.App.seed: Callable[[D], None] | None
+vibesys_evaluator.llm_serving.endpoint() -> str
+vibesys_evaluator.llm_serving.agentx.HARNESS_VERSION: Final[str]
+vibesys_evaluator.llm_serving.agentx.METRICS: Final[Mapping[str, Metric]]
+vibesys_evaluator.llm_serving.agentx.replay(*, model: str, tokenizer: str, tokenizer_revision: str, concurrency: int, max_context_length: int, artifacts: Path, url: str | None = None, mode: Literal['full', 'smoke'] = 'full', timeout_secs: float = 3300.0) -> dict[str, float]
+class vibesys_evaluator.llm_serving.golden.Thresholds  (*, near_tie_margin: float = 0.5, max_decisive_flips: int = 0, max_mean_abs_dlogprob: float = 0.05, max_p99_abs_dlogprob: float = 0.25, min_mean_prefix_fraction: float = 0.5) -> None
+vibesys_evaluator.llm_serving.golden.Thresholds.max_decisive_flips: int
+vibesys_evaluator.llm_serving.golden.Thresholds.max_mean_abs_dlogprob: float
+vibesys_evaluator.llm_serving.golden.Thresholds.max_p99_abs_dlogprob: float
+vibesys_evaluator.llm_serving.golden.Thresholds.min_mean_prefix_fraction: float
+vibesys_evaluator.llm_serving.golden.Thresholds.near_tie_margin: float
+vibesys_evaluator.llm_serving.golden.logprobs(path: Path, *, url: str | None = None, model: str | None = None, thresholds: Thresholds | None = None, report: Path | None = None) -> str | None

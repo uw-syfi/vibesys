@@ -68,7 +68,7 @@ def _write_input(base: Path, transport: str) -> tuple[Path, Path, Path]:
     (project / "queue.py").write_text("VALUE = 1\n", encoding="utf-8")
     write_task(
         project,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n'
         '[benchmark]\ncommand = ["run-benchmark"]\nresult_protocol = 2\n',
         objective="Improve the queue.\n",

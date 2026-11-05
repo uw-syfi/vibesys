@@ -107,7 +107,7 @@ def _native_profiler_request(root: Path, requested: ProfilerKind) -> RunRequest:
     project.mkdir()
     write_task(
         project,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n'
         '[benchmark]\ncommand = ["true"]\n'
         '[profile]\ncommand = ["true"]\n',
@@ -139,7 +139,7 @@ def _request(root: Path, *, service: bool, profile: bool, requested: ProfilerKin
     project = root / "project"
     project.mkdir()
     manifest = (
-        'version = 1\n[agent]\ndomain = "llm-serving"\n'
+        'version = "0.1"\n[agent]\ndomain = "llm-serving"\n'
         '[accuracy]\ncommand = ["python", "check.py"]\n'
         '[benchmark]\ncommand = ["python", "benchmark.py"]\n'
     )

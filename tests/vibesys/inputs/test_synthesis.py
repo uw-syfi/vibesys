@@ -101,7 +101,7 @@ def test_synthesize_rejects_evaluator_dir_reserved_name_collision(tmp_path: Path
 def test_synthesize_rejects_evaluator_dir_root_manifest(tmp_path: Path) -> None:
     evaluator = tmp_path / "eval"
     evaluator.mkdir()
-    (evaluator / "vibesys.input.toml").write_text("version = 1\n")
+    (evaluator / "vibesys.input.toml").write_text('version = "0.1"\n')
 
     with pytest.raises(InputSynthesisError, match="reserved project name"):
         synthesize_input_bundle(_minimal_spec(evaluator_dir=evaluator), tmp_path / "bundle")
