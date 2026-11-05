@@ -349,6 +349,13 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.Outco
 "resources/**" = ["TID251"]
 "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py" = ["TID251"]
 "sdk/vs-bench/**" = ["TID251"]
+# The real clock of vibesys-evaluator's deploy layer, which runs in a task container outside
+# the VibeSys process; every other module takes it as a Clock.
+"sdk/vibesys-evaluator/python/src/vibesys_evaluator/deploy/_k8s/_clock.py" = ["TID251"]
+# TRY003: the deploy layer has one error type per boundary (DeployError, KubeError,
+# ManifestError, BuildError) whose messages name the step, object or field and say what to
+# fix (the package's error rule); a subclass per message would add dozens of one-use types.
+"sdk/vibesys-evaluator/python/src/vibesys_evaluator/deploy/**" = ["TRY003"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
