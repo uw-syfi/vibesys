@@ -1,0 +1,19 @@
+# Bindings for the vibesys-evaluator SDK's schema (loadgen and phase files), generated into the SDK:
+# Go for loadgen's own module and Python (typed, inline annotations) for the vibesys_evaluator
+# package. buf.gen.yaml excludes this package, so the repository's own bindings are unaffected.
+# include_imports puts the validation rules' own messages next to the Python bindings, so the
+# package needs no other generated package.
+version: v2
+clean: true
+inputs:
+  - directory: proto
+    paths: [proto/vibesys/evaluator]
+plugins:
+  - local: [go, -C, sdk/vibesys-evaluator/loadgen, tool, protoc-gen-go]
+    strategy: all
+    out: sdk/vibesys-evaluator/loadgen/gen
+    opt: paths=source_relative
+  - local: protoc-gen-py
+    strategy: all
+    out: sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto
+    include_imports: true

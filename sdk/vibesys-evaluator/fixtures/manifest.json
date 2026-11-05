@@ -1,0 +1,133 @@
+{
+  "about": "Conformance fixtures of proto/vibesys/evaluator/v1: every file kind in both formats (binpb: length-delimited; json: proto3 JSON lines), and files a reader must reject. Written by `go test ./internal/conformance -update` in sdk/vibesys-evaluator/loadgen; read by the Go and Python tests.",
+  "entries": [
+    {
+      "file": "requests.binpb",
+      "kind": "requests",
+      "format": "binpb",
+      "description": "A plan of five operations: a three-step login with a captured token used raw, as a JSON string and as a JSON value; a query; a form; a raw PUT that captures a header and two operations on exclusive key k7.",
+      "valid": true,
+      "messages": 6
+    },
+    {
+      "file": "results.binpb",
+      "kind": "results",
+      "format": "binpb",
+      "description": "Results in completion order: kept bodies, digests, a status error, a transport error, an operation spilled past the window after an exclusive-key wait, and one never sent (start 0).",
+      "valid": true,
+      "messages": 7
+    },
+    {
+      "file": "summary.binpb",
+      "kind": "summary",
+      "format": "binpb",
+      "description": "The summary of results.binpb over the window [base+1s, base+2s), base = 1700000000 s; latency counts successful operations only.",
+      "valid": true,
+      "messages": 1,
+      "latency_p50_micros": 20015,
+      "latency_p99_micros": 20015,
+      "latency_count": 3,
+      "from_results": "results.binpb"
+    },
+    {
+      "file": "selftest.binpb",
+      "kind": "selftest",
+      "format": "binpb",
+      "description": "A selftest result.",
+      "valid": true,
+      "messages": 1
+    },
+    {
+      "file": "capabilities.binpb",
+      "kind": "capabilities",
+      "format": "binpb",
+      "description": "What `loadgen --capabilities` prints (version replaced by \"fixture\").",
+      "valid": true,
+      "messages": 1
+    },
+    {
+      "file": "requests.json",
+      "kind": "requests",
+      "format": "json",
+      "description": "A plan of five operations: a three-step login with a captured token used raw, as a JSON string and as a JSON value; a query; a form; a raw PUT that captures a header and two operations on exclusive key k7.",
+      "valid": true,
+      "messages": 6
+    },
+    {
+      "file": "results.json",
+      "kind": "results",
+      "format": "json",
+      "description": "Results in completion order: kept bodies, digests, a status error, a transport error, an operation spilled past the window after an exclusive-key wait, and one never sent (start 0).",
+      "valid": true,
+      "messages": 7
+    },
+    {
+      "file": "summary.json",
+      "kind": "summary",
+      "format": "json",
+      "description": "The summary of results.json over the window [base+1s, base+2s), base = 1700000000 s; latency counts successful operations only.",
+      "valid": true,
+      "messages": 1,
+      "latency_p50_micros": 20015,
+      "latency_p99_micros": 20015,
+      "latency_count": 3,
+      "from_results": "results.json"
+    },
+    {
+      "file": "selftest.json",
+      "kind": "selftest",
+      "format": "json",
+      "description": "A selftest result.",
+      "valid": true,
+      "messages": 1
+    },
+    {
+      "file": "capabilities.json",
+      "kind": "capabilities",
+      "format": "json",
+      "description": "What `loadgen --capabilities` prints (version replaced by \"fixture\").",
+      "valid": true,
+      "messages": 1
+    },
+    {
+      "file": "invalid-schema-version.binpb",
+      "kind": "requests",
+      "format": "binpb",
+      "description": "A schema version this reader does not implement.",
+      "valid": false,
+      "error": "unsupported schema version"
+    },
+    {
+      "file": "invalid-unknown-ref.json",
+      "kind": "requests",
+      "format": "json",
+      "description": "A ref to a name no earlier step captures.",
+      "valid": false,
+      "error": "names no capture of an earlier step"
+    },
+    {
+      "file": "invalid-count.binpb",
+      "kind": "requests",
+      "format": "binpb",
+      "description": "RequestsHeader.count does not match the operations that follow.",
+      "valid": false,
+      "error": "count is 3"
+    },
+    {
+      "file": "invalid-operation-name.json",
+      "kind": "requests",
+      "format": "json",
+      "description": "An operation name outside the pattern.",
+      "valid": false,
+      "error": "operation_names"
+    },
+    {
+      "file": "invalid-kind.binpb",
+      "kind": "requests",
+      "format": "binpb",
+      "description": "A summary file where a requests file is expected.",
+      "valid": false,
+      "error": "FileHeader.kind"
+    }
+  ]
+}

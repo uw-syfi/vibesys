@@ -1,0 +1,3 @@
+{"schemaVersion":1,"kind":"FILE_KIND_REQUESTS","writer":"fixture"}
+{"operationNames":["login_read"],"count":"1"}
+{"steps":[{"http":{"method":"HTTP_METHOD_GET","path":{"parts":[{"literal":"/kv/"},{"ref":{"name":"token","encoding":"REF_ENCODING_RAW"}}]}}}]}

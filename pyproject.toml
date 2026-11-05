@@ -183,6 +183,7 @@ omit = [
     "*/__main__.py",
     # Generated bindings are verified byte-for-byte by the proto check.
     "*/vs_proto/_generated/*",
+    "*/vibesys_evaluator/_proto/*",
     "scripts/corevalue/tests/*",
 ]
 
@@ -265,6 +266,7 @@ src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-p
 extend-exclude = [
     # Tool-owned output: edits are rejected by the proto regenerate-and-diff check.
     "libs/vs-proto/src/vs_proto/_generated",
+    "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto",
     "libs/vs-core/src/vs_core/_generated",
     "libs/vs-runtime/src/vs_runtime/_core_values",
     "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto",
@@ -486,7 +488,7 @@ root = [
 unused-ignore-comment = "error"
 
 [tool.ty.src]
-exclude = ["libs/vs-proto/src/vs_proto/_generated"]
+exclude = ["libs/vs-proto/src/vs_proto/_generated", "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto"]
 # Same tree the previous checker covered: first-party sources plus their
 # tests. `examples/` and `skills/domains/` vendor code VibeSys does not own
 # and are left out.
