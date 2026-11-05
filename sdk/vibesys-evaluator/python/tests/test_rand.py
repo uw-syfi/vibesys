@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -25,6 +27,7 @@ STAY_WEIGHTS = [30, 24, 16, 11, 8, 6, 5]
 # NewZipf(1000, ZipfThreeQuarters).Rank and NewZipf(20, ZipfOne).Rank of newRNG(9, "zipf", 1).float().
 GO_ZIPF = [(474, 7), (9, 1), (289, 3), (301, 5), (970, 0), (15, 1)]
 
+FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 seeds = st.integers(min_value=0, max_value=(1 << 64) - 1)
 labels = st.lists(
     st.one_of(st.text(max_size=8), st.integers(min_value=0, max_value=1 << 40)), max_size=4
@@ -132,3 +135,13 @@ def test_zipf_favours_low_ranks() -> None:
 def test_invalid_arguments_are_refused(call: Callable[[], object], error: type[Exception]) -> None:
     with pytest.raises(error):
         call()
+
+
+def test_the_shared_fixture_is_what_rand_draws() -> None:
+    # fixtures/rand.json pins Rand for the Python and the Go SDK (Go: TestRandIsThePythonRand).
+    spec = importlib.util.spec_from_file_location("rand_streams", FIXTURES / "rand_streams.py")
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert (FIXTURES / "rand.json").read_text() == module.text()

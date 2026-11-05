@@ -197,6 +197,6 @@ METRICS = {
 
 def benchmark(run: vse.Run) -> None:
     """A closed loop, then an open loop at half its throughput (both short)."""
-    closed = run.closed_loop(clients=4, secs=1, warmup=0.5, max_ops_per_sec=400)
+    closed = run.closed_loop(clients=4, secs=1, warmup=0.5)
     opened = run.open_loop(rate=0.5 * closed.ops_per_sec, secs=1, warmup=0.5, arrivals="uniform")
     run.report({"operations_per_second": closed.ops_per_sec, "latency_ms.p99": opened.p99_ms})

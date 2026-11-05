@@ -140,11 +140,11 @@ func (a *Aggregator) Add(r Record) {
 
 // Phase is what the summary says about the phase beyond its results.
 type Phase struct {
-	Model          pb.LoadModel
-	TargetRate     float64
-	Clients        uint32
-	CPUFraction    float64
-	MinSustained   float64
+	Model        pb.LoadModel
+	TargetRate   float64
+	Clients      uint32
+	CPUFraction  float64
+	MinSustained float64
 	// Saturated counts the open loop's window operations that waited for a busy sender.
 	Saturated      uint64
 	ResultsSpilled uint64

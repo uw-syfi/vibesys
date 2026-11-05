@@ -23,7 +23,7 @@ vibesys_evaluator.Response.body: bytes
 vibesys_evaluator.Response.json() -> Any
 vibesys_evaluator.Response.status: int
 class vibesys_evaluator.Run  ()
-vibesys_evaluator.Run.closed_loop(*, clients: int, secs: float, warmup: float, max_ops_per_sec: float = 20000.0) -> PhaseResult
+vibesys_evaluator.Run.closed_loop(*, clients: int, secs: float, warmup: float) -> PhaseResult
 vibesys_evaluator.Run.open_loop(*, rate: float, secs: float, warmup: float, arrivals: Literal['poisson', 'uniform'] = 'poisson') -> PhaseResult
 vibesys_evaluator.Run.report(values: Mapping[str, float]) -> None
 class vibesys_evaluator.Validity  (*, max_error_rate: float = 0.0, min_sustained_ratio: float = 0.95, min_ops_per_operation: int = 1) -> None
@@ -34,7 +34,9 @@ class vibesys_evaluator.Versions(Generic[K, V])  (*, bound_secs: float = 1.0) ->
 vibesys_evaluator.Versions.allowed(key: K, default: V, *, start: float, end: float) -> tuple[V, ...]
 vibesys_evaluator.Versions.latest(key: K, default: V) -> V
 vibesys_evaluator.Versions.write(key: K, value: V, call: Call) -> None
-vibesys_evaluator.main(*, dataset: Callable[[], D], system: App[D], workload: Workload[D, M], benchmark: Callable[[Run], None], metrics: Mapping[str, Metric], validity: Validity = Validity()) -> NoReturn
+vibesys_evaluator.main(*, dataset: Callable[[], D], system: App[D], workload: Workload[D, M] | Generator, benchmark: Callable[[Run], None], metrics: Mapping[str, Metric], validity: Validity = Validity()) -> NoReturn
+class vibesys_evaluator.service.Generator  (command: Sequence[str]) -> None
+vibesys_evaluator.service.Generator.command: Sequence[str]
 class vibesys_evaluator.service.Operation(Generic[M])  (*, name: str, weight: float, build: Callable[[M, Rand], Request], check: Callable[[M, Call], str | None] | None = None, apply: Callable[[M, Call], None] | None = None, sample: float | None = None) -> None
 vibesys_evaluator.service.Operation.apply: Callable[[M, Call], None] | None
 vibesys_evaluator.service.Operation.build: Callable[[M, Rand], Request]

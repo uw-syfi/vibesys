@@ -3,8 +3,9 @@
 // sdk/vibesys-evaluator/docs/spec.md ("loadgen command line") and
 // proto/vibesys/evaluator/v1/loadgen.proto.
 //
-// Exit status: 0 when the phase ran and the summary is written (an exhausted or unsustained phase
-// included), 2 for a usage error or a plan it cannot run, 1 for any other failure.
+// Exit status: 0 when the phase ran and the summary is written (an unsustained phase included), 2
+// for a usage error or a request stream it cannot run, 1 for any other failure (a generator that
+// ends its stream early).
 package main
 
 import (

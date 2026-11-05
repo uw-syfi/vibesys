@@ -100,3 +100,32 @@ class Workload(Generic[D, M]):
                 msg = f"Workload has two operations named {operation.name!r}"
                 raise ValueError(msg)
             seen.add(operation.name)
+
+
+@dataclass(frozen=True)
+class Generator:
+    """A workload written in another language: a program that writes the request stream and checks it.
+
+    The phase pod runs ``command + ["generate", ...]`` (loadgen reads its
+    standard output) and then ``command + ["check", ...]``, with the flags of
+    ``docs/spec.md``, "Generator command line"; a Go generator is
+    ``workload.Main`` of the Go SDK. A first element with a ``/`` that is not
+    absolute is relative to the task script's directory; one without is
+    looked up on ``PATH``.
+
+    Attributes:
+        command: The program and its leading arguments.
+    """
+
+    command: Sequence[str]
+
+    def __post_init__(self) -> None:
+        """Reject an empty command or one that is not a sequence of strings."""
+        if isinstance(self.command, str):
+            msg = f"Generator command is a list of arguments, not the string {self.command!r}"
+            raise TypeError(msg)
+        command = tuple(self.command)
+        if not command or not all(isinstance(arg, str) and arg for arg in command):
+            msg = f"Generator command must be non-empty strings, got {self.command!r}"
+            raise ValueError(msg)
+        object.__setattr__(self, "command", command)

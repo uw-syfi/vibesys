@@ -91,13 +91,18 @@ def _map(path: Path) -> bytes | mmap.mmap:
         return mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ)
 
 
-def _frames(data: bytes | mmap.mmap, where: str) -> Iterator[memoryview]:
+def _frames(
+    data: bytes | mmap.mmap, where: str, *, partial_tail: bool = False
+) -> Iterator[memoryview]:
+    """The frames of ``data``; with ``partial_tail``, a last frame cut short ends them."""
     view = memoryview(data)
     position = 0
     while position < len(view):
         length = 0
         shift = 0
         while True:
+            if position >= len(view) and partial_tail:
+                return
             if position >= len(view) or shift > _MAX_SHIFT:
                 msg = f"{where}: truncated length prefix at byte {position}"
                 raise SchemaFileError(msg)
@@ -108,6 +113,8 @@ def _frames(data: bytes | mmap.mmap, where: str) -> Iterator[memoryview]:
             if byte < _CONTINUE:
                 break
         if position + length > len(view):
+            if partial_tail:
+                return
             msg = f"{where}: message of {length} bytes runs past the end of the file"
             raise SchemaFileError(msg)
         yield view[position : position + length]
@@ -229,19 +236,41 @@ def _refs(step: pb.Step) -> Iterator[str]:
 def read_requests(
     path: Path, *, file_format: Format = "binpb"
 ) -> tuple[pb.RequestsHeader, list[pb.PlannedOperation]]:
-    """A requests file, with the rules loadgen holds a plan to (count, refs)."""
+    """A recorded request stream read to its end (tests, fixtures, probes), with loadgen's rules.
+
+    A phase's stream has no end; a recorded one is a prefix of it, read whole.
+    """
     reader = DelimitedReader(path, pb.FileKind.REQUESTS, file_format=file_format)
     header = reader.one(pb.RequestsHeader)
     operations = list(reader.rest(pb.PlannedOperation))
-    if header.count != len(operations):
-        msg = (
-            f"{path}: RequestsHeader.count is {header.count} "
-            f"but the file holds {len(operations)} operations"
-        )
-        raise SchemaFileError(msg)
     for index, operation in enumerate(operations):
         _captured(operation, f"{path}: operation {index}")
     return header, operations
+
+
+def check_refs(operation: pb.PlannedOperation, where: str) -> pb.PlannedOperation:
+    """Check that every ref of a (validated) operation names a capture of an earlier step."""
+    _captured(operation, where)
+    return operation
+
+
+def read_records(path: Path, message_type: type[_T]) -> Iterator[_T]:
+    """The messages of a length-delimited file without a header (a generator's state).
+
+    A last record cut short is dropped: its writer was stopped while writing it.
+    """
+    try:
+        data = _map(path)
+    except OSError as error:
+        msg = f"{path}: cannot read ({error.strerror})"
+        raise SchemaFileError(msg) from error
+    for frame in _frames(data, str(path), partial_tail=True):
+        try:
+            message = message_type.from_binary(frame)
+        except (ValueError, TypeError) as error:
+            msg = f"{path}: cannot decode a {message_type.__name__} ({error})"
+            raise SchemaFileError(msg) from error
+        yield _check(message, str(path))
 
 
 def read_summary(path: Path) -> pb.PhaseSummary:
