@@ -3,8 +3,8 @@ clean: true
 inputs:
   # vibesys-cli and the orchestrator have their own templates (buf.gen.cli.yaml,
   # buf.gen.orchestrator.yaml) and only Go bindings. The vibesys-evaluator SDK's
-  # loadgen schema gets its own template (Python and Go, into the SDK) with its
-  # implementation; it is not part of the repository's own bindings.
+  # schema has its own template (buf.gen.evaluator.yaml: Python and Go, into the
+  # SDK); it is not part of the repository's own bindings.
   - directory: proto
     exclude_paths: [proto/vibesys/cli, proto/vibesys/orchestrator, proto/vibesys/evaluator]
 managed:

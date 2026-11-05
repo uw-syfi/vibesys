@@ -82,9 +82,10 @@ class RequestsHeader(Message[_RequestsHeaderFields]):
             repeated string operation_names = 1;
             ```
         count:
-            The number of PlannedOperation messages that follow. An open loop sends
-            exactly this many; a closed loop sends a prefix and fails the phase as
-            exhausted if it runs out before the window ends.
+            The number of PlannedOperation messages that follow; a file with another
+            number is rejected. Both loops send a prefix of the plan, in plan order: the
+            operations due before the window ends. A plan that runs out before the
+            window ends is reported as exhausted (PhaseSummary.exhausted).
 
             ```proto
             uint64 count = 2;
@@ -169,7 +170,10 @@ _StepFields: TypeAlias = Literal["http", "thrift", "captures", "expect_status"]
 class Step(Message[_StepFields]):
     """
     Step is one call. A step may use values captured from the responses of
-    earlier steps of the same operation (Template.Part.ref).
+    earlier steps of the same operation (Template.Part.ref); a Ref to a name that
+    no earlier step of the operation captures is rejected with the plan. An
+    operation stops at its first failed step: the later steps are not sent and
+    have no StepResult.
 
     ```proto
     message vibesys.evaluator.v1.Step
@@ -217,7 +221,10 @@ _HttpCallFields: TypeAlias = Literal["method", "path", "query", "headers", "raw"
 class HttpCall(Message[_HttpCallFields]):
     """
     HttpCall is one HTTP/1.1 request to the phase's target (--target). Query
-    and form values are URL-encoded by loadgen after the templates are filled.
+    and form values are URL-encoded by loadgen after the templates are filled;
+    the path is sent as filled. loadgen sets Content-Type only for a form body
+    (application/x-www-form-urlencoded) without a Content-Type header; a text or
+    raw body carries the Content-Type its headers give.
 
     ```proto
     message vibesys.evaluator.v1.HttpCall
@@ -494,8 +501,11 @@ _OperationResultFields: TypeAlias = Literal["index", "operation", "scheduled_uni
 
 class OperationResult(Message[_OperationResultFields]):
     """
-    OperationResult is the outcome of one PlannedOperation that loadgen started.
-    Times are Unix nanoseconds of the loadgen pod's clock.
+    OperationResult is the outcome of one PlannedOperation that loadgen took.
+    Times are Unix nanoseconds of the loadgen pod's clock. An open-loop operation
+    that was due in the window but could not be started before the phase's
+    deadline (the window's end plus --timeout) is recorded with error CANCELLED,
+    start 0 and no steps: it was never sent.
 
     ```proto
     message vibesys.evaluator.v1.OperationResult
@@ -514,8 +524,9 @@ class OperationResult(Message[_OperationResultFields]):
             ```
         scheduled_unix_nanos:
             When the operation was due: its arrival time (open loop), or the time a
-            client became free to send it (closed loop). Latency is end - scheduled
-            (open) and end - start (closed).
+            client took it from the plan (closed loop). Latency is end - scheduled in
+            both: in a closed loop it differs from end - start only by the wait for the
+            exclusive key, which counts as latency.
 
             ```proto
             int64 scheduled_unix_nanos = 3;
@@ -675,7 +686,10 @@ class HdrHistogram(Message[_HdrHistogramFields]):
     """
     HdrHistogram is an HDR histogram of durations in microseconds, in the
     standard compressed V2 encoding that the Go and Python HdrHistogram
-    libraries read and write.
+    libraries read and write. `encoded` holds the encoding's bytes (cookie, then
+    the zlib stream), not the base64 text those libraries' encode functions
+    return: Python reads it with HdrHistogram.decode(base64.b64encode(encoded)).
+    A value above highest_trackable_micros is recorded as that value.
 
     ```proto
     message vibesys.evaluator.v1.HdrHistogram
@@ -768,7 +782,7 @@ class OperationSummary(Message[_OperationSummaryFields]):
         errors: int
         latency: HdrHistogram | None
 
-_PhaseSummaryFields: TypeAlias = Literal["model", "target_rate", "clients", "window_start_unix_nanos", "window_end_unix_nanos", "sent", "completed", "errors", "errors_by_kind", "spilled", "offered_rate", "achieved_rate", "send_lag", "max_send_lag_micros", "exclusive_wait", "loadgen_cpu_fraction", "sustained", "exhausted", "latency", "operations"]
+_PhaseSummaryFields: TypeAlias = Literal["model", "target_rate", "clients", "window_start_unix_nanos", "window_end_unix_nanos", "sent", "completed", "errors", "errors_by_kind", "spilled", "offered_rate", "achieved_rate", "send_lag", "max_send_lag_micros", "exclusive_wait", "loadgen_cpu_fraction", "sustained", "exhausted", "latency", "operations", "results_spilled"]
 
 class PhaseSummary(Message[_PhaseSummaryFields]):
     """
@@ -806,7 +820,10 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             int64 window_end_unix_nanos = 5;
             ```
         sent:
-            Operations started, completed (success or error) and failed in the window.
+            Of the window's operations: those sent (start not 0), those with an
+            outcome (every one, once the phase has ended: answered, failed, or never
+            sent and CANCELLED), and those that failed (any ErrorKind). The error rate
+            is errors / completed.
 
             ```proto
             uint64 sent = 6;
@@ -826,15 +843,17 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             map<uint32, uint64> errors_by_kind = 9;
             ```
         spilled:
-            Operations started in the window that completed after it (bounded by the
+            Operations of the window that were sent and ended after it (bounded by the
             request timeout); counted in completed, not in the throughput.
 
             ```proto
             uint64 spilled = 10;
             ```
         offered_rate:
-            The rate operations were sent at, and the rate they completed at within
-            the window, operations/s. A closed loop's throughput is achieved_rate.
+            The rate operations were sent at (operations whose first step started in
+            the window, divided by its length), and the rate they completed at within
+            the window (completed - spilled, divided by its length), operations/s. A
+            closed loop's throughput is achieved_rate.
 
             ```proto
             double offered_rate = 11;
@@ -844,8 +863,9 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             double achieved_rate = 12;
             ```
         send_lag:
-            Send lag: start - scheduled, the time an operation waited for a free
-            sender (or its exclusive key, reported apart in exclusive_wait).
+            Send lag: the time a sent operation waited for a free sender after it was
+            due (0 in a closed loop); the wait for its exclusive key after that is
+            exclusive_wait. start - scheduled is their sum.
 
             ```proto
             optional vibesys.evaluator.v1.HdrHistogram send_lag = 13;
@@ -873,14 +893,16 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             bool sustained = 17;
             ```
         exhausted:
-            Closed loop: the plan ran out before the window ended; the phase is not
-            a measurement.
+            The plan ran out before the window ended (no operation was left to take
+            or to schedule); the phase is not a measurement.
 
             ```proto
             bool exhausted = 18;
             ```
         latency:
-            The latency of every operation, and of each operation.
+            The latency (end - scheduled) of every operation of the window that
+            succeeded, and per operation (OperationSummary). Failed operations are in
+            errors, not in the latency.
 
             ```proto
             optional vibesys.evaluator.v1.HdrHistogram latency = 19;
@@ -889,9 +911,17 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             ```proto
             repeated vibesys.evaluator.v1.OperationSummary operations = 20;
             ```
+        results_spilled:
+            Results that went through loadgen's spill file because the results file
+            was written slower than operations completed; they are in the results file
+            all the same. Diagnosis only.
+
+            ```proto
+            uint64 results_spilled = 21;
+            ```
     """
 
-    __slots__ = ("model", "target_rate", "clients", "window_start_unix_nanos", "window_end_unix_nanos", "sent", "completed", "errors", "errors_by_kind", "spilled", "offered_rate", "achieved_rate", "send_lag", "max_send_lag_micros", "exclusive_wait", "loadgen_cpu_fraction", "sustained", "exhausted", "latency", "operations")
+    __slots__ = ("model", "target_rate", "clients", "window_start_unix_nanos", "window_end_unix_nanos", "sent", "completed", "errors", "errors_by_kind", "spilled", "offered_rate", "achieved_rate", "send_lag", "max_send_lag_micros", "exclusive_wait", "loadgen_cpu_fraction", "sustained", "exhausted", "latency", "operations", "results_spilled")
 
     if TYPE_CHECKING:
 
@@ -918,6 +948,7 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             exhausted: bool = False,
             latency: HdrHistogram | None = None,
             operations: list[OperationSummary] | None = None,
+            results_spilled: int = 0,
         ) -> None:
             pass
 
@@ -941,6 +972,7 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
         exhausted: bool
         latency: HdrHistogram | None
         operations: list[OperationSummary]
+        results_spilled: int
 
 _CapabilitiesFields: TypeAlias = Literal["loadgen_version", "min_schema_version", "max_schema_version", "calls", "models", "arrivals", "exclusive_keys", "ref_encodings"]
 
@@ -1018,12 +1050,13 @@ class Capabilities(Message[_CapabilitiesFields]):
         exclusive_keys: bool
         ref_encodings: list[RefEncoding]
 
-_SelftestResultFields: TypeAlias = Literal["max_rate", "added_latency", "loadgen_cpu_fraction"]
+_SelftestResultFields: TypeAlias = Literal["max_rate", "added_latency", "loadgen_cpu_fraction", "cpus", "added_latency_rate"]
 
 class SelftestResult(Message[_SelftestResultFields]):
     """
     SelftestResult is what `loadgen selftest` writes: its limits on this pod,
-    measured against an in-process HTTP server that answers at once.
+    measured against an in-process HTTP server that answers at once (the server
+    shares loadgen's process and CPUs, so the limits are conservative).
 
     ```proto
     message vibesys.evaluator.v1.SelftestResult
@@ -1031,8 +1064,8 @@ class SelftestResult(Message[_SelftestResultFields]):
 
     Attributes:
         max_rate:
-            The highest open-loop rate it sustained with send lag below its guard,
-            operations/s.
+            The highest open-loop rate it sustained (offered rate at least 99% of the
+            target, p99 send lag at most 1 ms), operations/s.
 
             ```proto
             double max_rate = 1;
@@ -1047,9 +1080,22 @@ class SelftestResult(Message[_SelftestResultFields]):
             ```proto
             double loadgen_cpu_fraction = 3;
             ```
+        cpus:
+            The CPUs loadgen may use (its cgroup quota, or the machine's CPUs), so the
+            rate per CPU is max_rate / cpus.
+
+            ```proto
+            double cpus = 4;
+            ```
+        added_latency_rate:
+            The rate added_latency and loadgen_cpu_fraction were measured at.
+
+            ```proto
+            double added_latency_rate = 5;
+            ```
     """
 
-    __slots__ = ("max_rate", "added_latency", "loadgen_cpu_fraction")
+    __slots__ = ("max_rate", "added_latency", "loadgen_cpu_fraction", "cpus", "added_latency_rate")
 
     if TYPE_CHECKING:
 
@@ -1059,12 +1105,16 @@ class SelftestResult(Message[_SelftestResultFields]):
             max_rate: float = 0,
             added_latency: HdrHistogram | None = None,
             loadgen_cpu_fraction: float = 0,
+            cpus: float = 0,
+            added_latency_rate: float = 0,
         ) -> None:
             pass
 
         max_rate: float
         added_latency: HdrHistogram | None
         loadgen_cpu_fraction: float
+        cpus: float
+        added_latency_rate: float
 
 class FileKind(Enum):
     """
@@ -1091,12 +1141,22 @@ class FileKind(Enum):
             ```proto
             FILE_KIND_SUMMARY = 3
             ```
+        SELFTEST:
+            ```proto
+            FILE_KIND_SELFTEST = 4
+            ```
+        CAPABILITIES:
+            ```proto
+            FILE_KIND_CAPABILITIES = 5
+            ```
     """
 
     UNSPECIFIED = 0
     REQUESTS = 1
     RESULTS = 2
     SUMMARY = 3
+    SELFTEST = 4
+    CAPABILITIES = 5
 
 class HttpMethod(Enum):
     """
@@ -1167,7 +1227,8 @@ class RefEncoding(Enum):
             REF_ENCODING_JSON_STRING = 2
             ```
         JSON_VALUE:
-            As a JSON value: the captured JSON text itself.
+            As a JSON value: the captured JSON text itself, with the quotes of a
+            string (a header value is inserted as a JSON string).
 
             ```proto
             REF_ENCODING_JSON_VALUE = 3
@@ -1325,7 +1386,7 @@ class CallKind(Enum):
 
 
 _DESC = file_desc(
-    b'\n"vibesys/evaluator/v1/loadgen.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto"\x9d\x01\n\nFileHeader\x12.\n\x0eschema_version\x18\x01 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12>\n\x04kind\x18\x02 \x01(\x0e2\x1e.vibesys.evaluator.v1.FileKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1f\n\x06writer\x18\x03 \x01(\tR\x06writerB\x07\xbaH\x04r\x02\x10\x01"\x80\x01\n\x0eRequestsHeader\x12O\n\x0foperation_names\x18\x01 \x03(\tR\x0eoperationNamesB&\xbaH#\x92\x01 \x08\x01\x18\x01"\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x12\x1d\n\x05count\x18\x02 \x01(\x04R\x05countB\x07\xbaH\x042\x02(\x01"\xbe\x01\n\x10PlannedOperation\x12\x1c\n\toperation\x18\x01 \x01(\rR\toperation\x12<\n\x05steps\x18\x02 \x03(\x0b2\x1a.vibesys.evaluator.v1.StepR\x05stepsB\n\xbaH\x07\x92\x01\x04\x08\x01\x10\x10\x12-\n\rexclusive_key\x18\x03 \x01(\tR\x0cexclusiveKeyB\x08\xbaH\x05r\x03\x18\x80\x02\x12\x1f\n\x0bkeep_bodies\x18\x04 \x01(\x08R\nkeepBodies"\x84\x02\n\x04Step\x124\n\x04http\x18\x01 \x01(\x0b2\x1e.vibesys.evaluator.v1.HttpCallH\x00R\x04http\x12:\n\x06thrift\x18\x02 \x01(\x0b2 .vibesys.evaluator.v1.ThriftCallH\x00R\x06thrift\x12C\n\x08captures\x18\x03 \x03(\x0b2\x1d.vibesys.evaluator.v1.CaptureR\x08capturesB\x08\xbaH\x05\x92\x01\x02\x10\x10\x126\n\rexpect_status\x18\x04 \x03(\rR\x0cexpectStatusB\x11\xbaH\x0e\x92\x01\x0b\x10\x10"\x07*\x05\x18\xd7\x04(dB\r\n\x04call\x12\x05\xbaH\x02\x08\x01"\xfa\x02\n\x08HttpCall\x12D\n\x06method\x18\x01 \x01(\x0e2 .vibesys.evaluator.v1.HttpMethodR\x06methodB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12:\n\x04path\x18\x02 \x01(\x0b2\x1e.vibesys.evaluator.v1.TemplateR\x04pathB\x06\xbaH\x03\xc8\x01\x01\x121\n\x05query\x18\x03 \x03(\x0b2\x1b.vibesys.evaluator.v1.ParamR\x05query\x125\n\x07headers\x18\x04 \x03(\x0b2\x1b.vibesys.evaluator.v1.ParamR\x07headers\x12\x12\n\x03raw\x18\x05 \x01(\x0cH\x00R\x03raw\x124\n\x04text\x18\x06 \x01(\x0b2\x1e.vibesys.evaluator.v1.TemplateH\x00R\x04text\x120\n\x04form\x18\x07 \x01(\x0b2\x1a.vibesys.evaluator.v1.FormH\x00R\x04formB\x06\n\x04body";\n\x04Form\x123\n\x06fields\x18\x01 \x03(\x0b2\x1b.vibesys.evaluator.v1.ParamR\x06fields"b\n\x05Param\x12\x1b\n\x04name\x18\x01 \x01(\tR\x04nameB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x05value\x18\x02 \x01(\x0b2\x1e.vibesys.evaluator.v1.TemplateR\x05valueB\x06\xbaH\x03\xc8\x01\x01"\x0c\n\nThriftCall"\xb1\x01\n\x08Template\x12C\n\x05parts\x18\x01 \x03(\x0b2#.vibesys.evaluator.v1.Template.PartR\x05partsB\x08\xbaH\x05\x92\x01\x02\x08\x01\x1a`\n\x04Part\x12\x1a\n\x07literal\x18\x01 \x01(\tH\x00R\x07literal\x12-\n\x03ref\x18\x02 \x01(\x0b2\x19.vibesys.evaluator.v1.RefH\x00R\x03refB\r\n\x04part\x12\x05\xbaH\x02\x08\x01"\x83\x01\n\x03Ref\x121\n\x04name\x18\x01 \x01(\tR\x04nameB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x12I\n\x08encoding\x18\x02 \x01(\x0e2!.vibesys.evaluator.v1.RefEncodingR\x08encodingB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"\xa9\x01\n\x07Capture\x121\n\x04name\x18\x01 \x01(\tR\x04nameB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x127\n\x0cjson_pointer\x18\x02 \x01(\tH\x00R\x0bjsonPointerB\x12\xbaH\x0fr\r2\x0b^(/[^/]*)+$\x12!\n\x06header\x18\x03 \x01(\tH\x00R\x06headerB\x07\xbaH\x04r\x02\x10\x01B\x0f\n\x06source\x12\x05\xbaH\x02\x08\x01"\xc0\x02\n\x0fOperationResult\x12\x14\n\x05index\x18\x01 \x01(\x04R\x05index\x12\x1c\n\toperation\x18\x02 \x01(\rR\toperation\x120\n\x14scheduled_unix_nanos\x18\x03 \x01(\x03R\x12scheduledUnixNanos\x12(\n\x10start_unix_nanos\x18\x04 \x01(\x03R\x0estartUnixNanos\x12$\n\x0eend_unix_nanos\x18\x05 \x01(\x03R\x0cendUnixNanos\x126\n\x05steps\x18\x06 \x03(\x0b2 .vibesys.evaluator.v1.StepResultR\x05steps\x12?\n\x05error\x18\x07 \x01(\x0e2\x1f.vibesys.evaluator.v1.ErrorKindR\x05errorB\x08\xbaH\x05\x82\x01\x02\x10\x01"\xcc\x02\n\nStepResult\x12(\n\x10start_unix_nanos\x18\x01 \x01(\x03R\x0estartUnixNanos\x12$\n\x0eend_unix_nanos\x18\x02 \x01(\x03R\x0cendUnixNanos\x12 \n\x06status\x18\x03 \x01(\rR\x06statusB\x08\xbaH\x05*\x03\x18\xd7\x04\x12\x14\n\x04body\x18\x04 \x01(\x0cH\x00R\x04body\x12:\n\x06digest\x18\x05 \x01(\x0b2 .vibesys.evaluator.v1.BodyDigestH\x00R\x06digest\x12?\n\x05error\x18\x06 \x01(\x0e2\x1f.vibesys.evaluator.v1.ErrorKindR\x05errorB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12-\n\rerror_message\x18\x07 \x01(\tR\x0cerrorMessageB\x08\xbaH\x05r\x03\x18\x80\x08B\n\n\x08response"E\n\nBodyDigest\x12\x1f\n\x06sha256\x18\x01 \x01(\x0cR\x06sha256B\x07\xbaH\x04z\x02h \x12\x16\n\x06length\x18\x02 \x01(\x04R\x06length"\xf1\x01\n\x0cHdrHistogram\x12?\n\x17lowest_trackable_micros\x18\x01 \x01(\x03R\x15lowestTrackableMicrosB\x07\xbaH\x04"\x02(\x01\x12A\n\x18highest_trackable_micros\x18\x02 \x01(\x03R\x16highestTrackableMicrosB\x07\xbaH\x04"\x02 \x01\x12:\n\x13significant_figures\x18\x03 \x01(\rR\x12significantFiguresB\t\xbaH\x06*\x04\x18\x05(\x01\x12!\n\x07encoded\x18\x04 \x01(\x0cR\x07encodedB\x07\xbaH\x04z\x02\x10\x01"\xac\x01\n\x10OperationSummary\x12\x1c\n\toperation\x18\x01 \x01(\rR\toperation\x12\x1c\n\tcompleted\x18\x02 \x01(\x04R\tcompleted\x12\x16\n\x06errors\x18\x03 \x01(\x04R\x06errors\x12D\n\x07latency\x18\x04 \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\x07latencyB\x06\xbaH\x03\xc8\x01\x01"\xbb\x08\n\x0cPhaseSummary\x12A\n\x05model\x18\x01 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelR\x05modelB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x121\n\x0btarget_rate\x18\x02 \x01(\x01R\ntargetRateB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x18\n\x07clients\x18\x03 \x01(\rR\x07clients\x125\n\x17window_start_unix_nanos\x18\x04 \x01(\x03R\x14windowStartUnixNanos\x121\n\x15window_end_unix_nanos\x18\x05 \x01(\x03R\x12windowEndUnixNanos\x12\x12\n\x04sent\x18\x06 \x01(\x04R\x04sent\x12\x1c\n\tcompleted\x18\x07 \x01(\x04R\tcompleted\x12\x16\n\x06errors\x18\x08 \x01(\x04R\x06errors\x12Z\n\x0eerrors_by_kind\x18\t \x03(\x0b24.vibesys.evaluator.v1.PhaseSummary.ErrorsByKindEntryR\x0cerrorsByKind\x12\x18\n\x07spilled\x18\n \x01(\x04R\x07spilled\x12*\n\x0coffered_rate\x18\x0b \x01(\x01R\x0bofferedRateB\x07\xbaH\x04\x12\x02@\x01\x12,\n\rachieved_rate\x18\x0c \x01(\x01R\x0cachievedRateB\x07\xbaH\x04\x12\x02@\x01\x12E\n\x08send_lag\x18\r \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\x07sendLagB\x06\xbaH\x03\xc8\x01\x01\x126\n\x13max_send_lag_micros\x18\x0e \x01(\x03R\x10maxSendLagMicrosB\x07\xbaH\x04"\x02(\x00\x12I\n\x0eexclusive_wait\x18\x0f \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\rexclusiveWait\x12B\n\x14loadgen_cpu_fraction\x18\x10 \x01(\x01R\x12loadgenCpuFractionB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x1c\n\tsustained\x18\x11 \x01(\x08R\tsustained\x12\x1c\n\texhausted\x18\x12 \x01(\x08R\texhausted\x12D\n\x07latency\x18\x13 \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\x07latencyB\x06\xbaH\x03\xc8\x01\x01\x12F\n\noperations\x18\x14 \x03(\x0b2&.vibesys.evaluator.v1.OperationSummaryR\noperations\x1a?\n\x11ErrorsByKindEntry\x12\x10\n\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01"\x8c\x04\n\x0cCapabilities\x120\n\x0floadgen_version\x18\x01 \x01(\tR\x0eloadgenVersionB\x07\xbaH\x04r\x02\x10\x01\x125\n\x12min_schema_version\x18\x02 \x01(\rR\x10minSchemaVersionB\x07\xbaH\x04*\x02(\x01\x125\n\x12max_schema_version\x18\x03 \x01(\rR\x10maxSchemaVersionB\x07\xbaH\x04*\x02(\x01\x12E\n\x05calls\x18\x04 \x03(\x0e2\x1e.vibesys.evaluator.v1.CallKindR\x05callsB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00\x12H\n\x06models\x18\x05 \x03(\x0e2\x1f.vibesys.evaluator.v1.LoadModelR\x06modelsB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00\x12K\n\x08arrivals\x18\x06 \x03(\x0e2\x1e.vibesys.evaluator.v1.ArrivalsR\x08arrivalsB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00\x12%\n\x0eexclusive_keys\x18\x07 \x01(\x08R\rexclusiveKeys\x12W\n\rref_encodings\x18\x08 \x03(\x0e2!.vibesys.evaluator.v1.RefEncodingR\x0crefEncodingsB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00"\xc9\x01\n\x0eSelftestResult\x12+\n\x08max_rate\x18\x01 \x01(\x01R\x07maxRateB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x12O\n\radded_latency\x18\x02 \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\x0caddedLatencyB\x06\xbaH\x03\xc8\x01\x01\x129\n\x14loadgen_cpu_fraction\x18\x03 \x01(\x01R\x12loadgenCpuFractionB\x07\xbaH\x04\x12\x02@\x01*k\n\x08FileKind\x12\x19\n\x15FILE_KIND_UNSPECIFIED\x10\x00\x12\x16\n\x12FILE_KIND_REQUESTS\x10\x01\x12\x15\n\x11FILE_KIND_RESULTS\x10\x02\x12\x15\n\x11FILE_KIND_SUMMARY\x10\x03*\x98\x01\n\nHttpMethod\x12\x1b\n\x17HTTP_METHOD_UNSPECIFIED\x10\x00\x12\x13\n\x0fHTTP_METHOD_GET\x10\x01\x12\x14\n\x10HTTP_METHOD_POST\x10\x02\x12\x13\n\x0fHTTP_METHOD_PUT\x10\x03\x12\x16\n\x12HTTP_METHOD_DELETE\x10\x04\x12\x15\n\x11HTTP_METHOD_PATCH\x10\x05*|\n\x0bRefEncoding\x12\x1c\n\x18REF_ENCODING_UNSPECIFIED\x10\x00\x12\x14\n\x10REF_ENCODING_RAW\x10\x01\x12\x1c\n\x18REF_ENCODING_JSON_STRING\x10\x02\x12\x1b\n\x17REF_ENCODING_JSON_VALUE\x10\x03*\xa2\x01\n\tErrorKind\x12\x1a\n\x16ERROR_KIND_UNSPECIFIED\x10\x00\x12\x18\n\x14ERROR_KIND_TRANSPORT\x10\x01\x12\x16\n\x12ERROR_KIND_TIMEOUT\x10\x02\x12\x15\n\x11ERROR_KIND_STATUS\x10\x03\x12\x16\n\x12ERROR_KIND_CAPTURE\x10\x04\x12\x18\n\x14ERROR_KIND_CANCELLED\x10\x05*S\n\tLoadModel\x12\x1a\n\x16LOAD_MODEL_UNSPECIFIED\x10\x00\x12\x15\n\x11LOAD_MODEL_CLOSED\x10\x01\x12\x13\n\x0fLOAD_MODEL_OPEN\x10\x02*P\n\x08Arrivals\x12\x18\n\x14ARRIVALS_UNSPECIFIED\x10\x00\x12\x14\n\x10ARRIVALS_UNIFORM\x10\x01\x12\x14\n\x10ARRIVALS_POISSON\x10\x02*O\n\x08CallKind\x12\x19\n\x15CALL_KIND_UNSPECIFIED\x10\x00\x12\x12\n\x0eCALL_KIND_HTTP\x10\x01\x12\x14\n\x10CALL_KIND_THRIFT\x10\x02B_Z]github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
+    b'\n"vibesys/evaluator/v1/loadgen.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto"\x9d\x01\n\nFileHeader\x12.\n\x0eschema_version\x18\x01 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02(\x01\x12>\n\x04kind\x18\x02 \x01(\x0e2\x1e.vibesys.evaluator.v1.FileKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1f\n\x06writer\x18\x03 \x01(\tR\x06writerB\x07\xbaH\x04r\x02\x10\x01"\x80\x01\n\x0eRequestsHeader\x12O\n\x0foperation_names\x18\x01 \x03(\tR\x0eoperationNamesB&\xbaH#\x92\x01 \x08\x01\x18\x01"\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x12\x1d\n\x05count\x18\x02 \x01(\x04R\x05countB\x07\xbaH\x042\x02(\x01"\xbe\x01\n\x10PlannedOperation\x12\x1c\n\toperation\x18\x01 \x01(\rR\toperation\x12<\n\x05steps\x18\x02 \x03(\x0b2\x1a.vibesys.evaluator.v1.StepR\x05stepsB\n\xbaH\x07\x92\x01\x04\x08\x01\x10\x10\x12-\n\rexclusive_key\x18\x03 \x01(\tR\x0cexclusiveKeyB\x08\xbaH\x05r\x03\x18\x80\x02\x12\x1f\n\x0bkeep_bodies\x18\x04 \x01(\x08R\nkeepBodies"\x84\x02\n\x04Step\x124\n\x04http\x18\x01 \x01(\x0b2\x1e.vibesys.evaluator.v1.HttpCallH\x00R\x04http\x12:\n\x06thrift\x18\x02 \x01(\x0b2 .vibesys.evaluator.v1.ThriftCallH\x00R\x06thrift\x12C\n\x08captures\x18\x03 \x03(\x0b2\x1d.vibesys.evaluator.v1.CaptureR\x08capturesB\x08\xbaH\x05\x92\x01\x02\x10\x10\x126\n\rexpect_status\x18\x04 \x03(\rR\x0cexpectStatusB\x11\xbaH\x0e\x92\x01\x0b\x10\x10"\x07*\x05\x18\xd7\x04(dB\r\n\x04call\x12\x05\xbaH\x02\x08\x01"\xfa\x02\n\x08HttpCall\x12D\n\x06method\x18\x01 \x01(\x0e2 .vibesys.evaluator.v1.HttpMethodR\x06methodB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12:\n\x04path\x18\x02 \x01(\x0b2\x1e.vibesys.evaluator.v1.TemplateR\x04pathB\x06\xbaH\x03\xc8\x01\x01\x121\n\x05query\x18\x03 \x03(\x0b2\x1b.vibesys.evaluator.v1.ParamR\x05query\x125\n\x07headers\x18\x04 \x03(\x0b2\x1b.vibesys.evaluator.v1.ParamR\x07headers\x12\x12\n\x03raw\x18\x05 \x01(\x0cH\x00R\x03raw\x124\n\x04text\x18\x06 \x01(\x0b2\x1e.vibesys.evaluator.v1.TemplateH\x00R\x04text\x120\n\x04form\x18\x07 \x01(\x0b2\x1a.vibesys.evaluator.v1.FormH\x00R\x04formB\x06\n\x04body";\n\x04Form\x123\n\x06fields\x18\x01 \x03(\x0b2\x1b.vibesys.evaluator.v1.ParamR\x06fields"b\n\x05Param\x12\x1b\n\x04name\x18\x01 \x01(\tR\x04nameB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x05value\x18\x02 \x01(\x0b2\x1e.vibesys.evaluator.v1.TemplateR\x05valueB\x06\xbaH\x03\xc8\x01\x01"\x0c\n\nThriftCall"\xb1\x01\n\x08Template\x12C\n\x05parts\x18\x01 \x03(\x0b2#.vibesys.evaluator.v1.Template.PartR\x05partsB\x08\xbaH\x05\x92\x01\x02\x08\x01\x1a`\n\x04Part\x12\x1a\n\x07literal\x18\x01 \x01(\tH\x00R\x07literal\x12-\n\x03ref\x18\x02 \x01(\x0b2\x19.vibesys.evaluator.v1.RefH\x00R\x03refB\r\n\x04part\x12\x05\xbaH\x02\x08\x01"\x83\x01\n\x03Ref\x121\n\x04name\x18\x01 \x01(\tR\x04nameB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x12I\n\x08encoding\x18\x02 \x01(\x0e2!.vibesys.evaluator.v1.RefEncodingR\x08encodingB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"\xa9\x01\n\x07Capture\x121\n\x04name\x18\x01 \x01(\tR\x04nameB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$\x127\n\x0cjson_pointer\x18\x02 \x01(\tH\x00R\x0bjsonPointerB\x12\xbaH\x0fr\r2\x0b^(/[^/]*)+$\x12!\n\x06header\x18\x03 \x01(\tH\x00R\x06headerB\x07\xbaH\x04r\x02\x10\x01B\x0f\n\x06source\x12\x05\xbaH\x02\x08\x01"\xc0\x02\n\x0fOperationResult\x12\x14\n\x05index\x18\x01 \x01(\x04R\x05index\x12\x1c\n\toperation\x18\x02 \x01(\rR\toperation\x120\n\x14scheduled_unix_nanos\x18\x03 \x01(\x03R\x12scheduledUnixNanos\x12(\n\x10start_unix_nanos\x18\x04 \x01(\x03R\x0estartUnixNanos\x12$\n\x0eend_unix_nanos\x18\x05 \x01(\x03R\x0cendUnixNanos\x126\n\x05steps\x18\x06 \x03(\x0b2 .vibesys.evaluator.v1.StepResultR\x05steps\x12?\n\x05error\x18\x07 \x01(\x0e2\x1f.vibesys.evaluator.v1.ErrorKindR\x05errorB\x08\xbaH\x05\x82\x01\x02\x10\x01"\xcc\x02\n\nStepResult\x12(\n\x10start_unix_nanos\x18\x01 \x01(\x03R\x0estartUnixNanos\x12$\n\x0eend_unix_nanos\x18\x02 \x01(\x03R\x0cendUnixNanos\x12 \n\x06status\x18\x03 \x01(\rR\x06statusB\x08\xbaH\x05*\x03\x18\xd7\x04\x12\x14\n\x04body\x18\x04 \x01(\x0cH\x00R\x04body\x12:\n\x06digest\x18\x05 \x01(\x0b2 .vibesys.evaluator.v1.BodyDigestH\x00R\x06digest\x12?\n\x05error\x18\x06 \x01(\x0e2\x1f.vibesys.evaluator.v1.ErrorKindR\x05errorB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12-\n\rerror_message\x18\x07 \x01(\tR\x0cerrorMessageB\x08\xbaH\x05r\x03\x18\x80\x08B\n\n\x08response"E\n\nBodyDigest\x12\x1f\n\x06sha256\x18\x01 \x01(\x0cR\x06sha256B\x07\xbaH\x04z\x02h \x12\x16\n\x06length\x18\x02 \x01(\x04R\x06length"\xf1\x01\n\x0cHdrHistogram\x12?\n\x17lowest_trackable_micros\x18\x01 \x01(\x03R\x15lowestTrackableMicrosB\x07\xbaH\x04"\x02(\x01\x12A\n\x18highest_trackable_micros\x18\x02 \x01(\x03R\x16highestTrackableMicrosB\x07\xbaH\x04"\x02 \x01\x12:\n\x13significant_figures\x18\x03 \x01(\rR\x12significantFiguresB\t\xbaH\x06*\x04\x18\x05(\x01\x12!\n\x07encoded\x18\x04 \x01(\x0cR\x07encodedB\x07\xbaH\x04z\x02\x10\x01"\xac\x01\n\x10OperationSummary\x12\x1c\n\toperation\x18\x01 \x01(\rR\toperation\x12\x1c\n\tcompleted\x18\x02 \x01(\x04R\tcompleted\x12\x16\n\x06errors\x18\x03 \x01(\x04R\x06errors\x12D\n\x07latency\x18\x04 \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\x07latencyB\x06\xbaH\x03\xc8\x01\x01"\xe4\x08\n\x0cPhaseSummary\x12A\n\x05model\x18\x01 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelR\x05modelB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x121\n\x0btarget_rate\x18\x02 \x01(\x01R\ntargetRateB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x18\n\x07clients\x18\x03 \x01(\rR\x07clients\x125\n\x17window_start_unix_nanos\x18\x04 \x01(\x03R\x14windowStartUnixNanos\x121\n\x15window_end_unix_nanos\x18\x05 \x01(\x03R\x12windowEndUnixNanos\x12\x12\n\x04sent\x18\x06 \x01(\x04R\x04sent\x12\x1c\n\tcompleted\x18\x07 \x01(\x04R\tcompleted\x12\x16\n\x06errors\x18\x08 \x01(\x04R\x06errors\x12Z\n\x0eerrors_by_kind\x18\t \x03(\x0b24.vibesys.evaluator.v1.PhaseSummary.ErrorsByKindEntryR\x0cerrorsByKind\x12\x18\n\x07spilled\x18\n \x01(\x04R\x07spilled\x12*\n\x0coffered_rate\x18\x0b \x01(\x01R\x0bofferedRateB\x07\xbaH\x04\x12\x02@\x01\x12,\n\rachieved_rate\x18\x0c \x01(\x01R\x0cachievedRateB\x07\xbaH\x04\x12\x02@\x01\x12E\n\x08send_lag\x18\r \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\x07sendLagB\x06\xbaH\x03\xc8\x01\x01\x126\n\x13max_send_lag_micros\x18\x0e \x01(\x03R\x10maxSendLagMicrosB\x07\xbaH\x04"\x02(\x00\x12I\n\x0eexclusive_wait\x18\x0f \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\rexclusiveWait\x12B\n\x14loadgen_cpu_fraction\x18\x10 \x01(\x01R\x12loadgenCpuFractionB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x1c\n\tsustained\x18\x11 \x01(\x08R\tsustained\x12\x1c\n\texhausted\x18\x12 \x01(\x08R\texhausted\x12D\n\x07latency\x18\x13 \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\x07latencyB\x06\xbaH\x03\xc8\x01\x01\x12F\n\noperations\x18\x14 \x03(\x0b2&.vibesys.evaluator.v1.OperationSummaryR\noperations\x12\'\n\x0fresults_spilled\x18\x15 \x01(\x04R\x0eresultsSpilled\x1a?\n\x11ErrorsByKindEntry\x12\x10\n\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01"\x8c\x04\n\x0cCapabilities\x120\n\x0floadgen_version\x18\x01 \x01(\tR\x0eloadgenVersionB\x07\xbaH\x04r\x02\x10\x01\x125\n\x12min_schema_version\x18\x02 \x01(\rR\x10minSchemaVersionB\x07\xbaH\x04*\x02(\x01\x125\n\x12max_schema_version\x18\x03 \x01(\rR\x10maxSchemaVersionB\x07\xbaH\x04*\x02(\x01\x12E\n\x05calls\x18\x04 \x03(\x0e2\x1e.vibesys.evaluator.v1.CallKindR\x05callsB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00\x12H\n\x06models\x18\x05 \x03(\x0e2\x1f.vibesys.evaluator.v1.LoadModelR\x06modelsB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00\x12K\n\x08arrivals\x18\x06 \x03(\x0e2\x1e.vibesys.evaluator.v1.ArrivalsR\x08arrivalsB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00\x12%\n\x0eexclusive_keys\x18\x07 \x01(\x08R\rexclusiveKeys\x12W\n\rref_encodings\x18\x08 \x03(\x0e2!.vibesys.evaluator.v1.RefEncodingR\x0crefEncodingsB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00"\xaf\x02\n\x0eSelftestResult\x12+\n\x08max_rate\x18\x01 \x01(\x01R\x07maxRateB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x12O\n\radded_latency\x18\x02 \x01(\x0b2".vibesys.evaluator.v1.HdrHistogramR\x0caddedLatencyB\x06\xbaH\x03\xc8\x01\x01\x129\n\x14loadgen_cpu_fraction\x18\x03 \x01(\x01R\x12loadgenCpuFractionB\x07\xbaH\x04\x12\x02@\x01\x12$\n\x04cpus\x18\x04 \x01(\x01R\x04cpusB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x12>\n\x12added_latency_rate\x18\x05 \x01(\x01R\x10addedLatencyRateB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00*\x9f\x01\n\x08FileKind\x12\x19\n\x15FILE_KIND_UNSPECIFIED\x10\x00\x12\x16\n\x12FILE_KIND_REQUESTS\x10\x01\x12\x15\n\x11FILE_KIND_RESULTS\x10\x02\x12\x15\n\x11FILE_KIND_SUMMARY\x10\x03\x12\x16\n\x12FILE_KIND_SELFTEST\x10\x04\x12\x1a\n\x16FILE_KIND_CAPABILITIES\x10\x05*\x98\x01\n\nHttpMethod\x12\x1b\n\x17HTTP_METHOD_UNSPECIFIED\x10\x00\x12\x13\n\x0fHTTP_METHOD_GET\x10\x01\x12\x14\n\x10HTTP_METHOD_POST\x10\x02\x12\x13\n\x0fHTTP_METHOD_PUT\x10\x03\x12\x16\n\x12HTTP_METHOD_DELETE\x10\x04\x12\x15\n\x11HTTP_METHOD_PATCH\x10\x05*|\n\x0bRefEncoding\x12\x1c\n\x18REF_ENCODING_UNSPECIFIED\x10\x00\x12\x14\n\x10REF_ENCODING_RAW\x10\x01\x12\x1c\n\x18REF_ENCODING_JSON_STRING\x10\x02\x12\x1b\n\x17REF_ENCODING_JSON_VALUE\x10\x03*\xa2\x01\n\tErrorKind\x12\x1a\n\x16ERROR_KIND_UNSPECIFIED\x10\x00\x12\x18\n\x14ERROR_KIND_TRANSPORT\x10\x01\x12\x16\n\x12ERROR_KIND_TIMEOUT\x10\x02\x12\x15\n\x11ERROR_KIND_STATUS\x10\x03\x12\x16\n\x12ERROR_KIND_CAPTURE\x10\x04\x12\x18\n\x14ERROR_KIND_CANCELLED\x10\x05*S\n\tLoadModel\x12\x1a\n\x16LOAD_MODEL_UNSPECIFIED\x10\x00\x12\x15\n\x11LOAD_MODEL_CLOSED\x10\x01\x12\x13\n\x0fLOAD_MODEL_OPEN\x10\x02*P\n\x08Arrivals\x12\x18\n\x14ARRIVALS_UNSPECIFIED\x10\x00\x12\x14\n\x10ARRIVALS_UNIFORM\x10\x01\x12\x14\n\x10ARRIVALS_POISSON\x10\x02*O\n\x08CallKind\x12\x19\n\x15CALL_KIND_UNSPECIFIED\x10\x00\x12\x12\n\x0eCALL_KIND_HTTP\x10\x01\x12\x14\n\x10CALL_KIND_THRIFT\x10\x02B_Z]github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
     [
         validate_pb.desc(),
     ],
