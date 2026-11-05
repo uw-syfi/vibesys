@@ -300,6 +300,21 @@ func TestAJobsStateIsWhatSlurmSays(t *testing.T) {
 	}
 }
 
+// A queued job's state carries Slurm's estimate of its start when it gives one, and a running
+// job's its node; neither is made up when Slurm writes none.
+func TestAQueuedJobsStateSaysWhenSlurmExpectsItToStart(t *testing.T) {
+	for out, want := range map[string]apptainer.JobState{
+		"squeue 0\nPENDING|Priority|2026-11-05T22:14:03|\n==sacct==\n":   {Phase: apptainer.Queued, Name: "PENDING", Reason: "Priority", Start: "2026-11-05T22:14:03"},
+		"squeue 0\nPENDING|Resources|N/A|\n==sacct==\n":                  {Phase: apptainer.Queued, Name: "PENDING", Reason: "Resources"},
+		"squeue 0\nPENDING|Priority|Unknown|\n==sacct==\n":               {Phase: apptainer.Queued, Name: "PENDING", Reason: "Priority"},
+		"squeue 0\nRUNNING|None|2026-11-05T19:01:00|node-a\n==sacct==\n": {Phase: apptainer.Running, Name: "RUNNING", Reason: "None", Node: "node-a"},
+	} {
+		if got, err := clustercli.ParseState(out); err != nil || got != want {
+			t.Errorf("%q: %+v, %v; want %+v", out, got, err, want)
+		}
+	}
+}
+
 func TestOnlyThisPackagesJobsOfTheScopeAreListed(t *testing.T) {
 	out := "vibesys-apptainer-vibesys-cli-01|d1\nvibesys-apptainer-vibesys-cli-02|d2\nother-job|d1\nvibesys-docker-vibesys-cli-03|d1\n\n"
 	if got := clustercli.ParseJobs(out, "d1"); !slices.Equal(got, []string{"vibesys-apptainer-vibesys-cli-01"}) {

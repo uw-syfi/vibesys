@@ -106,6 +106,11 @@ type JobState struct {
 	Name string
 	// Reason is why a queued job waits, as Slurm says it.
 	Reason string
+	// Start is when Slurm estimates a queued job starts, as it writes the time (in the cluster's
+	// time zone), when it gives an estimate.
+	Start string
+	// Node is the node of a running job, as Slurm names it.
+	Node string
 }
 
 // Node is the node of a running allocation. Each call runs on the node, inside the allocation.

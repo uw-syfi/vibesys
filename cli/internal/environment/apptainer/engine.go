@@ -359,13 +359,19 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 	e.boxes[spec.Name] = b
 	e.mu.Unlock()
 
+	// The image was converted as part of its build, whose log says so; this is the rare start of an
+	// image no build of this process made, and the run's log carries nothing but the wait below.
 	sif, err := e.publish(ctx, spec.Image, io.Discard)
 	if err != nil {
 		e.forget(b)
 		return nil, err
 	}
+	log := spec.Log
+	if log == nil {
+		log = io.Discard
+	}
 	if !joins {
-		if err := e.allocate(ctx, b); err != nil {
+		if err := e.allocate(ctx, b, log); err != nil {
 			// The allocation may exist: the box stays known, so Remove cancels it.
 			return nil, err
 		}
@@ -377,9 +383,9 @@ func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 	return &handle{e: e, b: b, node: node}, nil
 }
 
-// allocate asks for the box's allocation, waits for it to run, holds it for this process, and reads
-// its node.
-func (e *Engine) allocate(ctx context.Context, b *box) error {
+// allocate asks for the box's allocation, waits for it to run, saying to log what Slurm says of the
+// wait, holds it for this process, and reads its node.
+func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
 	limit := NoLimit
 	if b.spec.Limit > 0 {
 		limit = b.spec.Limit
@@ -394,7 +400,7 @@ func (e *Engine) allocate(ctx context.Context, b *box) error {
 	e.mu.Lock()
 	b.job = job
 	e.mu.Unlock()
-	if err := e.await(ctx, job); err != nil {
+	if err := e.await(ctx, job, log); err != nil {
 		return err
 	}
 	node := e.cfg.Cluster.Node(job)
@@ -408,10 +414,16 @@ func (e *Engine) allocate(ctx context.Context, b *box) error {
 	return e.read(ctx, node)
 }
 
-// await waits for the job to run, pausing between reads of its state, up to QueueTimeout.
-func (e *Engine) await(ctx context.Context, job string) error {
+// await waits for the job to run, pausing between reads of its state, up to QueueTimeout. When
+// the job waits in the queue, what Slurm says of it (its state, its reason and its estimate of the
+// start) goes to log when the wait begins and whenever it changes, and its node and the length of
+// the wait once it runs, so that the run's log says why nothing ran yet. A job that runs at once
+// writes nothing.
+func (e *Engine) await(ctx context.Context, job string, log io.Writer) error {
 	limit, stop := e.cfg.Timers.Timeout(ctx, e.cfg.QueueTimeout)
 	defer stop()
+	since := e.cfg.Clock.Now()
+	var said *JobState
 	for {
 		st, err := e.cfg.Cluster.State(ctx, job)
 		if err != nil {
@@ -419,7 +431,16 @@ func (e *Engine) await(ctx context.Context, job string) error {
 		}
 		switch st.Phase {
 		case Running:
+			if said != nil {
+				_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s runs on %s, after %v in Slurm's queue\n",
+					job, orUnknown(st.Node), e.cfg.Clock.Now().Sub(since).Round(time.Second))
+			}
 			return nil
+		case Queued:
+			if said == nil || st.Name != said.Name || st.Reason != said.Reason || st.Start != said.Start {
+				_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s waits in Slurm's queue: %s\n", job, queued(st))
+				said = &st
+			}
 		case Ended:
 			return unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
 		}
@@ -439,6 +460,20 @@ func (e *Engine) await(ctx context.Context, job string) error {
 			return ctx.Err()
 		}
 	}
+}
+
+// queued says what Slurm says of a queued job, for a person.
+func queued(st JobState) string {
+	out := orUnknown(st.Name)
+	if st.Reason != "" {
+		out += " (" + st.Reason + ")"
+	}
+	if st.Start != "" {
+		out += "; Slurm expects it to start at " + st.Start
+	} else {
+		out += "; Slurm gives no estimate of its start"
+	}
+	return out
 }
 
 func orUnknown(s string) string {

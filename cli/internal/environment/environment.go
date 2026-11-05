@@ -39,7 +39,9 @@ type Environment interface {
 	Fingerprint(ctx context.Context) (core.Fingerprint, error)
 
 	// Run executes one command in the checkout, with its service if the execution names one,
-	// writing the combined output to out as it appears.
+	// writing the combined output to out as it appears. An environment that waits before the
+	// command starts, as for a cluster's queue, may first write to out whole lines that say why,
+	// each starting with "[" and its name; it writes nothing of its own otherwise.
 	//
 	// It ends the whole process group of the command and of the service on every path: normal
 	// exit, timeout, cancellation of ctx and a service that never became ready, so nothing

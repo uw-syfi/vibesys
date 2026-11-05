@@ -227,6 +227,46 @@ func TestARunWaitsInTheQueue(t *testing.T) {
 	nothingLeft(t, cluster)
 }
 
+// A run whose allocation waits in Slurm's queue says so in its output before its command's: what
+// Slurm says of the allocation when the wait begins, again each time its state, its reason or its
+// estimate of the start changes and not at every read, and its node and the wait once it runs. A
+// run whose allocation runs at once says nothing of it.
+func TestARunSaysWhySlurmKeepsItsAllocationWaiting(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	early := apptainer.JobState{Name: "PENDING", Reason: "Priority", Start: "2026-11-05T22:14:03"}
+	later := apptainer.JobState{Name: "PENDING", Reason: "Priority", Start: "2026-11-05T23:40:00"}
+	resources := apptainer.JobState{Name: "PENDING", Reason: "Resources"}
+	cluster.QueueSaying(early, early, later, later, later, resources)
+	r := newRig(t, w, cluster, setup{engineTimers: clock.Immediate{Longest: apptainer.DefaultPoll}})
+	a, out := run(t, r.env, "print", "hello")
+	exited(t, a, 0)
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	want := []string{
+		"[apptainer] the allocation 1001 waits in Slurm's queue: PENDING (Priority); Slurm expects it to start at 2026-11-05T22:14:03",
+		"[apptainer] the allocation 1001 waits in Slurm's queue: PENDING (Priority); Slurm expects it to start at 2026-11-05T23:40:00",
+		"[apptainer] the allocation 1001 waits in Slurm's queue: PENDING (Resources); Slurm gives no estimate of its start",
+	}
+	if len(lines) != len(want)+2 || !slices.Equal(lines[:len(want)], want) {
+		t.Fatalf("output\n%s\nwant the lines\n%s\nthen the allocation running and the command's output", out, strings.Join(want, "\n"))
+	}
+	if running := lines[len(want)]; !strings.HasPrefix(running, "[apptainer] the allocation 1001 runs on "+clusterfake.NodeName+", after ") ||
+		!strings.HasSuffix(running, "in Slurm's queue") {
+		t.Errorf("the line once it runs: %q", running)
+	}
+	if lines[len(lines)-1] != "hello" {
+		t.Errorf("the command's output: %q", lines[len(lines)-1])
+	}
+
+	cluster.QueueSaying()
+	a, out = run(t, newRig(t, w, cluster, setup{process: 1}).env, "print", "hello")
+	exited(t, a, 0)
+	if out != "hello\n" {
+		t.Errorf("a run whose allocation ran at once wrote %q", out)
+	}
+	nothingLeft(t, cluster)
+}
+
 // A job that waits longer than the queue's bound is cancelled, and the run fails before its
 // command with what Slurm said of the wait; a job Slurm ends before it runs fails the same way.
 func TestAJobThatNeverRunsFailsTheRunSayingWhy(t *testing.T) {

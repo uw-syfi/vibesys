@@ -152,6 +152,10 @@ type ContainerSpec struct {
 	// Measured says the container's commands are timed: an engine that places the container in
 	// an allocation gives it the whole machine, and an unmeasured container only its share.
 	Measured bool
+	// Log, when set, is the run's output, where an engine that waits while it starts the container,
+	// as for a cluster's queue, says why in whole lines (environment.Environment.Run). It writes
+	// nothing there otherwise, and nothing once Start has returned.
+	Log io.Writer
 }
 
 var (

@@ -193,6 +193,7 @@ func (r *run) prepareAndExecute() core.Attempt {
 // start starts a container of the run.
 func (r *run) start(b *box, spec ContainerSpec) error {
 	b.attempted = true
+	spec.Log = r.sink
 	c, err := r.e.p.cfg.Engine.Start(r.ctx, spec)
 	b.container = c
 	return err

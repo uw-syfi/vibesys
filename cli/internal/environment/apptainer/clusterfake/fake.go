@@ -50,6 +50,7 @@ type Cluster struct {
 	ports     int
 	says      map[string]string
 	queued    int // how many reads of its state a new job waits for before it runs
+	saying    []apptainer.JobState
 	ends      bool
 	fail      func(op string) error
 	started   []apptainer.Box
@@ -62,6 +63,8 @@ type job struct {
 	phase             apptainer.Phase
 	state             string
 	waits             int
+	reads             int                  // the reads of its state while it was queued
+	saying            []apptainer.JobState // what Slurm says of it while it is queued, read by read
 	boxes             map[string]*box
 	ports             []int // the ports the node chose in it
 }
@@ -88,6 +91,17 @@ func (c *Cluster) Queue(n int, ends bool) {
 	defer c.mu.Unlock()
 	c.queued, c.ends = n, ends
 }
+
+// QueueSaying makes every later job wait in the queue for one read of its state for each of the
+// states, which say in turn what Slurm says of it, and then run.
+func (c *Cluster) QueueSaying(states ...apptainer.JobState) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.queued, c.saying, c.ends = len(states), slices.Clone(states), false
+}
+
+// NodeName is the name Slurm gives the node of every running job of the fake.
+const NodeName = "node-a"
 
 // Say sets what every node prints for the script of the name.
 func (c *Cluster) Say(script, out string) {
@@ -303,7 +317,7 @@ func (cl *Client) Submit(ctx context.Context, a apptainer.Allocation) (string, e
 	defer c.mu.Unlock()
 	c.ids++
 	id := strconv.Itoa(1000 + c.ids)
-	j := &job{id: id, name: a.Name, comment: a.Comment, phase: apptainer.Queued, state: "PENDING", waits: c.queued, boxes: map[string]*box{}}
+	j := &job{id: id, name: a.Name, comment: a.Comment, phase: apptainer.Queued, state: "PENDING", waits: c.queued, saying: c.saying, boxes: map[string]*box{}}
 	if c.queued == 0 && !c.ends {
 		j.phase, j.state = apptainer.Running, "RUNNING"
 	}
@@ -332,7 +346,19 @@ func (cl *Client) State(ctx context.Context, id string) (apptainer.JobState, err
 			}
 		}
 	}
-	return apptainer.JobState{Phase: j.phase, Name: j.state, Reason: map[bool]string{true: "Priority"}[j.phase == apptainer.Queued]}, nil
+	switch j.phase {
+	case apptainer.Queued:
+		j.reads++
+		if j.reads <= len(j.saying) {
+			st := j.saying[j.reads-1]
+			st.Phase = apptainer.Queued
+			return st, nil
+		}
+		return apptainer.JobState{Phase: j.phase, Name: j.state, Reason: "Priority"}, nil
+	case apptainer.Running:
+		return apptainer.JobState{Phase: j.phase, Name: j.state, Node: NodeName}, nil
+	}
+	return apptainer.JobState{Phase: j.phase, Name: j.state}, nil
 }
 
 // Jobs implements apptainer.Cluster.

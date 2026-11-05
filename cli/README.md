@@ -819,6 +819,13 @@ start without it, saying to install it.
   container and commented with the daemon's scope. Its time limit is the command's limit and 10
   minutes for the stop. A holder step keeps it for the run: when the run ends, or the daemon dies
   and its ssh connection with it, the holder cancels the allocation.
+- A run is one command of a job, so each command has an allocation of its own: a check job's
+  stages, and a measure's check and each of its benchmark samples, each wait in Slurm's queue
+  again. On a busy partition a measure can wait between its samples. While an allocation waits, the
+  run says why in the job's log, before its command's output: Slurm's state of the allocation, its
+  reason and its estimate of the start (`squeue -o %T|%r|%S`) when the wait begins and each time
+  one of them changes, and the node and how long it waited once it runs. A run whose allocation
+  runs at once writes nothing of it. `vibesys-cli jobs` shows such a job as running.
 - The AMD GPUs a job gets are its allocation's: Slurm keeps two allocations off one GPU, and gives
   a measure the whole node with `[slurm] exclusive` (the default). So the GPUs are claimed per
   placement, `rocm:<placement>@<login node>`: a measure holds its own placement alone, and the

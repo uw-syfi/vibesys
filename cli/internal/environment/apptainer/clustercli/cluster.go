@@ -273,8 +273,9 @@ func ParseJobID(out string) (string, error) {
 // user is how a command names the shell's user.
 const user = `"$(id -un)"`
 
-// stateScript prints squeue's state and reason of job $1, its exit status, and sacct's states.
-const stateScript = `q=$(squeue -h -j "$1" -o '%T|%r' 2>&1); r=$?
+// stateScript prints squeue's state, reason, estimated start and node of job $1, its exit status,
+// and sacct's states.
+const stateScript = `q=$(squeue -h -j "$1" -o '%T|%r|%S|%N' 2>&1); r=$?
 printf 'squeue %s\n%s\n==sacct==\n' "$r" "$q"
 sacct -n -X -P -j "$1" -o State 2>/dev/null || true`
 
@@ -290,8 +291,9 @@ func (c *Cluster) State(ctx context.Context, job string) (apptainer.JobState, er
 	return ParseState(out)
 }
 
-// ParseState reads stateScript's output. A job squeue lists is queued or running as it says, and
-// any other state of it is ended; one it does not know is what sacct says, and ended when sacct
+// ParseState reads stateScript's output. A job squeue lists is queued or running as it says, with
+// its reason, Slurm's estimate of its start while it is queued (none for "N/A" or "Unknown") and
+// its node while it runs, and any other state of it is ended; one it does not know is what sacct says, and ended when sacct
 // knows nothing of it either. A squeue that failed for another reason than an unknown job is no
 // answer.
 func ParseState(out string) (apptainer.JobState, error) {
@@ -302,8 +304,18 @@ func ParseState(out string) (apptainer.JobState, error) {
 		return apptainer.JobState{}, unavailable("squeue failed: %s", clip(squeue))
 	}
 	if strings.TrimSpace(status) == "squeue 0" && squeue != "" {
-		name, reason, _ := strings.Cut(strings.Split(squeue, "\n")[0], "|")
-		return apptainer.JobState{Phase: phaseOf(name), Name: name, Reason: strings.TrimSpace(reason)}, nil
+		f := append(strings.Split(strings.Split(squeue, "\n")[0], "|"), "", "", "")
+		name := strings.TrimSpace(f[0])
+		st := apptainer.JobState{Phase: phaseOf(name), Name: name, Reason: strings.TrimSpace(f[1])}
+		switch start := strings.TrimSpace(f[2]); {
+		case st.Phase != apptainer.Queued, start == "N/A", strings.EqualFold(start, "Unknown"):
+		default:
+			st.Start = start
+		}
+		if st.Phase == apptainer.Running {
+			st.Node = strings.TrimSpace(f[3])
+		}
+		return st, nil
 	}
 	for _, line := range strings.Split(sacct, "\n") {
 		if f := strings.Fields(line); len(f) > 0 {
