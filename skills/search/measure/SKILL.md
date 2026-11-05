@@ -43,7 +43,8 @@ them. Use the task's own commands through `check` and `measure`; do not rebuild 
 Everything that puts load on the machine goes through a job, so the daemon decides what runs
 together and the numbers stay clean: a measure job holds its placement alone, while checks and
 command jobs may share it up to the placement's `max_jobs`. Do not start a benchmark, a profiler
-or a server in your own shell.
+or a server in your own shell. Unit tests and in-process microbenchmarks that finish in seconds
+are checks, not load: run them in your worktree.
 
 ## Wait
 
