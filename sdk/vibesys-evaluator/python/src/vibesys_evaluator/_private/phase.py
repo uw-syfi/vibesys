@@ -12,7 +12,9 @@ starts and the responses are checked after it exits.
 3. Run loadgen over the plan.
 4. Check: a fresh model, the history and this phase's sent writes applied in
    start order, then ``check`` on every sampled operation that loadgen
-   counted as a success, in start order.
+   counted as a success, in start order. The results file is streamed and
+   only the results of writes and sampled operations are kept, so the
+   check's memory grows with the sample, not with the plan.
 """
 
 from __future__ import annotations
@@ -28,8 +30,8 @@ from vibesys_evaluator._private.calls import Call, Response
 from vibesys_evaluator._private.deploy import PHASE_INPUT_FILE, PHASE_OUTPUT_FILE
 from vibesys_evaluator._private.files import (
     DelimitedWriter,
+    iter_results,
     read_message,
-    read_results,
     read_summary,
     write_message,
 )
@@ -143,8 +145,8 @@ class Plan:
     """What generation remembers about the plan for the check: per operation, its kind and info."""
 
     operations: list[int] = field(default_factory=list)
-    #: Sampled operations and writes: the info after a JSON round trip, and its text.
-    infos: dict[int, tuple[str, dict[str, Any]]] = field(default_factory=dict)
+    #: Sampled operations and writes: the info's JSON text (parsed again when checked).
+    infos: dict[int, str] = field(default_factory=dict)
     sampled: set[int] = field(default_factory=set)
 
 
@@ -177,7 +179,7 @@ def generate(
             plan.operations.append(choice)
             if sampled or operation.apply is not None:
                 info = _roundtrip(request_info(request), operation.name)
-                plan.infos[index] = info
+                plan.infos[index] = info[0]
                 if sampled:
                     plan.sampled.add(index)
                 if operation.apply is not None:
@@ -243,7 +245,7 @@ def _writes(
     return [
         phase_pb.HistoryEntry(
             operation=operation.name,
-            info_json=plan.infos[result.index][0],
+            info_json=plan.infos[result.index],
             start_unix_nanos=result.start_unix_nanos,
             end_unix_nanos=result.end_unix_nanos,
             ok=result.error == pb.ErrorKind.UNSPECIFIED,
@@ -261,12 +263,16 @@ def check(
     phase: phase_pb.PhaseInput,
     plan: Plan,
     summary: pb.PhaseSummary,
-    results: Sequence[pb.OperationResult],
+    results: Iterable[pb.OperationResult],
 ) -> phase_pb.PhaseOutput:
-    """Check the sample and collect this phase's writes."""
+    """Check the sample and collect this phase's writes.
+
+    Only the results of writes and sampled operations are kept from ``results``
+    (which may be a stream): the others are never checked and never applied.
+    """
     operations = list(workload.operations)
     by_index = sorted(
-        (r for r in results if r.index < len(plan.operations)),
+        (r for r in results if r.index < len(plan.operations) and r.index in plan.infos),
         key=lambda r: (r.start_unix_nanos, r.index),
     )
     writes = _writes(operations, plan, by_index)
@@ -279,7 +285,7 @@ def check(
         operation = operations[plan.operations[result.index]]
         if operation.check is None:  # only operations with a check are sampled
             continue
-        call = _call(result, plan.infos[result.index][1])
+        call = _call(result, json.loads(plan.infos[result.index]))
         try:
             problem = operation.check(model, call)
         except Exception as error:
@@ -355,9 +361,8 @@ def run_pod(
         msg = f"loadgen exited {done.code}: {done.stderr.strip()[-_MAX_MESSAGE:]}"
         raise PhaseError(msg)
     summary = read_summary(files.summary)
-    results = read_results(files.results)
     checking = clock()
-    output = check(task.workload, data, phase, plan, summary, results)
+    output = check(task.workload, data, phase, plan, summary, iter_results(files.results))
     output.generate_secs = generated - started
     output.check_secs = clock() - checking
     with files.results.open("rb") as raw, gzip.open(work / RESULTS_FILE, "wb") as packed:

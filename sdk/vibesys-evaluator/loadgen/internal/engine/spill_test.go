@@ -39,10 +39,7 @@ func TestPhaseIsSustainedWhileTheResultsReaderIsStalled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := indexedPlan(t, 1200, nil)
-	for i := range p.Ops {
-		p.Ops[i].KeepBodies = true
-	}
+	p := indexedPlanKeeping(t, 1200)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute) // hang guard only
 	defer cancel()
 	config := engine.Config{

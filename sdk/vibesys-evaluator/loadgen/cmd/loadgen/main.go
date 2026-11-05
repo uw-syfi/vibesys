@@ -223,12 +223,11 @@ func phaseCommand(ctx context.Context, model string, args []string) error {
 }
 
 func readPlan(path string, format files.Format) (*plan.Plan, error) {
-	file, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("--requests: %w", err)
 	}
-	defer func() { _ = file.Close() }()
-	p, err := plan.Read(file, format)
+	p, err := plan.Parse(data, format)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

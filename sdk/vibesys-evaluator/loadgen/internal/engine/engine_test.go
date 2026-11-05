@@ -59,9 +59,21 @@ func serve(t *testing.T, handler http.HandlerFunc) *call.Client {
 // indexedPlan is count GETs of /op/<index>, optionally keyed.
 func indexedPlan(t *testing.T, count int, key func(int) string) *plan.Plan {
 	t.Helper()
+	return newIndexedPlan(t, count, key, false)
+}
+
+// indexedPlanKeeping is indexedPlan with every response body kept.
+func indexedPlanKeeping(t *testing.T, count int) *plan.Plan {
+	t.Helper()
+	return newIndexedPlan(t, count, nil, true)
+}
+
+func newIndexedPlan(t *testing.T, count int, key func(int) string, keep bool) *plan.Plan {
+	t.Helper()
 	ops := make([]*pb.PlannedOperation, count)
 	for i := range ops {
 		ops[i] = messages.Op(uint32(i%2), messages.Get("/op/"+strconv.Itoa(i)))
+		ops[i].KeepBodies = keep
 		if key != nil {
 			ops[i].ExclusiveKey = key(i)
 		}
@@ -330,5 +342,42 @@ func TestPoissonArrivalsAreSeeded(t *testing.T) {
 	}
 	if mean := last.Seconds() / 100_000; mean < 0.00098 || mean > 0.00102 || !differs {
 		t.Fatalf("mean gap %v s, seeds differ %v", mean, differs)
+	}
+}
+
+// An exhausted closed loop's rates are over the time it ran, not the whole window: 40 operations
+// of 10 ms on 2 clients take about 200 ms of a 2 s window, so the rate is near 200/s, not 20/s.
+func TestExhaustedClosedLoopRatesCoverTheTimeItRan(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) { time.Sleep(10 * time.Millisecond) })
+	config := engine.Config{Load: engine.Closed{Clients: 2}, Window: 2 * time.Second, Timeout: 5 * time.Second}
+	s, _ := run(t, config, indexedPlan(t, 40, nil), client)
+	stopped := s.GetExhaustedUnixNanos()
+	if !s.GetExhausted() || stopped <= s.GetWindowStartUnixNanos() || stopped >= s.GetWindowEndUnixNanos() {
+		t.Fatalf("exhausted %v at %d, window [%d, %d)", s.GetExhausted(), stopped, s.GetWindowStartUnixNanos(), s.GetWindowEndUnixNanos())
+	}
+	ran := float64(stopped-s.GetWindowStartUnixNanos()) / 1e9
+	if want := 40 / ran; s.GetAchievedRate() < 0.99*want || s.GetAchievedRate() < 60 {
+		t.Fatalf("achieved %.1f ops/s over %.3f s, want %.1f (the whole window would give 20)", s.GetAchievedRate(), ran, want)
+	}
+}
+
+// An application that holds every sender (4 senders, 50 ms responses, 200 operations/s offered)
+// saturates the open loop: its late operations are counted as saturated, so the send lag is
+// attributed to the application. A fast application leaves the senders free and counts none.
+func TestOpenLoopCountsOperationsDueWhileEverySenderIsBusy(t *testing.T) {
+	slow := serve(t, func(w http.ResponseWriter, r *http.Request) { time.Sleep(50 * time.Millisecond) })
+	config := engine.Config{
+		Load:   engine.Open{Rate: 200, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 4},
+		Window: time.Second, Timeout: 5 * time.Second,
+	}
+	s, _ := run(t, config, indexedPlan(t, 400, nil), slow)
+	if s.GetSaturated() < s.GetCompleted()/2 || s.GetMaxSendLagMicros() < 100_000 {
+		t.Fatalf("slow application: saturated %d of %d, max send lag %d us", s.GetSaturated(), s.GetCompleted(), s.GetMaxSendLagMicros())
+	}
+	fast := serve(t, func(w http.ResponseWriter, r *http.Request) {})
+	config.Load = engine.Open{Rate: 200, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 64}
+	s, _ = run(t, config, indexedPlan(t, 400, nil), fast)
+	if s.GetSaturated() > s.GetCompleted()/100 {
+		t.Fatalf("fast application: saturated %d of %d", s.GetSaturated(), s.GetCompleted())
 	}
 }

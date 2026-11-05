@@ -133,13 +133,106 @@ func NewReader(in io.Reader, format Format, kind pb.FileKind) (*Reader, *pb.File
 		}
 		return nil, nil, fmt.Errorf("FileHeader: %w", err)
 	}
-	if header.GetSchemaVersion() != SchemaVersion {
-		return nil, nil, fmt.Errorf("%w %d (this loadgen implements %d)", ErrSchemaVersion, header.GetSchemaVersion(), SchemaVersion)
-	}
-	if header.GetKind() != kind {
-		return nil, nil, fmt.Errorf("%w: FileHeader.kind is %s, expected %s", ErrMalformed, header.GetKind(), kind)
+	if err := checkHeader(header, kind); err != nil {
+		return nil, nil, err
 	}
 	return r, header, nil
+}
+
+func checkHeader(header *pb.FileHeader, kind pb.FileKind) error {
+	if header.GetSchemaVersion() != SchemaVersion {
+		return fmt.Errorf("%w %d (this loadgen implements %d)", ErrSchemaVersion, header.GetSchemaVersion(), SchemaVersion)
+	}
+	if header.GetKind() != kind {
+		return fmt.Errorf("%w: FileHeader.kind is %s, expected %s", ErrMalformed, header.GetKind(), kind)
+	}
+	return nil
+}
+
+// Frames splits a whole file held in memory into its messages, as Reader reads them, without
+// decoding them: a reader can keep the bytes and decode a message when it needs it.
+type Frames struct {
+	data   []byte
+	pos    int
+	format Format
+	count  int
+}
+
+// NewFrames reads and checks the header of a file's bytes, as NewReader does, and returns the
+// frames of the messages after it.
+func NewFrames(data []byte, format Format, kind pb.FileKind) (*Frames, *pb.FileHeader, error) {
+	f := &Frames{data: data, format: format}
+	start, end, err := f.Next()
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, nil, fmt.Errorf("%w: empty file, expected a FileHeader", ErrMalformed)
+		}
+		return nil, nil, fmt.Errorf("FileHeader: %w", err)
+	}
+	header := &pb.FileHeader{}
+	if err := Unmarshal(f.Message(start, end), format, header); err != nil {
+		return nil, nil, fmt.Errorf("FileHeader: %w", err)
+	}
+	if err := checkHeader(header, kind); err != nil {
+		return nil, nil, err
+	}
+	return f, header, nil
+}
+
+// Next returns where the next message's frame starts and ends in the file (binpb: its length
+// prefix included; json: its line, newline included); io.EOF at a clean end of file.
+func (f *Frames) Next() (int, int, error) {
+	f.count++
+	start := f.pos
+	if f.format == JSON {
+		if start >= len(f.data) || len(bytes.TrimSpace(f.data[start:])) == 0 {
+			return 0, 0, io.EOF
+		}
+		end := len(f.data)
+		if newline := bytes.IndexByte(f.data[start:], '\n'); newline >= 0 {
+			end = start + newline + 1
+		}
+		if len(bytes.TrimSpace(f.data[start:end])) == 0 {
+			return 0, 0, fmt.Errorf("%w: empty line %d", ErrMalformed, f.count)
+		}
+		f.pos = end
+		return start, end, nil
+	}
+	if start >= len(f.data) {
+		return 0, 0, io.EOF
+	}
+	size, n := protowire.ConsumeVarint(f.data[start:])
+	if n < 0 || size > maxMessageBytes || uint64(len(f.data)-start-n) < size {
+		return 0, 0, fmt.Errorf("%w: message %d: truncated or oversized at byte %d", ErrMalformed, f.count, start)
+	}
+	f.pos = start + n + int(size)
+	return start, f.pos, nil
+}
+
+// Message returns the encoded message of the frame [start, end) that Next returned.
+func (f *Frames) Message(start, end int) []byte { return MessageOf(f.data[start:end], f.format) }
+
+// MessageOf returns the encoded message of one frame (as Next delimits it).
+func MessageOf(frame []byte, format Format) []byte {
+	if format == JSON {
+		return frame
+	}
+	_, n := protowire.ConsumeVarint(frame)
+	return frame[n:]
+}
+
+// Unmarshal decodes one encoded message (a frame's, from MessageOf).
+func Unmarshal(encoded []byte, format Format, message proto.Message) error {
+	var err error
+	if format == JSON {
+		err = protojson.Unmarshal(encoded, message)
+	} else {
+		err = proto.Unmarshal(encoded, message)
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
+	return nil
 }
 
 // Read decodes the next message into message; io.EOF at a clean end of file.

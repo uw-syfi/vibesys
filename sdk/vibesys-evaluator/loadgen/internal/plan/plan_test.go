@@ -27,14 +27,14 @@ func TestReadCompilesEveryOperationInBothFormats(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(p.Ops) != 2 || len(p.Ops[0].Steps) != 2 || p.Ops[1].Operation != 1 {
+		if p.Len() != 2 || len(p.Op(0).Steps) != 2 || p.Op(1).Operation != 1 {
 			t.Fatalf("plan %+v", p)
 		}
-		header := p.Ops[0].Steps[1].Headers[0].Value.Fill(map[string]plan.Captured{"token": {Text: "abc", JSON: `"abc"`}})
+		header := p.Op(0).Steps[1].Headers[0].Value.Fill(map[string]plan.Captured{"token": {Text: "abc", JSON: `"abc"`}})
 		if header != "Bearer abc" {
 			t.Fatalf("header %q", header)
 		}
-		if got := p.Ops[1].Steps[0].Expect; len(got) != 1 || got[0] != 200 {
+		if got := p.Op(1).Steps[0].Expect; len(got) != 1 || got[0] != 200 {
 			t.Fatalf("default expect %v", got)
 		}
 	}
@@ -87,7 +87,8 @@ func TestExclusiveKeysChainInPlanOrder(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i, op := range p.Ops {
+		for i := range int(p.Len()) {
+			op := p.Op(uint64(i))
 			want := int64(-1)
 			for j := i - 1; j >= 0 && keys[i] != ""; j-- {
 				if keys[j] == keys[i] {
@@ -118,7 +119,7 @@ func TestTextFillEncodesRefs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	step := p.Ops[0].Steps[1]
+	step := p.Op(0).Steps[1]
 	if got := step.Body.Text.Fill(captured); got != `{"s":"a\"b","v":"a\"b","n":12}` {
 		t.Fatalf("body %s", got)
 	}

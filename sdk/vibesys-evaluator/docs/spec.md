@@ -131,14 +131,19 @@ package calls loadgen as a subprocess through files whose schema is the
    operation is in the validation sample is drawn here too, so the sample does
    not depend on timing. Open loop: `ceil(1.02 rate (warmup + secs)) + 100`
    operations; closed loop: `max_ops_per_sec (warmup + secs)`.
-3. **Run.** `loadgen` reads the whole plan into memory, then starts t0. It
+3. **Run.** `loadgen` reads the whole plan into memory and validates and
+   compiles every operation, then starts t0; it keeps only the file's bytes
+   and a few words per operation, and compiles an operation again from its
+   bytes when a sender takes it (before it is due, in the open loop). It
    sends a prefix of the plan: clients take operations in plan order; at the
    window's end no new operation starts and those in flight complete, bounded
    by the request timeout. Operations never taken are never sent and do not
    enter the history.
 4. **Check.** Rebuild the model from the history plus this phase's sent
    writes, then call `check(model, call)` for every sampled operation in order
-   of start time (a model may learn from earlier responses, as social
+   of start time. The results file is streamed and only the results of writes
+   and sampled operations are kept, so the check's memory grows with the
+   sample, not the plan (a model may learn from earlier responses, as social
    network's first sight of a live post does). Writes are always in the
    sample. A check returns `None` or what is wrong.
 5. **Judge.** Apply the saturation guard and the validity rules; leave a
@@ -152,6 +157,10 @@ warmup and `S` the window: the warmup is `[t0, t0+W)`, the measurement window
 the operations scheduled (open loop) or started (closed loop) in the window.
 Throughput is the operations completed in the window divided by `S`;
 operations started in the window that end after it are counted as `spilled`.
+An exhausted closed loop (its plan ran out) divides by the part of the window
+before it stopped instead (`exhausted_unix_nanos`, the end of its last
+operation), so its rates are the rates it ran at; it is retried, not
+reported.
 Checks run on sampled operations of both the warmup and the window; a failed
 check in the window is an error, one in the warmup is reported only (as the
 servicebench engine does today).
@@ -285,8 +294,10 @@ reader must reject.
 
 Sizes: a request of the yardsticks encodes in about 100 to 300 bytes, so a
 60 s open-loop phase at 5,000 ops/s is about 300,000 operations and 60 MB of
-plan, held in memory by loadgen (the phase pod has 4 GiB). Unsampled bodies
-are kept as 40 bytes.
+plan, held in memory by loadgen as those bytes plus about 30 bytes per
+operation (the phase pod has 4 GiB). Unsampled bodies are kept as 40 bytes.
+A phase pod killed at its memory limit fails the sample with an error that
+says so and names the plan's size.
 
 ## Saturation guard and validity
 
@@ -297,9 +308,15 @@ budget. A phase fails, and with it the sample, when:
 - loadgen's CPU over the window exceeds 80% of its quota; or
 - open loop: the 99th percentile of send lag (excluding exclusive-key waits)
   exceeds the larger of 10% of the window's p99 latency and twice the
-  added latency `selftest` measured; or
-- closed loop: the plan was exhausted before the window ended (the message
-  says to raise `max_ops_per_sec`).
+  added latency `selftest` measured, unless at least 1% of the window's
+  operations were due while every sender was busy (`saturated`): then the
+  application held the senders with slow responses, and the lag is its
+  queue, already in its latency (end minus scheduled); or
+- closed loop: the plan was exhausted before the window ended twice. The
+  first time, the phase is run again once with a plan for twice the larger of
+  `max_ops_per_sec` and the rate it sent at (its whole plan over the time
+  until it stopped); the second time the message says to raise
+  `max_ops_per_sec`.
 
 `Validity` is the task's: `max_error_rate` (loadgen errors plus failed checks,
 over the window's operations), `min_sustained_ratio` (open loop: offered rate

@@ -14,9 +14,9 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Literal
 
 from vibesys_evaluator._private.deploy import PHASE_OUTPUT_FILE, PhaseJob
-from vibesys_evaluator._private.files import SchemaFileError, read_message, read_results_gz
+from vibesys_evaluator._private.files import SchemaFileError, read_message
 from vibesys_evaluator._private.judge import Exhausted, Failed, judge
-from vibesys_evaluator._private.phase import RESULTS_FILE
+from vibesys_evaluator._private.phase import plan_size
 from vibesys_evaluator._private.records import Partial, RecordError
 from vibesys_evaluator._private.results import PhaseResult, finite
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
@@ -32,8 +32,9 @@ if TYPE_CHECKING:
 
 #: Time a phase pod may spend outside loadgen's run: the model, generation, checking, copying.
 PHASE_OVERHEAD_SECS = 900.0
-#: A closed loop's retry plans for at least this multiple of the rate it ran out at ...
-RETRY_RATE_MARGIN = 1.5
+#: A closed loop's retry plans for at least this multiple of the rate it ran out at (its whole
+#: plan over the time until it stopped) ...
+RETRY_RATE_MARGIN = 2.0
 #: ... and at least this multiple of the bound it ran out of.
 RETRY_BOUND_FACTOR = 2.0
 
@@ -81,14 +82,35 @@ def _warmup(value: float) -> float:
     return float(value)
 
 
-def _sent_rate(results: Path) -> float:
-    """The rate a phase started operations at, from its results file (0 with fewer than two)."""
-    try:
-        starts = sorted(r.start_unix_nanos for r in read_results_gz(results))
-    except SchemaFileError:
-        return 0.0
-    span = (starts[-1] - starts[0]) / 1e9 if starts else 0.0
-    return (len(starts) - 1) / span if span > 0 else 0.0
+def _sent_rate(load: Load, verdict: Exhausted) -> float:
+    """The rate an exhausted closed loop sent at, or its window's rate if unknown.
+
+    Its whole plan over the time from the phase's start (the window's start
+    minus the warmup) until it stopped.
+    """
+    if verdict.stopped_unix_nanos <= 0:
+        return verdict.rate
+    started = verdict.window_start_unix_nanos - load.warmup * 1e9
+    ran = (verdict.stopped_unix_nanos - started) / 1e9
+    count = plan_size(_phase_input(load, sample_seed=0, index=0, history=[]))
+    return max(verdict.rate, count / ran) if ran > 0 else verdict.rate
+
+
+def _phase_input(
+    load: Load, *, sample_seed: int, index: int, history: list[phase_pb.HistoryEntry]
+) -> phase_pb.PhaseInput:
+    return phase_pb.PhaseInput(
+        sample_seed=sample_seed,
+        phase_index=index,
+        model=load.model,
+        clients=load.clients,
+        max_ops_per_sec=load.max_ops_per_sec,
+        rate=load.rate,
+        arrivals=load.arrivals,
+        secs=load.secs,
+        warmup_secs=load.warmup,
+        history=history,
+    )
 
 
 class PhaseDriver:
@@ -143,7 +165,7 @@ class PhaseDriver:
             if isinstance(verdict, Failed):
                 msg = f"phase {index} ({load.describe()}): {verdict.reason}"
                 raise BenchmarkError(msg, partial=self.partial)
-            rate = max(verdict.rate, _sent_rate(self._artifacts / f"phase-{index}" / RESULTS_FILE))
+            rate = _sent_rate(load, verdict)
             bound = max(RETRY_BOUND_FACTOR * load.max_ops_per_sec, RETRY_RATE_MARGIN * rate)
             if attempt == 0:
                 self._log(
@@ -160,17 +182,8 @@ class PhaseDriver:
     def _run(self, load: Load) -> tuple[int, PhaseResult | Exhausted | Failed]:
         index = self._next_index
         self._next_index += 1
-        phase_input = phase_pb.PhaseInput(
-            sample_seed=self._seed,
-            phase_index=index,
-            model=load.model,
-            clients=load.clients,
-            max_ops_per_sec=load.max_ops_per_sec,
-            rate=load.rate,
-            arrivals=load.arrivals,
-            secs=load.secs,
-            warmup_secs=load.warmup,
-            history=list(self._history),
+        phase_input = _phase_input(
+            load, sample_seed=self._seed, index=index, history=list(self._history)
         )
         name = f"phase-{index}"
         out_dir = self._artifacts / name

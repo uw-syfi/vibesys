@@ -1,6 +1,9 @@
-// Package plan reads a requests file into a Plan: every PlannedOperation validated and compiled
-// (templates split into literals and refs, refs resolved against earlier captures, the exclusive
-// keys chained in plan order), so nothing is parsed or validated during the measured window.
+// Package plan reads a requests file into a Plan. Every PlannedOperation is validated and
+// compiled once when the file is read (templates split into literals and refs, refs resolved
+// against earlier captures, the exclusive keys chained in plan order), so a plan loadgen cannot
+// run fails before the phase starts. The plan then keeps only the file's bytes and a few words per
+// operation; a sender compiles an operation again from its bytes when it takes it (no validation),
+// so the memory a plan needs is about its file's size, whatever its operations compile to.
 package plan
 
 import (
@@ -26,7 +29,38 @@ var ErrInvalid = errors.New("invalid plan")
 type Plan struct {
 	// Names are the operation names; Op.Operation indexes into them.
 	Names []string
-	Ops   []Op
+
+	format files.Format
+	data   []byte
+	// bounds[i] and bounds[i+1] delimit operation i's frame in data.
+	bounds    []int64
+	operation []uint32
+	after     []int64
+	gated     []bool
+}
+
+// Len is the number of planned operations.
+func (p *Plan) Len() uint64 { return uint64(len(p.operation)) }
+
+// Gated reports whether a later operation waits for operation index (it shares its key).
+func (p *Plan) Gated(index uint64) bool { return p.gated[index] }
+
+// Operation is operation index's number (an index into Names), without compiling it.
+func (p *Plan) Operation(index uint64) uint32 { return p.operation[index] }
+
+// Op compiles operation index from its bytes. Read compiled the same bytes already, so it cannot
+// fail; a failure means the plan's memory changed under it and panics.
+func (p *Plan) Op(index uint64) *Op {
+	planned := &pb.PlannedOperation{}
+	if err := files.Unmarshal(files.MessageOf(p.data[p.bounds[index]:p.bounds[index+1]], p.format), p.format, planned); err != nil {
+		panic(fmt.Sprintf("plan: operation %d no longer decodes: %v", index, err))
+	}
+	op, err := compileOp(index, planned, p.Names)
+	if err != nil {
+		panic(fmt.Sprintf("plan: operation %d no longer compiles: %v", index, err))
+	}
+	op.After, op.Gated = p.after[index], p.gated[index]
+	return &op
 }
 
 // Op is one compiled PlannedOperation.
@@ -103,53 +137,90 @@ func mustValidator() protovalidate.Validator {
 // Read reads a whole requests file. Errors wrap ErrInvalid or files.ErrSchemaVersion when the
 // file is not a runnable plan, and are I/O errors otherwise.
 func Read(in io.Reader, format files.Format) (*Plan, error) {
-	reader, _, err := files.NewReader(in, format, pb.FileKind_FILE_KIND_REQUESTS)
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data, format)
+}
+
+// Parse reads a requests file's bytes, as Read does; the plan keeps data, which the caller must
+// not change.
+func Parse(data []byte, format files.Format) (*Plan, error) {
+	frames, _, err := files.NewFrames(data, format, pb.FileKind_FILE_KIND_REQUESTS)
 	if err != nil {
 		return nil, invalid(err)
 	}
+	start, end, err := frames.Next()
+	if errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%w: no RequestsHeader after the FileHeader", ErrInvalid)
+	}
 	header := &pb.RequestsHeader{}
-	if err := reader.Read(header); err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("%w: no RequestsHeader after the FileHeader", ErrInvalid)
-		}
+	if err == nil {
+		err = files.Unmarshal(frames.Message(start, end), format, header)
+	}
+	if err != nil {
 		return nil, invalid(fmt.Errorf("RequestsHeader: %w", err))
 	}
 	if err := validator.Validate(header); err != nil {
 		return nil, fmt.Errorf("%w: RequestsHeader: %v", ErrInvalid, err)
 	}
 	const preallocLimit = 1 << 22
-	ops := make([]*pb.PlannedOperation, 0, min(header.GetCount(), preallocLimit))
+	bounds := make([]int64, 0, min(header.GetCount(), preallocLimit)+1)
 	for {
-		planned := &pb.PlannedOperation{}
-		err := reader.Read(planned)
+		start, end, err := frames.Next()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			return nil, invalid(fmt.Errorf("operation %d: %w", len(ops), err))
+			return nil, invalid(fmt.Errorf("operation %d: %w", len(bounds), err))
 		}
-		ops = append(ops, planned)
+		if len(bounds) == 0 {
+			bounds = append(bounds, int64(start))
+		}
+		bounds = append(bounds, int64(end))
 	}
-	if uint64(len(ops)) != header.GetCount() {
-		return nil, fmt.Errorf("%w: RequestsHeader.count is %d but the file holds %d operations", ErrInvalid, header.GetCount(), len(ops))
+	count := max(len(bounds)-1, 0)
+	if uint64(count) != header.GetCount() {
+		return nil, fmt.Errorf("%w: RequestsHeader.count is %d but the file holds %d operations", ErrInvalid, header.GetCount(), count)
 	}
-	return compileAll(header.GetOperationNames(), ops)
+	p := &Plan{Names: header.GetOperationNames(), format: format, data: data, bounds: bounds}
+	if err := p.compileAll(); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // New compiles a plan from messages, as Read does from a file.
 func New(names []string, ops []*pb.PlannedOperation) (*Plan, error) {
-	if err := validator.Validate(&pb.RequestsHeader{OperationNames: names, Count: uint64(len(ops))}); err != nil {
-		return nil, fmt.Errorf("%w: RequestsHeader: %v", ErrInvalid, err)
+	data, err := files.Append(nil, files.Binpb, files.Header(pb.FileKind_FILE_KIND_REQUESTS, "plan.New"))
+	if err != nil {
+		return nil, err
 	}
-	return compileAll(names, ops)
+	if data, err = files.Append(data, files.Binpb, &pb.RequestsHeader{OperationNames: names, Count: uint64(len(ops))}); err != nil {
+		return nil, err
+	}
+	for _, op := range ops {
+		if data, err = files.Append(data, files.Binpb, op); err != nil {
+			return nil, fmt.Errorf("%w: operation: %v", ErrInvalid, err)
+		}
+	}
+	return Parse(data, files.Binpb)
 }
 
 // compileAll validates and compiles every operation on every CPU (validation dominates reading a
-// plan), then chains the exclusive keys in plan order. The first invalid operation is reported.
-func compileAll(names []string, planned []*pb.PlannedOperation) (*Plan, error) {
-	p := &Plan{Names: names, Ops: make([]Op, len(planned))}
-	errs := make([]error, len(planned))
-	workers := min(runtime.GOMAXPROCS(0), max(len(planned)/1024, 1))
+// plan), keeping only each one's number and exclusive key, then chains the exclusive keys in plan
+// order. The first invalid operation is reported.
+func (p *Plan) compileAll() error {
+	count := len(p.bounds) - 1
+	if count < 0 {
+		count = 0
+	}
+	p.operation = make([]uint32, count)
+	keys := make([]string, count)
+	errs := make([]error, count)
+	workers := min(runtime.GOMAXPROCS(0), max(count/1024, 1))
+	const chunk = 256
 	var next atomic.Int64
 	var wg sync.WaitGroup
 	for range workers {
@@ -157,31 +228,46 @@ func compileAll(names []string, planned []*pb.PlannedOperation) (*Plan, error) {
 		go func() {
 			defer wg.Done()
 			for {
-				i := int(next.Add(1) - 1)
-				if i >= len(planned) {
+				from := int(next.Add(chunk) - chunk)
+				if from >= count {
 					return
 				}
-				p.Ops[i], errs[i] = compile(uint64(i), planned[i], names)
+				for i := from; i < min(from+chunk, count); i++ {
+					planned := &pb.PlannedOperation{}
+					err := files.Unmarshal(files.MessageOf(p.data[p.bounds[i]:p.bounds[i+1]], p.format), p.format, planned)
+					if err == nil {
+						err = validator.Validate(planned)
+					}
+					if err == nil {
+						_, err = compileOp(uint64(i), planned, p.Names)
+					}
+					errs[i] = err
+					p.operation[i], keys[i] = planned.GetOperation(), planned.GetExclusiveKey()
+				}
 			}
 		}()
 	}
 	wg.Wait()
 	for i, err := range errs {
 		if err != nil {
-			return nil, fmt.Errorf("%w: operation %d: %v", ErrInvalid, i, err)
+			return fmt.Errorf("%w: operation %d: %v", ErrInvalid, i, err)
 		}
 	}
+	p.after = make([]int64, count)
+	p.gated = make([]bool, count)
 	lastByKey := map[string]int64{}
-	for i, op := range planned {
-		if key := op.GetExclusiveKey(); key != "" {
-			if previous, ok := lastByKey[key]; ok {
-				p.Ops[i].After = previous
-				p.Ops[previous].Gated = true
-			}
-			lastByKey[key] = int64(i)
+	for i, key := range keys {
+		p.after[i] = -1
+		if key == "" {
+			continue
 		}
+		if previous, ok := lastByKey[key]; ok {
+			p.after[i] = previous
+			p.gated[previous] = true
+		}
+		lastByKey[key] = int64(i)
 	}
-	return p, nil
+	return nil
 }
 
 func invalid(err error) error {
@@ -191,10 +277,8 @@ func invalid(err error) error {
 	return err
 }
 
-func compile(index uint64, planned *pb.PlannedOperation, names []string) (Op, error) {
-	if err := validator.Validate(planned); err != nil {
-		return Op{}, err
-	}
+// compileOp compiles one operation that validates (without its exclusive-key chain).
+func compileOp(index uint64, planned *pb.PlannedOperation, names []string) (Op, error) {
 	if int(planned.GetOperation()) >= len(names) {
 		return Op{}, fmt.Errorf("operation index %d is outside operation_names (%d names)", planned.GetOperation(), len(names))
 	}

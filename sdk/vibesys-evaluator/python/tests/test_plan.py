@@ -7,14 +7,16 @@ is encoded as the schema says.
 
 from __future__ import annotations
 
+import gc
 import json
+import weakref
 from typing import TYPE_CHECKING
 
 from vibesys_evaluator import Call, Rand, Versions
 
 # test-isolation: generation is the phase pod's private step; its output is the schema's file.
 from vibesys_evaluator._private.files import read_requests
-from vibesys_evaluator._private.phase import build_model, generate, plan_size
+from vibesys_evaluator._private.phase import build_model, check, generate, plan_size
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
 from vibesys_evaluator.service import Operation, Request, Workload, post, put, ref
@@ -22,6 +24,7 @@ from vibesys_evaluator.service import Operation, Request, Workload, post, put, r
 from .vse_support import kv
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 
@@ -181,3 +184,34 @@ def test_a_pending_write_is_seen_by_the_requests_built_after_it(tmp_path: Path) 
     plan = _plan(tmp_path / "p", workload, _phase())
     sent = [int(str(_parts(_http(op.steps[0]).query[0].value)[0])) for op in plan]
     assert sent == list(range(1, len(plan) + 1))
+
+
+def test_the_check_keeps_only_the_results_of_writes_and_sampled_operations(tmp_path: Path) -> None:
+    # A large plan's results do not fit in the phase pod as objects: the check streams them and
+    # keeps only those it applies or checks. Every result it drops is freed while it runs.
+    data = kv.Data()
+    phase = _phase(rate=400.0)
+    model = build_model(kv.WORKLOAD, data, phase)
+    plan = generate(kv.WORKLOAD, model, phase, tmp_path / "requests.binpb")
+    alive: list[weakref.ref[pb.OperationResult]] = []
+    kept_alive: list[int] = []
+
+    def results() -> Iterator[pb.OperationResult]:
+        for index in range(len(plan.operations)):
+            result = pb.OperationResult(
+                index=index,
+                start_unix_nanos=1 + index,
+                end_unix_nanos=2 + index,
+                steps=[pb.StepResult(status=200), pb.StepResult(status=200)],
+            )
+            alive.append(weakref.ref(result))
+            yield result
+            del result
+        gc.collect()
+        kept_alive.append(sum(ref() is not None for ref in alive))
+
+    summary = pb.PhaseSummary(window_start_unix_nanos=0, window_end_unix_nanos=10**12)
+    output = check(kv.WORKLOAD, data, phase, plan, summary, results())
+    assert kept_alive == [len(plan.infos)]
+    assert len(plan.infos) < len(plan.operations)
+    assert len(output.writes) == sum(1 for i in plan.operations if i == 1)

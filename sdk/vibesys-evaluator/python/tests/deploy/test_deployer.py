@@ -18,6 +18,7 @@ from vibesys_evaluator._private.deploy import (
 )
 from vibesys_evaluator._private.files import DelimitedReader
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
+from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
 from vibesys_evaluator.deploy._k8s import WORK_DIR, KubeDeployer, Outcome, probe_plan, run_control
 from vibesys_evaluator.service import get
 
@@ -164,3 +165,27 @@ def test_ctl_needs_the_namespace_and_acts_on_it(world: World, tmp_path: Path) ->
             == 1
         )
         assert len(world.kube.flushed(namespace)) == 1
+
+
+def test_an_oomkilled_phase_pod_names_the_limit_and_the_plan_size(
+    world: World, tmp_path: Path
+) -> None:
+    world.kube.programs["python"] = lambda argv, _inputs: (
+        Outcome() if "seed" in argv else Outcome(crash=True, crash_reason="OOMKilled", secs=5)
+    )
+    deployer = KubeDeployer(make_app(ready=[get("/")]), environ=ENVIRON, connect=connected(world))
+    out = tmp_path / "phase-1"
+    out.mkdir()
+    closed = phase_pb.PhaseInput(
+        model=pb.LoadModel.CLOSED, clients=32, max_ops_per_sec=10296.0, secs=60.0, warmup_secs=15.0
+    )
+    job = PhaseJob(name="phase-1", phase_input=closed.to_binary(), timeout_secs=300)
+    with (
+        deployer.deploy(context(world, tmp_path)) as runner,
+        pytest.raises(PhaseRunError) as raised,
+    ):
+        runner.run_phase(job, out)
+    message = str(raised.value)
+    assert "ran out of memory (OOMKilled at its 4Gi limit)" in message
+    assert "a plan of 772,200 operations" in message
+    assert "lower the closed loop's max_ops_per_sec" in message

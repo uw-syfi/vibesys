@@ -40,7 +40,8 @@ class Outcome:
     """What a fake pod's command does.
 
     Its exit status, the files it leaves in WORK_DIR, its log, and how long it runs. crash:
-    the container dies instead (no exit marker, pod Failed).
+    the container dies instead (no exit marker, pod Failed, exit 137), with the termination
+    reason crash_reason (OOMKilled when the kernel killed it at its memory limit).
     """
 
     exit_code: int = 0
@@ -48,6 +49,7 @@ class Outcome:
     log: str = ""
     secs: float = 1.0
     crash: bool = False
+    crash_reason: str = "Error"
 
 
 Program = Callable[[Sequence[str], Mapping[str, bytes]], Outcome]
@@ -268,6 +270,7 @@ class FakeKube:
         now = self.clock.now()
         started = now >= pod.created + pod.start_secs
         exit_code = None
+        reason = ""
         if pod.finished:
             phase = (
                 "Failed"
@@ -275,6 +278,8 @@ class FakeKube:
                 else "Succeeded"
             )
             exit_code = 137 if pod.outcome is None or pod.outcome.crash else pod.outcome.exit_code
+            if pod.outcome is not None and pod.outcome.crash:
+                reason = pod.outcome.crash_reason
         elif pod.never_ready in ("ImagePullBackOff", "ErrImagePull", "InvalidImageName"):
             phase = "Pending"
         else:
@@ -290,6 +295,7 @@ class FakeKube:
             node=pod.node,
             waiting=waiting if phase != "Failed" else "",
             exit_code=exit_code,
+            reason=reason,
         )
 
     def _pod(self, namespace: str, name: str) -> _Pod:

@@ -25,6 +25,8 @@ from vibesys_evaluator.deploy._k8s import (
     deploy,
     tree_digest,
 )
+from vibesys_evaluator.deploy._k8s._deployment import PodOutOfMemoryError
+from vibesys_evaluator.deploy._k8s._kubectl import parse_pod
 
 from .k8s_world import SEED, World, make_app, make_world
 
@@ -291,3 +293,41 @@ def test_an_exit_at_any_call_leaves_no_namespace(call: int, how: str) -> None:
             assert len(world.kube.calls) - call <= 2
         world.clock.sleep(FakeKube.NAMESPACE_DELETE_SECS)
         assert world.kube.all_namespaces() == []
+
+
+# A phase pod the kernel killed at its memory limit, as `kubectl get pod -o json` reports it.
+OOMKILLED_POD = {
+    "metadata": {
+        "name": "vse-phase-4-xswhx",
+        "uid": "u1",
+        "labels": {"vibesys.dev/evaluator-pod": "phase"},
+    },
+    "spec": {"nodeName": "node-1"},
+    "status": {
+        "phase": "Failed",
+        "containerStatuses": [
+            {
+                "name": "main",
+                "restartCount": 0,
+                "state": {"terminated": {"exitCode": 137, "reason": "OOMKilled"}},
+            }
+        ],
+    },
+}
+
+
+def test_a_recorded_oomkilled_pod_status_parses_with_its_reason() -> None:
+    pod = parse_pod(OOMKILLED_POD)
+    assert (pod.phase, pod.exit_code, pod.reason) == ("Failed", 137, "OOMKilled")
+
+
+def test_an_oomkilled_pod_raises_out_of_memory_with_its_limit(world: World) -> None:
+    world.kube.programs["vse-phase"] = lambda *_: Outcome(crash=True, crash_reason="OOMKilled")
+    with (
+        up(world) as deployment,
+        pytest.raises(
+            PodOutOfMemoryError,
+            match=r"running out of memory \(OOMKilled at its 4Gi limit, exit 137\)",
+        ),
+    ):
+        deployment.run_pod(Role.PHASE, PodCommand(argv=("vse-phase",)), timeout_secs=600)

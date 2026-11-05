@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import gzip
 import importlib.metadata
+import mmap
 from typing import IO, TYPE_CHECKING, Literal, TypeVar
 
 import protovalidate
@@ -79,7 +80,18 @@ class DelimitedWriter:
         self.write(pb.FileHeader(schema_version=SCHEMA_VERSION, kind=kind, writer=WRITER))
 
 
-def _frames(data: bytes, where: str) -> Iterator[memoryview]:
+def _map(path: Path) -> bytes | mmap.mmap:
+    """The file's bytes, mapped read-only; an empty file reads as no bytes.
+
+    A large results file then stays in the page cache, out of the process's own memory.
+    """
+    with path.open("rb") as file:
+        if path.stat().st_size == 0:
+            return b""
+        return mmap.mmap(file.fileno(), 0, access=mmap.ACCESS_READ)
+
+
+def _frames(data: bytes | mmap.mmap, where: str) -> Iterator[memoryview]:
     view = memoryview(data)
     position = 0
     while position < len(view):
@@ -112,7 +124,7 @@ class DelimitedReader:
             SchemaFileError: The file is missing, empty or of another kind or version.
         """
         try:
-            data = path.read_bytes()
+            data = _map(path)
         except OSError as error:
             msg = f"{path}: cannot read ({error.strerror})"
             raise SchemaFileError(msg) from error
@@ -127,7 +139,7 @@ class DelimitedReader:
         reader._open(data, where, kind)
         return reader
 
-    def _open(self, data: bytes, where: str, kind: pb.FileKind) -> None:
+    def _open(self, data: bytes | mmap.mmap, where: str, kind: pb.FileKind) -> None:
         path = where
         self._where = where
         self._frames: Iterator[memoryview | str] = (
@@ -177,9 +189,9 @@ class DelimitedReader:
             yield message
 
 
-def _lines(data: bytes, where: str) -> Iterator[str]:
+def _lines(data: bytes | mmap.mmap, where: str) -> Iterator[str]:
     try:
-        text = data.decode()
+        text = bytes(data).decode()
     except UnicodeDecodeError as error:
         msg = f"{where}: not UTF-8 JSON lines ({error})"
         raise SchemaFileError(msg) from error
@@ -239,7 +251,15 @@ def read_summary(path: Path) -> pb.PhaseSummary:
 
 def read_results(path: Path) -> list[pb.OperationResult]:
     """Every ``OperationResult`` of a results file, in completion order."""
-    return list(DelimitedReader(path, pb.FileKind.RESULTS).rest(pb.OperationResult))
+    return list(iter_results(path))
+
+
+def iter_results(path: Path) -> Iterator[pb.OperationResult]:
+    """The ``OperationResult``s of a results file one at a time, in completion order.
+
+    A reader that keeps few of them holds few in memory.
+    """
+    return DelimitedReader(path, pb.FileKind.RESULTS).rest(pb.OperationResult)
 
 
 def read_results_gz(path: Path) -> list[pb.OperationResult]:
