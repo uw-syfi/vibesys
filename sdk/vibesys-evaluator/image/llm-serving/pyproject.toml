@@ -1,0 +1,32 @@
+# The Python environment of the image vibesys-evaluator-llm-serving: the package with the AgentX
+# harness (AIPerf) that `vibesys_evaluator.llm_serving.agentx` drives. It is no package of its own;
+# it exists for its lock (uv.lock), which pins every distribution of that environment with hashes,
+# and the image installs exactly what `uv export` writes from it (requirements.txt beside it).
+#
+# The harness is not an extra of the package: the repository's uv workspace resolves every extra
+# of its members together with VibeSys itself, and the harness moved VibeSys's own pins.
+#
+# Regenerate both after changing a pin (the package's dependencies or the harness):
+#   uv lock --project sdk/vibesys-evaluator/image/llm-serving
+#   uv export --frozen --project sdk/vibesys-evaluator/image/llm-serving --no-emit-project \
+#     --no-emit-local --no-header --no-annotate \
+#     -o sdk/vibesys-evaluator/image/llm-serving/requirements.txt
+[project]
+name = "vibesys-evaluator-llm-serving-image"
+version = "0"
+requires-python = "==3.12.*"
+dependencies = [
+    "vibesys-evaluator",
+    # llm_serving.agentx.HARNESS_VERSION: the package refuses to replay with any other version.
+    "agentx-harness==1.0.7",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+vibesys-evaluator = { path = "../../python" }
+
+# Its own workspace: the repository workspace excludes sdk/vibesys-evaluator.
+[tool.uv.workspace]
+members = []

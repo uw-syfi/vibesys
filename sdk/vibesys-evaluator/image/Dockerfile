@@ -1,26 +1,34 @@
-# The image vibesys-evaluator:<version>, which task images build FROM:
+# The per-domain images task images build FROM, one target each:
 #
-#   FROM vibesys-evaluator:<version>@sha256:...
+#   vibesys-evaluator-microservices:<version>  (--target microservices)
+#   vibesys-evaluator-llm-serving:<version>    (--target llm-serving)
+#
+#   FROM vibesys-evaluator-<domain>:<version>@sha256:...
 #   COPY . /task
 #
-# It holds Python with the vibesys_evaluator package, loadgen and otelcapture (the Go
-# module in ../loadgen), kubectl and buildctl. The orchestrator (python /task/bench.py)
-# runs in it in the container vibesys-cli starts, and its phase, seed and probe pods run
-# the task image in the cluster, so everything a phase needs is in this one image.
+# Both hold Python with the vibesys_evaluator package (every domain of it; a task uses its
+# own). microservices adds loadgen and otelcapture (the Go module in ../loadgen), kubectl and
+# buildctl: the orchestrator (python /task/bench.py) runs in the container vibesys-cli
+# starts, and its phase, seed and probe pods run the task image in the cluster, so
+# everything a phase needs is in that image. llm-serving adds the AgentX harness (AIPerf)
+# at the one version vibesys_evaluator.llm_serving.agentx replays with, from the hashed
+# lock in llm-serving/ (task writers never install it); the candidate server runs in its
+# own image and is reached over HTTP.
 #
 # Build with sdk/vibesys-evaluator as the context:
-#   docker build -f sdk/vibesys-evaluator/image/Dockerfile sdk/vibesys-evaluator
+#   docker build --target microservices -f sdk/vibesys-evaluator/image/Dockerfile sdk/vibesys-evaluator
+#   docker build --target llm-serving -f sdk/vibesys-evaluator/image/Dockerfile sdk/vibesys-evaluator
 #
 # By default the package's wheel is built from ../python. A release installs the wheel
 # it already built and verified instead, by replacing the stage `wheels` with a directory
 # that holds exactly that one wheel, and stamps loadgen with the release version:
 #   docker buildx build --build-context wheels=dist/evaluator \
-#     --build-arg VIBESYS_EVALUATOR_VERSION=<version> -f ... sdk/vibesys-evaluator
+#     --build-arg VIBESYS_EVALUATOR_VERSION=<version> --target <domain> -f ... sdk/vibesys-evaluator
 # Without VIBESYS_EVALUATOR_VERSION, loadgen keeps its development version.
 #
-# Every base is pinned by digest and every download by checksum. Update them together,
-# with a version bump of the package (one version for the package, the Go module and
-# this image).
+# Every base is pinned by digest and every download by checksum or hash. Update them
+# together, with a version bump of the package (one version for the package, the Go module
+# and both images).
 
 ARG KUBECTL_VERSION=v1.34.0
 ARG KUBECTL_SHA256=cfda68cba5848bc3b6c6135ae2f20ba2c78de20059f68789c090166d6abc3e2c
@@ -55,7 +63,7 @@ RUN pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /src/python
 FROM scratch AS wheels
 COPY --from=wheel /wheels/ /
 
-FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c
+FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS microservices
 COPY --from=wheels / /tmp/wheels/
 RUN set -- /tmp/wheels/*.whl \
  && if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then echo "expected exactly one wheel, found: $*" >&2; exit 1; fi \
@@ -66,4 +74,22 @@ COPY --from=buildkit /usr/bin/buildctl /usr/local/bin/buildctl
 # their caches under /tmp. Pods of the package write only below /vse (an emptyDir).
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp KUBECACHEDIR=/tmp/.kube/cache
 RUN loadgen --capabilities >/dev/null && kubectl version --client >/dev/null && buildctl --version >/dev/null \
- && python -c "import vibesys_evaluator.deploy.k8s"
+ && python -c "import vibesys_evaluator.microservices.k8s"
+
+FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS llm-serving
+# Every distribution of the environment, pinned with hashes, wheels only (llm-serving/uv.lock,
+# exported to requirements.txt); then the package's own wheel, whose dependencies that lock
+# already holds at the versions its metadata pins.
+COPY image/llm-serving/requirements.txt /tmp/llm-serving-requirements.txt
+RUN pip install --no-cache-dir --require-hashes --only-binary=:all: --no-deps \
+      -r /tmp/llm-serving-requirements.txt \
+ && rm /tmp/llm-serving-requirements.txt
+COPY --from=wheels / /tmp/wheels/
+RUN set -- /tmp/wheels/*.whl \
+ && if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then echo "expected exactly one wheel, found: $*" >&2; exit 1; fi \
+ && pip install --no-cache-dir --no-deps "$1" && rm -rf /tmp/wheels && pip check
+# A job runs as the invoking user, whose HOME may not exist: Hugging Face and AIPerf keep
+# their caches under /tmp unless the operator mounts a cache (VIBESYS_CACHE_DIR).
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp
+RUN python -c "import importlib.metadata as m, vibesys_evaluator.llm_serving.agentx as a, vibesys_evaluator.llm_serving.golden; assert m.version('agentx-harness') == a.HARNESS_VERSION, m.version('agentx-harness')" \
+ && python -I -m aiperf --help >/dev/null

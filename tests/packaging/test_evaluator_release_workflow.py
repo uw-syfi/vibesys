@@ -176,3 +176,24 @@ def test_a_missing_go_tag_is_not_read_as_an_existing_one() -> None:
     assert 'select(.ref == \\"refs/tags/$GO_TAG\\")' in script
     assert "|| true" not in script
     assert "git/ref/tags/" not in script
+
+
+def test_every_domain_image_is_built_smoked_pushed_and_recorded() -> None:
+    """One image per domain, from the Dockerfile's target of that name (sdk/vibesys-evaluator)."""
+    domains = _workflow()["env"]["DOMAINS"].split()
+    assert domains == ["microservices", "llm-serving"]
+    assert _jobs()["image"]["strategy"]["matrix"]["domain"] == domains
+    dockerfile = (REPO_ROOT / "sdk/vibesys-evaluator/image/Dockerfile").read_text()
+    targets = re.findall(r"^FROM \S+ AS (\S+)$", dockerfile, flags=re.MULTILINE)
+    assert set(domains) <= set(targets)
+    build = next(s["run"] for s in _jobs()["verify"]["steps"] if s.get("id") == "image")
+    assert '--target "$domain"' in build
+    assert "for domain in $DOMAINS" in build
+    outputs = _jobs()["verify"]["outputs"]
+    for domain in domains:
+        key = f"digest_{domain.replace('-', '_')}"
+        assert outputs[key] == f"${{{{ steps.image.outputs.{key} }}}}"
+    notes = next(
+        s["run"] for s in _jobs()["go-tag"]["steps"] if s.get("name", "").startswith("Record")
+    )
+    assert "for domain in $DOMAINS" in notes
