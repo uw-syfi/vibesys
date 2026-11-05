@@ -266,7 +266,7 @@ func writeStream[D, M any](w Workload[D, M], model M, phase *pb.PhaseInput, out 
 	for i, op := range w.Operations {
 		names[i], weights[i], shares[i] = op.Name, op.Weight, op.checkedShare()
 	}
-	writer, err := files.NewWriter(out, files.Binpb, files.Header(pb.FileKind_FILE_KIND_REQUESTS, Writer()))
+	writer, err := files.NewWriter(out, files.Binpb, files.Header(pb.FileKind_FILE_KIND_REQUESTS, writer()))
 	if err != nil {
 		return err
 	}
@@ -308,8 +308,8 @@ func writeStream[D, M any](w Workload[D, M], model M, phase *pb.PhaseInput, out 
 	}
 }
 
-// Writer names the Go front end in the FileHeader of the streams it writes.
-func Writer() string { return "vibesys-evaluator-go " + version.Version }
+// writer names the Go front end in the FileHeader of the streams it writes.
+func writer() string { return "vibesys-evaluator-go " + version.Version }
 
 type checkFiles struct{ state, results, summary, output string }
 

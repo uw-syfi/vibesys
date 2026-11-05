@@ -1,12 +1,14 @@
 // Package workload is the Go front end of vibesys-evaluator: a task's request generator written
-// in Go. It has the concepts of the Python SDK's vibesys_evaluator.service: a Workload is a model
-// and a weighted mix of Operations; each Operation builds a Request (Steps from Get, Post and
-// Put, a Template filled from an earlier step's response, the info it was built from, an
-// exclusive key), a write's Apply updates the model, and Check says what is wrong with a
-// response after the phase. Rand is bit-identical to the Python SDK's Rand.
+// in Go. It has the concepts of the Python SDK's vibesys_evaluator.service: a Workload is a
+// dataset, a model built from it, and a weighted mix of Operations; each Operation builds a
+// Request (Steps from Get, Post and Put, a Template filled from an earlier step's response, the
+// info it was built from, an exclusive key), a write's Apply updates the model, and Check says
+// what is wrong with a response after the phase. The dataset and the model are any Go types, so a
+// task's existing reference model and checks serve as they are. Rand is bit-identical to the
+// Python SDK's Rand.
 //
-// Main is the generator command that loadgen and the phase pod run (sdk/vibesys-evaluator/
-// docs/spec.md, "Generator command line"): `generate` writes the request stream on standard
+// Main is the generator command that loadgen and the phase pod run (see "Generator command
+// line" in sdk/vibesys-evaluator/docs/spec.md): `generate` writes the request stream on standard
 // output until loadgen closes it, and `check` checks the phase's results afterwards. For the same
 // PhaseInput, a Go and a Python generator of the same workload write the same stream.
 package workload
