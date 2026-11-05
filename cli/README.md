@@ -129,8 +129,13 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/environment/docker/dockertest/` | The one contract suite every `Engine` passes. Tests only. |
 | `internal/environment/docker/machine/` | Where a docker engine's containers find a run's directories: `Local` (this machine's own directories, and its caches) and `Remote` (copies made with rsync on a machine reached over ssh, copied back when the command ends). |
 | `internal/environment/slurm/` | The Slurm placement: an `Allocator` that runs a container's first process and every image build under `srun`, and an `Engine` that removes a container and then cancels and confirms the end of its allocation, and sweeps the allocations a dead run left. Passes the environment contract suite over the fake engine. |
+| `internal/environment/apptainer/` | The apptainer placement: an `Engine` that places the docker environment's containers on a Slurm cluster whose nodes run Apptainer and no Docker. It copies each image to the cluster once, by digest, converts it to a SIF on a node, runs a run's containers as steps of one batch allocation, and reads the machine and the GPUs on the node. It decides over a `Cluster`, the narrow interface to the cluster. |
+| `internal/environment/apptainer/clustercli/` | The `Cluster` that runs Slurm's and Apptainer's programs through ssh on the login node. Its tests run it against fake `srun`, `apptainer` and `scancel` programs. |
+| `internal/environment/apptainer/clusterfake/` | A `Cluster` that keeps a cluster in memory, with queued jobs, nodes that run the fake world's scripts, and faults. Tests only. |
 | `internal/remote/` | Running programs on a machine and copying directories to and from it: this one, or another over ssh and rsync. An exit code that is ssh's own is never taken for the program's. |
 | `internal/backend/nvidia/` | The GPU facts of a machine (model, count, driver, the driver's CUDA version) for a fingerprint, read with `nvidia-smi`. |
+| `internal/backend/amd/` | The AMD GPU facts of a machine (model, count, the amdgpu driver's version) for a fingerprint, read with `rocminfo` or `amd-smi` and `/sys/module/amdgpu/version`. |
+| `internal/resource/rocm/` | The `rocm` resource: the machine's AMD GPUs, and a check, run in the container before the command, that the image's ROCm runtime sees them. |
 | `internal/tomlproto/` | Decoding TOML into a proto message by its field names, refusing an unknown key by name, and a key newer than the schema version the file declares (`task_schema_since_minor`). The task manifest and the operator config are read with it. |
 | `internal/operator/` | The operator config (`cli.toml`), decoded into `OperatorConfig` in `operator.proto` with unknown keys refused by name: its named placements, each placement's kind and sections, and a file of the earlier shape read as the placement `default`. What a kind's section means is that kind's package's business. |
 | `internal/resource/` | `Resource`: what a placement gives every container (`Kind`, `Claims` for scheduling, `Fingerprint`, and `Attach`, the mounts, variables, network and GPUs a container is made with), and the contract suite in `resourcetest/` every resource passes, with the Fake in `fakeresource/` (tests only). |
@@ -459,7 +464,7 @@ other users' daemons on the same machine, and daemons on other machines that sha
   shell there over ssh. So the measures of every placement on one machine, of
   one daemon or of several, take turns. Host jobs that claim a slot of their own (`host`) take this
   machine's lease. A Kubernetes cluster a placement gives is leased in the cluster (below). GPUs
-  take no lease of their own, since their machine's lease covers them, and a `slurm` placement takes
+  take no lease of their own, since their machine's lease covers them, and a `slurm` or `apptainer` placement takes
   none, since Slurm's exclusive allocation arbitrates. A claim that shares its resource takes no
   lease.
 - The directory of leases is `vibesys-leases` in the first of `/run/lock`, `/var/tmp` and
@@ -624,7 +629,8 @@ refused with the reason.
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
   no container runtime. A task for the `cuda` backend runs when its placement has a `gpu`
-  resource, and is refused otherwise; other accelerator backends are refused.
+  resource, and a task for the `rocm` backend when it has a `rocm` resource; each is refused
+  otherwise, with the resource it lacks named. Other accelerator backends are refused.
 - A container also gets the cache directory of the task's image at `/vibesys/cache`, kept across
   commits and jobs, and an empty `/vibesys/artifacts` that is kept with the job; the variables
   `VIBESYS_CACHE_DIR` and `VIBESYS_ARTIFACTS_DIR` name them. Why the task environment is shaped this
@@ -637,14 +643,15 @@ refused with the reason.
   | `gpu` | The GPUs, by `--gpus`, or by the runtime with `NVIDIA_VISIBLE_DEVICES`. |
   | `kubernetes` | The kubeconfig, read-only, at `/vibesys/kubeconfig`, with `KUBECONFIG` naming it; the network mode (`docker run --network`), such as `host` for a cluster whose API server listens on the machine's loopback address; `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER` when the config names them. The task deploys to the cluster and cleans up after itself; the daemon does not manage the cluster. |
   | `mounts` | Each directory, read-only, at `/vibesys/mounts/<name>`, with `VIBESYS_MOUNTS` listing the names. |
+  | `rocm` | The machine's AMD GPUs: `--device /dev/kfd --device /dev/dri --group-add video` under docker, `--rocm` under Apptainer, and each of `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL` and `CUDA_VISIBLE_DEVICES` that Slurm set. Before the command, the container checks that its ROCm runtime sees a GPU; when it does not, the job fails before its command with why, naming the image's ROCm version and the machine's amdgpu driver version. In a task of two images the GPUs are the server's. |
 
   A task names the resources its jobs need in its manifest, `[environment] needs = ["kubernetes"]`
-  (any of `gpu`, `kubernetes`, `mounts`). A job runs only on a placement that gives them all, and
+  (any of `gpu`, `kubernetes`, `mounts`, `rocm`). A job runs only on a placement that gives them all, and
   one restricted to a placement that lacks one is refused before anything is built, with
   `placement "<name>" has no resource "<kind>"`.
 - A result's environment fingerprint records where it was taken, for telling where a number came
   from: the placement (`placement`), the machine, and what identifies each resource: the GPUs'
-  model, count and driver, the cluster's server and version (`kubernetes_server`,
+  model, count and driver (`amd_gpu_model`, `amd_gpu_count` and `amdgpu_driver` for AMD GPUs), the cluster's server and version (`kubernetes_server`,
   `kubernetes_version`), the mounts' names. `show` and `jobs` name the placement. None of it decides
   which results are compared or reused (see "Placements are interchangeable").
 - Every container is named and labelled for the daemon that started it. A cancelled or timed out
@@ -705,6 +712,20 @@ partition = "a100"
 gres = "gpu:1"
 [placements.a100.resources.gpu]
 devices = "all"
+
+[placements.mi210]
+kind = "apptainer"
+[placements.mi210.remote]
+host = "host-a"
+remote_workspace_root = "/shared/vibesys"
+[placements.mi210.slurm]
+partition = "mi210"
+[placements.mi210.apptainer]
+submit_command = ["/opt/site/bin/sbatch-wrapper"]
+submit_arguments = ["--account=acct-a"]
+[placements.mi210.resources.rocm]
+[placements.mi210.resources.mounts]
+hf = "/shared/hf-cache"
 ```
 
 | Key | Meaning |
@@ -712,15 +733,18 @@ devices = "all"
 | `[scheduler] policy` | Which job starts next: `fifo` (default) or `fair-share`. |
 | `stop_grace_seconds` | How long a job's commands get to clean up after a cancel or the time limit asks them to terminate, before they are killed, on the host and on every placement (30 by default, at most 240). See "Stopping a command". |
 | `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
-| `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh) or `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`). A name is lower-case letters, digits, `_` and `-`. |
+| `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh), `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`) or `apptainer` (a Slurm cluster reached through its login node `remote.host`, whose compute nodes run Apptainer and no Docker; see "The apptainer placement"). A name is lower-case letters, digits, `_` and `-`. |
 | `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it. More than 1 needs kind `local`, since another machine stages and sweeps one job at a time. |
-| `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh` and `slurm`: the ssh destination and the programs that reach it. |
-| `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). |
+| `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh`, `slurm` and `apptainer`: the ssh destination (the login node, for `apptainer`) and the programs that reach it. |
+| `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). For `apptainer` it must be on the file system the compute nodes share, and also holds the images (`images/`), the probe program (`bin/`) and the last reading of a node (`nodes/`). |
 | `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
 | `[placements.<name>.slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
+| `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for `gres` and, with `exclusive`, the whole node when it measures, and `shared_gres` (or `gres`), `cpus` and `memory` when it does not. |
+| `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`). |
 | `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
-| `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`. |
+| `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
+| `[placements.<name>.resources.rocm]` | An empty table: the machine's AMD GPUs, for tasks of the `rocm` backend. An `apptainer` placement gives GPUs only this way; it refuses `gpu` and `kubernetes`. |
 
 A file of the earlier shape is read as the one placement `default`, and needs no edit: `[docker]
 placement` is its kind, `[remote]` and `[slurm]` its sections, `[docker] gpus` and `runtime` its
@@ -734,6 +758,46 @@ is removed and then its allocation is cancelled and confirmed ended, on every pa
 Docker daemon runs outside Slurm's cgroups; a run first cancels any allocation of its scope that a
 dead run left. The queue wait does not count against a command's timeout. The ssh host must be the
 node Docker runs on.
+
+### The apptainer placement
+
+An `apptainer` placement runs the same docker environment on a multi-node Slurm cluster reached
+through its login node, whose compute nodes have Slurm and Apptainer and no Docker:
+
+- The images are built by this machine's Docker, as for every placement. Before a container of an
+  image starts, the image is exported (`docker save`), compressed with gzip, and copied over ssh to
+  `images/<digest>.tar.gz` under `remote_workspace_root`, with its unpacked size beside it. The copy
+  is written to a file of its own and renamed into place once its size is what was sent, so
+  daemons that copy one image at once each publish a whole file, and a copy cut short leaves none.
+  An image the cluster has, or has the SIF of, is not copied again. The copy is the image's whole
+  compressed size over the ssh connection: several GiB for a ROCm image, once per image.
+- A run's first container is a batch allocation of its own (`sbatch --parsable --no-requeue`, or the
+  site's `submit_command`, with the `[slurm]` options and `submit_arguments`), named by the
+  container and commented with the daemon's scope. Its time limit is the command's limit and 40
+  minutes for the conversion and the stop. A holder step keeps it for the run: when the run ends,
+  or the daemon dies and its ssh connection with it, the holder cancels the allocation.
+- On the node, the archive is converted to a SIF in the node's own scratch directory (`$TMPDIR`),
+  after checking that it has three times the image's unpacked size free; when it has not, the job
+  fails before its command naming the space needed and the space there is. The SIF is published at
+  `images/<digest>.sif`, where every later run finds it.
+- The machine's facts and load, and the AMD GPUs' facts, are read on the node inside the
+  allocation, never on the login node. A daemon fingerprints a placement before it has a node, so
+  its fingerprint names the last node a run of its scope read (kept at `nodes/<scope>.json`), and
+  says `unread` before any.
+- Each of a container's processes is a step of the allocation (`srun --jobid --overlap`) that runs
+  `apptainer exec` of the SIF with a clean environment, the container's variables, its mounts
+  (read-only ones with `:ro`), the run's directories (staged under `remote_workspace_root` as for
+  `ssh`), a private home at `/tmp`, and `--rocm` with a `rocm` resource. The image's own files are
+  read-only, unlike in a docker container. SIGTERM and SIGKILL go to every process of the container,
+  found by a variable each carries; the grace and the kill are as under docker.
+- In a task of two images, the command's container joins the server's allocation, so both run on
+  one node and share its network. The server's port is one the node has free, chosen in the
+  allocation, and the command's container probes it with this binary, which is copied to the
+  cluster (`bin/`) once and must be a static Linux build, as a release is.
+- Removing a run's first container cancels its allocation and confirms it ended, with `squeue` and
+  then `sacct`; a run first cancels every allocation of its scope a dead run left. An exit code that
+  is ssh's own (255), or a step that never started its command, is never taken for the command's:
+  the command's ending is then unknown.
 
 ### Placements are interchangeable
 

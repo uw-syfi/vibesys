@@ -352,8 +352,81 @@ and after a build that did not finish.
 The Spark's Docker 29.2.1 has the `nvidia` runtime registered and no CDI
 devices, so `--gpus all` (through the NVIDIA hook) or `--runtime nvidia` with
 `NVIDIA_VISIBLE_DEVICES` work and CDI names do not. A task for the `cuda`
-backend is refused unless the operator config passes GPUs; other accelerator
+backend is refused unless the operator config passes GPUs; a task for the
+`rocm` backend unless it gives a `rocm` resource (below); other accelerator
 backends are refused.
+
+### AMD GPUs are a resource of their own, checked in the container
+
+`rocm` is a resource kind beside `gpu`, not a vendor setting of it: what the
+container gets differs (`--device /dev/kfd --device /dev/dri --group-add
+video` under Docker, `--rocm` under Apptainer, and no `--gpus`), its facts
+differ (`amd_gpu_model`, `amd_gpu_count` and `amdgpu_driver`, read with
+`rocminfo`, or `amd-smi` when it lists none, and `/sys/module/amdgpu/version`),
+and a task needs one or the other by its backend. A variable in which Slurm
+names the GPUs it assigned (`ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`,
+`GPU_DEVICE_ORDINAL`, `CUDA_VISIBLE_DEVICES`) is passed on when it is set and
+not required, since a partition that does not isolate its nodes' GPUs sets
+none.
+
+A ROCm image runs on the node's kernel driver, which may be older or newer than
+the image's ROCm supports, and then the runtime sees no GPU and the command
+fails in a way that blames the task. So the container first runs a check, a
+POSIX shell script, before the command: it asks `rocminfo` (or `amd-smi`) for a
+GPU agent and, when there is none, fails the job before its command with
+`the container's ROCm runtime does not see the GPU: … (the image's ROCm X, the
+node's amdgpu driver Y)`. In a task of two images the GPUs and the check are the
+server's.
+
+### Apptainer: a multi-node cluster without Docker
+
+A cluster whose compute nodes run Apptainer and no Docker, reached through a
+login node, is the placement kind `apptainer`, not a runtime setting of the
+`slurm` kind: the engine, the sections and the lifecycle all differ, and the
+`slurm` kind's configs stay as they were. It is a `docker.Engine`, so the docker
+environment's decisions (images, the two containers of a task of two images,
+the resources, the stop) hold unchanged; only how a container exists differs.
+
+- The image is built by the caller's own Docker, then exported, compressed
+  (gzip at its fastest level),
+  and copied over ssh to the shared file system, named by its digest, once.
+  The copy is honest about its cost: a ROCm image is several GiB, so the first
+  run of an image on a cluster spends minutes copying it, and later runs and
+  other daemons copy nothing. Building on the cluster was not an option, since
+  its nodes have no Docker and `apptainer build` from a Dockerfile would make
+  another image than the one the result records.
+- Publishing is a write to a file of the publisher's own and a rename once its
+  size is what was sent, so concurrent publishers each rename a whole file,
+  and a copy cut short is never there. The unpacked size is published after the
+  archive, so its presence says the archive is whole.
+- The conversion to a SIF runs inside the allocation, on the node's own
+  scratch space (`$TMPDIR`), never on the shared file system, which a build's
+  many small files would load. It first checks that the scratch space has three
+  times the image's unpacked size (the archive, the unpacked tree and the SIF),
+  and fails naming the space needed and the space there is. `apptainer build`
+  reads an uncompressed docker archive only, so the archive is unpacked first.
+  The SIF is published beside the archive by digest, and is what later runs use.
+- One batch allocation per run holds both containers, which share the node's
+  network; the server's port is chosen free in the allocation, from the node's
+  `/proc/net/tcp`, not from the run's id, since other jobs share the node's
+  network. The allocation is `sbatch --no-requeue --wrap 'exec sleep infinity'`
+  through the operator's submit command, so a site's wrapper and the options it
+  requires are configuration. Its processes are `srun --jobid --overlap` steps
+  started from the login node. A holder step reads its standard input and
+  cancels the allocation when it ends, which is when the run closes it or the
+  daemon dies and its ssh connection with it; the run also cancels by name and
+  confirms with `squeue` then `sacct`, and a run sweeps its scope's leftovers
+  by name.
+- A container's processes carry a variable naming it, set inside the container
+  only, by which SIGTERM and SIGKILL reach every one of them; the step itself is
+  not signalled, so the grace works as under Docker.
+- Machine facts, load and GPU facts are read on the node inside the allocation.
+  The daemon fingerprints before a job has a node, so it reports the last node
+  its scope read, kept on the shared file system, which assumes the partition's
+  nodes are alike; the facts are recorded and compared by nothing.
+- A step whose command never started (srun or apptainer failed first, which
+  the wrapper's start marker on standard error tells) or whose ssh exit is 255
+  is unknown, never the command's exit.
 
 ### One daemon per user per machine, and a sandbox beside it
 
@@ -444,17 +517,23 @@ later; until then the check covers 0.2 and every later schema.
 
 ## What is not done
 
-- Tasks of two images on ssh and Slurm placements: they have no probe program
-  yet and refuse such tasks. Section 2 of the plan gives them one, runs both
-  containers in one allocation, and shares the network namespace there.
+- Tasks of two images on `ssh` and `slurm` placements: they have no probe
+  program and refuse such tasks. The `apptainer` placement has one (the binary
+  is copied to the cluster) and runs both containers in one allocation.
 - Schema 0.1 as a proto message (above).
 
-- Multi-node Slurm clusters, where the ssh host is a login node: images, exec
-  and removal would have to go through `srun --overlap` into the allocation, and
-  the machine facts and load a result records, which the environment reads over
-  ssh, would have to be read on the allocated node.
+- Multi-node Slurm clusters with Docker on the compute nodes, where the ssh
+  host is a login node: the `slurm` kind still needs the ssh host to be the
+  node Docker runs on. Such a cluster without Docker is the `apptainer` kind,
+  which goes through the login node with `srun --overlap` and reads the
+  machine on the allocated node.
+- Under `apptainer`, the image's own files are read-only (no writable overlay),
+  where a Docker container's are not; a task that writes outside its mounts,
+  `/tmp` and its home fails there. The node's GPUs are passed with `--rocm`,
+  and whether a step on a partition that isolates GPUs gets the job's GPUs
+  without `--gres` on the step is not verified.
 - Passing exactly the GPUs Slurm allocated on a node with several, instead of
-  the configured `--gpus` value.
+  the configured `--gpus` value, under `slurm`.
 - A build's log is kept only when the build fails (its last lines are in the
   error); a successful build's output is discarded, so its duration is not in
   the job's log.
