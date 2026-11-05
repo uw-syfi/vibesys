@@ -152,3 +152,17 @@ def test_the_image_installs_the_verified_wheel() -> None:
 
 def test_python_checks_leave_no_bytecode_among_the_fixtures() -> None:
     assert _jobs()["verify"]["env"] == {"PYTHONDONTWRITEBYTECODE": "1"}
+
+
+def test_the_attestation_is_pushed_with_a_docker_login_that_is_removed_after() -> None:
+    """The attest action reads Docker's credentials; skopeo's authfile is not enough (rc1)."""
+    steps = _jobs()["image"]["steps"]
+    names = [step.get("name", "") for step in steps]
+    login = names.index("Log in to the registry for the attestation")
+    attest = next(i for i, s in enumerate(steps) if "attest" in s.get("uses", ""))
+    logout = names.index("Log out of the registry")
+    assert login < attest < logout
+    assert "docker login ghcr.io" in steps[login]["run"]
+    assert "--password-stdin" in steps[login]["run"]
+    assert steps[logout]["if"] == "always()"
+    assert steps[logout]["run"] == "docker logout ghcr.io"
