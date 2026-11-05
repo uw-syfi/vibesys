@@ -196,9 +196,12 @@ one passes the same environment contract suite (`envtest`).
 
 The build context is a tar of the task directory, sent on standard input, so
 the build sees the task's files and nothing else; files a tool generates
-(`__pycache__`, `*.pyc`) are left out, as they are of the task version. The image tag is the task
-version (the digest of every file in the directory), so the image changes
-exactly when the task does. The old rule that refused `COPY` and `ADD` is gone:
+(`__pycache__`, `*.pyc`) are left out, as they are of the task version. The image tag is a digest
+of the task version (the digest of every file in the directory) and of the
+local image ID of each image the Dockerfile builds on (`FROM`, `COPY --from=`),
+so the image changes exactly when the task does or a base changes under its
+tag; docker builds on its local image of a tag, so a key of files alone would
+keep an image built on a base that was since rebuilt. The old rule that refused `COPY` and `ADD` is gone:
 it existed because the build had no context. The image digest, not the tag,
 is what the fingerprint pins and what containers are made from.
 

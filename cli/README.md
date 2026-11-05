@@ -623,8 +623,16 @@ refused with the reason.
 
 - The image is built from the task's directory as the job's commit has it: the directory is the
   build context, so the Dockerfile can `COPY` the task's scripts into the image, and the build sees
-  no file of the candidate. The image is tagged by a digest of those files, so it is built again
-  exactly when a file of the task changes. The first `submit` of a task builds the image before the
+  no file of the candidate. The image is tagged (`vibesys-cli-task:<key>`) by a digest of those
+  files and of the image ID, as the engine has it locally, of each image the Dockerfile builds on:
+  each `FROM` and `COPY --from=` that is not a stage of the same Dockerfile or `scratch`, with the
+  defaults of `ARG`s declared before the first `FROM` substituted. So it is built again exactly
+  when a file of the task changes or when one of those images changes under its reference, such
+  as a base rebuilt locally under the same tag; nothing needs removing by hand. A base the engine
+  does not have yet is pulled by the build, and the next job builds once more on it, from the
+  build cache. A reference that names a variable with no default is not looked up, and a change of
+  its image is not seen. The candidate's image of a task of two images is named the same way, by
+  the digest of its files and its Dockerfile's bases (`vibesys-candidate:<task>-<key>`). The first `submit` of a task builds the image before the
   job is queued, so that submission takes as long as the build. The image digest is recorded with
   each result and is what makes two docker results comparable, with the backend, so results from
   different images are never mixed.

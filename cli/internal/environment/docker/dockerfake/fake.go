@@ -122,6 +122,18 @@ func (d *Daemon) Builds() int {
 	return d.builds
 }
 
+// Load gives the daemon an image under the reference whose ID is a digest of what it holds, as a
+// local build or a pull of a base image does: what a task's Dockerfile builds FROM. Loading other
+// content under the same reference moves the reference to a new image.
+func (d *Daemon) Load(ref, content string) docker.Image {
+	sum := sha256.Sum256([]byte("loaded " + content))
+	img := docker.Image{ID: "sha256:" + hex.EncodeToString(sum[:]), Platform: Platform}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.images[ref] = img
+	return img
+}
+
 // Prune removes every image, as an image prune does.
 func (d *Daemon) Prune() {
 	d.mu.Lock()
@@ -277,9 +289,16 @@ func (c *Client) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	}
 	c.d.mu.Lock()
 	c.d.builds++
-	seed := spec.Context
+	// The image is what its context makes on the daemon's local image of each base, as docker
+	// builds FROM a local image when it has one.
+	seed := slices.Clone(spec.Context)
+	for _, ref := range fromRefs(spec.Context) {
+		if img, ok := c.d.images[ref]; ok {
+			seed = fmt.Appendf(seed, "\nFROM %s", img.ID)
+		}
+	}
 	if !c.d.reproducible {
-		seed = fmt.Appendf(slices.Clone(spec.Context), "\nbuild %d", c.d.builds)
+		seed = fmt.Appendf(seed, "\nbuild %d", c.d.builds)
 	}
 	content := sha256.Sum256(append([]byte("content of "), seed...))
 	if c.d.attested {

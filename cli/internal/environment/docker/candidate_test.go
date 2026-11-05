@@ -147,9 +147,8 @@ func TestACandidatesImageIsBuiltOnceForWhatBuildsItAndNamedByItsDigest(t *testin
 	if s.daemon.Builds() != before+1 {
 		t.Fatalf("builds: %d, want %d", s.daemon.Builds(), before+1)
 	}
-	sum := sha256.Sum256([]byte(s.files.files["serve/Dockerfile"]))
-	if want := "vibesys-candidate:task-" + hex.EncodeToString(sum[:])[:32]; first.Tag != want {
-		t.Fatalf("tag %q, want %q", first.Tag, want)
+	if key, ok := strings.CutPrefix(first.Tag, "vibesys-candidate:task-"); !ok || len(key) != 32 || strings.Trim(key, "0123456789abcdef") != "" {
+		t.Fatalf("tag %q, want vibesys-candidate:task-<32 hexadecimal digits>", first.Tag)
 	}
 	if again := s.candidate(); again != first || s.daemon.Builds() != before+1 {
 		t.Fatalf("the same files built again: %+v after %+v, %d builds", again, first, s.daemon.Builds())
@@ -159,6 +158,27 @@ func TestACandidatesImageIsBuiltOnceForWhatBuildsItAndNamedByItsDigest(t *testin
 	s.files.mu.Unlock()
 	if changed := s.candidate(); changed.Tag == first.Tag || s.daemon.Builds() != before+2 {
 		t.Fatalf("changed files gave %+v after %+v, %d builds", changed, first, s.daemon.Builds())
+	}
+}
+
+// Regression: the candidate's image was named by its files alone, so a base image rebuilt under
+// the same tag left every later candidate of the same files on the old base.
+func TestACandidateIsBuiltAgainOnABaseImageRebuiltUnderTheSameTag(t *testing.T) {
+	s := newCandidateScene(t)
+	const ref = "registry.example/serving/base:dev"
+	s.files.mu.Lock()
+	s.files.files["serve/Dockerfile"] = "FROM " + ref + "\nCOPY . /srv\n"
+	s.files.mu.Unlock()
+	s.daemon.Load(ref, "base v1")
+	first := s.candidate()
+	if again := s.candidate(); again != first {
+		t.Fatalf("an unchanged base built again: %+v after %+v", again, first)
+	}
+	builds := s.daemon.Builds()
+	s.daemon.Load(ref, "base v2")
+	rebuilt := s.candidate()
+	if s.daemon.Builds() != builds+1 || rebuilt.ID == first.ID || rebuilt.Tag == first.Tag {
+		t.Fatalf("the base %s changed under its tag, and the candidate is %+v after %+v, with %d builds after %d", ref, rebuilt, first, s.daemon.Builds(), builds)
 	}
 }
 

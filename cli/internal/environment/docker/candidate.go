@@ -60,8 +60,8 @@ func (c CandidateFiles) Candidate(ctx context.Context, target environment.Target
 
 var tagUnsafe = regexp.MustCompile(`[^a-z0-9_.-]+`)
 
-// candidateTag names a candidate's image by the task and the digest of what builds it.
-func candidateTag(taskName, digest string) string {
+// candidateTag names a candidate's image by the task and its build key (buildKey).
+func candidateTag(taskName, key string) string {
 	name := strings.Trim(tagUnsafe.ReplaceAllString(strings.ToLower(taskName), "-"), ".-")
 	if name == "" {
 		name = "task"
@@ -69,11 +69,12 @@ func candidateTag(taskName, digest string) string {
 	if len(name) > 64 {
 		name = name[:64]
 	}
-	return candidateRepository + ":" + name + "-" + digest[:32]
+	return candidateRepository + ":" + name + "-" + key[:32]
 }
 
 // Candidate implements environment.Environment: the candidate's image, built from the target's
-// commit when the engine has no image of the same digest. A build that fails says why, with the
+// commit when the engine has no image of the same build key: the digest of the candidate's files,
+// and the engine's local image of each base its Dockerfile builds on. A build that fails says why, with the
 // end of its output.
 func (e *env) Candidate(ctx context.Context, b core.CandidateBuild, log io.Writer) (core.CandidateImage, error) {
 	p := e.p
@@ -94,13 +95,17 @@ func (e *env) Candidate(ctx context.Context, b core.CandidateBuild, log io.Write
 	if err != nil {
 		return core.CandidateImage{}, err
 	}
-	tag := candidateTag(e.target.Task, files.Digest)
 	select {
 	case p.build <- struct{}{}:
 		defer func() { <-p.build }()
 	case <-ctx.Done():
 		return core.CandidateImage{}, ctx.Err()
 	}
+	bases, err := p.bases(ctx, files.Dockerfile)
+	if err != nil {
+		return core.CandidateImage{}, err
+	}
+	tag := candidateTag(e.target.Task, buildKey([]byte(files.Digest), bases))
 	img, ok, err := p.cfg.Engine.Image(ctx, tag)
 	if err == nil && !ok {
 		_, _ = fmt.Fprintf(log, "[candidate] building %s from %s\n", tag, b.Dockerfile)

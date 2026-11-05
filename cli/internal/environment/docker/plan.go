@@ -51,12 +51,30 @@ func runLabels(scope, runID string) Labels {
 // containerName is the unique name of the container of the run with the id.
 func containerName(runID string) string { return containerPrefix + runID }
 
-// imageTag names the image a build context builds, by a digest of the context: the same task
-// files are the same tag, so an unchanged task finds its image already built.
-func imageTag(context []byte) string {
-	sum := sha256.Sum256(context)
-	return imageRepository + ":" + hex.EncodeToString(sum[:16])
+// base is an image a build builds on (baseRefs), as the engine has it before the build.
+type base struct {
+	Ref string
+	// ID is the engine's local image of Ref, or empty when it has none and the build pulls it.
+	ID string
 }
+
+// buildKey is a digest, in hexadecimal, of everything a build reads: its input (the build context,
+// or a digest of what makes it) and the local image of each base it builds on. The same files on
+// the same base images are the same key, so an unchanged task finds its image already built; a
+// base image rebuilt or pulled again under the same reference is a new key, so the image is built
+// again on it instead of being reused from the old one.
+func buildKey(input []byte, bases []base) string {
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%d\n", len(input))
+	h.Write(input)
+	for _, b := range bases {
+		_, _ = fmt.Fprintf(h, "base %q %q\n", b.Ref, b.ID)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// imageTag names the task's image by its build key.
+func imageTag(key string) string { return imageRepository + ":" + key[:32] }
 
 // Where a container finds what the environment gives it besides the checkout, and the variables
 // that name them.

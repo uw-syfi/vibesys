@@ -216,8 +216,8 @@ func (e *env) Machine(ctx context.Context) (core.MachineFacts, error) {
 // Load implements environment.Environment.
 func (e *env) Load(ctx context.Context) (core.MachineLoad, error) { return e.p.cfg.Backend.Load(ctx) }
 
-// image returns the image the task's files build. An image the engine already has under their
-// tag is not built again. Builds are one at a time, so that a Fingerprint and a Run that ask for
+// image returns the image the task's files build on the engine's local images of its bases. An
+// image the engine already has under their tag (buildKey) is not built again. Builds are one at a time, so that a Fingerprint and a Run that ask for
 // the same image build it once; the build's progress goes to log.
 func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, error) {
 	select {
@@ -230,7 +230,11 @@ func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, 
 	if err != nil {
 		return Image{}, err
 	}
-	tag := imageTag(buildContext)
+	bases, err := p.bases(ctx, spec.Dockerfile)
+	if err != nil {
+		return Image{}, err
+	}
+	tag := imageTag(buildKey(buildContext, bases))
 	if img, ok, err := p.cfg.Engine.Image(ctx, tag); err != nil || ok {
 		return checked(img, err)
 	}
@@ -242,6 +246,23 @@ func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, 
 		err = &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: the engine built %s and does not have it", tag)}
 	}
 	return checked(img, err)
+}
+
+// bases looks up the engine's local image of each image the Dockerfile builds on (baseRefs).
+func (p *Provider) bases(ctx context.Context, dockerfile []byte) ([]base, error) {
+	var out []base
+	for _, ref := range baseRefs(dockerfile) {
+		img, ok, err := p.cfg.Engine.Image(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		b := base{Ref: ref}
+		if ok {
+			b.ID = img.ID
+		}
+		out = append(out, b)
+	}
+	return out, nil
 }
 
 // checked passes err on, and refuses an image the fingerprint could not pin.
