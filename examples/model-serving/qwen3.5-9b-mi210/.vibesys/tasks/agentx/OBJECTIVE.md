@@ -36,8 +36,11 @@ flips, mean |Δlogprob| ≤ 0.05 and p99 ≤ 0.25, mean matched-prefix fraction
 path), and a streamed response equal to the non-streamed one with a correct
 usage chunk. The server needs `/v1/completions` with `ignore_eos`,
 `return_token_ids`, `echo` + `logprobs` + `return_tokens_as_token_ids`, and
-`usage.prompt_tokens_details.cached_tokens`. Calibration and the policy are
-in `../default/accuracy_checker/README.md`.
+`usage.prompt_tokens_details.cached_tokens`. The gate is
+`vibesys_evaluator.llm_serving.golden` in the task image (its bounds are
+`golden.Thresholds`; the requests it sends are in that module), and
+`golden.json`'s `meta` says how the reference was made. This task does not
+depend on any other task directory, so it still reads true when copied alone.
 
 ## Benchmark (`benchmark`)
 
