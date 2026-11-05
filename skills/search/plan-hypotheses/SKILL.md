@@ -41,6 +41,9 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    (`vibesys-cli plan list --json`) and open full plans only for plans near your idea
    (`plan view <n>`). Then browse the saved results (`vibesys-cli result`, `show <sha>`, `jobs`,
    `logs <job>`) and the code. A profile an earlier agent kept lives in its plan's comments.
+   Read the code of the revision you plan on (usually the result branch head) without checking it
+   out: `git show <sha>:<path>`, `git grep <pattern> <sha>`, `git diff <a> <b>`. The checkout you
+   start in belongs to the user or the lead; never change its index, HEAD or files.
 2. **Bound first.** Compute the speed-of-light floor of the part you look at from the bytes and
    operations it must move and the hardware's measured peaks. The gap to the observed time is the
    headroom. Use the benchmark's observed operating point, not its configured one. An idea may not

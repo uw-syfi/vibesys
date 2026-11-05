@@ -51,7 +51,10 @@ It selects a working CLI or installs one only after explicit user approval.
    `unmeasured`: read [from-scratch.md](references/from-scratch.md) and create nothing else
    until it says to. Otherwise it gets the result branch `vibesys/result/<task>` at the base
    commit, and a context line you reuse in every brief: `--task <task> --run <run id> --harness
-   <harness>`. Every worktree of the repository shares the task's one store, so each agent sees
+   <harness>`. The run id is `VIBESYS_RUN` when the orchestrator set it; otherwise choose one
+   short name for this optimization, keep it on resume, and pass it as `--run` in the context
+   line. Never export `VIBESYS_RUN` yourself: its presence is what selects the orchestrator
+   harness file, for you and for every subagent that inherits your environment. Every worktree of the repository shares the task's one store, so each agent sees
    the others' jobs.
 5. If `vibesys-cli show <base>` lists no measure result, measure the base with
    `vibesys-cli submit measure <base> --samples 5`, as a tracked background `wait`

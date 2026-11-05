@@ -23,12 +23,20 @@ names; they usually say which profiler fits. Details are in
 ## Work
 
 1. Decide what evidence would answer the question, and the cheapest way to capture it.
-2. Build in the checkout if the task needs it. Edit no tracked file. Scratch output, traces and
+2. Build in the checkout if the task needs it. Edit no tracked file, except as step 4 allows. Scratch output, traces and
    reports go in the scratch directory your brief names, not in the checkout.
 3. Capture on the workload the benchmark uses, or one close enough to say so. A capture that
    drives load is a `vibesys-cli submit command <rev> -- <argv...>` job (`vibesys:measure`), and
-   its output is read with `vibesys-cli logs <job>`.
-4. Answer from what you captured. Aggregate timings do not show where time goes inside a phase;
+   its output is read with `vibesys-cli logs <job>`. A capture script of your own can travel as
+   the job's argv (`-- python3 -c "<script>"`), so it needs no commit.
+4. If the program cannot show what the question needs (it serves no profiler, its binaries carry
+   no symbols, it has no hook to time), say so and stop, unless your brief names an
+   instrumentation branch. A job runs only a commit, so a scratch copy outside the checkout is
+   never what runs. On that branch, make one `wip:` commit that adds the instrumentation and
+   nothing else: no change to what the program computes or returns. Profile that commit. Never
+   measure, check or hand it back as a candidate, and say in the findings what the
+   instrumentation may cost the run.
+5. Answer from what you captured. Aggregate timings do not show where time goes inside a phase;
    if the evidence does not cover part of the question, say which part and what is missing.
    Repeating the same capture cannot fill a field it does not collect.
 
