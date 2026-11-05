@@ -265,6 +265,12 @@ extend-exclude = [
     "scripts/corevalue/tests/generated_pb",
     "scripts/corevalue/tests/generated_values",
     "scripts/corevalue/tests/generated_boundary",
+    # Spec examples of vibesys-evaluator, written against its intended API before the
+    # package exists: they cannot import it, and holding them to the repo's rules
+    # (docstrings on every helper, no magic values in request distributions) would
+    # bury the task code they exist to show. They get the package's own lint and
+    # type-check configuration when they run in CI with the package.
+    "sdk/vibesys-evaluator/examples",
     "skills/domains",
     "third_party/serving-repos",
     "examples/model-serving/show-o2-1.5B-HQ/.vibesys/tasks/default/reference/Show-o",
@@ -520,7 +526,8 @@ package = true
 [tool.uv.workspace]
 # `sdk/vs-evaluator` ships a protocol spec, conformance fixtures, and non-Python
 # SDKs, so it has no `pyproject.toml` and is not a uv workspace member.
-exclude = ["exp_env/**", "sdk/vs-evaluator"]
+# `sdk/vibesys-evaluator` holds only its spec until its Python package lands.
+exclude = ["exp_env/**", "sdk/vs-evaluator", "sdk/vibesys-evaluator"]
 members = ["sdk/*", "libs/*"]
 
 [tool.uv.sources]

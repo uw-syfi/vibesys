@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+// What the orchestrator (the task's bench.py in the container vibesys starts)
+// and a phase pod (the same bench.py, in the cluster) exchange for one phase.
+// Both sides are the vibesys-evaluator Python package; the messages are here
+// because the exchange crosses a process and is kept as an artifact. See
+// sdk/vibesys-evaluator/docs/spec.md. Files are one binpb message each.
+package vibesys.evaluator.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/evaluator/v1/loadgen.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1";
+
+// PhaseInput is everything a phase pod needs besides the task image.
+message PhaseInput {
+  // The sample's seed; the phase's streams derive from it and phase_index.
+  uint64 sample_seed = 1;
+  // 0 for the first phase of the sample, then 1, 2, ...
+  uint32 phase_index = 2;
+  LoadModel model = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Closed loop.
+  uint32 clients = 4;
+  double max_ops_per_sec = 5 [(buf.validate.field).double.finite = true];
+  // Open loop.
+  double rate = 6 [(buf.validate.field).double.finite = true];
+  Arrivals arrivals = 7 [(buf.validate.field).enum.defined_only = true];
+  double secs = 8 [(buf.validate.field).double = {
+    gt: 0
+    finite: true
+  }];
+  double warmup_secs = 9 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  // The writes of the sample's earlier phases, in the order they started.
+  repeated HistoryEntry history = 10;
+}
+
+// HistoryEntry is one write a phase sent: what the task's `apply` receives as
+// a Call when a later phase replays the sample's history.
+message HistoryEntry {
+  // The operation's name.
+  string operation = 1 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_]{0,62}$"];
+  // The Request's info, as a JSON object.
+  string info_json = 2;
+  int64 start_unix_nanos = 3;
+  int64 end_unix_nanos = 4;
+  // Every step answered with an expected status. A write that is not ok may
+  // still have been applied.
+  bool ok = 5;
+  // The responses, with bodies (writes are always in the validation sample).
+  repeated StepResult steps = 6;
+}
+
+// Violation is one check that failed, for the error message and artifacts.
+message Violation {
+  string operation = 1;
+  uint64 index = 2;
+  string message = 3 [(buf.validate.field).string.max_len = 2000];
+}
+
+// PhaseOutput is what a phase pod leaves for the orchestrator.
+message PhaseOutput {
+  PhaseSummary summary = 1;
+  // Operations checked, and the checks that failed, in the measurement window.
+  uint64 checked = 2;
+  uint64 invalid = 3;
+  // The first violations (at most 20), for the error record and artifacts.
+  repeated Violation violations = 4 [(buf.validate.field).repeated.max_items = 20];
+  // The writes this phase sent, to append to the sample's history.
+  repeated HistoryEntry writes = 5;
+  // Seconds spent generating the plan and checking the sample (outside the window).
+  double generate_secs = 6;
+  double check_secs = 7;
+}

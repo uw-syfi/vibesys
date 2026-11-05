@@ -18,6 +18,7 @@ without pulling in the full VibeSys dependency tree.
 |---------|---------|
 | `vs-bench` | Benchmark toolkit: SSE transport, load scheduling, statistics |
 | `vs-evaluator` | Evaluator result protocol: spec, conformance fixtures, Go SDK |
+| `vibesys-evaluator` | Benchmark evaluators for services: Python API, loadgen, deploy layer (spec only so far: `docs/spec.md`) |
 
 ## Co-developing an SDK and a consumer
 
