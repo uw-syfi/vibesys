@@ -17,16 +17,21 @@ type frontierWorld struct {
 	points   map[core.Commit][]float64
 	frontier core.Frontier
 	minute   int
+	// version is the task's current version, which measurements are taken under unless a test
+	// says otherwise: that of the task at the result branch head.
+	version string
 }
 
 func newFrontierWorld(t testing.TB) *frontierWorld {
-	return &frontierWorld{t: t, points: map[core.Commit][]float64{}}
+	return &frontierWorld{t: t, points: map[core.Commit][]float64{}, version: "t1"}
 }
 
-// measure saves a measurement of commit n at the point, and returns the commit.
+// measure saves a measurement of commit n at the point, under the current task version, and
+// returns the commit.
 func (w *frontierWorld) measure(n int, point []float64, options ...func(*core.Result)) core.Commit {
 	w.minute++
 	c := commitN(n)
+	options = append([]func(*core.Result){underTask(w.version)}, options...)
 	w.results = append(w.results, paretoMeasurement(fmt.Sprintf("j%d", len(w.results)+1), c, point, w.minute, options...))
 	w.points[c] = point
 	return c
@@ -35,7 +40,9 @@ func (w *frontierWorld) measure(n int, point []float64, options ...func(*core.Re
 func (w *frontierWorld) decide(c core.Commit) core.FrontierDecision {
 	w.t.Helper()
 	w.minute++
-	d, err := core.DecideFrontier(core.FrontierRequest{Candidate: c, Frontier: w.frontier, Results: w.results, At: at(w.minute)})
+	d, err := core.DecideFrontier(core.FrontierRequest{
+		Candidate: c, Frontier: w.frontier, Results: w.results, TaskVersion: w.version, At: at(w.minute),
+	})
 	if err != nil {
 		w.t.Fatalf("DecideFrontier(%.7s): %v", c, err)
 	}
@@ -162,6 +169,115 @@ func TestTheFrontierIsTheParetoSetInAnyOrder(t *testing.T) {
 	}
 }
 
+// A task switch changes the task version and, with the task's image, the environment. The first
+// commit admitted under the new version retires the members measured only under the old one: they
+// neither refuse it as measured in another environment nor stay beside it. A commit measured only
+// under the old version is refused as stale and retires nothing, and nothing is compared across
+// versions or environments.
+func TestATaskSwitchRetiresTheMembersOfTheOldVersion(t *testing.T) {
+	w := newFrontierWorld(t)
+	old := w.measure(1, []float64{100, 100, 100})
+	w.add(old)
+	late := w.measure(2, []float64{100, 50, 100}) // a tradeoff the old task never saw admitted
+
+	w.version = "t2"
+	current := w.measure(3, []float64{50, 200, 200}, inEnvironment(dockerEnv))
+	d := w.add(current)
+	a, ok := d.(core.FrontierAdmission)
+	if !ok || !slices.Equal(a.Retired(), []core.Commit{old}) || len(a.Evicted()) != 0 {
+		t.Fatalf("%+v, want admitted retiring %.7s", d, old)
+	}
+	if got := w.commits(); !slices.Equal(got, []core.Commit{current}) {
+		t.Fatalf("frontier %v, want only the commit of the new version", got)
+	}
+	if kinds := refusalKinds(w.add(late)); !slices.Equal(kinds, []core.FrontierRefusalKind{core.FrontierStale}) {
+		t.Fatalf("%v, want stale", kinds)
+	}
+	if got := w.commits(); !slices.Equal(got, []core.Commit{current}) {
+		t.Fatalf("a stale commit changed the frontier: %v", got)
+	}
+	// Under the new version the environment rule stands: a member measured in another one refuses.
+	elsewhere := w.measure(4, []float64{300, 50, 50})
+	if kinds := refusalKinds(w.add(elsewhere)); !slices.Equal(kinds, []core.FrontierRefusalKind{core.FrontierEnvironmentMismatch}) {
+		t.Fatalf("%v, want environment_mismatch", kinds)
+	}
+}
+
+// A member measured again under the new version stays a member, judged on its new measurements
+// only: its old ones are not pooled with them.
+func TestAMemberMeasuredAgainUnderTheNewVersionIsJudgedOnItsNewMeasurements(t *testing.T) {
+	w := newFrontierWorld(t)
+	kept := w.measure(1, []float64{100, 100, 100})
+	w.add(kept)
+	w.version = "t2"
+	w.measure(1, []float64{200, 100, 100}, inEnvironment(dockerEnv))
+	c := w.measure(2, []float64{100, 50, 100}, inEnvironment(dockerEnv))
+	d := w.add(c)
+	if a, ok := d.(core.FrontierAdmission); !ok || len(a.Retired()) != 0 || !slices.Equal(w.commits(), []core.Commit{kept, c}) {
+		t.Fatalf("%+v, want admitted beside %.7s as a tradeoff", d, kept)
+	}
+}
+
+// Over any sequence of task switches, admissions and offers of commits measured under an older
+// version, the frontier ends as the Pareto set of the commits of the current version that were
+// offered since the last switch, once one of them was; a commit that is not a member and was
+// measured only under an older version is always refused as stale and changes nothing.
+func TestAcrossTaskSwitchesTheFrontierIsTheParetoSetOfTheCurrentVersion(t *testing.T) {
+	r := newRand(103)
+	for range properties / 4 {
+		w := newFrontierWorld(t)
+		version := 1
+		n := 0
+		var offered []core.Commit // of the current version, since the last switch
+		var older []core.Commit   // measured under an older version only
+		initial := w.commits()    // the members before the first offer of the version
+		for range 2 + r.IntN(20) {
+			switch step := r.IntN(10); {
+			case step == 0:
+				older = append(older, offered...)
+				version++
+				w.version = fmt.Sprintf("t%d", version)
+				offered, initial = nil, w.commits()
+			case step == 1 && len(older) > 0:
+				before := w.frontier
+				c := older[r.IntN(len(older))]
+				if before.Has(c) {
+					continue // a member is admitted again with nothing changed
+				}
+				if kinds := refusalKinds(w.add(c)); !slices.Equal(kinds, []core.FrontierRefusalKind{core.FrontierStale}) || w.frontier.Revision != before.Revision {
+					t.Fatalf("%.7s of an older version: %v; want stale, and nothing changed", c, kinds)
+				}
+			default:
+				p := gridPoint(r)
+				if slices.ContainsFunc(offered, func(c core.Commit) bool { return slices.Equal(w.points[c], p) }) {
+					continue
+				}
+				n++
+				c := w.measure(n, p, inEnvironment(core.Fingerprint{
+					Kind: core.EnvironmentDocker, Backend: core.BackendCPU, ImageDigest: fmt.Sprintf("sha256:%064x", version),
+				}))
+				offered = append(offered, c)
+				w.add(c)
+			}
+		}
+		var want []core.Commit
+		for _, c := range offered {
+			if !slices.ContainsFunc(offered, func(o core.Commit) bool { return dominance(w.points[o], w.points[c]) == core.Better }) {
+				want = append(want, c)
+			}
+		}
+		if len(offered) == 0 {
+			want = initial
+		}
+		got := w.commits()
+		slices.Sort(got)
+		slices.Sort(want)
+		if !slices.Equal(got, want) {
+			t.Fatalf("frontier %v, want %v", got, want)
+		}
+	}
+}
+
 func TestAMemberIsAdmittedAgainWithNothingChanged(t *testing.T) {
 	w := newFrontierWorld(t)
 	c := w.measure(1, []float64{200, 100, 100})
@@ -199,9 +315,9 @@ func TestFrontierRefusalsNameTheMember(t *testing.T) {
 		t.Fatalf("%v, want within_noise", kinds)
 	}
 
-	other := w.measure(4, []float64{100, 50, 100}, underTask("t2"))
-	if kinds := refusalKinds(w.add(other)); !slices.Equal(kinds, []core.FrontierRefusalKind{core.FrontierStale}) {
-		t.Fatalf("%v, want stale", kinds)
+	other := w.measure(4, []float64{100, 50, 100}, underTask("t0"))
+	if d := w.add(other); !slices.Equal(refusalKinds(d), []core.FrontierRefusalKind{core.FrontierStale}) || d.(core.FrontierRefusal).Reasons[0].Member != "" {
+		t.Fatalf("%+v, want stale, about the commit alone", d)
 	}
 	elsewhere := w.measure(5, []float64{100, 50, 100}, inEnvironment(dockerEnv))
 	if kinds := refusalKinds(w.add(elsewhere)); !slices.Equal(kinds, []core.FrontierRefusalKind{core.FrontierEnvironmentMismatch}) {
@@ -225,9 +341,13 @@ func TestOnlyAParetoMeasurementJoinsAFrontier(t *testing.T) {
 	if failureKind(err) != core.FailureInvalidInput {
 		t.Fatalf("a single-metric measurement: %v, want invalid input", err)
 	}
-	_, err = core.DecideFrontier(core.FrontierRequest{Candidate: candidateCommit, Results: results})
+	_, err = core.DecideFrontier(core.FrontierRequest{Candidate: candidateCommit, Results: results, TaskVersion: "t1"})
 	if failureKind(err) != core.FailureInvalidInput {
 		t.Fatalf("no time: %v, want invalid input", err)
+	}
+	_, err = core.DecideFrontier(core.FrontierRequest{Candidate: candidateCommit, Results: results, At: at(2)})
+	if failureKind(err) != core.FailureInvalidInput {
+		t.Fatalf("no task version: %v, want invalid input", err)
 	}
 }
 

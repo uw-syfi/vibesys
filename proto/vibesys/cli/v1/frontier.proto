@@ -47,9 +47,11 @@ enum FrontierRefusalKind {
   FRONTIER_REFUSAL_KIND_WITHIN_NOISE = 4;
   // The samples cannot place the commit against the member named.
   FRONTIER_REFUSAL_KIND_INCONCLUSIVE = 5;
-  // The commit and the member named were measured under different task versions.
+  // The commit was measured only under other task versions than the task's current one: that of
+  // the task at the result branch head. The frontier holds the commits of the current version.
   FRONTIER_REFUSAL_KIND_STALE = 6;
-  // The commit and the member named were measured in different environments.
+  // The commit and the member named were measured, under the current task version, in different
+  // environments.
   FRONTIER_REFUSAL_KIND_ENVIRONMENT_MISMATCH = 7;
 }
 
@@ -60,7 +62,7 @@ message FrontierRefusalReason {
   // The member the reason is about. Empty for a reason about the commit alone.
   string member = 3;
   // The overall verdict of the commit against the member, and the verdict on each objective. Set
-  // for DOMINATED, WITHIN_NOISE, INCONCLUSIVE and STALE.
+  // for DOMINATED, WITHIN_NOISE and INCONCLUSIVE.
   Verdict verdict = 4;
   repeated ObjectiveVerdict objectives = 5;
 }
@@ -79,6 +81,9 @@ message FrontierAdmission {
   bool already_member = 3;
   // The frontier after the change, in the order the members were admitted.
   repeated FrontierMember members = 4;
+  // The members measured only under other task versions than the current one, which left the
+  // frontier: they belong to a task it no longer holds, and the commit was not compared with them.
+  repeated string retired = 5;
 }
 
 // FrontierDecision is what the frontier made of a commit.

@@ -1,12 +1,15 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store/storetest"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
 
 var servingTask = core.Objectives{
@@ -20,11 +23,52 @@ var servingTask = core.Objectives{
 // measuredOn saves a measurement of a multi-objective commit: five samples of each objective.
 func (c *resultsCLI) measuredOn(n int, tok, ttft float64) {
 	c.t.Helper()
+	c.measuredUnder(n, c.taskVersion, storetest.HostEnvironment(), tok, ttft)
+}
+
+// measuredUnder is measuredOn under a task version and in an environment.
+func (c *resultsCLI) measuredUnder(n int, version string, environment core.Fingerprint, tok, ttft float64) {
+	c.t.Helper()
 	five := func(v float64) []float64 { return []float64{v, v, v, v, v} }
 	storetest.SeedMeasurement(c.t, c.store, storetest.Measurement{
-		Commit: rev(n), Samples: five(tok), At: c.clk.Now(), Objectives: servingTask,
-		Others: []core.Observation{{Name: "ttft_p50", Values: five(ttft)}},
+		Commit: rev(n), Samples: five(tok), At: c.clk.Now(), Objectives: servingTask, TaskVersion: version,
+		Environment: environment, Others: []core.Observation{{Name: "ttft_p50", Values: five(ttft)}},
 	})
+}
+
+// After a task switch, a promoted commit joins the frontier and the answer names the members of
+// the old task it retired; the JSON carries them as retired.
+func TestAPromotionAfterATaskSwitchRetiresTheOldMembers(t *testing.T) {
+	c := newResultsCLI(t)
+	c.measuredOn(1, 200, 200)
+	mustExit(t, c.run(withTask("frontier", "add", "c1")...), exitOK, "frontier add c1")
+
+	switched := tasktest.Files("kv")
+	switched[task.TasksDir+"/kv/bench.sh"] = task.File{Data: []byte("#!/bin/sh\necho fixed\n"), Executable: true}
+	c.world.Tasks.Put("/repo", rev(2), switched)
+	c.world.Tasks.Put("/repo", rev(3), switched)
+	tk, err := c.world.Tasks.Task(context.Background(), "/repo", rev(2), "kv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.world.Branches.FastForward(context.Background(), "/repo", resultBranch, rev(0), rev(2)); err != nil {
+		t.Fatal(err)
+	}
+	c.measuredUnder(2, tk.Version, storetest.DockerEnvironment(), 100, 100)
+	c.measuredUnder(3, tk.Version, storetest.DockerEnvironment(), 300, 50)
+
+	r := c.run(withTask("promote", "c3")...)
+	mustExit(t, r, exitOK, "promote c3")
+	if want := "retiring " + string(rev(1))[:12] + ", measured only under another task version"; !strings.Contains(r.stdout, want) {
+		t.Fatalf("promote c3 = %+v, want it to say %q", r, want)
+	}
+	r = c.run(withTask("frontier", "list", "--json")...)
+	var listed struct {
+		Members []struct{ Member struct{ Commit string } }
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &listed); err != nil || len(listed.Members) != 1 || listed.Members[0].Member.Commit != string(rev(3)) {
+		t.Fatalf("frontier list --json = %s (%v)", r.stdout, err)
+	}
 }
 
 // The JSON an agent parses: the field names of the contract, a verdict on each objective, and

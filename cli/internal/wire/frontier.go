@@ -31,17 +31,21 @@ func frontierMembers(ms []core.FrontierMember) []*cliv1.FrontierMember {
 	return out
 }
 
+func commitStrings(cs []core.Commit) []string {
+	var out []string
+	for _, c := range cs {
+		out = append(out, string(c))
+	}
+	return out
+}
+
 // FrontierDecision returns the contract's message for what the frontier made of a commit.
 func FrontierDecision(d core.FrontierDecision) *cliv1.FrontierDecision {
 	switch d := d.(type) {
 	case core.FrontierAdmission:
-		var evicted []string
-		for _, c := range d.Evicted() {
-			evicted = append(evicted, string(c))
-		}
 		return &cliv1.FrontierDecision{Outcome: &cliv1.FrontierDecision_Admitted{Admitted: &cliv1.FrontierAdmission{
-			Added: FrontierMember(d.Added()), Evicted: evicted, AlreadyMember: d.AlreadyMember(),
-			Members: frontierMembers(d.Members()),
+			Added: FrontierMember(d.Added()), Evicted: commitStrings(d.Evicted()), AlreadyMember: d.AlreadyMember(),
+			Members: frontierMembers(d.Members()), Retired: commitStrings(d.Retired()),
 		}}}
 	case core.FrontierRefusal:
 		refusal := &cliv1.FrontierRefusal{}

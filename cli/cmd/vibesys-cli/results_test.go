@@ -18,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/storetest"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
 
 // The history the result commands run over: base, then a line of commits on it. The result
@@ -38,6 +39,8 @@ type resultsCLI struct {
 	*cli
 	clk   *clock.Manual
 	store store.Store
+	// taskVersion is the version of the task every commit of the history has.
+	taskVersion string
 }
 
 func newResultsCLI(t *testing.T) *resultsCLI {
@@ -52,12 +55,19 @@ func newResultsCLI(t *testing.T) *resultsCLI {
 		c.world.Branches.AddCommit("/repo", rev(n), rev(n-1))
 	}
 	c.world.Branches.AddBranch("/repo", resultBranch, rev(0))
+	for n := 0; n <= 4; n++ {
+		c.world.Tasks.Put("/repo", rev(n), tasktest.Files("kv"))
+	}
+	tk, err := c.world.Tasks.Task(context.Background(), "/repo", rev(0), "kv")
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.git.AddRepo("/repo", revisions)
 	st, err := c.world.Stores.Create(context.Background(), scopeAt("/repo", "kv"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &resultsCLI{cli: c, clk: clk, store: st}
+	return &resultsCLI{cli: c, clk: clk, store: st, taskVersion: tk.Version}
 }
 
 func (c *resultsCLI) measured(n int, samples []float64) core.Result {
