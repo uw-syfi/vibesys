@@ -2,6 +2,7 @@ package workload
 
 import (
 	"math"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -98,5 +99,20 @@ func TestBadStepsAndRequestsSayWhatToFix(t *testing.T) {
 	}
 	if _, err := planned(Request{}, 0, false); err == nil {
 		t.Fatal("an empty request was planned")
+	}
+}
+
+// Property: the hand-written checks agree with the schema's patterns.
+func TestNameAndPointerChecksAreThePatterns(t *testing.T) {
+	name, pointer := regexp.MustCompile(namePattern), regexp.MustCompile(pointerPattern)
+	for _, s := range []string{"", "a", "token", "a_1", "1a", "A", "a-b", "_a", strings.Repeat("a", 63), strings.Repeat("a", 64), "a b", "é"} {
+		if validName(s) != name.MatchString(s) {
+			t.Errorf("name %q: %v", s, validName(s))
+		}
+	}
+	for _, s := range []string{"", "/", "//", "/a/b", "a", "a/b", "/~0", " /"} {
+		if validPointer(s) != pointer.MatchString(s) {
+			t.Errorf("pointer %q: %v", s, validPointer(s))
+		}
 	}
 }

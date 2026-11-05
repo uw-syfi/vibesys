@@ -59,7 +59,7 @@ type Operation[M any] struct {
 }
 
 func (o Operation[M]) validate() error {
-	if !namePattern.MatchString(o.Name) {
+	if !validName(o.Name) {
 		return fmt.Errorf("operation name %q must match %s", o.Name, namePattern)
 	}
 	if !(o.Weight > 0) || math.IsInf(o.Weight, 0) {

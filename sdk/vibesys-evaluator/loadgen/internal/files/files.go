@@ -76,7 +76,8 @@ func Append(buf []byte, format Format, message proto.Message) ([]byte, error) {
 	default:
 		size := proto.Size(message)
 		buf = protowire.AppendVarint(buf, uint64(size))
-		return proto.MarshalOptions{Deterministic: true}.MarshalAppend(buf, message)
+		// The sizes proto.Size just computed and cached are reused, not computed again.
+		return proto.MarshalOptions{Deterministic: true, UseCachedSize: true}.MarshalAppend(buf, message)
 	}
 }
 

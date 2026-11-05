@@ -324,10 +324,12 @@ func TestFixturesAreCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		// check_histograms.py is the hand-written Python check of these fixtures;
-		// __pycache__ is what running it leaves behind.
+		// check_histograms.py is the hand-written Python check of these fixtures; rand.json is
+		// the Python side's (rand_streams.py writes it, the Go SDK's test reads it);
+		// __pycache__ is what running them leaves behind.
 		name := entry.Name()
-		if _, ok := generated[name]; !ok && name != "check_histograms.py" && name != "__pycache__" {
+		ours := map[string]bool{"check_histograms.py": true, "rand_streams.py": true, "rand.json": true, "__pycache__": true}
+		if _, ok := generated[name]; !ok && !ours[name] {
 			t.Errorf("%s is not a generated fixture; remove it", name)
 		}
 	}

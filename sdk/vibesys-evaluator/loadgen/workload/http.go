@@ -2,16 +2,33 @@ package workload
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
 )
 
-var (
-	namePattern    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
-	pointerPattern = regexp.MustCompile(`^(/[^/]*)+$`)
+// The schema's patterns, checked by hand: a regular expression per step showed in profiles.
+const (
+	namePattern    = `^[a-z][a-z0-9_]{0,62}$`
+	pointerPattern = `^(/[^/]*)+$`
 )
+
+// validName reports whether name matches namePattern.
+func validName(name string) bool {
+	if len(name) < 1 || len(name) > 63 || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		c := name[i]
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// validPointer reports whether pointer matches pointerPattern: it starts with "/".
+func validPointer(pointer string) bool { return strings.HasPrefix(pointer, "/") }
 
 const (
 	maxSteps     = 16
@@ -37,7 +54,7 @@ type Text interface{ ~string | Template }
 // Ref is the value an earlier step of the same request captured as name (Capture). It panics on
 // a name outside ^[a-z][a-z0-9_]{0,62}$.
 func Ref(name string) Template {
-	if !namePattern.MatchString(name) {
+	if !validName(name) {
 		panic(fmt.Sprintf("workload.Ref name %q must match %s", name, namePattern))
 	}
 	return Template{parts: []part{{ref: name}}}
@@ -210,10 +227,10 @@ func Body(body []byte) Option {
 // steps of the request to send with Ref(name).
 func Capture(name, pointer string) Option {
 	return func(b *stepBuilder) {
-		if !namePattern.MatchString(name) {
+		if !validName(name) {
 			panic(fmt.Sprintf("workload.Capture name %q must match %s", name, namePattern))
 		}
-		if !pointerPattern.MatchString(pointer) {
+		if !validPointer(pointer) {
 			panic(fmt.Sprintf("workload.Capture %q: %q is not a JSON pointer such as \"/token\"", name, pointer))
 		}
 		b.captures = append(b.captures, &pb.Capture{Name: name, Source: &pb.Capture_JsonPointer{JsonPointer: pointer}})
