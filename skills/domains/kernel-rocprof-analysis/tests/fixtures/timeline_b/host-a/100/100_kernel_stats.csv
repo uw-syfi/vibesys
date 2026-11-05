@@ -1,0 +1,4 @@
+Name,Calls,TotalDurationNs,AverageNs,Percentage,MinNs,MaxNs,StdDev
+Cijk_Ailk_Bljk_BBS_BH_MT128x128x32_MI32x32x8_ISA90a_WG128_2_1,2,600000,300000.0000,0.00,300000,300000,0.0
+"void ck_tile::kentry<256, 2, ck_tile::FmhaFwdKernel<Problem>>(Kargs)",2,500000,250000.0000,0.00,250000,250000,0.0
+triton_red_fused_rms_norm_1,2,30000,15000.0000,0.00,15000,15000,0.0

@@ -122,6 +122,8 @@ Written against NVIDIA-first upstream trees; ROCm paths exist in vLLM and SGLang
 
 - [`references/tooling/accuracy-checker.md`](references/tooling/accuracy-checker.md) — Verify a custom generation implementation against HuggingFace `model.generate()`.
 
+- [`references/tooling/engine-profiling-conventions.md`](references/tooling/engine-profiling-conventions.md) — What an engine does so a wrapped profiler yields a readable trace: phase ranges (roctx / NVTX), warming every compiled variant before ready, a profiler pause/resume window, workers that inherit the environment and exit cleanly on SIGTERM.
+
 - [`references/tooling/fastapi-serving.md`](references/tooling/fastapi-serving.md) — Production-ready FastAPI inference server for HuggingFace models.
 
 - [`references/tooling/io-handling.md`](references/tooling/io-handling.md) — Tokenization and chat templates, image/video/audio preprocessing, detokenization and UTF-8-safe streaming, tool-call parsing.
