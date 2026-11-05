@@ -128,6 +128,10 @@ type Config struct {
 	Poll time.Duration
 	// QueueTimeout bounds the wait for an allocation; zero is DefaultQueueTimeout.
 	QueueTimeout time.Duration
+	// MaxTime, when set, is the longest time limit an allocation asks for, such as the MaxTime of
+	// the partition, in whole minutes: a container that runs longer is ended by Slurm and fails.
+	// Zero is no cap.
+	MaxTime time.Duration
 	// Sizing is what each allocation asks for.
 	Sizing Sizing
 	// NodeScripts are scripts each node runs with its facts, whose output Facts reads by name.
@@ -513,12 +517,16 @@ func (e *Engine) sizingKey(spec docker.ContainerSpec) string {
 }
 
 // limitOf is the time limit of an allocation for the container: its limit, the later containers'
-// it may be kept for, and the margin for the stop.
-func limitOf(spec docker.ContainerSpec) time.Duration {
+// it may be kept for, and the margin for the stop, capped at MaxTime in whole minutes.
+func (e *Engine) limitOf(spec docker.ContainerSpec) time.Duration {
+	limit := spec.Limit + spec.Later + StopMargin
 	if spec.Limit <= 0 {
-		return NoLimit + StopMargin
+		limit = NoLimit + StopMargin
 	}
-	return spec.Limit + spec.Later + StopMargin
+	if ceiling := e.cfg.MaxTime.Truncate(time.Minute); ceiling > 0 {
+		limit = min(limit, ceiling)
+	}
+	return limit
 }
 
 // reuse places the box in the allocation a container of the job kept for it (Keep), and reports
@@ -535,7 +543,7 @@ func (e *Engine) reuse(ctx context.Context, b *box, log io.Writer) (bool, error)
 	}
 	sizing := e.sizingKey(b.spec)
 	left := k.ends.Sub(e.cfg.Clock.Now())
-	if need := limitOf(docker.ContainerSpec{Limit: b.spec.Limit}); k.sizing != sizing || left < need {
+	if need := e.limitOf(docker.ContainerSpec{Limit: b.spec.Limit}); k.sizing != sizing || left < need {
 		if k.sizing == sizing {
 			_, _ = fmt.Fprintf(log, "[apptainer] the allocation %s kept for this container has %v of its time limit left, "+
 				"and the container needs %v; asking for another\n", k.job, left.Round(time.Second), need)
@@ -565,7 +573,7 @@ func (e *Engine) reuse(ctx context.Context, b *box, log io.Writer) (bool, error)
 // wait, holds it for this process, and reads its node. The allocation's time limit covers the
 // later containers of the job it may be kept for (limitOf).
 func (e *Engine) allocate(ctx context.Context, b *box, log io.Writer) error {
-	limit := limitOf(b.spec)
+	limit := e.limitOf(b.spec)
 	sizing := e.cfg.Sizing.Options(b.spec.Measured)
 	e.mu.Lock()
 	b.alloc, b.sizing = JobName(b.name), e.sizingKey(b.spec)

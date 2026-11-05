@@ -75,7 +75,9 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 			return machines{}, fmt.Errorf("the operator config %s, placements.%s: %w", operator.Path(p.Getenv, p.Home), name, err)
 		}
 		providers[name] = provider
-		out.offers = append(out.offers, provider.Offer())
+		offer := provider.Offer()
+		offer.Jobs = operator.JobKinds(op.GetPlacements()[name])
+		out.offers = append(out.offers, offer)
 		out.claims[name] = provider.Claims()
 	}
 	onHost := hostenv.New(hostenv.Config{Backend: local, Timers: clk, Grace: grace})
@@ -174,6 +176,7 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		engineCfg.Allocator = slurm.Allocator{
 			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusive, CPUs: int(s.GetCpus()),
 			Memory: s.GetMemory(), Arguments: s.GetSrunArguments(), Builder: slurm.BuilderName(scope),
+			MaxTime: seconds(s.GetMaxTimeSeconds(), 0),
 		}
 		engineCfg.StartTimeout = seconds(s.GetQueueTimeoutSeconds(), slurm.DefaultQueueTimeout)
 	}
@@ -235,6 +238,7 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cli
 		Local: local, Export: local, Cluster: cluster, Root: pl.GetRemote().GetRemoteWorkspaceRoot(), Scope: cfg.Scope,
 		Timers: clk, Clock: clk, Poll: seconds(s.GetPollIntervalSeconds(), apptainer.DefaultPoll),
 		QueueTimeout: seconds(s.GetQueueTimeoutSeconds(), apptainer.DefaultQueueTimeout),
+		MaxTime:      seconds(s.GetMaxTimeSeconds(), 0),
 		Sizing: apptainer.Sizing{
 			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusive,
 			CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),

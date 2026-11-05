@@ -423,7 +423,7 @@ func (b *book) hold(id ID, claims []Claim) {
 func (b *book) decide(c Candidate, rules Rules) Decision {
 	// The options the resources can ever grant, in the job's order, one for each placement.
 	var options []Option
-	refusal := "it may run on no placement that gives what its task needs"
+	refusal := "it may run on no placement that runs its kind of job and gives what its task needs"
 	for i, o := range c.Options {
 		if slices.ContainsFunc(c.Options[:i], func(p Option) bool { return p.Placement == o.Placement }) {
 			continue

@@ -102,6 +102,53 @@ func TestADockerJobMayRunOnEveryPlacementThatGivesWhatItsTaskNeeds(t *testing.T)
 	}
 }
 
+// A placement that names its job kinds runs those alone. A measure restricted with --placement to
+// one that runs no measure is refused, naming the placement and the kind, and queues nothing; an
+// unrestricted measure is keyed on a placement that runs measures, though the other sorts first;
+// a check and a command may be restricted to it. With no placement that runs measures, a measure
+// is refused rather than queued to wait forever.
+func TestAJobIsRefusedAPlacementThatRunsNoJobOfItsKind(t *testing.T) {
+	w := newWorld(t)
+	w.withNeeds(`[]`)
+	envs := &targetRecorder{Environments: fakeenv.Environments{
+		core.EnvironmentDocker: fakeenv.New(core.EnvironmentDocker, w.gates), core.EnvironmentHost: w.env,
+	}}
+	short := []core.JobKind{core.JobCheck, core.JobCommand}
+	a := newPlacementApp(w, []core.PlacementOffer{{Name: "devel", Jobs: short}, {Name: "gpu"}}, envs)
+	docker := func(s core.Settings, placement string) app.SubmitRequest {
+		return app.SubmitRequest{Context: call, NoCache: true, Spec: core.JobSpec{Commit: commit, Environment: core.EnvironmentDocker, Placement: placement, Settings: s}}
+	}
+	_, err := a.Submit(ctxFor(t), docker(core.MeasureSettings{}, "devel"))
+	if f := core.AsFailure(err); err == nil || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, `placement "devel" runs no measure job (its job_kinds: check, command)`) {
+		t.Fatalf("a measure restricted to devel: %v, want a refusal naming devel and measure", err)
+	}
+	if jobs, err := a.Jobs(ctxFor(t), scope, core.JobFilter{}); len(jobs) != 0 {
+		t.Fatalf("jobs = %v, %v; a refused submission queues nothing", jobs, err)
+	}
+	m, err := a.Submit(ctxFor(t), docker(core.MeasureSettings{}, ""))
+	if got := envs.asked(); err != nil || m.Job.Spec.Placement != "" || len(got) == 0 || got[len(got)-1].Placement != "gpu" {
+		t.Fatalf("an unrestricted measure: %+v, %v, keyed on %+v; want it keyed on gpu", m.Job.Spec, err, got)
+	}
+	if c, err := a.Submit(ctxFor(t), docker(core.CheckSettings{}, "devel")); err != nil || c.Job.Spec.Placement != "devel" {
+		t.Fatalf("a check restricted to devel: %+v, %v", c.Job.Spec, err)
+	}
+	if c, err := a.Submit(ctxFor(t), docker(core.CommandSettings{Argv: []string{"true"}}, "devel")); err != nil || c.Job.Spec.Placement != "devel" {
+		t.Fatalf("a command restricted to devel: %+v, %v", c.Job.Spec, err)
+	}
+
+	w2 := newWorld(t)
+	w2.withNeeds(`[]`)
+	envs2 := &targetRecorder{Environments: fakeenv.Environments{core.EnvironmentDocker: fakeenv.New(core.EnvironmentDocker, w2.gates)}}
+	b := newPlacementApp(w2, []core.PlacementOffer{{Name: "devel", Jobs: short}}, envs2)
+	_, err = b.Submit(ctxFor(t), docker(core.MeasureSettings{}, ""))
+	if f := core.AsFailure(err); err == nil || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, "no placement of the operator config runs a measure job") {
+		t.Fatalf("a measure with only devel: %v, want a refusal saying no placement runs a measure", err)
+	}
+	if jobs, err := b.Jobs(ctxFor(t), scope, core.JobFilter{}); len(jobs) != 0 {
+		t.Fatalf("jobs = %v, %v; a refused submission queues nothing", jobs, err)
+	}
+}
+
 // onPlacements is a docker environment per placement, each with gates of its own, whose
 // fingerprints differ only in the placement they name; and the host.
 type onPlacements struct {

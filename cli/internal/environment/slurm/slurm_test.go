@@ -222,6 +222,20 @@ func TestAnAllocationIsSizedByWhatTheCommandIs(t *testing.T) {
 		{"a build on a sharded GPU", slurm.Allocator{Gres: "gpu:1", SharedGres: "shard:1", Exclusive: true},
 			dockercli.Allocation{Name: "c", Build: true},
 			[]string{"--time=240", "--cpus-per-task=8"}},
+		// A partition's MaxTime caps every allocation, a build's too, in whole minutes, and leaves
+		// one shorter than it as it is.
+		{"a check on a partition of 30 minutes", slurm.Allocator{Partition: "devel", MaxTime: 30 * time.Minute},
+			dockercli.Allocation{Name: "c", Limit: time.Hour},
+			[]string{"--time=30", "--partition=devel", "--cpus-per-task=8"}},
+		{"a build on a partition of 30 minutes", slurm.Allocator{Partition: "devel", MaxTime: 30 * time.Minute},
+			dockercli.Allocation{Name: "c", Build: true},
+			[]string{"--time=30", "--partition=devel", "--cpus-per-task=8"}},
+		{"a cap of a part of a minute", slurm.Allocator{MaxTime: 30*time.Minute + 59*time.Second},
+			dockercli.Allocation{Name: "c", Limit: time.Hour},
+			[]string{"--time=30", "--cpus-per-task=8"}},
+		{"a check shorter than the cap", slurm.Allocator{MaxTime: 30 * time.Minute},
+			dockercli.Allocation{Name: "c", Limit: time.Minute},
+			[]string{"--time=11", "--cpus-per-task=8"}},
 	}
 	for _, c := range cases {
 		opts, _ := srunOptions(t, c.allocator.Allocate(c.x, []string{"docker", "run", "x"}))

@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 
@@ -206,6 +207,10 @@ func (d decoder) single(v any, fd protoreflect.FieldDescriptor, at string) (any,
 	case protoreflect.DoubleKind, protoreflect.FloatKind:
 		switch n := v.(type) {
 		case float64:
+			// TOML writes nan and inf, which JSON, and so protojson, cannot carry.
+			if math.IsNaN(n) || math.IsInf(n, 0) {
+				return nil, wrong("a finite number")
+			}
 		case int64:
 			return float64(n), nil
 		default:

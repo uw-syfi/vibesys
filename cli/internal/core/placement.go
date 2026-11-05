@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -67,11 +68,38 @@ func ValidPlacementName(name string) error {
 	return nil
 }
 
-// PlacementOffer is a placement of the operator config as choosing one sees it: its name and the
-// kinds of resource it gives a container.
+// PlacementOffer is a placement of the operator config as choosing one sees it: its name, the
+// kinds of resource it gives a container, and the kinds of job it runs.
 type PlacementOffer struct {
 	Name      string
 	Resources []ResourceKind
+	// Jobs are the kinds of job the placement runs, such as check and command on a partition whose
+	// time limit is shorter than a measure takes. Empty means every kind.
+	Jobs []JobKind
+}
+
+// Runs reports whether the placement runs a job of the kind.
+func (p PlacementOffer) Runs(kind JobKind) bool {
+	return len(p.Jobs) == 0 || slices.Contains(p.Jobs, kind)
+}
+
+// fits says why a job of the kind with the needs cannot run on the placement, or "" when it can.
+func (p PlacementOffer) fits(kind JobKind, needs []ResourceKind) string {
+	if !p.Runs(kind) {
+		return fmt.Sprintf("placement %q runs no %s job (its job_kinds: %s)", p.Name, kind, jobKindList(p.Jobs))
+	}
+	if lack := p.Lacks(needs); lack != "" {
+		return fmt.Sprintf("placement %q has no resource %q, which the task needs", p.Name, lack)
+	}
+	return ""
+}
+
+func jobKindList(kinds []JobKind) string {
+	names := make([]string, len(kinds))
+	for i, k := range kinds {
+		names[i] = string(k)
+	}
+	return strings.Join(names, ", ")
 }
 
 // Lacks returns the first of needs the placement does not give, or "" when it gives them all.
@@ -84,16 +112,16 @@ func (p PlacementOffer) Lacks(needs []ResourceKind) ResourceKind {
 	return ""
 }
 
-// EligiblePlacements returns the placements a docker job may run on, by name: every offer that
-// gives each needed resource, or, when the job is restricted to one placement, that one. Placements
-// are interchangeable, so which of them a job runs on is the scheduler's choice when it starts
-// (schedule.PlacementDemand), and every one of them is eligible as long as it gives what the task
-// needs.
+// EligiblePlacements returns the placements a docker job of the kind may run on, by name: every
+// offer that runs jobs of the kind and gives each needed resource, or, when the job is restricted to
+// one placement, that one. Placements are interchangeable, so which of them a job runs on is the
+// scheduler's choice when it starts (schedule.PlacementDemand), and every one of them is eligible
+// as long as it runs the job's kind and gives what the task needs.
 //
 // It fails with FailureInvalidInput, naming the placements there are, for a restriction that is not
-// a placement of the offers or that lacks a need, and when no offer gives every need. It never
-// returns an empty list without an error.
-func EligiblePlacements(offers []PlacementOffer, needs []ResourceKind, restriction string) ([]string, error) {
+// a placement of the offers, that runs no job of the kind or that lacks a need, and when no offer
+// fits. It never returns an empty list without an error.
+func EligiblePlacements(offers []PlacementOffer, kind JobKind, needs []ResourceKind, restriction string) ([]string, error) {
 	names := make([]string, len(offers))
 	for i, o := range offers {
 		names[i] = o.Name
@@ -107,23 +135,31 @@ func EligiblePlacements(offers []PlacementOffer, needs []ResourceKind, restricti
 		if i < 0 {
 			return nil, failf(FailureInvalidInput, "placement %q is not in the operator config (its placements: %s)", restriction, strings.Join(names, ", "))
 		}
-		if lack := offers[i].Lacks(needs); lack != "" {
-			return nil, failf(FailureInvalidInput, "placement %q has no resource %q, which the task needs", restriction, lack)
+		if why := offers[i].fits(kind, needs); why != "" {
+			return nil, failf(FailureInvalidInput, "%s", why)
 		}
 		return []string{restriction}, nil
 	}
-	var fit []string
+	var fit, runs []string
 	for _, o := range offers {
+		if !o.Runs(kind) {
+			continue
+		}
+		runs = append(runs, o.Name)
 		if o.Lacks(needs) == "" {
 			fit = append(fit, o.Name)
 		}
 	}
 	if len(fit) == 0 {
+		if len(runs) == 0 {
+			return nil, failf(FailureInvalidInput, "no placement of the operator config runs a %s job (its job_kinds exclude it; its placements: %s)", kind, strings.Join(names, ", "))
+		}
 		what := "the task needs no resource"
 		if len(needs) > 0 {
 			what = "the task needs " + kindList(needs)
 		}
-		return nil, failf(FailureInvalidInput, "no placement of the operator config gives what it needs (%s; its placements: %s)", what, strings.Join(names, ", "))
+		slices.Sort(runs)
+		return nil, failf(FailureInvalidInput, "no placement of the operator config that runs a %s job gives what it needs (%s; those placements: %s)", kind, what, strings.Join(runs, ", "))
 	}
 	slices.Sort(fit)
 	return slices.Compact(fit), nil

@@ -67,8 +67,9 @@ type Config struct {
 	Leasing Leasing
 
 	// Placements are the placements of the operator config a docker job can run on, with the kinds
-	// of resource each gives. A submission is refused unless one of them gives what its task needs,
-	// or the one it is restricted to does (core.EligiblePlacements); which of them the job runs on
+	// of resource each gives and the kinds of job each runs. A submission is refused unless one of
+	// them runs its kind and gives what its task needs, or the one it is restricted to does
+	// (core.EligiblePlacements); which of them the job runs on
 	// is the scheduler's choice when it starts (Scheduler.Demand). Empty leaves a job's restriction
 	// as it is.
 	Placements []core.PlacementOffer

@@ -778,10 +778,12 @@ hf = "/shared/hf-cache"
 | `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
 | `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh), `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`) or `apptainer` (a Slurm cluster reached through its login node `remote.host`, whose compute nodes run Apptainer and no Docker; see "The apptainer placement"). A name is lower-case letters, digits, `_` and `-`. |
 | `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it. More than 1 needs kind `local`, since another machine stages and sweeps one job at a time. |
+| `[placements.<name>] job_kinds` | The kinds of job the placement runs, of `check`, `measure` and `command` (a profile is a command job), such as `["check", "command"]` for a partition too short for a measure. Unset or empty runs every kind. The scheduler never starts a job on a placement that excludes its kind, even when that placement is the least loaded, and `jobs` names only the placements a job may start on when it says why it waits. `submit --placement <name>` of an excluded kind is refused, naming the placement and the kind; so is a job no placement runs, rather than queued forever. |
 | `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh`, `slurm` and `apptainer`: the ssh destination (the login node, for `apptainer`) and the programs that reach it. |
 | `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). For `apptainer` it must be on the file system the compute nodes share, and also holds the images (`images/`), the probe program (`bin/`) and the last reading of a node (`nodes/`). |
 | `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
 | `[placements.<name>.slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
+| `[placements.<name>.slurm] max_time_seconds` | For `slurm` and `apptainer`, optional: the longest time limit an allocation asks Slurm for, such as the partition's `MaxTime` (at least 60, at most a year; whole minutes are asked for). Unset asks for what the job needs: the command's limit and a margin, and for an `apptainer` measure every sample's limit. A job that runs longer than the cap is ended by Slurm and fails, so pair it with `job_kinds`. |
 | `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for `gres` and, with `exclusive`, the whole node when it measures, and `shared_gres` (or `gres`), `cpus` and `memory` when it does not. |
 | `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`), which only runs SIFs. |
 | `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF (3600 by default). See "The apptainer placement". |
@@ -871,7 +873,9 @@ start without it, saying to install it.
   ended between two samples (preempted, its node failed) fails the job before the next sample,
   saying that it lost its place, rather than wait in the queue again. Because the first sample asks for
   the time of all of them, a partition whose `MaxTime` is shorter than the samples' limits together
-  refuses the allocation; the submit's error says so.
+  refuses the allocation; the submit's error says so. With `[slurm] max_time_seconds` set, every
+  allocation asks for no more than it, and a sample asks for an allocation of its own when the kept
+  one has less than its limit and the 10 minutes left.
 - Every other command has an allocation of its own: a check job's stages, and a measure's build and
   check, each wait in Slurm's queue, and a measure's first sample waits again after its check,
   since only samples hand their allocation on (a check asks for less: no whole node). While an
@@ -908,6 +912,32 @@ start without it, saying to install it.
   then `sacct`; a run first cancels every allocation of its scope a dead run left. An exit code that
   is ssh's own (255), or a step that never started its command, is never taken for the command's:
   the command's ending is then unknown.
+
+A short partition, such as a `devel` partition whose `MaxTime` is 30 minutes and that is often idle,
+is a placement of its own that runs checks and commands and no measure, with its allocations capped
+at the partition's limit:
+
+```toml
+[placements.mi210-devel]
+kind = "apptainer"
+job_kinds = ["check", "command"]
+[placements.mi210-devel.remote]
+host = "host-a"
+remote_workspace_root = "/shared/vibesys"
+[placements.mi210-devel.slurm]
+partition = "devel"
+max_time_seconds = 1800
+[placements.mi210-devel.apptainer]
+submit_arguments = ["--account=acct-a"]
+[placements.mi210-devel.resources.rocm]
+```
+
+A measure submitted without `--placement` then never starts there, though it is the least loaded
+placement, and waits for a placement that runs measures; `submit measure --placement mi210-devel`
+is refused. Without `max_time_seconds`, the CLI asks for the job's limits and the stop's margin,
+such as 70 minutes for a check of an hour, and a partition of 30 minutes refuses the allocation. A
+check or a command that runs longer than the cap is ended by Slurm and fails. Every allocation asks
+for one node (`--nodes=1 --ntasks=1`), which a site that requires an explicit node count accepts.
 
 ### Placements are interchangeable
 

@@ -58,6 +58,8 @@ type setup struct {
 	scope string
 	// sizing is what the allocations ask for; nil is a partition and an argument of the operator's.
 	sizing *apptainer.Sizing
+	// maxTime caps an allocation's time limit; zero is no cap.
+	maxTime time.Duration
 }
 
 // rig is one process's docker environment over the apptainer engine, on a cluster it shares with
@@ -95,7 +97,7 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 	eng, err := apptainer.New(apptainer.Config{
 		Local: local, Export: local, Cluster: client, Root: root, Scope: o.scope,
 		Timers: o.engineTimers, Clock: clk,
-		Sizing:      *o.sizing,
+		Sizing: *o.sizing, MaxTime: o.maxTime,
 		NodeScripts: o.scripts, Converter: o.converter, LocalDir: localDir,
 	})
 	if err != nil {
@@ -223,6 +225,35 @@ func TestARunHasAnAllocationOfItsOwnThatEndsWithIt(t *testing.T) {
 		t.Errorf("options %v: the partition first, the operator's own arguments last", got.Options)
 	}
 	nothingLeft(t, cluster)
+}
+
+// A placement's max_time_seconds caps an allocation's time limit, in whole minutes, whatever the
+// container's limit and the later samples it may be kept for: a partition refuses a job that asks
+// for more than its MaxTime. An allocation shorter than the cap asks for its own limit.
+func TestAnAllocationAsksForNoMoreThanTheMaxTime(t *testing.T) {
+	cases := []struct {
+		name    string
+		maxTime time.Duration
+		later   time.Duration
+		want    time.Duration
+	}{
+		{"a run longer than the cap", 30 * time.Minute, 0, 30 * time.Minute},
+		{"a cap of a part of a minute", 30*time.Minute + 59*time.Second, 0, 30 * time.Minute},
+		{"a measure's samples longer than the cap", 2 * time.Hour, 2 * limit, 2 * time.Hour},
+		{"a run shorter than the cap", 2 * time.Hour, 0, limit + apptainer.StopMargin},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := fakeworld.New()
+			cluster := clusterfake.New(w.MemoryGates)
+			r := newRig(t, w, cluster, setup{maxTime: c.maxTime})
+			a, _ := sample(context.Background(), t, r.env, c.later, "exit", "0")
+			exited(t, a, 0)
+			if sub := cluster.Submitted(); len(sub) == 0 || sub[0].Limit != c.want {
+				t.Fatalf("allocations %+v, want the first of %v", sub, c.want)
+			}
+		})
+	}
 }
 
 // A job waits in the queue, polled on the engine's timers, and runs once Slurm starts it.

@@ -6,6 +6,8 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -186,6 +188,22 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"a choice of where to convert":              {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nconvert = \"node\"", 1), "placements.mi210.apptainer.convert"},
 		"a negative conversion bound":               {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nconvert_timeout_seconds = -1", 1), "convert_timeout_seconds"},
 		"an unknown rocm key":                       {strings.Replace(apptainerPlacement, "[placements.mi210.resources.rocm]", "[placements.mi210.resources.rocm]\ndevices = \"all\"", 1), "placements.mi210.resources.rocm.devices"},
+
+		"a job kind that is not one":      {"[placements.x]\nkind = \"local\"\njob_kinds = [\"profile\"]\n", "placements.x.job_kinds"},
+		"an unspecified job kind":         {"[placements.x]\nkind = \"local\"\njob_kinds = [\"unspecified\"]\n", "job_kinds"},
+		"a job kind in upper case":        {"[placements.x]\nkind = \"local\"\njob_kinds = [\"CHECK\"]\n", "placements.x.job_kinds"},
+		"a job kind twice":                {"[placements.x]\nkind = \"local\"\njob_kinds = [\"check\", \"check\"]\n", "job_kinds"},
+		"job kinds that are not a list":   {"[placements.x]\nkind = \"local\"\njob_kinds = \"check\"\n", "placements.x.job_kinds"},
+		"job kinds in the earlier shape":  {"[docker]\njob_kinds = [\"check\"]\n", "docker.job_kinds"},
+		"a zero max time":                 {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = 0", 1), "max_time_seconds"},
+		"a negative max time":             {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = -1800", 1), "max_time_seconds"},
+		"a max time under a minute":       {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = 59", 1), "max_time_seconds"},
+		"a max time that is not a number": {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = nan", 1), "max_time_seconds"},
+		"an infinite max time":            {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = inf", 1), "max_time_seconds"},
+		"a max time longer than a year":   {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = 31536001", 1), "max_time_seconds"},
+		"a max time as a string":          {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = \"30m\"", 1), "placements.mi210.slurm.max_time_seconds"},
+		"a max time misspelled":           {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time = 1800", 1), "placements.mi210.slurm.max_time"},
+		"a max time on a local placement": {"[placements.x]\nkind = \"local\"\nmax_time_seconds = 1800\n", "placements.x.max_time_seconds"},
 	}
 	for name, c := range cases {
 		_, err := operator.Parse([]byte(c.text))
@@ -242,6 +260,36 @@ func TestAnApptainerPlacementIsRead(t *testing.T) {
 	a := c.GetPlacements()["mi210"].GetApptainer()
 	if err != nil || a.GetLocalScratchDir() != "/scratch/me" || a.GetConvertTimeoutSeconds() != 7200 {
 		t.Errorf("the conversion's settings: %v, %v", a, err)
+	}
+}
+
+// A placement of a short partition names the kinds of job it runs and the longest allocation the
+// partition takes; a placement that names no kind runs every kind, and one with no cap asks for
+// what its jobs need.
+func TestAShortPartitionIsReadWithItsJobKindsAndMaxTime(t *testing.T) {
+	text := strings.Replace(apptainerPlacement, "kind = \"apptainer\"", "kind = \"apptainer\"\njob_kinds = [\"check\", \"command\"]", 1)
+	text = strings.Replace(text, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nmax_time_seconds = 1800", 1)
+	c, err := operator.Parse([]byte(text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := c.GetPlacements()["mi210"]
+	if got := operator.JobKinds(p); !slices.Equal(got, []core.JobKind{core.JobCheck, core.JobCommand}) {
+		t.Errorf("job kinds %v, want check and command", got)
+	}
+	if p.GetSlurm().MaxTimeSeconds == nil || p.GetSlurm().GetMaxTimeSeconds() != 1800 {
+		t.Errorf("max_time_seconds %v, want 1800", p.GetSlurm().MaxTimeSeconds)
+	}
+	c, err = operator.Parse([]byte(apptainerPlacement))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := c.GetPlacements()["mi210"]; operator.JobKinds(p) != nil || p.GetSlurm().MaxTimeSeconds != nil {
+		t.Errorf("a placement that names neither: kinds %v, max time %v", operator.JobKinds(p), p.GetSlurm().MaxTimeSeconds)
+	}
+	measure := strings.Replace(apptainerPlacement, "kind = \"apptainer\"", "kind = \"apptainer\"\njob_kinds = [\"measure\"]", 1)
+	if c, err = operator.Parse([]byte(measure)); err != nil || !slices.Equal(operator.JobKinds(c.GetPlacements()["mi210"]), []core.JobKind{core.JobMeasure}) {
+		t.Errorf("a placement of measures alone: %v, %v", c, err)
 	}
 }
 
@@ -330,6 +378,16 @@ func TestAnyPlacementsReadAsWrittenAndAnUnknownKeyAnywhereIsNamed(t *testing.T) 
 				p.MaxJobs = 1
 			}
 			tables = append(tables, "placements."+name)
+			var jobKinds []string
+			for _, k := range []cliv1.JobKind{cliv1.JobKind_JOB_KIND_CHECK, cliv1.JobKind_JOB_KIND_COMMAND, cliv1.JobKind_JOB_KIND_MEASURE} {
+				if r.IntN(3) == 0 {
+					p.JobKinds = append(p.JobKinds, k)
+					jobKinds = append(jobKinds, strconv.Quote(strings.ToLower(strings.TrimPrefix(k.String(), "JOB_KIND_"))))
+				}
+			}
+			if len(jobKinds) > 0 {
+				fmt.Fprintf(&text, "job_kinds = [%s]\n", strings.Join(jobKinds, ", "))
+			}
 			if p.Kind != cliv1.PlacementKind_PLACEMENT_KIND_LOCAL {
 				p.Remote = &cliv1.RemoteSettings{Host: "host-a", RemoteWorkspaceRoot: "/w"}
 				fmt.Fprintf(&text, "[placements.%s.remote]\nhost = \"host-a\"\nremote_workspace_root = \"/w\"\n", name)
@@ -338,6 +396,10 @@ func TestAnyPlacementsReadAsWrittenAndAnUnknownKeyAnywhereIsNamed(t *testing.T) 
 			if p.Kind == cliv1.PlacementKind_PLACEMENT_KIND_SLURM {
 				p.Slurm = &cliv1.SlurmSettings{Partition: "gpu"}
 				fmt.Fprintf(&text, "[placements.%s.slurm]\npartition = \"gpu\"\n", name)
+				if r.IntN(2) == 0 {
+					p.Slurm.MaxTimeSeconds = proto.Float64(float64(60 + r.IntN(100_000)))
+					fmt.Fprintf(&text, "max_time_seconds = %d\n", int(p.Slurm.GetMaxTimeSeconds()))
+				}
 				tables = append(tables, "placements."+name+".slurm")
 			}
 			if r.IntN(2) == 0 {
