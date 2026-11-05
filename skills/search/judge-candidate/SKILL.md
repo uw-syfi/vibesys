@@ -37,7 +37,10 @@ candidate's whole diff from its parent, not one commit: the candidate may sit on
    --json` yourself and read the verdict and the sample counts; worker text is not measurement
    evidence. Fail a claim about speed only when a saved result shows it is not there. If the
    candidate or its parent has no comparable result, return `unmeasured` and ask the lead to
-   schedule the measurement. Never run a long measurement in the judge. A correctness-only pass is
+   schedule the measurement. In a multi-objective task, read every objective's verdict
+   (`comparison.objectives`): a claimed tradeoff is supported when the objectives the claim says
+   improve are `better`, the ones it concedes stay within the bound it states, and no other
+   objective is `worse`; name each objective in your reasons. Never run a long measurement in the judge. A correctness-only pass is
    `unmeasured`, never an unconditional `pass`, except for a bootstrap candidate, which your brief
    names: it claims no speed, so correctness and honesty decide, and it needs no comparison.
 
