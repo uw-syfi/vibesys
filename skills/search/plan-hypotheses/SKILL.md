@@ -48,7 +48,9 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    operations it must move and the hardware's measured peaks. The gap to the observed time is the
    headroom. Use the benchmark's observed operating point, not its configured one. An idea may not
    claim more than that headroom; if the part's time is unmeasured, say "unattributed" and make the
-   first step a measurement.
+   first step a measurement. Bound the whole system too: the most the task's fixed resources allow
+   end to end, including whatever drives the load. Say which resource sets that ceiling and where
+   the current result sits under it. A part's headroom is real only below that ceiling.
 3. **Claim early.** As soon as you chose an idea, run `vibesys-cli plan create --title "<claim>"
    --body-file -` with a stub body (one line of mechanism); note the number it prints. Before
    investing in details, list the plans again: if a sibling already claimed the same mechanism,
