@@ -27,7 +27,51 @@
       "latency_p50_micros": 20015,
       "latency_p99_micros": 20015,
       "latency_count": 3,
-      "from_results": "results.binpb"
+      "from_results": "results.binpb",
+      "histograms": {
+        "exclusive_wait": {
+          "count": 5,
+          "p50_micros": 0,
+          "p99_micros": 15007,
+          "max_micros": 15007
+        },
+        "latency": {
+          "count": 3,
+          "p50_micros": 20015,
+          "p99_micros": 20015,
+          "max_micros": 20015
+        },
+        "operations.0.latency": {
+          "count": 0,
+          "p50_micros": 0,
+          "p99_micros": 0,
+          "max_micros": 0
+        },
+        "operations.1.latency": {
+          "count": 1,
+          "p50_micros": 4001,
+          "p99_micros": 4001,
+          "max_micros": 4001
+        },
+        "operations.2.latency": {
+          "count": 1,
+          "p50_micros": 20015,
+          "p99_micros": 20015,
+          "max_micros": 20015
+        },
+        "operations.3.latency": {
+          "count": 1,
+          "p50_micros": 20015,
+          "p99_micros": 20015,
+          "max_micros": 20015
+        },
+        "send_lag": {
+          "count": 5,
+          "p50_micros": 0,
+          "p99_micros": 1000,
+          "max_micros": 1000
+        }
+      }
     },
     {
       "file": "selftest.binpb",
@@ -35,7 +79,15 @@
       "format": "binpb",
       "description": "A selftest result.",
       "valid": true,
-      "messages": 1
+      "messages": 1,
+      "histograms": {
+        "added_latency": {
+          "count": 100,
+          "p50_micros": 99,
+          "p99_micros": 148,
+          "max_micros": 149
+        }
+      }
     },
     {
       "file": "capabilities.binpb",
@@ -71,7 +123,51 @@
       "latency_p50_micros": 20015,
       "latency_p99_micros": 20015,
       "latency_count": 3,
-      "from_results": "results.json"
+      "from_results": "results.json",
+      "histograms": {
+        "exclusive_wait": {
+          "count": 5,
+          "p50_micros": 0,
+          "p99_micros": 15007,
+          "max_micros": 15007
+        },
+        "latency": {
+          "count": 3,
+          "p50_micros": 20015,
+          "p99_micros": 20015,
+          "max_micros": 20015
+        },
+        "operations.0.latency": {
+          "count": 0,
+          "p50_micros": 0,
+          "p99_micros": 0,
+          "max_micros": 0
+        },
+        "operations.1.latency": {
+          "count": 1,
+          "p50_micros": 4001,
+          "p99_micros": 4001,
+          "max_micros": 4001
+        },
+        "operations.2.latency": {
+          "count": 1,
+          "p50_micros": 20015,
+          "p99_micros": 20015,
+          "max_micros": 20015
+        },
+        "operations.3.latency": {
+          "count": 1,
+          "p50_micros": 20015,
+          "p99_micros": 20015,
+          "max_micros": 20015
+        },
+        "send_lag": {
+          "count": 5,
+          "p50_micros": 0,
+          "p99_micros": 1000,
+          "max_micros": 1000
+        }
+      }
     },
     {
       "file": "selftest.json",
@@ -79,7 +175,15 @@
       "format": "json",
       "description": "A selftest result.",
       "valid": true,
-      "messages": 1
+      "messages": 1,
+      "histograms": {
+        "added_latency": {
+          "count": 100,
+          "p50_micros": 99,
+          "p99_micros": 148,
+          "max_micros": 149
+        }
+      }
     },
     {
       "file": "capabilities.json",

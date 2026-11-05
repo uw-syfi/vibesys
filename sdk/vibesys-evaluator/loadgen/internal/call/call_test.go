@@ -12,8 +12,8 @@ import (
 	"time"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
-	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/build"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/call"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/messages"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/plan"
 )
 
@@ -52,7 +52,7 @@ func kvServer(t *testing.T) *httptest.Server {
 
 func compile(t *testing.T, keep bool, steps ...*pb.Step) *plan.Op {
 	t.Helper()
-	op := build.Op(0, steps...)
+	op := messages.Op(0, steps...)
 	op.KeepBodies = keep
 	p, err := plan.New([]string{"op"}, []*pb.PlannedOperation{op})
 	if err != nil {
@@ -72,12 +72,12 @@ func client(t *testing.T, server *httptest.Server, timeout time.Duration) *call.
 }
 
 func login(user string) *pb.Step {
-	return build.CaptureJSON(build.Post(build.Text(`{"user":"`, user, `"}`), "/login"), "token", "/token")
+	return messages.CaptureJSON(messages.Post(messages.Text(`{"user":"`, user, `"}`), "/login"), "token", "/token")
 }
 
 func TestTemplateCarriesCapturedTokenToTheNextStep(t *testing.T) {
 	server := kvServer(t)
-	read := build.Query(build.Header(build.Get("/kv/k1"), "Authorization", "Bearer ", build.Raw("token")), "q", "a b&", build.Raw("token"))
+	read := messages.Query(messages.Header(messages.Get("/kv/k1"), "Authorization", "Bearer ", messages.Raw("token")), "q", "a b&", messages.Raw("token"))
 	outcome := client(t, server, 5*time.Second).Do(context.Background(), compile(t, true, login("alice"), read))
 	if outcome.Error != pb.ErrorKind_ERROR_KIND_UNSPECIFIED || len(outcome.Steps) != 2 {
 		t.Fatalf("outcome %v", outcome)
@@ -92,7 +92,7 @@ func TestTemplateCarriesCapturedTokenToTheNextStep(t *testing.T) {
 
 func TestWrongTokenFailsWithStatusAndUnkeptBodiesAreDigested(t *testing.T) {
 	server := kvServer(t)
-	read := build.Header(build.Get("/kv/k1"), "Authorization", "Bearer ", build.Raw("token"))
+	read := messages.Header(messages.Get("/kv/k1"), "Authorization", "Bearer ", messages.Raw("token"))
 	outcome := client(t, server, 5*time.Second).Do(context.Background(), compile(t, false, login("bob"), read))
 	if outcome.Error != pb.ErrorKind_ERROR_KIND_STATUS || outcome.Steps[1].GetStatus() != 401 {
 		t.Fatalf("outcome %v", outcome)
@@ -106,8 +106,8 @@ func TestWrongTokenFailsWithStatusAndUnkeptBodiesAreDigested(t *testing.T) {
 
 func TestFailedCaptureStopsTheOperation(t *testing.T) {
 	server := kvServer(t)
-	missing := build.CaptureJSON(build.Post(build.Text(`{"user":"alice"}`), "/login"), "token", "/nothing")
-	outcome := client(t, server, 5*time.Second).Do(context.Background(), compile(t, true, missing, build.Get("/kv/", build.Raw("token"))))
+	missing := messages.CaptureJSON(messages.Post(messages.Text(`{"user":"alice"}`), "/login"), "token", "/nothing")
+	outcome := client(t, server, 5*time.Second).Do(context.Background(), compile(t, true, missing, messages.Get("/kv/", messages.Raw("token"))))
 	if outcome.Error != pb.ErrorKind_ERROR_KIND_CAPTURE || len(outcome.Steps) != 1 || outcome.Steps[0].GetErrorMessage() == "" {
 		t.Fatalf("outcome %v", outcome)
 	}
@@ -115,10 +115,10 @@ func TestFailedCaptureStopsTheOperation(t *testing.T) {
 
 func TestHeaderCaptureAndFormBody(t *testing.T) {
 	server := kvServer(t)
-	first := build.Post(build.Text(`{"user":"alice"}`), "/login")
+	first := messages.Post(messages.Text(`{"user":"alice"}`), "/login")
 	first.Captures = append(first.Captures, &pb.Capture{Name: "session", Source: &pb.Capture_Header{Header: "x-session"}})
-	form := build.HTTP(pb.HttpMethod_HTTP_METHOD_POST, "/form")
-	form.GetHttp().Body = &pb.HttpCall_Form{Form: &pb.Form{Fields: []*pb.Param{{Name: "a", Value: build.Text(build.Raw("session"), "&=")}}}}
+	form := messages.HTTP(pb.HttpMethod_HTTP_METHOD_POST, "/form")
+	form.GetHttp().Body = &pb.HttpCall_Form{Form: &pb.Form{Fields: []*pb.Param{{Name: "a", Value: messages.Text(messages.Raw("session"), "&=")}}}}
 	outcome := client(t, server, 5*time.Second).Do(context.Background(), compile(t, true, first, form))
 	if got := string(outcome.Steps[1].GetBody()); got != "application/x-www-form-urlencoded s-alice&=" {
 		t.Fatalf("form echo %q (%v)", got, outcome)
@@ -127,7 +127,7 @@ func TestHeaderCaptureAndFormBody(t *testing.T) {
 
 func TestStepTimeoutAndPhaseCancellation(t *testing.T) {
 	server := kvServer(t)
-	op := compile(t, true, build.Get("/slow"))
+	op := compile(t, true, messages.Get("/slow"))
 	if outcome := client(t, server, 50*time.Millisecond).Do(context.Background(), op); outcome.Error != pb.ErrorKind_ERROR_KIND_TIMEOUT {
 		t.Fatalf("timeout: %v", outcome)
 	}
@@ -142,7 +142,7 @@ func TestTransportErrorWhenNothingListens(t *testing.T) {
 	server := kvServer(t)
 	c := client(t, server, time.Second)
 	server.Close()
-	if outcome := c.Do(context.Background(), compile(t, true, build.Get("/"))); outcome.Error != pb.ErrorKind_ERROR_KIND_TRANSPORT || outcome.Steps[0].GetStatus() != 0 {
+	if outcome := c.Do(context.Background(), compile(t, true, messages.Get("/"))); outcome.Error != pb.ErrorKind_ERROR_KIND_TRANSPORT || outcome.Steps[0].GetStatus() != 0 {
 		t.Fatalf("outcome %v", outcome)
 	}
 }

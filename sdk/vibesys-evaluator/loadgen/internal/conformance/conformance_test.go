@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -16,8 +17,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
-	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/build"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/files"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/messages"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/plan"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/summary"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/version"
@@ -44,6 +45,46 @@ type Entry struct {
 	LatencyP99Micros int64  `json:"latency_p99_micros,omitempty"`
 	LatencyCount     int64  `json:"latency_count,omitempty"`
 	FromResults      string `json:"from_results,omitempty"`
+	// Histograms: what decoding each histogram of a summary or selftest fixture must give, by
+	// field path ("latency", "operations.2.latency", "added_latency", ...).
+	Histograms map[string]HistogramExpect `json:"histograms,omitempty"`
+}
+
+// HistogramExpect is one decoded histogram: its total count and HdrHistogram's value at the 50th
+// and 99th percentile, in microseconds.
+type HistogramExpect struct {
+	Count     int64 `json:"count"`
+	P50Micros int64 `json:"p50_micros"`
+	P99Micros int64 `json:"p99_micros"`
+	MaxMicros int64 `json:"max_micros"`
+}
+
+// histograms names every histogram of a summary or selftest message.
+func histograms(message proto.Message) map[string]*pb.HdrHistogram {
+	switch m := message.(type) {
+	case *pb.PhaseSummary:
+		out := map[string]*pb.HdrHistogram{"latency": m.GetLatency(), "send_lag": m.GetSendLag(), "exclusive_wait": m.GetExclusiveWait()}
+		for i, op := range m.GetOperations() {
+			out["operations."+strconv.Itoa(i)+".latency"] = op.GetLatency()
+		}
+		return out
+	case *pb.SelftestResult:
+		return map[string]*pb.HdrHistogram{"added_latency": m.GetAddedLatency()}
+	}
+	return nil
+}
+
+func expect(t *testing.T, message proto.Message) map[string]HistogramExpect {
+	t.Helper()
+	out := map[string]HistogramExpect{}
+	for name, h := range histograms(message) {
+		decoded, err := summary.Decode(h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[name] = HistogramExpect{Count: decoded.TotalCount(), P50Micros: decoded.ValueAtQuantile(50), P99Micros: decoded.ValueAtQuantile(99), MaxMicros: decoded.Max()}
+	}
+	return out
 }
 
 // Manifest is manifest.json.
@@ -58,30 +99,30 @@ const ms = int64(1_000_000)
 var names = []string{"login_read", "search", "put_value", "delete_value"}
 
 func requests() []*pb.PlannedOperation {
-	login := build.CaptureJSON(build.Post(build.Text(`{"user":"u1","password":"p1"}`), "/login"), "token", "/token")
-	build.Header(login, "Content-Type", "application/json")
-	read := build.Header(build.Get("/kv/", build.Raw("token")), "Authorization", "Bearer ", build.Raw("token"))
-	build.Expect(read, 200, 404)
-	echo := build.Post(build.Text(`{"token":"`, build.Ref{Name: "token", Encoding: pb.RefEncoding_REF_ENCODING_JSON_STRING},
-		`","as_value":`, build.Ref{Name: "token", Encoding: pb.RefEncoding_REF_ENCODING_JSON_VALUE}, `}`), "/echo")
-	search := build.Query(build.Query(build.Get("/hotels"), "inDate", "2015-04-09"), "lat", "37.7867")
-	form := build.HTTP(pb.HttpMethod_HTTP_METHOD_POST, "/user")
+	login := messages.CaptureJSON(messages.Post(messages.Text(`{"user":"u1","password":"p1"}`), "/login"), "token", "/token")
+	messages.Header(login, "Content-Type", "application/json")
+	read := messages.Header(messages.Get("/kv/", messages.Raw("token")), "Authorization", "Bearer ", messages.Raw("token"))
+	messages.Expect(read, 200, 404)
+	echo := messages.Post(messages.Text(`{"token":"`, messages.Ref{Name: "token", Encoding: pb.RefEncoding_REF_ENCODING_JSON_STRING},
+		`","as_value":`, messages.Ref{Name: "token", Encoding: pb.RefEncoding_REF_ENCODING_JSON_VALUE}, `}`), "/echo")
+	search := messages.Query(messages.Query(messages.Get("/hotels"), "inDate", "2015-04-09"), "lat", "37.7867")
+	form := messages.HTTP(pb.HttpMethod_HTTP_METHOD_POST, "/user")
 	form.GetHttp().Body = &pb.HttpCall_Form{Form: &pb.Form{Fields: []*pb.Param{
-		{Name: "username", Value: build.Text("Cornell_1")}, {Name: "password", Value: build.Text("1111111111")},
+		{Name: "username", Value: messages.Text("Cornell_1")}, {Name: "password", Value: messages.Text("1111111111")},
 	}}}
-	put := build.HTTP(pb.HttpMethod_HTTP_METHOD_PUT, "/kv/k7")
+	put := messages.HTTP(pb.HttpMethod_HTTP_METHOD_PUT, "/kv/k7")
 	put.GetHttp().Body = &pb.HttpCall_Raw{Raw: []byte{0, 1, 2, 255}}
 	session := &pb.Capture{Name: "session", Source: &pb.Capture_Header{Header: "X-Session"}}
 	put.Captures = append(put.Captures, session)
-	confirm := build.Header(build.Get("/kv/k7"), "X-Session", build.Raw("session"))
-	del := build.HTTP(pb.HttpMethod_HTTP_METHOD_DELETE, "/kv/k7")
+	confirm := messages.Header(messages.Get("/kv/k7"), "X-Session", messages.Raw("session"))
+	del := messages.HTTP(pb.HttpMethod_HTTP_METHOD_DELETE, "/kv/k7")
 	keep := func(op *pb.PlannedOperation) *pb.PlannedOperation { op.KeepBodies = true; return op }
 	return []*pb.PlannedOperation{
-		keep(build.Op(0, login, read, echo)),
-		build.Op(1, search),
-		build.Op(1, form),
-		keep(build.Exclusive(build.Op(2, put, confirm), "k7")),
-		keep(build.Exclusive(build.Op(3, del), "k7")),
+		keep(messages.Op(0, login, read, echo)),
+		messages.Op(1, search),
+		messages.Op(1, form),
+		keep(messages.Exclusive(messages.Op(2, put, confirm), "k7")),
+		keep(messages.Exclusive(messages.Op(3, del), "k7")),
 	}
 }
 
@@ -236,8 +277,10 @@ func generate(t *testing.T) (map[string][]byte, Manifest) {
 		out["summary."+name] = encode(t, format, header(pb.FileKind_FILE_KIND_SUMMARY), s)
 		manifest.Entries = append(manifest.Entries, Entry{File: "summary." + name, Kind: "summary", Format: name, Valid: true, Messages: 1,
 			Description:      "The summary of results." + name + " over the window [base+1s, base+2s), base = " + "1700000000 s; latency counts successful operations only.",
-			LatencyP50Micros: p50, LatencyP99Micros: p99, LatencyCount: latency.TotalCount(), FromResults: "results." + name})
+			LatencyP50Micros: p50, LatencyP99Micros: p99, LatencyCount: latency.TotalCount(), FromResults: "results." + name,
+			Histograms: expect(t, s)})
 		add("selftest."+name, "selftest", "A selftest result.", encode(t, format, header(pb.FileKind_FILE_KIND_SELFTEST), selftestResult(t)), 1)
+		manifest.Entries[len(manifest.Entries)-1].Histograms = expect(t, selftestResult(t))
 		add("capabilities."+name, "capabilities", "What `loadgen --capabilities` prints (version replaced by \"fixture\").",
 			encode(t, format, header(pb.FileKind_FILE_KIND_CAPABILITIES), capabilities()), 1)
 	}
@@ -248,14 +291,14 @@ func generate(t *testing.T) (map[string][]byte, Manifest) {
 	v2 := header(pb.FileKind_FILE_KIND_REQUESTS)
 	v2.SchemaVersion = 2
 	reject("invalid-schema-version.binpb", "requests", "binpb", "A schema version this reader does not implement.", "unsupported schema version",
-		encode(t, files.Binpb, v2, &pb.RequestsHeader{OperationNames: names[:1], Count: 1}, build.Op(0, build.Get("/"))))
+		encode(t, files.Binpb, v2, &pb.RequestsHeader{OperationNames: names[:1], Count: 1}, messages.Op(0, messages.Get("/"))))
 	reject("invalid-unknown-ref.json", "requests", "json", "A ref to a name no earlier step captures.", "names no capture of an earlier step",
 		encode(t, files.JSON, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: names[:1], Count: 1},
-			build.Op(0, build.Get("/kv/", build.Raw("token")))))
+			messages.Op(0, messages.Get("/kv/", messages.Raw("token")))))
 	reject("invalid-count.binpb", "requests", "binpb", "RequestsHeader.count does not match the operations that follow.", "count is 3",
-		encode(t, files.Binpb, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: names[:1], Count: 3}, build.Op(0, build.Get("/"))))
+		encode(t, files.Binpb, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: names[:1], Count: 3}, messages.Op(0, messages.Get("/"))))
 	reject("invalid-operation-name.json", "requests", "json", "An operation name outside the pattern.", "operation_names",
-		encode(t, files.JSON, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: []string{"Login"}, Count: 1}, build.Op(0, build.Get("/"))))
+		encode(t, files.JSON, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: []string{"Login"}, Count: 1}, messages.Op(0, messages.Get("/"))))
 	reject("invalid-kind.binpb", "requests", "binpb", "A summary file where a requests file is expected.", "FileHeader.kind",
 		encode(t, files.Binpb, header(pb.FileKind_FILE_KIND_SUMMARY), summaryOf(t, results())))
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
@@ -280,7 +323,8 @@ func TestFixturesAreCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		if _, ok := generated[entry.Name()]; !ok {
+		// check_histograms.py is the hand-written Python check of these fixtures.
+		if _, ok := generated[entry.Name()]; !ok && entry.Name() != "check_histograms.py" {
 			t.Errorf("%s is not a generated fixture; remove it", entry.Name())
 		}
 	}
@@ -372,6 +416,17 @@ func TestFixturesReadAsTheManifestSays(t *testing.T) {
 				t.Fatalf("%s: %v", entry.File, err)
 			}
 			_ = file.Close()
+		}
+		if len(entry.Histograms) > 0 {
+			got := expect(t, messages[0])
+			if len(got) != len(entry.Histograms) {
+				t.Fatalf("%s: histograms %v, manifest %v", entry.File, got, entry.Histograms)
+			}
+			for name, want := range entry.Histograms {
+				if got[name] != want {
+					t.Fatalf("%s %s: decoded %+v, manifest %+v", entry.File, name, got[name], want)
+				}
+			}
 		}
 		if entry.Kind == "summary" {
 			s := messages[0].(*pb.PhaseSummary)

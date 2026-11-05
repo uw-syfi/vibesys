@@ -15,9 +15,9 @@ import (
 	"time"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
-	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/build"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/call"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/engine"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/messages"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/plan"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/summary"
 )
@@ -61,7 +61,7 @@ func indexedPlan(t *testing.T, count int, key func(int) string) *plan.Plan {
 	t.Helper()
 	ops := make([]*pb.PlannedOperation, count)
 	for i := range ops {
-		ops[i] = build.Op(uint32(i%2), build.Get("/op/"+strconv.Itoa(i)))
+		ops[i] = messages.Op(uint32(i%2), messages.Get("/op/"+strconv.Itoa(i)))
 		if key != nil {
 			ops[i].ExclusiveKey = key(i)
 		}
