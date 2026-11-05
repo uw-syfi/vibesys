@@ -7,15 +7,9 @@ type NoCurrentResultReason string
 const (
 	// NoHead means nothing was promoted, so there is no head.
 	NoHead NoCurrentResultReason = "no_head"
-	// NotMeasuredSincePromotion means the last promotion set the head and the head has no
-	// measurement and check taken after it. The cache cannot supply one: reusing the samples that
-	// picked a winner would overstate its score. A fresh measure of the head gives it a number.
-	NotMeasuredSincePromotion NoCurrentResultReason = "not_measured_since_promotion"
-	// HeadNotPromoted means the branch was moved outside promote, to a head the last promotion did
-	// not set. No measurement gives it a number: nothing records when the branch moved, so no
-	// measurement can be shown to be taken after the move, and the head may have been picked on the
-	// very samples that would overstate it. The next promotion sets a head that can have one.
-	HeadNotPromoted NoCurrentResultReason = "head_not_promoted"
+	// HeadNotMeasured means the head has no saved measurement that rests on a passing check of
+	// the same commit, task version and environment. A measure of the head gives it one.
+	HeadNotMeasured NoCurrentResultReason = "head_not_measured"
 )
 
 // ResultAnswer is what `result` reports: a CurrentResult or a NoCurrentResult.
@@ -23,7 +17,7 @@ type ResultAnswer interface {
 	resultAnswer()
 }
 
-// CurrentResult is the head and a final number measured after the head last moved.
+// CurrentResult is the head and a final number: a measurement of the head commit itself.
 type CurrentResult struct {
 	Head   Commit
 	Result Result
@@ -38,41 +32,31 @@ type NoCurrentResult struct {
 func (CurrentResult) resultAnswer()   {}
 func (NoCurrentResult) resultAnswer() {}
 
-// CurrentResultAt decides what `result` reports when the result branch is at head. It is
-// CurrentResultOf, except that a head the last promotion did not set has no number: the branch
-// moved by some other means, so no measurement of the last promoted commit speaks for it, and the
-// answer is HeadNotPromoted for the head it is at. A branch that was never promoted has no head to
-// report, whatever commit it is at.
-func CurrentResultAt(head Commit, promotions []Promotion, results []Result) ResultAnswer {
-	if len(promotions) == 0 {
+// CurrentResultAt decides what `result` reports when the result branch is at head, and head is
+// empty when nothing was promoted. The answer is the head's latest measurement that rests on a
+// passing check of the same commit, task version and environment (the check a measurement ran in
+// its own job, or the saved pass it linked), whenever either was taken and whatever moved the
+// branch to the head: a promotion, or a commit such as a task switch made on the branch. Results
+// of other commits are ignored, so nothing measured in another task version or for another commit
+// stands for the head: a commit's task version is that of the task its tree holds, so the head's
+// own measurements are all of the head's task version. A failed check or measure saves no result,
+// so it never answers.
+//
+// The measurements a promotion rests on are measurements of the head, and they count: a second,
+// fresh measure of a commit already measured in its environment would spend a whole measure on a
+// number already known.
+func CurrentResultAt(head Commit, results []Result) ResultAnswer {
+	if head == "" {
 		return NoCurrentResult{Reason: NoHead}
 	}
-	if head != promotions[len(promotions)-1].Commit {
-		return NoCurrentResult{Reason: HeadNotPromoted, Head: head}
-	}
-	return CurrentResultOf(promotions, results)
-}
-
-// CurrentResultOf decides what `result` reports. The head is the commit of the last promotion
-// (promotions are oldest first). The answer is its latest measurement that was recorded after the
-// head last moved and rests on a passing check that was also recorded after it. A measurement
-// or a check from before the move never counts, so a saved result cannot satisfy this however
-// recent the cache makes it look: the cache answers submissions, and this answers a request for a
-// number taken fresh. Results of other commits are ignored.
-func CurrentResultOf(promotions []Promotion, results []Result) ResultAnswer {
-	if len(promotions) == 0 {
-		return NoCurrentResult{Reason: NoHead}
-	}
-	last := promotions[len(promotions)-1]
 	var latest *Result
-	for _, r := range measurementsOf(last.Commit, results) {
-		checkedAt, passed := checkPassOf(r, results)
-		if passed && r.RecordedAt.After(last.At) && checkedAt.After(last.At) {
+	for _, r := range measurementsOf(head, results) {
+		if restsOnPassingCheck(r, results) {
 			latest = &r
 		}
 	}
 	if latest == nil {
-		return NoCurrentResult{Reason: NotMeasuredSincePromotion, Head: last.Commit}
+		return NoCurrentResult{Reason: HeadNotMeasured, Head: head}
 	}
-	return CurrentResult{Head: last.Commit, Result: *latest}
+	return CurrentResult{Head: head, Result: *latest}
 }

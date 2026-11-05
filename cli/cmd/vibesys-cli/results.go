@@ -200,7 +200,7 @@ func promoteCommand(ctx context.Context, d deps, args []string) int {
 	})
 }
 
-// resultCommand is `result`: the head and a number measured after it last moved, or why there is
+// resultCommand is `result`: the head and its latest checked measurement, or why there is
 // none. With no number the exit code is 1, so a script cannot take silence for a result.
 func resultCommand(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("result", d)
@@ -274,12 +274,9 @@ func noResultText(r cliv1.NoCurrentResultReason, head string) string {
 	switch r {
 	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD:
 		return "nothing was promoted, so there is no head"
-	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION:
-		return "the head was promoted on measurements that selected it, which overstate its score, and has no " +
-			"measurement and check taken since; run `vibesys-cli submit measure " + head + " --no-cache`"
-	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED:
-		return "the result branch was moved outside promote, to a head no promotion set; no measurement " +
-			"gives that head a number, and the next promotion sets a head that can have one"
+	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED:
+		return "the head has no measurement that rests on a passing check in the same task version and environment; " +
+			"run `vibesys-cli submit measure " + head + "`"
 	}
 	return lower("NO_CURRENT_RESULT_REASON_", r.String())
 }

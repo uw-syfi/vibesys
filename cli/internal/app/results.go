@@ -359,13 +359,14 @@ func (a *App) carryOut(ctx context.Context, t taskStore, branch string, approved
 }
 
 // CurrentResult reports the head of the result branch and a final number for it, or says why
-// there is none. The number is a measurement of the head with a check, both taken after the head
-// last moved: the cache cannot supply it.
+// there is none. The number is the head's latest measurement that rests on a passing check of the
+// same commit, task version and environment, whenever it was taken and whatever moved the branch
+// to the head (core.CurrentResultAt).
 func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.ResultAnswer, error) {
 	t, err := a.openTask(ctx, c.Scope)
 	if errors.Is(err, store.ErrNoStore) {
 		// A task with no store has promoted nothing.
-		return core.CurrentResultAt("", nil, nil), nil
+		return core.CurrentResultAt("", nil), nil
 	}
 	if err != nil {
 		return nil, err
@@ -377,7 +378,7 @@ func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.Resul
 		return nil, err
 	}
 	if len(promotions) == 0 {
-		return core.CurrentResultAt("", nil, nil), nil
+		return core.CurrentResultAt("", nil), nil
 	}
 	head, err := a.settledHead(ctx, t)
 	if err != nil {
@@ -387,7 +388,7 @@ func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.Resul
 	if err != nil {
 		return nil, err
 	}
-	return core.CurrentResultAt(head, promotions, results), nil
+	return core.CurrentResultAt(head, results), nil
 }
 
 // resultsOf returns the saved results of the commits.

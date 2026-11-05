@@ -104,14 +104,19 @@ const (
 	NoCurrentResultReason_NO_CURRENT_RESULT_REASON_UNSPECIFIED NoCurrentResultReason = 0
 	// Nothing was promoted, so there is no head.
 	NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD NoCurrentResultReason = 1
-	// The head was set by the last promotion and has no measurement and check taken after it. The
-	// cache cannot supply one, because reusing the samples that picked a winner would overstate its
-	// score: a measure of the head with --no-cache gives it its number.
+	// No longer sent. A daemon before HEAD_NOT_MEASURED sent it for a promoted head with no
+	// measurement and check taken after the promotion.
+	//
+	// Deprecated: Marked as deprecated in vibesys/cli/v1/promote.proto.
 	NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION NoCurrentResultReason = 2
-	// The result branch was moved outside promote, to a head the last promotion did not set. No
-	// measurement gives that head a number: nothing records when the branch moved, so none can be
-	// shown to be taken after the move. The next promotion sets a head that can have one.
+	// No longer sent. A daemon before HEAD_NOT_MEASURED sent it for a result branch moved outside
+	// promote, to a head the last promotion did not set.
+	//
+	// Deprecated: Marked as deprecated in vibesys/cli/v1/promote.proto.
 	NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED NoCurrentResultReason = 3
+	// The head has no saved measurement that rests on a passing check of the same commit, task
+	// version and environment. A measure of the head gives it one.
+	NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED NoCurrentResultReason = 4
 )
 
 // Enum value maps for NoCurrentResultReason.
@@ -121,12 +126,14 @@ var (
 		1: "NO_CURRENT_RESULT_REASON_NO_HEAD",
 		2: "NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION",
 		3: "NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED",
+		4: "NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED",
 	}
 	NoCurrentResultReason_value = map[string]int32{
 		"NO_CURRENT_RESULT_REASON_UNSPECIFIED":                  0,
 		"NO_CURRENT_RESULT_REASON_NO_HEAD":                      1,
 		"NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION": 2,
 		"NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED":            3,
+		"NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED":            4,
 	}
 )
 
@@ -389,7 +396,9 @@ func (x *Promotion) GetObjectives() []*ObjectiveVerdict {
 	return nil
 }
 
-// CurrentResult is the head and a final number measured after the head last moved.
+// CurrentResult is the head and a final number: the head's latest measurement that rests on a
+// passing check of the same commit, task version and environment, whenever it was taken and
+// whatever moved the branch to the head.
 type CurrentResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Head          string                 `protobuf:"bytes,1,opt,name=head,proto3" json:"head,omitempty"`
@@ -536,12 +545,13 @@ const file_vibesys_cli_v1_promote_proto_rawDesc = "" +
 	"!PROMOTE_REFUSAL_KIND_INCONCLUSIVE\x10\x05\x12\x1e\n" +
 	"\x1aPROMOTE_REFUSAL_KIND_STALE\x10\x06\x12-\n" +
 	")PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH\x10\a\x12!\n" +
-	"\x1dPROMOTE_REFUSAL_KIND_TRADEOFF\x10\b*\xd2\x01\n" +
+	"\x1dPROMOTE_REFUSAL_KIND_TRADEOFF\x10\b*\x8a\x02\n" +
 	"\x15NoCurrentResultReason\x12(\n" +
 	"$NO_CURRENT_RESULT_REASON_UNSPECIFIED\x10\x00\x12$\n" +
-	" NO_CURRENT_RESULT_REASON_NO_HEAD\x10\x01\x129\n" +
-	"5NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION\x10\x02\x12.\n" +
-	"*NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED\x10\x03B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	" NO_CURRENT_RESULT_REASON_NO_HEAD\x10\x01\x12=\n" +
+	"5NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION\x10\x02\x1a\x02\b\x01\x122\n" +
+	"*NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED\x10\x03\x1a\x02\b\x01\x12.\n" +
+	"*NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED\x10\x04B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_promote_proto_rawDescOnce sync.Once

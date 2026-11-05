@@ -263,7 +263,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon; each of its `observations` has the same `value` for its own samples. For a multi-objective task the line gives every objective's headline in the order the task declares them, the numbers `compare` weighs. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
 | `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. For a multi-objective task, also `tradeoff`, with a verdict on every objective (see "Multi-objective tasks" below). Refuses to mix environments. |
 | `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. A promoted multi-objective commit is also offered to the frontier. |
-| `result` | The head and a final number measured after the head last moved, or why there is none (exit `1`): a head just promoted needs `submit measure <head> --no-cache`, which the answer names, and a head moved outside `promote` has no number (see "The result branch"). |
+| `result` | The head and a final number, its latest measurement that rests on a passing check of the same commit, task version and environment, or why there is none (exit `1`): `no_head` before the first promotion, and `head_not_measured`, which names the `submit measure <head>` that gives the head one (see "The result branch"). |
 | `frontier add <commit>` | Add a measured, check-passed commit of a multi-objective task to the task's frontier, evicting the members it beats, or print every reason it was refused. A refusal exits `1` and is printed on stdout; a commit of a single-metric task is `INVALID_INPUT`. |
 | `frontier list` | The frontier's members in the order they were added, each with its headline number on every objective, computed by the daemon. |
 | `plan create --title t [--body text \| --body-file path]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. |
@@ -777,12 +777,13 @@ and the daemon completes the move the next time it looks at the branch (any of `
 or `result`, or on start): the branch is never ahead of the record. Tests cut every effect off,
 before and after it took place, in core over a model and in the daemon over the fake repository.
 A branch someone moved by hand is diverged: nothing writes over it, it is the head the next
-commands use, and `result` reports no number for a head the last promotion did not set
-(`head_not_promoted`), however recently that head was measured: nothing records when the branch
-moved, so no measurement can be shown to be taken after the move. A head the last promotion set
-has a number once a measure and its check are taken after the promotion
-(`not_measured_since_promotion` until then); the measurements the promotion rests on never count,
-because they selected the head and so overstate it.
+commands use, and `result` reports it. `result` gives the head the latest measurement of that exact
+commit that rests on a passing check of the same commit, task version and environment, whenever it
+was taken and whatever moved the branch there: the measurement a promotion rests on counts, and so
+does one of a commit made on the branch, such as a task switch. Measurements of other commits never
+count, so nothing taken under another task version stands for the head (a commit's task version is
+that of the task its tree holds), and a failed check or measure saves no result. A head with no such
+measurement is `head_not_measured`, and `submit measure <head>` gives it one.
 
 ## Multi-objective tasks
 

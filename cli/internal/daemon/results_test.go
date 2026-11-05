@@ -236,14 +236,13 @@ func TestCurrentResultAnswersNoneThenTheNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := r.client.CurrentResult(ctxFor(t), &cliv1.CurrentResultRequest{Context: call})
-	if err != nil || second.GetNone().GetReason() != cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION ||
-		second.GetNone().GetHead() != string(cm(1)) {
-		t.Fatalf("result after a promotion = %+v, %v", second, err)
+	if err != nil || second.GetCurrent().GetHead() != string(cm(1)) || len(second.GetCurrent().GetResult().GetMeasure().GetSamples()) != len(winning) {
+		t.Fatalf("result after a promotion = %+v, %v; want the measurement the promotion rests on", second, err)
 	}
-	r.measured(cm(1), 119, 120, 121, 118, 120)
+	r.measured(cm(1), 119, 120, 121, 118, 120, 119)
 	third, err := r.client.CurrentResult(ctxFor(t), &cliv1.CurrentResultRequest{Context: call})
-	if err != nil || third.GetCurrent().GetHead() != string(cm(1)) || len(third.GetCurrent().GetResult().GetMeasure().GetSamples()) != 5 {
-		t.Fatalf("result after a fresh measurement = %+v, %v", third, err)
+	if err != nil || third.GetCurrent().GetHead() != string(cm(1)) || len(third.GetCurrent().GetResult().GetMeasure().GetSamples()) != 6 {
+		t.Fatalf("result after a later measurement = %+v, %v", third, err)
 	}
 }
 

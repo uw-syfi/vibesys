@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -18,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/storetest"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
 
@@ -531,64 +533,103 @@ func TestCompareFailsForAnUnmeasuredCommitAndForMixedEnvironments(t *testing.T) 
 	wantFailure(t, "mixed environments", err, core.FailureEnvironmentMismatch)
 }
 
-// `result` has a number only for a measurement and a check taken after the head last moved. The
-// samples that picked the winner do not count, and neither does anything the cache could answer.
-func TestResultNeedsAFreshMeasurementOfTheHead(t *testing.T) {
-	r := newResultsRig(t)
-	answer := func() core.ResultAnswer {
-		t.Helper()
-		a, err := r.app.CurrentResult(ctxFor(t), call)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return a
+// currentResult is what `result` reports now.
+func (r *resultsRig) currentResult() core.ResultAnswer {
+	r.t.Helper()
+	a, err := r.app.CurrentResult(ctxFor(r.t), call)
+	if err != nil {
+		r.t.Fatal(err)
 	}
-	want := func(reason core.NoCurrentResultReason, head core.Commit) {
-		t.Helper()
-		got, ok := answer().(core.NoCurrentResult)
-		if !ok || got.Reason != reason || got.Head != head {
-			t.Fatalf("result = %+v, want none: %s at %.7s", got, reason, head)
-		}
-	}
-
-	want(core.NoHead, "")
-	r.measured(base, level)
-	r.measured(cm(1), win) // the samples that pick the winner
-	want(core.NoHead, "")
-	r.promoted(cm(1))
-	want(core.NotMeasuredSincePromotion, cm(1))
-
-	fresh := r.measured(cm(1), []float64{118, 119, 121, 120, 119})
-	got, ok := answer().(core.CurrentResult)
-	if !ok || got.Head != cm(1) || got.Result.Job != fresh.Job {
-		t.Fatalf("result = %+v, want the fresh measurement %s of %.7s", got, fresh.Job, cm(1))
-	}
-
-	// A measurement of another commit says nothing about the head, and a later promotion makes
-	// the number stale again.
-	r.measured(cm(2), []float64{140, 141, 139, 142, 140})
-	r.promoted(cm(2))
-	want(core.NotMeasuredSincePromotion, cm(2))
+	return a
 }
 
-// The head is the branch, whoever moved it: a branch moved by hand has no number, however
-// recently its old head or the new head itself was measured.
-func TestResultForABranchMovedByHandHasNoNumber(t *testing.T) {
+// wantNoResult fails unless `result` reports no number, for the reason, at the head.
+func (r *resultsRig) wantNoResult(reason core.NoCurrentResultReason, head core.Commit) {
+	r.t.Helper()
+	got, ok := r.currentResult().(core.NoCurrentResult)
+	if !ok || got.Reason != reason || got.Head != head {
+		r.t.Fatalf("result = %+v, want none: %s at %.7s", got, reason, head)
+	}
+}
+
+// wantResult fails unless `result` reports the measurement as the number of the head.
+func (r *resultsRig) wantResult(head core.Commit, m core.Result) {
+	r.t.Helper()
+	got, ok := r.currentResult().(core.CurrentResult)
+	if !ok || got.Head != head || got.Result.Job != m.Job {
+		r.t.Fatalf("result = %+v, want the measurement %s of %.7s", got, m.Job, head)
+	}
+}
+
+// Regression: right after `promote`, `result` said the head had no measurement taken since it
+// moved, although the measurement the promotion rests on is a measurement of the head. It is the
+// head's number from the moment of the promotion, on a check in its own job or on a check job's
+// pass, and a later measurement of the head replaces it.
+func TestResultIsTheMeasurementAPromotionRestsOn(t *testing.T) {
+	r := newResultsRig(t)
+	r.wantNoResult(core.NoHead, "")
+	r.measured(base, level)
+	picked := r.measured(cm(1), win)
+	r.wantNoResult(core.NoHead, "")
+	r.promoted(cm(1))
+	r.wantResult(cm(1), picked)
+
+	later := r.measured(cm(1), []float64{118, 119, 121, 120, 119})
+	r.wantResult(cm(1), later)
+
+	// A measurement of another commit says nothing about the head; the promotion of that commit
+	// makes the measurement it rests on, on a check job's pass, the number.
+	check := storetest.SeedCheck(t, r.store, cm(2), r.clock.Now())
+	r.clock.Advance(time.Minute)
+	onPass := storetest.SeedMeasurement(t, r.store, storetest.Measurement{Commit: cm(2), Samples: []float64{140, 141, 139, 142, 140}, At: r.clock.Now(), CheckJob: check.Job})
+	r.wantResult(cm(1), later)
+	r.promoted(cm(2))
+	r.wantResult(cm(2), onPass)
+}
+
+// Regression: a run that switches task versions commits the task change on the result branch, so
+// the branch moves outside promote. That commit is the head, and its own measurement, a first
+// measure of that very commit under the new task in the environment it builds, is its number. A
+// measurement of the old head does not stand for it.
+func TestResultOfAHeadMovedByATaskSwitchIsItsOwnMeasurement(t *testing.T) {
 	r := newResultsRig(t)
 	r.measured(base, level)
 	r.measured(cm(1), win)
 	r.promoted(cm(1))
+
+	switched := tasktest.Files("task")
+	switched[task.TasksDir+"/task/bench.sh"] = task.File{Data: []byte("#!/bin/sh\necho fixed\n"), Executable: true}
+	r.tasks.Put("/repo", cm(2), switched)
+	tk, err := r.tasks.Task(ctxFor(t), "/repo", cm(2), "task")
+	if err != nil || tk.Version == r.taskVersion {
+		t.Fatalf("the switched task has version %q (%v), want a new one", tk.Version, err)
+	}
+	if err := r.branches.FastForward(ctxFor(t), "/repo", resultBranch, cm(1), cm(2)); err != nil {
+		t.Fatal(err)
+	}
+	r.wantNoResult(core.HeadNotMeasured, cm(2))
+
+	r.clock.Advance(time.Minute)
+	first := storetest.SeedMeasurement(t, r.store, storetest.Measurement{
+		Commit: cm(2), Samples: win, At: r.clock.Now(), TaskVersion: tk.Version, Environment: storetest.DockerEnvironment(),
+	})
+	r.wantResult(cm(2), first)
+}
+
+// A measurement that rests on no passing check of its own commit, task version and environment is
+// no number for the head, whenever it was taken.
+func TestResultNeedsAPassingCheckInTheMeasurementsEnvironment(t *testing.T) {
+	r := newResultsRig(t)
+	r.measured(base, level)
 	r.measured(cm(1), win)
+	r.promoted(cm(1))
 	r.branches.AddBranch("/repo", resultBranch, cm(2))
 
-	for _, when := range []string{"before the new head is measured", "after it is measured"} {
-		got, err := r.app.CurrentResult(ctxFor(t), call)
-		none, ok := got.(core.NoCurrentResult)
-		if err != nil || !ok || none.Reason != core.HeadNotPromoted || none.Head != cm(2) {
-			t.Fatalf("%s: result = %+v, %v; want none for the head %.7s the branch is at", when, got, err, cm(2))
-		}
-		r.measured(cm(2), win)
-	}
+	elsewhere := storetest.SeedCheck(t, r.store, cm(2), r.clock.Now())
+	storetest.SeedMeasurement(t, r.store, storetest.Measurement{
+		Commit: cm(2), Samples: win, At: r.clock.Now(), Environment: storetest.DockerEnvironment(), CheckJob: elsewhere.Job,
+	})
+	r.wantNoResult(core.HeadNotMeasured, cm(2))
 }
 
 func TestShowListsEveryResultOfTheCommitOldestFirst(t *testing.T) {

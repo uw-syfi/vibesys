@@ -308,7 +308,7 @@ func TestCompareAgainstNamesTheBaseAndDefaultsToTheBranch(t *testing.T) {
 	}
 }
 
-func TestResultReportsTheHeadAndAFreshNumberOrSaysThereIsNone(t *testing.T) {
+func TestResultReportsTheHeadAndItsNumberOrSaysThereIsNone(t *testing.T) {
 	c := newResultsCLI(t)
 	r := c.run(withTask("result")...)
 	mustExit(t, r, exitFailed, "result before a promotion")
@@ -317,27 +317,16 @@ func TestResultReportsTheHeadAndAFreshNumberOrSaysThereIsNone(t *testing.T) {
 	}
 
 	c.measured(0, level)
-	c.measured(1, win)
+	picked := c.measured(1, []float64{118.123456789, 119, 121, 120, 119})
 	mustExit(t, c.run(withTask("promote", "c1")...), exitOK)
 
+	// Regression: the measurement the promotion rests on is the head's number right away.
 	r = c.run(withTask("result")...)
-	mustExit(t, r, exitFailed, "result right after a promotion")
-	if !strings.Contains(r.stdout, "measurement and check taken since") || !strings.Contains(r.stdout, "head "+string(rev(1))[:12]) {
-		t.Fatalf("result = %+v", r)
-	}
-	var none cliv1.CurrentResultResponse
-	j := c.run(withTask("result", "--json")...)
-	if err := protojson.Unmarshal([]byte(j.stdout), &none); err != nil || none.GetNone().GetReason() != cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION {
-		t.Fatalf("result --json = %+v (%v)", j, err)
-	}
-
-	fresh := c.measured(1, []float64{118.123456789, 119, 121, 120, 119})
-	r = c.run(withTask("result")...)
-	mustExit(t, r, exitOK, "result after a fresh measurement")
-	if !strings.Contains(r.stdout, "head "+string(rev(1))[:12]) || !strings.Contains(r.stdout, string(fresh.Job)) || !strings.Contains(r.stdout, "mean 119.4 over 5 samples") {
+	mustExit(t, r, exitOK, "result right after a promotion")
+	if !strings.Contains(r.stdout, "head "+string(rev(1))[:12]) || !strings.Contains(r.stdout, string(picked.Job)) || !strings.Contains(r.stdout, "mean 119.4 over 5 samples") {
 		t.Fatalf("result = %q", r.stdout)
 	}
-	j = c.run(withTask("result", "--json")...)
+	j := c.run(withTask("result", "--json")...)
 	var cur cliv1.CurrentResultResponse
 	if err := protojson.Unmarshal([]byte(j.stdout), &cur); err != nil || cur.GetCurrent().GetResult().GetMeasure().GetSamples()[0] != 118.123456789 {
 		t.Fatalf("result --json = %+v (%v): the samples must be exact", j, err)
@@ -354,42 +343,30 @@ func noneReason(t *testing.T, r result) string {
 	return answer.None.Reason
 }
 
-// Right after a promotion, `result` says why the measurements the promotion rests on do not
-// count and names the command, with the head's full commit, that gives the head its number.
-func TestResultAfterAPromotionNamesTheMeasureToRun(t *testing.T) {
-	c := newResultsCLI(t)
-	c.measured(0, level)
-	c.measured(1, win)
-	mustExit(t, c.run(withTask("promote", "c1")...), exitOK)
-
-	r := c.run(withTask("result")...)
-	mustExit(t, r, exitFailed, "result right after a promotion")
-	for _, want := range []string{"selected", "vibesys-cli submit measure " + string(rev(1)) + " --no-cache"} {
-		if !strings.Contains(r.stdout, want) {
-			t.Fatalf("result = %q, want it to say %q", r.stdout, want)
-		}
-	}
-}
-
-// A result branch moved outside `promote` has a head no promotion set. No measurement can give it
-// a number, so `result` says that, and never tells the caller to measure it: a measure of that
-// head, however fresh, leaves `result` where it was.
-func TestResultForAHeadNoPromotionSetSaysNoMeasureGivesItANumber(t *testing.T) {
+// Regression: a result branch moved outside `promote`, as a task switch moves it, has a head of
+// its own. Until that head is measured, `result` names the measure, with the head's full commit,
+// that gives it its number; once it is, that measurement is the number.
+func TestResultOfAHeadMovedOutsidePromoteIsItsOwnMeasurement(t *testing.T) {
 	c := newResultsCLI(t)
 	c.measured(0, level)
 	c.measured(1, win)
 	mustExit(t, c.run(withTask("promote", "c1")...), exitOK)
 	c.world.Branches.AddBranch("/repo", resultBranch, rev(2))
-	c.clk.Advance(time.Minute)
-	c.measured(2, win) // measured after the move
 
 	r := c.run(withTask("result")...)
-	mustExit(t, r, exitFailed, "result at a head no promotion set")
-	if strings.Contains(r.stdout, "submit") || !strings.Contains(r.stdout, "outside promote") || !strings.Contains(r.stdout, "head "+string(rev(2))[:12]) {
-		t.Fatalf("result = %q", r.stdout)
+	mustExit(t, r, exitFailed, "result at an unmeasured head")
+	if want := "run `vibesys-cli submit measure " + string(rev(2)) + "`"; !strings.Contains(r.stdout, want) || !strings.Contains(r.stdout, "head "+string(rev(2))[:12]) {
+		t.Fatalf("result = %q, want it to say %q", r.stdout, want)
 	}
-	if got := noneReason(t, c.run(withTask("result", "--json")...)); got != "NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED" {
+	if got := noneReason(t, c.run(withTask("result", "--json")...)); got != "NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED" {
 		t.Fatalf("result --json reason = %s", got)
+	}
+
+	measured := c.measured(2, win)
+	r = c.run(withTask("result")...)
+	mustExit(t, r, exitOK, "result at a measured head")
+	if !strings.Contains(r.stdout, "head "+string(rev(2))[:12]) || !strings.Contains(r.stdout, string(measured.Job)) {
+		t.Fatalf("result = %q", r.stdout)
 	}
 }
 

@@ -21,7 +21,7 @@ All worktrees of the repository share one store per task, so any agent sees the 
 | --- | --- |
 | Jobs, their states, logs and notes | `vibesys-cli jobs --json`, `logs <job>`, `show <sha>` |
 | Saved results: check passes and samples, per commit | `vibesys-cli show <sha> --json` |
-| The head of the result branch and its fresh number | `vibesys-cli result --json` |
+| The head of the result branch and its number | `vibesys-cli result --json` |
 | Plans, their status and comments, and the jobs linked to them | `vibesys-cli plan list\|view` |
 | `vibesysd`, the CLI's daemon that runs it all | `vibesys-cli daemon status` |
 

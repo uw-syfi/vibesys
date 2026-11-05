@@ -33,14 +33,14 @@ func (r *resultsRig) measuredAt(commit core.Commit, point ...float64) {
 }
 
 // measuredUnder is measuredAt under a task version and in an environment.
-func (r *resultsRig) measuredUnder(commit core.Commit, version string, environment core.Fingerprint, point ...float64) {
+func (r *resultsRig) measuredUnder(commit core.Commit, version string, environment core.Fingerprint, point ...float64) core.Result {
 	r.t.Helper()
 	five := func(v float64) []float64 { return []float64{v, v, v, v, v} }
 	var others []core.Observation
 	for i, m := range servingObjectives.Metrics[1:] {
 		others = append(others, core.Observation{Name: m.Name, Values: five(point[i+1])})
 	}
-	storetest.SeedMeasurement(r.t, r.store, storetest.Measurement{
+	return storetest.SeedMeasurement(r.t, r.store, storetest.Measurement{
 		Commit: commit, Samples: five(point[0]), At: r.clock.Now(), Objectives: servingObjectives, Others: others,
 		TaskVersion: version, Environment: environment,
 	})
@@ -137,7 +137,8 @@ func TestParetoPromotionMovesTheBranchOnlyOnAWinAndKeepsTheFrontier(t *testing.T
 // A task switch moves the result branch to a commit with a new task, whose version builds another
 // image. The base and the candidates are measured again under it, and a commit promoted then joins
 // the frontier: the members measured only under the old version leave it rather than refuse it as
-// measured in another environment, so the frontier can hold the current result.
+// measured in another environment, so the frontier can hold the current result, and `result`
+// reports the measurement the promotion rests on.
 func TestATaskSwitchStartsTheFrontierAfresh(t *testing.T) {
 	r := newResultsRig(t)
 	r.measuredAt(cm(1), 200, 100, 100)
@@ -158,7 +159,7 @@ func TestATaskSwitchStartsTheFrontierAfresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.measuredUnder(cm(2), tk.Version, storetest.DockerEnvironment(), 100, 100, 100)
-	r.measuredUnder(cm(3), tk.Version, storetest.DockerEnvironment(), 300, 50, 50)
+	candidate := r.measuredUnder(cm(3), tk.Version, storetest.DockerEnvironment(), 300, 50, 50)
 
 	d, frontier, err := r.app.Promote(ctxFor(t), call, cm(3))
 	if err != nil {
@@ -173,6 +174,7 @@ func TestATaskSwitchStartsTheFrontierAfresh(t *testing.T) {
 	if got := r.frontierCommits(); !slices.Equal(got, []core.Commit{cm(3)}) {
 		t.Fatalf("frontier %v, want only the commit of the new task", got)
 	}
+	r.wantResult(cm(3), candidate)
 
 	// A commit measured only under the old task is not compared with the new one's members.
 	r.measuredAt(side, 400, 10, 10)
