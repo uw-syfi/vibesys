@@ -387,7 +387,12 @@ func resultFromMessage(m *cliv1.Result) (core.Result, error) {
 			return fail(fmt.Errorf("its headline value %v is not that of its samples", o.Measure.GetValue()))
 		}
 		for _, ob := range o.Measure.GetObservations() {
-			out.Observations = append(out.Observations, core.Observation{Name: ob.GetName(), Values: slices.Clone(ob.GetValues())})
+			values := slices.Clone(ob.GetValues())
+			// An observation's headline is stored the same way, by builds that know it.
+			if ob.Value != nil && (len(values) == 0 || ob.GetValue() != core.Headline(values)) {
+				return fail(fmt.Errorf("the headline value %v of its observation %q is not that of its values", ob.GetValue(), ob.GetName()))
+			}
+			out.Observations = append(out.Observations, core.Observation{Name: ob.GetName(), Values: values})
 		}
 		if out.Objectives, err = objectivesFromMessage("objectives", o.Measure.GetObjectives()); err != nil {
 			return fail(err)

@@ -18,7 +18,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/promote.proto.
  */
 export const file_vibesys_cli_v1_promote: GenFile = /*@__PURE__*/
-  fileDesc("Chx2aWJlc3lzL2NsaS92MS9wcm9tb3RlLnByb3RvEg52aWJlc3lzLmNsaS52MSLpAQoUUHJvbW90ZVJlZnVzYWxSZWFzb24SMAoEa2luZBgBIAEoDjIiLnZpYmVzeXMuY2xpLnYxLlByb21vdGVSZWZ1c2FsS2luZBIPCgdtZXNzYWdlGAIgASgJEigKB3ZlcmRpY3QYAyABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0EhgKEG1lYXN1cmVkX2FnYWluc3QYBCABKAkSFAoMY3VycmVudF9oZWFkGAUgASgJEjQKCm9iamVjdGl2ZXMYBiADKAsyIC52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVWZXJkaWN0IkcKDlByb21vdGVSZWZ1c2FsEjUKB3JlYXNvbnMYASADKAsyJC52aWJlc3lzLmNsaS52MS5Qcm9tb3RlUmVmdXNhbFJlYXNvbiKOAgoJUHJvbW90aW9uEg4KBmNvbW1pdBgBIAEoCRIVCg1wcmV2aW91c19oZWFkGAIgASgJEigKB3ZlcmRpY3QYAyABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0EjsKC2Vudmlyb25tZW50GAQgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBIVCg1yZXN1bHRfam9iX2lkGAUgASgJEiYKAmF0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0CgpvYmplY3RpdmVzGAcgAygLMiAudmliZXN5cy5jbGkudjEuT2JqZWN0aXZlVmVyZGljdCJFCg1DdXJyZW50UmVzdWx0EgwKBGhlYWQYASABKAkSJgoGcmVzdWx0GAIgASgLMhYudmliZXN5cy5jbGkudjEuUmVzdWx0IlYKD05vQ3VycmVudFJlc3VsdBI1CgZyZWFzb24YASABKA4yJS52aWJlc3lzLmNsaS52MS5Ob0N1cnJlbnRSZXN1bHRSZWFzb24SDAoEaGVhZBgCIAEoCSrnAgoSUHJvbW90ZVJlZnVzYWxLaW5kEiQKIFBST01PVEVfUkVGVVNBTF9LSU5EX1VOU1BFQ0lGSUVEEAASIwofUFJPTU9URV9SRUZVU0FMX0tJTkRfVU5NRUFTVVJFRBABEiYKIlBST01PVEVfUkVGVVNBTF9LSU5EX0NIRUNLX01JU1NJTkcQAhIeChpQUk9NT1RFX1JFRlVTQUxfS0lORF9XT1JTRRADEiUKIVBST01PVEVfUkVGVVNBTF9LSU5EX1dJVEhJTl9OT0lTRRAEEiUKIVBST01PVEVfUkVGVVNBTF9LSU5EX0lOQ09OQ0xVU0lWRRAFEh4KGlBST01PVEVfUkVGVVNBTF9LSU5EX1NUQUxFEAYSLQopUFJPTU9URV9SRUZVU0FMX0tJTkRfRU5WSVJPTk1FTlRfTUlTTUFUQ0gQBxIhCh1QUk9NT1RFX1JFRlVTQUxfS0lORF9UUkFERU9GRhAIKqIBChVOb0N1cnJlbnRSZXN1bHRSZWFzb24SKAokTk9fQ1VSUkVOVF9SRVNVTFRfUkVBU09OX1VOU1BFQ0lGSUVEEAASJAogTk9fQ1VSUkVOVF9SRVNVTFRfUkVBU09OX05PX0hFQUQQARI5CjVOT19DVVJSRU5UX1JFU1VMVF9SRUFTT05fTk9UX01FQVNVUkVEX1NJTkNFX1BST01PVElPThACQjlaN2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2NsaS9nZW4vdmliZXN5cy9jbGkvdjE7Y2xpdjFiBnByb3RvMw", [file_google_protobuf_timestamp, file_vibesys_cli_v1_environment, file_vibesys_cli_v1_result, file_vibesys_cli_v1_verdict]);
+  fileDesc("Chx2aWJlc3lzL2NsaS92MS9wcm9tb3RlLnByb3RvEg52aWJlc3lzLmNsaS52MSLpAQoUUHJvbW90ZVJlZnVzYWxSZWFzb24SMAoEa2luZBgBIAEoDjIiLnZpYmVzeXMuY2xpLnYxLlByb21vdGVSZWZ1c2FsS2luZBIPCgdtZXNzYWdlGAIgASgJEigKB3ZlcmRpY3QYAyABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0EhgKEG1lYXN1cmVkX2FnYWluc3QYBCABKAkSFAoMY3VycmVudF9oZWFkGAUgASgJEjQKCm9iamVjdGl2ZXMYBiADKAsyIC52aWJlc3lzLmNsaS52MS5PYmplY3RpdmVWZXJkaWN0IkcKDlByb21vdGVSZWZ1c2FsEjUKB3JlYXNvbnMYASADKAsyJC52aWJlc3lzLmNsaS52MS5Qcm9tb3RlUmVmdXNhbFJlYXNvbiKOAgoJUHJvbW90aW9uEg4KBmNvbW1pdBgBIAEoCRIVCg1wcmV2aW91c19oZWFkGAIgASgJEigKB3ZlcmRpY3QYAyABKAsyFy52aWJlc3lzLmNsaS52MS5WZXJkaWN0EjsKC2Vudmlyb25tZW50GAQgASgLMiYudmliZXN5cy5jbGkudjEuRW52aXJvbm1lbnRGaW5nZXJwcmludBIVCg1yZXN1bHRfam9iX2lkGAUgASgJEiYKAmF0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI0CgpvYmplY3RpdmVzGAcgAygLMiAudmliZXN5cy5jbGkudjEuT2JqZWN0aXZlVmVyZGljdCJFCg1DdXJyZW50UmVzdWx0EgwKBGhlYWQYASABKAkSJgoGcmVzdWx0GAIgASgLMhYudmliZXN5cy5jbGkudjEuUmVzdWx0IlYKD05vQ3VycmVudFJlc3VsdBI1CgZyZWFzb24YASABKA4yJS52aWJlc3lzLmNsaS52MS5Ob0N1cnJlbnRSZXN1bHRSZWFzb24SDAoEaGVhZBgCIAEoCSrnAgoSUHJvbW90ZVJlZnVzYWxLaW5kEiQKIFBST01PVEVfUkVGVVNBTF9LSU5EX1VOU1BFQ0lGSUVEEAASIwofUFJPTU9URV9SRUZVU0FMX0tJTkRfVU5NRUFTVVJFRBABEiYKIlBST01PVEVfUkVGVVNBTF9LSU5EX0NIRUNLX01JU1NJTkcQAhIeChpQUk9NT1RFX1JFRlVTQUxfS0lORF9XT1JTRRADEiUKIVBST01PVEVfUkVGVVNBTF9LSU5EX1dJVEhJTl9OT0lTRRAEEiUKIVBST01PVEVfUkVGVVNBTF9LSU5EX0lOQ09OQ0xVU0lWRRAFEh4KGlBST01PVEVfUkVGVVNBTF9LSU5EX1NUQUxFEAYSLQopUFJPTU9URV9SRUZVU0FMX0tJTkRfRU5WSVJPTk1FTlRfTUlTTUFUQ0gQBxIhCh1QUk9NT1RFX1JFRlVTQUxfS0lORF9UUkFERU9GRhAIKooCChVOb0N1cnJlbnRSZXN1bHRSZWFzb24SKAokTk9fQ1VSUkVOVF9SRVNVTFRfUkVBU09OX1VOU1BFQ0lGSUVEEAASJAogTk9fQ1VSUkVOVF9SRVNVTFRfUkVBU09OX05PX0hFQUQQARI9CjVOT19DVVJSRU5UX1JFU1VMVF9SRUFTT05fTk9UX01FQVNVUkVEX1NJTkNFX1BST01PVElPThACGgIIARIyCipOT19DVVJSRU5UX1JFU1VMVF9SRUFTT05fSEVBRF9OT1RfUFJPTU9URUQQAxoCCAESLgoqTk9fQ1VSUkVOVF9SRVNVTFRfUkVBU09OX0hFQURfTk9UX01FQVNVUkVEEARCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_vibesys_cli_v1_environment, file_vibesys_cli_v1_result, file_vibesys_cli_v1_verdict]);
 
 /**
  * @generated from message vibesys.cli.v1.PromoteRefusalReason
@@ -149,7 +149,9 @@ export const PromotionSchema: GenMessage<Promotion> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_promote, 2);
 
 /**
- * CurrentResult is the head and a final number measured after the head last moved.
+ * CurrentResult is the head and a final number: the head's latest measurement that rests on a
+ * passing check of the same commit, task version and environment, whenever it was taken and
+ * whatever moved the branch to the head.
  *
  * @generated from message vibesys.cli.v1.CurrentResult
  */
@@ -286,12 +288,30 @@ export enum NoCurrentResultReason {
   NO_HEAD = 1,
 
   /**
-   * The head has no measurement and check taken after its last move. The cache cannot supply one,
-   * because reusing the samples that picked a winner would overstate its score.
+   * No longer sent. A daemon before HEAD_NOT_MEASURED sent it for a promoted head with no
+   * measurement and check taken after the promotion.
    *
-   * @generated from enum value: NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION = 2;
+   * @generated from enum value: NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION = 2 [deprecated = true];
+   * @deprecated
    */
   NOT_MEASURED_SINCE_PROMOTION = 2,
+
+  /**
+   * No longer sent. A daemon before HEAD_NOT_MEASURED sent it for a result branch moved outside
+   * promote, to a head the last promotion did not set.
+   *
+   * @generated from enum value: NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED = 3 [deprecated = true];
+   * @deprecated
+   */
+  HEAD_NOT_PROMOTED = 3,
+
+  /**
+   * The head has no saved measurement that rests on a passing check of the same commit, task
+   * version and environment. A measure of the head gives it one.
+   *
+   * @generated from enum value: NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED = 4;
+   */
+  HEAD_NOT_MEASURED = 4,
 }
 
 /**

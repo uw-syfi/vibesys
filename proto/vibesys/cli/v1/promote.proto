@@ -68,12 +68,20 @@ enum NoCurrentResultReason {
   NO_CURRENT_RESULT_REASON_UNSPECIFIED = 0;
   // Nothing was promoted, so there is no head.
   NO_CURRENT_RESULT_REASON_NO_HEAD = 1;
-  // The head has no measurement and check taken after its last move. The cache cannot supply one,
-  // because reusing the samples that picked a winner would overstate its score.
-  NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION = 2;
+  // No longer sent. A daemon before HEAD_NOT_MEASURED sent it for a promoted head with no
+  // measurement and check taken after the promotion.
+  NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION = 2 [deprecated = true];
+  // No longer sent. A daemon before HEAD_NOT_MEASURED sent it for a result branch moved outside
+  // promote, to a head the last promotion did not set.
+  NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED = 3 [deprecated = true];
+  // The head has no saved measurement that rests on a passing check of the same commit, task
+  // version and environment. A measure of the head gives it one.
+  NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED = 4;
 }
 
-// CurrentResult is the head and a final number measured after the head last moved.
+// CurrentResult is the head and a final number: the head's latest measurement that rests on a
+// passing check of the same commit, task version and environment, whenever it was taken and
+// whatever moved the branch to the head.
 message CurrentResult {
   string head = 1;
   Result result = 2;

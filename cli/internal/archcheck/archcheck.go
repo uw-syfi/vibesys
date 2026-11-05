@@ -271,7 +271,7 @@ var testRules = map[string][]string{
 	"internal/app/filestores": {"internal/core"},
 	"internal/daemon": {
 		"internal/store", "internal/app/memstores", "internal/environment/fakeenv", "internal/store/storetest",
-		"internal/lease", "internal/lease/fakelease", "internal/schedule",
+		"internal/lease", "internal/lease/fakelease", "internal/schedule", "internal/task/tasktest",
 	},
 	"internal/client": {
 		"internal/app", "internal/app/memstores", "internal/core", "internal/daemon", "internal/daemon/daemontest",

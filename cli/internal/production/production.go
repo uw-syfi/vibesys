@@ -176,11 +176,11 @@ const hostResource schedule.ResourceID = "host"
 // schedulerOf is how the operator config shares the machines: the named policy, a demand that lets
 // a docker job run on every placement that gives what its task needs (offers says what each gives),
 // a resource of max_jobs slots for each placement, and one for each resource the placements'
-// resources claim,
-// with room for every job of the placements that claim it, so that it bounds nothing but a measure,
-// which takes it whole. A host job runs on this machine beside the jobs of the local placement
-// "default" of the earlier shape, so it claims a slot of that placement; without one, host jobs
-// have a resource of one slot of their own.
+// resources claim, with room for every job of the placements that claim it, so that it bounds only
+// the claims that take it whole: a measure's, and those a resource makes exclusive, such as a
+// cluster's. A host job runs on this machine beside the jobs of the local placement "default" of
+// the earlier shape, so it claims a slot of that placement; without one, host jobs have a resource
+// of one slot of their own.
 func schedulerOf(op *cliv1.OperatorConfig, offers []core.PlacementOffer, claims map[string][]core.Claim) (app.Scheduler, error) {
 	policy := op.GetScheduler().GetPolicy()
 	newPolicy, ok := policies[policy]

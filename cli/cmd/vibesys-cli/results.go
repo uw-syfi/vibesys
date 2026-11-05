@@ -200,7 +200,7 @@ func promoteCommand(ctx context.Context, d deps, args []string) int {
 	})
 }
 
-// resultCommand is `result`: the head and a number measured after it last moved, or why there is
+// resultCommand is `result`: the head and its latest checked measurement, or why there is
 // none. With no number the exit code is 1, so a script cannot take silence for a result.
 func resultCommand(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("result", d)
@@ -241,7 +241,7 @@ func resultCommand(ctx context.Context, d deps, args []string) int {
 		if none.GetHead() != "" {
 			head = " (head " + shortCommit(none.GetHead()) + ")"
 		}
-		fmt.Fprintf(d.stdout, "no current result: %s%s\n", noResultText(none.GetReason()), head)
+		fmt.Fprintf(d.stdout, "no current result: %s%s\n", noResultText(none.GetReason(), none.GetHead()), head)
 		return code
 	})
 }
@@ -269,12 +269,14 @@ func refusalName(k cliv1.PromoteRefusalKind) string {
 	return lower("PROMOTE_REFUSAL_KIND_", k.String())
 }
 
-func noResultText(r cliv1.NoCurrentResultReason) string {
+// noResultText says why there is no number for the head, and what, if anything, gives it one.
+func noResultText(r cliv1.NoCurrentResultReason, head string) string {
 	switch r {
 	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD:
 		return "nothing was promoted, so there is no head"
-	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION:
-		return "the head has no measurement and check taken since it last moved; submit a measure with --no-cache"
+	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED:
+		return "the head has no measurement that rests on a passing check in the same task version and environment; " +
+			"run `vibesys-cli submit measure " + head + "`"
 	}
 	return lower("NO_CURRENT_RESULT_REASON_", r.String())
 }
@@ -365,8 +367,7 @@ func describeResult(r *cliv1.Result) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s\t", r.GetJobId())
 	if m := r.GetMeasure(); m != nil {
-		fmt.Fprintf(&b, "measure\t%s (%s)\tmean %s over %d samples\tcheck %s", m.GetMetric().GetName(),
-			lower("DIRECTION_", m.GetMetric().GetDirection().String()), number(m.GetValue()), len(m.GetSamples()), m.GetCheckJobId())
+		fmt.Fprintf(&b, "measure\t%s\tcheck %s", strings.Join(headlines(m), "\t"), m.GetCheckJobId())
 	} else {
 		b.WriteString("check\tpassed")
 	}
@@ -375,4 +376,37 @@ func describeResult(r *cliv1.Result) string {
 		fmt.Fprintf(&b, "\ton %s", p)
 	}
 	return b.String()
+}
+
+// headlines is a measurement's headline number on each objective, rounded, in the order the task
+// declares them, as compare and frontier list name them: its one metric for a single-metric task.
+// The scored metric's number is the measurement's value, and every other objective's is the value
+// of the observation of its name. An objective with no samples, or whose samples came from a
+// daemon too old to give their headline, says so in place of a number.
+func headlines(m *cliv1.MeasureResult) []string {
+	objectives := m.GetObjectives().GetMetrics()
+	if len(objectives) == 0 {
+		objectives = []*cliv1.Metric{m.GetMetric()}
+	}
+	out := make([]string, len(objectives))
+	for i, o := range objectives {
+		out[i] = fmt.Sprintf("%s (%s)\t%s", o.GetName(), lower("DIRECTION_", o.GetDirection().String()), headline(m, o.GetName()))
+	}
+	return out
+}
+
+// headline is the number headlines prints for the named objective of a measurement.
+func headline(m *cliv1.MeasureResult, name string) string {
+	if name == m.GetMetric().GetName() {
+		return fmt.Sprintf("mean %s over %d samples", number(m.GetValue()), len(m.GetSamples()))
+	}
+	i := slices.IndexFunc(m.GetObservations(), func(ob *cliv1.Observation) bool { return ob.GetName() == name })
+	if i < 0 || len(m.GetObservations()[i].GetValues()) == 0 {
+		return "no samples"
+	}
+	ob := m.GetObservations()[i]
+	if ob.Value == nil {
+		return fmt.Sprintf("%d samples, no headline from this daemon", len(ob.GetValues()))
+	}
+	return fmt.Sprintf("mean %s over %d samples", number(ob.GetValue()), len(ob.GetValues()))
 }

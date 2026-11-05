@@ -42,8 +42,8 @@ var refusalKinds = map[core.PromoteRefusalKind]cliv1.PromoteRefusalKind{
 }
 
 var noResultReasons = map[core.NoCurrentResultReason]cliv1.NoCurrentResultReason{
-	core.NoHead:                    cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD,
-	core.NotMeasuredSincePromotion: cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION,
+	core.NoHead:          cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD,
+	core.HeadNotMeasured: cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED,
 }
 
 var metricDirections = []struct {
@@ -104,10 +104,21 @@ func measureResult(o core.MeasureOutcome) *cliv1.MeasureResult {
 		Value: core.Headline(o.Samples),
 	}
 	for _, ob := range o.Observations {
-		m.Observations = append(m.Observations, &cliv1.Observation{Name: ob.Name, Values: slices.Clone(ob.Values)})
+		m.Observations = append(m.Observations, observation(ob))
 	}
 	m.Objectives = Objectives(o.Objectives)
 	return m
+}
+
+// observation is the contract's message for an observation, with its headline value, the number
+// compare weighs when the observation is an objective; an observation with no values has none.
+func observation(ob core.Observation) *cliv1.Observation {
+	out := &cliv1.Observation{Name: ob.Name, Values: slices.Clone(ob.Values)}
+	if len(ob.Values) > 0 {
+		v := core.Headline(ob.Values)
+		out.Value = &v
+	}
+	return out
 }
 
 // Measurements returns the contract's messages for pooled measurements.

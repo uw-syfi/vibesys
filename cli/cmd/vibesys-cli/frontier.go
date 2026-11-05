@@ -124,6 +124,13 @@ func describeFrontierDecision(decision *cliv1.FrontierDecision, commit string) s
 				}
 				fmt.Fprintf(&b, ", evicting %s, which it beats", strings.Join(short, ", "))
 			}
+			if retired := a.GetRetired(); len(retired) > 0 {
+				short := make([]string, len(retired))
+				for i, r := range retired {
+					short[i] = shortCommit(r)
+				}
+				fmt.Fprintf(&b, ", retiring %s, measured only under another task version", strings.Join(short, ", "))
+			}
 			b.WriteString("\n")
 		}
 		fmt.Fprintf(&b, "  members now: %d\n", len(a.GetMembers()))

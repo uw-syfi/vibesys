@@ -24,6 +24,10 @@ message Metric {
 message Observation {
   string name = 1;
   repeated double values = 2;
+  // The headline number of the values: their mean, the number compare weighs for an objective, as
+  // MeasureResult.value is for the scored metric. The daemon computes it, so no reader recomputes
+  // it. Absent when there are no values, and from a daemon or a saved result older than this field.
+  optional double value = 3;
 }
 
 // Objectives is what a measurement of a multi-objective (Pareto) task is judged on: a task whose

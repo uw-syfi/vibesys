@@ -51,7 +51,10 @@ It selects a working CLI or installs one only after explicit user approval.
    `unmeasured`: read [from-scratch.md](references/from-scratch.md) and create nothing else
    until it says to. Otherwise it gets the result branch `vibesys/result/<task>` at the base
    commit, and a context line you reuse in every brief: `--task <task> --run <run id> --harness
-   <harness>`. Every worktree of the repository shares the task's one store, so each agent sees
+   <harness>`. The run id is `VIBESYS_RUN` when the orchestrator set it; otherwise choose one
+   short name for this optimization, keep it on resume, and pass it as `--run` in the context
+   line. Never export `VIBESYS_RUN` yourself: its presence is what selects the orchestrator
+   harness file, for you and for every subagent that inherits your environment. Every worktree of the repository shares the task's one store, so each agent sees
    the others' jobs.
 5. If `vibesys-cli show <base>` lists no measure result, measure the base with
    `vibesys-cli submit measure <base> --samples 5`, as a tracked background `wait`
@@ -113,7 +116,8 @@ It selects a working CLI or installs one only after explicit user approval.
 - A judge verdict `unmeasured` is not a pass: re-judge after the measurement.
 - A number reported to the user is the `value` the CLI printed in `vibesys-cli result --json`
   (`current.result.measure.value`), never one you computed from samples. If `result` exits 1, there
-  is none: submit `vibesys-cli submit measure <head SHA> --no-cache` and report after that lands.
+  is none: for `head_not_measured`, submit `vibesys-cli submit measure <head SHA>` and report after
+  that lands.
   Before the first promotion the headline is the `measure.value` of `vibesys-cli show <base> --json`.
 - Workers may submit their own jobs. The daemon runs as many at once as its capacity allows, and
   a measure job runs alone where it lands, so a measure may queue behind other measures and

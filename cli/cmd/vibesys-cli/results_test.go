@@ -18,6 +18,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/storetest"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
 
 // The history the result commands run over: base, then a line of commits on it. The result
@@ -38,6 +39,8 @@ type resultsCLI struct {
 	*cli
 	clk   *clock.Manual
 	store store.Store
+	// taskVersion is the version of the task every commit of the history has.
+	taskVersion string
 }
 
 func newResultsCLI(t *testing.T) *resultsCLI {
@@ -52,12 +55,19 @@ func newResultsCLI(t *testing.T) *resultsCLI {
 		c.world.Branches.AddCommit("/repo", rev(n), rev(n-1))
 	}
 	c.world.Branches.AddBranch("/repo", resultBranch, rev(0))
+	for n := 0; n <= 4; n++ {
+		c.world.Tasks.Put("/repo", rev(n), tasktest.Files("kv"))
+	}
+	tk, err := c.world.Tasks.Task(context.Background(), "/repo", rev(0), "kv")
+	if err != nil {
+		t.Fatal(err)
+	}
 	c.git.AddRepo("/repo", revisions)
 	st, err := c.world.Stores.Create(context.Background(), scopeAt("/repo", "kv"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &resultsCLI{cli: c, clk: clk, store: st}
+	return &resultsCLI{cli: c, clk: clk, store: st, taskVersion: tk.Version}
 }
 
 func (c *resultsCLI) measured(n int, samples []float64) core.Result {
@@ -298,7 +308,7 @@ func TestCompareAgainstNamesTheBaseAndDefaultsToTheBranch(t *testing.T) {
 	}
 }
 
-func TestResultReportsTheHeadAndAFreshNumberOrSaysThereIsNone(t *testing.T) {
+func TestResultReportsTheHeadAndItsNumberOrSaysThereIsNone(t *testing.T) {
 	c := newResultsCLI(t)
 	r := c.run(withTask("result")...)
 	mustExit(t, r, exitFailed, "result before a promotion")
@@ -307,30 +317,56 @@ func TestResultReportsTheHeadAndAFreshNumberOrSaysThereIsNone(t *testing.T) {
 	}
 
 	c.measured(0, level)
-	c.measured(1, win)
+	picked := c.measured(1, []float64{118.123456789, 119, 121, 120, 119})
 	mustExit(t, c.run(withTask("promote", "c1")...), exitOK)
 
+	// Regression: the measurement the promotion rests on is the head's number right away.
 	r = c.run(withTask("result")...)
-	mustExit(t, r, exitFailed, "result right after a promotion")
-	if !strings.Contains(r.stdout, "since it last moved") || !strings.Contains(r.stdout, "head "+string(rev(1))[:12]) {
-		t.Fatalf("result = %+v", r)
-	}
-	var none cliv1.CurrentResultResponse
-	j := c.run(withTask("result", "--json")...)
-	if err := protojson.Unmarshal([]byte(j.stdout), &none); err != nil || none.GetNone().GetReason() != cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION {
-		t.Fatalf("result --json = %+v (%v)", j, err)
-	}
-
-	fresh := c.measured(1, []float64{118.123456789, 119, 121, 120, 119})
-	r = c.run(withTask("result")...)
-	mustExit(t, r, exitOK, "result after a fresh measurement")
-	if !strings.Contains(r.stdout, "head "+string(rev(1))[:12]) || !strings.Contains(r.stdout, string(fresh.Job)) || !strings.Contains(r.stdout, "mean 119.4 over 5 samples") {
+	mustExit(t, r, exitOK, "result right after a promotion")
+	if !strings.Contains(r.stdout, "head "+string(rev(1))[:12]) || !strings.Contains(r.stdout, string(picked.Job)) || !strings.Contains(r.stdout, "mean 119.4 over 5 samples") {
 		t.Fatalf("result = %q", r.stdout)
 	}
-	j = c.run(withTask("result", "--json")...)
+	j := c.run(withTask("result", "--json")...)
 	var cur cliv1.CurrentResultResponse
 	if err := protojson.Unmarshal([]byte(j.stdout), &cur); err != nil || cur.GetCurrent().GetResult().GetMeasure().GetSamples()[0] != 118.123456789 {
 		t.Fatalf("result --json = %+v (%v): the samples must be exact", j, err)
+	}
+}
+
+// noneReason is the reason `result --json` gives for having no number, read by its name.
+func noneReason(t *testing.T, r result) string {
+	t.Helper()
+	var answer struct{ None struct{ Reason string } }
+	if err := json.Unmarshal([]byte(r.stdout), &answer); err != nil {
+		t.Fatalf("result --json = %+v (%v)", r, err)
+	}
+	return answer.None.Reason
+}
+
+// Regression: a result branch moved outside `promote`, as a task switch moves it, has a head of
+// its own. Until that head is measured, `result` names the measure, with the head's full commit,
+// that gives it its number; once it is, that measurement is the number.
+func TestResultOfAHeadMovedOutsidePromoteIsItsOwnMeasurement(t *testing.T) {
+	c := newResultsCLI(t)
+	c.measured(0, level)
+	c.measured(1, win)
+	mustExit(t, c.run(withTask("promote", "c1")...), exitOK)
+	c.world.Branches.AddBranch("/repo", resultBranch, rev(2))
+
+	r := c.run(withTask("result")...)
+	mustExit(t, r, exitFailed, "result at an unmeasured head")
+	if want := "run `vibesys-cli submit measure " + string(rev(2)) + "`"; !strings.Contains(r.stdout, want) || !strings.Contains(r.stdout, "head "+string(rev(2))[:12]) {
+		t.Fatalf("result = %q, want it to say %q", r.stdout, want)
+	}
+	if got := noneReason(t, c.run(withTask("result", "--json")...)); got != "NO_CURRENT_RESULT_REASON_HEAD_NOT_MEASURED" {
+		t.Fatalf("result --json reason = %s", got)
+	}
+
+	measured := c.measured(2, win)
+	r = c.run(withTask("result")...)
+	mustExit(t, r, exitOK, "result at a measured head")
+	if !strings.Contains(r.stdout, "head "+string(rev(2))[:12]) || !strings.Contains(r.stdout, string(measured.Job)) {
+		t.Fatalf("result = %q", r.stdout)
 	}
 }
 

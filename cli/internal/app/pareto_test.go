@@ -9,6 +9,8 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/store"
 	"github.com/uw-syfi/vibesys/cli/internal/store/storetest"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 )
 
 // The task of these tests has three objectives, as a serving benchmark does: throughput, scored
@@ -23,16 +25,24 @@ var servingObjectives = core.Objectives{
 }
 
 // measuredAt saves a measurement of a multi-objective commit at a point: the value of each
-// objective, five samples of each, in the order of servingObjectives.
+// objective, five samples of each, in the order of servingObjectives. It is taken in the host
+// environment under the version of the task the rig's history has.
 func (r *resultsRig) measuredAt(commit core.Commit, point ...float64) {
+	r.t.Helper()
+	r.measuredUnder(commit, r.taskVersion, storetest.HostEnvironment(), point...)
+}
+
+// measuredUnder is measuredAt under a task version and in an environment.
+func (r *resultsRig) measuredUnder(commit core.Commit, version string, environment core.Fingerprint, point ...float64) core.Result {
 	r.t.Helper()
 	five := func(v float64) []float64 { return []float64{v, v, v, v, v} }
 	var others []core.Observation
 	for i, m := range servingObjectives.Metrics[1:] {
 		others = append(others, core.Observation{Name: m.Name, Values: five(point[i+1])})
 	}
-	storetest.SeedMeasurement(r.t, r.store, storetest.Measurement{
+	return storetest.SeedMeasurement(r.t, r.store, storetest.Measurement{
 		Commit: commit, Samples: five(point[0]), At: r.clock.Now(), Objectives: servingObjectives, Others: others,
+		TaskVersion: version, Environment: environment,
 	})
 }
 
@@ -121,6 +131,55 @@ func TestParetoPromotionMovesTheBranchOnlyOnAWinAndKeepsTheFrontier(t *testing.T
 	}
 	if r.head() != cm(2) || !slices.Equal(r.frontierCommits(), []core.Commit{cm(2)}) {
 		t.Fatalf("branch at %.7s, frontier %v", r.head(), r.frontierCommits())
+	}
+}
+
+// A task switch moves the result branch to a commit with a new task, whose version builds another
+// image. The base and the candidates are measured again under it, and a commit promoted then joins
+// the frontier: the members measured only under the old version leave it rather than refuse it as
+// measured in another environment, so the frontier can hold the current result, and `result`
+// reports the measurement the promotion rests on.
+func TestATaskSwitchStartsTheFrontierAfresh(t *testing.T) {
+	r := newResultsRig(t)
+	r.measuredAt(cm(1), 200, 100, 100)
+	if got := r.addToFrontier(cm(1)); frontierKinds(got) != nil {
+		t.Fatalf("an empty frontier refused %.7s: %+v", cm(1), got)
+	}
+
+	switched := tasktest.Files("task")
+	switched[task.TasksDir+"/task/bench.sh"] = task.File{Data: []byte("#!/bin/sh\necho fixed\n"), Executable: true}
+	for _, c := range []core.Commit{cm(2), cm(3)} {
+		r.tasks.Put("/repo", c, switched)
+	}
+	tk, err := r.tasks.Task(ctxFor(t), "/repo", cm(2), "task")
+	if err != nil || tk.Version == r.taskVersion {
+		t.Fatalf("the switched task has version %q (%v), want a new one", tk.Version, err)
+	}
+	if err := r.branches.FastForward(ctxFor(t), "/repo", resultBranch, base, cm(2)); err != nil {
+		t.Fatal(err)
+	}
+	r.measuredUnder(cm(2), tk.Version, storetest.DockerEnvironment(), 100, 100, 100)
+	candidate := r.measuredUnder(cm(3), tk.Version, storetest.DockerEnvironment(), 300, 50, 50)
+
+	d, frontier, err := r.app.Promote(ctxFor(t), call, cm(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := d.(core.Approved); !ok {
+		t.Fatalf("a win on every objective under the new task: %+v, want a promotion", d)
+	}
+	if a, ok := frontier.(core.FrontierAdmission); !ok || a.Added().Commit != cm(3) {
+		t.Fatalf("frontier decision %+v, want %.7s admitted", frontier, cm(3))
+	}
+	if got := r.frontierCommits(); !slices.Equal(got, []core.Commit{cm(3)}) {
+		t.Fatalf("frontier %v, want only the commit of the new task", got)
+	}
+	r.wantResult(cm(3), candidate)
+
+	// A commit measured only under the old task is not compared with the new one's members.
+	r.measuredAt(side, 400, 10, 10)
+	if kinds := frontierKinds(r.addToFrontier(side)); !slices.Equal(kinds, []core.FrontierRefusalKind{core.FrontierStale}) {
+		t.Fatalf("a commit of the old task: %v, want stale", kinds)
 	}
 }
 

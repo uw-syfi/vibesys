@@ -23,6 +23,8 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/store/storetest"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
@@ -42,6 +44,8 @@ type resultsRig struct {
 	clk      *clock.Manual
 	app      *app.App
 	stores   *memstores.Stores
+	// taskVersion is the version of the task every commit of the history has.
+	taskVersion string
 }
 
 func newResultsRig(t *testing.T) *resultsRig {
@@ -54,11 +58,19 @@ func newResultsRig(t *testing.T) *resultsRig {
 	branches.AddCommit("/repo", cm(1), cm(0))
 	branches.AddCommit("/repo", cm(2), cm(0))
 	branches.AddBranch("/repo", "vibesys/result/task", cm(0))
+	tasks := task.NewMemorySource()
+	for n := range 3 {
+		tasks.Put("/repo", cm(n), tasktest.Files("task"))
+	}
+	tk, err := tasks.Task(ctxFor(t), "/repo", cm(0), "task")
+	if err != nil {
+		t.Fatal(err)
+	}
 	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
 	stores := memstores.New(app.Rules(5))
 	survivors := supervisor.NewSurvivors()
 	a := app.New(app.Config{
-		Clock: clk, Stores: stores, Environments: envs, Branches: branches, Repositories: repos(),
+		Clock: clk, Stores: stores, Environments: envs, Branches: branches, Repositories: repos(), Tasks: tasks,
 		Supervisors: supervisor.NewInProcess(envs, &fakeenv.Checkouts{}, survivors),
 	})
 	if err := a.Start(ctxFor(t)); err != nil {
@@ -82,7 +94,7 @@ func newResultsRig(t *testing.T) *resultsRig {
 		a.Close()
 		survivors.Close()
 	})
-	return &resultsRig{t: t, client: cliv1.NewDaemonServiceClient(conn), branches: branches, clk: clk, app: a, stores: stores}
+	return &resultsRig{t: t, client: cliv1.NewDaemonServiceClient(conn), branches: branches, clk: clk, app: a, stores: stores, taskVersion: tk.Version}
 }
 
 func (r *resultsRig) measured(c core.Commit, samples ...float64) {
@@ -224,14 +236,13 @@ func TestCurrentResultAnswersNoneThenTheNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	second, err := r.client.CurrentResult(ctxFor(t), &cliv1.CurrentResultRequest{Context: call})
-	if err != nil || second.GetNone().GetReason() != cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION ||
-		second.GetNone().GetHead() != string(cm(1)) {
-		t.Fatalf("result after a promotion = %+v, %v", second, err)
+	if err != nil || second.GetCurrent().GetHead() != string(cm(1)) || len(second.GetCurrent().GetResult().GetMeasure().GetSamples()) != len(winning) {
+		t.Fatalf("result after a promotion = %+v, %v; want the measurement the promotion rests on", second, err)
 	}
-	r.measured(cm(1), 119, 120, 121, 118, 120)
+	r.measured(cm(1), 119, 120, 121, 118, 120, 119)
 	third, err := r.client.CurrentResult(ctxFor(t), &cliv1.CurrentResultRequest{Context: call})
-	if err != nil || third.GetCurrent().GetHead() != string(cm(1)) || len(third.GetCurrent().GetResult().GetMeasure().GetSamples()) != 5 {
-		t.Fatalf("result after a fresh measurement = %+v, %v", third, err)
+	if err != nil || third.GetCurrent().GetHead() != string(cm(1)) || len(third.GetCurrent().GetResult().GetMeasure().GetSamples()) != 6 {
+		t.Fatalf("result after a later measurement = %+v, %v", third, err)
 	}
 }
 

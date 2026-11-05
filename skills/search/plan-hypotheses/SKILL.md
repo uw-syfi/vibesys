@@ -41,11 +41,16 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    (`vibesys-cli plan list --json`) and open full plans only for plans near your idea
    (`plan view <n>`). Then browse the saved results (`vibesys-cli result`, `show <sha>`, `jobs`,
    `logs <job>`) and the code. A profile an earlier agent kept lives in its plan's comments.
+   Read the code of the revision you plan on (usually the result branch head) without checking it
+   out: `git show <sha>:<path>`, `git grep <pattern> <sha>`, `git diff <a> <b>`. The checkout you
+   start in belongs to the user or the lead; never change its index, HEAD or files.
 2. **Bound first.** Compute the speed-of-light floor of the part you look at from the bytes and
    operations it must move and the hardware's measured peaks. The gap to the observed time is the
    headroom. Use the benchmark's observed operating point, not its configured one. An idea may not
    claim more than that headroom; if the part's time is unmeasured, say "unattributed" and make the
-   first step a measurement.
+   first step a measurement. Bound the whole system too: the most the task's fixed resources allow
+   end to end, including whatever drives the load. Say which resource sets that ceiling and where
+   the current result sits under it. A part's headroom is real only below that ceiling.
 3. **Claim early.** As soon as you chose an idea, run `vibesys-cli plan create --title "<claim>"
    --body-file -` with a stub body (one line of mechanism); note the number it prints. Before
    investing in details, list the plans again: if a sibling already claimed the same mechanism,

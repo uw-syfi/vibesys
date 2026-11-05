@@ -12,6 +12,12 @@ import (
 //
 // Membership is decided here, from saved results alone, with the comparison compare uses: a
 // candidate is judged against each member on every objective (CompareCommits).
+//
+// A frontier holds the commits of one task version: the version of the task at the result branch
+// head, which every check and measure is held to when it is submitted. A switch to a new task
+// version retires the members measured only under an older one, as the next admission's
+// measurements cannot be compared with theirs; a measurement is never compared across versions or
+// environments.
 
 // FrontierMember is one commit on a task's frontier.
 type FrontierMember struct {
@@ -52,11 +58,11 @@ const (
 	FrontierWithinNoise FrontierRefusalKind = "within_noise"
 	// FrontierInconclusive is a member the samples cannot place the candidate against.
 	FrontierInconclusive FrontierRefusalKind = "inconclusive"
-	// FrontierStale is a member measured under another task version than the candidate: the two
-	// are not comparable, and the candidate is not admitted beside a member it cannot be judged
-	// against.
+	// FrontierStale is a candidate with no measurement under the task's current version: what it
+	// was measured under is a task the frontier no longer holds.
 	FrontierStale FrontierRefusalKind = "stale"
-	// FrontierEnvironmentMismatch is a member measured in another environment than the candidate.
+	// FrontierEnvironmentMismatch is a member measured, under the current task version, in another
+	// environment than the candidate.
 	FrontierEnvironmentMismatch FrontierRefusalKind = "environment_mismatch"
 )
 
@@ -73,7 +79,7 @@ type FrontierRefusalReason struct {
 	// alone: its own missing measurement or check.
 	Member Commit
 	// Verdict is the overall verdict of the candidate against Member, and Objectives the verdict on
-	// each objective, for dominated, within_noise, inconclusive and stale.
+	// each objective, for dominated, within_noise and inconclusive.
 	Verdict    *Verdict
 	Objectives []ObjectiveVerdict
 }
@@ -92,6 +98,7 @@ type FrontierAdmission struct {
 	from    uint64
 	added   FrontierMember
 	evicted []Commit
+	retired []Commit
 	members []FrontierMember
 	already bool
 	valid   bool
@@ -106,6 +113,10 @@ func (a FrontierAdmission) Added() FrontierMember { return a.added }
 // Evicted are the members the admitted commit beats, which leave the frontier, in the order they
 // were admitted.
 func (a FrontierAdmission) Evicted() []Commit { return slices.Clone(a.evicted) }
+
+// Retired are the members measured only under another task version than the current one, which
+// leave the frontier, in the order they were admitted.
+func (a FrontierAdmission) Retired() []Commit { return slices.Clone(a.retired) }
 
 // Members is the frontier after the change.
 func (a FrontierAdmission) Members() []FrontierMember { return slices.Clone(a.members) }
@@ -140,64 +151,86 @@ func (FrontierRefusal) frontierDecision()   {}
 type FrontierRequest struct {
 	Candidate Commit
 	Frontier  Frontier
-	// Results are saved results of the candidate and of the members. Those of other commits are
-	// ignored.
+	// Results are saved results of the candidate and of the members. Those of other commits, and
+	// those taken under another task version than TaskVersion, are ignored.
 	Results []Result
+	// TaskVersion is the task's current version: that of the task at the result branch head.
+	TaskVersion string
 	// At is when the commit would be admitted.
 	At time.Time
 }
 
 // DecideFrontier decides whether the candidate joins the frontier. A commit that is a member is
-// admitted again with nothing changed, so asking twice is asking once. Otherwise it is judged
-// against each member with the comparison of CompareCommits, on every objective:
+// admitted again with nothing changed, so asking twice is asking once. Otherwise only the
+// measurements taken under the current task version (TaskVersion) count, and the candidate is
+// judged against each member with the comparison of CompareCommits, on every objective:
 //
+//   - a member measured, but only under other task versions, is retired: it belongs to a task the
+//     frontier no longer holds, so it neither refuses the candidate nor stays;
 //   - a member it is better than (better on some objective, worse on none) is evicted;
 //   - a member it is a tradeoff against stays;
 //   - a member it is worse than refuses it as FrontierDominated, one it is within noise of as
-//     FrontierWithinNoise, one it cannot be placed against as FrontierInconclusive, and one
-//     measured under another task version as FrontierStale; FrontierEnvironmentMismatch is a
-//     member measured in another environment, and FrontierUnmeasured one with no measurement.
+//     FrontierWithinNoise, and one it cannot be placed against as FrontierInconclusive;
+//     FrontierEnvironmentMismatch is a member measured in another environment, and
+//     FrontierUnmeasured one with no measurement at all.
 //
-// A candidate with no measurement is refused as FrontierUnmeasured and is judged no further; one
-// with a measurement that rests on no passing check is refused as FrontierCheckMissing. Every
-// reason that applies is returned, in the order of the kinds and, within a kind, of the members.
-// The admission keeps the members that stay in their order and adds the candidate last.
+// A candidate with no measurement is refused as FrontierUnmeasured, and one measured only under
+// other task versions as FrontierStale; either is judged no further. One with a measurement that
+// rests on no passing check is refused as FrontierCheckMissing. Every reason that applies is
+// returned, in the order of the kinds and, within a kind, of the members. The admission keeps the
+// members that stay in their order and adds the candidate last. A refusal retires nothing.
 //
-// It fails with a *Failure, rather than refusing, for a request with no time, for a candidate whose
-// latest measurement is not of a multi-objective task (FailureInvalidInput: a single-metric task
-// has a result branch and no frontier), and when two sides cannot be compared at all (see
-// Compare).
+// It fails with a *Failure, rather than refusing, for a request with no time or no task version,
+// for a candidate whose latest measurement is not of a multi-objective task (FailureInvalidInput:
+// a single-metric task has a result branch and no frontier), and when two sides cannot be compared
+// at all (see Compare).
 func DecideFrontier(req FrontierRequest) (FrontierDecision, error) {
 	if req.At.IsZero() {
 		return nil, failf(FailureInvalidInput, "frontier: no time")
+	}
+	if req.TaskVersion == "" {
+		return nil, failf(FailureInvalidInput, "frontier: no task version")
 	}
 	if req.Frontier.Has(req.Candidate) {
 		members := slices.Clone(req.Frontier.Members)
 		added := members[slices.IndexFunc(members, func(m FrontierMember) bool { return m.Commit == req.Candidate })]
 		return FrontierAdmission{from: req.Frontier.Revision, added: added, members: members, already: true, valid: true}, nil
 	}
-	candidate := measurementsOf(req.Candidate, req.Results)
-	if len(candidate) == 0 {
+	measured := measurementsOf(req.Candidate, req.Results)
+	if len(measured) == 0 {
 		return FrontierRefusal{Reasons: []FrontierRefusalReason{{
 			Kind: FrontierUnmeasured, Message: "commit " + shortCommit(req.Candidate) + " has no measurement",
 		}}}, nil
 	}
-	if !objectivesOf(candidate[len(candidate)-1]).Pareto() {
+	if !objectivesOf(measured[len(measured)-1]).Pareto() {
 		return nil, failf(FailureInvalidInput,
 			"commit %s was measured on one metric: a frontier holds the commits of a task whose objectives.toml has a [pareto] section and more than one objective",
 			shortCommit(req.Candidate))
 	}
+	current := slices.DeleteFunc(slices.Clone(req.Results), func(r Result) bool { return r.TaskVersion != req.TaskVersion })
+	candidate := measurementsOf(req.Candidate, current)
+	if len(candidate) == 0 {
+		return FrontierRefusal{Reasons: []FrontierRefusalReason{{
+			Kind: FrontierStale, Message: "commit " + shortCommit(req.Candidate) +
+				" was measured only under other task versions than the task's current one, " + req.TaskVersion +
+				", the result branch head's; merge or rebase it onto the head and measure that",
+		}}}, nil
+	}
 	var reasons []FrontierRefusalReason
-	if slices.ContainsFunc(candidate, func(r Result) bool { return !restsOnPassingCheck(r, req.Results) }) {
+	if slices.ContainsFunc(candidate, func(r Result) bool { return !restsOnPassingCheck(r, current) }) {
 		reasons = append(reasons, FrontierRefusalReason{
 			Kind:    FrontierCheckMissing,
 			Message: "a measurement of commit " + shortCommit(req.Candidate) + " does not rest on a passing check of the same commit, task version and environment",
 		})
 	}
 	var kept []FrontierMember
-	var evicted []Commit
+	var evicted, retired []Commit
 	for _, member := range req.Frontier.Members {
-		reason, verdict, err := judgeAgainst(req.Candidate, candidate, member.Commit, req.Results)
+		if len(measurementsOf(member.Commit, current)) == 0 && len(measurementsOf(member.Commit, req.Results)) > 0 {
+			retired = append(retired, member.Commit)
+			continue
+		}
+		reason, verdict, err := judgeAgainst(req.Candidate, candidate, member.Commit, current)
 		if err != nil {
 			return nil, err
 		}
@@ -218,13 +251,14 @@ func DecideFrontier(req FrontierRequest) (FrontierDecision, error) {
 	}
 	added := FrontierMember{Commit: req.Candidate, AddedAt: req.At}
 	return FrontierAdmission{
-		from: req.Frontier.Revision, added: added, evicted: evicted,
+		from: req.Frontier.Revision, added: added, evicted: evicted, retired: retired,
 		members: append(kept, added), valid: true,
 	}, nil
 }
 
-// judgeAgainst compares the candidate with one member, and returns the reason the member refuses
-// it, or the overall verdict when it does not: better or tradeoff.
+// judgeAgainst compares the candidate with one member, both measured under one task version, and
+// returns the reason the member refuses it, or the overall verdict when it does not: better or
+// tradeoff.
 func judgeAgainst(commit Commit, candidate []Result, member Commit, results []Result) (*FrontierRefusalReason, VerdictKind, error) {
 	base := measurementsOf(member, results)
 	if len(base) == 0 {
@@ -253,8 +287,6 @@ func judgeAgainst(commit Commit, candidate []Result, member Commit, results []Re
 		return refuse(FrontierDominated, "the member "+of+" beats commit "+short+": it is better on some objective and worse on none")
 	case v.Kind == WithinNoise:
 		return refuse(FrontierWithinNoise, "commit "+short+" is within noise of the member "+of+" on every objective")
-	case v.Kind == Inconclusive && v.Reason == ReasonTaskVersionMismatch:
-		return refuse(FrontierStale, "commit "+short+" and the member "+of+" were measured under different task versions")
 	case v.Kind == Inconclusive:
 		return refuse(FrontierInconclusive, "the samples cannot place commit "+short+" against the member "+of+" ("+string(v.Reason)+")")
 	}

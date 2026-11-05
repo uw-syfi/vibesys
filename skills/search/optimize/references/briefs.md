@@ -81,13 +81,17 @@ Hand back: the commit, the parts you could not apply and why, the checks you ran
 
 ## Profile
 
-Read-only worktree of the revision, as for the judge. Profiles that drive load run as
+Read-only worktree of the revision, as for the judge. When the question needs the program to
+expose something it does not (a profiler endpoint, symbols), create a branch and worktree for
+it at the revision and name it as the instrumentation branch; a profile of an earlier revision
+can be reused on a later one by cherry-picking its instrumentation commit onto a new branch. Profiles that drive load run as
 `vibesys-cli submit command` jobs; their output is read with `vibesys-cli logs`.
 
 ```
 Question: <one question about one revision>      Revision: <SHA>
 Decision it informs: <the choice that depends on the answer>
-Change no code. Hand back findings with the evidence for each, and say which decision they
+Instrumentation: none | branch <vibesys-work/<task>/profile-<topic>> at <SHA>, worktree <path>
+Change no code, except one instrumentation commit on the branch named above. Hand back findings with the evidence for each, and say which decision they
 inform.
 ```
 

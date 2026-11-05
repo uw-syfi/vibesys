@@ -70,7 +70,7 @@ func (a *App) lookAtTask(ctx context.Context, scope core.Scope, judged int) (cor
 	t, err := a.openTask(ctx, scope)
 	if errors.Is(err, store.ErrNoStore) {
 		// A task with no store has nothing, and nothing is the same as an empty store.
-		return core.TaskView{Content: &core.TaskContent{Head: core.CurrentResultAt("", nil, nil)}}, true
+		return core.TaskView{Content: &core.TaskContent{Head: core.CurrentResultAt("", nil)}}, true
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -129,7 +129,7 @@ func (a *App) lookAtTask(ctx context.Context, scope core.Scope, judged int) (cor
 // whether there is a head to judge against. A branch that cannot be read has no head to report.
 func (a *App) headOf(ctx context.Context, t taskStore, promotions []core.Promotion, results []core.Result) (core.ResultAnswer, bool) {
 	if len(promotions) == 0 {
-		return core.CurrentResultAt("", nil, nil), false
+		return core.CurrentResultAt("", nil), false
 	}
 	head, err := a.settledHead(ctx, t)
 	if err != nil {
@@ -137,7 +137,7 @@ func (a *App) headOf(ctx context.Context, t taskStore, promotions []core.Promoti
 		if !errors.As(err, &f) || (f.Kind != core.FailureNotFound && f.Kind != core.FailureUnavailable) {
 			a.cfg.Logf("task %s in %s: reading the result branch to report the head: %v", string(t.scope.Task()), string(t.scope.Repository()), err)
 		}
-		return core.CurrentResultAt("", nil, nil), false
+		return core.CurrentResultAt("", nil), false
 	}
 	var at []core.Result
 	for _, r := range results {
@@ -145,7 +145,7 @@ func (a *App) headOf(ctx context.Context, t taskStore, promotions []core.Promoti
 			at = append(at, r)
 		}
 	}
-	return core.CurrentResultAt(head, promotions, at), true
+	return core.CurrentResultAt(head, at), true
 }
 
 // judgeNewest judges the newest n measured commits against the head. The head is not judged

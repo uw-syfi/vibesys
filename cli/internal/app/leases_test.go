@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
@@ -19,7 +20,7 @@ import (
 const leaseSlow = 7 * time.Minute
 
 // slowTimers end every wait shorter than leaseSlow at once, and the slow period when the test
-// passes it.
+// passes it. Passing it ends only the waits armed so far, as a clock that moves on would.
 type slowTimers struct {
 	mu   sync.Mutex
 	slow []chan struct{}
@@ -63,69 +64,72 @@ func daemonOf(t *testing.T, place *fakelease.Place, user string, pid int) (*worl
 	return w, w.newApp(), timers
 }
 
-// awaitWait waits until the daemon says a job waits as ok wants, bounded by the backstop.
-func awaitWait(t *testing.T, a *app.App, sc core.Scope, id core.JobID, ok func(core.JobWait) bool) core.JobWait {
+// waitOf is how the daemon says a job waits.
+func waitOf(t *testing.T, a *app.App, sc core.Scope, id core.JobID) core.JobWait {
 	t.Helper()
-	ctx := ctxFor(t)
-	for {
-		w, found := a.Waits(sc, []core.JobID{id})[id]
-		if found && ok(w) {
-			return w
-		}
-		if ctx.Err() != nil {
-			t.Fatalf("job %s waits as %+v", id, w)
-		}
-		runtime.Gosched()
+	w, found := a.Waits(sc, []core.JobID{id})[id]
+	if !found {
+		t.Fatalf("the daemon says nothing of how job %s waits", id)
 	}
+	return w
 }
 
 // TestTwoDaemonsTakeTurnsAtWhatTheyHoldAlone runs two users' daemons on one machine. While
 // alice's measure holds the machine's lease, bob's waits, naming alice, and runs nothing, and his
 // command that shares the machine keeps behind it. Once alice's measure ends, bob's takes the
 // lease at its next try, then his command runs, and nobody holds a lease.
+//
+// It runs in a bubble, and looks at the daemons only once every goroutine of both is blocked: a
+// refused job arms its next try on a goroutine of its own, after the daemon already says it waits
+// for the lease, and passing the slow period before that try is armed passes nothing.
 func TestTwoDaemonsTakeTurnsAtWhatTheyHoldAlone(t *testing.T) {
-	place := &fakelease.Place{}
-	wa, alice, _ := daemonOf(t, place, "alice", 101)
-	wb, bob, bobSlow := daemonOf(t, place, "bob", 202)
-	ctx := ctxFor(t)
+	synctest.Test(t, func(t *testing.T) {
+		place := &fakelease.Place{}
+		wa, alice, _ := daemonOf(t, place, "alice", 101)
+		wb, bob, bobSlow := daemonOf(t, place, "bob", 202)
+		ctx := ctxFor(t)
 
-	hers := submit(t, alice, "mark", "alone", ";", "hold", "a", ";", "exit", "0")
-	if !wa.gates.Reached(ctx, "alone") {
-		t.Fatalf("alice's measure did not start")
-	}
-	if st := alice.Status(); len(st.Leases) != 1 || st.Leases[0].Job != hers.ID || st.Leases[0].Key != "machine" {
-		t.Fatalf("alice's daemon holds %+v, want the machine's lease for her measure", st.Leases)
-	}
-	his := submit(t, bob, "mark", "alone", ";", "exit", "0")
-	w := awaitWait(t, bob, scope, his.ID, func(w core.JobWait) bool { return w.Kind == core.WaitLeased })
-	if w.Elsewhere == nil || w.Elsewhere.User != "alice" || w.Elsewhere.PID != 101 || w.Elsewhere.Job != hers.ID || w.Resource != string(schedule.DefaultPlacement) {
-		t.Fatalf("bob's measure waits as %+v, want alice's measure named", w)
-	}
-	if n := wb.env.Active(); n != 0 {
-		t.Fatalf("bob's daemon runs %d commands while alice's measure holds the machine", n)
-	}
-	// A command of bob's that shares the machine keeps behind his measure, which keeps its turn
-	// while it waits for the lease: otherwise a stream of them would starve it.
-	shared := submitIn(t, bob, elsewhere, "exit", "0")
-	if w := awaitWait(t, bob, scopeElsewhere, shared.ID, func(core.JobWait) bool { return true }); w.Kind != core.WaitBehind {
-		t.Fatalf("bob's command waits as %+v, want behind his measure", w)
-	}
-
-	wa.gates.Release("a")
-	awaitState(t, alice, hers.ID, core.JobSucceeded)
-	for len(alice.Status().Leases) > 0 {
-		if ctx.Err() != nil {
-			t.Fatalf("alice's daemon still holds %+v after her measure ended", alice.Status().Leases)
+		hers := submit(t, alice, "mark", "alone", ";", "hold", "a", ";", "exit", "0")
+		if !wa.gates.Reached(ctx, "alone") {
+			t.Fatalf("alice's measure did not start")
 		}
-		runtime.Gosched()
-	}
-	bobSlow.pass()
-	awaitState(t, bob, his.ID, core.JobSucceeded)
-	awaitIn(t, bob, scopeElsewhere, shared.ID, core.JobSucceeded)
-	if wa.env.Active() != 0 {
-		t.Fatalf("alice's daemon runs a command beside bob's measure")
-	}
-	awaitHeldNothing(t, place)
+		if st := alice.Status(); len(st.Leases) != 1 || st.Leases[0].Job != hers.ID || st.Leases[0].Key != "machine" {
+			t.Fatalf("alice's daemon holds %+v, want the machine's lease for her measure", st.Leases)
+		}
+		his := submit(t, bob, "mark", "alone", ";", "exit", "0")
+		synctest.Wait()
+		w := waitOf(t, bob, scope, his.ID)
+		if w.Kind != core.WaitLeased || w.Elsewhere == nil || w.Elsewhere.User != "alice" || w.Elsewhere.PID != 101 || w.Elsewhere.Job != hers.ID || w.Resource != string(schedule.DefaultPlacement) {
+			t.Fatalf("bob's measure waits as %+v, want alice's measure named", w)
+		}
+		if n := wb.env.Active(); n != 0 {
+			t.Fatalf("bob's daemon runs %d commands while alice's measure holds the machine", n)
+		}
+		// A command of bob's that shares the machine keeps behind his measure, which keeps its turn
+		// while it waits for the lease: otherwise a stream of them would starve it.
+		shared := submitIn(t, bob, elsewhere, "exit", "0")
+		synctest.Wait()
+		if w := waitOf(t, bob, scopeElsewhere, shared.ID); w.Kind != core.WaitBehind {
+			t.Fatalf("bob's command waits as %+v, want behind his measure", w)
+		}
+
+		wa.gates.Release("a")
+		awaitState(t, alice, hers.ID, core.JobSucceeded)
+		synctest.Wait()
+		if held := alice.Status().Leases; len(held) > 0 {
+			t.Fatalf("alice's daemon still holds %+v after her measure ended", held)
+		}
+		bobSlow.pass()
+		awaitState(t, bob, his.ID, core.JobSucceeded)
+		awaitIn(t, bob, scopeElsewhere, shared.ID, core.JobSucceeded)
+		if wa.env.Active() != 0 {
+			t.Fatalf("alice's daemon runs a command beside bob's measure")
+		}
+		synctest.Wait()
+		if held := place.Held(); len(held) > 0 {
+			t.Fatalf("leases still held: %+v", held)
+		}
+	})
 }
 
 // awaitHeldNothing waits until no lease is held at the place.

@@ -96,8 +96,9 @@ func (Tasks) Task(ctx context.Context, repository string, commit core.Commit, na
 	return task.Read(tree, name)
 }
 
-// readTar reads the regular files of a tar archive, of at most limit bytes in all. Links and
-// special files are left out, as task.Version leaves them out.
+// readTar reads the regular files and symbolic links of a tar archive, of at most limit bytes in
+// all, which is what git archive writes besides directories and its header of the commit. Any
+// other entry is refused, not left out, so a task never silently loses a file.
 func readTar(archive []byte, limit int64, what string) (task.Tree, error) {
 	tree := task.Tree{}
 	if len(archive) == 0 {
@@ -113,8 +114,15 @@ func readTar(archive []byte, limit int64, what string) (task.Tree, error) {
 		if err != nil {
 			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading %s: %v", what, err)}
 		}
-		if h.Typeflag != tar.TypeReg {
+		switch h.Typeflag {
+		case tar.TypeDir, tar.TypeXGlobalHeader:
 			continue
+		case tar.TypeSymlink:
+			tree[path.Clean(h.Name)] = task.File{Link: h.Linkname}
+			continue
+		case tar.TypeReg:
+		default:
+			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading %s: %s is an entry of type %q, which a task cannot hold", what, h.Name, h.Typeflag)}
 		}
 		if total += h.Size; total > limit {
 			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("%s are over %d bytes, more than this build reads", what, limit)}

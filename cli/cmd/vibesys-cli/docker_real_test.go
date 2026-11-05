@@ -24,8 +24,9 @@ import (
 // image tag, so repeated runs of the tests share one image.
 const pinned = "busybox:1.36.1@sha256:73aaf090f3d85aa34ee199857f03fa3a95c8ede2ffd4cc2cdb5b94e566b11662"
 
-// commitDockerTask commits a repository whose task "bench" ships a Dockerfile. Its check says who
-// runs it, and its benchmark prints a line for every sample it takes.
+// commitDockerTask commits a repository whose task "bench" ships a Dockerfile that copies the task
+// into the image. Its check reads the task's symbolic link there and says who runs it, and its
+// benchmark prints a line for every sample it takes.
 func (m *machine) commitDockerTask() {
 	m.t.Helper()
 	m.git("init", "-q", "-b", "main")
@@ -36,7 +37,7 @@ version = "0.1"
 backends = ["cpu"]
 
 [accuracy]
-command = ['sh', '-c', 'test "$(cat ${PROJECT_ROOT}/src.txt)" = committed && echo "user $(id -u)"']
+command = ['sh', '-c', 'test "$(cat ${PROJECT_ROOT}/src.txt)" = committed && test -L /task/k8s/deployed.yaml && grep -q List /task/k8s/deployed.yaml && echo "user $(id -u)"']
 timeout_seconds = 60
 
 [benchmark]
@@ -48,7 +49,11 @@ json_argument = "--out"
 metric = "ops"
 `, 0o644)
 	m.write(dir+task.ObjectiveName, "[[objective]]\nname = \"ops\"\ndirection = \"max\"\n", 0o644)
-	m.write(dir+"Dockerfile", "FROM "+pinned+"\nRUN true\n", 0o644)
+	m.write(dir+"k8s/manifest.yaml", "kind: List\n", 0o644)
+	if err := os.Symlink("manifest.yaml", filepath.Join(m.repo, filepath.FromSlash(dir+"k8s/deployed.yaml"))); err != nil {
+		m.t.Fatal(err)
+	}
+	m.write(dir+"Dockerfile", "FROM "+pinned+"\nCOPY . /task\n", 0o644)
 	m.git("add", "-A")
 	m.git("commit", "-q", "-m", "task")
 }

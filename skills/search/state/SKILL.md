@@ -21,7 +21,7 @@ All worktrees of the repository share one store per task, so any agent sees the 
 | --- | --- |
 | Jobs, their states, logs and notes | `vibesys-cli jobs --json`, `logs <job>`, `show <sha>` |
 | Saved results: check passes and samples, per commit | `vibesys-cli show <sha> --json` |
-| The head of the result branch and its fresh number | `vibesys-cli result --json` |
+| The head of the result branch and its number | `vibesys-cli result --json` |
 | Plans, their status and comments, and the jobs linked to them | `vibesys-cli plan list\|view` |
 | `vibesysd`, the CLI's daemon that runs it all | `vibesys-cli daemon status` |
 
@@ -29,7 +29,11 @@ All worktrees of the repository share one store per task, so any agent sees the 
 
 - Result branch (the optimization's "main"): `vibesys/result/<task>`. The lead creates it once, at
   the base commit (for a base that fails the check, at the bootstrap commit:
-  `vibesys:optimize`), and never checks it out. Only `vibesys-cli promote` moves it.
+  `vibesys:optimize`), and never checks it out. Only `vibesys-cli promote` moves it. The CLI
+  fixes this name. Git cannot create it while a local branch named exactly `vibesys` exists
+  (`cannot lock ref ... 'refs/heads/vibesys' exists`). In that case, if `vibesys` only tracks
+  a remote branch at the same commit, delete it (`git branch -d vibesys`); otherwise stop and
+  report the collision. Never rename the result branch.
 - Candidate branches: `vibesys-work/<task>/plan-N`, where N is the plan number.
 - Worktrees: the lead picks one directory outside the repository's working tree and puts every
   worktree there (`git worktree add`), one per plan, one per judge or profile question. Each brief

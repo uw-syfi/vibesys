@@ -89,7 +89,7 @@ func testFrontier(t *testing.T, newStore New) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		decision, err := core.DecideFrontier(core.FrontierRequest{Candidate: commit(1), Frontier: first, At: e.now()})
+		decision, err := core.DecideFrontier(core.FrontierRequest{Candidate: commit(1), Frontier: first, TaskVersion: "v1", At: e.now()})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +127,7 @@ func testFrontier(t *testing.T, newStore New) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			decision, err := core.DecideFrontier(core.FrontierRequest{Candidate: c, Frontier: frontier, Results: results, At: e.now()})
+			decision, err := core.DecideFrontier(core.FrontierRequest{Candidate: c, Frontier: frontier, Results: results, TaskVersion: "v1", At: e.now()})
 			if err != nil {
 				t.Fatal(err)
 			}

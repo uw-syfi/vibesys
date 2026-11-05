@@ -268,10 +268,10 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `note <job> <text>` | Add a note to a job in any state. |
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first, with why each queued job waits. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
-| `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
+| `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon; each of its `observations` has the same `value` for its own samples. For a multi-objective task the line gives every objective's headline in the order the task declares them, the numbers `compare` weighs. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
 | `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. For a multi-objective task, also `tradeoff`, with a verdict on every objective (see "Multi-objective tasks" below). Refuses to mix environments. |
 | `promote <commit>` | Fast-forward the result branch to a commit that is `better` than its head, or print every reason it was refused. A refusal exits `1` and is printed on stdout. A promoted multi-objective commit is also offered to the frontier. |
-| `result` | The head and a final number measured after the head last moved, or why there is none (exit `1`). |
+| `result` | The head and a final number, its latest measurement that rests on a passing check of the same commit, task version and environment, or why there is none (exit `1`): `no_head` before the first promotion, and `head_not_measured`, which names the `submit measure <head>` that gives the head one (see "The result branch"). |
 | `frontier add <commit>` | Add a measured, check-passed commit of a multi-objective task to the task's frontier, evicting the members it beats, or print every reason it was refused. A refusal exits `1` and is printed on stdout; a commit of a single-metric task is `INVALID_INPUT`. |
 | `frontier list` | The frontier's members in the order they were added, each with its headline number on every objective, computed by the daemon. |
 | `plan create --title t [--body text \| --body-file path]` | Store a plan, open, and print its number. `--body -` and `--body-file -` read standard input. |
@@ -444,6 +444,11 @@ queued jobs start from `schedule`:
   one slot of its own. A measure job claims each of them whole, so a benchmark sample never runs
   beside another job of its placement or of another placement on its cluster or GPUs, while the
   jobs of other placements run. A command job chooses its placement as a check does.
+- A cluster is held alone by every job that runs with it, of every kind: each job deploys into
+  the cluster with CPU and memory the scheduler does not see, so two checks on one cluster could
+  starve each other's pods. So jobs on a placement that gives a cluster run one at a time whatever
+  its `max_jobs`, as do the jobs of every placement that gives the same cluster, and each takes the
+  cluster's lease (below). `max_jobs` still runs jobs side by side on a placement without one.
 - No resource is given past its capacity and an exclusive claim shares its resource with nothing,
   whatever the policy. The policy (`[scheduler] policy`) only orders the jobs that may start:
   `fifo` takes the oldest first, and `fair-share` takes the next job of the run (the run that first
@@ -466,7 +471,8 @@ other users' daemons on the same machine, and daemons on other machines that sha
   directory of leases; for an `ssh` placement, the same file on the engine's machine, held by a
   shell there over ssh. So the measures of every placement on one machine, of
   one daemon or of several, take turns. Host jobs that claim a slot of their own (`host`) take this
-  machine's lease. A Kubernetes cluster a placement gives is leased in the cluster (below). GPUs
+  machine's lease. A Kubernetes cluster a placement gives is leased in the cluster (below), by
+  every job that runs with it. GPUs
   take no lease of their own, since their machine's lease covers them, and a `slurm` or `apptainer` placement takes
   none, since Slurm's exclusive allocation arbitrates. A claim that shares its resource takes no
   lease.
@@ -623,8 +629,11 @@ refused with the reason.
 
 - The image is built from the task's directory as the job's commit has it: the directory is the
   build context, so the Dockerfile can `COPY` the task's scripts into the image, and the build sees
-  no file of the candidate. The image is tagged (`vibesys-cli-task:<key>`) by a digest of those
-  files and of the image ID, as the engine has it locally, of each image the Dockerfile builds on:
+  no file of the candidate. A symbolic link of the directory is a link in the context, and a task
+  is refused when it is read if a link is absolute, leaves the directory, points at a path the
+  commit does not have, or is part of a cycle, since it would lead to nothing in the image; the
+  error names the link (see [task environment](../docs/contributing/cli-task-environment.md)). The
+  image is tagged (`vibesys-cli-task:<key>`) by a digest of those files and links and of the image ID, as the engine has it locally, of each image the Dockerfile builds on:
   each `FROM` and `COPY --from=` that is not a stage of the same Dockerfile or `scratch`, with the
   defaults of `ARG`s declared before the first `FROM` substituted. So it is built again exactly
   when a file of the task changes or when one of those images changes under its reference, such
@@ -909,7 +918,13 @@ and the daemon completes the move the next time it looks at the branch (any of `
 or `result`, or on start): the branch is never ahead of the record. Tests cut every effect off,
 before and after it took place, in core over a model and in the daemon over the fake repository.
 A branch someone moved by hand is diverged: nothing writes over it, it is the head the next
-commands use, and `result` reports no number for a head the last promotion did not set.
+commands use, and `result` reports it. `result` gives the head the latest measurement of that exact
+commit that rests on a passing check of the same commit, task version and environment, whenever it
+was taken and whatever moved the branch there: the measurement a promotion rests on counts, and so
+does one of a commit made on the branch, such as a task switch. Measurements of other commits never
+count, so nothing taken under another task version stands for the head (a commit's task version is
+that of the task its tree holds), and a failed check or measure saves no result. A head with no such
+measurement is `head_not_measured`, and `submit measure <head>` gives it one.
 
 ## Multi-objective tasks
 
@@ -954,14 +969,18 @@ objective in the order the task declares them, each verdict with its own numbers
 the branch only on an overall `better`, and refuses a `tradeoff` with the reason `tradeoff`; its
 refusal reasons and its promotion carry the same `objectives`.
 
-The frontier is the set of the task's commits that no member beats. `frontier add` judges the
-commit against each member with the comparison `compare` makes: it evicts a member it is `better`
-than, keeps one it is a `tradeoff` against, and is refused with every reason that applies, each
-naming the `member` it is about: `unmeasured`, `check_missing`, `dominated` (the member is better),
-`within_noise`, `inconclusive`, `stale` (measured under another task version) and
-`environment_mismatch`. A commit that is a member already is answered `already_member` and nothing
-changes. The JSON answer is `decision.admitted` (`added`, `evicted`, `already_member`, `members`)
-or `decision.refused.reasons`. A successful `promote` of a multi-objective commit offers it to the
+The frontier is the set of the task's commits that no member beats, under the task's current
+version: that of the task at the result branch head. Only measurements under that version count.
+`frontier add` judges the commit against each member with the comparison `compare` makes: it evicts
+a member it is `better` than, keeps one it is a `tradeoff` against, retires a member measured only
+under other task versions (a task switch starts the frontier afresh, and nothing is compared across
+versions), and is refused with every reason that applies: `unmeasured` (the commit or a member), `check_missing`, `stale`
+(the commit was measured only under another task version), and, each naming the `member` it is
+about, `dominated` (the member is better), `within_noise`, `inconclusive` and
+`environment_mismatch` (measured in another environment under the current version). A commit that is
+a member already is answered `already_member` and nothing changes. The JSON answer is
+`decision.admitted` (`added`, `evicted`, `retired`, `already_member`, `members`) or
+`decision.refused.reasons`. A successful `promote` of a multi-objective commit offers it to the
 frontier in the same way, and its answer's `frontier` field says what the frontier made of it; the
 promotion stands even when the frontier refuses the commit. The frontier takes the commit before
 the promotion is recorded, so a crash between the two leaves a frontier that is right, and the

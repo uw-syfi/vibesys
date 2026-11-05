@@ -128,9 +128,13 @@ func (x *Metric) GetDirection() Direction {
 // Observation is a named series of auxiliary readings, such as latency, kept beside the scored
 // metric. It is part of a verdict only when it is an objective of a multi-objective task.
 type Observation struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Values        []float64              `protobuf:"fixed64,2,rep,packed,name=values,proto3" json:"values,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Name   string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Values []float64              `protobuf:"fixed64,2,rep,packed,name=values,proto3" json:"values,omitempty"`
+	// The headline number of the values: their mean, the number compare weighs for an objective, as
+	// MeasureResult.value is for the scored metric. The daemon computes it, so no reader recomputes
+	// it. Absent when there are no values, and from a daemon or a saved result older than this field.
+	Value         *float64 `protobuf:"fixed64,3,opt,name=value,proto3,oneof" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -177,6 +181,13 @@ func (x *Observation) GetValues() []float64 {
 		return x.Values
 	}
 	return nil
+}
+
+func (x *Observation) GetValue() float64 {
+	if x != nil && x.Value != nil {
+		return *x.Value
+	}
+	return 0
 }
 
 // Objectives is what a measurement of a multi-objective (Pareto) task is judged on: a task whose
@@ -703,10 +714,12 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\x1bvibesys/cli/v1/result.proto\x12\x0evibesys.cli.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a vibesys/cli/v1/environment.proto\"U\n" +
 	"\x06Metric\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x127\n" +
-	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionR\tdirection\"9\n" +
+	"\tdirection\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.DirectionR\tdirection\"^\n" +
 	"\vObservation\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
-	"\x06values\x18\x02 \x03(\x01R\x06values\"\x9b\x01\n" +
+	"\x06values\x18\x02 \x03(\x01R\x06values\x12\x19\n" +
+	"\x05value\x18\x03 \x01(\x01H\x00R\x05value\x88\x01\x01B\b\n" +
+	"\x06_value\"\x9b\x01\n" +
 	"\n" +
 	"Objectives\x120\n" +
 	"\ametrics\x18\x01 \x03(\v2\x16.vibesys.cli.v1.MetricR\ametrics\x12%\n" +
@@ -814,6 +827,7 @@ func file_vibesys_cli_v1_result_proto_init() {
 		return
 	}
 	file_vibesys_cli_v1_environment_proto_init()
+	file_vibesys_cli_v1_result_proto_msgTypes[1].OneofWrappers = []any{}
 	file_vibesys_cli_v1_result_proto_msgTypes[7].OneofWrappers = []any{
 		(*Result_Check)(nil),
 		(*Result_Measure)(nil),

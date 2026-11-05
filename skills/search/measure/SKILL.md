@@ -49,7 +49,8 @@ before a measure pays for the build.
 Everything that puts load on the machine goes through a job, so the daemon decides what runs
 together and the numbers stay clean: a measure job holds its placement alone, while checks and
 command jobs may share it up to the placement's `max_jobs`. Do not start a benchmark, a profiler
-or a server in your own shell.
+or a server in your own shell. Unit tests and in-process microbenchmarks that finish in seconds
+are checks, not load: run them in your worktree.
 
 ## Wait
 
@@ -85,7 +86,7 @@ A failed check or build saves nothing; put the failing output in the hand-back, 
 - Samples add up: `submit measure <sha> --samples 8` runs only the missing ones. Identical readings
   on both sides stay inconclusive however many you add.
 - `vibesys-cli result --json` has the number to report for the result branch, in
-  `current.result.measure.value`. It exits 1 when the head has no measurement taken since it last
-  moved (`none.reason` says why); the way to get one is `vibesys-cli submit measure <head SHA>
-  --no-cache`, because reusing the samples that picked a winner would overstate its score.
+  `current.result.measure.value`: the head's latest checked measurement, the one a promotion rests
+  on included. It exits 1 when there is none (`none.reason` says why); for `head_not_measured`,
+  `vibesys-cli submit measure <head SHA>` gives it one.
 - Tell the reader the base, the sample counts and the environment from the output, never from memory.

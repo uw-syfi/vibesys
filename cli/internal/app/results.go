@@ -207,7 +207,7 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 	// can be asked for again, which finds the commit a member already and changes nothing there.
 	var frontier core.FrontierDecision
 	if len(approved.Promotion().Objectives) > 0 {
-		if frontier, err = a.offerToFrontier(ctx, t, commit); err != nil {
+		if frontier, err = a.offerToFrontier(ctx, t, commit, head); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -218,9 +218,11 @@ func (a *App) Promote(ctx context.Context, c core.CallContext, commit core.Commi
 }
 
 // AddToFrontier admits a commit of a multi-objective task to the task's frontier if core says no
-// member beats it or matches it, evicting the members it beats, and otherwise returns the refusal
-// with every reason. Both are normal answers. A commit measured on one metric is invalid input:
-// such a task has a result branch and no frontier.
+// member beats it or matches it, evicting the members it beats and retiring those measured only
+// under another task version, and otherwise returns the refusal with every reason. Both are normal
+// answers. A commit measured on one metric is invalid input: such a task has a result branch and no
+// frontier. The task's current version is that of the task at the result branch head, so the
+// branch must exist.
 func (a *App) AddToFrontier(ctx context.Context, c core.CallContext, commit core.Commit) (core.FrontierDecision, error) {
 	if !commit.Valid() {
 		return nil, invalid("commit: %q is not a full 40-digit commit id", commit)
@@ -232,13 +234,26 @@ func (a *App) AddToFrontier(ctx context.Context, c core.CallContext, commit core
 	// The frontier changes under branchMu, as a promotion offers it the commit it promotes.
 	a.branchMu.Lock()
 	defer a.branchMu.Unlock()
-	return a.offerToFrontier(ctx, t, commit)
+	head, err := a.settledHead(ctx, t)
+	if err != nil {
+		return nil, err
+	}
+	return a.offerToFrontier(ctx, t, commit, head)
 }
 
 // offerToFrontier decides whether the commit joins the task's frontier, against the members and
-// their measurements as the store holds them now, and keeps an admission that changes the
-// frontier. The caller holds branchMu.
-func (a *App) offerToFrontier(ctx context.Context, t taskStore, commit core.Commit) (core.FrontierDecision, error) {
+// their measurements as the store holds them now, under the version of the task at the result
+// branch head, and keeps an admission that changes the frontier. The caller holds branchMu.
+func (a *App) offerToFrontier(ctx context.Context, t taskStore, commit, head core.Commit) (core.FrontierDecision, error) {
+	current, err := a.taskAt(ctx, string(t.scope.Repository()), head, string(t.scope.Task()))
+	var f *core.Failure
+	if errors.As(err, &f) {
+		return nil, &core.Failure{Kind: f.Kind, Message: fmt.Sprintf(
+			"the frontier holds the commits of the task at the result branch head %s, which cannot be read: %s", head, f.Message)}
+	}
+	if err != nil {
+		return nil, err
+	}
 	frontier, err := t.store.Frontier(ctx)
 	if err != nil {
 		return nil, err
@@ -251,7 +266,9 @@ func (a *App) offerToFrontier(ctx context.Context, t taskStore, commit core.Comm
 	if err != nil {
 		return nil, err
 	}
-	decision, err := core.DecideFrontier(core.FrontierRequest{Candidate: commit, Frontier: frontier, Results: results, At: a.now()})
+	decision, err := core.DecideFrontier(core.FrontierRequest{
+		Candidate: commit, Frontier: frontier, Results: results, TaskVersion: current.Version, At: a.now(),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -342,13 +359,14 @@ func (a *App) carryOut(ctx context.Context, t taskStore, branch string, approved
 }
 
 // CurrentResult reports the head of the result branch and a final number for it, or says why
-// there is none. The number is a measurement of the head with a check, both taken after the head
-// last moved: the cache cannot supply it.
+// there is none. The number is the head's latest measurement that rests on a passing check of the
+// same commit, task version and environment, whenever it was taken and whatever moved the branch
+// to the head (core.CurrentResultAt).
 func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.ResultAnswer, error) {
 	t, err := a.openTask(ctx, c.Scope)
 	if errors.Is(err, store.ErrNoStore) {
 		// A task with no store has promoted nothing.
-		return core.CurrentResultAt("", nil, nil), nil
+		return core.CurrentResultAt("", nil), nil
 	}
 	if err != nil {
 		return nil, err
@@ -360,7 +378,7 @@ func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.Resul
 		return nil, err
 	}
 	if len(promotions) == 0 {
-		return core.CurrentResultAt("", nil, nil), nil
+		return core.CurrentResultAt("", nil), nil
 	}
 	head, err := a.settledHead(ctx, t)
 	if err != nil {
@@ -370,7 +388,7 @@ func (a *App) CurrentResult(ctx context.Context, c core.CallContext) (core.Resul
 	if err != nil {
 		return nil, err
 	}
-	return core.CurrentResultAt(head, promotions, results), nil
+	return core.CurrentResultAt(head, results), nil
 }
 
 // resultsOf returns the saved results of the commits.
