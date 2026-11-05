@@ -11,8 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Generic, Literal
 
+from vibesys_evaluator._private.typevars import D
 from vibesys_evaluator.deploy._k8s import _validate
 
 if TYPE_CHECKING:
@@ -21,8 +22,6 @@ if TYPE_CHECKING:
     from vibesys_evaluator.service import Step
 
 __all__ = ["App"]
-
-D = TypeVar("D")
 
 
 @dataclass(frozen=True, kw_only=True)

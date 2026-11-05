@@ -10,9 +10,10 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from k8s_world import SEED, World, make_app, make_world
+
+from vibesys_evaluator._private.cli import Stopped
 from vibesys_evaluator.deploy._k8s import (
-    IN_DIR,
-    OUT_DIR,
+    WORK_DIR,
     DeployError,
     Deployment,
     FakeKube,
@@ -20,8 +21,6 @@ from vibesys_evaluator.deploy._k8s import (
     Outcome,
     PodCommand,
     Role,
-    Terminated,
-    TerminationGuard,
     attach,
     ctl,
     deploy,
@@ -158,7 +157,7 @@ def test_a_phase_pod_gets_its_inputs_and_returns_its_outputs(world: World) -> No
         run = deployment.run_pod(
             Role.PHASE,
             PodCommand(
-                argv=("vse-phase", "--in", IN_DIR, "--out", OUT_DIR),
+                argv=("vse-phase", "--work", WORK_DIR),
                 inputs={"phase-input.binpb": b"abc"},
             ),
             timeout_secs=600,
@@ -259,15 +258,6 @@ def test_usage_reports_cpu_per_pod_between_snapshots(world: World) -> None:
         assert (world.env.artifacts / "pod-usage-open.json").is_file()  # type: ignore[operator]
 
 
-def test_the_termination_guard_raises_once_then_ignores() -> None:
-    guard = TerminationGuard()
-    with pytest.raises(Terminated):
-        guard.handle(15, None)
-    guard.handle(15, None)
-    guard.handle(2, None)
-    assert guard.signalled == 15
-
-
 def _calls_of_a_full_run() -> int:
     with tempfile.TemporaryDirectory() as root:
         world = make_world(Path(root))
@@ -287,13 +277,13 @@ def test_an_exit_at_any_call_leaves_no_namespace(call: int, how: str) -> None:
     with tempfile.TemporaryDirectory() as root:
         world = make_world(Path(root))
         error: BaseException = (
-            Terminated(15) if how == "signal" else KubeError("the API server went away")
+            Stopped(15) if how == "signal" else KubeError("the API server went away")
         )
         world.kube.interrupt_at(call, error)
         try:
             with up(world):
                 world.kube.programs["loadgen"]  # the sample's phases would run here
-        except (Terminated, KubeError, DeployError):
+        except (Stopped, KubeError, DeployError):
             pass
         assert world.kube.live_namespaces() == []
         if how == "signal":  # at most a lookup of the UID and the deletion request after it

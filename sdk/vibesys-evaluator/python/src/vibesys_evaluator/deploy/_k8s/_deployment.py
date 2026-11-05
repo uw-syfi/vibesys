@@ -3,7 +3,7 @@
 Every decision is in the pure modules (`_manifest`, `_status`, `_pods`); this module only
 sequences `KubeAPI` and `Builder` calls, waits with the injected `Clock`, and writes
 artifacts. The namespace is owned by one `Deployment` and deleted by `close()`, which
-every exit path of the orchestrator passes through (return, exception, `Terminated`).
+every exit path of the orchestrator passes through (return, exception, signal).
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+from vibesys_evaluator._private.deploy import DeployError
 from vibesys_evaluator.deploy._k8s import _build, _manifest, _pods, _status, _validate
 from vibesys_evaluator.deploy._k8s._api import ConflictError, KubeAPI, KubeError, NotFoundError, Pod
 from vibesys_evaluator.deploy._k8s._pods import Role
@@ -43,35 +44,9 @@ MEMCACHED_FLUSH = (
 )
 
 
-class DeployError(Exception):
-    """The application could not be deployed, seeded, probed or acted on.
-
-    The message says which step failed and why, with the relevant log tail.
-    """
-
-
-class Terminated(BaseException):
-    """The process was asked to stop (SIGTERM, SIGINT, SIGHUP); teardown must be quick."""
-
-    def __init__(self, signum: int) -> None:
-        super().__init__(f"terminated by signal {signum}")
-        self.signum = signum
-
-
-class TerminationGuard:
-    """A signal handler: the first signal raises Terminated, the rest are ignored.
-
-    So the teardown the first one starts is not cut short. Install with
-    signal.signal(sig, guard.handle).
-    """
-
-    def __init__(self) -> None:
-        self.signalled: int | None = None
-
-    def handle(self, signum: int, _frame: object) -> None:
-        if self.signalled is None:
-            self.signalled = signum
-            raise Terminated(signum)
+def _stopping(error: BaseException | None) -> bool:
+    """A signal (the orchestrator's Stopped), Ctrl-C or exit, not a failure: tear down fast."""
+    return error is not None and not isinstance(error, Exception)
 
 
 @dataclass(frozen=True)
@@ -85,7 +60,8 @@ class Environment:
     job: str
 
     @staticmethod
-    def parse(environ: Mapping[str, str], *, work_dir: Path) -> Environment:
+    def parse(environ: Mapping[str, str], *, work_dir: Path, artifacts: Path | None) -> Environment:
+        """Read the job's variables; artifacts overrides $VIBESYS_ARTIFACTS_DIR when given."""
         for name in ("KUBECONFIG", "VIBESYS_K8S_REGISTRY", "VIBESYS_K8S_BUILDER"):
             if not environ.get(name):
                 raise DeployError(
@@ -93,19 +69,21 @@ class Environment:
                     '["kubernetes"]` and a placement whose kubernetes resource names '
                     "the registry and the builder"
                 )
-        artifacts = environ.get("VIBESYS_ARTIFACTS_DIR", "")
+        job_dir = environ.get("VIBESYS_ARTIFACTS_DIR", "")
+        if artifacts is None and job_dir:
+            artifacts = Path(job_dir)
         return Environment(
             registry=environ["VIBESYS_K8S_REGISTRY"].rstrip("/"),
             builder=environ["VIBESYS_K8S_BUILDER"],
-            artifacts=Path(artifacts) if artifacts else None,
+            artifacts=artifacts,
             work_dir=work_dir,
-            job=_status.job_label(artifacts, secrets.token_hex(4)),
+            job=_status.job_label(job_dir, secrets.token_hex(4)),
         )
 
 
 @dataclass(frozen=True)
 class PodCommand:
-    """A command of the task image, and the files written into its pod's IN_DIR first."""
+    """A command of the task image, and the files written into its pod's WORK_DIR first."""
 
     argv: tuple[str, ...]
     inputs: Mapping[str, bytes] = field(default_factory=dict)
@@ -113,7 +91,10 @@ class PodCommand:
 
 @dataclass(frozen=True)
 class PodRun:
-    """A finished pod: its command's exit status, OUT_DIR's files copied into `outputs`, its log."""
+    """A finished pod: its command's exit status, its outputs and its log.
+
+    `outputs` holds the files the command left in WORK_DIR, its inputs excepted.
+    """
 
     name: str
     exit_code: int
@@ -257,7 +238,7 @@ class Deployment:
         error: BaseException | None,
         _tb: TracebackType | None,
     ) -> None:
-        self.close(fast=isinstance(error, Terminated), failed=error is not None)
+        self.close(fast=_stopping(error), failed=error is not None)
 
     def create_namespace(self, labels: Mapping[str, str]) -> None:
         """Create the namespace this Deployment owns (deploy() does, once)."""
@@ -269,31 +250,33 @@ class Deployment:
 
         fast (after a signal): ask for the deletion and return, within the CLI's grace
         period. Otherwise save diagnostics when failed, then wait (bounded) until the
-        namespace is gone so the next sample finds the cluster free. A signal during the
-        wait ends the wait, never the deletion request, which comes first.
+        namespace is gone so the next sample finds the cluster free. A signal during close
+        ends the wait, never the deletion request, and is raised again once it is sent.
         """
         if self._closed or not self._owned or not self._creating:
             return
         self._closed = True
         if failed and not fast:
             self._save_diagnostics()
+        stop: BaseException | None = None
         try:
             uid = self._uid or self._find_uid()
-        except Terminated:
-            uid, fast = self._find_uid(), True
-        if uid is None:
-            return
-        try:
-            self._request_delete(uid)
-        except Terminated:
-            self._request_delete(uid)  # the guard ignores further signals: this one completes
-            fast = True
-        if fast:
-            return
-        try:
-            self._wait_deleted()
-        except Terminated:
-            self._log(f"namespace {self.namespace}: deletion requested, not waited for (signal)")
+        except BaseException as error:
+            if not _stopping(error):
+                raise
+            stop, uid = error, self._find_uid()
+        if uid is not None:
+            try:
+                self._request_delete(uid)
+            except BaseException as error:
+                if not _stopping(error):
+                    raise
+                stop = stop or error
+                self._request_delete(uid)  # later signals are ignored: this request completes
+            if not fast and stop is None:
+                self._wait_deleted()
+        if stop is not None:
+            raise stop
 
     def _find_uid(self) -> str | None:
         """The namespace's UID when its creation was cut short before its answer arrived."""
@@ -410,7 +393,7 @@ class Deployment:
             "--target",
             self.gateway.url,
             "--requests",
-            f"{_pods.IN_DIR}/{PROBE_FILE}",
+            f"{_pods.WORK_DIR}/{PROBE_FILE}",
             "--rounds",
             str(rounds),
             "--deadline",
@@ -430,12 +413,15 @@ class Deployment:
 
     # -- the package's pods ----------------------------------------------------------------------
 
-    def run_pod(self, role: Role, command: PodCommand, *, timeout_secs: float) -> PodRun:
-        """Run a command of the task image in a pod of the namespace and collect OUT_DIR.
+    def run_pod(
+        self, role: Role, command: PodCommand, *, timeout_secs: float, outputs: Path | None = None
+    ) -> PodRun:
+        """Run a command of the task image in a pod of the namespace and collect WORK_DIR.
 
-        The pod gets `command.inputs` in IN_DIR before the command starts; the command
-        writes its outputs to OUT_DIR. A nonzero exit is returned, not raised (the caller
-        judges it); a pod that cannot start or dies raises DeployError with its log tail.
+        The pod gets `command.inputs` in WORK_DIR before the command starts; the files the
+        command leaves there are copied into `outputs` (a fresh directory by default). A
+        nonzero exit is returned, not raised (the caller judges it); a pod that cannot
+        start, dies or runs past timeout_secs raises DeployError with its log tail.
         """
         self._pods += 1
         name = f"vse-{role}-{self._pods}"
@@ -454,12 +440,19 @@ class Deployment:
             ],
         )
         pod = self._wait_pod_running(name)
-        files = {f"in/{key}": value for key, value in command.inputs.items()}
+        work = _pods.WORK_DIR.removeprefix(f"{_pods.ROOT}/")
+        files = {f"{work}/{key}": value for key, value in command.inputs.items()}
         files[f"control/{_pods.READY_MARK}"] = b""
         self._kube.put_files(self.namespace, pod, _pods.ROOT, files)
         code = self._wait_exit(name, pod, started + timeout_secs)
-        outputs = self._work_dir / name
-        names = self._kube.get_files(self.namespace, pod, _pods.OUT_DIR, outputs)
+        outputs = outputs or self._work_dir / name
+        names = [
+            n
+            for n in self._kube.get_files(self.namespace, pod, _pods.WORK_DIR, outputs)
+            if n not in command.inputs
+        ]
+        for key in command.inputs:
+            (outputs / key).unlink(missing_ok=True)
         self._kube.put_files(
             self.namespace, pod, _pods.ROOT, {f"control/{_pods.COLLECTED_MARK}": b""}
         )
@@ -696,7 +689,7 @@ def deploy(source: AppSource, *, seed: PodCommand | None, cluster: Cluster) -> D
     """Sweep, build, deploy into a fresh namespace, seed and probe; return the serving Deployment.
 
     The caller owns the result and must close it (use it as a context manager). On any
-    failure here, including Terminated, the namespace is deleted before the error propagates.
+    failure here, including a signal, the namespace is deleted before the error propagates.
     """
     app, env = source.app, cluster.env
     if (seed is None) != (app.seed is None):
@@ -737,7 +730,7 @@ def deploy(source: AppSource, *, seed: PodCommand | None, cluster: Cluster) -> D
         deployment.close(failed=True)
         raise DeployError(str(error)) from None
     except BaseException as error:
-        deployment.close(fast=isinstance(error, Terminated), failed=True)
+        deployment.close(fast=_stopping(error), failed=True)
         raise
     return deployment
 
@@ -768,3 +761,28 @@ def attach(source: AppSource, *, namespace: str, cluster: Cluster) -> Deployment
     task_image = _build.image_name(cluster.env.registry, _status.slug(app.name), "task", digest)
     target = _Target(source=source, namespace=namespace, task_image=task_image, rendered=rendered)
     return Deployment(target, cluster, owned=False)
+
+
+CTL_USAGE = "ctl restart DEPLOYMENT [--every-pod] | flush CACHE | stop | start"
+
+
+def ctl(deployment: Deployment, argv: Sequence[str]) -> None:
+    """Run one of the accuracy checkers' hooks.
+
+    `restart DEPLOYMENT [--every-pod]`, `flush CACHE`, `stop` or `start`; anything else
+    raises DeployError naming the usage.
+    """
+    args = list(argv)
+    match args:
+        case ["restart", name]:
+            deployment.restart([name])
+        case ["restart", name, "--every-pod"]:
+            deployment.restart([name], every_pod=True)
+        case ["flush", name]:
+            deployment.flush(name)
+        case ["stop"]:
+            deployment.stop()
+        case ["start"]:
+            deployment.start()
+        case _:
+            raise DeployError(f"ctl {' '.join(args)!r}: want {CTL_USAGE}")

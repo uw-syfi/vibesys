@@ -1,3 +1,3 @@
-"""Where the system under test runs. `vibesys_evaluator.deploy.k8s` is the one deploy layer."""
+"""Deploy kinds: how the system under test is brought up (``deploy.k8s``)."""
 
 __all__: list[str] = []

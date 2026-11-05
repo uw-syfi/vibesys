@@ -3,10 +3,10 @@
 A pod of the package runs the task image under a small shell wrapper:
 
 1. it waits until `CONTROL/ready` exists; the orchestrator first writes the input files
-   into `IN_DIR` and that marker last, in one tar stream (`KubeAPI.put_files`);
-2. it runs the command, its output going to the pod log, and writes the exit status to
-   `CONTROL/exit`;
-3. it waits until `CONTROL/collected` exists, so the orchestrator can copy `OUT_DIR`
+   into `WORK_DIR` and that marker last, in one tar stream (`KubeAPI.put_files`);
+2. it runs the command, which leaves its outputs in `WORK_DIR` and its output in the pod
+   log, and writes the exit status to `CONTROL/exit`;
+3. it waits until `CONTROL/collected` exists, so the orchestrator can copy `WORK_DIR`
    out of the running container, then exits with the command's status.
 
 The inputs and outputs travel through the API server's exec stream, so no ConfigMap
@@ -23,8 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 ROOT = "/vse"
-IN_DIR = f"{ROOT}/in"
-OUT_DIR = f"{ROOT}/out"
+WORK_DIR = f"{ROOT}/work"
 CONTROL = f"{ROOT}/control"
 READY_MARK = "ready"
 EXIT_MARK = "exit"
@@ -33,7 +32,7 @@ POD_LABEL = "vibesys.dev/evaluator-pod"  # the role, on every pod of the package
 
 WRAPPER = f"""\
 set -u
-mkdir -p {IN_DIR} {OUT_DIR} {CONTROL}
+mkdir -p {WORK_DIR} {CONTROL}
 until [ -e {CONTROL}/{READY_MARK} ]; do sleep 0.2; done
 "$@"
 echo $? > {CONTROL}/{EXIT_MARK}.tmp && mv {CONTROL}/{EXIT_MARK}.tmp {CONTROL}/{EXIT_MARK}

@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 class Outcome:
     """What a fake pod's command does.
 
-    Its exit status, the files it leaves in OUT_DIR, its log, and how long it runs. crash:
+    Its exit status, the files it leaves in WORK_DIR, its log, and how long it runs. crash:
     the container dies instead (no exit marker, pod Failed).
     """
 
@@ -450,7 +450,7 @@ class FakeKube:
         ):
             return
         for name, data in outcome.outputs.items():
-            pod.files.setdefault(f"{_pods.OUT_DIR}/{name}", data)
+            pod.files.setdefault(f"{_pods.WORK_DIR}/{name}", data)
         pod.files.setdefault(
             f"{_pods.CONTROL}/{_pods.EXIT_MARK}", f"{outcome.exit_code}\n".encode()
         )
@@ -464,7 +464,7 @@ class FakeKube:
             target.files[f"{directory}/{name}"] = data
         ready = f"{_pods.CONTROL}/{_pods.READY_MARK}"
         if ready in target.files and target.outcome is None and target.argv:
-            prefix = f"{_pods.IN_DIR}/"
+            prefix = f"{_pods.WORK_DIR}/"
             inputs = {k[len(prefix) :]: v for k, v in target.files.items() if k.startswith(prefix)}
             program = self.programs.get(target.argv[0])
             outcome = (

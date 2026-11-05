@@ -156,6 +156,7 @@ def make_world(root: Path, manifest: str = MANIFEST) -> World:
             "VIBESYS_ARTIFACTS_DIR": str(artifacts),
         },
         work_dir=root / "work",
+        artifacts=None,
     )
     kube.programs["loadgen"] = lambda *_: Outcome(log="probe ok\n")
     kube.programs["python"] = lambda *_: Outcome(log="seeded\n", secs=20)

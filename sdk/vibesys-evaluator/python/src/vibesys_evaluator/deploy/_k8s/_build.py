@@ -125,10 +125,7 @@ class BuildctlBuilder:
             for index, build in enumerate(builds):
                 log_path = log_dir / f"build-{index}.log"
                 log = log_path.open("wb")
-                # lint-waiver: LW-561003 [S603]; buildctl is run with an argv list, never a shell.
-                # > The builds run at once as child processes; BuildKit's Go client is not
-                # > available from Python, and a shell would only weaken the argv boundary.
-                proc = subprocess.Popen(self.argv(build), stdout=log, stderr=subprocess.STDOUT)  # noqa: S603
+                proc = subprocess.Popen(self.argv(build), stdout=log, stderr=subprocess.STDOUT)
                 running.append((build, proc, log, log_path))
             seconds: dict[str, float] = {}
             for build, proc, _, log_path in running:

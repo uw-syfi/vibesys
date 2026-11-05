@@ -117,10 +117,7 @@ class KubectlAPI:
     ) -> subprocess.CompletedProcess[bytes]:
         argv = [self._kubectl, *args]
         try:
-            # lint-waiver: LW-561001 [S603]; kubectl is run with an argv list, never a shell.
-            # > This is the one place the deploy layer reaches kubectl; a client library would add a
-            # > dependency and a second implementation of kubeconfig handling for the same calls.
-            done = subprocess.run(  # noqa: S603
+            done = subprocess.run(
                 argv, input=stdin, capture_output=True, timeout=timeout, env=self._env, check=False
             )
         except subprocess.TimeoutExpired:
@@ -265,10 +262,7 @@ class KubectlAPI:
                 ".",
             ]
             try:
-                # lint-waiver: LW-561002 [S603]; kubectl exec with an argv list, never a shell.
-                # > Streaming tar to a file needs stdout to a file object, which _run's capture
-                # > would hold in memory; a second helper for one call adds indirection only.
-                done = subprocess.run(  # noqa: S603
+                done = subprocess.run(
                     argv,
                     stdout=stream,
                     stderr=subprocess.PIPE,

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vibesys-evaluator"
+version = "0.1.0"
+description = "Build VibeSys benchmark evaluators for services: workloads, phases, validation"
+requires-python = ">=3.12"
+license = "MIT"
+# The schema's generated Python types (protoc-gen-py) and their validation. Nothing else:
+# the package runs in every task image, and the task's own code brings its own clients.
+dependencies = [
+    "protobuf-py==0.6.0",
+    "protovalidate==2.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["vibesys_evaluator*"]
+
+[tool.setuptools.package-data]
+vibesys_evaluator = ["py.typed"]
