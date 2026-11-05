@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -351,6 +352,12 @@ func (c *Client) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		known = known || img.ID == spec.Image
 	}
 	_, taken := c.d.boxes[spec.Name]
+	if joined, ok := strings.CutPrefix(spec.Network, "container:"); ok {
+		if host := c.d.boxes[joined]; host == nil || !host.running {
+			c.d.mu.Unlock()
+			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("docker: cannot join the network of container %q, which is not running", joined)}
+		}
+	}
 	if !known || taken {
 		c.d.mu.Unlock()
 		if taken {
@@ -403,8 +410,44 @@ func (h *handle) Start(argv []string, sink io.Writer) (environment.Process, erro
 		_, _ = h.b.machine.Start(argv, io.Discard)
 		return nil, fault.Err
 	}
+	if len(argv) == 3 && argv[0] == docker.ProbeMount && argv[1] == docker.ProbeCommand {
+		return h.probe(), nil
+	}
 	return h.b.machine.Start(argv, sink)
 }
+
+// probe is the probe program asking the server whose network the container joined: it answers
+// once a process of that container ran the `ready` step. A container without the program mounted
+// cannot run it, as a shell cannot (127).
+func (h *handle) probe() environment.Process {
+	h.c.d.mu.Lock()
+	defer h.c.d.mu.Unlock()
+	mounted := slices.ContainsFunc(h.b.spec.Mounts, func(m docker.Mount) bool { return m.Container == docker.ProbeMount })
+	if !mounted {
+		return newExitedProcess(127)
+	}
+	joined, _ := strings.CutPrefix(h.b.spec.Network, "container:")
+	server := h.c.d.boxes[joined]
+	if server == nil || !server.running || !server.machine.Ready() {
+		return newExitedProcess(1)
+	}
+	return newExitedProcess(0)
+}
+
+// exitedProcess is a process that has already exited with a code.
+type exitedProcess struct{ exited chan environment.Exit }
+
+func newExitedProcess(code int) *exitedProcess {
+	p := &exitedProcess{exited: make(chan environment.Exit, 1)}
+	p.exited <- environment.Exit{Code: code}
+	return p
+}
+
+func (p *exitedProcess) Exited() <-chan environment.Exit { return p.exited }
+
+func (*exitedProcess) Terminate() {}
+
+func (*exitedProcess) Kill() {}
 
 // Close implements docker.Container: the connection stops holding the container's input, so the
 // container stops. It does not remove it.

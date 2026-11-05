@@ -87,6 +87,8 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"plan":       planCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
+	// Run in a container by the docker environment, never by a person: see probeCommand.
+	"probe-ready": probeCommand,
 	"upgrade":    upgradeCommand,
 }
 
@@ -96,7 +98,10 @@ commands:
   submit check <commit> [flags]                  queue the task's check and print the job
   submit measure <commit> [--samples n] [--recheck] [flags]
                                                  queue the task's benchmark and print the job
-  submit command <commit> [flags] -- <argv...>   queue a command and print the job
+  submit command <commit> [--wrap prefix] [flags] -- <argv...>
+                                                 queue a command and print the job
+  submit profile <commit> [--wrap prefix]        queue the task's [profile] load against the
+                                                 candidate's server started under the prefix
   wait <job>... [--any] [--timeout 30m]          block until the jobs are final
   cancel <job> [--reason text]                   stop a job
   note <job> <text>                              add a note to a job
@@ -127,7 +132,7 @@ answer this build cannot read). The README lists every failure kind and wait out
 // so a test drives it in process.
 func run(args []string, d deps) int {
 	if len(args) == 1 && args[0] == "--version" {
-		_, _ = fmt.Fprintf(d.stdout, "vibesys-cli %s\n", version)
+		_, _ = fmt.Fprintln(d.stdout, versionLine())
 		return exitOK
 	}
 	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help") {
@@ -147,6 +152,12 @@ func run(args []string, d deps) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	return command(ctx, d, args[1:])
+}
+
+// versionLine is what --version prints: the release, and the task schema versions this build reads
+// (a manifest's `version`), which follow their own numbers.
+func versionLine() string {
+	return fmt.Sprintf("vibesys-cli %s (task schemas %s)", version, production.TaskSchemas())
 }
 
 func lookup(args []string) (func(context.Context, deps, []string) int, bool) {

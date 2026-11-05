@@ -242,6 +242,22 @@ func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 	}
 	defer remove()
 	x := core.Execution{Checkout: checkout, Argv: command.Argv, Service: command.Service, Timeout: command.Timeout}
+	if c := command.Candidate; c != nil {
+		// A job of a task of two images: its candidate's image first, built from the job's commit.
+		img, err := env.Candidate(s.ctx, c.Build, writer{s})
+		if err != nil {
+			return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
+		}
+		x.Candidate = &core.CandidateRun{Image: img.ID}
+		if c.Serve != nil {
+			// A profile: the task's load in its image, against the server under the wrapper. Both
+			// are the task's commands, which name the checkout's root.
+			serve := *c.Serve
+			serve.Argv = core.ResolveProjectRoot(serve.Argv, checkout.Dir)
+			x.Candidate.Serve = &serve
+			x.Argv = core.ResolveProjectRoot(x.Argv, checkout.Dir)
+		}
+	}
 	if h := s.cfg.Host; h.Artifacts != nil && h.Files != nil {
 		x.Artifacts = flowrun.ArtifactsOf(h.Artifacts(s.cfg.Launch.Repository, s.cfg.Launch.Task, s.cfg.Launch.Job), 1, "command")
 		if err := h.Files.MakeDir(s.ctx, x.Artifacts); err != nil {

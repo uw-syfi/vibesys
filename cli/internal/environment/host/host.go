@@ -86,10 +86,18 @@ func (e *Environment) Machine(ctx context.Context) (core.MachineFacts, error) {
 // Load implements environment.Environment.
 func (e *Environment) Load(ctx context.Context) (core.MachineLoad, error) { return e.backend.Load(ctx) }
 
+// Candidate implements environment.Environment: the host runs no images.
+func (e *Environment) Candidate(context.Context, core.CandidateBuild, io.Writer) (core.CandidateImage, error) {
+	return core.CandidateImage{}, environment.NoImages(core.EnvironmentHost)
+}
+
 // Run implements environment.Environment.
 func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) core.Attempt {
 	if err := environment.Validate(x); err != nil {
 		return core.NotStarted{Failure: core.AsFailure(err)}
+	}
+	if x.Candidate != nil {
+		return core.NotStarted{Failure: core.AsFailure(environment.NoImages(core.EnvironmentHost))}
 	}
 	if ctx.Err() != nil {
 		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}

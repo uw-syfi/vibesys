@@ -63,8 +63,8 @@ func TestTheDevicesGoByGPUsOrByTheRuntime(t *testing.T) {
 		want resource.Attachment
 	}{
 		{gpu.Config{Devices: "all"}, resource.Attachment{GPUs: resource.GPUs{Devices: "all"}}},
-		{gpu.Config{Devices: "device=0", Runtime: "nvidia"}, resource.Attachment{GPUs: resource.GPUs{Devices: "device=0", Runtime: "nvidia"}, Env: map[string]string{gpu.EnvVisibleDevices: "0"}}},
-		{gpu.Config{Devices: "all", Runtime: "nvidia"}, resource.Attachment{GPUs: resource.GPUs{Devices: "all", Runtime: "nvidia"}, Env: map[string]string{gpu.EnvVisibleDevices: "all"}}},
+		{gpu.Config{Devices: "device=0", Runtime: "nvidia"}, resource.Attachment{GPUs: resource.GPUs{Devices: "device=0", Runtime: "nvidia"}, GPUEnv: map[string]string{gpu.EnvVisibleDevices: "0"}}},
+		{gpu.Config{Devices: "all", Runtime: "nvidia"}, resource.Attachment{GPUs: resource.GPUs{Devices: "all", Runtime: "nvidia"}, GPUEnv: map[string]string{gpu.EnvVisibleDevices: "all"}}},
 	} {
 		c.cfg.Machine, c.cfg.Facts = "local", someGPU()
 		g, err := gpu.New(c.cfg)

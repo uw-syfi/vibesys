@@ -25,7 +25,7 @@ type Rig struct {
 // Manifest is a valid task manifest, and Objectives its objectives file.
 const (
 	Manifest = `
-version = 1
+version = "0.1"
 backends = ["cpu"]
 
 [build]
@@ -153,7 +153,7 @@ func Run(t *testing.T, rig Rig) {
 	})
 	t.Run("a task it cannot run is refused and names why", func(t *testing.T) {
 		bad := with(Files("t"), func(f task.Tree) {
-			f[task.TasksDir+"/t/"+task.ManifestName] = task.File{Data: []byte(strings.Replace(Manifest, "version = 1", "version = 1\nsurprise = true", 1))}
+			f[task.TasksDir+"/t/"+task.ManifestName] = task.File{Data: []byte(strings.Replace(Manifest, "version = \"0.1\"", "version = \"0.1\"\nsurprise = true", 1))}
 		})
 		src, repo, commit := rig.Make(t, bad)
 		_, err := src.Task(ctx, repo, commit, "t")
@@ -186,7 +186,7 @@ func Scripted(name string, check, bench []string) task.Tree {
 		return "[" + strings.Join(parts, ", ") + "]"
 	}
 	manifest := fmt.Sprintf(`
-version = 1
+version = "0.1"
 backends = ["cpu"]
 
 [accuracy]

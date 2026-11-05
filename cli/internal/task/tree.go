@@ -9,6 +9,20 @@ import (
 	"time"
 )
 
+// Under returns the files at or under the paths ("." is every file).
+func (t Tree) Under(paths []string) Tree {
+	out := Tree{}
+	for name, f := range t {
+		for _, p := range paths {
+			if p == "." || name == p || strings.HasPrefix(name, strings.TrimSuffix(p, "/")+"/") {
+				out[name] = f
+				break
+			}
+		}
+	}
+	return out
+}
+
 // File is a file of a Tree.
 type File struct {
 	Data       []byte

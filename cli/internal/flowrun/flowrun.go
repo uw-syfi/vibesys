@@ -85,6 +85,8 @@ func (s *Shell) Do(ctx context.Context, r flow.Request) flow.Event {
 		return s.run(ctx, r)
 	case flow.Observe:
 		return s.observe(ctx)
+	case flow.BuildCandidate:
+		return s.buildCandidate(ctx, r)
 	}
 	return flow.CheckoutFailed{Failure: core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the shell cannot carry out %T", r)}}
 }
@@ -121,7 +123,7 @@ func (s *Shell) run(ctx context.Context, r flow.Run) flow.Event {
 	n := s.runs
 	s.mu.Unlock()
 	_, _ = fmt.Fprintf(s.cfg.Output, "[%s] %s\n", r.Stage, strings.Join(r.Argv, " "))
-	x := core.Execution{Checkout: checkout, Scratch: scratch, Argv: r.Argv, Timeout: r.Timeout, Measured: r.Stage == flow.StageBenchmark}
+	x := core.Execution{Checkout: checkout, Scratch: scratch, Argv: r.Argv, Timeout: r.Timeout, Measured: r.Stage == flow.StageBenchmark, Candidate: r.Candidate}
 	if s.cfg.Artifacts != "" {
 		x.Artifacts = ArtifactsOf(s.cfg.Artifacts, n, r.Stage)
 		if err := s.cfg.Files.MakeDir(ctx, x.Artifacts); err != nil {
@@ -132,22 +134,36 @@ func (s *Shell) run(ctx context.Context, r flow.Run) flow.Event {
 	started := s.cfg.Clock.Now()
 	attempt := s.cfg.Environment.Run(ctx, x, s.cfg.Output)
 	ended := s.cfg.Clock.Now()
-	var exec core.ExecOutcome
+	var ran flow.Ran
 	switch a := attempt.(type) {
 	case core.NotStarted:
 		return flow.NotRan{Failure: a.Failure}
 	case core.Unobserved:
 		return flow.Unseen{Failure: a.Failure}
 	case core.Ended:
-		exec = a.Exec
+		ran = flow.Ran{Exec: a.Exec, ServiceLog: a.ServiceLog}
 	default:
 		return flow.Unseen{Failure: core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("the environment answered %T", attempt)}}
 	}
-	ran := flow.Ran{Exec: exec, Started: started, Ended: ended}
+	ran.Started, ran.Ended = started, ended
 	if r.Read != "" {
 		ran.Output, ran.Found, ran.ReadError = s.read(r.Read)
 	}
 	return ran
+}
+
+// buildCandidate builds the candidate's image of a task of two images, or finds it built. The
+// build's progress goes to the job's output.
+func (s *Shell) buildCandidate(ctx context.Context, r flow.BuildCandidate) flow.Event {
+	_, _ = fmt.Fprintf(s.cfg.Output, "[%s] the image of %s, context %s\n", flow.StageCandidate, r.Build.Dockerfile, r.Build.Context)
+	img, err := s.cfg.Environment.Candidate(ctx, r.Build, s.cfg.Output)
+	if err != nil {
+		if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+			return flow.Cancelled{}
+		}
+		return flow.NotRan{Failure: failureOf(err)}
+	}
+	return flow.CandidateBuilt{Image: img}
 }
 
 // ArtifactsOf is the artifacts directory of the nth command of a job (from 1), of the stage: the

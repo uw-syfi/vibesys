@@ -104,6 +104,9 @@ message FlowPlan {
   // For a measure job of a multi-objective task: the objectives every sample reports and the
   // result records.
   Objectives objectives = 13;
+  // For a task of two images: how the candidate's image is built, and its server, which the
+  // commands run against.
+  CandidateSetup candidate = 14;
 }
 
 // ExecutionKind is how a command ended.

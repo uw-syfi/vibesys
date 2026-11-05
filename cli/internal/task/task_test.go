@@ -19,7 +19,7 @@ import (
 )
 
 const jsonManifest = `
-version = 1
+version = "0.1"
 backends = ["cpu"]
 
 [agent]
@@ -48,7 +48,7 @@ cpu = "any"
 `
 
 const protocol2Manifest = `
-version = 1
+version = "0.1"
 
 [agent]
 domain = "kernels"
@@ -193,7 +193,7 @@ func TestAParetoTaskNeedsAnEvaluatorStream(t *testing.T) {
 
 func TestAMetricKeyChoosesTheScoredObjective(t *testing.T) {
 	manifest := protocol2Manifest + "\n"
-	manifest = strings.Replace(manifest, "version = 1\n", "version = 1\nmetric = \"throughput\"\n", 1)
+	manifest = strings.Replace(manifest, "version = \"0.1\"\n", "version = \"0.1\"\nmetric = \"throughput\"\n", 1)
 	got, err := task.Read(repo(taskFiles("p", manifest, objectives2)), "p")
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func TestWhatItCannotRunIsRefusedAndSaysWhy(t *testing.T) {
 			"backends", core.FailureUnavailable,
 		},
 		"a version it does not know": {
-			strings.Replace(jsonManifest, "version = 1", "version = 2", 1),
+			strings.Replace(jsonManifest, `version = "0.1"`, `version = "0.9"`, 1),
 			"version", core.FailureInvalidInput,
 		},
 		"no result": {
@@ -369,7 +369,7 @@ func TestUnknownKeysAreRejectedByName(t *testing.T) {
 		section := sections[r.IntN(len(sections))]
 		var manifest string
 		if section == "" {
-			manifest = strings.Replace(jsonManifest, "version = 1\n", "version = 1\n"+key+" = 1\n", 1)
+			manifest = strings.Replace(jsonManifest, "version = \"0.1\"\n", "version = \"0.1\"\n"+key+" = 1\n", 1)
 		} else {
 			manifest = strings.Replace(jsonManifest, section+"\n", section+"\n"+key+" = 1\n", 1)
 		}
@@ -497,7 +497,7 @@ func FuzzParse(f *testing.F) {
 	f.Add([]byte(jsonManifest), []byte(objectives))
 	f.Add([]byte(protocol2Manifest), []byte(objectives2))
 	f.Add([]byte(""), []byte(""))
-	f.Add([]byte("version = 1\n[check]\ncommand=['a']\n[measure]\ncommand=['b']\nresult_protocol=2\n"), []byte("[[objective]]\nname='m'\ndirection='min'\n"))
+	f.Add([]byte("version = \"0.1\"\n[check]\ncommand=['a']\n[measure]\ncommand=['b']\nresult_protocol=2\n"), []byte("[[objective]]\nname='m'\ndirection='min'\n"))
 	f.Fuzz(func(t *testing.T, manifest, objectives []byte) {
 		got, err := task.Parse("t", manifest, objectives)
 		if err != nil {

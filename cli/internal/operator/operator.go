@@ -23,12 +23,11 @@ import (
 	"strings"
 
 	"buf.build/go/protovalidate"
-	"github.com/BurntSushi/toml"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/tomlproto"
 )
 
 // EnvConfig names the variable that points at another operator config file.
@@ -77,7 +76,7 @@ func invalid(format string, args ...any) error {
 // of the placement "default". Its stop_grace_seconds is the file's, or unset.
 func Parse(data []byte) (*cliv1.OperatorConfig, error) {
 	c := &cliv1.OperatorConfig{}
-	if err := decode(data, c); err != nil {
+	if err := tomlproto.Decode(data, c, tomlproto.Options{}); err != nil {
 		return nil, err
 	}
 	if err := protovalidate.Validate(c); err != nil {
@@ -184,26 +183,4 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 // kindName is how the file spells a placement kind.
 func kindName(k cliv1.PlacementKind) string {
 	return strings.ToLower(strings.TrimPrefix(k.String(), "PLACEMENT_KIND_"))
-}
-
-// decode decodes TOML into m by m's field names, refusing a key m has no field for and a value of
-// the wrong type, naming the key. An enum value is written as its name without the enum's prefix,
-// in lower case.
-func decode(data []byte, m proto.Message) error {
-	var raw map[string]any
-	if _, err := toml.Decode(string(data), &raw); err != nil {
-		return invalid("%v", err)
-	}
-	j, err := message(raw, m.ProtoReflect().Descriptor(), "")
-	if err != nil {
-		return err
-	}
-	text, err := jsonOf(j)
-	if err != nil {
-		return invalid("%v", err)
-	}
-	if err := protojson.Unmarshal(text, m); err != nil {
-		return invalid("%v", err)
-	}
-	return nil
 }

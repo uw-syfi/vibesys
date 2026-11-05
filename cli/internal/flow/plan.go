@@ -3,6 +3,7 @@ package flow
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -38,6 +39,11 @@ type Plan struct {
 	// CheckPass is the saved check pass a measure job links instead of running the check. Empty
 	// means the job runs the check itself.
 	CheckPass core.JobID
+
+	// Candidate is set for a task of two images: the job builds the candidate's image from its
+	// commit after the checkout, and every command runs in the task's image against the candidate's
+	// server, which each run starts in the candidate's image.
+	Candidate *task.Candidate
 }
 
 // RunsCheck reports whether the job runs the check.
@@ -89,6 +95,20 @@ func (p Plan) Validate() error {
 	if p.Build != nil {
 		if err := validCommand("build", *p.Build); err != nil {
 			return bad("%v", err)
+		}
+	}
+	if c := p.Candidate; c != nil {
+		switch {
+		case p.Build != nil:
+			return bad("a job of a task of two images builds its candidate from the candidate's Dockerfile, and has no build command")
+		case c.Build.Dockerfile == "" || c.Build.Context == "":
+			return bad("the candidate's image has a Dockerfile and a build context")
+		case len(c.Serve) == 0 || c.Serve[0] == "":
+			return bad("the candidate's server has a command")
+		case !strings.HasPrefix(c.Ready, "/"):
+			return bad("the candidate's readiness path %q is not an absolute HTTP path", c.Ready)
+		case c.StartupTimeout <= 0:
+			return bad("the candidate's server has no positive startup time (%v)", c.StartupTimeout)
 		}
 	}
 	return nil
@@ -147,6 +167,7 @@ type Stage string
 const (
 	StageCheckout  Stage = "checkout"
 	StageBuild     Stage = "build"
+	StageCandidate Stage = "candidate"
 	StageCheck     Stage = "check"
 	StageBenchmark Stage = "benchmark"
 	StageObserve   Stage = "observe"
@@ -163,6 +184,9 @@ type Findings struct {
 	Observations []core.Observation
 	Machine      core.MachineFacts
 	Load         core.MachineLoad
+	// CandidateImage is the exact digest of the candidate's image the commands ran against, for a
+	// task of two images.
+	CandidateImage string
 }
 
 // Record is the result to save for a job that passed. A measure job names itself as its check pass
@@ -171,7 +195,7 @@ func (p Plan) Record(job core.JobID, commit core.Commit, f Findings, at time.Tim
 	r := core.Result{
 		Job: job, Key: p.Key, Task: p.Task, TaskVersion: p.TaskVersion, Commit: commit,
 		SchemaVersion: core.SchemaVersion, Environment: p.Environment,
-		Machine: f.Machine, Load: f.Load, RecordedAt: at,
+		Machine: f.Machine, Load: f.Load, RecordedAt: at, CandidateImage: f.CandidateImage,
 	}
 	if p.Kind == core.JobCheck {
 		r.Outcome = core.CheckOutcome{Duration: f.CheckTook}

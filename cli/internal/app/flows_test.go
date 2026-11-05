@@ -307,11 +307,11 @@ func TestSubmissionsTheDaemonCannotKeyAreRefusedNotQueued(t *testing.T) {
 	a := w.newApp()
 	other := core.Commit(strings.Repeat("ab", 20))
 	w.tasks.Put(string(call.Scope.Repository()), other, task.Tree{
-		taskDir + task.ManifestName: {Data: []byte("version = 1\nbackends = [\"cpu\"]\n[evaluator]\nname = \"x\"\n")},
+		taskDir + task.ManifestName: {Data: []byte("version = \"0.1\"\nbackends = [\"cpu\"]\n[evaluator]\nname = \"x\"\n")},
 	})
 	junk := core.Commit(strings.Repeat("ef", 20))
 	w.tasks.Put(string(call.Scope.Repository()), junk, task.Tree{
-		taskDir + task.ManifestName: {Data: []byte("version = 1\nbackends = [\"cpu\"]\nunknown_key = 1\n")},
+		taskDir + task.ManifestName: {Data: []byte("version = \"0.1\"\nbackends = [\"cpu\"]\nunknown_key = 1\n")},
 	})
 	cases := map[string]struct {
 		spec core.JobSpec

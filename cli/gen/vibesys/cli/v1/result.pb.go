@@ -539,9 +539,13 @@ type Result struct {
 	//
 	//	*Result_Check
 	//	*Result_Measure
-	Outcome       isResult_Outcome `protobuf_oneof:"outcome"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Outcome isResult_Outcome `protobuf_oneof:"outcome"`
+	// For a task of two images, the exact digest of the candidate's image the commands ran against.
+	// It is recorded and never part of the key: a dependency the candidate changes is part of the
+	// candidate, as its code is.
+	CandidateImage string `protobuf:"bytes,13,opt,name=candidate_image,json=candidateImage,proto3" json:"candidate_image,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Result) Reset() {
@@ -669,6 +673,13 @@ func (x *Result) GetMeasure() *MeasureResult {
 	return nil
 }
 
+func (x *Result) GetCandidateImage() string {
+	if x != nil {
+		return x.CandidateImage
+	}
+	return ""
+}
+
 type isResult_Outcome interface {
 	isResult_Outcome()
 }
@@ -721,7 +732,7 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	"\ftask_version\x18\x02 \x01(\tR\vtaskVersion\x12H\n" +
 	"\venvironment\x18\x03 \x01(\v2&.vibesys.cli.v1.EnvironmentFingerprintR\venvironment\x12\x17\n" +
 	"\ajob_ids\x18\x04 \x03(\tR\x06jobIds\x127\n" +
-	"\ameasure\x18\x05 \x01(\v2\x1d.vibesys.cli.v1.MeasureResultR\ameasure\"\x92\x04\n" +
+	"\ameasure\x18\x05 \x01(\v2\x1d.vibesys.cli.v1.MeasureResultR\ameasure\"\xbb\x04\n" +
 	"\x06Result\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x10\n" +
 	"\x03key\x18\x02 \x01(\tR\x03key\x12\x12\n" +
@@ -736,7 +747,8 @@ const file_vibesys_cli_v1_result_proto_rawDesc = "" +
 	" \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"recordedAt\x123\n" +
 	"\x05check\x18\v \x01(\v2\x1b.vibesys.cli.v1.CheckResultH\x00R\x05check\x129\n" +
-	"\ameasure\x18\f \x01(\v2\x1d.vibesys.cli.v1.MeasureResultH\x00R\ameasureB\t\n" +
+	"\ameasure\x18\f \x01(\v2\x1d.vibesys.cli.v1.MeasureResultH\x00R\ameasure\x12'\n" +
+	"\x0fcandidate_image\x18\r \x01(\tR\x0ecandidateImageB\t\n" +
 	"\aoutcome*V\n" +
 	"\tDirection\x12\x19\n" +
 	"\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x16\n" +

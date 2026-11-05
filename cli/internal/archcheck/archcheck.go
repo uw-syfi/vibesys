@@ -55,7 +55,10 @@ var rules = map[string][]string{
 	// The operator's settings of the machine, which never come from a task: the outer structure of
 	// the file, decoded into the contract's message. What each placement or resource kind's section
 	// means is that kind's package's business, which only production names.
-	"internal/operator": {"gen/", "internal/core"},
+	"internal/operator": {"gen/", "internal/core", "internal/tomlproto"},
+	// A TOML file decoded into a contract message by its field names, refusing unknown keys and
+	// keys newer than the schema version the file declares.
+	"internal/tomlproto": {"gen/", "internal/core"},
 	// What a placement gives a container. Each kind imports the interface and core (and what it
 	// reads a machine with), never another kind; only production names a concrete kind.
 	"internal/resource":              {"internal/core"},
@@ -87,7 +90,7 @@ var rules = map[string][]string{
 	},
 	"internal/environment/docker/dockertest": {"internal/core", "internal/environment", "internal/environment/docker", "internal/environment/envtest"},
 	"internal/gitrepo":                       {"internal/core"},
-	"internal/task":                          {"internal/core"},
+	"internal/task":                          {"gen/", "internal/core", "internal/tomlproto"},
 	"internal/task/tasktest":                 {"internal/core", "internal/task"},
 	"internal/gitwork":                       {"internal/core", "internal/task"},
 	"internal/reading":                       {},

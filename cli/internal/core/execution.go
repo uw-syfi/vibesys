@@ -26,6 +26,9 @@ type Execution struct {
 	Argv      []string
 	// Service, when set, is started first and the command runs against it.
 	Service *ServiceSpec
+	// Candidate, when set, runs the execution with a candidate's image, for a task of two images:
+	// the command in it, or the candidate's server in it and the command in the task's image.
+	Candidate *CandidateRun
 	// Timeout bounds the whole execution. It must be positive.
 	Timeout time.Duration
 	// Measured says the command's own timing is its result, as a benchmark sample's is. An
@@ -63,7 +66,12 @@ type Attempt interface{ attempt() }
 type NotStarted struct{ Failure Failure }
 
 // Ended says the execution started and the environment saw it end as Exec says.
-type Ended struct{ Exec ExecOutcome }
+type Ended struct {
+	Exec ExecOutcome
+	// ServiceLog, for an execution its service ended (ExecServiceNotReady, ExecServiceExited), is
+	// the last lines the service wrote, when the environment kept them: why it was not ready.
+	ServiceLog string
+}
 
 // Unobserved says a process of the execution started, and the environment cannot vouch for how it
 // ended or for what it left: its end was not seen, its output was not all kept, or its container

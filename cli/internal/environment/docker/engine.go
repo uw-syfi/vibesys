@@ -131,7 +131,8 @@ type ContainerSpec struct {
 	// GPUs are the GPUs the container gets. The zero value gives it none.
 	GPUs GPUs
 	// Network is the container's network mode (docker run --network). Empty leaves the engine's
-	// default.
+	// default. NetworkOf a container joins that container's network, as the command's container of
+	// a task of two images joins its candidate's server's.
 	Network string
 	// Limit is the longest the container's commands may run. An engine that places the container
 	// in an allocation with a time limit of its own bounds the allocation by it; zero means the
@@ -148,7 +149,7 @@ var (
 	envNamePattern       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	gpuDevicesPattern    = regexp.MustCompile(`^[A-Za-z0-9=,:._-]*$`)
 	runtimePattern       = regexp.MustCompile(`^[a-z0-9._-]*$`)
-	networkPattern       = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_.-]*)?$`)
+	networkPattern       = regexp.MustCompile(`^((container:)?[A-Za-z0-9][A-Za-z0-9_.-]*)?$`)
 )
 
 // Validate refuses a spec an engine would have to refuse or misread, with a *core.Failure of kind

@@ -18,6 +18,15 @@ type Source interface {
 	Task(ctx context.Context, repository string, commit core.Commit, name string) (Task, error)
 }
 
+// Files reads files of a repository as a commit has them: what builds a candidate's image, which
+// is never read from a working tree.
+type Files interface {
+	// Files returns the regular files at or under the paths, by their path from the repository's
+	// root ("." is all of it). A path the commit does not have is left out, not an error. It fails
+	// with core.FailureNotFound for a commit the repository does not have.
+	Files(ctx context.Context, repository string, commit core.Commit, paths []string) (Tree, error)
+}
+
 // MemorySource is a Source over repositories described in memory. It reads a task through Read,
 // like any source, so it differs from git only in where the files come from. It is safe for
 // concurrent use.
@@ -31,7 +40,10 @@ type treeAt struct {
 	commit     core.Commit
 }
 
-var _ Source = (*MemorySource)(nil)
+var (
+	_ Source = (*MemorySource)(nil)
+	_ Files  = (*MemorySource)(nil)
+)
 
 // NewMemorySource returns a source with no repository.
 func NewMemorySource() *MemorySource { return &MemorySource{trees: map[treeAt]Tree{}} }
@@ -41,6 +53,20 @@ func (m *MemorySource) Put(repository string, commit core.Commit, files Tree) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.trees[treeAt{repository, commit}] = files
+}
+
+// Files implements Files.
+func (m *MemorySource) Files(ctx context.Context, repository string, commit core.Commit, paths []string) (Tree, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	tree, ok := m.trees[treeAt{repository, commit}]
+	m.mu.Unlock()
+	if !ok {
+		return nil, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("commit %s is not a commit of %s", commit, repository)}
+	}
+	return tree.Under(paths), nil
 }
 
 // Task implements Source.

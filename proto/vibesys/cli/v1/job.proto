@@ -48,6 +48,49 @@ message CommandSettings {
   ServiceSpec service = 2;
   // Zero means the default limit.
   google.protobuf.Duration timeout = 3;
+  // Set for a profile job of a task of two images: the task's [profile] load against the
+  // candidate's server started under the wrapper. A submission gives no argv; the daemon sets the
+  // argv, the timeout and the candidate from the task.
+  ProfileRequest profile = 4;
+  // Set by the daemon for a job of a task of two images, never by a caller: how the candidate's
+  // image is built, and for a profile the server the command runs against.
+  CandidateSetup candidate = 5;
+}
+
+// ProfileRequest is what a profile submission asks for.
+message ProfileRequest {
+  // An argv prefix the candidate's server starts under, such as a profiler's command line. The CLI
+  // never reads it.
+  repeated string wrap = 1 [(buf.validate.field).repeated.items.string.min_len = 1];
+}
+
+// CandidateBuild is how a task of two images builds the candidate's image from its commit.
+message CandidateBuild {
+  // The Dockerfile, a path in the candidate's checkout.
+  string dockerfile = 1;
+  // The build context, a directory in the candidate's checkout.
+  string context = 2;
+  // The exact references the Dockerfile's first FROM may name. Empty allows any.
+  repeated string allowed_bases = 3;
+}
+
+// CandidateServe is the candidate's server.
+message CandidateServe {
+  // Its command, run in the candidate's container from the checkout's root. The port placeholder is
+  // left for the environment, and the project root placeholder for whoever has the checkout.
+  repeated string argv = 1;
+  // The HTTP path that answers 2xx once the server is ready.
+  string ready = 2;
+  // How long the server may take to be ready.
+  google.protobuf.Duration startup_timeout = 3;
+}
+
+// CandidateSetup is how a job of a task of two images uses the candidate's image: it builds it,
+// and when serve is set runs its server there and the job's commands in the task's image against
+// it. Without serve, a command job's command runs in the candidate's image.
+message CandidateSetup {
+  CandidateBuild build = 1;
+  CandidateServe serve = 2;
 }
 
 message MeasureSettings {

@@ -56,6 +56,10 @@ type Attachment struct {
 	Network string
 	// GPUs are the GPUs the container gets. The zero value gives it none.
 	GPUs GPUs
+	// GPUEnv is set, beside Env, for every process of a container that gets the GPUs: the variables
+	// that pass them, which a container that gets none, such as the task's container beside a
+	// candidate's server, does not get either.
+	GPUEnv map[string]string
 }
 
 // Mount is a directory or a file of the engine's machine that the container sees.
@@ -106,10 +110,18 @@ func (a Attachment) Validate() error {
 			return err
 		}
 	}
-	for _, k := range slices.Sorted(maps.Keys(a.Env)) {
-		if !envName.MatchString(k) || strings.ContainsAny(a.Env[k], "\x00\n") {
-			return invalid("the environment variable %q=%q is not valid", k, a.Env[k])
+	for _, env := range []map[string]string{a.Env, a.GPUEnv} {
+		for _, k := range slices.Sorted(maps.Keys(env)) {
+			if !envName.MatchString(k) || strings.ContainsAny(env[k], "\x00\n") {
+				return invalid("the environment variable %q=%q is not valid", k, env[k])
+			}
+			if _, both := a.Env[k]; both && len(a.GPUEnv) > 0 && a.GPUEnv[k] != "" {
+				return invalid("the environment variable %q is set with the GPUs and without them", k)
+			}
 		}
+	}
+	if len(a.GPUEnv) > 0 && a.GPUs.Devices == "" {
+		return invalid("variables are set to pass GPUs, and no GPU is given")
 	}
 	switch {
 	case !networkName.MatchString(a.Network):
@@ -127,7 +139,7 @@ func (a Attachment) Validate() error {
 // Combine joins the attachments of a placement's resources into one, and refuses two that ask
 // for different values of one thing: one container path, one variable, the network or the GPUs.
 func Combine(attachments []Attachment) (Attachment, error) {
-	out := Attachment{Env: map[string]string{}}
+	out := Attachment{Env: map[string]string{}, GPUEnv: map[string]string{}}
 	targets := map[string]bool{}
 	for _, a := range attachments {
 		if err := a.Validate(); err != nil {
@@ -145,6 +157,12 @@ func Combine(attachments []Attachment) (Attachment, error) {
 				return Attachment{}, invalid("two resources set %s, to %q and %q", k, old, v)
 			}
 			out.Env[k] = v
+		}
+		for k, v := range a.GPUEnv {
+			if old, ok := out.GPUEnv[k]; ok && old != v {
+				return Attachment{}, invalid("two resources set %s, to %q and %q", k, old, v)
+			}
+			out.GPUEnv[k] = v
 		}
 		if a.Network != "" {
 			if out.Network != "" && out.Network != a.Network {

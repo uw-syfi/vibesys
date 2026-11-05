@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -18,10 +19,49 @@ import (
 // digest of all of it.
 const MaxTaskBytes = 64 << 20
 
-// Tasks is a task.Source over the git program.
+// MaxCandidateBytes bounds what Files reads at once: a candidate's Dockerfile and build context,
+// which are read into memory to digest and send to the image builder.
+const MaxCandidateBytes = 1 << 30
+
+// Tasks is a task.Source over the git program, and the task.Files of what builds a candidate's
+// image.
 type Tasks struct{}
 
-var _ task.Source = Tasks{}
+var (
+	_ task.Source = Tasks{}
+	_ task.Files  = Tasks{}
+)
+
+// Files implements task.Files with git archive of the paths at the commit.
+func (Tasks) Files(ctx context.Context, repository string, commit core.Commit, paths []string) (task.Tree, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ok, err := hasCommit(ctx, repository, commit)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, noCommit(repository, commit)
+	}
+	tree := task.Tree{}
+	for _, p := range paths {
+		// A path the commit lacks makes git archive fail, and is the same as an empty one.
+		data, err := git(ctx, repository, "archive", "--format=tar", string(commit), "--", p)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		got, err := readTar(data, MaxCandidateBytes, "the candidate's files")
+		if err != nil {
+			return nil, err
+		}
+		maps.Copy(tree, got)
+	}
+	return tree, nil
+}
 
 // Task implements task.Source. It reads the task directory at the commit with git archive, and
 // reads the task from those files exactly as a source of any kind does.
@@ -49,16 +89,16 @@ func (Tasks) Task(ctx context.Context, repository string, commit core.Commit, na
 		}
 		data = nil
 	}
-	tree, err := treeOf(data)
+	tree, err := readTar(data, MaxTaskBytes, "the task's files")
 	if err != nil {
 		return task.Task{}, err
 	}
 	return task.Read(tree, name)
 }
 
-// treeOf reads the regular files of a tar archive. Links and special files are left out, as
-// task.Version leaves them out.
-func treeOf(archive []byte) (task.Tree, error) {
+// readTar reads the regular files of a tar archive, of at most limit bytes in all. Links and
+// special files are left out, as task.Version leaves them out.
+func readTar(archive []byte, limit int64, what string) (task.Tree, error) {
 	tree := task.Tree{}
 	if len(archive) == 0 {
 		return tree, nil
@@ -71,17 +111,17 @@ func treeOf(archive []byte) (task.Tree, error) {
 			return tree, nil
 		}
 		if err != nil {
-			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading the task's files: %v", err)}
+			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading %s: %v", what, err)}
 		}
 		if h.Typeflag != tar.TypeReg {
 			continue
 		}
-		if total += h.Size; total > MaxTaskBytes {
-			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("the task's files are over %d bytes, which is more than a task is", MaxTaskBytes)}
+		if total += h.Size; total > limit {
+			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("%s are over %d bytes, more than this build reads", what, limit)}
 		}
 		data, err := io.ReadAll(r)
 		if err != nil {
-			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading the task's files: %v", err)}
+			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading %s: %v", what, err)}
 		}
 		tree[path.Clean(h.Name)] = task.File{Data: data, Executable: h.Mode&0o111 != 0}
 	}

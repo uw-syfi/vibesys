@@ -3,6 +3,7 @@ package fakeenv
 import (
 	"io"
 	"sync"
+	"sync/atomic"
 
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 )
@@ -29,8 +30,12 @@ func NewMachine(gates Gates, dir string, lost error) *Machine {
 		lost = errEndedUnseen
 	}
 	wg := &sync.WaitGroup{}
-	return &Machine{l: &launcher{in: &interpreter{gates: gates, dir: dir, lostOnEnd: lost}, wg: wg}, wg: wg}
+	return &Machine{l: &launcher{in: &interpreter{gates: gates, dir: dir, lostOnEnd: lost, ready: &atomic.Bool{}}, wg: wg}, wg: wg}
 }
+
+// Ready reports whether a process of the machine ran the `ready` step: whether a server on it
+// answers its readiness path.
+func (m *Machine) Ready() bool { return m.l.in.ready.Load() }
 
 // Start implements environment.Launcher. The sink is written to by several processes at once, so
 // it must be safe for concurrent use.

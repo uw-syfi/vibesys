@@ -85,7 +85,8 @@ func Result(r core.Result) *cliv1.Result {
 			SampledAt: timestamp(r.Load.SampledAt), LoadAverage_1M: r.Load.LoadAverage1m,
 			CpuBusyFraction: r.Load.CPUBusyFraction, MemoryAvailableBytes: r.Load.MemoryAvailableBytes,
 		},
-		RecordedAt: timestamp(r.RecordedAt),
+		RecordedAt:     timestamp(r.RecordedAt),
+		CandidateImage: r.CandidateImage,
 	}
 	switch o := r.Outcome.(type) {
 	case core.CheckOutcome:
@@ -282,7 +283,10 @@ func toResult(field string, r *cliv1.Result) (core.Result, error) {
 			SampledAt: toTime(r.GetLoad().GetSampledAt()), LoadAverage1m: r.GetLoad().GetLoadAverage_1M(),
 			CPUBusyFraction: r.GetLoad().GetCpuBusyFraction(), MemoryAvailableBytes: r.GetLoad().GetMemoryAvailableBytes(),
 		},
-		RecordedAt: toTime(r.GetRecordedAt()),
+		RecordedAt: toTime(r.GetRecordedAt()), CandidateImage: r.GetCandidateImage(),
+	}
+	if c := out.CandidateImage; c != "" && !core.ValidImageDigest(c) {
+		return core.Result{}, invalid("%s.candidate_image: %q is not an exact image digest", field, c)
 	}
 	switch o := r.GetOutcome().(type) {
 	case *cliv1.Result_Check:

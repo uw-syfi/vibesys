@@ -107,7 +107,10 @@ func JobSpec(s core.JobSpec) *cliv1.JobSpec {
 	case core.CheckSettings:
 		out.Settings = &cliv1.JobSpec_Check{Check: &cliv1.CheckSettings{}}
 	case core.CommandSettings:
-		command := &cliv1.CommandSettings{Argv: append([]string(nil), settings.Argv...), Service: serviceSpec(settings.Service)}
+		command := &cliv1.CommandSettings{
+			Argv: append([]string(nil), settings.Argv...), Service: serviceSpec(settings.Service),
+			Profile: profileRequest(settings.Profile), Candidate: commandCandidate(settings.Candidate),
+		}
 		if settings.Timeout != 0 {
 			command.Timeout = durationpb.New(settings.Timeout)
 		}
@@ -157,7 +160,16 @@ func ToJobSpec(field string, s *cliv1.JobSpec) (core.JobSpec, error) {
 }
 
 func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSettings, error) {
-	if len(c.GetArgv()) == 0 || c.GetArgv()[0] == "" {
+	profile, err := toProfileRequest(field+".profile", c.GetProfile())
+	if err != nil {
+		return core.CommandSettings{}, err
+	}
+	candidate, err := toCommandCandidate(field+".candidate", c.GetCandidate())
+	if err != nil {
+		return core.CommandSettings{}, err
+	}
+	// A profile is submitted without a command, which the daemon takes from the task.
+	if (len(c.GetArgv()) == 0 && profile == nil) || (len(c.GetArgv()) > 0 && c.GetArgv()[0] == "") {
 		return core.CommandSettings{}, invalid("%s.argv: a command needs a program to run", field)
 	}
 	if svc := c.GetService(); svc != nil && (len(svc.GetArgv()) == 0 || svc.GetArgv()[0] == "") {
@@ -176,7 +188,10 @@ func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSett
 	if timeout < 0 {
 		return core.CommandSettings{}, invalid("%s.timeout: %v is negative", field, timeout)
 	}
-	return core.CommandSettings{Argv: append([]string(nil), c.GetArgv()...), Service: toServiceSpec(c.GetService()), Timeout: timeout}, nil
+	return core.CommandSettings{
+		Argv: append([]string(nil), c.GetArgv()...), Service: toServiceSpec(c.GetService()), Timeout: timeout,
+		Profile: profile, Candidate: candidate,
+	}, nil
 }
 
 // Job returns the contract's message for a job.

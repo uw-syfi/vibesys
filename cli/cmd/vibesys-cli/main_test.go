@@ -111,7 +111,7 @@ func (c *cli) submit(argv ...string) string {
 func TestVersionNamesTheBinaryAndExitsZero(t *testing.T) {
 	c := newCLI(t)
 	r := c.run("--version")
-	if r.code != exitOK || r.stdout != "vibesys-cli "+version+"\n" || r.stderr != "" {
+	if r.code != exitOK || r.stdout != "vibesys-cli "+version+" (task schemas 0.1, 0.2)\n" || r.stderr != "" {
 		t.Fatalf("result = %+v", r)
 	}
 }

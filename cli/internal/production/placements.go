@@ -3,6 +3,8 @@ package production
 import (
 	"fmt"
 	"maps"
+	"path"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -26,6 +28,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/resource/kubernetes"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/mounts"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // machines are the environments this machine's jobs run in, and the placements a docker job can
@@ -83,6 +86,19 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 	return out, nil
 }
 
+// probe is the program a local placement's containers probe a candidate's server with: this
+// binary, which is static, when it is built for Linux, where the containers run it. A binary of
+// another system has none, and its placements run no task of two images.
+func (p Process) probe() string {
+	if runtime.GOOS != "linux" || !path.IsAbs(p.Executable) {
+		return ""
+	}
+	return p.Executable
+}
+
+// TaskSchemas names the task schema versions this build reads, as --version prints them.
+func TaskSchemas() string { return task.SchemasText() }
+
 // scopeOf is the scope of a placement's work, keyed by a directory: the daemon's runtime directory,
 // or a run's. The placement of a file of the earlier shape keeps the scope the daemon's one
 // placement had, so a daemon of this build sweeps what one before it left; another placement has one
@@ -100,6 +116,7 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 	cfg := docker.Config{
 		Source: docker.TaskSource{Tasks: gitwork.Tasks{}}, Timers: clk, IDs: dockercli.RandomIDs{}, Scope: scope,
 		User: docker.User{UID: p.UID, GID: p.GID}, Placement: name, Grace: grace,
+		Candidates: docker.CandidateFiles{Files: gitwork.Tasks{}},
 	}
 	engineCfg := dockercli.Config{Timers: clk}
 	var shell remote.Shell = remote.Local{}
@@ -108,6 +125,7 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		cfg.Scope = scopeOf(containerKey, name)
 		cfg.Backend = local
 		cfg.Machine = machine.Local{CacheRoot: p.cacheRoot(), As: cfg.User}
+		cfg.Probe = p.probe()
 	} else {
 		r := pl.GetRemote()
 		ssh := remote.SSH{Host: r.GetHost(), Program: orDefault(r.GetSshCommand(), "ssh")}

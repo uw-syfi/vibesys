@@ -42,6 +42,7 @@ func flowPlan(p *flow.Plan) *cliv1.FlowPlan {
 		Check:          planCommand(&p.Check),
 		Samples:        p.Samples,
 		CheckPassJobId: string(p.CheckPass),
+		Candidate:      planCandidate(p.Candidate),
 	}
 	if p.Kind == core.JobMeasure {
 		out.Benchmark = planCommand(&p.Benchmark)
@@ -96,6 +97,9 @@ func toFlowPlan(field string, p *cliv1.FlowPlan) (*flow.Plan, error) {
 		out.Metric.Name = m.GetName()
 	}
 	if out.Objectives, err = toObjectives(field+".objectives", p.GetObjectives(), toDirection); err != nil {
+		return nil, err
+	}
+	if out.Candidate, err = toPlanCandidate(field+".candidate", p.GetCandidate()); err != nil {
 		return nil, err
 	}
 	if err := out.Validate(); err != nil {
