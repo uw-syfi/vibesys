@@ -46,6 +46,13 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# lint-waiver: LW-389002 [E402]; Path-invoked runs need the repo root on sys.path before this import.
+from scripts.repo_files import tracked_files  # noqa: E402
+
 DEFAULT_PYPROJECT = Path("pyproject.toml")
 SKIPPED_DIR_NAMES = frozenset({"tests", "__pycache__"})
 
@@ -130,18 +137,24 @@ def count_lines(path: Path) -> int:
 
 
 def measure(
-    repo_root: Path, roots: tuple[str, ...], generated: tuple[str, ...] = ()
+    repo_root: Path,
+    roots: tuple[str, ...],
+    generated: tuple[str, ...] = (),
+    *,
+    names: tuple[str, ...] | None = None,
 ) -> dict[str, int]:
-    """Map every scanned repo-relative `*.py` path to its physical line count."""
+    """Map every scanned repo-relative `*.py` path to its physical line count.
+
+    ``names`` injects a tracked listing for tests (see ``scripts.repo_files``).
+    """
     measured: dict[str, int] = {}
-    for root in roots:
-        for path in sorted((repo_root / root).rglob("*.py")):
-            relative = path.relative_to(repo_root)
-            if SKIPPED_DIR_NAMES.intersection(relative.parts):
-                continue
-            if any(parent.match(pattern) for parent in relative.parents for pattern in generated):
-                continue
-            measured[relative.as_posix()] = count_lines(path)
+    for path in tracked_files(repo_root, suffixes=(".py",), under=roots, names=names):
+        relative = path.relative_to(repo_root)
+        if SKIPPED_DIR_NAMES.intersection(relative.parts):
+            continue
+        if any(parent.match(pattern) for parent in relative.parents for pattern in generated):
+            continue
+        measured[relative.as_posix()] = count_lines(path)
     return measured
 
 

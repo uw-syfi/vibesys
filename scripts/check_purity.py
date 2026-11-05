@@ -18,6 +18,7 @@ from pathlib import Path
 
 from scripts.ast_identity import node_identity
 from scripts.flow_code import async_allowed_paths
+from scripts.repo_files import tracked_files
 from vs_project.api import Git
 from vs_sim.api import OsProcesses
 
@@ -996,7 +997,8 @@ def scan_value_exports(root: Path) -> tuple[Violation, ...]:
     """Check the repository-local transitive closure of pure request exports."""
     modules: dict[str, Path] = {}
     for source in sorted((root / "libs").glob("*/src")):
-        for path in sorted(source.rglob("*.py")):
+        prefix = source.relative_to(root).as_posix()
+        for path in tracked_files(root, suffixes=(".py",), under=(prefix,)):
             parts = path.relative_to(source).with_suffix("").parts
             name = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
             modules[name] = path
@@ -1036,7 +1038,10 @@ def scan_repository(root: Path) -> tuple[Violation, ...]:
     flow_paths = async_allowed_paths(root)
     for scope in (*LEGACY_SCOPE, PURE_SCOPE):
         location = root / scope
-        paths = [location] if location.is_file() else sorted(location.rglob("*.py"))
+        if location.is_file():
+            paths = [location]
+        else:
+            paths = list(tracked_files(root, suffixes=(".py",), under=(scope,)))
         for path in paths:
             if "__pycache__" in path.parts:
                 continue
