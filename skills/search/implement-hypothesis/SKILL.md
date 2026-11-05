@@ -31,14 +31,10 @@ set; export it as the absolute path of the vibesys-cli to use`.
 2. Build, then run the cheapest check that covers what you changed. Once it builds and one local
    check passes, make the candidate commit and measure; do not polish first. After a failure, change the code
    before you run the check again. When output is long, write it to a file and read the file.
-   When the claim is about the cost of a unit of work (CPU, allocations or calls per request in
-   one function or component) and a measure is expensive, first add a microbenchmark of that
-   unit next to its tests (the language's own harness, such as `go test -bench`, `pytest-benchmark`
-   or `criterion`) and run it on the parent and on your change. It needs no job when it runs
-   in-process on small inputs; anything that deploys the program or drives load stays a job. A
-   change that does not move its own microbenchmark is not worth a measure: report that instead.
-   A microbenchmark number is evidence for your handoff, never a result to report as the task's
-   metric.
+   When the claim is about the cost of one unit of work and a measure is expensive, first
+   microbenchmark that unit on the parent and on your change. A change that does not move its own
+   microbenchmark is not worth a measure: report that instead. The number is evidence for your
+   handoff, never the task's metric.
 3. Commit in your worktree as `vibesys:commit` says: often, with `wip` checkpoints as you go, and the
    candidate as a full commit with `Checks: pass`. A cheap check on a commit that needs no number:
    `vibesys-cli submit check <sha> --wait --plan <n>`. For the number, follow your brief: if it
