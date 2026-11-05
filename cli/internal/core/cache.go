@@ -61,9 +61,6 @@ type CachePlan struct {
 //     that runs; a measure that is answered from saved samples runs nothing, so it has no check
 //     to redo.
 //
-// The cache is the answer to a submission. It never satisfies a request for the current result
-// (see CurrentResultOf), which needs samples and a check taken after the last promotion.
-//
 // It fails with a *Failure of kind FailureInvalidInput for missing settings, settings that are not
 // check, command or measure settings, or a measure job with no sample count to ask for.
 func PlanCache(q CacheQuery) (CachePlan, error) {

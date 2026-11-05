@@ -92,7 +92,7 @@ func TestRefusalsCarryTheirReasonsAndEvidence(t *testing.T) {
 		}
 	}
 
-	for _, reason := range []core.NoCurrentResultReason{core.NoHead, core.NotMeasuredSincePromotion, core.HeadNotPromoted} {
+	for _, reason := range []core.NoCurrentResultReason{core.NoHead, core.HeadNotMeasured} {
 		got := wire.CurrentResultResponse(core.NoCurrentResult{Reason: reason, Head: commitN(3)}).GetNone()
 		if got.GetReason() == cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_UNSPECIFIED || got.GetHead() != string(commitN(3)) {
 			t.Errorf("reason %q became %+v", reason, got)
