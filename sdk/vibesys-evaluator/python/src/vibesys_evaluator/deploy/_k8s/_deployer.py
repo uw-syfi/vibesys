@@ -25,8 +25,9 @@ from vibesys_evaluator._private.deploy import (
     PhaseRunError,
     TaskCommand,
 )
-from vibesys_evaluator._private.files import DelimitedWriter
+from vibesys_evaluator._private.files import DelimitedWriter, SchemaFileError, phase_input
 from vibesys_evaluator._private.http import step_message
+from vibesys_evaluator._private.phase import plan_size
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator.deploy._k8s._build import BuildctlBuilder
 from vibesys_evaluator.deploy._k8s._clock import SystemClock
@@ -36,6 +37,7 @@ from vibesys_evaluator.deploy._k8s._deployment import (
     Deployment,
     Environment,
     PodCommand,
+    PodOutOfMemoryError,
     attach,
     ctl,
     deploy,
@@ -82,6 +84,21 @@ def probe_plan(steps: Sequence[Step]) -> bytes:
     return buffer.getvalue()
 
 
+def _out_of_memory(job: PhaseJob, error: PodOutOfMemoryError) -> str:
+    """What an OOMKilled phase pod means: the plan size, the limit, and what to change."""
+    try:
+        ops = f"{plan_size(phase_input(job.phase_input, job.name)):,} operations"
+    except SchemaFileError:
+        ops = "an unknown number of operations"
+    return (
+        f"{job.name}: the phase pod ran out of memory (OOMKilled at its {error.limit} limit) "
+        f"with a plan of {ops}. The plan, the workload's model and the results of the "
+        "sampled operations and writes must fit in the pod: lower the closed loop's "
+        "max_ops_per_sec (or the open loop's rate x window), sample fewer large responses, "
+        f"or shrink the model. {error}"
+    )
+
+
 @dataclass(frozen=True)
 class KubePhaseRunner:
     """Runs each phase as `task.phase(...)` in a phase pod (6 CPUs, 4 GiB) of the namespace."""
@@ -99,6 +116,9 @@ class KubePhaseRunner:
             run = self.deployment.run_pod(
                 Role.PHASE, command, timeout_secs=job.timeout_secs, outputs=out_dir
             )
+        except PodOutOfMemoryError as error:
+            (out_dir / PHASE_LOG_FILE).write_text(str(error))
+            raise PhaseRunError(_out_of_memory(job, error)) from None
         except DeployError as error:
             (out_dir / PHASE_LOG_FILE).write_text(str(error))
             raise PhaseRunError(f"{job.name}: {error}") from None

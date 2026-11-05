@@ -49,6 +49,7 @@ class Pod:
     restarts: int = 0
     waiting: str = ""  # a container's waiting reason, such as ImagePullBackOff
     exit_code: int | None = None  # the first container's, once terminated
+    reason: str = ""  # the first container's termination reason, such as OOMKilled
 
 
 @dataclass(frozen=True)

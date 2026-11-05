@@ -32,9 +32,17 @@ _VIOLATIONS_SHOWN = 3
 
 @dataclass(frozen=True, kw_only=True)
 class Exhausted:
-    """A closed loop ran out of planned operations; ``rate`` is the rate it was sending at."""
+    """A closed loop ran out of planned operations.
+
+    ``rate`` is the rate it was sending at in the window; ``stopped_unix_nanos``
+    is when it stopped (loadgen's ``exhausted_unix_nanos``, 0 if unknown) and
+    ``window_start_unix_nanos`` the window's start, from which the rate over
+    the whole phase follows.
+    """
 
     rate: float
+    stopped_unix_nanos: int = 0
+    window_start_unix_nanos: int = 0
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -137,9 +145,11 @@ def judge(
     if summary is None:
         return Failed(reason="the phase output has no loadgen summary")
     if summary.model == pb.LoadModel.CLOSED and summary.exhausted:
-        window = (summary.window_end_unix_nanos - summary.window_start_unix_nanos) / 1e9
-        sent_rate = summary.sent / window if window > 0 else 0.0
-        return Exhausted(rate=max(summary.offered_rate, summary.achieved_rate, sent_rate))
+        return Exhausted(
+            rate=max(summary.offered_rate, summary.achieved_rate),
+            stopped_unix_nanos=summary.exhausted_unix_nanos,
+            window_start_unix_nanos=summary.window_start_unix_nanos,
+        )
     if summary.exhausted:  # an open loop's plan is sized with a margin over its arrivals
         return Failed(
             reason=f"the open loop's plan ran out before the window ended "

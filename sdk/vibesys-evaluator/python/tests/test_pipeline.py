@@ -195,7 +195,8 @@ def test_an_exhausted_closed_loop_is_retried_once_with_a_larger_plan(tmp_path: P
     first, second = (phase_pb.PhaseInput.from_binary(j.phase_input) for j in deployer.runner.jobs)
     assert code == 0, text
     assert first.max_ops_per_sec == 50
-    assert second.max_ops_per_sec >= 1.5 * 200 * 0.95  # 4 clients at 20 ms an operation
+    # Sized from the rate it sent at until the plan ran out: 4 clients at 20 ms an operation.
+    assert second.max_ops_per_sec >= 2.0 * 200 * 0.95
     assert second.phase_index == 1
     assert len(second.history) > 0  # the exhausted attempt's writes stay in the history
 

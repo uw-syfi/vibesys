@@ -58,7 +58,7 @@ func compile(t *testing.T, keep bool, steps ...*pb.Step) *plan.Op {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &p.Ops[0]
+	return p.Op(0)
 }
 
 func client(t *testing.T, server *httptest.Server, timeout time.Duration) *call.Client {

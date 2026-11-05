@@ -1670,9 +1670,12 @@ type PhaseSummary struct {
 	// request timeout); counted in completed, not in the throughput.
 	Spilled uint64 `protobuf:"varint,10,opt,name=spilled,proto3" json:"spilled,omitempty"`
 	// The rate operations were sent at (operations whose first step started in
-	// the window, divided by its length), and the rate they completed at within
-	// the window (completed - spilled, divided by its length), operations/s. A
-	// closed loop's throughput is achieved_rate.
+	// the window, divided by the time the window ran), and the rate they
+	// completed at within the window (completed - spilled, divided by the same
+	// time), operations/s. A closed loop's throughput is achieved_rate. The time
+	// the window ran is its length, except for an exhausted closed loop, whose
+	// clients stopped when the plan ran out: there it is from the window's start
+	// to exhausted_unix_nanos (0 when the plan ran out before the window).
 	OfferedRate  float64 `protobuf:"fixed64,11,opt,name=offered_rate,json=offeredRate,proto3" json:"offered_rate,omitempty"`
 	AchievedRate float64 `protobuf:"fixed64,12,opt,name=achieved_rate,json=achievedRate,proto3" json:"achieved_rate,omitempty"`
 	// Send lag: the time a sent operation waited for a free sender after it was
@@ -1699,8 +1702,14 @@ type PhaseSummary struct {
 	// was written slower than operations completed; they are in the results file
 	// all the same. Diagnosis only.
 	ResultsSpilled uint64 `protobuf:"varint,21,opt,name=results_spilled,json=resultsSpilled,proto3" json:"results_spilled,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Closed loop, exhausted: when the loop stopped, the end of the last
+	// operation (every planned operation had been taken), Unix nanoseconds; 0
+	// otherwise. The rate the loop sent at over the whole phase is
+	// the plan's count divided by this minus the phase's start (window start
+	// minus --warmup).
+	ExhaustedUnixNanos int64 `protobuf:"varint,22,opt,name=exhausted_unix_nanos,json=exhaustedUnixNanos,proto3" json:"exhausted_unix_nanos,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *PhaseSummary) Reset() {
@@ -1876,6 +1885,13 @@ func (x *PhaseSummary) GetOperations() []*OperationSummary {
 func (x *PhaseSummary) GetResultsSpilled() uint64 {
 	if x != nil {
 		return x.ResultsSpilled
+	}
+	return 0
+}
+
+func (x *PhaseSummary) GetExhaustedUnixNanos() int64 {
+	if x != nil {
+		return x.ExhaustedUnixNanos
 	}
 	return 0
 }
@@ -2243,7 +2259,7 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\toperation\x18\x01 \x01(\rR\toperation\x12\x1c\n" +
 	"\tcompleted\x18\x02 \x01(\x04R\tcompleted\x12\x16\n" +
 	"\x06errors\x18\x03 \x01(\x04R\x06errors\x12D\n" +
-	"\alatency\x18\x04 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\alatency\"\xe4\b\n" +
+	"\alatency\x18\x04 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\alatency\"\x9f\t\n" +
 	"\fPhaseSummary\x12A\n" +
 	"\x05model\x18\x01 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05model\x121\n" +
@@ -2270,7 +2286,8 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\n" +
 	"operations\x18\x14 \x03(\v2&.vibesys.evaluator.v1.OperationSummaryR\n" +
 	"operations\x12'\n" +
-	"\x0fresults_spilled\x18\x15 \x01(\x04R\x0eresultsSpilled\x1a?\n" +
+	"\x0fresults_spilled\x18\x15 \x01(\x04R\x0eresultsSpilled\x129\n" +
+	"\x14exhausted_unix_nanos\x18\x16 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\x12exhaustedUnixNanos\x1a?\n" +
 	"\x11ErrorsByKindEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\x8c\x04\n" +

@@ -151,14 +151,10 @@ func (m measurer) trial(rate float64) (bool, *pb.PhaseSummary, error) {
 }
 
 func nullPlan(count int) (*plan.Plan, error) {
-	p, err := plan.New([]string{"null"}, []*pb.PlannedOperation{messages.Op(0, messages.Get("/"))})
-	if err != nil {
-		return nil, err
+	op := messages.Op(0, messages.Get("/"))
+	ops := make([]*pb.PlannedOperation, count)
+	for i := range ops {
+		ops[i] = op
 	}
-	op := p.Ops[0]
-	for i := 1; i < count; i++ {
-		op.Index = uint64(i)
-		p.Ops = append(p.Ops, op)
-	}
-	return p, nil
+	return plan.New([]string{"null"}, ops)
 }

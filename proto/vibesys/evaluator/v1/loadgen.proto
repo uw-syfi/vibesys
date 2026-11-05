@@ -350,9 +350,12 @@ message PhaseSummary {
   // request timeout); counted in completed, not in the throughput.
   uint64 spilled = 10;
   // The rate operations were sent at (operations whose first step started in
-  // the window, divided by its length), and the rate they completed at within
-  // the window (completed - spilled, divided by its length), operations/s. A
-  // closed loop's throughput is achieved_rate.
+  // the window, divided by the time the window ran), and the rate they
+  // completed at within the window (completed - spilled, divided by the same
+  // time), operations/s. A closed loop's throughput is achieved_rate. The time
+  // the window ran is its length, except for an exhausted closed loop, whose
+  // clients stopped when the plan ran out: there it is from the window's start
+  // to exhausted_unix_nanos (0 when the plan ran out before the window).
   double offered_rate = 11 [(buf.validate.field).double.finite = true];
   double achieved_rate = 12 [(buf.validate.field).double.finite = true];
   // Send lag: the time a sent operation waited for a free sender after it was
@@ -382,6 +385,12 @@ message PhaseSummary {
   // was written slower than operations completed; they are in the results file
   // all the same. Diagnosis only.
   uint64 results_spilled = 21;
+  // Closed loop, exhausted: when the loop stopped, the end of the last
+  // operation (every planned operation had been taken), Unix nanoseconds; 0
+  // otherwise. The rate the loop sent at over the whole phase is
+  // the plan's count divided by this minus the phase's start (window start
+  // minus --warmup).
+  int64 exhausted_unix_nanos = 22 [(buf.validate.field).int64.gte = 0];
 }
 
 // CallKind is a kind of Step.call.

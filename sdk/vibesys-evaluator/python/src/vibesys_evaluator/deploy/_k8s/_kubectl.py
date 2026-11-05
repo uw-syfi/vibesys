@@ -77,6 +77,7 @@ def parse_pod(item: Mapping[str, Any]) -> Pod:
         restarts=sum(int(s.get("restartCount", 0)) for s in statuses),
         waiting=waiting,
         exit_code=int(terminated["exitCode"]) if terminated else None,
+        reason=str(terminated.get("reason", "")) if terminated else "",
     )
 
 

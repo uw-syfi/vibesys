@@ -309,8 +309,12 @@ class FakeLoadgen:
                 spilled += 1
             else:
                 in_time += 1
-        secs = (window_end - window_start) / 1e9
-        offered = sent / secs
+        # An exhausted closed loop ran until its last operation ended (loadgen's
+        # exhausted_unix_nanos); its rates are over the part of the window before that.
+        stopped = max((r.end_unix_nanos for r in results), default=0) if closed and exhausted else 0
+        ran_end = min(stopped, window_end) if stopped else window_end
+        secs = max((ran_end - window_start) / 1e9, 0.0)
+        offered = sent / secs if secs > 0 else 0.0
         summary = pb.PhaseSummary(
             model=pb.LoadModel.CLOSED if closed else pb.LoadModel.OPEN,
             target_rate=0.0 if closed else options.rate,
@@ -323,12 +327,13 @@ class FakeLoadgen:
             errors_by_kind=by_kind,
             spilled=spilled,
             offered_rate=offered,
-            achieved_rate=in_time / secs,
+            achieved_rate=in_time / secs if secs > 0 else 0.0,
             send_lag=_message(lag),
             max_send_lag_micros=self.send_lag_micros,
             loadgen_cpu_fraction=self.cpu_fraction,
             sustained=closed or offered >= options.min_sustained * options.rate,
             exhausted=exhausted,
+            exhausted_unix_nanos=stopped,
             latency=_message(latency),
             operations=[
                 pb.OperationSummary(operation=n, completed=c[0], errors=c[1], latency=_message(h))

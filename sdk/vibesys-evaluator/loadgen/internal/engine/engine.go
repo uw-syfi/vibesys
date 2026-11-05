@@ -1,7 +1,8 @@
 // Package engine runs one phase: it sends a prefix of the plan in plan order, closed loop (a fixed
 // number of clients) or open loop (operations at arrival times, whatever the responses), grants
 // exclusive keys in plan order, and hands every result to a sink and to the summary. Nothing is
-// read, parsed or validated here; the plan arrives compiled and whole.
+// read or validated here; the plan arrives validated and whole, and a sender compiles each
+// operation from its bytes as it takes it (before it is due, in the open loop).
 package engine
 
 import (
@@ -121,10 +122,10 @@ func Run(ctx context.Context, config Config, p *plan.Plan, sender Sender, sink S
 		sink:   sink,
 		window: window,
 		agg:    summary.New(window, p.Names),
-		gates:  make([]chan struct{}, len(p.Ops)),
+		gates:  make([]chan struct{}, p.Len()),
 	}
-	for i := range p.Ops {
-		if p.Ops[i].Gated {
+	for i := range p.Len() {
+		if p.Gated(i) {
 			r.gates[i] = make(chan struct{})
 		}
 	}
@@ -135,7 +136,7 @@ func Run(ctx context.Context, config Config, p *plan.Plan, sender Sender, sink S
 	case Closed:
 		phase.Model = pb.LoadModel_LOAD_MODEL_CLOSED
 		phase.Clients = uint32(load.Clients)
-		phase.Exhausted = r.closed(t0, load.Clients)
+		phase.Exhausted, phase.ExhaustedAt = r.closed(t0, load.Clients)
 	case Open:
 		phase.Model = pb.LoadModel_LOAD_MODEL_OPEN
 		phase.TargetRate = load.Rate
@@ -161,12 +162,14 @@ type runner struct {
 	agg *summary.Aggregator
 }
 
-// closed runs a closed loop and reports whether the plan ran out before the window ended.
-func (r *runner) closed(t0 time.Time, clients int) bool {
+// closed runs a closed loop and reports whether the plan ran out before the window ended and, if
+// it did, when the loop stopped: the end of its last operation, since every client returns once
+// its operation is done and it finds the plan empty.
+func (r *runner) closed(t0 time.Time, clients int) (bool, int64) {
 	var next atomic.Uint64
 	var exhausted atomic.Bool
 	end := time.Unix(0, r.window.End)
-	count := uint64(len(r.plan.Ops))
+	count := r.plan.Len()
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for range clients {
@@ -184,14 +187,20 @@ func (r *runner) closed(t0 time.Time, clients int) bool {
 					exhausted.Store(true)
 					return
 				}
-				r.run(index, now, now)
+				// Taking an operation includes compiling it: it is scheduled once ready to send.
+				op := r.plan.Op(index)
+				taken := time.Now()
+				r.run(op, taken, taken)
 			}
 		}()
 	}
 	sleepUntil(r.ctx, t0)
 	close(start)
 	wg.Wait()
-	return exhausted.Load()
+	if !exhausted.Load() {
+		return false, 0
+	}
+	return true, time.Now().UnixNano()
 }
 
 type job struct {
@@ -209,15 +218,16 @@ func (r *runner) open(t0 time.Time, load Open) bool {
 		go func() {
 			defer wg.Done()
 			for item := range work {
+				op := r.plan.Op(item.index) // in the time the operation is handed over early
 				waitUntil(r.ctx, item.scheduled)
-				r.run(item.index, item.scheduled, time.Now())
+				r.run(op, item.scheduled, time.Now())
 			}
 		}()
 	}
 	defer wg.Wait()
 	defer close(work)
 	end := time.Unix(0, r.window.End)
-	count := uint64(len(r.plan.Ops))
+	count := r.plan.Len()
 	for index := range count {
 		scheduled := t0.Add(arrivals())
 		if !scheduled.Before(end) {
@@ -239,10 +249,10 @@ func (r *runner) open(t0 time.Time, load Open) bool {
 // abandon records the operations due in the window from index on as never sent.
 func (r *runner) abandon(index uint64, scheduled time.Time, arrivals func() time.Duration, t0, end time.Time) {
 	now := time.Now().UnixNano()
-	for ; index < uint64(len(r.plan.Ops)) && scheduled.Before(end); index++ {
+	for ; index < r.plan.Len() && scheduled.Before(end); index++ {
 		r.finish(&pb.OperationResult{
 			Index:              index,
-			Operation:          r.plan.Ops[index].Operation,
+			Operation:          r.plan.Operation(index),
 			ScheduledUnixNanos: scheduled.UnixNano(),
 			EndUnixNanos:       now,
 			Error:              pb.ErrorKind_ERROR_KIND_CANCELLED,
@@ -252,9 +262,8 @@ func (r *runner) abandon(index uint64, scheduled time.Time, arrivals func() time
 }
 
 // run sends one operation taken at picked (scheduled is when it was due).
-func (r *runner) run(index uint64, scheduled, picked time.Time) {
-	op := &r.plan.Ops[index]
-	result := &pb.OperationResult{Index: index, Operation: op.Operation, ScheduledUnixNanos: scheduled.UnixNano()}
+func (r *runner) run(op *plan.Op, scheduled, picked time.Time) {
+	result := &pb.OperationResult{Index: op.Index, Operation: op.Operation, ScheduledUnixNanos: scheduled.UnixNano()}
 	if op.After >= 0 {
 		select {
 		case <-r.gates[op.After]:

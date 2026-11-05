@@ -36,6 +36,18 @@ DELETE_ATTEMPTS = 3
 POLL_SECS = 2.0
 EXIT_POLL_SECS = 1.0
 LOG_TAIL = 1500
+#: The termination reason of a container the kernel killed at its memory limit.
+OOM_KILLED = "OOMKilled"
+
+
+class PodOutOfMemoryError(DeployError):
+    """A pod of the package was OOMKilled; ``limit`` is its memory limit (``4Gi``)."""
+
+    def __init__(self, message: str, *, limit: str) -> None:
+        super().__init__(message)
+        self.limit = limit
+
+
 PROBE_FILE = "probe.binpb"
 
 MEMCACHED_FLUSH = (
@@ -476,6 +488,13 @@ class Deployment:
         self.write_artifact(f"{name}.log", log)
         state = pod.waiting or pod.phase
         code = f", exit {pod.exit_code}" if pod.exit_code is not None else ""
+        if pod.reason == OOM_KILLED:
+            limit = _pods.SIZES[Role(pod.labels.get(_pods.POD_LABEL, ""))].memory
+            return PodOutOfMemoryError(
+                f"pod {name} ({pod.name}) was killed for running out of memory "
+                f"(OOMKilled at its {limit} limit{code}); log tail:\n{log[-LOG_TAIL:]}",
+                limit=limit,
+            )
         return DeployError(f"pod {name} ({pod.name}) {state}{code}; log tail:\n{log[-LOG_TAIL:]}")
 
     def _wait_pod_running(self, name: str) -> str:

@@ -125,18 +125,38 @@ func (a *Aggregator) Add(r Record) {
 
 // Phase is what the summary says about the phase beyond its results.
 type Phase struct {
-	Model          pb.LoadModel
-	TargetRate     float64
-	Clients        uint32
-	CPUFraction    float64
-	MinSustained   float64
-	Exhausted      bool
+	Model        pb.LoadModel
+	TargetRate   float64
+	Clients      uint32
+	CPUFraction  float64
+	MinSustained float64
+	Exhausted    bool
+	// ExhaustedAt is when an exhausted closed loop stopped (its last operation's end), Unix
+	// nanoseconds; 0 otherwise.
+	ExhaustedAt    int64
 	ResultsSpilled uint64
+}
+
+// ranSecs is how long the window ran: its length, or for an exhausted closed loop the part of
+// it before the loop stopped (0 when it stopped before the window).
+func (a *Aggregator) ranSecs(phase Phase) float64 {
+	if phase.Model != pb.LoadModel_LOAD_MODEL_CLOSED || !phase.Exhausted || phase.ExhaustedAt == 0 {
+		return a.window.Secs()
+	}
+	end := min(phase.ExhaustedAt, a.window.End)
+	return max(float64(end-a.window.Start)/1e9, 0)
+}
+
+func rate(count uint64, secs float64) float64 {
+	if secs <= 0 {
+		return 0
+	}
+	return float64(count) / secs
 }
 
 // Summary returns the PhaseSummary of the records added so far.
 func (a *Aggregator) Summary(phase Phase) (*pb.PhaseSummary, error) {
-	secs := a.window.Secs()
+	secs := a.ranSecs(phase)
 	summary := &pb.PhaseSummary{
 		Model:                phase.Model,
 		TargetRate:           phase.TargetRate,
@@ -148,11 +168,12 @@ func (a *Aggregator) Summary(phase Phase) (*pb.PhaseSummary, error) {
 		Errors:               a.errors,
 		ErrorsByKind:         a.byKind,
 		Spilled:              a.spilled,
-		OfferedRate:          float64(a.started) / secs,
-		AchievedRate:         float64(a.ended) / secs,
+		OfferedRate:          rate(a.started, secs),
+		AchievedRate:         rate(a.ended, secs),
 		MaxSendLagMicros:     max(a.maxLagNanos/1000, 0),
 		LoadgenCpuFraction:   max(phase.CPUFraction, 0),
 		Exhausted:            phase.Exhausted,
+		ExhaustedUnixNanos:   max(phase.ExhaustedAt, 0),
 		ResultsSpilled:       phase.ResultsSpilled,
 	}
 	summary.Sustained = phase.Model != pb.LoadModel_LOAD_MODEL_OPEN || summary.GetOfferedRate() >= phase.MinSustained*phase.TargetRate
