@@ -144,6 +144,9 @@ files = [
   "MANIFEST.in",
   ".github/delegated-merge.toml",
   ".github/workflows/delegated-merge.yml",
+  # The release workflows' static contracts are Python tests (tests/packaging).
+  ".github/workflows/publish.yml",
+  ".github/workflows/evaluator-release.yml",
 ]
 
 [[components]]

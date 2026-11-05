@@ -1,0 +1,406 @@
+name: Build and publish vibesys-evaluator release
+
+# A published GitHub release whose tag is evaluator-v<version> releases vibesys-evaluator: the
+# wheel to PyPI, the image ghcr.io/uw-syfi/vibesys-evaluator:<version>, and the Go module tag
+# sdk/vibesys-evaluator/loadgen/v<semver>, all from the same commit of main. The flow and the
+# one-time setup are in docs/contributing/publishing.md, "vibesys-evaluator releases".
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# One evaluator release at a time, and a started release is never cancelled half published.
+# Every other release of the repository (vibesys v*, vibesys-cli) also starts this workflow,
+# skips every job, and gets a group of its own, so it never queues behind or displaces an
+# evaluator release.
+concurrency:
+  group: ${{ startsWith(github.event.release.tag_name, 'evaluator-') && 'evaluator-release' || format('evaluator-release-skipped-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+env:
+  TAG: ${{ github.event.release.tag_name }}
+  IMAGE: ghcr.io/uw-syfi/vibesys-evaluator
+  PACKAGE_ROOT: sdk/vibesys-evaluator
+
+jobs:
+  verify:
+    name: Build and verify the wheel and the image
+    # publish.yml skips every tag starting evaluator-; this workflow takes them all, and the
+    # version check below refuses any that is not evaluator-v<canonical PEP 440 version>.
+    if: startsWith(github.event.release.tag_name, 'evaluator-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      go_version: ${{ steps.version.outputs.go_version }}
+      commit: ${{ steps.version.outputs.commit }}
+      image_digest: ${{ steps.image.outputs.digest }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+
+      # No dependency cache anywhere in this workflow: a cache written by another workflow run
+      # must not reach what is published.
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.9.24"
+          enable-cache: false
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Validate the tag, the source version and main
+        id: version
+        run: |
+          check=(uv run --frozen python packaging/check_release_version.py
+            --source-root "$PACKAGE_ROOT/python" --tag-prefix refs/tags/evaluator-v
+            --tag "refs/tags/$TAG")
+          version="$("${check[@]}")"
+          go_version="$("${check[@]}" --go-module-version)"
+          # Never publish a commit that is not on main.
+          git fetch --no-tags origin main
+          release_commit="$(git rev-parse --verify "refs/tags/$TAG^{commit}")"
+          git merge-base --is-ancestor "$release_commit" origin/main
+          test "$(git rev-parse HEAD)" = "$release_commit"
+          {
+            echo "version=$version"
+            echo "go_version=$go_version"
+            echo "commit=$release_commit"
+          } >> "$GITHUB_OUTPUT"
+
+      # GitHub's "latest" marker belongs to the vibesys Python releases (publishing.md). Refuse
+      # before anything is published, so the marker can be moved back and the run re-run.
+      - name: Refuse a release that took the latest marker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2> /dev/null || true)"
+          if [[ "$latest" == "$TAG" ]]; then
+            echo "::error::Release $TAG is marked as the repository's latest release. Mark the newest vibesys v* release as latest again, keep 'Set as the latest release' off for $TAG, then re-run this workflow."
+            exit 1
+          fi
+
+      - name: Export pinned runtime dependencies
+        run: |
+          uv export --frozen --package vibesys-evaluator --no-dev --no-editable \
+            --no-emit-project --no-emit-workspace --no-hashes --no-header --no-annotate \
+            -o "$RUNNER_TEMP/evaluator-constraints.txt"
+
+      # Like the vibesys wheel, a single universal wheel and no sdist: the package is pure
+      # Python, and an sdist would be a second artifact to verify for no installer that needs it.
+      - name: Build the wheel
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist/evaluator
+          uv build --package vibesys-evaluator --wheel --out-dir dist/evaluator
+          uv run --frozen python packaging/check_release_version.py \
+            --source-root "$PACKAGE_ROOT/python" --wheel-dir dist/evaluator
+
+      - name: Install the wheel in a clean environment
+        id: install
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -- dist/evaluator/*.whl
+          test "$#" -eq 1
+          root="$(cd "$RUNNER_TEMP" && pwd -P)/evaluator-installed"
+          home="$root/home"
+          venv="$root/venv"
+          mkdir -p "$home"
+          test -z "$(find "$home" -mindepth 1 -print -quit)"
+          cp "$1" "$root/"
+          wheel="$root/$(basename "$1")"
+          uv_bin="$(command -v uv)"
+          python_path="$(uv python find 3.12)"
+          clean_path="/usr/bin:/bin"
+          clean_env=(env -i HOME="$home" PATH="$clean_path" PYTHONNOUSERSITE=1
+            UV_CACHE_DIR="$root/uv-cache" UV_PYTHON_DOWNLOADS=never)
+          "${clean_env[@]}" "$uv_bin" venv --no-config --python "$python_path" "$venv"
+          "${clean_env[@]}" "$uv_bin" pip install --no-config --no-cache --python "$venv/bin/python" \
+            --constraints "$RUNNER_TEMP/evaluator-constraints.txt" "$wheel"
+          rm "$wheel"
+          cd "$root"
+          "${clean_env[@]}" EXPECTED_VERSION="$VERSION" EXPECTED_PREFIX="$venv" \
+            "$venv/bin/python" -I -c '
+          import importlib.metadata, os, pathlib
+          import vibesys_evaluator, vibesys_evaluator.deploy.k8s, vibesys_evaluator.service
+          where = pathlib.Path(vibesys_evaluator.__file__).resolve()
+          assert where.is_relative_to(pathlib.Path(os.environ["EXPECTED_PREFIX"]).resolve()), where
+          installed = importlib.metadata.version("vibesys-evaluator")
+          assert installed == os.environ["EXPECTED_VERSION"], installed
+          print(f"vibesys_evaluator {installed} imports from {where.parent}")
+          '
+          echo "python=$venv/bin/python" >> "$GITHUB_OUTPUT"
+
+      - name: Check the type completeness of the installed public API
+        env:
+          INSTALLED_PYTHON: ${{ steps.install.outputs.python }}
+        run: |
+          # pyright in a venv of its own, so it cannot add to what the package is checked against.
+          # --verifytypes finds packages through the `python` on PATH (it ignores --pythonpath),
+          # so that is the clean installation's interpreter.
+          tools="$RUNNER_TEMP/pyright-venv"
+          uv venv --no-config --python 3.12 "$tools"
+          uv pip install --no-config --python "$tools/bin/python" 'pyright[nodejs]==1.1.414'
+          mkdir -p "$RUNNER_TEMP/verifytypes"
+          cd "$RUNNER_TEMP/verifytypes"
+          PATH="$(dirname "$INSTALLED_PYTHON"):$PATH" \
+            "$tools/bin/pyright" --verifytypes vibesys_evaluator --ignoreexternal
+
+      - name: Check the conformance fixtures from Python
+        env:
+          INSTALLED_PYTHON: ${{ steps.install.outputs.python }}
+        run: |
+          # With the installed package's decoder, then with the reference HdrHistogram library.
+          "$INSTALLED_PYTHON" -I "$PACKAGE_ROOT/fixtures/check_histograms.py" --core
+          uv run --no-config --no-project --with hdrhistogram==0.10.8 \
+            python -I "$PACKAGE_ROOT/fixtures/check_histograms.py"
+
+      - name: Run the package tests
+        run: |
+          uv sync --frozen
+          uv run --frozen python -m pytest "$PACKAGE_ROOT/python/tests" --no-cov
+
+      - name: Check the public API snapshot
+        run: |
+          snapshot="$PACKAGE_ROOT/api/public-api.txt"
+          generator="$PACKAGE_ROOT/api/generate.py"
+          if [[ ! -f "$generator" ]]; then
+            echo "::error::$generator, which regenerates $snapshot, is missing; the release cannot check the snapshot."
+            exit 1
+          fi
+          uv run --frozen python "$generator" --output "$RUNNER_TEMP/public-api.txt"
+          diff -u "$snapshot" "$RUNNER_TEMP/public-api.txt"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: sdk/vibesys-evaluator/loadgen/go.mod
+          cache: false
+
+      - name: Test loadgen and its conformance fixtures
+        working-directory: sdk/vibesys-evaluator/loadgen
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [[ -n "$unformatted" ]]; then
+            printf '%s\n' "$unformatted" >&2
+            echo "::error::Run gofmt -w on the files above." >&2
+            exit 1
+          fi
+          go vet ./...
+          go test -race ./...
+
+      # The image is built once, here, into an OCI archive. The image job pushes these exact
+      # blobs, so the digest recorded now is the digest published, and the smoke test below
+      # runs what is published.
+      - name: Build the image
+        id: image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GO_VERSION: ${{ steps.version.outputs.go_version }}
+          COMMIT: ${{ steps.version.outputs.commit }}
+        run: |
+          docker buildx create --name evaluator-release --driver docker-container \
+            --driver-opt image=moby/buildkit:v0.22.0@sha256:832fa7aa1eb3deb56fa62ae933bfa42dad9a83ff4824dbbaf173b49c722b59d0 \
+            --use
+          mkdir -p "$RUNNER_TEMP/image"
+          archive="$RUNNER_TEMP/image/vibesys-evaluator.oci.tar"
+          docker buildx build --file "$PACKAGE_ROOT/image/Dockerfile" \
+            --platform linux/amd64 --provenance=false --sbom=false --pull --no-cache \
+            --build-arg VIBESYS_EVALUATOR_VERSION="$GO_VERSION" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$COMMIT" \
+            --label "org.opencontainers.image.version=$VERSION" \
+            --output "type=oci,dest=$archive" "$PACKAGE_ROOT"
+          tar -xOf "$archive" index.json > "$RUNNER_TEMP/image/index.json"
+          test "$(jq '.manifests | length' "$RUNNER_TEMP/image/index.json")" -eq 1
+          test "$(jq -r '.manifests[0].mediaType' "$RUNNER_TEMP/image/index.json")" \
+            = application/vnd.oci.image.manifest.v1+json
+          digest="$(jq -r '.manifests[0].digest' "$RUNNER_TEMP/image/index.json")"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "$digest" > "$RUNNER_TEMP/image/digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Image digest: $digest"
+
+      - name: Smoke the image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GO_VERSION: ${{ steps.version.outputs.go_version }}
+        run: |
+          command -v skopeo > /dev/null
+          local_image="vibesys-evaluator-verify:$VERSION"
+          skopeo copy "oci-archive:$RUNNER_TEMP/image/vibesys-evaluator.oci.tar" \
+            "docker-daemon:$local_image"
+          # The capabilities file is a header line and then the Capabilities message.
+          docker run --rm --network none "$local_image" loadgen --capabilities --format json \
+            > "$RUNNER_TEMP/image/capabilities.json"
+          loadgen_version="$(sed -n 2p "$RUNNER_TEMP/image/capabilities.json" | jq -r .loadgenVersion)"
+          if [[ "$loadgen_version" != "$GO_VERSION" ]]; then
+            echo "::error::loadgen in the image reports version '$loadgen_version', not $GO_VERSION: the image must stamp loadgen with the release version (build argument VIBESYS_EVALUATOR_VERSION)."
+            exit 1
+          fi
+          docker run --rm --network none -e EXPECTED_VERSION="$VERSION" "$local_image" python -c '
+          import importlib.metadata, os
+          import vibesys_evaluator, vibesys_evaluator.deploy.k8s
+          installed = importlib.metadata.version("vibesys-evaluator")
+          assert installed == os.environ["EXPECTED_VERSION"], installed
+          '
+
+      - name: Upload the verified wheel
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evaluator-dist
+          path: dist/evaluator/*.whl
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload the verified image
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evaluator-image
+          path: |
+            ${{ runner.temp }}/image/vibesys-evaluator.oci.tar
+            ${{ runner.temp }}/image/digest
+          if-no-files-found: error
+          retention-days: 7
+
+  pypi:
+    name: Publish the wheel to PyPI
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The Trusted Publisher on PyPI names this environment; it deploys only evaluator-v* tags.
+    environment: pypi-evaluator
+    permissions:
+      actions: read # download the verified wheel
+      id-token: write # PyPI Trusted Publishing and the wheel's PyPI attestations
+    steps:
+      - name: Download the verified wheel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: evaluator-dist
+          path: dist/evaluator
+
+      - name: Require exactly one wheel and no sdist
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          test "$(find dist/evaluator -maxdepth 1 -type f | wc -l | tr -d ' ')" -eq 1
+          test -f "dist/evaluator/vibesys_evaluator-$VERSION-py3-none-any.whl"
+
+      - name: Publish with PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/evaluator
+          attestations: true
+
+  image:
+    name: Push and attest the image
+    # After PyPI, so a release whose wheel was not published publishes nothing else either.
+    needs: [verify, pypi]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # id-token and attestations sign the build provenance, as cli-release.yml does for its
+    # binaries. This job's OIDC token cannot publish to PyPI: the Trusted Publisher requires the
+    # pypi-evaluator environment, which only the pypi job runs in.
+    permissions:
+      actions: read # download the verified image
+      packages: write # push the image and its attestation to ghcr.io
+      id-token: write # sign the build provenance
+      attestations: write # record the attestation in the repository
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Download the verified image
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: evaluator-image
+          path: image
+
+      - name: Push the image
+        id: push
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          VERIFIED_DIGEST: ${{ needs.verify.outputs.image_digest }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(cat image/digest)" = "$VERIFIED_DIGEST"
+          authfile="$RUNNER_TEMP/registry-auth.json"
+          trap 'rm -f "$authfile"' EXIT
+          printf '%s' "$GH_TOKEN" | skopeo login --authfile "$authfile" \
+            --username "$GITHUB_ACTOR" --password-stdin ghcr.io
+          destination="docker://$IMAGE:$VERSION"
+          # A version is pushed once. A re-run after a partial failure finds the same digest and
+          # goes on; a different image under the tag is never overwritten.
+          if published="$(skopeo inspect --authfile "$authfile" --raw "$destination" 2> /dev/null)"; then
+            published_digest="sha256:$(printf '%s' "$published" | sha256sum | cut -d' ' -f1)"
+            if [[ "$published_digest" != "$VERIFIED_DIGEST" ]]; then
+              echo "::error::$IMAGE:$VERSION already exists with digest $published_digest, not the verified $VERIFIED_DIGEST. Publish a new version."
+              exit 1
+            fi
+          else
+            skopeo copy --authfile "$authfile" --preserve-digests \
+              "oci-archive:image/vibesys-evaluator.oci.tar" "$destination"
+          fi
+          pushed_digest="sha256:$(skopeo inspect --authfile "$authfile" --raw "$destination" | sha256sum | cut -d' ' -f1)"
+          test "$pushed_digest" = "$VERIFIED_DIGEST"
+          echo "digest=$pushed_digest" >> "$GITHUB_OUTPUT"
+          echo "Pushed $IMAGE:$VERSION@$pushed_digest"
+          echo "Image: \`$IMAGE:$VERSION@$pushed_digest\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attest the image
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  go-tag:
+    name: Tag the Go module and record the image in the release
+    needs: [verify, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # create the Go module tag and edit the release notes
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # This job has no checkout, so gh cannot infer the repository from a git remote.
+      GH_REPO: ${{ github.repository }}
+      COMMIT: ${{ needs.verify.outputs.commit }}
+      GO_TAG: sdk/vibesys-evaluator/loadgen/v${{ needs.verify.outputs.go_version }}
+    steps:
+      - name: Tag the Go module
+        run: |
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GO_TAG" --jq .object.sha 2> /dev/null || true)"
+          if [[ -z "$existing" ]]; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$GO_TAG" -f sha="$COMMIT" > /dev/null
+            echo "Tagged $GO_TAG at $COMMIT"
+          elif [[ "$existing" != "$COMMIT" ]]; then
+            echo "::error::$GO_TAG already points at $existing, not $COMMIT. A Go module version is never moved; publish a new version."
+            exit 1
+          else
+            echo "$GO_TAG already points at $COMMIT"
+          fi
+
+      # Editing the release keeps it off GitHub's "latest" marker, which belongs to the vibesys
+      # Python releases (publishing.md).
+      - name: Record the image digest in the release notes
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          DIGEST: ${{ needs.image.outputs.digest }}
+        run: |
+          gh release view "$TAG" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+          line="Image: \`$IMAGE:$VERSION@$DIGEST\` (provenance: \`gh attestation verify oci://$IMAGE@$DIGEST --repo $GITHUB_REPOSITORY\`). Go module: \`$GO_TAG\`."
+          if ! grep -qF "$DIGEST" "$RUNNER_TEMP/notes.md"; then
+            printf '\n\n%s\n' "$line" >> "$RUNNER_TEMP/notes.md"
+          fi
+          gh release edit "$TAG" --verify-tag --latest=false --notes-file "$RUNNER_TEMP/notes.md"

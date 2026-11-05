@@ -88,3 +88,70 @@ Recovery follows the wheel's rule: do not rewrite a published version. If a bina
 a higher version; the alias then moves to it and `vibesys-cli upgrade` follows. Between two assets
 of the alias being replaced, a reader can see new binaries with old checksums for a moment. Both
 `install.sh` and `upgrade` refuse that mix and can simply be run again.
+
+## vibesys-evaluator releases
+
+`vibesys-evaluator` is the package task writers build benchmark evaluators on. One version
+covers its three published parts, all built from one commit of `main`:
+
+- the wheel `vibesys-evaluator` on PyPI (one universal wheel, no sdist, like `vibesys`);
+- the image `ghcr.io/uw-syfi/vibesys-evaluator:<version>`, which task images build `FROM`;
+- the Go module tag `sdk/vibesys-evaluator/loadgen/v<semver>` for its load generator.
+
+`.github/workflows/evaluator-release.yml` releases them. `publish.yml` skips a release whose tag
+starts with `evaluator-`.
+
+### One-time external setup
+
+Create a GitHub environment named `pypi-evaluator`. Restrict deployment to selected tags matching
+`evaluator-v*`, and add no required reviewers: nothing waits for an approval, and the publish is
+gated by the check that the tagged commit is on `main` and by the verification job. Do not add a
+PyPI API token.
+
+Configure a pending Trusted Publisher on PyPI with this exact tuple:
+
+- PyPI project: `vibesys-evaluator`
+- GitHub owner: `uw-syfi`
+- GitHub repository: `vibesys`
+- Workflow filename: `evaluator-release.yml`
+- Environment: `pypi-evaluator`
+
+The image job pushes with the workflow's own token. GitHub creates the container package
+`vibesys-evaluator` on the first push and links it to this repository through the image's
+`org.opencontainers.image.source` label; a package cannot be configured before it exists. After
+the first release (a release candidate is enough), open the package's settings, set its visibility
+to public, and under "Manage Actions access" confirm that the `vibesys` repository has the Write
+role. Task images pull it without credentials only once it is public.
+
+### Release flow
+
+1. Update `project.version` in `sdk/vibesys-evaluator/python/pyproject.toml`, in canonical PEP 440
+   (`0.1.0`, or `0.1.0rc1` for a release candidate), and merge the change to `main`.
+2. Create the tag `evaluator-v<version>` on that commit, for example `evaluator-v0.1.0rc1`, and
+   publish a GitHub release for it with "Set as the latest release" off
+   (`gh release create evaluator-v0.1.0rc1 --latest=false --prerelease` for a candidate). A
+   published release is the only trigger.
+3. The workflow refuses the release unless the tag's version equals `project.version` and the
+   tagged commit is contained in `main`, and also when the release took the "latest" marker. It
+   then builds the wheel and the image without any write permission and verifies them: the wheel
+   installs and imports in a clean environment, `pyright --verifytypes` passes on the installed
+   package, the package's tests, its public API snapshot, the loadgen Go tests and the conformance
+   fixtures pass, and the image runs `loadgen --capabilities` with the release version and imports
+   the package.
+4. The wheel that was verified is published by Trusted Publishing, from the only job that runs in
+   `pypi-evaluator`. Then the image that was verified is pushed by digest-preserving copy, so the
+   digest recorded at build time is the one published, and its build provenance is attested
+   (`gh attestation verify oci://ghcr.io/uw-syfi/vibesys-evaluator@<digest> --repo uw-syfi/vibesys`).
+   Last, the Go module tag is created on the same commit and the image reference with its digest
+   is added to the release notes. A release candidate's Go tag is the semantic version
+   `v0.1.0-rc.1`.
+
+Evaluator releases run one at a time, and a started one is never cancelled. Never take GitHub's
+"latest" marker with an evaluator release, for the reason given under the `vibesys-cli` releases
+above: it belongs to the Python releases. The workflow edits the release with `--latest=false`.
+
+Recovery follows the wheel's rule: never delete or move a published tag, image tag or version. A
+re-run after a partial failure is safe: it skips an image tag that already has the verified
+digest and a Go tag that already points at the commit, and fails if either holds something else.
+If a release is bad, yank the wheel on PyPI, mark the GitHub release as affected, and publish a
+higher version.

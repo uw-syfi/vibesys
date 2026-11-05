@@ -181,6 +181,16 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
+name = "the vibesys-evaluator release workflow selects its contract tests"
+paths = [".github/workflows/evaluator-release.yml"]
+jobs = ["examples", "python"]
+[cases.collections]
+native_languages = []
+dockerfile_contexts = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
 name = "the vibesys-cli release workflow selects the cli checks"
 paths = [".github/workflows/cli-release.yml"]
 jobs = ["cli", "examples"]
