@@ -21,11 +21,24 @@ from vibesys_evaluator._private.deploy import TaskCommand
 from vibesys_evaluator._private.local import LocalDeployer
 from vse_support import kv  # the tests directory is on PYTHONPATH
 
+# A real local server is far faster than the fake runner's 400 ops/s plan (more so when it
+# drops writes), and how much faster depends on the machine. Plan above what an in-process
+# Python HTTP server can serve, so the phase never runs out of plan and the test checks
+# what it names, not the runner's speed.
+LOCAL_MAX_OPS_PER_SEC = 50_000.0
+
+
+def _benchmark(run: vse.Run) -> None:
+    closed = run.closed_loop(clients=4, secs=1, warmup=0.5, max_ops_per_sec=LOCAL_MAX_OPS_PER_SEC)
+    opened = run.open_loop(rate=0.5 * closed.ops_per_sec, secs=1, warmup=0.5, arrivals="uniform")
+    run.report({"operations_per_second": closed.ops_per_sec, "latency_ms.p99": opened.p99_ms})
+
+
 TASK = Task(
     dataset=kv.Data,
     system=dataclasses.replace(kv.SYSTEM, seed=None),  # the test seeds the service it serves
     workload=kv.WORKLOAD,
-    benchmark=kv.benchmark,
+    benchmark=_benchmark,
     metrics=kv.METRICS,
     validity=vse.Validity(),
 )
