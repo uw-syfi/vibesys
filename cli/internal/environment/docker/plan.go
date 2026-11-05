@@ -114,8 +114,10 @@ func refusal(spec Spec, placement core.PlacementOffer) error {
 	switch backend := backendOf(spec); {
 	case backend == core.BackendCUDA && placement.Lacks([]core.ResourceKind{core.ResourceGPU}) != "":
 		return unavailable("the task targets the cuda backend, and the placement %q passes no GPU into a container; give it a gpu resource in the operator config, or run it on the host with --env host", placement.Name)
-	case backend != core.BackendCPU && backend != core.BackendCUDA:
-		return unavailable("the task targets the %q backend, and a container of this build gets GPUs only for the cuda backend; run it on the host with --env host", backend)
+	case backend == core.BackendROCm && placement.Lacks([]core.ResourceKind{core.ResourceROCm}) != "":
+		return unavailable("the task targets the rocm backend, and the placement %q passes no AMD GPU into a container; give it a rocm resource in the operator config, or run it on the host with --env host", placement.Name)
+	case backend != core.BackendCPU && backend != core.BackendCUDA && backend != core.BackendROCm:
+		return unavailable("the task targets the %q backend, and a container of this build gets GPUs only for the cuda and rocm backends; run it on the host with --env host", backend)
 	case spec.NestedDocker:
 		return unavailable("the task starts containers of its own (docker_in_docker = true), and a container of this build has no container runtime in it; run it on the host with --env host")
 	}

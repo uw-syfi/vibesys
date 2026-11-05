@@ -60,6 +60,10 @@ type Attachment struct {
 	// that pass them, which a container that gets none, such as the task's container beside a
 	// candidate's server, does not get either.
 	GPUEnv map[string]string
+	// Check, when set, is a command the container runs before anything else: a program and its
+	// arguments that exits 0 when the resource works in the container's image, and otherwise prints
+	// why it does not, which is what the run that needed it fails with.
+	Check []string
 }
 
 // Mount is a directory or a file of the engine's machine that the container sees.
@@ -70,11 +74,18 @@ type Mount struct {
 
 // GPUs says which GPUs a container gets, and how.
 type GPUs struct {
-	// Devices is a docker --gpus value, such as "all" or "device=0,1". Empty passes no GPU.
+	// Devices is a docker --gpus value, such as "all" or "device=0,1", of NVIDIA GPUs. Empty passes
+	// no NVIDIA GPU.
 	Devices string
 	// Runtime, when set, is the container runtime that passes the devices instead of --gpus.
 	Runtime string
+	// ROCm passes the machine's AMD GPUs through the ROCm kernel driver: its devices and the group
+	// that may use them under docker, --rocm under Apptainer. It is never set with Devices.
+	ROCm bool
 }
+
+// Given reports whether the container gets GPUs of either kind.
+func (g GPUs) Given() bool { return g.Devices != "" || g.ROCm }
 
 var (
 	factName    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
@@ -120,8 +131,11 @@ func (a Attachment) Validate() error {
 			}
 		}
 	}
-	if len(a.GPUEnv) > 0 && a.GPUs.Devices == "" {
+	if len(a.GPUEnv) > 0 && !a.GPUs.Given() {
 		return invalid("variables are set to pass GPUs, and no GPU is given")
+	}
+	if len(a.Check) > 0 && a.Check[0] == "" {
+		return invalid("the check has no program")
 	}
 	switch {
 	case !networkName.MatchString(a.Network):
@@ -132,6 +146,8 @@ func (a Attachment) Validate() error {
 		return invalid("%q is not a container runtime name", a.GPUs.Runtime)
 	case a.GPUs.Runtime != "" && a.GPUs.Devices == "":
 		return invalid("the runtime %q is for GPUs, and no GPU is given", a.GPUs.Runtime)
+	case a.GPUs.ROCm && a.GPUs.Devices != "":
+		return invalid("the GPUs are passed both as AMD GPUs and with the --gpus value %q", a.GPUs.Devices)
 	}
 	return nil
 }
@@ -175,6 +191,12 @@ func Combine(attachments []Attachment) (Attachment, error) {
 				return Attachment{}, invalid("two resources pass GPUs")
 			}
 			out.GPUs = a.GPUs
+		}
+		if len(a.Check) > 0 {
+			if len(out.Check) > 0 {
+				return Attachment{}, invalid("two resources check the container")
+			}
+			out.Check = slices.Clone(a.Check)
 		}
 	}
 	return out, nil

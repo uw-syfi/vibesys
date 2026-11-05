@@ -11,11 +11,14 @@ import (
 	"time"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/cli/internal/backend/amd"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/nvidia"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/clustercli"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/dockercli"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker/machine"
@@ -28,6 +31,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/resource/gpu"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/kubernetes"
 	"github.com/uw-syfi/vibesys/cli/internal/resource/mounts"
+	"github.com/uw-syfi/vibesys/cli/internal/resource/rocm"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
@@ -164,6 +168,9 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 		}
 		engineCfg.StartTimeout = seconds(s.GetQueueTimeoutSeconds(), slurm.DefaultQueueTimeout)
 	}
+	if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
+		return p.apptainerPlacement(clk, cfg, pl)
+	}
 	engine, err := dockercli.New(engineCfg)
 	if err != nil {
 		return nil, err
@@ -175,15 +182,76 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 			Builders: slurm.Buildx{Shell: engineCfg.Shell, Timers: clk, Name: slurm.BuilderName(scope)},
 		}
 	}
-	if cfg.Resources, err = resources(pl.GetResources(), shell, where, clk); err != nil {
+	if cfg.Resources, err = resources(pl.GetResources(), shell, where, clk, &amd.GPUs{Shell: shell, Timers: clk}); err != nil {
 		return nil, err
 	}
 	return docker.New(cfg)
 }
 
-// resources are the resources of a placement, each made by its own package from its section.
-func resources(r *cliv1.Resources, shell remote.Shell, where string, clk clock.System) ([]resource.Resource, error) {
+// gpuScript names the node script whose output the rocm resource of an apptainer placement reads.
+const gpuScript = "gpu"
+
+// apptainerPlacement makes the docker environments of a placement of the apptainer kind: this
+// machine's Docker builds and exports the images, the login node stages the runs' directories on
+// the file system the nodes share, and the cluster runs the containers in its allocations. The
+// machine and the GPUs are what the nodes say inside the allocations, never the login node.
+func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cliv1.Placement) (*docker.Provider, error) {
+	local, err := dockercli.New(dockercli.Config{Timers: clk})
+	if err != nil {
+		return nil, err
+	}
+	ssh := remote.SSH{Host: pl.GetRemote().GetHost(), Program: orDefault(pl.GetRemote().GetSshCommand(), "ssh")}
+	s, a := pl.GetSlurm(), pl.GetApptainer()
+	cluster, err := clustercli.New(clustercli.Config{
+		Shell: ssh, Timers: clk, Submit: orDefault(a.GetSubmitCommand(), "sbatch"), Program: a.GetProgram(),
+		Poll: seconds(s.GetPollIntervalSeconds(), clustercli.DefaultPoll),
+	})
+	if err != nil {
+		return nil, err
+	}
+	exclusive := true
+	if s.Exclusive != nil {
+		exclusive = s.GetExclusive()
+	}
+	var scripts map[string]string
+	if pl.GetResources().GetRocm() != nil {
+		scripts = map[string]string{gpuScript: amd.Script}
+	}
+	eng, err := apptainer.New(apptainer.Config{
+		Local: local, Export: local, Cluster: cluster, Root: pl.GetRemote().GetRemoteWorkspaceRoot(), Scope: cfg.Scope,
+		Timers: clk, Clock: clk, Poll: seconds(s.GetPollIntervalSeconds(), apptainer.DefaultPoll),
+		QueueTimeout: seconds(s.GetQueueTimeoutSeconds(), apptainer.DefaultQueueTimeout),
+		Sizing: apptainer.Sizing{
+			Partition: s.GetPartition(), Gres: s.GetGres(), SharedGres: s.GetSharedGres(), Exclusive: exclusive,
+			CPUs: int(s.GetCpus()), Memory: s.GetMemory(), Arguments: a.GetSubmitArguments(),
+		},
+		NodeScripts: scripts,
+	})
+	if err != nil {
+		return nil, err
+	}
+	cfg.Engine, cfg.Backend, cfg.Probe = eng, eng.Backend(), p.probe()
+	unread := map[string]string{amd.FactModel: apptainer.Unread, amd.FactCount: apptainer.Unread, amd.FactDriver: apptainer.Unread}
+	facts := apptainer.Facts{Engine: eng, Script: gpuScript, Parse: amd.Parse, Unread: unread}
+	// The GPUs are the cluster's, named by its login node: they are claimed once for the cluster,
+	// whose allocations are what keeps two jobs off one node's GPUs.
+	if cfg.Resources, err = resources(pl.GetResources(), ssh, ssh.Host, clk, facts); err != nil {
+		return nil, err
+	}
+	return docker.New(cfg)
+}
+
+// resources are the resources of a placement, each made by its own package from its section. The
+// AMD GPUs' facts are read by amdFacts.
+func resources(r *cliv1.Resources, shell remote.Shell, where string, clk clock.System, amdFacts rocm.Facts) ([]resource.Resource, error) {
 	var out []resource.Resource
+	if r.GetRocm() != nil {
+		res, err := rocm.New(rocm.Config{Machine: where, Facts: amdFacts})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, res)
+	}
 	if g := r.GetGpu(); g != nil {
 		res, err := gpu.New(gpu.Config{Devices: g.GetDevices(), Runtime: g.GetRuntime(), Machine: where, Facts: &nvidia.GPUs{Shell: shell, Timers: clk}})
 		if err != nil {

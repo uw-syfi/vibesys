@@ -32,10 +32,14 @@ const (
 	OpStart      Op = "start"
 	// OpExec is the start of a process in a container.
 	OpExec Op = "exec"
+	// OpPort is the choice of a container's free port.
+	OpPort Op = "port"
+	// OpSave is the export of an image as a docker archive.
+	OpSave Op = "save"
 )
 
 // Ops lists every call a fault can fail.
-var Ops = []Op{OpImage, OpBuild, OpContainers, OpRemove, OpStart, OpExec}
+var Ops = []Op{OpImage, OpBuild, OpContainers, OpRemove, OpStart, OpExec, OpPort, OpSave}
 
 // Call is one call of the engine, as a fault sees it.
 type Call struct {
@@ -280,6 +284,33 @@ func (c *Client) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	return nil
 }
 
+// Save writes the image, found by its ID or a tag, as an archive: what Archive returns of it.
+func (c *Client) Save(ctx context.Context, image string, w io.Writer) error {
+	fault, err := c.enter(ctx, Call{OpSave, image})
+	if err != nil {
+		return err
+	}
+	if fault != nil {
+		return fault.Err
+	}
+	c.d.mu.Lock()
+	var id string
+	for tag, img := range c.d.images {
+		if tag == image || img.ID == image {
+			id = img.ID
+		}
+	}
+	c.d.mu.Unlock()
+	if id == "" {
+		return &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
+	}
+	_, err = w.Write(Archive(id))
+	return err
+}
+
+// Archive is the archive Save writes of the image with the ID.
+func Archive(id string) []byte { return []byte("docker archive of " + id + "\n") }
+
 // Containers implements docker.Engine.
 func (c *Client) Containers(ctx context.Context, match docker.Labels) ([]string, error) {
 	fault, err := c.enter(ctx, Call{OpContainers, labelsKey(match)})
@@ -414,6 +445,15 @@ func (h *handle) Start(argv []string, sink io.Writer) (environment.Process, erro
 		return h.probe(), nil
 	}
 	return h.b.machine.Start(argv, sink)
+}
+
+// Port implements docker.Container: a container of the fake has a network of its own, as a real
+// one has.
+func (h *handle) Port(ctx context.Context, seed string) (int, error) {
+	if _, err := h.c.enter(ctx, Call{OpPort, h.b.spec.Name}); err != nil {
+		return 0, err
+	}
+	return docker.PortOf(seed), nil
 }
 
 // probe is the probe program asking the server whose network the container joined: it answers

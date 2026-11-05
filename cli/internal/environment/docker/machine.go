@@ -30,6 +30,11 @@ type Machine interface {
 	// User is the user and group the commands run as there, so the files they write are that
 	// user's.
 	User(ctx context.Context) (User, error)
+
+	// Program makes a program of the caller's machine, given by its absolute path, runnable on the
+	// engine's machine, and returns its path there. A program built for another platform than the
+	// engine's machine's fails with core.FailureUnavailable naming both.
+	Program(ctx context.Context, local string) (string, error)
 }
 
 // Shared is the Machine of an engine that runs on the caller's own machine with the caller's
@@ -50,3 +55,6 @@ func (Shared) Cache(context.Context, string) (string, error) { return "", nil }
 
 // User implements Machine.
 func (s Shared) User(context.Context) (User, error) { return s.As, nil }
+
+// Program implements Machine: the engine's machine is the caller's.
+func (Shared) Program(_ context.Context, local string) (string, error) { return local, nil }

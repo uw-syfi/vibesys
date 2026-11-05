@@ -118,10 +118,9 @@ func (e *env) Candidate(ctx context.Context, b core.CandidateBuild, log io.Write
 	return core.CandidateImage{ID: img.ID, Tag: tag}, nil
 }
 
-// portOf is the port the candidate's server of the run listens on. Every run's candidate has a
-// network of its own, so any port is free in it; the port is taken from the run's id, so that no
-// two runs assume one fixed port.
-func portOf(runID string) int {
+// PortOf is a port taken from a seed, such as a run's id, for an engine whose containers have a
+// network of their own, so that any port is free in them and no two runs assume one fixed port.
+func PortOf(runID string) int {
 	sum := sha256.Sum256([]byte(runID))
 	return 20000 + int(binary.BigEndian.Uint32(sum[:4])%20000)
 }

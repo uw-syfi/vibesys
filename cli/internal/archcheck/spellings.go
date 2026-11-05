@@ -23,7 +23,8 @@ var spelledAt = map[string][]string{
 		// The closed set of resource kinds: the one place the domain spells them.
 		"cli/internal/core/placement.go",
 	},
-	"slurm":  {"cli/internal/environment/slurm/", "cli/internal/operator/"},
+	// The apptainer placement is a Slurm cluster's: its engine and its cluster speak Slurm.
+	"slurm":  {"cli/internal/environment/slurm/", "cli/internal/environment/apptainer/", "cli/internal/operator/"},
 	"nvidia": {"cli/internal/backend/nvidia/", "cli/internal/resource/gpu/"},
 }
 

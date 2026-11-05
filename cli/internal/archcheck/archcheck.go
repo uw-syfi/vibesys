@@ -50,6 +50,7 @@ var rules = map[string][]string{
 	"internal/backend/cpu":         {"internal/backend", "internal/clock", "internal/core"},
 	"internal/backend/backendtest": {"internal/backend"},
 	"internal/backend/nvidia":      {"internal/clock", "internal/core", "internal/remote"},
+	"internal/backend/amd":         {"internal/clock", "internal/core", "internal/remote"},
 	// Reaching a machine to run programs on: this one, or another over ssh and rsync.
 	"internal/remote": {"internal/backend/cpu", "internal/clock", "internal/core"},
 	// The operator's settings of the machine, which never come from a task: the outer structure of
@@ -65,6 +66,7 @@ var rules = map[string][]string{
 	"internal/resource/resourcetest": {"internal/core", "internal/resource"},
 	"internal/resource/fakeresource": {"internal/core", "internal/resource"},
 	"internal/resource/gpu":          {"internal/core", "internal/resource"},
+	"internal/resource/rocm":         {"internal/core", "internal/resource"},
 	"internal/resource/mounts":       {"internal/core", "internal/resource"},
 	"internal/resource/kubernetes":   {"internal/clock", "internal/core", "internal/remote", "internal/resource"},
 	"internal/environment":           {"internal/core"},
@@ -87,6 +89,20 @@ var rules = map[string][]string{
 	"internal/environment/slurm": {"internal/clock", "internal/core", "internal/environment/docker", "internal/environment/docker/dockercli", "internal/remote"},
 	"internal/environment/docker/dockerfake": {
 		"internal/core", "internal/environment", "internal/environment/docker", "internal/environment/fakeenv",
+	},
+	// Containers placed on a Slurm cluster whose nodes run Apptainer and no Docker: an engine over
+	// the cluster's interface, the real cluster reached over ssh, and a fake kept in memory.
+	"internal/environment/apptainer": {
+		"internal/backend", "internal/backend/cpu", "internal/clock", "internal/core", "internal/environment",
+		"internal/environment/docker",
+	},
+	"internal/environment/apptainer/clustercli": {
+		"internal/clock", "internal/core", "internal/environment", "internal/environment/apptainer",
+		"internal/environment/docker", "internal/environment/slurm", "internal/remote",
+	},
+	"internal/environment/apptainer/clusterfake": {
+		"internal/core", "internal/environment", "internal/environment/apptainer", "internal/environment/docker",
+		"internal/environment/fakeenv",
 	},
 	"internal/environment/docker/dockertest": {"internal/core", "internal/environment", "internal/environment/docker", "internal/environment/envtest"},
 	"internal/gitrepo":                       {"internal/core"},
@@ -162,6 +178,7 @@ var rules = map[string][]string{
 		"internal/schedule/policy/fifo", "gen/", "internal/resource", "internal/resource/gpu",
 		"internal/resource/kubernetes", "internal/resource/mounts", "internal/lease", "internal/lease/hostlease", "internal/lease/kubelease",
 		"internal/lease/locallease", "internal/neighbors",
+		"internal/backend/amd", "internal/resource/rocm", "internal/environment/apptainer", "internal/environment/apptainer/clustercli",
 	},
 
 	// Replacing the running binary with a newer release.
@@ -207,9 +224,17 @@ var testRules = map[string][]string{
 	"internal/environment/docker/machine": {"internal/environment/envtest"},
 	"internal/remote":                     {"internal/environment/envtest"},
 	"internal/resource/gpu":               {"internal/resource/resourcetest"},
-	"internal/resource/mounts":            {"internal/resource/resourcetest"},
-	"internal/resource/kubernetes":        {"internal/resource/resourcetest"},
-	"internal/resource/fakeresource":      {"internal/resource/resourcetest"},
+	"internal/resource/rocm":              {"internal/resource/resourcetest"},
+	"internal/environment/apptainer": {
+		"internal/backend/amd", "internal/environment/apptainer/clusterfake",
+		"internal/environment/docker/dockerfake", "internal/environment/docker/dockertest", "internal/environment/envtest",
+		"internal/environment/fakeenv", "internal/environment/fakeenv/fakeworld", "internal/resource",
+		"internal/resource/rocm", "internal/task",
+	},
+	"internal/environment/apptainer/clustercli": {"internal/environment/envtest"},
+	"internal/resource/mounts":                  {"internal/resource/resourcetest"},
+	"internal/resource/kubernetes":              {"internal/resource/resourcetest"},
+	"internal/resource/fakeresource":            {"internal/resource/resourcetest"},
 	"internal/environment/docker": {
 		"internal/resource/fakeresource",
 		"internal/backend/cpu", "internal/clock", "internal/environment/docker/dockerfake",

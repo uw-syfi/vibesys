@@ -1,0 +1,632 @@
+package apptainer
+
+import (
+	"compress/gzip"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"maps"
+	"path"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/uw-syfi/vibesys/cli/internal/clock"
+	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
+	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
+)
+
+// Defaults of what Config may leave out.
+const (
+	// DefaultPoll is the pause between two reads of a queued job's state.
+	DefaultPoll = 5 * time.Second
+	// DefaultQueueTimeout bounds the wait for an allocation.
+	DefaultQueueTimeout = 24 * time.Hour
+	// CallTimeout bounds a call that should answer at once, such as a signal to a box.
+	CallTimeout = 2 * time.Minute
+)
+
+// Margin is added to a container's limit to make its allocation's time limit: the time it may take
+// to convert its images to SIFs on the node, and the stop after the limit. The allocation is a
+// backstop: the environment ends the commands first.
+const Margin = 40 * time.Minute
+
+// NoLimit is the time limit of an allocation whose container was given none.
+const NoLimit = 24 * time.Hour
+
+// ScratchFactor is how many times its archive's unpacked size converting an image needs of the
+// node's scratch space: the unpacked archive, the image's file tree Apptainer builds from it, and
+// the SIF it writes.
+const ScratchFactor = 3
+
+// Exporter writes a local image as a docker archive (docker save).
+type Exporter interface {
+	Save(ctx context.Context, image string, w io.Writer) error
+}
+
+// Sizing is what an allocation asks for, by what its container runs.
+type Sizing struct {
+	Partition string
+	// Gres is what a measured container's allocation asks for.
+	Gres string
+	// SharedGres is what an unmeasured container's allocation asks for instead of Gres, when set.
+	SharedGres string
+	// Exclusive gives a measured container's allocation the whole node.
+	Exclusive bool
+	// CPUs is how many CPUs an allocation that is not the whole node asks for; zero is 8.
+	CPUs int
+	// Memory, when set, is the memory such an allocation asks for, as Slurm writes a size.
+	Memory string
+	// Arguments are the operator's own options, after these.
+	Arguments []string
+}
+
+// Options are the submit command's options of an allocation for a container that is measured or
+// not.
+func (s Sizing) Options(measured bool) []string {
+	var out []string
+	if s.Partition != "" {
+		out = append(out, "--partition="+s.Partition)
+	}
+	gres := s.Gres
+	if !measured && s.SharedGres != "" {
+		gres = s.SharedGres
+	}
+	if gres != "" {
+		out = append(out, "--gres="+gres)
+	}
+	if measured && s.Exclusive {
+		out = append(out, "--exclusive")
+	} else {
+		cpus := s.CPUs
+		if cpus <= 0 {
+			cpus = 8
+		}
+		out = append(out, "--cpus-per-task="+strconv.Itoa(cpus))
+		if s.Memory != "" {
+			out = append(out, "--mem="+s.Memory)
+		}
+	}
+	return append(out, s.Arguments...)
+}
+
+// Config configures New.
+type Config struct {
+	// Local is the Docker engine of the caller's machine, which builds the images and finds them.
+	Local docker.Engine
+	// Export writes the local engine's images as docker archives.
+	Export Exporter
+	// Cluster is the cluster the containers run on.
+	Cluster Cluster
+	// Root is the absolute directory of the shared file system that holds the images, the SIFs and
+	// the readings of the nodes.
+	Root string
+	// Scope names whose last reading of a node is kept (nodes/<scope>.json under Root).
+	Scope string
+	// Timers makes the engine's own waits: the pause between two reads of a queued job, the bound
+	// on the queue, and the bound of a signal.
+	Timers clock.Timers
+	// Clock stamps the readings of the nodes.
+	Clock clock.Clock
+	// Poll is the pause between two reads of a queued job's state; zero is DefaultPoll.
+	Poll time.Duration
+	// QueueTimeout bounds the wait for an allocation; zero is DefaultQueueTimeout.
+	QueueTimeout time.Duration
+	// Sizing is what each allocation asks for.
+	Sizing Sizing
+	// NodeScripts are scripts each node runs with its facts, whose output Facts reads by name.
+	NodeScripts map[string]string
+}
+
+// Engine is the docker.Engine of a cluster. Create it with New. It is safe for concurrent use.
+type Engine struct {
+	cfg Config
+
+	mu      sync.Mutex
+	boxes   map[string]*box // the containers this engine started, by name
+	reading *Reading        // the last node this process read
+}
+
+var _ docker.Engine = (*Engine)(nil)
+
+// box is a container this engine started.
+type box struct {
+	name   string
+	labels docker.Labels
+	job    string // the allocation it runs in
+	owner  bool   // the allocation is its own
+	spec   docker.ContainerSpec
+	sif    string
+	hold   io.Closer
+	gone   bool // removed or closed: its processes end with it
+}
+
+// New returns an engine, or a core.FailureInvalidInput naming what is missing.
+func New(cfg Config) (*Engine, error) {
+	missing := func(what string) error {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: "apptainer: the config has no " + what}
+	}
+	switch {
+	case cfg.Local == nil:
+		return nil, missing("Local")
+	case cfg.Export == nil:
+		return nil, missing("Export")
+	case cfg.Cluster == nil:
+		return nil, missing("Cluster")
+	case cfg.Timers == nil:
+		return nil, missing("Timers")
+	case cfg.Clock == nil:
+		return nil, missing("Clock")
+	case !path.IsAbs(cfg.Root) || path.Clean(cfg.Root) == "/":
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("apptainer: the root %q is not an absolute directory other than /", cfg.Root)}
+	}
+	if err := checkScripts(cfg.NodeScripts); err != nil {
+		return nil, err
+	}
+	if cfg.Poll <= 0 {
+		cfg.Poll = DefaultPoll
+	}
+	if cfg.QueueTimeout <= 0 {
+		cfg.QueueTimeout = DefaultQueueTimeout
+	}
+	return &Engine{cfg: cfg, boxes: map[string]*box{}}, nil
+}
+
+// JobName is the name of the allocation of the container with the name.
+func JobName(container string) string { return JobPrefix + container }
+
+// JobPrefix starts the name of every allocation this package asks for.
+const JobPrefix = "vibesys-apptainer-"
+
+func unavailable(format string, args ...any) error {
+	return &core.Failure{Kind: core.FailureUnavailable, Message: "apptainer: " + fmt.Sprintf(format, args...)}
+}
+
+func invalid(format string, args ...any) error {
+	return &core.Failure{Kind: core.FailureInvalidInput, Message: "apptainer: " + fmt.Sprintf(format, args...)}
+}
+
+// Image implements docker.Engine: the images are the local engine's.
+func (e *Engine) Image(ctx context.Context, ref string) (docker.Image, bool, error) {
+	return e.cfg.Local.Image(ctx, ref)
+}
+
+// Build implements docker.Engine: the local engine builds.
+func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer) error {
+	return e.cfg.Local.Build(ctx, spec, log)
+}
+
+// Containers implements docker.Engine: the containers of this engine that carry the labels, and,
+// with a scope among them, the scope's allocations, which are what a run of another process
+// started, live or dead.
+func (e *Engine) Containers(ctx context.Context, match docker.Labels) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var names []string
+	e.mu.Lock()
+	for name, b := range e.boxes {
+		if !b.gone && hasLabels(b.labels, match) {
+			names = append(names, name)
+		}
+	}
+	e.mu.Unlock()
+	if scope, ok := match[docker.LabelScope]; ok {
+		jobs, err := e.cfg.Cluster.Jobs(ctx, scope)
+		if err != nil {
+			return nil, err
+		}
+		for _, job := range jobs {
+			if name, ok := strings.CutPrefix(job, JobPrefix); ok && !slices.Contains(names, name) {
+				names = append(names, name)
+			}
+		}
+	}
+	slices.Sort(names)
+	return names, nil
+}
+
+func hasLabels(have, want docker.Labels) bool {
+	for k, v := range want {
+		if got, ok := have[k]; !ok || got != v {
+			return false
+		}
+	}
+	return true
+}
+
+// Remove implements docker.Engine. A container that joined another's allocation has its processes
+// killed; any other has its allocation cancelled, confirmed, which ends everything in it. A
+// container this process did not start is the allocation of its name.
+func (e *Engine) Remove(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	e.mu.Lock()
+	b := e.boxes[name]
+	var owner *box
+	if b != nil && !b.owner {
+		owner = e.ownerOf(b)
+	}
+	e.mu.Unlock()
+	if b != nil && !b.owner {
+		if owner != nil && b.job != "" {
+			if err := e.cfg.Cluster.Node(b.job).Signal(ctx, name, SIGKILL); err != nil {
+				return fmt.Errorf("killing the processes of %s: %w", name, err)
+			}
+		}
+		e.forget(b)
+		return nil
+	}
+	if err := e.cfg.Cluster.Cancel(ctx, JobName(name)); err != nil {
+		return fmt.Errorf("the allocation of %s was not confirmed ended: %w", name, err)
+	}
+	if b != nil {
+		e.forget(b)
+	}
+	return nil
+}
+
+// ownerOf is the live container whose allocation b joined. e.mu is held.
+func (e *Engine) ownerOf(b *box) *box {
+	for _, o := range e.boxes {
+		if o.owner && o.job == b.job && !o.gone {
+			return o
+		}
+	}
+	return nil
+}
+
+// forget drops a container that is gone: its processes end with it.
+func (e *Engine) forget(b *box) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	b.gone = true
+	if e.boxes[b.name] == b {
+		delete(e.boxes, b.name)
+	}
+}
+
+// Start implements docker.Engine. A container whose network is another's joins that one's
+// allocation; any other asks for an allocation of its own and waits for it, which may take as long
+// as the queue does, up to QueueTimeout. Its image is copied to the cluster first when the cluster
+// has neither it nor its SIF, and converted on the node when the cluster has no SIF of it.
+func (e *Engine) Start(ctx context.Context, spec docker.ContainerSpec) (docker.Container, error) {
+	if err := spec.Validate(); err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if spec.GPUs.Devices != "" {
+		return nil, invalid("the container %s is given GPUs by device (--gpus %s), and a node of this placement gives only AMD GPUs, with a rocm resource", spec.Name, spec.GPUs.Devices)
+	}
+	joined, joins := strings.CutPrefix(spec.Network, "container:")
+	if !joins && spec.Network != "" && spec.Network != "host" {
+		return nil, invalid("the container %s asks for the network %q, and a container on a cluster's node has the node's network", spec.Name, spec.Network)
+	}
+	b := &box{name: spec.Name, labels: maps.Clone(spec.Labels), spec: spec, owner: !joins}
+	e.mu.Lock()
+	if _, taken := e.boxes[spec.Name]; taken {
+		e.mu.Unlock()
+		return nil, &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf("apptainer: the container name %q is already in use", spec.Name)}
+	}
+	if joins {
+		o := e.boxes[joined]
+		if o == nil || o.gone || !o.owner {
+			e.mu.Unlock()
+			return nil, unavailable("cannot join the allocation of container %q, which is not running", joined)
+		}
+		b.job = o.job
+	}
+	e.boxes[spec.Name] = b
+	e.mu.Unlock()
+
+	if err := e.publish(ctx, spec.Image); err != nil {
+		e.forget(b)
+		return nil, err
+	}
+	if !joins {
+		if err := e.allocate(ctx, b); err != nil {
+			// The allocation may exist: the box stays known, so Remove cancels it.
+			return nil, err
+		}
+	}
+	node := e.cfg.Cluster.Node(b.job)
+	sif, err := e.convert(ctx, node, spec.Image)
+	if err != nil {
+		return nil, err
+	}
+	e.mu.Lock()
+	b.sif = sif
+	e.mu.Unlock()
+	return &handle{e: e, b: b, node: node}, nil
+}
+
+// allocate asks for the box's allocation, waits for it to run, holds it for this process, and reads
+// its node.
+func (e *Engine) allocate(ctx context.Context, b *box) error {
+	limit := NoLimit
+	if b.spec.Limit > 0 {
+		limit = b.spec.Limit
+	}
+	job, err := e.cfg.Cluster.Submit(ctx, Allocation{
+		Name: JobName(b.name), Comment: b.labels[docker.LabelScope], Limit: limit + Margin,
+		Options: e.cfg.Sizing.Options(b.spec.Measured),
+	})
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	b.job = job
+	e.mu.Unlock()
+	if err := e.await(ctx, job); err != nil {
+		return err
+	}
+	node := e.cfg.Cluster.Node(job)
+	hold, err := node.Hold(ctx)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	b.hold = hold
+	e.mu.Unlock()
+	return e.read(ctx, node)
+}
+
+// await waits for the job to run, pausing between reads of its state, up to QueueTimeout.
+func (e *Engine) await(ctx context.Context, job string) error {
+	limit, stop := e.cfg.Timers.Timeout(ctx, e.cfg.QueueTimeout)
+	defer stop()
+	for {
+		st, err := e.cfg.Cluster.State(ctx, job)
+		if err != nil {
+			return err
+		}
+		switch st.Phase {
+		case Running:
+			return nil
+		case Ended:
+			return unavailable("the allocation %s ended before it ran (Slurm says %s)", job, orUnknown(st.Name))
+		}
+		pause, stopPause := e.cfg.Timers.Timeout(ctx, e.cfg.Poll)
+		select {
+		case <-pause:
+			stopPause()
+		case <-limit:
+			stopPause()
+			why := orUnknown(st.Name)
+			if st.Reason != "" {
+				why += ", " + st.Reason
+			}
+			return unavailable("the allocation %s did not start within %v (Slurm says %s); it is cancelled", job, e.cfg.QueueTimeout, why)
+		case <-ctx.Done():
+			stopPause()
+			return ctx.Err()
+		}
+	}
+}
+
+func orUnknown(s string) string {
+	if s == "" {
+		return "nothing of it"
+	}
+	return s
+}
+
+// imagePaths are where the cluster keeps an image: its archive, the archive's unpacked size, which
+// is published after the archive and so says the archive is whole, and its SIF.
+func (e *Engine) imagePaths(image string) (archive, size, sif string) {
+	base := path.Join(e.cfg.Root, "images", strings.TrimPrefix(image, "sha256:"))
+	return base + ".tar.gz", base + ".size", base + ".sif"
+}
+
+// publish copies the image to the cluster, compressed, unless the cluster has it or its SIF.
+func (e *Engine) publish(ctx context.Context, image string) error {
+	archive, size, sif := e.imagePaths(image)
+	for _, p := range []string{sif, size} {
+		has, err := e.cfg.Cluster.Has(ctx, p)
+		if err != nil || has {
+			return err
+		}
+	}
+	pr, pw := io.Pipe()
+	var (
+		wg       sync.WaitGroup
+		unpacked int64
+	)
+	wg.Go(func() {
+		gz, _ := gzip.NewWriterLevel(pw, gzip.BestSpeed)
+		count := &counter{w: gz}
+		err := e.cfg.Export.Save(ctx, image, count)
+		if cerr := gz.Close(); err == nil {
+			err = cerr
+		}
+		unpacked = count.n
+		if err != nil {
+			err = fmt.Errorf("exporting the image %s: %w", image, err)
+		}
+		pw.CloseWithError(err)
+	})
+	err := e.cfg.Cluster.Publish(ctx, archive, pr)
+	pr.CloseWithError(errors.New("apptainer: the copy ended"))
+	wg.Wait()
+	if err != nil {
+		return err
+	}
+	return e.cfg.Cluster.Publish(ctx, size, strings.NewReader(strconv.FormatInt(unpacked, 10)+"\n"))
+}
+
+// counter counts what is written through it.
+type counter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *counter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// convert returns the image's SIF on the cluster, converting it on the node when there is none,
+// after checking that the node's scratch space can hold the conversion.
+func (e *Engine) convert(ctx context.Context, node Node, image string) (string, error) {
+	archive, sizePath, sif := e.imagePaths(image)
+	has, err := e.cfg.Cluster.Has(ctx, sif)
+	if err != nil || has {
+		return sif, err
+	}
+	text, ok, err := e.cfg.Cluster.Read(ctx, sizePath)
+	if err != nil {
+		return "", err
+	}
+	size, perr := strconv.ParseInt(strings.TrimSpace(string(text)), 10, 64)
+	if !ok || perr != nil || size < 0 {
+		return "", unavailable("the size of the image %s on the cluster (%s) is not a number of bytes: %q", image, sizePath, text)
+	}
+	free, err := node.Scratch(ctx)
+	if err != nil {
+		return "", err
+	}
+	if need := ScratchFactor * size; free < need {
+		return "", unavailable(
+			"converting the image %s to a SIF needs about %s of the node's own scratch space (%d times the image's %s), and the node has %s free; "+
+				"run on a partition whose jobs have more scratch space, or free it", image, Size(need), ScratchFactor, Size(size), Size(free))
+	}
+	if err := node.Convert(ctx, archive, sif); err != nil {
+		return "", fmt.Errorf("converting the image %s to a SIF: %w", image, err)
+	}
+	return sif, nil
+}
+
+// Size writes a number of bytes for a person.
+func Size(n int64) string {
+	const gib = 1 << 30
+	if n >= gib {
+		return fmt.Sprintf("%.1f GiB", float64(n)/gib)
+	}
+	return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+}
+
+// handle is a started container, and a docker.Container.
+type handle struct {
+	e    *Engine
+	b    *box
+	node Node
+
+	mu     sync.Mutex
+	procs  []*proc
+	closed bool
+	once   sync.Once
+}
+
+var _ docker.Container = (*handle)(nil)
+
+// boxOf is what the node runs the container's processes with.
+func (h *handle) boxOf() Box {
+	h.e.mu.Lock()
+	defer h.e.mu.Unlock()
+	return Box{
+		Name: h.b.name, Image: h.b.sif, Dir: h.b.spec.Dir, Mounts: slices.Clone(h.b.spec.Mounts),
+		Env: maps.Clone(h.b.spec.Env), ROCm: h.b.spec.GPUs.ROCm,
+	}
+}
+
+// Start implements environment.Launcher.
+func (h *handle) Start(argv []string, sink io.Writer) (environment.Process, error) {
+	if len(argv) == 0 || argv[0] == "" {
+		return nil, invalid("no command to run")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return nil, unavailable("the container %s is closed", h.b.name)
+	}
+	inner, err := h.node.Start(h.boxOf(), argv, sink)
+	if err != nil {
+		return nil, err
+	}
+	p := &proc{h: h, inner: inner, exited: make(chan environment.Exit, 1)}
+	p.wg.Go(func() { p.exited <- h.finish(<-inner.Exited()) })
+	h.procs = append(h.procs, p)
+	return p, nil
+}
+
+// finish says how a process ended: one killed by a signal after its container went away was ended
+// by its removal, which says nothing of how the command would have ended.
+func (h *handle) finish(st environment.Exit) environment.Exit {
+	h.e.mu.Lock()
+	gone := h.b.gone
+	h.e.mu.Unlock()
+	if st.Err == nil && st.Kind == "" && st.Code >= 128 && gone {
+		return docker.Lost(fmt.Sprintf("the container %s went away under the command", h.b.name))
+	}
+	return st
+}
+
+// Port implements docker.Container: a port of the node that no process listens on, since the
+// node's network is shared with every other job on it.
+func (h *handle) Port(ctx context.Context, _ string) (int, error) {
+	return h.node.Port(ctx)
+}
+
+// signal sends the signal to the container's processes, bounded.
+func (h *handle) signal(sig Signal) error {
+	ctx, stop := clock.Deadline(context.Background(), h.e.cfg.Timers, CallTimeout)
+	defer stop()
+	return h.node.Signal(ctx, h.b.name, sig)
+}
+
+// Close implements docker.Container. The container of an allocation releases its hold, which ends
+// the allocation; a container that joined one has its processes killed. Then the clients of its
+// processes are ended and waited for, so nothing writes to a sink afterwards.
+func (h *handle) Close() {
+	h.once.Do(func() {
+		h.mu.Lock()
+		h.closed = true
+		procs := slices.Clone(h.procs)
+		h.mu.Unlock()
+		h.e.mu.Lock()
+		hold, owner := h.b.hold, h.b.owner
+		h.b.gone = true
+		h.e.mu.Unlock()
+		if owner {
+			if hold != nil {
+				_ = hold.Close()
+			}
+		} else {
+			_ = h.signal(SIGKILL)
+		}
+		for _, p := range procs {
+			p.Kill()
+		}
+		for _, p := range procs {
+			p.wg.Wait()
+		}
+	})
+}
+
+// proc is a process of a container.
+type proc struct {
+	h      *handle
+	inner  environment.Process
+	exited chan environment.Exit
+	wg     sync.WaitGroup
+}
+
+// Exited implements environment.Process.
+func (p *proc) Exited() <-chan environment.Exit { return p.exited }
+
+// Terminate implements environment.Process: SIGTERM to every process of the container, as a
+// container's processes are one machine. A container that cannot be reached is not an error here:
+// its processes end when it is removed, which the caller does after the grace period either way.
+func (p *proc) Terminate() { _ = p.h.signal(SIGTERM) }
+
+// Kill implements environment.Process: it ends the client of the command at once. The command
+// itself ends no later than the container's removal.
+func (p *proc) Kill() { p.inner.Kill() }

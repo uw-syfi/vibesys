@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -46,6 +47,8 @@ type box struct {
 	claimed   bool // this run owns the name
 	attempted bool // Start was called, so the container may exist
 	container Container
+	// check is what the container runs first, to see that what its resources give it works.
+	check []string
 }
 
 // run is one call of Run: the containers it started and what it needs to end them.
@@ -121,36 +124,38 @@ func (r *run) prepareAndExecute() core.Attempt {
 			return notStarted(err)
 		}
 	}
-	port := portOf(id)
-	var specs []ContainerSpec
+	var port int
 	switch {
 	case serving:
-		server, err := r.containerSpec(r.boxes[0].name, id, candImg, roleServer, "")
+		server, err := r.containerSpec(r.boxes[0], id, candImg, roleServer, "")
 		if err != nil {
 			return notStarted(err)
 		}
-		beside, err := r.containerSpec(r.boxes[1].name, id, img, roleBeside, environment.ServiceURL(port))
+		if err := r.start(r.boxes[0], server); err != nil {
+			return notStarted(err)
+		}
+		// The server's port is chosen once its container is up, where it will listen: on a machine
+		// whose network other work shares, a port is free only there and then.
+		if port, err = r.boxes[0].container.Port(r.ctx, id); err != nil {
+			return notStarted(err)
+		}
+		beside, err := r.containerSpec(r.boxes[1], id, img, roleBeside, environment.ServiceURL(port))
 		if err != nil {
 			return notStarted(err)
 		}
-		specs = []ContainerSpec{server, beside}
-	case cand != nil:
-		only, err := r.containerSpec(r.boxes[0].name, id, candImg, roleOnly, "")
-		if err != nil {
+		if err := r.start(r.boxes[1], beside); err != nil {
 			return notStarted(err)
 		}
-		specs = []ContainerSpec{only}
 	default:
-		only, err := r.containerSpec(r.boxes[0].name, id, img, roleOnly, "")
+		of := img
+		if cand != nil {
+			of = candImg
+		}
+		only, err := r.containerSpec(r.boxes[0], id, of, roleOnly, "")
 		if err != nil {
 			return notStarted(err)
 		}
-		specs = []ContainerSpec{only}
-	}
-	for i, cs := range specs {
-		b := r.boxes[i]
-		b.attempted = true
-		if b.container, err = p.cfg.Engine.Start(r.ctx, cs); err != nil {
+		if err := r.start(r.boxes[0], only); err != nil {
 			return notStarted(err)
 		}
 	}
@@ -159,6 +164,11 @@ func (r *run) prepareAndExecute() core.Attempt {
 	// takes. It is armed before anything runs in the containers.
 	limit, stop := p.cfg.Timers.Timeout(r.ctx, r.x.Timeout)
 	r.stopLimit = append(r.stopLimit, stop)
+	for _, b := range r.boxes {
+		if attempt := r.check(b, limit); attempt != nil {
+			return attempt
+		}
+	}
 	ev := environment.Events{
 		Limit:     limit,
 		Cancelled: r.ctx.Done(),
@@ -178,6 +188,54 @@ func (r *run) prepareAndExecute() core.Attempt {
 	}
 	places := environment.Places{Command: r.boxes[1].container, Service: environment.Teeing(r.boxes[0].container, r.tail)}
 	return environment.ExecuteBeside(x, places, ev, r.sink)
+}
+
+// start starts a container of the run.
+func (r *run) start(b *box, spec ContainerSpec) error {
+	b.attempted = true
+	c, err := r.e.p.cfg.Engine.Start(r.ctx, spec)
+	b.container = c
+	return err
+}
+
+// check runs what the container's resources ask it to run first, if anything, within the limit,
+// and says how the run ends when it fails: nothing of the execution ran, and the failure is what
+// the check printed. It returns nil when the check passed or there is none.
+func (r *run) check(b *box, limit <-chan struct{}) core.Attempt {
+	if len(b.check) == 0 {
+		return nil
+	}
+	out := &environment.Tail{}
+	proc, err := b.container.Start(b.check, out)
+	if err != nil {
+		return core.NotStarted{Failure: core.AsFailure(err)}
+	}
+	failed := func(why string) core.Attempt {
+		return core.NotStarted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
+			"docker: the placement %q gives the container %s what it cannot use: %s", r.e.p.cfg.Placement, b.name, why)}}
+	}
+	select {
+	case st := <-proc.Exited():
+		switch {
+		case st.Err != nil:
+			return failed(fmt.Sprintf("its check did not run to its end (%v)", st.Err))
+		case st.Code != 0:
+			said := strings.TrimSpace(out.String())
+			if said == "" {
+				said = fmt.Sprintf("its check exited with %d and said nothing", st.Code)
+			}
+			return failed(said)
+		}
+		return nil
+	case <-limit:
+		proc.Kill()
+		<-proc.Exited()
+		return failed("its check did not end within the command's limit")
+	case <-r.ctx.Done():
+		proc.Kill()
+		<-proc.Exited()
+		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
+	}
 }
 
 // canServe refuses a run whose candidate's server this placement cannot start beside the command:
@@ -215,7 +273,7 @@ func (r *run) claim(name string) (*box, error) {
 // containerSpec stages the run's directories on the engine's machine, once, and says what a
 // container of the run is made of. url is where the command's container reaches the candidate's
 // server, for roleBeside.
-func (r *run) containerSpec(name, id string, img Image, as role, url string) (ContainerSpec, error) {
+func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (ContainerSpec, error) {
 	p := r.e.p
 	m := p.cfg.Machine
 	if r.staged == nil {
@@ -247,7 +305,11 @@ func (r *run) containerSpec(name, id string, img Image, as role, url string) (Co
 		env[EnvArtifactsDir] = ArtifactsDir
 	}
 	if as == roleBeside {
-		mounts = append(mounts, Mount{Host: p.cfg.Probe, Container: ProbeMount, ReadOnly: true})
+		probe, err := m.Program(r.ctx, p.cfg.Probe)
+		if err != nil {
+			return ContainerSpec{}, err
+		}
+		mounts = append(mounts, Mount{Host: probe, Container: ProbeMount, ReadOnly: true})
 		env[core.EnvServiceURL] = url
 	}
 	given, err := r.attachments(as)
@@ -264,7 +326,8 @@ func (r *run) containerSpec(name, id string, img Image, as role, url string) (Co
 		}
 		mounts = append(mounts, Mount{Host: m.Host, Container: m.Container, ReadOnly: m.ReadOnly})
 	}
-	gpus := GPUs{Devices: given.GPUs.Devices, Runtime: given.GPUs.Runtime}
+	gpus := GPUs{Devices: given.GPUs.Devices, Runtime: given.GPUs.Runtime, ROCm: given.GPUs.ROCm}
+	b.check = given.Check
 	given.Env = maps.Clone(given.Env)
 	maps.Copy(given.Env, given.GPUEnv)
 	for _, k := range slices.Sorted(maps.Keys(given.Env)) {
@@ -274,7 +337,7 @@ func (r *run) containerSpec(name, id string, img Image, as role, url string) (Co
 		env[k] = given.Env[k]
 	}
 	cs := ContainerSpec{
-		Name:     name,
+		Name:     b.name,
 		Image:    img.ID,
 		Labels:   runLabels(p.cfg.Scope, id),
 		User:     user,
@@ -330,6 +393,7 @@ type share struct {
 // a cluster is the task's, whose commands drive it.
 var twoImageShares = map[core.ResourceKind]map[role]share{
 	core.ResourceGPU:        {roleServer: {given: true}},
+	core.ResourceROCm:       {roleServer: {given: true}},
 	core.ResourceMounts:     {roleServer: {given: true, readOnly: true}, roleBeside: {given: true, readOnly: true}},
 	core.ResourceKubernetes: {roleBeside: {given: true}},
 }

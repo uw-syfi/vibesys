@@ -59,6 +59,30 @@ func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	return unavailable("building the task's image failed (exit %d); the end of the build's output:\n%s", exit.ExitCode(), out.last())
 }
 
+// Save writes the image as a docker archive (docker save) to w, streaming: an image is as large as
+// it is, so no bound is put on the copy but the caller's.
+func (e *Engine) Save(ctx context.Context, image string, w io.Writer) error {
+	if image == "" || strings.HasPrefix(image, "-") {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("dockercli: %q is not an image reference", image)}
+	}
+	cmd := e.command(ctx, nil, "save", image)
+	cmd.Stdout = w
+	errs := &tail{w: io.Discard}
+	cmd.Stderr = errs
+	err := cmd.Run()
+	if err == nil {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	var exit *exec.ExitError
+	if !asExit(err, &exit) {
+		return unavailable("cannot run %q to save the image %s: %v; %s", e.program, image, err, hint)
+	}
+	return unavailable("docker save %s failed (exit %d): %s", image, exit.ExitCode(), clip(errs.last()))
+}
+
 // BuildName is the unique name of a build of the tag, as an Allocator is given it: a build of one
 // tag runs at most once at a time in one process, and its name says which image it builds.
 func BuildName(tag string) string {

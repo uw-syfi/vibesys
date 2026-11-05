@@ -170,6 +170,19 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		"jobs at once on a remote engine":      {"[scheduler]\nmax_jobs = 2\n" + slurmConfig, "scheduler.max_jobs"},
 		"jobs at once on a remote placement":   {strings.Replace(sshPlacement, "kind = \"ssh\"", "kind = \"ssh\"\nmax_jobs = 2", 1), "placements.x.max_jobs"},
 		"a scheduler max_jobs with placements": {"[scheduler]\nmax_jobs = 2\n" + placementsConfig, "scheduler.max_jobs"},
+
+		"an apptainer placement with no remote":     {strings.Replace(apptainerPlacement, "[placements.mi210.remote]\nhost = \"host-a\"\nremote_workspace_root = \"/shared/vibesys\"\n", "", 1), "[placements.mi210.remote]"},
+		"an apptainer placement with no slurm":      {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]\npartition = \"part-a\"\n", "", 1), "[placements.mi210.slurm]"},
+		"an apptainer placement with srun options":  {strings.Replace(apptainerPlacement, "[placements.mi210.slurm]", "[placements.mi210.slurm]\nsrun_arguments = [\"--qos=x\"]", 1), "submit_arguments"},
+		"an apptainer placement with NVIDIA GPUs":   {apptainerPlacement + "[placements.mi210.resources.gpu]\ndevices = \"all\"\n", "rocm"},
+		"an apptainer placement with a cluster":     {apptainerPlacement + "[placements.mi210.resources.kubernetes]\nkubeconfig = \"/k\"\n", "kubernetes"},
+		"an apptainer placement running two jobs":   {strings.Replace(apptainerPlacement, "kind = \"apptainer\"", "kind = \"apptainer\"\nmax_jobs = 2", 1), "placements.mi210.max_jobs"},
+		"an apptainer section on a slurm placement": {strings.Replace(apptainerPlacement, "kind = \"apptainer\"", "kind = \"slurm\"", 1), "[placements.mi210.apptainer]"},
+		"an unknown apptainer key":                  {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nbind = \"/x\"", 1), "placements.mi210.apptainer.bind"},
+		"an empty submit command":                   {strings.Replace(apptainerPlacement, `submit_command = ["/opt/site/bin/sbatch-wrapper"]`, `submit_command = [""]`, 1), "submit_command"},
+		"a submit argument not a flag":              {strings.Replace(apptainerPlacement, `"--account=acct-a"`, `"acct-a"`, 1), "submit_arguments"},
+		"an apptainer program with a space":         {strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]", "[placements.mi210.apptainer]\nprogram = \"apptainer --debug\"", 1), "program"},
+		"an unknown rocm key":                       {strings.Replace(apptainerPlacement, "[placements.mi210.resources.rocm]", "[placements.mi210.resources.rocm]\ndevices = \"all\"", 1), "placements.mi210.resources.rocm.devices"},
 	}
 	for name, c := range cases {
 		_, err := operator.Parse([]byte(c.text))
@@ -177,6 +190,48 @@ func TestAMistakeIsRefusedNamingTheKey(t *testing.T) {
 		if !errors.As(err, &f) || f.Kind != core.FailureInvalidInput || !strings.Contains(f.Message, c.names) {
 			t.Errorf("%s: %v, want an invalid input naming %q", name, err, c.names)
 		}
+	}
+}
+
+// apptainerPlacement is one placement of the apptainer kind, on a cluster whose site wraps sbatch
+// and requires an account on every job.
+const apptainerPlacement = `
+[placements.mi210]
+kind = "apptainer"
+[placements.mi210.remote]
+host = "host-a"
+remote_workspace_root = "/shared/vibesys"
+[placements.mi210.slurm]
+partition = "part-a"
+[placements.mi210.apptainer]
+submit_command = ["/opt/site/bin/sbatch-wrapper"]
+submit_arguments = ["--account=acct-a"]
+[placements.mi210.resources.rocm]
+[placements.mi210.resources.mounts]
+hf = "/shared/hf"
+`
+
+// An apptainer placement is read with its login node, its Slurm settings, how it submits, and the
+// AMD GPUs it gives; its apptainer section may be left out for the defaults.
+func TestAnApptainerPlacementIsRead(t *testing.T) {
+	c, err := operator.Parse([]byte(apptainerPlacement))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := &cliv1.Placement{
+		Kind: cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER, MaxJobs: 1,
+		Remote:    &cliv1.RemoteSettings{Host: "host-a", RemoteWorkspaceRoot: "/shared/vibesys"},
+		Slurm:     &cliv1.SlurmSettings{Partition: "part-a"},
+		Apptainer: &cliv1.ApptainerSettings{SubmitCommand: []string{"/opt/site/bin/sbatch-wrapper"}, SubmitArguments: []string{"--account=acct-a"}},
+		Resources: &cliv1.Resources{Rocm: &cliv1.RocmResource{}, Mounts: map[string]string{"hf": "/shared/hf"}},
+	}
+	if got := c.GetPlacements()["mi210"]; !proto.Equal(got, want) {
+		t.Errorf("placement\n%v\nwant\n%v", got, want)
+	}
+	text := strings.Replace(apptainerPlacement, "[placements.mi210.apptainer]\nsubmit_command = [\"/opt/site/bin/sbatch-wrapper\"]\nsubmit_arguments = [\"--account=acct-a\"]\n", "", 1)
+	c, err = operator.Parse([]byte(text))
+	if err != nil || c.GetPlacements()["mi210"].GetApptainer() != nil {
+		t.Errorf("without an apptainer section: %v, %v", c, err)
 	}
 }
 

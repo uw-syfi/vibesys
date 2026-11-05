@@ -33,6 +33,18 @@ func gpuOf(facts map[string]string) *fakeresource.Fake {
 
 func withGPUs(c *docker.Config) { c.Resources = append(c.Resources, gpuOf(someGPU)) }
 
+// someAMDGPU are the facts a fake machine's AMD GPUs report.
+var someAMDGPU = map[string]string{"amd_gpu_model": "AMD Instinct MI210", "amd_gpu_count": "1", "amdgpu_driver": "6.16.13"}
+
+// amdOf is a resource that attaches AMD GPUs the way the rocm resource does: the GPUs, and a check
+// the container runs first, here a script of the fake's.
+func amdOf(check ...string) *fakeresource.Fake {
+	return &fakeresource.Fake{
+		Of: core.ResourceROCm, Facts: someAMDGPU, Attached: resource.Attachment{GPUs: resource.GPUs{ROCm: true}, Check: check},
+		Claimed: []core.Claim{{Resource: "rocm:local", Amount: 1}},
+	}
+}
+
 // remoteMachine is a Machine whose directories live under another root, as a machine reached
 // over ssh has them, and that records what it was asked.
 type remoteMachine struct {
@@ -73,6 +85,10 @@ func (m *remoteMachine) Cache(_ context.Context, key string) (string, error) {
 
 func (m *remoteMachine) User(context.Context) (docker.User, error) {
 	return docker.User{UID: 1002, GID: 1002}, nil
+}
+
+func (m *remoteMachine) Program(_ context.Context, local string) (string, error) {
+	return "/far/bin" + local, nil
 }
 
 func runIn(t *testing.T, s *scene, x core.Execution) core.Attempt {

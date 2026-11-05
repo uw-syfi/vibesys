@@ -89,6 +89,7 @@ func TestATaskThatNeedsWhatThePlacementLacksIsRefusedNamingBoth(t *testing.T) {
 		core.ResourceGPU:        func() resource.Resource { return gpuOf(someGPU) },
 		core.ResourceKubernetes: func() resource.Resource { return clusterOf("https://k") },
 		core.ResourceMounts:     func() resource.Resource { return mountsOf() },
+		core.ResourceROCm:       func() resource.Resource { return amdOf() },
 	}
 	for range 60 {
 		var given, needs []core.ResourceKind

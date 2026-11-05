@@ -36,6 +36,8 @@ var configs = []string{
 	"[placements.a]\nkind = \"local\"\n[placements.b]\nkind = \"local\"\n",
 	"[placements.a]\nkind = \"local\"\n[placements.a.resources.gpu]\ndevices = \"all\"\n[placements.a.resources.kubernetes]\nkubeconfig = \"/k\"\n" +
 		"[placements.b]\nkind = \"ssh\"\n[placements.b.remote]\nhost = \"host-b\"\nremote_workspace_root = \"/w\"\n[placements.b.resources.kubernetes]\nkubeconfig = \"/k\"\n",
+	"[placements.mi210]\nkind = \"apptainer\"\n[placements.mi210.remote]\nhost = \"login\"\nremote_workspace_root = \"/w\"\n[placements.mi210.slurm]\npartition = \"gpu\"\n" +
+		"[placements.mi210.resources.rocm]\n",
 }
 
 // claimsOf are what the resources of each placement claim, as machineEnvironments has them: the
@@ -50,6 +52,9 @@ func claimsOf(t *testing.T, text string) map[string][]core.Claim {
 		}
 		if pl.GetResources().GetGpu() != nil {
 			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceGPU) + ":" + where + "/all", Amount: 1})
+		}
+		if pl.GetResources().GetRocm() != nil {
+			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceROCm) + ":" + where, Amount: 1})
 		}
 		if k := pl.GetResources().GetKubernetes(); k != nil {
 			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceKubernetes) + ":" + where + k.GetKubeconfig(), Amount: 1})

@@ -145,6 +145,8 @@ const (
 	ResourceKind_RESOURCE_KIND_KUBERNETES ResourceKind = 2
 	// Read-only directories of the engine's machine.
 	ResourceKind_RESOURCE_KIND_MOUNTS ResourceKind = 3
+	// AMD GPUs passed into the container, through the ROCm kernel driver.
+	ResourceKind_RESOURCE_KIND_ROCM ResourceKind = 4
 )
 
 // Enum value maps for ResourceKind.
@@ -154,12 +156,14 @@ var (
 		1: "RESOURCE_KIND_GPU",
 		2: "RESOURCE_KIND_KUBERNETES",
 		3: "RESOURCE_KIND_MOUNTS",
+		4: "RESOURCE_KIND_ROCM",
 	}
 	ResourceKind_value = map[string]int32{
 		"RESOURCE_KIND_UNSPECIFIED": 0,
 		"RESOURCE_KIND_GPU":         1,
 		"RESOURCE_KIND_KUBERNETES":  2,
 		"RESOURCE_KIND_MOUNTS":      3,
+		"RESOURCE_KIND_ROCM":        4,
 	}
 )
 
@@ -464,12 +468,13 @@ const file_vibesys_cli_v1_environment_proto_rawDesc = "" +
 	"\x11BACKEND_KIND_CUDA\x10\x02\x12\x15\n" +
 	"\x11BACKEND_KIND_ROCM\x10\x03\x12\x16\n" +
 	"\x12BACKEND_KIND_METAL\x10\x04\x12\x19\n" +
-	"\x15BACKEND_KIND_TRAINIUM\x10\x05*|\n" +
+	"\x15BACKEND_KIND_TRAINIUM\x10\x05*\x94\x01\n" +
 	"\fResourceKind\x12\x1d\n" +
 	"\x19RESOURCE_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11RESOURCE_KIND_GPU\x10\x01\x12\x1c\n" +
 	"\x18RESOURCE_KIND_KUBERNETES\x10\x02\x12\x18\n" +
-	"\x14RESOURCE_KIND_MOUNTS\x10\x03B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\x14RESOURCE_KIND_MOUNTS\x10\x03\x12\x16\n" +
+	"\x12RESOURCE_KIND_ROCM\x10\x04B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_environment_proto_rawDescOnce sync.Once

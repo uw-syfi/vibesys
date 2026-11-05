@@ -19,11 +19,13 @@ const (
 	ResourceKubernetes ResourceKind = "kubernetes"
 	// ResourceMounts is read-only directories of the engine's machine.
 	ResourceMounts ResourceKind = "mounts"
+	// ResourceROCm is AMD GPUs passed into the container, through the ROCm kernel driver.
+	ResourceROCm ResourceKind = "rocm"
 )
 
 // ResourceKinds returns every resource kind, in the order the contract numbers them.
 func ResourceKinds() []ResourceKind {
-	return []ResourceKind{ResourceGPU, ResourceKubernetes, ResourceMounts}
+	return []ResourceKind{ResourceGPU, ResourceKubernetes, ResourceMounts, ResourceROCm}
 }
 
 // ParseResourceKind reads a resource kind by its name, and fails with FailureInvalidInput naming
