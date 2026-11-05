@@ -95,6 +95,12 @@ func fill(m protoreflect.Message, variant int) {
 		measure := m.Interface().(*cliv1.MeasureResult)
 		measure.Value = core.Headline(measure.Samples)
 	}
+	// So is an observation's.
+	if md.FullName() == "vibesys.cli.v1.Observation" {
+		ob := m.Interface().(*cliv1.Observation)
+		v := core.Headline(ob.Values)
+		ob.Value = &v
+	}
 }
 
 func scalar(fd protoreflect.FieldDescriptor, n int) protoreflect.Value {
