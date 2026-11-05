@@ -10,6 +10,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 )
 
 // test-isolation: machineEnvironments is the wiring from the operator config to each placement's
@@ -19,18 +20,7 @@ import (
 // resources its section names, the AMD GPUs of an apptainer placement among them, with the claims
 // its resources make.
 func TestEveryPlacementKindIsWired(t *testing.T) {
-	// The apptainer placements convert with this machine's apptainer, found on the daemon's PATH.
-	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "apptainer"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	getenv := func(k string) string {
-		if k == "PATH" {
-			return bin
-		}
-		return ""
-	}
-	p := Process{UID: 1000, GID: 1000, Home: "/home/u", Executable: "/usr/bin/vibesys-cli", Getenv: getenv}
+	p := withApptainer(t)
 	for _, text := range configs {
 		op := parse(t, text)
 		m, err := p.machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
@@ -48,6 +38,97 @@ func TestEveryPlacementKindIsWired(t *testing.T) {
 		}
 		if got, want := m.claims, claimsOf(t, text); len(want) > 0 && !sameClaims(got, want) {
 			t.Errorf("config %q: claims %v, want %v", text, got, want)
+		}
+	}
+}
+
+// withApptainer is a process whose PATH has an apptainer, with which the apptainer placements
+// convert their images on this machine.
+func withApptainer(t *testing.T) Process {
+	t.Helper()
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "apptainer"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	getenv := func(k string) string {
+		if k == "PATH" {
+			return bin
+		}
+		return ""
+	}
+	return Process{UID: 1000, GID: 1000, Home: "/home/u", Executable: "/usr/bin/vibesys-cli", Getenv: getenv}
+}
+
+// twoSlices is an operator config of two apptainer placements on one cluster, each of whose
+// allocations is a slice of a node with its own GPUs.
+const twoSlices = `
+[placements.mi210-a]
+kind = "apptainer"
+[placements.mi210-a.remote]
+host = "host-a"
+remote_workspace_root = "/w"
+[placements.mi210-a.slurm]
+partition = "gpu"
+exclusive = false
+[placements.mi210-a.resources.rocm]
+[placements.mi210-b]
+kind = "apptainer"
+[placements.mi210-b.remote]
+host = "host-a"
+remote_workspace_root = "/w"
+[placements.mi210-b.slurm]
+partition = "gpu"
+exclusive = false
+[placements.mi210-b.resources.rocm]
+`
+
+// A job of an apptainer placement gets the GPUs of its own allocation, so the scheduler of the
+// operator config holds them per placement: a measure on one placement of a cluster does not wait
+// for a job on another placement of it, nor a job there for the measure, and a measure still
+// excludes every other job of its own placement, and waits for one that runs there.
+func TestAMeasureHoldsTheGPUsOfItsOwnApptainerPlacementOnly(t *testing.T) {
+	op := parse(t, twoSlices)
+	m, err := withApptainer(t).machineEnvironments(op, clock.System{}, runtimedir.Dir{}, "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := schedulerOf(op, m.offers, m.claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims := func(placement string, kind core.JobKind) []schedule.Claim {
+		spec := core.JobSpec{Environment: core.EnvironmentDocker, Placement: placement}
+		if kind == core.JobMeasure {
+			spec.Settings = core.MeasureSettings{}
+		}
+		options := s.Demand.Options(core.Job{Spec: spec})
+		if len(options) != 1 {
+			t.Fatalf("a %s job restricted to %s may run on %+v", kind, placement, options)
+		}
+		return options[0].Claims
+	}
+	cases := []struct {
+		running, waiting       string // the placement of each job
+		runningKind, waitsKind core.JobKind
+		starts                 bool
+	}{
+		{"mi210-b", "mi210-a", core.JobCommand, core.JobMeasure, true},
+		{"mi210-b", "mi210-a", core.JobMeasure, core.JobCommand, true},
+		{"mi210-b", "mi210-a", core.JobMeasure, core.JobMeasure, true},
+		{"mi210-a", "mi210-a", core.JobCommand, core.JobMeasure, false},
+		{"mi210-a", "mi210-a", core.JobMeasure, core.JobCommand, false},
+	}
+	for _, c := range cases {
+		state := schedule.State{
+			Resources: s.Resources,
+			Holdings:  []schedule.Holding{{ID: "running", Claims: claims(c.running, c.runningKind)}},
+			Waiting:   []schedule.Candidate{{ID: "waiting", Options: []schedule.Option{{Placement: c.waiting, Claims: claims(c.waiting, c.waitsKind)}}}},
+		}
+		decisions := schedule.Step(state, schedule.Rules{Policy: s.Policy})
+		_, started := decisions[0].(schedule.Start)
+		if started != c.starts {
+			t.Errorf("a %s job on %s waits beside a %s job on %s: %+v, want started %v",
+				c.waitsKind, c.waiting, c.runningKind, c.running, decisions[0], c.starts)
 		}
 	}
 }

@@ -54,7 +54,9 @@ type Facts interface {
 
 // Config configures New.
 type Config struct {
-	// Machine names the engine's machine, or the cluster, so that the GPUs of two are two claims.
+	// Machine names whose GPUs these are, so that the GPUs of two are two claims: the engine's
+	// machine, or, for a placement whose jobs each get the GPUs of an allocation of their own, the
+	// placement on its cluster.
 	Machine string
 	// Facts reads the GPUs for the fingerprint.
 	Facts Facts

@@ -183,7 +183,7 @@ func (p Process) placement(clk clock.System, dir runtimedir.Dir, containerKey st
 			Builders: slurm.Buildx{Shell: engineCfg.Shell, Timers: clk, Name: slurm.BuilderName(scope)},
 		}
 	}
-	if cfg.Resources, err = resources(pl.GetResources(), shell, where, clk, &amd.GPUs{Shell: shell, Timers: clk}); err != nil {
+	if cfg.Resources, err = resources(pl.GetResources(), shell, where, where, clk, &amd.GPUs{Shell: shell, Timers: clk}); err != nil {
 		return nil, err
 	}
 	return docker.New(cfg)
@@ -240,27 +240,30 @@ func (p Process) apptainerPlacement(clk clock.System, cfg docker.Config, pl *cli
 	cfg.Engine, cfg.Backend, cfg.Probe = eng, eng.Backend(), p.probe()
 	unread := map[string]string{amd.FactModel: apptainer.Unread, amd.FactCount: apptainer.Unread, amd.FactDriver: apptainer.Unread}
 	facts := apptainer.Facts{Engine: eng, Script: gpuScript, Parse: amd.Parse, Unread: unread}
-	// The GPUs are the cluster's, named by its login node: they are claimed once for the cluster,
-	// whose allocations are what keeps two jobs off one node's GPUs.
-	if cfg.Resources, err = resources(pl.GetResources(), ssh, ssh.Host, clk, facts); err != nil {
+	// The GPUs a job gets are its own allocation's: Slurm keeps two allocations off one GPU, and
+	// gives a measure of [slurm] exclusive the whole node. So they are claimed per placement, named
+	// by the placement and the cluster's login node: a measure holds its own placement's GPUs alone,
+	// and the jobs of the cluster's other placements run beside it, in allocations of their own.
+	if cfg.Resources, err = resources(pl.GetResources(), ssh, ssh.Host, cfg.Placement+"@"+ssh.Host, clk, facts); err != nil {
 		return nil, err
 	}
 	return docker.New(cfg)
 }
 
-// resources are the resources of a placement, each made by its own package from its section. The
-// AMD GPUs' facts are read by amdFacts.
-func resources(r *cliv1.Resources, shell remote.Shell, where string, clk clock.System, amdFacts rocm.Facts) ([]resource.Resource, error) {
+// resources are the resources of a placement, each made by its own package from its section. where
+// names the machine the placement reaches, and gpus whose GPUs a job of it gets, which names their
+// claim. The AMD GPUs' facts are read by amdFacts.
+func resources(r *cliv1.Resources, shell remote.Shell, where, gpus string, clk clock.System, amdFacts rocm.Facts) ([]resource.Resource, error) {
 	var out []resource.Resource
 	if r.GetRocm() != nil {
-		res, err := rocm.New(rocm.Config{Machine: where, Facts: amdFacts})
+		res, err := rocm.New(rocm.Config{Machine: gpus, Facts: amdFacts})
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, res)
 	}
 	if g := r.GetGpu(); g != nil {
-		res, err := gpu.New(gpu.Config{Devices: g.GetDevices(), Runtime: g.GetRuntime(), Machine: where, Facts: &nvidia.GPUs{Shell: shell, Timers: clk}})
+		res, err := gpu.New(gpu.Config{Devices: g.GetDevices(), Runtime: g.GetRuntime(), Machine: gpus, Facts: &nvidia.GPUs{Shell: shell, Timers: clk}})
 		if err != nil {
 			return nil, err
 		}

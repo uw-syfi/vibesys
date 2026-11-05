@@ -436,8 +436,10 @@ queued jobs start from `schedule`:
   waits. A job that started stays where it started, and a job no placement fits is refused.
 - A job holds claims from its launch until its end is recorded. A docker job claims a slot of
   `placement:<name>`, the placement it runs on, which has the placement's `max_jobs` slots, and
-  what the placement's resources claim: `kubernetes:<machine><kubeconfig>` for a cluster and
-  `gpu:<machine>/<devices>` for GPUs, which every placement that gives the same one shares. A host
+  what the placement's resources claim: `kubernetes:<machine><kubeconfig>` for a cluster,
+  `gpu:<machine>/<devices>` and `rocm:<machine>` for GPUs, which every placement that gives the
+  same one shares, and `rocm:<placement>@<login node>` for the AMD GPUs of an `apptainer`
+  placement, whose jobs each get the GPUs of a Slurm allocation of their own. A host
   job claims a slot of `placement:default` when that placement is local, and otherwise of `host`,
   one slot of its own. A measure job claims each of them whole, so a benchmark sample never runs
   beside another job of its placement or of another placement on its cluster or GPUs, while the
@@ -817,6 +819,14 @@ start without it, saying to install it.
   container and commented with the daemon's scope. Its time limit is the command's limit and 10
   minutes for the stop. A holder step keeps it for the run: when the run ends, or the daemon dies
   and its ssh connection with it, the holder cancels the allocation.
+- The AMD GPUs a job gets are its allocation's: Slurm keeps two allocations off one GPU, and gives
+  a measure the whole node with `[slurm] exclusive` (the default). So the GPUs are claimed per
+  placement, `rocm:<placement>@<login node>`: a measure holds its own placement alone, and the
+  jobs of the cluster's other placements run beside it, in allocations of their own. With
+  `exclusive = false`, a measure's allocation is a slice of a node whose other slices may run
+  other jobs, of this daemon's other placements or of anyone. Nothing of a placement of this kind
+  is leased between daemons: Slurm, which grants each its own allocations, is what keeps them
+  apart.
 - The machine's facts and load, and the AMD GPUs' facts, are read on the node inside the
   allocation, never on the login node. A daemon fingerprints a placement before it has a node, so
   its fingerprint names the last node a run of its scope read (kept at `nodes/<scope>.json`), and

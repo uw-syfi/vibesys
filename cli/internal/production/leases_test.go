@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lease"
@@ -56,7 +57,12 @@ func claimsOf(t *testing.T, text string) map[string][]core.Claim {
 			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceGPU) + ":" + where + "/all", Amount: 1})
 		}
 		if pl.GetResources().GetRocm() != nil {
-			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceROCm) + ":" + where, Amount: 1})
+			gpus := where
+			if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
+				// Each job gets the GPUs of an allocation of its own: they are the placement's.
+				gpus = name + "@" + where
+			}
+			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceROCm) + ":" + gpus, Amount: 1})
 		}
 		if k := pl.GetResources().GetKubernetes(); k != nil {
 			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceKubernetes) + ":" + where + k.GetKubeconfig(), Amount: 1})
