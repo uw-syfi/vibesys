@@ -141,7 +141,7 @@ func Run(ctx context.Context, config Config, p *plan.Plan, sender Sender, sink S
 		phase.Model = pb.LoadModel_LOAD_MODEL_OPEN
 		phase.TargetRate = load.Rate
 		phase.MinSustained = load.MinSustained
-		phase.Exhausted = r.open(t0, load)
+		phase.Exhausted, phase.Saturated = r.open(t0, load)
 	}
 	if err := ctx.Err(); err != nil {
 		return Outcome{}, err
@@ -208,8 +208,10 @@ type job struct {
 	scheduled time.Time
 }
 
-// open runs an open loop and reports whether the plan ran out before the window ended.
-func (r *runner) open(t0 time.Time, load Open) bool {
+// open runs an open loop and reports whether the plan ran out before the window ended, and how
+// many of the window's operations were due while every sender was busy (saturated).
+func (r *runner) open(t0 time.Time, load Open) (bool, uint64) {
+	var saturated uint64
 	arrivals := NewArrivals(load.Arrivals, load.Rate, load.Seed)
 	work := make(chan job)
 	var wg sync.WaitGroup
@@ -231,19 +233,29 @@ func (r *runner) open(t0 time.Time, load Open) bool {
 	for index := range count {
 		scheduled := t0.Add(arrivals())
 		if !scheduled.Before(end) {
-			return false
+			return false, saturated
 		}
 		// Hand the operation to a sender a little early; the sender waits for the exact time.
 		sleepUntil(r.ctx, scheduled.Add(-ahead))
+		item := job{index: index, scheduled: scheduled}
 		select {
-		case work <- job{index: index, scheduled: scheduled}:
+		case work <- item:
+			continue
+		default:
+		}
+		// Every sender is busy with an operation in flight: this one waits for the first to finish.
+		if r.window.Contains(scheduled.UnixNano()) {
+			saturated++
+		}
+		select {
+		case work <- item:
 		case <-r.ctx.Done():
 			// The phase's deadline passed with operations still due: they were never sent.
 			r.abandon(index, scheduled, arrivals, t0, end)
-			return false
+			return false, saturated
 		}
 	}
-	return t0.Add(arrivals()).Before(end)
+	return t0.Add(arrivals()).Before(end), saturated
 }
 
 // abandon records the operations due in the window from index on as never sent.

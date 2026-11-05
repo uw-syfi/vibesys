@@ -391,6 +391,12 @@ message PhaseSummary {
   // the plan's count divided by this minus the phase's start (window start
   // minus --warmup).
   int64 exhausted_unix_nanos = 22 [(buf.validate.field).int64.gte = 0];
+  // Open loop: operations of the window that were due while every one of the
+  // --max-in-flight senders was busy, so they waited for one to finish. Their
+  // send lag is the application holding the senders (its responses were slow),
+  // not loadgen falling behind; their latency (end - scheduled) includes the
+  // wait. Closed loop: 0.
+  uint64 saturated = 23;
 }
 
 // CallKind is a kind of Step.call.

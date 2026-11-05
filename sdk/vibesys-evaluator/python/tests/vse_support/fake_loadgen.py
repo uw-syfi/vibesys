@@ -97,6 +97,9 @@ class FakeLoadgen:
     step_micros_by_run: list[int] = field(default_factory=list)
     cpu_fraction: float = 0.1
     send_lag_micros: int = 0
+    #: Open loop: report the late operations as due while every sender was busy (the
+    #: application held them), as loadgen's ``saturated`` counts them.
+    senders_saturated: bool = False
     #: Open loop: every n-th operation is due but never sent (CANCELLED, start 0); 0: none.
     never_sent_every: int = 0
     runs: list[list[str]] = field(default_factory=list)
@@ -334,6 +337,9 @@ class FakeLoadgen:
             sustained=closed or offered >= options.min_sustained * options.rate,
             exhausted=exhausted,
             exhausted_unix_nanos=stopped,
+            saturated=completed
+            if not closed and self.senders_saturated and self.send_lag_micros
+            else 0,
             latency=_message(latency),
             operations=[
                 pb.OperationSummary(operation=n, completed=c[0], errors=c[1], latency=_message(h))

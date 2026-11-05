@@ -133,7 +133,9 @@ type Phase struct {
 	Exhausted    bool
 	// ExhaustedAt is when an exhausted closed loop stopped (its last operation's end), Unix
 	// nanoseconds; 0 otherwise.
-	ExhaustedAt    int64
+	ExhaustedAt int64
+	// Saturated counts the open loop's window operations that waited for a busy sender.
+	Saturated      uint64
 	ResultsSpilled uint64
 }
 
@@ -174,6 +176,7 @@ func (a *Aggregator) Summary(phase Phase) (*pb.PhaseSummary, error) {
 		LoadgenCpuFraction:   max(phase.CPUFraction, 0),
 		Exhausted:            phase.Exhausted,
 		ExhaustedUnixNanos:   max(phase.ExhaustedAt, 0),
+		Saturated:            phase.Saturated,
 		ResultsSpilled:       phase.ResultsSpilled,
 	}
 	summary.Sustained = phase.Model != pb.LoadModel_LOAD_MODEL_OPEN || summary.GetOfferedRate() >= phase.MinSustained*phase.TargetRate

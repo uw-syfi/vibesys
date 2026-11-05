@@ -308,7 +308,10 @@ budget. A phase fails, and with it the sample, when:
 - loadgen's CPU over the window exceeds 80% of its quota; or
 - open loop: the 99th percentile of send lag (excluding exclusive-key waits)
   exceeds the larger of 10% of the window's p99 latency and twice the
-  added latency `selftest` measured; or
+  added latency `selftest` measured, unless at least 1% of the window's
+  operations were due while every sender was busy (`saturated`): then the
+  application held the senders with slow responses, and the lag is its
+  queue, already in its latency (end minus scheduled); or
 - closed loop: the plan was exhausted before the window ended twice. The
   first time, the phase is run again once with a plan for twice the larger of
   `max_ops_per_sec` and the rate it sent at (its whole plan over the time

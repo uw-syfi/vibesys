@@ -1708,8 +1708,14 @@ type PhaseSummary struct {
 	// the plan's count divided by this minus the phase's start (window start
 	// minus --warmup).
 	ExhaustedUnixNanos int64 `protobuf:"varint,22,opt,name=exhausted_unix_nanos,json=exhaustedUnixNanos,proto3" json:"exhausted_unix_nanos,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Open loop: operations of the window that were due while every one of the
+	// --max-in-flight senders was busy, so they waited for one to finish. Their
+	// send lag is the application holding the senders (its responses were slow),
+	// not loadgen falling behind; their latency (end - scheduled) includes the
+	// wait. Closed loop: 0.
+	Saturated     uint64 `protobuf:"varint,23,opt,name=saturated,proto3" json:"saturated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PhaseSummary) Reset() {
@@ -1892,6 +1898,13 @@ func (x *PhaseSummary) GetResultsSpilled() uint64 {
 func (x *PhaseSummary) GetExhaustedUnixNanos() int64 {
 	if x != nil {
 		return x.ExhaustedUnixNanos
+	}
+	return 0
+}
+
+func (x *PhaseSummary) GetSaturated() uint64 {
+	if x != nil {
+		return x.Saturated
 	}
 	return 0
 }
@@ -2259,7 +2272,7 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\toperation\x18\x01 \x01(\rR\toperation\x12\x1c\n" +
 	"\tcompleted\x18\x02 \x01(\x04R\tcompleted\x12\x16\n" +
 	"\x06errors\x18\x03 \x01(\x04R\x06errors\x12D\n" +
-	"\alatency\x18\x04 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\alatency\"\x9f\t\n" +
+	"\alatency\x18\x04 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\alatency\"\xbd\t\n" +
 	"\fPhaseSummary\x12A\n" +
 	"\x05model\x18\x01 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05model\x121\n" +
@@ -2287,7 +2300,8 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"operations\x18\x14 \x03(\v2&.vibesys.evaluator.v1.OperationSummaryR\n" +
 	"operations\x12'\n" +
 	"\x0fresults_spilled\x18\x15 \x01(\x04R\x0eresultsSpilled\x129\n" +
-	"\x14exhausted_unix_nanos\x18\x16 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\x12exhaustedUnixNanos\x1a?\n" +
+	"\x14exhausted_unix_nanos\x18\x16 \x01(\x03B\a\xbaH\x04\"\x02(\x00R\x12exhaustedUnixNanos\x12\x1c\n" +
+	"\tsaturated\x18\x17 \x01(\x04R\tsaturated\x1a?\n" +
 	"\x11ErrorsByKindEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\rR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\x8c\x04\n" +

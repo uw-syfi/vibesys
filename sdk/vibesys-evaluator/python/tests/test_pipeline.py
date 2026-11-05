@@ -183,6 +183,18 @@ def test_late_sending_fails_an_open_loop(tmp_path: Path) -> None:
     assert "sent late" in message
 
 
+def test_late_sending_of_an_application_holding_every_sender_is_its_latency(
+    tmp_path: Path,
+) -> None:
+    # Lag from senders all busy with slow responses is the application's queue, which the
+    # latency (end - scheduled) already charges it for: not a loadgen verdict.
+    service = kv.KvService()
+    loadgen = FakeLoadgen(app=service.handle, send_lag_micros=5000, senders_saturated=True)
+    code, text = _sample(tmp_path, _task(), _deployer(_task(), service, loadgen))
+    assert code == 0, text
+    assert _read(text).values is not None
+
+
 def _closed_only(run: vse.Run) -> None:
     phase = run.closed_loop(clients=4, secs=1, warmup=0.5, max_ops_per_sec=50)
     run.report({"operations_per_second": phase.ops_per_sec, "latency_ms.p99": phase.p99_ms})

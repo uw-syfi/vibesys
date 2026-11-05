@@ -26,6 +26,10 @@ MAX_SEND_LAG_SHARE = 0.1
 #: ... or this floor, whichever is larger. ``loadgen selftest`` (work package 7) will replace
 #: the floor with twice the latency it measures loadgen adding.
 SEND_LAG_FLOOR_MS = 1.0
+#: Open loop: when at least this share of the window's operations were due while every sender
+#: was busy (loadgen's ``saturated``), the send lag's tail is the application holding the
+#: senders, which its latency (end - scheduled) already includes: not a reason to fail.
+MIN_SATURATED_SHARE = 0.01
 _MICROS_PER_MS = 1000.0
 _VIOLATIONS_SHOWN = 3
 
@@ -83,7 +87,8 @@ def _guard(summary: pb.PhaseSummary, p99_ms: float, validity: Validity) -> str |
         return None
     lag_ms = _ms(summary.send_lag, 99.0)
     allowed = max(MAX_SEND_LAG_SHARE * p99_ms, SEND_LAG_FLOOR_MS)
-    if lag_ms > allowed:
+    held = summary.saturated >= MIN_SATURATED_SHARE * max(summary.completed, 1)
+    if lag_ms > allowed and not held:
         return (
             f"loadgen sent late: send lag p99 {lag_ms:.2f} ms is above {allowed:.2f} ms "
             f"(the larger of {MAX_SEND_LAG_SHARE:.0%} of latency p99 {p99_ms:.2f} ms and "
