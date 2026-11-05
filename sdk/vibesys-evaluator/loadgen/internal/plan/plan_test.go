@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
-	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/build"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/files"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/messages"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/plan"
 )
 
@@ -19,11 +19,11 @@ func read(t *testing.T, data []byte, format files.Format) (*plan.Plan, error) {
 }
 
 func TestReadCompilesEveryOperationInBothFormats(t *testing.T) {
-	login := build.CaptureJSON(build.Post(build.Text(`{"user":"u"}`), "/login"), "token", "/token")
-	use := build.Header(build.Get("/kv/", build.Raw("token")), "Authorization", "Bearer ", build.Raw("token"))
-	ops := []*pb.PlannedOperation{build.Op(0, login, build.Expect(use, 200, 404)), build.Op(1, build.Get("/x"))}
+	login := messages.CaptureJSON(messages.Post(messages.Text(`{"user":"u"}`), "/login"), "token", "/token")
+	use := messages.Header(messages.Get("/kv/", messages.Raw("token")), "Authorization", "Bearer ", messages.Raw("token"))
+	ops := []*pb.PlannedOperation{messages.Op(0, login, messages.Expect(use, 200, 404)), messages.Op(1, messages.Get("/x"))}
 	for _, format := range []files.Format{files.Binpb, files.JSON} {
-		p, err := read(t, build.RequestsFile(format, []string{"read", "other"}, ops...), format)
+		p, err := read(t, messages.RequestsFile(format, []string{"read", "other"}, ops...), format)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -44,22 +44,22 @@ func TestReadRejectsPlansItCannotRun(t *testing.T) {
 	names := []string{"a"}
 	thrift := &pb.PlannedOperation{Steps: []*pb.Step{{Call: &pb.Step_Thrift{Thrift: &pb.ThriftCall{}}}}}
 	cases := map[string][]byte{
-		"names no capture of an earlier step": build.RequestsFile(files.Binpb, names, build.Op(0, build.Get("/", build.Raw("token")))),
-		"outside operation_names":             build.RequestsFile(files.Binpb, names, build.Op(3, build.Get("/"))),
-		"only HTTP calls":                     build.RequestsFile(files.Binpb, names, thrift),
-		"steps":                               build.RequestsFile(files.Binpb, names, build.Op(0)),
-		"unsupported schema version":          build.RequestsFileVersion(files.Binpb, 2, names, build.Op(0, build.Get("/"))),
-		"literal \"/\"":                       build.RequestsFile(files.Binpb, names, build.Op(0, build.Get("x"))),
-		"operation_names":                     build.RequestsFile(files.Binpb, []string{"Bad-Name"}, build.Op(0, build.Get("/"))),
+		"names no capture of an earlier step": messages.RequestsFile(files.Binpb, names, messages.Op(0, messages.Get("/", messages.Raw("token")))),
+		"outside operation_names":             messages.RequestsFile(files.Binpb, names, messages.Op(3, messages.Get("/"))),
+		"only HTTP calls":                     messages.RequestsFile(files.Binpb, names, thrift),
+		"steps":                               messages.RequestsFile(files.Binpb, names, messages.Op(0)),
+		"unsupported schema version":          messages.RequestsFileVersion(files.Binpb, 2, names, messages.Op(0, messages.Get("/"))),
+		"literal \"/\"":                       messages.RequestsFile(files.Binpb, names, messages.Op(0, messages.Get("x"))),
+		"operation_names":                     messages.RequestsFile(files.Binpb, []string{"Bad-Name"}, messages.Op(0, messages.Get("/"))),
 	}
 	// A capture of the same step does not count: refs resolve against earlier steps only.
-	self := build.CaptureJSON(build.Get("/", build.Raw("t")), "t", "/t")
-	cases["\"t\" names no capture"] = build.RequestsFile(files.Binpb, names, build.Op(0, self))
+	self := messages.CaptureJSON(messages.Get("/", messages.Raw("t")), "t", "/t")
+	cases["\"t\" names no capture"] = messages.RequestsFile(files.Binpb, names, messages.Op(0, self))
 	// The header's count must match the operations that follow.
 	var short bytes.Buffer
 	writer, _ := files.NewWriter(&short, files.Binpb, files.Header(pb.FileKind_FILE_KIND_REQUESTS, "t"))
 	_ = writer.Write(&pb.RequestsHeader{OperationNames: names, Count: 3})
-	_ = writer.Write(build.Op(0, build.Get("/")))
+	_ = writer.Write(messages.Op(0, messages.Get("/")))
 	_ = writer.Flush()
 	cases["count is 3"] = short.Bytes()
 	for want, data := range cases {
@@ -81,7 +81,7 @@ func TestExclusiveKeysChainInPlanOrder(t *testing.T) {
 			if random.IntN(3) > 0 {
 				keys[i] = string(rune('a' + random.IntN(4)))
 			}
-			ops = append(ops, build.Exclusive(build.Op(0, build.Get("/")), keys[i]))
+			ops = append(ops, messages.Exclusive(messages.Op(0, messages.Get("/")), keys[i]))
 		}
 		p, err := plan.New([]string{"op"}, ops)
 		if err != nil {
@@ -108,11 +108,11 @@ func TestExclusiveKeysChainInPlanOrder(t *testing.T) {
 
 func TestTextFillEncodesRefs(t *testing.T) {
 	captured := map[string]plan.Captured{"s": {Text: `a"b`, JSON: `"a\"b"`}, "n": {Text: "12", JSON: "12"}}
-	ops := []*pb.PlannedOperation{build.Op(0,
-		build.CaptureJSON(build.CaptureJSON(build.Get("/"), "s", "/s"), "n", "/n"),
-		build.Post(build.Text(`{"s":"`, build.Ref{Name: "s", Encoding: pb.RefEncoding_REF_ENCODING_JSON_STRING},
-			`","v":`, build.Ref{Name: "s", Encoding: pb.RefEncoding_REF_ENCODING_JSON_VALUE},
-			`,"n":`, build.Ref{Name: "n", Encoding: pb.RefEncoding_REF_ENCODING_JSON_VALUE}, `}`), "/", build.Raw("s")),
+	ops := []*pb.PlannedOperation{messages.Op(0,
+		messages.CaptureJSON(messages.CaptureJSON(messages.Get("/"), "s", "/s"), "n", "/n"),
+		messages.Post(messages.Text(`{"s":"`, messages.Ref{Name: "s", Encoding: pb.RefEncoding_REF_ENCODING_JSON_STRING},
+			`","v":`, messages.Ref{Name: "s", Encoding: pb.RefEncoding_REF_ENCODING_JSON_VALUE},
+			`,"n":`, messages.Ref{Name: "n", Encoding: pb.RefEncoding_REF_ENCODING_JSON_VALUE}, `}`), "/", messages.Raw("s")),
 	)}
 	p, err := plan.New([]string{"op"}, ops)
 	if err != nil {

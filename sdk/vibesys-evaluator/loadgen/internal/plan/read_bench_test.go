@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1"
-	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/build"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/files"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/messages"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/internal/plan"
 )
 
@@ -14,11 +14,11 @@ import (
 func BenchmarkRead(b *testing.B) {
 	var ops []*pb.PlannedOperation
 	for i := range 10_000 {
-		step := build.Query(build.Query(build.Query(build.Get("/hotels"), "inDate", "2015-04-09"), "outDate", "2015-04-11"), "lat", "37.7867")
-		build.Header(step, "X-Request", "r-", string(rune('a'+i%26)))
-		ops = append(ops, build.Exclusive(build.Op(0, step), "k"+string(rune('a'+i%26))))
+		step := messages.Query(messages.Query(messages.Query(messages.Get("/hotels"), "inDate", "2015-04-09"), "outDate", "2015-04-11"), "lat", "37.7867")
+		messages.Header(step, "X-Request", "r-", string(rune('a'+i%26)))
+		ops = append(ops, messages.Exclusive(messages.Op(0, step), "k"+string(rune('a'+i%26))))
 	}
-	data := build.RequestsFile(files.Binpb, []string{"search"}, ops...)
+	data := messages.RequestsFile(files.Binpb, []string{"search"}, ops...)
 	b.SetBytes(int64(len(data)))
 	b.ResetTimer()
 	for range b.N {

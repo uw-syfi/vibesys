@@ -1502,6 +1502,10 @@ func (x *BodyDigest) GetLength() uint64 {
 // libraries read and write. `encoded` holds the encoding's bytes (cookie, then
 // the zlib stream), not the base64 text those libraries' encode functions
 // return: Python reads it with HdrHistogram.decode(base64.b64encode(encoded)).
+// As the reference libraries (Java, Go, Python's hdrhistogram) write it, the
+// outer cookie is 0x1c849314 (the compressed base 0x1c849304 | 0x10) and the
+// inner one 0x1c849313 (0x1c849303 | 0x10); a reader compares cookie & ~0xf0
+// with the bases. sdk/vibesys-evaluator/fixtures/check_histograms.py checks it.
 // A value above highest_trackable_micros is recorded as that value.
 type HdrHistogram struct {
 	state                  protoimpl.MessageState `protogen:"open.v1"`
