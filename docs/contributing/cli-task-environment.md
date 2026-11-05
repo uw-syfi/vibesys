@@ -387,25 +387,35 @@ login node, is the placement kind `apptainer`, not a runtime setting of the
 environment's decisions (images, the two containers of a task of two images,
 the resources, the stop) hold unchanged; only how a container exists differs.
 
-- The image is built by the caller's own Docker, then exported, compressed
-  (gzip at its fastest level),
-  and copied over ssh to the shared file system, named by its digest, once.
-  The copy is honest about its cost: a ROCm image is several GiB, so the first
-  run of an image on a cluster spends minutes copying it, and later runs and
-  other daemons copy nothing. Building on the cluster was not an option, since
-  its nodes have no Docker and `apptainer build` from a Dockerfile would make
-  another image than the one the result records.
+- The image is built by the caller's own Docker, and converted to a SIF on
+  the caller's machine by its own `apptainer`, which the placement requires
+  on the daemon's `PATH`; the SIF is copied over ssh to the shared file
+  system, named by its digest, once, and later runs and other daemons copy
+  nothing. The cluster's apptainer only runs SIFs. Converting where the image
+  already is was chosen over converting on the cluster after measuring both
+  on a 47 GB ROCm image: a node's scratch space (25 GB) cannot hold the image
+  unpacked; an unpacked sandbox built on the shared file system (WekaFS)
+  wrote 121k of its several hundred thousand files in 30 minutes, an hour or
+  two per image; and `mksquashfs` stalls there. Locally, `docker save` took
+  202 s and `apptainer build` 475 s, to an 11 GB SIF, which is the one
+  transfer. Building on the cluster from the Dockerfile was not an option
+  either: its nodes have no Docker, and `apptainer build` of a Dockerfile
+  would make another image than the one the result records, so Dockerfiles
+  stay the only image recipe.
+- `docker save` streams into the conversion and the SIF streams to the
+  cluster, so no archive is copied anywhere: the archive is written once, in
+  the conversion's own directory under the operator's `local_scratch_dir`,
+  beside Apptainer's `APPTAINER_TMPDIR` and `APPTAINER_CACHEDIR`, and the
+  directory is removed when the conversion ends. That file system is checked
+  first for the image's unpacked size (`docker image ls`; with Docker's
+  containerd image store `docker image inspect` reports the compressed
+  layers) and twice its stored size (the archive and the SIF), and too
+  little fails naming the space needed and the space there is.
 - Publishing is a write to a file of the publisher's own and a rename once its
   size is what was sent, so concurrent publishers each rename a whole file,
-  and a copy cut short is never there. The unpacked size is published after the
-  archive, so its presence says the archive is whole.
-- The conversion to a SIF runs inside the allocation, on the node's own
-  scratch space (`$TMPDIR`), never on the shared file system, which a build's
-  many small files would load. It first checks that the scratch space has three
-  times the image's unpacked size (the archive, the unpacked tree and the SIF),
-  and fails naming the space needed and the space there is. `apptainer build`
-  reads an uncompressed docker archive only, so the archive is unpacked first.
-  The SIF is published beside the archive by digest, and is what later runs use.
+  and a copy cut short, or a conversion that fails, is never there. What
+  converted a SIF, with its version, goes to the build's log and to
+  `<digest>.sif.built-by` beside it.
 - One batch allocation per run holds both containers, which share the node's
   network; the server's port is chosen free in the allocation, from the node's
   `/proc/net/tcp`, not from the run's id, since other jobs share the node's
@@ -529,7 +539,12 @@ later; until then the check covers 0.2 and every later schema.
   machine on the allocated node.
 - Under `apptainer`, the image's own files are read-only (no writable overlay),
   where a Docker container's are not; a task that writes outside its mounts,
-  `/tmp` and its home fails there. The node's GPUs are passed with `--rocm`,
+  `/tmp` and its home fails there. The site's bind paths are not mounted
+  (`--no-mount bind-paths`): a probe found the shared file system bound
+  read-write into every container by them, through which a container wrote
+  into a shared image; only the node's `/etc/hosts` is bound back. A machine
+  that cannot run Apptainer, such as macOS, has no `apptainer` placement.
+  The node's GPUs are passed with `--rocm`,
   and whether a step on a partition that isolates GPUs gets the job's GPUs
   without `--gres` on the step is not verified.
 - Passing exactly the GPUs Slurm allocated on a node with several, instead of

@@ -129,9 +129,10 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/environment/docker/dockertest/` | The one contract suite every `Engine` passes. Tests only. |
 | `internal/environment/docker/machine/` | Where a docker engine's containers find a run's directories: `Local` (this machine's own directories, and its caches) and `Remote` (copies made with rsync on a machine reached over ssh, copied back when the command ends). |
 | `internal/environment/slurm/` | The Slurm placement: an `Allocator` that runs a container's first process and every image build under `srun`, and an `Engine` that removes a container and then cancels and confirms the end of its allocation, and sweeps the allocations a dead run left. Passes the environment contract suite over the fake engine. |
-| `internal/environment/apptainer/` | The apptainer placement: an `Engine` that places the docker environment's containers on a Slurm cluster whose nodes run Apptainer and no Docker. It copies each image to the cluster once, by digest, converts it to a SIF on a node, runs a run's containers as steps of one batch allocation, and reads the machine and the GPUs on the node. It decides over a `Cluster`, the narrow interface to the cluster. |
+| `internal/environment/apptainer/` | The apptainer placement: an `Engine` that places the docker environment's containers on a Slurm cluster whose nodes run Apptainer and no Docker. It converts each image to a SIF on this machine with its apptainer program and copies the SIF to the cluster once, by digest, runs a run's containers as steps of one batch allocation, and reads the machine and the GPUs on the node. It decides over a `Cluster`, the narrow interface to the cluster. |
 | `internal/environment/apptainer/clustercli/` | The `Cluster` that runs Slurm's and Apptainer's programs through ssh on the login node. Its tests run it against fake `srun`, `apptainer` and `scancel` programs. |
-| `internal/environment/apptainer/clusterfake/` | A `Cluster` that keeps a cluster in memory, with queued jobs, nodes that run the fake world's scripts, and faults. Tests only. |
+| `internal/environment/apptainer/clusterfake/` | A `Cluster` that keeps a cluster in memory, with queued jobs, nodes that run the fake world's scripts, and faults, and a `Converter` that builds SIFs in memory. Tests only. |
+| `internal/environment/apptainer/localsif/` | The `Converter` that runs this machine's `apptainer build`, found on the daemon's `PATH`, in a scratch directory of its own. Its tests run it against a fake `apptainer` program. |
 | `internal/remote/` | Running programs on a machine and copying directories to and from it: this one, or another over ssh and rsync. An exit code that is ssh's own is never taken for the program's. |
 | `internal/backend/nvidia/` | The GPU facts of a machine (model, count, driver, the driver's CUDA version) for a fingerprint, read with `nvidia-smi`. |
 | `internal/backend/amd/` | The AMD GPU facts of a machine (model, count, the amdgpu driver's version) for a fingerprint, read with `rocminfo` or `amd-smi` and `/sys/module/amdgpu/version`. |
@@ -740,7 +741,8 @@ hf = "/shared/hf-cache"
 | `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
 | `[placements.<name>.slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
 | `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for `gres` and, with `exclusive`, the whole node when it measures, and `shared_gres` (or `gres`), `cpus` and `memory` when it does not. |
-| `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`). |
+| `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`), which only runs SIFs. |
+| `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF (3600 by default). See "The apptainer placement". |
 | `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
 | `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
@@ -762,24 +764,32 @@ node Docker runs on.
 ### The apptainer placement
 
 An `apptainer` placement runs the same docker environment on a multi-node Slurm cluster reached
-through its login node, whose compute nodes have Slurm and Apptainer and no Docker:
+through its login node, whose compute nodes have Slurm and Apptainer and no Docker. This machine
+needs Apptainer too, on the daemon's `PATH`: a placement of the kind is refused at the daemon's
+start without it, saying to install it.
 
-- The images are built by this machine's Docker, as for every placement. Before a container of an
-  image starts, the image is exported (`docker save`), compressed with gzip, and copied over ssh to
-  `images/<digest>.tar.gz` under `remote_workspace_root`, with its unpacked size beside it. The copy
-  is written to a file of its own and renamed into place once its size is what was sent, so
-  daemons that copy one image at once each publish a whole file, and a copy cut short leaves none.
-  An image the cluster has, or has the SIF of, is not copied again. The copy is the image's whole
-  compressed size over the ssh connection: several GiB for a ROCm image, once per image.
+- The images are built by this machine's Docker, as for every placement, and converted to SIFs here,
+  where they already are, by this machine's `apptainer build`: neither the nodes' scratch space nor
+  the shared file system limits the conversion, and only the SIF crosses the network. Before a
+  container of an image starts (and as part of a build, whose log then says which apptainer, of
+  which version, converted it), unless the cluster has the image's SIF, `docker save` streams the
+  image into a directory of its own under `local_scratch_dir`, which also holds Apptainer's
+  temporary files (`APPTAINER_TMPDIR`, `APPTAINER_CACHEDIR`) and is removed when the conversion
+  ends. The directory's file system is checked first for the image unpacked (as `docker image ls`
+  reports it) and its archive and SIF (each about the image's stored layers); when it has too
+  little, the run fails before its command naming the space needed, the directory, and the space
+  there is. A 47 GB ROCm image converts in about ten minutes to an 11 GB SIF.
+- The SIF is copied over ssh to `images/<digest>.sif` under `remote_workspace_root`, with
+  `images/<digest>.sif.built-by` beside it naming what converted it. The copy is written to a file
+  of its own and renamed into place once its size is what was sent, so daemons that copy one image
+  at once each publish a whole file, and a copy cut short, or a conversion that fails, leaves none.
+  Every later run, of any daemon, finds it there. `convert_timeout_seconds` bounds the conversion
+  and the copy.
 - A run's first container is a batch allocation of its own (`sbatch --parsable --no-requeue`, or the
   site's `submit_command`, with the `[slurm]` options and `submit_arguments`), named by the
-  container and commented with the daemon's scope. Its time limit is the command's limit and 40
-  minutes for the conversion and the stop. A holder step keeps it for the run: when the run ends,
-  or the daemon dies and its ssh connection with it, the holder cancels the allocation.
-- On the node, the archive is converted to a SIF in the node's own scratch directory (`$TMPDIR`),
-  after checking that it has three times the image's unpacked size free; when it has not, the job
-  fails before its command naming the space needed and the space there is. The SIF is published at
-  `images/<digest>.sif`, where every later run finds it.
+  container and commented with the daemon's scope. Its time limit is the command's limit and 10
+  minutes for the stop. A holder step keeps it for the run: when the run ends, or the daemon dies
+  and its ssh connection with it, the holder cancels the allocation.
 - The machine's facts and load, and the AMD GPUs' facts, are read on the node inside the
   allocation, never on the login node. A daemon fingerprints a placement before it has a node, so
   its fingerprint names the last node a run of its scope read (kept at `nodes/<scope>.json`), and
@@ -787,8 +797,11 @@ through its login node, whose compute nodes have Slurm and Apptainer and no Dock
 - Each of a container's processes is a step of the allocation (`srun --jobid --overlap`) that runs
   `apptainer exec` of the SIF with a clean environment, the container's variables, its mounts
   (read-only ones with `:ro`), the run's directories (staged under `remote_workspace_root` as for
-  `ssh`), a private home at `/tmp`, and `--rocm` with a `rocm` resource. The image's own files are
-  read-only, unlike in a docker container. SIGTERM and SIGKILL go to every process of the container,
+  `ssh`), a private home at `/tmp`, `--rocm` with a `rocm` resource, and none of the site's bind
+  paths (`--no-mount bind-paths`), which can bind the whole shared file system read-write and would
+  let a container write the SIFs and other runs' directories; the node's `/etc/hosts` is bound back
+  read-only, so `localhost` resolves. The image's own files are read-only, unlike in a docker
+  container. SIGTERM and SIGKILL go to every process of the container,
   found by a variable each carries; the grace and the kill are as under docker.
 - In a task of two images, the command's container joins the server's allocation, so both run on
   one node and share its network. The server's port is one the node has free, chosen in the
