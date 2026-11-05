@@ -49,7 +49,7 @@ func describe(j *cliv1.Job) string {
 	fmt.Fprintf(&b, "\t%s", commit)
 	switch spec := j.GetSpec(); {
 	case spec.GetCommand() != nil:
-		fmt.Fprintf(&b, "\t%s", strings.Join(spec.GetCommand().GetArgv(), " "))
+		fmt.Fprintf(&b, "\t%s", commandSummary(spec.GetCommand().GetArgv()))
 	case spec.GetCheck() != nil:
 		fmt.Fprint(&b, "\tcheck")
 	case spec.GetMeasure() != nil:
@@ -62,6 +62,29 @@ func describe(j *cliv1.Job) string {
 		fmt.Fprintf(&b, "\n\t  note: %s", n.GetText())
 	}
 	return b.String()
+}
+
+// commandWidth is the most runes of a command's argv that describe prints.
+const commandWidth = 120
+
+// commandSummary is a command's argv as describe prints it: on one line and at most commandWidth
+// runes, so an inline script passed as an argument does not fill every listing that names its
+// job. What it leaves out it says, and --json carries the whole argv.
+func commandSummary(argv []string) string {
+	joined := strings.Join(argv, " ")
+	first, rest, multiline := strings.Cut(joined, "\n")
+	runes := []rune(first)
+	if !multiline && len(runes) <= commandWidth {
+		return joined
+	}
+	if len(runes) > commandWidth {
+		first = string(runes[:commandWidth])
+	}
+	more := ""
+	if multiline {
+		more = fmt.Sprintf("%d more lines, ", strings.Count(rest, "\n")+1)
+	}
+	return strings.TrimRight(first, " \t\r") + " … (" + more + "full argv in --json)"
 }
 
 // describeSubmitted is describe, with what the submission turned into when it did not make a new
