@@ -503,6 +503,157 @@ func TestAFailedConversionLeavesNoSIF(t *testing.T) {
 	}
 }
 
+// build builds the tests' image with the rig's engine, which converts it, and returns what the
+// build logged.
+func build(ctx context.Context, r *rig) (string, error) {
+	buildContext, err := docker.Context(docker.Spec{Dockerfile: []byte(dockerfile)})
+	if err != nil {
+		return "", err
+	}
+	var log bytes.Buffer
+	err = r.engine.Build(ctx, docker.BuildSpec{Tag: "vibesys-task:x", Context: buildContext}, &log)
+	return log.String(), err
+}
+
+// receive returns what ch gives, failing the test if ctx, its bound against a hang, ends first.
+func receive[T any](ctx context.Context, t *testing.T, ch <-chan T, what string) T {
+	t.Helper()
+	select {
+	case v := <-ch:
+		return v
+	case <-ctx.Done():
+		t.Fatalf("%s never happened", what)
+		var zero T
+		return zero
+	}
+}
+
+// heldConversion is a converter of one machine whose first build, once it started, waits for the
+// test to end it with the error it sends on release.
+type heldConversion struct {
+	converter *clusterfake.Converter
+	started   chan struct{}
+	release   chan error
+}
+
+func holdFirstConversion() *heldConversion {
+	h := &heldConversion{converter: clusterfake.NewConverter(), started: make(chan struct{}, 1), release: make(chan error, 1)}
+	var first sync.Once
+	h.converter.SetFaults(func(op string) error {
+		if op != "build" {
+			return nil
+		}
+		var err error
+		held := false
+		first.Do(func() {
+			held = true
+			h.started <- struct{}{}
+			err = <-h.release
+		})
+		if held {
+			return err
+		}
+		return nil
+	})
+	return h
+}
+
+// Two processes of one machine that publish one image at once convert it once: the second finds
+// the first converting it, says so in its build's log, waits for it on the engine's poll, and then
+// uses the SIF the first copied, which is copied once. When the first conversion fails, the one
+// that waited converts the image itself. Every lock is let go after.
+func TestPublishersOfOneImageOnOneMachineConvertItOnce(t *testing.T) {
+	cases := []struct {
+		name   string
+		first  error
+		builds int
+	}{
+		{"the first converts", nil, 1},
+		{"the first fails", &core.Failure{Kind: core.FailureUnavailable, Message: "FATAL: unpacking failed"}, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+			defer cancel()
+			w := fakeworld.New()
+			cluster := clusterfake.New(w.MemoryGates)
+			machine := holdFirstConversion()
+			sif := sifOf(imageID(t))
+			first := newRig(t, w, cluster, setup{process: 0, converter: machine.converter})
+			waiterTimers := envtest.NewTimers()
+			second := newRig(t, w, cluster, setup{process: 1, converter: machine.converter, engineTimers: waiterTimers})
+
+			firstDone := make(chan error, 1)
+			go func() { _, err := build(ctx, first); firstDone <- err }()
+			receive(ctx, t, machine.started, "the first conversion's start")
+			type result struct {
+				log string
+				err error
+			}
+			secondDone := make(chan result, 1)
+			go func() { log, err := build(ctx, second); secondDone <- result{log, err} }()
+			// The second waits: its bound of the wait, then its pause before it tries again.
+			pause := waiterTimers.Await(ctx, 2)
+			if pause == nil || pause.Duration != apptainer.DefaultPoll {
+				t.Fatalf("the second publisher did not pause to wait for the first: %+v", pause)
+			}
+			machine.release <- c.first
+			if err := receive(ctx, t, firstDone, "the first build's end"); (err != nil) != (c.first != nil) {
+				t.Fatalf("the first build: %v, want the error %v", err, c.first)
+			}
+			pause.Fire()
+			got := receive(ctx, t, secondDone, "the second build's end")
+			if got.err != nil {
+				t.Fatalf("the second build: %v", got.err)
+			}
+			if !strings.Contains(got.log, "another process of this machine is converting") {
+				t.Errorf("the second build's log %q does not say it waited for another conversion", got.log)
+			}
+			if builds := machine.converter.Builds(); len(builds) != c.builds {
+				t.Errorf("builds %v, want %d", builds, c.builds)
+			}
+			if n := cluster.Published(sif); n != 1 {
+				t.Errorf("the SIF was published %d times, want once", n)
+			}
+			if held := machine.converter.Held(); len(held) != 0 {
+				t.Errorf("locks held after: %v", held)
+			}
+		})
+	}
+}
+
+// A publisher that waits longer than ConvertTimeout for another conversion of its image on this
+// machine fails saying so, and converts nothing.
+func TestAWaitForAnotherConversionIsBounded(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	machine := holdFirstConversion()
+	first := newRig(t, w, cluster, setup{process: 0, converter: machine.converter})
+	second := newRig(t, w, cluster, setup{
+		process: 1, converter: machine.converter,
+		engineTimers: clock.Exactly{D: apptainer.DefaultConvertTimeout, Others: envtest.NewTimers()},
+	})
+	firstDone := make(chan error, 1)
+	go func() { _, err := build(ctx, first); firstDone <- err }()
+	receive(ctx, t, machine.started, "the first conversion's start")
+	_, err := build(ctx, second)
+	if err == nil || !strings.Contains(err.Error(), "stopped waiting") || !strings.Contains(err.Error(), "convert_timeout_seconds") {
+		t.Errorf("the second build: %v, want one saying it stopped waiting at its bound", err)
+	}
+	machine.release <- nil
+	if err := receive(ctx, t, firstDone, "the first build's end"); err != nil {
+		t.Fatal(err)
+	}
+	if builds := machine.converter.Builds(); len(builds) != 1 {
+		t.Errorf("builds %v, want the first's only", builds)
+	}
+	if held := machine.converter.Held(); len(held) != 0 {
+		t.Errorf("locks held after: %v", held)
+	}
+}
+
 // An engine needs a converter and an absolute local directory.
 func TestAnEngineNeedsAConverterAndALocalDirectory(t *testing.T) {
 	w := fakeworld.New()

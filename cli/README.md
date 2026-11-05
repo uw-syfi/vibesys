@@ -779,12 +779,21 @@ start without it, saying to install it.
   reports it) and its archive and SIF (each about the image's stored layers); when it has too
   little, the run fails before its command naming the space needed, the directory, and the space
   there is. A 47 GB ROCm image converts in about ten minutes to an 11 GB SIF.
+- The jobs of this machine convert one image one at a time, whichever process runs each: a
+  conversion holds a lock on the file `vibesys-convert-<digest>.lock` in `local_scratch_dir`
+  (`flock`, which the machine lets go of when the process ends, however it ends). A job that finds
+  it held says in its log that another process of this machine is converting the image, tries
+  again every `[slurm] poll_interval_seconds` (5 by default) for up to `convert_timeout_seconds`,
+  and then uses the SIF the other copied, or converts the image itself when the other failed. The lock files stay, one per image converted.
+  Conversions of different images still run at once, and the check of the free space does not count
+  what the others are about to write, so two that start together can each find room for itself and
+  not for both.
 - The SIF is copied over ssh to `images/<digest>.sif` under `remote_workspace_root`, with
   `images/<digest>.sif.built-by` beside it naming what converted it. The copy is written to a file
-  of its own and renamed into place once its size is what was sent, so daemons that copy one image
-  at once each publish a whole file, and a copy cut short, or a conversion that fails, leaves none.
-  Every later run, of any daemon, finds it there. `convert_timeout_seconds` bounds the conversion
-  and the copy.
+  of its own and renamed into place once its size is what was sent, so daemons of different
+  machines that copy one image at once each publish a whole file, and a copy cut short, or a
+  conversion that fails, leaves none. Every later run, of any daemon, finds it there.
+  `convert_timeout_seconds` bounds the conversion and the copy.
 - A run's first container is a batch allocation of its own (`sbatch --parsable --no-requeue`, or the
   site's `submit_command`, with the `[slurm]` options and `submit_arguments`), named by the
   container and commented with the daemon's scope. Its time limit is the command's limit and 10

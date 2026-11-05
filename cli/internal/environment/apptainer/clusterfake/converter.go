@@ -6,7 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"maps"
+	"path"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -21,10 +24,12 @@ type Converter struct {
 	free   int64
 	builds []string // the directory of each build that finished
 	fail   func(op string) error
+	held   map[string]bool // the locks held, by their path
 }
 
-// NewConverter returns a converter with a petabyte free in every directory.
-func NewConverter() *Converter { return &Converter{free: 1 << 50} }
+// NewConverter returns a converter with a petabyte free in every directory. It is one machine's:
+// the engines of the processes of one machine share it, and its locks.
+func NewConverter() *Converter { return &Converter{free: 1 << 50, held: map[string]bool{}} }
 
 // Version is what the fake says it is.
 const Version = "apptainer version 1.4.5 (fake)"
@@ -42,7 +47,7 @@ func (c *Converter) SetFree(free int64) {
 	c.free = free
 }
 
-// SetFaults makes the calls named by op ("free", "build", "describe") fail with what f returns.
+// SetFaults makes the calls named by op ("free", "build", "describe", "lock") fail with what f returns.
 func (c *Converter) SetFaults(f func(op string) error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -114,6 +119,48 @@ func (c *Converter) Describe(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return Version, nil
+}
+
+// Lock implements apptainer.Converter.
+func (c *Converter) Lock(ctx context.Context, dir, name string) (io.Closer, error) {
+	if err := c.fault(ctx, "lock"); err != nil {
+		return nil, err
+	}
+	if name == "" || strings.ContainsRune(name, '/') || name == "." || name == ".." {
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: "clusterfake: the lock name " + name + " is not a file name"}
+	}
+	p := path.Join(dir, name)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.held[p] {
+		return nil, apptainer.ErrConverting
+	}
+	c.held[p] = true
+	return &lock{c: c, path: p}, nil
+}
+
+// Held returns the path of every lock held, sorted.
+func (c *Converter) Held() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Sorted(maps.Keys(c.held))
+}
+
+// lock is a held lock of a Converter.
+type lock struct {
+	c    *Converter
+	path string
+	once sync.Once
+}
+
+// Close lets the lock go; closing it again does nothing.
+func (l *lock) Close() error {
+	l.once.Do(func() {
+		l.c.mu.Lock()
+		defer l.c.mu.Unlock()
+		delete(l.c.held, l.path)
+	})
+	return nil
 }
 
 var _ apptainer.Converter = (*Converter)(nil)

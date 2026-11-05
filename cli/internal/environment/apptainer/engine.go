@@ -451,17 +451,76 @@ func (e *Engine) sifPath(image string) string {
 const BuiltBy = ".built-by"
 
 // publish returns the image's SIF on the cluster, converting the image on this machine and copying
-// the SIF there unless the cluster has it: docker save streams the archive into the converter, and
-// the SIF it builds streams to the cluster, published whole by a rename, so a conversion cut short
-// leaves no SIF there and publishers of one image at once each publish a whole one. The conversion
-// is checked first against the space of the local directory, and bounded by ConvertTimeout. What
-// converted it goes to log, and to a file beside the SIF.
+// the SIF there unless the cluster has it.
+//
+// The publishers of one image on this machine, in this process or others, convert it one at a
+// time, under the image's lock of the Converter: one that finds the lock held says so to log and
+// waits for it, then uses the SIF the holder published, or converts the image itself when the
+// holder failed. Publishers on different machines each convert the image, and the cluster keeps
+// one of their SIFs, whole.
 func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (string, error) {
 	sif := e.sifPath(image)
 	has, err := e.cfg.Cluster.Has(ctx, sif)
 	if err != nil || has {
 		return sif, err
 	}
+	lock, err := e.lockConversion(ctx, image, log)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = lock.Close() }()
+	// A holder this publisher waited for may have published the SIF.
+	if has, err := e.cfg.Cluster.Has(ctx, sif); err != nil || has {
+		return sif, err
+	}
+	return e.convert(ctx, image, sif, log)
+}
+
+// lockConversion takes the lock of the image's conversions on this machine, trying again after
+// each Poll while another holds it, up to ConvertTimeout: the bound of the conversion it waits for.
+func (e *Engine) lockConversion(ctx context.Context, image string, log io.Writer) (io.Closer, error) {
+	name := "vibesys-convert-" + strings.TrimPrefix(image, "sha256:") + ".lock"
+	var limit <-chan struct{}
+	for {
+		lock, err := e.cfg.Converter.Lock(ctx, e.cfg.LocalDir, name)
+		if !errors.Is(err, ErrConverting) {
+			if err != nil {
+				return nil, fmt.Errorf("locking the conversion of the image %s in %s: %w", image, e.cfg.LocalDir, err)
+			}
+			return lock, nil
+		}
+		if limit == nil {
+			_, _ = fmt.Fprintf(log, "[apptainer] another process of this machine is converting %s to a SIF; "+
+				"waiting for it to end, to use its SIF\n", image)
+			var stop func()
+			limit, stop = e.cfg.Timers.Timeout(ctx, e.cfg.ConvertTimeout)
+			defer stop()
+		}
+		pause, stopPause := e.cfg.Timers.Timeout(ctx, e.cfg.Poll)
+		select {
+		case <-pause:
+			stopPause()
+		case <-limit:
+			stopPause()
+			return nil, unavailable("another process of this machine converted the image %s to a SIF for longer than %v "+
+				"([apptainer] convert_timeout_seconds), and this one stopped waiting for it", image, e.cfg.ConvertTimeout)
+		case <-ctx.Done():
+			stopPause()
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// convert converts the image on this machine and copies its SIF to the cluster: docker save streams
+// the archive into the converter, and the SIF it builds streams to the cluster, published whole by
+// a rename, so a conversion cut short leaves no SIF there. The conversion is checked first against
+// the space of the local directory, and bounded by ConvertTimeout. What converted it goes to log,
+// and to a file beside the SIF.
+//
+// The check of the space does not count what conversions of other images in progress on this
+// machine are about to write: two of them that start together may each find room for itself and
+// not for both.
+func (e *Engine) convert(ctx context.Context, image, sif string, log io.Writer) (string, error) {
 	unpacked, stored, err := e.cfg.Export.Sizes(ctx, image)
 	if err != nil {
 		return "", fmt.Errorf("reading the size of the image %s: %w", image, err)

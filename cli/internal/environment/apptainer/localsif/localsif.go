@@ -8,6 +8,7 @@ package localsif
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -70,6 +71,44 @@ func (c *Converter) Free(ctx context.Context, dir string) (int64, error) {
 	}
 	// Bsize is an int64 on linux and a uint32 on darwin.
 	return int64(st.Bavail) * int64(st.Bsize), nil
+}
+
+// Lock implements apptainer.Converter with flock(2) on the file of the name in dir. The kernel lets
+// the lock go when the process ends, however it ends, so a crash leaves no lock held. The file stays:
+// removing it would let a process that opened it before take a lock that a later opener of the new
+// file of the name does not see. The directory is a local disk's (local_scratch_dir), whose locks
+// hold between the processes of this machine.
+func (c *Converter) Lock(ctx context.Context, dir, name string) (io.Closer, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if name == "" || strings.ContainsRune(name, '/') || name == "." || name == ".." {
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("localsif: the lock name %q is not a file name", name)}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, unavailable("cannot make the scratch directory %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, name)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, unavailable("cannot open the lock %s: %v", path, err)
+	}
+	for {
+		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if !errors.Is(err, syscall.EINTR) {
+			break
+		}
+	}
+	switch {
+	case err == nil:
+		return f, nil
+	case errors.Is(err, syscall.EWOULDBLOCK):
+		_ = f.Close()
+		return nil, apptainer.ErrConverting
+	default:
+		_ = f.Close()
+		return nil, unavailable("cannot lock %s: %v", path, err)
+	}
 }
 
 // buildScript builds the SIF of the docker archive on its standard input with the apptainer

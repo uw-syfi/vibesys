@@ -5,12 +5,14 @@ package localsif_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/apptainer/localsif"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/envtest"
 )
@@ -119,5 +121,39 @@ func TestNoApptainerOnPathSaysToInstallIt(t *testing.T) {
 	_, err := localsif.New(empty + string(os.PathListSeparator) + notProgram)
 	if err == nil || !strings.Contains(err.Error(), "install Apptainer") {
 		t.Errorf("new: %v", err)
+	}
+}
+
+// The lock of a name is held by one open of it at a time, as by one process: another open is
+// refused at once with ErrConverting until the holder lets go, and a lock of another name is
+// another lock. A name that is not a file name is refused.
+func TestALockIsHeldByOneAtATime(t *testing.T) {
+	c := onPath(t)
+	dir := filepath.Join(t.TempDir(), "scratch")
+	held, err := c.Lock(ctx(t), dir, "image-a.lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Lock(ctx(t), dir, "image-a.lock"); !errors.Is(err, apptainer.ErrConverting) {
+		t.Errorf("a second lock of a held name: %v, want ErrConverting", err)
+	}
+	other, err := c.Lock(ctx(t), dir, "image-b.lock")
+	if err != nil {
+		t.Errorf("a lock of another name: %v", err)
+	} else {
+		_ = other.Close()
+	}
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
+	again, err := c.Lock(ctx(t), dir, "image-a.lock")
+	if err != nil {
+		t.Fatalf("the lock after its holder let go: %v", err)
+	}
+	_ = again.Close()
+	for _, name := range []string{"", ".", "..", "a/b"} {
+		if _, err := c.Lock(ctx(t), dir, name); err == nil || errors.Is(err, apptainer.ErrConverting) {
+			t.Errorf("the lock name %q: %v, want it refused", name, err)
+		}
 	}
 }
