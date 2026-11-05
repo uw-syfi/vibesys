@@ -178,6 +178,7 @@ class _Encoder:
 
 _LITERALS: dict[str, pb.Template] = {}
 _LITERAL_CACHE_LIMIT = 4096
+_LITERAL_CACHED_LENGTH = 64
 
 
 def _literal(text: str) -> pb.Template:
@@ -187,7 +188,7 @@ def _literal(text: str) -> pb.Template:
     if cached is not None:
         return cached
     message = pb.Template(parts=[pb.Template.Part(part=Oneof("literal", text))])
-    if len(text) <= 64 and len(_LITERALS) < _LITERAL_CACHE_LIMIT:  # noqa: PLR2004 - small values repeat
+    if len(text) <= _LITERAL_CACHED_LENGTH and len(_LITERALS) < _LITERAL_CACHE_LIMIT:
         _LITERALS[text] = message
     return message
 
@@ -256,7 +257,7 @@ def _captures(capture: Mapping[str, str] | None) -> list[pb.Capture]:
     return out
 
 
-def _step(  # noqa: PLR0913 - the public builders' keyword arguments, passed through once
+def _step(
     method: pb.HttpMethod,
     path: str | Template,
     *,
@@ -265,7 +266,7 @@ def _step(  # noqa: PLR0913 - the public builders' keyword arguments, passed thr
     capture: Mapping[str, str] | None,
     expect: int | Sequence[int],
     form: Mapping[str, str | Template] | None = None,
-    json: Any = None,  # noqa: ANN401 - any JSON value
+    json: Any = None,
     body: bytes | None = None,
 ) -> Step:
     encoder = _Encoder()
@@ -335,12 +336,12 @@ def get(
     )
 
 
-def post(  # noqa: PLR0913 - the HTTP request's parts, all keyword-only and optional
+def post(
     path: str | Template,
     *,
     query: Mapping[str, str | Template] | None = None,
     form: Mapping[str, str | Template] | None = None,
-    json: Any = None,  # noqa: ANN401 - any JSON value
+    json: Any = None,
     body: bytes | None = None,
     headers: Mapping[str, str | Template] | None = None,
     capture: Mapping[str, str] | None = None,
@@ -375,12 +376,12 @@ def post(  # noqa: PLR0913 - the HTTP request's parts, all keyword-only and opti
     )
 
 
-def put(  # noqa: PLR0913 - the HTTP request's parts, all keyword-only and optional
+def put(
     path: str | Template,
     *,
     query: Mapping[str, str | Template] | None = None,
     form: Mapping[str, str | Template] | None = None,
-    json: Any = None,  # noqa: ANN401 - any JSON value
+    json: Any = None,
     body: bytes | None = None,
     headers: Mapping[str, str | Template] | None = None,
     capture: Mapping[str, str] | None = None,

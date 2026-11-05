@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, NoReturn
 
+from vibesys_evaluator._private import cli
 from vibesys_evaluator._private.calls import Call, Response, Versions
 from vibesys_evaluator._private.rand import Rand
 from vibesys_evaluator._private.results import Metric, PhaseResult, Validity
 from vibesys_evaluator._private.run import Run
+from vibesys_evaluator.deploy import _k8s
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -34,14 +36,16 @@ __all__ = [
 ]
 
 
-def main(  # noqa: PLR0913 - the five parts of a task, keyword-only
+def main(
     *,
     dataset: Callable[[], D],
     system: App[D],
     workload: Workload[D, M],
     benchmark: Callable[[Run], None],
     metrics: Mapping[str, Metric],
-    validity: Validity = Validity(),  # noqa: B008 - a frozen dataclass, never mutated
+    validity: Validity = Validity(),  # noqa: B008  # LW-150401 [B008]; the default is a frozen dataclass.
+    # > The approved signature (api/public-api.txt) shows the default as Validity(); a module
+    # > constant would show its private name instead, and None would widen the type.
 ) -> NoReturn:
     """Run the task script's command (``benchmark``, ``phase``, ``seed`` or ``ctl``) and exit.
 
@@ -53,9 +57,6 @@ def main(  # noqa: PLR0913 - the five parts of a task, keyword-only
         metrics: The metrics ``run.report`` reports, by name.
         validity: When a phase is a measurement.
     """
-    from vibesys_evaluator._private import cli  # noqa: PLC0415 - keep importing the package cheap
-    from vibesys_evaluator.deploy import _k8s  # noqa: PLC0415 - keep importing the package cheap
-
     task = cli.Task(
         dataset=dataset,
         system=system,

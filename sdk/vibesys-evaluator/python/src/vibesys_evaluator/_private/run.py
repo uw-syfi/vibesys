@@ -83,7 +83,7 @@ def _warmup(value: float) -> float:
 class PhaseDriver:
     """Runs the sample's phases in order and keeps its write history."""
 
-    def __init__(  # noqa: PLR0913 - the sample's collaborators, named
+    def __init__(
         self,
         *,
         runner: PhaseRunner,

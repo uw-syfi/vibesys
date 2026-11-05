@@ -53,7 +53,7 @@ _MAX_SEED = (1 << 64) - 1
 
 def log(message: str) -> None:
     """One progress line on standard error."""
-    print(f"vibesys-evaluator: {message}", file=sys.stderr, flush=True)  # noqa: T201 - the job's log
+    print(f"vibesys-evaluator: {message}", file=sys.stderr, flush=True)
 
 
 class Stopped(BaseException):
@@ -127,7 +127,7 @@ def _artifacts(env: Mapping[str, str], scratch: Path) -> Path:
     return path
 
 
-def benchmark(  # noqa: PLR0913 - the sample's inputs, named
+def benchmark(
     task: Task,
     *,
     project_root: Path,
@@ -190,7 +190,7 @@ def benchmark(  # noqa: PLR0913 - the sample's inputs, named
                 f"stopped by signal {signal.Signals(stop.signum).name} before the sample finished",
                 partial=driver.partial if driver else None,
             )
-        except Exception as error:  # noqa: BLE001 - any failure of the task's code is the sample's error
+        except Exception as error:
             traceback.print_exc()
             records.error(
                 f"{type(error).__name__}: {error}", partial=driver.partial if driver else None
@@ -240,7 +240,7 @@ def phase(task: Task, *, work: Path, target: str) -> int:
     return 0
 
 
-def run(  # noqa: PLR0913 - the task and the process's environment, named
+def run(
     task: Task,
     argv: Sequence[str],
     *,

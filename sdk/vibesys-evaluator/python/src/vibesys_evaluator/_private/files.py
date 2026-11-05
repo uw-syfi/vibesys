@@ -23,6 +23,8 @@ if TYPE_CHECKING:
 SCHEMA_VERSION = 1
 WRITER = "vibesys-evaluator 0.1.0"
 _T = TypeVar("_T", bound="Message")
+_CONTINUE = 0x80  # LEB128: a byte below it ends a varint
+_MAX_SHIFT = 63
 
 
 class SchemaFileError(ValueError):
@@ -31,7 +33,7 @@ class SchemaFileError(ValueError):
 
 def _varint(value: int) -> bytes:
     out = bytearray()
-    while value >= 0x80:  # noqa: PLR2004 - LEB128 continuation bit
+    while value >= _CONTINUE:
         out.append((value & 0x7F) | 0x80)
         value >>= 7
     out.append(value)
@@ -77,14 +79,14 @@ def _frames(data: bytes, where: str) -> Iterator[memoryview]:
         length = 0
         shift = 0
         while True:
-            if position >= len(view) or shift > 63:  # noqa: PLR2004 - a 64-bit varint
+            if position >= len(view) or shift > _MAX_SHIFT:
                 msg = f"{where}: truncated length prefix at byte {position}"
                 raise SchemaFileError(msg)
             byte = view[position]
             position += 1
             length |= (byte & 0x7F) << shift
             shift += 7
-            if byte < 0x80:  # noqa: PLR2004 - LEB128 continuation bit
+            if byte < _CONTINUE:
                 break
         if position + length > len(view):
             msg = f"{where}: message of {length} bytes runs past the end of the file"

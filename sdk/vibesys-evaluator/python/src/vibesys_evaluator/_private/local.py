@@ -59,7 +59,7 @@ class LocalPhaseRunner:
             command = self._task.phase(work_dir=str(work), target=self._target)
             with log.open("wb") as output:
                 try:
-                    done = subprocess.run(  # noqa: S603 - the task's own script, command built by TaskCommand
+                    done = subprocess.run(
                         command,
                         stdout=output,
                         stderr=subprocess.STDOUT,
@@ -96,7 +96,7 @@ class LocalDeployer:
         command = context.task.seed(dataset_digest=context.dataset_digest)
         with log.open("wb") as output:
             try:
-                done = subprocess.run(  # noqa: S603 - the task's own script, command built by TaskCommand
+                done = subprocess.run(
                     command,
                     stdout=output,
                     stderr=subprocess.STDOUT,

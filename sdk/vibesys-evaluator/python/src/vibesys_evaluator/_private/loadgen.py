@@ -50,7 +50,7 @@ class PhaseFiles:
     summary: Path
 
 
-def phase_args(  # noqa: PLR0913 - the phase's load, passed through to the command line once
+def phase_args(
     *,
     model: pb.LoadModel,
     target: str,
@@ -107,7 +107,7 @@ class ProcessLoadgen:
     def run(self, args: Sequence[str], *, timeout_secs: float) -> LoadgenExit:
         """Run it; stderr is kept (its tail), stdout is passed through."""
         try:
-            done = subprocess.run(  # noqa: S603 - the package's own binary, arguments built above
+            done = subprocess.run(
                 [self._path, *args],
                 stderr=subprocess.PIPE,
                 text=True,

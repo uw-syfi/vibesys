@@ -24,7 +24,7 @@ class Response:
     status: int
     body: bytes
 
-    def json(self) -> Any:  # noqa: ANN401 - a JSON document is any JSON value
+    def json(self) -> Any:
         """The body parsed as JSON.
 
         Raises:
@@ -117,18 +117,17 @@ class Versions(Generic[K, V]):
         Returns:
             At least one value.
         """
-        writes = [w for w in self._writes.get(key, ()) if w.start is not None]
+        writes = [(w, w.start) for w in self._writes.get(key, ()) if w.start is not None]
         visible_by = start - self._bound
         # The latest start among the writes certainly applied and visible: every
         # acknowledged write that ended before it is certainly overwritten.
         settled = max(
-            (w.start for w in writes if w.ok and w.end is not None and w.end <= visible_by),
+            (began for w, began in writes if w.ok and w.end is not None and w.end <= visible_by),
             default=None,
         )
         values: list[V] = [] if settled is not None else [default]
-        for w in writes:
-            assert w.start is not None  # noqa: S101 - filtered above
-            if w.start >= end:
+        for w, began in writes:
+            if began >= end:
                 continue
             overwritten = settled is not None and w.ok and w.end is not None and w.end <= settled
             if not overwritten and w.value not in values:

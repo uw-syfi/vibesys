@@ -31,10 +31,11 @@ class DatasetError(ValueError):
     """The dataset holds a value the file cannot represent (the message gives its path)."""
 
 
-def _plain(value: object, path: str, depth: int) -> object:  # noqa: C901, PLR0911 - one branch per JSON kind
-    if depth > _MAX_DEPTH:
-        msg = f"dataset{path}: nested deeper than {_MAX_DEPTH} levels"
-        raise DatasetError(msg)
+_NOT_LEAF = object()
+
+
+def _leaf(value: object, path: str) -> object:
+    """A scalar's JSON value, or ``_NOT_LEAF``."""
     if value is None or isinstance(value, bool | int | str):
         return value
     if isinstance(value, float):
@@ -42,32 +43,37 @@ def _plain(value: object, path: str, depth: int) -> object:  # noqa: C901, PLR09
             msg = f"dataset{path}: {value!r} is not a finite number"
             raise DatasetError(msg)
         return value
-    if isinstance(value, Enum):
-        return _plain(value.value, path, depth + 1)
     if isinstance(value, bytes | bytearray):
         return base64.b64encode(bytes(value)).decode()
-    if isinstance(value, datetime.date | datetime.datetime | datetime.time):
+    if isinstance(value, datetime.date | datetime.time):
         return value.isoformat()
+    return _NOT_LEAF
+
+
+def _plain(value: object, path: str, depth: int) -> object:
+    if depth > _MAX_DEPTH:
+        msg = f"dataset{path}: nested deeper than {_MAX_DEPTH} levels"
+        raise DatasetError(msg)
+    leaf = _leaf(value.value if isinstance(value, Enum) else value, path)
+    if leaf is not _NOT_LEAF:
+        return leaf
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return {
-            f.name: _plain(getattr(value, f.name), f"{path}.{f.name}", depth + 1)
-            for f in dataclasses.fields(value)
+        fields: dict[str, object] = {
+            f.name: getattr(value, f.name) for f in dataclasses.fields(value)
         }
-    if isinstance(value, Mapping):
-        return {str(k): _plain(v, f"{path}[{k!r}]", depth + 1) for k, v in value.items()}
-    if isinstance(value, set | frozenset):
+    elif isinstance(value, Mapping):
+        fields = {str(k): v for k, v in value.items()}
+    elif isinstance(value, set | frozenset):
         items = [_plain(v, f"{path}[]", depth + 1) for v in value]
         return sorted(items, key=lambda v: json.dumps(v, sort_keys=True))
-    if isinstance(value, list | tuple):
+    elif isinstance(value, list | tuple):
         return [_plain(v, f"{path}[{n}]", depth + 1) for n, v in enumerate(value)]
-    if hasattr(value, "__dict__"):
-        return {
-            k: _plain(v, f"{path}.{k}", depth + 1)
-            for k, v in vars(value).items()
-            if not k.startswith("_")
-        }
-    msg = f"dataset{path}: a {type(value).__name__} cannot be written to the dataset file"
-    raise DatasetError(msg)
+    elif hasattr(value, "__dict__"):
+        fields = {k: v for k, v in vars(value).items() if not k.startswith("_")}
+    else:
+        msg = f"dataset{path}: a {type(value).__name__} cannot be written to the dataset file"
+        raise DatasetError(msg)
+    return {k: _plain(v, f"{path}.{k}", depth + 1) for k, v in fields.items()}
 
 
 def encode(data: object) -> bytes:

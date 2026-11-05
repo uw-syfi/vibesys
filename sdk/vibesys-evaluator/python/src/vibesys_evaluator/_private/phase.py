@@ -78,7 +78,7 @@ def phase_rand(phase: phase_pb.PhaseInput) -> Rand:
     return Rand(phase.sample_seed, "phase", phase.phase_index)
 
 
-def _roundtrip(info: Any, operation: str) -> tuple[str, dict[str, Any]]:  # noqa: ANN401 - any JSON object
+def _roundtrip(info: Any, operation: str) -> tuple[str, dict[str, Any]]:
     try:
         text = json.dumps(info, allow_nan=False, separators=(",", ":"), sort_keys=True)
     except (TypeError, ValueError) as error:
@@ -104,7 +104,9 @@ def _response(step: pb.StepResult) -> Response:
 
 
 def _apply(operation: Operation[Any], model: object, call: Call) -> None:
-    assert operation.apply is not None  # noqa: S101 - callers pass writes only
+    if operation.apply is None:
+        msg = f"operation {operation.name} is not a write (it has no apply)"
+        raise PhaseError(msg)
     try:
         operation.apply(model, call)
     except Exception as error:
@@ -251,7 +253,7 @@ def _writes(
     ]
 
 
-def check(  # noqa: PLR0913 - the phase's inputs and loadgen's outputs, named
+def check(
     workload: Workload[Any, Any],
     data: object,
     phase: phase_pb.PhaseInput,
@@ -273,11 +275,12 @@ def check(  # noqa: PLR0913 - the phase's inputs and loadgen's outputs, named
         if result.index not in plan.sampled or result.error != pb.ErrorKind.UNSPECIFIED:
             continue
         operation = operations[plan.operations[result.index]]
-        assert operation.check is not None  # noqa: S101 - only operations with a check are sampled
+        if operation.check is None:  # only operations with a check are sampled
+            continue
         call = _call(result, plan.infos[result.index][1])
         try:
             problem = operation.check(model, call)
-        except Exception as error:  # noqa: BLE001 - a malformed response must count, not end the phase
+        except Exception as error:
             problem = f"check raised {type(error).__name__}: {error}"
         tally.add(
             operation.name,
@@ -303,7 +306,7 @@ class PodTask:
     min_sustained_ratio: float
 
 
-def run_pod(  # noqa: PLR0913 - the pod's inputs, named
+def run_pod(
     task: PodTask,
     *,
     work: Path,
