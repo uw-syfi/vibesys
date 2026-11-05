@@ -333,13 +333,16 @@ message PhaseSummary {
   uint32 clients = 3;
   int64 window_start_unix_nanos = 4;
   int64 window_end_unix_nanos = 5;
-  // Operations started, completed (success or error) and failed in the window.
+  // Of the window's operations: those sent (start not 0), those with an
+  // outcome (every one, once the phase has ended: answered, failed, or never
+  // sent and CANCELLED), and those that failed (any ErrorKind). The error rate
+  // is errors / completed.
   uint64 sent = 6;
   uint64 completed = 7;
   uint64 errors = 8;
   // Errors by kind (ErrorKind number -> count).
   map<uint32, uint64> errors_by_kind = 9;
-  // Operations started in the window that completed after it (bounded by the
+  // Operations of the window that were sent and ended after it (bounded by the
   // request timeout); counted in completed, not in the throughput.
   uint64 spilled = 10;
   // The rate operations were sent at (operations whose first step started in
@@ -348,8 +351,9 @@ message PhaseSummary {
   // closed loop's throughput is achieved_rate.
   double offered_rate = 11 [(buf.validate.field).double.finite = true];
   double achieved_rate = 12 [(buf.validate.field).double.finite = true];
-  // Send lag: start - scheduled, the time an operation waited for a free
-  // sender (or its exclusive key, reported apart in exclusive_wait).
+  // Send lag: the time a sent operation waited for a free sender after it was
+  // due (0 in a closed loop); the wait for its exclusive key after that is
+  // exclusive_wait. start - scheduled is their sum.
   HdrHistogram send_lag = 13 [(buf.validate.field).required = true];
   int64 max_send_lag_micros = 14 [(buf.validate.field).int64.gte = 0];
   HdrHistogram exclusive_wait = 15;
@@ -365,7 +369,9 @@ message PhaseSummary {
   // The plan ran out before the window ended (no operation was left to take
   // or to schedule); the phase is not a measurement.
   bool exhausted = 18;
-  // The latency of every operation, and of each operation.
+  // The latency (end - scheduled) of every operation of the window that
+  // succeeded, and per operation (OperationSummary). Failed operations are in
+  // errors, not in the latency.
   HdrHistogram latency = 19 [(buf.validate.field).required = true];
   repeated OperationSummary operations = 20;
   // Results that went through loadgen's spill file because the results file

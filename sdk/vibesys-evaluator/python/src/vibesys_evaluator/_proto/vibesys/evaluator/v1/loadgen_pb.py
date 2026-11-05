@@ -820,7 +820,10 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             int64 window_end_unix_nanos = 5;
             ```
         sent:
-            Operations started, completed (success or error) and failed in the window.
+            Of the window's operations: those sent (start not 0), those with an
+            outcome (every one, once the phase has ended: answered, failed, or never
+            sent and CANCELLED), and those that failed (any ErrorKind). The error rate
+            is errors / completed.
 
             ```proto
             uint64 sent = 6;
@@ -840,7 +843,7 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             map<uint32, uint64> errors_by_kind = 9;
             ```
         spilled:
-            Operations started in the window that completed after it (bounded by the
+            Operations of the window that were sent and ended after it (bounded by the
             request timeout); counted in completed, not in the throughput.
 
             ```proto
@@ -860,8 +863,9 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             double achieved_rate = 12;
             ```
         send_lag:
-            Send lag: start - scheduled, the time an operation waited for a free
-            sender (or its exclusive key, reported apart in exclusive_wait).
+            Send lag: the time a sent operation waited for a free sender after it was
+            due (0 in a closed loop); the wait for its exclusive key after that is
+            exclusive_wait. start - scheduled is their sum.
 
             ```proto
             optional vibesys.evaluator.v1.HdrHistogram send_lag = 13;
@@ -896,7 +900,9 @@ class PhaseSummary(Message[_PhaseSummaryFields]):
             bool exhausted = 18;
             ```
         latency:
-            The latency of every operation, and of each operation.
+            The latency (end - scheduled) of every operation of the window that
+            succeeded, and per operation (OperationSummary). Failed operations are in
+            errors, not in the latency.
 
             ```proto
             optional vibesys.evaluator.v1.HdrHistogram latency = 19;

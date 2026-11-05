@@ -1653,13 +1653,16 @@ type PhaseSummary struct {
 	Clients              uint32 `protobuf:"varint,3,opt,name=clients,proto3" json:"clients,omitempty"`
 	WindowStartUnixNanos int64  `protobuf:"varint,4,opt,name=window_start_unix_nanos,json=windowStartUnixNanos,proto3" json:"window_start_unix_nanos,omitempty"`
 	WindowEndUnixNanos   int64  `protobuf:"varint,5,opt,name=window_end_unix_nanos,json=windowEndUnixNanos,proto3" json:"window_end_unix_nanos,omitempty"`
-	// Operations started, completed (success or error) and failed in the window.
+	// Of the window's operations: those sent (start not 0), those with an
+	// outcome (every one, once the phase has ended: answered, failed, or never
+	// sent and CANCELLED), and those that failed (any ErrorKind). The error rate
+	// is errors / completed.
 	Sent      uint64 `protobuf:"varint,6,opt,name=sent,proto3" json:"sent,omitempty"`
 	Completed uint64 `protobuf:"varint,7,opt,name=completed,proto3" json:"completed,omitempty"`
 	Errors    uint64 `protobuf:"varint,8,opt,name=errors,proto3" json:"errors,omitempty"`
 	// Errors by kind (ErrorKind number -> count).
 	ErrorsByKind map[uint32]uint64 `protobuf:"bytes,9,rep,name=errors_by_kind,json=errorsByKind,proto3" json:"errors_by_kind,omitempty" protobuf_key:"varint,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	// Operations started in the window that completed after it (bounded by the
+	// Operations of the window that were sent and ended after it (bounded by the
 	// request timeout); counted in completed, not in the throughput.
 	Spilled uint64 `protobuf:"varint,10,opt,name=spilled,proto3" json:"spilled,omitempty"`
 	// The rate operations were sent at (operations whose first step started in
@@ -1668,8 +1671,9 @@ type PhaseSummary struct {
 	// closed loop's throughput is achieved_rate.
 	OfferedRate  float64 `protobuf:"fixed64,11,opt,name=offered_rate,json=offeredRate,proto3" json:"offered_rate,omitempty"`
 	AchievedRate float64 `protobuf:"fixed64,12,opt,name=achieved_rate,json=achievedRate,proto3" json:"achieved_rate,omitempty"`
-	// Send lag: start - scheduled, the time an operation waited for a free
-	// sender (or its exclusive key, reported apart in exclusive_wait).
+	// Send lag: the time a sent operation waited for a free sender after it was
+	// due (0 in a closed loop); the wait for its exclusive key after that is
+	// exclusive_wait. start - scheduled is their sum.
 	SendLag          *HdrHistogram `protobuf:"bytes,13,opt,name=send_lag,json=sendLag,proto3" json:"send_lag,omitempty"`
 	MaxSendLagMicros int64         `protobuf:"varint,14,opt,name=max_send_lag_micros,json=maxSendLagMicros,proto3" json:"max_send_lag_micros,omitempty"`
 	ExclusiveWait    *HdrHistogram `protobuf:"bytes,15,opt,name=exclusive_wait,json=exclusiveWait,proto3" json:"exclusive_wait,omitempty"`
@@ -1682,7 +1686,9 @@ type PhaseSummary struct {
 	// The plan ran out before the window ended (no operation was left to take
 	// or to schedule); the phase is not a measurement.
 	Exhausted bool `protobuf:"varint,18,opt,name=exhausted,proto3" json:"exhausted,omitempty"`
-	// The latency of every operation, and of each operation.
+	// The latency (end - scheduled) of every operation of the window that
+	// succeeded, and per operation (OperationSummary). Failed operations are in
+	// errors, not in the latency.
 	Latency    *HdrHistogram       `protobuf:"bytes,19,opt,name=latency,proto3" json:"latency,omitempty"`
 	Operations []*OperationSummary `protobuf:"bytes,20,rep,name=operations,proto3" json:"operations,omitempty"`
 	// Results that went through loadgen's spill file because the results file

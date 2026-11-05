@@ -225,7 +225,8 @@ loadgen open   --target URL --rate R [--arrivals uniform|poisson] [--seed N]
                --requests F --results F --summary F
                [--timeout S] [--format binpb|json]
 loadgen probe  --target URL --requests F --rounds N --deadline S
-loadgen selftest --summary F [--format binpb|json]
+               [--timeout S] [--format binpb|json]
+loadgen selftest --summary F [--step-secs S] [--max-rate R] [--format binpb|json]
 loadgen --capabilities [--format binpb|json]
 ```
 
@@ -235,6 +236,18 @@ loadgen --capabilities [--format binpb|json]
   wait, which shows as send lag.
 - `--arrivals` defaults to `poisson`; `uniform` spaces arrivals `1/rate`
   apart, as the servicebench engine does, and the yardsticks keep it.
+  `--min-sustained` defaults to 0.95 (the default `min_sustained_ratio`).
+- Latency is end minus scheduled in both loops; a closed-loop operation is
+  scheduled when its client takes it, so it differs from end minus start only
+  by the exclusive-key wait. The latency histograms hold successful
+  operations; failed ones are counted in `errors`.
+- At the window's end no operation starts; those in flight get until the
+  window's end plus `--timeout`, then fail CANCELLED. An open-loop operation
+  due in the window but not started by then is recorded CANCELLED with start
+  0 (never sent).
+- `selftest` tries uniform open loops of `--step-secs` (default 2) from
+  1,000 operations/s, doubling up to `--max-rate` (default 200,000) and
+  bisecting, against an in-process server.
 - `probe` sends each planned operation `--rounds` times on fresh connections
   until each succeeds once per round or `--deadline` passes (readiness).
 - Exit 0: the phase ran and the summary is written, including an exhausted
@@ -256,16 +269,19 @@ All in `proto/vibesys/evaluator/v1/`; see the comments there for every field.
   SHA-256 and length, error kind). Summary file: `PhaseSummary` (window,
   sent, completed, errors by kind, spilled, offered and achieved rate, send
   lag histogram and maximum, exclusive-key wait, loadgen CPU fraction,
-  sustained, exhausted, HDR latency overall and per operation).
-  `Capabilities` and `SelftestResult`.
+  sustained, exhausted, HDR latency overall and per operation, results
+  spilled). Selftest file: `SelftestResult`; `--capabilities` prints a
+  `Capabilities`; both after their own `FileHeader` kind.
 - `phase.proto`: `PhaseInput` (sample seed, phase index, load, history),
   `HistoryEntry`, `PhaseOutput`.
 
 Length-delimited binary is the default; `--format json` writes proto3 JSON,
 one message per line. Histograms are microseconds in the standard compressed
-HdrHistogram V2 encoding, which both the Go and Python libraries read.
-Conformance fixtures (`fixtures/`, work package 2) hold files of each kind
-that both sides must read and write identically.
+HdrHistogram V2 encoding, which both the Go and Python libraries read (the
+raw bytes, not their base64 text). Conformance fixtures
+([`fixtures/`](../fixtures), indexed by `fixtures/manifest.json`) hold files
+of each kind that both sides must read and write identically, and files a
+reader must reject.
 
 Sizes: a request of the yardsticks encodes in about 100 to 300 bytes, so a
 60 s open-loop phase at 5,000 ops/s is about 300,000 operations and 60 MB of
