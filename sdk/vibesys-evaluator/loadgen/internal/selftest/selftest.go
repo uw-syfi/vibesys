@@ -115,8 +115,7 @@ type measurer struct {
 
 // trial runs one open loop at rate and reports whether it passed the guard.
 func (m measurer) trial(rate float64) (bool, *pb.PhaseSummary, error) {
-	count := int(math.Ceil(rate*(warmup+m.step).Seconds()*1.02)) + 100
-	p, err := nullPlan(count)
+	source, err := nullSource()
 	if err != nil {
 		return false, nil, err
 	}
@@ -129,7 +128,7 @@ func (m measurer) trial(rate float64) (bool, *pb.PhaseSummary, error) {
 		Warmup:  warmup,
 		Window:  m.step,
 		Timeout: 5 * time.Second,
-	}, p, m.client, sink)
+	}, source, m.client, sink)
 	spilled, closeErr := sink.Close()
 	if err != nil {
 		return false, nil, err
@@ -146,15 +145,15 @@ func (m measurer) trial(rate float64) (bool, *pb.PhaseSummary, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	ok := phase.GetSustained() && lag <= maxLagP99Micros && phase.GetErrors() == 0 && !phase.GetExhausted()
+	ok := phase.GetSustained() && lag <= maxLagP99Micros && phase.GetErrors() == 0
 	return ok, phase, nil
 }
 
-func nullPlan(count int) (*plan.Plan, error) {
-	op := messages.Op(0, messages.Get("/"))
-	ops := make([]*pb.PlannedOperation, count)
-	for i := range ops {
-		ops[i] = op
+// nullSource repeats a GET of "/" for as long as a trial takes.
+func nullSource() (*plan.Repeat, error) {
+	p, err := plan.New([]string{"null"}, []*pb.PlannedOperation{messages.Op(0, messages.Get("/"))})
+	if err != nil {
+		return nil, err
 	}
-	return plan.New([]string{"null"}, ops)
+	return plan.NewRepeat(p.Names, p.Ops[0]), nil
 }

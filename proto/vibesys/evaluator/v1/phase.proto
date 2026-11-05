@@ -1,10 +1,12 @@
 syntax = "proto3";
 
-// What the orchestrator (the task's bench.py in the container vibesys starts)
-// and a phase pod (the same bench.py, in the cluster) exchange for one phase.
-// Both sides are the vibesys-evaluator Python package; the messages are here
-// because the exchange crosses a process and is kept as an artifact. See
-// sdk/vibesys-evaluator/docs/spec.md. Files are one binpb message each.
+// What the orchestrator (the task's bench.py in the container vibesys starts),
+// a phase pod (the same bench.py, in the cluster) and the task's request
+// generator (a Python or Go front end: `GENERATOR generate` and `GENERATOR
+// check`) exchange for one phase. The messages are here because the exchange
+// crosses processes and languages and is kept as an artifact. See
+// sdk/vibesys-evaluator/docs/spec.md ("Generator command line"). PhaseInput and
+// PhaseOutput files are one binpb message each.
 package vibesys.evaluator.v1;
 
 import "buf/validate/validate.proto";
@@ -24,7 +26,9 @@ message PhaseInput {
   }];
   // Closed loop.
   uint32 clients = 4;
-  double max_ops_per_sec = 5 [(buf.validate.field).double.finite = true];
+  // Removed with the requests file: a stream does not run out.
+  reserved 5;
+  reserved "max_ops_per_sec";
   // Open loop.
   double rate = 6 [(buf.validate.field).double.finite = true];
   Arrivals arrivals = 7 [(buf.validate.field).enum.defined_only = true];
@@ -73,7 +77,26 @@ message PhaseOutput {
   repeated Violation violations = 4 [(buf.validate.field).repeated.max_items = 20];
   // The writes this phase sent, to append to the sample's history.
   repeated HistoryEntry writes = 5;
-  // Seconds spent generating the plan and checking the sample (outside the window).
-  double generate_secs = 6;
+  // Removed with the requests file: requests are generated during the phase
+  // (PhaseSummary.generator).
+  reserved 6;
+  reserved "generate_secs";
+  // Seconds spent checking the sample (after the window).
   double check_secs = 7;
+}
+
+// KeptOperation is what a generator remembers of one operation it generated
+// for its own check: the front ends write one per operation in the validation
+// sample and per write, length-delimited, into the --state directory that
+// `generate` and `check` share. loadgen never reads it.
+message KeptOperation {
+  // The operation's position in the request stream, from 0.
+  uint64 index = 1;
+  // Index into RequestsHeader.operation_names.
+  uint32 operation = 2;
+  // The Request's info, as a JSON object.
+  string info_json = 3;
+  // In the validation sample (its response is checked); a write that is not
+  // sampled is kept for the history only.
+  bool sampled = 4;
 }

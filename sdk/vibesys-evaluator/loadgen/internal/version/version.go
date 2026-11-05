@@ -23,6 +23,7 @@ func Capabilities() *pb.Capabilities {
 		Models:           []pb.LoadModel{pb.LoadModel_LOAD_MODEL_CLOSED, pb.LoadModel_LOAD_MODEL_OPEN},
 		Arrivals:         []pb.Arrivals{pb.Arrivals_ARRIVALS_UNIFORM, pb.Arrivals_ARRIVALS_POISSON},
 		ExclusiveKeys:    true,
+		RequestStream:    true,
 		RefEncodings: []pb.RefEncoding{
 			pb.RefEncoding_REF_ENCODING_RAW, pb.RefEncoding_REF_ENCODING_JSON_STRING, pb.RefEncoding_REF_ENCODING_JSON_VALUE,
 		},

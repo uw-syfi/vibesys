@@ -39,14 +39,17 @@ func TestPhaseIsSustainedWhileTheResultsReaderIsStalled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := indexedPlanKeeping(t, 1200)
+	source := generator{keep: true}.source(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute) // hang guard only
 	defer cancel()
 	config := engine.Config{
 		Load:   engine.Open{Rate: 1000, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 64, MinSustained: 0.8},
 		Window: time.Second, Timeout: 5 * time.Second,
 	}
-	outcome, err := engine.Run(ctx, config, p, client, sink)
+	if err := source.WaitReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err := engine.Run(ctx, config, source, client, sink)
 	if err != nil {
 		t.Fatal(err)
 	}

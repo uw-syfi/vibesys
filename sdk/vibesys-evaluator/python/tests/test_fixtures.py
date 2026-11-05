@@ -59,11 +59,11 @@ def _read(path: Path, kind: str, file_format: Format) -> list:
     return messages
 
 
-def test_the_manifest_covers_every_kind_in_both_formats_and_five_rejects() -> None:
+def test_the_manifest_covers_every_kind_in_both_formats_and_four_rejects() -> None:
     assert {(e["kind"], e["format"]) for e in VALID} == {
         (kind, file_format) for kind in KINDS for file_format in ("binpb", "json")
     }
-    assert len(REJECTED) == 5
+    assert len(REJECTED) == 4
 
 
 @pytest.mark.parametrize("entry", VALID, ids=lambda e: e["file"])

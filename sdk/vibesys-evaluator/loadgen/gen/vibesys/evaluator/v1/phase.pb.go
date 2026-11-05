@@ -4,11 +4,13 @@
 // 	protoc        (unknown)
 // source: vibesys/evaluator/v1/phase.proto
 
-// What the orchestrator (the task's bench.py in the container vibesys starts)
-// and a phase pod (the same bench.py, in the cluster) exchange for one phase.
-// Both sides are the vibesys-evaluator Python package; the messages are here
-// because the exchange crosses a process and is kept as an artifact. See
-// sdk/vibesys-evaluator/docs/spec.md. Files are one binpb message each.
+// What the orchestrator (the task's bench.py in the container vibesys starts),
+// a phase pod (the same bench.py, in the cluster) and the task's request
+// generator (a Python or Go front end: `GENERATOR generate` and `GENERATOR
+// check`) exchange for one phase. The messages are here because the exchange
+// crosses processes and languages and is kept as an artifact. See
+// sdk/vibesys-evaluator/docs/spec.md ("Generator command line"). PhaseInput and
+// PhaseOutput files are one binpb message each.
 
 package evaluatorv1
 
@@ -37,8 +39,7 @@ type PhaseInput struct {
 	PhaseIndex uint32    `protobuf:"varint,2,opt,name=phase_index,json=phaseIndex,proto3" json:"phase_index,omitempty"`
 	Model      LoadModel `protobuf:"varint,3,opt,name=model,proto3,enum=vibesys.evaluator.v1.LoadModel" json:"model,omitempty"`
 	// Closed loop.
-	Clients      uint32  `protobuf:"varint,4,opt,name=clients,proto3" json:"clients,omitempty"`
-	MaxOpsPerSec float64 `protobuf:"fixed64,5,opt,name=max_ops_per_sec,json=maxOpsPerSec,proto3" json:"max_ops_per_sec,omitempty"`
+	Clients uint32 `protobuf:"varint,4,opt,name=clients,proto3" json:"clients,omitempty"`
 	// Open loop.
 	Rate       float64  `protobuf:"fixed64,6,opt,name=rate,proto3" json:"rate,omitempty"`
 	Arrivals   Arrivals `protobuf:"varint,7,opt,name=arrivals,proto3,enum=vibesys.evaluator.v1.Arrivals" json:"arrivals,omitempty"`
@@ -104,13 +105,6 @@ func (x *PhaseInput) GetModel() LoadModel {
 func (x *PhaseInput) GetClients() uint32 {
 	if x != nil {
 		return x.Clients
-	}
-	return 0
-}
-
-func (x *PhaseInput) GetMaxOpsPerSec() float64 {
-	if x != nil {
-		return x.MaxOpsPerSec
 	}
 	return 0
 }
@@ -313,8 +307,7 @@ type PhaseOutput struct {
 	Violations []*Violation `protobuf:"bytes,4,rep,name=violations,proto3" json:"violations,omitempty"`
 	// The writes this phase sent, to append to the sample's history.
 	Writes []*HistoryEntry `protobuf:"bytes,5,rep,name=writes,proto3" json:"writes,omitempty"`
-	// Seconds spent generating the plan and checking the sample (outside the window).
-	GenerateSecs  float64 `protobuf:"fixed64,6,opt,name=generate_secs,json=generateSecs,proto3" json:"generate_secs,omitempty"`
+	// Seconds spent checking the sample (after the window).
 	CheckSecs     float64 `protobuf:"fixed64,7,opt,name=check_secs,json=checkSecs,proto3" json:"check_secs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -385,13 +378,6 @@ func (x *PhaseOutput) GetWrites() []*HistoryEntry {
 	return nil
 }
 
-func (x *PhaseOutput) GetGenerateSecs() float64 {
-	if x != nil {
-		return x.GenerateSecs
-	}
-	return 0
-}
-
 func (x *PhaseOutput) GetCheckSecs() float64 {
 	if x != nil {
 		return x.CheckSecs
@@ -399,11 +385,88 @@ func (x *PhaseOutput) GetCheckSecs() float64 {
 	return 0
 }
 
+// KeptOperation is what a generator remembers of one operation it generated
+// for its own check: the front ends write one per operation in the validation
+// sample and per write, length-delimited, into the --state directory that
+// `generate` and `check` share. loadgen never reads it.
+type KeptOperation struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The operation's position in the request stream, from 0.
+	Index uint64 `protobuf:"varint,1,opt,name=index,proto3" json:"index,omitempty"`
+	// Index into RequestsHeader.operation_names.
+	Operation uint32 `protobuf:"varint,2,opt,name=operation,proto3" json:"operation,omitempty"`
+	// The Request's info, as a JSON object.
+	InfoJson string `protobuf:"bytes,3,opt,name=info_json,json=infoJson,proto3" json:"info_json,omitempty"`
+	// In the validation sample (its response is checked); a write that is not
+	// sampled is kept for the history only.
+	Sampled       bool `protobuf:"varint,4,opt,name=sampled,proto3" json:"sampled,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KeptOperation) Reset() {
+	*x = KeptOperation{}
+	mi := &file_vibesys_evaluator_v1_phase_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KeptOperation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KeptOperation) ProtoMessage() {}
+
+func (x *KeptOperation) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_evaluator_v1_phase_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KeptOperation.ProtoReflect.Descriptor instead.
+func (*KeptOperation) Descriptor() ([]byte, []int) {
+	return file_vibesys_evaluator_v1_phase_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *KeptOperation) GetIndex() uint64 {
+	if x != nil {
+		return x.Index
+	}
+	return 0
+}
+
+func (x *KeptOperation) GetOperation() uint32 {
+	if x != nil {
+		return x.Operation
+	}
+	return 0
+}
+
+func (x *KeptOperation) GetInfoJson() string {
+	if x != nil {
+		return x.InfoJson
+	}
+	return ""
+}
+
+func (x *KeptOperation) GetSampled() bool {
+	if x != nil {
+		return x.Sampled
+	}
+	return false
+}
+
 var File_vibesys_evaluator_v1_phase_proto protoreflect.FileDescriptor
 
 const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
 	"\n" +
-	" vibesys/evaluator/v1/phase.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto\x1a\"vibesys/evaluator/v1/loadgen.proto\"\xd5\x03\n" +
+	" vibesys/evaluator/v1/phase.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto\x1a\"vibesys/evaluator/v1/loadgen.proto\"\xbc\x03\n" +
 	"\n" +
 	"PhaseInput\x12\x1f\n" +
 	"\vsample_seed\x18\x01 \x01(\x04R\n" +
@@ -412,15 +475,14 @@ const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
 	"phaseIndex\x12A\n" +
 	"\x05model\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.LoadModelB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05model\x12\x18\n" +
-	"\aclients\x18\x04 \x01(\rR\aclients\x12.\n" +
-	"\x0fmax_ops_per_sec\x18\x05 \x01(\x01B\a\xbaH\x04\x12\x02@\x01R\fmaxOpsPerSec\x12\x1b\n" +
+	"\aclients\x18\x04 \x01(\rR\aclients\x12\x1b\n" +
 	"\x04rate\x18\x06 \x01(\x01B\a\xbaH\x04\x12\x02@\x01R\x04rate\x12D\n" +
 	"\barrivals\x18\a \x01(\x0e2\x1e.vibesys.evaluator.v1.ArrivalsB\b\xbaH\x05\x82\x01\x02\x10\x01R\barrivals\x12$\n" +
 	"\x04secs\x18\b \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00R\x04secs\x121\n" +
 	"\vwarmup_secs\x18\t \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\n" +
 	"warmupSecs\x12<\n" +
 	"\ahistory\x18\n" +
-	" \x03(\v2\".vibesys.evaluator.v1.HistoryEntryR\ahistory\"\x80\x02\n" +
+	" \x03(\v2\".vibesys.evaluator.v1.HistoryEntryR\ahistoryJ\x04\b\x05\x10\x06R\x0fmax_ops_per_sec\"\x80\x02\n" +
 	"\fHistoryEntry\x12;\n" +
 	"\toperation\x18\x01 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$R\toperation\x12\x1b\n" +
 	"\tinfo_json\x18\x02 \x01(\tR\binfoJson\x12(\n" +
@@ -431,7 +493,7 @@ const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
 	"\tViolation\x12\x1c\n" +
 	"\toperation\x18\x01 \x01(\tR\toperation\x12\x14\n" +
 	"\x05index\x18\x02 \x01(\x04R\x05index\x12\"\n" +
-	"\amessage\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\xd0\x0fR\amessage\"\xca\x02\n" +
+	"\amessage\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\xd0\x0fR\amessage\"\xba\x02\n" +
 	"\vPhaseOutput\x12<\n" +
 	"\asummary\x18\x01 \x01(\v2\".vibesys.evaluator.v1.PhaseSummaryR\asummary\x12\x18\n" +
 	"\achecked\x18\x02 \x01(\x04R\achecked\x12\x18\n" +
@@ -439,10 +501,14 @@ const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
 	"\n" +
 	"violations\x18\x04 \x03(\v2\x1f.vibesys.evaluator.v1.ViolationB\b\xbaH\x05\x92\x01\x02\x10\x14R\n" +
 	"violations\x12:\n" +
-	"\x06writes\x18\x05 \x03(\v2\".vibesys.evaluator.v1.HistoryEntryR\x06writes\x12#\n" +
-	"\rgenerate_secs\x18\x06 \x01(\x01R\fgenerateSecs\x12\x1d\n" +
+	"\x06writes\x18\x05 \x03(\v2\".vibesys.evaluator.v1.HistoryEntryR\x06writes\x12\x1d\n" +
 	"\n" +
-	"check_secs\x18\a \x01(\x01R\tcheckSecsB_Z]github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3"
+	"check_secs\x18\a \x01(\x01R\tcheckSecsJ\x04\b\x06\x10\aR\rgenerate_secs\"z\n" +
+	"\rKeptOperation\x12\x14\n" +
+	"\x05index\x18\x01 \x01(\x04R\x05index\x12\x1c\n" +
+	"\toperation\x18\x02 \x01(\rR\toperation\x12\x1b\n" +
+	"\tinfo_json\x18\x03 \x01(\tR\binfoJson\x12\x18\n" +
+	"\asampled\x18\x04 \x01(\bR\asampledB_Z]github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3"
 
 var (
 	file_vibesys_evaluator_v1_phase_proto_rawDescOnce sync.Once
@@ -456,23 +522,24 @@ func file_vibesys_evaluator_v1_phase_proto_rawDescGZIP() []byte {
 	return file_vibesys_evaluator_v1_phase_proto_rawDescData
 }
 
-var file_vibesys_evaluator_v1_phase_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_vibesys_evaluator_v1_phase_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_vibesys_evaluator_v1_phase_proto_goTypes = []any{
-	(*PhaseInput)(nil),   // 0: vibesys.evaluator.v1.PhaseInput
-	(*HistoryEntry)(nil), // 1: vibesys.evaluator.v1.HistoryEntry
-	(*Violation)(nil),    // 2: vibesys.evaluator.v1.Violation
-	(*PhaseOutput)(nil),  // 3: vibesys.evaluator.v1.PhaseOutput
-	(LoadModel)(0),       // 4: vibesys.evaluator.v1.LoadModel
-	(Arrivals)(0),        // 5: vibesys.evaluator.v1.Arrivals
-	(*StepResult)(nil),   // 6: vibesys.evaluator.v1.StepResult
-	(*PhaseSummary)(nil), // 7: vibesys.evaluator.v1.PhaseSummary
+	(*PhaseInput)(nil),    // 0: vibesys.evaluator.v1.PhaseInput
+	(*HistoryEntry)(nil),  // 1: vibesys.evaluator.v1.HistoryEntry
+	(*Violation)(nil),     // 2: vibesys.evaluator.v1.Violation
+	(*PhaseOutput)(nil),   // 3: vibesys.evaluator.v1.PhaseOutput
+	(*KeptOperation)(nil), // 4: vibesys.evaluator.v1.KeptOperation
+	(LoadModel)(0),        // 5: vibesys.evaluator.v1.LoadModel
+	(Arrivals)(0),         // 6: vibesys.evaluator.v1.Arrivals
+	(*StepResult)(nil),    // 7: vibesys.evaluator.v1.StepResult
+	(*PhaseSummary)(nil),  // 8: vibesys.evaluator.v1.PhaseSummary
 }
 var file_vibesys_evaluator_v1_phase_proto_depIdxs = []int32{
-	4, // 0: vibesys.evaluator.v1.PhaseInput.model:type_name -> vibesys.evaluator.v1.LoadModel
-	5, // 1: vibesys.evaluator.v1.PhaseInput.arrivals:type_name -> vibesys.evaluator.v1.Arrivals
+	5, // 0: vibesys.evaluator.v1.PhaseInput.model:type_name -> vibesys.evaluator.v1.LoadModel
+	6, // 1: vibesys.evaluator.v1.PhaseInput.arrivals:type_name -> vibesys.evaluator.v1.Arrivals
 	1, // 2: vibesys.evaluator.v1.PhaseInput.history:type_name -> vibesys.evaluator.v1.HistoryEntry
-	6, // 3: vibesys.evaluator.v1.HistoryEntry.steps:type_name -> vibesys.evaluator.v1.StepResult
-	7, // 4: vibesys.evaluator.v1.PhaseOutput.summary:type_name -> vibesys.evaluator.v1.PhaseSummary
+	7, // 3: vibesys.evaluator.v1.HistoryEntry.steps:type_name -> vibesys.evaluator.v1.StepResult
+	8, // 4: vibesys.evaluator.v1.PhaseOutput.summary:type_name -> vibesys.evaluator.v1.PhaseSummary
 	2, // 5: vibesys.evaluator.v1.PhaseOutput.violations:type_name -> vibesys.evaluator.v1.Violation
 	1, // 6: vibesys.evaluator.v1.PhaseOutput.writes:type_name -> vibesys.evaluator.v1.HistoryEntry
 	7, // [7:7] is the sub-list for method output_type
@@ -494,7 +561,7 @@ func file_vibesys_evaluator_v1_phase_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_evaluator_v1_phase_proto_rawDesc), len(file_vibesys_evaluator_v1_phase_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
     from vibesys_evaluator._private.typevars import D, M
     from vibesys_evaluator.deploy.k8s import App
-    from vibesys_evaluator.service import Workload
+    from vibesys_evaluator.service import Generator, Workload
 
 __all__ = [
     "Call",
@@ -40,19 +40,20 @@ def main(
     *,
     dataset: Callable[[], D],
     system: App[D],
-    workload: Workload[D, M],
+    workload: Workload[D, M] | Generator,
     benchmark: Callable[[Run], None],
     metrics: Mapping[str, Metric],
     validity: Validity = Validity(),  # noqa: B008  # LW-150401 [B008]; the default is a frozen dataclass.
     # > The approved signature (api/public-api.txt) shows the default as Validity(); a module
     # > constant would show its private name instead, and None would widen the type.
 ) -> NoReturn:
-    """Run the task script's command (``benchmark``, ``phase``, ``seed`` or ``ctl``) and exit.
+    """Run the task script's command (``benchmark``, ``phase``, ``generate``, ``check``, ``seed`` or ``ctl``) and exit.
 
     Args:
         dataset: Builds the initial data; a pure function of the task's constants.
         system: The system under test.
-        workload: The operations and their model.
+        workload: The operations and their model, or the ``Generator`` command
+            of a workload written in Go.
         benchmark: The scoring definition: runs phases on ``run`` and calls ``run.report``.
         metrics: The metrics ``run.report`` reports, by name.
         validity: When a phase is a measurement.

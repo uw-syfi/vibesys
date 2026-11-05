@@ -9,34 +9,27 @@ with the reason, which ends the sample with an error record.
 
 from __future__ import annotations
 
-import math
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from vibesys_evaluator._private.deploy import PHASE_OUTPUT_FILE, PhaseJob
 from vibesys_evaluator._private.files import SchemaFileError, read_message
-from vibesys_evaluator._private.judge import Exhausted, Failed, judge
-from vibesys_evaluator._private.phase import plan_size
+from vibesys_evaluator._private.judge import Failed, judge
 from vibesys_evaluator._private.records import Partial, RecordError
 from vibesys_evaluator._private.results import PhaseResult, finite
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from vibesys_evaluator._private.deploy import PhaseRunner
     from vibesys_evaluator._private.records import RecordStream
     from vibesys_evaluator._private.results import Validity
 
-#: Time a phase pod may spend outside loadgen's run: the model, generation, checking, copying.
-PHASE_OVERHEAD_SECS = 900.0
-#: A closed loop's retry plans for at least this multiple of the rate it ran out at (its whole
-#: plan over the time until it stopped) ...
-RETRY_RATE_MARGIN = 2.0
-#: ... and at least this multiple of the bound it ran out of.
-RETRY_BOUND_FACTOR = 2.0
+#: Time a phase pod may spend outside the window: the generator's start, the check, copying.
+PHASE_OVERHEAD_SECS = 1500.0
 
 
 class BenchmarkError(Exception):
@@ -56,7 +49,6 @@ class Load:
     secs: float
     warmup: float
     clients: int = 0
-    max_ops_per_sec: float = 0.0
     rate: float = 0.0
     arrivals: pb.Arrivals = pb.Arrivals.UNSPECIFIED
 
@@ -82,37 +74,6 @@ def _warmup(value: float) -> float:
     return float(value)
 
 
-def _sent_rate(load: Load, verdict: Exhausted) -> float:
-    """The rate an exhausted closed loop sent at, or its window's rate if unknown.
-
-    Its whole plan over the time from the phase's start (the window's start
-    minus the warmup) until it stopped.
-    """
-    if verdict.stopped_unix_nanos <= 0:
-        return verdict.rate
-    started = verdict.window_start_unix_nanos - load.warmup * 1e9
-    ran = (verdict.stopped_unix_nanos - started) / 1e9
-    count = plan_size(_phase_input(load, sample_seed=0, index=0, history=[]))
-    return max(verdict.rate, count / ran) if ran > 0 else verdict.rate
-
-
-def _phase_input(
-    load: Load, *, sample_seed: int, index: int, history: list[phase_pb.HistoryEntry]
-) -> phase_pb.PhaseInput:
-    return phase_pb.PhaseInput(
-        sample_seed=sample_seed,
-        phase_index=index,
-        model=load.model,
-        clients=load.clients,
-        max_ops_per_sec=load.max_ops_per_sec,
-        rate=load.rate,
-        arrivals=load.arrivals,
-        secs=load.secs,
-        warmup_secs=load.warmup,
-        history=history,
-    )
-
-
 class PhaseDriver:
     """Runs the sample's phases in order and keeps its write history."""
 
@@ -121,7 +82,6 @@ class PhaseDriver:
         *,
         runner: PhaseRunner,
         sample_seed: int,
-        operations: Sequence[str],
         validity: Validity,
         artifacts: Path,
         records: RecordStream,
@@ -130,7 +90,6 @@ class PhaseDriver:
         """Drive phases through ``runner``; their files go under ``artifacts``."""
         self._runner = runner
         self._seed = sample_seed
-        self._operations = list(operations)
         self._validity = validity
         self._artifacts = artifacts
         self._records = records
@@ -152,38 +111,31 @@ class PhaseDriver:
         )
 
     def phase(self, load: Load) -> PhaseResult:
-        """Run one phase (a closed loop that runs out of plan is retried once with a larger one)."""
-        for attempt in range(2):
-            index, verdict = self._run(load)
-            if isinstance(verdict, PhaseResult):
-                self._log(
-                    f"phase {index} ({load.describe()}): {verdict.ops_per_sec:.1f} ops/s, "
-                    f"p50 {verdict.p50_ms:.2f} ms, p99 {verdict.p99_ms:.2f} ms"
-                )
-                self._last = verdict
-                return verdict
-            if isinstance(verdict, Failed):
-                msg = f"phase {index} ({load.describe()}): {verdict.reason}"
-                raise BenchmarkError(msg, partial=self.partial)
-            rate = _sent_rate(load, verdict)
-            bound = max(RETRY_BOUND_FACTOR * load.max_ops_per_sec, RETRY_RATE_MARGIN * rate)
-            if attempt == 0:
-                self._log(
-                    f"phase {index} ran out of its plan of {load.max_ops_per_sec:.0f} ops/s at "
-                    f"{rate:.0f} ops/s; running it again planned for {bound:.0f} ops/s"
-                )
-                load = replace(load, max_ops_per_sec=math.ceil(bound))
-        msg = (
-            f"phase {index} ({load.describe()}) ran out of its plan of {load.max_ops_per_sec:.0f} "
-            f"ops/s twice: the application is faster than the plan; raise max_ops_per_sec"
+        """Run one phase."""
+        index, verdict = self._run(load)
+        if isinstance(verdict, Failed):
+            msg = f"phase {index} ({load.describe()}): {verdict.reason}"
+            raise BenchmarkError(msg, partial=self.partial)
+        self._log(
+            f"phase {index} ({load.describe()}): {verdict.ops_per_sec:.1f} ops/s, "
+            f"p50 {verdict.p50_ms:.2f} ms, p99 {verdict.p99_ms:.2f} ms"
         )
-        raise BenchmarkError(msg, partial=self.partial)
+        self._last = verdict
+        return verdict
 
-    def _run(self, load: Load) -> tuple[int, PhaseResult | Exhausted | Failed]:
+    def _run(self, load: Load) -> tuple[int, PhaseResult | Failed]:
         index = self._next_index
         self._next_index += 1
-        phase_input = _phase_input(
-            load, sample_seed=self._seed, index=index, history=list(self._history)
+        phase_input = phase_pb.PhaseInput(
+            sample_seed=self._seed,
+            phase_index=index,
+            model=load.model,
+            clients=load.clients,
+            rate=load.rate,
+            arrivals=load.arrivals,
+            secs=load.secs,
+            warmup_secs=load.warmup,
+            history=list(self._history),
         )
         name = f"phase-{index}"
         out_dir = self._artifacts / name
@@ -202,15 +154,21 @@ class PhaseDriver:
         except SchemaFileError as error:
             msg = f"phase {index} ({load.describe()}) left no usable output: {error}"
             raise BenchmarkError(msg, partial=self.partial) from error
-        # Every write sent stays in the history, from a failed or exhausted phase too: the
-        # application may have applied it.
+        # Every write sent stays in the history, from a failed phase too: the application
+        # may have applied it.
         self._history.extend(output.writes)
+        generator = output.summary.generator if output.summary is not None else None
+        if generator is not None:
+            self._log(
+                f"phase {index}: the generator wrote {generator.rate:.0f} ops/s, "
+                f"{generator.waited} operations waited for it"
+            )
         self._log(
-            f"phase {index}: generated in {output.generate_secs:.1f} s, checked {output.checked} "
-            f"in {output.check_secs:.1f} s, {output.invalid} failed, {len(output.writes)} writes"
+            f"phase {index}: checked {output.checked} in {output.check_secs:.1f} s, "
+            f"{output.invalid} failed, {len(output.writes)} writes"
         )
         try:
-            return index, judge(output, validity=self._validity, operations=self._operations)
+            return index, judge(output, validity=self._validity)
         except ValueError as error:
             msg = f"phase {index}: {error}"
             raise BenchmarkError(msg, partial=self.partial) from error
@@ -235,20 +193,16 @@ class Run:
     __slots__ = ("_driver",)
     _driver: PhaseDriver
 
-    def closed_loop(
-        self, *, clients: int, secs: float, warmup: float, max_ops_per_sec: float = 20000.0
-    ) -> PhaseResult:
+    def closed_loop(self, *, clients: int, secs: float, warmup: float) -> PhaseResult:
         """Capacity: ``clients`` clients, each sending its next operation when the last completed.
 
-        The plan holds ``max_ops_per_sec * (warmup + secs)`` operations; a
-        phase that runs out of them is run again once with a plan sized from
-        the rate it reached, then fails.
+        The operations come from the workload's request stream, which has no
+        end; a phase whose clients wait for it is not a measurement.
 
         Args:
             clients: The number of clients, at least 1.
             secs: The measurement window, seconds.
             warmup: Seconds of load before the window.
-            max_ops_per_sec: The highest throughput the plan provides for.
 
         Returns:
             The window's throughput and latency (end minus start).
@@ -262,7 +216,6 @@ class Run:
                 clients=clients,
                 secs=_positive("closed_loop secs", secs),
                 warmup=_warmup(warmup),
-                max_ops_per_sec=_positive("closed_loop max_ops_per_sec", max_ops_per_sec),
             )
         )
 

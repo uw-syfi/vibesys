@@ -2,7 +2,10 @@
 
 The end-to-end test runs this as ``bench.py`` runs in a task: ``benchmark``
 in a child process, which runs the ``phase`` commands as children of its own,
-each running the real loadgen against the service at ``KV_TARGET``.
+each running the real loadgen against the service at ``KV_TARGET``, which
+runs the generator. The generator is this script's ``generate`` (the Python
+workload), or, with ``KV_GO_GENERATOR`` set, that binary: the kv-store
+example's Go generator (``KV_STORE_SCALE=test`` selects this task's scale).
 """
 
 from __future__ import annotations
@@ -19,17 +22,14 @@ import vibesys_evaluator as vse
 from vibesys_evaluator._private.cli import Task, run
 from vibesys_evaluator._private.deploy import TaskCommand
 from vibesys_evaluator._private.local import LocalDeployer
+from vibesys_evaluator.service import Generator
 from vse_support import kv  # the tests directory is on PYTHONPATH
 
-# A real local server is far faster than the fake runner's 400 ops/s plan (more so when it
-# drops writes), and how much faster depends on the machine. Plan above what an in-process
-# Python HTTP server can serve, so the phase never runs out of plan and the test checks
-# what it names, not the runner's speed.
-LOCAL_MAX_OPS_PER_SEC = 50_000.0
+GO_GENERATOR = os.environ.get("KV_GO_GENERATOR", "")
 
 
 def _benchmark(run: vse.Run) -> None:
-    closed = run.closed_loop(clients=4, secs=1, warmup=0.5, max_ops_per_sec=LOCAL_MAX_OPS_PER_SEC)
+    closed = run.closed_loop(clients=16, secs=1, warmup=0.5)  # 16 x 20 ops/s at SERVICE_SECS
     opened = run.open_loop(rate=0.5 * closed.ops_per_sec, secs=1, warmup=0.5, arrivals="uniform")
     run.report({"operations_per_second": closed.ops_per_sec, "latency_ms.p99": opened.p99_ms})
 
@@ -37,7 +37,7 @@ def _benchmark(run: vse.Run) -> None:
 TASK = Task(
     dataset=kv.Data,
     system=dataclasses.replace(kv.SYSTEM, seed=None),  # the test seeds the service it serves
-    workload=kv.WORKLOAD,
+    workload=Generator([GO_GENERATOR]) if GO_GENERATOR else kv.WORKLOAD,
     benchmark=_benchmark,
     metrics=kv.METRICS,
     validity=vse.Validity(),
@@ -49,7 +49,7 @@ def _control(_argv: object) -> int:
 
 
 if __name__ == "__main__":
-    target = os.environ["KV_TARGET"]
+    target = os.environ.get("KV_TARGET", "")  # only benchmark deploys (generate and check do not)
     sys.exit(
         run(
             TASK,

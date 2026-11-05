@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"buf.build/go/protovalidate"
 	"google.golang.org/protobuf/proto"
@@ -63,7 +64,8 @@ type HistogramExpect struct {
 func histograms(message proto.Message) map[string]*pb.HdrHistogram {
 	switch m := message.(type) {
 	case *pb.PhaseSummary:
-		out := map[string]*pb.HdrHistogram{"latency": m.GetLatency(), "send_lag": m.GetSendLag(), "exclusive_wait": m.GetExclusiveWait()}
+		out := map[string]*pb.HdrHistogram{"latency": m.GetLatency(), "send_lag": m.GetSendLag(), "exclusive_wait": m.GetExclusiveWait(),
+			"generator.wait": m.GetGenerator().GetWait()}
 		for i, op := range m.GetOperations() {
 			out["operations."+strconv.Itoa(i)+".latency"] = op.GetLatency()
 		}
@@ -169,7 +171,7 @@ func results() []summary.Record {
 				stepAt{509 * ms, 512 * ms, 200, `{"token":"tk-1","as_value":"tk-1"}`, 0, ""})}},
 		{Picked: at(1001 * ms), Result: &pb.OperationResult{Index: 1, Operation: 1, ScheduledUnixNanos: at(1000 * ms),
 			StartUnixNanos: at(1001 * ms), EndUnixNanos: at(1004 * ms), Steps: steps(stepAt{1001 * ms, 1004 * ms, 200, digest(`{"hotels":[]}`), 0, ""})}},
-		{Picked: at(1200 * ms), Result: &pb.OperationResult{Index: 2, Operation: 1, ScheduledUnixNanos: at(1200 * ms),
+		{Picked: at(1200 * ms), GeneratorWait: 3 * time.Millisecond, Result: &pb.OperationResult{Index: 2, Operation: 1, ScheduledUnixNanos: at(1200 * ms),
 			StartUnixNanos: at(1200 * ms), EndUnixNanos: at(1230 * ms), Error: pb.ErrorKind_ERROR_KIND_STATUS,
 			Steps: steps(stepAt{1200 * ms, 1230 * ms, 500, digest("internal error"), pb.ErrorKind_ERROR_KIND_STATUS, ""})}},
 		{Picked: at(1400 * ms), Result: &pb.OperationResult{Index: 3, Operation: 2, ScheduledUnixNanos: at(1400 * ms),
@@ -194,7 +196,8 @@ func summaryOf(t *testing.T, records []summary.Record) *pb.PhaseSummary {
 	for _, r := range records {
 		agg.Add(r)
 	}
-	s, err := agg.Summary(summary.Phase{Model: pb.LoadModel_LOAD_MODEL_OPEN, TargetRate: 7, MinSustained: 0.95, CPUFraction: 0.125, ResultsSpilled: 2})
+	s, err := agg.Summary(summary.Phase{Model: pb.LoadModel_LOAD_MODEL_OPEN, TargetRate: 7, MinSustained: 0.95, CPUFraction: 0.125, ResultsSpilled: 2,
+		Generator: &pb.GeneratorStats{Read: 9, Rate: 1234.5, ReadySecs: 0.75, Buffer: 8192}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +259,7 @@ func generate(t *testing.T) (map[string][]byte, Manifest) {
 	ops := requests()
 	for _, name := range []string{"binpb", "json"} {
 		format := formats[name]
-		requestsMessages := []proto.Message{&pb.RequestsHeader{OperationNames: names, Count: uint64(len(ops))}}
+		requestsMessages := []proto.Message{&pb.RequestsHeader{OperationNames: names}}
 		for _, op := range ops {
 			requestsMessages = append(requestsMessages, op)
 		}
@@ -264,7 +267,7 @@ func generate(t *testing.T) (map[string][]byte, Manifest) {
 			out[file] = data
 			manifest.Entries = append(manifest.Entries, Entry{File: file, Kind: kind, Format: name, Description: description, Valid: true, Messages: count})
 		}
-		add("requests."+name, "requests", "A plan of five operations: a three-step login with a captured token used raw, as a JSON "+
+		add("requests."+name, "requests", "A recorded request stream of five operations: a three-step login with a captured token used raw, as a JSON "+
 			"string and as a JSON value; a query; a form; a raw PUT that captures a header and two operations on exclusive key k7.",
 			encode(t, format, header(pb.FileKind_FILE_KIND_REQUESTS), requestsMessages...), len(requestsMessages))
 		add("results."+name, "results", "Results in completion order: kept bodies, digests, a status error, a transport "+
@@ -291,14 +294,12 @@ func generate(t *testing.T) (map[string][]byte, Manifest) {
 	v2 := header(pb.FileKind_FILE_KIND_REQUESTS)
 	v2.SchemaVersion = 2
 	reject("invalid-schema-version.binpb", "requests", "binpb", "A schema version this reader does not implement.", "unsupported schema version",
-		encode(t, files.Binpb, v2, &pb.RequestsHeader{OperationNames: names[:1], Count: 1}, messages.Op(0, messages.Get("/"))))
+		encode(t, files.Binpb, v2, &pb.RequestsHeader{OperationNames: names[:1]}, messages.Op(0, messages.Get("/"))))
 	reject("invalid-unknown-ref.json", "requests", "json", "A ref to a name no earlier step captures.", "names no capture of an earlier step",
-		encode(t, files.JSON, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: names[:1], Count: 1},
+		encode(t, files.JSON, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: names[:1]},
 			messages.Op(0, messages.Get("/kv/", messages.Raw("token")))))
-	reject("invalid-count.binpb", "requests", "binpb", "RequestsHeader.count does not match the operations that follow.", "count is 3",
-		encode(t, files.Binpb, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: names[:1], Count: 3}, messages.Op(0, messages.Get("/"))))
 	reject("invalid-operation-name.json", "requests", "json", "An operation name outside the pattern.", "operation_names",
-		encode(t, files.JSON, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: []string{"Login"}, Count: 1}, messages.Op(0, messages.Get("/"))))
+		encode(t, files.JSON, header(pb.FileKind_FILE_KIND_REQUESTS), &pb.RequestsHeader{OperationNames: []string{"Login"}}, messages.Op(0, messages.Get("/"))))
 	reject("invalid-kind.binpb", "requests", "binpb", "A summary file where a requests file is expected.", "FileHeader.kind",
 		encode(t, files.Binpb, header(pb.FileKind_FILE_KIND_SUMMARY), summaryOf(t, results())))
 	manifestData, err := json.MarshalIndent(manifest, "", "  ")
@@ -323,10 +324,12 @@ func TestFixturesAreCurrent(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
-		// check_histograms.py is the hand-written Python check of these fixtures;
-		// __pycache__ is what running it leaves behind.
+		// check_histograms.py is the hand-written Python check of these fixtures; rand.json is
+		// the Python side's (rand_streams.py writes it, the Go SDK's test reads it);
+		// __pycache__ is what running them leaves behind.
 		name := entry.Name()
-		if _, ok := generated[name]; !ok && name != "check_histograms.py" && name != "__pycache__" {
+		ours := map[string]bool{"check_histograms.py": true, "rand_streams.py": true, "rand.json": true, "__pycache__": true}
+		if _, ok := generated[name]; !ok && !ours[name] {
 			t.Errorf("%s is not a generated fixture; remove it", name)
 		}
 	}

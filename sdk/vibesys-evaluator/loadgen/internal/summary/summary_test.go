@@ -146,31 +146,3 @@ func TestHistogramEncodingRoundTrips(t *testing.T) {
 		}
 	}
 }
-
-// An exhausted closed loop divides by the part of the window before it stopped; an exhausted
-// open loop and an unexhausted closed loop by the whole window.
-func TestExhaustedClosedLoopRateIsOverTheTimeItRan(t *testing.T) {
-	agg := summary.New(window, []string{"a"})
-	for i := range uint64(50) {
-		at := window.Start + int64(i)*2*ms // 50 operations in the first 100 ms
-		agg.Add(summary.Record{Picked: at, Result: &pb.OperationResult{Index: i, ScheduledUnixNanos: at, StartUnixNanos: at, EndUnixNanos: at + ms}})
-	}
-	cases := []struct {
-		phase summary.Phase
-		want  float64
-	}{
-		{summary.Phase{Model: pb.LoadModel_LOAD_MODEL_CLOSED, Exhausted: true, ExhaustedAt: window.Start + 100*ms}, 500},
-		{summary.Phase{Model: pb.LoadModel_LOAD_MODEL_CLOSED, Exhausted: true, ExhaustedAt: window.Start - ms}, 0},
-		{summary.Phase{Model: pb.LoadModel_LOAD_MODEL_CLOSED}, 50},
-		{summary.Phase{Model: pb.LoadModel_LOAD_MODEL_OPEN, TargetRate: 1, Exhausted: true}, 50},
-	}
-	for _, c := range cases {
-		s, err := agg.Summary(c.phase)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if s.GetAchievedRate() != c.want || s.GetOfferedRate() != c.want || s.GetExhaustedUnixNanos() != max(c.phase.ExhaustedAt, 0) {
-			t.Errorf("%+v: achieved %g offered %g exhausted at %d, want %g", c.phase, s.GetAchievedRate(), s.GetOfferedRate(), s.GetExhaustedUnixNanos(), c.want)
-		}
-	}
-}

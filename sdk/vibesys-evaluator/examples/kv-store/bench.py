@@ -6,7 +6,8 @@ data tier; the dataset is a few lines here and is seeded through the
 service's own API; every operation logs in and uses the token it got (a
 template the loadgen fills from the first response); reads must see every
 acknowledged write at once (bound 0); the score is latency at a fixed
-Poisson-arrival rate, with no closed loop.
+Poisson-arrival rate, with no closed loop. bench_go.py is the same task with
+this workload written in Go (generator/): both write the same request stream.
 
 The service (candidate directory `server/`, its own Dockerfile) offers
     POST /register {"user", "password"}

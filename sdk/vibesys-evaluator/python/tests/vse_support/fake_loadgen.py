@@ -1,11 +1,18 @@
 """A Fake of loadgen: the same command line and files, in virtual time, against an in-memory app.
 
-It reads the requests file the package wrote, fills templates from captures,
-sends each step to ``app`` (``KvService.handle``'s signature), and writes the
-results and summary files the real loadgen writes, with HDR histograms. Time
-is virtual: every step takes ``step_micros``; a closed loop's clients take
-operations in plan order, an open loop's operations arrive every ``1/rate``.
-It is as strict as the schema: it validates every message it reads.
+It reads the request stream of the generator command after ``--`` (run by
+``generator``, in this process), fills templates from captures, sends each
+step to ``app`` (``KvService.handle``'s signature), and writes the results
+and summary files the real loadgen writes, with HDR histograms. Time is
+virtual: every step takes ``step_micros``; a closed loop's clients take
+operations in stream order, an open loop's operations arrive every
+``1/rate``. It is as strict as the schema: it validates every message it
+reads.
+
+The stream has no end, and the Fake runs no threads: it runs the generator
+on an output that is closed (``BrokenPipeError``) after a number of bytes,
+and runs it again on a larger one when it needs more operations, as the
+stream is a function of the phase input alone.
 """
 
 from __future__ import annotations
@@ -13,21 +20,31 @@ from __future__ import annotations
 import argparse
 import hashlib
 import heapq
+import io
+import itertools
 import json
+from collections.abc import Buffer, Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import IO
 from urllib.parse import urlencode
 
 from protobuf import Oneof
 
-from vibesys_evaluator._private.files import DelimitedWriter, SchemaFileError, read_requests
+from vibesys_evaluator._private.files import (
+    DelimitedReader,
+    DelimitedWriter,
+    SchemaFileError,
+    check_refs,
+)
 from vibesys_evaluator._private.hdr import Histogram, encode
 from vibesys_evaluator._private.loadgen import LoadgenExit
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+#: Runs a generator command (its argv) writing its stream to the given output; how it ended.
+GeneratorRun = Callable[[Sequence[str], IO[bytes]], LoadgenExit]
+_FIRST_CAP = 1 << 14
+_CONTINUE = 0x80
 
 T0 = 1_800_000_000 * 10**9
 _METHODS = {
@@ -87,11 +104,81 @@ def _pointer(body: bytes, pointer: str) -> str | None:
     return value if isinstance(value, str) else json.dumps(value)
 
 
+class Capped(io.BytesIO):
+    """An output that is closed, as loadgen closes the stream, once it holds ``cap`` bytes."""
+
+    def __init__(self, cap: int) -> None:
+        super().__init__()
+        self.cap = cap
+
+    def write(self, data: Buffer, /) -> int:
+        if self.tell() + memoryview(data).nbytes > self.cap:
+            raise BrokenPipeError
+        return super().write(data)
+
+
+def whole_frames(data: bytes) -> bytes:
+    """``data`` up to its last whole length-delimited frame."""
+    position = end = 0
+    while position < len(data):
+        length, shift = 0, 0
+        while position < len(data):
+            byte = data[position]
+            position += 1
+            length |= (byte & 0x7F) << shift
+            shift += 7
+            if byte < _CONTINUE:
+                break
+        else:
+            break
+        if position + length > len(data):
+            break
+        position += length
+        end = position
+    return data[:end]
+
+
+class _Stream:
+    """The generator's stream, read as far as the Fake needs it."""
+
+    def __init__(self, generator: GeneratorRun, argv: Sequence[str]) -> None:
+        self._generator = generator
+        self._argv = list(argv)
+        self._cap = _FIRST_CAP
+        self.operations: list[pb.PlannedOperation] = []
+        self.names: list[str] = []
+        self.read = 0
+        self._fill()
+
+    def _fill(self) -> None:
+        out = Capped(self._cap)
+        done = self._generator(self._argv, out)
+        if done.code != 0:  # loadgen passes the generator's standard error through
+            msg = f"{done.stderr}the request stream ended: the generator exited {done.code}"
+            raise SchemaFileError(msg)
+        reader = DelimitedReader.from_bytes(
+            whole_frames(out.getvalue()), "the request stream", pb.FileKind.REQUESTS
+        )
+        self.names = list(reader.one(pb.RequestsHeader).operation_names)
+        self.operations = [
+            check_refs(op, f"the request stream: operation {n}")
+            for n, op in enumerate(reader.rest(pb.PlannedOperation))
+        ]
+
+    def take(self, index: int) -> pb.PlannedOperation:
+        while index >= len(self.operations):
+            self._cap *= 4
+            self._fill()
+        self.read = max(self.read, index + 1)
+        return self.operations[index]
+
+
 @dataclass
 class FakeLoadgen:
     """Runs phases against ``app``; ``runs`` records each command line."""
 
     app: Callable[[str, str, dict[str, str], bytes], tuple[int, bytes]]
+    generator: GeneratorRun
     step_micros: int = 10_000
     #: Per run, a step time that replaces ``step_micros`` (an application that speeds up).
     step_micros_by_run: list[int] = field(default_factory=list)
@@ -102,6 +189,8 @@ class FakeLoadgen:
     senders_saturated: bool = False
     #: Open loop: every n-th operation is due but never sent (CANCELLED, start 0); 0: none.
     never_sent_every: int = 0
+    #: The window's operations whose client waited for the generator (a slow generator).
+    generator_waited: int = 0
     runs: list[list[str]] = field(default_factory=list)
     #: The virtual clock: each run starts a second after the previous one ended.
     clock: int = T0
@@ -111,9 +200,14 @@ class FakeLoadgen:
         self.runs.append(list(args))
         if len(self.runs) <= len(self.step_micros_by_run):
             self.step_micros = self.step_micros_by_run[len(self.runs) - 1]
+        args = list(args)
+        if "--" not in args:
+            return LoadgenExit(code=2, stderr="usage: no generator command after --")
+        split = args.index("--")
+        args, command = args[:split], args[split + 1 :]
         parser = argparse.ArgumentParser(exit_on_error=False)
         parser.add_argument("mode", choices=["closed", "open"])
-        for name in ("--target", "--requests", "--results", "--summary"):
+        for name in ("--target", "--results", "--summary"):
             parser.add_argument(name, required=True)
         for name in ("--secs", "--warmup", "--rate", "--min-sustained", "--timeout"):
             parser.add_argument(name, type=float, default=0.0)
@@ -124,11 +218,13 @@ class FakeLoadgen:
             options = parser.parse_args(list(args))
         except (argparse.ArgumentError, SystemExit) as error:
             return LoadgenExit(code=2, stderr=f"usage: {error}")
+        if not command:
+            return LoadgenExit(code=2, stderr="usage: no generator command after --")
         try:
-            header, plan = read_requests(Path(options.requests))
+            stream = _Stream(self.generator, command)
+            return self._run(options, stream)
         except SchemaFileError as error:
-            return LoadgenExit(code=2, stderr=str(error))
-        return self._run(options, header, plan)
+            return LoadgenExit(code=1, stderr=str(error))
 
     def _execute(
         self, op: pb.PlannedOperation, start: int
@@ -197,18 +293,12 @@ class FakeLoadgen:
                 captured[capture.name] = value
         return steps, pb.ErrorKind.UNSPECIFIED, now
 
-    def _run(
-        self,
-        options: argparse.Namespace,
-        header: pb.RequestsHeader,
-        plan: list[pb.PlannedOperation],
-    ) -> LoadgenExit:
+    def _run(self, options: argparse.Namespace, stream: _Stream) -> LoadgenExit:
         closed = options.mode == "closed"
         t0 = self.clock
         window_start = t0 + int(options.warmup * 1e9)
         window_end = window_start + int(options.secs * 1e9)
         results: list[pb.OperationResult] = []
-        exhausted = False
         if closed:
             clients = [(t0, n) for n in range(options.clients)]
             heapq.heapify(clients)
@@ -217,14 +307,12 @@ class FakeLoadgen:
                 free, client = heapq.heappop(clients)
                 if free >= window_end:
                     continue
-                if index >= len(plan):
-                    exhausted = True
-                    break
-                steps, error, end = self._execute(plan[index], free)
+                op = stream.take(index)
+                steps, error, end = self._execute(op, free)
                 results.append(
                     pb.OperationResult(
                         index=index,
-                        operation=plan[index].operation,
+                        operation=op.operation,
                         scheduled_unix_nanos=free,
                         start_unix_nanos=free,
                         end_unix_nanos=end,
@@ -236,11 +324,11 @@ class FakeLoadgen:
                 heapq.heappush(clients, (end, client))
         else:
             gap = 1e9 / options.rate
-            exhausted = t0 + int(len(plan) * gap) < window_end
-            for index, op in enumerate(plan):
+            for index in itertools.count():
                 scheduled = t0 + int(index * gap)
                 if scheduled >= window_end:
                     break
+                op = stream.take(index)
                 if self.never_sent_every and index % self.never_sent_every == 0:
                     results.append(
                         pb.OperationResult(
@@ -266,17 +354,15 @@ class FakeLoadgen:
                     )
                 )
         self.clock = max([window_end, *(r.end_unix_nanos for r in results)]) + 10**9
-        self._write(options, header, results, (window_start, window_end), exhausted=exhausted)
+        self._write(options, stream, results, (window_start, window_end))
         return LoadgenExit(code=0, stderr="")
 
     def _write(
         self,
         options: argparse.Namespace,
-        header: pb.RequestsHeader,
+        stream: _Stream,
         results: list[pb.OperationResult],
         window: tuple[int, int],
-        *,
-        exhausted: bool,
     ) -> None:
         window_start, window_end = window
         closed = options.mode == "closed"
@@ -286,7 +372,7 @@ class FakeLoadgen:
             for result in sorted(results, key=lambda r: (r.end_unix_nanos, r.index)):
                 writer.write(result)
         latency, lag = _histogram(), _histogram()
-        per_op = {n: (_histogram(), [0, 0]) for n in range(len(header.operation_names))}
+        per_op = {n: (_histogram(), [0, 0]) for n in range(len(stream.names))}
         sent = completed = errors = spilled = in_time = 0
         by_kind: dict[int, int] = {}
         # As loadgen counts (internal/summary): an operation is the window's when it was
@@ -312,12 +398,8 @@ class FakeLoadgen:
                 spilled += 1
             else:
                 in_time += 1
-        # An exhausted closed loop ran until its last operation ended (loadgen's
-        # exhausted_unix_nanos); its rates are over the part of the window before that.
-        stopped = max((r.end_unix_nanos for r in results), default=0) if closed and exhausted else 0
-        ran_end = min(stopped, window_end) if stopped else window_end
-        secs = max((ran_end - window_start) / 1e9, 0.0)
-        offered = sent / secs if secs > 0 else 0.0
+        secs = (window_end - window_start) / 1e9
+        offered = sent / secs
         summary = pb.PhaseSummary(
             model=pb.LoadModel.CLOSED if closed else pb.LoadModel.OPEN,
             target_rate=0.0 if closed else options.rate,
@@ -330,16 +412,23 @@ class FakeLoadgen:
             errors_by_kind=by_kind,
             spilled=spilled,
             offered_rate=offered,
-            achieved_rate=in_time / secs if secs > 0 else 0.0,
+            achieved_rate=in_time / secs,
             send_lag=_message(lag),
             max_send_lag_micros=self.send_lag_micros,
             loadgen_cpu_fraction=self.cpu_fraction,
             sustained=closed or offered >= options.min_sustained * options.rate,
-            exhausted=exhausted,
-            exhausted_unix_nanos=stopped,
             saturated=completed
             if not closed and self.senders_saturated and self.send_lag_micros
             else 0,
+            operation_names=stream.names,
+            generator=pb.GeneratorStats(
+                read=stream.read,
+                waited=self.generator_waited,
+                wait=_message(_histogram()),
+                rate=12_345.0,
+                ready_secs=0.25,
+                buffer=8192,
+            ),
             latency=_message(latency),
             operations=[
                 pb.OperationSummary(operation=n, completed=c[0], errors=c[1], latency=_message(h))

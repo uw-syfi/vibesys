@@ -150,6 +150,7 @@ _NATIVE_BUILD_FIXTURES = frozenset(
         "compiled_unordered_map_candidate",
         "built_unordered_map_tbb",
         "built_loadgen",
+        "go_generator",
     }
 )
 
