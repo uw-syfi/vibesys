@@ -7,10 +7,15 @@ type NoCurrentResultReason string
 const (
 	// NoHead means nothing was promoted, so there is no head.
 	NoHead NoCurrentResultReason = "no_head"
-	// NotMeasuredSincePromotion means the head has no measurement and check taken after it last
-	// moved. The cache cannot supply one: reusing the samples that picked a winner would
-	// overstate its score.
+	// NotMeasuredSincePromotion means the last promotion set the head and the head has no
+	// measurement and check taken after it. The cache cannot supply one: reusing the samples that
+	// picked a winner would overstate its score. A fresh measure of the head gives it a number.
 	NotMeasuredSincePromotion NoCurrentResultReason = "not_measured_since_promotion"
+	// HeadNotPromoted means the branch was moved outside promote, to a head the last promotion did
+	// not set. No measurement gives it a number: nothing records when the branch moved, so no
+	// measurement can be shown to be taken after the move, and the head may have been picked on the
+	// very samples that would overstate it. The next promotion sets a head that can have one.
+	HeadNotPromoted NoCurrentResultReason = "head_not_promoted"
 )
 
 // ResultAnswer is what `result` reports: a CurrentResult or a NoCurrentResult.
@@ -36,14 +41,14 @@ func (NoCurrentResult) resultAnswer() {}
 // CurrentResultAt decides what `result` reports when the result branch is at head. It is
 // CurrentResultOf, except that a head the last promotion did not set has no number: the branch
 // moved by some other means, so no measurement of the last promoted commit speaks for it, and the
-// answer is NotMeasuredSincePromotion for the head it is at. A branch that was never promoted has
-// no head to report, whatever commit it is at.
+// answer is HeadNotPromoted for the head it is at. A branch that was never promoted has no head to
+// report, whatever commit it is at.
 func CurrentResultAt(head Commit, promotions []Promotion, results []Result) ResultAnswer {
 	if len(promotions) == 0 {
 		return NoCurrentResult{Reason: NoHead}
 	}
 	if head != promotions[len(promotions)-1].Commit {
-		return NoCurrentResult{Reason: NotMeasuredSincePromotion, Head: head}
+		return NoCurrentResult{Reason: HeadNotPromoted, Head: head}
 	}
 	return CurrentResultOf(promotions, results)
 }

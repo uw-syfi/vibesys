@@ -104,9 +104,14 @@ const (
 	NoCurrentResultReason_NO_CURRENT_RESULT_REASON_UNSPECIFIED NoCurrentResultReason = 0
 	// Nothing was promoted, so there is no head.
 	NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD NoCurrentResultReason = 1
-	// The head has no measurement and check taken after its last move. The cache cannot supply one,
-	// because reusing the samples that picked a winner would overstate its score.
+	// The head was set by the last promotion and has no measurement and check taken after it. The
+	// cache cannot supply one, because reusing the samples that picked a winner would overstate its
+	// score: a measure of the head with --no-cache gives it its number.
 	NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION NoCurrentResultReason = 2
+	// The result branch was moved outside promote, to a head the last promotion did not set. No
+	// measurement gives that head a number: nothing records when the branch moved, so none can be
+	// shown to be taken after the move. The next promotion sets a head that can have one.
+	NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED NoCurrentResultReason = 3
 )
 
 // Enum value maps for NoCurrentResultReason.
@@ -115,11 +120,13 @@ var (
 		0: "NO_CURRENT_RESULT_REASON_UNSPECIFIED",
 		1: "NO_CURRENT_RESULT_REASON_NO_HEAD",
 		2: "NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION",
+		3: "NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED",
 	}
 	NoCurrentResultReason_value = map[string]int32{
 		"NO_CURRENT_RESULT_REASON_UNSPECIFIED":                  0,
 		"NO_CURRENT_RESULT_REASON_NO_HEAD":                      1,
 		"NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION": 2,
+		"NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED":            3,
 	}
 )
 
@@ -529,11 +536,12 @@ const file_vibesys_cli_v1_promote_proto_rawDesc = "" +
 	"!PROMOTE_REFUSAL_KIND_INCONCLUSIVE\x10\x05\x12\x1e\n" +
 	"\x1aPROMOTE_REFUSAL_KIND_STALE\x10\x06\x12-\n" +
 	")PROMOTE_REFUSAL_KIND_ENVIRONMENT_MISMATCH\x10\a\x12!\n" +
-	"\x1dPROMOTE_REFUSAL_KIND_TRADEOFF\x10\b*\xa2\x01\n" +
+	"\x1dPROMOTE_REFUSAL_KIND_TRADEOFF\x10\b*\xd2\x01\n" +
 	"\x15NoCurrentResultReason\x12(\n" +
 	"$NO_CURRENT_RESULT_REASON_UNSPECIFIED\x10\x00\x12$\n" +
 	" NO_CURRENT_RESULT_REASON_NO_HEAD\x10\x01\x129\n" +
-	"5NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION\x10\x02B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"5NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION\x10\x02\x12.\n" +
+	"*NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED\x10\x03B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_promote_proto_rawDescOnce sync.Once

@@ -241,7 +241,7 @@ func resultCommand(ctx context.Context, d deps, args []string) int {
 		if none.GetHead() != "" {
 			head = " (head " + shortCommit(none.GetHead()) + ")"
 		}
-		fmt.Fprintf(d.stdout, "no current result: %s%s\n", noResultText(none.GetReason()), head)
+		fmt.Fprintf(d.stdout, "no current result: %s%s\n", noResultText(none.GetReason(), none.GetHead()), head)
 		return code
 	})
 }
@@ -269,12 +269,17 @@ func refusalName(k cliv1.PromoteRefusalKind) string {
 	return lower("PROMOTE_REFUSAL_KIND_", k.String())
 }
 
-func noResultText(r cliv1.NoCurrentResultReason) string {
+// noResultText says why there is no number for the head, and what, if anything, gives it one.
+func noResultText(r cliv1.NoCurrentResultReason, head string) string {
 	switch r {
 	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD:
 		return "nothing was promoted, so there is no head"
 	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION:
-		return "the head has no measurement and check taken since it last moved; submit a measure with --no-cache"
+		return "the head was promoted on measurements that selected it, which overstate its score, and has no " +
+			"measurement and check taken since; run `vibesys-cli submit measure " + head + " --no-cache`"
+	case cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED:
+		return "the result branch was moved outside promote, to a head no promotion set; no measurement " +
+			"gives that head a number, and the next promotion sets a head that can have one"
 	}
 	return lower("NO_CURRENT_RESULT_REASON_", r.String())
 }

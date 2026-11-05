@@ -68,9 +68,14 @@ enum NoCurrentResultReason {
   NO_CURRENT_RESULT_REASON_UNSPECIFIED = 0;
   // Nothing was promoted, so there is no head.
   NO_CURRENT_RESULT_REASON_NO_HEAD = 1;
-  // The head has no measurement and check taken after its last move. The cache cannot supply one,
-  // because reusing the samples that picked a winner would overstate its score.
+  // The head was set by the last promotion and has no measurement and check taken after it. The
+  // cache cannot supply one, because reusing the samples that picked a winner would overstate its
+  // score: a measure of the head with --no-cache gives it its number.
   NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION = 2;
+  // The result branch was moved outside promote, to a head the last promotion did not set. No
+  // measurement gives that head a number: nothing records when the branch moved, so none can be
+  // shown to be taken after the move. The next promotion sets a head that can have one.
+  NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED = 3;
 }
 
 // CurrentResult is the head and a final number measured after the head last moved.
