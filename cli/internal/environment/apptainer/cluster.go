@@ -6,15 +6,16 @@
 //
 // What a container is here:
 //
-//   - The images are built by the caller's own Docker, as everywhere, and each is converted to a SIF
-//     on the caller's machine with its apptainer program, in a local directory checked first for
-//     room for the image unpacked, where the SIF is kept until it is copied to the cluster, once
-//     the conversion has ended, named by its digest (images/<hex>.sif under the remote root): a
-//     run that finds it there converts and copies nothing. A copy that loses its connection is
-//     made again, a bounded number of times, and a SIF never copied is kept for the next run. The publishers of one image on one machine convert it one at a time, under a lock of
-//     the machine, and a publisher that waited uses the SIF of the one it waited for. It is
-//     published whole by a rename, so publishers of different machines at once each write a file of
-//     their own and one of them wins. The cluster's apptainer only runs SIFs.
+//   - The images are built by the caller's own Docker, as everywhere, and each is converted to a
+//     SIF on the caller's machine with its apptainer program, in a local directory checked first
+//     for room for the image unpacked, where the SIF is kept until it is copied to the cluster,
+//     once the conversion has ended, named by the digest of the image's content (images/<hex>.sif
+//     under the remote root), not by its ID: a run that finds it there converts and copies nothing.
+//     A copy that loses its connection is made again, a bounded number of times, and a SIF never
+//     copied is kept for the next run. The publishers of one image on one machine convert it one at
+//     a time, under a lock of the machine, and a publisher that waited uses the SIF of the one it
+//     waited for. It is published whole by a rename, so publishers of different machines at once
+//     each write a file of their own and one of them wins. The cluster's apptainer only runs SIFs.
 //   - A run's first container is a batch allocation of its own (sbatch, or the site's command that
 //     wraps it), named by the container and commented with the scope, never requeued. Once it runs,
 //     a holding process is started on its node, whose input the caller keeps: when the caller closes

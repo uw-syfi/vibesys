@@ -40,12 +40,19 @@ const StopMargin = 10 * time.Minute
 // NoLimit is the time limit of an allocation whose container was given none.
 const NoLimit = 24 * time.Hour
 
-// Exporter writes a local image as a docker archive (docker save), and says how large the image is
-// unpacked and stored, as the local engine has it: stored, its layers are compressed under Docker's
-// default containerd image store, about the size of its archive.
+// Exporter writes a local image as a docker archive (docker save), says how large the image is
+// unpacked and stored, as the local engine has it (stored, its layers are compressed under Docker's
+// default containerd image store, about the size of its archive), and says what the image holds.
 type Exporter interface {
 	Save(ctx context.Context, image string, w io.Writer) error
 	Sizes(ctx context.Context, image string) (unpacked, stored int64, err error)
+	// Content returns the digest of what a container of the image runs, as "sha256:" and 64
+	// lower-case hexadecimal digits: of its config (its environment, entrypoint, command, working
+	// directory, user, labels and the rest), its platform, and its layers' diff IDs, in order. Two
+	// images of one content have one digest whatever their IDs: under the containerd image store an
+	// image's ID is the digest of its manifest or index, which differs from one build to the next of
+	// the same Dockerfile and files when BuildKit attaches attestations to it.
+	Content(ctx context.Context, image string) (string, error)
 }
 
 // Sizing is what an allocation asks for, by what its container runs.
@@ -441,9 +448,24 @@ func orUnknown(s string) string {
 	return s
 }
 
-// sifPath is where the cluster keeps the image's SIF, named by its digest.
-func (e *Engine) sifPath(image string) string {
-	return path.Join(e.cfg.Root, "images", strings.TrimPrefix(image, "sha256:")+".sif")
+// sifPath is where the cluster keeps the SIF of an image's content, named by the content's digest
+// (Exporter.Content). It is not named by the image's ID, which two builds of one content may not
+// share; a SIF named by an ID, as earlier versions named them, is used by nothing.
+func (e *Engine) sifPath(content string) string {
+	return path.Join(e.cfg.Root, "images", strings.TrimPrefix(content, "sha256:")+".sif")
+}
+
+// contentOf is the digest of the image's content, checked to be one, since it names files.
+func (e *Engine) contentOf(ctx context.Context, image string) (string, error) {
+	content, err := e.cfg.Export.Content(ctx, image)
+	if err != nil {
+		return "", fmt.Errorf("reading the content of the image %s: %w", image, err)
+	}
+	hexPart, ok := strings.CutPrefix(content, "sha256:")
+	if !ok || len(hexPart) != 64 || strings.Trim(hexPart, "0123456789abcdef") != "" {
+		return "", unavailable("the digest of the content of the image %s, %q, is not sha256: and 64 hexadecimal digits", image, content)
+	}
+	return content, nil
 }
 
 // BuiltBy is the suffix of the file beside a SIF that says what converted it, in one line for a
@@ -454,7 +476,8 @@ const BuiltBy = ".built-by"
 const CopyAttempts = 3
 
 // publish returns the image's SIF on the cluster, converting the image on this machine and copying
-// the SIF there unless the cluster has it.
+// the SIF there unless the cluster has a SIF of the image's content: of this image, or of another
+// build of the same content.
 //
 // The publishers of one image on this machine, in this process or others, convert it one at a
 // time, under the image's lock of the Converter: one that finds the lock held says so to log and
@@ -469,12 +492,16 @@ const CopyAttempts = 3
 // instead of converting the image again. The kept SIF is removed once the cluster has it, or by
 // the next conversion of this machine once it is a day old.
 func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (string, error) {
-	sif := e.sifPath(image)
+	content, err := e.contentOf(ctx, image)
+	if err != nil {
+		return "", err
+	}
+	sif := e.sifPath(content)
 	has, err := e.cfg.Cluster.Has(ctx, sif)
 	if err != nil || has {
 		return sif, err
 	}
-	lock, err := e.lockConversion(ctx, image, log)
+	lock, err := e.lockConversion(ctx, image, content, log)
 	if err != nil {
 		return "", err
 	}
@@ -520,10 +547,11 @@ func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (stri
 	return sif, nil
 }
 
-// lockConversion takes the lock of the image's conversions on this machine, trying again after
-// each Poll while another holds it, up to ConvertTimeout: the bound of the conversion it waits for.
-func (e *Engine) lockConversion(ctx context.Context, image string, log io.Writer) (io.Closer, error) {
-	name := "vibesys-convert-" + strings.TrimPrefix(image, "sha256:") + ".lock"
+// lockConversion takes the lock of the conversions of the image's content on this machine, trying
+// again after each Poll while another holds it, up to ConvertTimeout: the bound of the conversion
+// it waits for.
+func (e *Engine) lockConversion(ctx context.Context, image, content string, log io.Writer) (io.Closer, error) {
+	name := "vibesys-convert-" + strings.TrimPrefix(content, "sha256:") + ".lock"
 	var limit <-chan struct{}
 	for {
 		lock, err := e.cfg.Converter.Lock(ctx, e.cfg.LocalDir, name)

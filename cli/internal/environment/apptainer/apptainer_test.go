@@ -49,6 +49,8 @@ type setup struct {
 	configure            func(*docker.Config)
 	// converter is the machine's apptainer; nil is one of the rig's own with room for any image.
 	converter *clusterfake.Converter
+	// daemon configures the rig's local Docker daemon.
+	daemon []dockerfake.Option
 	// scope is the rig's; empty is the tests' scope. A scope is one process's: a run sweeps what
 	// every other process of its scope left, as a dead one's.
 	scope string
@@ -79,7 +81,7 @@ func newRig(t testing.TB, w fakeworld.World, cluster *clusterfake.Cluster, o set
 	if o.converter == nil {
 		o.converter = clusterfake.NewConverter()
 	}
-	local := dockerfake.NewDaemon(w.MemoryGates).Connect()
+	local := dockerfake.NewDaemon(w.MemoryGates, o.daemon...).Connect()
 	client := cluster.Connect()
 	eng, err := apptainer.New(apptainer.Config{
 		Local: local, Export: local, Cluster: client, Root: root, Scope: o.scope,
@@ -344,9 +346,27 @@ func imagesOn(c *clusterfake.Cluster) []string {
 	return out
 }
 
-// sifOf is where the cluster keeps the SIF of the image.
-func sifOf(id string) string {
-	return path.Join(root, "images", strings.TrimPrefix(id, "sha256:")+".sif")
+// sifOf is where the cluster keeps the SIF of the image of the ID, which the local engine has: the
+// SIF of the image's content.
+func sifOf(t testing.TB, local *dockerfake.Client, id string) string {
+	t.Helper()
+	content, err := local.Content(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path.Join(root, "images", strings.TrimPrefix(content, "sha256:")+".sif")
+}
+
+// taskSIF is where the cluster keeps the SIF of the rigs' task image.
+func taskSIF(t testing.TB) string {
+	t.Helper()
+	w := fakeworld.New()
+	r := newRig(t, w, clusterfake.New(w.MemoryGates), setup{})
+	f, err := r.env.Fingerprint(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sifOf(t, r.local, f.ImageDigest)
 }
 
 // An image is converted to a SIF on this machine, in its local directory, and the SIF is copied to
@@ -358,7 +378,7 @@ func TestAnImageIsConvertedHereAndItsSIFCopiedOnce(t *testing.T) {
 	cluster := clusterfake.New(w.MemoryGates)
 	converter := clusterfake.NewConverter()
 	id := imageID(t)
-	sif := sifOf(id)
+	sif := taskSIF(t)
 	for process := range uint32(3) {
 		r := newRig(t, w, cluster, setup{process: process, converter: converter})
 		a, _ := run(t, r.env, "exit", "0")
@@ -405,10 +425,10 @@ func TestTheBuildsLogSaysWhatConvertedTheImage(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("image %v, %v", ok, err)
 	}
-	if !strings.Contains(log.String(), clusterfake.Version) || !strings.Contains(log.String(), sifOf(img.ID)) {
+	if !strings.Contains(log.String(), clusterfake.Version) || !strings.Contains(log.String(), sifOf(t, r.local, img.ID)) {
 		t.Errorf("the build's log %q does not say what converted the image to what", log.String())
 	}
-	if _, ok := cluster.File(sifOf(img.ID)); !ok {
+	if _, ok := cluster.File(sifOf(t, r.local, img.ID)); !ok {
 		t.Error("the build copied no SIF to the cluster")
 	}
 }
@@ -429,7 +449,7 @@ func TestRunsOfSeveralProcessesAtOnceShareTheImage(t *testing.T) {
 	for _, a := range attempts {
 		exited(t, a, 0)
 	}
-	if got, _ := cluster.File(sifOf(id)); !bytes.Equal(got, clusterfake.SIF(dockerfake.Archive(id))) {
+	if got, _ := cluster.File(taskSIF(t)); !bytes.Equal(got, clusterfake.SIF(dockerfake.Archive(id))) {
 		t.Errorf("the SIF %q is not whole", got)
 	}
 	nothingLeft(t, cluster)
@@ -579,7 +599,7 @@ func TestPublishersOfOneImageOnOneMachineConvertItOnce(t *testing.T) {
 			w := fakeworld.New()
 			cluster := clusterfake.New(w.MemoryGates)
 			machine := holdFirstConversion()
-			sif := sifOf(imageID(t))
+			sif := taskSIF(t)
 			first := newRig(t, w, cluster, setup{process: 0, converter: machine.converter})
 			waiterTimers := envtest.NewTimers()
 			second := newRig(t, w, cluster, setup{process: 1, converter: machine.converter, engineTimers: waiterTimers})
@@ -685,7 +705,7 @@ func TestACopyThatLosesItsConnectionIsMadeAgain(t *testing.T) {
 			converter := clusterfake.NewConverter()
 			r := newRig(t, w, cluster, setup{converter: converter, engineTimers: clock.Immediate{Longest: apptainer.DefaultPoll}})
 			copies := losingCopies(cluster, losses, lost)
-			sif := sifOf(imageID(t))
+			sif := taskSIF(t)
 			log, err := build(context.Background(), r)
 			if err != nil {
 				t.Fatalf("the build: %v", err)
@@ -717,7 +737,7 @@ func TestASIFNeverCopiedIsKeptForTheNextPublisher(t *testing.T) {
 	cluster := clusterfake.New(w.MemoryGates)
 	converter := clusterfake.NewConverter()
 	timers := clock.Immediate{Longest: apptainer.DefaultPoll}
-	sif := sifOf(imageID(t))
+	sif := taskSIF(t)
 	copies := losingCopies(cluster, apptainer.CopyAttempts, lost)
 	_, err := build(context.Background(), newRig(t, w, cluster, setup{process: 0, converter: converter, engineTimers: timers}))
 	if err == nil || !errors.Is(err, apptainer.ErrConnectionLost) || !strings.Contains(err.Error(), fmt.Sprintf("%d times", apptainer.CopyAttempts)) {
@@ -760,6 +780,56 @@ func TestACopyThatFailsOtherwiseIsNotMadeAgain(t *testing.T) {
 	}
 	if got := copies.Load(); got != 1 {
 		t.Errorf("%d copies, want one", got)
+	}
+}
+
+// Builds of one Dockerfile whose images have IDs of their own and one content, as BuildKit's
+// attestations make them under the containerd image store, share one SIF: the image is converted
+// and copied once, and every container of either runs that SIF. Builds of different content
+// (a Dockerfile that downloads what changes) each have a SIF of their own.
+func TestImagesOfOneContentShareOneSIF(t *testing.T) {
+	cases := []struct {
+		name   string
+		daemon dockerfake.Option
+		sifs   int
+	}{
+		{"one content, IDs of their own", dockerfake.AttestedBuilds(), 1},
+		{"contents of their own", dockerfake.NonReproducibleBuilds(), 2},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			w := fakeworld.New()
+			cluster := clusterfake.New(w.MemoryGates)
+			converter := clusterfake.NewConverter()
+			r := newRig(t, w, cluster, setup{converter: converter, daemon: []dockerfake.Option{c.daemon}})
+			ids := map[string]bool{}
+			var sifs []string
+			for range 2 {
+				if _, err := build(context.Background(), r); err != nil {
+					t.Fatal(err)
+				}
+				img, ok, err := r.engine.Image(context.Background(), "vibesys-task:x")
+				if err != nil || !ok {
+					t.Fatalf("image %v, %v", ok, err)
+				}
+				ids[img.ID] = true
+				sifs = append(sifs, sifOf(t, r.local, img.ID))
+			}
+			if len(ids) != 2 {
+				t.Fatalf("the builds made the images %v, want two IDs", ids)
+			}
+			if builds := converter.Builds(); len(builds) != c.sifs {
+				t.Errorf("%d conversions, want %d", len(builds), c.sifs)
+			}
+			if got := len(imagesOn(cluster)); got != 2*c.sifs {
+				t.Errorf("files on the cluster %v, want %d SIFs and what built each", imagesOn(cluster), c.sifs)
+			}
+			for _, sif := range sifs {
+				if n := cluster.Published(sif); n != 1 {
+					t.Errorf("%s was published %d times, want once", sif, n)
+				}
+			}
+		})
 	}
 }
 

@@ -3,6 +3,9 @@ package dockercli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -198,4 +201,64 @@ func (t *tail) last() string {
 		lines = lines[extra:]
 	}
 	return strings.ToValidUTF8(clipEnd(strings.Join(lines, "\n"), maxError), "")
+}
+
+// Content implements apptainer.Exporter: the digest of what `docker image inspect` says a
+// container of the image runs (ContentDigest).
+func (e *Engine) Content(ctx context.Context, image string) (string, error) {
+	if image == "" || strings.HasPrefix(image, "-") {
+		return "", &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("dockercli: %q is not an image reference", image)}
+	}
+	res, err := e.call(ctx, "image inspect", "image", "inspect", "--format", "{{json .}}", image)
+	if err != nil {
+		return "", err
+	}
+	if res.code != 0 {
+		return "", failed("image inspect", res)
+	}
+	return ContentDigest([]byte(res.stdout))
+}
+
+// ContentDigest is the digest, as "sha256:" and 64 hexadecimal digits, of what an image's
+// `docker image inspect` output (one image, as JSON) says a container of it runs: its Config, its
+// platform (Os, Architecture, Variant), and its RootFS's layers, by diff ID and in order. What
+// names this one build of the content (Id, RepoTags, RepoDigests, Created, Metadata, Descriptor)
+// is left out: under the containerd image store the Id is the digest of the image's manifest or
+// index, which BuildKit's attestations make differ from one build to the next of one content. The
+// config is written canonically, its keys sorted, so the digest does not depend on how Docker
+// orders them.
+func ContentDigest(inspect []byte) (string, error) {
+	var img struct {
+		Config       json.RawMessage
+		Os           string
+		Architecture string
+		Variant      string
+		RootFS       *struct{ Layers []string }
+	}
+	if err := json.Unmarshal(inspect, &img); err != nil {
+		return "", unavailable("docker image inspect wrote what is not an image: %v", err)
+	}
+	if img.RootFS == nil || img.Os == "" || img.Architecture == "" {
+		return "", unavailable("docker image inspect wrote an image with no RootFS, Os or Architecture")
+	}
+	var config any
+	if len(img.Config) > 0 {
+		dec := json.NewDecoder(bytes.NewReader(img.Config))
+		dec.UseNumber()
+		if err := dec.Decode(&config); err != nil {
+			return "", unavailable("docker image inspect wrote a config that is not JSON: %v", err)
+		}
+	}
+	canonical, err := json.Marshal(struct {
+		Config       any      `json:"config"`
+		Os           string   `json:"os"`
+		Architecture string   `json:"architecture"`
+		Variant      string   `json:"variant"`
+		Layers       []string `json:"layers"`
+	}{config, img.Os, img.Architecture, img.Variant, img.RootFS.Layers})
+	if err != nil {
+		return "", unavailable("cannot write the content of an image: %v", err)
+	}
+	sum := sha256.Sum256(canonical)
+	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }

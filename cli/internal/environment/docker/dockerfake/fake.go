@@ -66,12 +66,14 @@ type Faults func(Call) *Fault
 type Daemon struct {
 	gates        fakeenv.Gates
 	reproducible bool
+	attested     bool
 
-	mu     sync.Mutex
-	faults Faults
-	images map[string]docker.Image // by tag
-	builds int
-	boxes  map[string]*box // containers, by name
+	mu       sync.Mutex
+	faults   Faults
+	images   map[string]docker.Image // by tag
+	contents map[string]string       // the digest of each image's content, by its ID
+	builds   int
+	boxes    map[string]*box // containers, by name
 }
 
 // box is a container.
@@ -89,9 +91,14 @@ type Option func(*Daemon)
 // downloads something that changes does. By default the same Dockerfile builds the same image.
 func NonReproducibleBuilds() Option { return func(d *Daemon) { d.reproducible = false } }
 
+// AttestedBuilds makes every build produce an image of a different ID and of the same content as
+// another build of the same Dockerfile, as BuildKit's attestations do under the containerd image
+// store, where an image's ID is the digest of its index.
+func AttestedBuilds() Option { return func(d *Daemon) { d.attested = true } }
+
 // NewDaemon returns an empty daemon whose containers run scripts that wait at the gates.
 func NewDaemon(gates fakeenv.Gates, opts ...Option) *Daemon {
-	d := &Daemon{gates: gates, reproducible: true, images: map[string]docker.Image{}, boxes: map[string]*box{}}
+	d := &Daemon{gates: gates, reproducible: true, images: map[string]docker.Image{}, contents: map[string]string{}, boxes: map[string]*box{}}
 	for _, opt := range opts {
 		opt(d)
 	}
@@ -274,8 +281,14 @@ func (c *Client) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	if !c.d.reproducible {
 		seed = fmt.Appendf(slices.Clone(spec.Context), "\nbuild %d", c.d.builds)
 	}
+	content := sha256.Sum256(append([]byte("content of "), seed...))
+	if c.d.attested {
+		seed = fmt.Appendf(slices.Clone(seed), "\nattestation of build %d", c.d.builds)
+	}
 	sum := sha256.Sum256(seed)
-	c.d.images[spec.Tag] = docker.Image{ID: "sha256:" + hex.EncodeToString(sum[:]), Platform: Platform}
+	id := "sha256:" + hex.EncodeToString(sum[:])
+	c.d.images[spec.Tag] = docker.Image{ID: id, Platform: Platform}
+	c.d.contents[id] = "sha256:" + hex.EncodeToString(content[:])
 	c.d.mu.Unlock()
 	_, _ = fmt.Fprintf(log, "built %s\n", spec.Tag)
 	if fault != nil {
@@ -334,6 +347,26 @@ func (c *Client) Sizes(ctx context.Context, image string) (unpacked, stored int6
 		}
 	}
 	return 0, 0, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
+}
+
+// Content returns the digest of the content of the image, found by its ID or a tag: of its build
+// context, and of the build for a daemon of NonReproducibleBuilds, never of its ID.
+func (c *Client) Content(ctx context.Context, image string) (string, error) {
+	fault, err := c.enter(ctx, Call{OpSave, image})
+	if err != nil {
+		return "", err
+	}
+	if fault != nil {
+		return "", fault.Err
+	}
+	c.d.mu.Lock()
+	defer c.d.mu.Unlock()
+	for tag, img := range c.d.images {
+		if tag == image || img.ID == image {
+			return c.d.contents[img.ID], nil
+		}
+	}
+	return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
 }
 
 // Containers implements docker.Engine.

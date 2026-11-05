@@ -129,7 +129,7 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/environment/docker/dockertest/` | The one contract suite every `Engine` passes. Tests only. |
 | `internal/environment/docker/machine/` | Where a docker engine's containers find a run's directories: `Local` (this machine's own directories, and its caches) and `Remote` (copies made with rsync on a machine reached over ssh, copied back when the command ends). |
 | `internal/environment/slurm/` | The Slurm placement: an `Allocator` that runs a container's first process and every image build under `srun`, and an `Engine` that removes a container and then cancels and confirms the end of its allocation, and sweeps the allocations a dead run left. Passes the environment contract suite over the fake engine. |
-| `internal/environment/apptainer/` | The apptainer placement: an `Engine` that places the docker environment's containers on a Slurm cluster whose nodes run Apptainer and no Docker. It converts each image to a SIF on this machine with its apptainer program and copies the SIF to the cluster once, by digest, runs a run's containers as steps of one batch allocation, and reads the machine and the GPUs on the node. It decides over a `Cluster`, the narrow interface to the cluster. |
+| `internal/environment/apptainer/` | The apptainer placement: an `Engine` that places the docker environment's containers on a Slurm cluster whose nodes run Apptainer and no Docker. It converts each image to a SIF on this machine with its apptainer program and copies the SIF to the cluster once, by the digest of the image's content, runs a run's containers as steps of one batch allocation, and reads the machine and the GPUs on the node. It decides over a `Cluster`, the narrow interface to the cluster. |
 | `internal/environment/apptainer/clustercli/` | The `Cluster` that runs Slurm's and Apptainer's programs through ssh on the login node. Its tests run it against fake `srun`, `apptainer` and `scancel` programs. |
 | `internal/environment/apptainer/clusterfake/` | A `Cluster` that keeps a cluster in memory, with queued jobs, nodes that run the fake world's scripts, and faults, and a `Converter` that builds SIFs in memory. Tests only. |
 | `internal/environment/apptainer/localsif/` | The `Converter` that runs this machine's `apptainer build`, found on the daemon's `PATH`, in a scratch directory of its own. Its tests run it against a fake `apptainer` program. |
@@ -781,6 +781,15 @@ start without it, saying to install it.
   reports it) and its archive and SIF (each about the image's stored layers); when it has too
   little, the run fails before its command naming the space needed, the directory, and the space
   there is. A 47 GB ROCm image converts in about ten minutes to an 11 GB SIF.
+- A SIF, the SIF kept here, and the lock of its conversion are named by the digest of the image's
+  content, `<digest>` below: a SHA-256 over what `docker image inspect` says a container of it
+  runs, its `Config` (keys sorted), its `Os`, `Architecture` and `Variant`, and its `RootFS` layers'
+  diff IDs, in order. They are not named by the image's ID: under Docker's containerd image store
+  the ID is the digest of the image's manifest or index, and BuildKit's attestations make it
+  differ from one build to the next of the same Dockerfile and files, so a commit that changes only
+  files the Dockerfile never copies would otherwise convert and copy the whole image again. Builds
+  of one content share one SIF. SIFs that earlier versions named by image ID stay on the cluster,
+  used by nothing; remove `images/` files older than the upgrade to reclaim their space.
 - The jobs of this machine convert one image one at a time, whichever process runs each: a
   conversion holds a lock on the file `vibesys-convert-<digest>.lock` in `local_scratch_dir`
   (`flock`, which the machine lets go of when the process ends, however it ends). A job that finds
