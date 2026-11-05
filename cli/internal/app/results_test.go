@@ -561,7 +561,7 @@ func TestResultNeedsAFreshMeasurementOfTheHead(t *testing.T) {
 }
 
 // The head is the branch, whoever moved it: a branch moved by hand has no number, however
-// recently its old head was measured.
+// recently its old head or the new head itself was measured.
 func TestResultForABranchMovedByHandHasNoNumber(t *testing.T) {
 	r := newResultsRig(t)
 	r.measured(base, level)
@@ -570,10 +570,13 @@ func TestResultForABranchMovedByHandHasNoNumber(t *testing.T) {
 	r.measured(cm(1), win)
 	r.branches.AddBranch("/repo", resultBranch, cm(2))
 
-	got, err := r.app.CurrentResult(ctxFor(t), call)
-	none, ok := got.(core.NoCurrentResult)
-	if err != nil || !ok || none.Reason != core.NotMeasuredSincePromotion || none.Head != cm(2) {
-		t.Fatalf("result = %+v, %v; want none for the head %.7s the branch is at", got, err, cm(2))
+	for _, when := range []string{"before the new head is measured", "after it is measured"} {
+		got, err := r.app.CurrentResult(ctxFor(t), call)
+		none, ok := got.(core.NoCurrentResult)
+		if err != nil || !ok || none.Reason != core.HeadNotPromoted || none.Head != cm(2) {
+			t.Fatalf("%s: result = %+v, %v; want none for the head %.7s the branch is at", when, got, err, cm(2))
+		}
+		r.measured(cm(2), win)
 	}
 }
 

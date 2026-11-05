@@ -148,12 +148,13 @@ func TestResultIsTheLatestQualifyingMeasurement(t *testing.T) {
 	}
 }
 
-// A head that the last promotion did not set has no number, whatever was measured: the branch
-// moved by other means. At the promoted head the answer is CurrentResultOf's.
+// A head that the last promotion did not set has no number, whatever was measured, its own fresh
+// measurements included: the branch moved by other means, and the reason says so rather than
+// asking for a measurement that cannot help. At the promoted head the answer is CurrentResultOf's.
 func TestResultAtAHeadThePromotionDidNotSetHasNoNumber(t *testing.T) {
-	results := []core.Result{measurement("m", candidateCommit, clearWin, 30)}
+	results := []core.Result{measurement("m", candidateCommit, clearWin, 30), measurement("h", commitN(77), clearWin, 40)}
 	got, ok := core.CurrentResultAt(commitN(77), promoted(), results).(core.NoCurrentResult)
-	if !ok || got.Reason != core.NotMeasuredSincePromotion || got.Head != commitN(77) {
+	if !ok || got.Reason != core.HeadNotPromoted || got.Head != commitN(77) {
 		t.Fatalf("%+v, want no number for the head the branch is at", got)
 	}
 	if want, got := core.CurrentResultOf(promoted(), results), core.CurrentResultAt(candidateCommit, promoted(), results); want.(core.CurrentResult).Result.Job != got.(core.CurrentResult).Result.Job {

@@ -44,6 +44,7 @@ var refusalKinds = map[core.PromoteRefusalKind]cliv1.PromoteRefusalKind{
 var noResultReasons = map[core.NoCurrentResultReason]cliv1.NoCurrentResultReason{
 	core.NoHead:                    cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NO_HEAD,
 	core.NotMeasuredSincePromotion: cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_NOT_MEASURED_SINCE_PROMOTION,
+	core.HeadNotPromoted:           cliv1.NoCurrentResultReason_NO_CURRENT_RESULT_REASON_HEAD_NOT_PROMOTED,
 }
 
 var metricDirections = []struct {
