@@ -166,3 +166,13 @@ def test_the_attestation_is_pushed_with_a_docker_login_that_is_removed_after() -
     assert "--password-stdin" in steps[login]["run"]
     assert steps[logout]["if"] == "always()"
     assert steps[logout]["run"] == "docker logout ghcr.io"
+
+
+def test_a_missing_go_tag_is_not_read_as_an_existing_one() -> None:
+    """A 404 body on stdout once read as the tag's commit and failed rc2 (exact ref, no ``|| true``)."""
+    tag = next(s for s in _jobs()["go-tag"]["steps"] if s.get("name") == "Tag the Go module")
+    script = tag["run"]
+    assert "git/matching-refs/tags/$GO_TAG" in script
+    assert 'select(.ref == \\"refs/tags/$GO_TAG\\")' in script
+    assert "|| true" not in script
+    assert "git/ref/tags/" not in script

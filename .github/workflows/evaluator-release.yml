@@ -399,7 +399,10 @@ jobs:
     steps:
       - name: Tag the Go module
         run: |
-          existing="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GO_TAG" --jq .object.sha 2> /dev/null || true)"
+          # matching-refs answers an empty list when the tag does not exist; git/ref/tags answers
+          # 404 with its error body on stdout, which must not be read as an existing tag (rc2).
+          existing="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$GO_TAG" \
+            --jq "map(select(.ref == \"refs/tags/$GO_TAG\")) | .[0].object.sha // \"\"")"
           if [[ -z "$existing" ]]; then
             gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
               -f ref="refs/tags/$GO_TAG" -f sha="$COMMIT" > /dev/null
