@@ -85,10 +85,14 @@ dev = [
     "chardet<6",
     "check-wheel-contents",
     "diff-cover",
+    # vibesys-evaluator's public API checks (scripts/check_vibesys_evaluator_api.py): the
+    # snapshot is generated with griffe, and pyright --verifytypes checks its typing.
+    "griffe==1.15.0",
     "hypothesis",
     "tach==0.35.1",
     "matplotlib>=3.10.8",
     "pytest",
+    "pyright[nodejs]==1.1.408",
     "protobuf==6.33.5",
     "pytest-asyncio",
     "pytest-cov",
@@ -96,6 +100,7 @@ dev = [
     "pytest-xdist",
     "respx",
     "vs-bench",
+    "vibesys-evaluator",
     "vs-dst",
     # Pinned exactly (not `>=`): a routine lock refresh with a floating bound
     # could silently change what CI enforces under the strict rule set below.
@@ -111,7 +116,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "scripts/published_skills/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "skills/search/commit/tests"]
+testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "scripts/published_skills/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "sdk/vibesys-evaluator/python/tests", "skills/search/commit/tests"]
 # Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
 sim_smoke_slow = ["libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
@@ -126,6 +131,8 @@ sim_smoke_slow = ["libs/vs-core/tests"]
 # on one worker, locally as in CI.
 addopts = "-ra -p no:tach --import-mode=importlib --dist loadgroup --maxschedchunk=1 --max-worker-restart=0 --cov -m 'not native_build'"
 pythonpath = [".", "packaging", "libs/vs-sim/pytest_plugin"]
+# The vs-sim plugin's default real tiers, and vibesys-evaluator's local sample with the real loadgen.
+sim_real_tiers = ["tests/e2e", "tests/slurm_cluster", "tests/minimal_container", "sdk/vibesys-evaluator/python/tests/e2e"]
 # No `faulthandler_timeout`: pytest's watchdog for it dumps every thread's stack from a C
 # thread that holds no GIL, and walking the frames of a thread that is running Python code can
 # segfault the worker (a script with eight busy threads and one dump crashed 26 of 100 runs;
@@ -178,6 +185,7 @@ omit = [
     "*/__main__.py",
     # Generated bindings are verified byte-for-byte by the proto check.
     "*/vs_proto/_generated/*",
+    "*/vibesys_evaluator/_proto/*",
     "scripts/corevalue/tests/*",
 ]
 
@@ -223,7 +231,7 @@ copy_waivers = [
 # (`style/noExcessiveLinesPerFile`) at the same 2000-line ceiling.
 max_lines = 2000
 # Generated artifacts are guarded by the proto regenerate-and-diff check.
-generated = ["libs/vs-proto/src/vs_proto/_generated"]
+generated = ["libs/vs-proto/src/vs_proto/_generated", "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto"]
 
 # Directories scanned for `*.py`. Any path with a `tests` or `__pycache__`
 # component is skipped: long test modules are normal, and `clients/biome.json`
@@ -253,18 +261,26 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/src", "libs/vs-decode/tests", "libs/vs-redaction/src", "libs/vs-redaction/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "libs/vs-logs/src", "libs/vs-logs/tests", "libs/vs-proto/src", "libs/vs-runlog/src", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/src", "libs/vs-decode/tests", "libs/vs-redaction/src", "libs/vs-redaction/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "libs/vs-logs/src", "libs/vs-logs/tests", "libs/vs-proto/src", "libs/vs-runlog/src", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests", "sdk/vibesys-evaluator/python/src", "sdk/vibesys-evaluator/python/tests"]
 # skills/domains/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
 extend-exclude = [
     # Tool-owned output: edits are rejected by the proto regenerate-and-diff check.
     "libs/vs-proto/src/vs_proto/_generated",
+    "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto",
     "libs/vs-core/src/vs_core/_generated",
     "libs/vs-runtime/src/vs_runtime/_core_values",
+    "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto",
     "scripts/corevalue/tests/generated_pb",
     "scripts/corevalue/tests/generated_values",
     "scripts/corevalue/tests/generated_boundary",
+    # Spec examples of vibesys-evaluator, written against its intended API before the
+    # package exists: they cannot import it, and holding them to the repo's rules
+    # (docstrings on every helper, no magic values in request distributions) would
+    # bury the task code they exist to show. They get the package's own lint and
+    # type-check configuration when they run in CI with the package.
+    "sdk/vibesys-evaluator/examples",
     "skills/domains",
     "third_party/serving-repos",
     "examples/model-serving/show-o2-1.5B-HQ/.vibesys/tasks/default/reference/Show-o",
@@ -343,9 +359,30 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.Outco
 "resources/**" = ["TID251"]
 "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py" = ["TID251"]
 "sdk/vs-bench/**" = ["TID251"]
+# vibesys-evaluator runs in task images and phase pods, never in the VibeSys process: its
+# clock is the benchmark's (phase timings), like vs-bench's.
+"sdk/vibesys-evaluator/python/**" = ["TID251"]
+# Its public signatures are fixed by api/public-api.txt: keyword-only builders with many
+# optional parts (PLR0913) and JSON values typed Any (ANN401). It is a program that runs task
+# code and its own commands: any exception of the task's code is that sample's reported
+# failure (BLE001), its commands are argv it builds (S603), and its log is stderr (T201).
+"sdk/vibesys-evaluator/python/src/**" = ["PLR0913", "ANN401", "BLE001", "S603", "T201"]
+# The package's private modules read the internals of its opaque public types (Step,
+# Template, Request, Run expose no attributes by design, see api/public-api.txt). Public
+# accessors would add API; a noqa on every such line would bury the code.
+"sdk/vibesys-evaluator/python/src/vibesys_evaluator/_private/**" = ["SLF001"]
+# TRY003: the deploy layer has one error type per boundary (DeployError, KubeError,
+# ManifestError, BuildError) whose messages name the step, object or field and say what to
+# fix (the package's error rule); a subclass per message would add dozens of one-use types.
+"sdk/vibesys-evaluator/python/src/vibesys_evaluator/deploy/**" = ["TRY003"]
+# The real tier must be its own directory (sim_real_tiers) and shares the deterministic tests'
+# application (tests/vse_support): the tests directory is not an importable package, so the
+# parent-relative import is the only one that reaches it.
+"sdk/vibesys-evaluator/python/tests/e2e/**" = ["TID252"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
+"sdk/*/python/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "support/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 # Build-tool tests live beside their tool, with the same assertion rules as library tests.
 "scripts/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
@@ -383,6 +420,9 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.Outco
 # `packaging` package would shadow the PyPA `packaging` library), and release
 # tools that report on stdout/stderr like scripts/.
 "packaging/*.py" = ["INP001", "T201", "TID251"]
+# The fixtures' Python check is a standalone script beside the data it checks, like packaging/*.py:
+# not a package, and it reports on standard output.
+"sdk/vibesys-evaluator/fixtures/*.py" = ["INP001", "T201"]
 # This file unit-tests resources/profilers/torch/analyze_torch_profile.py, a
 # standalone script (no public library API) loaded by file path. Exercising
 # its trace-indexing, correlation, and shape/roofline math directly means
@@ -452,6 +492,7 @@ root = [
     "libs/vs-logs/src",
     "libs/vs-proto/src", "libs/vs-runlog/src",
     "sdk/vs-bench/src",
+    "sdk/vibesys-evaluator/python/src",
 ]
 
 [tool.ty.rules]
@@ -461,7 +502,7 @@ root = [
 unused-ignore-comment = "error"
 
 [tool.ty.src]
-exclude = ["libs/vs-proto/src/vs_proto/_generated"]
+exclude = ["libs/vs-proto/src/vs_proto/_generated", "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto"]
 # Same tree the previous checker covered: first-party sources plus their
 # tests. `examples/` and `skills/domains/` vendor code VibeSys does not own
 # and are left out.
@@ -512,6 +553,8 @@ include = [
     "libs/vs-proto/tests", "libs/vs-runlog/tests",
     "sdk/vs-bench/src",
     "sdk/vs-bench/tests",
+    "sdk/vibesys-evaluator/python/src",
+    "sdk/vibesys-evaluator/python/tests",
 ]
 
 [tool.uv]
@@ -520,10 +563,13 @@ package = true
 [tool.uv.workspace]
 # `sdk/vs-evaluator` ships a protocol spec, conformance fixtures, and non-Python
 # SDKs, so it has no `pyproject.toml` and is not a uv workspace member.
-exclude = ["exp_env/**", "sdk/vs-evaluator"]
-members = ["sdk/*", "libs/*"]
+# `sdk/vibesys-evaluator` holds the package's spec, schema fixtures, Go loadgen and examples;
+# its Python package is the member `sdk/vibesys-evaluator/python`.
+exclude = ["exp_env/**", "sdk/vs-evaluator", "sdk/vibesys-evaluator"]
+members = ["sdk/*", "libs/*", "sdk/vibesys-evaluator/python"]
 
 [tool.uv.sources]
 vs-bench = { workspace = true }
+vibesys-evaluator = { workspace = true }
 vs-dst = { workspace = true }
 vs-core = { workspace = true }

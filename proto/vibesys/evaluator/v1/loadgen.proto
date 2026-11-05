@@ -1,0 +1,445 @@
+syntax = "proto3";
+
+// The files the vibesys-evaluator Python package and loadgen (its native load
+// generator, sdk/vibesys-evaluator/loadgen) exchange for one phase: the
+// requests file (written by Python before the phase), the results file and the
+// summary file (written by loadgen). See sdk/vibesys-evaluator/docs/spec.md.
+//
+// Encoding. Each file is a sequence of length-delimited messages (a varint
+// length, then the message; the binpb format), or proto3 JSON, one message per
+// line, for debugging (--format json). The first message of every file is a
+// FileHeader; what follows depends on its kind:
+//
+//   requests:     FileHeader, RequestsHeader, PlannedOperation...
+//   results:      FileHeader, OperationResult...   (in completion order)
+//   summary:      FileHeader, PhaseSummary
+//   selftest:     FileHeader, SelftestResult
+//   capabilities: FileHeader, Capabilities          (loadgen --capabilities, on stdout)
+//
+// Within v1 changes are additive only (`buf breaking`); a reader rejects a
+// file whose schema_version it does not implement.
+package vibesys.evaluator.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/loadgen/gen/vibesys/evaluator/v1;evaluatorv1";
+
+// FileKind says what a file holds after its header.
+enum FileKind {
+  FILE_KIND_UNSPECIFIED = 0;
+  FILE_KIND_REQUESTS = 1;
+  FILE_KIND_RESULTS = 2;
+  FILE_KIND_SUMMARY = 3;
+  FILE_KIND_SELFTEST = 4;
+  FILE_KIND_CAPABILITIES = 5;
+}
+
+// FileHeader is the first message of every file.
+message FileHeader {
+  // The schema version the writer implements; 1 for this file.
+  uint32 schema_version = 1 [(buf.validate.field).uint32.gte = 1];
+  FileKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The writer, for diagnosis only: "vibesys-evaluator 0.1.0", "loadgen 0.1.0".
+  string writer = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+// RequestsHeader follows the FileHeader of a requests file.
+message RequestsHeader {
+  // Operation names; PlannedOperation.operation and the summaries index into
+  // this list. Names are unique.
+  repeated string operation_names = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    unique: true
+    items: {
+      string: {pattern: "^[a-z][a-z0-9_]{0,62}$"}
+    }
+  }];
+  // The number of PlannedOperation messages that follow; a file with another
+  // number is rejected. Both loops send a prefix of the plan, in plan order: the
+  // operations due before the window ends. A plan that runs out before the
+  // window ends is reported as exhausted (PhaseSummary.exhausted).
+  uint64 count = 2 [(buf.validate.field).uint64.gte = 1];
+}
+
+// PlannedOperation is one logical operation: one or more steps sent in order
+// on one client, counted as one operation with one latency.
+message PlannedOperation {
+  // Index into RequestsHeader.operation_names.
+  uint32 operation = 1;
+  repeated Step steps = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 16
+  }];
+  // Operations with the same non-empty key never run at the same time; loadgen
+  // grants the key in plan order, so operations on one key are applied in plan
+  // order. Time spent waiting for the key counts as latency.
+  string exclusive_key = 3 [(buf.validate.field).string.max_len = 256];
+  // Keep every response body in the results file. Otherwise only a digest and
+  // the length are kept (the operation is outside the validation sample).
+  bool keep_bodies = 4;
+}
+
+// Step is one call. A step may use values captured from the responses of
+// earlier steps of the same operation (Template.Part.ref); a Ref to a name that
+// no earlier step of the operation captures is rejected with the plan. An
+// operation stops at its first failed step: the later steps are not sent and
+// have no StepResult.
+message Step {
+  oneof call {
+    option (buf.validate.oneof).required = true;
+    HttpCall http = 1;
+    ThriftCall thrift = 2;
+  }
+  // Values to capture from this step's response for later steps.
+  repeated Capture captures = 3 [(buf.validate.field).repeated.max_items = 16];
+  // Status codes that count as success; any other is an error of kind STATUS.
+  // Empty means 200 only.
+  repeated uint32 expect_status = 4 [(buf.validate.field).repeated = {
+    max_items: 16
+    items: {
+      uint32: {
+        gte: 100
+        lte: 599
+      }
+    }
+  }];
+}
+
+// HttpMethod is the method of an HttpCall.
+enum HttpMethod {
+  HTTP_METHOD_UNSPECIFIED = 0;
+  HTTP_METHOD_GET = 1;
+  HTTP_METHOD_POST = 2;
+  HTTP_METHOD_PUT = 3;
+  HTTP_METHOD_DELETE = 4;
+  HTTP_METHOD_PATCH = 5;
+}
+
+// HttpCall is one HTTP/1.1 request to the phase's target (--target). Query
+// and form values are URL-encoded by loadgen after the templates are filled;
+// the path is sent as filled. loadgen sets Content-Type only for a form body
+// (application/x-www-form-urlencoded) without a Content-Type header; a text or
+// raw body carries the Content-Type its headers give.
+message HttpCall {
+  HttpMethod method = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The path below the target, starting with "/".
+  Template path = 2 [(buf.validate.field).required = true];
+  repeated Param query = 3;
+  repeated Param headers = 4;
+  oneof body {
+    // Sent as is.
+    bytes raw = 5;
+    // A text body (JSON, for example); captured values are inserted with
+    // their part's encoding.
+    Template text = 6;
+    // application/x-www-form-urlencoded.
+    Form form = 7;
+  }
+}
+
+// Form is a URL-encoded form body.
+message Form {
+  repeated Param fields = 1;
+}
+
+// Param is one query parameter, header or form field.
+message Param {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  Template value = 2 [(buf.validate.field).required = true];
+}
+
+// ThriftCall is reserved for a Thrift driver. It is not designed yet; a
+// loadgen whose Capabilities do not list CALL_KIND_THRIFT rejects a requests
+// file that uses it.
+message ThriftCall {}
+
+// Template is a text made of literal parts and captured values.
+message Template {
+  repeated Part parts = 1 [(buf.validate.field).repeated.min_items = 1];
+
+  // Part is one piece of a template.
+  message Part {
+    oneof part {
+      option (buf.validate.oneof).required = true;
+      string literal = 1;
+      Ref ref = 2;
+    }
+  }
+}
+
+// RefEncoding says how a captured value is inserted into a template.
+enum RefEncoding {
+  REF_ENCODING_UNSPECIFIED = 0;
+  // As is (paths, query values, headers, form fields; loadgen URL-encodes
+  // query and form values itself).
+  REF_ENCODING_RAW = 1;
+  // As the inside of a JSON string literal (escaped, without the quotes).
+  REF_ENCODING_JSON_STRING = 2;
+  // As a JSON value: the captured JSON text itself, with the quotes of a
+  // string (a header value is inserted as a JSON string).
+  REF_ENCODING_JSON_VALUE = 3;
+}
+
+// Ref names a value captured by an earlier step of the same operation.
+message Ref {
+  string name = 1 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_]{0,62}$"];
+  RefEncoding encoding = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// Capture takes one value from a step's response. A capture that finds
+// nothing fails the operation (error kind CAPTURE) and skips its later steps.
+message Capture {
+  string name = 1 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_]{0,62}$"];
+  oneof source {
+    option (buf.validate.oneof).required = true;
+    // An RFC 6901 JSON pointer into the response body; a string is captured
+    // without its quotes, any other JSON value as its JSON text.
+    string json_pointer = 2 [(buf.validate.field).string.pattern = "^(/[^/]*)+$"];
+    // A response header, case-insensitive; the first value.
+    string header = 3 [(buf.validate.field).string.min_len = 1];
+  }
+}
+
+// ErrorKind is why an operation or a step failed, as loadgen sees it.
+// Application-level validity is the Python side's (the validation sample).
+enum ErrorKind {
+  ERROR_KIND_UNSPECIFIED = 0;
+  // Connection refused or reset, DNS, TLS, a malformed response.
+  ERROR_KIND_TRANSPORT = 1;
+  // No response within the request timeout (--timeout).
+  ERROR_KIND_TIMEOUT = 2;
+  // A status code outside Step.expect_status.
+  ERROR_KIND_STATUS = 3;
+  // A Capture found nothing; the later steps were not sent.
+  ERROR_KIND_CAPTURE = 4;
+  // The phase ended (a deadline after the window) before the step completed.
+  ERROR_KIND_CANCELLED = 5;
+}
+
+// OperationResult is the outcome of one PlannedOperation that loadgen took.
+// Times are Unix nanoseconds of the loadgen pod's clock. An open-loop operation
+// that was due in the window but could not be started before the phase's
+// deadline (the window's end plus --timeout) is recorded with error CANCELLED,
+// start 0 and no steps: it was never sent.
+message OperationResult {
+  // The position of the PlannedOperation in the requests file, from 0.
+  uint64 index = 1;
+  uint32 operation = 2;
+  // When the operation was due: its arrival time (open loop), or the time a
+  // client took it from the plan (closed loop). Latency is end - scheduled in
+  // both: in a closed loop it differs from end - start only by the wait for the
+  // exclusive key, which counts as latency.
+  int64 scheduled_unix_nanos = 3;
+  // When its first step was sent (after any wait for the exclusive key).
+  int64 start_unix_nanos = 4;
+  // When its last step's response was complete, or it failed.
+  int64 end_unix_nanos = 5;
+  repeated StepResult steps = 6;
+  // ERROR_KIND_UNSPECIFIED when every step succeeded.
+  ErrorKind error = 7 [(buf.validate.field).enum.defined_only = true];
+}
+
+// StepResult is the outcome of one step.
+message StepResult {
+  int64 start_unix_nanos = 1;
+  int64 end_unix_nanos = 2;
+  // The HTTP status; 0 when no response arrived.
+  uint32 status = 3 [(buf.validate.field).uint32.lte = 599];
+  oneof response {
+    // The whole body (PlannedOperation.keep_bodies).
+    bytes body = 4;
+    // Its digest and length otherwise.
+    BodyDigest digest = 5;
+  }
+  ErrorKind error = 6 [(buf.validate.field).enum.defined_only = true];
+  // A short description of a TRANSPORT or CAPTURE error.
+  string error_message = 7 [(buf.validate.field).string.max_len = 1024];
+}
+
+// BodyDigest stands for a response body that was not kept.
+message BodyDigest {
+  bytes sha256 = 1 [(buf.validate.field).bytes.len = 32];
+  uint64 length = 2;
+}
+
+// LoadModel is how a phase offers load.
+enum LoadModel {
+  LOAD_MODEL_UNSPECIFIED = 0;
+  // A fixed number of clients, each sending its next operation when the
+  // previous one completed.
+  LOAD_MODEL_CLOSED = 1;
+  // Operations at scheduled arrival times, whatever the responses.
+  LOAD_MODEL_OPEN = 2;
+}
+
+// Arrivals is the arrival process of an open loop; the only randomness
+// loadgen draws (from --seed) is the Poisson inter-arrival times.
+enum Arrivals {
+  ARRIVALS_UNSPECIFIED = 0;
+  // Every 1/rate seconds.
+  ARRIVALS_UNIFORM = 1;
+  // Exponential inter-arrival times of mean 1/rate.
+  ARRIVALS_POISSON = 2;
+}
+
+// HdrHistogram is an HDR histogram of durations in microseconds, in the
+// standard compressed V2 encoding that the Go and Python HdrHistogram
+// libraries read and write. `encoded` holds the encoding's bytes (cookie, then
+// the zlib stream), not the base64 text those libraries' encode functions
+// return: Python reads it with HdrHistogram.decode(base64.b64encode(encoded)).
+// As the reference libraries (Java, Go, Python's hdrhistogram) write it, the
+// outer cookie is 0x1c849314 (the compressed base 0x1c849304 | 0x10) and the
+// inner one 0x1c849313 (0x1c849303 | 0x10); a reader compares cookie & ~0xf0
+// with the bases. sdk/vibesys-evaluator/fixtures/check_histograms.py checks it.
+// A value above highest_trackable_micros is recorded as that value.
+message HdrHistogram {
+  int64 lowest_trackable_micros = 1 [(buf.validate.field).int64.gte = 1];
+  int64 highest_trackable_micros = 2 [(buf.validate.field).int64.gt = 1];
+  uint32 significant_figures = 3 [(buf.validate.field).uint32 = {
+    gte: 1
+    lte: 5
+  }];
+  bytes encoded = 4 [(buf.validate.field).bytes.min_len = 1];
+}
+
+// OperationSummary is one operation's counts and latency in the measurement
+// window.
+message OperationSummary {
+  uint32 operation = 1;
+  uint64 completed = 2;
+  uint64 errors = 3;
+  HdrHistogram latency = 4 [(buf.validate.field).required = true];
+}
+
+// PhaseSummary is loadgen's account of one phase. Counts and histograms
+// cover the measurement window: operations scheduled (open) or started
+// (closed) in [window_start, window_end), which begins after the warmup.
+message PhaseSummary {
+  LoadModel model = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Open loop: the offered rate (--rate), operations/s. Closed loop: 0.
+  double target_rate = 2 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  // Closed loop: the clients (--clients). Open loop: 0.
+  uint32 clients = 3;
+  int64 window_start_unix_nanos = 4;
+  int64 window_end_unix_nanos = 5;
+  // Of the window's operations: those sent (start not 0), those with an
+  // outcome (every one, once the phase has ended: answered, failed, or never
+  // sent and CANCELLED), and those that failed (any ErrorKind). The error rate
+  // is errors / completed.
+  uint64 sent = 6;
+  uint64 completed = 7;
+  uint64 errors = 8;
+  // Errors by kind (ErrorKind number -> count).
+  map<uint32, uint64> errors_by_kind = 9;
+  // Operations of the window that were sent and ended after it (bounded by the
+  // request timeout); counted in completed, not in the throughput.
+  uint64 spilled = 10;
+  // The rate operations were sent at (operations whose first step started in
+  // the window, divided by its length), and the rate they completed at within
+  // the window (completed - spilled, divided by its length), operations/s. A
+  // closed loop's throughput is achieved_rate.
+  double offered_rate = 11 [(buf.validate.field).double.finite = true];
+  double achieved_rate = 12 [(buf.validate.field).double.finite = true];
+  // Send lag: the time a sent operation waited for a free sender after it was
+  // due (0 in a closed loop); the wait for its exclusive key after that is
+  // exclusive_wait. start - scheduled is their sum.
+  HdrHistogram send_lag = 13 [(buf.validate.field).required = true];
+  int64 max_send_lag_micros = 14 [(buf.validate.field).int64.gte = 0];
+  HdrHistogram exclusive_wait = 15;
+  // loadgen's own CPU time over the window divided by the window and by the
+  // CPUs it may use (its cgroup quota), from 0 to 1.
+  double loadgen_cpu_fraction = 16 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  // Open loop: offered_rate reached the Python side's min_sustained_ratio of
+  // target_rate (passed as --min-sustained). Closed loop: true.
+  bool sustained = 17;
+  // The plan ran out before the window ended (no operation was left to take
+  // or to schedule); the phase is not a measurement.
+  bool exhausted = 18;
+  // The latency (end - scheduled) of every operation of the window that
+  // succeeded, and per operation (OperationSummary). Failed operations are in
+  // errors, not in the latency.
+  HdrHistogram latency = 19 [(buf.validate.field).required = true];
+  repeated OperationSummary operations = 20;
+  // Results that went through loadgen's spill file because the results file
+  // was written slower than operations completed; they are in the results file
+  // all the same. Diagnosis only.
+  uint64 results_spilled = 21;
+}
+
+// CallKind is a kind of Step.call.
+enum CallKind {
+  CALL_KIND_UNSPECIFIED = 0;
+  CALL_KIND_HTTP = 1;
+  CALL_KIND_THRIFT = 2;
+}
+
+// Capabilities is what `loadgen --capabilities` prints (one message, in the
+// chosen format): what this build implements, so the Python side can refuse
+// a plan it cannot run before deploying anything.
+message Capabilities {
+  string loadgen_version = 1 [(buf.validate.field).string.min_len = 1];
+  // The schema versions it reads and writes, inclusive.
+  uint32 min_schema_version = 2 [(buf.validate.field).uint32.gte = 1];
+  uint32 max_schema_version = 3 [(buf.validate.field).uint32.gte = 1];
+  repeated CallKind calls = 4 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  repeated LoadModel models = 5 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  repeated Arrivals arrivals = 6 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  bool exclusive_keys = 7;
+  repeated RefEncoding ref_encodings = 8 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// SelftestResult is what `loadgen selftest` writes: its limits on this pod,
+// measured against an in-process HTTP server that answers at once (the server
+// shares loadgen's process and CPUs, so the limits are conservative).
+message SelftestResult {
+  // The highest open-loop rate it sustained (offered rate at least 99% of the
+  // target, p99 send lag at most 1 ms), operations/s.
+  double max_rate = 1 [(buf.validate.field).double = {
+    gt: 0
+    finite: true
+  }];
+  // The latency it adds at half that rate.
+  HdrHistogram added_latency = 2 [(buf.validate.field).required = true];
+  double loadgen_cpu_fraction = 3 [(buf.validate.field).double.finite = true];
+  // The CPUs loadgen may use (its cgroup quota, or the machine's CPUs), so the
+  // rate per CPU is max_rate / cpus.
+  double cpus = 4 [(buf.validate.field).double = {
+    gt: 0
+    finite: true
+  }];
+  // The rate added_latency and loadgen_cpu_fraction were measured at.
+  double added_latency_rate = 5 [(buf.validate.field).double = {
+    gt: 0
+    finite: true
+  }];
+}

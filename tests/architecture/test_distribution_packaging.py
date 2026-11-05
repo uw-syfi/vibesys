@@ -346,7 +346,11 @@ def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None
 
     assert requirements.isdisjoint(INTERNAL_DISTRIBUTIONS)
     assert {"mcp", "modal"} <= requirements
-    assert pyproject["tool"]["uv"]["workspace"]["members"] == ["sdk/*", "libs/*"]
+    assert pyproject["tool"]["uv"]["workspace"]["members"] == [
+        "sdk/*",
+        "libs/*",
+        "sdk/vibesys-evaluator/python",
+    ]
     libraries = sorted((PROJECT_ROOT / "libs").iterdir())
     assert libraries
     assert all((library / "pyproject.toml").is_file() for library in libraries)

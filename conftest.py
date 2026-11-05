@@ -149,6 +149,7 @@ _NATIVE_BUILD_FIXTURES = frozenset(
         "unordered_map_native_runner",
         "compiled_unordered_map_candidate",
         "built_unordered_map_tbb",
+        "built_loadgen",
     }
 )
 

@@ -1,0 +1,23 @@
+{
+  "include": [
+    "kv-store",
+    "hotel-k8s",
+    "social-network-k8s"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "kv-store"
+    },
+    {
+      "root": "hotel-k8s"
+    },
+    {
+      "root": "social-network-k8s"
+    }
+  ],
+  "typeCheckingMode": "standard",
+  "pythonVersion": "3.12",
+  "venvPath": "../../..",
+  "venv": ".venv",
+  "reportMissingImports": "warning"
+}
