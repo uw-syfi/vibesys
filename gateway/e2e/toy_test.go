@@ -39,7 +39,7 @@ func newToy(t *testing.T, dir string) *toy {
 	}
 	r := &toy{t: t, path: path}
 	r.write("score.txt", "10\n")
-	r.write(".vibesys/tasks/toy/vibesys.input.toml", fmt.Sprintf(`version = 1
+	r.write(".vibesys/tasks/toy/vibesys.input.toml", fmt.Sprintf(`version = "0.1"
 backends = ["cpu"]
 
 [accuracy]
