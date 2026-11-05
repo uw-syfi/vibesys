@@ -59,7 +59,7 @@ type candidateScene struct {
 	timers *envtest.Timers
 }
 
-func newCandidateScene(t *testing.T) *candidateScene {
+func newCandidateScene(t *testing.T, more ...resource.Resource) *candidateScene {
 	t.Helper()
 	files := &candidateFiles{files: map[string]string{"serve/Dockerfile": "FROM busybox:1.36.1\nCOPY . /srv\n"}}
 	timers := envtest.NewTimers()
@@ -67,7 +67,7 @@ func newCandidateScene(t *testing.T) *candidateScene {
 		c.Candidates = files
 		c.Probe = probeProgram
 		c.ProbePause = probePause
-		c.Resources = []resource.Resource{gpus}
+		c.Resources = append([]resource.Resource{gpus}, more...)
 	}})
 	return &candidateScene{scene: s, files: files, timers: timers}
 }
@@ -302,6 +302,64 @@ func (s *candidateScene) fire(d time.Duration) {
 			return
 		}
 	}
+}
+
+// The GPUs go to the server, the mounted directories to both containers read-only, and a cluster
+// to the command's container.
+func TestEachContainerGetsItsShareOfThePlacementsResources(t *testing.T) {
+	mounts := &fakeresource.Fake{
+		Of: core.ResourceMounts, Facts: map[string]string{"mounts_id": "m"},
+		Attached: resource.Attachment{Mounts: []resource.Mount{{Host: "/models", Container: "/models"}}},
+		Claimed:  []core.Claim{{Resource: "mounts:m", Amount: 1}},
+	}
+	cluster := &fakeresource.Fake{
+		Of: core.ResourceKubernetes, Facts: map[string]string{"kubernetes_id": "k"},
+		Attached: resource.Attachment{Env: map[string]string{"KUBECONFIG": "/kube/config"}, Mounts: []resource.Mount{{Host: "/kube", Container: "/kube", ReadOnly: true}}},
+		Claimed:  []core.Claim{{Resource: "kubernetes:k", Amount: 1}},
+	}
+	s := newCandidateScene(t, mounts, cluster)
+	wait := s.start(context.Background(), s.execution([]string{"ready", ";", "hold", "forever"}, "mark", "shares", ";", "hold", "shares-go"))
+	s.reach("shares")
+	var server, command dockerfake.Info
+	for _, b := range s.daemon.Containers() {
+		if strings.HasSuffix(b.Name, "-candidate") {
+			server = b
+		} else {
+			command = b
+		}
+	}
+	mounted := func(c dockerfake.Info, dir string) (bool, bool) {
+		for _, m := range c.Spec.Mounts {
+			if m.Container == dir {
+				return true, m.ReadOnly
+			}
+		}
+		return false, false
+	}
+	for _, c := range []dockerfake.Info{server, command} {
+		if ok, ro := mounted(c, "/models"); !ok || !ro {
+			t.Errorf("%s: /models mounted %v, read-only %v; want read-only", c.Name, ok, ro)
+		}
+	}
+	if ok, _ := mounted(server, "/kube"); ok || server.Spec.Env["KUBECONFIG"] != "" {
+		t.Errorf("the server got the cluster: %+v", server.Spec)
+	}
+	if ok, _ := mounted(command, "/kube"); !ok || command.Spec.Env["KUBECONFIG"] != "/kube/config" {
+		t.Errorf("the command lacks the cluster: %+v", command.Spec)
+	}
+	if server.Spec.GPUs.Devices == "" || command.Spec.GPUs.Devices != "" {
+		t.Errorf("GPUs: server %+v, command %+v", server.Spec.GPUs, command.Spec.GPUs)
+	}
+	s.world.Release("shares-go")
+	if a, _ := wait(); !isExit0(a) {
+		t.Fatalf("attempt %+v", a)
+	}
+	s.noContainersLeft()
+}
+
+func isExit0(a core.Attempt) bool {
+	e, ok := a.(core.Ended)
+	return ok && e.Exec.Kind == core.ExecExited && e.Exec.ExitCode == 0
 }
 
 func TestAPlacementWithoutAProbeRunsNoTaskOfTwoImages(t *testing.T) {

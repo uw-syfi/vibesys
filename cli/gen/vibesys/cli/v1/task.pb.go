@@ -11,6 +11,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
+	structpb "google.golang.org/protobuf/types/known/structpb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -81,6 +82,10 @@ func (x *TaskSchema) GetMinor() uint32 {
 // builds the task image: the judge and the load generator, which the candidate cannot change. The
 // candidate's Dockerfile, in the candidate's commit, builds the image its server runs in. The task
 // container reaches the candidate only over HTTP, at VIBESYS_SERVICE_URL.
+//
+// It has every key of the single-image format 0.1, with the same meaning, except [evaluator] and the
+// entrypoint and args of a command, which it refuses by name; and it adds [candidate] and gives
+// [profile] a command. The sections 0.1 accepts without reading them are accepted the same way here.
 type TaskManifestV02 struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The schema version, "0.2".
@@ -92,15 +97,33 @@ type TaskManifestV02 struct {
 	Metric string `protobuf:"bytes,3,opt,name=metric,proto3" json:"metric,omitempty"`
 	// The candidate's image and server.
 	Candidate *TaskCandidateV02 `protobuf:"bytes,4,opt,name=candidate,proto3" json:"candidate,omitempty"`
-	// The check: run in the task container against the candidate's server; exit 0 passes.
+	// The check: run in the task container against the candidate's server; exit 0 passes. [check] is
+	// the same section by its other name; a manifest has one of them.
 	Accuracy *TaskCommandV02 `protobuf:"bytes,5,opt,name=accuracy,proto3" json:"accuracy,omitempty"`
 	// The benchmark: run in the task container against the candidate's server, once per sample.
+	// [measure] is the same section by its other name; a manifest has one of them.
 	Benchmark *TaskBenchmarkV02 `protobuf:"bytes,6,opt,name=benchmark,proto3" json:"benchmark,omitempty"`
 	// The standard profile load: run in the task container against the candidate's server, which a
 	// profile job starts under its wrapper. It is never scored.
 	Profile *TaskCommandV02 `protobuf:"bytes,7,opt,name=profile,proto3" json:"profile,omitempty"`
-	// What a placement gives the containers.
-	Environment   *TaskEnvironmentV02 `protobuf:"bytes,8,opt,name=environment,proto3" json:"environment,omitempty"`
+	// What the task needs of the placement a job runs on.
+	Environment *TaskEnvironmentV02 `protobuf:"bytes,8,opt,name=environment,proto3" json:"environment,omitempty"`
+	// A build, run in the task container from the checkout's root before the check.
+	Build *TaskBuildV02 `protobuf:"bytes,9,opt,name=build,proto3" json:"build,omitempty"`
+	// [accuracy] by its other name.
+	Check *TaskCommandV02 `protobuf:"bytes,10,opt,name=check,proto3" json:"check,omitempty"`
+	// [benchmark] by its other name.
+	Measure *TaskBenchmarkV02 `protobuf:"bytes,11,opt,name=measure,proto3" json:"measure,omitempty"`
+	// The agent loop's metadata, which the optimize skill reads to choose its domain plugins.
+	Agent *TaskAgentV02 `protobuf:"bytes,12,opt,name=agent,proto3" json:"agent,omitempty"`
+	// The sections below are the Python product's: vibesys-cli accepts them, as 0.1 does, without
+	// reading them, so their keys are not held here.
+	ProfileGuided *structpb.Struct   `protobuf:"bytes,13,opt,name=profile_guided,json=profileGuided,proto3" json:"profile_guided,omitempty"`
+	Resources     *structpb.Struct   `protobuf:"bytes,14,opt,name=resources,proto3" json:"resources,omitempty"`
+	Workspace     *structpb.Struct   `protobuf:"bytes,15,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Plan          *structpb.Struct   `protobuf:"bytes,16,opt,name=plan,proto3" json:"plan,omitempty"`
+	Catalogue     *structpb.Struct   `protobuf:"bytes,17,opt,name=catalogue,proto3" json:"catalogue,omitempty"`
+	Comparison    []*structpb.Struct `protobuf:"bytes,18,rep,name=comparison,proto3" json:"comparison,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -187,6 +210,76 @@ func (x *TaskManifestV02) GetProfile() *TaskCommandV02 {
 func (x *TaskManifestV02) GetEnvironment() *TaskEnvironmentV02 {
 	if x != nil {
 		return x.Environment
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetBuild() *TaskBuildV02 {
+	if x != nil {
+		return x.Build
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetCheck() *TaskCommandV02 {
+	if x != nil {
+		return x.Check
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetMeasure() *TaskBenchmarkV02 {
+	if x != nil {
+		return x.Measure
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetAgent() *TaskAgentV02 {
+	if x != nil {
+		return x.Agent
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetProfileGuided() *structpb.Struct {
+	if x != nil {
+		return x.ProfileGuided
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetResources() *structpb.Struct {
+	if x != nil {
+		return x.Resources
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetWorkspace() *structpb.Struct {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetPlan() *structpb.Struct {
+	if x != nil {
+		return x.Plan
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetCatalogue() *structpb.Struct {
+	if x != nil {
+		return x.Catalogue
+	}
+	return nil
+}
+
+func (x *TaskManifestV02) GetComparison() []*structpb.Struct {
+	if x != nil {
+		return x.Comparison
 	}
 	return nil
 }
@@ -338,21 +431,79 @@ func (x *TaskCommandV02) GetTimeoutSeconds() uint32 {
 	return 0
 }
 
-// TaskBenchmarkV02 is the benchmark: it writes evaluator result protocol 2 records to the path the
-// CLI appends after --vs-output.
-type TaskBenchmarkV02 struct {
+// TaskBuildV02 is the build: its program is a name or a path in the checkout, never absolute.
+type TaskBuildV02 struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Command        []string               `protobuf:"bytes,1,rep,name=command,proto3" json:"command,omitempty"`
 	TimeoutSeconds uint32                 `protobuf:"varint,2,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
-	// The result protocol, which is 2.
-	ResultProtocol uint32 `protobuf:"varint,3,opt,name=result_protocol,json=resultProtocol,proto3" json:"result_protocol,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
 
+func (x *TaskBuildV02) Reset() {
+	*x = TaskBuildV02{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskBuildV02) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskBuildV02) ProtoMessage() {}
+
+func (x *TaskBuildV02) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskBuildV02.ProtoReflect.Descriptor instead.
+func (*TaskBuildV02) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *TaskBuildV02) GetCommand() []string {
+	if x != nil {
+		return x.Command
+	}
+	return nil
+}
+
+func (x *TaskBuildV02) GetTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+// TaskBenchmarkV02 is the benchmark. With result_protocol = 2 it writes evaluator result protocol 2
+// records to the path the CLI appends after --vs-output; otherwise [benchmark.result] says which flag
+// takes the path of the JSON file it writes, and which field of it is the metric.
+type TaskBenchmarkV02 struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Command        []string               `protobuf:"bytes,1,rep,name=command,proto3" json:"command,omitempty"`
+	TimeoutSeconds uint32                 `protobuf:"varint,2,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	// The result protocol, 2, when the benchmark speaks it.
+	ResultProtocol *uint32        `protobuf:"varint,3,opt,name=result_protocol,json=resultProtocol,proto3,oneof" json:"result_protocol,omitempty"`
+	Result         *TaskResultV02 `protobuf:"bytes,4,opt,name=result,proto3" json:"result,omitempty"`
+	// Whether a measurement needs a passing check first. Only true is supported: a measurement is
+	// saved only after its check passed.
+	RequiresAccuracy *bool `protobuf:"varint,5,opt,name=requires_accuracy,json=requiresAccuracy,proto3,oneof" json:"requires_accuracy,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
 func (x *TaskBenchmarkV02) Reset() {
 	*x = TaskBenchmarkV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -364,7 +515,7 @@ func (x *TaskBenchmarkV02) String() string {
 func (*TaskBenchmarkV02) ProtoMessage() {}
 
 func (x *TaskBenchmarkV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[4]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -377,7 +528,7 @@ func (x *TaskBenchmarkV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskBenchmarkV02.ProtoReflect.Descriptor instead.
 func (*TaskBenchmarkV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *TaskBenchmarkV02) GetCommand() []string {
@@ -395,24 +546,99 @@ func (x *TaskBenchmarkV02) GetTimeoutSeconds() uint32 {
 }
 
 func (x *TaskBenchmarkV02) GetResultProtocol() uint32 {
-	if x != nil {
-		return x.ResultProtocol
+	if x != nil && x.ResultProtocol != nil {
+		return *x.ResultProtocol
 	}
 	return 0
 }
 
-// TaskEnvironmentV02 is what the task needs of the placement a job runs on.
+func (x *TaskBenchmarkV02) GetResult() *TaskResultV02 {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *TaskBenchmarkV02) GetRequiresAccuracy() bool {
+	if x != nil && x.RequiresAccuracy != nil {
+		return *x.RequiresAccuracy
+	}
+	return false
+}
+
+// TaskResultV02 is [benchmark.result]: the JSON file a benchmark of no result protocol writes.
+type TaskResultV02 struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The flag the CLI passes the file's path after.
+	JsonArgument string `protobuf:"bytes,1,opt,name=json_argument,json=jsonArgument,proto3" json:"json_argument,omitempty"`
+	// The field of the file that is the metric.
+	Metric        string `protobuf:"bytes,2,opt,name=metric,proto3" json:"metric,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskResultV02) Reset() {
+	*x = TaskResultV02{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskResultV02) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskResultV02) ProtoMessage() {}
+
+func (x *TaskResultV02) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskResultV02.ProtoReflect.Descriptor instead.
+func (*TaskResultV02) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *TaskResultV02) GetJsonArgument() string {
+	if x != nil {
+		return x.JsonArgument
+	}
+	return ""
+}
+
+func (x *TaskResultV02) GetMetric() string {
+	if x != nil {
+		return x.Metric
+	}
+	return ""
+}
+
+// TaskEnvironmentV02 is what the task needs of the placement a job runs on. For a task of two
+// images, gpu is given to the candidate's container only, mounts to both containers read-only, and
+// kubernetes to the task's container only.
 type TaskEnvironmentV02 struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The resources a placement must give the containers, each once: gpu, kubernetes, mounts.
-	Needs         []string `protobuf:"bytes,1,rep,name=needs,proto3" json:"needs,omitempty"`
+	Needs []string `protobuf:"bytes,1,rep,name=needs,proto3" json:"needs,omitempty"`
+	// The candidate is a container topology and needs a Docker daemon of its own.
+	DockerInDocker bool `protobuf:"varint,2,opt,name=docker_in_docker,json=dockerInDocker,proto3" json:"docker_in_docker,omitempty"`
+	// A Modal environment, which vibesys-cli cannot honor and refuses, as 0.1 does.
+	Modal         *structpb.Struct `protobuf:"bytes,3,opt,name=modal,proto3" json:"modal,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskEnvironmentV02) Reset() {
 	*x = TaskEnvironmentV02{}
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -424,7 +650,7 @@ func (x *TaskEnvironmentV02) String() string {
 func (*TaskEnvironmentV02) ProtoMessage() {}
 
 func (x *TaskEnvironmentV02) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_cli_v1_task_proto_msgTypes[5]
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -437,7 +663,7 @@ func (x *TaskEnvironmentV02) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskEnvironmentV02.ProtoReflect.Descriptor instead.
 func (*TaskEnvironmentV02) Descriptor() ([]byte, []int) {
-	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *TaskEnvironmentV02) GetNeeds() []string {
@@ -445,6 +671,75 @@ func (x *TaskEnvironmentV02) GetNeeds() []string {
 		return x.Needs
 	}
 	return nil
+}
+
+func (x *TaskEnvironmentV02) GetDockerInDocker() bool {
+	if x != nil {
+		return x.DockerInDocker
+	}
+	return false
+}
+
+func (x *TaskEnvironmentV02) GetModal() *structpb.Struct {
+	if x != nil {
+		return x.Modal
+	}
+	return nil
+}
+
+// TaskAgentV02 is [agent]: what the agent loop optimizes.
+type TaskAgentV02 struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The domain, which chooses the domain plugins.
+	Domain string `protobuf:"bytes,1,opt,name=domain,proto3" json:"domain,omitempty"`
+	// How the evaluator reaches the candidate: inprocess or service. Empty leaves it to the flag.
+	Interface     string `protobuf:"bytes,2,opt,name=interface,proto3" json:"interface,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskAgentV02) Reset() {
+	*x = TaskAgentV02{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskAgentV02) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskAgentV02) ProtoMessage() {}
+
+func (x *TaskAgentV02) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskAgentV02.ProtoReflect.Descriptor instead.
+func (*TaskAgentV02) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *TaskAgentV02) GetDomain() string {
+	if x != nil {
+		return x.Domain
+	}
+	return ""
+}
+
+func (x *TaskAgentV02) GetInterface() string {
+	if x != nil {
+		return x.Interface
+	}
+	return ""
 }
 
 var file_vibesys_cli_v1_task_proto_extTypes = []protoimpl.ExtensionInfo{
@@ -489,24 +784,35 @@ var File_vibesys_cli_v1_task_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\n" +
-	"\x19vibesys/cli/v1/task.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\"8\n" +
+	"\x19vibesys/cli/v1/task.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1cgoogle/protobuf/struct.proto\"8\n" +
 	"\n" +
 	"TaskSchema\x12\x14\n" +
 	"\x05major\x18\x01 \x01(\rR\x05major\x12\x14\n" +
-	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xfa\x03\n" +
+	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xd7\b\n" +
 	"\x0fTaskManifestV02\x12+\n" +
 	"\aversion\x18\x01 \x01(\tB\x11\xbaH\n" +
 	"r\b2\x06^0\\.2$\xd0\xf3\x18\x02R\aversion\x12(\n" +
-	"\bbackends\x18\x02 \x03(\tB\f\xbaH\x05\x92\x01\x02\x10\x01\xd0\xf3\x18\x02R\bbackends\x12\x1c\n" +
-	"\x06metric\x18\x03 \x01(\tB\x04\xd0\xf3\x18\x02R\x06metric\x12J\n" +
+	"\bbackends\x18\x02 \x03(\tB\f\xbaH\x05\x92\x01\x02\x10\x01\xd0\xf3\x18\x02R\bbackends\x12$\n" +
+	"\x06metric\x18\x03 \x01(\tB\f\xbaH\x05r\x03\x18\x80\x02\xd0\xf3\x18\x02R\x06metric\x12J\n" +
 	"\tcandidate\x18\x04 \x01(\v2 .vibesys.cli.v1.TaskCandidateV02B\n" +
-	"\xbaH\x03\xc8\x01\x01\xd0\xf3\x18\x02R\tcandidate\x12F\n" +
-	"\baccuracy\x18\x05 \x01(\v2\x1e.vibesys.cli.v1.TaskCommandV02B\n" +
-	"\xbaH\x03\xc8\x01\x01\xd0\xf3\x18\x02R\baccuracy\x12J\n" +
-	"\tbenchmark\x18\x06 \x01(\v2 .vibesys.cli.v1.TaskBenchmarkV02B\n" +
-	"\xbaH\x03\xc8\x01\x01\xd0\xf3\x18\x02R\tbenchmark\x12>\n" +
+	"\xbaH\x03\xc8\x01\x01\xd0\xf3\x18\x02R\tcandidate\x12@\n" +
+	"\baccuracy\x18\x05 \x01(\v2\x1e.vibesys.cli.v1.TaskCommandV02B\x04\xd0\xf3\x18\x02R\baccuracy\x12D\n" +
+	"\tbenchmark\x18\x06 \x01(\v2 .vibesys.cli.v1.TaskBenchmarkV02B\x04\xd0\xf3\x18\x02R\tbenchmark\x12>\n" +
 	"\aprofile\x18\a \x01(\v2\x1e.vibesys.cli.v1.TaskCommandV02B\x04\xd0\xf3\x18\x02R\aprofile\x12J\n" +
-	"\venvironment\x18\b \x01(\v2\".vibesys.cli.v1.TaskEnvironmentV02B\x04\xd0\xf3\x18\x02R\venvironment:\x06\xca\xf3\x18\x02\x10\x02\"\xbc\x02\n" +
+	"\venvironment\x18\b \x01(\v2\".vibesys.cli.v1.TaskEnvironmentV02B\x04\xd0\xf3\x18\x02R\venvironment\x128\n" +
+	"\x05build\x18\t \x01(\v2\x1c.vibesys.cli.v1.TaskBuildV02B\x04\xd0\xf3\x18\x02R\x05build\x12:\n" +
+	"\x05check\x18\n" +
+	" \x01(\v2\x1e.vibesys.cli.v1.TaskCommandV02B\x04\xd0\xf3\x18\x02R\x05check\x12@\n" +
+	"\ameasure\x18\v \x01(\v2 .vibesys.cli.v1.TaskBenchmarkV02B\x04\xd0\xf3\x18\x02R\ameasure\x128\n" +
+	"\x05agent\x18\f \x01(\v2\x1c.vibesys.cli.v1.TaskAgentV02B\x04\xd0\xf3\x18\x02R\x05agent\x12D\n" +
+	"\x0eprofile_guided\x18\r \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\rprofileGuided\x12;\n" +
+	"\tresources\x18\x0e \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tresources\x12;\n" +
+	"\tworkspace\x18\x0f \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tworkspace\x121\n" +
+	"\x04plan\x18\x10 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x04plan\x12;\n" +
+	"\tcatalogue\x18\x11 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\tcatalogue\x12=\n" +
+	"\n" +
+	"comparison\x18\x12 \x03(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\n" +
+	"comparison:\x06\xca\xf3\x18\x02\x10\x02\"\xbc\x02\n" +
 	"\x10TaskCandidateV02\x12+\n" +
 	"\n" +
 	"dockerfile\x18\x01 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xd0\xf3\x18\x02R\n" +
@@ -518,13 +824,28 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\rallowed_bases\x18\x06 \x03(\tB\x10\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01\xd0\xf3\x18\x02R\fallowedBases\"v\n" +
 	"\x0eTaskCommandV02\x12,\n" +
 	"\acommand\x18\x01 \x03(\tB\x12\xbaH\v\x92\x01\b\b\x01\"\x04r\x02\x10\x01\xd0\xf3\x18\x02R\acommand\x126\n" +
-	"\x0ftimeout_seconds\x18\x02 \x01(\rB\r\xbaH\x06*\x04\x18\x80\xf5$\xd0\xf3\x18\x02R\x0etimeoutSeconds\"\xae\x01\n" +
+	"\x0ftimeout_seconds\x18\x02 \x01(\rB\r\xbaH\x06*\x04\x18\x80\xf5$\xd0\xf3\x18\x02R\x0etimeoutSeconds\"t\n" +
+	"\fTaskBuildV02\x12,\n" +
+	"\acommand\x18\x01 \x03(\tB\x12\xbaH\v\x92\x01\b\b\x01\"\x04r\x02\x10\x01\xd0\xf3\x18\x02R\acommand\x126\n" +
+	"\x0ftimeout_seconds\x18\x02 \x01(\rB\r\xbaH\x06*\x04\x18\x80\xf5$\xd0\xf3\x18\x02R\x0etimeoutSeconds\"\xd2\x02\n" +
 	"\x10TaskBenchmarkV02\x12,\n" +
 	"\acommand\x18\x01 \x03(\tB\x12\xbaH\v\x92\x01\b\b\x01\"\x04r\x02\x10\x01\xd0\xf3\x18\x02R\acommand\x126\n" +
-	"\x0ftimeout_seconds\x18\x02 \x01(\rB\r\xbaH\x06*\x04\x18\x80\xf5$\xd0\xf3\x18\x02R\x0etimeoutSeconds\x124\n" +
-	"\x0fresult_protocol\x18\x03 \x01(\rB\v\xbaH\x04*\x02\b\x02\xd0\xf3\x18\x02R\x0eresultProtocol\"8\n" +
+	"\x0ftimeout_seconds\x18\x02 \x01(\rB\r\xbaH\x06*\x04\x18\x80\xf5$\xd0\xf3\x18\x02R\x0etimeoutSeconds\x129\n" +
+	"\x0fresult_protocol\x18\x03 \x01(\rB\v\xbaH\x04*\x02\b\x02\xd0\xf3\x18\x02H\x00R\x0eresultProtocol\x88\x01\x01\x12;\n" +
+	"\x06result\x18\x04 \x01(\v2\x1d.vibesys.cli.v1.TaskResultV02B\x04\xd0\xf3\x18\x02R\x06result\x126\n" +
+	"\x11requires_accuracy\x18\x05 \x01(\bB\x04\xd0\xf3\x18\x02H\x01R\x10requiresAccuracy\x88\x01\x01B\x12\n" +
+	"\x10_result_protocolB\x14\n" +
+	"\x12_requires_accuracy\"X\n" +
+	"\rTaskResultV02\x12)\n" +
+	"\rjson_argument\x18\x01 \x01(\tB\x04\xd0\xf3\x18\x02R\fjsonArgument\x12\x1c\n" +
+	"\x06metric\x18\x02 \x01(\tB\x04\xd0\xf3\x18\x02R\x06metric\"\x9d\x01\n" +
 	"\x12TaskEnvironmentV02\x12\"\n" +
-	"\x05needs\x18\x01 \x03(\tB\f\xbaH\x05\x92\x01\x02\x18\x01\xd0\xf3\x18\x02R\x05needs:^\n" +
+	"\x05needs\x18\x01 \x03(\tB\f\xbaH\x05\x92\x01\x02\x18\x01\xd0\xf3\x18\x02R\x05needs\x12.\n" +
+	"\x10docker_in_docker\x18\x02 \x01(\bB\x04\xd0\xf3\x18\x02R\x0edockerInDocker\x123\n" +
+	"\x05modal\x18\x03 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x05modal\"t\n" +
+	"\fTaskAgentV02\x12#\n" +
+	"\x06domain\x18\x01 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xd0\xf3\x18\x02R\x06domain\x12?\n" +
+	"\tinterface\x18\x02 \x01(\tB!\xbaH\x1ar\x182\x16^(inprocess|service)?$\xd0\xf3\x18\x02R\tinterface:^\n" +
 	"\vtask_schema\x12\x1f.google.protobuf.MessageOptions\x18\xb9\x8e\x03 \x01(\v2\x1a.vibesys.cli.v1.TaskSchemaR\n" +
 	"taskSchema:Y\n" +
 	"\x17task_schema_since_minor\x12\x1d.google.protobuf.FieldOptions\x18\xba\x8e\x03 \x01(\rR\x14taskSchemaSinceMinor\x88\x01\x01B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
@@ -541,31 +862,47 @@ func file_vibesys_cli_v1_task_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_task_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_vibesys_cli_v1_task_proto_goTypes = []any{
 	(*TaskSchema)(nil),                  // 0: vibesys.cli.v1.TaskSchema
 	(*TaskManifestV02)(nil),             // 1: vibesys.cli.v1.TaskManifestV02
 	(*TaskCandidateV02)(nil),            // 2: vibesys.cli.v1.TaskCandidateV02
 	(*TaskCommandV02)(nil),              // 3: vibesys.cli.v1.TaskCommandV02
-	(*TaskBenchmarkV02)(nil),            // 4: vibesys.cli.v1.TaskBenchmarkV02
-	(*TaskEnvironmentV02)(nil),          // 5: vibesys.cli.v1.TaskEnvironmentV02
-	(*descriptorpb.MessageOptions)(nil), // 6: google.protobuf.MessageOptions
-	(*descriptorpb.FieldOptions)(nil),   // 7: google.protobuf.FieldOptions
+	(*TaskBuildV02)(nil),                // 4: vibesys.cli.v1.TaskBuildV02
+	(*TaskBenchmarkV02)(nil),            // 5: vibesys.cli.v1.TaskBenchmarkV02
+	(*TaskResultV02)(nil),               // 6: vibesys.cli.v1.TaskResultV02
+	(*TaskEnvironmentV02)(nil),          // 7: vibesys.cli.v1.TaskEnvironmentV02
+	(*TaskAgentV02)(nil),                // 8: vibesys.cli.v1.TaskAgentV02
+	(*structpb.Struct)(nil),             // 9: google.protobuf.Struct
+	(*descriptorpb.MessageOptions)(nil), // 10: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 11: google.protobuf.FieldOptions
 }
 var file_vibesys_cli_v1_task_proto_depIdxs = []int32{
-	2, // 0: vibesys.cli.v1.TaskManifestV02.candidate:type_name -> vibesys.cli.v1.TaskCandidateV02
-	3, // 1: vibesys.cli.v1.TaskManifestV02.accuracy:type_name -> vibesys.cli.v1.TaskCommandV02
-	4, // 2: vibesys.cli.v1.TaskManifestV02.benchmark:type_name -> vibesys.cli.v1.TaskBenchmarkV02
-	3, // 3: vibesys.cli.v1.TaskManifestV02.profile:type_name -> vibesys.cli.v1.TaskCommandV02
-	5, // 4: vibesys.cli.v1.TaskManifestV02.environment:type_name -> vibesys.cli.v1.TaskEnvironmentV02
-	6, // 5: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
-	7, // 6: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
-	0, // 7: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	7, // [7:8] is the sub-list for extension type_name
-	5, // [5:7] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	2,  // 0: vibesys.cli.v1.TaskManifestV02.candidate:type_name -> vibesys.cli.v1.TaskCandidateV02
+	3,  // 1: vibesys.cli.v1.TaskManifestV02.accuracy:type_name -> vibesys.cli.v1.TaskCommandV02
+	5,  // 2: vibesys.cli.v1.TaskManifestV02.benchmark:type_name -> vibesys.cli.v1.TaskBenchmarkV02
+	3,  // 3: vibesys.cli.v1.TaskManifestV02.profile:type_name -> vibesys.cli.v1.TaskCommandV02
+	7,  // 4: vibesys.cli.v1.TaskManifestV02.environment:type_name -> vibesys.cli.v1.TaskEnvironmentV02
+	4,  // 5: vibesys.cli.v1.TaskManifestV02.build:type_name -> vibesys.cli.v1.TaskBuildV02
+	3,  // 6: vibesys.cli.v1.TaskManifestV02.check:type_name -> vibesys.cli.v1.TaskCommandV02
+	5,  // 7: vibesys.cli.v1.TaskManifestV02.measure:type_name -> vibesys.cli.v1.TaskBenchmarkV02
+	8,  // 8: vibesys.cli.v1.TaskManifestV02.agent:type_name -> vibesys.cli.v1.TaskAgentV02
+	9,  // 9: vibesys.cli.v1.TaskManifestV02.profile_guided:type_name -> google.protobuf.Struct
+	9,  // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
+	9,  // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
+	9,  // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
+	9,  // 13: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> google.protobuf.Struct
+	9,  // 14: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
+	6,  // 15: vibesys.cli.v1.TaskBenchmarkV02.result:type_name -> vibesys.cli.v1.TaskResultV02
+	9,  // 16: vibesys.cli.v1.TaskEnvironmentV02.modal:type_name -> google.protobuf.Struct
+	10, // 17: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
+	11, // 18: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
+	0,  // 19: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	19, // [19:20] is the sub-list for extension type_name
+	17, // [17:19] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_task_proto_init() }
@@ -573,13 +910,14 @@ func file_vibesys_cli_v1_task_proto_init() {
 	if File_vibesys_cli_v1_task_proto != nil {
 		return
 	}
+	file_vibesys_cli_v1_task_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_task_proto_rawDesc), len(file_vibesys_cli_v1_task_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   6,
+			NumMessages:   9,
 			NumExtensions: 2,
 			NumServices:   0,
 		},

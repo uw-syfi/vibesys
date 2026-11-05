@@ -3,6 +3,7 @@ package task_test
 import (
 	"fmt"
 	"math/rand/v2"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -98,9 +99,20 @@ func TestWhatSchema02RefusesIsNamed(t *testing.T) {
 	}{
 		{"an unknown top-level key", `metric = "tokens_per_second"`, "metric = \"tokens_per_second\"\nflavour = 1", `"flavour"`},
 		{"an unknown candidate key", `ready = "/health"`, "ready = \"/health\"\nport = 8000", `"candidate.port"`},
-		{"an unknown section", `[environment]`, "[agent]\ndomain = \"x\"\n[environment]", `"agent"`},
+		{"an unknown section", `[environment]`, "[flavour]\nx = 1\n[environment]", `"flavour"`},
+		{"an unknown agent key", `[environment]`, "[agent]\ndomain = \"x\"\nmodel = \"y\"\n[environment]", `"agent.model"`},
+		{"an agent of no domain", `[environment]`, "[agent]\ninterface = \"service\"\n[environment]", "domain"},
+		{"an unknown interface", `[environment]`, "[agent]\ndomain = \"x\"\ninterface = \"rpc\"\n[environment]", "interface"},
+		{"args", `timeout_seconds = 1800`, "timeout_seconds = 1800\nargs = [\"x\"]", "[accuracy] args"},
+		{"check beside accuracy", `[environment]`, "[check]\ncommand = [\"x\"]\n[environment]", "not both"},
+		{"measure beside benchmark", `[environment]`, "[measure]\ncommand = [\"x\"]\n[environment]", "not both"},
+		{"no accuracy", `[accuracy]`, `[accuracy_]`, "accuracy"},
+		{"a modal environment", `needs = ["gpu"]`, "needs = [\"gpu\"]\n[environment.modal]\nentrypoint = \"m.py\"", "modal"},
+		{"a benchmark that needs no check", `result_protocol = 2`, "result_protocol = 2\nrequires_accuracy = false", "requires_accuracy"},
+		{"an absolute build", `[environment]`, "[build]\ncommand = [\"/bin/make\"]\n[environment]", "[build]"},
+		{"docker_in_docker that is not a boolean", `needs = ["gpu"]`, "needs = [\"gpu\"]\ndocker_in_docker = \"yes\"", "docker_in_docker"},
 		{"the evaluator section", `[environment]`, "[evaluator]\nimage = \"x\"\n[environment]", "[evaluator]"},
-		{"an entrypoint", `timeout_seconds = 1800`, "timeout_seconds = 1800\nentrypoint = \"x\"", `"accuracy.entrypoint"`},
+		{"an entrypoint", `timeout_seconds = 1800`, "timeout_seconds = 1800\nentrypoint = \"x\"", "[accuracy] entrypoint"},
 		{"no candidate", `[candidate]`, `[candidate_]`, "candidate"},
 		{"no dockerfile", `dockerfile = "serve/Dockerfile"`, ``, "dockerfile"},
 		{"no serve", `serve = ["python", "${PROJECT_ROOT}/serve/server.py", "--port", "${PORT}"]`, ``, "serve"},
@@ -127,6 +139,59 @@ func TestWhatSchema02RefusesIsNamed(t *testing.T) {
 			f := failureOf(t, err)
 			if !strings.Contains(f.Message, c.says) {
 				t.Fatalf("got %+v, want it to name %q", f, c.says)
+			}
+		})
+	}
+}
+
+// Schema 0.2 keeps every key 0.1 reads, with its meaning: a 0.1 manifest that declares 0.2 and
+// adds a candidate reads as the same task, with the candidate.
+func TestSchema02KeepsEveryKeyOf01(t *testing.T) {
+	withCandidate := func(m string) string {
+		return strings.Replace(m, `version = "0.1"`, `version = "0.2"`, 1) + `
+[candidate]
+dockerfile = "Dockerfile"
+context = "."
+serve = ["./serve", "${PORT}"]
+ready = "/"
+startup_timeout_seconds = 30
+`
+	}
+	extras := `
+[workspace]
+unread = ["data"]
+[plan]
+anything = 1
+[profile_guided]
+command = ["x"]
+[resources]
+gpus = 1
+[[comparison]]
+name = "baseline"
+when = 2026-01-01
+[environment]
+needs = ["kubernetes"]
+docker_in_docker = true
+`
+	for name, c := range map[string]struct{ manifest, objectives string }{
+		"json result":         {jsonManifest + extras, objectives},
+		"aliases, protocol 2": {protocol2Manifest, objectives},
+	} {
+		t.Run(name, func(t *testing.T) {
+			old, err := task.Parse("t", []byte(c.manifest), []byte(c.objectives))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := task.Parse("t", []byte(withCandidate(c.manifest)), []byte(c.objectives))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Candidate == nil || got.Schema != task.Schema02 {
+				t.Fatalf("read %+v", got)
+			}
+			got.Candidate, got.Schema = nil, old.Schema
+			if !reflect.DeepEqual(got, old) {
+				t.Fatalf("0.2 reads\n%+v\n0.1 reads\n%+v", got, old)
 			}
 		})
 	}
@@ -323,9 +388,9 @@ func TestACandidateTheCommitCannotBuildIsRefusedNamingWhy(t *testing.T) {
 
 func TestFirstBaseIsTheImageOfTheFirstFrom(t *testing.T) {
 	cases := map[string]string{
-		"FROM a:1\nFROM b:2\n":                  "a:1",
-		"# c\n\nARG X\nfrom a:1 AS s\n":         "a:1",
-		"FROM --platform=$P \\\n  # c\n  a:1\n": "a:1",
+		"FROM a:1\nFROM b:2\n":                   "a:1",
+		"# c\n\nARG X\nfrom a:1 AS s\n":          "a:1",
+		"FROM --platform=$P \\\n  # c\n  a:1\n":  "a:1",
 		"# syntax=docker/dockerfile:1\nFROM a\n": "a",
 	}
 	for text, want := range cases {

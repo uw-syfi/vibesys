@@ -3,6 +3,7 @@ package vibesys.cli.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/descriptor.proto";
+import "google/protobuf/struct.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
@@ -56,6 +57,10 @@ extend google.protobuf.FieldOptions {
 // builds the task image: the judge and the load generator, which the candidate cannot change. The
 // candidate's Dockerfile, in the candidate's commit, builds the image its server runs in. The task
 // container reaches the candidate only over HTTP, at VIBESYS_SERVICE_URL.
+//
+// It has every key of the single-image format 0.1, with the same meaning, except [evaluator] and the
+// entrypoint and args of a command, which it refuses by name; and it adds [candidate] and gives
+// [profile] a command. The sections 0.1 accepts without reading them are accepted the same way here.
 message TaskManifestV02 {
   option (task_schema) = {
     major: 0
@@ -74,27 +79,43 @@ message TaskManifestV02 {
   ];
   // The scored metric of a protocol 2 benchmark. Empty scores the first objective of
   // objectives.toml.
-  string metric = 3 [(task_schema_since_minor) = 2];
+  string metric = 3 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.max_len = 256
+  ];
   // The candidate's image and server.
   TaskCandidateV02 candidate = 4 [
     (task_schema_since_minor) = 2,
     (buf.validate.field).required = true
   ];
-  // The check: run in the task container against the candidate's server; exit 0 passes.
-  TaskCommandV02 accuracy = 5 [
-    (task_schema_since_minor) = 2,
-    (buf.validate.field).required = true
-  ];
+  // The check: run in the task container against the candidate's server; exit 0 passes. [check] is
+  // the same section by its other name; a manifest has one of them.
+  TaskCommandV02 accuracy = 5 [(task_schema_since_minor) = 2];
   // The benchmark: run in the task container against the candidate's server, once per sample.
-  TaskBenchmarkV02 benchmark = 6 [
-    (task_schema_since_minor) = 2,
-    (buf.validate.field).required = true
-  ];
+  // [measure] is the same section by its other name; a manifest has one of them.
+  TaskBenchmarkV02 benchmark = 6 [(task_schema_since_minor) = 2];
   // The standard profile load: run in the task container against the candidate's server, which a
   // profile job starts under its wrapper. It is never scored.
   TaskCommandV02 profile = 7 [(task_schema_since_minor) = 2];
-  // What a placement gives the containers.
+  // What the task needs of the placement a job runs on.
   TaskEnvironmentV02 environment = 8 [(task_schema_since_minor) = 2];
+  // A build, run in the task container from the checkout's root before the check.
+  TaskBuildV02 build = 9 [(task_schema_since_minor) = 2];
+  // [accuracy] by its other name.
+  TaskCommandV02 check = 10 [(task_schema_since_minor) = 2];
+  // [benchmark] by its other name.
+  TaskBenchmarkV02 measure = 11 [(task_schema_since_minor) = 2];
+  // The agent loop's metadata, which the optimize skill reads to choose its domain plugins.
+  TaskAgentV02 agent = 12 [(task_schema_since_minor) = 2];
+
+  // The sections below are the Python product's: vibesys-cli accepts them, as 0.1 does, without
+  // reading them, so their keys are not held here.
+  google.protobuf.Struct profile_guided = 13 [(task_schema_since_minor) = 2];
+  google.protobuf.Struct resources = 14 [(task_schema_since_minor) = 2];
+  google.protobuf.Struct workspace = 15 [(task_schema_since_minor) = 2];
+  google.protobuf.Struct plan = 16 [(task_schema_since_minor) = 2];
+  google.protobuf.Struct catalogue = 17 [(task_schema_since_minor) = 2];
+  repeated google.protobuf.Struct comparison = 18 [(task_schema_since_minor) = 2];
 }
 
 // TaskCandidateV02 is how the candidate's image is built from its commit, and how its server starts.
@@ -138,6 +159,8 @@ message TaskCandidateV02 {
 }
 
 // TaskCommandV02 is a command of the task container, run from the checkout's root.
+
+// TaskCommandV02 is a command of the task container, run from the checkout's root.
 message TaskCommandV02 {
   repeated string command = 1 [
     (task_schema_since_minor) = 2,
@@ -151,8 +174,22 @@ message TaskCommandV02 {
   ];
 }
 
-// TaskBenchmarkV02 is the benchmark: it writes evaluator result protocol 2 records to the path the
-// CLI appends after --vs-output.
+// TaskBuildV02 is the build: its program is a name or a path in the checkout, never absolute.
+message TaskBuildV02 {
+  repeated string command = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).repeated.min_items = 1,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  uint32 timeout_seconds = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).uint32.lte = 604800
+  ];
+}
+
+// TaskBenchmarkV02 is the benchmark. With result_protocol = 2 it writes evaluator result protocol 2
+// records to the path the CLI appends after --vs-output; otherwise [benchmark.result] says which flag
+// takes the path of the JSON file it writes, and which field of it is the metric.
 message TaskBenchmarkV02 {
   repeated string command = 1 [
     (task_schema_since_minor) = 2,
@@ -163,18 +200,50 @@ message TaskBenchmarkV02 {
     (task_schema_since_minor) = 2,
     (buf.validate.field).uint32.lte = 604800
   ];
-  // The result protocol, which is 2.
-  uint32 result_protocol = 3 [
+  // The result protocol, 2, when the benchmark speaks it.
+  optional uint32 result_protocol = 3 [
     (task_schema_since_minor) = 2,
     (buf.validate.field).uint32.const = 2
   ];
+  TaskResultV02 result = 4 [(task_schema_since_minor) = 2];
+  // Whether a measurement needs a passing check first. Only true is supported: a measurement is
+  // saved only after its check passed.
+  optional bool requires_accuracy = 5 [(task_schema_since_minor) = 2];
 }
 
-// TaskEnvironmentV02 is what the task needs of the placement a job runs on.
+// TaskResultV02 is [benchmark.result]: the JSON file a benchmark of no result protocol writes.
+message TaskResultV02 {
+  // The flag the CLI passes the file's path after.
+  string json_argument = 1 [(task_schema_since_minor) = 2];
+  // The field of the file that is the metric.
+  string metric = 2 [(task_schema_since_minor) = 2];
+}
+
+// TaskEnvironmentV02 is what the task needs of the placement a job runs on. For a task of two
+// images, gpu is given to the candidate's container only, mounts to both containers read-only, and
+// kubernetes to the task's container only.
 message TaskEnvironmentV02 {
   // The resources a placement must give the containers, each once: gpu, kubernetes, mounts.
   repeated string needs = 1 [
     (task_schema_since_minor) = 2,
     (buf.validate.field).repeated.unique = true
+  ];
+  // The candidate is a container topology and needs a Docker daemon of its own.
+  bool docker_in_docker = 2 [(task_schema_since_minor) = 2];
+  // A Modal environment, which vibesys-cli cannot honor and refuses, as 0.1 does.
+  google.protobuf.Struct modal = 3 [(task_schema_since_minor) = 2];
+}
+
+// TaskAgentV02 is [agent]: what the agent loop optimizes.
+message TaskAgentV02 {
+  // The domain, which chooses the domain plugins.
+  string domain = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // How the evaluator reaches the candidate: inprocess or service. Empty leaves it to the flag.
+  string interface = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.pattern = "^(inprocess|service)?$"
   ];
 }

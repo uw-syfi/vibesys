@@ -189,13 +189,15 @@ func (r *run) canServe() error {
 		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
 			"docker: the placement %q has no program to probe a candidate's server with, so it runs no task of two images: it needs a static Linux build of vibesys-cli, as a release is (CGO_ENABLED=0)", p.cfg.Placement)}
 	}
-	given, err := r.attachments()
-	if err != nil {
-		return err
-	}
-	if given.Network != "" {
-		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
-			"docker: a resource of the placement %q sets the network mode %q, and a task of two images runs its candidate's server in a network of its own", p.cfg.Placement, given.Network)}
+	for _, as := range []role{roleServer, roleBeside} {
+		given, err := r.attachments(as)
+		if err != nil {
+			return err
+		}
+		if given.Network != "" {
+			return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
+				"docker: a resource of the placement %q sets the network mode %q, and a task of two images runs its candidate's server in a network of its own, which the task's container joins", p.cfg.Placement, given.Network)}
+		}
 	}
 	return nil
 }
@@ -248,7 +250,7 @@ func (r *run) containerSpec(name, id string, img Image, as role, url string) (Co
 		mounts = append(mounts, Mount{Host: p.cfg.Probe, Container: ProbeMount, ReadOnly: true})
 		env[core.EnvServiceURL] = url
 	}
-	given, err := r.attachments()
+	given, err := r.attachments(as)
 	if err != nil {
 		return ContainerSpec{}, err
 	}
@@ -264,13 +266,7 @@ func (r *run) containerSpec(name, id string, img Image, as role, url string) (Co
 	}
 	gpus := GPUs{Devices: given.GPUs.Devices, Runtime: given.GPUs.Runtime}
 	given.Env = maps.Clone(given.Env)
-	if as == roleBeside {
-		// The task's image judges and loads the server; the GPUs are the candidate's alone, and so
-		// are the variables that pass them.
-		gpus = GPUs{}
-	} else {
-		maps.Copy(given.Env, given.GPUEnv)
-	}
+	maps.Copy(given.Env, given.GPUEnv)
 	for _, k := range slices.Sorted(maps.Keys(given.Env)) {
 		if _, own := env[k]; own {
 			return ContainerSpec{}, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: a resource of the placement %q sets %s, which the run sets itself", p.cfg.Placement, k)}
@@ -300,16 +296,51 @@ func (r *run) containerSpec(name, id string, img Image, as role, url string) (Co
 func NetworkOf(container string) string { return "container:" + container }
 
 // attachments are what the placement's resources give the container, joined into one.
-func (r *run) attachments() (resource.Attachment, error) {
+func (r *run) attachments(as role) (resource.Attachment, error) {
 	var all []resource.Attachment
 	for _, res := range r.e.p.cfg.Resources {
+		s := shareOf(res.Kind(), as)
+		if !s.given {
+			continue
+		}
 		a, err := res.Attach(r.ctx)
 		if err != nil {
 			return resource.Attachment{}, err
 		}
+		if s.readOnly {
+			a.Mounts = slices.Clone(a.Mounts)
+			for i := range a.Mounts {
+				a.Mounts[i].ReadOnly = true
+			}
+		}
 		all = append(all, a)
 	}
 	return resource.Combine(all)
+}
+
+// share is how a container of a run gets a resource of the placement.
+type share struct {
+	given    bool
+	readOnly bool // its mounts are read-only, whatever the resource says
+}
+
+// twoImageShares says which of the two containers of a task of two images gets each kind of
+// resource: the GPUs are the candidate server's; the mounted directories, such as model weights
+// and tokenizer files, are both containers', read-only, so neither changes what the other reads;
+// a cluster is the task's, whose commands drive it.
+var twoImageShares = map[core.ResourceKind]map[role]share{
+	core.ResourceGPU:        {roleServer: {given: true}},
+	core.ResourceMounts:     {roleServer: {given: true, readOnly: true}, roleBeside: {given: true, readOnly: true}},
+	core.ResourceKubernetes: {roleBeside: {given: true}},
+}
+
+// shareOf is how a container in the role gets a resource of the kind. The only container of a
+// task of one image gets every resource as it is.
+func shareOf(kind core.ResourceKind, as role) share {
+	if as == roleOnly {
+		return share{given: true}
+	}
+	return twoImageShares[kind][as]
 }
 
 // mounts are the directories the commands see: the checkout, and the scratch directory when the

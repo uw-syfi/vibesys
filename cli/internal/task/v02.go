@@ -36,8 +36,8 @@ func (c Candidate) ServeAt(root string, wrap []string) core.CandidateServe {
 
 // parseV02 reads a manifest of task schema 0.2 (TaskManifestV02 in task.proto).
 func parseV02(name string, table map[string]any, o objectivesFile) (Task, error) {
-	if _, ok := table["evaluator"]; ok {
-		return Task{}, invalid("%s: [evaluator] is not part of task schema %s: the task's commands run in its own image, and the candidate's server in the candidate's", ManifestName, Schema02)
+	if err := refusedV02(table); err != nil {
+		return Task{}, err
 	}
 	var m cliv1.TaskManifestV02
 	declared := Schema02
@@ -52,15 +52,40 @@ func parseV02(name string, table map[string]any, o objectivesFile) (Task, error)
 	if t.Backend, err = backendOf(m.GetBackends()); err != nil {
 		return Task{}, err
 	}
-	if t.Needs, err = needsOf("environment.needs", m.GetEnvironment().GetNeeds()); err != nil {
+	env := m.GetEnvironment()
+	if env.GetModal() != nil {
+		return Task{}, unsupported("%s: [environment.modal] cannot be honored on this machine", ManifestName)
+	}
+	t.NestedDocker = env.GetDockerInDocker()
+	if t.Needs, err = needsOf("environment.needs", env.GetNeeds()); err != nil {
 		return Task{}, err
 	}
-	if t.Check, err = makeCommand("accuracy", m.GetAccuracy().GetCommand(), int(m.GetAccuracy().GetTimeoutSeconds())); err != nil {
+	check, err := pickV02("accuracy", m.GetAccuracy(), "check", m.GetCheck())
+	if err != nil {
 		return Task{}, err
 	}
-	b := m.GetBenchmark()
+	if t.Check, err = makeCommand("accuracy", check.GetCommand(), int(check.GetTimeoutSeconds())); err != nil {
+		return Task{}, err
+	}
+	b, err := pickV02("benchmark", m.GetBenchmark(), "measure", m.GetMeasure())
+	if err != nil {
+		return Task{}, err
+	}
 	if t.Benchmark, err = makeCommand("benchmark", b.GetCommand(), int(b.GetTimeoutSeconds())); err != nil {
 		return Task{}, err
+	}
+	if b.RequiresAccuracy != nil && !b.GetRequiresAccuracy() {
+		return Task{}, unsupported("%s: requires_accuracy = false is not supported; a measurement is saved only after its check passed", ManifestName)
+	}
+	if bc := m.GetBuild(); bc != nil {
+		c, err := buildCommand(buildSection{Command: bc.GetCommand(), TimeoutSeconds: int(bc.GetTimeoutSeconds())})
+		if err != nil {
+			return Task{}, err
+		}
+		if err := checkPlaceholders(c); err != nil {
+			return Task{}, err
+		}
+		t.Build = &c
 	}
 	if p := m.GetProfile(); p != nil {
 		c, err := makeCommand("profile", p.GetCommand(), int(p.GetTimeoutSeconds()))
@@ -98,10 +123,47 @@ func parseV02(name string, table map[string]any, o objectivesFile) (Task, error)
 		StartupTimeout: time.Duration(c.GetStartupTimeoutSeconds()) * time.Second,
 	}
 	bench := &benchSection{ResultProtocol: int(b.GetResultProtocol())}
+	if r := b.GetResult(); r != nil {
+		bench.Result = &resultSection{JSONArgument: r.GetJsonArgument(), Metric: r.GetMetric()}
+	}
 	if err := score(&t, bench, m.GetMetric(), o); err != nil {
 		return Task{}, err
 	}
 	return t, nil
+}
+
+// commandSections are the sections of a manifest that hold a command.
+var commandSections = []string{"accuracy", "check", "benchmark", "measure", "profile", "build"}
+
+// refusedV02 refuses, by name, what 0.1 has and 0.2 does not: an evaluator package, and a command
+// given as an evaluator's entrypoint and args.
+func refusedV02(table map[string]any) error {
+	if _, ok := table["evaluator"]; ok {
+		return invalid("%s: [evaluator] is not part of task schema %s: the task's commands run in its own image, and the candidate's server in the candidate's", ManifestName, Schema02)
+	}
+	for _, section := range commandSections {
+		s, _ := table[section].(map[string]any)
+		for _, key := range []string{"entrypoint", "args"} {
+			if _, ok := s[key]; ok {
+				return invalid("%s: [%s] %s is not part of task schema %s: declare the command, which runs in the task's image", ManifestName, section, key, Schema02)
+			}
+		}
+	}
+	return nil
+}
+
+// pickV02 is the section of the two names the manifest uses: one of them, never both.
+func pickV02[T interface{ comparable }](nameA string, a T, nameB string, b T) (T, error) {
+	var none T
+	switch {
+	case a != none && b != none:
+		return none, invalid("%s: declare [%s] or [%s], not both", ManifestName, nameA, nameB)
+	case a != none:
+		return a, nil
+	case b != none:
+		return b, nil
+	}
+	return none, invalid("%s: no [%s] (or [%s]) section", ManifestName, nameA, nameB)
 }
 
 // repositoryPath checks a path of the candidate's checkout: relative, clean, and inside it. A

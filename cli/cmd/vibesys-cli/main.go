@@ -89,7 +89,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"supervisor": supervisorCommand,
 	// Run in a container by the docker environment, never by a person: see probeCommand.
 	"probe-ready": probeCommand,
-	"upgrade":    upgradeCommand,
+	"upgrade":     upgradeCommand,
 }
 
 const usage = `usage: vibesys-cli <command> [flags]
