@@ -13,9 +13,13 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import math
+import os
 import re
+import shutil
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -23,8 +27,7 @@ from vibesys_evaluator._private.results import Metric
 from vibesys_evaluator._private.sample import SampleError, log
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-    from pathlib import Path
+    from collections.abc import Callable, Iterator, Mapping, Sequence
 
     from vibesys_evaluator._private.harness import Runner
 
@@ -33,6 +36,9 @@ HARNESS = "agentx-harness"
 HARNESS_VERSION = "1.0.7"
 #: The public corpus the recipe replays (date-pinned).
 DATASET = "semianalysis_cc_traces_weka_062126"
+#: The Hugging Face dataset behind ``DATASET``, and its directory in a ``datasets`` cache.
+HF_DATASET = "semianalysisai/cc-traces-weka-062126"
+_CACHED_NAME = HF_DATASET.replace("/", "___")
 #: The file AIPerf writes the run's summary to, somewhere under its artifact directory.
 EXPORT_NAME = "profile_export_aiperf.json"
 METRICS: Mapping[str, Metric] = MappingProxyType(
@@ -252,6 +258,61 @@ def read_export(artifacts: Path) -> dict[str, Any]:
         msg = f"AgentX export {exports[0]} must be a JSON object"
         raise AgentxError(msg)
     return summary
+
+
+def datasets_cache(environ: Mapping[str, str]) -> Path:
+    """The ``datasets`` cache the harness reads, as the ``datasets`` library resolves it."""
+    if explicit := environ.get("HF_DATASETS_CACHE"):
+        return Path(explicit)
+    if home := environ.get("HF_HOME"):
+        return Path(home) / "datasets"
+    if xdg := environ.get("XDG_CACHE_HOME"):
+        return Path(xdg) / "huggingface" / "datasets"
+    return Path.home() / ".cache" / "huggingface" / "datasets"
+
+
+def _writable(path: Path) -> bool:
+    return os.access(path, os.W_OK)
+
+
+@contextmanager
+def harness_environment(
+    environ: Mapping[str, str],
+    scratch: Path,
+    *,
+    writable: Callable[[Path], bool] = _writable,
+) -> Iterator[dict[str, str]]:
+    """The harness's environment: ``environ``, with a writable ``datasets`` cache.
+
+    ``datasets`` creates a lock file in its cache even to read a prepared
+    dataset, so it fails on a read-only cache, such as an operator's mount
+    (vibesys-cli mounts them read-only). Then the prepared corpus is copied
+    into a cache under ``scratch``, which the harness reads instead and which
+    is removed afterwards. A writable cache is used as it is.
+
+    Raises:
+        AgentxError: The cache is read-only and has no prepared corpus to copy.
+    """
+    cache = datasets_cache(environ)
+    env = dict(environ)
+    if not cache.exists() or writable(cache):
+        yield env
+        return
+    prepared = cache / _CACHED_NAME
+    if not prepared.is_dir():
+        msg = (
+            f"the datasets cache {cache} is read-only and has no prepared {HF_DATASET} "
+            f"(no {prepared}): prepare the corpus into it where it is writable"
+        )
+        raise AgentxError(msg)
+    shadow = scratch / "hf-datasets"
+    log(f"agentx: {cache} is read-only; copying the prepared {HF_DATASET} to {shadow}")
+    try:
+        shutil.copytree(prepared, shadow / _CACHED_NAME, symlinks=True)
+        env["HF_DATASETS_CACHE"] = str(shadow)
+        yield env
+    finally:
+        shutil.rmtree(shadow, ignore_errors=True)
 
 
 def run(

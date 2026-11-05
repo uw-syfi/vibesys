@@ -22,9 +22,12 @@ from vibesys_evaluator._private.harness import HarnessError
 from vibesys_evaluator._private.records import RecordStream
 from vibesys_evaluator.llm_serving import agentx
 from vibesys_evaluator.llm_serving._agentx import (
+    HF_DATASET,
     AgentxError,
     Replay,
     command,
+    datasets_cache,
+    harness_environment,
     run,
     summary_metrics,
 )
@@ -320,3 +323,82 @@ def test_any_valid_export_translates_to_a_protocol_2_result(
     stream.close()
     measurement = read_measurement(parse_records(output.read_text()))
     assert measurement.values == values
+
+
+# The harness's datasets cache. Regression: vibesys-cli mounts the operator's Hugging Face cache
+# read-only, and `datasets` takes a lock file in its cache even to read a prepared dataset, so the
+# replay failed with "Read-only file system" before it sent a request.
+
+CACHED = "semianalysisai___cc-traces-weka-062126"
+
+
+def _read_only(_: Path) -> bool:
+    return False
+
+
+def _prepared_cache(root: Path) -> Path:
+    cache = root / "hf" / "datasets"
+    data = cache / CACHED / "default" / "0.0.0" / "abc"
+    data.mkdir(parents=True)
+    (data / "train.arrow").write_bytes(b"arrow")
+    (data / "dataset_info.json").write_text("{}")
+    return cache
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({"HF_DATASETS_CACHE": "/d", "HF_HOME": "/h", "XDG_CACHE_HOME": "/x"}, "/d"),
+        ({"HF_HOME": "/h", "XDG_CACHE_HOME": "/x"}, "/h/datasets"),
+        ({"XDG_CACHE_HOME": "/x"}, "/x/huggingface/datasets"),
+    ],
+)
+def test_the_datasets_cache_resolves_as_the_datasets_library_does(
+    environ: dict[str, str], expected: str
+) -> None:
+    assert datasets_cache(environ) == Path(expected)
+
+
+def test_a_writable_datasets_cache_is_used_as_it_is(tmp_path: Path) -> None:
+    cache = _prepared_cache(tmp_path)
+    environ = {"HF_HOME": str(cache.parent), "OTHER": "kept"}
+    with harness_environment(environ, tmp_path / "scratch", writable=lambda _: True) as env:
+        assert env == environ
+    assert not (tmp_path / "scratch").exists()
+
+
+def test_a_read_only_datasets_cache_is_read_through_a_writable_copy(tmp_path: Path) -> None:
+    cache = _prepared_cache(tmp_path)
+    environ = {"HF_HOME": str(cache.parent), "OTHER": "kept"}
+    scratch = tmp_path / "scratch"
+    with harness_environment(environ, scratch, writable=_read_only) as env:
+        shadow = Path(env["HF_DATASETS_CACHE"])
+        assert shadow.is_relative_to(scratch)
+        assert {k: v for k, v in env.items() if k != "HF_DATASETS_CACHE"} == environ
+        copied = shadow / CACHED / "default" / "0.0.0" / "abc" / "train.arrow"
+        assert copied.read_bytes() == b"arrow"
+        (shadow / "a.lock").write_text("")  # the cache root takes the library's lock files
+    assert not shadow.exists()
+    assert sorted(p.name for p in cache.iterdir()) == [CACHED]
+
+
+def test_the_copy_is_removed_when_the_replay_fails(tmp_path: Path) -> None:
+    cache = _prepared_cache(tmp_path)
+    scratch = tmp_path / "scratch"
+    failure = HarnessError("aiperf exited 1")
+    with (
+        pytest.raises(HarnessError),
+        harness_environment({"HF_DATASETS_CACHE": str(cache)}, scratch, writable=_read_only),
+    ):
+        raise failure
+    assert not (scratch / "hf-datasets").exists()
+
+
+def test_a_read_only_cache_without_the_corpus_is_refused_naming_it(tmp_path: Path) -> None:
+    cache = tmp_path / "empty"
+    cache.mkdir()
+    with (
+        pytest.raises(AgentxError, match=rf"{cache}.*read-only.*{HF_DATASET}"),
+        harness_environment({"HF_DATASETS_CACHE": str(cache)}, tmp_path, writable=_read_only),
+    ):
+        pass

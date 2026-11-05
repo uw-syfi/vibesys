@@ -6,10 +6,19 @@ the ``vibesys-evaluator-llm-serving`` image installs, and returns the
 an export that does not prove a clean run: an invalid submission, any error,
 a unit it does not expect, or a value that is not a finite non-negative
 number.
+
+The ``datasets`` library cannot read even a prepared dataset from a read-only
+cache, and vibesys-cli mounts operator caches read-only: a replay then copies
+the prepared corpus to a temporary writable cache (removed afterwards) and
+runs the harness against that.
 """
 
 from __future__ import annotations
 
+import os
+import tempfile
+from functools import partial
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
 
 from vibesys_evaluator._private.harness import run_harness
@@ -18,7 +27,6 @@ from vibesys_evaluator.llm_serving._endpoint import endpoint
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
     from vibesys_evaluator._private.results import Metric
 
@@ -73,4 +81,12 @@ def replay(
         mode=mode,
         timeout_secs=timeout_secs,
     )
-    return _agentx.run(spec, artifacts, runner=run_harness, installed=_agentx.installed_harness())
+    installed = _agentx.installed_harness()
+    _agentx.check_harness(installed)
+    with (
+        tempfile.TemporaryDirectory(prefix="vibesys-agentx-") as scratch,
+        _agentx.harness_environment(os.environ, Path(scratch)) as env,
+    ):
+        return _agentx.run(
+            spec, artifacts, runner=partial(run_harness, env=env), installed=installed
+        )
