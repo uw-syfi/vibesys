@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
@@ -13,7 +15,7 @@ def test_a_valid_app_freezes_its_collections() -> None:
     app = make_app()
     assert app.restartable == ("frontend", "backend")
     with pytest.raises(TypeError):
-        app.images["OTHER"] = "x"  # type: ignore[index]
+        cast("dict[str, str]", app.images)["OTHER"] = "x"
 
 
 @pytest.mark.parametrize(

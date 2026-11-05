@@ -111,6 +111,7 @@ class World:
     env: Environment
     task_dir: Path
     project_root: Path
+    artifacts: Path
     lines: list[str]
 
     def log(self, line: str) -> None:
@@ -167,5 +168,6 @@ def make_world(root: Path, manifest: str = MANIFEST) -> World:
         env=env,
         task_dir=task_dir,
         project_root=project_root,
+        artifacts=artifacts,
         lines=[],
     )

@@ -131,7 +131,7 @@ def test_an_app_that_never_serves_fails_with_the_reason_and_is_deleted(world: Wo
     ):
         up(world)
     assert world.kube.all_namespaces() == []
-    assert (world.env.artifacts / "pods.json").is_file()  # type: ignore[operator]
+    assert (world.artifacts / "pods.json").is_file()
 
 
 def test_a_failed_seed_fails_the_deploy_with_its_log(world: World) -> None:
@@ -256,7 +256,7 @@ def test_usage_reports_cpu_per_pod_between_snapshots(world: World) -> None:
         assert app_pods <= set(second)
         assert all(second[name] == pytest.approx(5.0) for name in app_pods)
         assert all(first[name] > 0 for name in app_pods)
-        assert (world.env.artifacts / "pod-usage-open.json").is_file()  # type: ignore[operator]
+        assert (world.artifacts / "pod-usage-open.json").is_file()
 
 
 def _calls_of_a_full_run() -> int:
