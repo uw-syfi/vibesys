@@ -365,12 +365,23 @@ jobs:
           echo "Pushed $IMAGE:$VERSION@$pushed_digest"
           echo "Image: \`$IMAGE:$VERSION@$pushed_digest\`" >> "$GITHUB_STEP_SUMMARY"
 
+      # The attest action pushes the attestation with Docker's credentials, not skopeo's
+      # authfile above, so it needs its own login; the logout step removes it again.
+      - name: Log in to the registry for the attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
       - name: Attest the image
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
+
+      - name: Log out of the registry
+        if: always()
+        run: docker logout ghcr.io
 
   go-tag:
     name: Tag the Go module and record the image in the release
