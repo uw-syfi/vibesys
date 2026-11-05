@@ -1,0 +1,2 @@
+{"schemaVersion":1,"kind":"FILE_KIND_SELFTEST","writer":"fixture"}
+{"maxRate":40000,"addedLatency":{"lowestTrackableMicros":"1","highestTrackableMicros":"3600000000","significantFigures":3,"encoded":"HISTFAAAAC542pJpmSzMwMCQysDAwMjAwMDMAAEgNsO1yUsY7D9ABJKZ6AAAAQAA//+eHgYY"},"loadgenCpuFraction":0.31,"cpus":6,"addedLatencyRate":20000}

@@ -40,7 +40,7 @@ id_prefix = "native:"
 target = true
 ownership_group = "native_manifests"
 manifests = { "Cargo.toml" = "rust", "go.mod" = "go" }
-scope_roots = ["resources/evaluators", "sdk/vs-evaluator"]
+scope_roots = ["resources/evaluators", "sdk/vs-evaluator", "sdk/vibesys-evaluator"]
 selected_roots = [
   "examples/data-structures/ordered-map",
   "examples/data-structures/prioqueue",
@@ -58,6 +58,7 @@ selected_roots = [
   "resources/evaluators/stack/native_runner",
   "resources/evaluators/unordered-map",
   "resources/evaluators/unordered-map/native_runner",
+  "sdk/vibesys-evaluator/loadgen",
   "sdk/vs-evaluator/vseval",
 ]
 selected_jobs = ["evaluators"]
