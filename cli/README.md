@@ -606,8 +606,12 @@ refused with the reason.
 
 - The image is built from the task's directory as the job's commit has it: the directory is the
   build context, so the Dockerfile can `COPY` the task's scripts into the image, and the build sees
-  no file of the candidate. The image is tagged by a digest of those files, so it is built again
-  exactly when a file of the task changes. The first `submit` of a task builds the image before the
+  no file of the candidate. A symbolic link of the directory is a link in the context, and a task
+  is refused when it is read if a link is absolute, leaves the directory, points at a path the
+  commit does not have, or is part of a cycle, since it would lead to nothing in the image; the
+  error names the link (see [task environment](../docs/contributing/cli-task-environment.md)). The
+  image is tagged by a digest of those files and links, so it is built again exactly when one of
+  them changes. The first `submit` of a task builds the image before the
   job is queued, so that submission takes as long as the build. The image digest is recorded with
   each result and is what makes two docker results comparable, with the backend, so results from
   different images are never mixed.

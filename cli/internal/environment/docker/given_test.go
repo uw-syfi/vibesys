@@ -1,9 +1,12 @@
 package docker_test
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math/rand/v2"
 	"slices"
@@ -262,6 +265,53 @@ func TestTheImageIsNamedByEveryFileOfTheTask(t *testing.T) {
 				t.Fatalf("case %d: changing %s left the context as it was", i, name)
 			}
 		}
+	}
+}
+
+// A link of the task is in the build context as the same link, so the image has it: none is
+// dropped and none is replaced by what it points at.
+func TestTheBuildContextHoldsEveryFileAndLinkOfTheTask(t *testing.T) {
+	files := task.Tree{
+		"k8s/manifest.yaml": {Data: []byte("kind: List\n")},
+		"k8s/deployed.yaml": {Link: "manifest.yaml"},
+		"bin":               {Link: "k8s"},
+		"run.sh":            {Data: []byte("#!/bin/sh\n"), Executable: true},
+	}
+	ctx, err := docker.Context(docker.Spec{Dockerfile: []byte(simpleDockerfile), Files: files})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := task.Tree{}
+	r := tar.NewReader(bytes.NewReader(ctx))
+	for {
+		h, err := r.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch h.Typeflag {
+		case tar.TypeSymlink:
+			got[h.Name] = task.File{Link: h.Linkname}
+		case tar.TypeReg:
+			data, _ := io.ReadAll(r)
+			got[h.Name] = task.File{Data: data, Executable: h.Mode&0o111 != 0}
+		default:
+			t.Errorf("%s is an entry of type %q", h.Name, h.Typeflag)
+		}
+	}
+	want := maps.Clone(files)
+	want["Dockerfile"] = task.File{Data: []byte(simpleDockerfile)}
+	if !maps.EqualFunc(got, want, func(a, b task.File) bool {
+		return string(a.Data) == string(b.Data) && a.Executable == b.Executable && a.Link == b.Link
+	}) {
+		t.Errorf("the build context holds %+v, want %+v", got, want)
+	}
+	moved := maps.Clone(files)
+	moved["bin"] = task.File{Link: "run.sh"}
+	if other, _ := docker.Context(docker.Spec{Dockerfile: []byte(simpleDockerfile), Files: moved}); string(other) == string(ctx) {
+		t.Error("a link's new target left the context as it was")
 	}
 }
 

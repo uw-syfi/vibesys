@@ -130,8 +130,22 @@ one passes the same environment contract suite (`envtest`).
 The build context is a tar of the task directory, sent on standard input, so
 the build sees the task's files and nothing else; files a tool generates
 (`__pycache__`, `*.pyc`) are left out, as they are of the task version. The image tag is the task
-version (the digest of every file in the directory), so the image changes
-exactly when the task does. The old rule that refused `COPY` and `ADD` is gone:
+version (the digest of every file and symbolic link in the directory), so the image changes
+exactly when the task does.
+
+A symbolic link in the task directory is a link in the build context, to the
+target it holds, so `COPY` puts it in the image as it is in the repository. It
+works there only if it leads, link by link, to a file or a directory of the task
+directory, since nothing else is in the context. So a task with a `Dockerfile`
+is refused when it is read, before any job runs, if one of its links is
+absolute, points outside the task directory, points at a path the commit does
+not have (a file the task generates, say), or is part of a cycle; the error
+names the link and says which. A link to a file a command writes at run time
+cannot be checked, so such a task commits the file, makes the link relative to a
+committed one, or has the command write the file itself. A task with no
+`Dockerfile` runs in the checkout, where git makes every link as the commit
+holds it, so its links are not checked; they are still part of its version.
+Any other kind of entry (a device, a socket) is refused rather than left out. The old rule that refused `COPY` and `ADD` is gone:
 it existed because the build had no context. The image digest, not the tag,
 is what the fingerprint pins and what containers are made from.
 

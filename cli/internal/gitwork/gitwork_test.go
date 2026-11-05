@@ -40,6 +40,12 @@ func newRepo(t *testing.T, files task.Tree) (string, core.Commit) {
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		if f.IsLink() {
+			if err := os.Symlink(filepath.FromSlash(f.Link), full); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
 		mode := os.FileMode(0o644)
 		if f.Executable {
 			mode = 0o755
@@ -102,6 +108,8 @@ func TestTasksRefuseARepositoryGitCannotRead(t *testing.T) {
 
 func TestACheckoutHasTheCommittedFilesAndNothingElse(t *testing.T) {
 	files := tasktest.Files("t")
+	files[".vibesys/tasks/t/inside"] = task.File{Link: "check.sh"}
+	files[".vibesys/tasks/t/outside"] = task.File{Link: "/tmp/made-when-the-task-runs"}
 	repo, commit := newRepo(t, files)
 	if err := os.WriteFile(filepath.Join(repo, "src/main.c"), []byte("dirty"), 0o644); err != nil {
 		t.Fatal(err)
@@ -127,6 +135,13 @@ func TestACheckoutHasTheCommittedFilesAndNothingElse(t *testing.T) {
 	info, err := os.Stat(filepath.Join(co.Dir, ".vibesys/tasks/t/check.sh"))
 	if err != nil || info.Mode()&0o111 == 0 {
 		t.Errorf("the executable bit was lost: %v, %v", info, err)
+	}
+	// A task with no image runs here, so every link is in the checkout as the commit holds it.
+	for _, rel := range []string{"inside", "outside"} {
+		p := ".vibesys/tasks/t/" + rel
+		if target, err := os.Readlink(filepath.Join(co.Dir, p)); err != nil || target != files[p].Link {
+			t.Errorf("the checkout's %s links to %q (%v), want %q", p, target, err, files[p].Link)
+		}
 	}
 	if head := gitIn(t, co.Dir, "rev-parse", "HEAD"); head != string(commit) {
 		t.Errorf("HEAD = %s, want %s", head, commit)

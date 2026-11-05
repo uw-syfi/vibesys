@@ -16,9 +16,10 @@ import (
 const dockerfileName = "Dockerfile"
 
 // Context returns the build context of a task's image: a tar of the task's files, with the
-// Dockerfile at its root. The same files make the same bytes, whatever the order they were listed
-// in, the time, or the user: every entry has the same owner and time, and only the executable bit
-// of a mode is kept. It fails with core.FailureInvalidInput for a task with no Dockerfile or a
+// Dockerfile at its root. A symbolic link is written as a link to the target it holds, never
+// dropped and never replaced by its target's content. The same files make the same bytes, whatever
+// the order they were listed in, the time, or the user: every entry has the same owner and time,
+// and only the executable bit of a mode is kept. It fails with core.FailureInvalidInput for a task with no Dockerfile or a
 // path a tar cannot hold.
 func Context(spec Spec) ([]byte, error) {
 	files := maps.Clone(spec.Files)
@@ -35,15 +36,21 @@ func Context(spec Spec) ([]byte, error) {
 	w := tar.NewWriter(&buf)
 	for _, name := range slices.Sorted(maps.Keys(files)) {
 		f := files[name]
-		mode := int64(0o644)
-		if f.Executable {
-			mode = 0o755
-		}
-		if err := w.WriteHeader(&tar.Header{
-			Typeflag: tar.TypeReg, Name: name, Size: int64(len(f.Data)), Mode: mode,
+		h := &tar.Header{
+			Typeflag: tar.TypeReg, Name: name, Size: int64(len(f.Data)), Mode: 0o644,
 			ModTime: time.Unix(0, 0), Format: tar.FormatPAX,
-		}); err != nil {
+		}
+		switch {
+		case f.IsLink():
+			h.Typeflag, h.Linkname, h.Size, h.Mode = tar.TypeSymlink, f.Link, 0, 0o777
+		case f.Executable:
+			h.Mode = 0o755
+		}
+		if err := w.WriteHeader(h); err != nil {
 			return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: the task's file %q cannot be put in a build context: %v", name, err)}
+		}
+		if f.IsLink() {
+			continue
 		}
 		if _, err := w.Write(f.Data); err != nil {
 			return nil, &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: writing the build context: %v", err)}
