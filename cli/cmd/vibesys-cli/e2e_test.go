@@ -91,6 +91,8 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(run(os.Args[1:], d))
 	}
+	// The tests start from none of the operator's names, whatever shell runs them.
+	scrubOperatorEnvironment()
 	os.Exit(m.Run())
 }
 

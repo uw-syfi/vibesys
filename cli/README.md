@@ -1019,6 +1019,12 @@ The tests open real stores under `TMPDIR`, and a store refuses a file system wit
 such as NFS mounted with `nolock`. Where `/tmp` is such a mount, set `TMPDIR` to a directory on a
 local disk.
 
+The tests can run from a shell that has a live daemon's environment. The tests of
+`cmd/vibesys-cli` start the tool, its daemon and its supervisors, and their `TestMain` removes
+every `VIBESYS_` and `XDG_` variable before they run. So a test reaches no live daemon's socket,
+index or operator config; each test sets only the names it needs. A test runs the test binary with
+these names set to directories of its own, and checks that it passes and writes nothing there.
+
 The module pins Go 1.25.9 with a `toolchain` line: under `testing/synctest`, Go 1.25.0 corrupts its
 own runtime state at random, which the simulator hit as fatal errors and stalls.
 
