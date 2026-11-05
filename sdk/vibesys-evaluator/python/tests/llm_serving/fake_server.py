@@ -112,6 +112,12 @@ class FakeServer:
             yield "data: [DONE]"
 
 
+class _OkResponse(urllib.response.addinfourl):
+    """A 200 response as http.client makes it, with the reason urllib's HTTPErrorProcessor reads."""
+
+    msg = "OK"
+
+
 class FakeHandler(urllib.request.BaseHandler):
     """Serves a ``FakeServer`` at ``http://fake-server`` to ``urllib`` without a socket."""
 
@@ -134,9 +140,7 @@ class FakeHandler(urllib.request.BaseHandler):
             payload = "".join(line + "\n" for line in self.server.stream(body)).encode()
         else:
             payload = json.dumps(self.server.complete(body)).encode()
-        response = urllib.response.addinfourl(io.BytesIO(payload), headers, request.full_url, 200)
-        response.msg = "OK"  # what http.client gives; urllib's HTTPErrorProcessor reads it
-        return response
+        return _OkResponse(io.BytesIO(payload), headers, request.full_url, 200)
 
 
 def opener(server: FakeServer, *, status: int = 200) -> urllib.request.OpenerDirector:
