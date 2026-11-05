@@ -11,3 +11,5 @@
 FROM ghcr.io/uw-syfi/vibesys-evaluator-llm-serving:0.1.0rc3
 
 COPY . /task
+# The operator's Hugging Face cache, mounted read-only as "hf" (the task's [environment] needs).
+ENV HF_HOME=/vibesys/mounts/hf HF_HUB_OFFLINE=1

@@ -1,5 +1,5 @@
 # The seed candidate image: what engine/ needs to serve Qwen3.5-9B on an MI210. The task
-# (.vibesys/tasks/agentx-cli/vibesys.input.toml, [candidate]) builds it from the candidate's
+# (.vibesys/tasks/agentx/vibesys.input.toml, [candidate]) builds it from the candidate's
 # commit with engine/ as the context and runs `python -m engine.server` in it from the
 # checkout root, so the engine's code comes from the checkout and this image holds only its
 # dependencies. It is the agent's to change: another base, a kernel library or a profiler is
@@ -24,3 +24,5 @@ RUN python3 -m pip install --no-cache-dir --require-hashes --only-binary=:all: \
  && python3 -c "import torch; assert torch.version.hip, 'torch is not a ROCm build'; print('torch', torch.__version__, 'hip', torch.version.hip)"
 
 ENV PYTHONUNBUFFERED=1
+# The operator's Hugging Face cache, mounted read-only as "hf" (the task's [environment] needs).
+ENV HF_HOME=/vibesys/mounts/hf HF_HUB_OFFLINE=1

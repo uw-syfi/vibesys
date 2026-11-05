@@ -5,6 +5,15 @@
 version = "0.2"
 backends = ["rocm"]
 
+[agent]
+domain = "llm-serving"
+interface = "service"
+
+# The operator provides the Hugging Face cache (Qwen/Qwen3.5-9B weights at the pinned revision, its
+# tokenizer, and the AgentX corpus) as the read-only mount named "hf"; both images read it offline.
+[environment]
+needs = ["mounts"]
+
 [candidate]
 dockerfile = "engine/Dockerfile"
 context = "engine"
@@ -20,10 +29,14 @@ startup_timeout_seconds = 1800
 
 [accuracy]
 command = ["python", "/task/bench.py", "check"]
+timeout_seconds = 900
 
 [benchmark]
 command = ["python", "/task/bench.py", "benchmark"]
+# Dataset preparation, ten warmup requests per lane, the 900 s window and the drain.
+timeout_seconds = 3600
 result_protocol = 2
 
 [profile]
 command = ["python", "/task/bench.py", "profile"]
+timeout_seconds = 900
