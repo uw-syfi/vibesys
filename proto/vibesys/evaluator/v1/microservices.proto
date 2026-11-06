@@ -1,0 +1,104 @@
+syntax = "proto3";
+
+// The `phase` group of the core command line (`vibesys-evaluator phase <verb>`): what a
+// language SDK and the microservices phase runner (sdk/vibesys-evaluator/go/microservices)
+// exchange for one load phase. The calling convention is core.proto's: the request is one
+// proto3 JSON message on standard input, the response one on standard output; exit 1 is a
+// domain error (an Error); a long-running verb first writes events, one JSON line each
+// ({"event": PhaseEvent}), and ends with its response. See sdk/vibesys-evaluator/docs/spec.md
+// ("A phase" and "Core command line").
+//
+//   phase pod    run one phase where the phase pod runs: loadgen and the generator (long; events)
+//   phase judge  whether a phase's output is a measurement: the saturation guard and validity
+package vibesys.evaluator.v1;
+
+import "vibesys/evaluator/v1/phase.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1";
+
+// PhasePodRequest runs one phase in this process's machine or pod (`phase pod`): loadgen sends
+// the generator's request stream to the target and the pod's files are left in work_dir.
+message PhasePodRequest {
+  // The phase's work directory. It holds input.binpb (a PhaseInput); the phase leaves
+  // output.binpb (a PhaseOutput: its presence means the phase ran), summary.binpb and loadgen's
+  // results there: results.binpb.gz, or under capture results.binpb whole and the generator's
+  // kept.binpb. A path because the phase's results are files (loadgen's and the generator's,
+  // which an accuracy check reads as they are) that the pod's runner copies out of the pod.
+  string work_dir = 1;
+  // The base URL of every request: the system's gateway as the pod reaches it.
+  string target = 2;
+  // The generator command; `generate --phase-input F --dataset F --state DIR` follows it.
+  repeated string generator = 3;
+  // The dataset file the generator reads (--dataset); written by the caller. A path because the
+  // generator, a program of the task, takes its dataset as a file.
+  string dataset_file = 4;
+  // Open loop: the share of the target rate that counts as sustained (loadgen --min-sustained).
+  double min_sustained_ratio = 5;
+  // The loadgen binary; empty: the loadgen next to the core's executable, else loadgen on PATH.
+  string loadgen = 6;
+}
+
+// PhasePodResponse is a phase that ran: what loadgen measured, in a few numbers (the whole
+// summary is summary.binpb in the work directory).
+message PhasePodResponse {
+  // Of the window's operations: sent, completed (with an outcome) and failed.
+  uint64 sent = 1;
+  uint64 completed = 2;
+  uint64 errors = 3;
+  // Operations completed in the window per second.
+  double achieved_rate = 4;
+  // loadgen's run, seconds (PhaseOutput.loadgen_secs).
+  double loadgen_secs = 5;
+}
+
+// PhaseEvent is one step of a long verb, for the person watching: written before the
+// response as {"event": PhaseEvent}, one JSON line each.
+message PhaseEvent {
+  // What is happening: "loadgen" (loadgen started: the generator fills its buffer, then the
+  // warmup and the window run), "running" (loadgen still runs; once a minute), "files" (loadgen
+  // exited; the phase's files are written), "done".
+  string stage = 1;
+  // The same for people.
+  string message = 2;
+  // When, Unix nanoseconds of this process's clock.
+  int64 unix_nanos = 3;
+}
+
+// PhaseValidity is when a phase is a measurement (the SDKs' Validity).
+message PhaseValidity {
+  // Errors over the window's operations, at most; in [0, 1].
+  double max_error_rate = 1;
+  // Open loop: the offered rate over the target rate, at least; in (0, 1].
+  double min_sustained_ratio = 2;
+  // Every operation of the mix completed in the window at least this many times.
+  uint32 min_ops_per_operation = 3;
+}
+
+// PhaseJudgeRequest asks whether a phase is a measurement (`phase judge`).
+message PhaseJudgeRequest {
+  // The directory the phase pod's files were copied into: the judge reads the PhaseOutput the
+  // pod left there (output.binpb), which holds loadgen's summary.
+  string phase_dir = 1;
+  // The phase as the orchestrator asked for it, for the messages.
+  PhaseInput input = 2;
+  PhaseValidity validity = 3;
+}
+
+// PhaseMeasurement is what a phase measured in its window.
+message PhaseMeasurement {
+  // Operations completed in the window divided by its length.
+  double ops_per_sec = 1;
+  // Latency percentiles, milliseconds.
+  double p50_ms = 2;
+  double p99_ms = 3;
+}
+
+// PhaseJudgeResponse is the verdict: a measurement, or why the phase is not one.
+message PhaseJudgeResponse {
+  // Set when the phase is a measurement.
+  PhaseMeasurement measurement = 1;
+  // Why it is not one, naming the phase and its load; empty when it is.
+  string failure = 2;
+  // Progress lines for people (what the phase measured, how the generator kept up).
+  repeated string log = 3;
+}

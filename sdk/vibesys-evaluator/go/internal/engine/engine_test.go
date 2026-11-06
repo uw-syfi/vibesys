@@ -5,11 +5,13 @@ package engine_test
 // milliseconds against a bound of a fraction of it), never exact times.
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -418,5 +420,49 @@ func TestOpenLoopCountsOperationsDueWhileEverySenderIsBusy(t *testing.T) {
 	s, _ = run(t, config, generator{}.source(t), fast)
 	if s.GetSaturated() > s.GetCompleted()/100 {
 		t.Fatalf("fast application: saturated %d of %d", s.GetSaturated(), s.GetCompleted())
+	}
+}
+
+// With RecordClients each sent result names its client (the closed loop's client, the open
+// loop's in-flight slot), and two operations of one client never overlap; without it, none does.
+func TestClientsAreRecordedWhenAsked(t *testing.T) {
+	client := serve(t, func(w http.ResponseWriter, r *http.Request) { time.Sleep(5 * time.Millisecond) })
+	for name, load := range map[string]struct {
+		load    engine.Load
+		clients uint32
+	}{
+		"closed": {engine.Closed{Clients: 4}, 4},
+		"open":   {engine.Open{Rate: 300, Arrivals: pb.Arrivals_ARRIVALS_UNIFORM, MaxInFlight: 8, MinSustained: 0.5}, 8},
+	} {
+		for _, record := range []bool{true, false} {
+			config := engine.Config{Load: load.load, Window: 500 * time.Millisecond, Timeout: 5 * time.Second, RecordClients: record}
+			_, sink := run(t, config, indexed(t, nil), client)
+			last := map[uint32]int64{}
+			sink.mu.Lock()
+			results := append([]*pb.OperationResult(nil), sink.results...)
+			sink.mu.Unlock()
+			slices.SortFunc(results, func(a, b *pb.OperationResult) int { return cmp.Compare(a.GetStartUnixNanos(), b.GetStartUnixNanos()) })
+			for _, r := range results {
+				if !record {
+					if r.Client != nil {
+						t.Fatalf("%s: client %d recorded without RecordClients", name, r.GetClient())
+					}
+					continue
+				}
+				if r.GetStartUnixNanos() == 0 {
+					continue
+				}
+				if r.Client == nil || r.GetClient() >= load.clients {
+					t.Fatalf("%s: operation %d has client %v of %d", name, r.GetIndex(), r.Client, load.clients)
+				}
+				if r.GetStartUnixNanos() < last[r.GetClient()] {
+					t.Fatalf("%s: client %d ran operation %d before its previous one ended", name, r.GetClient(), r.GetIndex())
+				}
+				last[r.GetClient()] = r.GetEndUnixNanos()
+			}
+			if record && len(last) < 2 {
+				t.Fatalf("%s: %d clients ran operations", name, len(last))
+			}
+		}
 	}
 }

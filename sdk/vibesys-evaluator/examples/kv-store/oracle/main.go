@@ -52,7 +52,7 @@ type stored struct {
 	Body    string
 }
 
-// op is a piece's input: a read or a write of one key.
+// op is a piece's input: a read, or a write (a PUT, or a DELETE of Value absent) of one key.
 type op struct {
 	Key   int
 	Write bool
@@ -125,6 +125,13 @@ func project(s scale) func(iter.Seq[[]check.Call], *check.Projection[op, stored]
 					piece.In.Write, piece.In.Value = true, stored{true, s.value(in.Seed)}
 					if !piece.Unknown && step.Status != 200 {
 						out.Violation(c, "PUT answered HTTP %d", step.Status)
+						continue
+					}
+				case "delete":
+					piece.Write = true
+					piece.In.Write = true // the key is absent after it, whether it was there or not
+					if step.Status != 0 && step.Status != 200 && step.Status != 404 {
+						out.Violation(c, "DELETE answered HTTP %d", step.Status)
 						continue
 					}
 				case "read":

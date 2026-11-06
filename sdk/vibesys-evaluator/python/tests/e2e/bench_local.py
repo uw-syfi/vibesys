@@ -6,6 +6,8 @@ each running the real loadgen against the service at ``KV_TARGET``, which
 runs the generator. The generator is this script's ``generate`` (the Python
 workload), or, with ``KV_GO_GENERATOR`` set, that binary: the kv-store
 example's Go generator (``KV_STORE_SCALE=test`` selects this task's scale).
+With ``KV_CAPTURE`` set the sample records the accuracy history, with a fault
+between its phases.
 """
 
 from __future__ import annotations
@@ -27,10 +29,13 @@ from vibesys_evaluator.microservices._private.local import LocalDeployer
 from vse_support import kv  # the tests directory is on PYTHONPATH
 
 GO_GENERATOR = os.environ.get("KV_GO_GENERATOR", "")
+CAPTURE = bool(os.environ.get("KV_CAPTURE"))
 
 
 def _benchmark(run: ms.Run) -> None:
     closed = run.closed_loop(clients=16, secs=1, warmup=0.5)  # 16 x 20 ops/s at SERVICE_SECS
+    if CAPTURE:
+        run.fault("pause", "kv", lambda: None)
     opened = run.open_loop(rate=0.5 * closed.ops_per_sec, secs=1, warmup=0.5, arrivals="uniform")
     run.report({"operations_per_second": closed.ops_per_sec, "latency_ms.p99": opened.p99_ms})
 
@@ -42,6 +47,7 @@ TASK = Task(
     benchmark=_benchmark,
     metrics=kv.METRICS,
     validity=vse.Validity(),
+    capture=CAPTURE,
 )
 
 

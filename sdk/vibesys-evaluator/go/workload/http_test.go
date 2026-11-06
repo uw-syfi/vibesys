@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 )
@@ -79,6 +80,28 @@ func TestStepsAreThePythonSteps(t *testing.T) {
 	}
 }
 
+// HTTP sends any method loadgen.proto has, in any case; Get, Post and Put are its shorthands.
+func TestHTTPTakesEveryMethod(t *testing.T) {
+	for method, want := range map[string]pb.HttpMethod{
+		"GET": pb.HttpMethod_HTTP_METHOD_GET, "post": pb.HttpMethod_HTTP_METHOD_POST, "Put": pb.HttpMethod_HTTP_METHOD_PUT,
+		"DELETE": pb.HttpMethod_HTTP_METHOD_DELETE, "patch": pb.HttpMethod_HTTP_METHOD_PATCH,
+	} {
+		s := HTTP(method, Concat("/kv/", Ref("key")), Header("A", "b"), JSON(Object{{"n", 1}}), Expect(200, 204))
+		call := s.message.GetHttp()
+		if call.GetMethod() != want || string(call.GetRaw()) != `{"n":1}` || len(s.message.GetExpectStatus()) != 2 || !s.refs["key"] {
+			t.Errorf("%s: %s", method, stepJSON(t, s))
+		}
+	}
+	if !proto.Equal(HTTP("GET", "/x", Query("a", "1")).message, Get("/x", Query("a", "1")).message) ||
+		!proto.Equal(HTTP("POST", "/x", Form("a", "1")).message, Post("/x", Form("a", "1")).message) ||
+		!proto.Equal(HTTP("PUT", "/x", Body([]byte("v"))).message, Put("/x", Body([]byte("v"))).message) {
+		t.Fatal("Get, Post and Put are not HTTP's shorthands")
+	}
+	if got := HTTP("DELETE", "/kv/k1").String(); got != "Step(DELETE /kv/k1)" {
+		t.Fatalf("String %s", got)
+	}
+}
+
 func TestBadStepsAndRequestsSayWhatToFix(t *testing.T) {
 	for want, build := range map[string]func(){
 		"must start with a literal": func() { Get("kv") },
@@ -87,6 +110,7 @@ func TestBadStepsAndRequestsSayWhatToFix(t *testing.T) {
 		"must match":                func() { Ref("Bad") },
 		"100..599":                  func() { Get("/", Expect(700)) },
 		"is not JSON":               func() { Post("/", JSON(math.NaN())) },
+		"not one of GET, POST":      func() { HTTP("HEAD", "/") },
 	} {
 		err := safely("build", build)
 		if err == nil || !strings.Contains(err.Error(), want) {

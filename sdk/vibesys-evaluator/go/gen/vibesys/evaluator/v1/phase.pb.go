@@ -4,13 +4,13 @@
 // 	protoc        (unknown)
 // source: vibesys/evaluator/v1/phase.proto
 
-// What the orchestrator (the task's bench.py in the container vibesys starts),
-// a phase pod (the same bench.py, in the cluster) and the task's request
-// generator (a Python or Go front end: `GENERATOR generate` and `GENERATOR
-// check`) exchange for one phase. The messages are here because the exchange
-// crosses processes and languages and is kept as an artifact. See
-// sdk/vibesys-evaluator/docs/spec.md ("Generator command line"). PhaseInput and
-// PhaseOutput files are one binpb message each.
+// What the orchestrator (the task's bench.py or Go benchmark in the container
+// vibesys starts), a phase pod (in the cluster) and the task's request
+// generator (a Python or Go front end: `GENERATOR generate`) exchange for one
+// phase. The messages are here because the exchange crosses processes and
+// languages and is kept as an artifact. See sdk/vibesys-evaluator/docs/spec.md
+// ("A phase" and "Generator command line"). PhaseInput and PhaseOutput files
+// are one binpb message each.
 
 package evaluatorv1
 
@@ -45,8 +45,16 @@ type PhaseInput struct {
 	Arrivals   Arrivals `protobuf:"varint,7,opt,name=arrivals,proto3,enum=vibesys.evaluator.v1.Arrivals" json:"arrivals,omitempty"`
 	Secs       float64  `protobuf:"fixed64,8,opt,name=secs,proto3" json:"secs,omitempty"`
 	WarmupSecs float64  `protobuf:"fixed64,9,opt,name=warmup_secs,json=warmupSecs,proto3" json:"warmup_secs,omitempty"`
-	// The writes of the sample's earlier phases, in the order they started.
-	History       []*HistoryEntry `protobuf:"bytes,10,rep,name=history,proto3" json:"history,omitempty"`
+	// No longer written: the writes of the sample's earlier phases, which a
+	// generator replayed through `apply`. Benchmarks no longer check responses
+	// and workloads have no `apply`; a generator ignores it.
+	History []*HistoryEntry `protobuf:"bytes,10,rep,name=history,proto3" json:"history,omitempty"`
+	// Accuracy capture (docs/spec.md, "Accuracy history"): the generator sets
+	// keep_bodies on every operation and keeps a KeptOperation for every
+	// operation in its --state, loadgen records each operation's client, and
+	// the phase pod leaves loadgen's results file whole. A benchmark leaves it
+	// off.
+	Capture       bool `protobuf:"varint,11,opt,name=capture,proto3" json:"capture,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -144,8 +152,15 @@ func (x *PhaseInput) GetHistory() []*HistoryEntry {
 	return nil
 }
 
-// HistoryEntry is one write a phase sent: what the task's `apply` receives as
-// a Call when a later phase replays the sample's history.
+func (x *PhaseInput) GetCapture() bool {
+	if x != nil {
+		return x.Capture
+	}
+	return false
+}
+
+// HistoryEntry is one write a phase sent, for a generator to replay through
+// `apply` in a later phase. No longer written (see PhaseInput.history).
 type HistoryEntry struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The operation's name.
@@ -236,6 +251,7 @@ func (x *HistoryEntry) GetSteps() []*StepResult {
 }
 
 // Violation is one check that failed, for the error message and artifacts.
+// No longer written (see PhaseOutput).
 type Violation struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Operation     string                 `protobuf:"bytes,1,opt,name=operation,proto3" json:"operation,omitempty"`
@@ -296,19 +312,23 @@ func (x *Violation) GetMessage() string {
 	return ""
 }
 
-// PhaseOutput is what a phase pod leaves for the orchestrator.
+// PhaseOutput is what a phase pod leaves for the orchestrator: its presence
+// means loadgen ran the phase.
 type PhaseOutput struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Summary *PhaseSummary          `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
-	// Operations checked, and the checks that failed, in the measurement window.
-	Checked uint64 `protobuf:"varint,2,opt,name=checked,proto3" json:"checked,omitempty"`
-	Invalid uint64 `protobuf:"varint,3,opt,name=invalid,proto3" json:"invalid,omitempty"`
-	// The first violations (at most 20), for the error record and artifacts.
-	Violations []*Violation `protobuf:"bytes,4,rep,name=violations,proto3" json:"violations,omitempty"`
-	// The writes this phase sent, to append to the sample's history.
-	Writes []*HistoryEntry `protobuf:"bytes,5,rep,name=writes,proto3" json:"writes,omitempty"`
-	// Seconds spent checking the sample (after the window).
-	CheckSecs     float64 `protobuf:"fixed64,7,opt,name=check_secs,json=checkSecs,proto3" json:"check_secs,omitempty"`
+	// No longer written, with the generator's `check` (benchmarks measure;
+	// accuracy checks judge): the operations checked and the checks that failed
+	// in the window, the first violations, and the writes sent for the history.
+	Checked    uint64          `protobuf:"varint,2,opt,name=checked,proto3" json:"checked,omitempty"`
+	Invalid    uint64          `protobuf:"varint,3,opt,name=invalid,proto3" json:"invalid,omitempty"`
+	Violations []*Violation    `protobuf:"bytes,4,rep,name=violations,proto3" json:"violations,omitempty"`
+	Writes     []*HistoryEntry `protobuf:"bytes,5,rep,name=writes,proto3" json:"writes,omitempty"`
+	// No longer written (see checked).
+	CheckSecs float64 `protobuf:"fixed64,7,opt,name=check_secs,json=checkSecs,proto3" json:"check_secs,omitempty"`
+	// Seconds from the pod's start of loadgen to its exit: the generator's
+	// start-up, the warmup, the window and the operations in flight after it.
+	LoadgenSecs   float64 `protobuf:"fixed64,8,opt,name=loadgen_secs,json=loadgenSecs,proto3" json:"loadgen_secs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -385,10 +405,17 @@ func (x *PhaseOutput) GetCheckSecs() float64 {
 	return 0
 }
 
-// KeptOperation is what a generator remembers of one operation it generated
-// for its own check: the front ends write one per operation in the validation
-// sample and per write, length-delimited, into the --state directory that
-// `generate` and `check` share. loadgen never reads it.
+func (x *PhaseOutput) GetLoadgenSecs() float64 {
+	if x != nil {
+		return x.LoadgenSecs
+	}
+	return 0
+}
+
+// KeptOperation is what a generator remembers of one operation it generated:
+// under accuracy capture (PhaseInput.capture) the front ends write one for
+// every operation, before the operation, length-delimited without a header,
+// into --state/kept.binpb; otherwise none. loadgen never reads it.
 type KeptOperation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The operation's position in the request stream, from 0.
@@ -397,8 +424,8 @@ type KeptOperation struct {
 	Operation uint32 `protobuf:"varint,2,opt,name=operation,proto3" json:"operation,omitempty"`
 	// The Request's info, as a JSON object.
 	InfoJson string `protobuf:"bytes,3,opt,name=info_json,json=infoJson,proto3" json:"info_json,omitempty"`
-	// In the validation sample (its response is checked); a write that is not
-	// sampled is kept for the history only.
+	// No longer written: the operation was in the validation sample of the
+	// generator's former `check`.
 	Sampled       bool `protobuf:"varint,4,opt,name=sampled,proto3" json:"sampled,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -621,7 +648,7 @@ var File_vibesys_evaluator_v1_phase_proto protoreflect.FileDescriptor
 
 const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
 	"\n" +
-	" vibesys/evaluator/v1/phase.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto\x1a\"vibesys/evaluator/v1/loadgen.proto\"\xbc\x03\n" +
+	" vibesys/evaluator/v1/phase.proto\x12\x14vibesys.evaluator.v1\x1a\x1bbuf/validate/validate.proto\x1a\"vibesys/evaluator/v1/loadgen.proto\"\xd6\x03\n" +
 	"\n" +
 	"PhaseInput\x12\x1f\n" +
 	"\vsample_seed\x18\x01 \x01(\x04R\n" +
@@ -637,7 +664,8 @@ const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
 	"\vwarmup_secs\x18\t \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\n" +
 	"warmupSecs\x12<\n" +
 	"\ahistory\x18\n" +
-	" \x03(\v2\".vibesys.evaluator.v1.HistoryEntryR\ahistoryJ\x04\b\x05\x10\x06R\x0fmax_ops_per_sec\"\x80\x02\n" +
+	" \x03(\v2\".vibesys.evaluator.v1.HistoryEntryR\ahistory\x12\x18\n" +
+	"\acapture\x18\v \x01(\bR\acaptureJ\x04\b\x05\x10\x06R\x0fmax_ops_per_sec\"\x80\x02\n" +
 	"\fHistoryEntry\x12;\n" +
 	"\toperation\x18\x01 \x01(\tB\x1d\xbaH\x1ar\x182\x16^[a-z][a-z0-9_]{0,62}$R\toperation\x12\x1b\n" +
 	"\tinfo_json\x18\x02 \x01(\tR\binfoJson\x12(\n" +
@@ -648,7 +676,7 @@ const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
 	"\tViolation\x12\x1c\n" +
 	"\toperation\x18\x01 \x01(\tR\toperation\x12\x14\n" +
 	"\x05index\x18\x02 \x01(\x04R\x05index\x12\"\n" +
-	"\amessage\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\xd0\x0fR\amessage\"\xba\x02\n" +
+	"\amessage\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\xd0\x0fR\amessage\"\xef\x02\n" +
 	"\vPhaseOutput\x12<\n" +
 	"\asummary\x18\x01 \x01(\v2\".vibesys.evaluator.v1.PhaseSummaryR\asummary\x12\x18\n" +
 	"\achecked\x18\x02 \x01(\x04R\achecked\x12\x18\n" +
@@ -658,7 +686,8 @@ const file_vibesys_evaluator_v1_phase_proto_rawDesc = "" +
 	"violations\x12:\n" +
 	"\x06writes\x18\x05 \x03(\v2\".vibesys.evaluator.v1.HistoryEntryR\x06writes\x12\x1d\n" +
 	"\n" +
-	"check_secs\x18\a \x01(\x01R\tcheckSecsJ\x04\b\x06\x10\aR\rgenerate_secs\"z\n" +
+	"check_secs\x18\a \x01(\x01R\tcheckSecs\x123\n" +
+	"\floadgen_secs\x18\b \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\vloadgenSecsJ\x04\b\x06\x10\aR\rgenerate_secs\"z\n" +
 	"\rKeptOperation\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\x04R\x05index\x12\x1c\n" +
 	"\toperation\x18\x02 \x01(\rR\toperation\x12\x1b\n" +

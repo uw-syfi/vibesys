@@ -34,8 +34,8 @@ class Validity:
     """When a phase is a measurement; a phase that breaks a rule fails the sample.
 
     Attributes:
-        max_error_rate: Errors (loadgen's plus failed checks) over the window's
-            operations, at most.
+        max_error_rate: loadgen's errors (transport, timeout, status, capture)
+            over the window's operations, at most.
         min_sustained_ratio: Open loop: the offered rate over the target rate, at least.
         min_ops_per_operation: Every operation of the mix completed in the
             window at least this many times.

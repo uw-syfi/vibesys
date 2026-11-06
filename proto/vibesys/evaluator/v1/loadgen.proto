@@ -79,10 +79,13 @@ message PlannedOperation {
   }];
   // Operations with the same non-empty key never run at the same time; loadgen
   // grants the key in stream order, so operations on one key are applied in
-  // stream order. Time spent waiting for the key counts as latency.
+  // stream order. Time spent waiting for the key counts as latency. The SDKs
+  // no longer set it (benchmarks do not check responses); loadgen still
+  // honours it.
   string exclusive_key = 3 [(buf.validate.field).string.max_len = 256];
-  // Keep every response body in the results file. Otherwise only a digest and
-  // the length are kept (the operation is outside the validation sample).
+  // Keep every response body in the results file (the SDKs set it on every
+  // operation under accuracy capture). Otherwise only a digest and the length
+  // are kept.
   bool keep_bodies = 4;
 }
 
@@ -214,7 +217,7 @@ message Capture {
 }
 
 // ErrorKind is why an operation or a step failed, as loadgen sees it.
-// Application-level validity is the Python side's (the validation sample).
+// Whether a response is right is the accuracy check's (go/check).
 enum ErrorKind {
   ERROR_KIND_UNSPECIFIED = 0;
   // Connection refused or reset, DNS, TLS, a malformed response.
@@ -253,8 +256,8 @@ message OperationResult {
   // The client that ran it: in a closed loop the client's number (0 to
   // clients - 1), in an open loop the in-flight slot it held (0 to
   // max-in-flight - 1). Two operations of one client never overlap in time.
-  // Unset in files written before it was defined; the accuracy checker then
-  // assigns display lanes itself.
+  // Unset in files written before it was defined, and without
+  // --record-clients; the accuracy checker then assigns display lanes itself.
   optional uint32 client = 8;
 }
 
@@ -477,6 +480,8 @@ message Capabilities {
   // The phase commands read the request stream of a generator command (after
   // "--") and report GeneratorStats; the only request input of a phase.
   bool request_stream = 9;
+  // The phase commands take --record-clients (OperationResult.client).
+  bool record_clients = 10;
 }
 
 // SelftestResult is what `loadgen selftest` writes: its limits on this pod,

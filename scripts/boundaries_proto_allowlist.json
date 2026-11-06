@@ -65,6 +65,11 @@
     "RefEncoding.REF_ENCODING_JSON_STRING",
     "RefEncoding.REF_ENCODING_JSON_VALUE"
   ],
+  "proto/vibesys/evaluator/v1/microservices.proto": [
+    "PhaseJudgeRequest.phase_dir",
+    "PhasePodRequest.dataset_file",
+    "PhasePodRequest.work_dir"
+  ],
   "proto/vibesys/evaluator/v1/phase.proto": [
     "HistoryEntry.info_json",
     "KeptOperation.info_json"

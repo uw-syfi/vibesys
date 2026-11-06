@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vibesys_evaluator._private import core
-from vibesys_evaluator._private.loadgen import ProcessLoadgen
 from vibesys_evaluator._private.sample import SIGNALS, with_signals
 
 if TYPE_CHECKING:
@@ -81,15 +80,6 @@ def test_loadgen_and_otelcapture_are_found_like_the_core(
     (bundled / name).write_text("")
     monkeypatch.setattr(core, "_BUNDLED_DIR", bundled)
     assert core.find_binary(name) == str(bundled / name)
-
-
-def test_process_loadgen_without_a_binary_reports_why(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setenv("PATH", str(tmp_path))
-    done = ProcessLoadgen().run(["--capabilities"], timeout_secs=5)
-    assert done.code == 127
-    assert "VIBESYS_EVALUATOR_LOADGEN" in done.stderr
 
 
 def test_no_binary_is_a_typed_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -47,6 +47,9 @@ type Config struct {
 	Warmup  time.Duration
 	Window  time.Duration
 	Timeout time.Duration
+	// RecordClients sets OperationResult.client: the closed loop's client, or the open loop's
+	// in-flight slot, that ran the operation.
+	RecordClients bool
 }
 
 // Validate checks a configuration.
@@ -125,13 +128,14 @@ func Run(ctx context.Context, config Config, source Source, sender Sender, sink 
 	failCtx, fail := context.WithCancelCause(phaseCtx)
 	defer fail(nil)
 	r := &runner{
-		ctx:    failCtx,
-		fail:   fail,
-		source: source,
-		sender: sender,
-		sink:   sink,
-		window: window,
-		agg:    summary.New(window, source.Names()),
+		ctx:     failCtx,
+		fail:    fail,
+		source:  source,
+		sender:  sender,
+		sink:    sink,
+		window:  window,
+		clients: config.RecordClients,
+		agg:     summary.New(window, source.Names()),
 	}
 	meter := startMeter(window)
 	defer meter.stop()
@@ -158,12 +162,13 @@ func Run(ctx context.Context, config Config, source Source, sender Sender, sink 
 }
 
 type runner struct {
-	ctx    context.Context
-	fail   context.CancelCauseFunc
-	source Source
-	sender Sender
-	sink   Sink
-	window summary.Window
+	ctx     context.Context
+	fail    context.CancelCauseFunc
+	source  Source
+	sender  Sender
+	sink    Sink
+	window  summary.Window
+	clients bool
 
 	mu  sync.Mutex
 	agg *summary.Aggregator
@@ -190,7 +195,7 @@ func (r *runner) closed(t0 time.Time, clients int) {
 	defer cancel()
 	var wg sync.WaitGroup
 	start := make(chan struct{})
-	for range clients {
+	for client := range clients {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -209,7 +214,7 @@ func (r *runner) closed(t0 time.Time, clients int) {
 					r.release(op) // taken too late: never sent, not a result
 					return
 				}
-				r.run(op, now, now, waited)
+				r.run(op, now, now, waited, uint32(client))
 			}
 		}()
 	}
@@ -232,13 +237,13 @@ func (r *runner) open(t0 time.Time, load Open) uint64 {
 	arrivals := NewArrivals(load.Arrivals, load.Rate, load.Seed)
 	work := make(chan job)
 	var wg sync.WaitGroup
-	for range load.MaxInFlight {
+	for slot := range load.MaxInFlight {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for item := range work {
 				waitUntil(r.ctx, item.scheduled)
-				r.run(item.op, item.scheduled, time.Now(), item.waited)
+				r.run(item.op, item.scheduled, time.Now(), item.waited, uint32(slot))
 			}
 		}()
 	}
@@ -302,10 +307,13 @@ func (r *runner) abandon(op *plan.Op, scheduled time.Time, arrivals func() time.
 	}
 }
 
-// run sends one operation taken at picked (scheduled is when it was due, waited how long the
-// sender waited for the generator).
-func (r *runner) run(op *plan.Op, scheduled, picked time.Time, waited time.Duration) {
+// run sends one operation taken at picked by client (scheduled is when it was due, waited how
+// long the sender waited for the generator).
+func (r *runner) run(op *plan.Op, scheduled, picked time.Time, waited time.Duration, client uint32) {
 	result := &pb.OperationResult{Index: op.Index, Operation: op.Operation, ScheduledUnixNanos: scheduled.UnixNano()}
+	if r.clients {
+		result.Client = &client
+	}
 	if op.Prev != nil {
 		select {
 		case <-op.Prev:

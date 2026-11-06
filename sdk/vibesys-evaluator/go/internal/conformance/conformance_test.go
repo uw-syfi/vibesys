@@ -164,12 +164,12 @@ func results() []summary.Record {
 	at := func(v int64) int64 { return base + v }
 	return []summary.Record{
 		// Warmup: not in the summary.
-		{Picked: at(500 * ms), Result: &pb.OperationResult{Index: 0, Operation: 0, ScheduledUnixNanos: at(500 * ms),
+		{Picked: at(500 * ms), Result: &pb.OperationResult{Index: 0, Operation: 0, ScheduledUnixNanos: at(500 * ms), Client: proto.Uint32(0),
 			StartUnixNanos: at(500 * ms), EndUnixNanos: at(512 * ms), Steps: steps(
 				stepAt{500 * ms, 505 * ms, 200, `{"token":"tk-1"}`, 0, ""},
 				stepAt{505 * ms, 509 * ms, 404, "", 0, ""},
 				stepAt{509 * ms, 512 * ms, 200, `{"token":"tk-1","as_value":"tk-1"}`, 0, ""})}},
-		{Picked: at(1001 * ms), Result: &pb.OperationResult{Index: 1, Operation: 1, ScheduledUnixNanos: at(1000 * ms),
+		{Picked: at(1001 * ms), Result: &pb.OperationResult{Index: 1, Operation: 1, ScheduledUnixNanos: at(1000 * ms), Client: proto.Uint32(3),
 			StartUnixNanos: at(1001 * ms), EndUnixNanos: at(1004 * ms), Steps: steps(stepAt{1001 * ms, 1004 * ms, 200, digest(`{"hotels":[]}`), 0, ""})}},
 		{Picked: at(1200 * ms), GeneratorWait: 3 * time.Millisecond, Result: &pb.OperationResult{Index: 2, Operation: 1, ScheduledUnixNanos: at(1200 * ms),
 			StartUnixNanos: at(1200 * ms), EndUnixNanos: at(1230 * ms), Error: pb.ErrorKind_ERROR_KIND_STATUS,
@@ -271,7 +271,8 @@ func generate(t *testing.T) (map[string][]byte, Manifest) {
 			"string and as a JSON value; a query; a form; a raw PUT that captures a header and two operations on exclusive key k7.",
 			encode(t, format, header(pb.FileKind_FILE_KIND_REQUESTS), requestsMessages...), len(requestsMessages))
 		add("results."+name, "results", "Results in completion order: kept bodies, digests, a status error, a transport "+
-			"error, an operation spilled past the window after an exclusive-key wait, and one never sent (start 0).",
+			"error, an operation spilled past the window after an exclusive-key wait, and one never sent (start 0); the first two "+
+			"name their client (--record-clients).",
 			encode(t, format, header(pb.FileKind_FILE_KIND_RESULTS), resultMessages...), len(resultMessages))
 		s := summaryOf(t, results())
 		p50, _ := summary.Percentile(s.GetLatency(), 50)

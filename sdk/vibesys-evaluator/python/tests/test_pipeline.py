@@ -1,8 +1,8 @@
-"""The whole sample, in process: main's benchmark command, phases, the pod's work, the records.
+"""The whole sample, in process: main's benchmark command, phases, the pod's files, the records.
 
 The deploy layer is the in-process Fake and loadgen the Fake loadgen, so the
 files between the orchestrator, the phase pod and loadgen are the real ones,
-in virtual time.
+in virtual time; the core judges each phase (``phase judge``).
 """
 
 from __future__ import annotations
@@ -14,19 +14,19 @@ import pytest
 
 import vibesys_evaluator as vse
 from vibesys_evaluator import microservices as ms
-from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
-from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
-from vibesys_evaluator.microservices._private.deploy import TaskCommand
 
 # test-isolation: main() exits and builds the k8s deployer; the sample's command is tested
 # through its private entry, with the deploy seam (the interface the k8s layer implements).
+from vibesys_evaluator._private.files import read_records, read_results
+from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
+from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
+from vibesys_evaluator.microservices._private.deploy import TaskCommand
 from vibesys_evaluator.microservices._private.entry import Task, benchmark
-from vibesys_evaluator.microservices._private.phase import PodTask
 from vs_evaluator_protocol.api import Measurement, parse_records, read_measurement
 
 from .vse_support import kv
 from .vse_support.fake_loadgen import FakeLoadgen
-from .vse_support.runners import GENERATOR, InProcessDeployer, InProcessGenerator, InProcessRunner
+from .vse_support.runners import InProcessDeployer, InProcessGenerator, InProcessRunner
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -41,6 +41,7 @@ def _task(
     benchmark: Callable[[ms.Run], None] = kv.benchmark,
     metrics: Mapping[str, vse.Metric] = kv.METRICS,
     validity: vse.Validity = vse.Validity(),  # noqa: B008  # LW-150406 [B008]; a frozen dataclass
+    capture: bool = False,
 ) -> Task:
     return Task(
         dataset=kv.Data,
@@ -49,6 +50,7 @@ def _task(
         benchmark=benchmark,
         metrics=metrics,
         validity=validity,
+        capture=capture,
     )
 
 
@@ -66,15 +68,9 @@ class _Fake(TypedDict, total=False):
 def _deployer(task: Task, service: kv.KvService, **fake: Unpack[_Fake]) -> InProcessDeployer:
     """The in-process deploy layer, with a Fake loadgen (``fake``: its options) against ``service``."""
     data = kv.Data()
-    generator = InProcessGenerator(task)
     runner = InProcessRunner(
-        task=PodTask(
-            dataset=task.dataset,
-            generator=GENERATOR,
-            min_sustained_ratio=task.validity.min_sustained_ratio,
-        ),
-        loadgen=FakeLoadgen(app=service.handle, generator=generator, **fake),
-        commands=generator,
+        loadgen=FakeLoadgen(app=service.handle, generator=InProcessGenerator(task), **fake),
+        min_sustained_ratio=task.validity.min_sustained_ratio,
     )
     return InProcessDeployer(runner=runner, seed=lambda: kv.seed_service(service, data))
 
@@ -131,19 +127,87 @@ def test_a_sample_reports_both_metrics_in_a_valid_stream(tmp_path: Path) -> None
     }
 
 
-def test_the_second_phase_replays_the_first_phases_writes(tmp_path: Path) -> None:
+def test_every_phase_gets_the_sample_seed_and_its_index(tmp_path: Path) -> None:
     service = kv.KvService()
     deployer = _deployer(_task(), service)
     _sample(tmp_path, _task(), deployer)
-    first, second = deployer.runner.jobs
-    first_out = phase_pb.PhaseOutput.from_binary(
-        (tmp_path / "artifacts/phase-0/output.binpb").read_bytes()
+    inputs = [phase_pb.PhaseInput.from_binary(job.phase_input) for job in deployer.runner.jobs]
+    assert [(p.sample_seed, p.phase_index, p.capture) for p in inputs] == [
+        (5, 0, False),
+        (5, 1, False),
+    ]
+    assert [p.model for p in inputs] == [pb.LoadModel.CLOSED, pb.LoadModel.OPEN]
+
+
+def test_a_benchmark_keeps_no_bodies_and_no_history(tmp_path: Path) -> None:
+    code, _ = _sample(tmp_path, _task(), _deployer(_task(), kv.KvService()))
+    assert code == 0
+    artifacts = tmp_path / "artifacts"
+    assert not (artifacts / "history.binpb").exists()
+    assert not (artifacts / "phase-0" / "kept.binpb").exists()
+
+
+def _capture(run: ms.Run) -> None:
+    closed = run.closed_loop(clients=4, secs=1, warmup=0.5)
+    restarts: list[str] = []
+    run.fault("restart", "kv", lambda: restarts.append("kv"))
+    opened = run.open_loop(rate=0.5 * closed.ops_per_sec, secs=1, warmup=0.5, arrivals="uniform")
+    assert restarts == ["kv"]
+    run.report({"operations_per_second": closed.ops_per_sec, "latency_ms.p99": opened.p99_ms})
+
+
+def test_capture_records_the_history_an_accuracy_check_reads(tmp_path: Path) -> None:
+    task = _task(benchmark=_capture, capture=True)
+    code, text = _sample(tmp_path, task, _deployer(task, kv.KvService()))
+    assert code == 0, text
+    artifacts = tmp_path / "artifacts"
+    manifest = phase_pb.HistoryManifest.from_binary((artifacts / "history.binpb").read_bytes())
+    assert manifest.phases == 2
+    assert manifest.dataset == "dataset.json"
+    assert (artifacts / "dataset.json").is_file()
+    [fault] = manifest.faults
+    assert (fault.kind, fault.target, fault.after_phase) == ("restart", "kv", 0)
+    assert fault.end_unix_nanos >= fault.start_unix_nanos > 0
+    for index in range(2):
+        phase_dir = artifacts / f"phase-{index}"
+        results = read_results(phase_dir / "results.binpb")
+        kept = {k.index: k for k in read_records(phase_dir / "kept.binpb", phase_pb.KeptOperation)}
+        assert results
+        for result in results:
+            assert result.client is not None
+            assert kept[result.index].operation == result.operation
+            info = json.loads(kept[result.index].info_json)
+            assert "key" in info
+            if result.operation == 1:  # a write: begin_phase told the model the phase
+                assert info["phase"] == index
+            responses = [step.response for step in result.steps if step.response is not None]
+            assert all(r.field == "body" for r in responses)  # every body is kept
+
+
+def test_a_fault_goes_between_phases_and_is_recorded_when_it_fails(tmp_path: Path) -> None:
+    def early(run: ms.Run) -> None:
+        run.fault("restart", "kv", lambda: None)
+
+    task = _task(benchmark=early, capture=True)
+    _, text = _sample(tmp_path, task, _deployer(task, kv.KvService()))
+    assert "a fault goes between phases" in _error(text)
+
+    def failing(run: ms.Run) -> None:
+        run.closed_loop(clients=4, secs=1, warmup=0.5)
+
+        def action() -> None:
+            msg = "no such pod"
+            raise RuntimeError(msg)
+
+        run.fault("restart", "kv", action)
+
+    task = _task(benchmark=failing, capture=True)
+    _, text = _sample(tmp_path / "failing", task, _deployer(task, kv.KvService()))
+    assert "no such pod" in _error(text)
+    manifest = phase_pb.HistoryManifest.from_binary(
+        (tmp_path / "failing/artifacts/history.binpb").read_bytes()
     )
-    second_in = phase_pb.PhaseInput.from_binary(second.phase_input)
-    assert phase_pb.PhaseInput.from_binary(first.phase_input).history == []
-    assert len(first_out.writes) > 0
-    assert list(second_in.history) == list(first_out.writes)
-    assert second_in.phase_index == 1
+    assert [f.kind for f in manifest.faults] == ["restart"]
 
 
 def test_the_same_seed_sends_the_same_requests(tmp_path: Path) -> None:
@@ -154,16 +218,6 @@ def test_the_same_seed_sends_the_same_requests(tmp_path: Path) -> None:
         _sample(tmp_path / str(n), _task(), deployer, seed=99)
         runs.append([j.phase_input for j in deployer.runner.jobs])
     assert runs[0] == runs[1]
-
-
-def test_lost_writes_fail_the_sample_naming_the_check(tmp_path: Path) -> None:
-    service = kv.KvService(lose_writes=True)
-    code, text = _sample(tmp_path, _task(), _deployer(_task(), service))
-    message = _error(text)
-    assert code == 1
-    assert "phase 0" in message
-    assert "failed checks" in message
-    assert "read #" in message
 
 
 def test_status_errors_count_against_the_error_rate(tmp_path: Path) -> None:
@@ -238,14 +292,14 @@ def test_a_closed_loop_reads_as_much_of_the_stream_as_its_clients_take(tmp_path:
     assert output.summary.generator.read >= output.summary.completed >= 1_900
 
 
-def test_the_generator_runs_generate_under_loadgen_then_check(tmp_path: Path) -> None:
+def test_the_generator_only_generates(tmp_path: Path) -> None:
     deployer = _deployer(_task(), kv.KvService())
     _sample(tmp_path, _task(), deployer)
-    commands = [run[0] for run in deployer.runner.commands.runs]
-    assert commands[-1] == "check"
-    assert set(commands) == {"generate", "check"}
-    first = deployer.runner.commands.runs[0]
-    assert first[first.index("--dataset") + 1].endswith("dataset.json")
+    generator = deployer.runner.loadgen.generator
+    assert isinstance(generator, InProcessGenerator)
+    runs = generator.runs
+    assert {run[0] for run in runs} == {"generate"}
+    assert runs[0][runs[0].index("--dataset") + 1].endswith("dataset.json")
 
 
 def _closed_only(run: ms.Run) -> None:
@@ -360,7 +414,7 @@ def test_a_malformed_sample_seed_is_an_error(tmp_path: Path) -> None:
     assert "VIBESYS_SAMPLE_SEED" in _error(output.read_text())
 
 
-def test_operations_never_sent_are_errors_and_not_writes(tmp_path: Path) -> None:
+def test_operations_never_sent_are_errors(tmp_path: Path) -> None:
     # Every fifth operation is not sent: 80% sustained, 20% errors.
     lenient = _task(validity=vse.Validity(max_error_rate=0.5, min_sustained_ratio=0.5))
     deployer = _deployer(lenient, kv.KvService(), never_sent_every=5)
@@ -371,5 +425,3 @@ def test_operations_never_sent_are_errors_and_not_writes(tmp_path: Path) -> None
     )
     assert output.summary is not None
     assert output.summary.errors_by_kind.get(int(pb.ErrorKind.CANCELLED), 0) > 0
-    assert output.writes
-    assert all(w.start_unix_nanos != 0 for w in output.writes)

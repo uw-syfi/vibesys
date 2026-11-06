@@ -1,12 +1,12 @@
 syntax = "proto3";
 
-// What the orchestrator (the task's bench.py in the container vibesys starts),
-// a phase pod (the same bench.py, in the cluster) and the task's request
-// generator (a Python or Go front end: `GENERATOR generate` and `GENERATOR
-// check`) exchange for one phase. The messages are here because the exchange
-// crosses processes and languages and is kept as an artifact. See
-// sdk/vibesys-evaluator/docs/spec.md ("Generator command line"). PhaseInput and
-// PhaseOutput files are one binpb message each.
+// What the orchestrator (the task's bench.py or Go benchmark in the container
+// vibesys starts), a phase pod (in the cluster) and the task's request
+// generator (a Python or Go front end: `GENERATOR generate`) exchange for one
+// phase. The messages are here because the exchange crosses processes and
+// languages and is kept as an artifact. See sdk/vibesys-evaluator/docs/spec.md
+// ("A phase" and "Generator command line"). PhaseInput and PhaseOutput files
+// are one binpb message each.
 package vibesys.evaluator.v1;
 
 import "buf/validate/validate.proto";
@@ -40,12 +40,20 @@ message PhaseInput {
     gte: 0
     finite: true
   }];
-  // The writes of the sample's earlier phases, in the order they started.
+  // No longer written: the writes of the sample's earlier phases, which a
+  // generator replayed through `apply`. Benchmarks no longer check responses
+  // and workloads have no `apply`; a generator ignores it.
   repeated HistoryEntry history = 10;
+  // Accuracy capture (docs/spec.md, "Accuracy history"): the generator sets
+  // keep_bodies on every operation and keeps a KeptOperation for every
+  // operation in its --state, loadgen records each operation's client, and
+  // the phase pod leaves loadgen's results file whole. A benchmark leaves it
+  // off.
+  bool capture = 11;
 }
 
-// HistoryEntry is one write a phase sent: what the task's `apply` receives as
-// a Call when a later phase replays the sample's history.
+// HistoryEntry is one write a phase sent, for a generator to replay through
+// `apply` in a later phase. No longer written (see PhaseInput.history).
 message HistoryEntry {
   // The operation's name.
   string operation = 1 [(buf.validate.field).string.pattern = "^[a-z][a-z0-9_]{0,62}$"];
@@ -61,34 +69,42 @@ message HistoryEntry {
 }
 
 // Violation is one check that failed, for the error message and artifacts.
+// No longer written (see PhaseOutput).
 message Violation {
   string operation = 1;
   uint64 index = 2;
   string message = 3 [(buf.validate.field).string.max_len = 2000];
 }
 
-// PhaseOutput is what a phase pod leaves for the orchestrator.
+// PhaseOutput is what a phase pod leaves for the orchestrator: its presence
+// means loadgen ran the phase.
 message PhaseOutput {
   PhaseSummary summary = 1;
-  // Operations checked, and the checks that failed, in the measurement window.
+  // No longer written, with the generator's `check` (benchmarks measure;
+  // accuracy checks judge): the operations checked and the checks that failed
+  // in the window, the first violations, and the writes sent for the history.
   uint64 checked = 2;
   uint64 invalid = 3;
-  // The first violations (at most 20), for the error record and artifacts.
   repeated Violation violations = 4 [(buf.validate.field).repeated.max_items = 20];
-  // The writes this phase sent, to append to the sample's history.
   repeated HistoryEntry writes = 5;
   // Removed with the requests file: requests are generated during the phase
   // (PhaseSummary.generator).
   reserved 6;
   reserved "generate_secs";
-  // Seconds spent checking the sample (after the window).
+  // No longer written (see checked).
   double check_secs = 7;
+  // Seconds from the pod's start of loadgen to its exit: the generator's
+  // start-up, the warmup, the window and the operations in flight after it.
+  double loadgen_secs = 8 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
 }
 
-// KeptOperation is what a generator remembers of one operation it generated
-// for its own check: the front ends write one per operation in the validation
-// sample and per write, length-delimited, into the --state directory that
-// `generate` and `check` share. loadgen never reads it.
+// KeptOperation is what a generator remembers of one operation it generated:
+// under accuracy capture (PhaseInput.capture) the front ends write one for
+// every operation, before the operation, length-delimited without a header,
+// into --state/kept.binpb; otherwise none. loadgen never reads it.
 message KeptOperation {
   // The operation's position in the request stream, from 0.
   uint64 index = 1;
@@ -96,8 +112,8 @@ message KeptOperation {
   uint32 operation = 2;
   // The Request's info, as a JSON object.
   string info_json = 3;
-  // In the validation sample (its response is checked); a write that is not
-  // sampled is kept for the history only.
+  // No longer written: the operation was in the validation sample of the
+  // generator's former `check`.
   bool sampled = 4;
 }
 

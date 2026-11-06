@@ -4,16 +4,19 @@ Written against the intended vibesys-evaluator API; it does not run yet. It
 differs from the two DeathStarBench tasks on purpose: one Deployment and no
 data tier; the dataset is a few lines here and is seeded through the
 service's own API; every operation logs in and uses the token it got (a
-template the loadgen fills from the first response); reads must see every
-acknowledged write at once (bound 0); the score is latency at a fixed
-Poisson-arrival rate, with no closed loop. bench_go.py is the same task with
-this workload written in Go (generator/): both write the same request stream.
+template the loadgen fills from the first response); the score is latency at
+a fixed Poisson-arrival rate, with no closed loop. bench_go.py is the same
+task with this workload written in Go (generator/): both write the same
+request stream. The benchmark only measures: that reads see every
+acknowledged write at once is the accuracy oracle's to judge (oracle/), from
+the history a run with capture=True records.
 
 The service (candidate directory `server/`, its own Dockerfile) offers
     POST /register {"user", "password"}
     POST /login {"user", "password"} -> {"token"}
     GET  /kv/<key>   (Authorization: Bearer <token>) -> the value, or 404
     PUT  /kv/<key>   (Authorization: Bearer <token>) the value as the body
+    DELETE /kv/<key> (Authorization: Bearer <token>) -> 200, or 404 if absent
 """
 
 from __future__ import annotations
@@ -24,9 +27,8 @@ import urllib.request
 import vibesys_evaluator as vse
 from vibesys_evaluator import microservices as ms
 from vibesys_evaluator import Rand
-from vibesys_evaluator.microservices import Call, Versions
 from vibesys_evaluator.microservices import k8s
-from vibesys_evaluator.microservices import Operation, Request, Step, Template, Workload, get, post, put, ref
+from vibesys_evaluator.microservices import Operation, Request, Step, Template, Workload, get, http, post, put, ref
 
 SEED = 7
 KEYS = 100_000
@@ -82,10 +84,6 @@ SYSTEM = k8s.App(
 class Model:
     def __init__(self, data: Data, rand: Rand) -> None:
         self.data = data
-        self.values: Versions[int, bytes | None] = Versions(bound_secs=0.0)
-
-    def seeded(self, key: int) -> bytes | None:
-        return self.data.values[key] if key < len(self.data.values) else None
 
 
 AUTH: Template = "Bearer " + ref("token")  # filled from the login step's response
@@ -108,32 +106,22 @@ def write(m: Model, rand: Rand) -> Request:
     key, seed_ = rand.zipf(KEYS, 0.99), rand.below(1 << 62)
     return Request(login(m, rand),
                    put(f"/kv/k{key}", body=value(Rand(seed_)), headers={"Authorization": AUTH}),
-                   info={"key": key, "seed": seed_}, exclusive=f"k{key}")
+                   info={"key": key, "seed": seed_})  # the oracle redraws the value from the seed
 
 
-def apply_write(m: Model, call: Call) -> None:
-    m.values.write(call.info["key"], value(Rand(call.info["seed"])), call)
-
-
-def check_read(m: Model, call: Call) -> str | None:
-    assert call.start is not None and call.end is not None
-    key = call.info["key"]
-    response: ms.Response = call.responses[1]
-    got = response.body if response.status == 200 else None
-    allowed = m.values.allowed(key, m.seeded(key), start=call.start, end=call.end)
-    return None if got in allowed else f"k{key}: {got!r:.40}, allowed {len(allowed)} values"
-
-
-def check_write(m: Model, call: Call) -> str | None:
-    return None if call.responses[1].status == 200 else f"PUT: HTTP {call.responses[1].status}"
+def delete(m: Model, rand: Rand) -> Request:
+    key = rand.zipf(KEYS, 0.99)
+    return Request(login(m, rand),
+                   http("DELETE", f"/kv/k{key}", headers={"Authorization": AUTH}, expect=(200, 404)),
+                   info={"key": key})
 
 
 WORKLOAD = Workload(
     model=Model,
     operations=[
-        # A quarter of the reads are checked: the bodies of the others are kept as hash and length.
-        Operation(name="read", weight=90, build=read, check=check_read, sample=0.25),
-        Operation(name="write", weight=10, build=write, check=check_write, apply=apply_write),
+        Operation(name="read", weight=88, build=read),
+        Operation(name="write", weight=10, build=write),
+        Operation(name="delete", weight=2, build=delete),
     ],
 )
 

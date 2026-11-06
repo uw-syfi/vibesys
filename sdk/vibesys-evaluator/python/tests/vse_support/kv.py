@@ -2,7 +2,7 @@
 
 ``KvService.handle`` is the whole application: the deterministic tests call it
 through the Fake loadgen, the end-to-end test serves it over HTTP. Its knobs
-inject the faults the checks must catch.
+inject faults: errors a phase counts, writes an accuracy check would catch.
 """
 
 from __future__ import annotations
@@ -15,14 +15,13 @@ import vibesys_evaluator as vse
 from vibesys_evaluator import Rand
 from vibesys_evaluator import microservices as ms
 from vibesys_evaluator.microservices import (
-    Call,
     Operation,
     Request,
     Step,
     Template,
-    Versions,
     Workload,
     get,
+    http,
     k8s,
     post,
     put,
@@ -93,6 +92,12 @@ class KvService:
             if not self.lose_writes:
                 self.values[key] = body
             return 200, b""
+        if method == "DELETE":
+            if key not in self.values:
+                return 404, b""
+            if not self.lose_writes:
+                del self.values[key]
+            return 200, b""
         return 404, b"not found"
 
 
@@ -124,11 +129,13 @@ def seed_service(service: KvService, data: Data) -> None:
 class Model:
     def __init__(self, data: Data, rand: Rand) -> None:
         self.data = data
-        self.values: Versions[int, bytes | None] = Versions(bound_secs=0.0)
         self.draws = rand.below(1000)
+        self.phase = 0
+        self.written: dict[int, int] = {}
 
-    def seeded(self, key: int) -> bytes | None:
-        return self.data.values[key] if key < len(self.data.values) else None
+
+def begin_phase(m: Model, phase: int) -> None:
+    m.phase = phase
 
 
 AUTH: Template = "Bearer " + ref("token")
@@ -150,38 +157,31 @@ def read(m: Model, rand: Rand) -> Request:
 
 def write(m: Model, rand: Rand) -> Request:
     key, seed = rand.zipf(KEYS, 0.99), rand.below(1 << 62)
+    m.written[key] = m.written.get(key, 0) + 1  # build may change the model
     return Request(
         login(m, rand),
         put(f"/kv/k{key}", body=value(Rand(seed)), headers={"Authorization": AUTH}),
-        info={"key": key, "seed": seed},
-        exclusive=f"k{key}",
+        info={"key": key, "seed": seed, "phase": m.phase, "nth": m.written[key]},
     )
 
 
-def apply_write(m: Model, call: Call) -> None:
-    m.values.write(call.info["key"], value(Rand(call.info["seed"])), call)
-
-
-def check_read(m: Model, call: Call) -> str | None:
-    assert call.start is not None
-    assert call.end is not None
-    key = call.info["key"]
-    response = call.responses[1]
-    got = response.body if response.status == 200 else None
-    allowed = m.values.allowed(key, m.seeded(key), start=call.start, end=call.end)
-    return None if got in allowed else f"k{key}: {got!r:.40}, allowed {len(allowed)} values"
-
-
-def check_write(_m: Model, call: Call) -> str | None:
-    return None if call.responses[1].status == 200 else f"PUT: HTTP {call.responses[1].status}"
+def delete(m: Model, rand: Rand) -> Request:
+    key = rand.zipf(KEYS, 0.99)
+    return Request(
+        login(m, rand),
+        http("DELETE", f"/kv/k{key}", headers={"Authorization": AUTH}, expect=(200, 404)),
+        info={"key": key},
+    )
 
 
 WORKLOAD = Workload(
     model=Model,
     operations=[
-        Operation(name="read", weight=80, build=read, check=check_read, sample=0.5),
-        Operation(name="write", weight=20, build=write, check=check_write, apply=apply_write),
+        Operation(name="read", weight=75, build=read),
+        Operation(name="write", weight=20, build=write),
+        Operation(name="delete", weight=5, build=delete),
     ],
+    begin_phase=begin_phase,
 )
 
 SYSTEM = k8s.App(
