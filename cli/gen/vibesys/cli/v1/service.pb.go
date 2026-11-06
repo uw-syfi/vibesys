@@ -5254,7 +5254,7 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1f\n" +
 	"\x06number\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x06number\"@\n" +
 	"\x10ViewPlanResponse\x12,\n" +
-	"\x04view\x18\x01 \x01(\v2\x18.vibesys.cli.v1.PlanViewR\x04view\"\xf7\x03\n" +
+	"\x04view\x18\x01 \x01(\v2\x18.vibesys.cli.v1.PlanViewR\x04view\"\x99\x04\n" +
 	"\x0fEditPlanRequest\x125\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1f\n" +
 	"\x06number\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x06number\x12\"\n" +
@@ -5263,8 +5263,8 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x06status\x18\x05 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x02R\x06status\x88\x01\x01\x12C\n" +
 	"\bpriority\x18\x06 \x01(\x0e2\x18.vibesys.cli.v1.PriorityB\b\xbaH\x05\x82\x01\x02\x10\x01H\x03R\bpriority\x88\x01\x01\x12\x16\n" +
-	"\x06reason\x18\a \x01(\tR\x06reason:\x81\x01\xbaH~\x1a|\n" +
-	"\x18edit_plan.sets_something\x12)set at least one of title, body or status\x1a5has(this.title) || has(this.body) || has(this.status)B\b\n" +
+	"\x06reason\x18\a \x01(\tR\x06reason:\xa3\x01\xbaH\x9f\x01\x1a\x9c\x01\n" +
+	"\x18edit_plan.sets_something\x123set at least one of title, body, status or priority\x1aKhas(this.title) || has(this.body) || has(this.status) || has(this.priority)B\b\n" +
 	"\x06_titleB\a\n" +
 	"\x05_bodyB\t\n" +
 	"\a_statusB\v\n" +

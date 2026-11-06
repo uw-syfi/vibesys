@@ -542,8 +542,8 @@ message ViewPlanResponse {
 message EditPlanRequest {
   option (buf.validate.message).cel = {
     id: "edit_plan.sets_something"
-    message: "set at least one of title, body or status"
-    expression: "has(this.title) || has(this.body) || has(this.status)"
+    message: "set at least one of title, body, status or priority"
+    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.priority)"
   };
   CallContext context = 1;
   uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
