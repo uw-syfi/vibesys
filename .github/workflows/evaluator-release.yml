@@ -607,6 +607,6 @@ jobs:
             fi
           done
           if ! grep -qF "Go module: \`$GO_TAG\`" "$RUNNER_TEMP/notes.md"; then
-            printf '\n\nGo module: \`%s\`.\n' "$GO_TAG" >> "$RUNNER_TEMP/notes.md"
+            printf '\n\nGo module: `%s`.\n' "$GO_TAG" >> "$RUNNER_TEMP/notes.md"
           fi
           gh release edit "$TAG" --verify-tag --latest=false --notes-file "$RUNNER_TEMP/notes.md"
