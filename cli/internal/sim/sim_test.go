@@ -1091,6 +1091,7 @@ const defaultSeeds = 300
 const requeuedMark = "queued again:"
 
 func TestSeedsHoldTheInvariants(t *testing.T) {
+	t.Parallel()
 	first, count := seedRange()
 	runSeeds(t, first, count, profileOf)
 }
@@ -1098,6 +1099,7 @@ func TestSeedsHoldTheInvariants(t *testing.T) {
 // The seeds of cut-offs hold the same invariants, and the default range must reach the retry rule,
 // or the checks of it hold of nothing.
 func TestSeedsOfCutOffsHoldTheInvariants(t *testing.T) {
+	t.Parallel()
 	first, count := seedRange()
 	count = min(count, defaultSeeds/3)
 	if requeued := runSeeds(t, first, count, cutoffsOf); requeued == 0 && count == defaultSeeds/3 {
@@ -1110,6 +1112,7 @@ func TestSeedsOfCutOffsHoldTheInvariants(t *testing.T) {
 // one that needs the machine alone beside nothing. The default range must run commands beside each
 // other, or the check of the slots holds of nothing.
 func TestSeedsOfSeveralSlotsHoldTheInvariants(t *testing.T) {
+	t.Parallel()
 	first, count := seedRange()
 	count = min(count, defaultSeeds/3)
 	runSeeds(t, first, count, scheduledOf)

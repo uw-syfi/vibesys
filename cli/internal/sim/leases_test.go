@@ -291,6 +291,7 @@ func simulateNeighbors(seed uint64, apart bool) (violation string, h *neighborho
 }
 
 func TestSeedsOfTwoDaemonsSharingALeaseHoldTheInvariants(t *testing.T) {
+	t.Parallel()
 	first, count := seedRange()
 	count = min(count, defaultSeeds/3)
 	overlaps, refusals := 0, 0

@@ -218,6 +218,7 @@ func (m *machine) samples() int {
 }
 
 func TestRealMeasureOfARealRepositoryIsCachedAndTopsUp(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t)
 	m.commitTask()
 
@@ -259,6 +260,7 @@ func TestRealMeasureOfARealRepositoryIsCachedAndTopsUp(t *testing.T) {
 }
 
 func TestRealCheckThatFailsFailsTheJobAndSavesNothing(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t)
 	m.commitTask()
 	// Break the check: the committed source is no longer what it expects.

@@ -59,6 +59,8 @@ Hand back: claim, commit SHA, job ids and the compare output, what you learned, 
 ## Judge
 
 Give the judge a detached worktree of the candidate: `git worktree add --detach <path> <SHA>`.
+When the repository has submodules (`.gitmodules`), run `git -C <path> submodule update --init --recursive`
+too, so the judge can read their source.
 
 ```
 Candidate: <full SHA>      Parent: <full SHA>
