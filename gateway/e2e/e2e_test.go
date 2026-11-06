@@ -1,12 +1,11 @@
 //go:build e2e
 
-// Package e2e runs vibesys-host end to end with real processes: the gateway serving the orchestrator,
-// real sidecar processes over agentshim's scripted Claude peer, and the headless client. No model
+// Package e2e runs vibesys-host and vibesys-client end to end with real processes: the gateway serving the orchestrator,
+// real sidecar processes over agentshim's scripted Claude peer, and the real vibesys-client binary. No model
 // is called. Run it from gateway/ with `go test -tags e2e ./e2e -v`; it needs uv and Python.
 package e2e
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"os"
@@ -23,12 +22,13 @@ import (
 const bound = 90 * time.Second
 
 type rig struct {
-	t      *testing.T
-	binary string
-	root   string
-	state  string
-	dir    string
-	env    []string
+	t *testing.T
+	// binary is vibesys-host, and clientBinary the vibesys-client beside it that every verb runs.
+	binary, clientBinary string
+	root                 string
+	state                string
+	dir                  string
+	env                  []string
 	// marketplace is the plugin marketplace the orchestrator was given, once the test sets it.
 	marketplace string
 }
@@ -52,6 +52,11 @@ func newRig(t *testing.T) *rig {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build vibesys-host: %v\n%s", err, out)
 	}
+	clientBinary := filepath.Join(dir, "vibesys-client")
+	buildClient := exec.Command("go", "build", "-o", clientBinary, "../cmd/vibesys-client")
+	if out, err := buildClient.CombinedOutput(); err != nil {
+		t.Fatalf("build vibesys-client: %v\n%s", err, out)
+	}
 	cli := filepath.Join(dir, "vibesys-cli")
 	buildCLI := exec.Command("go", "build", "-o", cli, "./cmd/vibesys-cli")
 	buildCLI.Dir = "../../cli"
@@ -71,7 +76,7 @@ func newRig(t *testing.T) *rig {
 	}
 	// The daemon's root is the .vibesys directory of a home of its own (dir). A client that finds
 	// the gateway by the user's home, as the desktop app does, reaches this one when its HOME is dir.
-	r := &rig{t: t, binary: binary, dir: dir, root: filepath.Join(dir, ".vibesys"), state: filepath.Join(dir, "state")}
+	r := &rig{t: t, binary: binary, clientBinary: clientBinary, dir: dir, root: filepath.Join(dir, ".vibesys"), state: filepath.Join(dir, "state")}
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "XDG_RUNTIME_DIR=") && !strings.HasPrefix(kv, "XDG_STATE_HOME=") && !strings.HasPrefix(kv, "VIBESYS_") {
 			r.env = append(r.env, kv)
@@ -124,21 +129,22 @@ func (r *rig) serve() *exec.Cmd {
 		_ = cmd.Wait()
 		log.Close()
 	})
+	r.awaitServing()
 	return cmd
 }
 
-// client runs one client verb and returns its stdout.
+// client runs one vibesys-client verb and returns its stdout.
 func (r *rig) client(args ...string) string {
 	r.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, r.binary, append([]string{"--root", r.root}, args...)...)
+	cmd := exec.CommandContext(ctx, r.clientBinary, append([]string{"--root", r.root}, args...)...)
 	cmd.Env = r.env
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		r.t.Fatalf("vibesys-host %s: %v\n%s\nserve log:\n%s", strings.Join(args, " "), err, stderr.String(), r.serveLog())
+		r.t.Fatalf("vibesys-client %s: %v\n%s\nserve log:\n%s", strings.Join(args, " "), err, stderr.String(), r.serveLog())
 	}
 	return string(out)
 }
@@ -151,7 +157,8 @@ type receipt struct {
 	Sequence uint64
 }
 
-// receipt runs a client verb that dispatches a command and returns its receipt.
+// receipt runs a client verb that dispatches a command and returns its receipt, which it prints
+// with --json.
 func (r *rig) receipt(args ...string) receipt {
 	r.t.Helper()
 	var raw struct {
@@ -164,7 +171,7 @@ func (r *rig) receipt(args ...string) receipt {
 	}
 	sequence, err := strconv.ParseUint(raw.Sequence, 10, 64)
 	if err != nil {
-		r.t.Fatalf("vibesys-host %s printed no receipt sequence: %+v", strings.Join(args, " "), raw)
+		r.t.Fatalf("vibesys-client %s printed no receipt sequence: %+v", strings.Join(args, " "), raw)
 	}
 	return receipt{RunID: raw.RunID, AgentID: raw.AgentID, Sequence: sequence}
 }
@@ -174,7 +181,7 @@ func (r *rig) serveLog() string {
 	return string(data)
 }
 
-// watchUntil runs `run watch` and returns once a line satisfies want, failing after the bound.
+// watchUntil reads the stream of runs and returns once a line satisfies want, failing after the bound.
 //
 // With after zero the watch starts with a snapshot of runs and agents, so want may only look for
 // what a snapshot holds. An item is in no snapshot: a watch for one must replay the log after a
@@ -184,21 +191,13 @@ func (r *rig) watchUntil(what string, after uint64, want func(line string) bool)
 	r.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, r.binary, "--root", r.root, "run", "watch", "--after", strconv.FormatUint(after, 10))
-	cmd.Env = r.env
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		r.t.Fatal(err)
-	}
-	defer func() { cancel(); _ = cmd.Wait() }()
-	scanner := bufio.NewScanner(out)
-	scanner.Buffer(make([]byte, 1<<20), 16<<20)
+	next := r.watch(ctx, after)
 	var seen []string
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := next()
+		if err != nil {
+			break
+		}
 		seen = append(seen, line)
 		if want(line) {
 			return
@@ -265,7 +264,7 @@ func TestARunSurvivesADaemonRestart(t *testing.T) {
 	}
 
 	first := r.serve()
-	started := r.receipt("run", "start", "--repository", repository, "--task", "demo", "--brief", "say hello")
+	started := r.receipt("run", "start", "--repository", repository, "--task", "demo", "--brief", "say hello", "--json")
 	if started.RunID == "" || started.AgentID == "" {
 		t.Fatalf("run start printed no run and agent: %+v", started)
 	}
@@ -288,13 +287,13 @@ func TestARunSurvivesADaemonRestart(t *testing.T) {
 	r.watchUntil("the run still running after the restart", 0, func(line string) bool {
 		return strings.Contains(line, `"snapshot"`) && strings.Contains(line, "RUN_STATUS_RUNNING")
 	})
-	sent := r.receipt("send", started.AgentID, "say it again")
+	sent := r.receipt("run", "steer", started.RunID, "say it again", "--agent", started.AgentID, "--json")
 	r.watchUntil("the lead's second reply, from the same sidecar", sent.Sequence, func(line string) bool { return strings.Contains(line, "reply 2") })
 	if got := r.sidecarPids(); len(got) != 1 || got[0] != pids[0] {
 		t.Fatalf("the restart replaced the sidecar: before %v, after %v", pids, got)
 	}
 
-	r.client("run", "stop", started.RunID)
+	r.client("run", "stop", started.RunID, "--yes")
 	// A run's status is in the snapshot, so this watch needs no replay.
 	r.watchUntil("the run ended", 0, func(line string) bool {
 		return strings.Contains(line, started.RunID) && strings.Contains(line, "RUN_STATUS_ENDED")

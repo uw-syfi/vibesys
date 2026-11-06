@@ -37,7 +37,9 @@ func (r *rig) useCLI() {
 			r.env[i] = "VIBESYS_ORCHESTRATOR_CLI=" + filepath.Join(bin, "vibesys-cli")
 		}
 	}
-	r.env = append(r.env, "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// The rig's daemon is a sandbox daemon: with the runtime directory of its own, it must not meet
+	// the one daemon per user that a developer's machine may already run.
+	r.env = append(r.env, "VIBESYS_CLI_SANDBOX=1", "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	r.t.Cleanup(func() { r.stopCLIDaemon(filepath.Join(bin, "vibesys-cli")) })
 }
 
@@ -211,7 +213,7 @@ func (r *rig) pgids() []int {
 
 // uiWorld is a running world, as a UI test needs to attach to it.
 type uiWorld struct {
-	// Root and Binary are the daemon's --root and the vibesys-host to run client verbs with.
+	// Root and Binary are the daemon's --root and the vibesys-client to run verbs with.
 	Root, Binary string
 	// Home is the home directory whose .vibesys is Root: a client that finds the gateway by the
 	// user's home reaches this world when it runs with HOME set to Home.
@@ -249,7 +251,7 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 
 	r.serve()
 	const steering = "Prefer Codex workers for volume."
-	started := r.receipt("run", "start", "--repository", repository.path, "--task", toyTask, "--brief", steering)
+	started := r.receipt("run", "start", "--repository", repository.path, "--task", toyTask, "--brief", steering, "--json")
 	if started.RunID == "" || started.AgentID == "" {
 		t.Fatalf("run start printed no run and lead: %+v", started)
 	}
@@ -374,7 +376,7 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 		}
 		sort.Slice(agents, func(i, j int) bool { return agents[i].ID < agents[j].ID })
 		observeUI(t, uiWorld{
-			Root: r.root, Binary: r.binary, Home: r.dir, Env: r.env,
+			Root: r.root, Binary: r.clientBinary, Home: r.dir, Env: r.env,
 			RunID: started.RunID, LeadID: started.AgentID, Repository: repository.path,
 			Task: toyTask, Report: w.report(), Agents: agents,
 		})
@@ -387,7 +389,7 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 	// scripted agents were all awaited by them, so none is left queued or running.
 	pgids := r.pgids()
 	if observeUI == nil {
-		r.client("run", "stop", started.RunID)
+		r.client("run", "stop", started.RunID, "--yes")
 	}
 	r.observe("the run ended", w, func() bool { return w.run.Status == "RUN_STATUS_ENDED" })
 	for _, a := range w.agents {

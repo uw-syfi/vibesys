@@ -17,7 +17,7 @@ func TestCapabilityRules(t *testing.T) {
 		{"internal/clidaemon/clidaemontest/a.go", "package p\nimport x \"github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1\"\nvar _ x.DaemonServiceClient", "cli-stub", true},
 		{"internal/clidaemon/a.go", "package p\nimport x \"github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1\"\nvar _ x.DaemonServiceClient", "cli-stub", false},
 		{"internal/production/a.go", goFile("os/exec"), "exec-confined", true},
-		{"internal/production/production.go", goFile("os/exec"), "exec-confined", false},
+		{"internal/production/production.go", goFile("os/exec"), "exec-confined", true},
 		{"internal/production/cli_ensure.go", goFile("os/exec"), "exec-confined", false},
 		{"internal/production/cli_transport.go", "package p\nimport \"os\"\nvar read = os.Lstat", "fs-reads", false},
 		{"internal/search/a.go", "package p\nimport \"os\"\nvar read = os.ReadFile", "fs-reads", true},

@@ -22,7 +22,7 @@ func TestAStartForAMissingTaskIsRefusedBeforeAnyRunExists(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, r.binary, "--root", r.root, "run", "start", "--repository", repository, "--task", "nope", "--brief", "x")
+	cmd := exec.CommandContext(ctx, r.clientBinary, "--root", r.root, "run", "start", "--repository", repository, "--task", "nope", "--brief", "x")
 	cmd.Env = r.env
 	out, err := cmd.CombinedOutput()
 	if err == nil {

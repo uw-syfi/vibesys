@@ -4,15 +4,10 @@ package e2e
 
 import (
 	"context"
-	"github.com/uw-syfi/vibesys/orchestrator/hosted"
-	"net"
 	"testing"
 
-	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
-	"github.com/uw-syfi/vibesys/gateway/schemahash"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
 
 // awaitLeadDeliveries observes the typed mailbox, rather than waiting for a
@@ -22,12 +17,7 @@ func (r *rig) awaitLeadDeliveries(lead string) {
 	r.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	connection, err := grpc.NewClient("passthrough:///gateway", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", lifecycle.SocketPath(r.root, schemahash.APISchemaHash))
-	}), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(4<<20)))
-	if err != nil {
-		r.t.Fatal(err)
-	}
+	connection := r.dial(ctx)
 	defer connection.Close()
 	stream, err := pb.NewOrchestratorServiceClient(connection).WatchRuns(ctx, &pb.WatchRunsRequest{})
 	if err != nil {

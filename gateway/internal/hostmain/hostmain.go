@@ -41,14 +41,14 @@ func Main(args []string) int {
 }
 
 func run(ctx context.Context, args []string) error {
-	if verb, root, rest := orchestratorVerb(args); verb {
-		if code := orchestratorCommand(ctx, root, rest); code != 0 {
+	if len(args) > 0 && hosted.IsCommand(args[0]) {
+		if code := hosted.Command(ctx, version, args, os.Stdin, os.Stdout, os.Stderr); code != 0 {
 			return exitCode(code)
 		}
 		return nil
 	}
 	if len(args) == 0 || (args[0] != "serve" && args[0] != "connect") {
-		return errors.New("usage: " + hosted.HostProgram + " {serve|connect} [options]\n  " + hosted.HostProgram + " [--root PATH] VERB, where VERB is one of\n" + hosted.Usage)
+		return errors.New("usage: " + hosted.HostProgram + " {serve|connect} [options]\n  " + hosted.HostProgram + " VERB, where VERB is one of\n" + hosted.Usage)
 	}
 	command := args[0]
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)

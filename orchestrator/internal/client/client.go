@@ -1,11 +1,11 @@
 // Package client is the way to the daemon. It speaks only OrchestratorService, so the desktop app
-// and the headless client use exactly the same calls, and an agent's tools use them too, with the
-// session metadata that says which agent is calling.
+// and vibesys-client (orchestrator/clientcli) use exactly the same calls, and an agent's tools use
+// them too, with the session metadata that says which agent is calling.
 //
-// There is one transport: a net.Conn from a Dialer. On the daemon's host the Dialer opens its
-// private Unix socket. From another host it runs `ssh host vibesys-host connect`, which
-// pipes its stdio to that socket, and wraps the pipes as a net.Conn. The package starts no process
-// and opens no socket itself.
+// There is one transport: a net.Conn from a Dialer. On the daemon's host the Dialer opens the
+// gateway's Unix socket. A Dialer for another host would run `ssh host vibesys-host connect`, which
+// pipes its stdio to that socket, and wrap the pipes with StdioConn; none is wired today. The
+// package starts no process and opens no socket itself.
 package client
 
 import (

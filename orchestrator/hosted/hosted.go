@@ -145,13 +145,6 @@ func registerUnavailable(server grpc.ServiceRegistrar, reason string) {
 	server.RegisterService(&desc, pb.UnimplementedOrchestratorServiceServer{})
 }
 
-// GatewayRoot is the host .vibesys directory a gateway serves from and its clients dial, so that a
-// gateway belongs to exactly one orchestrator state directory: the --root flag, else a subdirectory
-// of $VIBESYS_ORCHESTRATOR_STATE_DIR, else ~/.vibesys. See production.GatewayRoot.
-func GatewayRoot(flag string, getenv func(string) string, home string) (string, error) {
-	return production.GatewayRoot(flag, getenv, home)
-}
-
 // Environ is the process environment, for Options.Getenv.
 func Environ() (func(string) string, string) {
 	home, _ := os.UserHomeDir()

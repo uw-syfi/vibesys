@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -56,12 +55,11 @@ func TestConnectCLI(t *testing.T) {
 		if err := command.Run(); !errors.As(err, &exit) || exit.ExitCode() != 1 {
 			t.Fatalf("no arguments: %v", err)
 		}
-		const usage = "usage: vibesys-host {serve|connect} [options]\n  vibesys-host [--root PATH] VERB, where VERB is one of\n  mcp\n  [--host HOST] run start --repository DIR --task NAME --brief TEXT [--harness claude_code|codex] [--fanout N] [--model M] [--effort E] [--deadline RFC3339]\n  [--host HOST] run stop RUN\n  [--host HOST] run watch [--after SEQUENCE]\n  [--host HOST] send AGENT TEXT\n\n"
+		const usage = "usage: vibesys-host {serve|connect} [options]\n  vibesys-host VERB, where VERB is one of\n  mcp\n\n"
 		if stdout.Len() != 0 || stderr.String() != usage {
 			t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
 		}
 	})
-	t.Run("run-start-dial-failure", func(t *testing.T) { testRunStartDialFailure(t, binary) })
 }
 
 func testTailCLI(t *testing.T, binary string) {
@@ -298,45 +296,6 @@ func testStateDirectoryRoot(t *testing.T, binary string) {
 
 // Bare run start currently reaches the host before checking arguments. Pin exit 1
 // on a failed handshake rather than introducing usage validation during the move.
-func testRunStartDialFailure(t *testing.T, binary string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	root, err := os.MkdirTemp("", "g")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(root)
-	endpoint, err := lifecycle.Listen(root, schemahash.APISchemaHash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer endpoint.Close()
-	// A HostService-only peer refuses the orchestrator handshake without launching a host.
-	served := make(chan error, 1)
-	go func() { served <- server.Serve(ctx, endpoint.Listener, server.Config{Root: root, Version: "cli-test"}) }()
-	defer func() {
-		cancel()
-		select {
-		case err := <-served:
-			if err != nil {
-				t.Error(err)
-			}
-		case <-time.After(5 * time.Second):
-			t.Error("server did not stop")
-		}
-	}()
-	command := exec.CommandContext(ctx, binary, "--root", root, "run", "start")
-	var stdout, stderr bytes.Buffer
-	command.Stdout, command.Stderr = &stdout, &stderr
-	var exit *exec.ExitError
-	if err := command.Run(); !errors.As(err, &exit) || exit.ExitCode() != 1 {
-		t.Fatalf("run start: %v, stderr: %s", err, &stderr)
-	}
-	if stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "vibesys-host: handshake with the orchestrator:") {
-		t.Fatalf("stdout = %q, stderr = %q", stdout.String(), stderr.String())
-	}
-}
-
 func testSecondServe(t *testing.T, binary string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

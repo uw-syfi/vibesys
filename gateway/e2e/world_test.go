@@ -3,15 +3,13 @@
 package e2e
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
-	"os/exec"
 	"strconv"
 	"strings"
 )
 
-// world is the run as `run watch` shows it: the last state of each agent and each message, folded
+// world is the run as the stream of runs shows it: the last state of each agent and each message, folded
 // from the events in order. It is a reading of the daemon's own output, so what a test asserts on
 // it is what an operator's client would see.
 type world struct {
@@ -63,7 +61,7 @@ func newWorld() *world {
 	return &world{agents: map[string]*agentView{}, messages: map[string]*messageView{}}
 }
 
-// fold applies one line of `run watch`. A line that is not an event (a snapshot) changes nothing.
+// fold applies one line of the stream of runs. A line that is not an event (a snapshot) changes nothing.
 func (w *world) fold(line string) {
 	var l struct {
 		Event *struct {
@@ -117,21 +115,13 @@ func (r *rig) observe(what string, w *world, done func() bool) {
 	r.t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), bound)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, r.binary, "--root", r.root, "run", "watch", "--after", strconv.FormatUint(w.last, 10))
-	cmd.Env = r.env
-	out, err := cmd.StdoutPipe()
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	if err := cmd.Start(); err != nil {
-		r.t.Fatal(err)
-	}
-	defer func() { cancel(); _ = cmd.Wait() }()
-	scanner := bufio.NewScanner(out)
-	scanner.Buffer(make([]byte, 1<<20), 16<<20)
+	next := r.watch(ctx, w.last)
 	var seen []string
-	for scanner.Scan() {
-		line := scanner.Text()
+	for {
+		line, err := next()
+		if err != nil {
+			break
+		}
 		seen = append(seen, line)
 		w.fold(line)
 		if done() {
