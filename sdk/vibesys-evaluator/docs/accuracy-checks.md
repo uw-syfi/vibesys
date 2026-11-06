@@ -60,9 +60,15 @@ and its `Origin` call.
   checker then searches those keys together (their connected component).
   Use this only for what the contract makes atomic; one hot multi-key
   operation can merge everything into one huge partition.
-- **Decode strictly.** A body that does not parse, a status the operation
-  never answers, an answer that is wrong without any state (an id outside the
-  candidates) is a `Violation`: the check fails without a search.
+- **Decode strictly.** A body that does not parse, a field the schema does
+  not have, a status the operation never answers, an answer that is wrong
+  without any state (an id outside the candidates) is a `Violation`: the check
+  fails without a search.
+- **Statuses.** The recommended default: a 2xx is a known outcome; a 4xx the
+  operation can answer (409 full, 404 absent) is a known outcome too, and any
+  other 4xx is a `Violation`; a 5xx, a timeout or a reset (`Call.Lost`) is an
+  **unknown outcome**: the operation may or may not have taken effect, so its
+  piece is `Unknown`.
 - **Lookups across phases** (an id created in phase 0, read in phase 2) are
   resolved by keeping a small index across loop iterations and adding the
   dependent pieces after the loop. Do not keep `Call`s: a phase's bodies are
@@ -76,7 +82,24 @@ and its `Origin` call.
 `Step` returns the states the system may be in after an operation, or none
 and a sentence saying why the answer is impossible; that sentence is what a
 failure report shows. Return several states when the model allows several
-outcomes. States are values: `Step` returns new ones and never mutates its
+outcomes: an unknown outcome (applied or not), or a race the application
+really has. Train Ticket creates with find-then-save, so two concurrent
+creates of one id can both succeed:
+
+```go
+case "create":
+    if _, exists := s.entities[op.In.ID]; exists && op.Out.Created {
+        // Both creates may have found the id absent before either saved it:
+        // a second "created" is allowed while the first one is in flight.
+        if s.inFlight(op.In.ID, op.Call) {
+            return []State{s.with(op.In.ID, op.In.Entity)}, ""
+        }
+        return nil, fmt.Sprintf("%s already exists, yet the create succeeded", op.In.ID)
+    }
+```
+
+(The state remembers recent creates with their times, as `Window` does for
+values, and prunes them at `Op.Floor`.) States are values: `Step` returns new ones and never mutates its
 argument. `Equal` and `Hash` define when two states are the same for the
 search's cache; states that differ only in how they were reached should
 compare equal, or the search cannot merge them.
@@ -111,8 +134,28 @@ Restarts and cache flushes happen between phases, at quiescent points.
 `Fault(state, fault)` returns the states after one; leave it nil when faults
 must not change anything (acknowledged writes are durable). With `Fault` nil
 the checker does not copy faults into partitions, which matters with
-thousands of keys. A fault while an operation was in flight is a capture
-problem and makes the verdict UNKNOWN.
+thousands of keys; with `Fault` set, every partition sees every fault. A
+fault while an operation was in flight is a capture problem and makes the
+verdict UNKNOWN.
+
+A restart can change state on purpose. Train Ticket's services re-apply their
+seed data on startup (create-if-absent for most tables, an upsert for routes
+and prices), so the model closes over the pristine seed and re-applies it:
+
+```go
+seed := readSeed(h.Dataset) // in Main's oracle function
+spec.Fault = func(s State, f check.Fault) []State {
+    if f.Kind != "restart" {
+        return []State{s}
+    }
+    for id, e := range seed.ofService(f.Target) {
+        if _, present := s.get(id); !present || seed.upserts(f.Target) {
+            s = s.with(id, e)
+        }
+    }
+    return []State{s}
+}
+```
 
 ## Unknown outcomes and EffectWindow
 
@@ -126,10 +169,11 @@ undecidable. So:
 - Set `EffectWindow` to how long a lost operation can still take effect (the
   application's own request deadline). Without it, a lost write can take
   effect any time until the end of the history.
-- Keep lost responses near zero: the accuracy load is fixed and low. More
-  than `MaxLostShare` (default 1%) of pieces with an unknown outcome fails the
-  check, since losing responses at that load is the candidate's fault. A task
-  can raise it with `--max-lost-share`.
+- Keep unknown outcomes near zero: the accuracy load is fixed and low. More
+  than `MaxLostShare` (default 1%) of pieces with an unknown outcome (lost
+  responses and 5xx alike: whatever the projection marked `Unknown`) fails the
+  check, since at that load they are the candidate's fault. A task can raise
+  it with `--max-lost-share`.
 - An unknown read tells nothing and is dropped.
 
 ## Keep per-key overlap low

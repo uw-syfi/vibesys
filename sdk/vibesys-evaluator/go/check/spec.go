@@ -53,7 +53,7 @@ type Piece[I, O any] struct {
 	Keys []string
 	In   I
 	Out  O
-	// Unknown means the outcome is unknown (a lost response, or an error that may have been
+	// Unknown means the outcome is unknown (a lost response, a 5xx, an error that may have been
 	// applied): Out is ignored and Step must allow both outcomes. An unknown read tells nothing
 	// and is dropped.
 	Unknown bool

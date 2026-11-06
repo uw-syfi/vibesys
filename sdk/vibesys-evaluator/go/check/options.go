@@ -24,9 +24,9 @@ type Options struct {
 	// MaxOpsPerPartition: a partition with more ops than this after sampling is not searched
 	// (undecided, status too-large).
 	MaxOpsPerPartition int
-	// MaxLostShare is the largest share of pieces with an unknown outcome a spec accepts; above
-	// it the check fails, since at a fixed low load losing responses is the candidate's fault.
-	// Negative: no limit.
+	// MaxLostShare is the largest share of pieces with an unknown outcome (Piece.Unknown: lost
+	// responses and 5xx alike) a spec accepts; above it the check fails, since at the check's
+	// fixed low load they are the candidate's fault. Negative: no limit.
 	MaxLostShare float64
 	// OverlapWarning: a partition with more ops in flight at once than this gets a warning, since
 	// a search that must reject a history costs about 2^overlap per operation.
