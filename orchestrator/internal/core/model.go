@@ -37,6 +37,9 @@ type Run struct {
 	// Kept are the working copies agents made that were not removed when the run ended, because they
 	// hold changes git does not have. Empty until the run is over and its checkouts are released.
 	Kept []Checkout
+	// NeverOpened says the run failed without its lead ever running a turn: a start that did not
+	// happen. It is set when the run ends and never changes.
+	NeverOpened bool
 }
 
 // Checkout is a working copy of a run's repository that one agent made.

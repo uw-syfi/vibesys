@@ -1026,6 +1026,10 @@ type Run struct {
 	// because they hold changes git does not have. Empty while the run is live, and for a run that left
 	// none. The run's operator decides what becomes of them.
 	KeptCheckouts []*KeptCheckout `protobuf:"bytes,19,rep,name=kept_checkouts,json=keptCheckouts,proto3" json:"kept_checkouts,omitempty"`
+	// The run failed and its lead never ran a turn: it never opened, usually because the host could
+	// not start the agent. Such a run is a refused start more than a run, so a listing leaves it out
+	// unless asked. False for every other run, and for runs recorded before this was known.
+	NeverOpened   bool `protobuf:"varint,21,opt,name=never_opened,json=neverOpened,proto3" json:"never_opened,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1184,6 +1188,13 @@ func (x *Run) GetKeptCheckouts() []*KeptCheckout {
 		return x.KeptCheckouts
 	}
 	return nil
+}
+
+func (x *Run) GetNeverOpened() bool {
+	if x != nil {
+		return x.NeverOpened
+	}
+	return false
 }
 
 // KeptCheckout is one agent's working copy of the run's repository, left in place because removing
@@ -3454,7 +3465,7 @@ var File_vibesys_orchestrator_v1_orchestrator_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\n" +
-	"*vibesys/orchestrator/v1/orchestrator.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xce\a\n" +
+	"*vibesys/orchestrator/v1/orchestrator.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xf1\a\n" +
 	"\x03Run\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12'\n" +
 	"\n" +
@@ -3480,7 +3491,8 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x05usage\x18\x10 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageR\x05usage\x12%\n" +
 	"\x0efinal_reported\x18\x11 \x01(\bR\rfinalReported\x12L\n" +
 	"\x0eallowed_agents\x18\x12 \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgents\x12L\n" +
-	"\x0ekept_checkouts\x18\x13 \x03(\v2%.vibesys.orchestrator.v1.KeptCheckoutR\rkeptCheckoutsJ\x04\b\v\x10\fJ\x04\b\x14\x10\x15R\fcli_locationR\bjob_tool\"b\n" +
+	"\x0ekept_checkouts\x18\x13 \x03(\v2%.vibesys.orchestrator.v1.KeptCheckoutR\rkeptCheckouts\x12!\n" +
+	"\fnever_opened\x18\x15 \x01(\bR\vneverOpenedJ\x04\b\v\x10\fJ\x04\b\x14\x10\x15R\fcli_locationR\bjob_tool\"b\n" +
 	"\fKeptCheckout\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12.\n" +
 	"\blocation\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]+$R\blocation\"l\n" +
