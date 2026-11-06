@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -48,7 +49,7 @@ func startFakeProcess(t testing.TB, place HolderPlace, pid int, groups ...uint32
 		t.Fatalf("the lock was not free: %v", err)
 	}
 	p.lock = file
-	writeRecord(t, place, &pb.SessionProcesses{HolderPid: uint32(pid), AgentProcessGroups: groups})
+	writeRecord(t, place, &pb.SessionProcesses{HolderPid: uint32(pid), AgentProcessGroups: groupsOf(groups...)})
 	t.Cleanup(p.die)
 	return p
 }
@@ -61,6 +62,18 @@ func (p *fakeProcess) die() {
 		p.lock = nil
 	}
 }
+
+// groupsOf records groups with the start time their leaders had.
+func groupsOf(ids ...uint32) []*pb.AgentProcessGroup {
+	var out []*pb.AgentProcessGroup
+	for _, id := range ids {
+		out = append(out, &pb.AgentProcessGroup{Id: id, LeaderStarted: startedAt(int(id), 0)})
+	}
+	return out
+}
+
+// startedAt is the start time of the process with that pid in the boot-th run of the machine.
+func startedAt(pid, boot int) string { return fmt.Sprintf("boot %d pid %d", boot, pid) }
 
 func writeRecord(t testing.TB, place HolderPlace, record *pb.SessionProcesses) {
 	t.Helper()
@@ -81,6 +94,15 @@ type recordingSignals struct {
 	process *fakeProcess
 	pids    []signalled
 	pgids   []signalled
+	// leaders is when the leader of each group started now; a group with no entry has no leader.
+	leaders map[int]string
+}
+
+func (s *recordingSignals) LeaderStarted(pid int) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	started, ok := s.leaders[pid]
+	return started, ok, nil
 }
 
 // signalled is one signal, and whether the lock of the place was held when it was sent.
@@ -134,6 +156,15 @@ const (
 	records
 )
 
+// The ways a recorded group can be when the host looks at it.
+const (
+	groupOurs     = iota // its leader runs and started when the record says
+	groupNoLeader        // no leader: the group, if it exists, is still the agent's
+	groupRecycled        // a leader runs that started at another time: the id went to another program
+	groupUnknown         // the record has no start time, and a leader runs
+	groupKinds
+)
+
 // scene is a place put into one of the combinations of the two.
 type scene struct {
 	place   HolderPlace
@@ -141,6 +172,7 @@ type scene struct {
 	record  int
 	pid     int
 	groups  []uint32
+	kinds   []int // how each of groups is now
 	process *fakeProcess
 	signals *recordingSignals
 }
@@ -156,6 +188,21 @@ func newScene(t testing.TB, r *rand.Rand, lock, record int) *scene {
 	}
 	for range r.IntN(4) {
 		s.groups = append(s.groups, uint32(2+r.IntN(1<<20)))
+		s.kinds = append(s.kinds, r.IntN(groupKinds))
+	}
+	s.signals.leaders = map[int]string{}
+	recorded := make([]*pb.AgentProcessGroup, len(s.groups))
+	for i, id := range s.groups {
+		recorded[i] = &pb.AgentProcessGroup{Id: id, LeaderStarted: startedAt(int(id), 0)}
+		switch s.kinds[i] {
+		case groupOurs:
+			s.signals.leaders[int(id)] = startedAt(int(id), 0)
+		case groupRecycled: // after a reboot, say
+			s.signals.leaders[int(id)] = startedAt(int(id), 1)
+		case groupUnknown:
+			recorded[i].LeaderStarted = ""
+			s.signals.leaders[int(id)] = startedAt(int(id), 1)
+		}
 	}
 	switch lock {
 	case lockFree:
@@ -163,10 +210,10 @@ func newScene(t testing.TB, r *rand.Rand, lock, record int) *scene {
 			t.Fatal(err)
 		}
 	case lockHeld:
-		s.process = startFakeProcess(t, s.place, s.pid, s.groups...)
+		s.process = startFakeProcess(t, s.place, s.pid)
 		s.signals.process = s.process
 	}
-	valid := &pb.SessionProcesses{HolderPid: uint32(s.pid), AgentProcessGroups: s.groups}
+	valid := &pb.SessionProcesses{HolderPid: uint32(s.pid), AgentProcessGroups: recorded}
 	switch record {
 	case recordAbsent:
 		if err := os.Remove(s.place.ProcessesFile()); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -178,10 +225,10 @@ func newScene(t testing.TB, r *rand.Rand, lock, record int) *scene {
 		data := append([]byte{0xff}, strconv.Itoa(r.IntN(1<<30))...) // wire type 7 does not exist
 		writeBytes(t, s.place, data)
 	case recordTruncated:
-		data, _ := proto.Marshal(&pb.SessionProcesses{HolderPid: uint32(s.pid), AgentProcessGroups: []uint32{1 << 21, 1 << 22}})
+		data, _ := proto.Marshal(&pb.SessionProcesses{HolderPid: uint32(s.pid), AgentProcessGroups: groupsOf(1<<21, 1<<22)})
 		writeBytes(t, s.place, data[:len(data)-1])
 	case recordInvalid:
-		bad := []*pb.SessionProcesses{{}, {HolderPid: uint32(s.pid), AgentProcessGroups: []uint32{1}}, {AgentProcessGroups: []uint32{5}}}
+		bad := []*pb.SessionProcesses{{}, {HolderPid: uint32(s.pid), AgentProcessGroups: groupsOf(1)}, {AgentProcessGroups: groupsOf(5)}}
 		writeRecord(t, s.place, bad[r.IntN(len(bad))])
 	}
 	return s
@@ -213,6 +260,9 @@ func (s *scene) check(t *testing.T, op string, err error) {
 	for _, n := range s.signals.pgids {
 		if n.held {
 			t.Fatalf("%s: ended group %d while its holder still held the lock", where, n.id)
+		}
+		if i := slices.Index(s.groups, uint32(n.id)); i < 0 || s.kinds[i] == groupRecycled || s.kinds[i] == groupUnknown {
+			t.Fatalf("%s: ended group %d, whose leader started at another time than the record says", where, n.id)
 		}
 	}
 	if s.record >= recordGarbage {
@@ -253,7 +303,7 @@ func TestNoProcessIsSignalledWithoutTheLockItNeedsWhateverTheFilesSay(t *testing
 						case "Reap":
 							err = s.holders().Reap(s.place)
 						case "Spawn":
-							err = prepareStart(s.place, s.signals)
+							_, err = prepareStart(s.place, s.signals)
 						}
 						s.check(t, op, err)
 						s.checkOutcome(t, op, err)
@@ -271,8 +321,10 @@ func (s *scene) checkOutcome(t *testing.T, op string, err error) {
 	pid := int(s.pid)
 	wantGroups := func() []int {
 		var out []int
-		for _, g := range s.groups {
-			out = append(out, int(g))
+		for i, g := range s.groups {
+			if s.kinds[i] == groupOurs || s.kinds[i] == groupNoLeader {
+				out = append(out, int(g))
+			}
 		}
 		return out
 	}
@@ -306,7 +358,7 @@ func (s *scene) checkOutcome(t *testing.T, op string, err error) {
 			t.Fatalf("%s: err %v, record kept %v; want a named error and the record removed", where, err, s.recordExists())
 		}
 		// Reported once: the next look finds nothing to report.
-		if again := reapUnheld(s.place, s.signals); again != nil {
+		if _, again := reapUnheld(s.place, s.signals); again != nil {
 			t.Fatalf("%s: the damaged record was reported again: %v", where, again)
 		}
 	}
@@ -379,7 +431,7 @@ func TestAPlaceWithAHolderIsNotStartedAgain(t *testing.T) {
 
 // Whatever bytes a record holds, reading it gives a record the contract accepts or a named error.
 func FuzzReadProcesses(f *testing.F) {
-	valid, _ := proto.Marshal(&pb.SessionProcesses{HolderPid: 3, AgentProcessGroups: []uint32{2, 9}})
+	valid, _ := proto.Marshal(&pb.SessionProcesses{HolderPid: 3, AgentProcessGroups: groupsOf(2, 9)})
 	f.Add(valid)
 	f.Add(valid[:2])
 	f.Add([]byte{})
@@ -400,10 +452,36 @@ func FuzzReadProcesses(f *testing.F) {
 			t.Fatalf("accepted a record with no pid: %v", record)
 		default:
 			for _, g := range record.GetAgentProcessGroups() {
-				if g <= 1 {
-					t.Fatalf("accepted group %d", g)
+				if g.GetId() <= 1 {
+					t.Fatalf("accepted group %d", g.GetId())
 				}
 			}
 		}
 	})
+}
+
+// A machine that rebooted since the record was written gave its group ids to other programs. The host
+// ends none whose leader started at another time, and says so; it ends one whose leader is gone.
+func TestAGroupIDAnotherProgramGotAfterARebootIsLeftAlone(t *testing.T) {
+	place := newPlace(t)
+	signals := &recordingSignals{leaders: map[int]string{
+		11: startedAt(11, 1), // another program's now
+		12: startedAt(12, 0), // still the agent
+		// 13: no leader, and a group of that id the kernel still counts as the agent's.
+		14: startedAt(14, 1), // the record has no start time for it
+	}}
+	writeRecord(t, place, &pb.SessionProcesses{HolderPid: 5, AgentProcessGroups: []*pb.AgentProcessGroup{
+		{Id: 11, LeaderStarted: startedAt(11, 0)}, {Id: 12, LeaderStarted: startedAt(12, 0)},
+		{Id: 13, LeaderStarted: startedAt(13, 0)}, {Id: 14},
+	}})
+	skipped, err := reapGone(place, signals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := signals.groups(); !slices.Equal(got, []int{12, 13}) {
+		t.Fatalf("ended groups %v, want only 12 and 13", got)
+	}
+	if len(skipped) != 2 || !strings.Contains(skipped[0], "group 11") || !strings.Contains(skipped[1], "group 14") {
+		t.Fatalf("said %v, want groups 11 and 14 named", skipped)
+	}
 }

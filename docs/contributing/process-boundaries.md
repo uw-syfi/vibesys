@@ -194,7 +194,8 @@ daemon and its supervisor already work this way.
 
 Three consequences are held by tests:
 
-- A second holder for a session cannot take the lock and exits at once, so a
+- A second holder for a session cannot take the lock and exits (after a few short
+  tries, because the host's own look at the lock lasts an instant), so a
   host that crashed between starting a holder and the holder's listening starts
   no second one: it sees the lock held and waits.
 - A command to a holder whose lock is free is a lost session with a reason, not
@@ -202,7 +203,9 @@ Three consequences are held by tests:
   ends.
 - A record that cannot be read ends nothing and is reported with its path.
   The pid in the record is signalled only while the lock is held; the groups
-  only when it is free.
+  only when it is free, and each only if its leader is gone or started when the
+  record says (`ps -o lstart=` as an opaque token, no `/proc`), because a group
+  id may have gone to another program since, as after a reboot.
 
 ### Environment contract
 

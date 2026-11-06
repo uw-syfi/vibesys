@@ -111,6 +111,24 @@ def _process_table() -> str:
     ).stdout
 
 
+def process_started(pid: int) -> str:
+    """When the process *pid* started, as ``ps`` prints it in a fixed locale and zone.
+
+    The text is an opaque token the host compares for equality, read the same way on Linux and macOS
+    with no ``/proc``. It is empty when it cannot be read, which the host takes to prove nothing.
+    """
+    # lint-waiver: LW-770104 [S603]; a fixed program with a number for its one argument.
+    # > Same reason as the process table above: ps is the one source that is the same on Linux and macOS.
+    done = subprocess.run(  # noqa: S603
+        [PS, "-o", "lstart=", "-p", str(pid)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"LC_ALL": "C", "TZ": "UTC"},
+    )
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
 def _children_in(table: str, parent: int) -> list[int]:
     children: list[int] = []
     for line in table.splitlines():
@@ -235,7 +253,9 @@ def _serve_locked(
             request.session, FileStore.at(state), drivers(request, state), wakeup.notify
         )
     )
-    groups = SessionProcessesFile(Path(bootstrap.processes_file), os.getpid(), agent_groups)
+    groups = SessionProcessesFile(
+        Path(bootstrap.processes_file), os.getpid(), agent_groups, process_started
+    )
     ending = _Ending()
 
     def stopped(*_: object) -> None:

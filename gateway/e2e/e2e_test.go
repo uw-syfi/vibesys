@@ -359,8 +359,8 @@ func TestAKilledSessionProcessIsFoundGoneAndItsAgentIsReaped(t *testing.T) {
 	for _, pid := range untilNoneRunning(func() []int {
 		var left []int
 		for _, group := range groups {
-			if running(int(group)) {
-				left = append(left, int(group))
+			if running(int(group.GetId())) {
+				left = append(left, int(group.GetId()))
 			}
 		}
 		return left

@@ -78,6 +78,7 @@
     "KeptOperation.info_json"
   ],
   "proto/vibesys/orchestrator/v1/agent_session.proto": [
+    "AgentProcessGroup",
     "OpenSessionRequest.agent_data_directory",
     "OpenSessionRequest.working_directory",
     "SessionBootstrap.listen_socket",

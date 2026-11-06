@@ -19,7 +19,7 @@ from tests.fakes import FaultyFiles, FileFaultError, ScriptedDriver, TurnScript
 from vs_sidecar.engine import Engine
 from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.holder import SessionProcessesFile
-from vs_sidecar.main import agent_groups, child_pids, work
+from vs_sidecar.main import agent_groups, child_pids, process_started, work
 from vs_sidecar.server import Wakeup, serve
 from vs_sidecar.store import FileStore, MemoryStore
 
@@ -91,12 +91,18 @@ def test_the_record_names_the_live_groups_and_is_emptied_when_the_agent_is_close
 ) -> None:
     live = [41, 42]
     path = tmp_path / "processes.pb"
-    groups = SessionProcessesFile(path, 7, lambda: list(live))
+    groups = SessionProcessesFile(path, 7, lambda: list(live), lambda pid: f"started {pid}")
     groups.record()
-    assert _read(path) == sc.SessionProcesses(holder_pid=7, agent_process_groups=[41, 42])
+    assert _read(path) == sc.SessionProcesses(
+        holder_pid=7,
+        agent_process_groups=[
+            sc.AgentProcessGroup(id=41, leader_started="started 41"),
+            sc.AgentProcessGroup(id=42, leader_started="started 42"),
+        ],
+    )
     live.append(43)  # the provider respawned the agent mid-turn
     groups.record()
-    assert _read(path).agent_process_groups == [41, 42, 43]
+    assert [g.id for g in _read(path).agent_process_groups] == [41, 42, 43]
     groups.clear()
     assert _read(path) == sc.SessionProcesses(holder_pid=7)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["processes.pb"]
@@ -106,11 +112,41 @@ def test_the_record_names_the_live_groups_and_is_emptied_when_the_agent_is_close
 def test_the_record_is_always_one_the_host_accepts(live: list[int]) -> None:
     with tempfile.TemporaryDirectory(prefix="vs") as directory:
         path = Path(directory) / "processes.pb"
-        SessionProcessesFile(path, 7, lambda: live).record()
+        SessionProcessesFile(path, 7, lambda: live, lambda pid: f"s{pid}").record()
         record = _read(path)
         assert protovalidate.validate(record) is None
         assert record.holder_pid == 7
-        assert list(record.agent_process_groups) == [group for group in live if group > 1]
+        assert [g.id for g in record.agent_process_groups] == [group for group in live if group > 1]
+        assert all(g.leader_started == f"s{g.id}" for g in record.agent_process_groups)
+
+
+def test_a_leaders_start_time_is_read_once_and_again_only_if_it_could_not_be_read(
+    tmp_path: Path,
+) -> None:
+    reads: list[int] = []
+    answers = iter(["", "t1", "never read again"])
+
+    def started(pid: int) -> str:
+        reads.append(pid)
+        return next(answers)
+
+    path = tmp_path / "processes.pb"
+    groups = SessionProcessesFile(path, 7, lambda: [41], started)
+    groups.record()
+    assert _read(path).agent_process_groups[0].leader_started == ""
+    groups.record()
+    groups.record()
+    assert _read(path).agent_process_groups[0].leader_started == "t1"
+    assert reads == [41, 41]
+
+
+def test_the_start_time_of_this_process_is_the_same_each_time_it_is_read_and_missing_for_none() -> (
+    None
+):
+    first = process_started(os.getpid())
+    assert first
+    assert process_started(os.getpid()) == first
+    assert process_started(2**22 + 12345) == ""
 
 
 def test_without_a_proc_the_children_come_from_the_process_table(tmp_path: Path) -> None:

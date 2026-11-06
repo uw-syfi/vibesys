@@ -215,6 +215,32 @@ func TestAHostThatCrashesBetweenSpawnAndBindStartsNoSecondProcess(t *testing.T) 
 	}
 }
 
+// The host's look at a place's lock, from its detection path, lands at each step of a start. It
+// takes the lock for an instant, and a process that is starting must not take that for a second
+// process and end (the process side of this is held by test_holder_lock.py). Here the start goes on
+// whatever step it lands at: one process, one agent, the session open, and the look ends nothing.
+func TestAProbeOfTheLockAtAnyStepOfAStartLeavesTheStartAlone(t *testing.T) {
+	for _, step := range startSteps {
+		t.Run(step, func(t *testing.T) {
+			s := newStartSim(t)
+			s.world.probes[step] = true
+			s.world.lateBinds = 1
+			lead := s.start()
+			s.settle()
+			if s.world.probes[step] {
+				t.Fatalf("the start never reached %q", step)
+			}
+			a := s.lead(lead)
+			if a.Status.Over() || a.ResumeToken != "token" || a.Session != 1 {
+				t.Fatalf("lead %s, session %d, resume %q: want the first session open", a.Status, a.Session, a.ResumeToken)
+			}
+			if s.world.spawns != 1 || s.world.startedAgents() != 1 || s.world.liveAgents() != 1 {
+				t.Fatalf("%d processes, %d agents started, %d live: want one of each", s.world.spawns, s.world.startedAgents(), s.world.liveAgents())
+			}
+		})
+	}
+}
+
 // A second process at a place a process holds is refused, whatever the host believes.
 func TestAProcessIsNotStartedAtAPlaceAProcessHolds(t *testing.T) {
 	w := newHolderWorld()

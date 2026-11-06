@@ -40,6 +40,16 @@ class OtherSessionError(ValueError):
     """An open for a session other than the one this process holds."""
 
 
+#: How many times a busy lock is tried, and how long to wait between tries. A look by the host lasts
+#: microseconds; this is long enough to outlast many and short enough that a second process ends soon.
+LOCK_ATTEMPTS = 25
+LOCK_PAUSE_SECONDS = 0.02
+
+
+def _pause() -> None:
+    threading.Event().wait(LOCK_PAUSE_SECONDS)
+
+
 class HolderLockedError(RuntimeError):
     """Another process holds the lock, so another process lives for this session."""
 
@@ -56,19 +66,31 @@ class HolderLock:
         self._descriptor: int | None = descriptor
 
     @classmethod
-    def take(cls, path: Path) -> HolderLock:
-        """Take the lock on *path* without waiting. Raises ``HolderLockedError`` if it is held."""
+    def take(
+        cls, path: Path, *, pause: Callable[[], None] = _pause, attempts: int = LOCK_ATTEMPTS
+    ) -> HolderLock:
+        """Take the lock on *path*. Raises ``HolderLockedError`` if another process keeps it.
+
+        The host tries this lock to learn whether a process lives, and holds it for an instant while it
+        does. A process that starts then must not mistake that look for a second process, so a busy lock
+        is tried again up to *attempts* times, with *pause* between. A real second process holds it for
+        its whole life, which is far longer than the tries last, so it still ends here.
+        """
         descriptor = os.open(path, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC, 0o600)
-        try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            os.close(descriptor)
-            msg = f"another process holds {path}"
-            raise HolderLockedError(msg) from error
-        except BaseException:
-            os.close(descriptor)
-            raise
-        return cls(descriptor)
+        for attempt in range(attempts):
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if attempt + 1 < attempts:
+                    pause()
+            except BaseException:
+                os.close(descriptor)
+                raise
+            else:
+                return cls(descriptor)
+        os.close(descriptor)
+        msg = f"another process holds {path}"
+        raise HolderLockedError(msg)
 
     def release(self) -> None:
         """Free the lock. The system does the same when the process ends."""
@@ -104,11 +126,24 @@ class SessionProcessesFile:
     calls ``record``; ``clear`` runs after that thread has stopped.
     """
 
-    def __init__(self, path: Path, pid: int, groups: Callable[[], list[int]]) -> None:
-        """Write to *path* the groups *groups* finds, for the process *pid*."""
+    def __init__(
+        self,
+        path: Path,
+        pid: int,
+        groups: Callable[[], list[int]],
+        started: Callable[[int], str],
+    ) -> None:
+        """Write to *path* the groups *groups* finds, for the process *pid*.
+
+        *started* says when a group's leader started: an opaque token the host compares for equality
+        before it ends the group, so that an id another program got later is not ended. It is read once
+        for each group, when the group is first seen.
+        """
         self._path = path
         self._pid = pid
         self._groups = groups
+        self._started = started
+        self._tokens: dict[int, str] = {}
         self._validator = protovalidate.Validator()
         self._written: bytes | None = None
 
@@ -121,7 +156,14 @@ class SessionProcessesFile:
         self._write([])
 
     def _write(self, groups: list[int]) -> None:
-        message = sc.SessionProcesses(holder_pid=self._pid, agent_process_groups=groups)
+        self._tokens = {group: self._tokens.get(group) or self._started(group) for group in groups}
+        message = sc.SessionProcesses(
+            holder_pid=self._pid,
+            agent_process_groups=[
+                sc.AgentProcessGroup(id=group, leader_started=self._tokens[group])
+                for group in groups
+            ],
+        )
         self._validator.validate(message)
         data = message.SerializeToString(deterministic=True)
         if data != self._written:

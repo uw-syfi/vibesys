@@ -47,6 +47,8 @@ type holderWorld struct {
 	spawns, worktrees, reaps int
 	// crashes and deaths are the steps where the host panics and where the holder dies, each once.
 	crashes, deaths map[string]bool
+	// probes are the steps where the host looks at every place's lock, as its detection path does.
+	probes map[string]bool
 	// lateBinds is how many Dials find nothing although a spawned holder is on its way.
 	lateBinds int
 	// failSpawn, when set, is why a spawn fails.
@@ -62,7 +64,7 @@ func newHolderWorld() *holderWorld {
 	current := uint32(pb.SessionProtocolVersion_SESSION_PROTOCOL_VERSION_CURRENT)
 	return &holderWorld{
 		holders: map[string]*worldHolder{}, waiting: map[string]*worldHolder{}, agents: map[string]bool{}, started: map[string]int{},
-		crashes: map[string]bool{}, deaths: map[string]bool{}, protocol: current,
+		crashes: map[string]bool{}, deaths: map[string]bool{}, probes: map[string]bool{}, protocol: current,
 		outcome: func(*pb.OpenSessionRequest) []*pb.SessionEvent {
 			return []*pb.SessionEvent{{Body: &pb.SessionEvent_Opened{Opened: &pb.SessionOpened{
 				ResumeToken: []byte("token"), Capabilities: &pb.Capabilities{StreamsText: true, Steers: true, Resumes: true},
@@ -87,9 +89,17 @@ func holderParts(marketplace string) Parts {
 // at spends what is armed at a step: the holders die there, or the host does.
 func (w *holderWorld) at(step string) {
 	w.mu.Lock()
-	dies, crashes := w.deaths[step], w.crashes[step]
+	dies, crashes, probes := w.deaths[step], w.crashes[step], w.probes[step]
 	delete(w.deaths, step)
 	delete(w.crashes, step)
+	delete(w.probes, step)
+	var places []HolderPlace
+	for _, h := range w.waiting {
+		places = append(places, h.place)
+	}
+	for _, h := range w.holders {
+		places = append(places, h.place)
+	}
 	if dies {
 		for socket, h := range w.holders {
 			h.dead = true
@@ -98,6 +108,13 @@ func (w *holderWorld) at(step string) {
 		w.waiting = map[string]*worldHolder{}
 	}
 	w.mu.Unlock()
+	if probes {
+		// The host's detection path looks at the lock of every place, at this very point of a start.
+		for _, place := range places {
+			w.Alive(place)
+			_ = w.Reap(place)
+		}
+	}
 	if crashes {
 		panic(daemontest.Crash{At: step})
 	}

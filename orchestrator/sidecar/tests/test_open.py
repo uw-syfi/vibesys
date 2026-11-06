@@ -283,7 +283,9 @@ def test_a_process_whose_predecessor_died_takes_the_lock_whatever_files_are_left
         bootstrap = _bootstrap(directory)
         (root / "holder.lock").write_text("left over")
         (root / "processes.pb").write_bytes(
-            sc.SessionProcesses(holder_pid=1234, agent_process_groups=[1234]).SerializeToString()
+            sc.SessionProcesses(
+                holder_pid=1234, agent_process_groups=[sc.AgentProcessGroup(id=1234)]
+            ).SerializeToString()
         )
         with pytest.raises(_LeftError):
             serve_holder(

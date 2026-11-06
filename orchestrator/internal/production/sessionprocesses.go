@@ -19,6 +19,10 @@ import (
 //
 //   - A free lock means no process, whatever any record says. The groups the record names are ended
 //     and the record is removed, while the host holds the lock, so no new process starts under it.
+//     A group id may have been given to another program since the record was written (a reboot, a
+//     long gap), so a group is ended only if its leader is gone, which the kernel allows only while
+//     the group is still ours, or started when the record says. A leader that started at another
+//     time is not ours, and its group is left alone and reported.
 //   - A held lock means a process, and the record's pid is its own: the process wrote the record
 //     while it held the lock, and the host removes a stale record before it starts a process. So a pid
 //     the system has since given to another program is never signalled, because that only happens
@@ -32,6 +36,9 @@ type ProcessSignals interface {
 	Kill(pid int) error
 	// KillGroup ends every process of a group. A group already gone is not an error.
 	KillGroup(pgid int) error
+	// LeaderStarted says when the process pid started, as an opaque token that is the same for the
+	// same process and differs for another that got the pid later, and whether such a process exists.
+	LeaderStarted(pid int) (started string, exists bool, err error)
 }
 
 // OSSignals is ProcessSignals over the operating system.
@@ -132,29 +139,40 @@ func alive(place HolderPlace) bool {
 }
 
 // reapGone ends the agent processes a gone holder recorded, and removes the record and the socket
-// name it left. The caller holds the place's lock, so the holder is gone and no new one starts.
-func reapGone(place HolderPlace, signals ProcessSignals) error {
+// name it left. The caller holds the place's lock, so the holder is gone and no new one starts. It
+// returns what it left alone because it was not the agent's: a group whose leader started at another
+// time than the record says, or at a time the record does not say.
+func reapGone(place HolderPlace, signals ProcessSignals) (skipped []string, err error) {
 	record, err := readProcesses(place.ProcessesFile())
 	// Removed whatever it held, so that a record nothing can use is reported once and not forever.
 	for _, stale := range []string{place.ProcessesFile(), place.Socket} {
 		_ = os.Remove(stale)
 	}
 	if err != nil || record == nil {
-		return err
+		return nil, err
 	}
 	var errs []error
-	for _, pgid := range record.GetAgentProcessGroups() {
-		errs = append(errs, signals.KillGroup(int(pgid)))
+	for _, group := range record.GetAgentProcessGroups() {
+		id := int(group.GetId())
+		started, exists, err := signals.LeaderStarted(id)
+		switch {
+		case err != nil:
+			errs = append(errs, fmt.Errorf("tell whether group %d is still the agent's, so it was left alone: %w", id, err))
+		case exists && (group.GetLeaderStarted() == "" || started != group.GetLeaderStarted()):
+			skipped = append(skipped, fmt.Sprintf("group %d: its leader started at %q and the record says %q, so it is another program's", id, started, group.GetLeaderStarted()))
+		default:
+			errs = append(errs, signals.KillGroup(id))
+		}
 	}
-	return errors.Join(errs...)
+	return skipped, errors.Join(errs...)
 }
 
 // reapUnheld does reapGone for a place nothing holds. A place a holder lives at is left alone: its
 // agents are its own.
-func reapUnheld(place HolderPlace, signals ProcessSignals) error {
+func reapUnheld(place HolderPlace, signals ProcessSignals) (skipped []string, err error) {
 	lock, err := tryLock(place.LockFile())
 	if err != nil || lock.held {
-		return err
+		return nil, err
 	}
 	defer lock.release()
 	return reapGone(place, signals)
@@ -163,24 +181,24 @@ func reapUnheld(place HolderPlace, signals ProcessSignals) error {
 // killHolder ends the holder at a place and its agents. The pid it signals is read while the lock is
 // held, so it is the holder's own; the agents are reaped once the lock is free, from the record as
 // the holder last wrote it.
-func killHolder(place HolderPlace, signals ProcessSignals) error {
+func killHolder(place HolderPlace, signals ProcessSignals) (skipped []string, err error) {
 	lock, err := tryLock(place.LockFile())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if lock.held {
 		record, err := readProcesses(place.ProcessesFile())
 		if err != nil {
-			return fmt.Errorf("end the session's process: %w", err)
+			return nil, fmt.Errorf("end the session's process: %w", err)
 		}
 		if record == nil {
-			return fmt.Errorf("the session's process holds %s and has not recorded its pid yet", place.LockFile())
+			return nil, fmt.Errorf("the session's process holds %s and has not recorded its pid yet", place.LockFile())
 		}
 		if err := signals.Kill(int(record.GetHolderPid())); err != nil {
-			return fmt.Errorf("end the session's process %d: %w", record.GetHolderPid(), err)
+			return nil, fmt.Errorf("end the session's process %d: %w", record.GetHolderPid(), err)
 		}
 		if lock, err = awaitFree(place.LockFile()); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	defer lock.release()
@@ -209,13 +227,13 @@ func awaitFree(path string) (holderLock, error) {
 
 // prepareStart checks no holder lives at a place, and ends what a gone one left, so that a process
 // started now starts clean.
-func prepareStart(place HolderPlace, signals ProcessSignals) error {
+func prepareStart(place HolderPlace, signals ProcessSignals) (skipped []string, err error) {
 	lock, err := tryLock(place.LockFile())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if lock.held {
-		return fmt.Errorf("%w: %s is locked", ErrHolderLives, place.LockFile())
+		return nil, fmt.Errorf("%w: %s is locked", ErrHolderLives, place.LockFile())
 	}
 	defer lock.release()
 	return reapGone(place, signals)

@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/agent_session.proto.
  */
 export const file_vibesys_orchestrator_v1_agent_session: GenFile = /*@__PURE__*/
-  fileDesc("Cit2aWJlc3lzL29yY2hlc3RyYXRvci92MS9hZ2VudF9zZXNzaW9uLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSKEBAoQU2Vzc2lvbkJvb3RzdHJhcBJ7Cg1saXN0ZW5fc29ja2V0GAEgASgJQmS6SGG6AVoKKHNlc3Npb25fYm9vdHN0cmFwLmxpc3Rlbl9zb2NrZXQuYWJzb2x1dGUSGG11c3QgYmUgYW4gYWJzb2x1dGUgcGF0aBoUdGhpcy5zdGFydHNXaXRoKCcvJylyAhABEn8KD3N0YXRlX2RpcmVjdG9yeRgCIAEoCUJmukhjugFcCipzZXNzaW9uX2Jvb3RzdHJhcC5zdGF0ZV9kaXJlY3RvcnkuYWJzb2x1dGUSGG11c3QgYmUgYW4gYWJzb2x1dGUgcGF0aBoUdGhpcy5zdGFydHNXaXRoKCcvJylyAhABEnMKCWxvY2tfZmlsZRgDIAEoCUJgukhdugFWCiRzZXNzaW9uX2Jvb3RzdHJhcC5sb2NrX2ZpbGUuYWJzb2x1dGUSGG11c3QgYmUgYW4gYWJzb2x1dGUgcGF0aBoUdGhpcy5zdGFydHNXaXRoKCcvJylyAhABEn0KDnByb2Nlc3Nlc19maWxlGAQgASgJQmW6SGK6AVsKKXNlc3Npb25fYm9vdHN0cmFwLnByb2Nlc3Nlc19maWxlLmFic29sdXRlEhhtdXN0IGJlIGFuIGFic29sdXRlIHBhdGgaFHRoaXMuc3RhcnRzV2l0aCgnLycpcgIQASJbChBTZXNzaW9uUHJvY2Vzc2VzEhsKCmhvbGRlcl9waWQYASABKA1CB7pIBCoCIAASKgoUYWdlbnRfcHJvY2Vzc19ncm91cHMYAiADKA1CDLpICZIBBiIEKgIgASJVChNTZXNzaW9uSGVsbG9SZXF1ZXN0Ej4KBmNsaWVudBgBIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkJ1aWxkVmVyc2lvbnNCBrpIA8gBASLZAQoUU2Vzc2lvbkhlbGxvUmVzcG9uc2USQAoIdmVyc2lvbnMYASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQESSQoNY29tcGF0aWJpbGl0eRgCIAEoDjImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbXBhdGliaWxpdHlCCrpIB4IBBBABIAASNAoHc2Vzc2lvbhgDIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWYigQYKEk9wZW5TZXNzaW9uUmVxdWVzdBI8CgdzZXNzaW9uGAEgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblJlZkIGukgDyAEBEj0KB2hhcm5lc3MYAiABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgq6SAeCAQQQASAAEg0KBW1vZGVsGAMgASgJEhgKEHJlYXNvbmluZ19lZmZvcnQYBCABKAkSfgoRd29ya2luZ19kaXJlY3RvcnkYBSABKAlCY7pIYLoBWQonb3Blbl9zZXNzaW9uLndvcmtpbmdfZGlyZWN0b3J5LmFic29sdXRlEhhtdXN0IGJlIGFuIGFic29sdXRlIHBhdGgaFHRoaXMuc3RhcnRzV2l0aCgnLycpcgIQARKEAQoUYWdlbnRfZGF0YV9kaXJlY3RvcnkYBiABKAlCZrpIY7oBXAoqb3Blbl9zZXNzaW9uLmFnZW50X2RhdGFfZGlyZWN0b3J5LmFic29sdXRlEhhtdXN0IGJlIGFuIGFic29sdXRlIHBhdGgaFHRoaXMuc3RhcnRzV2l0aCgnLycpcgIQARIeCgxyZXN1bWVfdG9rZW4YByABKAxCCLpIBXoDGIAgEj4KBnNraWxscxgIIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25Ta2lsbHNCBrpIA8gBARKVAQoFdG9vbHMYCSADKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Ub29sU2VydmVyQmG6SF66AVsKGW9wZW5fc2Vzc2lvbi50b29scy51bmlxdWUSIHRvb2wgc2VydmVyIG5hbWVzIG11c3QgYmUgdW5pcXVlGhx0aGlzLm1hcCh0LCB0Lm5hbWUpLnVuaXF1ZSgpEkYKC2Vudmlyb25tZW50GAogASgLMikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRFbnZpcm9ubWVudEIGukgDyAEBIlMKE09wZW5TZXNzaW9uUmVzcG9uc2USPAoHc2Vzc2lvbhgBIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWZCBrpIA8gBASKWAQoNU2Vzc2lvblNraWxscxJuCglkaXJlY3RvcnkYASABKAlCW7pIWLoBUQofc2tpbGxfYnVuZGxlLmRpcmVjdG9yeS5hYnNvbHV0ZRIYbXVzdCBiZSBhbiBhYnNvbHV0ZSBwYXRoGhR0aGlzLnN0YXJ0c1dpdGgoJy8nKXICEAESFQoEbmFtZRgCIAEoCUIHukgEcgIQASLKAgoKVG9vbFNlcnZlchIlCgRuYW1lGAEgASgJQhe6SBRyEjIQXltBLVphLXowLTlfLV0rJBKHAQoEYXJndhgCIAMoCUJ5ukh2ugFuChl0b29sX3NlcnZlci5hcmd2LmFic29sdXRlEiR0aGUgcHJvZ3JhbSBtdXN0IGJlIGFuIGFic29sdXRlIHBhdGgaK3RoaXMuc2l6ZSgpID09IDAgfHwgdGhpc1swXS5zdGFydHNXaXRoKCcvJymSAQIIARJfCgNlbnYYAyADKAsyLC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Ub29sU2VydmVyLkVudkVudHJ5QiS6SCGaAR4iHHIaMhheW0EtWmEtel9dW0EtWmEtejAtOV9dKiQaKgoIRW52RW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASLRAgoQQWdlbnRFbnZpcm9ubWVudBJlCgNzZXQYASADKAsyMi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudEVudmlyb25tZW50LlNldEVudHJ5QiS6SCGaAR4iHHIaMhheW0EtWmEtel9dW0EtWmEtejAtOV9dKiQSMwoFdW5zZXQYAiADKAlCJLpIIZIBHiIcchoyGF5bQS1aYS16X11bQS1aYS16MC05X10qJBoqCghTZXRFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBOnW6SHIacAoeYWdlbnRfZW52aXJvbm1lbnQuc2V0X29yX3Vuc2V0EiNhIG5hbWUgY2Fubm90IGJlIGJvdGggc2V0IGFuZCB1bnNldBopdGhpcy51bnNldC5hbGwobmFtZSwgIShuYW1lIGluIHRoaXMuc2V0KSkilwIKDlNlc3Npb25Db21tYW5kEhoKCWVmZmVjdF9pZBgBIAEoCUIHukgEcgIQARI4CgpzdGFydF90dXJuGAIgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3RhcnRUdXJuSAASLwoFc3RlZXIYAyABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdGVlckgAEjcKCWludGVycnVwdBgEIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkludGVycnVwdEgAEjYKBWNsb3NlGAUgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQ2xvc2VTZXNzaW9uSABCDQoEYm9keRIFukgCCAEiTwoLU2VuZFJlcXVlc3QSQAoHY29tbWFuZBgBIAEoCzInLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25Db21tYW5kQga6SAPIAQEiDgoMU2VuZFJlc3BvbnNlIiUKDUZvbGxvd1JlcXVlc3QSFAoMYWZ0ZXJfb2Zmc2V0GAEgASgEIk4KDkZvbGxvd1Jlc3BvbnNlEjwKBWV2ZW50GAEgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbkV2ZW50Qga6SAPIAQEinAIKDVNlc3Npb25PcGVuZWQSHgoMcmVzdW1lX3Rva2VuGAEgASgMQgi6SAV6AxiAIBJDCgxjYXBhYmlsaXRpZXMYAiABKAsyJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5DYXBhYmlsaXRpZXNCBrpIA8gBATqlAbpIoQEangEKG3Nlc3Npb25fb3BlbmVkLnJlc3VtZV90b2tlbhJDYSBzZXNzaW9uIHRoYXQgY2FuIHJlc3VtZSBnaXZlcyBhIHRva2VuIHRvIHJlc3VtZSB3aXRoLCBhbmQgb25seSBpdBo6KHNpemUodGhpcy5yZXN1bWVfdG9rZW4pID4gMCkgPT0gdGhpcy5jYXBhYmlsaXRpZXMucmVzdW1lcyLYAgoLU2Vzc2lvbkl0ZW0SEwoCaWQYASABKAlCB7pIBHICEAESGAoHdHVybl9pZBgCIAEoCUIHukgEcgIQARI/CgZzdGF0dXMYAyABKA4yIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtU3RhdHVzQgq6SAeCAQQQASAAEjIKCWFzc2lzdGFudBgKIAEoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRleHRIABIyCglyZWFzb25pbmcYCyABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UZXh0SAASLwoGcHJvbXB0GAwgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVGV4dEgAEjEKBHRvb2wYDSABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Ub29sQ2FsbEgAQg0KBGJvZHkSBbpIAggBImEKDFNlc3Npb25EZWx0YRIYCgdpdGVtX2lkGAEgASgJQge6SARyAhABEg4KBHRleHQYAiABKAlIABIYCg5jb21tYW5kX291dHB1dBgDIAEoCUgAQg0KBGJvZHkSBbpIAggBIpkBCglUdXJuRW5kZWQSGAoHdHVybl9pZBgBIAEoCUIHukgEcgIQARJDCgZzdGF0dXMYAiABKA4yIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuU3RhdHVzQg66SAuCAQgQARgCGAMYBBItCgV1c2FnZRgDIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlIj0KDFN0ZWVyT3V0Y29tZRIbCgptZXNzYWdlX2lkGAEgASgJQge6SARyAhABEhAKCGFjY2VwdGVkGAIgASgIImAKDVVzYWdlUmVwb3J0ZWQSGAoHdHVybl9pZBgBIAEoCUIHukgEcgIQARI1CgV1c2FnZRgCIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlQga6SAPIAQEifQoNU2Vzc2lvbkZhaWxlZBIXCgZkZXRhaWwYASABKAlCB7pIBHICEAESUwoUc3RhcnRfZmFpbHVyZV9yZWFzb24YAiABKA4yKy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdGFydEZhaWx1cmVSZWFzb25CCLpIBYIBAhABIg8KDVNlc3Npb25DbG9zZWQi/QMKDFNlc3Npb25FdmVudBIXCgZvZmZzZXQYASABKARCB7pIBDICIAASOAoGb3BlbmVkGAogASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbk9wZW5lZEgAEjQKBGl0ZW0YCyABKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uSXRlbUgAEjYKBWRlbHRhGAwgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbkRlbHRhSAASOAoKdHVybl9lbmRlZBgNIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlR1cm5FbmRlZEgAEjYKBXN0ZWVyGA4gASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3RlZXJPdXRjb21lSAASNwoFdXNhZ2UYDyABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZVJlcG9ydGVkSAASOAoGZmFpbGVkGBAgASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbkZhaWxlZEgAEjgKBmNsb3NlZBgRIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25DbG9zZWRIAEINCgRib2R5EgW6SAIIASpoChZTZXNzaW9uUHJvdG9jb2xWZXJzaW9uEigKJFNFU1NJT05fUFJPVE9DT0xfVkVSU0lPTl9VTlNQRUNJRklFRBAAEiQKIFNFU1NJT05fUFJPVE9DT0xfVkVSU0lPTl9DVVJSRU5UEAEykAMKE0FnZW50U2Vzc2lvblNlcnZpY2USZAoFSGVsbG8SLC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uSGVsbG9SZXF1ZXN0Gi0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbkhlbGxvUmVzcG9uc2USYQoET3BlbhIrLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9wZW5TZXNzaW9uUmVxdWVzdBosLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9wZW5TZXNzaW9uUmVzcG9uc2USUwoEU2VuZBIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlbmRSZXF1ZXN0GiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VuZFJlc3BvbnNlElsKBkZvbGxvdxImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkZvbGxvd1JlcXVlc3QaJy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Gb2xsb3dSZXNwb25zZTABQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_vibesys_orchestrator_v1_effects, file_vibesys_orchestrator_v1_orchestrator]);
+  fileDesc("Cit2aWJlc3lzL29yY2hlc3RyYXRvci92MS9hZ2VudF9zZXNzaW9uLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSKEBAoQU2Vzc2lvbkJvb3RzdHJhcBJ7Cg1saXN0ZW5fc29ja2V0GAEgASgJQmS6SGG6AVoKKHNlc3Npb25fYm9vdHN0cmFwLmxpc3Rlbl9zb2NrZXQuYWJzb2x1dGUSGG11c3QgYmUgYW4gYWJzb2x1dGUgcGF0aBoUdGhpcy5zdGFydHNXaXRoKCcvJylyAhABEn8KD3N0YXRlX2RpcmVjdG9yeRgCIAEoCUJmukhjugFcCipzZXNzaW9uX2Jvb3RzdHJhcC5zdGF0ZV9kaXJlY3RvcnkuYWJzb2x1dGUSGG11c3QgYmUgYW4gYWJzb2x1dGUgcGF0aBoUdGhpcy5zdGFydHNXaXRoKCcvJylyAhABEnMKCWxvY2tfZmlsZRgDIAEoCUJgukhdugFWCiRzZXNzaW9uX2Jvb3RzdHJhcC5sb2NrX2ZpbGUuYWJzb2x1dGUSGG11c3QgYmUgYW4gYWJzb2x1dGUgcGF0aBoUdGhpcy5zdGFydHNXaXRoKCcvJylyAhABEn0KDnByb2Nlc3Nlc19maWxlGAQgASgJQmW6SGK6AVsKKXNlc3Npb25fYm9vdHN0cmFwLnByb2Nlc3Nlc19maWxlLmFic29sdXRlEhhtdXN0IGJlIGFuIGFic29sdXRlIHBhdGgaFHRoaXMuc3RhcnRzV2l0aCgnLycpcgIQASJ5ChBTZXNzaW9uUHJvY2Vzc2VzEhsKCmhvbGRlcl9waWQYASABKA1CB7pIBCoCIAASSAoUYWdlbnRfcHJvY2Vzc19ncm91cHMYAiADKAsyKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudFByb2Nlc3NHcm91cCJJChFBZ2VudFByb2Nlc3NHcm91cBITCgJpZBgBIAEoDUIHukgEKgIgARIfCg5sZWFkZXJfc3RhcnRlZBgCIAEoCUIHukgEcgIYQCJVChNTZXNzaW9uSGVsbG9SZXF1ZXN0Ej4KBmNsaWVudBgBIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkJ1aWxkVmVyc2lvbnNCBrpIA8gBASLZAQoUU2Vzc2lvbkhlbGxvUmVzcG9uc2USQAoIdmVyc2lvbnMYASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQESSQoNY29tcGF0aWJpbGl0eRgCIAEoDjImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbXBhdGliaWxpdHlCCrpIB4IBBBABIAASNAoHc2Vzc2lvbhgDIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWYigQYKEk9wZW5TZXNzaW9uUmVxdWVzdBI8CgdzZXNzaW9uGAEgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblJlZkIGukgDyAEBEj0KB2hhcm5lc3MYAiABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgq6SAeCAQQQASAAEg0KBW1vZGVsGAMgASgJEhgKEHJlYXNvbmluZ19lZmZvcnQYBCABKAkSfgoRd29ya2luZ19kaXJlY3RvcnkYBSABKAlCY7pIYLoBWQonb3Blbl9zZXNzaW9uLndvcmtpbmdfZGlyZWN0b3J5LmFic29sdXRlEhhtdXN0IGJlIGFuIGFic29sdXRlIHBhdGgaFHRoaXMuc3RhcnRzV2l0aCgnLycpcgIQARKEAQoUYWdlbnRfZGF0YV9kaXJlY3RvcnkYBiABKAlCZrpIY7oBXAoqb3Blbl9zZXNzaW9uLmFnZW50X2RhdGFfZGlyZWN0b3J5LmFic29sdXRlEhhtdXN0IGJlIGFuIGFic29sdXRlIHBhdGgaFHRoaXMuc3RhcnRzV2l0aCgnLycpcgIQARIeCgxyZXN1bWVfdG9rZW4YByABKAxCCLpIBXoDGIAgEj4KBnNraWxscxgIIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25Ta2lsbHNCBrpIA8gBARKVAQoFdG9vbHMYCSADKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Ub29sU2VydmVyQmG6SF66AVsKGW9wZW5fc2Vzc2lvbi50b29scy51bmlxdWUSIHRvb2wgc2VydmVyIG5hbWVzIG11c3QgYmUgdW5pcXVlGhx0aGlzLm1hcCh0LCB0Lm5hbWUpLnVuaXF1ZSgpEkYKC2Vudmlyb25tZW50GAogASgLMikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRFbnZpcm9ubWVudEIGukgDyAEBIlMKE09wZW5TZXNzaW9uUmVzcG9uc2USPAoHc2Vzc2lvbhgBIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWZCBrpIA8gBASKWAQoNU2Vzc2lvblNraWxscxJuCglkaXJlY3RvcnkYASABKAlCW7pIWLoBUQofc2tpbGxfYnVuZGxlLmRpcmVjdG9yeS5hYnNvbHV0ZRIYbXVzdCBiZSBhbiBhYnNvbHV0ZSBwYXRoGhR0aGlzLnN0YXJ0c1dpdGgoJy8nKXICEAESFQoEbmFtZRgCIAEoCUIHukgEcgIQASLKAgoKVG9vbFNlcnZlchIlCgRuYW1lGAEgASgJQhe6SBRyEjIQXltBLVphLXowLTlfLV0rJBKHAQoEYXJndhgCIAMoCUJ5ukh2ugFuChl0b29sX3NlcnZlci5hcmd2LmFic29sdXRlEiR0aGUgcHJvZ3JhbSBtdXN0IGJlIGFuIGFic29sdXRlIHBhdGgaK3RoaXMuc2l6ZSgpID09IDAgfHwgdGhpc1swXS5zdGFydHNXaXRoKCcvJymSAQIIARJfCgNlbnYYAyADKAsyLC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Ub29sU2VydmVyLkVudkVudHJ5QiS6SCGaAR4iHHIaMhheW0EtWmEtel9dW0EtWmEtejAtOV9dKiQaKgoIRW52RW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgJOgI4ASLRAgoQQWdlbnRFbnZpcm9ubWVudBJlCgNzZXQYASADKAsyMi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudEVudmlyb25tZW50LlNldEVudHJ5QiS6SCGaAR4iHHIaMhheW0EtWmEtel9dW0EtWmEtejAtOV9dKiQSMwoFdW5zZXQYAiADKAlCJLpIIZIBHiIcchoyGF5bQS1aYS16X11bQS1aYS16MC05X10qJBoqCghTZXRFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAk6AjgBOnW6SHIacAoeYWdlbnRfZW52aXJvbm1lbnQuc2V0X29yX3Vuc2V0EiNhIG5hbWUgY2Fubm90IGJlIGJvdGggc2V0IGFuZCB1bnNldBopdGhpcy51bnNldC5hbGwobmFtZSwgIShuYW1lIGluIHRoaXMuc2V0KSkilwIKDlNlc3Npb25Db21tYW5kEhoKCWVmZmVjdF9pZBgBIAEoCUIHukgEcgIQARI4CgpzdGFydF90dXJuGAIgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3RhcnRUdXJuSAASLwoFc3RlZXIYAyABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdGVlckgAEjcKCWludGVycnVwdBgEIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkludGVycnVwdEgAEjYKBWNsb3NlGAUgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQ2xvc2VTZXNzaW9uSABCDQoEYm9keRIFukgCCAEiTwoLU2VuZFJlcXVlc3QSQAoHY29tbWFuZBgBIAEoCzInLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25Db21tYW5kQga6SAPIAQEiDgoMU2VuZFJlc3BvbnNlIiUKDUZvbGxvd1JlcXVlc3QSFAoMYWZ0ZXJfb2Zmc2V0GAEgASgEIk4KDkZvbGxvd1Jlc3BvbnNlEjwKBWV2ZW50GAEgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbkV2ZW50Qga6SAPIAQEinAIKDVNlc3Npb25PcGVuZWQSHgoMcmVzdW1lX3Rva2VuGAEgASgMQgi6SAV6AxiAIBJDCgxjYXBhYmlsaXRpZXMYAiABKAsyJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5DYXBhYmlsaXRpZXNCBrpIA8gBATqlAbpIoQEangEKG3Nlc3Npb25fb3BlbmVkLnJlc3VtZV90b2tlbhJDYSBzZXNzaW9uIHRoYXQgY2FuIHJlc3VtZSBnaXZlcyBhIHRva2VuIHRvIHJlc3VtZSB3aXRoLCBhbmQgb25seSBpdBo6KHNpemUodGhpcy5yZXN1bWVfdG9rZW4pID4gMCkgPT0gdGhpcy5jYXBhYmlsaXRpZXMucmVzdW1lcyLYAgoLU2Vzc2lvbkl0ZW0SEwoCaWQYASABKAlCB7pIBHICEAESGAoHdHVybl9pZBgCIAEoCUIHukgEcgIQARI/CgZzdGF0dXMYAyABKA4yIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtU3RhdHVzQgq6SAeCAQQQASAAEjIKCWFzc2lzdGFudBgKIAEoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRleHRIABIyCglyZWFzb25pbmcYCyABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UZXh0SAASLwoGcHJvbXB0GAwgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVGV4dEgAEjEKBHRvb2wYDSABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Ub29sQ2FsbEgAQg0KBGJvZHkSBbpIAggBImEKDFNlc3Npb25EZWx0YRIYCgdpdGVtX2lkGAEgASgJQge6SARyAhABEg4KBHRleHQYAiABKAlIABIYCg5jb21tYW5kX291dHB1dBgDIAEoCUgAQg0KBGJvZHkSBbpIAggBIpkBCglUdXJuRW5kZWQSGAoHdHVybl9pZBgBIAEoCUIHukgEcgIQARJDCgZzdGF0dXMYAiABKA4yIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuU3RhdHVzQg66SAuCAQgQARgCGAMYBBItCgV1c2FnZRgDIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlIj0KDFN0ZWVyT3V0Y29tZRIbCgptZXNzYWdlX2lkGAEgASgJQge6SARyAhABEhAKCGFjY2VwdGVkGAIgASgIImAKDVVzYWdlUmVwb3J0ZWQSGAoHdHVybl9pZBgBIAEoCUIHukgEcgIQARI1CgV1c2FnZRgCIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlQga6SAPIAQEifQoNU2Vzc2lvbkZhaWxlZBIXCgZkZXRhaWwYASABKAlCB7pIBHICEAESUwoUc3RhcnRfZmFpbHVyZV9yZWFzb24YAiABKA4yKy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdGFydEZhaWx1cmVSZWFzb25CCLpIBYIBAhABIg8KDVNlc3Npb25DbG9zZWQi/QMKDFNlc3Npb25FdmVudBIXCgZvZmZzZXQYASABKARCB7pIBDICIAASOAoGb3BlbmVkGAogASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbk9wZW5lZEgAEjQKBGl0ZW0YCyABKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uSXRlbUgAEjYKBWRlbHRhGAwgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbkRlbHRhSAASOAoKdHVybl9lbmRlZBgNIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlR1cm5FbmRlZEgAEjYKBXN0ZWVyGA4gASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3RlZXJPdXRjb21lSAASNwoFdXNhZ2UYDyABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZVJlcG9ydGVkSAASOAoGZmFpbGVkGBAgASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbkZhaWxlZEgAEjgKBmNsb3NlZBgRIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25DbG9zZWRIAEINCgRib2R5EgW6SAIIASpoChZTZXNzaW9uUHJvdG9jb2xWZXJzaW9uEigKJFNFU1NJT05fUFJPVE9DT0xfVkVSU0lPTl9VTlNQRUNJRklFRBAAEiQKIFNFU1NJT05fUFJPVE9DT0xfVkVSU0lPTl9DVVJSRU5UEAEykAMKE0FnZW50U2Vzc2lvblNlcnZpY2USZAoFSGVsbG8SLC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uSGVsbG9SZXF1ZXN0Gi0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvbkhlbGxvUmVzcG9uc2USYQoET3BlbhIrLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9wZW5TZXNzaW9uUmVxdWVzdBosLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk9wZW5TZXNzaW9uUmVzcG9uc2USUwoEU2VuZBIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlbmRSZXF1ZXN0GiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VuZFJlc3BvbnNlElsKBkZvbGxvdxImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkZvbGxvd1JlcXVlc3QaJy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Gb2xsb3dSZXNwb25zZTABQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_vibesys_orchestrator_v1_effects, file_vibesys_orchestrator_v1_orchestrator]);
 
 /**
  * SessionBootstrap is the one message a session's process reads, as binary, from its standard input
@@ -40,7 +40,8 @@ export type SessionBootstrap = Message<"vibesys.orchestrator.v1.SessionBootstrap
 
   /**
    * The file the process holds an exclusive lock on for its whole life, taken before anything else.
-   * A process that cannot take it ends at once, because another one lives for this session. The host
+   * A process that still cannot take it after a few short tries ends, because another one lives for this
+   * session (the host's own look at the lock lasts an instant, so a try that meets it is repeated). The host
    * learns whether the process lives by trying the same lock: it is free exactly when the process is
    * gone, whatever any file says.
    *
@@ -67,8 +68,11 @@ export const SessionBootstrapSchema: GenMessage<SessionBootstrap> = /*@__PURE__*
  * SessionProcesses is what must be ended when a session is over, as binary. The session's process
  * replaces it atomically while it holds its lock, and the host reads it only to clean up after that
  * process. Its pid is signalled only while the lock is held, since only then is it the pid of a
- * process that still lives; the groups are signalled only when the lock is free. These are process
- * ids on purpose: this reader's whole job is to signal processes, and no client sees it.
+ * process that still lives. The groups are read when the lock is free, which is when nothing keeps
+ * their ids from having been given to another program since (a reboot, a long gap), so each carries
+ * the start time of its leader, and a group whose leader now started at another time is not ours.
+ * These are process ids on purpose: this reader's whole job is to signal processes, and no client
+ * sees it.
  *
  * @generated from message vibesys.orchestrator.v1.SessionProcesses
  */
@@ -81,11 +85,11 @@ export type SessionProcesses = Message<"vibesys.orchestrator.v1.SessionProcesses
   holderPid: number;
 
   /**
-   * The process groups of the agent's processes. Group 1 is never one of them.
+   * The process groups of the agent's processes.
    *
-   * @generated from field: repeated uint32 agent_process_groups = 2;
+   * @generated from field: repeated vibesys.orchestrator.v1.AgentProcessGroup agent_process_groups = 2;
    */
-  agentProcessGroups: number[];
+  agentProcessGroups: AgentProcessGroup[];
 };
 
 /**
@@ -94,6 +98,37 @@ export type SessionProcesses = Message<"vibesys.orchestrator.v1.SessionProcesses
  */
 export const SessionProcessesSchema: GenMessage<SessionProcesses> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_agent_session, 1);
+
+/**
+ * AgentProcessGroup is a process group the agent leads, and what tells it from a group that later
+ * got the same id.
+ *
+ * @generated from message vibesys.orchestrator.v1.AgentProcessGroup
+ */
+export type AgentProcessGroup = Message<"vibesys.orchestrator.v1.AgentProcessGroup"> & {
+  /**
+   * The group id, which is its leader's pid. Group 1 is never one.
+   *
+   * @generated from field: uint32 id = 1;
+   */
+  id: number;
+
+  /**
+   * When the leader started, as `ps -o lstart=` prints it with LC_ALL=C and TZ=UTC. It is an opaque
+   * token compared for equality and never parsed. Empty when the writer could not read it, which
+   * proves nothing: a leader that exists then is not taken to be ours.
+   *
+   * @generated from field: string leader_started = 2;
+   */
+  leaderStarted: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.AgentProcessGroup.
+ * Use `create(AgentProcessGroupSchema)` to create a new message.
+ */
+export const AgentProcessGroupSchema: GenMessage<AgentProcessGroup> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 2);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SessionHelloRequest
@@ -110,7 +145,7 @@ export type SessionHelloRequest = Message<"vibesys.orchestrator.v1.SessionHelloR
  * Use `create(SessionHelloRequestSchema)` to create a new message.
  */
 export const SessionHelloRequestSchema: GenMessage<SessionHelloRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 2);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 3);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SessionHelloResponse
@@ -140,7 +175,7 @@ export type SessionHelloResponse = Message<"vibesys.orchestrator.v1.SessionHello
  * Use `create(SessionHelloResponseSchema)` to create a new message.
  */
 export const SessionHelloResponseSchema: GenMessage<SessionHelloResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 3);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 4);
 
 /**
  * @generated from message vibesys.orchestrator.v1.OpenSessionRequest
@@ -215,7 +250,7 @@ export type OpenSessionRequest = Message<"vibesys.orchestrator.v1.OpenSessionReq
  * Use `create(OpenSessionRequestSchema)` to create a new message.
  */
 export const OpenSessionRequestSchema: GenMessage<OpenSessionRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 4);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 5);
 
 /**
  * OpenSessionResponse says the request was taken. It names the session, so a repeat answers the same.
@@ -234,7 +269,7 @@ export type OpenSessionResponse = Message<"vibesys.orchestrator.v1.OpenSessionRe
  * Use `create(OpenSessionResponseSchema)` to create a new message.
  */
 export const OpenSessionResponseSchema: GenMessage<OpenSessionResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 5);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 6);
 
 /**
  * SessionSkills is a published skill bundle, named by value so the session never guesses where one is.
@@ -264,7 +299,7 @@ export type SessionSkills = Message<"vibesys.orchestrator.v1.SessionSkills"> & {
  * Use `create(SessionSkillsSchema)` to create a new message.
  */
 export const SessionSkillsSchema: GenMessage<SessionSkills> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 6);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 7);
 
 /**
  * ToolServer is a program that serves the agent tools over its standard input and output. Its
@@ -296,7 +331,7 @@ export type ToolServer = Message<"vibesys.orchestrator.v1.ToolServer"> & {
  * Use `create(ToolServerSchema)` to create a new message.
  */
 export const ToolServerSchema: GenMessage<ToolServer> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 7);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 8);
 
 /**
  * AgentEnvironment is laid over the login environment of the session's agent. The holder does not
@@ -321,7 +356,7 @@ export type AgentEnvironment = Message<"vibesys.orchestrator.v1.AgentEnvironment
  * Use `create(AgentEnvironmentSchema)` to create a new message.
  */
 export const AgentEnvironmentSchema: GenMessage<AgentEnvironment> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 8);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 9);
 
 /**
  * SessionCommand is an effect addressed to a live session. Opening one is not: that is Open.
@@ -371,7 +406,7 @@ export type SessionCommand = Message<"vibesys.orchestrator.v1.SessionCommand"> &
  * Use `create(SessionCommandSchema)` to create a new message.
  */
 export const SessionCommandSchema: GenMessage<SessionCommand> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 9);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 10);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SendRequest
@@ -388,7 +423,7 @@ export type SendRequest = Message<"vibesys.orchestrator.v1.SendRequest"> & {
  * Use `create(SendRequestSchema)` to create a new message.
  */
 export const SendRequestSchema: GenMessage<SendRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 10);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 11);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SendResponse
@@ -401,7 +436,7 @@ export type SendResponse = Message<"vibesys.orchestrator.v1.SendResponse"> & {
  * Use `create(SendResponseSchema)` to create a new message.
  */
 export const SendResponseSchema: GenMessage<SendResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 11);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 12);
 
 /**
  * @generated from message vibesys.orchestrator.v1.FollowRequest
@@ -420,7 +455,7 @@ export type FollowRequest = Message<"vibesys.orchestrator.v1.FollowRequest"> & {
  * Use `create(FollowRequestSchema)` to create a new message.
  */
 export const FollowRequestSchema: GenMessage<FollowRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 12);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 13);
 
 /**
  * @generated from message vibesys.orchestrator.v1.FollowResponse
@@ -437,7 +472,7 @@ export type FollowResponse = Message<"vibesys.orchestrator.v1.FollowResponse"> &
  * Use `create(FollowResponseSchema)` to create a new message.
  */
 export const FollowResponseSchema: GenMessage<FollowResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 13);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 14);
 
 /**
  * SessionOpened says a session is ready.
@@ -463,7 +498,7 @@ export type SessionOpened = Message<"vibesys.orchestrator.v1.SessionOpened"> & {
  * Use `create(SessionOpenedSchema)` to create a new message.
  */
 export const SessionOpenedSchema: GenMessage<SessionOpened> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 14);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 15);
 
 /**
  * SessionItem is an item as the agent reports it. The orchestrator assigns its ordinal and agent.
@@ -521,7 +556,7 @@ export type SessionItem = Message<"vibesys.orchestrator.v1.SessionItem"> & {
  * Use `create(SessionItemSchema)` to create a new message.
  */
 export const SessionItemSchema: GenMessage<SessionItem> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 15);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 16);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SessionDelta
@@ -555,7 +590,7 @@ export type SessionDelta = Message<"vibesys.orchestrator.v1.SessionDelta"> & {
  * Use `create(SessionDeltaSchema)` to create a new message.
  */
 export const SessionDeltaSchema: GenMessage<SessionDelta> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 16);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 17);
 
 /**
  * @generated from message vibesys.orchestrator.v1.TurnEnded
@@ -584,7 +619,7 @@ export type TurnEnded = Message<"vibesys.orchestrator.v1.TurnEnded"> & {
  * Use `create(TurnEndedSchema)` to create a new message.
  */
 export const TurnEndedSchema: GenMessage<TurnEnded> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 17);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 18);
 
 /**
  * SteerOutcome answers one Steer. It follows the TurnEnded of a turn the steer came too late for.
@@ -610,7 +645,7 @@ export type SteerOutcome = Message<"vibesys.orchestrator.v1.SteerOutcome"> & {
  * Use `create(SteerOutcomeSchema)` to create a new message.
  */
 export const SteerOutcomeSchema: GenMessage<SteerOutcome> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 18);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 19);
 
 /**
  * @generated from message vibesys.orchestrator.v1.UsageReported
@@ -632,7 +667,7 @@ export type UsageReported = Message<"vibesys.orchestrator.v1.UsageReported"> & {
  * Use `create(UsageReportedSchema)` to create a new message.
  */
 export const UsageReportedSchema: GenMessage<UsageReported> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 19);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 20);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SessionFailed
@@ -657,7 +692,7 @@ export type SessionFailed = Message<"vibesys.orchestrator.v1.SessionFailed"> & {
  * Use `create(SessionFailedSchema)` to create a new message.
  */
 export const SessionFailedSchema: GenMessage<SessionFailed> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 20);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 21);
 
 /**
  * SessionClosed confirms a session is over. It is the last event of a session.
@@ -672,7 +707,7 @@ export type SessionClosed = Message<"vibesys.orchestrator.v1.SessionClosed"> & {
  * Use `create(SessionClosedSchema)` to create a new message.
  */
 export const SessionClosedSchema: GenMessage<SessionClosed> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 21);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 22);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SessionEvent
@@ -744,7 +779,7 @@ export type SessionEvent = Message<"vibesys.orchestrator.v1.SessionEvent"> & {
  * Use `create(SessionEventSchema)` to create a new message.
  */
 export const SessionEventSchema: GenMessage<SessionEvent> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_agent_session, 22);
+  messageDesc(file_vibesys_orchestrator_v1_agent_session, 23);
 
 /**
  * SessionProtocolVersion holds the one number both sides of this service carry in BuildVersions, so

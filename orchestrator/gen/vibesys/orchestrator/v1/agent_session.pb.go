@@ -79,7 +79,8 @@ type SessionBootstrap struct {
 	// The directory private to this process, which only it reads.
 	StateDirectory string `protobuf:"bytes,2,opt,name=state_directory,json=stateDirectory,proto3" json:"state_directory,omitempty"`
 	// The file the process holds an exclusive lock on for its whole life, taken before anything else.
-	// A process that cannot take it ends at once, because another one lives for this session. The host
+	// A process that still cannot take it after a few short tries ends, because another one lives for this
+	// session (the host's own look at the lock lasts an instant, so a try that meets it is repeated). The host
 	// learns whether the process lives by trying the same lock: it is free exactly when the process is
 	// gone, whatever any file says.
 	LockFile string `protobuf:"bytes,3,opt,name=lock_file,json=lockFile,proto3" json:"lock_file,omitempty"`
@@ -150,14 +151,17 @@ func (x *SessionBootstrap) GetProcessesFile() string {
 // SessionProcesses is what must be ended when a session is over, as binary. The session's process
 // replaces it atomically while it holds its lock, and the host reads it only to clean up after that
 // process. Its pid is signalled only while the lock is held, since only then is it the pid of a
-// process that still lives; the groups are signalled only when the lock is free. These are process
-// ids on purpose: this reader's whole job is to signal processes, and no client sees it.
+// process that still lives. The groups are read when the lock is free, which is when nothing keeps
+// their ids from having been given to another program since (a reboot, a long gap), so each carries
+// the start time of its leader, and a group whose leader now started at another time is not ours.
+// These are process ids on purpose: this reader's whole job is to signal processes, and no client
+// sees it.
 type SessionProcesses struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The process that holds the lock.
 	HolderPid uint32 `protobuf:"varint,1,opt,name=holder_pid,json=holderPid,proto3" json:"holder_pid,omitempty"`
-	// The process groups of the agent's processes. Group 1 is never one of them.
-	AgentProcessGroups []uint32 `protobuf:"varint,2,rep,packed,name=agent_process_groups,json=agentProcessGroups,proto3" json:"agent_process_groups,omitempty"`
+	// The process groups of the agent's processes.
+	AgentProcessGroups []*AgentProcessGroup `protobuf:"bytes,2,rep,name=agent_process_groups,json=agentProcessGroups,proto3" json:"agent_process_groups,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -199,11 +203,69 @@ func (x *SessionProcesses) GetHolderPid() uint32 {
 	return 0
 }
 
-func (x *SessionProcesses) GetAgentProcessGroups() []uint32 {
+func (x *SessionProcesses) GetAgentProcessGroups() []*AgentProcessGroup {
 	if x != nil {
 		return x.AgentProcessGroups
 	}
 	return nil
+}
+
+// AgentProcessGroup is a process group the agent leads, and what tells it from a group that later
+// got the same id.
+type AgentProcessGroup struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The group id, which is its leader's pid. Group 1 is never one.
+	Id uint32 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
+	// When the leader started, as `ps -o lstart=` prints it with LC_ALL=C and TZ=UTC. It is an opaque
+	// token compared for equality and never parsed. Empty when the writer could not read it, which
+	// proves nothing: a leader that exists then is not taken to be ours.
+	LeaderStarted string `protobuf:"bytes,2,opt,name=leader_started,json=leaderStarted,proto3" json:"leader_started,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AgentProcessGroup) Reset() {
+	*x = AgentProcessGroup{}
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentProcessGroup) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentProcessGroup) ProtoMessage() {}
+
+func (x *AgentProcessGroup) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentProcessGroup.ProtoReflect.Descriptor instead.
+func (*AgentProcessGroup) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AgentProcessGroup) GetId() uint32 {
+	if x != nil {
+		return x.Id
+	}
+	return 0
+}
+
+func (x *AgentProcessGroup) GetLeaderStarted() string {
+	if x != nil {
+		return x.LeaderStarted
+	}
+	return ""
 }
 
 type SessionHelloRequest struct {
@@ -215,7 +277,7 @@ type SessionHelloRequest struct {
 
 func (x *SessionHelloRequest) Reset() {
 	*x = SessionHelloRequest{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -227,7 +289,7 @@ func (x *SessionHelloRequest) String() string {
 func (*SessionHelloRequest) ProtoMessage() {}
 
 func (x *SessionHelloRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -240,7 +302,7 @@ func (x *SessionHelloRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHelloRequest.ProtoReflect.Descriptor instead.
 func (*SessionHelloRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SessionHelloRequest) GetClient() *BuildVersions {
@@ -263,7 +325,7 @@ type SessionHelloResponse struct {
 
 func (x *SessionHelloResponse) Reset() {
 	*x = SessionHelloResponse{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[3]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -275,7 +337,7 @@ func (x *SessionHelloResponse) String() string {
 func (*SessionHelloResponse) ProtoMessage() {}
 
 func (x *SessionHelloResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[3]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -288,7 +350,7 @@ func (x *SessionHelloResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionHelloResponse.ProtoReflect.Descriptor instead.
 func (*SessionHelloResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SessionHelloResponse) GetVersions() *BuildVersions {
@@ -337,7 +399,7 @@ type OpenSessionRequest struct {
 
 func (x *OpenSessionRequest) Reset() {
 	*x = OpenSessionRequest{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -349,7 +411,7 @@ func (x *OpenSessionRequest) String() string {
 func (*OpenSessionRequest) ProtoMessage() {}
 
 func (x *OpenSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -362,7 +424,7 @@ func (x *OpenSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenSessionRequest.ProtoReflect.Descriptor instead.
 func (*OpenSessionRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *OpenSessionRequest) GetSession() *SessionRef {
@@ -445,7 +507,7 @@ type OpenSessionResponse struct {
 
 func (x *OpenSessionResponse) Reset() {
 	*x = OpenSessionResponse{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -457,7 +519,7 @@ func (x *OpenSessionResponse) String() string {
 func (*OpenSessionResponse) ProtoMessage() {}
 
 func (x *OpenSessionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -470,7 +532,7 @@ func (x *OpenSessionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OpenSessionResponse.ProtoReflect.Descriptor instead.
 func (*OpenSessionResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *OpenSessionResponse) GetSession() *SessionRef {
@@ -495,7 +557,7 @@ type SessionSkills struct {
 
 func (x *SessionSkills) Reset() {
 	*x = SessionSkills{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -507,7 +569,7 @@ func (x *SessionSkills) String() string {
 func (*SessionSkills) ProtoMessage() {}
 
 func (x *SessionSkills) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -520,7 +582,7 @@ func (x *SessionSkills) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionSkills.ProtoReflect.Descriptor instead.
 func (*SessionSkills) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SessionSkills) GetDirectory() string {
@@ -551,7 +613,7 @@ type ToolServer struct {
 
 func (x *ToolServer) Reset() {
 	*x = ToolServer{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -563,7 +625,7 @@ func (x *ToolServer) String() string {
 func (*ToolServer) ProtoMessage() {}
 
 func (x *ToolServer) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -576,7 +638,7 @@ func (x *ToolServer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolServer.ProtoReflect.Descriptor instead.
 func (*ToolServer) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ToolServer) GetName() string {
@@ -612,7 +674,7 @@ type AgentEnvironment struct {
 
 func (x *AgentEnvironment) Reset() {
 	*x = AgentEnvironment{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -624,7 +686,7 @@ func (x *AgentEnvironment) String() string {
 func (*AgentEnvironment) ProtoMessage() {}
 
 func (x *AgentEnvironment) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -637,7 +699,7 @@ func (x *AgentEnvironment) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentEnvironment.ProtoReflect.Descriptor instead.
 func (*AgentEnvironment) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *AgentEnvironment) GetSet() map[string]string {
@@ -672,7 +734,7 @@ type SessionCommand struct {
 
 func (x *SessionCommand) Reset() {
 	*x = SessionCommand{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[9]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -684,7 +746,7 @@ func (x *SessionCommand) String() string {
 func (*SessionCommand) ProtoMessage() {}
 
 func (x *SessionCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[9]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -697,7 +759,7 @@ func (x *SessionCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionCommand.ProtoReflect.Descriptor instead.
 func (*SessionCommand) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SessionCommand) GetEffectId() string {
@@ -787,7 +849,7 @@ type SendRequest struct {
 
 func (x *SendRequest) Reset() {
 	*x = SendRequest{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -799,7 +861,7 @@ func (x *SendRequest) String() string {
 func (*SendRequest) ProtoMessage() {}
 
 func (x *SendRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -812,7 +874,7 @@ func (x *SendRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendRequest.ProtoReflect.Descriptor instead.
 func (*SendRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SendRequest) GetCommand() *SessionCommand {
@@ -830,7 +892,7 @@ type SendResponse struct {
 
 func (x *SendResponse) Reset() {
 	*x = SendResponse{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -842,7 +904,7 @@ func (x *SendResponse) String() string {
 func (*SendResponse) ProtoMessage() {}
 
 func (x *SendResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -855,7 +917,7 @@ func (x *SendResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendResponse.ProtoReflect.Descriptor instead.
 func (*SendResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{12}
 }
 
 type FollowRequest struct {
@@ -868,7 +930,7 @@ type FollowRequest struct {
 
 func (x *FollowRequest) Reset() {
 	*x = FollowRequest{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[12]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -880,7 +942,7 @@ func (x *FollowRequest) String() string {
 func (*FollowRequest) ProtoMessage() {}
 
 func (x *FollowRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[12]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -893,7 +955,7 @@ func (x *FollowRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FollowRequest.ProtoReflect.Descriptor instead.
 func (*FollowRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *FollowRequest) GetAfterOffset() uint64 {
@@ -912,7 +974,7 @@ type FollowResponse struct {
 
 func (x *FollowResponse) Reset() {
 	*x = FollowResponse{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[13]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -924,7 +986,7 @@ func (x *FollowResponse) String() string {
 func (*FollowResponse) ProtoMessage() {}
 
 func (x *FollowResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[13]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -937,7 +999,7 @@ func (x *FollowResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FollowResponse.ProtoReflect.Descriptor instead.
 func (*FollowResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{13}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *FollowResponse) GetEvent() *SessionEvent {
@@ -959,7 +1021,7 @@ type SessionOpened struct {
 
 func (x *SessionOpened) Reset() {
 	*x = SessionOpened{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[14]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -971,7 +1033,7 @@ func (x *SessionOpened) String() string {
 func (*SessionOpened) ProtoMessage() {}
 
 func (x *SessionOpened) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[14]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -984,7 +1046,7 @@ func (x *SessionOpened) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionOpened.ProtoReflect.Descriptor instead.
 func (*SessionOpened) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{14}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *SessionOpened) GetResumeToken() []byte {
@@ -1020,7 +1082,7 @@ type SessionItem struct {
 
 func (x *SessionItem) Reset() {
 	*x = SessionItem{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[15]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1032,7 +1094,7 @@ func (x *SessionItem) String() string {
 func (*SessionItem) ProtoMessage() {}
 
 func (x *SessionItem) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[15]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1045,7 +1107,7 @@ func (x *SessionItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionItem.ProtoReflect.Descriptor instead.
 func (*SessionItem) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{15}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *SessionItem) GetId() string {
@@ -1154,7 +1216,7 @@ type SessionDelta struct {
 
 func (x *SessionDelta) Reset() {
 	*x = SessionDelta{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[16]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1166,7 +1228,7 @@ func (x *SessionDelta) String() string {
 func (*SessionDelta) ProtoMessage() {}
 
 func (x *SessionDelta) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[16]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1179,7 +1241,7 @@ func (x *SessionDelta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionDelta.ProtoReflect.Descriptor instead.
 func (*SessionDelta) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{16}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *SessionDelta) GetItemId() string {
@@ -1242,7 +1304,7 @@ type TurnEnded struct {
 
 func (x *TurnEnded) Reset() {
 	*x = TurnEnded{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[17]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1254,7 +1316,7 @@ func (x *TurnEnded) String() string {
 func (*TurnEnded) ProtoMessage() {}
 
 func (x *TurnEnded) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[17]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1267,7 +1329,7 @@ func (x *TurnEnded) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TurnEnded.ProtoReflect.Descriptor instead.
 func (*TurnEnded) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{17}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *TurnEnded) GetTurnId() string {
@@ -1303,7 +1365,7 @@ type SteerOutcome struct {
 
 func (x *SteerOutcome) Reset() {
 	*x = SteerOutcome{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[18]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1315,7 +1377,7 @@ func (x *SteerOutcome) String() string {
 func (*SteerOutcome) ProtoMessage() {}
 
 func (x *SteerOutcome) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[18]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1328,7 +1390,7 @@ func (x *SteerOutcome) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SteerOutcome.ProtoReflect.Descriptor instead.
 func (*SteerOutcome) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{18}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SteerOutcome) GetMessageId() string {
@@ -1355,7 +1417,7 @@ type UsageReported struct {
 
 func (x *UsageReported) Reset() {
 	*x = UsageReported{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[19]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1367,7 +1429,7 @@ func (x *UsageReported) String() string {
 func (*UsageReported) ProtoMessage() {}
 
 func (x *UsageReported) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[19]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1380,7 +1442,7 @@ func (x *UsageReported) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageReported.ProtoReflect.Descriptor instead.
 func (*UsageReported) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{19}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *UsageReported) GetTurnId() string {
@@ -1409,7 +1471,7 @@ type SessionFailed struct {
 
 func (x *SessionFailed) Reset() {
 	*x = SessionFailed{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[20]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1421,7 +1483,7 @@ func (x *SessionFailed) String() string {
 func (*SessionFailed) ProtoMessage() {}
 
 func (x *SessionFailed) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[20]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1434,7 +1496,7 @@ func (x *SessionFailed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionFailed.ProtoReflect.Descriptor instead.
 func (*SessionFailed) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{20}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *SessionFailed) GetDetail() string {
@@ -1460,7 +1522,7 @@ type SessionClosed struct {
 
 func (x *SessionClosed) Reset() {
 	*x = SessionClosed{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[21]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1472,7 +1534,7 @@ func (x *SessionClosed) String() string {
 func (*SessionClosed) ProtoMessage() {}
 
 func (x *SessionClosed) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[21]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1485,7 +1547,7 @@ func (x *SessionClosed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionClosed.ProtoReflect.Descriptor instead.
 func (*SessionClosed) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{21}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{22}
 }
 
 type SessionEvent struct {
@@ -1509,7 +1571,7 @@ type SessionEvent struct {
 
 func (x *SessionEvent) Reset() {
 	*x = SessionEvent{}
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[22]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1521,7 +1583,7 @@ func (x *SessionEvent) String() string {
 func (*SessionEvent) ProtoMessage() {}
 
 func (x *SessionEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[22]
+	mi := &file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1534,7 +1596,7 @@ func (x *SessionEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionEvent.ProtoReflect.Descriptor instead.
 func (*SessionEvent) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{22}
+	return file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *SessionEvent) GetOffset() uint64 {
@@ -1688,11 +1750,14 @@ const file_vibesys_orchestrator_v1_agent_session_proto_rawDesc = "" +
 	"\tlock_file\x18\x03 \x01(\tB`\xbaH]\xba\x01V\n" +
 	"$session_bootstrap.lock_file.absolute\x12\x18must be an absolute path\x1a\x14this.startsWith('/')r\x02\x10\x01R\blockFile\x12\x8c\x01\n" +
 	"\x0eprocesses_file\x18\x04 \x01(\tBe\xbaHb\xba\x01[\n" +
-	")session_bootstrap.processes_file.absolute\x12\x18must be an absolute path\x1a\x14this.startsWith('/')r\x02\x10\x01R\rprocessesFile\"z\n" +
+	")session_bootstrap.processes_file.absolute\x12\x18must be an absolute path\x1a\x14this.startsWith('/')r\x02\x10\x01R\rprocessesFile\"\x98\x01\n" +
 	"\x10SessionProcesses\x12&\n" +
 	"\n" +
-	"holder_pid\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\tholderPid\x12>\n" +
-	"\x14agent_process_groups\x18\x02 \x03(\rB\f\xbaH\t\x92\x01\x06\"\x04*\x02 \x01R\x12agentProcessGroups\"]\n" +
+	"holder_pid\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\tholderPid\x12\\\n" +
+	"\x14agent_process_groups\x18\x02 \x03(\v2*.vibesys.orchestrator.v1.AgentProcessGroupR\x12agentProcessGroups\"\\\n" +
+	"\x11AgentProcessGroup\x12\x17\n" +
+	"\x02id\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x01R\x02id\x12.\n" +
+	"\x0eleader_started\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x18@R\rleaderStarted\"]\n" +
 	"\x13SessionHelloRequest\x12F\n" +
 	"\x06client\x18\x01 \x01(\v2&.vibesys.orchestrator.v1.BuildVersionsB\x06\xbaH\x03\xc8\x01\x01R\x06client\"\xfb\x01\n" +
 	"\x14SessionHelloResponse\x12J\n" +
@@ -1823,100 +1888,102 @@ func file_vibesys_orchestrator_v1_agent_session_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_agent_session_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_orchestrator_v1_agent_session_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_vibesys_orchestrator_v1_agent_session_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_vibesys_orchestrator_v1_agent_session_proto_goTypes = []any{
 	(SessionProtocolVersion)(0),  // 0: vibesys.orchestrator.v1.SessionProtocolVersion
 	(*SessionBootstrap)(nil),     // 1: vibesys.orchestrator.v1.SessionBootstrap
 	(*SessionProcesses)(nil),     // 2: vibesys.orchestrator.v1.SessionProcesses
-	(*SessionHelloRequest)(nil),  // 3: vibesys.orchestrator.v1.SessionHelloRequest
-	(*SessionHelloResponse)(nil), // 4: vibesys.orchestrator.v1.SessionHelloResponse
-	(*OpenSessionRequest)(nil),   // 5: vibesys.orchestrator.v1.OpenSessionRequest
-	(*OpenSessionResponse)(nil),  // 6: vibesys.orchestrator.v1.OpenSessionResponse
-	(*SessionSkills)(nil),        // 7: vibesys.orchestrator.v1.SessionSkills
-	(*ToolServer)(nil),           // 8: vibesys.orchestrator.v1.ToolServer
-	(*AgentEnvironment)(nil),     // 9: vibesys.orchestrator.v1.AgentEnvironment
-	(*SessionCommand)(nil),       // 10: vibesys.orchestrator.v1.SessionCommand
-	(*SendRequest)(nil),          // 11: vibesys.orchestrator.v1.SendRequest
-	(*SendResponse)(nil),         // 12: vibesys.orchestrator.v1.SendResponse
-	(*FollowRequest)(nil),        // 13: vibesys.orchestrator.v1.FollowRequest
-	(*FollowResponse)(nil),       // 14: vibesys.orchestrator.v1.FollowResponse
-	(*SessionOpened)(nil),        // 15: vibesys.orchestrator.v1.SessionOpened
-	(*SessionItem)(nil),          // 16: vibesys.orchestrator.v1.SessionItem
-	(*SessionDelta)(nil),         // 17: vibesys.orchestrator.v1.SessionDelta
-	(*TurnEnded)(nil),            // 18: vibesys.orchestrator.v1.TurnEnded
-	(*SteerOutcome)(nil),         // 19: vibesys.orchestrator.v1.SteerOutcome
-	(*UsageReported)(nil),        // 20: vibesys.orchestrator.v1.UsageReported
-	(*SessionFailed)(nil),        // 21: vibesys.orchestrator.v1.SessionFailed
-	(*SessionClosed)(nil),        // 22: vibesys.orchestrator.v1.SessionClosed
-	(*SessionEvent)(nil),         // 23: vibesys.orchestrator.v1.SessionEvent
-	nil,                          // 24: vibesys.orchestrator.v1.ToolServer.EnvEntry
-	nil,                          // 25: vibesys.orchestrator.v1.AgentEnvironment.SetEntry
-	(*BuildVersions)(nil),        // 26: vibesys.orchestrator.v1.BuildVersions
-	(Compatibility)(0),           // 27: vibesys.orchestrator.v1.Compatibility
-	(*SessionRef)(nil),           // 28: vibesys.orchestrator.v1.SessionRef
-	(Harness)(0),                 // 29: vibesys.orchestrator.v1.Harness
-	(*StartTurn)(nil),            // 30: vibesys.orchestrator.v1.StartTurn
-	(*Steer)(nil),                // 31: vibesys.orchestrator.v1.Steer
-	(*Interrupt)(nil),            // 32: vibesys.orchestrator.v1.Interrupt
-	(*CloseSession)(nil),         // 33: vibesys.orchestrator.v1.CloseSession
-	(*Capabilities)(nil),         // 34: vibesys.orchestrator.v1.Capabilities
-	(ItemStatus)(0),              // 35: vibesys.orchestrator.v1.ItemStatus
-	(*Text)(nil),                 // 36: vibesys.orchestrator.v1.Text
-	(*ToolCall)(nil),             // 37: vibesys.orchestrator.v1.ToolCall
-	(TurnStatus)(0),              // 38: vibesys.orchestrator.v1.TurnStatus
-	(*Usage)(nil),                // 39: vibesys.orchestrator.v1.Usage
-	(StartFailureReason)(0),      // 40: vibesys.orchestrator.v1.StartFailureReason
+	(*AgentProcessGroup)(nil),    // 3: vibesys.orchestrator.v1.AgentProcessGroup
+	(*SessionHelloRequest)(nil),  // 4: vibesys.orchestrator.v1.SessionHelloRequest
+	(*SessionHelloResponse)(nil), // 5: vibesys.orchestrator.v1.SessionHelloResponse
+	(*OpenSessionRequest)(nil),   // 6: vibesys.orchestrator.v1.OpenSessionRequest
+	(*OpenSessionResponse)(nil),  // 7: vibesys.orchestrator.v1.OpenSessionResponse
+	(*SessionSkills)(nil),        // 8: vibesys.orchestrator.v1.SessionSkills
+	(*ToolServer)(nil),           // 9: vibesys.orchestrator.v1.ToolServer
+	(*AgentEnvironment)(nil),     // 10: vibesys.orchestrator.v1.AgentEnvironment
+	(*SessionCommand)(nil),       // 11: vibesys.orchestrator.v1.SessionCommand
+	(*SendRequest)(nil),          // 12: vibesys.orchestrator.v1.SendRequest
+	(*SendResponse)(nil),         // 13: vibesys.orchestrator.v1.SendResponse
+	(*FollowRequest)(nil),        // 14: vibesys.orchestrator.v1.FollowRequest
+	(*FollowResponse)(nil),       // 15: vibesys.orchestrator.v1.FollowResponse
+	(*SessionOpened)(nil),        // 16: vibesys.orchestrator.v1.SessionOpened
+	(*SessionItem)(nil),          // 17: vibesys.orchestrator.v1.SessionItem
+	(*SessionDelta)(nil),         // 18: vibesys.orchestrator.v1.SessionDelta
+	(*TurnEnded)(nil),            // 19: vibesys.orchestrator.v1.TurnEnded
+	(*SteerOutcome)(nil),         // 20: vibesys.orchestrator.v1.SteerOutcome
+	(*UsageReported)(nil),        // 21: vibesys.orchestrator.v1.UsageReported
+	(*SessionFailed)(nil),        // 22: vibesys.orchestrator.v1.SessionFailed
+	(*SessionClosed)(nil),        // 23: vibesys.orchestrator.v1.SessionClosed
+	(*SessionEvent)(nil),         // 24: vibesys.orchestrator.v1.SessionEvent
+	nil,                          // 25: vibesys.orchestrator.v1.ToolServer.EnvEntry
+	nil,                          // 26: vibesys.orchestrator.v1.AgentEnvironment.SetEntry
+	(*BuildVersions)(nil),        // 27: vibesys.orchestrator.v1.BuildVersions
+	(Compatibility)(0),           // 28: vibesys.orchestrator.v1.Compatibility
+	(*SessionRef)(nil),           // 29: vibesys.orchestrator.v1.SessionRef
+	(Harness)(0),                 // 30: vibesys.orchestrator.v1.Harness
+	(*StartTurn)(nil),            // 31: vibesys.orchestrator.v1.StartTurn
+	(*Steer)(nil),                // 32: vibesys.orchestrator.v1.Steer
+	(*Interrupt)(nil),            // 33: vibesys.orchestrator.v1.Interrupt
+	(*CloseSession)(nil),         // 34: vibesys.orchestrator.v1.CloseSession
+	(*Capabilities)(nil),         // 35: vibesys.orchestrator.v1.Capabilities
+	(ItemStatus)(0),              // 36: vibesys.orchestrator.v1.ItemStatus
+	(*Text)(nil),                 // 37: vibesys.orchestrator.v1.Text
+	(*ToolCall)(nil),             // 38: vibesys.orchestrator.v1.ToolCall
+	(TurnStatus)(0),              // 39: vibesys.orchestrator.v1.TurnStatus
+	(*Usage)(nil),                // 40: vibesys.orchestrator.v1.Usage
+	(StartFailureReason)(0),      // 41: vibesys.orchestrator.v1.StartFailureReason
 }
 var file_vibesys_orchestrator_v1_agent_session_proto_depIdxs = []int32{
-	26, // 0: vibesys.orchestrator.v1.SessionHelloRequest.client:type_name -> vibesys.orchestrator.v1.BuildVersions
-	26, // 1: vibesys.orchestrator.v1.SessionHelloResponse.versions:type_name -> vibesys.orchestrator.v1.BuildVersions
-	27, // 2: vibesys.orchestrator.v1.SessionHelloResponse.compatibility:type_name -> vibesys.orchestrator.v1.Compatibility
-	28, // 3: vibesys.orchestrator.v1.SessionHelloResponse.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	28, // 4: vibesys.orchestrator.v1.OpenSessionRequest.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	29, // 5: vibesys.orchestrator.v1.OpenSessionRequest.harness:type_name -> vibesys.orchestrator.v1.Harness
-	7,  // 6: vibesys.orchestrator.v1.OpenSessionRequest.skills:type_name -> vibesys.orchestrator.v1.SessionSkills
-	8,  // 7: vibesys.orchestrator.v1.OpenSessionRequest.tools:type_name -> vibesys.orchestrator.v1.ToolServer
-	9,  // 8: vibesys.orchestrator.v1.OpenSessionRequest.environment:type_name -> vibesys.orchestrator.v1.AgentEnvironment
-	28, // 9: vibesys.orchestrator.v1.OpenSessionResponse.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	24, // 10: vibesys.orchestrator.v1.ToolServer.env:type_name -> vibesys.orchestrator.v1.ToolServer.EnvEntry
-	25, // 11: vibesys.orchestrator.v1.AgentEnvironment.set:type_name -> vibesys.orchestrator.v1.AgentEnvironment.SetEntry
-	30, // 12: vibesys.orchestrator.v1.SessionCommand.start_turn:type_name -> vibesys.orchestrator.v1.StartTurn
-	31, // 13: vibesys.orchestrator.v1.SessionCommand.steer:type_name -> vibesys.orchestrator.v1.Steer
-	32, // 14: vibesys.orchestrator.v1.SessionCommand.interrupt:type_name -> vibesys.orchestrator.v1.Interrupt
-	33, // 15: vibesys.orchestrator.v1.SessionCommand.close:type_name -> vibesys.orchestrator.v1.CloseSession
-	10, // 16: vibesys.orchestrator.v1.SendRequest.command:type_name -> vibesys.orchestrator.v1.SessionCommand
-	23, // 17: vibesys.orchestrator.v1.FollowResponse.event:type_name -> vibesys.orchestrator.v1.SessionEvent
-	34, // 18: vibesys.orchestrator.v1.SessionOpened.capabilities:type_name -> vibesys.orchestrator.v1.Capabilities
-	35, // 19: vibesys.orchestrator.v1.SessionItem.status:type_name -> vibesys.orchestrator.v1.ItemStatus
-	36, // 20: vibesys.orchestrator.v1.SessionItem.assistant:type_name -> vibesys.orchestrator.v1.Text
-	36, // 21: vibesys.orchestrator.v1.SessionItem.reasoning:type_name -> vibesys.orchestrator.v1.Text
-	36, // 22: vibesys.orchestrator.v1.SessionItem.prompt:type_name -> vibesys.orchestrator.v1.Text
-	37, // 23: vibesys.orchestrator.v1.SessionItem.tool:type_name -> vibesys.orchestrator.v1.ToolCall
-	38, // 24: vibesys.orchestrator.v1.TurnEnded.status:type_name -> vibesys.orchestrator.v1.TurnStatus
-	39, // 25: vibesys.orchestrator.v1.TurnEnded.usage:type_name -> vibesys.orchestrator.v1.Usage
-	39, // 26: vibesys.orchestrator.v1.UsageReported.usage:type_name -> vibesys.orchestrator.v1.Usage
-	40, // 27: vibesys.orchestrator.v1.SessionFailed.start_failure_reason:type_name -> vibesys.orchestrator.v1.StartFailureReason
-	15, // 28: vibesys.orchestrator.v1.SessionEvent.opened:type_name -> vibesys.orchestrator.v1.SessionOpened
-	16, // 29: vibesys.orchestrator.v1.SessionEvent.item:type_name -> vibesys.orchestrator.v1.SessionItem
-	17, // 30: vibesys.orchestrator.v1.SessionEvent.delta:type_name -> vibesys.orchestrator.v1.SessionDelta
-	18, // 31: vibesys.orchestrator.v1.SessionEvent.turn_ended:type_name -> vibesys.orchestrator.v1.TurnEnded
-	19, // 32: vibesys.orchestrator.v1.SessionEvent.steer:type_name -> vibesys.orchestrator.v1.SteerOutcome
-	20, // 33: vibesys.orchestrator.v1.SessionEvent.usage:type_name -> vibesys.orchestrator.v1.UsageReported
-	21, // 34: vibesys.orchestrator.v1.SessionEvent.failed:type_name -> vibesys.orchestrator.v1.SessionFailed
-	22, // 35: vibesys.orchestrator.v1.SessionEvent.closed:type_name -> vibesys.orchestrator.v1.SessionClosed
-	3,  // 36: vibesys.orchestrator.v1.AgentSessionService.Hello:input_type -> vibesys.orchestrator.v1.SessionHelloRequest
-	5,  // 37: vibesys.orchestrator.v1.AgentSessionService.Open:input_type -> vibesys.orchestrator.v1.OpenSessionRequest
-	11, // 38: vibesys.orchestrator.v1.AgentSessionService.Send:input_type -> vibesys.orchestrator.v1.SendRequest
-	13, // 39: vibesys.orchestrator.v1.AgentSessionService.Follow:input_type -> vibesys.orchestrator.v1.FollowRequest
-	4,  // 40: vibesys.orchestrator.v1.AgentSessionService.Hello:output_type -> vibesys.orchestrator.v1.SessionHelloResponse
-	6,  // 41: vibesys.orchestrator.v1.AgentSessionService.Open:output_type -> vibesys.orchestrator.v1.OpenSessionResponse
-	12, // 42: vibesys.orchestrator.v1.AgentSessionService.Send:output_type -> vibesys.orchestrator.v1.SendResponse
-	14, // 43: vibesys.orchestrator.v1.AgentSessionService.Follow:output_type -> vibesys.orchestrator.v1.FollowResponse
-	40, // [40:44] is the sub-list for method output_type
-	36, // [36:40] is the sub-list for method input_type
-	36, // [36:36] is the sub-list for extension type_name
-	36, // [36:36] is the sub-list for extension extendee
-	0,  // [0:36] is the sub-list for field type_name
+	3,  // 0: vibesys.orchestrator.v1.SessionProcesses.agent_process_groups:type_name -> vibesys.orchestrator.v1.AgentProcessGroup
+	27, // 1: vibesys.orchestrator.v1.SessionHelloRequest.client:type_name -> vibesys.orchestrator.v1.BuildVersions
+	27, // 2: vibesys.orchestrator.v1.SessionHelloResponse.versions:type_name -> vibesys.orchestrator.v1.BuildVersions
+	28, // 3: vibesys.orchestrator.v1.SessionHelloResponse.compatibility:type_name -> vibesys.orchestrator.v1.Compatibility
+	29, // 4: vibesys.orchestrator.v1.SessionHelloResponse.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	29, // 5: vibesys.orchestrator.v1.OpenSessionRequest.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	30, // 6: vibesys.orchestrator.v1.OpenSessionRequest.harness:type_name -> vibesys.orchestrator.v1.Harness
+	8,  // 7: vibesys.orchestrator.v1.OpenSessionRequest.skills:type_name -> vibesys.orchestrator.v1.SessionSkills
+	9,  // 8: vibesys.orchestrator.v1.OpenSessionRequest.tools:type_name -> vibesys.orchestrator.v1.ToolServer
+	10, // 9: vibesys.orchestrator.v1.OpenSessionRequest.environment:type_name -> vibesys.orchestrator.v1.AgentEnvironment
+	29, // 10: vibesys.orchestrator.v1.OpenSessionResponse.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	25, // 11: vibesys.orchestrator.v1.ToolServer.env:type_name -> vibesys.orchestrator.v1.ToolServer.EnvEntry
+	26, // 12: vibesys.orchestrator.v1.AgentEnvironment.set:type_name -> vibesys.orchestrator.v1.AgentEnvironment.SetEntry
+	31, // 13: vibesys.orchestrator.v1.SessionCommand.start_turn:type_name -> vibesys.orchestrator.v1.StartTurn
+	32, // 14: vibesys.orchestrator.v1.SessionCommand.steer:type_name -> vibesys.orchestrator.v1.Steer
+	33, // 15: vibesys.orchestrator.v1.SessionCommand.interrupt:type_name -> vibesys.orchestrator.v1.Interrupt
+	34, // 16: vibesys.orchestrator.v1.SessionCommand.close:type_name -> vibesys.orchestrator.v1.CloseSession
+	11, // 17: vibesys.orchestrator.v1.SendRequest.command:type_name -> vibesys.orchestrator.v1.SessionCommand
+	24, // 18: vibesys.orchestrator.v1.FollowResponse.event:type_name -> vibesys.orchestrator.v1.SessionEvent
+	35, // 19: vibesys.orchestrator.v1.SessionOpened.capabilities:type_name -> vibesys.orchestrator.v1.Capabilities
+	36, // 20: vibesys.orchestrator.v1.SessionItem.status:type_name -> vibesys.orchestrator.v1.ItemStatus
+	37, // 21: vibesys.orchestrator.v1.SessionItem.assistant:type_name -> vibesys.orchestrator.v1.Text
+	37, // 22: vibesys.orchestrator.v1.SessionItem.reasoning:type_name -> vibesys.orchestrator.v1.Text
+	37, // 23: vibesys.orchestrator.v1.SessionItem.prompt:type_name -> vibesys.orchestrator.v1.Text
+	38, // 24: vibesys.orchestrator.v1.SessionItem.tool:type_name -> vibesys.orchestrator.v1.ToolCall
+	39, // 25: vibesys.orchestrator.v1.TurnEnded.status:type_name -> vibesys.orchestrator.v1.TurnStatus
+	40, // 26: vibesys.orchestrator.v1.TurnEnded.usage:type_name -> vibesys.orchestrator.v1.Usage
+	40, // 27: vibesys.orchestrator.v1.UsageReported.usage:type_name -> vibesys.orchestrator.v1.Usage
+	41, // 28: vibesys.orchestrator.v1.SessionFailed.start_failure_reason:type_name -> vibesys.orchestrator.v1.StartFailureReason
+	16, // 29: vibesys.orchestrator.v1.SessionEvent.opened:type_name -> vibesys.orchestrator.v1.SessionOpened
+	17, // 30: vibesys.orchestrator.v1.SessionEvent.item:type_name -> vibesys.orchestrator.v1.SessionItem
+	18, // 31: vibesys.orchestrator.v1.SessionEvent.delta:type_name -> vibesys.orchestrator.v1.SessionDelta
+	19, // 32: vibesys.orchestrator.v1.SessionEvent.turn_ended:type_name -> vibesys.orchestrator.v1.TurnEnded
+	20, // 33: vibesys.orchestrator.v1.SessionEvent.steer:type_name -> vibesys.orchestrator.v1.SteerOutcome
+	21, // 34: vibesys.orchestrator.v1.SessionEvent.usage:type_name -> vibesys.orchestrator.v1.UsageReported
+	22, // 35: vibesys.orchestrator.v1.SessionEvent.failed:type_name -> vibesys.orchestrator.v1.SessionFailed
+	23, // 36: vibesys.orchestrator.v1.SessionEvent.closed:type_name -> vibesys.orchestrator.v1.SessionClosed
+	4,  // 37: vibesys.orchestrator.v1.AgentSessionService.Hello:input_type -> vibesys.orchestrator.v1.SessionHelloRequest
+	6,  // 38: vibesys.orchestrator.v1.AgentSessionService.Open:input_type -> vibesys.orchestrator.v1.OpenSessionRequest
+	12, // 39: vibesys.orchestrator.v1.AgentSessionService.Send:input_type -> vibesys.orchestrator.v1.SendRequest
+	14, // 40: vibesys.orchestrator.v1.AgentSessionService.Follow:input_type -> vibesys.orchestrator.v1.FollowRequest
+	5,  // 41: vibesys.orchestrator.v1.AgentSessionService.Hello:output_type -> vibesys.orchestrator.v1.SessionHelloResponse
+	7,  // 42: vibesys.orchestrator.v1.AgentSessionService.Open:output_type -> vibesys.orchestrator.v1.OpenSessionResponse
+	13, // 43: vibesys.orchestrator.v1.AgentSessionService.Send:output_type -> vibesys.orchestrator.v1.SendResponse
+	15, // 44: vibesys.orchestrator.v1.AgentSessionService.Follow:output_type -> vibesys.orchestrator.v1.FollowResponse
+	41, // [41:45] is the sub-list for method output_type
+	37, // [37:41] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_agent_session_proto_init() }
@@ -1926,23 +1993,23 @@ func file_vibesys_orchestrator_v1_agent_session_proto_init() {
 	}
 	file_vibesys_orchestrator_v1_effects_proto_init()
 	file_vibesys_orchestrator_v1_orchestrator_proto_init()
-	file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[9].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[10].OneofWrappers = []any{
 		(*SessionCommand_StartTurn)(nil),
 		(*SessionCommand_Steer)(nil),
 		(*SessionCommand_Interrupt)(nil),
 		(*SessionCommand_Close)(nil),
 	}
-	file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[15].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[16].OneofWrappers = []any{
 		(*SessionItem_Assistant)(nil),
 		(*SessionItem_Reasoning)(nil),
 		(*SessionItem_Prompt)(nil),
 		(*SessionItem_Tool)(nil),
 	}
-	file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[16].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[17].OneofWrappers = []any{
 		(*SessionDelta_Text)(nil),
 		(*SessionDelta_CommandOutput)(nil),
 	}
-	file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[22].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_agent_session_proto_msgTypes[23].OneofWrappers = []any{
 		(*SessionEvent_Opened)(nil),
 		(*SessionEvent_Item)(nil),
 		(*SessionEvent_Delta)(nil),
@@ -1958,7 +2025,7 @@ func file_vibesys_orchestrator_v1_agent_session_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_agent_session_proto_rawDesc), len(file_vibesys_orchestrator_v1_agent_session_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   25,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -206,7 +206,7 @@ func (r *rig) pgids() []int {
 	var out []int
 	for _, record := range r.sessionRecords() {
 		for _, group := range record.GetAgentProcessGroups() {
-			out = append(out, int(group))
+			out = append(out, int(group.GetId()))
 		}
 	}
 	return out

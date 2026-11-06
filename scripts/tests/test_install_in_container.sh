@@ -221,7 +221,7 @@ for path in sys.argv[1:]:
         record = sc.SessionProcesses.FromString(open(path, "rb").read())
     except OSError:
         continue
-    print(record.holder_pid, *record.agent_process_groups, sep="\n")
+    print(record.holder_pid, *(g.id for g in record.agent_process_groups), sep="\n")
 PY
 }
 

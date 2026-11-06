@@ -131,7 +131,9 @@ func (h *ProcessHolders) Spawn(place HolderPlace, command []string, bootstrap *p
 	if err := os.MkdirAll(place.Directory, 0o700); err != nil {
 		return nil, err
 	}
-	if err := prepareStart(place, h.signals()); err != nil {
+	skipped, err := prepareStart(place, h.signals())
+	h.said(place, skipped)
+	if err != nil {
 		return nil, err
 	}
 	data, err := proto.Marshal(bootstrap)
@@ -196,10 +198,47 @@ func (h *ProcessHolders) listening(place HolderPlace) bool {
 func (h *ProcessHolders) Alive(place HolderPlace) bool { return alive(place) }
 
 // End implements SessionHolders.
-func (h *ProcessHolders) End(place HolderPlace) error { return killHolder(place, h.signals()) }
+func (h *ProcessHolders) End(place HolderPlace) error {
+	skipped, err := killHolder(place, h.signals())
+	h.said(place, skipped)
+	return err
+}
 
 // Reap implements SessionHolders.
-func (h *ProcessHolders) Reap(place HolderPlace) error { return reapUnheld(place, h.signals()) }
+func (h *ProcessHolders) Reap(place HolderPlace) error {
+	skipped, err := reapUnheld(place, h.signals())
+	h.said(place, skipped)
+	return err
+}
+
+// LeaderStarted implements ProcessSignals. The start time is what `ps` prints for it, in a fixed
+// locale and zone, and is only ever compared for equality, so no /proc is read and the same code
+// serves Linux and macOS. ps exits with status 1 and prints nothing when no such process exists.
+func (OSSignals) LeaderStarted(pid int) (string, bool, error) {
+	cmd := exec.Command("/bin/ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	cmd.Env = []string{"LC_ALL=C", "TZ=UTC"}
+	out, err := cmd.Output()
+	started := strings.TrimSpace(string(out))
+	var exit *exec.ExitError
+	switch {
+	case err == nil && started != "":
+		return started, true, nil
+	case err == nil, errors.As(err, &exit) && exit.ExitCode() == 1 && started == "":
+		return "", false, nil
+	default:
+		return "", false, fmt.Errorf("ps -o lstart= -p %d: %w", pid, err)
+	}
+}
+
+// said logs the process groups a look at a place left alone because they are not the agent's.
+func (h *ProcessHolders) said(place HolderPlace, skipped []string) {
+	if h.Log == nil {
+		return
+	}
+	for _, s := range skipped {
+		h.Log.Warn("left a process group alone", "session", place.Directory, "why", s)
+	}
+}
 
 // ReapAgent implements SessionHolders.
 func (h *ProcessHolders) ReapAgent(agentDirectory string) error {

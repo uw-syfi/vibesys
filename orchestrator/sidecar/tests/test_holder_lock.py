@@ -28,6 +28,34 @@ def test_a_second_process_cannot_take_a_lock_that_is_held_and_can_once_it_is_fre
     HolderLock.take(path).release()
 
 
+def test_a_look_at_the_lock_by_the_host_does_not_make_a_starting_process_end(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "holder.lock"
+    look = HolderLock.take(path)  # the host's try, at the very moment the process tries
+    pauses: list[None] = []
+
+    def pause() -> None:
+        pauses.append(None)
+        look.release()  # the look is over after a moment
+
+    started = HolderLock.take(path, pause=pause)
+    assert pauses == [None]
+    started.release()
+
+
+def test_a_process_that_really_holds_the_lock_makes_a_second_one_end_after_its_tries(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "holder.lock"
+    first = HolderLock.take(path)
+    pauses: list[None] = []
+    with pytest.raises(HolderLockedError):
+        HolderLock.take(path, pause=lambda: pauses.append(None), attempts=5)
+    assert len(pauses) == 4  # between its five tries
+    first.release()
+
+
 def test_a_lock_left_by_a_process_that_ended_is_free_whatever_the_file_holds(
     tmp_path: Path,
 ) -> None:
