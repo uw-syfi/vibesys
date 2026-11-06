@@ -93,7 +93,10 @@ message CallContext {
 message HelloRequest {
   // The daemon serves the command line tool and the orchestrator.
   Component component = 1 [(buf.validate.field).enum = {
-    in: [1, 4]
+    in: [
+      1,
+      4
+    ]
   }];
   BuildVersions versions = 2;
 }
@@ -225,7 +228,9 @@ message WaitRequest {
   CallContext context = 1;
   repeated string job_ids = 2 [(buf.validate.field).repeated = {
     min_items: 1
-    items: {string: {min_len: 1}}
+    items: {
+      string: {min_len: 1}
+    }
   }];
   // The wait is over when one job is final, and not when all are.
   bool any = 3;
@@ -393,6 +398,8 @@ message CreatePlanRequest {
   CallContext context = 1;
   string title = 2 [(buf.validate.field).string.min_len = 1];
   string body = 3;
+  // The bound on the plan's possible gain, when the planner states one.
+  PlanGainBound gain_bound = 4;
 }
 
 message CreatePlanResponse {
@@ -425,8 +432,8 @@ message ViewPlanResponse {
 message EditPlanRequest {
   option (buf.validate.message).cel = {
     id: "edit_plan.sets_something"
-    message: "set at least one of title, body or status"
-    expression: "has(this.title) || has(this.body) || has(this.status)"
+    message: "set at least one of title, body, status or gain_bound"
+    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.gain_bound)"
   };
   CallContext context = 1;
   uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
@@ -437,6 +444,8 @@ message EditPlanRequest {
     defined_only: true
     not_in: [0]
   }];
+  // Replaces the plan's bound. A plan's bound is replaced and never cleared.
+  PlanGainBound gain_bound = 6;
 }
 
 message EditPlanResponse {
