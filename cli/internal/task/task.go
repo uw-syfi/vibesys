@@ -120,7 +120,8 @@ type Task struct {
 
 	// Schema is the task schema the manifest declares.
 	Schema SchemaVersion
-	// Candidate is set for a task of two images (Schema02): the candidate's image and server. Its
+	// Candidate is set for a task of two images (a Schema02 manifest with [candidate]): the candidate's
+	// image and server. Its
 	// Check, Benchmark and Profile run in the task's image against that server.
 	Candidate *Candidate
 	// Profile is the standard profile load of a task of two images, when it declares one. It is
@@ -175,7 +176,7 @@ func Read(fsys fs.FS, name string) (Task, error) {
 		return Task{}, err
 	}
 	if t.Candidate != nil && !t.HasDockerfile {
-		return Task{}, invalid("task %q: a task of schema %s needs a %s in %s, which builds the task's image; the candidate's image is built from %s", name, t.Schema, dockerfile, dir, t.Candidate.Build.Dockerfile)
+		return Task{}, invalid("task %q: a task with a [candidate] needs a %s in %s, which builds the task's image; the candidate's image is built from %s", name, dockerfile, dir, t.Candidate.Build.Dockerfile)
 	}
 	t.Files = fingerprints(tree)
 	t.Version = versionOf(t.Files)

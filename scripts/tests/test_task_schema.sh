@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The task schema check on fixture schemas, with real Git and Buf: a schema of major version 0 is
-# frozen, and one of 1.0 on grows only by fields that declare a raised minor version, with its
+# The task schema check on fixture schemas, with real Git and Buf: a schema of major version 0 may
+# change freely, and one of 1.0 on grows only by fields that declare a raised minor version, with its
 # protovalidate rules unchanged. A rename is Buf's to refuse, beside it.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -25,7 +25,7 @@ cp -R "$root/proto/buf" "$repo/proto/"
 cp "$root/scripts/check_task_schema.py" "$root/scripts/check_task_schema.sh" "$repo/scripts/"
 touch "$repo/scripts/__init__.py"
 
-# schema writes the fixture's task.proto: a 1.x schema whose fields are given, and a frozen 0.1 one.
+# schema writes the fixture's task.proto: a 1.x schema whose fields are given, and a 0.1 one.
 schema() {
   local minor="$1" fields="$2" frozen="${3:-string version = 1 [(task_schema_since_minor) = 1];}"
   cat > "$repo/proto/vibesys/cli/v1/task.proto" <<PROTO
@@ -120,7 +120,7 @@ fails "a rule loosened" "tightening needs a new major; loosening needs a reviewe
 
 schema 0 "$base_fields" 'string version = 1 [(task_schema_since_minor) = 1];
   string extra = 2 [(task_schema_since_minor) = 1];'
-fails "a change to a 0.x schema" "TaskManifestV01: task schema 0.1 is frozen"
+pass "a change to a 0.x schema"
 
 # A renamed field keeps its number, so the rules above see the same field; Buf refuses it.
 schema 0 'string version = 1 [(task_schema_since_minor) = 0];

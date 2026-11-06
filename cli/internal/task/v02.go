@@ -34,7 +34,9 @@ func (c Candidate) ServeAt(root string, wrap []string) core.CandidateServe {
 	return core.CandidateServe{Argv: argv, Ready: c.Ready, StartupTimeout: c.StartupTimeout}
 }
 
-// parseV02 reads a manifest of task schema 0.2 (TaskManifestV02 in task.proto).
+// parseV02 reads a manifest of task schema 0.2 (TaskManifestV02 in task.proto). Without [candidate]
+// the task has no Candidate, as a task of 0.1: its commands run in the task image and own the system
+// under test.
 func parseV02(name string, table map[string]any, o objectivesFile) (Task, error) {
 	if err := refusedV02(table); err != nil {
 		return Task{}, err
@@ -104,23 +106,10 @@ func parseV02(name string, table map[string]any, o objectivesFile) (Task, error)
 			return Task{}, err
 		}
 	}
-	c := m.GetCandidate()
-	dockerfile, err := repositoryPath("candidate.dockerfile", c.GetDockerfile(), false)
-	if err != nil {
-		return Task{}, err
-	}
-	context, err := repositoryPath("candidate.context", c.GetContext(), true)
-	if err != nil {
-		return Task{}, err
-	}
-	if err := checkPlaceholders(Command{Argv: c.GetServe()}, core.PortPlaceholder); err != nil {
-		return Task{}, err
-	}
-	t.Candidate = &Candidate{
-		Build:          core.CandidateBuild{Dockerfile: dockerfile, Context: context, AllowedBases: slices.Clone(c.GetAllowedBases())},
-		Serve:          slices.Clone(c.GetServe()),
-		Ready:          c.GetReady(),
-		StartupTimeout: time.Duration(c.GetStartupTimeoutSeconds()) * time.Second,
+	if m.GetCandidate() != nil {
+		if t.Candidate, err = candidateOf(m.GetCandidate()); err != nil {
+			return Task{}, err
+		}
 	}
 	bench := &benchSection{ResultProtocol: int(b.GetResultProtocol())}
 	if r := b.GetResult(); r != nil {
@@ -130,6 +119,27 @@ func parseV02(name string, table map[string]any, o objectivesFile) (Task, error)
 		return Task{}, err
 	}
 	return t, nil
+}
+
+// candidateOf reads [candidate]: the image the candidate's commit builds, and the server it starts.
+func candidateOf(c *cliv1.TaskCandidateV02) (*Candidate, error) {
+	dockerfile, err := repositoryPath("candidate.dockerfile", c.GetDockerfile(), false)
+	if err != nil {
+		return nil, err
+	}
+	context, err := repositoryPath("candidate.context", c.GetContext(), true)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkPlaceholders(Command{Argv: c.GetServe()}, core.PortPlaceholder); err != nil {
+		return nil, err
+	}
+	return &Candidate{
+		Build:          core.CandidateBuild{Dockerfile: dockerfile, Context: context, AllowedBases: slices.Clone(c.GetAllowedBases())},
+		Serve:          slices.Clone(c.GetServe()),
+		Ready:          c.GetReady(),
+		StartupTimeout: time.Duration(c.GetStartupTimeoutSeconds()) * time.Second,
+	}, nil
 }
 
 // commandSections are the sections of a manifest that hold a command.

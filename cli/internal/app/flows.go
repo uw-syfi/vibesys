@@ -124,7 +124,7 @@ func commandOfTwoImages(c core.CommandSettings, t task.Task) (core.CommandSettin
 	cand := t.Candidate
 	switch {
 	case cand == nil && c.Profile != nil:
-		return c, invalid("task %q has no candidate image of its own (a task of schema %s does), so it has no standard profile; profile with submit command --wrap instead", t.Name, task.Schema02)
+		return c, invalid("task %q has no candidate image of its own (only a task with a [candidate] does), so it has no standard profile; profile with submit command --wrap instead", t.Name)
 	case cand == nil:
 		return c, nil
 	case c.Profile == nil:

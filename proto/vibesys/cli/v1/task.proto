@@ -8,7 +8,7 @@ import "google/protobuf/struct.proto";
 option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 
 // The task manifest, vibesys.input.toml, of task schema 0.2: a task of two images, the trusted task
-// image and the agent's candidate image. vibesys-cli decodes the TOML file into TaskManifestV02 by
+// image and the agent's candidate image, or, without [candidate], a task of one image. vibesys-cli decodes the TOML file into TaskManifestV02 by
 // its field names, refuses a key this message has no field for, naming the key, and holds the
 // message to its protovalidate rules. This file is the only definition of the schema; the Go types
 // are generated from it.
@@ -22,9 +22,9 @@ option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
 //   and of the messages it holds the minor version that introduced the field
 //   (task_schema_since_minor). The reader dispatches on the version a file declares.
 // - While the major version is 0, any minor version may be incompatible: each 0.x version is a
-//   message of its own (TaskManifestV02, with its sections TaskCandidateV02 and so on), a reader
-//   accepts exactly the 0.x versions it has messages for, and a change of any kind to an existing
-//   0.x message is refused: it is a new 0.x version.
+//   message of its own (TaskManifestV02, with its sections TaskCandidateV02 and so on), and a reader
+//   accepts exactly the 0.x versions it has messages for. A pre-1.0 format may change freely,
+//   including an existing 0.x message; the check below does not hold it.
 // - From 1.0 on, a minor version adds optional keys or sections and nothing else. A field added
 //   since the base declares the message's current minor version, and adding one raises that minor
 //   version by one. A manifest that declares M.N may set only the keys of M.0 to M.N, so the version
@@ -59,8 +59,8 @@ extend google.protobuf.FieldOptions {
 // container reaches the candidate only over HTTP, at VIBESYS_SERVICE_URL.
 //
 // It has every key of the single-image format 0.1, with the same meaning, except [evaluator] and the
-// entrypoint and args of a command, which it refuses by name; and it adds [candidate] and gives
-// [profile] a command. The sections 0.1 accepts without reading them are accepted the same way here.
+// entrypoint and args of a command, which it refuses by name; and it adds an optional [candidate] and
+// gives [profile] a command. The sections 0.1 accepts without reading them are accepted the same way here.
 message TaskManifestV02 {
   option (task_schema) = {
     major: 0
@@ -83,11 +83,9 @@ message TaskManifestV02 {
     (task_schema_since_minor) = 2,
     (buf.validate.field).string.max_len = 256
   ];
-  // The candidate's image and server.
-  TaskCandidateV02 candidate = 4 [
-    (task_schema_since_minor) = 2,
-    (buf.validate.field).required = true
-  ];
+  // The candidate's image and server. Optional: a manifest without it is a task of one image, whose
+  // commands run in the task image and own the system under test, as in 0.1.
+  TaskCandidateV02 candidate = 4 [(task_schema_since_minor) = 2];
   // The check: run in the task container against the candidate's server; exit 0 passes. [check] is
   // the same section by its other name; a manifest has one of them.
   TaskCommandV02 accuracy = 5 [(task_schema_since_minor) = 2];
