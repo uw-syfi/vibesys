@@ -142,7 +142,7 @@ def _launch_file(tmp_path: Path, launch: fx.LaunchSession) -> Path:
 
 def test_the_launch_file_round_trips_the_plugin(tmp_path: Path, plugin_root: Path) -> None:
     launch = h.launch()
-    loaded = load_launch(_launch_file(tmp_path, launch), None)
+    loaded = load_launch(_launch_file(tmp_path, launch))
     assert loaded.plugin == launch.plugin
     assert loaded.plugin.home == str(plugin_root / "plugin-home")
 
@@ -151,14 +151,14 @@ def test_a_launch_file_without_a_plugin_is_refused_naming_the_field(tmp_path: Pa
     launch = h.launch()
     launch.ClearField("plugin")
     with pytest.raises(LaunchError, match=r"launch\.plugin is missing"):
-        load_launch(_launch_file(tmp_path, launch), None)
+        load_launch(_launch_file(tmp_path, launch))
 
 
 def test_a_marketplace_without_a_manifest_is_refused_naming_the_field(tmp_path: Path) -> None:
     launch = h.launch()
     launch.plugin.marketplace = str(tmp_path / "nowhere")
     with pytest.raises(LaunchError, match=r"launch\.plugin\.marketplace .*nowhere"):
-        load_launch(_launch_file(tmp_path, launch), None)
+        load_launch(_launch_file(tmp_path, launch))
 
 
 def test_a_manifest_that_is_not_json_is_refused_naming_the_field(tmp_path: Path) -> None:
@@ -167,7 +167,7 @@ def test_a_manifest_that_is_not_json_is_refused_naming_the_field(tmp_path: Path)
     (tmp_path / "market" / ".claude-plugin" / "marketplace.json").write_text("{")
     launch.plugin.marketplace = str(tmp_path / "market")
     with pytest.raises(LaunchError, match=r"launch\.plugin\.marketplace"):
-        load_launch(_launch_file(tmp_path, launch), None)
+        load_launch(_launch_file(tmp_path, launch))
 
 
 @given(name=st.from_regex(r"[a-z][a-z0-9-]{0,20}", fullmatch=True).filter(lambda n: n != "vibesys"))
@@ -177,7 +177,7 @@ def test_a_plugin_the_marketplace_does_not_hold_is_refused_naming_the_field(name
         launch = h.launch()
         launch.plugin.name = name
         with pytest.raises(LaunchError, match=r"launch\.plugin\.name"):
-            load_launch(_launch_file(root, launch), None)
+            load_launch(_launch_file(root, launch))
 
 
 @given(path=st.text(min_size=1, max_size=30).filter(lambda p: not p.startswith("/")))
@@ -187,4 +187,4 @@ def test_a_relative_plugin_path_is_refused_naming_the_field(field: str, path: st
         launch = h.launch()
         setattr(launch.plugin, field, path)
         with pytest.raises(LaunchError, match=field):
-            load_launch(_launch_file(Path(directory), launch), None)
+            load_launch(_launch_file(Path(directory), launch))

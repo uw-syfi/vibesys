@@ -380,7 +380,6 @@ class Identity:
                 "VIBESYS_RUN": launch.run_id,
                 "VIBESYS_AGENT": launch.session.agent_id,
                 "VIBESYS_HARNESS": _harness_name(launch.harness),
-                "VIBESYS_SESSION": str(launch.session.session),
                 "VIBESYS_CLI": where.cli,
                 "XDG_RUNTIME_DIR": where.xdg_runtime_dir,
                 "XDG_STATE_HOME": where.xdg_state_home,
@@ -397,8 +396,6 @@ class Identity:
         differ and a server cannot be told it is another agent.
         """
         merged = dict(env)
-        merged.pop("VIBESYS_RUN_ID", None)
-        merged.pop("VIBESYS_AGENT_ID", None)
         for name, value in self.values.items():
             if value:
                 merged[name] = value

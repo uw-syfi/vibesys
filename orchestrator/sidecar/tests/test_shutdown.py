@@ -61,19 +61,18 @@ def _launch_file(tmp_path: Path, **fields: str) -> Path:
     return path
 
 
-def test_a_launch_without_a_worktree_is_refused_unless_the_command_line_gives_one(
+def test_a_launch_without_a_worktree_is_refused(
     tmp_path: Path,
 ) -> None:
     path = _launch_file(tmp_path, worktree="")
     with pytest.raises(LaunchError, match="worktree"):
-        load_launch(path, None)
-    assert load_launch(path, "/w").worktree == "/w"
+        load_launch(path)
 
 
 def test_a_launch_that_breaks_its_contract_is_refused_naming_the_problem(tmp_path: Path) -> None:
     path = _launch_file(tmp_path, run_id="")
     with pytest.raises(LaunchError, match="run_id"):
-        load_launch(path, None)
+        load_launch(path)
 
 
 def test_the_children_of_this_process_are_read_from_proc(tmp_path: Path) -> None:

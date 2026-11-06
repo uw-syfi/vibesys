@@ -50,12 +50,6 @@
       ]
     },
     {
-      "name": "VIBESYS_SESSION",
-      "from": "session.session",
-      "empty": "unset",
-      "readers": []
-    },
-    {
       "name": "VIBESYS_CLI",
       "from": "cli_location.cli",
       "empty": "unset",

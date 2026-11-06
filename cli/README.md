@@ -254,7 +254,7 @@ sidecar's tests both read; a name that is empty there is left unset in the agent
 | `HOME` | The home directory the index falls back to. |
 
 The orchestrator also sets `VIBESYS_CLI`, the absolute path of this binary for the skills to run
-(`"$VIBESYS_CLI"`), and `VIBESYS_SESSION`; the CLI itself reads neither. Installing and upgrading
+(`"$VIBESYS_CLI"`); the CLI itself does not read it. Installing and upgrading
 read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBESYS_CLI_RELEASES_URL`).
 
 | Command | What it does |

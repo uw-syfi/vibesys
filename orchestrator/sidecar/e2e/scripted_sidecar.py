@@ -187,7 +187,7 @@ def main() -> int:
     if args.detach:
         detach(args.state_dir / "sidecar.log")
     try:
-        launch = load_launch(args.launch, args.worktree)
+        launch = load_launch(args.launch)
     except LaunchError as error:
         sys.stderr.write(f"scripted_sidecar: {error}\n")
         return 2

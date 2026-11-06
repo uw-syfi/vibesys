@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"syscall"
 	"time"
@@ -17,12 +16,11 @@ import (
 const MaxOutput = 1 << 20
 const MaxStderr = 65536
 
-// Command is one argv invocation. StateRoot is the same root used by run discovery.
+// Command is one argv invocation.
 type Command struct {
 	Executable string
 	Args       []string
 	Input      []byte
-	StateRoot  string
 }
 
 // Result retains diagnostics even on cancellation, launch failure or nonzero exit.
@@ -48,7 +46,6 @@ func (ExecRunner) Run(ctx context.Context, command Command) (Result, error) {
 	}
 	cmd := exec.CommandContext(ctx, command.Executable, command.Args...)
 	cmd.Stdin = bytes.NewReader(command.Input)
-	cmd.Env = append(os.Environ(), "VIBESYS_STATE_HOME="+command.StateRoot)
 	// A wrapper's children must not outlive its timeout: they would keep running,
 	// and keep the output pipes open until WaitDelay. So the group is killed.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
