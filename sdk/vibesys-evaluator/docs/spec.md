@@ -374,7 +374,8 @@ or more `Spec[S, I, O]`s, all of which must hold:
 
 `Check(history, specs, options)` projects each spec (stopping after a phase
 with violations), fails when more than `MaxLostShare` (default 1%) of the
-pieces have an unknown outcome, splits the pieces into partitions (the
+calls have an unknown outcome (a call counts once, however many pieces it
+became; this is decided before any search), splits the pieces into partitions (the
 connected components of their keys), keeps every write and at most
 `MaxReadsPerKey` reads per key (a seeded sample), and searches each
 partition with porcupine for an order that respects real time and that the

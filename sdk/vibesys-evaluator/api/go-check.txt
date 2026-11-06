@@ -156,6 +156,10 @@ func (c Counter) Value() int
 type Coverage struct {
 	// Calls read, and those with a lost response.
 	Calls, LostCalls int
+	// UnknownCalls are the calls with an unknown outcome (lost responses, 5xx and the like: some
+	// piece of the call is Unknown), however many pieces each became. Their share of Calls is
+	// what MaxLostShare limits.
+	UnknownCalls int
 	// Pieces projected, those with an unknown outcome, the unknown reads dropped, and the
 	// pieces without keys (counted, never searched).
 	Pieces, UnknownPieces, UnknownReadsDropped, Keyless int
@@ -234,8 +238,9 @@ type Op[I, O any] struct {
 type Options struct {
 	// PartitionTimeout bounds one partition's search; past it the partition is undecided.
 	PartitionTimeout time.Duration
-	// TotalTimeout bounds the whole check, from projection to the last search: partitions not
-	// started by then are undecided (status skipped). Explaining failures has its own budget.
+	// TotalTimeout bounds the whole check, from projection to the last search (searches look at
+	// it from inside their steps, so it holds whatever the history): partitions not started by
+	// then are undecided (status skipped). Explaining failures has its own budget.
 	TotalTimeout time.Duration
 	// MaxSearchSteps bounds one partition's search in model steps, a budget that does not depend
 	// on the machine's speed. Negative: no bound (the default).
@@ -252,8 +257,9 @@ type Options struct {
 	// MaxOpsPerPartition: a partition with more ops than this after sampling is not searched
 	// (undecided, status too-large).
 	MaxOpsPerPartition int
-	// MaxLostShare is the largest share of pieces with an unknown outcome (Piece.Unknown: lost
-	// responses and 5xx alike) a spec accepts; above it the check fails, since at the check's
+	// MaxLostShare is the largest share of calls with an unknown outcome (some piece of the call
+	// is Piece.Unknown: lost responses and 5xx alike, however many pieces the projection makes of
+	// the call) a spec accepts; above it the check fails, before any search, since at the check's
 	// fixed low load they are the candidate's fault. Negative: no limit.
 	MaxLostShare float64
 	// OverlapWarning: a partition with more ops in flight at once than this gets a warning, since
@@ -422,14 +428,14 @@ func Check(h *History, specs []AnySpec, o Options) *Report
     Check checks a history against specs, all of which must hold, under the
     options' budgets.
 
-    For each spec it projects the history phase by phase (stopping after a
-    phase with violations), fails when the share of unknown outcomes is above
-    MaxLostShare, splits the pieces into partitions (connected components of
-    keys), samples reads per key, and searches the partitions, largest first and
-    in parallel, each first over prefixes of doubling length (an early violation
-    is found at a fraction of the cost) and then whole. A partition aborted for
-    memory is retried alone once the others are done. The first violations of
-    failing partitions are explained.
+    For each spec it projects the history phase by phase (stopping after a phase
+    with violations), fails when the share of calls with an unknown outcome is
+    above MaxLostShare (before any search), splits the pieces into partitions
+    (connected components of keys), samples reads per key, and searches the
+    partitions, largest first and in parallel, each first over prefixes of
+    doubling length (an early violation is found at a fraction of the cost) and
+    then whole. A partition aborted for memory is retried alone once the others
+    are done. The first violations of failing partitions are explained.
 
     The verdict is FAIL when some spec has a violation, an illegal partition
     or too many unknown outcomes; otherwise UNKNOWN when something could not be

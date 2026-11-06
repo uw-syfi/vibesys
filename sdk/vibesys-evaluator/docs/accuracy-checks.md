@@ -115,9 +115,9 @@ and its `Origin` call.
   piece is `Unknown`.
 - **Operations that touch nothing.** A piece with no `Keys` touches no
   state: a lost login, a request rejected before it reached any data. It is
-  counted, an unknown one toward `MaxLostShare` too, and never searched. Add
-  one rather than skipping the call, so that lost responses count whichever
-  step lost them.
+  counted, an unknown one toward `MaxLostShare` too (once per call), and never
+  searched. Add one rather than skipping the call, so that lost responses
+  count whichever step lost them.
 - **Several views.** When one projection cannot see every rule (per author and
   per reader, say), give several specs over the same history; all must hold.
 
@@ -267,10 +267,13 @@ undecidable. So:
   application's own request deadline). Without it, a lost write can take
   effect any time until the end of the history.
 - Keep unknown outcomes near zero: the accuracy load is fixed and low. More
-  than `MaxLostShare` (default 1%) of pieces with an unknown outcome (lost
-  responses and 5xx alike: whatever the projection marked `Unknown`) fails the
-  check, since at that load they are the candidate's fault. A task can raise
-  it with `--max-lost-share`.
+  than `MaxLostShare` (default 1%) of calls with an unknown outcome (lost
+  responses and 5xx alike: a call with any piece the projection marked
+  `Unknown`) fails the check, before any search, since at that load they are
+  the candidate's fault. The share is of calls, so a projection that turns one
+  call into many pieces (one compose onto every follower's timeline) does not
+  make one lost call count many times. A task can raise it with
+  `--max-lost-share`.
 - An unknown read tells nothing and is dropped.
 
 ## Keep per-key overlap low
@@ -302,8 +305,9 @@ rejecting is what is expensive.
 - `MaxReadsPerKey` (5,000) keeps a seeded uniform sample of each key's reads;
   writes are never sampled. Sampling can hide a violation, never invent one;
   the report counts what it dropped.
-- `PartitionTimeout` (60 s) and `TotalTimeout` (10 min) bound the searches;
-  `MaxSearchSteps` bounds a search in model steps, independent of the
+- `PartitionTimeout` (60 s) and `TotalTimeout` (10 min) bound the searches, and
+  hold from inside a step (a state set that doubles with every unknown
+  outcome cannot outrun them); `MaxSearchSteps` bounds a search in model steps, independent of the
   machine.
 - `MemoryBytes` (2 GiB) bounds the checker's heap. Above it the search with
   the most steps is aborted; when all partitions are done, aborted ones are
@@ -341,7 +345,7 @@ writes and sampled reads cannot be checked.
 ## Reading a report
 
 The first line is the verdict and its reason; then, per spec, the coverage
-(calls, lost calls, pieces, unknown outcomes, pieces without keys,
+(calls, lost calls, calls with an unknown outcome, pieces, unknown outcomes, pieces without keys,
 partitions, ops checked and unchecked, reads sampled out, the most ops in
 flight at once), warnings, the partitions (undecided and failing first) and
 the failures.

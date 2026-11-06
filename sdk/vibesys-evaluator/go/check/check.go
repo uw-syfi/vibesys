@@ -14,7 +14,7 @@ import (
 // Check checks a history against specs, all of which must hold, under the options' budgets.
 //
 // For each spec it projects the history phase by phase (stopping after a phase with violations),
-// fails when the share of unknown outcomes is above MaxLostShare, splits the pieces into
+// fails when the share of calls with an unknown outcome is above MaxLostShare (before any search), splits the pieces into
 // partitions (connected components of keys), samples reads per key, and searches the partitions,
 // largest first and in parallel, each first over prefixes of doubling length (an early violation
 // is found at a fraction of the cost) and then whole. A partition aborted for memory is retried
@@ -94,13 +94,15 @@ func (sp *Spec[S, I, O]) run(h *History, r *runner) *SpecReport {
 	}
 	rep.Coverage.Pieces = len(out.pieces) + out.keyless
 	rep.Coverage.UnknownPieces = out.unknown
+	rep.Coverage.UnknownCalls = len(out.lostCalls) + out.lostNoCall
 	rep.Coverage.Keyless = out.keyless
 	rep.Coverage.Faults = len(h.Faults)
 	if len(rep.Errors) > 0 || len(rep.Violations) > 0 {
 		rep.finish(o)
 		return rep
 	}
-	if n := rep.Coverage.Pieces; n > 0 && o.MaxLostShare >= 0 && float64(out.unknown) > o.MaxLostShare*float64(n) {
+	// The share is of calls, not pieces: a projection may spread one call over many pieces.
+	if n := rep.Coverage.Calls; n > 0 && o.MaxLostShare >= 0 && float64(rep.Coverage.UnknownCalls) > o.MaxLostShare*float64(n) {
 		rep.LostShareExceeded = true
 		rep.finish(o)
 		return rep

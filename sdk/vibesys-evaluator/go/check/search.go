@@ -183,9 +183,24 @@ func mix64(x uint64) uint64 {
 // porcupineModel wraps a spec for porcupine: state sets, faults, and the budget (an aborted
 // search sees every step fail, unwinds, and its result is discarded). c may be nil.
 func porcupineModel[S, I, O any](sp *Spec[S, I, O], keys []string, r *runner, c *control) porcupine.Model {
+	// halted looks at the budgets from inside a loop over a state set, which can hold millions
+	// of states (every unknown outcome may double it): one model step then takes longer than
+	// any budget, and the look every pollEvery steps would come too late. i counts iterations.
+	halted := func(i int) bool {
+		if c == nil {
+			return false
+		}
+		if i%64 == 63 {
+			r.poll(c, c.steps.Load())
+		}
+		return c.abort.Load() != running
+	}
 	makeSet := func(states []S) *stateSet[S] {
 		set := &stateSet[S]{}
-		for _, s := range states {
+		for i, s := range states {
+			if halted(i) {
+				break // the search is aborted and its result discarded
+			}
 			h := sp.Hash(s)
 			dup := false
 			for k, other := range set.states {
@@ -211,7 +226,10 @@ func porcupineModel[S, I, O any](sp *Spec[S, I, O], keys []string, r *runner, c 
 			set := state.(*stateSet[S])
 			in := input.(*pin[I, O])
 			var next []S
-			for _, s := range set.states {
+			for i, s := range set.states {
+				if halted(i) {
+					return false, nil
+				}
 				if in.fault != nil {
 					if sp.Fault == nil {
 						next = append(next, s)
@@ -226,6 +244,9 @@ func porcupineModel[S, I, O any](sp *Spec[S, I, O], keys []string, r *runner, c 
 			if len(next) == 0 {
 				return false, nil
 			}
+			if halted(0) {
+				return false, nil
+			}
 			return true, makeSet(next)
 		},
 		Equal: func(a, b any) bool {
@@ -234,6 +255,9 @@ func porcupineModel[S, I, O any](sp *Spec[S, I, O], keys []string, r *runner, c 
 				return false
 			}
 			for i, s := range x.states {
+				if halted(i) {
+					return false
+				}
 				found := false
 				for j, t := range y.states {
 					if x.hashes[i] == y.hashes[j] && sp.Equal(s, t) {
@@ -502,6 +526,10 @@ func prefix[I, O any](p *partition[I, O], faults []Fault, t int64, culpritsUnkno
 // the whole.
 func searchPartition[S, I, O any](sp *Spec[S, I, O], r *runner, p *partition[I, O], faults []Fault, horizon int64) PartitionReport {
 	pr := PartitionReport{Name: p.name, Keys: len(p.keys), SampledOut: p.sampledOut}
+	if r.totalExpired() { // before anything that costs: a spent budget skips every queued partition
+		pr.Status, pr.Reason = StatusSkipped, "the check's total time budget ran out before this partition started"
+		return pr
+	}
 	ops := buildOps(sp, p, faults, horizon, &pr)
 	switch {
 	case r.totalExpired():

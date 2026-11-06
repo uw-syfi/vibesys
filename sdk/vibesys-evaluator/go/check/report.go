@@ -84,6 +84,10 @@ type SpecReport struct {
 type Coverage struct {
 	// Calls read, and those with a lost response.
 	Calls, LostCalls int
+	// UnknownCalls are the calls with an unknown outcome (lost responses, 5xx and the like: some
+	// piece of the call is Unknown), however many pieces each became. Their share of Calls is
+	// what MaxLostShare limits.
+	UnknownCalls int
 	// Pieces projected, those with an unknown outcome, the unknown reads dropped, and the
 	// pieces without keys (counted, never searched).
 	Pieces, UnknownPieces, UnknownReadsDropped, Keyless int
@@ -150,7 +154,7 @@ func (s *SpecReport) finish(o Options) {
 			parts = append(parts, fmt.Sprintf("%d responses are wrong on their own (first: %s: %s)", n, where(s.Violations[0].Call), s.Violations[0].Message))
 		}
 		if s.LostShareExceeded {
-			parts = append(parts, fmt.Sprintf("%d of %d pieces (%.2f%%) have an unknown outcome (lost responses: %d of %d calls), more than MaxLostShare %.2f%%; at the check's fixed load, losing responses is the candidate's fault", c.UnknownPieces, c.Pieces, 100*float64(c.UnknownPieces)/float64(c.Pieces), c.LostCalls, c.Calls, 100*o.MaxLostShare))
+			parts = append(parts, fmt.Sprintf("%d of %d calls (%.2f%%) have an unknown outcome (%d of them lost responses; %d of %d pieces are unknown), more than MaxLostShare %.2f%%; at the check's fixed load, losing responses is the candidate's fault", c.UnknownCalls, c.Calls, 100*float64(c.UnknownCalls)/float64(c.Calls), c.LostCalls, c.UnknownPieces, c.Pieces, 100*o.MaxLostShare))
 		}
 		if len(illegal) > 0 {
 			var names []string
@@ -239,8 +243,8 @@ func (r *Report) Text(maxPartitions int) string {
 	for _, s := range r.Specs {
 		c := s.Coverage
 		fmt.Fprintf(&sb, "\n== spec %s: %s\n", s.Name, s.Verdict)
-		fmt.Fprintf(&sb, "coverage: %d calls (%d lost) -> %d pieces (%d unknown outcomes, %d unknown reads dropped, %d without keys) over %d keys in %d partitions; %d faults; ops checked %d, unchecked %d; reads sampled out %d; most in flight at once %d; partitions by status %v; heap before the searches %s\n",
-			c.Calls, c.LostCalls, c.Pieces, c.UnknownPieces, c.UnknownReadsDropped, c.Keyless, c.Keys, len(s.Partitions), c.Faults, c.OpsChecked, c.OpsUnchecked, c.ReadsSampledOut, s.MaxInFlight, c.ByStatus, mb(s.HeapBeforeSearch))
+		fmt.Fprintf(&sb, "coverage: %d calls (%d lost, %d unknown) -> %d pieces (%d unknown outcomes, %d unknown reads dropped, %d without keys) over %d keys in %d partitions; %d faults; ops checked %d, unchecked %d; reads sampled out %d; most in flight at once %d; partitions by status %v; heap before the searches %s\n",
+			c.Calls, c.LostCalls, c.UnknownCalls, c.Pieces, c.UnknownPieces, c.UnknownReadsDropped, c.Keyless, c.Keys, len(s.Partitions), c.Faults, c.OpsChecked, c.OpsUnchecked, c.ReadsSampledOut, s.MaxInFlight, c.ByStatus, mb(s.HeapBeforeSearch))
 		for _, w := range s.Warnings {
 			fmt.Fprintf(&sb, "warning: %s\n", w)
 		}

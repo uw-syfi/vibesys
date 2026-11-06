@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/check"
 )
@@ -481,5 +482,100 @@ func TestTooLargeAPartitionIsNotSearched(t *testing.T) {
 	rep := run(one(calls...), check.Options{MaxOpsPerPartition: 10}, kvSpec("kv", true))
 	if p := rep.Specs[0].Partitions[0]; rep.Verdict != check.Unknown || p.Status != check.StatusTooLarge || p.Steps != 0 {
 		t.Fatalf("got %s %s after %d steps, want UNKNOWN too-large with no search", rep.Verdict, p.Status, p.Steps)
+	}
+}
+
+// unknownStorm is n concurrent writes of one key whose outcomes are all unknown (each doubles the
+// states a search must keep apart), then a read of a value none wrote, which the search can only reject after trying every subset.
+func unknownStorm(n int, key string) []check.Call {
+	var calls []check.Call
+	for i := range n {
+		calls = append(calls, kvCall(uint64(i), -1, int64(i), 100000, true, []string{key}, []int{i + 1}, true))
+	}
+	return append(calls, r(uint64(n), 0, 100, key, 999)) // no write made it: every subset must be tried
+}
+
+// The budgets hold whatever the history: a search over a storm of unknown outcomes ends within
+// the partition and total budgets (plus a small margin), UNKNOWN, not minutes later.
+func TestBudgetsHoldUnderAStormOfUnknownOutcomes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		o    check.Options
+	}{
+		{"partition", check.Options{PartitionTimeout: 500 * time.Millisecond, TotalTimeout: time.Minute}},
+		{"total", check.Options{PartitionTimeout: time.Minute, TotalTimeout: 500 * time.Millisecond}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			o := tc.o
+			o.MaxLostShare, o.Workers, o.MemoryBytes = -1, 1, 64<<30
+			o.HeapBytes = func() int64 { return 0 }
+			began := time.Now()
+			rep := run(one(unknownStorm(40, "hot")...), o, kvSpec("kv", true))
+			checkInBudget(t, began, rep)
+		})
+		t.Run(tc.name+"/states", func(t *testing.T) {
+			// Unknown writes over distinct keys joined into one partition: the states a step
+			// carries multiply (2^n), so one step can take longer than the whole budget.
+			o := tc.o
+			o.MaxLostShare, o.Workers, o.MemoryBytes = -1, 1, 64<<30
+			o.HeapBytes = func() int64 { return 0 }
+			var calls []check.Call
+			for i := range 30 {
+				a, b := fmt.Sprintf("k%02d", i), fmt.Sprintf("k%02d", i+1)
+				calls = append(calls, kvCall(uint64(i), -1, int64(i), 100000, true, []string{a, b}, []int{i + 1, i + 1}, true))
+			}
+			calls = append(calls, r(30, 0, 100, "k00,k30", 999, 999))
+			began := time.Now()
+			rep := run(one(calls...), o, kvSpec("kv", false))
+			checkInBudget(t, began, rep)
+		})
+	}
+}
+
+func checkInBudget(t *testing.T, began time.Time, rep *check.Report) {
+	t.Helper()
+	if d := time.Since(began); d > 3*time.Second {
+		t.Fatalf("took %v with a 500ms budget", d)
+	}
+	if rep.Verdict != check.Unknown {
+		t.Fatalf("got %s, want UNKNOWN\n%s", rep.Verdict, rep.Text(5))
+	}
+}
+
+// lostComposes is nCalls writes of two keys each, the first nLost of them with a lost response,
+// then one more call per key that reads it.
+func lostComposes(nCalls, nLost int) []check.Call {
+	var calls []check.Call
+	for i := range nCalls {
+		t0 := int64(i * 100)
+		calls = append(calls, kvCall(uint64(i), 0, t0, t0+10, true, []string{"a", "b", "c", "d"}, []int{i, i, i, i}, i < nLost))
+	}
+	return calls
+}
+
+// The lost share is of calls, whatever the projection makes of them: one lost call that becomes
+// four pieces counts once (the per-key spec projects each call onto its four keys).
+func TestLostShareCountsCallsNotPieces(t *testing.T) {
+	calls := lostComposes(200, 3)
+	rep := run(one(calls...), check.Options{MaxLostShare: 0.02}, kvSpec("kv", true))
+	c := rep.Specs[0].Coverage
+	if rep.Verdict != check.Pass || c.UnknownCalls != 3 || c.UnknownPieces != 12 {
+		t.Fatalf("3 of 200 calls lost (12 unknown pieces) with a 2%% limit: %s, %d unknown calls, %d pieces, want PASS, 3, 12\n%s", rep.Verdict, c.UnknownCalls, c.UnknownPieces, rep.Text(5))
+	}
+	// A keyless piece counts once per call, and a call whose pieces are all unknown counts once.
+	rep = run(one(lostComposes(200, 5)...), check.Options{MaxLostShare: 0.02}, kvSpec("kv", true))
+	if rep.Verdict != check.Fail || !rep.Specs[0].LostShareExceeded || !strings.Contains(rep.Reason, "5 of 200 calls") {
+		t.Fatalf("5 of 200 calls lost, limit 2%%: %s (%s), want FAIL naming calls", rep.Verdict, rep.Reason)
+	}
+}
+
+// Over the limit the check fails before any search, however hard the history is to search.
+func TestLostShareFailsBeforeAnySearch(t *testing.T) {
+	calls := unknownStorm(40, "hot") // 40 of 41 calls lost; searching it would run out of budget
+	began := time.Now()
+	rep := run(one(calls...), check.Options{TotalTimeout: time.Minute}, kvSpec("kv", true))
+	s := rep.Specs[0]
+	if rep.Verdict != check.Fail || !s.LostShareExceeded || len(s.Partitions) != 0 || time.Since(began) > 5*time.Second {
+		t.Fatalf("got %s with %d partitions in %v, want an immediate FAIL on the lost share\n%s", rep.Verdict, len(s.Partitions), time.Since(began), rep.Text(5))
 	}
 }

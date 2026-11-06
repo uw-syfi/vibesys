@@ -103,6 +103,8 @@ type Projection[I, O any] struct {
 	errors     []string
 	unknown    int
 	keyless    int
+	lostCalls  map[[2]uint64]bool // calls (phase, index) with an unknown piece
+	lostNoCall int                // unknown pieces with no Origin: one call each
 	origins    map[*Call]*Call
 	spec       string
 }
@@ -128,6 +130,15 @@ func (p *Projection[I, O]) Add(piece Piece[I, O]) {
 	}
 	if piece.Unknown {
 		p.unknown++
+		switch o := piece.Origin; {
+		case o == nil:
+			p.lostNoCall++
+		default:
+			if p.lostCalls == nil {
+				p.lostCalls = map[[2]uint64]bool{}
+			}
+			p.lostCalls[[2]uint64{uint64(o.Phase), o.Index}] = true
+		}
 	}
 	if len(piece.Keys) == 0 {
 		p.keyless++ // touches no state: only counted
