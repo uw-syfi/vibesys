@@ -554,7 +554,7 @@ loadgen open   --target URL --rate R [--arrivals uniform|poisson] [--seed N]
                [--record-clients] [--format binpb|json] -- GENERATOR [ARG...]
 loadgen probe  --target URL --requests F --rounds N --deadline S
                [--timeout S] [--format binpb|json]
-loadgen selftest --summary F [--step-secs S] [--max-rate R] [--format binpb|json]
+loadgen selftest --summary F [--step-secs S] [--max-rate R] [--accept-any-rate] [--format binpb|json]
 loadgen --capabilities [--format binpb|json]
 ```
 
