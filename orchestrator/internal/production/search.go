@@ -2,6 +2,7 @@ package production
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"sync"
 	"time"
@@ -66,17 +67,35 @@ func Plan(live []core.Run, followed []Subscription) (start, stop []Subscription)
 // Terminal exits remain unreadable until the subscription is removed or its
 // recorded location changes. Retrying unchanged inputs cannot repair a terminal
 // protocol/install/size failure and would spin on every daemon step.
+//
+// A run that is over is read once by each host process, whether it ended while
+// this host was running or before it started: the first view Follow publishes,
+// readable or not, is its last, and it stays in Store. So an ended run's counts
+// do not depend on which host saw it end, and a view that is still being read
+// always ends. ReadBound, when set, bounds that one read, so a job service that
+// accepts the connection and never sends settles as unreadable.
 type Reconciler struct {
-	Store  *search.Store
-	Follow func(context.Context, Subscription, func(search.View))
-	mu     sync.Mutex
-	active map[Subscription]*following
-	runs   map[core.RunID]Subscription
+	Store     *search.Store
+	Follow    func(context.Context, Subscription, func(search.View))
+	ReadBound func(context.Context) (context.Context, context.CancelFunc)
+	mu        sync.Mutex
+	active    map[Subscription]*following
+	runs      map[core.RunID]Subscription
+	reads     map[Subscription]*following
+	ended     map[core.RunID]endedRun
+}
+
+// endedRun is a run that is over and has been dealt with by this host. Read says its view is the
+// shared read of its subscription, and not the empty one of a start that never ran.
+type endedRun struct {
+	key  Subscription
+	read bool
 }
 type following struct {
-	cancel context.CancelFunc
-	done   chan struct{}
-	view   search.View
+	cancel  context.CancelFunc
+	done    chan struct{}
+	view    search.View
+	settled bool
 }
 
 func (r *Reconciler) Sync(ctx context.Context, live []core.Run) {
@@ -92,8 +111,18 @@ func (r *Reconciler) Sync(ctx context.Context, live []core.Run) {
 			next[run.ID] = subscription(run)
 		}
 	}
+	known := map[core.RunID]bool{}
+	for _, run := range live {
+		known[run.ID] = true
+	}
+	for id := range r.ended {
+		if !known[id] {
+			delete(r.ended, id)
+			r.Store.Delete(id)
+		}
+	}
 	for id := range r.runs {
-		if _, ok := next[id]; !ok {
+		if !known[id] {
 			r.Store.Delete(id)
 		}
 	}
@@ -143,11 +172,87 @@ func (r *Reconciler) Sync(ctx context.Context, live []core.Run) {
 			})
 		}()
 	}
+	for _, run := range live {
+		if !run.Status.Live() {
+			r.readEnded(ctx, run)
+		}
+	}
 	r.mu.Unlock()
 	for _, a := range stopped {
 		<-a.done
 	}
 }
+
+// readEnded makes sure a run that is over has a view in Store and, when this host has not read its
+// job log yet, starts the one read. It is called with mu held.
+func (r *Reconciler) readEnded(ctx context.Context, run core.Run) {
+	if _, asked := r.ended[run.ID]; asked {
+		return
+	}
+	k := subscription(run)
+	if r.ended == nil {
+		r.ended, r.reads = map[core.RunID]endedRun{}, map[Subscription]*following{}
+	}
+	r.ended[run.ID] = endedRun{k, !run.NeverOpened}
+	if run.NeverOpened {
+		// Its lead never ran a turn, so nothing could have submitted a job: that is a read.
+		r.Store.Put(run.ID, search.View{})
+		return
+	}
+	if a := r.reads[k]; a != nil {
+		if a.settled {
+			r.Store.Put(run.ID, a.view)
+		} else if _, rev := r.Store.Get(run.ID); rev == 0 {
+			r.Store.Put(run.ID, search.View{Reason: core.Connecting})
+		}
+		return
+	}
+	// What the run's own live view knew stays when the last read cannot be made.
+	prior, rev := r.Store.Get(run.ID)
+	if a := r.active[k]; a != nil && rev == 0 {
+		prior = a.view
+	}
+	if rev == 0 {
+		r.Store.Put(run.ID, search.View{Reason: core.Connecting})
+	}
+	c, cancel := context.WithCancel(ctx)
+	bound := func() {}
+	if r.ReadBound != nil {
+		c, bound = r.ReadBound(c)
+	}
+	a := &following{cancel: cancel, done: make(chan struct{}), view: search.View{Reason: core.Connecting}}
+	r.reads[k] = a
+	settle := func(v search.View) {
+		if v.Reason != core.Readable && len(v.Facts) == 0 {
+			v.Facts = prior.Facts
+		}
+		a.view, a.settled = v, true
+		for id, e := range r.ended {
+			if e.read && e.key == k {
+				r.Store.Put(id, v)
+			}
+		}
+		cancel()
+	}
+	go func() {
+		defer close(a.done)
+		defer bound()
+		r.Follow(c, k, func(v search.View) {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if !a.settled && r.reads[k] == a {
+				settle(v)
+			}
+		})
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		// A read that ran out of time ends as a failure to read. One cancelled by Close ends as nothing.
+		if !a.settled && r.reads[k] == a && errors.Is(c.Err(), context.DeadlineExceeded) {
+			settle(search.View{Reason: core.StreamLost, Detail: "the job service did not send the job log in time"})
+		}
+	}()
+}
+
 func (r *Reconciler) Close() {
 	r.mu.Lock()
 	var all []*following
@@ -155,6 +260,11 @@ func (r *Reconciler) Close() {
 		a.cancel()
 		all = append(all, a)
 		delete(r.active, k)
+	}
+	for k, a := range r.reads {
+		a.cancel()
+		all = append(all, a)
+		delete(r.reads, k)
 	}
 	r.mu.Unlock()
 	for _, a := range all {
@@ -164,7 +274,9 @@ func (r *Reconciler) Close() {
 
 // SearchFor wires the production edges around the read-only link library.
 func SearchFor() *Reconciler {
-	return &Reconciler{Store: new(search.Store), Follow: func(ctx context.Context, k Subscription, publish func(search.View)) {
+	return &Reconciler{Store: new(search.Store), ReadBound: func(ctx context.Context) (context.Context, context.CancelFunc) {
+		return context.WithTimeout(ctx, 30*time.Second)
+	}, Follow: func(ctx context.Context, k Subscription, publish func(search.View)) {
 		var view search.View
 		f := clidaemon.Follower{
 			Ensurer: ExecEnsurerFor(k.JobTool, ExecRunner{}),

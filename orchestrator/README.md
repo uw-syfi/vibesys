@@ -306,6 +306,17 @@ own detail and the start failure reason, when the run died first. `run get --jso
 with its `searches` as the snapshot carried them; a snapshot cut to fit says `truncated`, and the human
 summary then omits the counts it cannot stand behind.
 
+A run's job counts and best result come from its task's job log, which the host reads and keeps in memory;
+it stores no copy, so the job log stays the one source. The host follows the log of every live run. A run
+that is over is read once by each host process: the first view of the log, or the reason it could not be
+read, is its last. So an ended run shows its final counts after any number of host restarts, whether it
+ended before or after the restart. A view that says the log is still being read (`NO_DAEMON`) always ends,
+with the counts or with the reason: `NOT_ANSWERING` when no job service answered (after the host started
+one), the job service's own reasons, or `STREAM_LOST` when it accepted the connection and sent nothing
+within 30 seconds. A read that failed is not tried again by that host; `host restart` tries again, and the
+facts the host had from the run's live period stay with the reason. A start that never ran reads as empty
+without asking.
+
 The daemon ends the sidecar process of every session the core no longer counts as live, whatever ended
 it: a close the sidecar reported, a failure, a stop nobody answered, or a resume that replaced the
 session. So when `run stop` returns and the run is over, none of its sidecars is left, the lead's

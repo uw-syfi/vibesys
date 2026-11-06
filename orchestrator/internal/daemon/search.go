@@ -19,11 +19,13 @@ func (e *Engine) searchState(run core.RunID) *pb.SearchState {
 	if old != nil && (revision == 0 || revision+1 == old.Revision) {
 		return old
 	}
+	// Nothing reads the job log when no store is wired, and that is final. With a store, a run with no
+	// entry yet is one whose first read is still being asked for.
 	v := search.View{Reason: core.NoDaemon}
 	if e.Search != nil {
 		v, revision = e.Search.Get(run)
 		if revision == 0 {
-			v.Reason = core.NoDaemon
+			v.Reason = core.Connecting
 		}
 	}
 	// Reserve the first revision for a run that has not received a CLI view yet.
@@ -57,8 +59,10 @@ func (e *Engine) searchState(run core.RunID) *pb.SearchState {
 
 func unreadableReason(r core.ViewReason) pb.UnreadableReason {
 	switch r {
-	case core.NoDaemon, core.Connecting:
+	case core.Connecting:
 		return pb.UnreadableReason_UNREADABLE_REASON_NO_DAEMON
+	case core.NoDaemon:
+		return pb.UnreadableReason_UNREADABLE_REASON_NOT_ANSWERING
 	case core.StartFailed:
 		return pb.UnreadableReason_UNREADABLE_REASON_START_FAILED
 	case core.CLINotInstalled:

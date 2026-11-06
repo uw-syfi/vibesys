@@ -48,6 +48,11 @@ func TestReconcilerGeneratedLifetimes(t *testing.T) {
 		r := &Reconciler{Store: store}
 		defer r.Close()
 		r.Follow = func(ctx context.Context, k Subscription, publish func(search.View)) {
+			if k.Task == "over" {
+				// An ended run's subscription is read once: the first view is the last.
+				publish(search.View{})
+				return
+			}
 			mu.Lock()
 			if active[k] {
 				t.Error("duplicate follower")
@@ -65,13 +70,17 @@ func TestReconcilerGeneratedLifetimes(t *testing.T) {
 			// A callback racing a stop must not restore a deleted run.
 			publish(search.View{Reason: core.StreamLost, Detail: "late"})
 		}
+		// A run is live until it ends, and then it stays over.
+		var over [5]bool
+		tool := [5]string{"/a/cli", "/b/cli", "/a/cli", "/b/cli", "/a/cli"}
 		for range 100 {
 			var runs []core.Run
 			want := map[Subscription]bool{}
 			for i := range 5 {
-				run := core.Run{ID: core.RunID(string(rune('a' + i))), Repository: "/repo", Task: "task", JobTool: core.JobToolEndpoint{Executable: []string{"/a/cli", "/b/cli"}[random.IntN(2)]}, Status: core.RunEnded}
-				if random.IntN(2) == 0 {
-					run.Status = core.RunRunning
+				over[i] = over[i] || random.IntN(8) == 0
+				run := core.Run{ID: core.RunID(string(rune('a' + i))), Repository: "/repo", Task: "over", JobTool: core.JobToolEndpoint{Executable: tool[i]}, Status: core.RunEnded}
+				if !over[i] {
+					run.Status, run.Task = core.RunRunning, "task"
 					want[subscription(run)] = true
 				}
 				runs = append(runs, run)
@@ -88,8 +97,8 @@ func TestReconcilerGeneratedLifetimes(t *testing.T) {
 			}
 			for _, run := range runs {
 				v, rev := store.Get(run.ID)
-				if !run.Status.Live() && rev != 0 {
-					t.Fatal("ended view retained", run.ID, v)
+				if !run.Status.Live() && (rev == 0 || v.Reason != core.Readable) {
+					t.Fatal("ended run left unread", run.ID, v)
 				}
 				if run.Status.Live() && rev == 0 {
 					t.Fatal("missing view", run.ID)
