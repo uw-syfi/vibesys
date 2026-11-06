@@ -2,6 +2,7 @@ package app_test
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
@@ -11,48 +12,52 @@ import (
 // A drain lets the job that runs end and starts no queued job, which says it waits on the drain;
 // a daemon that restarts drains still, so the queued job stays queued until the daemon resumes.
 func TestADrainLetsWhatRunsEndAndStartsNothingAcrossARestart(t *testing.T) {
-	w := newWorld(t)
-	a := w.newApp()
-	ctx := ctxFor(t)
-	running := submit(t, a, "mark", "started", ";", "hold", "g", ";", "exit", "0")
-	if !w.gates.Reached(ctx, "started") {
-		t.Fatalf("the first job did not start")
-	}
-	d, err := a.Drain(ctx, "lead", "a new build")
-	if err != nil || d.Agent != "lead" || d.Reason != "a new build" || d.Since.IsZero() {
-		t.Fatalf("Drain = %+v, %v", d, err)
-	}
-	queued := submit(t, a, "exit", "0")
-	w.gates.Release("g")
-	awaitState(t, a, running.ID, core.JobSucceeded)
-	if wait := a.Waits(scope, []core.JobID{queued.ID})[queued.ID]; wait.Kind != core.WaitHeld || wait.Detail != d.WaitDetail() {
-		t.Fatalf("the queued job waits as %+v, want on the drain", wait)
-	}
-	if st := a.Status(); st.Drain == nil || st.Queued != 1 || st.Running != 0 {
-		t.Fatalf("Status = %+v, want draining with one job queued", st)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		w := newWorld(t)
+		a := w.newApp()
+		ctx := ctxFor(t)
+		running := submit(t, a, "mark", "started", ";", "hold", "g", ";", "exit", "0")
+		if !w.gates.Reached(ctx, "started") {
+			t.Fatalf("the first job did not start")
+		}
+		d, err := a.Drain(ctx, "lead", "a new build")
+		if err != nil || d.Agent != "lead" || d.Reason != "a new build" || d.Since.IsZero() {
+			t.Fatalf("Drain = %+v, %v", d, err)
+		}
+		queued := submit(t, a, "exit", "0")
+		w.gates.Release("g")
+		awaitState(t, a, running.ID, core.JobSucceeded)
+		if wait := a.Waits(scope, []core.JobID{queued.ID})[queued.ID]; wait.Kind != core.WaitHeld || wait.Detail != d.WaitDetail() {
+			t.Fatalf("the queued job waits as %+v, want on the drain", wait)
+		}
+		synctest.Wait()
+		if st := a.Status(); st.Drain == nil || st.Queued != 1 || st.Running != 0 {
+			t.Fatalf("Status = %+v, want draining with one job queued", st)
+		}
 
-	a.Close()
-	b := w.newApp()
-	if st := b.Status(); st.Drain == nil || *st.Drain != d {
-		t.Fatalf("after a restart Status = %+v, want the drain %+v", st, d)
-	}
-	if job, err := b.Job(ctx, scope, queued.ID); err != nil || job.State != core.JobQueued {
-		t.Fatalf("after a restart the queued job is %+v, %v", job, err)
-	}
-	if wait := b.Waits(scope, []core.JobID{queued.ID})[queued.ID]; wait.Kind != core.WaitHeld || wait.Detail != d.WaitDetail() {
-		t.Fatalf("after a restart the queued job waits as %+v, want on the drain", wait)
-	}
-	if err := b.Resume(ctx); err != nil {
-		t.Fatal(err)
-	}
-	awaitState(t, b, queued.ID, core.JobSucceeded)
-	if st := b.Status(); st.Drain != nil {
-		t.Fatalf("Status after resuming = %+v, want no drain", st)
-	}
-	if got, err := w.drains.Load(ctx); got != nil || err != nil {
-		t.Fatalf("the record after resuming = %+v, %v; want no drain", got, err)
-	}
+		a.Close()
+		b := w.newApp()
+		synctest.Wait()
+		if st := b.Status(); st.Drain == nil || *st.Drain != d {
+			t.Fatalf("after a restart Status = %+v, want the drain %+v", st, d)
+		}
+		if job, err := b.Job(ctx, scope, queued.ID); err != nil || job.State != core.JobQueued {
+			t.Fatalf("after a restart the queued job is %+v, %v", job, err)
+		}
+		if wait := b.Waits(scope, []core.JobID{queued.ID})[queued.ID]; wait.Kind != core.WaitHeld || wait.Detail != d.WaitDetail() {
+			t.Fatalf("after a restart the queued job waits as %+v, want on the drain", wait)
+		}
+		if err := b.Resume(ctx); err != nil {
+			t.Fatal(err)
+		}
+		awaitState(t, b, queued.ID, core.JobSucceeded)
+		if st := b.Status(); st.Drain != nil {
+			t.Fatalf("Status after resuming = %+v, want no drain", st)
+		}
+		if got, err := w.drains.Load(ctx); got != nil || err != nil {
+			t.Fatalf("the record after resuming = %+v, %v; want no drain", got, err)
+		}
+	})
 }
 
 // A held job keeps its place and stands in no one's way: the job after it runs, and once it is
