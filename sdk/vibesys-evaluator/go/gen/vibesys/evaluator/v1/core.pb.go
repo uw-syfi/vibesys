@@ -195,8 +195,8 @@ func (x *Error) GetMessage() string {
 	return ""
 }
 
-// MetricSpec declares one metric of a benchmark (a `hello` record's entry).
-type MetricSpec struct {
+// DeclaredMetric declares one metric of a benchmark (a `hello` record's entry).
+type DeclaredMetric struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Its unit, for people ("ops/s", "ms"); may be empty.
@@ -206,20 +206,20 @@ type MetricSpec struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *MetricSpec) Reset() {
-	*x = MetricSpec{}
+func (x *DeclaredMetric) Reset() {
+	*x = DeclaredMetric{}
 	mi := &file_vibesys_evaluator_v1_core_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *MetricSpec) String() string {
+func (x *DeclaredMetric) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*MetricSpec) ProtoMessage() {}
+func (*DeclaredMetric) ProtoMessage() {}
 
-func (x *MetricSpec) ProtoReflect() protoreflect.Message {
+func (x *DeclaredMetric) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_evaluator_v1_core_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -231,26 +231,26 @@ func (x *MetricSpec) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use MetricSpec.ProtoReflect.Descriptor instead.
-func (*MetricSpec) Descriptor() ([]byte, []int) {
+// Deprecated: Use DeclaredMetric.ProtoReflect.Descriptor instead.
+func (*DeclaredMetric) Descriptor() ([]byte, []int) {
 	return file_vibesys_evaluator_v1_core_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *MetricSpec) GetName() string {
+func (x *DeclaredMetric) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *MetricSpec) GetUnit() string {
+func (x *DeclaredMetric) GetUnit() string {
 	if x != nil {
 		return x.Unit
 	}
 	return ""
 }
 
-func (x *MetricSpec) GetDirection() Direction {
+func (x *DeclaredMetric) GetDirection() Direction {
 	if x != nil {
 		return x.Direction
 	}
@@ -846,7 +846,7 @@ func (x *WriteRecordRequest) GetHello() *HelloRecord {
 	return nil
 }
 
-func (x *WriteRecordRequest) GetResult() *ResultRecord {
+func (x *WriteRecordRequest) GetResult() *ResultRow {
 	if x != nil {
 		if x, ok := x.Record.(*WriteRecordRequest_Result); ok {
 			return x.Result
@@ -880,7 +880,7 @@ type WriteRecordRequest_Hello struct {
 }
 
 type WriteRecordRequest_Result struct {
-	Result *ResultRecord `protobuf:"bytes,3,opt,name=result,proto3,oneof"`
+	Result *ResultRow `protobuf:"bytes,3,opt,name=result,proto3,oneof"`
 }
 
 type WriteRecordRequest_Error struct {
@@ -896,7 +896,7 @@ func (*WriteRecordRequest_Error) isWriteRecordRequest_Record() {}
 // HelloRecord declares the metrics, in order; it creates (truncates) the file.
 type HelloRecord struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Metrics       []*MetricSpec          `protobuf:"bytes,1,rep,name=metrics,proto3" json:"metrics,omitempty"`
+	Metrics       []*DeclaredMetric      `protobuf:"bytes,1,rep,name=metrics,proto3" json:"metrics,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -931,35 +931,35 @@ func (*HelloRecord) Descriptor() ([]byte, []int) {
 	return file_vibesys_evaluator_v1_core_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *HelloRecord) GetMetrics() []*MetricSpec {
+func (x *HelloRecord) GetMetrics() []*DeclaredMetric {
 	if x != nil {
 		return x.Metrics
 	}
 	return nil
 }
 
-// ResultRecord is the measured row: every declared metric, finite.
-type ResultRecord struct {
+// ResultRow is the measured row: every declared metric, finite.
+type ResultRow struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Values        []*MetricValue         `protobuf:"bytes,1,rep,name=values,proto3" json:"values,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ResultRecord) Reset() {
-	*x = ResultRecord{}
+func (x *ResultRow) Reset() {
+	*x = ResultRow{}
 	mi := &file_vibesys_evaluator_v1_core_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ResultRecord) String() string {
+func (x *ResultRow) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ResultRecord) ProtoMessage() {}
+func (*ResultRow) ProtoMessage() {}
 
-func (x *ResultRecord) ProtoReflect() protoreflect.Message {
+func (x *ResultRow) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_evaluator_v1_core_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -971,12 +971,12 @@ func (x *ResultRecord) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ResultRecord.ProtoReflect.Descriptor instead.
-func (*ResultRecord) Descriptor() ([]byte, []int) {
+// Deprecated: Use ResultRow.ProtoReflect.Descriptor instead.
+func (*ResultRow) Descriptor() ([]byte, []int) {
 	return file_vibesys_evaluator_v1_core_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *ResultRecord) GetValues() []*MetricValue {
+func (x *ResultRow) GetValues() []*MetricValue {
 	if x != nil {
 		return x.Values
 	}
@@ -1207,9 +1207,8 @@ const file_vibesys_evaluator_v1_core_proto_rawDesc = "" +
 	"\x05Error\x12\x1d\n" +
 	"\n" +
 	"error_kind\x18\x01 \x01(\tR\terrorKind\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"s\n" +
-	"\n" +
-	"MetricSpec\x12\x12\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"w\n" +
+	"\x0eDeclaredMetric\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04unit\x18\x02 \x01(\tR\x04unit\x12=\n" +
 	"\tdirection\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.DirectionR\tdirection\"7\n" +
@@ -1247,17 +1246,17 @@ const file_vibesys_evaluator_v1_core_proto_rawDesc = "" +
 	"\x14SampleCombineRequest\x124\n" +
 	"\x06series\x18\x01 \x03(\v2\x1c.vibesys.evaluator.v1.SeriesR\x06series\"R\n" +
 	"\x15SampleCombineResponse\x129\n" +
-	"\x06values\x18\x01 \x03(\v2!.vibesys.evaluator.v1.MetricValueR\x06values\"\xfc\x01\n" +
+	"\x06values\x18\x01 \x03(\v2!.vibesys.evaluator.v1.MetricValueR\x06values\"\xf9\x01\n" +
 	"\x12WriteRecordRequest\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x129\n" +
-	"\x05hello\x18\x02 \x01(\v2!.vibesys.evaluator.v1.HelloRecordH\x00R\x05hello\x12<\n" +
-	"\x06result\x18\x03 \x01(\v2\".vibesys.evaluator.v1.ResultRecordH\x00R\x06result\x129\n" +
+	"\x05hello\x18\x02 \x01(\v2!.vibesys.evaluator.v1.HelloRecordH\x00R\x05hello\x129\n" +
+	"\x06result\x18\x03 \x01(\v2\x1f.vibesys.evaluator.v1.ResultRowH\x00R\x06result\x129\n" +
 	"\x05error\x18\x04 \x01(\v2!.vibesys.evaluator.v1.ErrorRecordH\x00R\x05error\x12\x14\n" +
 	"\x05fresh\x18\x05 \x01(\bR\x05freshB\b\n" +
-	"\x06record\"I\n" +
-	"\vHelloRecord\x12:\n" +
-	"\ametrics\x18\x01 \x03(\v2 .vibesys.evaluator.v1.MetricSpecR\ametrics\"I\n" +
-	"\fResultRecord\x129\n" +
+	"\x06record\"M\n" +
+	"\vHelloRecord\x12>\n" +
+	"\ametrics\x18\x01 \x03(\v2$.vibesys.evaluator.v1.DeclaredMetricR\ametrics\"F\n" +
+	"\tResultRow\x129\n" +
 	"\x06values\x18\x01 \x03(\v2!.vibesys.evaluator.v1.MetricValueR\x06values\"q\n" +
 	"\vErrorRecord\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\x12<\n" +
@@ -1305,7 +1304,7 @@ var file_vibesys_evaluator_v1_core_proto_goTypes = []any{
 	(Direction)(0),                // 0: vibesys.evaluator.v1.Direction
 	(Aggregation)(0),              // 1: vibesys.evaluator.v1.Aggregation
 	(*Error)(nil),                 // 2: vibesys.evaluator.v1.Error
-	(*MetricSpec)(nil),            // 3: vibesys.evaluator.v1.MetricSpec
+	(*DeclaredMetric)(nil),        // 3: vibesys.evaluator.v1.DeclaredMetric
 	(*MetricValue)(nil),           // 4: vibesys.evaluator.v1.MetricValue
 	(*Partial)(nil),               // 5: vibesys.evaluator.v1.Partial
 	(*SampleStartRequest)(nil),    // 6: vibesys.evaluator.v1.SampleStartRequest
@@ -1317,23 +1316,23 @@ var file_vibesys_evaluator_v1_core_proto_goTypes = []any{
 	(*SampleCombineResponse)(nil), // 12: vibesys.evaluator.v1.SampleCombineResponse
 	(*WriteRecordRequest)(nil),    // 13: vibesys.evaluator.v1.WriteRecordRequest
 	(*HelloRecord)(nil),           // 14: vibesys.evaluator.v1.HelloRecord
-	(*ResultRecord)(nil),          // 15: vibesys.evaluator.v1.ResultRecord
+	(*ResultRow)(nil),             // 15: vibesys.evaluator.v1.ResultRow
 	(*ErrorRecord)(nil),           // 16: vibesys.evaluator.v1.ErrorRecord
 	(*WriteRecordResponse)(nil),   // 17: vibesys.evaluator.v1.WriteRecordResponse
 	(*HistSummaryRequest)(nil),    // 18: vibesys.evaluator.v1.HistSummaryRequest
 	(*HistSummaryResponse)(nil),   // 19: vibesys.evaluator.v1.HistSummaryResponse
 }
 var file_vibesys_evaluator_v1_core_proto_depIdxs = []int32{
-	0,  // 0: vibesys.evaluator.v1.MetricSpec.direction:type_name -> vibesys.evaluator.v1.Direction
+	0,  // 0: vibesys.evaluator.v1.DeclaredMetric.direction:type_name -> vibesys.evaluator.v1.Direction
 	0,  // 1: vibesys.evaluator.v1.Partial.direction:type_name -> vibesys.evaluator.v1.Direction
 	1,  // 2: vibesys.evaluator.v1.Series.aggregation:type_name -> vibesys.evaluator.v1.Aggregation
 	10, // 3: vibesys.evaluator.v1.SampleCombineRequest.series:type_name -> vibesys.evaluator.v1.Series
 	4,  // 4: vibesys.evaluator.v1.SampleCombineResponse.values:type_name -> vibesys.evaluator.v1.MetricValue
 	14, // 5: vibesys.evaluator.v1.WriteRecordRequest.hello:type_name -> vibesys.evaluator.v1.HelloRecord
-	15, // 6: vibesys.evaluator.v1.WriteRecordRequest.result:type_name -> vibesys.evaluator.v1.ResultRecord
+	15, // 6: vibesys.evaluator.v1.WriteRecordRequest.result:type_name -> vibesys.evaluator.v1.ResultRow
 	16, // 7: vibesys.evaluator.v1.WriteRecordRequest.error:type_name -> vibesys.evaluator.v1.ErrorRecord
-	3,  // 8: vibesys.evaluator.v1.HelloRecord.metrics:type_name -> vibesys.evaluator.v1.MetricSpec
-	4,  // 9: vibesys.evaluator.v1.ResultRecord.values:type_name -> vibesys.evaluator.v1.MetricValue
+	3,  // 8: vibesys.evaluator.v1.HelloRecord.metrics:type_name -> vibesys.evaluator.v1.DeclaredMetric
+	4,  // 9: vibesys.evaluator.v1.ResultRow.values:type_name -> vibesys.evaluator.v1.MetricValue
 	5,  // 10: vibesys.evaluator.v1.ErrorRecord.partial:type_name -> vibesys.evaluator.v1.Partial
 	11, // [11:11] is the sub-list for method output_type
 	11, // [11:11] is the sub-list for method input_type

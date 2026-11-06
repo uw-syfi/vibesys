@@ -55,14 +55,14 @@ class Error(Message[_ErrorFields]):
         error_kind: str
         message: str
 
-_MetricSpecFields: TypeAlias = Literal["name", "unit", "direction"]
+_DeclaredMetricFields: TypeAlias = Literal["name", "unit", "direction"]
 
-class MetricSpec(Message[_MetricSpecFields]):
+class DeclaredMetric(Message[_DeclaredMetricFields]):
     """
-    MetricSpec declares one metric of a benchmark (a `hello` record's entry).
+    DeclaredMetric declares one metric of a benchmark (a `hello` record's entry).
 
     ```proto
-    message vibesys.evaluator.v1.MetricSpec
+    message vibesys.evaluator.v1.DeclaredMetric
     ```
 
     Attributes:
@@ -500,13 +500,13 @@ class WriteRecordRequest(Message[_WriteRecordRequestFields]):
             self,
             *,
             path: str = "",
-            record: Oneof[Literal["hello"], HelloRecord] | Oneof[Literal["result"], ResultRecord] | Oneof[Literal["error"], ErrorRecord] | None = None,
+            record: Oneof[Literal["hello"], HelloRecord] | Oneof[Literal["result"], ResultRow] | Oneof[Literal["error"], ErrorRecord] | None = None,
             fresh: bool = False,
         ) -> None:
             pass
 
         path: str
-        record: Oneof[Literal["hello"], HelloRecord] | Oneof[Literal["result"], ResultRecord] | Oneof[Literal["error"], ErrorRecord] | None
+        record: Oneof[Literal["hello"], HelloRecord] | Oneof[Literal["result"], ResultRow] | Oneof[Literal["error"], ErrorRecord] | None
         fresh: bool
 
 _HelloRecordFields: TypeAlias = Literal["metrics"]
@@ -522,7 +522,7 @@ class HelloRecord(Message[_HelloRecordFields]):
     Attributes:
         metrics:
             ```proto
-            repeated vibesys.evaluator.v1.MetricSpec metrics = 1;
+            repeated vibesys.evaluator.v1.DeclaredMetric metrics = 1;
             ```
     """
 
@@ -533,20 +533,20 @@ class HelloRecord(Message[_HelloRecordFields]):
         def __init__(
             self,
             *,
-            metrics: list[MetricSpec] | None = None,
+            metrics: list[DeclaredMetric] | None = None,
         ) -> None:
             pass
 
-        metrics: list[MetricSpec]
+        metrics: list[DeclaredMetric]
 
-_ResultRecordFields: TypeAlias = Literal["values"]
+_ResultRowFields: TypeAlias = Literal["values"]
 
-class ResultRecord(Message[_ResultRecordFields]):
+class ResultRow(Message[_ResultRowFields]):
     """
-    ResultRecord is the measured row: every declared metric, finite.
+    ResultRow is the measured row: every declared metric, finite.
 
     ```proto
-    message vibesys.evaluator.v1.ResultRecord
+    message vibesys.evaluator.v1.ResultRow
     ```
 
     Attributes:
@@ -790,11 +790,11 @@ class Aggregation(Enum):
 
 
 _DESC = file_desc(
-    b'\n\x1fvibesys/evaluator/v1/core.proto\x12\x14vibesys.evaluator.v1"@\n\x05Error\x12\x1d\n\nerror_kind\x18\x01 \x01(\tR\terrorKind\x12\x18\n\x07message\x18\x02 \x01(\tR\x07message"s\n\nMetricSpec\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n\x04unit\x18\x02 \x01(\tR\x04unit\x12=\n\tdirection\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.DirectionR\tdirection"7\n\x0bMetricValue\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n\x05value\x18\x02 \x01(\x01R\x05value"\x86\x01\n\x07Partial\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n\x05value\x18\x02 \x01(\x01R\x05value\x12=\n\tdirection\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.DirectionR\tdirection\x12\x12\n\x04unit\x18\x04 \x01(\tR\x04unit"\xc0\x01\n\x12SampleStartRequest\x12\x12\n\x04mode\x18\x01 \x01(\tR\x04mode\x12 \n\tseed_flag\x18\x02 \x01(\tH\x00R\x08seedFlag\x88\x01\x01\x12\x19\n\x08env_seed\x18\x03 \x01(\tR\x07envSeed\x12*\n\x11env_artifacts_dir\x18\x04 \x01(\tR\x0fenvArtifactsDir\x12\x1f\n\x0bscratch_dir\x18\x05 \x01(\tR\nscratchDirB\x0c\n\n_seed_flag"o\n\x13SampleStartResponse\x12\x12\n\x04seed\x18\x01 \x01(\x04R\x04seed\x12\x1f\n\x0bseed_source\x18\x02 \x01(\tR\nseedSource\x12#\n\rartifacts_dir\x18\x03 \x01(\tR\x0cartifactsDir"M\n\x12SamplePhaseRequest\x12#\n\rartifacts_dir\x18\x01 \x01(\tR\x0cartifactsDir\x12\x12\n\x04name\x18\x02 \x01(\tR\x04name")\n\x13SamplePhaseResponse\x12\x12\n\x04path\x18\x01 \x01(\tR\x04path"y\n\x06Series\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12C\n\x0baggregation\x18\x02 \x01(\x0e2!.vibesys.evaluator.v1.AggregationR\x0baggregation\x12\x16\n\x06values\x18\x03 \x03(\x01R\x06values"L\n\x14SampleCombineRequest\x124\n\x06series\x18\x01 \x03(\x0b2\x1c.vibesys.evaluator.v1.SeriesR\x06series"R\n\x15SampleCombineResponse\x129\n\x06values\x18\x01 \x03(\x0b2!.vibesys.evaluator.v1.MetricValueR\x06values"\xfc\x01\n\x12WriteRecordRequest\x12\x12\n\x04path\x18\x01 \x01(\tR\x04path\x129\n\x05hello\x18\x02 \x01(\x0b2!.vibesys.evaluator.v1.HelloRecordH\x00R\x05hello\x12<\n\x06result\x18\x03 \x01(\x0b2".vibesys.evaluator.v1.ResultRecordH\x00R\x06result\x129\n\x05error\x18\x04 \x01(\x0b2!.vibesys.evaluator.v1.ErrorRecordH\x00R\x05error\x12\x14\n\x05fresh\x18\x05 \x01(\x08R\x05freshB\x08\n\x06record"I\n\x0bHelloRecord\x12:\n\x07metrics\x18\x01 \x03(\x0b2 .vibesys.evaluator.v1.MetricSpecR\x07metrics"I\n\x0cResultRecord\x129\n\x06values\x18\x01 \x03(\x0b2!.vibesys.evaluator.v1.MetricValueR\x06values"q\n\x0bErrorRecord\x12\x18\n\x07message\x18\x01 \x01(\tR\x07message\x12<\n\x07partial\x18\x02 \x01(\x0b2\x1d.vibesys.evaluator.v1.PartialH\x00R\x07partial\x88\x01\x01B\n\n\x08_partial"/\n\x13WriteRecordResponse\x12\x18\n\x07outcome\x18\x01 \x01(\tR\x07outcome"V\n\x12HistSummaryRequest\x12\x1e\n\nhistograms\x18\x01 \x03(\x0cR\nhistograms\x12 \n\x0bpercentiles\x18\x02 \x03(\x01R\x0bpercentiles"U\n\x13HistSummaryResponse\x12\x14\n\x05count\x18\x01 \x01(\x03R\x05count\x12\x10\n\x03max\x18\x02 \x01(\x03R\x03max\x12\x16\n\x06values\x18\x03 \x03(\x03R\x06values*L\n\tDirection\x12\x19\n\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x11\n\rDIRECTION_MAX\x10\x01\x12\x11\n\rDIRECTION_MIN\x10\x02*\x97\x01\n\x0bAggregation\x12\x1b\n\x17AGGREGATION_UNSPECIFIED\x10\x00\x12\x16\n\x12AGGREGATION_MEDIAN\x10\x01\x12\x14\n\x10AGGREGATION_MEAN\x10\x02\x12\x13\n\x0fAGGREGATION_MIN\x10\x03\x12\x13\n\x0fAGGREGATION_MAX\x10\x04\x12\x13\n\x0fAGGREGATION_SUM\x10\x05BZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
+    b'\n\x1fvibesys/evaluator/v1/core.proto\x12\x14vibesys.evaluator.v1"@\n\x05Error\x12\x1d\n\nerror_kind\x18\x01 \x01(\tR\terrorKind\x12\x18\n\x07message\x18\x02 \x01(\tR\x07message"w\n\x0eDeclaredMetric\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n\x04unit\x18\x02 \x01(\tR\x04unit\x12=\n\tdirection\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.DirectionR\tdirection"7\n\x0bMetricValue\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n\x05value\x18\x02 \x01(\x01R\x05value"\x86\x01\n\x07Partial\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n\x05value\x18\x02 \x01(\x01R\x05value\x12=\n\tdirection\x18\x03 \x01(\x0e2\x1f.vibesys.evaluator.v1.DirectionR\tdirection\x12\x12\n\x04unit\x18\x04 \x01(\tR\x04unit"\xc0\x01\n\x12SampleStartRequest\x12\x12\n\x04mode\x18\x01 \x01(\tR\x04mode\x12 \n\tseed_flag\x18\x02 \x01(\tH\x00R\x08seedFlag\x88\x01\x01\x12\x19\n\x08env_seed\x18\x03 \x01(\tR\x07envSeed\x12*\n\x11env_artifacts_dir\x18\x04 \x01(\tR\x0fenvArtifactsDir\x12\x1f\n\x0bscratch_dir\x18\x05 \x01(\tR\nscratchDirB\x0c\n\n_seed_flag"o\n\x13SampleStartResponse\x12\x12\n\x04seed\x18\x01 \x01(\x04R\x04seed\x12\x1f\n\x0bseed_source\x18\x02 \x01(\tR\nseedSource\x12#\n\rartifacts_dir\x18\x03 \x01(\tR\x0cartifactsDir"M\n\x12SamplePhaseRequest\x12#\n\rartifacts_dir\x18\x01 \x01(\tR\x0cartifactsDir\x12\x12\n\x04name\x18\x02 \x01(\tR\x04name")\n\x13SamplePhaseResponse\x12\x12\n\x04path\x18\x01 \x01(\tR\x04path"y\n\x06Series\x12\x12\n\x04name\x18\x01 \x01(\tR\x04name\x12C\n\x0baggregation\x18\x02 \x01(\x0e2!.vibesys.evaluator.v1.AggregationR\x0baggregation\x12\x16\n\x06values\x18\x03 \x03(\x01R\x06values"L\n\x14SampleCombineRequest\x124\n\x06series\x18\x01 \x03(\x0b2\x1c.vibesys.evaluator.v1.SeriesR\x06series"R\n\x15SampleCombineResponse\x129\n\x06values\x18\x01 \x03(\x0b2!.vibesys.evaluator.v1.MetricValueR\x06values"\xf9\x01\n\x12WriteRecordRequest\x12\x12\n\x04path\x18\x01 \x01(\tR\x04path\x129\n\x05hello\x18\x02 \x01(\x0b2!.vibesys.evaluator.v1.HelloRecordH\x00R\x05hello\x129\n\x06result\x18\x03 \x01(\x0b2\x1f.vibesys.evaluator.v1.ResultRowH\x00R\x06result\x129\n\x05error\x18\x04 \x01(\x0b2!.vibesys.evaluator.v1.ErrorRecordH\x00R\x05error\x12\x14\n\x05fresh\x18\x05 \x01(\x08R\x05freshB\x08\n\x06record"M\n\x0bHelloRecord\x12>\n\x07metrics\x18\x01 \x03(\x0b2$.vibesys.evaluator.v1.DeclaredMetricR\x07metrics"F\n\tResultRow\x129\n\x06values\x18\x01 \x03(\x0b2!.vibesys.evaluator.v1.MetricValueR\x06values"q\n\x0bErrorRecord\x12\x18\n\x07message\x18\x01 \x01(\tR\x07message\x12<\n\x07partial\x18\x02 \x01(\x0b2\x1d.vibesys.evaluator.v1.PartialH\x00R\x07partial\x88\x01\x01B\n\n\x08_partial"/\n\x13WriteRecordResponse\x12\x18\n\x07outcome\x18\x01 \x01(\tR\x07outcome"V\n\x12HistSummaryRequest\x12\x1e\n\nhistograms\x18\x01 \x03(\x0cR\nhistograms\x12 \n\x0bpercentiles\x18\x02 \x03(\x01R\x0bpercentiles"U\n\x13HistSummaryResponse\x12\x14\n\x05count\x18\x01 \x01(\x03R\x05count\x12\x10\n\x03max\x18\x02 \x01(\x03R\x03max\x12\x16\n\x06values\x18\x03 \x03(\x03R\x06values*L\n\tDirection\x12\x19\n\x15DIRECTION_UNSPECIFIED\x10\x00\x12\x11\n\rDIRECTION_MAX\x10\x01\x12\x11\n\rDIRECTION_MIN\x10\x02*\x97\x01\n\x0bAggregation\x12\x1b\n\x17AGGREGATION_UNSPECIFIED\x10\x00\x12\x16\n\x12AGGREGATION_MEDIAN\x10\x01\x12\x14\n\x10AGGREGATION_MEAN\x10\x02\x12\x13\n\x0fAGGREGATION_MIN\x10\x03\x12\x13\n\x0fAGGREGATION_MAX\x10\x04\x12\x13\n\x0fAGGREGATION_SUM\x10\x05BZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
     [],
     {
         "Error": Error,
-        "MetricSpec": MetricSpec,
+        "DeclaredMetric": DeclaredMetric,
         "MetricValue": MetricValue,
         "Partial": Partial,
         "SampleStartRequest": SampleStartRequest,
@@ -806,7 +806,7 @@ _DESC = file_desc(
         "SampleCombineResponse": SampleCombineResponse,
         "WriteRecordRequest": WriteRecordRequest,
         "HelloRecord": HelloRecord,
-        "ResultRecord": ResultRecord,
+        "ResultRow": ResultRow,
         "ErrorRecord": ErrorRecord,
         "WriteRecordResponse": WriteRecordResponse,
         "HistSummaryRequest": HistSummaryRequest,
