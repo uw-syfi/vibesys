@@ -52,7 +52,7 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	if err != nil {
 		return x.unavailable(o.Log, "the orchestrator's state directory is refused: "+err.Error())
 	}
-	sidecars, err := production.SidecarsFor(o.Getenv, filepath.Join(layout.State.Path(), "sessions"), o.Executable, o.Log)
+	sidecars, err := production.SidecarsFor(o.Getenv, filepath.Join(layout.State.Path(), "sessions"), o.Executable, production.OSFiles{}, o.Log)
 	if err != nil {
 		return x.unavailable(o.Log, err.Error())
 	}

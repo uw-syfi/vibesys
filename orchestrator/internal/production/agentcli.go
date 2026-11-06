@@ -16,10 +16,12 @@ const EnvCLI = "VIBESYS_ORCHESTRATOR_CLI"
 // cliName is the program the skills run.
 const cliName = "vibesys-cli"
 
-// Files answers what ResolveCLI asks of the file system.
+// Files answers what the daemon's path resolution asks of the file system.
 type Files interface {
 	// Executable says path is a regular file the user may run.
 	Executable(path string) bool
+	// Regular says path is a regular file.
+	Regular(path string) bool
 }
 
 // OSFiles is the real file system.
@@ -29,6 +31,12 @@ type OSFiles struct{}
 func (OSFiles) Executable(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
+}
+
+// Regular implements Files.
+func (OSFiles) Regular(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
 // ResolveCLI picks the vibesys-cli the daemon gives its agents, once, as an absolute path, so that
