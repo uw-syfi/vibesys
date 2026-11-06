@@ -115,10 +115,31 @@ link_to() {
   fi
 }
 
-# release_ready DIR: DIR is a complete release, with a sidecar environment that imports.
+# release_ready DIR: DIR is a complete, installed release. The release says what that means: its
+# own vibesys-client checks it against the release.json it holds.
 release_ready() {
-  [ -x "$1/bin/vibesys-client" ] && [ -x "$1/sidecar/.venv/bin/python" ] &&
-    "$1/sidecar/.venv/bin/python" -c 'import vs_sidecar' >/dev/null 2>&1
+  [ -x "$1/bin/vibesys-client" ] && "$1/bin/vibesys-client" release verify --installed "$1" >/dev/null 2>&1
+}
+
+# unpack_bundle BUNDLE: extract the bundle into $stage, refusing names outside it.
+unpack_bundle() {
+  step="unpacking the bundle"
+  # Reject absolute and parent-relative names before extracting anything.
+  tar -tzf "$1" >"$work/names" 2>/dev/null || fail "$1 is not a readable VibeSys bundle"
+  if grep -E '^/|(^|/)\.\.(/|$)' "$work/names" >/dev/null; then
+    fail "the bundle contains paths outside its own directory"
+  fi
+  rm -rf "$stage"
+  mkdir -p "$stage" || fail "cannot create $stage"
+  tar -xzf "$1" -C "$stage" || fail "cannot extract the bundle"
+}
+
+# stage_version: check the unpacked bundle in $stage against its own manifest and print its version.
+# The bundle's vibesys-client does the check, so running it also proves the binaries run here.
+stage_version() {
+  step="checking the bundle"
+  [ -x "$stage/bin/vibesys-client" ] || fail "the bundle has no bin/vibesys-client to check it with"
+  "$stage/bin/vibesys-client" release verify "$stage" || fail "the bundle is not a whole VibeSys release that runs on this machine"
 }
 
 # current_version: the version `current` points at, or nothing.
@@ -210,6 +231,7 @@ main() {
   trap 'rm -rf "$work" "$stage"; [ -z "$created" ] || rm -rf "$created"' EXIT HUP INT TERM
 
   bundle=""
+  unpacked=0
   if [ -n "${VIBESYS_INSTALL_BUNDLE:-}" ]; then
     step="reading the local bundle"
     bundle="$VIBESYS_INSTALL_BUNDLE"
@@ -218,8 +240,10 @@ main() {
       step="verifying the local bundle"
       verify_checksum "$bundle" "$bundle.sha256"
     fi
-    step="reading the local bundle"
-    version="$(tar -xzOf "$bundle" ./VERSION 2>/dev/null)" || fail "$bundle is not a readable VibeSys bundle"
+    unpack_bundle "$bundle"
+    unpacked=1
+    # The version is the bundle's own, which only its manifest holds.
+    version="$(stage_version)" || exit 1
   elif [ -z "$version" ]; then
     # The newest release is the rolling vibesys-latest, whose VERSION file names it.
     step="finding the newest version"
@@ -250,26 +274,10 @@ main() {
       bundle="$work/$asset"
     fi
 
-    step="unpacking the bundle"
-    # Reject absolute and parent-relative names before extracting anything.
-    tar -tzf "$bundle" >"$work/names" 2>/dev/null || fail "$bundle is not a readable VibeSys bundle"
-    if grep -E '^/|(^|/)\.\.(/|$)' "$work/names" >/dev/null; then
-      fail "the bundle contains paths outside its own directory"
-    fi
-    rm -rf "$stage"
-    mkdir -p "$stage" || fail "cannot create $stage"
-    tar -xzf "$bundle" -C "$stage" || fail "cannot extract the bundle"
-    for needed in bin/vibesys-client bin/vibesys-host bin/vibesys-cli sidecar/pyproject.toml \
-      sidecar/uv.lock marketplace/.claude-plugin/marketplace.json VERSION; do
-      [ -e "$stage/$needed" ] || fail "the bundle has no $needed"
-    done
-    [ "$(tr -d ' \n\r' <"$stage/VERSION")" = "$version" ] || fail "the bundle's VERSION is not $version"
-
-    step="checking the binaries run here"
-    # A binary that cannot start on this machine is not installed over a working one.
-    if ! "$stage/bin/vibesys-client" --version >/dev/null 2>&1 &&
-      ! "$stage/bin/vibesys-client" --help >/dev/null 2>&1; then
-      fail "the bundle's vibesys-client does not run on this machine"
+    if [ "$unpacked" = 0 ]; then
+      unpack_bundle "$bundle"
+      actual="$(stage_version)" || exit 1
+      [ "$actual" = "$version" ] || fail "the bundle holds version $actual, not $version"
     fi
 
     step="moving the release into place"
@@ -285,8 +293,8 @@ main() {
     step="creating the sidecar environment (uv sync --frozen; this may download Python 3.12)"
     "$uv" sync --frozen --no-dev --python 3.12 --project "$release/sidecar" ||
       fail "uv could not create the sidecar environment in $release/sidecar"
-    step="checking the sidecar environment"
-    release_ready "$release" || fail "the sidecar environment in $release cannot import vs_sidecar"
+    step="checking the installed release"
+    "$release/bin/vibesys-client" release verify --installed "$release" >/dev/null || fail "$release is not complete after install"
     created=""
   fi
 
