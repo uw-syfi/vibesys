@@ -43,6 +43,14 @@
   "proto/vibesys/desktop/v1/settings.proto": [
     "DesktopRetainedRecentEntry.original_json"
   ],
+  "proto/vibesys/evaluator/v1/core.proto": [
+    "SamplePhaseRequest.artifacts_dir",
+    "SamplePhaseResponse.path",
+    "SampleStartRequest.env_artifacts_dir",
+    "SampleStartRequest.scratch_dir",
+    "SampleStartResponse.artifacts_dir",
+    "WriteRecordRequest.path"
+  ],
   "proto/vibesys/evaluator/v1/loadgen.proto": [
     "Capture.json_pointer",
     "FileHeader",
@@ -77,6 +85,7 @@
     "CliLocation.xdg_state_home",
     "Harness.HARNESS_CLAUDE_CODE",
     "Harness.HARNESS_CODEX",
+    "StartFailureReason.START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE",
     "ToolCall.args_json",
     "ToolCall.provider_call_id"
   ],
