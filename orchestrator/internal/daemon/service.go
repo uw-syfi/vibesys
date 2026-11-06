@@ -53,6 +53,8 @@ type ServiceDeps struct {
 	Bounds Bounds
 	// Binary is the release version, for display.
 	Binary string
+	// Starts refuses a StartRun that cannot work before it is decided.
+	Starts StartChecks
 }
 
 // Service is OrchestratorService over an Engine and the hub, for one Audience.
@@ -69,6 +71,9 @@ func NewService(e *Engine, deps ServiceDeps) (*Service, error) {
 	}
 	if deps.Bounds == nil {
 		return nil, errors.New("daemon: ServiceDeps.Bounds is required")
+	}
+	if deps.Starts == nil {
+		return nil, errors.New("daemon: ServiceDeps.Starts is required")
 	}
 	return &Service{e: e, ServiceDeps: deps}, nil
 }
@@ -148,6 +153,9 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
+	if err := s.checkStart(cmd); err != nil {
+		return nil, err
+	}
 	answer, err := s.e.Command(cmd)
 	switch {
 	case errors.Is(err, ErrCommandConflict):
@@ -156,6 +164,31 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 		return nil, status.Error(codes.Unavailable, err.Error())
 	}
 	return &pb.DispatchResponse{Receipt: wire.ReceiptMessage(answer.Receipt, answer.Sequence)}, nil
+}
+
+// checkStart refuses a new StartRun whose repository, task or launcher cannot work, before the
+// command reaches Decide. A retry of a command that already has a receipt skips the check, so it
+// still gets that receipt.
+func (s *Service) checkStart(cmd core.Command) error {
+	start, ok := cmd.Body.(core.StartRun)
+	if _, operator := cmd.Caller.(core.Operator); !ok || !operator {
+		// Only the operator may start a run; Decide refuses an agent that tries, with a receipt.
+		return nil
+	}
+	if _, recall := s.e.State().Recall(cmd.ID, cmd.Digest); recall != core.RecallNew {
+		return nil
+	}
+	err := s.Starts.CheckStart(start.Repository, start.Task)
+	var refusal *StartRefusal
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &refusal) && refusal.NotReady:
+		return status.Error(codes.FailedPrecondition, refusal.Reason)
+	case errors.As(err, &refusal):
+		return status.Error(codes.InvalidArgument, refusal.Reason)
+	}
+	return status.Error(codes.Unavailable, err.Error())
 }
 
 // runOf is the run an agent caller belongs to.

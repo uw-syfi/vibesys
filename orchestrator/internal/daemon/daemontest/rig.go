@@ -34,6 +34,7 @@ type Rig struct {
 	Sidecars *Sidecars
 	Jobs     *jobstest.FakeJobSource
 	Plans    *Plans
+	Starts   *StartChecks
 	Hub      *hub.Hub
 	Daemon   *daemon.Daemon
 	// Service is the operator's service, and AgentService the agent socket's.
@@ -64,7 +65,7 @@ func NewRig(tb testing.TB) *Rig {
 	}
 	r := &Rig{
 		Store: store.NewMemory(), Clock: NewClock(), Nonces: &Nonces{}, Sidecars: NewSidecars(),
-		Jobs: jobstest.NewFakeJobSource(), Plans: NewPlans(), Auth: auth, Bounds: &Bounds{},
+		Jobs: jobstest.NewFakeJobSource(), Plans: NewPlans(), Starts: &StartChecks{}, Auth: auth, Bounds: &Bounds{},
 		Log: slog.New(slog.DiscardHandler), Limits: hub.DefaultLimits, Wake: make(chan struct{}, 1),
 	}
 	r.Sidecars.Elapse = r.Bounds.Expire
@@ -115,7 +116,7 @@ func (r *Rig) Restart(tb testing.TB) {
 	r.Daemon = d
 	for audience, service := range map[daemon.Audience]**daemon.Service{daemon.AudienceOperator: &r.Service, daemon.AudienceAgent: &r.AgentService} {
 		if *service, err = daemon.NewService(d.Engine, daemon.ServiceDeps{
-			Plans: r.Plans, Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test",
+			Plans: r.Plans, Authority: r.Auth, Audience: audience, Bounds: r.Bounds, Binary: "test", Starts: r.Starts,
 		}); err != nil {
 			tb.Fatal(err)
 		}

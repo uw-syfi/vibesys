@@ -259,6 +259,10 @@ func TestARunSurvivesADaemonRestart(t *testing.T) {
 	if out, err := exec.Command("git", "init", "-q", repository).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
+	// A start is refused unless the repository holds the task.
+	if err := os.MkdirAll(filepath.Join(repository, ".vibesys", "tasks", "demo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	first := r.serve()
 	started := r.receipt("run", "start", "--repository", repository, "--task", "demo", "--brief", "say hello")

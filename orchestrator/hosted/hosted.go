@@ -62,7 +62,7 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	}
 	o.Log.Info("agents are told to run this vibesys-cli", "path", cli)
 	searches := production.SearchFor()
-	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Plans: production.NoPlans{}, Version: o.Version, Location: production.LocationFor(o.Getenv, o.Home, cli)}, o.Log)
+	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Plans: production.NoPlans{}, Tree: production.OSTree{}, Version: o.Version, Location: production.LocationFor(o.Getenv, o.Home, cli)}, o.Log)
 	if err != nil {
 		return x.unavailable(o.Log, "the orchestrator is not served by this process: "+err.Error())
 	}

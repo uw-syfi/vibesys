@@ -66,12 +66,12 @@ func TestASecondDaemonNamesTheHolder(t *testing.T) {
 		t.Skipf("the test directory is not a local filesystem: %v", err)
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	first, err := Open(layout, Wiring{Sidecars: NoSidecars{}, Plans: NoPlans{}, Version: "1.2.3"}, log)
+	first, err := Open(layout, Wiring{Sidecars: NoSidecars{}, Plans: NoPlans{}, Tree: fakeTree{}, Version: "1.2.3"}, log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	_, err = Open(layout, Wiring{Sidecars: NoSidecars{}, Plans: NoPlans{}, Version: "9.9.9"}, log)
+	_, err = Open(layout, Wiring{Sidecars: NoSidecars{}, Plans: NoPlans{}, Tree: fakeTree{}, Version: "9.9.9"}, log)
 	want := fmt.Sprintf("pid %d version 1.2.3", os.Getpid())
 	if !errors.Is(err, ErrHeld) || !strings.Contains(err.Error(), want) {
 		t.Fatalf("second open gave %v, want ErrHeld naming %q", err, want)
