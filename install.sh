@@ -187,8 +187,6 @@ main() {
 
   os="$(detect_os)"
   arch="$(detect_arch "$os")"
-  # The sidecar depends on agentshim by git URL, so uv needs git to build its environment.
-  command -v git >/dev/null 2>&1 || fail "git is not installed; it is needed to fetch the sidecar's dependencies. Install git and run this again"
 
   mkdir -p "$home/releases" || fail "cannot create $home/releases"
   mkdir -p "$install_dir" || fail "cannot create $install_dir"

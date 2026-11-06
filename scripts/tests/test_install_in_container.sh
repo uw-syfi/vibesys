@@ -20,7 +20,7 @@ install() {
 }
 
 # Nothing of the toolchain is here.
-for tool in go python3 uv; do
+for tool in go python3 uv git; do
   ! command -v "$tool" >/dev/null 2>&1 || die "$tool should not be installed in the clean container"
 done
 

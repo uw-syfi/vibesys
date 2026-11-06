@@ -69,7 +69,7 @@ docker run --rm \
   -e "ARCH=$arch" \
   "$image" bash -euc '
     apt-get update -qq >/dev/null
-    apt-get install -y -qq --no-install-recommends curl ca-certificates procps git >/dev/null
+    apt-get install -y -qq --no-install-recommends curl ca-certificates procps >/dev/null
     useradd -m tester
     runuser -u tester -- bash /opt/checks.sh
   '
