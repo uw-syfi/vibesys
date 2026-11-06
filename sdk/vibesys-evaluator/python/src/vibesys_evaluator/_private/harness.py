@@ -44,7 +44,9 @@ def run_harness(
         HarnessError: It could not start, ran past ``timeout_secs``, or exited non-zero.
     """
     try:
-        process = subprocess.Popen(list(argv), cwd=cwd, env=None if env is None else dict(env), start_new_session=True)
+        process = subprocess.Popen(
+            list(argv), cwd=cwd, env=None if env is None else dict(env), start_new_session=True
+        )
     except OSError as error:
         msg = f"cannot start {argv[0]!r}: {error.strerror}"
         raise HarnessError(msg) from error

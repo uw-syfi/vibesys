@@ -23,9 +23,10 @@ The public API is everything listed in [`api/public-api.txt`](api/public-api.txt
 (the names in each public module's `__all__`, their signatures and the
 behaviour documented for them), the Go SDK listed in
 [`api/go-workload.txt`](api/go-workload.txt),
-[`api/go-check.txt`](api/go-check.txt) and
-[`api/go-microservices.txt`](api/go-microservices.txt) (`go doc -all` of
-`go/workload`, `go/check` and `go/microservices`: their exported names,
+[`api/go-check.txt`](api/go-check.txt),
+[`api/go-microservices.txt`](api/go-microservices.txt) and
+[`api/go-k8s.txt`](api/go-k8s.txt) (`go doc -all` of
+`go/workload`, `go/check`, `go/microservices` and `go/k8s`: their exported names,
 signatures and documented behaviour),
 and the schema in `proto/vibesys/evaluator/v1/*.proto`, including the loadgen
 and generator command lines it describes. Task writers depend on them through
@@ -58,7 +59,7 @@ a pinned image and a pinned Go module version.
   (griffe) from the code and the `api/go-*.txt` listings by `go doc -all`;
   CI regenerates them and fails on a difference (the Python script and each
   Go package's test `TestAPISnapshotIsCurrent`). Regenerate them (`--write`;
-  `go test ./workload ./check ./microservices -run APISnapshot -update`) and
+  `go test ./workload ./check ./microservices ./k8s -run APISnapshot -update`) and
   review the diff.
 
 ## Working rules

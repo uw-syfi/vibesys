@@ -1,88 +1,23 @@
-"""A small task on the fake cluster: a data tier (db), two app Deployments, a cache, a gateway."""
+"""A small app, and a stand-in for the Go core (`vibesys-evaluator`) that records its calls.
+
+The wrapper's tests do not need a cluster or the Go binary: `FakeCore` is an executable the
+tests point `$VIBESYS_EVALUATOR_BIN` at. It appends each call (verb and request) to a log and
+answers from the replies the test gave; the logic behind the verbs is tested in Go (package
+`k8s`, on its in-memory cluster).
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+import stat
+import sys
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from vibesys_evaluator.microservices import k8s
-from vibesys_evaluator.microservices._k8s import (
-    AppSource,
-    Cluster,
-    Environment,
-    FakeBuilder,
-    FakeClock,
-    FakeKube,
-    Outcome,
-    PodCommand,
-)
+from vibesys_evaluator.microservices import get, k8s
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-MANIFEST = """\
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: config
-data:
-  db: db.${NAMESPACE}.svc.cluster.local:27017
----
-apiVersion: v1
-kind: Service
-metadata: {name: db}
-spec: {selector: {app: db}, ports: [{port: 27017}]}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: {name: db, labels: {tier: data}}
-spec:
-  replicas: 1
-  selector: {matchLabels: {app: db}}
-  template:
-    metadata: {labels: {app: db}}
-    spec: {containers: [{name: db, image: mongo:4.4}]}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: {name: cache, labels: {tier: app}}
-spec:
-  replicas: 1
-  selector: {matchLabels: {app: cache}}
-  template:
-    metadata: {labels: {app: cache}}
-    spec: {containers: [{name: cache, image: memcached:1.6}]}
----
-apiVersion: v1
-kind: Service
-metadata: {name: frontend, namespace: "${NAMESPACE}"}
-spec: {selector: {app: frontend}, ports: [{port: 5000}]}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: {name: frontend, labels: {tier: app}}
-spec:
-  replicas: 2
-  selector: {matchLabels: {app: frontend}}
-  template:
-    metadata: {labels: {app: frontend}}
-    spec: {containers: [{name: frontend, image: "${APP_IMAGE}"}]}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata: {name: backend, labels: {tier: app}}
-spec:
-  replicas: 2
-  selector: {matchLabels: {app: backend}}
-  template:
-    metadata: {labels: {app: backend}}
-    spec: {containers: [{name: backend, image: "${APP_IMAGE}"}]}
-"""
-
-SEED = PodCommand(
-    argv=("python", "/task/bench.py", "pod", "seed"), inputs={"dataset.pickle": b"data"}
-)
-PROBE_PLAN = b"probe-plan"
 
 
 def make_app(**overrides: object) -> k8s.App[Any]:
@@ -91,7 +26,7 @@ def make_app(**overrides: object) -> k8s.App[Any]:
         "manifest": "k8s/manifest.yaml",
         "images": {"APP_IMAGE": "app"},
         "gateway": "http://frontend:5000",
-        "ready": ["GET /"],  # stands in for service.get("/"): the deploy layer only counts them
+        "ready": [get("/")],
         "data_tier": "tier=data",
         "seed": lambda _data: None,
         "restartable": ["frontend", "backend"],
@@ -101,73 +36,65 @@ def make_app(**overrides: object) -> k8s.App[Any]:
     return k8s.App(**fields)
 
 
+TARGET: dict[str, Any] = {
+    "namespace": "hk8s-shop-t0",
+    "uid": "uid-1",
+    "task_image": "reg/vse/shop/task:1",
+}
+
+_SCRIPT = """#!{python}
+import json, sys
+from pathlib import Path
+here = Path({root!r})
+verb = sys.argv[2]
+request = json.load(sys.stdin)
+with (here / "calls.jsonl").open("a") as log:
+    log.write(json.dumps({{"verb": verb, "request": request}}) + "\\n")
+replies = json.loads((here / "replies.json").read_text())
+reply = replies.get(verb, {{}})
+if isinstance(reply, list):
+    reply = reply.pop(0) if len(reply) > 1 else reply[0]
+for name, text in (reply.pop("__outputs__", None) or {{}}).items():
+    out = Path(request["outputs_dir"])
+    out.mkdir(parents=True, exist_ok=True)
+    (out / name).write_text(text)
+code = 1 if "error_kind" in reply else 0
+print(json.dumps(reply))
+sys.exit(code)
+"""
+
+
 @dataclass
-class World:
-    """The fake cluster, builder and clock, a task directory and a project root."""
+class FakeCore:
+    """The core binary of one test: set `replies[verb]`, read `calls`."""
 
-    kube: FakeKube
-    builder: FakeBuilder
-    clock: FakeClock
-    env: Environment
-    task_dir: Path
-    project_root: Path
-    artifacts: Path
-    lines: list[str]
+    root: Path
+    replies: dict[str, Any] = field(default_factory=dict)
 
-    def log(self, line: str) -> None:
-        self.lines.append(line)
+    def __post_init__(self) -> None:
+        binary = self.root / "vibesys-evaluator"
+        binary.write_text(_SCRIPT.format(python=sys.executable, root=str(self.root)))
+        binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
+        self.binary = binary
+        self.replies.update(
+            {
+                "deploy": {"target": dict(TARGET)},
+                "attach": {"target": dict(TARGET)},
+                "run-pod": {"exit_code": 0, "log": "", "seconds": 1.0},
+            }
+        )
+        self.save()
+
+    def save(self) -> None:
+        (self.root / "replies.json").write_text(json.dumps(self.replies))
 
     @property
-    def cluster(self) -> Cluster:
-        return Cluster(
-            env=self.env,
-            kube=self.kube,
-            builder=self.builder,
-            clock=self.clock,
-            log=self.log,
-            token=lambda: "t0",
-        )
+    def calls(self) -> list[dict[str, Any]]:
+        path = self.root / "calls.jsonl"
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
-    def source(self, app: k8s.App[Any]) -> AppSource:
-        return AppSource(
-            app=app, task_dir=self.task_dir, project_root=self.project_root, probe_plan=PROBE_PLAN
-        )
+    def verbs(self) -> list[str]:
+        return [call["verb"] for call in self.calls]
 
-
-def make_world(root: Path, manifest: str = MANIFEST) -> World:
-    clock = FakeClock()
-    kube = FakeKube(clock)
-    task_dir = root / "task"
-    (task_dir / "k8s").mkdir(parents=True)
-    (task_dir / "k8s" / "manifest.yaml").write_text(manifest)
-    (task_dir / "Dockerfile").write_text("FROM vibesys-evaluator\nCOPY . /task\n")
-    (task_dir / "vibesys.input.toml").write_text(
-        "[accuracy]\ntimeout_seconds = 1800\n[benchmark]\ntimeout_seconds = 3600\n"
-    )
-    project_root = root / "project"
-    (project_root / "app").mkdir(parents=True)
-    (project_root / "app" / "Dockerfile").write_text("FROM scratch\n")
-    artifacts = root / "artifacts" / "job-7" / "benchmark-0"
-    artifacts.mkdir(parents=True)
-    env = Environment.parse(
-        {
-            "KUBECONFIG": "/vibesys/kubeconfig",
-            "VIBESYS_K8S_REGISTRY": "registry:5000",
-            "VIBESYS_K8S_BUILDER": "tcp://builder:1234",
-            "VIBESYS_ARTIFACTS_DIR": str(artifacts),
-        },
-        work_dir=root / "work",
-        artifacts=None,
-    )
-    kube.programs["loadgen"] = lambda *_: Outcome(log="probe ok\n")
-    kube.programs["python"] = lambda *_: Outcome(log="seeded\n", secs=20)
-    return World(
-        kube=kube,
-        builder=FakeBuilder(),
-        clock=clock,
-        env=env,
-        task_dir=task_dir,
-        project_root=project_root,
-        artifacts=artifacts,
-        lines=[],
-    )
+    def request(self, verb: str) -> dict[str, Any]:
+        return next(call["request"] for call in self.calls if call["verb"] == verb)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import signal
 import stat
+import time
 from typing import TYPE_CHECKING
 
 import pytest
@@ -140,3 +141,28 @@ def test_a_task_script_without_the_binary_exits_with_the_message(
         for sig, handler in saved.items():
             signal.signal(sig, handler)
     assert "VIBESYS_EVALUATOR_BIN" in capsys.readouterr().err
+
+def test_a_cut_short_wait_gives_the_core_its_grace_to_clean_up(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    marker = tmp_path / "cleaned"
+    binary = _fake(
+        tmp_path,
+        f"trap 'echo cleaned > {marker}; exit 0' TERM\ntouch {tmp_path}/started\n"
+        "while :; do sleep 0.05; done\n",
+    )
+    monkeypatch.setenv(core.BIN_ENV, binary)
+
+    def interrupted(*_args: object, **_kwargs: object) -> None:
+        while not (tmp_path / "started").exists():  # the core has installed its handler
+            time.sleep(0.01)
+        raise KeyboardInterrupt
+
+    original = core.subprocess.Popen.communicate
+    monkeypatch.setattr(core.subprocess.Popen, "communicate", interrupted)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            core.call("k8s", "deploy", {}, terminate_grace_secs=10)
+    finally:
+        monkeypatch.setattr(core.subprocess.Popen, "communicate", original)
+    assert marker.read_text() == "cleaned\n"
