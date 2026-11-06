@@ -686,7 +686,7 @@ jobs:
   # a Linux one's and this job runs several minutes.
   managed-install-macos:
     needs: changes
-    if: needs.changes.outputs.managed_install == 'true' # TEMP-PR
+    if: github.event_name != 'pull_request' && needs.changes.outputs.managed_install == 'true'
     runs-on: macos-latest
     timeout-minutes: 10
 
