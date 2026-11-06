@@ -20,6 +20,7 @@ func TestSteerSendsToTheLeadByDefaultAndSaysWhereItWent(t *testing.T) {
 		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
 	}
 	contains(t, "stdout", got.stdout, lead)
+	l.awaitConsumed(t, "try the second plan")
 	found := false
 	for _, s := range l.Sidecars.Sessions() {
 		for _, cmd := range s.Commands() {
