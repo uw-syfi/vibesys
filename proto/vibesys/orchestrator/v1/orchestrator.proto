@@ -395,13 +395,60 @@ message Text {
   string text = 1;
 }
 
+// ToolCall is one tool use, as a client shows it. The call is what the agent asked for, in the
+// words of what a client does with it: a command, a file read, an edit, a search. A tool that is
+// none of these is Other, with a name and text to show, so no call is lost and none is shown as
+// the JSON the provider received. Which provider tool is which is the sidecar's mapping, in one
+// place, so a client never knows a provider's tool or argument names.
 message ToolCall {
-  string tool = 1 [(buf.validate.field).string.min_len = 1];
-  string provider_call_id = 2;
-  string args_json = 3;
+  reserved 1 to 3;
+  reserved "tool", "provider_call_id", "args_json";
+
+  oneof call {
+    option (buf.validate.oneof).required = true;
+    ShellCall shell = 7;
+    ReadCall read = 8;
+    WriteCall write = 9;
+    EditCall edit = 10;
+    SearchCall search = 11;
+    OtherCall other = 12;
+  }
   string output = 4;
+  // exit_code is unset when the tool has no exit code.
   optional int32 exit_code = 5;
   bool is_error = 6;
+}
+
+// ShellCall runs a command. The command is empty until the provider has said what it is.
+message ShellCall {
+  string command = 1;
+}
+
+// ReadCall reads one file; the target is its name as the agent gave it.
+message ReadCall {
+  string target = 1;
+}
+
+// WriteCall writes one whole file; the target is its name as the agent gave it.
+message WriteCall {
+  string target = 1;
+}
+
+// EditCall changes files in place; the targets are their names as the agent gave them.
+message EditCall {
+  repeated string targets = 1;
+}
+
+// SearchCall looks through files, by their names or their contents.
+message SearchCall {
+  string pattern = 1;
+}
+
+// OtherCall is any tool the messages above do not name. The name is the tool's own, for a client
+// to show; the text is what it was asked, one argument to a line.
+message OtherCall {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  string text = 2;
 }
 
 // Handoff is what a finished subagent tells its lead, and the input of the post_handoff tool. The

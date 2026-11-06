@@ -9,7 +9,6 @@ Output events carry ``offset == 0``: the store numbers them.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -28,6 +27,7 @@ from agentshim import (
 
 from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
+from vs_sidecar.tool_use import describe_call
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -73,9 +73,7 @@ class _Item:
     kind: str  # "assistant" | "reasoning" | "tool"
     status: int
     text: str = ""
-    tool: str = ""
-    call_id: str = ""
-    args_json: str = ""
+    call: orch.ToolCall | None = None
     output: str = ""
     exit_code: int | None = None
     is_error: bool = False
@@ -84,13 +82,11 @@ class _Item:
         """The item as it is now."""
         item = sc.SessionItem(id=item_id, turn_id=turn_id, status=self.status)  # type: ignore[arg-type]
         if self.kind == "tool":
-            tool = orch.ToolCall(
-                tool=self.tool or "unknown",
-                provider_call_id=self.call_id,
-                args_json=self.args_json,
-                output=self.output,
-                is_error=self.is_error,
-            )
+            tool = orch.ToolCall()
+            if self.call is not None:
+                tool.CopyFrom(self.call)
+            tool.output = self.output
+            tool.is_error = self.is_error
             if self.exit_code is not None:
                 tool.exit_code = self.exit_code
             item.tool.CopyFrom(tool)
@@ -248,9 +244,7 @@ class TurnNormalizer:
         item = _Item(
             kind="tool",
             status=orch.ITEM_STATUS_RUNNING,
-            tool=event.tool,
-            call_id=event.tool_id or "",
-            args_json=_args_json(event.args),
+            call=describe_call(event.tool, event.args),
         )
         self._items[item_id] = item
         return [self._event(item=item.proto(item_id, self._turn_id))]
@@ -262,8 +256,7 @@ class TurnNormalizer:
             item = self._items[item_id] = _Item(
                 kind="tool",
                 status=orch.ITEM_STATUS_RUNNING,
-                tool=event.tool,
-                call_id=event.tool_id or "",
+                call=describe_call(event.tool, None),
             )
         output = event.stdout + (
             ("\n" if event.stdout else "") + event.stderr if event.stderr else ""
@@ -271,9 +264,7 @@ class TurnNormalizer:
         finished = _Item(
             kind="tool",
             status=orch.ITEM_STATUS_FINISHED,
-            tool=item.tool or event.tool,
-            call_id=item.call_id,
-            args_json=item.args_json,
+            call=item.call,
             output=output,
             exit_code=event.exit_code,
             is_error=bool(event.exit_code),
@@ -308,14 +299,6 @@ class TurnNormalizer:
     @staticmethod
     def _event(**body: object) -> sc.SessionEvent:
         return sc.SessionEvent(**body)  # type: ignore[arg-type]
-
-
-def _args_json(args: object) -> str:
-    if args is None:
-        return ""
-    if isinstance(args, str):
-        return args
-    return json.dumps(args, sort_keys=True, separators=(",", ":"), default=str)
 
 
 def normalize(

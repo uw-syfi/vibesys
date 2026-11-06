@@ -642,7 +642,7 @@ func (w *sim) act() {
 			}
 			s.say(core.ItemObserved{
 				ID: core.ItemID(fmt.Sprintf("%s-item-%d", s.turn, 1+w.r.IntN(s.items))), Turn: s.turn, Status: status,
-				Body: core.ToolCall{Tool: "bash", Output: "x"},
+				Body: core.ToolCall{Use: core.ShellUse{Command: "ls"}, Output: "x"},
 			})
 		}
 	case 3:

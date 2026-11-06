@@ -179,7 +179,7 @@ it('timeline job timing uses typed facts and is independent of tool text', () =>
         items: {
           i: create(ItemSchema, {
             at: timestampFromMs(toolAt),
-            body: {case: 'tool', value: {output: `job-1 ${text}`, argsJson: 'job-1'}},
+            body: {case: 'tool', value: {output: `job-1 ${text}`}},
           }),
         },
       };

@@ -20,7 +20,7 @@ def _engine(driver: ScriptedDriver) -> tuple[Engine, MemoryStore]:
 
 def _items(store: MemoryStore) -> list[tuple[str, int, str]]:
     return [
-        (e.item.id, e.item.status, e.item.tool.args_json)
+        (e.item.id, e.item.status, e.item.tool.shell.command)
         for e in store.events_after(0)
         if e.HasField("item")
     ]
@@ -37,8 +37,8 @@ def test_a_tool_call_that_spans_two_polls_keeps_its_arguments_when_it_finishes()
     engine.poll_idle()
     engine.poll_idle()
     assert _items(store) == [
-        ("c1", orch.ITEM_STATUS_RUNNING, '{"command":"ls"}'),
-        ("c1", orch.ITEM_STATUS_FINISHED, '{"command":"ls"}'),
+        ("c1", orch.ITEM_STATUS_RUNNING, "ls"),
+        ("c1", orch.ITEM_STATUS_FINISHED, "ls"),
     ]
 
 

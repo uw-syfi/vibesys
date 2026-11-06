@@ -12,6 +12,7 @@ import {
   Refusal,
   Rejection,
   RunStatus,
+  type ToolCall,
   TurnStatus,
 } from '@vibesys/orchestrator-proto';
 import type {FaultKind} from '../../state/index.js';
@@ -185,45 +186,48 @@ export function faultWord(kind: FaultKind): string {
   }
 }
 
-/** A tool as a person names it, for the tools whose internal name is not a word. */
-const TOOL: Readonly<Record<string, string>> = {
-  shell: 'Command',
-  bash: 'Command',
-  exec: 'Command',
-  exec_command: 'Command',
-  read_file: 'Read a file',
-  write_file: 'Wrote a file',
-  apply_patch: 'Edited files',
-  edit: 'Edited a file',
-  grep: 'Searched the files',
-  glob: 'Looked for files',
-};
+/** What a person is told of one tool call: its name, and what it was asked as text. */
+export interface CallWords {
+  readonly name: string;
+  readonly asked: string | null;
+}
 
-export function toolLabel(tool: string): string {
-  const known = TOOL[tool];
-  if (known !== undefined) return known;
-  const words = tool.replace(/[_-]+/g, ' ').trim();
+/** A tool the host did not name, by the words of its own name. */
+function otherName(name: string): string {
+  const words = name
+    .replace(/^mcp__.+?__/, '')
+    .replace(/[_-]+/g, ' ')
+    .trim();
   return words === '' ? 'Tool' : words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+function orNull(text: string): string | null {
+  return text === '' ? null : text;
+}
+
 /**
- * What a tool call was asked to do, as text a person reads: the command when the arguments have
- * one, otherwise each argument on its own line. Never the JSON the tool received.
+ * A tool call as the words a person reads, from the typed call the host sent. Never the JSON the
+ * tool received and never a provider's argument names: the host has already said what the call is.
  */
-export function describeArgs(argsJson: string): string | null {
-  if (argsJson === '') return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(argsJson);
-  } catch {
-    return argsJson;
+export function describeCall(call: ToolCall): CallWords {
+  const use = call.call;
+  switch (use.case) {
+    case 'shell':
+      return {name: 'Command', asked: orNull(use.value.command)};
+    case 'read':
+      return {name: 'Read a file', asked: orNull(use.value.target)};
+    case 'write':
+      return {name: 'Wrote a file', asked: orNull(use.value.target)};
+    case 'edit':
+      return {
+        name: use.value.targets.length > 1 ? 'Edited files' : 'Edited a file',
+        asked: orNull(use.value.targets.join('\n')),
+      };
+    case 'search':
+      return {name: 'Searched the files', asked: orNull(use.value.pattern)};
+    case 'other':
+      return {name: otherName(use.value.name), asked: orNull(use.value.text)};
+    case undefined:
+      return {name: 'Tool', asked: null};
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return String(parsed);
-  const args = parsed as Record<string, unknown>;
-  const command = args['command'] ?? args['cmd'];
-  if (typeof command === 'string') return command;
-  if (Array.isArray(command)) return command.map(String).join(' ');
-  return Object.entries(args)
-    .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
-    .join('\n');
 }

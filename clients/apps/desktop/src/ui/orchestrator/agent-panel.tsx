@@ -36,14 +36,13 @@ import {CommandLine} from './command-line.js';
 import {
   agentWord,
   deliveryWord,
-  describeArgs,
+  describeCall,
   formatClock,
   formatDuration,
   harnessWord,
   refusalWord,
   rejectionWord,
   roleWord,
-  toolLabel,
   turnWord,
   type Word,
 } from './words.js';
@@ -63,11 +62,11 @@ const TRIGGER: Readonly<Record<TurnTrigger, string>> = {
 function toolItem(shown: ShownItem, call: ToolCall): ThreadItem {
   const {item} = shown;
   const running = item.status === ItemStatus.RUNNING;
-  const asked = describeArgs(call.argsJson);
+  const {name, asked} = describeCall(call);
   return {
     kind: 'tool',
     id: item.id,
-    name: toolLabel(call.tool),
+    name,
     state: running ? 'pending' : call.isError ? 'failed' : 'ok',
     summary: (asked ?? '').split('\n')[0]?.slice(0, 80) ?? '',
     input: asked,

@@ -306,6 +306,13 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 		t.Errorf("want one plugin home per agent (%d), got %d: %v", len(w.agents), len(homes), homes)
 	}
 
+	// A client reads typed tool calls on both harnesses: the lead and a Claude worker are Claude Code,
+	// the other worker is Codex, and the same orchestrator tool has the same name in both.
+	checkToolCalls(t, "the lead", r.toolCalls(lead.ID), "spawn_agent")
+	for _, a := range workers {
+		checkToolCalls(t, "worker "+a.Harness, r.toolCalls(a.ID), "post_handoff")
+	}
+
 	// The lead's first message was the rendered lead brief, with this run's values.
 	leadDir := filepath.Join(r.state, "sessions", sessionDirOf(r, started.AgentID), "1")
 	brief, err := os.ReadFile(filepath.Join(leadDir, "prompts", "1.md"))

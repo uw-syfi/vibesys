@@ -117,7 +117,7 @@ func TestMeasureScale(t *testing.T) {
 				}
 				batch = append(batch, core.Event{Run: runID(a), At: at, Body: core.Item{
 					ID: core.ItemID(fmt.Sprintf("item-%d-%d", a, i)), Turn: core.TurnID(fmt.Sprintf("turn-%d-%d", a, turn)), Agent: agentID(a),
-					Ordinal: uint32(i), Status: core.ItemFinished, At: at, Body: core.ToolCall{Tool: "bash", Output: body()},
+					Ordinal: uint32(i), Status: core.ItemFinished, At: at, Body: core.ToolCall{Use: core.ShellUse{Command: "ls"}, Output: body()},
 				}})
 				if len(batch) >= 500 {
 					flush()
@@ -135,7 +135,7 @@ func TestMeasureScale(t *testing.T) {
 		a := i % agents
 		e := core.Event{Run: runID(a), At: at, Body: core.Item{
 			ID: core.ItemID(fmt.Sprintf("late-%d", i)), Turn: "turn-late", Agent: agentID(a), Ordinal: uint32(perAgent + 1 + i/agents), Status: core.ItemFinished, At: at,
-			Body: core.ToolCall{Tool: "bash", Output: body()},
+			Body: core.ToolCall{Use: core.ShellUse{Command: "ls"}, Output: body()},
 		}}
 		lat = append(lat, timed(func() { commit(e) }))
 	}
@@ -224,7 +224,7 @@ func TestMeasureScale(t *testing.T) {
 	for i := range 10_000 {
 		commit(core.Event{Run: runID(i % agents), At: at, Body: core.Item{
 			ID: core.ItemID(fmt.Sprintf("tail-%d", i)), Turn: "turn-tail", Agent: agentID(i % agents), Ordinal: uint32(perAgent + 100 + i/agents), Status: core.ItemFinished, At: at,
-			Body: core.ToolCall{Tool: "bash", Output: body()},
+			Body: core.ToolCall{Use: core.ShellUse{Command: "ls"}, Output: body()},
 		}})
 	}
 	reopen()

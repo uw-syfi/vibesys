@@ -324,8 +324,12 @@ out. Watchers receive `RunChange`, the public part of each event, and a fold of
 those over a snapshot holds what a later snapshot would say. A working copy kept
 after a run (`Run.kept_checkouts`) is public on purpose: the operator decides what
 becomes of it, and the client shows where it is. A tool call is a
-`oneof` of a shell command or a named call with structured arguments; the
-mapping from a harness's spelling happens in the normalizer, not the screen.
+`oneof` of what a client shows (a command, a file read, write or edit, a search) or
+`OtherCall`, a tool's own name and the text of what it was asked, so an unknown tool is shown
+and never lost. The mapping from a harness's tool and argument names is
+`vs_sidecar/tool_use.py`, the one place that knows them, and not the screen. It stays there
+and not in agentshim because it needs no provider fact that is not already in the events agentshim
+emits (a tool's name and its arguments); moving it upstream later changes only that module.
 
 ### Benchmark results and job environment
 
@@ -364,7 +368,6 @@ part they wait for.
 
 | Part | Not built | Removes |
 | --- | --- | --- |
-| Tool calls | the `ToolCall` `oneof` | `args_json`, `provider_call_id`, the screen's `cmd`/`command` guess |
 | Result records | `ResultRecord` generated for Go and the SDK | the hand parser and writer |
 | Manifest 0.1 | `TaskManifestV01`: 48 example tasks and the Python input synthesis still write `version = "0.1"`, so it stays until they move | the hand TOML structs of the single-image reader |
 | `cli.v1` validation | rules on the remaining data messages (jobs, results, outcomes, plan) and the responses; the allowlist lists them | the gap against the data rule |

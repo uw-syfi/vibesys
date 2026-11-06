@@ -212,15 +212,40 @@ type (
 	Prompt struct{ Text string }
 	// ToolCall is one tool use, which changes in place as it runs.
 	ToolCall struct {
-		Tool           string
-		ProviderCallID string
-		ArgsJSON       string
-		Output         string
+		// Use is what the agent asked for. It is never nil in a stored call.
+		Use    ToolUse
+		Output string
 		// ExitCode is nil when the tool has no exit code.
 		ExitCode *int32
 		IsError  bool
 	}
 )
+
+// ToolUse is what a tool call asked for, in the terms of what a client shows.
+type ToolUse interface{ toolUse() }
+
+// The tool uses. Other is any tool the rest do not name, so no call is lost.
+type (
+	// ShellUse runs a command.
+	ShellUse struct{ Command string }
+	// ReadUse reads one file.
+	ReadUse struct{ Target string }
+	// WriteUse writes one whole file.
+	WriteUse struct{ Target string }
+	// EditUse changes files in place.
+	EditUse struct{ Targets []string }
+	// SearchUse looks through files.
+	SearchUse struct{ Pattern string }
+	// OtherUse is a tool with a name and the text of what it was asked.
+	OtherUse struct{ Name, Text string }
+)
+
+func (ShellUse) toolUse()  {}
+func (ReadUse) toolUse()   {}
+func (WriteUse) toolUse()  {}
+func (EditUse) toolUse()   {}
+func (SearchUse) toolUse() {}
+func (OtherUse) toolUse()  {}
 
 func (Assistant) itemBody() {}
 func (Reasoning) itemBody() {}
