@@ -551,9 +551,25 @@ func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (stri
 	}
 	ctx, stop := clock.Deadline(ctx, e.cfg.Timers, e.cfg.ConvertTimeout)
 	defer stop()
+	if err := e.convert(ctx, image, sif, log); err != nil {
+		// Every step runs under the bound, so any of them may be the one it ends, and each then
+		// fails with context.Canceled, as the bound's context cannot report otherwise.
+		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
+			return "", unavailable("converting the image %s to a SIF on this machine and copying it did not end within %v "+
+				"([apptainer] convert_timeout_seconds)", image, e.cfg.ConvertTimeout)
+		}
+		return "", err
+	}
+	return sif, nil
+}
+
+// convert converts the image to a SIF kept in the local directory, copies it to sif on the cluster,
+// and removes the kept one, all under ctx, the bound of the conversion.
+func (e *Engine) convert(ctx context.Context, image, sif string, log io.Writer) error {
+	kept := path.Base(sif)
 	by, err := e.cfg.Converter.Describe(ctx)
 	if err != nil {
-		return "", err
+		return err
 	}
 	err = e.keep(ctx, image, kept, by, log)
 	if err == nil {
@@ -571,15 +587,11 @@ func (e *Engine) publish(ctx context.Context, image string, log io.Writer) (stri
 		}, log)
 	}
 	if err != nil {
-		if errors.Is(context.Cause(ctx), context.DeadlineExceeded) {
-			return "", unavailable("converting the image %s to a SIF on this machine and copying it did not end within %v "+
-				"([apptainer] convert_timeout_seconds)", image, e.cfg.ConvertTimeout)
-		}
-		return "", err
+		return err
 	}
 	_, _ = fmt.Fprintf(log, "[apptainer] %s is %s, built by %s\n", image, sif, by)
 	e.evict(ctx, image, kept, log)
-	return sif, nil
+	return nil
 }
 
 // lockConversion takes the lock of the conversions of the image's content on this machine, trying

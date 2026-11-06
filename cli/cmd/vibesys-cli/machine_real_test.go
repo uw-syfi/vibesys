@@ -58,6 +58,7 @@ func (m *machine) pidOf(env []string) int {
 // directories: the second is refused, naming the first's pid, runtime directory and version, and it
 // starts once the first stops, or dies with no chance to let go.
 func TestRealASecondDaemonOfTheUserIsRefusedWhateverItsRuntimeDirectory(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t)
 	a, b := m.daemonAt("rt-a", false), m.daemonAt("rt-b", false)
 	if r := m.cliWith(a, "daemon", "ensure"); r.code != exitOK {
@@ -103,6 +104,7 @@ func TestRealASecondDaemonOfTheUserIsRefusedWhateverItsRuntimeDirectory(t *testi
 // own, and both daemons' status lists it while it runs. One in the holder's runtime directory, or in
 // none of its own, is refused.
 func TestRealASandboxDaemonRunsBesideTheDaemonAndIsListed(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t)
 	main, sandbox := m.daemonAt("rt-main", false), m.daemonAt("rt-sandbox", true)
 	if r := m.cliWith(main, "daemon", "ensure"); r.code != exitOK {
@@ -138,6 +140,7 @@ func TestRealASandboxDaemonRunsBesideTheDaemonAndIsListed(t *testing.T) {
 // A daemon that fails after it was given its readiness pipe has written why to its log by the time
 // the pipe closes without a byte, since the client that started it reads the log then.
 func TestRealADaemonThatFailsHasSaidWhyWhenItsPipeCloses(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t)
 	env := m.daemonAt("rt-refused", false)
 	machineDir, err := runtimedir.OpenMachine(filepath.Join(m.root, "machine"), os.Getuid(), anyFS{})
@@ -190,6 +193,7 @@ func TestRealADaemonThatFailsHasSaidWhyWhenItsPipeCloses(t *testing.T) {
 // A daemon that no longer answers, which a stop cannot end, is gone once the test's machine is swept,
 // as the cleanup of every test of a machine does, with the supervisors and clients of its root.
 func TestRealSweepEndsADaemonThatNoLongerAnswers(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t)
 	env := m.daemonAt("rt-wedged", true)
 	if r := m.cliWith(env, "daemon", "ensure"); r.code != exitOK {

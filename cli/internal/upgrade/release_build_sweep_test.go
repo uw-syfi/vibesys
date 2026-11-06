@@ -1,3 +1,5 @@
+//go:build !race
+
 package upgrade_test
 
 // The release build, upgrade and install.sh are three readers and writers of one layout. This

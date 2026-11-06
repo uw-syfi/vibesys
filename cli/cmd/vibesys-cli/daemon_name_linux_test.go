@@ -11,6 +11,7 @@ import (
 )
 
 func TestRealDaemonProcessName(t *testing.T) {
+	t.Parallel()
 	m := newMachine(t)
 	status := func() int {
 		t.Helper()
