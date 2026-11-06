@@ -392,9 +392,9 @@ depends_on = ["pnpm:@vibesys/desktop"]
 id = "managed_install"
 class = "manual"
 job = "managed_install"
-# The installer test builds a bundle and installs it in a clean container, so it runs when the
-# installer, the bundle builder, the workflow that publishes bundles, or what a bundle carries
-# (the sidecar project and lock, the skills and the plugin manifest) changes. The Go binaries are
-# built and tested by the gateway and cli jobs, so their sources do not select it.
-roots = ["orchestrator/sidecar", "skills"]
+# The installer test builds a bundle from the Go sources, installs it in a clean container and runs
+# a managed run with what was installed, so it runs when the installer, the bundle builder, the
+# workflow that publishes bundles, what a bundle carries (the sidecar, the skills and the plugin
+# manifest), or the code of the binaries it holds (gateway, cli and orchestrator) changes.
+roots = ["gateway", "cli", "orchestrator", "skills"]
 files = ["install.sh", "scripts/build_release_bundle.sh", "scripts/tests/test_install.sh", "scripts/tests/test_install_in_container.sh", ".github/workflows/managed-release.yml", ".claude-plugin/marketplace.json"]

@@ -29,12 +29,12 @@ type command struct {
 
 var commands = []command{
 	{CommandDirectory, "gateway/internal/hostmain", []string{
-		module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
+		module + "gateway/internal/buildinfo", module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
 		module + "gateway/internal/pipe", module + "gateway/internal/server",
 		module + "gateway/schemahash", module + "orchestrator/gatewayroot", module + "orchestrator/hosted",
 	}},
 	{ClientDirectory, "gateway/internal/clientmain", []string{
-		module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
+		module + "gateway/internal/buildinfo", module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
 		module + "gateway/schemahash", module + "orchestrator/clientcli", module + "orchestrator/gatewayroot",
 		"github.com/mattn/go-isatty",
 	}},

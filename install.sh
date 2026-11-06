@@ -38,10 +38,15 @@ fail() {
 
 # fetch URL DEST: download one file or fail.
 fetch() {
+  try_fetch "$1" "$2" || fail "cannot download $1"
+}
+
+# try_fetch URL DEST: download one file, returning its status.
+try_fetch() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "$2" "$1" || fail "cannot download $1"
+    curl -fsSL -o "$2" "$1"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$2" "$1" || fail "cannot download $1"
+    wget -q -O "$2" "$1"
   else
     fail "needs curl or wget"
   fi
@@ -66,19 +71,23 @@ detect_os() {
   esac
 }
 
-# detect_arch OS: print amd64 or arm64.
+# detect_arch OS: print amd64 or arm64. Releases cover linux/amd64, linux/arm64 and darwin/arm64.
 detect_arch() {
   case "$(uname -m)" in
     x86_64 | amd64)
-      # A shell running under Rosetta reports x86_64 on an Apple Silicon Mac.
-      if [ "$1" = darwin ] && [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
-        echo arm64
+      if [ "$1" = darwin ]; then
+        # A shell running under Rosetta reports x86_64 on an Apple Silicon Mac, which gets arm64.
+        if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
+          echo arm64
+        else
+          fail "VibeSys releases do not cover Intel Macs; they cover Apple Silicon Macs and Linux (amd64 and arm64)"
+        fi
       else
         echo amd64
       fi
       ;;
     aarch64 | arm64) echo arm64 ;;
-    *) fail "unsupported architecture '$(uname -m)'; releases cover amd64 and arm64" ;;
+    *) fail "unsupported architecture '$(uname -m)'; releases cover amd64 and arm64 on Linux and arm64 on macOS" ;;
   esac
 }
 
@@ -185,10 +194,9 @@ main() {
     *[!0-9A-Za-z.-]*) fail "VIBESYS_VERSION '$version' is not a version such as 0.2.0" ;;
   esac
 
-  os="$(detect_os)"
-  arch="$(detect_arch "$os")"
-  # The sidecar depends on agentshim by git URL, so uv needs git to build its environment.
-  command -v git >/dev/null 2>&1 || fail "git is not installed; it is needed to fetch the sidecar's dependencies. Install git and run this again"
+  # fail exits only the substitution it runs in, so each caller stops on its status.
+  os="$(detect_os)" || exit 1
+  arch="$(detect_arch "$os")" || exit 1
 
   mkdir -p "$home/releases" || fail "cannot create $home/releases"
   mkdir -p "$install_dir" || fail "cannot create $install_dir"
@@ -215,7 +223,9 @@ main() {
   elif [ -z "$version" ]; then
     # The newest release is the rolling vibesys-latest, whose VERSION file names it.
     step="finding the newest version"
-    fetch "$releases_url/vibesys-latest/VERSION" "$work/VERSION"
+    # vibesys-latest names stable versions only, so it does not exist while only pre-releases do.
+    try_fetch "$releases_url/vibesys-latest/VERSION" "$work/VERSION" ||
+      fail "cannot find the newest version at $releases_url/vibesys-latest/VERSION. No stable release may be published yet; name the version to install, for example VIBESYS_VERSION=0.2.0-rc.1"
     version="$(tr -d ' \n\r' <"$work/VERSION")"
     case "$version" in
       "" | *[!0-9A-Za-z.-]*) fail "the published VERSION file is not a version" ;;
@@ -295,10 +305,14 @@ main() {
   esac
   cat <<EOF
 
-Next steps:
-  vibesys-client run start --task <task>
+Next steps, in the git repository that holds the task:
+  vibesys-client run start --task <task> --detach
+  vibesys-client run wait --until report --timeout 30m
+  vibesys-client run get
+  vibesys-client run stop --yes
 
 What it needs:
+  - git, because a task lives in a git repository.
   - Claude Code or Codex installed and logged in on this machine.
   - Docker, only for tasks that run in containers.
 

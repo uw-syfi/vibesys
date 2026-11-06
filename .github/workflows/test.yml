@@ -648,10 +648,10 @@ jobs:
         # the display for this one check group.
         run: xvfb-run -a ./support/repoctl/repoctl run-checks --group desktop_path_e2e
 
-  # The installer for managed runs (install.sh) end to end: builds a bundle, installs it in a clean
-  # Debian container with no Go, Python or repository, and checks the layout, a re-install, a
-  # corrupted bundle and a version switch. Runs only when the installer or what a bundle carries
-  # changes.
+  # The installed product end to end: builds a bundle, installs it with install.sh in a clean Debian
+  # container with no Go, Python, git or repository, and checks the layout, a re-install, a corrupted
+  # bundle, then starts, checks and stops a run with scripted agents and switches versions over the
+  # running host. Runs when the installer, what a bundle carries or the code of its binaries changes.
   managed-install:
     needs: changes
     if: needs.changes.outputs.managed_install == 'true'

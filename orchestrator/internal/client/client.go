@@ -3,9 +3,7 @@
 // them too, with the session metadata that says which agent is calling.
 //
 // There is one transport: a net.Conn from a Dialer. On the daemon's host the Dialer opens the
-// gateway's Unix socket. A Dialer for another host would run `ssh host vibesys-host connect`, which
-// pipes its stdio to that socket, and wrap the pipes with StdioConn; none is wired today. The
-// package starts no process and opens no socket itself.
+// gateway's Unix socket. The package starts no process and opens no socket itself.
 package client
 
 import (

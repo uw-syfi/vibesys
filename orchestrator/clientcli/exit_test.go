@@ -89,3 +89,18 @@ func TestADialThatFailsIsUnavailable(t *testing.T) {
 		t.Fatalf("exit %d, want 4; stderr %q", got.code, got.stderr)
 	}
 }
+
+// --version prints the client's release version without reaching any host.
+func TestVersionPrintsTheReleaseVersionAndNeedsNoHost(t *testing.T) {
+	var out, errb bytes.Buffer
+	code := clientcli.Main(context.Background(), []string{"--version"}, clientcli.Env{
+		Version: "1.2.3", Stdout: &out, Stderr: &errb,
+		Connect: func(string) (clientcli.Dial, error) {
+			t.Error("--version reached for a host")
+			return nil, errors.New("unreachable")
+		},
+	})
+	if code != clientcli.ExitOK || out.String() != "vibesys-client 1.2.3\n" || errb.Len() != 0 {
+		t.Errorf("exit %d, stdout %q, stderr %q", code, out.String(), errb.String())
+	}
+}

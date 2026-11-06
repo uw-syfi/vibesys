@@ -16,13 +16,17 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/schemahash"
 )
 
+// stamped is the release version the test builds the client with, as scripts/build_release_bundle.sh
+// does, so what the client reports can only come from the build.
+const stamped = "7.8.9-test"
+
 func build(t *testing.T) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "vibesys-client")
-	if output, err := exec.CommandContext(ctx, "go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+	if output, err := exec.CommandContext(ctx, "go", "build", "-ldflags", "-X github.com/uw-syfi/vibesys/gateway/internal/buildinfo.Version="+stamped, "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
 	// The host is only looked for, never started, while a gateway already serves the socket.
@@ -59,6 +63,9 @@ func TestClientCLIExitCodes(t *testing.T) {
 	}
 	if code, stdout, _ := run(t, binary, "--help"); code != 0 || !strings.Contains(stdout, "run start") {
 		t.Errorf("--help: exit %d, stdout %q", code, stdout)
+	}
+	if code, stdout, _ := run(t, binary, "--version"); code != 0 || stdout != "vibesys-client "+stamped+"\n" {
+		t.Errorf("--version: exit %d, stdout %q, want the stamped version", code, stdout)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
