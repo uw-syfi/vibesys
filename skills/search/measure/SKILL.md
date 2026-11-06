@@ -77,6 +77,12 @@ one image has only the candidate's. A detached process's output is in `vibesys-c
 anything you need out of the containers into `/vibesys/artifacts` first. `lab checkout` refuses a
 commit whose task or candidate image differs: start a new lab for it.
 
+Before you drive load, wait for the server's readiness path from the task container with what that
+image has (it may have no `curl`; a three-line Python `urllib` loop works anywhere), and bound the
+wait. Budget the lab's time: server start, data preparation and the load's own warmup come out of
+`--for` before any measured request, so a lab capped at 30 minutes holds well under 30 minutes of
+load. Copy the scripts you run into the lab with `lab cp` and keep them with your results.
+
 A lab is a queued job like any other: it waits its turn, takes its plan's priority, and is held
 and drained as a job is. If it is held or the daemon drains, `lab start --wait` exits 1 at once
 saying so, and the lab keeps its place: do not start another, run `vibesys-cli lab ps j7 --wait`
