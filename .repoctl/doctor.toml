@@ -61,6 +61,14 @@ marker = "clients/node_modules/.modules.yaml"
 command = ["pnpm", "install", "--frozen-lockfile"]
 command_directory = "clients"
 
+# A virtual environment inside an example's tree (an earlier run's `uv run --project` leaves one beside
+# the project) holds thousands of Python files that the example-registry tests then read and fail on.
+[[strays]]
+name = "example-environments"
+root = "examples"
+directory = ".venv"
+reason = "the example-registry tests read every Python file under an example"
+
 # Go refuses to build in a linked worktree without this: "error obtaining VCS status".
 [[env_flags]]
 name = "GOFLAGS"

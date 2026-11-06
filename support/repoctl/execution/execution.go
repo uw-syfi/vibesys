@@ -192,7 +192,7 @@ func (r OSRunner) Run(parent context.Context, root string, check Check) error {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, check.Args[0], check.Args[1:]...)
 	cmd.Dir = filepath.Join(root, filepath.FromSlash(check.Directory))
-	cmd.Env = mergedEnvironment(os.Environ(), check.Env)
+	cmd.Env = mergedEnvironment(os.Environ(), expandRepoRoot(check.Env, root))
 	if r.OwnProcessGroup {
 		ownProcessGroup(cmd)
 		cmd.WaitDelay = 5 * time.Second
@@ -215,6 +215,21 @@ func (r OSRunner) Run(parent context.Context, root string, check Check) error {
 		return fmt.Errorf("%s: %s: %w", check.Label, strings.Join(check.Args, " "), err)
 	}
 	return nil
+}
+
+// RepoRootToken in a check's environment value stands for the repository root, so a variable
+// can name a place outside the directory a command works in without a machine's path in policy.
+const RepoRootToken = "{repo_root}"
+
+func expandRepoRoot(env map[string]string, root string) map[string]string {
+	if len(env) == 0 {
+		return env
+	}
+	out := make(map[string]string, len(env))
+	for key, value := range env {
+		out[key] = strings.ReplaceAll(value, RepoRootToken, root)
+	}
+	return out
 }
 
 func mergedEnvironment(base []string, overrides map[string]string) []string {

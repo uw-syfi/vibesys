@@ -29,6 +29,7 @@ type Config struct {
 	Temp         TempConfig         `toml:"temp"`
 	Programs     []ProgramConfig    `toml:"programs"`
 	Installs     []InstallConfig    `toml:"installs"`
+	Strays       []StrayConfig      `toml:"strays"`
 	EnvFlags     []EnvFlagConfig    `toml:"env_flags"`
 	Instructions InstructionsConfig `toml:"instructions"`
 }
@@ -96,6 +97,18 @@ type InstallConfig struct {
 	Command   []string `toml:"command"`
 	// CommandDirectory is where Command runs.
 	CommandDirectory string `toml:"command_directory"`
+}
+
+// StrayConfig names a directory that a tool leaves inside a tree it must not be in (a virtual
+// environment inside an example, say) and that later checks trip over. The doctor finds each one
+// under Root and, with --fix, removes it.
+type StrayConfig struct {
+	Name string `toml:"name"`
+	// Root is the repository-relative tree to search.
+	Root string `toml:"root"`
+	// Directory is the base name that marks a stray directory.
+	Directory string `toml:"directory"`
+	Reason    string `toml:"reason"`
 }
 
 // EnvFlagConfig requires a flag in an environment variable's space-separated value.
@@ -195,6 +208,15 @@ func (c Config) validate() error {
 		}
 		if !strings.HasPrefix(in.Marker, strings.TrimSuffix(in.Directory, "/")+"/") {
 			return fmt.Errorf("%s.marker %q must be inside %q", key, in.Marker, in.Directory)
+		}
+	}
+	for i, s := range c.Strays {
+		key := fmt.Sprintf("strays[%d]", i)
+		if s.Name == "" || s.Directory == "" || strings.ContainsAny(s.Directory, "/\\") {
+			return fmt.Errorf("%s needs a name and a bare directory name, got %q", key, s.Directory)
+		}
+		if err := relativePath(key+".root", s.Root); err != nil {
+			return err
 		}
 	}
 	for i, f := range c.EnvFlags {

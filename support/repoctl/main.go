@@ -227,6 +227,7 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 		return err
 	}
 	ensureHooks(root, os.Stderr)
+	runner = withRepositoryPython(runner, root, configPath)
 	switch args[0] {
 	case "gate":
 		return runGate(root, configPath, g, args[1:], os.Stdout)
@@ -262,6 +263,7 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 		event := fs.String("event", "pull_request", "Event type")
 		dryRun := fs.Bool("dry-run", false, "Print selected commands without running them")
 		checksOnly := fs.Bool("checks-only", false, "Run quality checks and always-on scripts, not test groups")
+		failFast := fs.Bool("fail-fast", false, "Stop at the first failing group; by default every selected group runs and a summary names the failures")
 		coverageOnly := fs.Bool("coverage-only", false, "Check touched Python modules and patch coverage using only --coverage-test files")
 		var coverageTests []string
 		fs.Func("coverage-test", "Own test file to run for touched modules; repeat for multiple files", func(value string) error {
@@ -293,7 +295,7 @@ func cliWithRunner(args []string, runner execution.Runner) error {
 			fmt.Println("Partial-suite coverage: only the supplied test files run; CI combines all shards.")
 			return runChecks(root, checks, *dryRun, runner)
 		}
-		return runSelectedTests(root, g, p, *dryRun, *checksOnly, runner, runNativeCommand)
+		return runSelectedTests(root, g, p, *dryRun, *checksOnly, *failFast, runner, runNativeCommand)
 	case "run-native":
 		fs := flag.NewFlagSet("run-native", flag.ContinueOnError)
 		targets := fs.String("targets-json", "", "Selected native roots as a JSON array")

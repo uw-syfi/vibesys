@@ -82,6 +82,42 @@ func (h *FakeHost) Run(dir string, argv ...string) (string, error) {
 	return "", fmt.Errorf("fake: no program for %v", argv)
 }
 
+// FindDirectories implements Host: a directory is any parent of a file, or a listed one.
+func (h *FakeHost) FindDirectories(dir, name string) []string {
+	dir = filepath.Clean(dir)
+	seen := map[string]bool{}
+	consider := func(path string) {
+		for p := filepath.Dir(path); isUnder(p, dir) && p != dir; p = filepath.Dir(p) {
+			if filepath.Base(p) == name {
+				// Only the outermost match counts: a match is not searched inside.
+				for q := range seen {
+					if isUnder(p, q) {
+						return
+					}
+				}
+				for q := range seen {
+					if isUnder(q, p) {
+						delete(seen, q)
+					}
+				}
+				seen[p] = true
+			}
+		}
+	}
+	for f := range h.Files {
+		consider(f)
+	}
+	for d := range h.Dirs {
+		consider(filepath.Join(d, "x"))
+	}
+	var out []string
+	for p := range seen {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Filesystem implements Host.
 func (h *FakeHost) Filesystem(path string) (Filesystem, error) {
 	path = filepath.Clean(path)

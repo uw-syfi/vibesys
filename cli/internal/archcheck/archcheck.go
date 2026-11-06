@@ -26,6 +26,10 @@ const (
 	genAt       = "cli/gen/"
 )
 
+// testSupport lists the packages every test file may import: support that keeps a test binary's
+// environment from deciding its result, and that no product code reaches.
+var testSupport = []string{"internal/shorttmp"}
+
 // rules lists, for each package directory under cli/, the module packages it may import beyond
 // itself. An entry ending in "/" allows the whole subtree. A package with Go files and no entry
 // fails the check, so a new package states its layer in the change that adds it.
@@ -119,6 +123,8 @@ var rules = map[string][]string{
 		"internal/reading",
 	},
 	"internal/runtimedir": {"gen/", "internal/clock", "internal/core"},
+	// Test support only: keeps a test binary's TMPDIR short enough for a socket path.
+	"internal/shorttmp": {"internal/runtimedir"},
 
 	// Storage.
 	"internal/store":           {"internal/core"},
@@ -359,6 +365,7 @@ func layering(name, source string) []string {
 	allowed = append(slices.Clone(allowed), dir)
 	if strings.HasSuffix(name, "_test.go") {
 		allowed = append(allowed, testRules[dir]...)
+		allowed = append(allowed, testSupport...)
 	}
 	return disallowed(name, imports, allowed)
 }

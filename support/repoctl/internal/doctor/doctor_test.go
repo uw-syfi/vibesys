@@ -45,6 +45,12 @@ marker = "clients/node_modules/.modules.yaml"
 command = ["pnpm", "install", "--frozen-lockfile"]
 command_directory = "clients"
 
+[[strays]]
+name = "example-environments"
+root = "examples"
+directory = ".venv"
+reason = "the example-registry tests read every Python file under an example"
+
 [[env_flags]]
 name = "GOFLAGS"
 flag = "-buildvcs=false"
@@ -201,6 +207,33 @@ func TestAHalfInstalledTreeIsRemovedThenInstalled(t *testing.T) {
 	}
 	if f.Actions[1].Kind != doctor.ActionRun || f.Actions[1].Dir != root+"/clients" {
 		t.Fatalf("second action: %+v", f.Actions[1])
+	}
+}
+
+func TestAVirtualEnvironmentLeftInAnExampleIsFoundAndRemovedByFix(t *testing.T) {
+	h := goodHost()
+	h.Files[root+"/examples/a/.vibesys/tasks/default/cpu_check/.venv/lib/x.py"] = ""
+	h.Files[root+"/examples/a/.vibesys/tasks/default/cpu_check/.venv/.venv/nested.py"] = ""
+	h.Files[root+"/examples/b/.venv/pyvenv.cfg"] = ""
+	h.Files[root+"/elsewhere/.venv/pyvenv.cfg"] = ""
+	f := find(t, evaluate(t, h), "example-environments")
+	if f.Status != doctor.Warn || len(f.Actions) != 2 {
+		t.Fatalf("got %+v", f)
+	}
+	for _, a := range f.Actions {
+		if a.Kind != doctor.ActionRemoveTree || !strings.HasPrefix(a.Path, root+"/examples/") {
+			t.Fatalf("unexpected action %+v", a)
+		}
+	}
+	var out bytes.Buffer
+	if err := doctor.Run(config(t), root, h, doctor.Options{Fix: true}, &out); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if f := find(t, evaluate(t, h), "example-environments"); f.Status != doctor.Pass {
+		t.Fatalf("after --fix: %+v", f)
+	}
+	if !h.Exists(root + "/elsewhere/.venv/pyvenv.cfg") {
+		t.Fatal("--fix removed a .venv outside the searched tree")
 	}
 }
 

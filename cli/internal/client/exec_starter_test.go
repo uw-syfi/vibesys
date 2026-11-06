@@ -19,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/shorttmp"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 )
 
@@ -45,7 +46,7 @@ func TestMain(m *testing.M) {
 	case "silent":
 		os.Exit(0)
 	}
-	os.Exit(m.Run())
+	os.Exit(shorttmp.Run(m))
 }
 
 type noFS struct{}

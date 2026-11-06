@@ -86,6 +86,9 @@ type Host interface {
 	LinkedWorktree() bool
 	// PlanChanges reports why the gate cannot plan the working tree's changes, nil when it can.
 	PlanChanges() error
+	// FindDirectories lists the directories named name under dir (absolute paths, sorted). It does
+	// not look inside a match, a .git directory, node_modules or target.
+	FindDirectories(dir, name string) []string
 	// Execute performs a repair.
 	Execute(Action) error
 }
@@ -148,6 +151,7 @@ type Facts struct {
 	PlanError      string
 	Programs       []ProgramFacts
 	Installs       []InstallFacts
+	Strays         [][]string
 	Temp           TempFacts
 	References     []Reference
 }
@@ -174,6 +178,9 @@ func Gather(cfg Config, root string, host Host) Facts {
 			DirectoryExists: host.Exists(filepath.Join(root, in.Directory)),
 			MarkerExists:    host.Exists(filepath.Join(root, in.Marker)),
 		})
+	}
+	for _, s := range cfg.Strays {
+		f.Strays = append(f.Strays, host.FindDirectories(filepath.Join(root, s.Root), s.Directory))
 	}
 	f.Temp = gatherTemp(cfg.Temp, root, f.Env, host)
 	f.References = gatherReferences(cfg.Instructions, root, host)
