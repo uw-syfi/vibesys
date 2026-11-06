@@ -26,10 +26,12 @@ const CommitRefPrefix = "refs/vibesys/runs/"
 
 // Release implements daemon.Checkouts. A copy whose HEAD no branch or kept ref holds is first kept
 // under CommitRefPrefix; if that ref cannot be written the copy stays, since removing it would leave
-// the commit to be pruned. Then git removes the worktree, and refuses one with modified or untracked
-// files, which is exactly the work that would be lost; that copy is kept as well, and so is one that
-// could not be removed for any other reason, since it is not known to be clean. A copy whose agent made
-// no commit has a HEAD a branch already holds and gets no ref.
+// the commit to be pruned. What git lacks is a change to a file it tracks: an agent's work is a commit,
+// so a copy with a modified, staged, deleted or conflicted tracked file is kept, and so is one whose
+// state cannot be read. Untracked files are not work. They are what a build or a benchmark leaves,
+// which every run produces, so they go with the copy, ignored ones the same. A copy that could not be
+// removed for any other reason is kept as well, since it is not known to be clean. A copy whose agent
+// made no commit has a HEAD a branch already holds and gets no ref.
 func (s *ProcessSidecars) Release(ctx context.Context, repository string, run core.RunID, agents []core.AgentID) ([]core.Checkout, error) {
 	var kept []core.Checkout
 	for _, agent := range agents {
@@ -45,7 +47,16 @@ func (s *ProcessSidecars) Release(ctx context.Context, repository string, run co
 			kept = append(kept, keep)
 			continue
 		}
-		if err := exec.CommandContext(ctx, "git", "-C", repository, "worktree", "remove", path).Run(); err != nil {
+		if modified, err := holdsTrackedChanges(ctx, path); err != nil || modified {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			kept = append(kept, keep)
+			continue
+		}
+		// --force because git refuses a copy with untracked files, which are not work here; every copy
+		// with a change to a tracked file was kept above.
+		if err := exec.CommandContext(ctx, "git", "-C", repository, "worktree", "remove", "--force", path).Run(); err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
@@ -57,6 +68,16 @@ func (s *ProcessSidecars) Release(ctx context.Context, repository string, run co
 	// A worktree whose directory is gone leaves a record in the repository; this drops those.
 	_ = exec.CommandContext(ctx, "git", "-C", repository, "worktree", "prune").Run()
 	return kept, ctx.Err()
+}
+
+// holdsTrackedChanges reports whether the working copy at path differs from its HEAD in a file git
+// tracks, staged or not. Untracked and ignored files do not count.
+func holdsTrackedChanges(ctx context.Context, path string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", path, "status", "--porcelain", "--untracked-files=no").Output()
+	if err != nil {
+		return false, fmt.Errorf("read the state of %s: %w", path, err)
+	}
+	return strings.TrimSpace(string(out)) != "", nil
 }
 
 // keepCommit writes the ref that holds the HEAD of the working copy at path, unless a branch, tag or

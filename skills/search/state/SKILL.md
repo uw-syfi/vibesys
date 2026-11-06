@@ -35,10 +35,13 @@ All worktrees of the repository share one store per task, so any agent sees the 
   a remote branch at the same commit, delete it (`git branch -d vibesys`); otherwise stop and
   report the collision. Never rename the result branch.
 - Candidate branches: `vibesys-work/<task>/plan-N`, where N is the plan number.
-- Worktrees: the lead puts every worktree in `<repository>.worktrees/`, a directory beside the
-  repository's working tree and never under `/tmp` (`git worktree add`), one per plan, one per
-  judge or profile question. The run does not remove these when it ends, so the lead removes the
-  ones of closed plans (see Housekeeping). Each brief
+- Worktrees: the lead puts every worktree outside the repository's directory tree, in
+  `<parent>/<name>.worktrees/`, where `<parent>` is the directory that holds the repository and
+  `<name>` is the repository directory's name (for a repository at `/work/kv`, a worktree is
+  `/work/kv.worktrees/plan-3`, never `/work/kv/kv.worktrees/plan-3`, which git reports as an
+  untracked directory of the user's checkout). Never under `/tmp`. Add with `git worktree add`,
+  one per plan, one per judge or profile question. The run does not remove these when it ends, so
+  the lead removes a plan's worktree when the plan closes (see Housekeeping). Each brief
   names its worktree. `git worktree list` is the truth about which exist. A new worktree has its
   submodules empty: when the repository has any (`.gitmodules`), run
   `git -C <path> submodule update --init --recursive` after `git worktree add`, so the agent can
@@ -83,5 +86,7 @@ parked plan's gain bound is under a share: `plan check-gain --under 10%`.
 
 ## Housekeeping
 
-Remove the worktrees of closed plans (`git worktree remove`); keep their branches, and never
-rewrite measured commits.
+When a plan closes, remove its worktree (`git worktree remove --force <path>`: build output in it
+is not work); keep its branch, and never rewrite measured commits. Before the final report, run
+`git worktree list`: only the repository itself should be listed, and `git status` should show no
+untracked `*.worktrees` directory.
