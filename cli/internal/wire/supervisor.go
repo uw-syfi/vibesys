@@ -16,6 +16,12 @@ func Launch(l lifecycle.Launch) *cliv1.Launch {
 // held to what a supervisor is promised: a concrete environment kind and, for a command, a
 // positive timeout.
 func ToLaunch(l *cliv1.Launch) (lifecycle.Launch, error) {
+	if l == nil {
+		return lifecycle.Launch{}, invalid("launch: missing")
+	}
+	if err := Validate(l); err != nil {
+		return lifecycle.Launch{}, err
+	}
 	if l.GetRepository() == "" || l.GetTask() == "" || l.GetJobId() == "" {
 		return lifecycle.Launch{}, invalid("launch: repository, task and job id are all required")
 	}

@@ -21,6 +21,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // ErrAlreadyRunning says another daemon of this user holds the instance lock.
@@ -174,7 +175,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 	}
 
 	srv := NewServer(a, cfg.Version, cfg.Inherited).WithMachine(cfg.Machine).WithNeighbors(cfg.Runtime.Neighbors)
-	server := grpc.NewServer()
+	server := grpc.NewServer(grpc.ChainUnaryInterceptor(wire.RequestValidator()), grpc.ChainStreamInterceptor(wire.StreamRequestValidator()))
 	cliv1.RegisterDaemonServiceServer(server, srv)
 	served := make(chan error, 1)
 	var serving owned.Group

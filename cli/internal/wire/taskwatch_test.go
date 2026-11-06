@@ -106,7 +106,7 @@ func TestJudgedCommitsAreCheckedInWire(t *testing.T) {
 		want  int
 		bad   bool
 	}{{0, 20, false}, {20, 20, false}, {100, 100, false}, {101, 0, true}} {
-		got, err := wire.JudgedCommits(&cliv1.WatchTaskRequest{Context: &cliv1.CallContext{}, JudgedCommits: tc.asked})
+		got, err := wire.JudgedCommits(&cliv1.WatchTaskRequest{Context: &cliv1.CallContext{Repository: "/repo", Task: "task"}, JudgedCommits: tc.asked})
 		if (err != nil) != tc.bad || got != tc.want || (tc.bad && !wire.IsInvalidInput(err)) {
 			t.Errorf("JudgedCommits(%d) = %d, %v", tc.asked, got, err)
 		}

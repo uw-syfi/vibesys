@@ -1,0 +1,110 @@
+{
+  "proto/vibesys/cli/v1/environment.proto": [
+    "EnvironmentFingerprint",
+    "MachineFacts",
+    "MachineLoad"
+  ],
+  "proto/vibesys/cli/v1/event.proto": [
+    "Event"
+  ],
+  "proto/vibesys/cli/v1/failure.proto": [
+    "Failure"
+  ],
+  "proto/vibesys/cli/v1/frontier.proto": [
+    "FrontierAdmission",
+    "FrontierDecision",
+    "FrontierEntry",
+    "FrontierMember",
+    "FrontierRefusal",
+    "FrontierRefusalReason",
+    "ObjectiveValue"
+  ],
+  "proto/vibesys/cli/v1/job.proto": [
+    "Attempt",
+    "CandidateBuild",
+    "CandidateServe",
+    "CandidateSetup",
+    "CommandSettings",
+    "LeaseHolder",
+    "MeasureSettings",
+    "Note",
+    "ServiceSpec"
+  ],
+  "proto/vibesys/cli/v1/plan.proto": [
+    "LinkedJob",
+    "Plan",
+    "PlanComment",
+    "PlanView"
+  ],
+  "proto/vibesys/cli/v1/promote.proto": [
+    "CurrentResult",
+    "NoCurrentResult",
+    "PromoteRefusal",
+    "PromoteRefusalReason",
+    "Promotion"
+  ],
+  "proto/vibesys/cli/v1/result.proto": [
+    "CheckResult",
+    "MeasureResult",
+    "Measurement",
+    "Metric",
+    "ObjectiveNoise",
+    "Objectives",
+    "Observation",
+    "Result"
+  ],
+  "proto/vibesys/cli/v1/service.proto": [
+    "AddNoteResponse",
+    "AddToFrontierResponse",
+    "CancelResponse",
+    "ClosePlanResponse",
+    "CommentPlanResponse",
+    "CompareResponse",
+    "CreatePlanResponse",
+    "CurrentResultRequest",
+    "CurrentResultResponse",
+    "EditPlanResponse",
+    "ForgetRepositoryRequest",
+    "ForgetRepositoryResponse",
+    "HelloResponse",
+    "InheritedVariable",
+    "ListFrontierRequest",
+    "ListFrontierResponse",
+    "ListJobsResponse",
+    "ListPlansResponse",
+    "PromoteResponse",
+    "ReadLogsResponse",
+    "ShowResponse",
+    "StatusResponse",
+    "SubmitResponse",
+    "ViewPlanResponse",
+    "WaitOutcome",
+    "WaitResponse",
+    "WatchRequest",
+    "WatchResponse"
+  ],
+  "proto/vibesys/cli/v1/supervisor.proto": [
+    "AttachRequest",
+    "CancelJobRequest",
+    "CommandEnd",
+    "ExecutionOutcome",
+    "FlowEnd",
+    "FlowPlan",
+    "HandshakeResponse",
+    "OutputChunk",
+    "ResultFormat",
+    "SupervisorOutcome"
+  ],
+  "proto/vibesys/cli/v1/task.proto": [
+    "TaskResultV02",
+    "TaskSchema"
+  ],
+  "proto/vibesys/cli/v1/verdict.proto": [
+    "Comparison",
+    "ObjectiveVerdict",
+    "Verdict"
+  ],
+  "proto/vibesys/cli/v1/version.proto": [
+    "BuildVersions"
+  ]
+}

@@ -279,9 +279,10 @@ func (x *CallContext) GetAgent() string {
 }
 
 type HelloRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Component     Component              `protobuf:"varint,1,opt,name=component,proto3,enum=vibesys.cli.v1.Component" json:"component,omitempty"`
-	Versions      *BuildVersions         `protobuf:"bytes,2,opt,name=versions,proto3" json:"versions,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The daemon serves the command line tool and the orchestrator.
+	Component     Component      `protobuf:"varint,1,opt,name=component,proto3,enum=vibesys.cli.v1.Component" json:"component,omitempty"`
+	Versions      *BuildVersions `protobuf:"bytes,2,opt,name=versions,proto3" json:"versions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4172,17 +4173,18 @@ var File_vibesys_cli_v1_service_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/cli/v1/service.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1cvibesys/cli/v1/machine.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/verdict.proto\x1a\x1cvibesys/cli/v1/version.proto\"\x88\x01\n" +
-	"\vCallContext\x12\x1e\n" +
+	"\x1cvibesys/cli/v1/service.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x1dvibesys/cli/v1/frontier.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1cvibesys/cli/v1/machine.proto\x1a\x19vibesys/cli/v1/plan.proto\x1a\x1cvibesys/cli/v1/promote.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/verdict.proto\x1a\x1cvibesys/cli/v1/version.proto\"\xc0\x01\n" +
+	"\vCallContext\x12)\n" +
 	"\n" +
-	"repository\x18\x01 \x01(\tR\n" +
-	"repository\x12\x12\n" +
-	"\x04task\x18\x02 \x01(\tR\x04task\x12\x15\n" +
+	"repository\x18\x01 \x01(\tB\t\xbaH\x06r\x042\x02^/R\n" +
+	"repository\x12?\n" +
+	"\x04task\x18\x02 \x01(\tB+\xbaH(r&2$^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$R\x04task\x12\x15\n" +
 	"\x06run_id\x18\x03 \x01(\tR\x05runId\x12\x18\n" +
 	"\aharness\x18\x04 \x01(\tR\aharness\x12\x14\n" +
-	"\x05agent\x18\x05 \x01(\tR\x05agent\"\x82\x01\n" +
-	"\fHelloRequest\x127\n" +
-	"\tcomponent\x18\x01 \x01(\x0e2\x19.vibesys.cli.v1.ComponentR\tcomponent\x129\n" +
+	"\x05agent\x18\x05 \x01(\tR\x05agent\"\x8e\x01\n" +
+	"\fHelloRequest\x12C\n" +
+	"\tcomponent\x18\x01 \x01(\x0e2\x19.vibesys.cli.v1.ComponentB\n" +
+	"\xbaH\a\x82\x01\x04\x18\x01\x18\x04R\tcomponent\x129\n" +
 	"\bversions\x18\x02 \x01(\v2\x1d.vibesys.cli.v1.BuildVersionsR\bversions\"\x8f\x01\n" +
 	"\rHelloResponse\x129\n" +
 	"\bversions\x18\x01 \x01(\v2\x1d.vibesys.cli.v1.BuildVersionsR\bversions\x12C\n" +
@@ -4231,10 +4233,10 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"repository\"D\n" +
 	"\x18ForgetRepositoryResponse\x12\x14\n" +
 	"\x05tasks\x18\x01 \x03(\tR\x05tasks\x12\x12\n" +
-	"\x04left\x18\x02 \x03(\tR\x04left\"\xb6\x01\n" +
+	"\x04left\x18\x02 \x03(\tR\x04left\"\xbe\x01\n" +
 	"\rSubmitRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12+\n" +
-	"\x04spec\x18\x02 \x01(\v2\x17.vibesys.cli.v1.JobSpecR\x04spec\x12\x19\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x123\n" +
+	"\x04spec\x18\x02 \x01(\v2\x17.vibesys.cli.v1.JobSpecB\x06\xbaH\x03\xc8\x01\x01R\x04spec\x12\x19\n" +
 	"\bno_cache\x18\x03 \x01(\bR\anoCache\x12\x12\n" +
 	"\x04note\x18\x04 \x01(\tR\x04note\x12\x12\n" +
 	"\x04plan\x18\x05 \x01(\rR\x04plan\"|\n" +
@@ -4245,12 +4247,12 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x17\n" +
 	"\ajob_ids\x18\x02 \x03(\tR\x06jobIds\"6\n" +
 	"\rWatchResponse\x12%\n" +
-	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"\xa4\x01\n" +
+	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"\xbe\x01\n" +
 	"\vWaitRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x17\n" +
-	"\ajob_ids\x18\x02 \x03(\tR\x06jobIds\x12\x10\n" +
-	"\x03any\x18\x03 \x01(\bR\x03any\x123\n" +
-	"\atimeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"y\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12'\n" +
+	"\ajob_ids\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\b\x01\"\x04r\x02\x10\x01R\x06jobIds\x12\x10\n" +
+	"\x03any\x18\x03 \x01(\bR\x03any\x12=\n" +
+	"\atimeout\x18\x04 \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x02*\x00R\atimeout\"y\n" +
 	"\fWaitResponse\x12'\n" +
 	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobH\x00R\x03job\x127\n" +
 	"\aoutcome\x18\x02 \x01(\v2\x1b.vibesys.cli.v1.WaitOutcomeH\x00R\aoutcomeB\a\n" +
@@ -4259,62 +4261,62 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1f.vibesys.cli.v1.WaitOutcomeKindR\x04kind\x12\x1d\n" +
 	"\n" +
 	"decided_by\x18\x02 \x01(\tR\tdecidedBy\x12'\n" +
-	"\x04jobs\x18\x03 \x03(\v2\x13.vibesys.cli.v1.JobR\x04jobs\"u\n" +
+	"\x04jobs\x18\x03 \x03(\v2\x13.vibesys.cli.v1.JobR\x04jobs\"~\n" +
 	"\rCancelRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x15\n" +
-	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x12\x16\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1e\n" +
+	"\x06job_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12\x16\n" +
 	"\x06reason\x18\x03 \x01(\tR\x06reason\"7\n" +
 	"\x0eCancelResponse\x12%\n" +
-	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"r\n" +
+	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"\x84\x01\n" +
 	"\x0eAddNoteRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x15\n" +
-	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"8\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1e\n" +
+	"\x06job_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12\x1b\n" +
+	"\x04text\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04text\"8\n" +
 	"\x0fAddNoteResponse\x12%\n" +
-	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"\xe4\x01\n" +
+	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"\x99\x02\n" +
 	"\x0fListJobsRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x16\n" +
-	"\x06commit\x18\x02 \x01(\tR\x06commit\x120\n" +
-	"\x06states\x18\x03 \x03(\x0e2\x18.vibesys.cli.v1.JobStateR\x06states\x12+\n" +
-	"\x04kind\x18\x04 \x01(\x0e2\x17.vibesys.cli.v1.JobKindR\x04kind\x12#\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x120\n" +
+	"\x06commit\x18\x02 \x01(\tB\x18\xbaH\x15r\x132\x11^([0-9a-f]{40})?$R\x06commit\x12A\n" +
+	"\x06states\x18\x03 \x03(\x0e2\x18.vibesys.cli.v1.JobStateB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\x06states\x125\n" +
+	"\x04kind\x18\x04 \x01(\x0e2\x17.vibesys.cli.v1.JobKindB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04kind\x12#\n" +
 	"\rnote_contains\x18\x05 \x01(\tR\fnoteContains\"j\n" +
 	"\x10ListJobsResponse\x12'\n" +
 	"\x04jobs\x18\x01 \x03(\v2\x13.vibesys.cli.v1.JobR\x04jobs\x12-\n" +
-	"\x05waits\x18\x02 \x03(\v2\x17.vibesys.cli.v1.JobWaitR\x05waits\"\x8f\x01\n" +
+	"\x05waits\x18\x02 \x03(\v2\x17.vibesys.cli.v1.JobWaitR\x05waits\"\x98\x01\n" +
 	"\x0fReadLogsRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x15\n" +
-	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x12\x16\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1e\n" +
+	"\x06job_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12\x16\n" +
 	"\x06offset\x18\x03 \x01(\x04R\x06offset\x12\x16\n" +
 	"\x06follow\x18\x04 \x01(\bR\x06follow\"G\n" +
 	"\x10ReadLogsResponse\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1f\n" +
 	"\vnext_offset\x18\x02 \x01(\x04R\n" +
-	"nextOffset\"\\\n" +
+	"nextOffset\"s\n" +
 	"\vShowRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x16\n" +
-	"\x06commit\x18\x02 \x01(\tR\x06commit\"\x81\x01\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12-\n" +
+	"\x06commit\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$R\x06commit\"\x81\x01\n" +
 	"\fShowResponse\x120\n" +
 	"\aresults\x18\x01 \x03(\v2\x16.vibesys.cli.v1.ResultR\aresults\x12?\n" +
-	"\fmeasurements\x18\x02 \x03(\v2\x1b.vibesys.cli.v1.MeasurementR\fmeasurements\"y\n" +
+	"\fmeasurements\x18\x02 \x03(\v2\x1b.vibesys.cli.v1.MeasurementR\fmeasurements\"\xaa\x01\n" +
 	"\x0eCompareRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x16\n" +
-	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x18\n" +
-	"\aagainst\x18\x03 \x01(\tR\aagainst\"M\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12-\n" +
+	"\x06commit\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$R\x06commit\x122\n" +
+	"\aagainst\x18\x03 \x01(\tB\x18\xbaH\x15r\x132\x11^([0-9a-f]{40})?$R\aagainst\"M\n" +
 	"\x0fCompareResponse\x12:\n" +
 	"\n" +
 	"comparison\x18\x01 \x01(\v2\x1a.vibesys.cli.v1.ComparisonR\n" +
-	"comparison\"_\n" +
+	"comparison\"v\n" +
 	"\x0ePromoteRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x16\n" +
-	"\x06commit\x18\x02 \x01(\tR\x06commit\"\xcf\x01\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12-\n" +
+	"\x06commit\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$R\x06commit\"\xcf\x01\n" +
 	"\x0fPromoteResponse\x127\n" +
 	"\bpromoted\x18\x01 \x01(\v2\x19.vibesys.cli.v1.PromotionH\x00R\bpromoted\x12:\n" +
 	"\arefused\x18\x02 \x01(\v2\x1e.vibesys.cli.v1.PromoteRefusalH\x00R\arefused\x12<\n" +
 	"\bfrontier\x18\x03 \x01(\v2 .vibesys.cli.v1.FrontierDecisionR\bfrontierB\t\n" +
-	"\aoutcome\"e\n" +
+	"\aoutcome\"|\n" +
 	"\x14AddToFrontierRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x16\n" +
-	"\x06commit\x18\x02 \x01(\tR\x06commit\"U\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12-\n" +
+	"\x06commit\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$R\x06commit\"U\n" +
 	"\x15AddToFrontierResponse\x12<\n" +
 	"\bdecision\x18\x01 \x01(\v2 .vibesys.cli.v1.FrontierDecisionR\bdecision\"L\n" +
 	"\x13ListFrontierRequest\x125\n" +
@@ -4326,45 +4328,48 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x15CurrentResultResponse\x129\n" +
 	"\acurrent\x18\x01 \x01(\v2\x1d.vibesys.cli.v1.CurrentResultH\x00R\acurrent\x125\n" +
 	"\x04none\x18\x02 \x01(\v2\x1f.vibesys.cli.v1.NoCurrentResultH\x00R\x04noneB\a\n" +
-	"\x05state\"t\n" +
+	"\x05state\"}\n" +
 	"\x11CreatePlanRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x14\n" +
-	"\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1d\n" +
+	"\x05title\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05title\x12\x12\n" +
 	"\x04body\x18\x03 \x01(\tR\x04body\">\n" +
 	"\x12CreatePlanResponse\x12(\n" +
-	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\x95\x01\n" +
+	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\xa6\x01\n" +
 	"\x10ListPlansRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x126\n" +
-	"\bstatuses\x18\x02 \x03(\x0e2\x1a.vibesys.cli.v1.PlanStatusR\bstatuses\x12\x12\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12G\n" +
+	"\bstatuses\x18\x02 \x03(\x0e2\x1a.vibesys.cli.v1.PlanStatusB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\bstatuses\x12\x12\n" +
 	"\x04text\x18\x03 \x01(\tR\x04text\"?\n" +
 	"\x11ListPlansResponse\x12*\n" +
-	"\x05plans\x18\x01 \x03(\v2\x14.vibesys.cli.v1.PlanR\x05plans\"`\n" +
+	"\x05plans\x18\x01 \x03(\v2\x14.vibesys.cli.v1.PlanR\x05plans\"i\n" +
 	"\x0fViewPlanRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x16\n" +
-	"\x06number\x18\x02 \x01(\rR\x06number\"@\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1f\n" +
+	"\x06number\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x06number\"@\n" +
 	"\x10ViewPlanResponse\x12,\n" +
-	"\x04view\x18\x01 \x01(\v2\x18.vibesys.cli.v1.PlanViewR\x04view\"\xeb\x01\n" +
+	"\x04view\x18\x01 \x01(\v2\x18.vibesys.cli.v1.PlanViewR\x04view\"\x8d\x03\n" +
 	"\x0fEditPlanRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x16\n" +
-	"\x06number\x18\x02 \x01(\rR\x06number\x12\x19\n" +
-	"\x05title\x18\x03 \x01(\tH\x00R\x05title\x88\x01\x01\x12\x17\n" +
-	"\x04body\x18\x04 \x01(\tH\x01R\x04body\x88\x01\x01\x127\n" +
-	"\x06status\x18\x05 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusH\x02R\x06status\x88\x01\x01B\b\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1f\n" +
+	"\x06number\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x06number\x12\"\n" +
+	"\x05title\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\x05title\x88\x01\x01\x12\x17\n" +
+	"\x04body\x18\x04 \x01(\tH\x01R\x04body\x88\x01\x01\x12C\n" +
+	"\x06status\x18\x05 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x02R\x06status\x88\x01\x01:\x81\x01\xbaH~\x1a|\n" +
+	"\x18edit_plan.sets_something\x12)set at least one of title, body or status\x1a5has(this.title) || has(this.body) || has(this.status)B\b\n" +
 	"\x06_titleB\a\n" +
 	"\x05_bodyB\t\n" +
 	"\a_status\"<\n" +
 	"\x10EditPlanResponse\x12(\n" +
-	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"w\n" +
+	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\x80\x01\n" +
 	"\x12CommentPlanRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x16\n" +
-	"\x06number\x18\x02 \x01(\rR\x06number\x12\x12\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1f\n" +
+	"\x06number\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x06number\x12\x12\n" +
 	"\x04text\x18\x03 \x01(\tR\x04text\"?\n" +
 	"\x13CommentPlanResponse\x12(\n" +
-	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\xaf\x01\n" +
+	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\xc4\x01\n" +
 	"\x10ClosePlanRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x16\n" +
-	"\x06number\x18\x02 \x01(\rR\x06number\x122\n" +
-	"\x06status\x18\x03 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusR\x06status\x12\x18\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1f\n" +
+	"\x06number\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x06number\x12>\n" +
+	"\x06status\x18\x03 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12\x18\n" +
 	"\acomment\x18\x04 \x01(\tR\acomment\"=\n" +
 	"\x11ClosePlanResponse\x12(\n" +
 	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\"\xbe\x01\n" +

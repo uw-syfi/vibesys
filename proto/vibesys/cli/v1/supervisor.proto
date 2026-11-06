@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/duration.proto";
 import "vibesys/cli/v1/environment.proto";
 import "vibesys/cli/v1/failure.proto";
@@ -50,10 +51,10 @@ service SupervisorService {
 message Launch {
   // The repository and task name the store the job belongs to; the daemon reads them back after a
   // restart to find that store.
-  string repository = 1;
-  string task = 2;
-  string job_id = 3;
-  JobSpec spec = 4;
+  string repository = 1 [(buf.validate.field).string.min_len = 1];
+  string task = 2 [(buf.validate.field).string.min_len = 1];
+  string job_id = 3 [(buf.validate.field).string.min_len = 1];
+  JobSpec spec = 4 [(buf.validate.field).required = true];
   // What a check or a measure job runs, as the daemon decided it when the job started. It is set
   // for those kinds and unset for a command job.
   FlowPlan plan = 5;
@@ -67,7 +68,8 @@ message Launch {
 // time limit. The supervisor resolves the project root placeholder in the checkout it makes.
 message PlanCommand {
   repeated string argv = 1;
-  google.protobuf.Duration timeout = 2;
+  // A plan's command always has a time limit; the daemon decided it.
+  google.protobuf.Duration timeout = 2 [(buf.validate.field).required = true];
 }
 
 // ResultFormat is how a benchmark reports a result: the evaluator record stream, or a JSON file
@@ -180,7 +182,7 @@ message SupervisorOutcome {
 
 message HandshakeRequest {
   // Always COMPONENT_DAEMON: the daemon is the only caller of a supervisor.
-  Component component = 1;
+  Component component = 1 [(buf.validate.field).enum.const = 2];
   // The caller's versions.
   BuildVersions versions = 2;
 }
@@ -213,12 +215,12 @@ enum SupervisorPhase {
 message RunRecord {
   // The identity of the boot the run began in.
   string boot_id = 1;
-  Launch launch = 2;
+  Launch launch = 2 [(buf.validate.field).required = true];
   // What the record says of the command's start. A daemon that marks starts writes NOT_SENT with
   // the record and SENT before it asks the supervisor to start, and a supervisor runs nothing
   // before that request: so only NOT_SENT proves the command never started. UNSPECIFIED is a
   // record written by a build that did not mark starts, whose command may have started.
-  StartMark start_mark = 3;
+  StartMark start_mark = 3 [(buf.validate.field).enum.defined_only = true];
 }
 
 // StartMark is what a run record says of the command's start.
@@ -248,6 +250,7 @@ message OutputChunk {
 
 message AttachResponse {
   oneof item {
+    option (buf.validate.oneof).required = true;
     OutputChunk output = 1;
     // The last message of a stream: every byte of output was sent before it.
     SupervisorOutcome outcome = 2;

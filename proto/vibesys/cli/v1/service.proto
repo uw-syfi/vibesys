@@ -82,8 +82,8 @@ message CallContext {
   // The absolute path of the directory the command ran in, or of --repo. The daemon resolves the
   // repository from it through the common git directory, so every linked worktree of a repository
   // shares one store per task.
-  string repository = 1;
-  string task = 2;
+  string repository = 1 [(buf.validate.field).string.pattern = "^/"];
+  string task = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$"];
   string run_id = 3;
   // The agent harness, such as "claude-code".
   string harness = 4;
@@ -91,7 +91,10 @@ message CallContext {
 }
 
 message HelloRequest {
-  Component component = 1;
+  // The daemon serves the command line tool and the orchestrator.
+  Component component = 1 [(buf.validate.field).enum = {
+    in: [1, 4]
+  }];
   BuildVersions versions = 2;
 }
 
@@ -184,7 +187,7 @@ message ForgetRepositoryResponse {
 
 message SubmitRequest {
   CallContext context = 1;
-  JobSpec spec = 2;
+  JobSpec spec = 2 [(buf.validate.field).required = true];
   // Run a new job even when a reusable result or a matching queued or running job exists.
   bool no_cache = 3;
   // A note to attach to the job, including one reached by a cache hit or a duplicate.
@@ -220,11 +223,14 @@ message WatchResponse {
 
 message WaitRequest {
   CallContext context = 1;
-  repeated string job_ids = 2;
+  repeated string job_ids = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {string: {min_len: 1}}
+  }];
   // The wait is over when one job is final, and not when all are.
   bool any = 3;
   // The wait ends with WAIT_OUTCOME_KIND_TIMED_OUT after this long. Unset waits as long as it takes.
-  google.protobuf.Duration timeout = 4;
+  google.protobuf.Duration timeout = 4 [(buf.validate.field).duration.gt = {}];
 }
 
 message WaitResponse {
@@ -265,7 +271,7 @@ message WaitOutcome {
 
 message CancelRequest {
   CallContext context = 1;
-  string job_id = 2;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
   string reason = 3;
 }
 
@@ -275,8 +281,8 @@ message CancelResponse {
 
 message AddNoteRequest {
   CallContext context = 1;
-  string job_id = 2;
-  string text = 3;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+  string text = 3 [(buf.validate.field).string.min_len = 1];
 }
 
 message AddNoteResponse {
@@ -286,9 +292,12 @@ message AddNoteResponse {
 message ListJobsRequest {
   CallContext context = 1;
   // Filters combine with AND; an empty one matches everything.
-  string commit = 2;
-  repeated JobState states = 3;
-  JobKind kind = 4;
+  string commit = 2 [(buf.validate.field).string.pattern = "^([0-9a-f]{40})?$"];
+  repeated JobState states = 3 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  JobKind kind = 4 [(buf.validate.field).enum.defined_only = true];
   string note_contains = 5;
 }
 
@@ -301,7 +310,7 @@ message ListJobsResponse {
 
 message ReadLogsRequest {
   CallContext context = 1;
-  string job_id = 2;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
   uint64 offset = 3;
   bool follow = 4;
 }
@@ -314,7 +323,7 @@ message ReadLogsResponse {
 
 message ShowRequest {
   CallContext context = 1;
-  string commit = 2;
+  string commit = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
 }
 
 message ShowResponse {
@@ -327,9 +336,9 @@ message ShowResponse {
 
 message CompareRequest {
   CallContext context = 1;
-  string commit = 2;
+  string commit = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
   // The commit to compare against. Empty means the current result branch head.
-  string against = 3;
+  string against = 3 [(buf.validate.field).string.pattern = "^([0-9a-f]{40})?$"];
 }
 
 message CompareResponse {
@@ -338,7 +347,7 @@ message CompareResponse {
 
 message PromoteRequest {
   CallContext context = 1;
-  string commit = 2;
+  string commit = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
 }
 
 message PromoteResponse {
@@ -353,7 +362,7 @@ message PromoteResponse {
 
 message AddToFrontierRequest {
   CallContext context = 1;
-  string commit = 2;
+  string commit = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
 }
 
 message AddToFrontierResponse {
@@ -382,7 +391,7 @@ message CurrentResultResponse {
 
 message CreatePlanRequest {
   CallContext context = 1;
-  string title = 2;
+  string title = 2 [(buf.validate.field).string.min_len = 1];
   string body = 3;
 }
 
@@ -392,7 +401,10 @@ message CreatePlanResponse {
 
 message ListPlansRequest {
   CallContext context = 1;
-  repeated PlanStatus statuses = 2;
+  repeated PlanStatus statuses = 2 [(buf.validate.field).repeated.items.enum = {
+    defined_only: true
+    not_in: [0]
+  }];
   // Matches a plan whose title or body contains the text.
   string text = 3;
 }
@@ -403,7 +415,7 @@ message ListPlansResponse {
 
 message ViewPlanRequest {
   CallContext context = 1;
-  uint32 number = 2;
+  uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
 }
 
 message ViewPlanResponse {
@@ -411,12 +423,20 @@ message ViewPlanResponse {
 }
 
 message EditPlanRequest {
+  option (buf.validate.message).cel = {
+    id: "edit_plan.sets_something"
+    message: "set at least one of title, body or status"
+    expression: "has(this.title) || has(this.body) || has(this.status)"
+  };
   CallContext context = 1;
-  uint32 number = 2;
+  uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
   // A field that is absent is left as it is.
-  optional string title = 3;
+  optional string title = 3 [(buf.validate.field).string.min_len = 1];
   optional string body = 4;
-  optional PlanStatus status = 5;
+  optional PlanStatus status = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }
 
 message EditPlanResponse {
@@ -425,7 +445,7 @@ message EditPlanResponse {
 
 message CommentPlanRequest {
   CallContext context = 1;
-  uint32 number = 2;
+  uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
   string text = 3;
 }
 
@@ -436,8 +456,11 @@ message CommentPlanResponse {
 // ClosePlan sets a status and adds a comment as one change. Any status but OPEN closes.
 message ClosePlanRequest {
   CallContext context = 1;
-  uint32 number = 2;
-  PlanStatus status = 3;
+  uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
+  PlanStatus status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
   string comment = 4;
 }
 

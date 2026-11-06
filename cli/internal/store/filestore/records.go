@@ -1,7 +1,6 @@
 package filestore
 
 import (
-	"buf.build/go/protovalidate"
 	"errors"
 	"fmt"
 	"slices"
@@ -77,7 +76,7 @@ var (
 
 // encode writes a file's content: one JSON document and a newline.
 func encode(file proto.Message) ([]byte, error) {
-	if err := protovalidate.Validate(file); err != nil {
+	if err := wire.Validate(file); err != nil {
 		return nil, err
 	}
 	data, err := encoder.Marshal(file)
@@ -110,7 +109,7 @@ func decode(name string, data []byte, file proto.Message) error {
 	if err := recordReader.Unmarshal(data, file); err != nil {
 		return corrupt(name, "%v", err)
 	}
-	if err := protovalidate.Validate(file); err != nil {
+	if err := wire.Validate(file); err != nil {
 		return corrupt(name, "%v", err)
 	}
 	return nil

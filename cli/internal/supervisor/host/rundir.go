@@ -154,6 +154,9 @@ func (h *Host) markStartSent(ref lifecycle.Ref) error {
 	if err := proto.Unmarshal(data, &msg); err != nil {
 		return fmt.Errorf("run record: %w", err)
 	}
+	if err := wire.Validate(&msg); err != nil {
+		return fmt.Errorf("run record: %w", err)
+	}
 	if msg.GetStartMark() == cliv1.StartMark_START_MARK_SENT {
 		return nil
 	}
@@ -191,6 +194,9 @@ func (h *Host) readRecord(ref lifecycle.Ref) (record, bool, error) {
 	}
 	var msg cliv1.RunRecord
 	if err := proto.Unmarshal(data, &msg); err != nil {
+		return record{}, false, fmt.Errorf("run record: %w", err)
+	}
+	if err := wire.Validate(&msg); err != nil {
 		return record{}, false, fmt.Errorf("run record: %w", err)
 	}
 	launch, err := wire.ToLaunch(msg.GetLaunch())

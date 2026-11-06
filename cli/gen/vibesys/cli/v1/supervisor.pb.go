@@ -7,6 +7,7 @@
 package cliv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
@@ -298,9 +299,10 @@ func (x *Launch) GetOutputBase() uint64 {
 // PlanCommand is one command of a plan, with its argument vector as the task wrote it and its
 // time limit. The supervisor resolves the project root placeholder in the checkout it makes.
 type PlanCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Argv          []string               `protobuf:"bytes,1,rep,name=argv,proto3" json:"argv,omitempty"`
-	Timeout       *durationpb.Duration   `protobuf:"bytes,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Argv  []string               `protobuf:"bytes,1,rep,name=argv,proto3" json:"argv,omitempty"`
+	// A plan's command always has a time limit; the daemon decided it.
+	Timeout       *durationpb.Duration `protobuf:"bytes,2,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1631,20 +1633,20 @@ var File_vibesys_cli_v1_supervisor_proto protoreflect.FileDescriptor
 
 const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\n" +
-	"\x1fvibesys/cli/v1/supervisor.proto\x12\x0evibesys.cli.v1\x1a\x1egoogle/protobuf/duration.proto\x1a vibesys/cli/v1/environment.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/version.proto\"\xcf\x01\n" +
-	"\x06Launch\x12\x1e\n" +
+	"\x1fvibesys/cli/v1/supervisor.proto\x12\x0evibesys.cli.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a vibesys/cli/v1/environment.proto\x1a\x1cvibesys/cli/v1/failure.proto\x1a\x18vibesys/cli/v1/job.proto\x1a\x1bvibesys/cli/v1/result.proto\x1a\x1cvibesys/cli/v1/version.proto\"\xf2\x01\n" +
+	"\x06Launch\x12'\n" +
 	"\n" +
-	"repository\x18\x01 \x01(\tR\n" +
-	"repository\x12\x12\n" +
-	"\x04task\x18\x02 \x01(\tR\x04task\x12\x15\n" +
-	"\x06job_id\x18\x03 \x01(\tR\x05jobId\x12+\n" +
-	"\x04spec\x18\x04 \x01(\v2\x17.vibesys.cli.v1.JobSpecR\x04spec\x12,\n" +
+	"repository\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
+	"repository\x12\x1b\n" +
+	"\x04task\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12\x1e\n" +
+	"\x06job_id\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x123\n" +
+	"\x04spec\x18\x04 \x01(\v2\x17.vibesys.cli.v1.JobSpecB\x06\xbaH\x03\xc8\x01\x01R\x04spec\x12,\n" +
 	"\x04plan\x18\x05 \x01(\v2\x18.vibesys.cli.v1.FlowPlanR\x04plan\x12\x1f\n" +
 	"\voutput_base\x18\x06 \x01(\x04R\n" +
-	"outputBase\"V\n" +
+	"outputBase\"^\n" +
 	"\vPlanCommand\x12\x12\n" +
-	"\x04argv\x18\x01 \x03(\tR\x04argv\x123\n" +
-	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"g\n" +
+	"\x04argv\x18\x01 \x03(\tR\x04argv\x12;\n" +
+	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationB\x06\xbaH\x03\xc8\x01\x01R\atimeout\"g\n" +
 	"\fResultFormat\x12\x1c\n" +
 	"\tprotocol2\x18\x01 \x01(\bR\tprotocol2\x12#\n" +
 	"\rjson_argument\x18\x02 \x01(\tR\fjsonArgument\x12\x14\n" +
@@ -1695,30 +1697,30 @@ const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\x04flow\x18\a \x01(\v2\x17.vibesys.cli.v1.FlowEndH\x00R\x04flow\x12(\n" +
 	"\rcancel_reason\x18\x03 \x01(\tH\x01R\fcancelReason\x88\x01\x01B\b\n" +
 	"\x06resultB\x10\n" +
-	"\x0e_cancel_reason\"\x86\x01\n" +
-	"\x10HandshakeRequest\x127\n" +
-	"\tcomponent\x18\x01 \x01(\x0e2\x19.vibesys.cli.v1.ComponentR\tcomponent\x129\n" +
+	"\x0e_cancel_reason\"\x90\x01\n" +
+	"\x10HandshakeRequest\x12A\n" +
+	"\tcomponent\x18\x01 \x01(\x0e2\x19.vibesys.cli.v1.ComponentB\b\xbaH\x05\x82\x01\x02\b\x02R\tcomponent\x129\n" +
 	"\bversions\x18\x02 \x01(\v2\x1d.vibesys.cli.v1.BuildVersionsR\bversions\"\xca\x01\n" +
 	"\x11HandshakeResponse\x129\n" +
 	"\bversions\x18\x01 \x01(\v2\x1d.vibesys.cli.v1.BuildVersionsR\bversions\x12C\n" +
 	"\rcompatibility\x18\x02 \x01(\x0e2\x1d.vibesys.cli.v1.CompatibilityR\rcompatibility\x125\n" +
-	"\x05phase\x18\x03 \x01(\x0e2\x1f.vibesys.cli.v1.SupervisorPhaseR\x05phase\"\x8e\x01\n" +
+	"\x05phase\x18\x03 \x01(\x0e2\x1f.vibesys.cli.v1.SupervisorPhaseR\x05phase\"\xa0\x01\n" +
 	"\tRunRecord\x12\x17\n" +
-	"\aboot_id\x18\x01 \x01(\tR\x06bootId\x12.\n" +
-	"\x06launch\x18\x02 \x01(\v2\x16.vibesys.cli.v1.LaunchR\x06launch\x128\n" +
+	"\aboot_id\x18\x01 \x01(\tR\x06bootId\x126\n" +
+	"\x06launch\x18\x02 \x01(\v2\x16.vibesys.cli.v1.LaunchB\x06\xbaH\x03\xc8\x01\x01R\x06launch\x12B\n" +
 	"\n" +
-	"start_mark\x18\x03 \x01(\x0e2\x19.vibesys.cli.v1.StartMarkR\tstartMark\"\x0e\n" +
+	"start_mark\x18\x03 \x01(\x0e2\x19.vibesys.cli.v1.StartMarkB\b\xbaH\x05\x82\x01\x02\x10\x01R\tstartMark\"\x0e\n" +
 	"\fStartRequest\"\x0f\n" +
 	"\rStartResponse\"'\n" +
 	"\rAttachRequest\x12\x16\n" +
 	"\x06offset\x18\x01 \x01(\x04R\x06offset\"9\n" +
 	"\vOutputChunk\x12\x16\n" +
 	"\x06offset\x18\x01 \x01(\x04R\x06offset\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\"\x8e\x01\n" +
+	"\x04data\x18\x02 \x01(\fR\x04data\"\x95\x01\n" +
 	"\x0eAttachResponse\x125\n" +
 	"\x06output\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.OutputChunkH\x00R\x06output\x12=\n" +
-	"\aoutcome\x18\x02 \x01(\v2!.vibesys.cli.v1.SupervisorOutcomeH\x00R\aoutcomeB\x06\n" +
-	"\x04item\"*\n" +
+	"\aoutcome\x18\x02 \x01(\v2!.vibesys.cli.v1.SupervisorOutcomeH\x00R\aoutcomeB\r\n" +
+	"\x04item\x12\x05\xbaH\x02\b\x01\"*\n" +
 	"\x10CancelJobRequest\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x13\n" +
 	"\x11CancelJobResponse\"\x10\n" +

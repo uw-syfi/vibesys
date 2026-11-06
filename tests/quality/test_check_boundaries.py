@@ -13,6 +13,8 @@ from scripts.check_boundaries import (
     mechanism_violations,
     proto_names,
     release_violations,
+    unvalidated_hits,
+    unvalidated_violations,
     words,
 )
 
@@ -217,3 +219,52 @@ def test_holding_one_orchestrator_file_does_not_count_as_holding_the_contract() 
     (problem,) = release_violations(one_file)
 
     assert problem.startswith("scripts/check_proto_breaking.sh: release:")
+
+
+_CLI = "proto/vibesys/cli/v1/x.proto"
+_RULES = """
+syntax = "proto3";
+import "buf/validate/validate.proto";
+message Ruled { string id = 1 [(buf.validate.field).string.min_len = 1]; }
+message OneofRuled { oneof body { option (buf.validate.oneof).required = true; string a = 1; } }
+message MessageRuled {
+  option (buf.validate.message).cel = {id: "x" expression: "true"};
+  string note = 1;
+}
+message Bare { string id = 1; /* buf.validate in a comment is not a rule */ }
+message StopRequest {}
+message Outer {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  message Inner { string name = 1; }
+}
+"""
+
+
+def test_a_message_with_fields_and_no_rule_counts_and_an_empty_or_ruled_one_does_not() -> None:
+    assert unvalidated_hits({_CLI: _RULES}) == {_CLI: ["Bare", "Outer.Inner"]}
+
+
+def test_a_nested_message_is_judged_on_its_own_rules_not_its_parents() -> None:
+    parent_ruled = unvalidated_hits({_CLI: _RULES})[_CLI]
+
+    assert "Outer" not in parent_ruled
+    assert "Outer.Inner" in parent_ruled
+
+
+def test_only_the_cli_package_is_held_to_the_rule_for_now() -> None:
+    for package in ("orchestrator", "evaluator", "desktop", "host"):
+        assert unvalidated_hits({f"proto/vibesys/{package}/v1/x.proto": _RULES}) == {}
+
+
+def test_a_new_unvalidated_message_fails_and_a_newly_ruled_one_must_leave_the_list() -> None:
+    (new,) = unvalidated_violations({_CLI: "message A { string id = 1; }"}, {})
+    assert new.startswith(f"{_CLI}: unvalidated: A ")
+    assert DOC in new
+
+    (stale,) = unvalidated_violations(
+        {_CLI: "message A { string id = 1 [(buf.validate.field).string.min_len = 1]; }"},
+        {_CLI: ["A"]},
+    )
+    assert "remove it from" in stale
+
+    assert unvalidated_violations({_CLI: "message A { string id = 1; }"}, {_CLI: ["A"]}) == []
