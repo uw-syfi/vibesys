@@ -43,9 +43,8 @@ jobs:
           release_commit="$(git rev-parse --verify "refs/tags/$TAG^{commit}")"
           git merge-base --is-ancestor "$release_commit" origin/main
 
-      # The orchestrator contract is exempt from `buf breaking` until the first release
-      # (docs/contributing/process-boundaries.md). A tagged release makes it a public contract, so
-      # the tag is refused until the check holds the path again.
+      # A tagged release makes the orchestrator contract public (docs/contributing/process-boundaries.md),
+      # so the tag is refused if `buf breaking` ever stops holding its path.
       - name: Require the orchestrator contract to be under the breaking check
         run: python3 scripts/check_boundaries.py --release
 

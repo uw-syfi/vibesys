@@ -13,13 +13,12 @@ if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
   trap 'rm -rf "$baseline"' EXIT
   # Git resolves promised blobs through this clone's remote before Buf reads them.
   git archive --format=tar "$base" buf.yaml proto/ > "$baseline/base.tar"
-  # proto/vibesys/orchestrator/v1 is left out until the first vibesys-v* tag: no release has shipped
-  # its contract, and docs/contributing/process-boundaries.md redesigns it in place. The managed
-  # release workflow refuses a tag while this path is missing below; restore it before tagging.
-  # host_control.proto is the exception: it is the contract every release's client asks a host
-  # through, so it is held from its first merge.
+  # Every versioned contract that crosses a process is held, proto/vibesys/orchestrator/v1 included:
+  # the first vibesys-v* tag makes it public. The managed release workflow refuses a tag if that
+  # path is ever missing below (scripts/check_boundaries.py --release reads this text), and
+  # scripts/tests/test_proto_breaking.sh proves the path fails a deleted or renamed field.
   uv run --project "$root" --locked --group proto buf breaking --path proto/vibesys/store/v1 --path proto/vibesys/search/v1 --path proto/vibesys/core/v1 --path proto/vibesys/cli/v1 \
-    --path proto/vibesys/orchestrator/v1/host_control.proto \
+    --path proto/vibesys/orchestrator/v1 \
     --against "$baseline/base.tar"
 elif git cat-file -e "$base:proto/vibesys/store/v1" 2>/dev/null; then
   echo "Store exists at $base but buf.yaml is missing; restore its breaking-check configuration." >&2

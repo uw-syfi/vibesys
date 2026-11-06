@@ -604,15 +604,20 @@ Every binary in the bundle reports the bundle's version: `vibesys-client --versi
   live runs, one that does not answer or one on another machine refuses the switch, having said what to
   do. `--force` skips the question. Old
   releases are kept.
-- With no version named, the installer reads the newest stable version from `vibesys-latest`. While
-  only pre-releases are published that tag does not exist, and the installer says to pass
-  `VIBESYS_VERSION=<version>`.
-- `VIBESYS_VERSION`, `VIBESYS_INSTALL_DIR`, `VIBESYS_HOME`, `VIBESYS_RELEASES_URL` and
+- With no version named, the installer reads the newest stable version from `vibesys-latest`. A
+  pre-release (a version with a suffix, such as `0.2.0-rc.1`) never moves that tag, and while only
+  pre-releases are published it does not exist, and the installer says to name the version. Name one
+  with `--version`, which is how a pre-release is installed:
+  `curl -fsSL https://raw.githubusercontent.com/uw-syfi/vibesys/main/install.sh | sh -s -- --version 0.2.0-rc.1`.
+  A stable release published after it becomes what an install with no version gets.
+- `VIBESYS_VERSION` (the same as `--version`, which wins), `VIBESYS_INSTALL_DIR`, `VIBESYS_HOME`, `VIBESYS_RELEASES_URL` and
   `VIBESYS_INSTALL_BUNDLE=/path/to/bundle.tar.gz` (offline install) are read; see the header of
   `install.sh`.
 
 You also need Claude Code or Codex installed and logged in, and Docker for tasks that use it.
-Agents run as your user, unconfined, with permissions bypassed.
+Agents run as your user, unconfined, with permissions bypassed. The installer ends with that warning,
+and `run start` prints it to stderr on every start (so `--json` output stays clean), as it prints a
+note when a run is given neither `--max-time` nor `--max-cost`.
 
 Bundles are built by `scripts/build_release_bundle.sh VERSION OS ARCH OUTDIR` and published by
 `.github/workflows/managed-release.yml` on `vibesys-v<version>` tags, with attestations; the tag

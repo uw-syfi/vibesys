@@ -44,6 +44,21 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+func TestARuntimeDirectoryOnANetworkFileSystemGetsAdviceThatFitsWhereItCameFrom(t *testing.T) {
+	// A directory the variable chose is fixed by changing or unsetting the variable.
+	_, err := runtimedir.Open(filepath.Join(shortDir(t), "rt"), os.Getuid(), fakeFS{network: true})
+	f := core.AsFailure(err)
+	if err == nil || !strings.Contains(f.Message, "network file system") || !strings.Contains(f.Message, "or unset it to use /tmp") {
+		t.Fatalf("a chosen runtime directory on a network file system: %v", err)
+	}
+	// The default directory under /tmp is not something the user set, so the advice does not tell
+	// them to set a variable they never touched, on macOS or anywhere else.
+	got := runtimedir.LocalDiskAdvice("/tmp/vibesys-cli-501", 501)
+	if !strings.Contains(got, "/tmp is on a network file system") || strings.Contains(got, "set XDG_RUNTIME_DIR to") {
+		t.Fatalf("advice for the default directory: %q", got)
+	}
+}
+
 func TestOpenMakesAPrivateDirectory(t *testing.T) {
 	path := filepath.Join(shortDir(t), "rt")
 	d, err := runtimedir.Open(path, os.Getuid(), fakeFS{})

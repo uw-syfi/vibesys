@@ -15,7 +15,7 @@ export PROTO_BASE_REF=base
 git init -q -b base "$work/repo"
 cd "$work/repo"
 cp "$root/buf.yaml" .
-for layer in store search core cli; do
+for layer in store search core cli orchestrator; do
   mkdir -p "proto/vibesys/$layer/v1"
   cat > "proto/vibesys/$layer/v1/record.proto" <<PROTO
 syntax = "proto3";
@@ -50,8 +50,10 @@ git commit -qm 'additive PR'
 "$root/scripts/check_proto_breaking.sh"
 echo 'proto breaking: behind-base additive PR passes'
 
-# Exercise both deletion and rename in every checked schema layer.
-for layer in store search core cli; do
+# Exercise both deletion and rename in every checked schema layer. The orchestrator layer is what
+# proves its path is held: the release gate (check_boundaries.py --release) reads the script's text,
+# and this loop shows that the text does hold the contract.
+for layer in store search core cli orchestrator; do
   for change in delete rename; do
     if [[ "$change" == delete ]]; then
       field=''

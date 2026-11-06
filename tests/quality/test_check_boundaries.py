@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from hypothesis import given
 from hypothesis import strategies as st
 from scripts.check_boundaries import (
@@ -221,6 +223,14 @@ def test_holding_one_orchestrator_file_does_not_count_as_holding_the_contract() 
     (problem,) = release_violations(one_file)
 
     assert problem.startswith("scripts/check_proto_breaking.sh: release:")
+
+
+def test_the_breaking_check_in_the_repository_holds_the_orchestrator_contract() -> None:
+    # The gate of a tag reads this file's text. scripts/tests/test_proto_breaking.sh runs buf to show
+    # that holding the path fails a deleted or renamed field; this keeps the real text holding it.
+    script = Path(__file__).resolve().parents[2] / "scripts" / "check_proto_breaking.sh"
+
+    assert release_violations(script.read_text(encoding="utf-8")) == []
 
 
 _CLI = "proto/vibesys/cli/v1/x.proto"

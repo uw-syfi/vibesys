@@ -110,23 +110,37 @@ Limits, stated so nobody reads more into the checks than they do:
 - Unenforced: whether a field is something the receiver needs, as opposed to
   how the sender works, needs judgment. Ask it in review for every new field.
 
-## Release window
+## After the first tag
 
-No `vibesys-v*` tag has been published, so the orchestrator's stored format and
-`orchestrator/v1` are still free to change in place:
+The first `vibesys-v*` tag makes three things public. From then on a change to any of them
+is a change to something a user already has.
 
-- `orchestrator/v1` is left out of the `buf breaking` run in
-  `scripts/check_proto_breaking.sh` and is put back before the first tag. The
-  release workflow refuses a tag until it is. `cli/v1` keeps its check, because
-  the job tool has shipped; its changes are additive.
-- The orchestrator store refuses a store written under an older schema, with an
-  error that tells the operator to move the state directory away. It does not
-  upgrade old rows. Run history on a development host is discarded by that move.
-  The refusal is part of the store change that first needs it (see the parts
-  below); until then the store reads its current schema only.
-
-After the first tag, every change to either surface is a public or stored
-format change and follows the compatibility rules of its own contract.
+- **`orchestrator/v1` is under `buf breaking`.** `scripts/check_proto_breaking.sh` holds it
+  with `store/v1`, `search/v1`, `core/v1` and `cli/v1`: a deleted or renamed field, message,
+  enum value or rpc fails the proto check. `scripts/tests/test_proto_breaking.sh` runs the
+  real script against a deleted and a renamed field in each of those packages, so the orchestrator
+  path is proved held and not only present in the script's text. The release workflow runs
+  `scripts/check_boundaries.py --release`, which refuses a tag if the text ever loses that path.
+  Only an additive change passes. A change that must break needs a new package version.
+- **The stored format is schema 12.** The orchestrator's SQLite store records its schema
+  version (`schemaVersion` in `orchestrator/internal/store/schema.go`). A host reads exactly the
+  version it was built with. It refuses a store of any other version, older or newer, naming
+  the file and the two versions, and it never converts a row. The message tells the operator
+  to move the state directory away, which discards its run history. A store written before the
+  tag has a version below 12 and is refused this way for good: only development builds wrote them.
+  There is no code that upgrades rows, and a refusal after a downgrade gives the same
+  advice. From the tag on, a change that raises the number is a decision: either the new build
+  reads the version before it, or it refuses on purpose and the release notes say that
+  run history is lost. Do not raise the number without making that choice in the same change.
+- **The client handshake says protocol 1.** `protocol_version` and `min_protocol_version` in
+  `service.proto` are 1: the first protocol a published client speaks. They stayed at 1 through
+  the redesign before the tag because no older client was ever published, so there was nothing to
+  tell apart. From now on a change that breaks a published client raises `protocol_version`, and
+  `min_protocol_version` rises only when the host stops serving the clients below it.
+  The session protocol between the host and the process that holds a session
+  (`SESSION_PROTOCOL_VERSION_CURRENT` in `agent_session.proto`) is 2. The two sides always come
+  from one bundle, so the number matters only to a session that outlived a host upgrade, and no
+  published build wrote a 1; the value is part of the held contract and is not renumbered.
 
 ## The design
 
