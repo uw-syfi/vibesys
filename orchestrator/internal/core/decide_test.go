@@ -795,7 +795,7 @@ func TestItemsKeepTheirPlaceAsTheyChange(t *testing.T) {
 	w.command(operator, core.SendMessage{Agent: leadID, Text: "go"})
 	turn := w.turn(leadID)
 	item := func(id core.ItemID, status core.ItemStatus) core.Item {
-		w.fact(leadID, core.ItemObserved{ID: id, Turn: turn.ID, Status: status, Body: core.ToolCall{Tool: "bash"}})
+		w.fact(leadID, core.ItemObserved{ID: id, Turn: turn.ID, Status: status, Body: core.ToolCall{Use: core.ShellUse{Command: "ls"}}})
 		if len(w.events) != 1 {
 			t.Fatalf("item %s recorded %v", id, w.events)
 		}
@@ -809,11 +809,11 @@ func TestItemsKeepTheirPlaceAsTheyChange(t *testing.T) {
 	if got := item("i1", core.ItemFinished); got.Ordinal != first.Ordinal {
 		t.Fatalf("an update moved item i1 to %d from %d", got.Ordinal, first.Ordinal)
 	}
-	w.fact(leadID, core.ItemObserved{ID: "i1", Turn: turn.ID, Status: core.ItemRunning, Body: core.ToolCall{Tool: "bash"}})
+	w.fact(leadID, core.ItemObserved{ID: "i1", Turn: turn.ID, Status: core.ItemRunning, Body: core.ToolCall{Use: core.ShellUse{Command: "ls"}}})
 	if len(w.events) != 0 {
 		t.Fatal("a finished item changed")
 	}
-	w.fact(leadID, core.ItemObserved{ID: "i3", Turn: "another", Status: core.ItemRunning, Body: core.ToolCall{Tool: "bash"}})
+	w.fact(leadID, core.ItemObserved{ID: "i3", Turn: "another", Status: core.ItemRunning, Body: core.ToolCall{Use: core.ShellUse{Command: "ls"}}})
 	if len(w.events) != 0 {
 		t.Fatal("an item of another turn was recorded")
 	}

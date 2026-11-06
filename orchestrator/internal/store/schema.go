@@ -10,7 +10,9 @@ package store
 // Version 10 split what clients receive from what is stored: a run, an agent and a receipt are held
 // in records with their private parts, and a capabilities message no longer says a session streams text.
 // Version 11 gave a run its limits (a cost limit, the limit it reached and when), and a start its time limit as a duration.
-const schemaVersion = 11
+// Version 12 replaced a tool call's provider tool name, call id and JSON arguments with a typed call:
+// a command, a file read, write or edit, a search, or any other tool by name and text.
+const schemaVersion = 12
 
 // The schema. It follows the draft in the design notes, with these deliberate differences:
 //

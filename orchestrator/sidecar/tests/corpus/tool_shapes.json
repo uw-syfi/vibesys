@@ -1,0 +1,297 @@
+[
+ {
+  "harness": "claude",
+  "tool": "Bash",
+  "args": {},
+  "case": "shell"
+ },
+ {
+  "harness": "claude",
+  "tool": "Bash",
+  "args": {
+   "command": "git status"
+  },
+  "case": "shell"
+ },
+ {
+  "harness": "claude",
+  "tool": "Bash",
+  "args": {
+   "command": "git status",
+   "description": "Show the state"
+  },
+  "case": "shell"
+ },
+ {
+  "harness": "claude",
+  "tool": "Bash",
+  "args": {
+   "command": "sleep 1",
+   "run_in_background": true,
+   "timeout": 120000
+  },
+  "case": "shell"
+ },
+ {
+  "harness": "claude",
+  "tool": "Read",
+  "args": {},
+  "case": "read"
+ },
+ {
+  "harness": "claude",
+  "tool": "Read",
+  "args": {
+   "file_path": "/work/repo/src/main.py"
+  },
+  "case": "read"
+ },
+ {
+  "harness": "claude",
+  "tool": "Read",
+  "args": {
+   "file_path": "/work/repo/src/main.py",
+   "limit": 50,
+   "offset": 10
+  },
+  "case": "read"
+ },
+ {
+  "harness": "claude",
+  "tool": "Edit",
+  "args": {},
+  "case": "edit"
+ },
+ {
+  "harness": "claude",
+  "tool": "Edit",
+  "args": {
+   "file_path": "/work/repo/src/main.py",
+   "old_string": "a",
+   "new_string": "b",
+   "replace_all": false
+  },
+  "case": "edit"
+ },
+ {
+  "harness": "claude",
+  "tool": "Write",
+  "args": {
+   "file_path": "/work/repo/src/main.py",
+   "content": "x"
+  },
+  "case": "write"
+ },
+ {
+  "harness": "claude",
+  "tool": "Grep",
+  "args": {
+   "pattern": "TODO",
+   "path": "/work/repo"
+  },
+  "case": "search"
+ },
+ {
+  "harness": "claude",
+  "tool": "Glob",
+  "args": {
+   "pattern": "**/*.py"
+  },
+  "case": "search"
+ },
+ {
+  "harness": "claude",
+  "tool": "Skill",
+  "args": {},
+  "case": "other"
+ },
+ {
+  "harness": "claude",
+  "tool": "Skill",
+  "args": {
+   "skill": "vibesys:judge-candidate"
+  },
+  "case": "other"
+ },
+ {
+  "harness": "claude",
+  "tool": "Skill",
+  "args": {
+   "skill": "vibesys:optimize",
+   "args": "default --fanout 1"
+  },
+  "case": "other"
+ },
+ {
+  "harness": "claude",
+  "tool": "ToolSearch",
+  "args": {
+   "query": "select:mcp__vibesys__spawn_agent",
+   "max_results": 5
+  },
+  "case": "other"
+ },
+ {
+  "harness": "claude",
+  "tool": "ScheduleWakeup",
+  "args": {
+   "delaySeconds": 1200,
+   "noop": false,
+   "prompt": "/loop 3600",
+   "reason": "wait"
+  },
+  "case": "other"
+ },
+ {
+  "harness": "claude",
+  "tool": "Monitor",
+  "args": {
+   "command": "until grep -q DONE log; do sleep 1; done",
+   "description": "wait",
+   "timeout_ms": 60000
+  },
+  "case": "other"
+ },
+ {
+  "harness": "claude",
+  "tool": "mcp__vibesys__list_agents",
+  "args": {},
+  "case": "other"
+ },
+ {
+  "harness": "claude",
+  "tool": "mcp__vibesys__spawn_agent",
+  "args": {
+   "role": "worker",
+   "plan_number": 1,
+   "brief": "Goal: make it fast"
+  },
+  "case": "other"
+ },
+ {
+  "harness": "claude",
+  "tool": "mcp__vibesys__post_handoff",
+  "args": {
+   "claim": "did it",
+   "learned": "x",
+   "next": "y",
+   "open_items": "",
+   "plan_number": 1
+  },
+  "case": "other"
+ },
+ {
+  "harness": "claude",
+  "tool": "mcp__vibesys__post_report",
+  "args": {
+   "kind": "final",
+   "headline": "h",
+   "changed": "c",
+   "decisions": "d",
+   "in_flight": "i",
+   "open_for_user": "o"
+  },
+  "case": "other"
+ },
+ {
+  "harness": "codex",
+  "tool": "execute",
+  "args": {
+   "command": "ls -la"
+  },
+  "case": "shell"
+ },
+ {
+  "harness": "codex",
+  "tool": "exec_command",
+  "args": {
+   "cmd": "ls -la"
+  },
+  "case": "shell"
+ },
+ {
+  "harness": "codex",
+  "tool": "shell",
+  "args": {
+   "command": [
+    "bash",
+    "-lc",
+    "ls"
+   ]
+  },
+  "case": "shell"
+ },
+ {
+  "harness": "codex",
+  "tool": "file_change",
+  "args": {
+   "changes": [
+    {
+     "path": "/work/repo/src/main.py"
+    },
+    {
+     "path": "/work/repo/README.md"
+    }
+   ]
+  },
+  "case": "edit"
+ },
+ {
+  "harness": "codex",
+  "tool": "file_change",
+  "args": {
+   "changes": []
+  },
+  "case": "other"
+ },
+ {
+  "harness": "codex",
+  "tool": "apply_patch",
+  "args": {
+   "input": "*** Begin Patch\n*** End Patch"
+  },
+  "case": "other"
+ },
+ {
+  "harness": "codex",
+  "tool": "web_search",
+  "args": {
+   "query": "asyncio queue"
+  },
+  "case": "other"
+ },
+ {
+  "harness": "codex",
+  "tool": "mcp_tool_call",
+  "args": {
+   "server": "vibesys",
+   "tool": "post_handoff",
+   "arguments": {
+    "claim": "did it",
+    "plan_number": 1
+   }
+  },
+  "case": "other"
+ },
+ {
+  "harness": "codex",
+  "tool": "dynamic_tool_call",
+  "args": {
+   "tool": "lookup",
+   "arguments": {
+    "id": 3
+   }
+  },
+  "case": "other"
+ },
+ {
+  "harness": "codex",
+  "tool": "mcp_tool_call",
+  "args": {
+   "server": "vibesys",
+   "tool": "",
+   "arguments": null
+  },
+  "case": "other"
+ }
+]

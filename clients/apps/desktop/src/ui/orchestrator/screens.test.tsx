@@ -4,14 +4,20 @@ import {
   AgentRole,
   CommandSchema,
   Delivery,
+  EditCallSchema,
   Harness,
   JobOutcome,
   JudgeVerdict,
   MessageSchema,
+  OtherCallSchema,
+  ReadCallSchema,
   ReceiptSchema,
   Refusal,
   Rejection,
   RunStatus,
+  ShellCallSchema,
+  type ToolCall,
+  ToolCallSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {renderToStaticMarkup} from 'react-dom/server';
@@ -31,7 +37,7 @@ import {HandoffCards, verdictOf} from './handoff-cards.js';
 import {RunList} from './run-list.js';
 import {RunScreen} from './run-screen.js';
 import {SearchPanels} from './search-panels.js';
-import {describeArgs, harnessWord, toolLabel} from './words.js';
+import {describeCall, harnessWord} from './words.js';
 
 const VIEWS: readonly RunView[] = ['timeline', 'cost', 'handoffs'];
 /** Names of the protocol that must never reach a person. */
@@ -186,12 +192,31 @@ describe('the screens', () => {
     expect(rejected).toContain('session is over');
   });
 
-  it('a command shows as the command, never as the JSON the tool received', () => {
-    expect(describeArgs('{"command":["bash","-lc","ls -la"]}')).toBe('bash -lc ls -la');
-    expect(describeArgs('{"cmd":"make test"}')).toBe('make test');
-    expect(describeArgs('{"path":"a.ts","line":3}')).toBe('path: a.ts\nline: 3');
-    expect(toolLabel('exec_command')).toBe('Command');
-    expect(toolLabel('some_custom_tool')).toBe('Some custom tool');
+  it('a call shows as what it did, from the typed call and never as JSON', () => {
+    const shown = (call: ToolCall['call']) => describeCall(create(ToolCallSchema, {call}));
+    expect(
+      shown({case: 'shell', value: create(ShellCallSchema, {command: 'bash -lc ls -la'})}),
+    ).toEqual({name: 'Command', asked: 'bash -lc ls -la'});
+    expect(shown({case: 'read', value: create(ReadCallSchema, {target: 'a.ts'})})).toEqual({
+      name: 'Read a file',
+      asked: 'a.ts',
+    });
+    expect(
+      shown({case: 'edit', value: create(EditCallSchema, {targets: ['a.ts', 'b.ts']})}),
+    ).toEqual({name: 'Edited files', asked: 'a.ts\nb.ts'});
+    expect(
+      shown({
+        case: 'other',
+        value: create(OtherCallSchema, {name: 'some_custom_tool', text: 'path: a.ts\nline: 3'}),
+      }),
+    ).toEqual({name: 'Some custom tool', asked: 'path: a.ts\nline: 3'});
+    expect(
+      shown({
+        case: 'other',
+        value: create(OtherCallSchema, {name: 'mcp__vibesys__post_handoff'}),
+      }),
+    ).toEqual({name: 'Post handoff', asked: null});
+    expect(shown({case: 'shell', value: create(ShellCallSchema, {})}).asked).toBeNull();
   });
 
   it('a Claude and a Codex agent say, in their own words, what a message can do', () => {

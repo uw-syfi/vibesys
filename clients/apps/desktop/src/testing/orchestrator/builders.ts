@@ -11,6 +11,7 @@ import {
   type Run,
   RunSchema,
   type RunStatus,
+  ShellCallSchema,
   type ToolCall,
   ToolCallSchema,
   type Turn,
@@ -79,8 +80,7 @@ export function itemOf(fields: {
 }): Item {
   const status = fields.status ?? ItemStatus.FINISHED;
   const tool: ToolCall = create(ToolCallSchema, {
-    tool: 'shell',
-    argsJson: JSON.stringify({command: fields.text}),
+    call: {case: 'shell', value: create(ShellCallSchema, {command: fields.text})},
     output: fields.output ?? '',
     ...(fields.exit === undefined ? {} : {exitCode: fields.exit}),
   });

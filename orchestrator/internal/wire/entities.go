@@ -172,17 +172,41 @@ func turnIn(t *pb.Turn, errs *errorList) core.Turn {
 }
 
 func toolOut(c core.ToolCall) *pb.ToolCall {
-	return &pb.ToolCall{
-		Tool: c.Tool, ProviderCallId: c.ProviderCallID, ArgsJson: c.ArgsJSON, Output: c.Output,
-		ExitCode: c.ExitCode, IsError: c.IsError,
+	out := &pb.ToolCall{Output: c.Output, ExitCode: c.ExitCode, IsError: c.IsError}
+	switch u := c.Use.(type) {
+	case core.ShellUse:
+		out.Call = &pb.ToolCall_Shell{Shell: &pb.ShellCall{Command: u.Command}}
+	case core.ReadUse:
+		out.Call = &pb.ToolCall_Read{Read: &pb.ReadCall{Target: u.Target}}
+	case core.WriteUse:
+		out.Call = &pb.ToolCall_Write{Write: &pb.WriteCall{Target: u.Target}}
+	case core.EditUse:
+		out.Call = &pb.ToolCall_Edit{Edit: &pb.EditCall{Targets: u.Targets}}
+	case core.SearchUse:
+		out.Call = &pb.ToolCall_Search{Search: &pb.SearchCall{Pattern: u.Pattern}}
+	case core.OtherUse:
+		out.Call = &pb.ToolCall_Other{Other: &pb.OtherCall{Name: u.Name, Text: u.Text}}
 	}
+	return out
 }
 
 func toolIn(c *pb.ToolCall) core.ToolCall {
-	return core.ToolCall{
-		Tool: c.GetTool(), ProviderCallID: c.GetProviderCallId(), ArgsJSON: c.GetArgsJson(), Output: c.GetOutput(),
-		ExitCode: c.ExitCode, IsError: c.GetIsError(),
+	out := core.ToolCall{Output: c.GetOutput(), ExitCode: c.ExitCode, IsError: c.GetIsError()}
+	switch u := c.GetCall().(type) {
+	case *pb.ToolCall_Shell:
+		out.Use = core.ShellUse{Command: u.Shell.GetCommand()}
+	case *pb.ToolCall_Read:
+		out.Use = core.ReadUse{Target: u.Read.GetTarget()}
+	case *pb.ToolCall_Write:
+		out.Use = core.WriteUse{Target: u.Write.GetTarget()}
+	case *pb.ToolCall_Edit:
+		out.Use = core.EditUse{Targets: u.Edit.GetTargets()}
+	case *pb.ToolCall_Search:
+		out.Use = core.SearchUse{Pattern: u.Search.GetPattern()}
+	case *pb.ToolCall_Other:
+		out.Use = core.OtherUse{Name: u.Other.GetName(), Text: u.Other.GetText()}
 	}
+	return out
 }
 
 func itemOut(i core.Item) *pb.Item {

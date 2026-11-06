@@ -28,7 +28,7 @@ func BenchmarkDecide(b *testing.B) {
 			for i := range b.N {
 				core.Decide(w.s, core.Input{At: epoch, Nonce: "n", Body: core.SessionFact{
 					Session: session, Offset: 1000, Body: core.ItemObserved{
-						ID: core.ItemID(fmt.Sprintf("item-%d", i)), Turn: turn.ID, Status: core.ItemRunning, Body: core.ToolCall{Tool: "bash"},
+						ID: core.ItemID(fmt.Sprintf("item-%d", i)), Turn: turn.ID, Status: core.ItemRunning, Body: core.ToolCall{Use: core.ShellUse{Command: "ls"}},
 					},
 				}})
 			}

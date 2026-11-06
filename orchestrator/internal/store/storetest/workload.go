@@ -179,7 +179,12 @@ func (w *Workload) text(n int) string { return strings.Repeat("x", max(n, 1)) }
 
 func (w *Workload) tool(n int) core.ToolCall {
 	code := int32(w.r.IntN(2))
-	return core.ToolCall{Tool: "bash", ProviderCallID: w.id("call"), ArgsJSON: `{"command":"ls"}`, Output: w.text(n), ExitCode: &code}
+	uses := []core.ToolUse{
+		core.ShellUse{Command: "ls"}, core.ReadUse{Target: "a.go"}, core.WriteUse{Target: "b.go"},
+		core.EditUse{Targets: []string{"a.go", "b.go"}}, core.SearchUse{Pattern: "TODO"},
+		core.OtherUse{Name: "post_handoff", Text: "claim: done"},
+	}
+	return core.ToolCall{Use: uses[w.r.IntN(len(uses))], Output: w.text(n), ExitCode: &code}
 }
 
 // newCommand asks for something of the core, as a client or an agent would.

@@ -67,8 +67,8 @@ def test_a_tool_call_runs_then_finishes_under_one_id() -> None:
     assert [t.status for t in tools] == [orch.ITEM_STATUS_RUNNING, orch.ITEM_STATUS_FINISHED]
     assert {t.id for t in tools} == {"c1"}
     last = tools[-1].tool
-    assert last.tool == "Bash"
-    assert last.args_json == '{"command":"ls"}'
+    assert last.WhichOneof("call") == "shell"
+    assert last.shell.command == "ls"
     assert last.output == "a\n\nwarn"
     assert last.exit_code == 2
     assert last.is_error
