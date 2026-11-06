@@ -59,6 +59,12 @@ It selects a working CLI or installs one only after explicit user approval.
 5. If `vibesys-cli show <base>` lists no measure result, measure the base with
    `vibesys-cli submit measure <base> --samples 5`, as a tracked background `wait`
    (`vibesys:measure`). No comparison means anything until it lands. Plan while it runs.
+6. While it runs, dispatch one planner with the nudge "end-to-end ceiling": for each objective,
+   the bound the workload sets with an infinitely fast system (read how the benchmark issues
+   load and computes each metric) and the bound the hardware sets at the observed operating
+   point, and where the base sits between them. Record it as a comment on the first plan. Fund
+   by headroom: an objective that is already near its workload bound earns no plan of its own.
+   Repeat it when the operating point moves a lot (after a big promotion).
 
 ## Loop
 
@@ -67,7 +73,8 @@ It selects a working CLI or installs one only after explicit user approval.
    planner none, and every few rounds one the nudge "bold" (a high-risk, high-reward idea). Fund a
    bold plan by expected value, upside times chance, and start it with its feasibility step; a low
    chance alone is no reason to drop it. Keep one bold track alive.
-2. Read the proposals (`vibesys-cli plan list`, `plan view <n>`). Dedupe, check each against the
+2. Read the proposals (`vibesys-cli plan list`, `plan view <n>`). A plan you write yourself
+   (from a profile or a judge's finding) states its bound like any planner's. Dedupe, check each against the
    rules in `OBJECTIVE.md` before funding it, check that chosen plans touch disjoint files, and
    write each decision as a plan comment, then set the status (`vibesys:state`). When you fund a
    plan, set its priority with a reason: high for work that gates others or has the best expected
