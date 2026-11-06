@@ -8,6 +8,13 @@ the evaluator's output flag. The framework reads the stream after the process
 exits. A future transport may deliver the same records over a live connection;
 the record definitions below do not depend on the transport.
 
+The records are defined once, as the `ResultRecord` message in
+`proto/vibesys/evaluator/v1/records.proto`, with its validation rules in the same
+file. The SDKs write it and the framework's reader reads it through code
+generated from that file. This document and the corpus describe the same
+bytes in prose and examples. A JSON null reads as an absent key, and an
+integer is a JSON number (never a string, a fraction or an exponent).
+
 The evaluator declares the metrics it produces. It never learns which of them a
 task optimizes for: objectives live in the task's `vibesys.input.toml` and are
 checked against the declared metrics by the framework.

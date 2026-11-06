@@ -35,6 +35,8 @@ uv run --locked --group proto buf generate --template buf.gen.orchestrator.yaml
 uv run --locked --group proto buf generate --template buf.gen.orchestrator-ts.yaml
 # The vibesys-evaluator SDK's schema: Go for loadgen's module, Python for the SDK's package.
 uv run --locked --group proto buf generate --template buf.gen.evaluator.yaml
+# The result record, once more for the older evaluator SDK, which is its own Go module.
+uv run --locked --group proto buf generate --template buf.gen.vseval.yaml
 uv run --locked --group proto buf generate --template scripts/corevalue/tests/buf.gen.yaml
 uv run --locked ruff check --select I --fix libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
 uv run --locked ruff format libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values

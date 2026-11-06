@@ -98,9 +98,3 @@ func number(token string) (float64, bool) {
 	}
 	return f, true
 }
-
-// isNumberToken reports whether a raw JSON value is a number, and not a string, boolean, null,
-// object or array.
-func isNumberToken(raw []byte) bool {
-	return len(raw) > 0 && (raw[0] == '-' || (raw[0] >= '0' && raw[0] <= '9'))
-}

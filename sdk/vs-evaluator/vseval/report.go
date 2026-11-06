@@ -1,13 +1,14 @@
 package vseval
 
 import (
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+
+	evaluatorv1 "github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval/internal/gen/vibesys/evaluator/v1"
 )
 
 // Protocol is the record stream protocol version this package writes.
@@ -145,11 +146,11 @@ func (r *Report) Declare(s *Schema) (*Run, error) {
 	if err := s.check(); err != nil {
 		return nil, err
 	}
-	metrics := make(map[string]metricSpec, len(s.names))
+	metrics := make(map[string]*evaluatorv1.MetricSpec, len(s.names))
 	for i, name := range s.names {
-		metrics[name] = s.specs[i]
+		metrics[name] = s.specs[i].record()
 	}
-	if err := r.write(helloRecord{Kind: kindHello, Protocol: Protocol, Metrics: metrics}); err != nil {
+	if err := r.write(&evaluatorv1.ResultRecord{Kind: ptr(kindHello), Protocol: ptr(uint32(Protocol)), Metrics: metrics}); err != nil {
 		return nil, err
 	}
 	r.declared = true
@@ -201,7 +202,7 @@ func (r *Report) EmitError(cause error) error {
 	if message == "" {
 		message = FailureFallbackMessage
 	}
-	if err := r.write(errorRecord{Kind: kindError, Message: message}); err != nil {
+	if err := r.write(&evaluatorv1.ResultRecord{Kind: ptr(kindError), Message: &message}); err != nil {
 		return err
 	}
 	r.outcome = true
@@ -246,10 +247,10 @@ type flusher interface {
 	Flush() error
 }
 
-func (r *Report) write(record any) error {
-	line, err := json.Marshal(record)
+func (r *Report) write(record *evaluatorv1.ResultRecord) error {
+	line, err := encode(record)
 	if err != nil {
-		return fmt.Errorf("encode %T: %w", record, err)
+		return err
 	}
 	if _, err := r.w.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("write evaluator record: %w", err)

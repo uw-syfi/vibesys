@@ -43,6 +43,8 @@ func TestLayerRules(t *testing.T) {
 		{"filestore imports the store interface", map[string]string{"cli/internal/store/filestore/a.go": goFile(module + "internal/store")}, false},
 		{"the store cannot import its implementation", map[string]string{"cli/internal/store/a.go": goFile(module + "internal/store/filestore")}, true},
 		{"generated code imports only generated code", map[string]string{"cli/gen/vibesys/cli/v1/a.go": goFile(module + "internal/core")}, true},
+		{"reading imports the evaluator record", map[string]string{"cli/internal/reading/a.go": goFile(module + "gen/vibesys/evaluator/v1")}, false},
+		{"reading cannot import the job contract", map[string]string{"cli/internal/reading/a.go": goFile(module + "gen/vibesys/cli/v1")}, true},
 		{"a package with no rule fails", map[string]string{"cli/internal/newthing/a.go": goFile("time")}, true},
 		{"ledger imports core and the store", map[string]string{"cli/internal/store/ledger/a.go": goFile(module+"internal/core", module+"internal/store")}, false},
 		{"the ledger cannot import an implementation", map[string]string{"cli/internal/store/ledger/a.go": goFile(module + "internal/store/memstore")}, true},

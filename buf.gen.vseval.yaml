@@ -1,0 +1,15 @@
+# Go bindings for the older evaluator SDK (sdk/vs-evaluator/vseval), which writes the result record.
+# They sit in an internal package of that module and come from the same file the other SDKs
+# generate. The M option only moves that file's Go import path into the module.
+version: v2
+clean: true
+inputs:
+  - directory: proto
+    paths: [proto/vibesys/evaluator/v1/records.proto]
+plugins:
+  - local: [go, -C, cli, tool, protoc-gen-go]
+    strategy: all
+    out: sdk/vs-evaluator/vseval/internal/gen
+    opt:
+      - paths=source_relative
+      - Mvibesys/evaluator/v1/records.proto=github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval/internal/gen/vibesys/evaluator/v1;evaluatorv1

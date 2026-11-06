@@ -1,0 +1,172 @@
+syntax = "proto3";
+
+// The evaluator result protocol (version 2): the record an evaluator writes, one per line, to the
+// file named by its output flag, and the framework reads after the process exits. The measured
+// number that decides whether a candidate is promoted travels in these records.
+//
+// Encoding. One proto3 JSON object per line, with the proto field names as keys (never the
+// lowerCamelCase aliases), UTF-8, newline-terminated. The bytes are the ones evaluators have always
+// written, so a stream written before this file existed reads unchanged and a stream written from it
+// reads in every earlier reader. The prose is sdk/vs-evaluator/PROTOCOL.md and the conformance corpus
+// is sdk/vs-evaluator/fixtures.
+//
+// Integers. Every integer is 32-bit, because proto3 JSON writes a 64-bit integer as a string, and the
+// protocol's integers are JSON numbers. Doubles are finite JSON numbers, never the strings "NaN",
+// "Infinity" or "1.5" that proto3 JSON would also accept; the readers here do not.
+//
+// Presence. Every scalar and message field is `optional`, so an absent key and a key holding the
+// default differ (`"label":""` is written, and `"required":false` means something an absent key
+// does not). A JSON null reads as an absent key. A map field cannot carry presence: an empty map
+// and an absent one read the same, and the order rules that need the difference live in the reader.
+//
+// What a record may hold depends on its kind, which the message rules below state. The rules that
+// look across records (the hello comes first, one outcome, every value names a declared metric)
+// need the stream and stay in the reader.
+package vibesys.evaluator.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1";
+
+// ResultRecord is one line of a result stream: a hello that declares the metrics, the result that
+// reports them, or the error that says why there is no result.
+//
+// A violation's rule id says which key it is about: "unknown_key.<field>" is a field the record's
+// kind does not define, and "required.<field>" a field the kind needs.
+message ResultRecord {
+  option (buf.validate.message).cel = {
+    id: "unknown_key.protocol"
+    message: "only a hello record has a protocol"
+    expression: "this.kind == 'hello' || !has(this.protocol)"
+  };
+  option (buf.validate.message).cel = {
+    id: "unknown_key.metrics"
+    message: "only a hello record has metrics"
+    expression: "this.kind == 'hello' || this.metrics.size() == 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "unknown_key.label"
+    message: "only a result record has a label"
+    expression: "this.kind == 'result' || !has(this.label)"
+  };
+  option (buf.validate.message).cel = {
+    id: "unknown_key.values"
+    message: "only a result record has values"
+    expression: "this.kind == 'result' || this.values.size() == 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "unknown_key.message"
+    message: "only an error record has a message"
+    expression: "this.kind == 'error' || !has(this.message)"
+  };
+  option (buf.validate.message).cel = {
+    id: "unknown_key.requirement"
+    message: "only an error record has a requirement"
+    expression: "this.kind == 'error' || !has(this.requirement)"
+  };
+  option (buf.validate.message).cel = {
+    id: "unknown_key.partial"
+    message: "only an error record has a partial"
+    expression: "this.kind == 'error' || !has(this.partial)"
+  };
+  option (buf.validate.message).cel = {
+    id: "unknown_key.error_kind"
+    message: "only an error record has an error_kind"
+    expression: "this.kind == 'error' || !has(this.error_kind)"
+  };
+  option (buf.validate.message).cel = {
+    id: "required.protocol"
+    message: "a hello record names its protocol"
+    expression: "this.kind != 'hello' || has(this.protocol)"
+  };
+  option (buf.validate.message).cel = {
+    id: "required.message"
+    message: "an error record carries a non-empty message"
+    expression: "this.kind != 'error' || (has(this.message) && this.message != '')"
+  };
+  option (buf.validate.message).cel = {
+    id: "requirement.with_error_kind"
+    message: "requirement is required by, and only allowed with, error_kind requirement_not_met"
+    expression: "this.kind != 'error' || ((this.error_kind == 'requirement_not_met') == has(this.requirement))"
+  };
+
+  // Which record this is. Required: a line with none, or another, is of no known kind.
+  optional string kind = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {in: ["hello", "result", "error"]}
+  ];
+
+  // hello: the version of the result protocol the evaluator writes. Readers reject a version they
+  // do not implement.
+  optional uint32 protocol = 2;
+
+  // hello: the metrics the evaluator produces, by name. Names are non-empty and hold no white
+  // space; a reader checks that, since a bad name has its own reason code.
+  map<string, MetricSpec> metrics = 3;
+
+  // result: names the operating point. Version 2 carries one, so a reader accepts only "".
+  optional string label = 4;
+
+  // result: the measured row, by declared metric name. Every value is a finite number.
+  map<string, double> values = 5 [(buf.validate.field).map.values.double.finite = true];
+
+  // error: why the run produced no row.
+  optional string message = 6;
+
+  // error: names the capability a requirement_not_met failure lacks (for example prefix_cache).
+  // Present exactly for that error_kind.
+  optional string requirement = 7 [(buf.validate.field).string.pattern = "^[^\\t-\\r \\x1c-\\x1f\\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+$"];
+
+  // error: what the run measured before it failed. It never counts as a result.
+  optional PartialResult partial = 8;
+
+  // error: why there is no row, from a closed set. "transient", the default when absent, says
+  // nothing about whether measuring again could help; "requirement_not_met" says it cannot.
+  optional string error_kind = 9 [(buf.validate.field).string = {in: ["transient", "requirement_not_met"]}];
+}
+
+// MetricSpec declares one metric of a hello record. Everything in it is metadata for people except
+// `required`, which a reader enforces.
+message MetricSpec {
+  // Human-facing unit. Never parsed for meaning.
+  optional string unit = 1;
+  // The metric's intrinsic better-direction. Advisory: it does not select objectives.
+  optional string direction = 2 [(buf.validate.field).string = {in: ["max", "min"]}];
+  // Whether every successful run must report the metric. Absent means true.
+  optional bool required = 3;
+}
+
+// PartialResult is what a failed or stopped run measured. Its name need not be a declared metric: a
+// run cut short usually measures a different quantity, such as a warmup rate.
+message PartialResult {
+  optional string name = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^[^\\t-\\r \\x1c-\\x1f\\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+$"
+  ];
+  optional double value = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).double.finite = true
+  ];
+  optional string direction = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {in: ["max", "min"]}
+  ];
+  optional string unit = 4 [(buf.validate.field).string.min_len = 1];
+  // The value a passing run needs.
+  optional double target = 5 [(buf.validate.field).double.finite = true];
+  optional Progress progress = 6;
+}
+
+// Progress is the work a stopped run completed out of the work a passing run completes.
+message Progress {
+  optional uint32 completed = 1 [(buf.validate.field).required = true];
+  optional uint32 required = 2 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).uint32.gte = 1
+  ];
+  // Names one unit of work (rounds, requests).
+  optional string unit = 3 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string.pattern = "^[^\\t-\\r \\x1c-\\x1f\\x{85}\\x{a0}\\x{1680}\\x{2000}-\\x{200a}\\x{2028}\\x{2029}\\x{202f}\\x{205f}\\x{3000}]+$"
+  ];
+}

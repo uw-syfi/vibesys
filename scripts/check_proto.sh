@@ -25,7 +25,7 @@ stage layers uv run --locked python -m scripts.check_proto_layers
 stage lint uv run --locked --group proto buf lint
 stage generate ./scripts/generate_proto.sh
 generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/topics_generated.go libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated clients/libs/orchestrator-proto/src/generated gateway/gen cli/gen orchestrator/gen
-  sdk/vibesys-evaluator/go/gen sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto
+  sdk/vibesys-evaluator/go/gen sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto sdk/vs-evaluator/vseval/internal/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
   scripts/corevalue/tests/generated_pb scripts/corevalue/tests/generated_values scripts/corevalue/tests/generated_boundary)
 git diff --exit-code -- "${generated[@]}"
@@ -54,7 +54,7 @@ pids+=("$!")
 # Its own process: each xdist worker above would import the projector's modules again.
 stage conversion uv run --locked pytest tests/vibesys/run/test_runlog_conversion.py -k regenerates_identically --no-cov -q &
 pids+=("$!")
-go_gen() { (cd gateway && go build ./gen/... && go vet ./gen/...) && (cd sdk/vibesys-evaluator/go && go build ./gen/... && go vet ./gen/...); }
+go_gen() { (cd gateway && go build ./gen/... && go vet ./gen/...) && (cd sdk/vibesys-evaluator/go && go build ./gen/... && go vet ./gen/...) && (cd sdk/vs-evaluator/vseval && go build ./internal/gen/... && go vet ./internal/gen/...); }
 stage go go_gen &
 pids+=("$!")
 stage hashes ./scripts/check_schema_hashes.sh &
