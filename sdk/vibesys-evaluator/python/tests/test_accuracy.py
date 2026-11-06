@@ -11,7 +11,7 @@ import dataclasses
 import io
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -215,9 +215,11 @@ def test_the_report_goes_into_the_artifacts() -> None:
         (lambda: ms.Fault("exec", "kv", 0), "argv"),
         (lambda: ms.Fault("restart", "kv", 0, ("x",)), "argv"),
         (lambda: ms.Fault("flush", "cache", 0, ("x",)), "argv"),
-        (lambda: ms.Fault("drain", "kv", 0), "restart, restart_all, exec or flush"),
+        (lambda: ms.Fault(cast("Any", "drain"), "kv", 0), "restart, restart_all, exec or flush"),
         (
-            lambda: ms.Accuracy(phases=1, rate=1, secs=1, oracle=["o"], workload="gen"),
+            lambda: ms.Accuracy(
+                phases=1, rate=1, secs=1, oracle=["o"], workload=cast("Any", "gen")
+            ),
             "Workload, a Generator or None",
         ),
         (lambda: ms.Accuracy(phases=0, rate=1, secs=1, oracle=["o"]), "phases"),

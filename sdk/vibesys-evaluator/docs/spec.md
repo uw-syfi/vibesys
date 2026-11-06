@@ -529,7 +529,7 @@ The verbs (messages in `proto/vibesys/evaluator/v1/core.proto`, and
 | `hist summary` | merge HDR histograms and read percentiles from the sum |
 | `phase pod` | run one phase where the phase pod runs: loadgen and the generator, the pod's files (long: `{"event": PhaseEvent}` lines, then the response) |
 | `phase judge` | whether a phase's files are a measurement: the saturation guard and the validity rules |
-| `accuracy run` | an accuracy check: deploy and seed the application (Kubernetes, or a local one), run the phases with capture and the faults between them into the history directory, tear it down, run the oracle program (long: `{"event": PhaseEvent}` lines, then the verdict) |
+| `accuracy run` | an accuracy check: deploy and seed the application (Kubernetes, or a local one), run the phases with capture (not judged as measurements) and the faults between them into the history directory, tear it down, run the oracle program (long: `{"event": PhaseEvent}` lines, then the verdict) |
 
 Error kinds a wrapper sees: `record` (a record the protocol refuses),
 `histogram`, `phase`, `invalid_argument`, `bad_request`, `io`, `cancelled`
