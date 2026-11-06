@@ -1,10 +1,10 @@
 /**
- * The folds: a snapshot and the events after its sequence become the state, and the per-agent feed
+ * The folds: a snapshot and the changes after its sequence become the state, and the per-agent feed
  * (items, progress, turns) lays over it. Plain reducers with no clock and no I/O.
  *
- * Two streams carry whole items (the run stream's `itemUpdated`, the agent stream's page and item
+ * Two streams carry whole items (the run stream's `item`, the agent stream's page and item
  * frames), and neither item has a revision of its own. The revision is the committed `sequence`
- * the item was carried at: the event's, or the agent frame's. Which whole item wins:
+ * the item was carried at: the change's, or the agent frame's. Which whole item wins:
  * 1. a final item (finished, failed) is never replaced by a running one, whatever its sequence;
  * 2. between two of the same finality, the higher sequence wins, and an equal one is the later
  *    arrival (one agent stream is in order, so its later frame is its newer one).
@@ -12,8 +12,8 @@
  * `s` means the stored item was committed after the progress and already holds it.
  *
  * Properties the tests hold (`fold.properties.test.ts`):
- * - events in any order, repeated any number of times, leave the state of the longest gap-free
- *   prefix received, so a skipped event is never papered over and a repeat changes nothing;
+ * - changes in any order, repeated any number of times, leave the state of the longest gap-free
+ *   prefix received, so a skipped change is never papered over and a repeat changes nothing;
  * - a snapshot over a populated state keeps what the snapshot does not carry (items, receipts,
  *   progress) and takes the state back to an earlier sequence only to close a gap;
  * - however the run stream and the agent stream interleave, every item ends as the newest copy
@@ -21,10 +21,10 @@
  */
 import {
   type Delta,
-  type Event,
   type Item,
   ItemStatus,
   oneofIs,
+  type RunChange,
   type RunsSnapshot,
   type SearchState,
   type Turn,
@@ -128,25 +128,25 @@ export function isFinalItem(item: Item): boolean {
   return item.status === ItemStatus.FINISHED || item.status === ItemStatus.FAILED;
 }
 
-/** One committed event. A repeat is ignored; a skipped event records a gap and nothing else. */
-export function applyEvent(state: OrchestratorState, event: Event): OrchestratorState {
-  if (event.sequence <= state.sequence) return state;
+/** One committed change. A repeat is ignored; a skipped one records a gap and nothing else. */
+export function applyChange(state: OrchestratorState, change: RunChange): OrchestratorState {
+  if (change.sequence <= state.sequence) return state;
   const expected = state.sequence + 1n;
-  if (event.sequence !== expected) return {...state, gap: {expected, got: event.sequence}};
-  const next: OrchestratorState = {...state, sequence: event.sequence, gap: null};
-  const {body} = event;
+  if (change.sequence !== expected) return {...state, gap: {expected, got: change.sequence}};
+  const next: OrchestratorState = {...state, sequence: change.sequence, gap: null};
+  const {body} = change;
   switch (body.case) {
-    case 'runUpdated':
+    case 'run':
       return {...next, runs: {...next.runs, [body.value.id]: body.value}};
-    case 'agentUpdated':
+    case 'agent':
       return {...next, agents: {...next.agents, [body.value.id]: body.value}};
-    case 'turnUpdated':
+    case 'turn':
       return withTurn(next, body.value);
-    case 'itemUpdated':
-      return withItem(next, body.value, event.sequence);
-    case 'messageUpdated':
+    case 'item':
+      return withItem(next, body.value, change.sequence);
+    case 'message':
       return {...next, messages: {...next.messages, [body.value.id]: body.value}};
-    case 'receiptRecorded':
+    case 'receipt':
       return {...next, receipts: {...next.receipts, [body.value.commandId]: body.value}};
     case undefined:
       return next;

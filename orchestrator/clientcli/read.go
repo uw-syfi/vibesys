@@ -9,10 +9,13 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
-// list shows every run the service knows, newest first.
+// list shows the runs the service knows, newest first. A start that failed before its lead ran
+// anything is not a run a person means to look at, so it is left out unless --all says otherwise;
+// `run get RUN` still shows it.
 func list(ctx context.Context, c *call, args []string) error {
 	fs := flags("list")
 	asJSON := fs.Bool("json", false, "print the runs as JSON")
+	all := fs.Bool("all", false, "include starts that failed before their lead ran anything")
 	positional, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -31,14 +34,33 @@ func list(ctx context.Context, c *call, args []string) error {
 	}
 	runs := snapshot.GetRuns()
 	sortNewestFirst(runs)
+	hidden := 0
+	if !*all {
+		shown := runs[:0:0]
+		for _, r := range runs {
+			if r.GetNeverOpened() {
+				hidden++
+				continue
+			}
+			shown = append(shown, r)
+		}
+		runs = shown
+	}
 	if *asJSON {
 		return printJSON(c.Stdout, &pb.RunsSnapshot{Runs: runs, Sequence: snapshot.GetSequence(), Truncated: snapshot.GetTruncated()})
 	}
 	table := tabwriter.NewWriter(c.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(table, "ID\tSTATUS\tTASK\tAGE\tREPOSITORY")
 	for _, r := range runs {
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", r.GetId(), statusWord(r.GetStatus().String(), "RUN_STATUS_"), r.GetTask(),
+		status := statusWord(r.GetStatus().String(), "RUN_STATUS_")
+		if r.GetNeverOpened() {
+			status += " (never started)"
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", r.GetId(), status, r.GetTask(),
 			age(c.Clock.Now(), r.GetCreatedAt().AsTime()), r.GetRepository())
+	}
+	if hidden > 0 {
+		fmt.Fprintf(table, "(%d start(s) that failed before the agent ran are hidden; `run list --all` shows them, `run get RUN` explains one)\n", hidden)
 	}
 	if snapshot.GetTruncated() {
 		fmt.Fprintln(table, "(older runs were left out of the snapshot)")

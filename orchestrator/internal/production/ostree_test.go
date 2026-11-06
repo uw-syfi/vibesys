@@ -36,6 +36,9 @@ func newRepository(t *testing.T) string {
 		t.Fatal(err)
 	}
 	gitIn(t, dir, "init", "-q")
+	// No background gc: a detached one outlives the commit that started it and races the next git
+	// command in the repository, such as a worktree add.
+	gitIn(t, dir, "config", "gc.auto", "0")
 	write(t, filepath.Join(dir, ".vibesys", "tasks", "demo", "OBJECTIVE.md"), "go faster\n")
 	return dir
 }

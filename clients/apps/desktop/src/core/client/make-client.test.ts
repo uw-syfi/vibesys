@@ -116,7 +116,7 @@ it.effect('a stream emits whole valid frames and stops at the first bad one', ()
     const seen: bigint[] = [];
     const exit = yield* Effect.exit(
       Stream.runForEach((yield* client).watchRuns({}), frame => {
-        if (oneofIs(frame.body, 'snapshot', {search: true, snapshot: true, event: true}))
+        if (oneofIs(frame.body, 'snapshot', {search: true, snapshot: true, change: true}))
           seen.push(frame.body.value.sequence);
         return Effect.void;
       }),

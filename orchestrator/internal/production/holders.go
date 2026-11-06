@@ -75,9 +75,9 @@ type SessionHolders interface {
 	// alone. A record of processes that cannot be read is reported as a *ProcessRecordError, and
 	// nothing is ended for it.
 	Reap(place HolderPlace) error
-	// ReapAgent does Reap for every session of an agent that nothing holds, so no old agent process
-	// works in a worktree under a new session.
-	ReapAgent(agentDirectory string) error
+	// ReapAgent does Reap for every place of an agent's sessions that nothing holds, so no old agent
+	// process works in a worktree under a new session.
+	ReapAgent(places []HolderPlace) error
 	// Worktree makes a detached git worktree of a repository at path, unless one is there.
 	Worktree(ctx context.Context, repository, path string) error
 }
@@ -98,6 +98,15 @@ type ProcessHolders struct {
 	Log *slog.Logger
 	// Signals ends processes. Nil ends them through the operating system.
 	Signals ProcessSignals
+	// Git runs git in a repository and returns its combined output. Nil runs the git program.
+	Git func(ctx context.Context, repository string, args ...string) ([]byte, error)
+}
+
+func (h *ProcessHolders) git(ctx context.Context, repository string, args ...string) ([]byte, error) {
+	if h.Git != nil {
+		return h.Git(ctx, repository, args...)
+	}
+	return exec.CommandContext(ctx, "git", append([]string{"-C", repository}, args...)...).CombinedOutput()
 }
 
 func (h *ProcessHolders) signals() ProcessSignals {
@@ -241,14 +250,10 @@ func (h *ProcessHolders) said(place HolderPlace, skipped []string) {
 }
 
 // ReapAgent implements SessionHolders.
-func (h *ProcessHolders) ReapAgent(agentDirectory string) error {
-	sessions, _ := os.ReadDir(agentDirectory)
+func (h *ProcessHolders) ReapAgent(places []HolderPlace) error {
 	var errs []error
-	for _, e := range sessions {
-		if _, err := strconv.ParseUint(e.Name(), 10, 32); err == nil && e.IsDir() {
-			dir := filepath.Join(agentDirectory, e.Name())
-			errs = append(errs, h.Reap(HolderPlace{Socket: filepath.Join(dir, "sock"), Directory: dir}))
-		}
+	for _, place := range places {
+		errs = append(errs, h.Reap(place))
 	}
 	return errors.Join(errs...)
 }
@@ -258,11 +263,25 @@ func (h *ProcessHolders) Worktree(ctx context.Context, repository, path string) 
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	}
-	out, err := exec.CommandContext(ctx, "git", "-C", repository, "worktree", "add", "--detach", path).CombinedOutput()
+	out, err := h.git(ctx, repository, "worktree", "add", "--detach", path)
+	if err != nil && lostItsRecord(out) {
+		// A `git worktree prune` (this host's own, at the end of another run, or the user's) between
+		// git making the record of the new worktree and locking it removes the record, and git then
+		// fails to open a file in it. The other process is done by the time this one returns, so
+		// one more try meets no record and makes it whole. Once: a second failure is a real one.
+		out, err = h.git(ctx, repository, "worktree", "add", "--detach", path)
+	}
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// lostItsRecord says git's output is a worktree add that lost its record in .git/worktrees to
+// another git process.
+func lostItsRecord(out []byte) bool {
+	text := string(out)
+	return strings.Contains(text, "could not open") && strings.Contains(text, "/worktrees/")
 }
 
 // grpcLink is HolderLink over gRPC.

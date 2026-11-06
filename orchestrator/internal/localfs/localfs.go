@@ -26,6 +26,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
 )
 
 // Remedy says how an operator chooses a state directory.
@@ -47,7 +50,13 @@ type Detector interface {
 
 // Dir is a directory proven to be on a local filesystem, symlinks resolved. Only Resolve and
 // StateDir make one.
-type Dir struct{ path string }
+type Dir struct {
+	path string
+	// chosen is true when the host's configuration named the directory, false when it follows from
+	// the root. A chosen directory is the operator's, and its sockets stay inside it or are refused;
+	// a default one is the host's to arrange.
+	chosen bool
+}
 
 // Path is the resolved directory. It may not exist yet.
 func (d Dir) Path() string { return d.path }
@@ -105,7 +114,7 @@ func resolve(path string, d Detector, isDefault bool) (Dir, error) {
 	if fs.Class != Local {
 		return Dir{}, &RefusedError{Path: abs, Resolved: resolved, Filesystem: fs, Default: isDefault}
 	}
-	return Dir{path: resolved}, nil
+	return Dir{path: resolved, chosen: !isDefault}, nil
 }
 
 // evalExisting resolves symlinks in the nearest ancestor of path that exists, and returns the full
@@ -148,21 +157,55 @@ func StateDir(chosen, fallback string, d Detector) (Dir, error) {
 	return resolve(fallback, d, true)
 }
 
-// agentSocketFile is the agent-only socket's name in a state directory, and maxSocketPath the longest
-// path a Unix socket address holds on the systems that matter.
+// agentSocketFile is the agent-only socket's name in a state directory. sessionsName is the
+// directory of the sessions' holders, whose sockets are below it as <agent>/<n>/sock; the agent
+// directory is AgentDirectoryBytes long and n is a number.
 const (
 	agentSocketFile = "agent.sock"
-	maxSocketPath   = 100
+	sessionsName    = "sessions"
+	// AgentDirectoryBytes is the length of an agent's directory name below Sessions.
+	AgentDirectoryBytes = 16
+	sessionSocketFile   = "sock"
+	// longestSessionNumber is the widest session number a socket is checked for, in a directory the
+	// operator chose.
+	longestSessionNumber = "9999"
 )
 
-// AgentSocket is the agent-only socket of a state directory, which lives inside it. A state directory
-// so long that the path does not fit in a socket address is an error that says what to do.
-func (d Dir) AgentSocket() (string, error) {
-	socket := filepath.Join(d.path, agentSocketFile)
-	if len(socket) > maxSocketPath {
-		return "", fmt.Errorf("the agent socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", socket, maxSocketPath, Remedy)
+// Sessions is the directory below the state directory where each session's holder keeps its files.
+func (d Dir) Sessions() string { return filepath.Join(d.path, sessionsName) }
+
+// Place is where the socket whose natural path inside the state directory is natural goes. In a
+// default state directory a path that does not fit a socket address goes to the short private place
+// derived from it (privatesocket.Short), so a long home directory is not something a user has to
+// know about. In a chosen one it stays: the operator put the directory there, and SocketPath
+// refuses it when it does not fit.
+func (d Dir) Place(natural string) string {
+	if d.chosen {
+		return natural
 	}
-	return socket, nil
+	return privatesocket.Place(natural)
+}
+
+// SocketPath is Place, or an error that says what to do when the place is still too long for a
+// socket address.
+func (d Dir) SocketPath(natural string) (string, error) {
+	path := d.Place(natural)
+	if !privatesocket.Fits(path) {
+		return "", fmt.Errorf("the socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", path, privatesocket.MaxPath, Remedy)
+	}
+	return path, nil
+}
+
+// AgentSocket is the agent-only socket of a state directory.
+func (d Dir) AgentSocket() (string, error) {
+	return d.SocketPath(filepath.Join(d.path, agentSocketFile))
+}
+
+// CheckSessionSockets says whether the sockets of sessions would find a place in this state
+// directory, as AgentSocket does for the agent socket. Only a chosen directory can fail.
+func (d Dir) CheckSessionSockets() error {
+	_, err := d.SocketPath(filepath.Join(d.Sessions(), strings.Repeat("a", AgentDirectoryBytes), longestSessionNumber, sessionSocketFile))
+	return err
 }
 
 // DefaultPath is where the state goes when nothing says otherwise: $XDG_STATE_HOME/vibesys/orchestrator

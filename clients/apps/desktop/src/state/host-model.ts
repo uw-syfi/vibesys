@@ -7,7 +7,7 @@ import type {WatchRunsResponse} from '@vibesys/orchestrator-proto';
 import {
   type AgentFrame,
   applyAgentFeed,
-  applyEvent,
+  applyChange,
   applySearch,
   applySnapshot,
 } from './orchestrator/fold.js';
@@ -45,8 +45,8 @@ export function applyHostFrame(model: HostModel, frame: HostFrame): HostModel {
       return {...model, data: applySnapshot(model.data, body.value)};
     case 'search':
       return {...model, data: applySearch(model.data, body.value)};
-    case 'event':
-      return {...model, data: applyEvent(model.data, body.value)};
+    case 'change':
+      return {...model, data: applyChange(model.data, body.value)};
     case undefined:
       return model;
     default:

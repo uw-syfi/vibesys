@@ -16,8 +16,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/hosted"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/production"
 	"github.com/uw-syfi/vibesys/orchestrator/release/releasetest"
 )
 
@@ -322,5 +324,45 @@ func TestHostProgramGolden(t *testing.T) {
 	}
 	if !strings.Contains(string(build), "./cmd/"+golden.Program) || !strings.Contains(string(build), "/"+golden.Program+`"`) {
 		t.Fatalf("build.sh does not build %s", golden.Program)
+	}
+}
+
+// A host in a default state directory serves for any length of the home directory, and the check a
+// client makes before it starts a run agrees: the sockets of the agent and of every session fit in a
+// socket address. This is the live finding: a home of 44 bytes made the first run start fail with a
+// socket path over 100 bytes.
+func TestAHostServesFromAHomeDirectoryOfAnyLength(t *testing.T) {
+	base, err := os.MkdirTemp("", "l")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+	getenv := func(string) string { return "" }
+	for _, length := range []int{1, 20, 40, 44, 60, 90, 130, 200, 240} {
+		home := base + "/" + strings.Repeat("h", length)
+		root := filepath.Join(home, ".vibesys")
+		if err := gatewayroot.CheckState("", root, home, getenv); err != nil {
+			t.Fatalf("a home of %d bytes: a client refuses the default state directory: %v", length, err)
+		}
+		layout, err := production.LayoutFor("", gatewayroot.StateDirectory(root, home, getenv))
+		if err != nil {
+			t.Fatalf("a home of %d bytes: the host refuses the default state directory: %v", length, err)
+		}
+		longest := layout.State.Place(filepath.Join(layout.State.Sessions(), strings.Repeat("a", 16), "9999", "sock"))
+		for _, socket := range []string{layout.AgentSocket, longest} {
+			if len(socket) > 100 {
+				t.Fatalf("a home of %d bytes: the socket %s is %d bytes", length, socket, len(socket))
+			}
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		x := hosted.Start(ctx, hosted.Options{
+			Version: "test", Executable: filepath.Join(root, "bin", "vibesys-host"), Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+			Config: &pb.HostConfig{}, Root: root, Getenv: getenv, Home: home, Stop: cancel,
+		})
+		if x.Unserved() != nil {
+			t.Fatalf("a home of %d bytes: the host does not serve: %v", length, x.Unserved())
+		}
+		cancel()
+		<-x.Done()
 	}
 }

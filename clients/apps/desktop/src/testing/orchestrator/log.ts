@@ -1,14 +1,14 @@
-/** A gap-free event log being written, with the builders for each kind of fact. */
+/** A gap-free log of what a watcher receives, being written, with the builders for each kind of fact. */
 import {create} from '@bufbuild/protobuf';
 import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {
   type Agent,
-  type Event,
-  EventSchema,
   type Item,
   type Message,
   type Receipt,
   type Run,
+  type RunChange,
+  RunChangeSchema,
   type Turn,
 } from '@vibesys/orchestrator-proto';
 
@@ -37,27 +37,26 @@ export class Rng {
 }
 
 export type Body =
-  | {case: 'runUpdated'; value: Run}
-  | {case: 'agentUpdated'; value: Agent}
-  | {case: 'turnUpdated'; value: Turn}
-  | {case: 'itemUpdated'; value: Item}
-  | {case: 'messageUpdated'; value: Message}
-  | {case: 'receiptRecorded'; value: Receipt};
+  | {case: 'run'; value: Run}
+  | {case: 'agent'; value: Agent}
+  | {case: 'turn'; value: Turn}
+  | {case: 'item'; value: Item}
+  | {case: 'message'; value: Message}
+  | {case: 'receipt'; value: Receipt};
 
-export class EventLog {
-  readonly events: Event[] = [];
+export class ChangeLog {
+  readonly changes: RunChange[] = [];
   constructor(readonly runId: string) {}
 
   /** Append one fact at `atMs`; the sequence is the next one. */
-  push(atMs: number, body: Body, commandId = ''): Event {
-    const event = create(EventSchema, {
-      sequence: BigInt(this.events.length + 1),
+  push(atMs: number, body: Body): RunChange {
+    const change = create(RunChangeSchema, {
+      sequence: BigInt(this.changes.length + 1),
       runId: this.runId,
-      commandId,
       at: timestampFromMs(atMs),
       body,
     });
-    this.events.push(event);
-    return event;
+    this.changes.push(change);
+    return change;
   }
 }

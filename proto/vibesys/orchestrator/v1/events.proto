@@ -2,42 +2,31 @@ syntax = "proto3";
 package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
 import "vibesys/orchestrator/v1/tool_options.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
-// SessionSource names the session event a stored event came from, so that a replay knows how far
-// each session's stream was committed. It is what a restarted daemon resumes that stream from.
-message SessionSource {
-  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
-  uint32 session = 2 [(buf.validate.field).uint32.gt = 0];
-  uint64 offset = 3 [(buf.validate.field).uint64.gt = 0];
-}
-
-// Event is one committed fact. The state is a fold of these, so nothing that a decision depends on
-// lives anywhere else. One input's events commit as one transaction.
-message Event {
-  // Global, gap-free, assigned at commit.
+// RunChange is what a watcher of runs receives for one committed event: the public part of it. A
+// client that folds these over a snapshot holds what a later snapshot would say.
+message RunChange {
+  // Global and gap-free across runs. A stream limited to one run skips the sequences of the others.
   uint64 sequence = 1 [(buf.validate.field).uint64.gt = 0];
-  // Empty only on the receipt of a command refused before it reached a run.
-  string run_id = 2;
-  // Empty unless a command caused the event.
-  string command_id = 3;
-  google.protobuf.Timestamp at = 4 [(buf.validate.field).required = true];
-  // Absent unless a session event caused the event.
-  SessionSource source = 5;
+  google.protobuf.Timestamp at = 2 [(buf.validate.field).required = true];
+  // The run the change belongs to, for a client that follows one run on a stream of all of them. Empty
+  // only on the receipt of a command refused before it reached a run.
+  string run_id = 3;
   oneof body {
     option (buf.validate.oneof).required = true;
-    Run run_updated = 10;
-    Agent agent_updated = 11;
-    Turn turn_updated = 12;
+    Run run = 10;
+    Agent agent = 11;
+    Turn turn = 12;
     // The whole item, so a client replaces by id.
-    Item item_updated = 13;
-    Message message_updated = 14;
-    // Every command ends in one, so a refused command is idempotent across a restart too.
-    Receipt receipt_recorded = 15;
+    Item item = 13;
+    Message message = 14;
+    Receipt receipt = 15;
   }
 }
 
@@ -67,8 +56,8 @@ message StartRun {
   string repository = 1 [(buf.validate.field).string.min_len = 1];
   string task = 2 [(buf.validate.field).string.min_len = 1];
   uint32 fanout_limit = 3;
-  // Absent when the run has no deadline.
-  google.protobuf.Timestamp deadline = 4;
+  reserved 4;
+  reserved "deadline";
   // The lead has nothing to inherit from, so its harness is required.
   AgentSpec lead = 5 [
     (buf.validate.field).required = true,
@@ -83,6 +72,14 @@ message StartRun {
   string brief = 6;
   // Agents the run may use besides the lead's own harness and model, which are always allowed.
   repeated AllowedAgent allow_agents = 7;
+  // The most the run may cost in dollars. Absent when the run has no cost limit.
+  optional double max_cost_usd = 8 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+  // How long the run may take, counted from its start by the host, so that a client's clock is not
+  // in it. Absent when the run has no time limit.
+  google.protobuf.Duration max_time = 9 [(buf.validate.field).duration.gt = {seconds: 0}];
 }
 
 message StopRun {
@@ -173,8 +170,8 @@ enum Refusal {
   REFUSAL_AGENT_IS_LEAD = 6;
   // The agent's session is already over or closing.
   REFUSAL_AGENT_NOT_LIVE = 7;
-  // The deadline had passed when the command arrived.
-  REFUSAL_DEADLINE_PASSED = 8;
+  reserved 8;
+  reserved "REFUSAL_DEADLINE_PASSED";
   // Another run that is not over already works in the repository. The receipt's run_id is that run.
   REFUSAL_REPOSITORY_IN_USE = 9;
   // The harness and model asked for are outside what the run may use. The receipt's allowed_agents
@@ -182,13 +179,17 @@ enum Refusal {
   REFUSAL_AGENT_NOT_ALLOWED = 10;
   // A handoff has no body, or the body of another role than the one posting it.
   REFUSAL_HANDOFF_NOT_YOURS = 11;
+  // The run reached its time limit: it starts no new agent.
+  REFUSAL_TIME_LIMIT_REACHED = 12;
+  // The run reached its cost limit: it starts no new agent.
+  REFUSAL_COST_LIMIT_REACHED = 13;
 }
 
 // Receipt is the answer to a command, and the same answer to each retry of it.
 message Receipt {
   string command_id = 1 [(buf.validate.field).string.min_len = 1];
-  // SHA-256 of the command, so that one id reused for another command is a conflict.
-  string command_digest = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  reserved 2;
+  reserved "command_digest";
   // Unspecified when the command was accepted.
   Refusal refusal = 3 [(buf.validate.field).enum.defined_only = true];
   // What the command made or acted on, where it did.

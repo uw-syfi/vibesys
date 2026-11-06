@@ -22,6 +22,11 @@ func fill(r *rand.Rand, m protoreflect.Message) {
 		m.Set(m.Descriptor().Fields().ByName("nanos"), protoreflect.ValueOfInt32(stamp.Nanos))
 		return
 	}
+	if m.Descriptor().FullName() == "google.protobuf.Duration" {
+		// A positive whole number of seconds, which is what the contract asks of a limit.
+		m.Set(m.Descriptor().Fields().ByName("seconds"), protoreflect.ValueOfInt64(1+r.Int64N(1<<20)))
+		return
+	}
 	oneofs := m.Descriptor().Oneofs()
 	for i := range oneofs.Len() {
 		oneof := oneofs.Get(i)
@@ -70,6 +75,7 @@ func set(r *rand.Rand, m protoreflect.Message, fd protoreflect.FieldDescriptor) 
 // to skip the field, so whether a body was ever accepted would depend on the seed.
 var absolutePathFields = map[string]bool{
 	"marketplace": true, "home": true, "cli": true, "xdg_runtime_dir": true, "xdg_state_home": true,
+	"executable": true, "runtime_directory": true, "location": true,
 }
 
 func scalar(r *rand.Rand, fd protoreflect.FieldDescriptor) protoreflect.Value {

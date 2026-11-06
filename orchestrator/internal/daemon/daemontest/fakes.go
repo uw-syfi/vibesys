@@ -171,7 +171,7 @@ func (h *Sidecars) Launch(ctx context.Context, start daemon.SessionStart) (daemo
 	}
 	s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_Opened{Opened: &pb.SessionOpened{
 		ResumeToken:  []byte(token),
-		Capabilities: &pb.Capabilities{StreamsText: true, Steers: true, Resumes: true},
+		Capabilities: &pb.Capabilities{Steers: true, Resumes: true},
 	}}})
 	return &conn{host: h, s: s}, nil
 }

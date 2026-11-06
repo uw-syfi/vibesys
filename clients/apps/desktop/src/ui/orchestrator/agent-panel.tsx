@@ -197,6 +197,7 @@ function SentMessages(props: {
               leadBrief: true,
               handoffReminder: true,
               leadIdleReminder: true,
+              runLimitReached: true,
             })
               ? message.body.value
               : ''
@@ -317,6 +318,7 @@ export function AgentPanel(props: {
               leadBrief: true,
               handoffReminder: true,
               leadIdleReminder: true,
+              runLimitReached: true,
             }),
         )}
         send={props.send}

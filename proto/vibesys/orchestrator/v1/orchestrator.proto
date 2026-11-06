@@ -23,9 +23,22 @@ enum RunStatus {
 enum RunStopReason {
   RUN_STOP_REASON_UNSPECIFIED = 0;
   RUN_STOP_REASON_OPERATOR = 1;
-  RUN_STOP_REASON_DEADLINE = 2;
+  // The run's time limit was reached, and the lead did not finish within the grace period after it
+  // was told (or had already finished). Ends the run as ENDED.
+  RUN_STOP_REASON_TIME_LIMIT = 2;
   // The lead failed or was lost and could not be resumed. Ends the run as FAILED.
   RUN_STOP_REASON_LEAD_GONE = 3;
+  // The run's cost limit was reached: see RUN_STOP_REASON_TIME_LIMIT. Ends the run as ENDED.
+  RUN_STOP_REASON_COST_LIMIT = 4;
+}
+
+// RunLimit is a limit an operator can put on a run.
+enum RunLimit {
+  RUN_LIMIT_UNSPECIFIED = 0;
+  // How long the run may take, from its start.
+  RUN_LIMIT_TIME = 1;
+  // What the run may cost in dollars, as the finished turns of its agents report it.
+  RUN_LIMIT_COST = 2;
 }
 
 enum AgentRole {
@@ -199,14 +212,14 @@ message Run {
   string lead_agent_id = 5 [(buf.validate.field).string.min_len = 1];
   // How many non-lead agents may be live at once.
   uint32 fanout_limit = 6;
-  // Absent when the run has no deadline.
+  // When the run reaches its time limit. Absent when the run has no time limit.
   google.protobuf.Timestamp deadline = 7;
   google.protobuf.Timestamp created_at = 8 [(buf.validate.field).required = true];
   // Set when the run left RUNNING.
   RunStopReason stop_reason = 9 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Timestamp ended_at = 10;
-  reserved 11;
-  reserved "cli_location";
+  reserved 11, 20;
+  reserved "cli_location", "job_tool";
   // How many reports the run's lead has posted. The next report is numbered one more.
   uint32 reports_posted = 12;
   // Set while the run has nothing left that could move it: its lead is idle, no other agent is
@@ -220,8 +233,9 @@ message Run {
   uint32 lead_reminders = 15;
   // What every turn of every agent of the run has cost, so far.
   Usage usage = 16;
-  // The lead's latest report is a final one and it has had no new input since: it has finished, so
-  // the run is not stalled and the lead is not reminded.
+  // The lead's latest report is a final one and it has started no new work since (it has spawned no
+  // agent, no job has started and it has posted no report): it has finished, so the run is not
+  // stalled and the lead is not reminded, however it answers a question put to it.
   bool final_reported = 17;
   // The agents this run may spend on, set when it starts and never changed. A subagent is launched
   // only on one of these.
@@ -230,10 +244,21 @@ message Run {
   // because they hold changes git does not have. Empty while the run is live, and for a run that left
   // none. The run's operator decides what becomes of them.
   repeated KeptCheckout kept_checkouts = 19;
-  // The job tool this run's agents use. Recorded when the run starts and never changed, so a relaunch
-  // of any of its sessions meets the same daemon. It is stored; item 10 of the redesign moves it out
-  // of what clients receive.
-  JobToolEndpoint job_tool = 20;
+  // The run failed and its lead never ran a turn: it never opened, usually because the host could
+  // not start the agent. Such a run is a refused start more than a run, so a listing leaves it out
+  // unless asked. False for every other run, and for runs recorded before this was known.
+  bool never_opened = 21;
+  // The most the run may cost in dollars. Absent when the run has no cost limit. The cost counted
+  // is that of finished turns, so a run can pass the limit by what was in flight when it was reached.
+  optional double max_cost_usd = 22 [(buf.validate.field).double = {
+    finite: true
+    gt: 0
+  }];
+  // Which limit the run has reached, and when. Unspecified while it has reached none. From then on
+  // the lead has been told to finish, new agents are refused, and the run stops once the lead has
+  // finished or the grace period has passed.
+  RunLimit limit_reached = 23 [(buf.validate.field).enum.defined_only = true];
+  google.protobuf.Timestamp limit_reached_at = 24;
 }
 
 // KeptCheckout is one agent's working copy of the run's repository, left in place because removing
@@ -253,16 +278,6 @@ message AllowedAgent {
     not_in: [0]
   }];
   string model = 2;
-}
-
-// JobToolEndpoint is the vibesys-cli a run's agents run and the daemon it serves, as that tool named
-// it when the run started (`daemon ensure --json`). Both are absolute paths, and neither says
-// anything about how the tool lays out what it keeps there.
-message JobToolEndpoint {
-  // The program the agents run. It becomes SkillEnvironment.cli (vibesys/cli/v1/env.proto).
-  string executable = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
-  // The tool's runtime directory. It becomes JobToolPlace.runtime_directory.
-  string runtime_directory = 2 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
 }
 
 message Agent {
@@ -286,10 +301,9 @@ message Agent {
     defined_only: true
     not_in: [0]
   }];
-  // What the next session of this agent resumes with. Opaque; empty until a session that can resume
-  // opened.
-  bytes resume_token = 11 [(buf.validate.field).bytes.max_len = 4096];
-  // Absent until the session opened.
+  reserved 11;
+  reserved "resume_token";
+  // Absent until the session opened, and for a session that can neither steer nor resume.
   Capabilities capabilities = 12;
   google.protobuf.Timestamp started_at = 13 [(buf.validate.field).required = true];
   google.protobuf.Timestamp ended_at = 14;
@@ -318,7 +332,8 @@ message Agent {
 // Capabilities are what a session can do. It reports them when it opens, so
 // that the orchestrator never branches on a harness.
 message Capabilities {
-  bool streams_text = 1;
+  reserved 1;
+  reserved "streams_text";
   bool steers = 2;
   bool resumes = 3;
 }
@@ -603,6 +618,23 @@ message LeadIdleReminder {
   uint32 judges_started = 4;
 }
 
+// RunLimitReached tells a lead that its run has reached a limit, so that it finishes: it posts its
+// final report and starts nothing new.
+message RunLimitReached {
+  RunLimit limit = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // How long the run has been going.
+  uint32 elapsed_seconds = 2;
+  // What the run has cost so far, absent when no turn reported a cost.
+  optional double spent_usd = 3;
+  // The cost limit, absent when the run has none.
+  optional double max_cost_usd = 4;
+  // How long the run goes on after this message before it is stopped.
+  uint32 grace_seconds = 5;
+}
+
 message Message {
   string id = 1 [(buf.validate.field).string.min_len = 1];
   string run_id = 2 [(buf.validate.field).string.min_len = 1];
@@ -633,6 +665,7 @@ message Message {
     LeadBrief lead_brief = 16;
     HandoffReminder handoff_reminder = 17;
     LeadIdleReminder lead_idle_reminder = 18;
+    RunLimitReached run_limit_reached = 19;
   }
 }
 

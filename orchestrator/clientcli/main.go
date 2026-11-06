@@ -17,8 +17,8 @@ const Program = "vibesys-client"
 // Usage is the text printed for a usage error and for --help.
 const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... | release verify ...
   run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--fanout N]
-            [--model M] [--effort E] [--allow-agent HARNESS[:MODEL]]... [--deadline RFC3339] [--detach] [--json]
-  run list [--json]
+            [--model M] [--effort E] [--allow-agent HARNESS[:MODEL]]... [--max-time DURATION] [--max-cost DOLLARS] [--detach] [--json]
+  run list [--all] [--json]
   run attach [RUN]
   run get [RUN] [--json]
   run wait [RUN] --until started|report|progress|stalled|ended --timeout DURATION [--after N] [--json]
@@ -34,6 +34,14 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... 
 
 A run starts subagents only on the lead's harness and model, and on each --allow-agent: a harness alone
 allows its default model. A spawn outside that is refused, and run get shows what is allowed.
+A run has no limit unless run start is given one: --max-time (such as 30m) and --max-cost (dollars). When a
+limit is reached the lead is told once to finish and post its final report, a spawn is refused naming the
+limit, and the run stops when the lead has posted the final report, or 10 minutes after the lead was told.
+run get and run wait then say the run ended by its time limit or cost limit. The host counts the time from
+the start. The cost is the sum of what the agents' finished turns reported, so a run can pass --max-cost by
+what is in flight when the limit is reached, and a turn whose provider reports no cost adds nothing: for a
+model the agent library cannot price, --max-cost never takes effect, and run get says so once a turn has
+finished with no cost reported.
 RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository. When
 no run is live there, an omitted RUN means its most recent run to run get, run stop and run attach: get
 shows it, attach replays it, and stop says it has already ended and exits 0, as for any RUN that has.

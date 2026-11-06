@@ -1,0 +1,9 @@
+{{if eq .Limit "time" -}}
+Your run has reached its time limit: it has been going for {{.ElapsedMinutes}} minutes.
+{{- else -}}
+Your run has reached its cost limit of ${{printf "%.2f" .MaxCost}}{{if .HasSpent}}; it has spent ${{printf "%.2f" .Spent}}{{end}}.
+{{- end}}
+
+Finish now. `spawn_agent` is refused from this point, so start no new plan, worker or judge. If a candidate has been judged and beats the base, promote it. Then send a report of kind `final` with `post_report`: say which commit is best, what it measured against the base, and what you did not get to.
+
+The run stops when you post the final report, and in any case {{.GraceMinutes}} minutes after this message; every agent still working is stopped with it.

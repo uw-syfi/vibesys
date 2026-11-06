@@ -36,22 +36,29 @@ func snapshotFrame(seq uint64, truncated bool, runs []*pb.Run, agents []*pb.Agen
 	}}}
 }
 
-func eventFrame(seq uint64, run string, minutes int, body func(*pb.Event)) *pb.WatchRunsResponse {
-	ev := &pb.Event{Sequence: seq, RunId: run, At: at(minutes)}
+// snapshotWithSearch is a snapshot frame that also carries the search view of its run.
+func snapshotWithSearch(seq uint64, runs []*pb.Run, agents []*pb.Agent, search *pb.SearchState) *pb.WatchRunsResponse {
+	return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Snapshot{Snapshot: &pb.RunsSnapshot{
+		Runs: runs, Agents: agents, Searches: []*pb.SearchState{search}, Sequence: seq,
+	}}}
+}
+
+func eventFrame(seq uint64, run string, minutes int, body func(*pb.RunChange)) *pb.WatchRunsResponse {
+	ev := &pb.RunChange{Sequence: seq, RunId: run, At: at(minutes)}
 	body(ev)
-	return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Event{Event: ev}}
+	return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Change{Change: ev}}
 }
 
 func runEvent(seq uint64, r *pb.Run, minutes int) *pb.WatchRunsResponse {
-	return eventFrame(seq, r.GetId(), minutes, func(ev *pb.Event) { ev.Body = &pb.Event_RunUpdated{RunUpdated: r} })
+	return eventFrame(seq, r.GetId(), minutes, func(ev *pb.RunChange) { ev.Body = &pb.RunChange_Run{Run: r} })
 }
 
 func agentEvent(seq uint64, a *pb.Agent, minutes int) *pb.WatchRunsResponse {
-	return eventFrame(seq, a.GetRunId(), minutes, func(ev *pb.Event) { ev.Body = &pb.Event_AgentUpdated{AgentUpdated: a} })
+	return eventFrame(seq, a.GetRunId(), minutes, func(ev *pb.RunChange) { ev.Body = &pb.RunChange_Agent{Agent: a} })
 }
 
 func messageEvent(seq uint64, m *pb.Message, minutes int) *pb.WatchRunsResponse {
-	return eventFrame(seq, m.GetRunId(), minutes, func(ev *pb.Event) { ev.Body = &pb.Event_MessageUpdated{MessageUpdated: m} })
+	return eventFrame(seq, m.GetRunId(), minutes, func(ev *pb.RunChange) { ev.Body = &pb.RunChange_Message{Message: m} })
 }
 
 // reportMessage is the first progress report of a run.

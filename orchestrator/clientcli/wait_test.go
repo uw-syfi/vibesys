@@ -72,7 +72,7 @@ func TestWaitOnARunThatEndsFirstExitsOne(t *testing.T) {
 	if got.code != 1 {
 		t.Fatalf("exit %d, want 1; stderr %q", got.code, got.stderr)
 	}
-	contains(t, "stderr", got.stderr, "ended before a final report was posted")
+	contains(t, "stderr", got.stderr, "ended by operator before a final report was posted")
 }
 
 func TestWaitForTheEndOfARunThatFailedExitsOne(t *testing.T) {
@@ -245,5 +245,55 @@ func TestWaitForAReportWaitsWhenARunHasOnlyProgressNotes(t *testing.T) {
 	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(5, false, []*pb.Run{reported("run-1", 1)}, []*pb.Agent{lead}, note)}}))
 	if got := w.runWaitingToTimeOut(waitArgs("report")...); got.code != 3 {
 		t.Fatalf("exit %d, want 3; stderr %q", got.code, got.stderr)
+	}
+}
+
+// A lead that gave its final report and then answered a question in text has not stalled, and a wait
+// for a later final report does not say it has: it times out saying the lead's report is final and it
+// started nothing since, which is how a person learns the answer is in the lead's reply.
+func TestWaitAfterAFinalReportTimesOutWithoutCallingTheRunStalled(t *testing.T) {
+	run := reported("run-1", 1)
+	run.FinalReported = true
+	final := reportOf("run-1", "m1", "the result", 1, 1, pb.ReportKind_REPORT_KIND_FINAL)
+	frame := snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)}, final)
+	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	got := w.runWaitingToTimeOut(append(waitArgs("report"), "--after", "1")...)
+	if got.code != 3 {
+		t.Fatalf("exit %d, want 3; stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stderr", got.stderr, "run-1 is running, its lead has given its final report", "number 1, is final", "answered in text")
+	if strings.Contains(got.stderr, "stalled") {
+		t.Errorf("a lead that finished is called stalled: %q", got.stderr)
+	}
+
+	// Without --after the same wait returns at once with that final report.
+	w = newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	if got := w.run(context.Background(), waitArgs("report")...); got.code != 0 {
+		t.Fatalf("without --after: exit %d, stderr %q", got.code, got.stderr)
+	}
+}
+
+// No wait hangs past the end of a run: one for a report on a run its limit stopped returns at once,
+// failed, naming the limit; one for its end returns normally.
+func TestWaitsOnARunStoppedByItsLimitReturnAndNameTheLimit(t *testing.T) {
+	for _, reason := range []pb.RunStopReason{pb.RunStopReason_RUN_STOP_REASON_TIME_LIMIT, pb.RunStopReason_RUN_STOP_REASON_COST_LIMIT} {
+		ended := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_ENDED, 0)
+		ended.StopReason = reason
+		frame := snapshotFrame(5, false, []*pb.Run{ended}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ENDED)})
+		words := strings.ToLower(strings.ReplaceAll(strings.TrimPrefix(reason.String(), "RUN_STOP_REASON_"), "_", " "))
+
+		w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+		got := w.run(context.Background(), waitArgs("report")...)
+		if got.code != 1 {
+			t.Fatalf("%s: wait for a report exited %d, want 1; stderr %q", reason, got.code, got.stderr)
+		}
+		contains(t, "stderr", got.stderr, "ended by "+words+" before a final report was posted")
+
+		w = newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+		got = w.run(context.Background(), waitArgs("ended")...)
+		if got.code != 0 {
+			t.Fatalf("%s: wait for the end exited %d, stderr %q", reason, got.code, got.stderr)
+		}
+		contains(t, "stdout", got.stdout, "ended by "+words)
 	}
 }

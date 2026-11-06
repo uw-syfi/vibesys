@@ -223,7 +223,7 @@ class AgentshimDriver:
         self._session = session
         profile = session.profile
         capabilities = orch.Capabilities(
-            streams_text=True, steers=profile.supports_steer, resumes=profile.supports_resume
+            steers=profile.supports_steer, resumes=profile.supports_resume
         )
         return Opened(conversation_id or "", capabilities)
 

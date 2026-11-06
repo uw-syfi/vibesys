@@ -1,13 +1,13 @@
 import {describe, expect, it} from '@effect/vitest';
 import {
   decodeValidated,
-  EventSchema,
   encodeMessage,
   Harness,
   PlanSchema,
+  RunChangeSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
-import {applyEvent} from '../../state/orchestrator/fold.js';
+import {applyChange} from '../../state/orchestrator/fold.js';
 import {emptyState} from '../../state/orchestrator/state.js';
 import {fanoutOverTime, runAgents} from '../../state/orchestrator/views.js';
 import {generateScenario} from './index.js';
@@ -21,9 +21,9 @@ describe('a generated run', () => {
         fc.boolean(),
         (seed, subagents, live) => {
           const scenario = generateScenario({seed, subagents, live});
-          scenario.events.forEach((event, index) => {
+          scenario.changes.forEach((event, index) => {
             expect(event.sequence).toBe(BigInt(index + 1));
-            const decoded = decodeValidated(EventSchema, encodeMessage(EventSchema, event));
+            const decoded = decodeValidated(RunChangeSchema, encodeMessage(RunChangeSchema, event));
             expect(decoded.sequence).toBe(event.sequence);
           });
           for (const plan of scenario.plans)
@@ -41,7 +41,7 @@ describe('a generated run', () => {
 
   it('the long fixture has ten agents, both harnesses, and several open at once', () => {
     const scenario = generateScenario({seed: 11, subagents: 9, live: true});
-    const state = scenario.events.reduce(applyEvent, emptyState);
+    const state = scenario.changes.reduce(applyChange, emptyState);
     const agents = runAgents(state, scenario.runId);
     expect(agents).toHaveLength(10);
     expect(new Set(agents.map(agent => agent.harness))).toEqual(

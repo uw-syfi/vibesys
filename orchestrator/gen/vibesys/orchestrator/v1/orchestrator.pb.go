@@ -90,9 +90,13 @@ type RunStopReason int32
 const (
 	RunStopReason_RUN_STOP_REASON_UNSPECIFIED RunStopReason = 0
 	RunStopReason_RUN_STOP_REASON_OPERATOR    RunStopReason = 1
-	RunStopReason_RUN_STOP_REASON_DEADLINE    RunStopReason = 2
+	// The run's time limit was reached, and the lead did not finish within the grace period after it
+	// was told (or had already finished). Ends the run as ENDED.
+	RunStopReason_RUN_STOP_REASON_TIME_LIMIT RunStopReason = 2
 	// The lead failed or was lost and could not be resumed. Ends the run as FAILED.
 	RunStopReason_RUN_STOP_REASON_LEAD_GONE RunStopReason = 3
+	// The run's cost limit was reached: see RUN_STOP_REASON_TIME_LIMIT. Ends the run as ENDED.
+	RunStopReason_RUN_STOP_REASON_COST_LIMIT RunStopReason = 4
 )
 
 // Enum value maps for RunStopReason.
@@ -100,14 +104,16 @@ var (
 	RunStopReason_name = map[int32]string{
 		0: "RUN_STOP_REASON_UNSPECIFIED",
 		1: "RUN_STOP_REASON_OPERATOR",
-		2: "RUN_STOP_REASON_DEADLINE",
+		2: "RUN_STOP_REASON_TIME_LIMIT",
 		3: "RUN_STOP_REASON_LEAD_GONE",
+		4: "RUN_STOP_REASON_COST_LIMIT",
 	}
 	RunStopReason_value = map[string]int32{
 		"RUN_STOP_REASON_UNSPECIFIED": 0,
 		"RUN_STOP_REASON_OPERATOR":    1,
-		"RUN_STOP_REASON_DEADLINE":    2,
+		"RUN_STOP_REASON_TIME_LIMIT":  2,
 		"RUN_STOP_REASON_LEAD_GONE":   3,
+		"RUN_STOP_REASON_COST_LIMIT":  4,
 	}
 )
 
@@ -136,6 +142,58 @@ func (x RunStopReason) Number() protoreflect.EnumNumber {
 // Deprecated: Use RunStopReason.Descriptor instead.
 func (RunStopReason) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{1}
+}
+
+// RunLimit is a limit an operator can put on a run.
+type RunLimit int32
+
+const (
+	RunLimit_RUN_LIMIT_UNSPECIFIED RunLimit = 0
+	// How long the run may take, from its start.
+	RunLimit_RUN_LIMIT_TIME RunLimit = 1
+	// What the run may cost in dollars, as the finished turns of its agents report it.
+	RunLimit_RUN_LIMIT_COST RunLimit = 2
+)
+
+// Enum value maps for RunLimit.
+var (
+	RunLimit_name = map[int32]string{
+		0: "RUN_LIMIT_UNSPECIFIED",
+		1: "RUN_LIMIT_TIME",
+		2: "RUN_LIMIT_COST",
+	}
+	RunLimit_value = map[string]int32{
+		"RUN_LIMIT_UNSPECIFIED": 0,
+		"RUN_LIMIT_TIME":        1,
+		"RUN_LIMIT_COST":        2,
+	}
+)
+
+func (x RunLimit) Enum() *RunLimit {
+	p := new(RunLimit)
+	*p = x
+	return p
+}
+
+func (x RunLimit) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RunLimit) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[2].Descriptor()
+}
+
+func (RunLimit) Type() protoreflect.EnumType {
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[2]
+}
+
+func (x RunLimit) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RunLimit.Descriptor instead.
+func (RunLimit) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{2}
 }
 
 type AgentRole int32
@@ -183,11 +241,11 @@ func (x AgentRole) String() string {
 }
 
 func (AgentRole) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[2].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[3].Descriptor()
 }
 
 func (AgentRole) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[2]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[3]
 }
 
 func (x AgentRole) Number() protoreflect.EnumNumber {
@@ -196,7 +254,7 @@ func (x AgentRole) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AgentRole.Descriptor instead.
 func (AgentRole) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{3}
 }
 
 // AgentStatus is where an agent's session is. ENDED, FAILED and LOST are final for the session;
@@ -256,11 +314,11 @@ func (x AgentStatus) String() string {
 }
 
 func (AgentStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[3].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[4].Descriptor()
 }
 
 func (AgentStatus) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[3]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[4]
 }
 
 func (x AgentStatus) Number() protoreflect.EnumNumber {
@@ -269,7 +327,7 @@ func (x AgentStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AgentStatus.Descriptor instead.
 func (AgentStatus) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{4}
 }
 
 // AgentStopStage is how far an agent's stop has come. An agent's status keeps saying what its
@@ -312,11 +370,11 @@ func (x AgentStopStage) String() string {
 }
 
 func (AgentStopStage) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[4].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[5].Descriptor()
 }
 
 func (AgentStopStage) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[4]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[5]
 }
 
 func (x AgentStopStage) Number() protoreflect.EnumNumber {
@@ -325,7 +383,7 @@ func (x AgentStopStage) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AgentStopStage.Descriptor instead.
 func (AgentStopStage) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{5}
 }
 
 // TurnTrigger is what started a turn.
@@ -385,11 +443,11 @@ func (x TurnTrigger) String() string {
 }
 
 func (TurnTrigger) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[5].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[6].Descriptor()
 }
 
 func (TurnTrigger) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[5]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[6]
 }
 
 func (x TurnTrigger) Number() protoreflect.EnumNumber {
@@ -398,7 +456,7 @@ func (x TurnTrigger) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TurnTrigger.Descriptor instead.
 func (TurnTrigger) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{6}
 }
 
 // TurnStatus is where a turn is. All but RUNNING are final.
@@ -441,11 +499,11 @@ func (x TurnStatus) String() string {
 }
 
 func (TurnStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[6].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[7].Descriptor()
 }
 
 func (TurnStatus) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[6]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[7]
 }
 
 func (x TurnStatus) Number() protoreflect.EnumNumber {
@@ -454,7 +512,7 @@ func (x TurnStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TurnStatus.Descriptor instead.
 func (TurnStatus) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{7}
 }
 
 // ItemStatus is where an item is. FINISHED and FAILED are final.
@@ -494,11 +552,11 @@ func (x ItemStatus) String() string {
 }
 
 func (ItemStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[7].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[8].Descriptor()
 }
 
 func (ItemStatus) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[7]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[8]
 }
 
 func (x ItemStatus) Number() protoreflect.EnumNumber {
@@ -507,7 +565,7 @@ func (x ItemStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ItemStatus.Descriptor instead.
 func (ItemStatus) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{8}
 }
 
 // Harness is the agent CLI behind a session. Only what holds a session maps it to a provider name.
@@ -544,11 +602,11 @@ func (x Harness) String() string {
 }
 
 func (Harness) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[8].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[9].Descriptor()
 }
 
 func (Harness) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[8]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[9]
 }
 
 func (x Harness) Number() protoreflect.EnumNumber {
@@ -557,7 +615,7 @@ func (x Harness) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Harness.Descriptor instead.
 func (Harness) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{9}
 }
 
 // Delivery is where a message is. CONSUMED and REJECTED are final.
@@ -609,11 +667,11 @@ func (x Delivery) String() string {
 }
 
 func (Delivery) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[9].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[10].Descriptor()
 }
 
 func (Delivery) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[9]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[10]
 }
 
 func (x Delivery) Number() protoreflect.EnumNumber {
@@ -622,7 +680,7 @@ func (x Delivery) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Delivery.Descriptor instead.
 func (Delivery) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{10}
 }
 
 // Rejection says why a message was not delivered.
@@ -673,11 +731,11 @@ func (x Rejection) String() string {
 }
 
 func (Rejection) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[10].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[11].Descriptor()
 }
 
 func (Rejection) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[10]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[11]
 }
 
 func (x Rejection) Number() protoreflect.EnumNumber {
@@ -686,7 +744,7 @@ func (x Rejection) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Rejection.Descriptor instead.
 func (Rejection) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{11}
 }
 
 // StartFailureReason says why an agent's session never opened. A session opens only once its
@@ -759,11 +817,11 @@ func (x StartFailureReason) String() string {
 }
 
 func (StartFailureReason) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[11].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[12].Descriptor()
 }
 
 func (StartFailureReason) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[11]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[12]
 }
 
 func (x StartFailureReason) Number() protoreflect.EnumNumber {
@@ -772,7 +830,7 @@ func (x StartFailureReason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StartFailureReason.Descriptor instead.
 func (StartFailureReason) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{12}
 }
 
 // ReportKind says what a report is for. A final report says the lead has finished what it was asked
@@ -810,11 +868,11 @@ func (x ReportKind) String() string {
 }
 
 func (ReportKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[12].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[13].Descriptor()
 }
 
 func (ReportKind) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[12]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[13]
 }
 
 func (x ReportKind) Number() protoreflect.EnumNumber {
@@ -823,7 +881,7 @@ func (x ReportKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ReportKind.Descriptor instead.
 func (ReportKind) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{13}
 }
 
 // JobOutcome is how a vibesys-cli job finished.
@@ -866,11 +924,11 @@ func (x JobOutcome) String() string {
 }
 
 func (JobOutcome) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[13].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[14].Descriptor()
 }
 
 func (JobOutcome) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[13]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[14]
 }
 
 func (x JobOutcome) Number() protoreflect.EnumNumber {
@@ -879,7 +937,7 @@ func (x JobOutcome) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobOutcome.Descriptor instead.
 func (JobOutcome) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{13}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{14}
 }
 
 // JudgeVerdict is what a judge found of a candidate's claim.
@@ -919,11 +977,11 @@ func (x JudgeVerdict) String() string {
 }
 
 func (JudgeVerdict) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[14].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[15].Descriptor()
 }
 
 func (JudgeVerdict) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[14]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[15]
 }
 
 func (x JudgeVerdict) Number() protoreflect.EnumNumber {
@@ -932,7 +990,7 @@ func (x JudgeVerdict) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JudgeVerdict.Descriptor instead.
 func (JudgeVerdict) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{14}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{15}
 }
 
 // Compatibility is the answer to a handshake, from the daemon's side.
@@ -972,11 +1030,11 @@ func (x Compatibility) String() string {
 }
 
 func (Compatibility) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[15].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[16].Descriptor()
 }
 
 func (Compatibility) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[15]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[16]
 }
 
 func (x Compatibility) Number() protoreflect.EnumNumber {
@@ -985,7 +1043,7 @@ func (x Compatibility) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Compatibility.Descriptor instead.
 func (Compatibility) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{15}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{16}
 }
 
 type Run struct {
@@ -997,7 +1055,7 @@ type Run struct {
 	LeadAgentId string                 `protobuf:"bytes,5,opt,name=lead_agent_id,json=leadAgentId,proto3" json:"lead_agent_id,omitempty"`
 	// How many non-lead agents may be live at once.
 	FanoutLimit uint32 `protobuf:"varint,6,opt,name=fanout_limit,json=fanoutLimit,proto3" json:"fanout_limit,omitempty"`
-	// Absent when the run has no deadline.
+	// When the run reaches its time limit. Absent when the run has no time limit.
 	Deadline  *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// Set when the run left RUNNING.
@@ -1016,8 +1074,9 @@ type Run struct {
 	LeadReminders uint32 `protobuf:"varint,15,opt,name=lead_reminders,json=leadReminders,proto3" json:"lead_reminders,omitempty"`
 	// What every turn of every agent of the run has cost, so far.
 	Usage *Usage `protobuf:"bytes,16,opt,name=usage,proto3" json:"usage,omitempty"`
-	// The lead's latest report is a final one and it has had no new input since: it has finished, so
-	// the run is not stalled and the lead is not reminded.
+	// The lead's latest report is a final one and it has started no new work since (it has spawned no
+	// agent, no job has started and it has posted no report): it has finished, so the run is not
+	// stalled and the lead is not reminded, however it answers a question put to it.
 	FinalReported bool `protobuf:"varint,17,opt,name=final_reported,json=finalReported,proto3" json:"final_reported,omitempty"`
 	// The agents this run may spend on, set when it starts and never changed. A subagent is launched
 	// only on one of these.
@@ -1026,12 +1085,20 @@ type Run struct {
 	// because they hold changes git does not have. Empty while the run is live, and for a run that left
 	// none. The run's operator decides what becomes of them.
 	KeptCheckouts []*KeptCheckout `protobuf:"bytes,19,rep,name=kept_checkouts,json=keptCheckouts,proto3" json:"kept_checkouts,omitempty"`
-	// The job tool this run's agents use. Recorded when the run starts and never changed, so a relaunch
-	// of any of its sessions meets the same daemon. It is stored; item 10 of the redesign moves it out
-	// of what clients receive.
-	JobTool       *JobToolEndpoint `protobuf:"bytes,20,opt,name=job_tool,json=jobTool,proto3" json:"job_tool,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// The run failed and its lead never ran a turn: it never opened, usually because the host could
+	// not start the agent. Such a run is a refused start more than a run, so a listing leaves it out
+	// unless asked. False for every other run, and for runs recorded before this was known.
+	NeverOpened bool `protobuf:"varint,21,opt,name=never_opened,json=neverOpened,proto3" json:"never_opened,omitempty"`
+	// The most the run may cost in dollars. Absent when the run has no cost limit. The cost counted
+	// is that of finished turns, so a run can pass the limit by what was in flight when it was reached.
+	MaxCostUsd *float64 `protobuf:"fixed64,22,opt,name=max_cost_usd,json=maxCostUsd,proto3,oneof" json:"max_cost_usd,omitempty"`
+	// Which limit the run has reached, and when. Unspecified while it has reached none. From then on
+	// the lead has been told to finish, new agents are refused, and the run stops once the lead has
+	// finished or the grace period has passed.
+	LimitReached   RunLimit               `protobuf:"varint,23,opt,name=limit_reached,json=limitReached,proto3,enum=vibesys.orchestrator.v1.RunLimit" json:"limit_reached,omitempty"`
+	LimitReachedAt *timestamppb.Timestamp `protobuf:"bytes,24,opt,name=limit_reached_at,json=limitReachedAt,proto3" json:"limit_reached_at,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *Run) Reset() {
@@ -1190,9 +1257,30 @@ func (x *Run) GetKeptCheckouts() []*KeptCheckout {
 	return nil
 }
 
-func (x *Run) GetJobTool() *JobToolEndpoint {
+func (x *Run) GetNeverOpened() bool {
 	if x != nil {
-		return x.JobTool
+		return x.NeverOpened
+	}
+	return false
+}
+
+func (x *Run) GetMaxCostUsd() float64 {
+	if x != nil && x.MaxCostUsd != nil {
+		return *x.MaxCostUsd
+	}
+	return 0
+}
+
+func (x *Run) GetLimitReached() RunLimit {
+	if x != nil {
+		return x.LimitReached
+	}
+	return RunLimit_RUN_LIMIT_UNSPECIFIED
+}
+
+func (x *Run) GetLimitReachedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LimitReachedAt
 	}
 	return nil
 }
@@ -1307,63 +1395,6 @@ func (x *AllowedAgent) GetModel() string {
 	return ""
 }
 
-// JobToolEndpoint is the vibesys-cli a run's agents run and the daemon it serves, as that tool named
-// it when the run started (`daemon ensure --json`). Both are absolute paths, and neither says
-// anything about how the tool lays out what it keeps there.
-type JobToolEndpoint struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The program the agents run. It becomes SkillEnvironment.cli (vibesys/cli/v1/env.proto).
-	Executable string `protobuf:"bytes,1,opt,name=executable,proto3" json:"executable,omitempty"`
-	// The tool's runtime directory. It becomes JobToolPlace.runtime_directory.
-	RuntimeDirectory string `protobuf:"bytes,2,opt,name=runtime_directory,json=runtimeDirectory,proto3" json:"runtime_directory,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
-}
-
-func (x *JobToolEndpoint) Reset() {
-	*x = JobToolEndpoint{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *JobToolEndpoint) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*JobToolEndpoint) ProtoMessage() {}
-
-func (x *JobToolEndpoint) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use JobToolEndpoint.ProtoReflect.Descriptor instead.
-func (*JobToolEndpoint) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *JobToolEndpoint) GetExecutable() string {
-	if x != nil {
-		return x.Executable
-	}
-	return ""
-}
-
-func (x *JobToolEndpoint) GetRuntimeDirectory() string {
-	if x != nil {
-		return x.RuntimeDirectory
-	}
-	return ""
-}
-
 type Agent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1377,10 +1408,7 @@ type Agent struct {
 	// Zero when not tied to a plan.
 	PlanNumber uint32      `protobuf:"varint,8,opt,name=plan_number,json=planNumber,proto3" json:"plan_number,omitempty"`
 	Status     AgentStatus `protobuf:"varint,10,opt,name=status,proto3,enum=vibesys.orchestrator.v1.AgentStatus" json:"status,omitempty"`
-	// What the next session of this agent resumes with. Opaque; empty until a session that can resume
-	// opened.
-	ResumeToken []byte `protobuf:"bytes,11,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"`
-	// Absent until the session opened.
+	// Absent until the session opened, and for a session that can neither steer nor resume.
 	Capabilities *Capabilities          `protobuf:"bytes,12,opt,name=capabilities,proto3" json:"capabilities,omitempty"`
 	StartedAt    *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	EndedAt      *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
@@ -1407,7 +1435,7 @@ type Agent struct {
 
 func (x *Agent) Reset() {
 	*x = Agent{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1419,7 +1447,7 @@ func (x *Agent) String() string {
 func (*Agent) ProtoMessage() {}
 
 func (x *Agent) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1432,7 +1460,7 @@ func (x *Agent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Agent.ProtoReflect.Descriptor instead.
 func (*Agent) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Agent) GetId() string {
@@ -1496,13 +1524,6 @@ func (x *Agent) GetStatus() AgentStatus {
 		return x.Status
 	}
 	return AgentStatus_AGENT_STATUS_UNSPECIFIED
-}
-
-func (x *Agent) GetResumeToken() []byte {
-	if x != nil {
-		return x.ResumeToken
-	}
-	return nil
 }
 
 func (x *Agent) GetCapabilities() *Capabilities {
@@ -1586,7 +1607,6 @@ func (x *Agent) GetUsage() *Usage {
 // that the orchestrator never branches on a harness.
 type Capabilities struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StreamsText   bool                   `protobuf:"varint,1,opt,name=streams_text,json=streamsText,proto3" json:"streams_text,omitempty"`
 	Steers        bool                   `protobuf:"varint,2,opt,name=steers,proto3" json:"steers,omitempty"`
 	Resumes       bool                   `protobuf:"varint,3,opt,name=resumes,proto3" json:"resumes,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1595,7 +1615,7 @@ type Capabilities struct {
 
 func (x *Capabilities) Reset() {
 	*x = Capabilities{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1607,7 +1627,7 @@ func (x *Capabilities) String() string {
 func (*Capabilities) ProtoMessage() {}
 
 func (x *Capabilities) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1620,14 +1640,7 @@ func (x *Capabilities) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Capabilities.ProtoReflect.Descriptor instead.
 func (*Capabilities) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *Capabilities) GetStreamsText() bool {
-	if x != nil {
-		return x.StreamsText
-	}
-	return false
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Capabilities) GetSteers() bool {
@@ -1659,7 +1672,7 @@ type Usage struct {
 
 func (x *Usage) Reset() {
 	*x = Usage{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1671,7 +1684,7 @@ func (x *Usage) String() string {
 func (*Usage) ProtoMessage() {}
 
 func (x *Usage) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1684,7 +1697,7 @@ func (x *Usage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Usage.ProtoReflect.Descriptor instead.
 func (*Usage) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Usage) GetInputTokens() uint64 {
@@ -1747,7 +1760,7 @@ type Turn struct {
 
 func (x *Turn) Reset() {
 	*x = Turn{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1759,7 +1772,7 @@ func (x *Turn) String() string {
 func (*Turn) ProtoMessage() {}
 
 func (x *Turn) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1772,7 +1785,7 @@ func (x *Turn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Turn.ProtoReflect.Descriptor instead.
 func (*Turn) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Turn) GetId() string {
@@ -1861,7 +1874,7 @@ type Item struct {
 
 func (x *Item) Reset() {
 	*x = Item{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1873,7 +1886,7 @@ func (x *Item) String() string {
 func (*Item) ProtoMessage() {}
 
 func (x *Item) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1886,7 +1899,7 @@ func (x *Item) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Item.ProtoReflect.Descriptor instead.
 func (*Item) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Item) GetId() string {
@@ -2011,7 +2024,7 @@ type Text struct {
 
 func (x *Text) Reset() {
 	*x = Text{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[9]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2023,7 +2036,7 @@ func (x *Text) String() string {
 func (*Text) ProtoMessage() {}
 
 func (x *Text) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[9]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2036,7 +2049,7 @@ func (x *Text) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Text.ProtoReflect.Descriptor instead.
 func (*Text) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *Text) GetText() string {
@@ -2060,7 +2073,7 @@ type ToolCall struct {
 
 func (x *ToolCall) Reset() {
 	*x = ToolCall{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2072,7 +2085,7 @@ func (x *ToolCall) String() string {
 func (*ToolCall) ProtoMessage() {}
 
 func (x *ToolCall) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2085,7 +2098,7 @@ func (x *ToolCall) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolCall.ProtoReflect.Descriptor instead.
 func (*ToolCall) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ToolCall) GetTool() string {
@@ -2156,7 +2169,7 @@ type Handoff struct {
 
 func (x *Handoff) Reset() {
 	*x = Handoff{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2168,7 +2181,7 @@ func (x *Handoff) String() string {
 func (*Handoff) ProtoMessage() {}
 
 func (x *Handoff) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2181,7 +2194,7 @@ func (x *Handoff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Handoff.ProtoReflect.Descriptor instead.
 func (*Handoff) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Handoff) GetPlanNumber() uint32 {
@@ -2319,7 +2332,7 @@ type WorkerHandoff struct {
 
 func (x *WorkerHandoff) Reset() {
 	*x = WorkerHandoff{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[12]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2331,7 +2344,7 @@ func (x *WorkerHandoff) String() string {
 func (*WorkerHandoff) ProtoMessage() {}
 
 func (x *WorkerHandoff) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[12]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2344,7 +2357,7 @@ func (x *WorkerHandoff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkerHandoff.ProtoReflect.Descriptor instead.
 func (*WorkerHandoff) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *WorkerHandoff) GetOutcome() isWorkerHandoff_Outcome {
@@ -2402,7 +2415,7 @@ type Candidate struct {
 
 func (x *Candidate) Reset() {
 	*x = Candidate{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[13]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2414,7 +2427,7 @@ func (x *Candidate) String() string {
 func (*Candidate) ProtoMessage() {}
 
 func (x *Candidate) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[13]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2427,7 +2440,7 @@ func (x *Candidate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Candidate.ProtoReflect.Descriptor instead.
 func (*Candidate) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{13}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Candidate) GetCommit() string {
@@ -2475,7 +2488,7 @@ type NoCandidate struct {
 
 func (x *NoCandidate) Reset() {
 	*x = NoCandidate{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[14]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2487,7 +2500,7 @@ func (x *NoCandidate) String() string {
 func (*NoCandidate) ProtoMessage() {}
 
 func (x *NoCandidate) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[14]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2500,7 +2513,7 @@ func (x *NoCandidate) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NoCandidate.ProtoReflect.Descriptor instead.
 func (*NoCandidate) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{14}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *NoCandidate) GetBlocker() string {
@@ -2523,7 +2536,7 @@ type PlannerHandoff struct {
 
 func (x *PlannerHandoff) Reset() {
 	*x = PlannerHandoff{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[15]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2535,7 +2548,7 @@ func (x *PlannerHandoff) String() string {
 func (*PlannerHandoff) ProtoMessage() {}
 
 func (x *PlannerHandoff) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[15]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2548,7 +2561,7 @@ func (x *PlannerHandoff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlannerHandoff.ProtoReflect.Descriptor instead.
 func (*PlannerHandoff) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{15}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PlannerHandoff) GetPlan() string {
@@ -2591,7 +2604,7 @@ type JudgeHandoff struct {
 
 func (x *JudgeHandoff) Reset() {
 	*x = JudgeHandoff{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[16]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2603,7 +2616,7 @@ func (x *JudgeHandoff) String() string {
 func (*JudgeHandoff) ProtoMessage() {}
 
 func (x *JudgeHandoff) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[16]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2616,7 +2629,7 @@ func (x *JudgeHandoff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JudgeHandoff.ProtoReflect.Descriptor instead.
 func (*JudgeHandoff) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{16}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *JudgeHandoff) GetCommit() string {
@@ -2655,7 +2668,7 @@ type CombinerHandoff struct {
 
 func (x *CombinerHandoff) Reset() {
 	*x = CombinerHandoff{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[17]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2667,7 +2680,7 @@ func (x *CombinerHandoff) String() string {
 func (*CombinerHandoff) ProtoMessage() {}
 
 func (x *CombinerHandoff) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[17]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2680,7 +2693,7 @@ func (x *CombinerHandoff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CombinerHandoff.ProtoReflect.Descriptor instead.
 func (*CombinerHandoff) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{17}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *CombinerHandoff) GetCommit() string {
@@ -2740,7 +2753,7 @@ type ProfilerHandoff struct {
 
 func (x *ProfilerHandoff) Reset() {
 	*x = ProfilerHandoff{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[18]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2752,7 +2765,7 @@ func (x *ProfilerHandoff) String() string {
 func (*ProfilerHandoff) ProtoMessage() {}
 
 func (x *ProfilerHandoff) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[18]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2765,7 +2778,7 @@ func (x *ProfilerHandoff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProfilerHandoff.ProtoReflect.Descriptor instead.
 func (*ProfilerHandoff) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{18}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ProfilerHandoff) GetQuestion() string {
@@ -2828,7 +2841,7 @@ type Report struct {
 
 func (x *Report) Reset() {
 	*x = Report{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[19]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2840,7 +2853,7 @@ func (x *Report) String() string {
 func (*Report) ProtoMessage() {}
 
 func (x *Report) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[19]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2853,7 +2866,7 @@ func (x *Report) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Report.ProtoReflect.Descriptor instead.
 func (*Report) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{19}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *Report) GetHeadline() string {
@@ -2918,7 +2931,7 @@ type JobFinished struct {
 
 func (x *JobFinished) Reset() {
 	*x = JobFinished{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[20]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2930,7 +2943,7 @@ func (x *JobFinished) String() string {
 func (*JobFinished) ProtoMessage() {}
 
 func (x *JobFinished) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[20]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2943,7 +2956,7 @@ func (x *JobFinished) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobFinished.ProtoReflect.Descriptor instead.
 func (*JobFinished) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{20}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *JobFinished) GetJobId() string {
@@ -2987,7 +3000,7 @@ type SubagentSettled struct {
 
 func (x *SubagentSettled) Reset() {
 	*x = SubagentSettled{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[21]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2999,7 +3012,7 @@ func (x *SubagentSettled) String() string {
 func (*SubagentSettled) ProtoMessage() {}
 
 func (x *SubagentSettled) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[21]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3012,7 +3025,7 @@ func (x *SubagentSettled) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubagentSettled.ProtoReflect.Descriptor instead.
 func (*SubagentSettled) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{21}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SubagentSettled) GetAgentId() string {
@@ -3046,7 +3059,7 @@ type HandoffReminder struct {
 
 func (x *HandoffReminder) Reset() {
 	*x = HandoffReminder{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[22]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3058,7 +3071,7 @@ func (x *HandoffReminder) String() string {
 func (*HandoffReminder) ProtoMessage() {}
 
 func (x *HandoffReminder) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[22]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3071,7 +3084,7 @@ func (x *HandoffReminder) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HandoffReminder.ProtoReflect.Descriptor instead.
 func (*HandoffReminder) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{22}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{21}
 }
 
 // LeadIdleReminder tells a lead that its run has stood still, so that it acts or says why not.
@@ -3090,7 +3103,7 @@ type LeadIdleReminder struct {
 
 func (x *LeadIdleReminder) Reset() {
 	*x = LeadIdleReminder{}
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[23]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3102,7 +3115,7 @@ func (x *LeadIdleReminder) String() string {
 func (*LeadIdleReminder) ProtoMessage() {}
 
 func (x *LeadIdleReminder) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[23]
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3115,7 +3128,7 @@ func (x *LeadIdleReminder) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LeadIdleReminder.ProtoReflect.Descriptor instead.
 func (*LeadIdleReminder) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{23}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *LeadIdleReminder) GetIdleSeconds() uint32 {
@@ -3146,6 +3159,88 @@ func (x *LeadIdleReminder) GetJudgesStarted() uint32 {
 	return 0
 }
 
+// RunLimitReached tells a lead that its run has reached a limit, so that it finishes: it posts its
+// final report and starts nothing new.
+type RunLimitReached struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Limit RunLimit               `protobuf:"varint,1,opt,name=limit,proto3,enum=vibesys.orchestrator.v1.RunLimit" json:"limit,omitempty"`
+	// How long the run has been going.
+	ElapsedSeconds uint32 `protobuf:"varint,2,opt,name=elapsed_seconds,json=elapsedSeconds,proto3" json:"elapsed_seconds,omitempty"`
+	// What the run has cost so far, absent when no turn reported a cost.
+	SpentUsd *float64 `protobuf:"fixed64,3,opt,name=spent_usd,json=spentUsd,proto3,oneof" json:"spent_usd,omitempty"`
+	// The cost limit, absent when the run has none.
+	MaxCostUsd *float64 `protobuf:"fixed64,4,opt,name=max_cost_usd,json=maxCostUsd,proto3,oneof" json:"max_cost_usd,omitempty"`
+	// How long the run goes on after this message before it is stopped.
+	GraceSeconds  uint32 `protobuf:"varint,5,opt,name=grace_seconds,json=graceSeconds,proto3" json:"grace_seconds,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunLimitReached) Reset() {
+	*x = RunLimitReached{}
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunLimitReached) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunLimitReached) ProtoMessage() {}
+
+func (x *RunLimitReached) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunLimitReached.ProtoReflect.Descriptor instead.
+func (*RunLimitReached) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *RunLimitReached) GetLimit() RunLimit {
+	if x != nil {
+		return x.Limit
+	}
+	return RunLimit_RUN_LIMIT_UNSPECIFIED
+}
+
+func (x *RunLimitReached) GetElapsedSeconds() uint32 {
+	if x != nil {
+		return x.ElapsedSeconds
+	}
+	return 0
+}
+
+func (x *RunLimitReached) GetSpentUsd() float64 {
+	if x != nil && x.SpentUsd != nil {
+		return *x.SpentUsd
+	}
+	return 0
+}
+
+func (x *RunLimitReached) GetMaxCostUsd() float64 {
+	if x != nil && x.MaxCostUsd != nil {
+		return *x.MaxCostUsd
+	}
+	return 0
+}
+
+func (x *RunLimitReached) GetGraceSeconds() uint32 {
+	if x != nil {
+		return x.GraceSeconds
+	}
+	return 0
+}
+
 type Message struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -3171,6 +3266,7 @@ type Message struct {
 	//	*Message_LeadBrief
 	//	*Message_HandoffReminder
 	//	*Message_LeadIdleReminder
+	//	*Message_RunLimitReached
 	Body          isMessage_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3350,6 +3446,15 @@ func (x *Message) GetLeadIdleReminder() *LeadIdleReminder {
 	return nil
 }
 
+func (x *Message) GetRunLimitReached() *RunLimitReached {
+	if x != nil {
+		if x, ok := x.Body.(*Message_RunLimitReached); ok {
+			return x.RunLimitReached
+		}
+	}
+	return nil
+}
+
 type isMessage_Body interface {
 	isMessage_Body()
 }
@@ -3393,6 +3498,10 @@ type Message_LeadIdleReminder struct {
 	LeadIdleReminder *LeadIdleReminder `protobuf:"bytes,18,opt,name=lead_idle_reminder,json=leadIdleReminder,proto3,oneof"`
 }
 
+type Message_RunLimitReached struct {
+	RunLimitReached *RunLimitReached `protobuf:"bytes,19,opt,name=run_limit_reached,json=runLimitReached,proto3,oneof"`
+}
+
 func (*Message_Text) isMessage_Body() {}
 
 func (*Message_Handoff) isMessage_Body() {}
@@ -3410,6 +3519,8 @@ func (*Message_LeadBrief) isMessage_Body() {}
 func (*Message_HandoffReminder) isMessage_Body() {}
 
 func (*Message_LeadIdleReminder) isMessage_Body() {}
+
+func (*Message_RunLimitReached) isMessage_Body() {}
 
 type LeadBrief struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
@@ -3540,7 +3651,7 @@ var File_vibesys_orchestrator_v1_orchestrator_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\n" +
-	"*vibesys/orchestrator/v1/orchestrator.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\x83\b\n" +
+	"*vibesys/orchestrator/v1/orchestrator.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xd3\t\n" +
 	"\x03Run\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12'\n" +
 	"\n" +
@@ -3566,20 +3677,20 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x05usage\x18\x10 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageR\x05usage\x12%\n" +
 	"\x0efinal_reported\x18\x11 \x01(\bR\rfinalReported\x12L\n" +
 	"\x0eallowed_agents\x18\x12 \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgents\x12L\n" +
-	"\x0ekept_checkouts\x18\x13 \x03(\v2%.vibesys.orchestrator.v1.KeptCheckoutR\rkeptCheckouts\x12C\n" +
-	"\bjob_tool\x18\x14 \x01(\v2(.vibesys.orchestrator.v1.JobToolEndpointR\ajobToolJ\x04\b\v\x10\fR\fcli_location\"b\n" +
+	"\x0ekept_checkouts\x18\x13 \x03(\v2%.vibesys.orchestrator.v1.KeptCheckoutR\rkeptCheckouts\x12!\n" +
+	"\fnever_opened\x18\x15 \x01(\bR\vneverOpened\x127\n" +
+	"\fmax_cost_usd\x18\x16 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\n" +
+	"maxCostUsd\x88\x01\x01\x12P\n" +
+	"\rlimit_reached\x18\x17 \x01(\x0e2!.vibesys.orchestrator.v1.RunLimitB\b\xbaH\x05\x82\x01\x02\x10\x01R\flimitReached\x12D\n" +
+	"\x10limit_reached_at\x18\x18 \x01(\v2\x1a.google.protobuf.TimestampR\x0elimitReachedAtB\x0f\n" +
+	"\r_max_cost_usdJ\x04\b\v\x10\fJ\x04\b\x14\x10\x15R\fcli_locationR\bjob_tool\"b\n" +
 	"\fKeptCheckout\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12.\n" +
 	"\blocation\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]+$R\blocation\"l\n" +
 	"\fAllowedAgent\x12F\n" +
 	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aharness\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\"\x86\x01\n" +
-	"\x0fJobToolEndpoint\x122\n" +
-	"\n" +
-	"executable\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]*$R\n" +
-	"executable\x12?\n" +
-	"\x11runtime_directory\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]*$R\x10runtimeDirectory\"\xc6\b\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\"\xad\b\n" +
 	"\x05Agent\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12\x1e\n" +
 	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12&\n" +
@@ -3594,8 +3705,7 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"planNumber\x12H\n" +
 	"\x06status\x18\n" +
 	" \x01(\x0e2$.vibesys.orchestrator.v1.AgentStatusB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12+\n" +
-	"\fresume_token\x18\v \x01(\fB\b\xbaH\x05z\x03\x18\x80 R\vresumeToken\x12I\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12I\n" +
 	"\fcapabilities\x18\f \x01(\v2%.vibesys.orchestrator.v1.CapabilitiesR\fcapabilities\x12A\n" +
 	"\n" +
 	"started_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\x125\n" +
@@ -3611,11 +3721,10 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"end_detail\x18\x13 \x01(\tB\b\xbaH\x05r\x03\x18\xe8\aR\tendDetail\x12g\n" +
 	"\x14start_failure_reason\x18\x14 \x01(\x0e2+.vibesys.orchestrator.v1.StartFailureReasonB\b\xbaH\x05\x82\x01\x02\x10\x01R\x12startFailureReason\x12)\n" +
 	"\x10handoff_reminded\x18\x15 \x01(\bR\x0fhandoffReminded\x124\n" +
-	"\x05usage\x18\x16 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageR\x05usage\"c\n" +
-	"\fCapabilities\x12!\n" +
-	"\fstreams_text\x18\x01 \x01(\bR\vstreamsText\x12\x16\n" +
+	"\x05usage\x18\x16 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageR\x05usageJ\x04\b\v\x10\fR\fresume_token\"T\n" +
+	"\fCapabilities\x12\x16\n" +
 	"\x06steers\x18\x02 \x01(\bR\x06steers\x12\x18\n" +
-	"\aresumes\x18\x03 \x01(\bR\aresumes\"\x9a\x03\n" +
+	"\aresumes\x18\x03 \x01(\bR\aresumesJ\x04\b\x01\x10\x02R\fstreams_text\"\x9a\x03\n" +
 	"\x05Usage\x12&\n" +
 	"\finput_tokens\x18\x01 \x01(\x04H\x00R\vinputTokens\x88\x01\x01\x12/\n" +
 	"\x11cache_read_tokens\x18\x02 \x01(\x04H\x01R\x0fcacheReadTokens\x88\x01\x01\x127\n" +
@@ -3745,7 +3854,18 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\fidle_seconds\x18\x01 \x01(\rR\vidleSeconds\x12+\n" +
 	"\x11subagents_started\x18\x02 \x01(\rR\x10subagentsStarted\x12'\n" +
 	"\x0fworkers_started\x18\x03 \x01(\rR\x0eworkersStarted\x12%\n" +
-	"\x0ejudges_started\x18\x04 \x01(\rR\rjudgesStarted\"\xbc\a\n" +
+	"\x0ejudges_started\x18\x04 \x01(\rR\rjudgesStarted\"\x8c\x02\n" +
+	"\x0fRunLimitReached\x12C\n" +
+	"\x05limit\x18\x01 \x01(\x0e2!.vibesys.orchestrator.v1.RunLimitB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05limit\x12'\n" +
+	"\x0felapsed_seconds\x18\x02 \x01(\rR\x0eelapsedSeconds\x12 \n" +
+	"\tspent_usd\x18\x03 \x01(\x01H\x00R\bspentUsd\x88\x01\x01\x12%\n" +
+	"\fmax_cost_usd\x18\x04 \x01(\x01H\x01R\n" +
+	"maxCostUsd\x88\x01\x01\x12#\n" +
+	"\rgrace_seconds\x18\x05 \x01(\rR\fgraceSecondsB\f\n" +
+	"\n" +
+	"_spent_usdB\x0f\n" +
+	"\r_max_cost_usd\"\x94\b\n" +
 	"\aMessage\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12\x1e\n" +
 	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12\"\n" +
@@ -3766,7 +3886,8 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\n" +
 	"lead_brief\x18\x10 \x01(\v2\".vibesys.orchestrator.v1.LeadBriefH\x00R\tleadBrief\x12U\n" +
 	"\x10handoff_reminder\x18\x11 \x01(\v2(.vibesys.orchestrator.v1.HandoffReminderH\x00R\x0fhandoffReminder\x12Y\n" +
-	"\x12lead_idle_reminder\x18\x12 \x01(\v2).vibesys.orchestrator.v1.LeadIdleReminderH\x00R\x10leadIdleReminderB\r\n" +
+	"\x12lead_idle_reminder\x18\x12 \x01(\v2).vibesys.orchestrator.v1.LeadIdleReminderH\x00R\x10leadIdleReminder\x12V\n" +
+	"\x11run_limit_reached\x18\x13 \x01(\v2(.vibesys.orchestrator.v1.RunLimitReachedH\x00R\x0frunLimitReachedB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01\"g\n" +
 	"\tLeadBrief\x12\x1b\n" +
 	"\x04task\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12!\n" +
@@ -3782,12 +3903,17 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x12RUN_STATUS_RUNNING\x10\x02\x12\x17\n" +
 	"\x13RUN_STATUS_STOPPING\x10\x03\x12\x14\n" +
 	"\x10RUN_STATUS_ENDED\x10\x04\x12\x15\n" +
-	"\x11RUN_STATUS_FAILED\x10\x05*\x8b\x01\n" +
+	"\x11RUN_STATUS_FAILED\x10\x05*\xad\x01\n" +
 	"\rRunStopReason\x12\x1f\n" +
 	"\x1bRUN_STOP_REASON_UNSPECIFIED\x10\x00\x12\x1c\n" +
-	"\x18RUN_STOP_REASON_OPERATOR\x10\x01\x12\x1c\n" +
-	"\x18RUN_STOP_REASON_DEADLINE\x10\x02\x12\x1d\n" +
-	"\x19RUN_STOP_REASON_LEAD_GONE\x10\x03*\xb3\x01\n" +
+	"\x18RUN_STOP_REASON_OPERATOR\x10\x01\x12\x1e\n" +
+	"\x1aRUN_STOP_REASON_TIME_LIMIT\x10\x02\x12\x1d\n" +
+	"\x19RUN_STOP_REASON_LEAD_GONE\x10\x03\x12\x1e\n" +
+	"\x1aRUN_STOP_REASON_COST_LIMIT\x10\x04*M\n" +
+	"\bRunLimit\x12\x19\n" +
+	"\x15RUN_LIMIT_UNSPECIFIED\x10\x00\x12\x12\n" +
+	"\x0eRUN_LIMIT_TIME\x10\x01\x12\x12\n" +
+	"\x0eRUN_LIMIT_COST\x10\x02*\xb3\x01\n" +
 	"\tAgentRole\x12\x1a\n" +
 	"\x16AGENT_ROLE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fAGENT_ROLE_LEAD\x10\x01\x12\x16\n" +
@@ -3897,29 +4023,29 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP() []byte {
 	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescData
 }
 
-var file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 16)
+var file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 17)
 var file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 27)
 var file_vibesys_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(RunStatus)(0),                // 0: vibesys.orchestrator.v1.RunStatus
 	(RunStopReason)(0),            // 1: vibesys.orchestrator.v1.RunStopReason
-	(AgentRole)(0),                // 2: vibesys.orchestrator.v1.AgentRole
-	(AgentStatus)(0),              // 3: vibesys.orchestrator.v1.AgentStatus
-	(AgentStopStage)(0),           // 4: vibesys.orchestrator.v1.AgentStopStage
-	(TurnTrigger)(0),              // 5: vibesys.orchestrator.v1.TurnTrigger
-	(TurnStatus)(0),               // 6: vibesys.orchestrator.v1.TurnStatus
-	(ItemStatus)(0),               // 7: vibesys.orchestrator.v1.ItemStatus
-	(Harness)(0),                  // 8: vibesys.orchestrator.v1.Harness
-	(Delivery)(0),                 // 9: vibesys.orchestrator.v1.Delivery
-	(Rejection)(0),                // 10: vibesys.orchestrator.v1.Rejection
-	(StartFailureReason)(0),       // 11: vibesys.orchestrator.v1.StartFailureReason
-	(ReportKind)(0),               // 12: vibesys.orchestrator.v1.ReportKind
-	(JobOutcome)(0),               // 13: vibesys.orchestrator.v1.JobOutcome
-	(JudgeVerdict)(0),             // 14: vibesys.orchestrator.v1.JudgeVerdict
-	(Compatibility)(0),            // 15: vibesys.orchestrator.v1.Compatibility
-	(*Run)(nil),                   // 16: vibesys.orchestrator.v1.Run
-	(*KeptCheckout)(nil),          // 17: vibesys.orchestrator.v1.KeptCheckout
-	(*AllowedAgent)(nil),          // 18: vibesys.orchestrator.v1.AllowedAgent
-	(*JobToolEndpoint)(nil),       // 19: vibesys.orchestrator.v1.JobToolEndpoint
+	(RunLimit)(0),                 // 2: vibesys.orchestrator.v1.RunLimit
+	(AgentRole)(0),                // 3: vibesys.orchestrator.v1.AgentRole
+	(AgentStatus)(0),              // 4: vibesys.orchestrator.v1.AgentStatus
+	(AgentStopStage)(0),           // 5: vibesys.orchestrator.v1.AgentStopStage
+	(TurnTrigger)(0),              // 6: vibesys.orchestrator.v1.TurnTrigger
+	(TurnStatus)(0),               // 7: vibesys.orchestrator.v1.TurnStatus
+	(ItemStatus)(0),               // 8: vibesys.orchestrator.v1.ItemStatus
+	(Harness)(0),                  // 9: vibesys.orchestrator.v1.Harness
+	(Delivery)(0),                 // 10: vibesys.orchestrator.v1.Delivery
+	(Rejection)(0),                // 11: vibesys.orchestrator.v1.Rejection
+	(StartFailureReason)(0),       // 12: vibesys.orchestrator.v1.StartFailureReason
+	(ReportKind)(0),               // 13: vibesys.orchestrator.v1.ReportKind
+	(JobOutcome)(0),               // 14: vibesys.orchestrator.v1.JobOutcome
+	(JudgeVerdict)(0),             // 15: vibesys.orchestrator.v1.JudgeVerdict
+	(Compatibility)(0),            // 16: vibesys.orchestrator.v1.Compatibility
+	(*Run)(nil),                   // 17: vibesys.orchestrator.v1.Run
+	(*KeptCheckout)(nil),          // 18: vibesys.orchestrator.v1.KeptCheckout
+	(*AllowedAgent)(nil),          // 19: vibesys.orchestrator.v1.AllowedAgent
 	(*Agent)(nil),                 // 20: vibesys.orchestrator.v1.Agent
 	(*Capabilities)(nil),          // 21: vibesys.orchestrator.v1.Capabilities
 	(*Usage)(nil),                 // 22: vibesys.orchestrator.v1.Usage
@@ -3940,69 +4066,73 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(*SubagentSettled)(nil),       // 37: vibesys.orchestrator.v1.SubagentSettled
 	(*HandoffReminder)(nil),       // 38: vibesys.orchestrator.v1.HandoffReminder
 	(*LeadIdleReminder)(nil),      // 39: vibesys.orchestrator.v1.LeadIdleReminder
-	(*Message)(nil),               // 40: vibesys.orchestrator.v1.Message
-	(*LeadBrief)(nil),             // 41: vibesys.orchestrator.v1.LeadBrief
-	(*BuildVersions)(nil),         // 42: vibesys.orchestrator.v1.BuildVersions
-	(*timestamppb.Timestamp)(nil), // 43: google.protobuf.Timestamp
+	(*RunLimitReached)(nil),       // 40: vibesys.orchestrator.v1.RunLimitReached
+	(*Message)(nil),               // 41: vibesys.orchestrator.v1.Message
+	(*LeadBrief)(nil),             // 42: vibesys.orchestrator.v1.LeadBrief
+	(*BuildVersions)(nil),         // 43: vibesys.orchestrator.v1.BuildVersions
+	(*timestamppb.Timestamp)(nil), // 44: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	0,  // 0: vibesys.orchestrator.v1.Run.status:type_name -> vibesys.orchestrator.v1.RunStatus
-	43, // 1: vibesys.orchestrator.v1.Run.deadline:type_name -> google.protobuf.Timestamp
-	43, // 2: vibesys.orchestrator.v1.Run.created_at:type_name -> google.protobuf.Timestamp
+	44, // 1: vibesys.orchestrator.v1.Run.deadline:type_name -> google.protobuf.Timestamp
+	44, // 2: vibesys.orchestrator.v1.Run.created_at:type_name -> google.protobuf.Timestamp
 	1,  // 3: vibesys.orchestrator.v1.Run.stop_reason:type_name -> vibesys.orchestrator.v1.RunStopReason
-	43, // 4: vibesys.orchestrator.v1.Run.ended_at:type_name -> google.protobuf.Timestamp
-	43, // 5: vibesys.orchestrator.v1.Run.stalled_since:type_name -> google.protobuf.Timestamp
+	44, // 4: vibesys.orchestrator.v1.Run.ended_at:type_name -> google.protobuf.Timestamp
+	44, // 5: vibesys.orchestrator.v1.Run.stalled_since:type_name -> google.protobuf.Timestamp
 	22, // 6: vibesys.orchestrator.v1.Run.usage:type_name -> vibesys.orchestrator.v1.Usage
-	18, // 7: vibesys.orchestrator.v1.Run.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
-	17, // 8: vibesys.orchestrator.v1.Run.kept_checkouts:type_name -> vibesys.orchestrator.v1.KeptCheckout
-	19, // 9: vibesys.orchestrator.v1.Run.job_tool:type_name -> vibesys.orchestrator.v1.JobToolEndpoint
-	8,  // 10: vibesys.orchestrator.v1.AllowedAgent.harness:type_name -> vibesys.orchestrator.v1.Harness
-	2,  // 11: vibesys.orchestrator.v1.Agent.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	8,  // 12: vibesys.orchestrator.v1.Agent.harness:type_name -> vibesys.orchestrator.v1.Harness
-	3,  // 13: vibesys.orchestrator.v1.Agent.status:type_name -> vibesys.orchestrator.v1.AgentStatus
-	21, // 14: vibesys.orchestrator.v1.Agent.capabilities:type_name -> vibesys.orchestrator.v1.Capabilities
-	43, // 15: vibesys.orchestrator.v1.Agent.started_at:type_name -> google.protobuf.Timestamp
-	43, // 16: vibesys.orchestrator.v1.Agent.ended_at:type_name -> google.protobuf.Timestamp
-	4,  // 17: vibesys.orchestrator.v1.Agent.stop_stage:type_name -> vibesys.orchestrator.v1.AgentStopStage
-	11, // 18: vibesys.orchestrator.v1.Agent.start_failure_reason:type_name -> vibesys.orchestrator.v1.StartFailureReason
-	22, // 19: vibesys.orchestrator.v1.Agent.usage:type_name -> vibesys.orchestrator.v1.Usage
-	5,  // 20: vibesys.orchestrator.v1.Turn.trigger:type_name -> vibesys.orchestrator.v1.TurnTrigger
-	6,  // 21: vibesys.orchestrator.v1.Turn.status:type_name -> vibesys.orchestrator.v1.TurnStatus
-	22, // 22: vibesys.orchestrator.v1.Turn.usage:type_name -> vibesys.orchestrator.v1.Usage
-	43, // 23: vibesys.orchestrator.v1.Turn.started_at:type_name -> google.protobuf.Timestamp
-	43, // 24: vibesys.orchestrator.v1.Turn.ended_at:type_name -> google.protobuf.Timestamp
-	7,  // 25: vibesys.orchestrator.v1.Item.status:type_name -> vibesys.orchestrator.v1.ItemStatus
-	43, // 26: vibesys.orchestrator.v1.Item.at:type_name -> google.protobuf.Timestamp
-	25, // 27: vibesys.orchestrator.v1.Item.assistant:type_name -> vibesys.orchestrator.v1.Text
-	25, // 28: vibesys.orchestrator.v1.Item.reasoning:type_name -> vibesys.orchestrator.v1.Text
-	25, // 29: vibesys.orchestrator.v1.Item.prompt:type_name -> vibesys.orchestrator.v1.Text
-	26, // 30: vibesys.orchestrator.v1.Item.tool:type_name -> vibesys.orchestrator.v1.ToolCall
-	28, // 31: vibesys.orchestrator.v1.Handoff.worker:type_name -> vibesys.orchestrator.v1.WorkerHandoff
-	31, // 32: vibesys.orchestrator.v1.Handoff.planner:type_name -> vibesys.orchestrator.v1.PlannerHandoff
-	32, // 33: vibesys.orchestrator.v1.Handoff.judge:type_name -> vibesys.orchestrator.v1.JudgeHandoff
-	33, // 34: vibesys.orchestrator.v1.Handoff.combiner:type_name -> vibesys.orchestrator.v1.CombinerHandoff
-	34, // 35: vibesys.orchestrator.v1.Handoff.profiler:type_name -> vibesys.orchestrator.v1.ProfilerHandoff
-	29, // 36: vibesys.orchestrator.v1.WorkerHandoff.candidate:type_name -> vibesys.orchestrator.v1.Candidate
-	30, // 37: vibesys.orchestrator.v1.WorkerHandoff.no_candidate:type_name -> vibesys.orchestrator.v1.NoCandidate
-	14, // 38: vibesys.orchestrator.v1.JudgeHandoff.verdict:type_name -> vibesys.orchestrator.v1.JudgeVerdict
-	12, // 39: vibesys.orchestrator.v1.Report.kind:type_name -> vibesys.orchestrator.v1.ReportKind
-	13, // 40: vibesys.orchestrator.v1.JobFinished.outcome:type_name -> vibesys.orchestrator.v1.JobOutcome
-	3,  // 41: vibesys.orchestrator.v1.SubagentSettled.status:type_name -> vibesys.orchestrator.v1.AgentStatus
-	9,  // 42: vibesys.orchestrator.v1.Message.delivery:type_name -> vibesys.orchestrator.v1.Delivery
-	43, // 43: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
-	10, // 44: vibesys.orchestrator.v1.Message.rejection:type_name -> vibesys.orchestrator.v1.Rejection
-	27, // 45: vibesys.orchestrator.v1.Message.handoff:type_name -> vibesys.orchestrator.v1.Handoff
-	35, // 46: vibesys.orchestrator.v1.Message.report:type_name -> vibesys.orchestrator.v1.Report
-	36, // 47: vibesys.orchestrator.v1.Message.job_finished:type_name -> vibesys.orchestrator.v1.JobFinished
-	37, // 48: vibesys.orchestrator.v1.Message.subagent_settled:type_name -> vibesys.orchestrator.v1.SubagentSettled
-	41, // 49: vibesys.orchestrator.v1.Message.lead_brief:type_name -> vibesys.orchestrator.v1.LeadBrief
-	38, // 50: vibesys.orchestrator.v1.Message.handoff_reminder:type_name -> vibesys.orchestrator.v1.HandoffReminder
-	39, // 51: vibesys.orchestrator.v1.Message.lead_idle_reminder:type_name -> vibesys.orchestrator.v1.LeadIdleReminder
-	52, // [52:52] is the sub-list for method output_type
-	52, // [52:52] is the sub-list for method input_type
-	52, // [52:52] is the sub-list for extension type_name
-	52, // [52:52] is the sub-list for extension extendee
-	0,  // [0:52] is the sub-list for field type_name
+	19, // 7: vibesys.orchestrator.v1.Run.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	18, // 8: vibesys.orchestrator.v1.Run.kept_checkouts:type_name -> vibesys.orchestrator.v1.KeptCheckout
+	2,  // 9: vibesys.orchestrator.v1.Run.limit_reached:type_name -> vibesys.orchestrator.v1.RunLimit
+	44, // 10: vibesys.orchestrator.v1.Run.limit_reached_at:type_name -> google.protobuf.Timestamp
+	9,  // 11: vibesys.orchestrator.v1.AllowedAgent.harness:type_name -> vibesys.orchestrator.v1.Harness
+	3,  // 12: vibesys.orchestrator.v1.Agent.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	9,  // 13: vibesys.orchestrator.v1.Agent.harness:type_name -> vibesys.orchestrator.v1.Harness
+	4,  // 14: vibesys.orchestrator.v1.Agent.status:type_name -> vibesys.orchestrator.v1.AgentStatus
+	21, // 15: vibesys.orchestrator.v1.Agent.capabilities:type_name -> vibesys.orchestrator.v1.Capabilities
+	44, // 16: vibesys.orchestrator.v1.Agent.started_at:type_name -> google.protobuf.Timestamp
+	44, // 17: vibesys.orchestrator.v1.Agent.ended_at:type_name -> google.protobuf.Timestamp
+	5,  // 18: vibesys.orchestrator.v1.Agent.stop_stage:type_name -> vibesys.orchestrator.v1.AgentStopStage
+	12, // 19: vibesys.orchestrator.v1.Agent.start_failure_reason:type_name -> vibesys.orchestrator.v1.StartFailureReason
+	22, // 20: vibesys.orchestrator.v1.Agent.usage:type_name -> vibesys.orchestrator.v1.Usage
+	6,  // 21: vibesys.orchestrator.v1.Turn.trigger:type_name -> vibesys.orchestrator.v1.TurnTrigger
+	7,  // 22: vibesys.orchestrator.v1.Turn.status:type_name -> vibesys.orchestrator.v1.TurnStatus
+	22, // 23: vibesys.orchestrator.v1.Turn.usage:type_name -> vibesys.orchestrator.v1.Usage
+	44, // 24: vibesys.orchestrator.v1.Turn.started_at:type_name -> google.protobuf.Timestamp
+	44, // 25: vibesys.orchestrator.v1.Turn.ended_at:type_name -> google.protobuf.Timestamp
+	8,  // 26: vibesys.orchestrator.v1.Item.status:type_name -> vibesys.orchestrator.v1.ItemStatus
+	44, // 27: vibesys.orchestrator.v1.Item.at:type_name -> google.protobuf.Timestamp
+	25, // 28: vibesys.orchestrator.v1.Item.assistant:type_name -> vibesys.orchestrator.v1.Text
+	25, // 29: vibesys.orchestrator.v1.Item.reasoning:type_name -> vibesys.orchestrator.v1.Text
+	25, // 30: vibesys.orchestrator.v1.Item.prompt:type_name -> vibesys.orchestrator.v1.Text
+	26, // 31: vibesys.orchestrator.v1.Item.tool:type_name -> vibesys.orchestrator.v1.ToolCall
+	28, // 32: vibesys.orchestrator.v1.Handoff.worker:type_name -> vibesys.orchestrator.v1.WorkerHandoff
+	31, // 33: vibesys.orchestrator.v1.Handoff.planner:type_name -> vibesys.orchestrator.v1.PlannerHandoff
+	32, // 34: vibesys.orchestrator.v1.Handoff.judge:type_name -> vibesys.orchestrator.v1.JudgeHandoff
+	33, // 35: vibesys.orchestrator.v1.Handoff.combiner:type_name -> vibesys.orchestrator.v1.CombinerHandoff
+	34, // 36: vibesys.orchestrator.v1.Handoff.profiler:type_name -> vibesys.orchestrator.v1.ProfilerHandoff
+	29, // 37: vibesys.orchestrator.v1.WorkerHandoff.candidate:type_name -> vibesys.orchestrator.v1.Candidate
+	30, // 38: vibesys.orchestrator.v1.WorkerHandoff.no_candidate:type_name -> vibesys.orchestrator.v1.NoCandidate
+	15, // 39: vibesys.orchestrator.v1.JudgeHandoff.verdict:type_name -> vibesys.orchestrator.v1.JudgeVerdict
+	13, // 40: vibesys.orchestrator.v1.Report.kind:type_name -> vibesys.orchestrator.v1.ReportKind
+	14, // 41: vibesys.orchestrator.v1.JobFinished.outcome:type_name -> vibesys.orchestrator.v1.JobOutcome
+	4,  // 42: vibesys.orchestrator.v1.SubagentSettled.status:type_name -> vibesys.orchestrator.v1.AgentStatus
+	2,  // 43: vibesys.orchestrator.v1.RunLimitReached.limit:type_name -> vibesys.orchestrator.v1.RunLimit
+	10, // 44: vibesys.orchestrator.v1.Message.delivery:type_name -> vibesys.orchestrator.v1.Delivery
+	44, // 45: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
+	11, // 46: vibesys.orchestrator.v1.Message.rejection:type_name -> vibesys.orchestrator.v1.Rejection
+	27, // 47: vibesys.orchestrator.v1.Message.handoff:type_name -> vibesys.orchestrator.v1.Handoff
+	35, // 48: vibesys.orchestrator.v1.Message.report:type_name -> vibesys.orchestrator.v1.Report
+	36, // 49: vibesys.orchestrator.v1.Message.job_finished:type_name -> vibesys.orchestrator.v1.JobFinished
+	37, // 50: vibesys.orchestrator.v1.Message.subagent_settled:type_name -> vibesys.orchestrator.v1.SubagentSettled
+	42, // 51: vibesys.orchestrator.v1.Message.lead_brief:type_name -> vibesys.orchestrator.v1.LeadBrief
+	38, // 52: vibesys.orchestrator.v1.Message.handoff_reminder:type_name -> vibesys.orchestrator.v1.HandoffReminder
+	39, // 53: vibesys.orchestrator.v1.Message.lead_idle_reminder:type_name -> vibesys.orchestrator.v1.LeadIdleReminder
+	40, // 54: vibesys.orchestrator.v1.Message.run_limit_reached:type_name -> vibesys.orchestrator.v1.RunLimitReached
+	55, // [55:55] is the sub-list for method output_type
+	55, // [55:55] is the sub-list for method input_type
+	55, // [55:55] is the sub-list for extension type_name
+	55, // [55:55] is the sub-list for extension extendee
+	0,  // [0:55] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_orchestrator_proto_init() }
@@ -4011,25 +4141,27 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_init() {
 		return
 	}
 	file_vibesys_orchestrator_v1_tool_options_proto_init()
-	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[6].OneofWrappers = []any{}
-	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[8].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[0].OneofWrappers = []any{}
+	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[5].OneofWrappers = []any{}
+	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[7].OneofWrappers = []any{
 		(*Item_Assistant)(nil),
 		(*Item_Reasoning)(nil),
 		(*Item_Prompt)(nil),
 		(*Item_Tool)(nil),
 	}
-	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[10].OneofWrappers = []any{}
-	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[11].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[9].OneofWrappers = []any{}
+	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[10].OneofWrappers = []any{
 		(*Handoff_Worker)(nil),
 		(*Handoff_Planner)(nil),
 		(*Handoff_Judge)(nil),
 		(*Handoff_Combiner)(nil),
 		(*Handoff_Profiler)(nil),
 	}
-	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[12].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[11].OneofWrappers = []any{
 		(*WorkerHandoff_Candidate)(nil),
 		(*WorkerHandoff_NoCandidate)(nil),
 	}
+	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[23].OneofWrappers = []any{}
 	file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[24].OneofWrappers = []any{
 		(*Message_Text)(nil),
 		(*Message_Handoff)(nil),
@@ -4040,13 +4172,14 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_init() {
 		(*Message_LeadBrief)(nil),
 		(*Message_HandoffReminder)(nil),
 		(*Message_LeadIdleReminder)(nil),
+		(*Message_RunLimitReached)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc), len(file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc)),
-			NumEnums:      16,
+			NumEnums:      17,
 			NumMessages:   27,
 			NumExtensions: 0,
 			NumServices:   0,

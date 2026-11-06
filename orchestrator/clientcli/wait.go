@@ -100,7 +100,7 @@ func wait(ctx context.Context, c *call, args []string) error {
 	fmt.Fprintf(c.Stderr, "waiting for %s on run %s (%s)\n", g.words, s.view.RunID, statusWord(s.view.Run.GetStatus().String(), "RUN_STATUS_")+stallWords(s.view, c.Clock.Now()))
 	for !g.met(s.view, baseline) {
 		if s.view.Over() {
-			return failed("run %s %s before %s", s.view.RunID, statusWord(s.view.Run.GetStatus().String(), "RUN_STATUS_"), g.words)
+			return failed("run %s %s before %s", s.view.RunID, statusWord(s.view.Run.GetStatus().String(), "RUN_STATUS_")+withPrefix(" by ", stopReason(s.view.Run)), g.words)
 		}
 		if _, err := s.feed.next(s.view); err != nil {
 			return c.interrupted(streamCtx, expired, g, *timeout, s.view, c.Clock.Now(), err)
@@ -125,6 +125,9 @@ func (c *call) interrupted(ctx context.Context, expired func() bool, g goal, tim
 		where := ""
 		if v != nil {
 			where = fmt.Sprintf("; run %s is %s", v.RunID, statusWord(v.Run.GetStatus().String(), "RUN_STATUS_")+stallWords(v, now))
+			if g.reports && v.Run.GetFinalReported() {
+				where += fmt.Sprintf("; its latest report, number %d, is final and its lead has started no new work since, so it may have answered in text (run attach shows its reply)", v.Run.GetReportsPosted())
+			}
 		}
 		return timedOut("timed out after %s waiting for %s%s", timeout, g.words, where)
 	case ctx.Err() != nil:
@@ -144,5 +147,5 @@ func reached(v *View, until string, baseline uint32, zone *time.Location) string
 	case "stalled":
 		return fmt.Sprintf("run %s is stalled: its lead has been idle since %s with nothing outstanding", v.RunID, clock(v.Run.GetStalledSince().AsTime(), zone))
 	}
-	return fmt.Sprintf("run %s %s", v.RunID, statusWord(v.Run.GetStatus().String(), "RUN_STATUS_"))
+	return fmt.Sprintf("run %s %s", v.RunID, statusWord(v.Run.GetStatus().String(), "RUN_STATUS_")+withPrefix(" by ", stopReason(v.Run)))
 }

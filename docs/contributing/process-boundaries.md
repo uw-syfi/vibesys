@@ -90,6 +90,7 @@ Each check names the path, the rule and the fix when it fails.
 | Environment reads | A read of a `VIBESYS_*` variable by its literal name (`os.Getenv`, `os.LookupEnv`, `getenv`, `os.environ`, `process.env`) anywhere but `cli/envcodec` fails. A read that is out of scope is listed with its exact count and a reason, and the list only shrinks. A name passed through a constant is not seen; the name check above still lists it. | `scripts/check_boundaries.py` |
 | Mechanism words | Message, field, enum and rpc names in the orchestrator, `cli`, desktop and evaluator packages that contain a mechanism word (path, dir, file, pid, process, socket, json, sidecar, provider, worktree, marketplace, home, xdg, docker, sqlite, claude, codex) are in a shrink-only allowlist. | `scripts/check_boundaries.py` |
 | Unvalidated messages | Every `cli.v1` message that has fields and no protovalidate rule is in a shrink-only allowlist. Empty messages are exempt. Each daemon and supervisor server validates the request of every RPC at its edge (`wire.RequestValidator`), and the store and run records validate on read, so a bad value is refused naming its field. | `scripts/check_boundaries.py` |
+| Stored facts | No message a service of `orchestrator/v1` sends or receives can hold, at any depth, a message of `stored.proto` or a field marked `stored_only`. It reads the compiled descriptors, so a new field or nested message is held when it is declared. | `orchestrator_checks` (`orchestrator/internal/archcheck`, `StoredLeaks`) |
 | Release gate | A `vibesys-v*` tag fails while `orchestrator/v1` is outside the breaking check. | `managed-release.yml` runs `scripts/check_boundaries.py --release` |
 
 Limits, stated so nobody reads more into the checks than they do:
@@ -317,8 +318,12 @@ the schemas.
 
 A stored record holds the public message plus its private part
 (`AgentRecord`, `RunRecord`, `ReceiptRecord`), so a client's type cannot name a
-private fact: no resume token, worktree path, job tool location or command
-digest. Watchers receive `RunChange`, not the stored event. A tool call is a
+private fact: no resume token, job tool location or command digest. The records
+and the stored `Event` live in `stored.proto`, which the TypeScript bindings leave
+out. Watchers receive `RunChange`, the public part of each event, and a fold of
+those over a snapshot holds what a later snapshot would say. A working copy kept
+after a run (`Run.kept_checkouts`) is public on purpose: the operator decides what
+becomes of it, and the client shows where it is. A tool call is a
 `oneof` of a shell command or a named call with structured arguments; the
 mapping from a harness's spelling happens in the normalizer, not the screen.
 
@@ -359,7 +364,6 @@ part they wait for.
 
 | Part | Not built | Removes |
 | --- | --- | --- |
-| Client records | `AgentRecord`, `RunRecord`, `ReceiptRecord`, `RunChange` | private fields served to clients |
 | Tool calls | the `ToolCall` `oneof` | `args_json`, `provider_call_id`, the screen's `cmd`/`command` guess |
 | Result records | `ResultRecord` generated for Go and the SDK | the hand parser and writer |
 | Manifest 0.1 | `TaskManifestV01`: 48 example tasks and the Python input synthesis still write `version = "0.1"`, so it stays until they move | the hand TOML structs of the single-image reader |
@@ -374,7 +378,7 @@ validated message; the other rows are what the parts above replace.
 
 | Boundary | Carrier | Owner | State |
 | --- | --- | --- | --- |
-| terminal client and desktop to host | gRPC `OrchestratorService` over a Unix socket | `orchestrator/v1/service.proto` | typed; run messages still mix stored and public fields |
+| terminal client and desktop to host | gRPC `OrchestratorService` over a Unix socket | `orchestrator/v1/service.proto` | typed |
 | desktop renderer and Electron main | `DesktopGatewayRequest` and `Reply` bytes | `desktop/v1/gateway.proto` | typed |
 | `connect` pipe | opaque bytes over stdio | carries the service above | typed |
 | handshake | `Hello`, `BuildVersions`, `Compatibility` | `service.proto` | typed; the protocol revision is a file option read by every peer |

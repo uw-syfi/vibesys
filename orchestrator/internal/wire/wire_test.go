@@ -50,16 +50,15 @@ func requireAll(t *testing.T, m proto.Message, accepted map[string]int) {
 func TestAnEventSurvivesTheCoreTypes(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
 	accepted := map[string]int{}
+	reached := map[protoreflect.FullName]bool{}
 	for range rounds {
-		in := generated(r, &pb.Event{})
-		if receipt := in.GetReceiptRecorded(); receipt != nil {
-			receipt.Sequence = in.GetSequence()
-		}
+		in := storedEvent(r)
 		seq, event, err := wire.DecodeEvent(encoded(in))
 		if err != nil {
 			continue
 		}
 		accepted[whichBody(in)]++
+		noteFields(in.ProtoReflect(), reached)
 		data, err := wire.EncodeEvent(seq, event)
 		if err != nil {
 			t.Fatalf("encode %v: %v", in, err)
@@ -73,6 +72,50 @@ func TestAnEventSurvivesTheCoreTypes(t *testing.T) {
 		}
 	}
 	requireAll(t, &pb.Event{}, accepted)
+	requireEveryField(t, (&pb.Event{}).ProtoReflect().Descriptor(), reached)
+}
+
+// noteFields records every field set in m, at any depth.
+func noteFields(m protoreflect.Message, reached map[protoreflect.FullName]bool) {
+	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
+		reached[fd.FullName()] = true
+		switch {
+		case fd.Message() == nil:
+		case fd.IsList():
+			for i := range v.List().Len() {
+				noteFields(v.List().Get(i).Message(), reached)
+			}
+		default:
+			noteFields(v.Message(), reached)
+		}
+		return true
+	})
+}
+
+// requireEveryField fails on a field of the message, at any depth, that no accepted message set. A
+// field the generator cannot give a valid value is a field no round trip holds to anything: a mapper
+// could forget it and this test would not see it.
+func requireEveryField(t *testing.T, m protoreflect.MessageDescriptor, reached map[protoreflect.FullName]bool) {
+	t.Helper()
+	seen := map[protoreflect.FullName]bool{}
+	var walk func(protoreflect.MessageDescriptor)
+	walk = func(m protoreflect.MessageDescriptor) {
+		if seen[m.FullName()] {
+			return
+		}
+		seen[m.FullName()] = true
+		fields := m.Fields()
+		for i := range fields.Len() {
+			fd := fields.Get(i)
+			if !reached[fd.FullName()] {
+				t.Errorf("no accepted message set %s: teach the generator a valid value for it", fd.FullName())
+			}
+			if fd.Message() != nil {
+				walk(fd.Message())
+			}
+		}
+	}
+	walk(m)
 }
 
 func TestAnEffectSurvivesTheCoreTypes(t *testing.T) {

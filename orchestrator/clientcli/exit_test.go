@@ -38,7 +38,7 @@ func TestExitCodes(t *testing.T) {
 		{"unknown flag", &fakeService{}, []string{"run", "list", "--nope"}, clientcli.ExitUsage, "nope"},
 		{"start without a task", &fakeService{}, []string{"run", "start"}, clientcli.ExitUsage, "--task"},
 		{"bad harness", &fakeService{}, []string{"run", "start", "--task", "t", "--harness", "vim"}, clientcli.ExitUsage, "claude_code or codex"},
-		{"bad deadline", &fakeService{}, []string{"run", "start", "--task", "t", "--deadline", "soon"}, clientcli.ExitUsage, "RFC 3339"},
+		{"bad time limit", &fakeService{}, []string{"run", "start", "--task", "t", "--max-time", "soon"}, clientcli.ExitUsage, "positive duration"},
 		{"steer without text", &fakeService{frames: frames}, []string{"run", "steer"}, clientcli.ExitUsage, "TEXT"},
 		{"list with an argument", &fakeService{frames: frames}, []string{"run", "list", "x"}, clientcli.ExitUsage, "no argument"},
 		{"unknown run", &fakeService{frames: frames}, []string{"run", "get", "zzz"}, clientcli.ExitFailed, "zzz"},

@@ -246,3 +246,28 @@ def judge(me: Me, messages: Sequence[str]) -> Script:
 
 
 ROLES = {"lead": lead, "worker": worker, "judge": judge}
+
+_LIMIT_NOTICE = re.compile(r"Your run has reached its (time|cost) limit")
+
+
+def limited_lead(_me: Me, messages: Sequence[str]) -> Script:
+    """A lead that does nothing until its run reaches a limit, then posts its final report.
+
+    It is for the tests of a run's limits, whose only question is what the orchestrator does when
+    a limit is reached: every other message is answered with text and no call.
+    """
+    if _LIMIT_NOTICE.search(messages[-1]):
+        yield Mcp(
+            "post_report",
+            {
+                "kind": "final",
+                "headline": "finishing, as the run's limit asks",
+                "changed": "nothing",
+            },
+        )
+        return "Reported."
+    return "Waiting."
+
+
+#: The scripts of the ``limit`` mode: a lead that finishes at a limit, and no other agent.
+LIMIT_ROLES = {"lead": limited_lead}

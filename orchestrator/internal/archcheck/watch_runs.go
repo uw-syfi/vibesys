@@ -34,7 +34,7 @@ func WatchRunsReaders(name string, file *ast.File, positions *token.FileSet, inf
 			}
 			if owner == "WatchRunsResponse" {
 				switch n.Sel.Name {
-				case "Body", "Event", "Snapshot", "Search", "GetBody", "GetEvent", "GetSnapshot", "GetSearch":
+				case "Body", "Change", "Snapshot", "Search", "GetBody", "GetChange", "GetSnapshot", "GetSearch":
 					report(n)
 				}
 			} else if strings.HasPrefix(owner, "WatchRunsResponse_") {

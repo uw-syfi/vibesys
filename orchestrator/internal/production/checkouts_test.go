@@ -2,6 +2,7 @@ package production
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -184,5 +185,36 @@ func TestACheckoutWhoseCommitCannotBeKeptStays(t *testing.T) {
 	}
 	if _, err := os.Stat(s.checkoutDir("agent-1")); err != nil {
 		t.Fatalf("the copy was removed although its commit was not kept: %v", err)
+	}
+}
+
+// A worktree add that lost its record to a concurrent prune is tried once more, and only that
+// failure and only once.
+func TestAWorktreeAddThatLostItsRecordToAPruneIsTriedOnce(t *testing.T) {
+	lost := []byte("fatal: could not open '/repo/.git/worktrees/worktree/locked' for writing: No such file or directory")
+	other := []byte("fatal: '/x' already exists")
+	for _, c := range []struct {
+		name     string
+		failures [][]byte
+		wantErr  bool
+		wantRuns int
+	}{
+		{"never", nil, false, 1},
+		{"once", [][]byte{lost}, false, 2},
+		{"twice", [][]byte{lost, lost}, true, 2},
+		{"another failure", [][]byte{other}, true, 1},
+	} {
+		runs := 0
+		h := &ProcessHolders{Git: func(context.Context, string, ...string) ([]byte, error) {
+			runs++
+			if runs <= len(c.failures) {
+				return c.failures[runs-1], errors.New("exit status 128")
+			}
+			return nil, nil
+		}}
+		err := h.Worktree(context.Background(), "/repo", filepath.Join(t.TempDir(), "worktree"))
+		if (err != nil) != c.wantErr || runs != c.wantRuns {
+			t.Errorf("%s: error %v after %d runs, want error %v after %d", c.name, err, runs, c.wantErr, c.wantRuns)
+		}
 	}
 }

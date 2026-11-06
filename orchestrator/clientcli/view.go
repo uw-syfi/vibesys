@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
@@ -48,7 +49,7 @@ type Change struct {
 	Result  *cliv1.Result
 }
 
-// View is one run as a client sees it: the snapshot folded with the events after it. It is the
+// View is one run as a client sees it: the snapshot folded with the changes after it. It is the
 // whole state a verb keeps, and applying the same frames in the same order always gives the same
 // View and the same Changes.
 type View struct {
@@ -103,26 +104,26 @@ func (v *View) Load(s *pb.RunsSnapshot) []Change {
 	return out
 }
 
-// Apply folds one event in. An event of another run, or one the view has already passed, changes
-// nothing.
-func (v *View) Apply(ev *pb.Event) []Change {
-	if ev.GetSequence() <= v.Sequence {
+// Apply folds one committed change in. A change of another run, or one the view has already passed,
+// changes nothing.
+func (v *View) Apply(c *pb.RunChange) []Change {
+	if c.GetSequence() <= v.Sequence {
 		return nil
 	}
-	v.Sequence = ev.GetSequence()
-	if ev.GetRunId() != v.RunID {
+	v.Sequence = c.GetSequence()
+	if c.GetRunId() != v.RunID {
 		return nil
 	}
-	at := ev.GetAt().AsTime()
-	switch b := ev.GetBody().(type) {
-	case *pb.Event_RunUpdated:
-		return v.setRun(b.RunUpdated, at)
-	case *pb.Event_AgentUpdated:
-		return v.setAgent(b.AgentUpdated, at)
-	case *pb.Event_TurnUpdated:
-		return v.setTurn(b.TurnUpdated, at)
-	case *pb.Event_MessageUpdated:
-		return v.setMessage(b.MessageUpdated, at)
+	at := c.GetAt().AsTime()
+	switch b := c.GetBody().(type) {
+	case *pb.RunChange_Run:
+		return v.setRun(b.Run, at)
+	case *pb.RunChange_Agent:
+		return v.setAgent(b.Agent, at)
+	case *pb.RunChange_Turn:
+		return v.setTurn(b.Turn, at)
+	case *pb.RunChange_Message:
+		return v.setMessage(b.Message, at)
 	}
 	return nil
 }
@@ -140,6 +141,15 @@ func (v *View) ApplySearch(s *pb.SearchState) []Change {
 	measured := map[string]bool{}
 	for _, r := range v.Search.GetResults() {
 		measured[r.GetJobId()] = true
+	}
+	// A host that has just started has read nothing yet, and says so as an unreadable view with no
+	// jobs. That is not the run having none: what this view already knew stays, with the new health,
+	// so a count never goes down.
+	if s.GetHealth().GetUnreadable() != nil && len(s.GetJobs()) == 0 && len(s.GetResults()) == 0 &&
+		(len(v.Search.GetJobs()) > 0 || len(v.Search.GetResults()) > 0) {
+		kept := proto.Clone(v.Search).(*pb.SearchState)
+		kept.Health, kept.Revision = s.GetHealth(), s.GetRevision()
+		s = kept
 	}
 	v.Search = s
 	var out []Change
@@ -239,7 +249,7 @@ func (v *View) setMessage(m *pb.Message, now time.Time) []Change {
 			return []Change{{Kind: JobFinishedMessage, At: at, Message: m}}
 		case *pb.Message_SubagentSettled:
 			return []Change{{Kind: SubagentSettled, At: at, Message: m}}
-		case *pb.Message_HandoffReminder, *pb.Message_LeadIdleReminder:
+		case *pb.Message_HandoffReminder, *pb.Message_LeadIdleReminder, *pb.Message_RunLimitReached:
 			return []Change{{Kind: ReminderSent, At: at, Message: m, Agent: v.Agents[m.GetToAgentId()]}}
 		}
 	}
@@ -260,10 +270,16 @@ func agentOver(a *pb.Agent) bool {
 // Lead is the run's lead agent, or nil before the view has it.
 func (v *View) Lead() *pb.Agent { return v.Agents[v.Run.GetLeadAgentId()] }
 
-// Started says the lead's session has opened: the lead is live, or was.
+// Started says the lead's session has opened: the lead is live, or was. A session that ended without
+// opening says why in start_failure_reason, unless it was stopped while still opening: such a lead
+// reads as having ended, because the run is over by then and says so.
 func (v *View) Started() bool {
 	lead := v.Lead()
-	return lead.GetCapabilities() != nil && lead.GetStatus() != pb.AgentStatus_AGENT_STATUS_LAUNCHING
+	switch lead.GetStatus() {
+	case pb.AgentStatus_AGENT_STATUS_UNSPECIFIED, pb.AgentStatus_AGENT_STATUS_LAUNCHING:
+		return false
+	}
+	return lead.GetStartFailureReason() == pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED
 }
 
 // Over says the run has a final status.

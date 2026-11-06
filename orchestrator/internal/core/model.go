@@ -10,18 +10,28 @@ type Run struct {
 	Status      RunStatus
 	Lead        AgentID
 	FanoutLimit uint32
-	// Deadline is the zero time when the run has none.
-	Deadline   time.Time
-	CreatedAt  time.Time
-	StopReason RunStopReason
-	EndedAt    time.Time
+	// Deadline is when the run reaches its time limit, the zero time when it has none.
+	Deadline time.Time
+	// MaxCostUSD is the most the run may cost in dollars, counted from its finished turns; zero when
+	// it has no cost limit.
+	MaxCostUSD float64
+	// LimitReached is the limit the run reached, empty until it reaches one, and LimitReachedAt is
+	// when. From then on the lead has been told to finish, a spawn is refused, and the run stops when
+	// the lead gives its final report or LimitGrace has passed.
+	LimitReached   RunLimit
+	LimitReachedAt time.Time
+	CreatedAt      time.Time
+	StopReason     RunStopReason
+	EndedAt        time.Time
 	// JobTool is the tool the run's agents use and the daemon it serves. It is recorded when the run
 	// starts and every session of the run is launched with it.
 	JobTool JobToolEndpoint
 	// ReportsPosted counts the reports the lead has posted; the next is numbered one more.
 	ReportsPosted uint32
-	// FinalReported says the lead's latest report is a final one and it has had no new input since: it
-	// has finished what it was asked, so the run is not stalled and the lead is not reminded.
+	// FinalReported says the lead's latest report is a final one and it has started no new work since:
+	// it has spawned no agent, no job has started and it has posted no report. It has finished what it
+	// was asked, so the run is not stalled and the lead is not reminded, however it answers a
+	// question put to it.
 	FinalReported bool
 	// StalledSince is the zero time unless the run is stalled: see stalled.
 	StalledSince time.Time
@@ -37,6 +47,9 @@ type Run struct {
 	// Kept are the working copies agents made that were not removed when the run ended, because they
 	// hold changes git does not have. Empty until the run is over and its checkouts are released.
 	Kept []Checkout
+	// NeverOpened says the run failed without its lead ever running a turn: a start that did not
+	// happen. It is set when the run ends and never changes.
+	NeverOpened bool
 }
 
 // Checkout is a working copy of a run's repository that one agent made.
@@ -71,9 +84,8 @@ type AgentSpec struct {
 // session opens, which is the safe answer: nothing is steered into or resumed from a session that
 // has not said it can.
 type Capabilities struct {
-	StreamsText bool
-	Steers      bool
-	Resumes     bool
+	Steers  bool
+	Resumes bool
 }
 
 // Agent is one session we launched, in a tree under the lead.
@@ -316,6 +328,16 @@ type (
 		Workers   uint32
 		Judges    uint32
 	}
+	// RunLimitReached tells the lead its run reached a limit and it must finish: post the final report
+	// and start nothing new. Elapsed is the run's age, Spent what it has cost (nil when no turn reported
+	// a cost), MaxCost the cost limit (zero when there is none) and Grace how long the run goes on.
+	RunLimitReached struct {
+		Limit   RunLimit
+		Elapsed time.Duration
+		Spent   *float64
+		MaxCost float64
+		Grace   time.Duration
+	}
 	// SubagentSettled tells the lead a subagent stopped working without a handoff.
 	SubagentSettled struct {
 		Agent  AgentID
@@ -348,6 +370,7 @@ func (Report) messageBody()           {}
 func (JobFinished) messageBody()      {}
 func (SubagentSettled) messageBody()  {}
 func (HandoffReminder) messageBody()  {}
+func (RunLimitReached) messageBody()  {}
 func (LeadIdleReminder) messageBody() {}
 
 // Message is typed mail between agents and the operator.
@@ -378,7 +401,7 @@ func (m Message) trigger() TurnTrigger {
 		return TriggerJobFinished
 	case SubagentSettled:
 		return TriggerSubagentSettled
-	case HandoffReminder, LeadIdleReminder:
+	case HandoffReminder, LeadIdleReminder, RunLimitReached:
 		return TriggerReminder
 	}
 	if m.From == "" {

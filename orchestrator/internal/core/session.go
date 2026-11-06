@@ -100,6 +100,7 @@ func (t *tx) turnEnded(a agentState, b TurnEnded) {
 	if a.Role != RoleLead && !a.HandedOff && a.Stop == StopNone && len(a.queue) == 0 && !t.steerPending(a.ID) {
 		t.settled(a)
 	}
+	t.costLimit(a.Run)
 }
 
 func (t *tx) steerOutcome(a agentState, b SteerOutcome) {
@@ -153,8 +154,14 @@ func (t *tx) job(b JobUpdate) {
 func (t *tx) timer(b TimerFired) {
 	switch b.Timer.Kind {
 	case TimerRunDeadline:
-		if run, ok := t.s.runs[b.Timer.Run]; ok && run.Status.Live() {
-			t.beginStop(run, StopDeadline)
+		if run, ok := t.s.runs[b.Timer.Run]; ok && !run.Deadline.IsZero() && !t.in.At.Before(run.Deadline) {
+			t.reachLimit(run.ID, LimitTime)
+			t.sweep(run.ID)
+		}
+	case TimerLimitGrace:
+		if run, ok := t.s.runs[b.Timer.Run]; ok && run.Status.Live() && run.LimitReached != "" &&
+			run.LimitReachedAt.Add(LimitGrace).Equal(b.Timer.FireAt) {
+			t.beginStop(run, run.LimitReached.stopReason())
 			t.sweep(run.ID)
 		}
 	case TimerLeadIdle:

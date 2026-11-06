@@ -10,6 +10,7 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -39,8 +40,6 @@ const (
 	Refusal_REFUSAL_AGENT_IS_LEAD Refusal = 6
 	// The agent's session is already over or closing.
 	Refusal_REFUSAL_AGENT_NOT_LIVE Refusal = 7
-	// The deadline had passed when the command arrived.
-	Refusal_REFUSAL_DEADLINE_PASSED Refusal = 8
 	// Another run that is not over already works in the repository. The receipt's run_id is that run.
 	Refusal_REFUSAL_REPOSITORY_IN_USE Refusal = 9
 	// The harness and model asked for are outside what the run may use. The receipt's allowed_agents
@@ -48,6 +47,10 @@ const (
 	Refusal_REFUSAL_AGENT_NOT_ALLOWED Refusal = 10
 	// A handoff has no body, or the body of another role than the one posting it.
 	Refusal_REFUSAL_HANDOFF_NOT_YOURS Refusal = 11
+	// The run reached its time limit: it starts no new agent.
+	Refusal_REFUSAL_TIME_LIMIT_REACHED Refusal = 12
+	// The run reached its cost limit: it starts no new agent.
+	Refusal_REFUSAL_COST_LIMIT_REACHED Refusal = 13
 )
 
 // Enum value maps for Refusal.
@@ -61,24 +64,26 @@ var (
 		5:  "REFUSAL_FANOUT_LIMIT",
 		6:  "REFUSAL_AGENT_IS_LEAD",
 		7:  "REFUSAL_AGENT_NOT_LIVE",
-		8:  "REFUSAL_DEADLINE_PASSED",
 		9:  "REFUSAL_REPOSITORY_IN_USE",
 		10: "REFUSAL_AGENT_NOT_ALLOWED",
 		11: "REFUSAL_HANDOFF_NOT_YOURS",
+		12: "REFUSAL_TIME_LIMIT_REACHED",
+		13: "REFUSAL_COST_LIMIT_REACHED",
 	}
 	Refusal_value = map[string]int32{
-		"REFUSAL_UNSPECIFIED":       0,
-		"REFUSAL_RUN_NOT_FOUND":     1,
-		"REFUSAL_AGENT_NOT_FOUND":   2,
-		"REFUSAL_NOT_PERMITTED":     3,
-		"REFUSAL_RUN_NOT_RUNNING":   4,
-		"REFUSAL_FANOUT_LIMIT":      5,
-		"REFUSAL_AGENT_IS_LEAD":     6,
-		"REFUSAL_AGENT_NOT_LIVE":    7,
-		"REFUSAL_DEADLINE_PASSED":   8,
-		"REFUSAL_REPOSITORY_IN_USE": 9,
-		"REFUSAL_AGENT_NOT_ALLOWED": 10,
-		"REFUSAL_HANDOFF_NOT_YOURS": 11,
+		"REFUSAL_UNSPECIFIED":        0,
+		"REFUSAL_RUN_NOT_FOUND":      1,
+		"REFUSAL_AGENT_NOT_FOUND":    2,
+		"REFUSAL_NOT_PERMITTED":      3,
+		"REFUSAL_RUN_NOT_RUNNING":    4,
+		"REFUSAL_FANOUT_LIMIT":       5,
+		"REFUSAL_AGENT_IS_LEAD":      6,
+		"REFUSAL_AGENT_NOT_LIVE":     7,
+		"REFUSAL_REPOSITORY_IN_USE":  9,
+		"REFUSAL_AGENT_NOT_ALLOWED":  10,
+		"REFUSAL_HANDOFF_NOT_YOURS":  11,
+		"REFUSAL_TIME_LIMIT_REACHED": 12,
+		"REFUSAL_COST_LIMIT_REACHED": 13,
 	}
 )
 
@@ -109,31 +114,43 @@ func (Refusal) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{0}
 }
 
-// SessionSource names the session event a stored event came from, so that a replay knows how far
-// each session's stream was committed. It is what a restarted daemon resumes that stream from.
-type SessionSource struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
-	Session       uint32                 `protobuf:"varint,2,opt,name=session,proto3" json:"session,omitempty"`
-	Offset        uint64                 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
+// RunChange is what a watcher of runs receives for one committed event: the public part of it. A
+// client that folds these over a snapshot holds what a later snapshot would say.
+type RunChange struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Global and gap-free across runs. A stream limited to one run skips the sequences of the others.
+	Sequence uint64                 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	At       *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=at,proto3" json:"at,omitempty"`
+	// The run the change belongs to, for a client that follows one run on a stream of all of them. Empty
+	// only on the receipt of a command refused before it reached a run.
+	RunId string `protobuf:"bytes,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	// Types that are valid to be assigned to Body:
+	//
+	//	*RunChange_Run
+	//	*RunChange_Agent
+	//	*RunChange_Turn
+	//	*RunChange_Item
+	//	*RunChange_Message
+	//	*RunChange_Receipt
+	Body          isRunChange_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionSource) Reset() {
-	*x = SessionSource{}
+func (x *RunChange) Reset() {
+	*x = RunChange{}
 	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionSource) String() string {
+func (x *RunChange) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SessionSource) ProtoMessage() {}
+func (*RunChange) ProtoMessage() {}
 
-func (x *SessionSource) ProtoReflect() protoreflect.Message {
+func (x *RunChange) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -145,225 +162,133 @@ func (x *SessionSource) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SessionSource.ProtoReflect.Descriptor instead.
-func (*SessionSource) Descriptor() ([]byte, []int) {
+// Deprecated: Use RunChange.ProtoReflect.Descriptor instead.
+func (*RunChange) Descriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *SessionSource) GetAgentId() string {
-	if x != nil {
-		return x.AgentId
-	}
-	return ""
-}
-
-func (x *SessionSource) GetSession() uint32 {
-	if x != nil {
-		return x.Session
-	}
-	return 0
-}
-
-func (x *SessionSource) GetOffset() uint64 {
-	if x != nil {
-		return x.Offset
-	}
-	return 0
-}
-
-// Event is one committed fact. The state is a fold of these, so nothing that a decision depends on
-// lives anywhere else. One input's events commit as one transaction.
-type Event struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Global, gap-free, assigned at commit.
-	Sequence uint64 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	// Empty only on the receipt of a command refused before it reached a run.
-	RunId string `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	// Empty unless a command caused the event.
-	CommandId string                 `protobuf:"bytes,3,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
-	At        *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
-	// Absent unless a session event caused the event.
-	Source *SessionSource `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`
-	// Types that are valid to be assigned to Body:
-	//
-	//	*Event_RunUpdated
-	//	*Event_AgentUpdated
-	//	*Event_TurnUpdated
-	//	*Event_ItemUpdated
-	//	*Event_MessageUpdated
-	//	*Event_ReceiptRecorded
-	Body          isEvent_Body `protobuf_oneof:"body"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *Event) Reset() {
-	*x = Event{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *Event) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*Event) ProtoMessage() {}
-
-func (x *Event) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use Event.ProtoReflect.Descriptor instead.
-func (*Event) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *Event) GetSequence() uint64 {
+func (x *RunChange) GetSequence() uint64 {
 	if x != nil {
 		return x.Sequence
 	}
 	return 0
 }
 
-func (x *Event) GetRunId() string {
-	if x != nil {
-		return x.RunId
-	}
-	return ""
-}
-
-func (x *Event) GetCommandId() string {
-	if x != nil {
-		return x.CommandId
-	}
-	return ""
-}
-
-func (x *Event) GetAt() *timestamppb.Timestamp {
+func (x *RunChange) GetAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.At
 	}
 	return nil
 }
 
-func (x *Event) GetSource() *SessionSource {
+func (x *RunChange) GetRunId() string {
 	if x != nil {
-		return x.Source
+		return x.RunId
 	}
-	return nil
+	return ""
 }
 
-func (x *Event) GetBody() isEvent_Body {
+func (x *RunChange) GetBody() isRunChange_Body {
 	if x != nil {
 		return x.Body
 	}
 	return nil
 }
 
-func (x *Event) GetRunUpdated() *Run {
+func (x *RunChange) GetRun() *Run {
 	if x != nil {
-		if x, ok := x.Body.(*Event_RunUpdated); ok {
-			return x.RunUpdated
+		if x, ok := x.Body.(*RunChange_Run); ok {
+			return x.Run
 		}
 	}
 	return nil
 }
 
-func (x *Event) GetAgentUpdated() *Agent {
+func (x *RunChange) GetAgent() *Agent {
 	if x != nil {
-		if x, ok := x.Body.(*Event_AgentUpdated); ok {
-			return x.AgentUpdated
+		if x, ok := x.Body.(*RunChange_Agent); ok {
+			return x.Agent
 		}
 	}
 	return nil
 }
 
-func (x *Event) GetTurnUpdated() *Turn {
+func (x *RunChange) GetTurn() *Turn {
 	if x != nil {
-		if x, ok := x.Body.(*Event_TurnUpdated); ok {
-			return x.TurnUpdated
+		if x, ok := x.Body.(*RunChange_Turn); ok {
+			return x.Turn
 		}
 	}
 	return nil
 }
 
-func (x *Event) GetItemUpdated() *Item {
+func (x *RunChange) GetItem() *Item {
 	if x != nil {
-		if x, ok := x.Body.(*Event_ItemUpdated); ok {
-			return x.ItemUpdated
+		if x, ok := x.Body.(*RunChange_Item); ok {
+			return x.Item
 		}
 	}
 	return nil
 }
 
-func (x *Event) GetMessageUpdated() *Message {
+func (x *RunChange) GetMessage() *Message {
 	if x != nil {
-		if x, ok := x.Body.(*Event_MessageUpdated); ok {
-			return x.MessageUpdated
+		if x, ok := x.Body.(*RunChange_Message); ok {
+			return x.Message
 		}
 	}
 	return nil
 }
 
-func (x *Event) GetReceiptRecorded() *Receipt {
+func (x *RunChange) GetReceipt() *Receipt {
 	if x != nil {
-		if x, ok := x.Body.(*Event_ReceiptRecorded); ok {
-			return x.ReceiptRecorded
+		if x, ok := x.Body.(*RunChange_Receipt); ok {
+			return x.Receipt
 		}
 	}
 	return nil
 }
 
-type isEvent_Body interface {
-	isEvent_Body()
+type isRunChange_Body interface {
+	isRunChange_Body()
 }
 
-type Event_RunUpdated struct {
-	RunUpdated *Run `protobuf:"bytes,10,opt,name=run_updated,json=runUpdated,proto3,oneof"`
+type RunChange_Run struct {
+	Run *Run `protobuf:"bytes,10,opt,name=run,proto3,oneof"`
 }
 
-type Event_AgentUpdated struct {
-	AgentUpdated *Agent `protobuf:"bytes,11,opt,name=agent_updated,json=agentUpdated,proto3,oneof"`
+type RunChange_Agent struct {
+	Agent *Agent `protobuf:"bytes,11,opt,name=agent,proto3,oneof"`
 }
 
-type Event_TurnUpdated struct {
-	TurnUpdated *Turn `protobuf:"bytes,12,opt,name=turn_updated,json=turnUpdated,proto3,oneof"`
+type RunChange_Turn struct {
+	Turn *Turn `protobuf:"bytes,12,opt,name=turn,proto3,oneof"`
 }
 
-type Event_ItemUpdated struct {
+type RunChange_Item struct {
 	// The whole item, so a client replaces by id.
-	ItemUpdated *Item `protobuf:"bytes,13,opt,name=item_updated,json=itemUpdated,proto3,oneof"`
+	Item *Item `protobuf:"bytes,13,opt,name=item,proto3,oneof"`
 }
 
-type Event_MessageUpdated struct {
-	MessageUpdated *Message `protobuf:"bytes,14,opt,name=message_updated,json=messageUpdated,proto3,oneof"`
+type RunChange_Message struct {
+	Message *Message `protobuf:"bytes,14,opt,name=message,proto3,oneof"`
 }
 
-type Event_ReceiptRecorded struct {
-	// Every command ends in one, so a refused command is idempotent across a restart too.
-	ReceiptRecorded *Receipt `protobuf:"bytes,15,opt,name=receipt_recorded,json=receiptRecorded,proto3,oneof"`
+type RunChange_Receipt struct {
+	Receipt *Receipt `protobuf:"bytes,15,opt,name=receipt,proto3,oneof"`
 }
 
-func (*Event_RunUpdated) isEvent_Body() {}
+func (*RunChange_Run) isRunChange_Body() {}
 
-func (*Event_AgentUpdated) isEvent_Body() {}
+func (*RunChange_Agent) isRunChange_Body() {}
 
-func (*Event_TurnUpdated) isEvent_Body() {}
+func (*RunChange_Turn) isRunChange_Body() {}
 
-func (*Event_ItemUpdated) isEvent_Body() {}
+func (*RunChange_Item) isRunChange_Body() {}
 
-func (*Event_MessageUpdated) isEvent_Body() {}
+func (*RunChange_Message) isRunChange_Body() {}
 
-func (*Event_ReceiptRecorded) isEvent_Body() {}
+func (*RunChange_Receipt) isRunChange_Body() {}
 
 // Delta is progress on a running item. It is never stored and never reaches the decision core: the
 // next item_updated for the same item replaces it.
@@ -382,7 +307,7 @@ type Delta struct {
 
 func (x *Delta) Reset() {
 	*x = Delta{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -394,7 +319,7 @@ func (x *Delta) String() string {
 func (*Delta) ProtoMessage() {}
 
 func (x *Delta) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[2]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -407,7 +332,7 @@ func (x *Delta) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Delta.ProtoReflect.Descriptor instead.
 func (*Delta) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Delta) GetAgentId() string {
@@ -480,7 +405,7 @@ type AgentSpec struct {
 
 func (x *AgentSpec) Reset() {
 	*x = AgentSpec{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[3]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -492,7 +417,7 @@ func (x *AgentSpec) String() string {
 func (*AgentSpec) ProtoMessage() {}
 
 func (x *AgentSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[3]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -505,7 +430,7 @@ func (x *AgentSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSpec.ProtoReflect.Descriptor instead.
 func (*AgentSpec) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *AgentSpec) GetHarness() Harness {
@@ -534,22 +459,25 @@ type StartRun struct {
 	Repository  string                 `protobuf:"bytes,1,opt,name=repository,proto3" json:"repository,omitempty"`
 	Task        string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
 	FanoutLimit uint32                 `protobuf:"varint,3,opt,name=fanout_limit,json=fanoutLimit,proto3" json:"fanout_limit,omitempty"`
-	// Absent when the run has no deadline.
-	Deadline *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	// The lead has nothing to inherit from, so its harness is required.
 	Lead *AgentSpec `protobuf:"bytes,5,opt,name=lead,proto3" json:"lead,omitempty"`
 	// The operator's steering text for the lead, such as a note about cost or which harnesses to
 	// prefer. Empty when there is none; a template words the lead's first prompt around it.
 	Brief string `protobuf:"bytes,6,opt,name=brief,proto3" json:"brief,omitempty"`
 	// Agents the run may use besides the lead's own harness and model, which are always allowed.
-	AllowAgents   []*AllowedAgent `protobuf:"bytes,7,rep,name=allow_agents,json=allowAgents,proto3" json:"allow_agents,omitempty"`
+	AllowAgents []*AllowedAgent `protobuf:"bytes,7,rep,name=allow_agents,json=allowAgents,proto3" json:"allow_agents,omitempty"`
+	// The most the run may cost in dollars. Absent when the run has no cost limit.
+	MaxCostUsd *float64 `protobuf:"fixed64,8,opt,name=max_cost_usd,json=maxCostUsd,proto3,oneof" json:"max_cost_usd,omitempty"`
+	// How long the run may take, counted from its start by the host, so that a client's clock is not
+	// in it. Absent when the run has no time limit.
+	MaxTime       *durationpb.Duration `protobuf:"bytes,9,opt,name=max_time,json=maxTime,proto3" json:"max_time,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *StartRun) Reset() {
 	*x = StartRun{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -561,7 +489,7 @@ func (x *StartRun) String() string {
 func (*StartRun) ProtoMessage() {}
 
 func (x *StartRun) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -574,7 +502,7 @@ func (x *StartRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartRun.ProtoReflect.Descriptor instead.
 func (*StartRun) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *StartRun) GetRepository() string {
@@ -598,13 +526,6 @@ func (x *StartRun) GetFanoutLimit() uint32 {
 	return 0
 }
 
-func (x *StartRun) GetDeadline() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Deadline
-	}
-	return nil
-}
-
 func (x *StartRun) GetLead() *AgentSpec {
 	if x != nil {
 		return x.Lead
@@ -626,6 +547,20 @@ func (x *StartRun) GetAllowAgents() []*AllowedAgent {
 	return nil
 }
 
+func (x *StartRun) GetMaxCostUsd() float64 {
+	if x != nil && x.MaxCostUsd != nil {
+		return *x.MaxCostUsd
+	}
+	return 0
+}
+
+func (x *StartRun) GetMaxTime() *durationpb.Duration {
+	if x != nil {
+		return x.MaxTime
+	}
+	return nil
+}
+
 type StopRun struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
@@ -635,7 +570,7 @@ type StopRun struct {
 
 func (x *StopRun) Reset() {
 	*x = StopRun{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -647,7 +582,7 @@ func (x *StopRun) String() string {
 func (*StopRun) ProtoMessage() {}
 
 func (x *StopRun) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -660,7 +595,7 @@ func (x *StopRun) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopRun.ProtoReflect.Descriptor instead.
 func (*StopRun) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *StopRun) GetRunId() string {
@@ -684,7 +619,7 @@ type SpawnAgent struct {
 
 func (x *SpawnAgent) Reset() {
 	*x = SpawnAgent{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -696,7 +631,7 @@ func (x *SpawnAgent) String() string {
 func (*SpawnAgent) ProtoMessage() {}
 
 func (x *SpawnAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -709,7 +644,7 @@ func (x *SpawnAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SpawnAgent.ProtoReflect.Descriptor instead.
 func (*SpawnAgent) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SpawnAgent) GetRunId() string {
@@ -757,7 +692,7 @@ type StopAgent struct {
 
 func (x *StopAgent) Reset() {
 	*x = StopAgent{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -769,7 +704,7 @@ func (x *StopAgent) String() string {
 func (*StopAgent) ProtoMessage() {}
 
 func (x *StopAgent) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -782,7 +717,7 @@ func (x *StopAgent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StopAgent.ProtoReflect.Descriptor instead.
 func (*StopAgent) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *StopAgent) GetAgentId() string {
@@ -803,7 +738,7 @@ type SendMessage struct {
 
 func (x *SendMessage) Reset() {
 	*x = SendMessage{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -815,7 +750,7 @@ func (x *SendMessage) String() string {
 func (*SendMessage) ProtoMessage() {}
 
 func (x *SendMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -828,7 +763,7 @@ func (x *SendMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SendMessage.ProtoReflect.Descriptor instead.
 func (*SendMessage) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SendMessage) GetAgentId() string {
@@ -854,7 +789,7 @@ type PostHandoff struct {
 
 func (x *PostHandoff) Reset() {
 	*x = PostHandoff{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[9]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -866,7 +801,7 @@ func (x *PostHandoff) String() string {
 func (*PostHandoff) ProtoMessage() {}
 
 func (x *PostHandoff) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[9]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -879,7 +814,7 @@ func (x *PostHandoff) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostHandoff.ProtoReflect.Descriptor instead.
 func (*PostHandoff) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *PostHandoff) GetHandoff() *Handoff {
@@ -898,7 +833,7 @@ type PostReport struct {
 
 func (x *PostReport) Reset() {
 	*x = PostReport{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -910,7 +845,7 @@ func (x *PostReport) String() string {
 func (*PostReport) ProtoMessage() {}
 
 func (x *PostReport) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[10]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -923,7 +858,7 @@ func (x *PostReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostReport.ProtoReflect.Descriptor instead.
 func (*PostReport) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PostReport) GetReport() *Report {
@@ -955,7 +890,7 @@ type Command struct {
 
 func (x *Command) Reset() {
 	*x = Command{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -967,7 +902,7 @@ func (x *Command) String() string {
 func (*Command) ProtoMessage() {}
 
 func (x *Command) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[11]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -980,7 +915,7 @@ func (x *Command) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Command.ProtoReflect.Descriptor instead.
 func (*Command) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *Command) GetId() string {
@@ -1110,8 +1045,6 @@ func (*Command_PostReport) isCommand_Body() {}
 type Receipt struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	CommandId string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
-	// SHA-256 of the command, so that one id reused for another command is a conflict.
-	CommandDigest string `protobuf:"bytes,2,opt,name=command_digest,json=commandDigest,proto3" json:"command_digest,omitempty"`
 	// Unspecified when the command was accepted.
 	Refusal Refusal `protobuf:"varint,3,opt,name=refusal,proto3,enum=vibesys.orchestrator.v1.Refusal" json:"refusal,omitempty"`
 	// What the command made or acted on, where it did.
@@ -1130,7 +1063,7 @@ type Receipt struct {
 
 func (x *Receipt) Reset() {
 	*x = Receipt{}
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[12]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1142,7 +1075,7 @@ func (x *Receipt) String() string {
 func (*Receipt) ProtoMessage() {}
 
 func (x *Receipt) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[12]
+	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1155,19 +1088,12 @@ func (x *Receipt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Receipt.ProtoReflect.Descriptor instead.
 func (*Receipt) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{12}
+	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *Receipt) GetCommandId() string {
 	if x != nil {
 		return x.CommandId
-	}
-	return ""
-}
-
-func (x *Receipt) GetCommandDigest() string {
-	if x != nil {
-		return x.CommandDigest
 	}
 	return ""
 }
@@ -1225,26 +1151,18 @@ var File_vibesys_orchestrator_v1_events_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"w\n" +
-	"\rSessionSource\x12\"\n" +
-	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12!\n" +
-	"\asession\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\asession\x12\x1f\n" +
-	"\x06offset\x18\x03 \x01(\x04B\a\xbaH\x042\x02 \x00R\x06offset\"\x91\x05\n" +
-	"\x05Event\x12#\n" +
-	"\bsequence\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\bsequence\x12\x15\n" +
-	"\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x1d\n" +
-	"\n" +
-	"command_id\x18\x03 \x01(\tR\tcommandId\x122\n" +
-	"\x02at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02at\x12>\n" +
-	"\x06source\x18\x05 \x01(\v2&.vibesys.orchestrator.v1.SessionSourceR\x06source\x12?\n" +
-	"\vrun_updated\x18\n" +
-	" \x01(\v2\x1c.vibesys.orchestrator.v1.RunH\x00R\n" +
-	"runUpdated\x12E\n" +
-	"\ragent_updated\x18\v \x01(\v2\x1e.vibesys.orchestrator.v1.AgentH\x00R\fagentUpdated\x12B\n" +
-	"\fturn_updated\x18\f \x01(\v2\x1d.vibesys.orchestrator.v1.TurnH\x00R\vturnUpdated\x12B\n" +
-	"\fitem_updated\x18\r \x01(\v2\x1d.vibesys.orchestrator.v1.ItemH\x00R\vitemUpdated\x12K\n" +
-	"\x0fmessage_updated\x18\x0e \x01(\v2 .vibesys.orchestrator.v1.MessageH\x00R\x0emessageUpdated\x12M\n" +
-	"\x10receipt_recorded\x18\x0f \x01(\v2 .vibesys.orchestrator.v1.ReceiptH\x00R\x0freceiptRecordedB\r\n" +
+	"$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xda\x03\n" +
+	"\tRunChange\x12#\n" +
+	"\bsequence\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\bsequence\x122\n" +
+	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02at\x12\x15\n" +
+	"\x06run_id\x18\x03 \x01(\tR\x05runId\x120\n" +
+	"\x03run\x18\n" +
+	" \x01(\v2\x1c.vibesys.orchestrator.v1.RunH\x00R\x03run\x126\n" +
+	"\x05agent\x18\v \x01(\v2\x1e.vibesys.orchestrator.v1.AgentH\x00R\x05agent\x123\n" +
+	"\x04turn\x18\f \x01(\v2\x1d.vibesys.orchestrator.v1.TurnH\x00R\x04turn\x123\n" +
+	"\x04item\x18\r \x01(\v2\x1d.vibesys.orchestrator.v1.ItemH\x00R\x04item\x12<\n" +
+	"\amessage\x18\x0e \x01(\v2 .vibesys.orchestrator.v1.MessageH\x00R\amessage\x12<\n" +
+	"\areceipt\x18\x0f \x01(\v2 .vibesys.orchestrator.v1.ReceiptH\x00R\areceiptB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01\"\x9b\x01\n" +
 	"\x05Delta\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12 \n" +
@@ -1255,18 +1173,21 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\tAgentSpec\x12D\n" +
 	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\b\xbaH\x05\x82\x01\x02\x10\x01R\aharness\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12)\n" +
-	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\x94\x03\n" +
+	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\xf6\x03\n" +
 	"\bStartRun\x12'\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
 	"repository\x12\x1b\n" +
 	"\x04task\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12!\n" +
-	"\ffanout_limit\x18\x03 \x01(\rR\vfanoutLimit\x126\n" +
-	"\bdeadline\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline\x12\x86\x01\n" +
+	"\ffanout_limit\x18\x03 \x01(\rR\vfanoutLimit\x12\x86\x01\n" +
 	"\x04lead\x18\x05 \x01(\v2\".vibesys.orchestrator.v1.AgentSpecBN\xbaHK\xba\x01E\n" +
 	"\x16start_run.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x14\n" +
 	"\x05brief\x18\x06 \x01(\tR\x05brief\x12H\n" +
-	"\fallow_agents\x18\a \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\vallowAgents\")\n" +
+	"\fallow_agents\x18\a \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\vallowAgents\x127\n" +
+	"\fmax_cost_usd\x18\b \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\n" +
+	"maxCostUsd\x88\x01\x01\x12>\n" +
+	"\bmax_time\x18\t \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x02*\x00R\amaxTimeB\x0f\n" +
+	"\r_max_cost_usdJ\x04\b\x04\x10\x05R\bdeadline\")\n" +
 	"\aStopRun\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\xea\x01\n" +
 	"\n" +
@@ -1303,11 +1224,10 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\fpost_handoff\x18\x0f \x01(\v2$.vibesys.orchestrator.v1.PostHandoffH\x00R\vpostHandoff\x12F\n" +
 	"\vpost_report\x18\x10 \x01(\v2#.vibesys.orchestrator.v1.PostReportH\x00R\n" +
 	"postReportB\r\n" +
-	"\x04body\x12\x05\xbaH\x02\b\x01\"\xb9\x03\n" +
+	"\x04body\x12\x05\xbaH\x02\b\x01\"\x91\x03\n" +
 	"\aReceipt\x12&\n" +
 	"\n" +
-	"command_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tcommandId\x12<\n" +
-	"\x0ecommand_digest\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\rcommandDigest\x12D\n" +
+	"command_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tcommandId\x12D\n" +
 	"\arefusal\x18\x03 \x01(\x0e2 .vibesys.orchestrator.v1.RefusalB\b\xbaH\x05\x82\x01\x02\x10\x01R\arefusal\x12\x15\n" +
 	"\x06run_id\x18\x04 \x01(\tR\x05runId\x12\x19\n" +
 	"\bagent_id\x18\x05 \x01(\tR\aagentId\x12\x1d\n" +
@@ -1315,7 +1235,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"message_id\x18\x06 \x01(\tR\tmessageId\x12G\n" +
 	"\bdelivery\x18\a \x01(\x0e2!.vibesys.orchestrator.v1.DeliveryB\b\xbaH\x05\x82\x01\x02\x10\x01R\bdelivery\x12\x1a\n" +
 	"\bsequence\x18\b \x01(\x04R\bsequence\x12L\n" +
-	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgents*\xdd\x02\n" +
+	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgentsJ\x04\b\x02\x10\x03R\x0ecommand_digest*\x9f\x03\n" +
 	"\aRefusal\x12\x17\n" +
 	"\x13REFUSAL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15REFUSAL_RUN_NOT_FOUND\x10\x01\x12\x1b\n" +
@@ -1324,12 +1244,13 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x17REFUSAL_RUN_NOT_RUNNING\x10\x04\x12\x18\n" +
 	"\x14REFUSAL_FANOUT_LIMIT\x10\x05\x12\x19\n" +
 	"\x15REFUSAL_AGENT_IS_LEAD\x10\x06\x12\x1a\n" +
-	"\x16REFUSAL_AGENT_NOT_LIVE\x10\a\x12\x1b\n" +
-	"\x17REFUSAL_DEADLINE_PASSED\x10\b\x12\x1d\n" +
+	"\x16REFUSAL_AGENT_NOT_LIVE\x10\a\x12\x1d\n" +
 	"\x19REFUSAL_REPOSITORY_IN_USE\x10\t\x12\x1d\n" +
 	"\x19REFUSAL_AGENT_NOT_ALLOWED\x10\n" +
 	"\x12\x1d\n" +
-	"\x19REFUSAL_HANDOFF_NOT_YOURS\x10\vBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x19REFUSAL_HANDOFF_NOT_YOURS\x10\v\x12\x1e\n" +
+	"\x1aREFUSAL_TIME_LIMIT_REACHED\x10\f\x12\x1e\n" +
+	"\x1aREFUSAL_COST_LIMIT_REACHED\x10\r\"\x04\b\b\x10\b*\x17REFUSAL_DEADLINE_PASSEDBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_events_proto_rawDescOnce sync.Once
@@ -1344,67 +1265,66 @@ func file_vibesys_orchestrator_v1_events_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_events_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_orchestrator_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_vibesys_orchestrator_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_vibesys_orchestrator_v1_events_proto_goTypes = []any{
 	(Refusal)(0),                  // 0: vibesys.orchestrator.v1.Refusal
-	(*SessionSource)(nil),         // 1: vibesys.orchestrator.v1.SessionSource
-	(*Event)(nil),                 // 2: vibesys.orchestrator.v1.Event
-	(*Delta)(nil),                 // 3: vibesys.orchestrator.v1.Delta
-	(*AgentSpec)(nil),             // 4: vibesys.orchestrator.v1.AgentSpec
-	(*StartRun)(nil),              // 5: vibesys.orchestrator.v1.StartRun
-	(*StopRun)(nil),               // 6: vibesys.orchestrator.v1.StopRun
-	(*SpawnAgent)(nil),            // 7: vibesys.orchestrator.v1.SpawnAgent
-	(*StopAgent)(nil),             // 8: vibesys.orchestrator.v1.StopAgent
-	(*SendMessage)(nil),           // 9: vibesys.orchestrator.v1.SendMessage
-	(*PostHandoff)(nil),           // 10: vibesys.orchestrator.v1.PostHandoff
-	(*PostReport)(nil),            // 11: vibesys.orchestrator.v1.PostReport
-	(*Command)(nil),               // 12: vibesys.orchestrator.v1.Command
-	(*Receipt)(nil),               // 13: vibesys.orchestrator.v1.Receipt
-	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
-	(*Run)(nil),                   // 15: vibesys.orchestrator.v1.Run
-	(*Agent)(nil),                 // 16: vibesys.orchestrator.v1.Agent
-	(*Turn)(nil),                  // 17: vibesys.orchestrator.v1.Turn
-	(*Item)(nil),                  // 18: vibesys.orchestrator.v1.Item
-	(*Message)(nil),               // 19: vibesys.orchestrator.v1.Message
-	(Harness)(0),                  // 20: vibesys.orchestrator.v1.Harness
-	(*AllowedAgent)(nil),          // 21: vibesys.orchestrator.v1.AllowedAgent
+	(*RunChange)(nil),             // 1: vibesys.orchestrator.v1.RunChange
+	(*Delta)(nil),                 // 2: vibesys.orchestrator.v1.Delta
+	(*AgentSpec)(nil),             // 3: vibesys.orchestrator.v1.AgentSpec
+	(*StartRun)(nil),              // 4: vibesys.orchestrator.v1.StartRun
+	(*StopRun)(nil),               // 5: vibesys.orchestrator.v1.StopRun
+	(*SpawnAgent)(nil),            // 6: vibesys.orchestrator.v1.SpawnAgent
+	(*StopAgent)(nil),             // 7: vibesys.orchestrator.v1.StopAgent
+	(*SendMessage)(nil),           // 8: vibesys.orchestrator.v1.SendMessage
+	(*PostHandoff)(nil),           // 9: vibesys.orchestrator.v1.PostHandoff
+	(*PostReport)(nil),            // 10: vibesys.orchestrator.v1.PostReport
+	(*Command)(nil),               // 11: vibesys.orchestrator.v1.Command
+	(*Receipt)(nil),               // 12: vibesys.orchestrator.v1.Receipt
+	(*timestamppb.Timestamp)(nil), // 13: google.protobuf.Timestamp
+	(*Run)(nil),                   // 14: vibesys.orchestrator.v1.Run
+	(*Agent)(nil),                 // 15: vibesys.orchestrator.v1.Agent
+	(*Turn)(nil),                  // 16: vibesys.orchestrator.v1.Turn
+	(*Item)(nil),                  // 17: vibesys.orchestrator.v1.Item
+	(*Message)(nil),               // 18: vibesys.orchestrator.v1.Message
+	(Harness)(0),                  // 19: vibesys.orchestrator.v1.Harness
+	(*AllowedAgent)(nil),          // 20: vibesys.orchestrator.v1.AllowedAgent
+	(*durationpb.Duration)(nil),   // 21: google.protobuf.Duration
 	(AgentRole)(0),                // 22: vibesys.orchestrator.v1.AgentRole
 	(*Handoff)(nil),               // 23: vibesys.orchestrator.v1.Handoff
 	(*Report)(nil),                // 24: vibesys.orchestrator.v1.Report
 	(Delivery)(0),                 // 25: vibesys.orchestrator.v1.Delivery
 }
 var file_vibesys_orchestrator_v1_events_proto_depIdxs = []int32{
-	14, // 0: vibesys.orchestrator.v1.Event.at:type_name -> google.protobuf.Timestamp
-	1,  // 1: vibesys.orchestrator.v1.Event.source:type_name -> vibesys.orchestrator.v1.SessionSource
-	15, // 2: vibesys.orchestrator.v1.Event.run_updated:type_name -> vibesys.orchestrator.v1.Run
-	16, // 3: vibesys.orchestrator.v1.Event.agent_updated:type_name -> vibesys.orchestrator.v1.Agent
-	17, // 4: vibesys.orchestrator.v1.Event.turn_updated:type_name -> vibesys.orchestrator.v1.Turn
-	18, // 5: vibesys.orchestrator.v1.Event.item_updated:type_name -> vibesys.orchestrator.v1.Item
-	19, // 6: vibesys.orchestrator.v1.Event.message_updated:type_name -> vibesys.orchestrator.v1.Message
-	13, // 7: vibesys.orchestrator.v1.Event.receipt_recorded:type_name -> vibesys.orchestrator.v1.Receipt
-	20, // 8: vibesys.orchestrator.v1.AgentSpec.harness:type_name -> vibesys.orchestrator.v1.Harness
-	14, // 9: vibesys.orchestrator.v1.StartRun.deadline:type_name -> google.protobuf.Timestamp
-	4,  // 10: vibesys.orchestrator.v1.StartRun.lead:type_name -> vibesys.orchestrator.v1.AgentSpec
-	21, // 11: vibesys.orchestrator.v1.StartRun.allow_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
-	22, // 12: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	4,  // 13: vibesys.orchestrator.v1.SpawnAgent.spec:type_name -> vibesys.orchestrator.v1.AgentSpec
-	23, // 14: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
-	24, // 15: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
-	5,  // 16: vibesys.orchestrator.v1.Command.start_run:type_name -> vibesys.orchestrator.v1.StartRun
-	6,  // 17: vibesys.orchestrator.v1.Command.stop_run:type_name -> vibesys.orchestrator.v1.StopRun
-	7,  // 18: vibesys.orchestrator.v1.Command.spawn_agent:type_name -> vibesys.orchestrator.v1.SpawnAgent
-	8,  // 19: vibesys.orchestrator.v1.Command.stop_agent:type_name -> vibesys.orchestrator.v1.StopAgent
-	9,  // 20: vibesys.orchestrator.v1.Command.send_message:type_name -> vibesys.orchestrator.v1.SendMessage
-	10, // 21: vibesys.orchestrator.v1.Command.post_handoff:type_name -> vibesys.orchestrator.v1.PostHandoff
-	11, // 22: vibesys.orchestrator.v1.Command.post_report:type_name -> vibesys.orchestrator.v1.PostReport
-	0,  // 23: vibesys.orchestrator.v1.Receipt.refusal:type_name -> vibesys.orchestrator.v1.Refusal
-	25, // 24: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
-	21, // 25: vibesys.orchestrator.v1.Receipt.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	13, // 0: vibesys.orchestrator.v1.RunChange.at:type_name -> google.protobuf.Timestamp
+	14, // 1: vibesys.orchestrator.v1.RunChange.run:type_name -> vibesys.orchestrator.v1.Run
+	15, // 2: vibesys.orchestrator.v1.RunChange.agent:type_name -> vibesys.orchestrator.v1.Agent
+	16, // 3: vibesys.orchestrator.v1.RunChange.turn:type_name -> vibesys.orchestrator.v1.Turn
+	17, // 4: vibesys.orchestrator.v1.RunChange.item:type_name -> vibesys.orchestrator.v1.Item
+	18, // 5: vibesys.orchestrator.v1.RunChange.message:type_name -> vibesys.orchestrator.v1.Message
+	12, // 6: vibesys.orchestrator.v1.RunChange.receipt:type_name -> vibesys.orchestrator.v1.Receipt
+	19, // 7: vibesys.orchestrator.v1.AgentSpec.harness:type_name -> vibesys.orchestrator.v1.Harness
+	3,  // 8: vibesys.orchestrator.v1.StartRun.lead:type_name -> vibesys.orchestrator.v1.AgentSpec
+	20, // 9: vibesys.orchestrator.v1.StartRun.allow_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	21, // 10: vibesys.orchestrator.v1.StartRun.max_time:type_name -> google.protobuf.Duration
+	22, // 11: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	3,  // 12: vibesys.orchestrator.v1.SpawnAgent.spec:type_name -> vibesys.orchestrator.v1.AgentSpec
+	23, // 13: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
+	24, // 14: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
+	4,  // 15: vibesys.orchestrator.v1.Command.start_run:type_name -> vibesys.orchestrator.v1.StartRun
+	5,  // 16: vibesys.orchestrator.v1.Command.stop_run:type_name -> vibesys.orchestrator.v1.StopRun
+	6,  // 17: vibesys.orchestrator.v1.Command.spawn_agent:type_name -> vibesys.orchestrator.v1.SpawnAgent
+	7,  // 18: vibesys.orchestrator.v1.Command.stop_agent:type_name -> vibesys.orchestrator.v1.StopAgent
+	8,  // 19: vibesys.orchestrator.v1.Command.send_message:type_name -> vibesys.orchestrator.v1.SendMessage
+	9,  // 20: vibesys.orchestrator.v1.Command.post_handoff:type_name -> vibesys.orchestrator.v1.PostHandoff
+	10, // 21: vibesys.orchestrator.v1.Command.post_report:type_name -> vibesys.orchestrator.v1.PostReport
+	0,  // 22: vibesys.orchestrator.v1.Receipt.refusal:type_name -> vibesys.orchestrator.v1.Refusal
+	25, // 23: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
+	20, // 24: vibesys.orchestrator.v1.Receipt.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_events_proto_init() }
@@ -1414,19 +1334,20 @@ func file_vibesys_orchestrator_v1_events_proto_init() {
 	}
 	file_vibesys_orchestrator_v1_orchestrator_proto_init()
 	file_vibesys_orchestrator_v1_tool_options_proto_init()
-	file_vibesys_orchestrator_v1_events_proto_msgTypes[1].OneofWrappers = []any{
-		(*Event_RunUpdated)(nil),
-		(*Event_AgentUpdated)(nil),
-		(*Event_TurnUpdated)(nil),
-		(*Event_ItemUpdated)(nil),
-		(*Event_MessageUpdated)(nil),
-		(*Event_ReceiptRecorded)(nil),
+	file_vibesys_orchestrator_v1_events_proto_msgTypes[0].OneofWrappers = []any{
+		(*RunChange_Run)(nil),
+		(*RunChange_Agent)(nil),
+		(*RunChange_Turn)(nil),
+		(*RunChange_Item)(nil),
+		(*RunChange_Message)(nil),
+		(*RunChange_Receipt)(nil),
 	}
-	file_vibesys_orchestrator_v1_events_proto_msgTypes[2].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_events_proto_msgTypes[1].OneofWrappers = []any{
 		(*Delta_Text)(nil),
 		(*Delta_CommandOutput)(nil),
 	}
-	file_vibesys_orchestrator_v1_events_proto_msgTypes[11].OneofWrappers = []any{
+	file_vibesys_orchestrator_v1_events_proto_msgTypes[3].OneofWrappers = []any{}
+	file_vibesys_orchestrator_v1_events_proto_msgTypes[10].OneofWrappers = []any{
 		(*Command_StartRun)(nil),
 		(*Command_StopRun)(nil),
 		(*Command_SpawnAgent)(nil),
@@ -1441,7 +1362,7 @@ func file_vibesys_orchestrator_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_events_proto_rawDesc), len(file_vibesys_orchestrator_v1_events_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

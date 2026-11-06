@@ -294,7 +294,7 @@ func (l *live) awaitRun(t testing.TB, run string, want func(*pb.Run) bool) {
 				return
 			}
 		}
-		if r := event.GetRunUpdated(); r.GetId() == run && want(r) {
+		if r := event.GetRun(); r.GetId() == run && want(r) {
 			return
 		}
 	}

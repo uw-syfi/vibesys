@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
 )
 
 // The agent socket is in the state directory whatever the runtime directory is, because the runtime
@@ -55,7 +57,7 @@ func TestTheAgentSocketIsInTheStateDirectoryWhateverTheRuntimeDirectoryIs(t *tes
 
 // A state directory too long for a socket path is an error that says how to choose another.
 func TestAStateDirectoryTooLongForTheAgentSocketSaysHowToChoose(t *testing.T) {
-	state := filepath.Join(t.TempDir(), strings.Repeat("d", maxSocketPath))
+	state := filepath.Join(t.TempDir(), strings.Repeat("d", privatesocket.MaxPath))
 	if err := os.MkdirAll(state, 0o700); err != nil {
 		t.Skipf("cannot make a long directory here: %v", err)
 	}

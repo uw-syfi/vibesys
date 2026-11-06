@@ -14,10 +14,31 @@ func runOut(r core.Run) *pb.Run {
 		Id: string(r.ID), Repository: r.Repository, Task: r.Task, Status: runStatuses.out(r.Status),
 		LeadAgentId: string(r.Lead), FanoutLimit: r.FanoutLimit, Deadline: when(r.Deadline),
 		CreatedAt: when(r.CreatedAt), StopReason: stopReasons.out(r.StopReason), EndedAt: when(r.EndedAt),
-		JobTool: jobToolOut(r.JobTool), ReportsPosted: r.ReportsPosted, FinalReported: r.FinalReported, StalledSince: when(r.StalledSince),
+		ReportsPosted: r.ReportsPosted, FinalReported: r.FinalReported, StalledSince: when(r.StalledSince),
 		ActiveJobs: r.ActiveJobs, LeadReminders: r.LeadReminders, Usage: usageOut(r.Usage),
 		AllowedAgents: choicesOut(r.Allowed), KeptCheckouts: checkoutsOut(r.Kept),
+		NeverOpened: r.NeverOpened,
+		MaxCostUsd:  limitOut(r.MaxCostUSD), LimitReached: runLimits.out(r.LimitReached), LimitReachedAt: when(r.LimitReachedAt),
 	}
+}
+
+// runRecordOut is a run as it is stored: the public message, and what only the host keeps.
+func runRecordOut(r core.Run) *pb.RunRecord {
+	return &pb.RunRecord{Run: runOut(r), JobTool: jobToolOut(r.JobTool)}
+}
+
+// limitOut is the contract's cost limit: absent for none.
+func limitOut(usd float64) *float64 {
+	if usd == 0 {
+		return nil
+	}
+	return &usd
+}
+
+func runRecordIn(r *pb.RunRecord, errs *errorList) core.Run {
+	out := runIn(r.GetRun(), errs)
+	out.JobTool = jobToolIn(r.GetJobTool())
+	return out
 }
 
 func jobToolOut(l core.JobToolEndpoint) *pb.JobToolEndpoint {
@@ -37,10 +58,12 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		Status: runStatuses.in(r.GetStatus(), errs), Lead: core.AgentID(r.GetLeadAgentId()),
 		FanoutLimit: r.GetFanoutLimit(), Deadline: moment(r.GetDeadline(), errs),
 		CreatedAt: moment(r.GetCreatedAt(), errs), StopReason: stopReasons.in(r.GetStopReason(), errs),
-		EndedAt: moment(r.GetEndedAt(), errs), JobTool: jobToolIn(r.GetJobTool()),
+		EndedAt:       moment(r.GetEndedAt(), errs),
 		ReportsPosted: r.GetReportsPosted(), FinalReported: r.GetFinalReported(), StalledSince: moment(r.GetStalledSince(), errs),
 		ActiveJobs: r.GetActiveJobs(), LeadReminders: r.GetLeadReminders(), Usage: usageIn(r.GetUsage()),
 		Allowed: choicesIn(r.GetAllowedAgents(), errs), Kept: checkoutsIn(r.GetKeptCheckouts()),
+		NeverOpened: r.GetNeverOpened(),
+		MaxCostUSD:  r.GetMaxCostUsd(), LimitReached: runLimits.in(r.GetLimitReached(), errs), LimitReachedAt: moment(r.GetLimitReachedAt(), errs),
 	}
 }
 
@@ -64,11 +87,11 @@ func capabilitiesOut(c core.Capabilities) *pb.Capabilities {
 	if c == (core.Capabilities{}) {
 		return nil
 	}
-	return &pb.Capabilities{StreamsText: c.StreamsText, Steers: c.Steers, Resumes: c.Resumes}
+	return &pb.Capabilities{Steers: c.Steers, Resumes: c.Resumes}
 }
 
 func capabilitiesIn(c *pb.Capabilities) core.Capabilities {
-	return core.Capabilities{StreamsText: c.GetStreamsText(), Steers: c.GetSteers(), Resumes: c.GetResumes()}
+	return core.Capabilities{Steers: c.GetSteers(), Resumes: c.GetResumes()}
 }
 
 func agentOut(a core.Agent) *pb.Agent {
@@ -76,7 +99,7 @@ func agentOut(a core.Agent) *pb.Agent {
 		Id: string(a.ID), RunId: string(a.Run), ParentAgentId: string(a.Parent), Role: roles.out(a.Role),
 		Harness: harnesses.out(a.Spec.Harness), Model: string(a.Spec.Model),
 		ReasoningEffort: string(a.Spec.Effort), PlanNumber: a.PlanNumber,
-		Status: agentStatuses.out(a.Status), ResumeToken: []byte(a.ResumeToken),
+		Status:       agentStatuses.out(a.Status),
 		Capabilities: capabilitiesOut(a.Capabilities), StartedAt: when(a.StartedAt), EndedAt: when(a.EndedAt),
 		Session: a.Session, StopStage: stopStages.out(a.Stop), HandedOff: a.HandedOff,
 		SessionFailures: a.SessionFailures, EndDetail: a.EndDetail, HandoffReminded: a.HandoffReminded,
@@ -93,11 +116,22 @@ func agentIn(a *pb.Agent, errs *errorList) core.Agent {
 			Effort: core.EffortName(a.GetReasoningEffort()),
 		},
 		PlanNumber: a.GetPlanNumber(), Status: agentStatuses.in(a.GetStatus(), errs),
-		ResumeToken: string(a.GetResumeToken()), Capabilities: capabilitiesIn(a.GetCapabilities()),
-		StartedAt: moment(a.GetStartedAt(), errs), EndedAt: moment(a.GetEndedAt(), errs), Session: a.GetSession(),
+		Capabilities: capabilitiesIn(a.GetCapabilities()),
+		StartedAt:    moment(a.GetStartedAt(), errs), EndedAt: moment(a.GetEndedAt(), errs), Session: a.GetSession(),
 		Stop: stopStages.in(a.GetStopStage(), errs), HandedOff: a.GetHandedOff(), SessionFailures: a.GetSessionFailures(),
 		EndDetail: a.GetEndDetail(), StartFailure: startFailures.in(a.GetStartFailureReason(), errs), HandoffReminded: a.GetHandoffReminded(), Usage: usageIn(a.GetUsage()),
 	}
+}
+
+// agentRecordOut is an agent as it is stored: the public message, and what only the host keeps.
+func agentRecordOut(a core.Agent) *pb.AgentRecord {
+	return &pb.AgentRecord{Agent: agentOut(a), ResumeToken: []byte(a.ResumeToken)}
+}
+
+func agentRecordIn(a *pb.AgentRecord, errs *errorList) core.Agent {
+	out := agentIn(a.GetAgent(), errs)
+	out.ResumeToken = string(a.GetResumeToken())
+	return out
 }
 
 func usageOut(u core.Usage) *pb.Usage {
@@ -296,6 +330,11 @@ func messageOut(m core.Message) *pb.Message {
 		out.Body = &pb.Message_LeadIdleReminder{LeadIdleReminder: &pb.LeadIdleReminder{
 			IdleSeconds: uint32(b.Idle / time.Second), SubagentsStarted: b.Subagents, WorkersStarted: b.Workers, JudgesStarted: b.Judges,
 		}}
+	case core.RunLimitReached:
+		out.Body = &pb.Message_RunLimitReached{RunLimitReached: &pb.RunLimitReached{
+			Limit: runLimits.out(b.Limit), ElapsedSeconds: uint32(b.Elapsed / time.Second), SpentUsd: b.Spent,
+			MaxCostUsd: limitOut(b.MaxCost), GraceSeconds: uint32(b.Grace / time.Second),
+		}}
 	case core.SubagentSettled:
 		out.Body = &pb.Message_SubagentSettled{SubagentSettled: &pb.SubagentSettled{
 			AgentId: string(b.Agent), Status: agentStatuses.out(b.Status), Detail: b.Detail,
@@ -334,6 +373,12 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 			Subagents: b.LeadIdleReminder.GetSubagentsStarted(), Workers: b.LeadIdleReminder.GetWorkersStarted(),
 			Judges: b.LeadIdleReminder.GetJudgesStarted(),
 		}
+	case *pb.Message_RunLimitReached:
+		l := b.RunLimitReached
+		out.Body = core.RunLimitReached{
+			Limit: runLimits.in(l.GetLimit(), errs), Elapsed: time.Duration(l.GetElapsedSeconds()) * time.Second,
+			Spent: l.SpentUsd, MaxCost: l.GetMaxCostUsd(), Grace: time.Duration(l.GetGraceSeconds()) * time.Second,
+		}
 	case *pb.Message_SubagentSettled:
 		out.Body = core.SubagentSettled{
 			Agent: core.AgentID(b.SubagentSettled.GetAgentId()), Status: agentStatuses.in(b.SubagentSettled.GetStatus(), errs),
@@ -345,7 +390,7 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 
 func receiptOut(r core.Receipt, sequence uint64) *pb.Receipt {
 	return &pb.Receipt{
-		CommandId: string(r.Command), CommandDigest: string(r.Digest), Refusal: refusals.out(r.Refusal),
+		CommandId: string(r.Command), Refusal: refusals.out(r.Refusal),
 		RunId: string(r.Run), AgentId: string(r.Agent), MessageId: string(r.Message),
 		Delivery: deliveries.out(r.Delivery), Sequence: sequence, AllowedAgents: choicesOut(r.Allowed),
 	}
@@ -353,11 +398,22 @@ func receiptOut(r core.Receipt, sequence uint64) *pb.Receipt {
 
 func receiptIn(r *pb.Receipt, errs *errorList) core.Receipt {
 	return core.Receipt{
-		Command: core.CommandID(r.GetCommandId()), Digest: core.Digest(r.GetCommandDigest()),
+		Command: core.CommandID(r.GetCommandId()),
 		Refusal: refusals.in(r.GetRefusal(), errs), Run: core.RunID(r.GetRunId()), Agent: core.AgentID(r.GetAgentId()),
 		Message: core.MessageID(r.GetMessageId()), Delivery: deliveries.in(r.GetDelivery(), errs),
 		Allowed: choicesIn(r.GetAllowedAgents(), errs),
 	}
+}
+
+// receiptRecordOut is a receipt as it is stored: the public message, and what only the host keeps.
+func receiptRecordOut(r core.Receipt, sequence uint64) *pb.ReceiptRecord {
+	return &pb.ReceiptRecord{Receipt: receiptOut(r, sequence), CommandDigest: string(r.Digest)}
+}
+
+func receiptRecordIn(r *pb.ReceiptRecord, errs *errorList) core.Receipt {
+	out := receiptIn(r.GetReceipt(), errs)
+	out.Digest = core.Digest(r.GetCommandDigest())
+	return out
 }
 
 // EncodeEvent gives one event its committed form. The store assigns the sequence.
@@ -370,9 +426,9 @@ func EncodeEvent(sequence uint64, e core.Event) ([]byte, error) {
 	}
 	switch b := e.Body.(type) {
 	case core.Run:
-		out.Body = &pb.Event_RunUpdated{RunUpdated: runOut(b)}
+		out.Body = &pb.Event_RunUpdated{RunUpdated: runRecordOut(b)}
 	case core.Agent:
-		out.Body = &pb.Event_AgentUpdated{AgentUpdated: agentOut(b)}
+		out.Body = &pb.Event_AgentUpdated{AgentUpdated: agentRecordOut(b)}
 	case core.Turn:
 		out.Body = &pb.Event_TurnUpdated{TurnUpdated: turnOut(b)}
 	case core.Item:
@@ -380,7 +436,7 @@ func EncodeEvent(sequence uint64, e core.Event) ([]byte, error) {
 	case core.Message:
 		out.Body = &pb.Event_MessageUpdated{MessageUpdated: messageOut(b)}
 	case core.Receipt:
-		out.Body = &pb.Event_ReceiptRecorded{ReceiptRecorded: receiptOut(b, sequence)}
+		out.Body = &pb.Event_ReceiptRecorded{ReceiptRecorded: receiptRecordOut(b, sequence)}
 	default:
 		return nil, describe("event", e.Body)
 	}
@@ -404,9 +460,9 @@ func DecodeEvent(data []byte) (uint64, core.Event, error) {
 	}
 	switch b := m.GetBody().(type) {
 	case *pb.Event_RunUpdated:
-		e.Body = runIn(b.RunUpdated, &errs)
+		e.Body = runRecordIn(b.RunUpdated, &errs)
 	case *pb.Event_AgentUpdated:
-		e.Body = agentIn(b.AgentUpdated, &errs)
+		e.Body = agentRecordIn(b.AgentUpdated, &errs)
 	case *pb.Event_TurnUpdated:
 		e.Body = turnIn(b.TurnUpdated, &errs)
 	case *pb.Event_ItemUpdated:
@@ -414,7 +470,7 @@ func DecodeEvent(data []byte) (uint64, core.Event, error) {
 	case *pb.Event_MessageUpdated:
 		e.Body = messageIn(b.MessageUpdated, &errs)
 	case *pb.Event_ReceiptRecorded:
-		e.Body = receiptIn(b.ReceiptRecorded, &errs)
+		e.Body = receiptRecordIn(b.ReceiptRecorded, &errs)
 	default:
 		errs.errs = append(errs.errs, describe("event", m.GetBody()))
 	}

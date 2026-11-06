@@ -355,7 +355,7 @@ type WatchRunsResponse struct {
 	// Types that are valid to be assigned to Body:
 	//
 	//	*WatchRunsResponse_Snapshot
-	//	*WatchRunsResponse_Event
+	//	*WatchRunsResponse_Change
 	//	*WatchRunsResponse_Search
 	Body          isWatchRunsResponse_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
@@ -408,10 +408,10 @@ func (x *WatchRunsResponse) GetSnapshot() *RunsSnapshot {
 	return nil
 }
 
-func (x *WatchRunsResponse) GetEvent() *Event {
+func (x *WatchRunsResponse) GetChange() *RunChange {
 	if x != nil {
-		if x, ok := x.Body.(*WatchRunsResponse_Event); ok {
-			return x.Event
+		if x, ok := x.Body.(*WatchRunsResponse_Change); ok {
+			return x.Change
 		}
 	}
 	return nil
@@ -434,8 +434,8 @@ type WatchRunsResponse_Snapshot struct {
 	Snapshot *RunsSnapshot `protobuf:"bytes,1,opt,name=snapshot,proto3,oneof"`
 }
 
-type WatchRunsResponse_Event struct {
-	Event *Event `protobuf:"bytes,2,opt,name=event,proto3,oneof"`
+type WatchRunsResponse_Change struct {
+	Change *RunChange `protobuf:"bytes,2,opt,name=change,proto3,oneof"`
 }
 
 type WatchRunsResponse_Search struct {
@@ -444,7 +444,7 @@ type WatchRunsResponse_Search struct {
 
 func (*WatchRunsResponse_Snapshot) isWatchRunsResponse_Body() {}
 
-func (*WatchRunsResponse_Event) isWatchRunsResponse_Body() {}
+func (*WatchRunsResponse_Change) isWatchRunsResponse_Body() {}
 
 func (*WatchRunsResponse_Search) isWatchRunsResponse_Body() {}
 
@@ -859,10 +859,10 @@ const file_vibesys_orchestrator_v1_service_proto_rawDesc = "" +
 	"\x05turns\x18\x04 \x03(\v2\x1d.vibesys.orchestrator.v1.TurnR\x05turns\x12<\n" +
 	"\bmessages\x18\x05 \x03(\v2 .vibesys.orchestrator.v1.MessageR\bmessages\x12@\n" +
 	"\bsearches\x18\x06 \x03(\v2$.vibesys.orchestrator.v1.SearchStateR\bsearches\x12\x1c\n" +
-	"\ttruncated\x18\a \x01(\bR\ttruncated\"\xdf\x01\n" +
+	"\ttruncated\x18\a \x01(\bR\ttruncated\"\xe5\x01\n" +
 	"\x11WatchRunsResponse\x12C\n" +
-	"\bsnapshot\x18\x01 \x01(\v2%.vibesys.orchestrator.v1.RunsSnapshotH\x00R\bsnapshot\x126\n" +
-	"\x05event\x18\x02 \x01(\v2\x1e.vibesys.orchestrator.v1.EventH\x00R\x05event\x12>\n" +
+	"\bsnapshot\x18\x01 \x01(\v2%.vibesys.orchestrator.v1.RunsSnapshotH\x00R\bsnapshot\x12<\n" +
+	"\x06change\x18\x02 \x01(\v2\".vibesys.orchestrator.v1.RunChangeH\x00R\x06change\x12>\n" +
 	"\x06search\x18\x03 \x01(\v2$.vibesys.orchestrator.v1.SearchStateH\x00R\x06searchB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01\"\x87\x01\n" +
 	"\x11WatchAgentRequest\x12\"\n" +
@@ -933,7 +933,7 @@ var file_vibesys_orchestrator_v1_service_proto_goTypes = []any{
 	(*Turn)(nil),                     // 18: vibesys.orchestrator.v1.Turn
 	(*Message)(nil),                  // 19: vibesys.orchestrator.v1.Message
 	(*SearchState)(nil),              // 20: vibesys.orchestrator.v1.SearchState
-	(*Event)(nil),                    // 21: vibesys.orchestrator.v1.Event
+	(*RunChange)(nil),                // 21: vibesys.orchestrator.v1.RunChange
 	(*Item)(nil),                     // 22: vibesys.orchestrator.v1.Item
 	(*Delta)(nil),                    // 23: vibesys.orchestrator.v1.Delta
 	(*descriptorpb.FileOptions)(nil), // 24: google.protobuf.FileOptions
@@ -950,7 +950,7 @@ var file_vibesys_orchestrator_v1_service_proto_depIdxs = []int32{
 	19, // 8: vibesys.orchestrator.v1.RunsSnapshot.messages:type_name -> vibesys.orchestrator.v1.Message
 	20, // 9: vibesys.orchestrator.v1.RunsSnapshot.searches:type_name -> vibesys.orchestrator.v1.SearchState
 	5,  // 10: vibesys.orchestrator.v1.WatchRunsResponse.snapshot:type_name -> vibesys.orchestrator.v1.RunsSnapshot
-	21, // 11: vibesys.orchestrator.v1.WatchRunsResponse.event:type_name -> vibesys.orchestrator.v1.Event
+	21, // 11: vibesys.orchestrator.v1.WatchRunsResponse.change:type_name -> vibesys.orchestrator.v1.RunChange
 	20, // 12: vibesys.orchestrator.v1.WatchRunsResponse.search:type_name -> vibesys.orchestrator.v1.SearchState
 	22, // 13: vibesys.orchestrator.v1.ItemsPage.items:type_name -> vibesys.orchestrator.v1.Item
 	8,  // 14: vibesys.orchestrator.v1.WatchAgentResponse.page:type_name -> vibesys.orchestrator.v1.ItemsPage
@@ -987,7 +987,7 @@ func file_vibesys_orchestrator_v1_service_proto_init() {
 	file_vibesys_orchestrator_v1_search_proto_init()
 	file_vibesys_orchestrator_v1_service_proto_msgTypes[6].OneofWrappers = []any{
 		(*WatchRunsResponse_Snapshot)(nil),
-		(*WatchRunsResponse_Event)(nil),
+		(*WatchRunsResponse_Change)(nil),
 		(*WatchRunsResponse_Search)(nil),
 	}
 	file_vibesys_orchestrator_v1_service_proto_msgTypes[9].OneofWrappers = []any{
