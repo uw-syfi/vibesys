@@ -12,9 +12,9 @@ option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchest
 // no client of another release can stop. Nothing is removed or renumbered; buf breaking holds it.
 service HostControlService {
   // Identify says what the host is, whether it can serve, and whether stopping it is safe.
-  rpc Identify(IdentifyRequest) returns (HostIdentity);
+  rpc Identify(IdentifyRequest) returns (IdentifyResponse);
   // Stop ends the host. Sessions of live runs keep running, and the next host finds them.
-  rpc Stop(StopHostRequest) returns (StopHostResponse);
+  rpc Stop(StopRequest) returns (StopResponse);
 }
 
 message IdentifyRequest {
@@ -23,7 +23,7 @@ message IdentifyRequest {
   string client_release = 1 [(buf.validate.field).string.max_bytes = 128];
 }
 
-message HostIdentity {
+message IdentifyResponse {
   // The running host's release version, or "dev" for a build of no release.
   string release = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 128}];
   ReleaseRelation relation = 2 [(buf.validate.field).enum = {
@@ -131,12 +131,12 @@ enum UnservedReason {
   UNSERVED_REASON_STATE_REFUSED = 2;
 }
 
-message StopHostRequest {
+message StopRequest {
   // Stop only when no run is live. A host with live runs answers refused instead.
   bool only_if_idle = 1;
 }
 
-message StopHostResponse {
+message StopResponse {
   oneof outcome {
     option (buf.validate.oneof).required = true;
     Stopping stopping = 1;

@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/host_control.proto.
  */
 export const file_vibesys_orchestrator_v1_host_control: GenFile = /*@__PURE__*/
-  fileDesc("Cip2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ob3N0X2NvbnRyb2wucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIjMKD0lkZW50aWZ5UmVxdWVzdBIgCg5jbGllbnRfcmVsZWFzZRgBIAEoCUIIukgFcgMogAEiggMKDEhvc3RJZGVudGl0eRIbCgdyZWxlYXNlGAEgASgJQgq6SAdyBRABKIABEkYKCHJlbGF0aW9uGAIgASgOMigudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVsZWFzZVJlbGF0aW9uQgq6SAeCAQQQASAAEjYKCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESEQoJbGl2ZV9ydW5zGAQgASgNEj8KBXBhcnRzGAUgAygLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUGFydFJlYWRpbmVzc0IIukgFkgECEBASMwoHc2VydmluZxgGIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlcnZpbmdIABI1Cgh1bnNlcnZlZBgHIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVuc2VydmVkSABCFQoMb3JjaGVzdHJhdG9yEgW6SAIIASLKAQoNUGFydFJlYWRpbmVzcxI7CgRwYXJ0GAEgASgOMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSG9zdFBhcnRCCrpIB4IBBBABIAASMwoFcmVhZHkYAiABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5QYXJ0UmVhZHlIABI3Cgdwcm9ibGVtGAMgASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUGFydFByb2JsZW1IAEIOCgVzdGF0ZRIFukgCCAEiTAoJUGFydFJlYWR5Ej8KBm9yaWdpbhgBIAEoDjIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBhcnRPcmlnaW5CCrpIB4IBBBABIAAibwoLUGFydFByb2JsZW0SRgoGcmVhc29uGAEgASgOMioudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUGFydFByb2JsZW1SZWFzb25CCrpIB4IBBBABIAASGAoGZGV0YWlsGAIgASgJQgi6SAVyAyiAICIJCgdTZXJ2aW5nIowBCghVbnNlcnZlZBJDCgZyZWFzb24YASABKA4yJy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5VbnNlcnZlZFJlYXNvbkIKukgHggEEEAEgABIhCg9oZWxkX2J5X3JlbGVhc2UYAiABKAlCCLpIBXIDKIABEhgKBmRldGFpbBgDIAEoCUIIukgFcgMogCAiJwoPU3RvcEhvc3RSZXF1ZXN0EhQKDG9ubHlfaWZfaWRsZRgBIAEoCCKNAQoQU3RvcEhvc3RSZXNwb25zZRI1CghzdG9wcGluZxgBIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0b3BwaW5nSAASMAoHcmVmdXNlZBgCIAEoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkJ1c3lIAEIQCgdvdXRjb21lEgW6SAIIASIKCghTdG9wcGluZyIiCgRCdXN5EhoKCWxpdmVfcnVucxgBIAEoDUIHukgEKgIgACI9CghIb3N0TG9jaxIUCgNwaWQYASABKA1CB7pIBCoCIAASGwoHcmVsZWFzZRgCIAEoCUIKukgHcgUQASiAASquAQoPUmVsZWFzZVJlbGF0aW9uEiAKHFJFTEVBU0VfUkVMQVRJT05fVU5TUEVDSUZJRUQQABIZChVSRUxFQVNFX1JFTEFUSU9OX1NBTUUQARIfChtSRUxFQVNFX1JFTEFUSU9OX0hPU1RfT0xERVIQAhIfChtSRUxFQVNFX1JFTEFUSU9OX0hPU1RfTkVXRVIQAxIcChhSRUxFQVNFX1JFTEFUSU9OX1VOS05PV04QBCpxCghIb3N0UGFydBIZChVIT1NUX1BBUlRfVU5TUEVDSUZJRUQQABIcChhIT1NUX1BBUlRfU0VTU0lPTl9IT0xERVIQARIUChBIT1NUX1BBUlRfU0tJTExTEAISFgoSSE9TVF9QQVJUX0pPQl9UT09MEAMqXAoKUGFydE9yaWdpbhIbChdQQVJUX09SSUdJTl9VTlNQRUNJRklFRBAAEhcKE1BBUlRfT1JJR0lOX1JFTEVBU0UQARIYChRQQVJUX09SSUdJTl9PUEVSQVRPUhACKrkBChFQYXJ0UHJvYmxlbVJlYXNvbhIjCh9QQVJUX1BST0JMRU1fUkVBU09OX1VOU1BFQ0lGSUVEEAASIgoeUEFSVF9QUk9CTEVNX1JFQVNPTl9OT19SRUxFQVNFEAESKgomUEFSVF9QUk9CTEVNX1JFQVNPTl9SRUxFQVNFX0lOQ09NUExFVEUQAhIvCitQQVJUX1BST0JMRU1fUkVBU09OX09QRVJBVE9SX0NIT0lDRV9SRUZVU0VEEAMqeAoOVW5zZXJ2ZWRSZWFzb24SHwobVU5TRVJWRURfUkVBU09OX1VOU1BFQ0lGSUVEEAASIgoeVU5TRVJWRURfUkVBU09OX0hFTERfRUxTRVdIRVJFEAESIQodVU5TRVJWRURfUkVBU09OX1NUQVRFX1JFRlVTRUQQAjLOAQoSSG9zdENvbnRyb2xTZXJ2aWNlElsKCElkZW50aWZ5EigudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSWRlbnRpZnlSZXF1ZXN0GiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSG9zdElkZW50aXR5ElsKBFN0b3ASKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wSG9zdFJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wSG9zdFJlc3BvbnNlQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("Cip2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ob3N0X2NvbnRyb2wucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIjMKD0lkZW50aWZ5UmVxdWVzdBIgCg5jbGllbnRfcmVsZWFzZRgBIAEoCUIIukgFcgMogAEihgMKEElkZW50aWZ5UmVzcG9uc2USGwoHcmVsZWFzZRgBIAEoCUIKukgHcgUQASiAARJGCghyZWxhdGlvbhgCIAEoDjIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlbGVhc2VSZWxhdGlvbkIKukgHggEEEAEgABI2CgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEhEKCWxpdmVfcnVucxgEIAEoDRI/CgVwYXJ0cxgFIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBhcnRSZWFkaW5lc3NCCLpIBZIBAhAQEjMKB3NlcnZpbmcYBiABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXJ2aW5nSAASNQoIdW5zZXJ2ZWQYByABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5VbnNlcnZlZEgAQhUKDG9yY2hlc3RyYXRvchIFukgCCAEiygEKDVBhcnRSZWFkaW5lc3MSOwoEcGFydBgBIAEoDjIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhvc3RQYXJ0Qgq6SAeCAQQQASAAEjMKBXJlYWR5GAIgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUGFydFJlYWR5SAASNwoHcHJvYmxlbRgDIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBhcnRQcm9ibGVtSABCDgoFc3RhdGUSBbpIAggBIkwKCVBhcnRSZWFkeRI/CgZvcmlnaW4YASABKA4yIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5QYXJ0T3JpZ2luQgq6SAeCAQQQASAAIm8KC1BhcnRQcm9ibGVtEkYKBnJlYXNvbhgBIAEoDjIqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBhcnRQcm9ibGVtUmVhc29uQgq6SAeCAQQQASAAEhgKBmRldGFpbBgCIAEoCUIIukgFcgMogCAiCQoHU2VydmluZyKMAQoIVW5zZXJ2ZWQSQwoGcmVhc29uGAEgASgOMicudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVW5zZXJ2ZWRSZWFzb25CCrpIB4IBBBABIAASIQoPaGVsZF9ieV9yZWxlYXNlGAIgASgJQgi6SAVyAyiAARIYCgZkZXRhaWwYAyABKAlCCLpIBXIDKIAgIiMKC1N0b3BSZXF1ZXN0EhQKDG9ubHlfaWZfaWRsZRgBIAEoCCKJAQoMU3RvcFJlc3BvbnNlEjUKCHN0b3BwaW5nGAEgASgLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3RvcHBpbmdIABIwCgdyZWZ1c2VkGAIgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQnVzeUgAQhAKB291dGNvbWUSBbpIAggBIgoKCFN0b3BwaW5nIiIKBEJ1c3kSGgoJbGl2ZV9ydW5zGAEgASgNQge6SAQqAiAAIj0KCEhvc3RMb2NrEhQKA3BpZBgBIAEoDUIHukgEKgIgABIbCgdyZWxlYXNlGAIgASgJQgq6SAdyBRABKIABKq4BCg9SZWxlYXNlUmVsYXRpb24SIAocUkVMRUFTRV9SRUxBVElPTl9VTlNQRUNJRklFRBAAEhkKFVJFTEVBU0VfUkVMQVRJT05fU0FNRRABEh8KG1JFTEVBU0VfUkVMQVRJT05fSE9TVF9PTERFUhACEh8KG1JFTEVBU0VfUkVMQVRJT05fSE9TVF9ORVdFUhADEhwKGFJFTEVBU0VfUkVMQVRJT05fVU5LTk9XThAEKnEKCEhvc3RQYXJ0EhkKFUhPU1RfUEFSVF9VTlNQRUNJRklFRBAAEhwKGEhPU1RfUEFSVF9TRVNTSU9OX0hPTERFUhABEhQKEEhPU1RfUEFSVF9TS0lMTFMQAhIWChJIT1NUX1BBUlRfSk9CX1RPT0wQAypcCgpQYXJ0T3JpZ2luEhsKF1BBUlRfT1JJR0lOX1VOU1BFQ0lGSUVEEAASFwoTUEFSVF9PUklHSU5fUkVMRUFTRRABEhgKFFBBUlRfT1JJR0lOX09QRVJBVE9SEAIquQEKEVBhcnRQcm9ibGVtUmVhc29uEiMKH1BBUlRfUFJPQkxFTV9SRUFTT05fVU5TUEVDSUZJRUQQABIiCh5QQVJUX1BST0JMRU1fUkVBU09OX05PX1JFTEVBU0UQARIqCiZQQVJUX1BST0JMRU1fUkVBU09OX1JFTEVBU0VfSU5DT01QTEVURRACEi8KK1BBUlRfUFJPQkxFTV9SRUFTT05fT1BFUkFUT1JfQ0hPSUNFX1JFRlVTRUQQAyp4Cg5VbnNlcnZlZFJlYXNvbhIfChtVTlNFUlZFRF9SRUFTT05fVU5TUEVDSUZJRUQQABIiCh5VTlNFUlZFRF9SRUFTT05fSEVMRF9FTFNFV0hFUkUQARIhCh1VTlNFUlZFRF9SRUFTT05fU1RBVEVfUkVGVVNFRBACMsoBChJIb3N0Q29udHJvbFNlcnZpY2USXwoISWRlbnRpZnkSKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JZGVudGlmeVJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JZGVudGlmeVJlc3BvbnNlElMKBFN0b3ASJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wUmVxdWVzdBolLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0b3BSZXNwb25zZUJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message vibesys.orchestrator.v1.IdentifyRequest
@@ -36,9 +36,9 @@ export const IdentifyRequestSchema: GenMessage<IdentifyRequest> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_host_control, 0);
 
 /**
- * @generated from message vibesys.orchestrator.v1.HostIdentity
+ * @generated from message vibesys.orchestrator.v1.IdentifyResponse
  */
-export type HostIdentity = Message<"vibesys.orchestrator.v1.HostIdentity"> & {
+export type IdentifyResponse = Message<"vibesys.orchestrator.v1.IdentifyResponse"> & {
   /**
    * The running host's release version, or "dev" for a build of no release.
    *
@@ -72,7 +72,7 @@ export type HostIdentity = Message<"vibesys.orchestrator.v1.HostIdentity"> & {
   parts: PartReadiness[];
 
   /**
-   * @generated from oneof vibesys.orchestrator.v1.HostIdentity.orchestrator
+   * @generated from oneof vibesys.orchestrator.v1.IdentifyResponse.orchestrator
    */
   orchestrator: {
     /**
@@ -94,10 +94,10 @@ export type HostIdentity = Message<"vibesys.orchestrator.v1.HostIdentity"> & {
 };
 
 /**
- * Describes the message vibesys.orchestrator.v1.HostIdentity.
- * Use `create(HostIdentitySchema)` to create a new message.
+ * Describes the message vibesys.orchestrator.v1.IdentifyResponse.
+ * Use `create(IdentifyResponseSchema)` to create a new message.
  */
-export const HostIdentitySchema: GenMessage<HostIdentity> = /*@__PURE__*/
+export const IdentifyResponseSchema: GenMessage<IdentifyResponse> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_host_control, 1);
 
 /**
@@ -220,9 +220,9 @@ export const UnservedSchema: GenMessage<Unserved> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_host_control, 6);
 
 /**
- * @generated from message vibesys.orchestrator.v1.StopHostRequest
+ * @generated from message vibesys.orchestrator.v1.StopRequest
  */
-export type StopHostRequest = Message<"vibesys.orchestrator.v1.StopHostRequest"> & {
+export type StopRequest = Message<"vibesys.orchestrator.v1.StopRequest"> & {
   /**
    * Stop only when no run is live. A host with live runs answers refused instead.
    *
@@ -232,18 +232,18 @@ export type StopHostRequest = Message<"vibesys.orchestrator.v1.StopHostRequest">
 };
 
 /**
- * Describes the message vibesys.orchestrator.v1.StopHostRequest.
- * Use `create(StopHostRequestSchema)` to create a new message.
+ * Describes the message vibesys.orchestrator.v1.StopRequest.
+ * Use `create(StopRequestSchema)` to create a new message.
  */
-export const StopHostRequestSchema: GenMessage<StopHostRequest> = /*@__PURE__*/
+export const StopRequestSchema: GenMessage<StopRequest> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_host_control, 7);
 
 /**
- * @generated from message vibesys.orchestrator.v1.StopHostResponse
+ * @generated from message vibesys.orchestrator.v1.StopResponse
  */
-export type StopHostResponse = Message<"vibesys.orchestrator.v1.StopHostResponse"> & {
+export type StopResponse = Message<"vibesys.orchestrator.v1.StopResponse"> & {
   /**
-   * @generated from oneof vibesys.orchestrator.v1.StopHostResponse.outcome
+   * @generated from oneof vibesys.orchestrator.v1.StopResponse.outcome
    */
   outcome: {
     /**
@@ -261,10 +261,10 @@ export type StopHostResponse = Message<"vibesys.orchestrator.v1.StopHostResponse
 };
 
 /**
- * Describes the message vibesys.orchestrator.v1.StopHostResponse.
- * Use `create(StopHostResponseSchema)` to create a new message.
+ * Describes the message vibesys.orchestrator.v1.StopResponse.
+ * Use `create(StopResponseSchema)` to create a new message.
  */
-export const StopHostResponseSchema: GenMessage<StopHostResponse> = /*@__PURE__*/
+export const StopResponseSchema: GenMessage<StopResponse> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_host_control, 8);
 
 /**
@@ -513,7 +513,7 @@ export const HostControlService: GenService<{
   identify: {
     methodKind: "unary";
     input: typeof IdentifyRequestSchema;
-    output: typeof HostIdentitySchema;
+    output: typeof IdentifyResponseSchema;
   },
   /**
    * Stop ends the host. Sessions of live runs keep running, and the next host finds them.
@@ -522,8 +522,8 @@ export const HostControlService: GenService<{
    */
   stop: {
     methodKind: "unary";
-    input: typeof StopHostRequestSchema;
-    output: typeof StopHostResponseSchema;
+    input: typeof StopRequestSchema;
+    output: typeof StopResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_vibesys_orchestrator_v1_host_control, 0);

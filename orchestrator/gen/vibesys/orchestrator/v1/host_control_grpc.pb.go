@@ -33,9 +33,9 @@ const (
 // no client of another release can stop. Nothing is removed or renumbered; buf breaking holds it.
 type HostControlServiceClient interface {
 	// Identify says what the host is, whether it can serve, and whether stopping it is safe.
-	Identify(ctx context.Context, in *IdentifyRequest, opts ...grpc.CallOption) (*HostIdentity, error)
+	Identify(ctx context.Context, in *IdentifyRequest, opts ...grpc.CallOption) (*IdentifyResponse, error)
 	// Stop ends the host. Sessions of live runs keep running, and the next host finds them.
-	Stop(ctx context.Context, in *StopHostRequest, opts ...grpc.CallOption) (*StopHostResponse, error)
+	Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopResponse, error)
 }
 
 type hostControlServiceClient struct {
@@ -46,9 +46,9 @@ func NewHostControlServiceClient(cc grpc.ClientConnInterface) HostControlService
 	return &hostControlServiceClient{cc}
 }
 
-func (c *hostControlServiceClient) Identify(ctx context.Context, in *IdentifyRequest, opts ...grpc.CallOption) (*HostIdentity, error) {
+func (c *hostControlServiceClient) Identify(ctx context.Context, in *IdentifyRequest, opts ...grpc.CallOption) (*IdentifyResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HostIdentity)
+	out := new(IdentifyResponse)
 	err := c.cc.Invoke(ctx, HostControlService_Identify_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -56,9 +56,9 @@ func (c *hostControlServiceClient) Identify(ctx context.Context, in *IdentifyReq
 	return out, nil
 }
 
-func (c *hostControlServiceClient) Stop(ctx context.Context, in *StopHostRequest, opts ...grpc.CallOption) (*StopHostResponse, error) {
+func (c *hostControlServiceClient) Stop(ctx context.Context, in *StopRequest, opts ...grpc.CallOption) (*StopResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(StopHostResponse)
+	out := new(StopResponse)
 	err := c.cc.Invoke(ctx, HostControlService_Stop_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -76,9 +76,9 @@ func (c *hostControlServiceClient) Stop(ctx context.Context, in *StopHostRequest
 // no client of another release can stop. Nothing is removed or renumbered; buf breaking holds it.
 type HostControlServiceServer interface {
 	// Identify says what the host is, whether it can serve, and whether stopping it is safe.
-	Identify(context.Context, *IdentifyRequest) (*HostIdentity, error)
+	Identify(context.Context, *IdentifyRequest) (*IdentifyResponse, error)
 	// Stop ends the host. Sessions of live runs keep running, and the next host finds them.
-	Stop(context.Context, *StopHostRequest) (*StopHostResponse, error)
+	Stop(context.Context, *StopRequest) (*StopResponse, error)
 	mustEmbedUnimplementedHostControlServiceServer()
 }
 
@@ -89,10 +89,10 @@ type HostControlServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedHostControlServiceServer struct{}
 
-func (UnimplementedHostControlServiceServer) Identify(context.Context, *IdentifyRequest) (*HostIdentity, error) {
+func (UnimplementedHostControlServiceServer) Identify(context.Context, *IdentifyRequest) (*IdentifyResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Identify not implemented")
 }
-func (UnimplementedHostControlServiceServer) Stop(context.Context, *StopHostRequest) (*StopHostResponse, error) {
+func (UnimplementedHostControlServiceServer) Stop(context.Context, *StopRequest) (*StopResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Stop not implemented")
 }
 func (UnimplementedHostControlServiceServer) mustEmbedUnimplementedHostControlServiceServer() {}
@@ -135,7 +135,7 @@ func _HostControlService_Identify_Handler(srv interface{}, ctx context.Context, 
 }
 
 func _HostControlService_Stop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(StopHostRequest)
+	in := new(StopRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func _HostControlService_Stop_Handler(srv interface{}, ctx context.Context, dec 
 		FullMethod: HostControlService_Stop_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HostControlServiceServer).Stop(ctx, req.(*StopHostRequest))
+		return srv.(HostControlServiceServer).Stop(ctx, req.(*StopRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

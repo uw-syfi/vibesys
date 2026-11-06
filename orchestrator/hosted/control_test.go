@@ -54,7 +54,7 @@ func control(t *testing.T, host fakeHost) (pb.HostControlServiceClient, <-chan s
 func TestStopWithLiveRunsIsRefusedWhenAskedToStopOnlyIfIdle(t *testing.T) {
 	for _, live := range []uint32{1, 2, 17} {
 		client, stopped := control(t, fakeHost{live: live})
-		got, err := client.Stop(context.Background(), &pb.StopHostRequest{OnlyIfIdle: true})
+		got, err := client.Stop(context.Background(), &pb.StopRequest{OnlyIfIdle: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -66,7 +66,7 @@ func TestStopWithLiveRunsIsRefusedWhenAskedToStopOnlyIfIdle(t *testing.T) {
 			t.Fatalf("%d live runs: the host stopped although it refused", live)
 		default:
 		}
-		if _, err := client.Stop(context.Background(), &pb.StopHostRequest{}); err != nil {
+		if _, err := client.Stop(context.Background(), &pb.StopRequest{}); err != nil {
 			t.Fatal(err)
 		}
 		select {
@@ -79,7 +79,7 @@ func TestStopWithLiveRunsIsRefusedWhenAskedToStopOnlyIfIdle(t *testing.T) {
 
 func TestAnIdleHostStopsOnceAfterItsReply(t *testing.T) {
 	client, stopped := control(t, fakeHost{})
-	got, err := client.Stop(context.Background(), &pb.StopHostRequest{OnlyIfIdle: true})
+	got, err := client.Stop(context.Background(), &pb.StopRequest{OnlyIfIdle: true})
 	if err != nil || got.GetStopping() == nil {
 		t.Fatalf("got %v, %v, want stopping", got, err)
 	}

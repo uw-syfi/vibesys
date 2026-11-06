@@ -44,11 +44,11 @@ func (c *Control) Close() error { return c.conn.Close() }
 
 // Identify asks the host what it is. clientRelease is this client's release, which the host
 // compares with its own.
-func (c *Control) Identify(ctx context.Context, clientRelease string) (*pb.HostIdentity, error) {
+func (c *Control) Identify(ctx context.Context, clientRelease string) (*pb.IdentifyResponse, error) {
 	return c.svc.Identify(ctx, &pb.IdentifyRequest{ClientRelease: clientRelease})
 }
 
 // Stop asks the host to end.
-func (c *Control) Stop(ctx context.Context, onlyIfIdle bool) (*pb.StopHostResponse, error) {
-	return c.svc.Stop(ctx, &pb.StopHostRequest{OnlyIfIdle: onlyIfIdle})
+func (c *Control) Stop(ctx context.Context, onlyIfIdle bool) (*pb.StopResponse, error) {
+	return c.svc.Stop(ctx, &pb.StopRequest{OnlyIfIdle: onlyIfIdle})
 }

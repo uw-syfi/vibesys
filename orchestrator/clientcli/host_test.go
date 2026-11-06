@@ -26,7 +26,7 @@ type fakeHost struct {
 	pb.UnimplementedHostControlServiceServer
 	mu       sync.Mutex
 	running  bool
-	identity *pb.HostIdentity
+	identity *pb.IdentifyResponse
 	// oldHost makes it answer as a host that predates host control.
 	oldHost bool
 	stops   []bool
@@ -35,14 +35,14 @@ type fakeHost struct {
 
 func (h *fakeHost) isRunning() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.running }
 
-func (h *fakeHost) Identify(context.Context, *pb.IdentifyRequest) (*pb.HostIdentity, error) {
+func (h *fakeHost) Identify(context.Context, *pb.IdentifyRequest) (*pb.IdentifyResponse, error) {
 	if h.oldHost {
 		return nil, status.Error(codes.Unimplemented, "unknown service")
 	}
 	return h.identity, nil
 }
 
-func (h *fakeHost) Stop(_ context.Context, req *pb.StopHostRequest) (*pb.StopHostResponse, error) {
+func (h *fakeHost) Stop(_ context.Context, req *pb.StopRequest) (*pb.StopResponse, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.oldHost {
@@ -50,10 +50,10 @@ func (h *fakeHost) Stop(_ context.Context, req *pb.StopHostRequest) (*pb.StopHos
 	}
 	h.stops = append(h.stops, req.GetOnlyIfIdle())
 	if req.GetOnlyIfIdle() && h.identity.GetLiveRuns() > 0 {
-		return &pb.StopHostResponse{Outcome: &pb.StopHostResponse_Refused{Refused: &pb.Busy{LiveRuns: h.identity.GetLiveRuns()}}}, nil
+		return &pb.StopResponse{Outcome: &pb.StopResponse_Refused{Refused: &pb.Busy{LiveRuns: h.identity.GetLiveRuns()}}}, nil
 	}
 	h.running = false
-	return &pb.StopHostResponse{Outcome: &pb.StopHostResponse_Stopping{Stopping: &pb.Stopping{}}}, nil
+	return &pb.StopResponse{Outcome: &pb.StopResponse_Stopping{Stopping: &pb.Stopping{}}}, nil
 }
 
 // dial connects to the host, or fails as a socket nobody serves does.
@@ -133,15 +133,15 @@ func runHost(env clientcli.Env, args ...string) (code int, stdout, stderr string
 	return code, out.String(), errb.String()
 }
 
-func identity(live uint32) *pb.HostIdentity {
-	return &pb.HostIdentity{
+func identity(live uint32) *pb.IdentifyResponse {
+	return &pb.IdentifyResponse{
 		Release: "1.0.0", Relation: pb.ReleaseRelation_RELEASE_RELATION_SAME, StartedAt: timestamppb.New(time.Unix(1_700_000_000, 0)),
 		LiveRuns: live,
 		Parts: []*pb.PartReadiness{
 			{Part: pb.HostPart_HOST_PART_SESSION_HOLDER, State: &pb.PartReadiness_Ready{Ready: &pb.PartReady{Origin: pb.PartOrigin_PART_ORIGIN_RELEASE}}},
 			{Part: pb.HostPart_HOST_PART_JOB_TOOL, State: &pb.PartReadiness_Problem{Problem: &pb.PartProblem{Reason: pb.PartProblemReason_PART_PROBLEM_REASON_RELEASE_INCOMPLETE, Detail: "missing bin/vibesys-cli"}}},
 		},
-		Orchestrator: &pb.HostIdentity_Serving{Serving: &pb.Serving{}},
+		Orchestrator: &pb.IdentifyResponse_Serving{Serving: &pb.Serving{}},
 	}
 }
 
@@ -171,7 +171,7 @@ func TestHostStatusSaysWhatTheHostIsAndNeverStartsOne(t *testing.T) {
 
 func TestHostStatusSaysWhyTheOrchestratorIsNotServed(t *testing.T) {
 	id := identity(0)
-	id.Orchestrator = &pb.HostIdentity_Unserved{Unserved: &pb.Unserved{Reason: pb.UnservedReason_UNSERVED_REASON_HELD_ELSEWHERE, HeldByRelease: "0.9.0", Detail: "another host"}}
+	id.Orchestrator = &pb.IdentifyResponse_Unserved{Unserved: &pb.Unserved{Reason: pb.UnservedReason_UNSERVED_REASON_HELD_ELSEWHERE, HeldByRelease: "0.9.0", Detail: "another host"}}
 	id.Relation = pb.ReleaseRelation_RELEASE_RELATION_HOST_OLDER
 	code, out, _ := runHost(hostWorld(&fakeHost{running: true, identity: id}, nil), "host", "status")
 	if code != clientcli.ExitOK || !strings.Contains(out, "held by another host, release 0.9.0") || !strings.Contains(out, "older than this client") {

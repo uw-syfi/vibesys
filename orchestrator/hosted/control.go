@@ -45,8 +45,8 @@ type control struct {
 
 // Identify implements pb.HostControlServiceServer. The parts are resolved now, not when the host
 // started, so the answer follows a repaired install.
-func (c *control) Identify(_ context.Context, req *pb.IdentifyRequest) (*pb.HostIdentity, error) {
-	id := &pb.HostIdentity{
+func (c *control) Identify(_ context.Context, req *pb.IdentifyRequest) (*pb.IdentifyResponse, error) {
+	id := &pb.IdentifyResponse{
 		Release:   c.c.Release,
 		Relation:  release.Relate(c.c.Release, req.GetClientRelease()),
 		StartedAt: timestamppb.New(c.c.Started),
@@ -54,9 +54,9 @@ func (c *control) Identify(_ context.Context, req *pb.IdentifyRequest) (*pb.Host
 		Parts:     c.c.Parts.Readiness(),
 	}
 	if unserved := c.c.Host.Unserved(); unserved != nil {
-		id.Orchestrator = &pb.HostIdentity_Unserved{Unserved: unserved}
+		id.Orchestrator = &pb.IdentifyResponse_Unserved{Unserved: unserved}
 	} else {
-		id.Orchestrator = &pb.HostIdentity_Serving{Serving: &pb.Serving{}}
+		id.Orchestrator = &pb.IdentifyResponse_Serving{Serving: &pb.Serving{}}
 	}
 	return id, nil
 }
@@ -65,13 +65,13 @@ func (c *control) Identify(_ context.Context, req *pb.IdentifyRequest) (*pb.Host
 // the call's context ends then, and not before. A host that serves live runs and was asked to stop
 // only when idle refuses. A run that starts between that check and the stop loses its host like any
 // run whose host crashed, and the next host recovers it.
-func (c *control) Stop(ctx context.Context, req *pb.StopHostRequest) (*pb.StopHostResponse, error) {
+func (c *control) Stop(ctx context.Context, req *pb.StopRequest) (*pb.StopResponse, error) {
 	if live := c.c.Host.LiveRuns(); req.GetOnlyIfIdle() && live > 0 {
-		return &pb.StopHostResponse{Outcome: &pb.StopHostResponse_Refused{Refused: &pb.Busy{LiveRuns: live}}}, nil
+		return &pb.StopResponse{Outcome: &pb.StopResponse_Refused{Refused: &pb.Busy{LiveRuns: live}}}, nil
 	}
 	go func() {
 		<-ctx.Done()
 		c.c.Stop()
 	}()
-	return &pb.StopHostResponse{Outcome: &pb.StopHostResponse_Stopping{Stopping: &pb.Stopping{}}}, nil
+	return &pb.StopResponse{Outcome: &pb.StopResponse_Stopping{Stopping: &pb.Stopping{}}}, nil
 }

@@ -72,7 +72,7 @@ func (c *call) control(ctx context.Context) (*client.Control, error) {
 }
 
 // identify asks the host what it is.
-func (c *call) identify(ctx context.Context) (*pb.HostIdentity, error) {
+func (c *call) identify(ctx context.Context) (*pb.IdentifyResponse, error) {
 	ctl, err := c.control(ctx)
 	if err != nil {
 		return nil, err
@@ -263,7 +263,7 @@ func plural(n uint32, one, many string) string {
 }
 
 // describeHost prints what a host said it is, in words.
-func describeHost(w io.Writer, id *pb.HostIdentity, zone *time.Location) error {
+func describeHost(w io.Writer, id *pb.IdentifyResponse, zone *time.Location) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "host: release %s, %s\n", id.GetRelease(), relation(id.GetRelation()))
 	if zone == nil {

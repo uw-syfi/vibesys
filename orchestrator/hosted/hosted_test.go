@@ -51,7 +51,7 @@ func startAt(t *testing.T, state, executable, version string, settings map[strin
 
 // identify asks a host process what it is, over an in-memory connection to the services it
 // registers.
-func identify(t *testing.T, x *hosted.Orchestrator, client string) *pb.HostIdentity {
+func identify(t *testing.T, x *hosted.Orchestrator, client string) *pb.IdentifyResponse {
 	t.Helper()
 	conn := serve(t, x)
 	id, err := pb.NewHostControlServiceClient(conn).Identify(context.Background(), &pb.IdentifyRequest{ClientRelease: client})
@@ -79,7 +79,7 @@ func serve(t *testing.T, x *hosted.Orchestrator) *grpc.ClientConn {
 	return conn
 }
 
-func part(id *pb.HostIdentity, which pb.HostPart) *pb.PartReadiness {
+func part(id *pb.IdentifyResponse, which pb.HostPart) *pb.PartReadiness {
 	for _, p := range id.GetParts() {
 		if p.GetPart() == which {
 			return p
