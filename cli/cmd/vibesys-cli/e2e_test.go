@@ -29,6 +29,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/shorttmp"
 	"github.com/uw-syfi/vibesys/cli/internal/store/filestore"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/host"
@@ -93,7 +94,7 @@ func TestMain(m *testing.M) {
 	}
 	// The tests start from none of the operator's names, whatever shell runs them.
 	scrubOperatorEnvironment()
-	os.Exit(m.Run())
+	os.Exit(shorttmp.Run(m))
 }
 
 type anyFS struct{}

@@ -327,6 +327,10 @@ local_paths = ["examples/model-serving/qwen3.5-9b-mi210"]
 language = "python"
 directory = "."
 timeout_seconds = 1200
+# uv puts a project's environment beside it by default, which here is inside the example's task
+# tree (cpu_check/.venv); the example-registry tests read every .py file under that tree and fail on
+# the installed packages. The environment goes under the ignored artifacts directory instead.
+env = { UV_PROJECT_ENVIRONMENT = "{repo_root}/artifacts/cpu-check-venv" }
 commands = [
   ["uv", "run", "--locked", "--directory", "examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default", "--project", "cpu_check", "python", "-m", "pytest", "cpu_check", "-v", "--durations=0"],
 ]

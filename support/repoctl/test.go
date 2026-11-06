@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
 
@@ -131,7 +133,11 @@ func selectedTestChecks(g graph, p plan, checksOnly bool) ([]execution.Check, []
 	return checks, targets, skipped, skippedGroups, nil
 }
 
-func runSelectedTests(root string, g graph, p plan, dryRun, checksOnly bool, runner execution.Runner, nativeRun nativeCommand) error {
+// runSelectedTests runs the planned groups and native targets. Each group is a unit: its commands
+// run in order and stop at the first failure, because a later command may rely on an earlier one.
+// Unless failFast, a failed group does not stop the others, and the run ends with a summary naming
+// every group's outcome, so one run reports everything that is wrong instead of the first thing.
+func runSelectedTests(root string, g graph, p plan, dryRun, checksOnly, failFast bool, runner execution.Runner, nativeRun nativeCommand) error {
 	checks, targets, skipped, skippedGroups, err := selectedTestChecks(g, p, checksOnly)
 	if err != nil {
 		return err
@@ -142,36 +148,125 @@ func runSelectedTests(root string, g graph, p plan, dryRun, checksOnly bool, run
 	for _, name := range skippedGroups {
 		fmt.Println(skippedGroupLine(g, name))
 	}
-	if err := runChecks(root, checks, dryRun, runner); err != nil {
-		return err
-	}
-	if len(targets) == 0 {
-		return nil
-	}
-	raw, err := json.Marshal(targets)
-	if err != nil {
-		return err
-	}
 	if dryRun {
-		registered, err := selectedNativeTargets(g)
+		return printSelectedTests(root, g, checks, targets, runner)
+	}
+	if err := preflight(runner, checks); err != nil {
+		return err
+	}
+	results := runGroups(root, checks, failFast, runner)
+	for _, target := range targets {
+		if failFast && anyFailed(results) {
+			results = append(results, groupResult{Group: "native " + target, Skipped: true})
+			continue
+		}
+		raw, err := json.Marshal([]string{target})
 		if err != nil {
 			return err
 		}
-		for _, target := range targets {
-			item, ok := registered[target]
-			if !ok {
-				return fmt.Errorf("unregistered native target %q", target)
-			}
-			for _, args := range g.NativeChecks.Commands[item.Language] {
-				fmt.Printf("%s: %s\n", target, strings.Join(args, " "))
-			}
+		results = append(results, groupResult{Group: "native " + target, Err: runNativeTargets(root, g, string(raw), nativeRun)})
+	}
+	return summarize(os.Stdout, results)
+}
+
+func printSelectedTests(root string, g graph, checks []execution.Check, targets []string, runner execution.Runner) error {
+	if err := runChecks(root, checks, true, runner); err != nil {
+		return err
+	}
+	registered, err := selectedNativeTargets(g)
+	if err != nil {
+		return err
+	}
+	for _, target := range targets {
+		item, ok := registered[target]
+		if !ok {
+			return fmt.Errorf("unregistered native target %q", target)
 		}
+		for _, args := range g.NativeChecks.Commands[item.Language] {
+			fmt.Printf("%s: %s\n", target, strings.Join(args, " "))
+		}
+	}
+	return nil
+}
+
+// groupResult is the outcome of one group: it ran and passed (Err nil), ran and failed, or was
+// not run because an earlier failure stopped a --fail-fast run.
+type groupResult struct {
+	Group   string
+	Err     error
+	Skipped bool
+}
+
+func anyFailed(results []groupResult) bool {
+	for _, r := range results {
+		if r.Err != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// runGroups runs checks grouped by their check group, in order. A group's commands stop at its
+// first failure; the next group still runs unless failFast.
+func runGroups(root string, checks []execution.Check, failFast bool, runner execution.Runner) []groupResult {
+	var order []string
+	byGroup := map[string][]execution.Check{}
+	for _, check := range checks {
+		name := groupName(check.Label)
+		if _, seen := byGroup[name]; !seen {
+			order = append(order, name)
+		}
+		byGroup[name] = append(byGroup[name], check)
+	}
+	results := make([]groupResult, 0, len(order))
+	for _, name := range order {
+		if failFast && anyFailed(results) {
+			results = append(results, groupResult{Group: name, Skipped: true})
+			continue
+		}
+		results = append(results, groupResult{Group: name, Err: runChecks(root, byGroup[name], false, runner)})
+	}
+	return results
+}
+
+// summarize prints each group's outcome and returns an error naming the failed groups.
+func summarize(out io.Writer, results []groupResult) error {
+	if len(results) == 0 {
 		return nil
 	}
-	return runNativeTargets(root, g, string(raw), nativeRun)
+	var failed []string
+	fmt.Fprintln(out, "\nrepoctl test summary:")
+	for _, r := range results {
+		switch {
+		case r.Skipped:
+			fmt.Fprintf(out, "  not run  %s (stopped by --fail-fast)\n", r.Group)
+		case r.Err != nil:
+			failed = append(failed, r.Group)
+			fmt.Fprintf(out, "  FAILED   %s: %v\n", r.Group, r.Err)
+		default:
+			fmt.Fprintf(out, "  passed   %s\n", r.Group)
+		}
+	}
+	if len(failed) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%d of %d groups failed: %s", len(failed), len(results), strings.Join(failed, ", "))
+}
+
+// preflight lets a runner refuse the whole plan before any of it runs.
+func preflight(runner execution.Runner, checks []execution.Check) error {
+	if p, ok := runner.(preflighter); ok {
+		return p.Preflight(checks)
+	}
+	return nil
 }
 
 func runChecks(root string, checks []execution.Check, dryRun bool, runner execution.Runner) error {
+	if !dryRun {
+		if err := preflight(runner, checks); err != nil {
+			return err
+		}
+	}
 	for _, check := range checks {
 		fmt.Printf("%s (%s): %s\n", check.Label, check.Directory, strings.Join(check.Args, " "))
 		if dryRun {

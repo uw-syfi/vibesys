@@ -22,6 +22,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/runtimedir"
+	"github.com/uw-syfi/vibesys/cli/internal/shorttmp"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/host"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor/suptest"
@@ -41,7 +42,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv(roleVar) == "supervisor" {
 		os.Exit(superviseForTest())
 	}
-	os.Exit(m.Run())
+	os.Exit(shorttmp.Run(m))
 }
 
 func superviseForTest() int {

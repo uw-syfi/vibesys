@@ -208,7 +208,7 @@ func runGate(root, configPath string, g graph, args []string, out io.Writer) err
 		return err
 	}
 	newRunner := func(w io.Writer) execution.Runner {
-		return execution.OSRunner{Stdout: w, Stderr: w, OwnProcessGroup: true}
+		return withRepositoryPython(execution.OSRunner{Stdout: w, Stderr: w, OwnProcessGroup: true}, root, configPath)
 	}
 	// Each lane runs in its own process group, which a terminal's Ctrl-C does not reach, so
 	// the interrupt cancels the lanes instead.

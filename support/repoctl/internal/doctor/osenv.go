@@ -48,6 +48,25 @@ func (h OSHost) Run(dir string, argv ...string) (string, error) {
 	return buf.String(), err
 }
 
+// FindDirectories implements Host.
+func (h OSHost) FindDirectories(dir, name string) []string {
+	var found []string
+	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		switch d.Name() {
+		case name:
+			found = append(found, path)
+			return filepath.SkipDir
+		case ".git", "node_modules", "target":
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return found
+}
+
 // Filesystem implements Host.
 func (h OSHost) Filesystem(path string) (Filesystem, error) { return filesystemOf(path) }
 

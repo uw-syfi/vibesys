@@ -40,6 +40,11 @@ The [coding guide](coding-best-practices.md) describes the enforced limits.
 Run the repository doctor's environment check before the first check on a
 machine. It checks tool versions, dependencies, temporary storage and hook setup.
 Apply its reported environment exports in the same shell that runs later checks.
+`doctor --fix` also removes a stray `.venv` left inside an example. `repoctl test`
+runs repository Python scripts with the repository's interpreter whatever PATH
+holds (it stops at once, naming the fix, when the machine has none), runs every
+selected group and ends with a summary, and takes `--fail-fast` to stop at the
+first failing group.
 A setup failure should be repaired at that boundary rather than suppressed in
 a test or gate.
 

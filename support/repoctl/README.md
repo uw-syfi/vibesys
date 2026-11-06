@@ -51,6 +51,13 @@ selects: `include_in_test` (the test groups and native targets) and
 `include_in_checks` (the quality groups). An `include_in_checks` group with no
 `trigger_job` runs on every change; that is the always-on scripts.
 `--checks-only` runs only the `include_in_checks` groups.
+`test` compares `HEAD` with `origin/<default_base>` unless `--base` says otherwise (a worktree's local `main` is often stale) and prints the base it chose. `test` runs every selected group even when one fails (a group's own commands still stop at
+its first failure) and ends with a summary naming each group's outcome; `--fail-fast` stops at the
+first failing group instead. `run-checks`, which CI runs one group at a time, always stops at the
+first failing command. A check whose command is a bare `python3` runs with the repository's
+interpreter (`.venv`, then the first copy on PATH that meets `requires-python`), and a machine with
+none stops the run at once, naming the fix. A check's `env` value may contain `{repo_root}`, which
+stands for the repository root.
 `test` plans with a narrower local view than CI (`plan`, `run-checks`), so a
 local run stays short while CI keeps its full selection. A component with
 `local_jobs` selects only those jobs in `test` instead of all jobs and

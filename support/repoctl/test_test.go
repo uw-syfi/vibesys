@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
+	"testing/quick"
 
 	"repoctl/execution"
 )
@@ -77,13 +79,13 @@ func TestSelectedTestsRunAndDryRun(t *testing.T) {
 		nativeCalls++
 		return nil
 	}
-	if err := runSelectedTests(t.TempDir(), g, p, true, false, runner, nativeRun); err != nil {
+	if err := runSelectedTests(t.TempDir(), g, p, true, false, false, runner, nativeRun); err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.checks) != 0 || nativeCalls != 0 {
 		t.Fatalf("dry-run executed %d suite checks and %d native checks", len(runner.checks), nativeCalls)
 	}
-	if err := runSelectedTests(t.TempDir(), g, p, false, false, runner, nativeRun); err != nil {
+	if err := runSelectedTests(t.TempDir(), g, p, false, false, false, runner, nativeRun); err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.checks) != 3 || nativeCalls != 1 {
@@ -229,7 +231,7 @@ func TestSelectedJobWithoutLocalTargetIsSkipped(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(skipped, tc.wantSkipped) {
 				t.Fatalf("skipped = %v, err = %v, want %v", skipped, err, tc.wantSkipped)
 			}
-			if err := runSelectedTests(t.TempDir(), g, p, false, false, runner, nativeRun); err != nil {
+			if err := runSelectedTests(t.TempDir(), g, p, false, false, false, runner, nativeRun); err != nil {
 				t.Fatalf("run failed: %v", err)
 			}
 			if len(runner.checks) != tc.wantChecks || nativeCalls != tc.wantNative {
@@ -243,8 +245,88 @@ func TestSkippedJobDoesNotMaskRunnableFailure(t *testing.T) {
 	g, p := testFixture()
 	p.Jobs["real_tiers"] = true
 	runner := &failingRunner{}
-	if err := runSelectedTests(t.TempDir(), g, p, false, false, runner, nil); err == nil {
+	if err := runSelectedTests(t.TempDir(), g, p, false, false, false, runner, func(context.Context, string, string, []string, []string) error { return nil }); err == nil {
 		t.Fatal("failing runnable group reported success")
+	}
+}
+
+// failsGroups fails every command of the named check groups and records what it was asked to run.
+type failsGroups struct {
+	fail map[string]bool
+	ran  []string
+}
+
+func (r *failsGroups) Run(_ context.Context, _ string, check execution.Check) error {
+	r.ran = append(r.ran, check.Label+" "+strings.Join(check.Args, " "))
+	if r.fail[groupName(check.Label)] {
+		return fmt.Errorf("%s failed", check.Label)
+	}
+	return nil
+}
+
+func TestEveryGroupRunsAfterAFailureAndTheSummaryNamesEachOutcome(t *testing.T) {
+	checks := []execution.Check{
+		{Label: "alpha", Args: []string{"one"}},
+		{Label: "alpha", Args: []string{"two"}},
+		{Label: "beta:pkg", Args: []string{"three"}},
+		{Label: "gamma", Args: []string{"four"}},
+	}
+	runner := &failsGroups{fail: map[string]bool{"alpha": true, "gamma": true}}
+	results := runGroups(t.TempDir(), checks, false, runner)
+	// A group stops at its first failing command; the next group still runs.
+	if want := []string{"alpha one", "beta:pkg three", "gamma four"}; !reflect.DeepEqual(runner.ran, want) {
+		t.Fatalf("ran %v, want %v", runner.ran, want)
+	}
+	var out strings.Builder
+	err := summarize(&out, results)
+	if err == nil || !strings.Contains(err.Error(), "2 of 3 groups failed: alpha, gamma") {
+		t.Fatalf("error = %v", err)
+	}
+	for _, want := range []string{"FAILED   alpha", "passed   beta", "FAILED   gamma"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("summary lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestFailFastStopsAtTheFirstFailingGroupAndSaysWhatDidNotRun(t *testing.T) {
+	checks := []execution.Check{
+		{Label: "alpha", Args: []string{"one"}},
+		{Label: "beta", Args: []string{"two"}},
+	}
+	runner := &failsGroups{fail: map[string]bool{"alpha": true}}
+	results := runGroups(t.TempDir(), checks, true, runner)
+	if len(runner.ran) != 1 {
+		t.Fatalf("ran %v after the first failure", runner.ran)
+	}
+	var out strings.Builder
+	_ = summarize(&out, results)
+	if !strings.Contains(out.String(), "not run  beta") {
+		t.Fatalf("summary does not name the group that did not run:\n%s", out.String())
+	}
+}
+
+// Whichever groups fail, the run reports failure exactly when one did, and without --fail-fast
+// every group is attempted.
+func TestTheRunFailsExactlyWhenAGroupFailed(t *testing.T) {
+	err := quick.Check(func(mask uint8, failFast bool) bool {
+		var checks []execution.Check
+		fail := map[string]bool{}
+		for i := 0; i < 5; i++ {
+			name := fmt.Sprintf("g%d", i)
+			checks = append(checks, execution.Check{Label: name, Args: []string{name}})
+			fail[name] = mask&(1<<i) != 0
+		}
+		runner := &failsGroups{fail: fail}
+		results := runGroups(t.TempDir(), checks, failFast, runner)
+		anyFail := mask&0x1f != 0
+		if (summarize(io.Discard, results) != nil) != anyFail {
+			return false
+		}
+		return failFast || len(runner.ran) == 5
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

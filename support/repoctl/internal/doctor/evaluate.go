@@ -42,6 +42,9 @@ func Evaluate(cfg Config, f Facts) []Finding {
 	for i, in := range cfg.Installs {
 		out = append(out, installFinding(in, f.Installs[i], f.Root))
 	}
+	for i, s := range cfg.Strays {
+		out = append(out, strayFinding(s, f.Strays[i], f.Root))
+	}
 	out = append(out, tempFinding(cfg.Temp, f))
 	for _, flag := range cfg.EnvFlags {
 		out = append(out, envFlagFinding(flag, f))
@@ -217,6 +220,34 @@ func missing(cfg ProgramConfig, install []Action, message string) Finding {
 	// After the repair the copy sits in a repository directory; exports are derived on the next
 	// evaluation, which is why `--fix` evaluates again.
 	return f
+}
+
+// strayFinding is a warning, not a failure: the directory breaks only the checks that read the
+// tree it is in. --fix removes it; the tool that made it makes it again elsewhere or not at all
+// once its policy says where it belongs.
+func strayFinding(s StrayConfig, found []string, root string) Finding {
+	if len(found) == 0 {
+		return pass(s.Name, "no %s directory under %s", s.Directory, s.Root)
+	}
+	var actions []Action
+	var rel []string
+	for _, p := range found {
+		actions = append(actions, Action{Kind: ActionRemoveTree, Path: p})
+		r, err := filepath.Rel(root, p)
+		if err != nil {
+			r = p
+		}
+		rel = append(rel, r)
+	}
+	msg := fmt.Sprintf("%d %s director%s under %s: %s", len(found), s.Directory, map[bool]string{true: "y", false: "ies"}[len(found) == 1], s.Root, strings.Join(rel, ", "))
+	if s.Reason != "" {
+		msg += " (" + s.Reason + ")"
+	}
+	var fix []string
+	for _, a := range actions {
+		fix = append(fix, a.Describe())
+	}
+	return Finding{Check: s.Name, Status: Warn, Message: msg, Fix: strings.Join(fix, " && "), Actions: actions}
 }
 
 func installFinding(in InstallConfig, f InstallFacts, root string) Finding {
