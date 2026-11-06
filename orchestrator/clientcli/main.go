@@ -17,7 +17,7 @@ const Program = "vibesys-client"
 // Usage is the text printed for a usage error and for --help.
 const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... | release verify ...
   run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--fanout N]
-            [--model M] [--effort E] [--deadline RFC3339] [--detach] [--json]
+            [--model M] [--effort E] [--allow-agent HARNESS[:MODEL]]... [--deadline RFC3339] [--detach] [--json]
   run list [--json]
   run attach [RUN]
   run get [RUN] [--json]
@@ -32,6 +32,8 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... 
   release verify [--installed] DIR
   --version
 
+A run starts subagents only on the lead's harness and model, and on each --allow-agent: a harness alone
+allows its default model. A spawn outside that is refused, and run get shows what is allowed.
 RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository. When
 no run is live there, an omitted RUN means its most recent run to run get, run stop and run attach: get
 shows it, attach replays it, and stop says it has already ended and exits 0, as for any RUN that has.

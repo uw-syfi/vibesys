@@ -217,7 +217,7 @@ followed, so `~/.local/bin/vibesys-client` finds the release directory's host), 
 `vibesys-host serve --root ROOT` when none serves.
 
 ```sh
-vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--detach] [--json]
+vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--detach] [--json]
 vibesys-client run list                       # every run, newest first
 vibesys-client run attach [RUN]               # follow a run; Ctrl-C detaches and never stops it
 vibesys-client run get [RUN] [--json]         # status, agents, cost, checks, best, last report
@@ -225,6 +225,13 @@ vibesys-client run wait [RUN] --until started|report|progress|stalled|ended --ti
 vibesys-client run steer [RUN] "text" [--agent AGENT]
 vibesys-client run stop [RUN] [--yes]
 ```
+
+A run spends only on agents its operator chose. It may start subagents on its lead's harness and model, and
+on each `--allow-agent` (a harness alone allows that harness's default model). A spawn that names neither
+takes the lead's harness and the first allowed model on it; a spawn outside the allowance gets
+`REFUSAL_AGENT_NOT_ALLOWED` with the list, and starts nothing. `Run.allowed_agents` holds the allowance and
+`run get` prints it as "may use". `run get` also counts the agents that ended without a measured cost, since
+their spend is missing from the usage total.
 
 A report is a `progress` note or a `final` report, numbered from 1 within its run. `wait --until report`
 returns for a final report and `--until progress` for any report, counting those posted after the wait began

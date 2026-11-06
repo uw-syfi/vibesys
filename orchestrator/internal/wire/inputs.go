@@ -16,6 +16,22 @@ func specIn(s *pb.AgentSpec, errs *errorList) core.AgentSpec {
 	}
 }
 
+func choicesIn(in []*pb.AllowedAgent, errs *errorList) []core.AgentChoice {
+	var out []core.AgentChoice
+	for _, c := range in {
+		out = append(out, core.AgentChoice{Harness: harnesses.in(c.GetHarness(), errs), Model: core.ModelName(c.GetModel())})
+	}
+	return out
+}
+
+func choicesOut(in []core.AgentChoice) []*pb.AllowedAgent {
+	var out []*pb.AllowedAgent
+	for _, c := range in {
+		out = append(out, &pb.AllowedAgent{Harness: harnesses.out(c.Harness), Model: string(c.Model)})
+	}
+	return out
+}
+
 // ParseCommand reads a command. The caller comes from the shell, which knows who is connected: the
 // contract has no field for it, so a caller cannot claim to be someone else.
 func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
@@ -35,6 +51,7 @@ func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
 		c.Body = core.StartRun{
 			Repository: r.GetRepository(), Task: r.GetTask(), FanoutLimit: r.GetFanoutLimit(),
 			Deadline: moment(r.GetDeadline(), &errs), Lead: specIn(r.GetLead(), &errs), Brief: r.GetBrief(),
+			Allow: choicesIn(r.GetAllowAgents(), &errs),
 		}
 	case *pb.Command_StopRun:
 		c.Body = core.StopRun{Run: core.RunID(b.StopRun.GetRunId())}

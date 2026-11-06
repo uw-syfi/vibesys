@@ -221,6 +221,19 @@ message Run {
   // The lead's latest report is a final one and it has had no new input since: it has finished, so
   // the run is not stalled and the lead is not reminded.
   bool final_reported = 17;
+  // The agents this run may spend on, set when it starts and never changed. A subagent is launched
+  // only on one of these.
+  repeated AllowedAgent allowed_agents = 18;
+}
+
+// AllowedAgent is one harness and model a run may use. An empty model means the harness's own
+// default model, and only that: naming another model on that harness is outside the allowance.
+message AllowedAgent {
+  Harness harness = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string model = 2;
 }
 
 // CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and

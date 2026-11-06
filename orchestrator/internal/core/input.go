@@ -58,11 +58,15 @@ type (
 		Deadline    time.Time
 		Lead        AgentSpec
 		Brief       string
+		// Allow adds to what the run may use. The lead's own harness and model are always allowed.
+		Allow []AgentChoice
 	}
 	// StopRun stops a run and every agent in it.
 	StopRun struct{ Run RunID }
-	// SpawnAgent launches a subagent. An empty harness takes the lead's. An empty model or effort
-	// takes the lead's on the lead's harness, and is left to the harness's default on another.
+	// SpawnAgent launches a subagent. An empty harness takes the lead's. An empty model takes the
+	// first model the run allows on that harness. An empty effort takes the lead's on the lead's
+	// harness, and is left to the harness's default on another. A harness and model the run does
+	// not allow are refused.
 	SpawnAgent struct {
 		Run        RunID
 		Role       AgentRole
