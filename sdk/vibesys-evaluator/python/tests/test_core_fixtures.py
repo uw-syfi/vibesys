@@ -30,7 +30,9 @@ FIXTURE = json.loads((Path(__file__).resolve().parents[2] / "fixtures" / "core.j
 
 
 def _number(value: float | str) -> float:
-    return {"NaN": math.nan, "Infinity": math.inf, "-Infinity": -math.inf}.get(value, value)
+    if isinstance(value, str):
+        return {"NaN": math.nan, "Infinity": math.inf, "-Infinity": -math.inf}[value]
+    return value
 
 
 @pytest.mark.parametrize("case", FIXTURE["histograms"], ids=lambda c: c["name"])

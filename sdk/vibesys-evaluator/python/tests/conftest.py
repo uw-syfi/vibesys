@@ -6,14 +6,10 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
 from vibesys_evaluator._private import core
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 GO_MODULE = Path(__file__).resolve().parents[2] / "go"
 BUILD_TIMEOUT_SECS = 600
@@ -47,8 +43,7 @@ def core_binary(tmp_path_factory: pytest.TempPathFactory) -> str | None:
 
 
 @pytest.fixture(autouse=True)
-def _core_env(core_binary: str | None, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def _core_env(core_binary: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
     """Point every test at the core binary (a test may still replace it)."""
     if core_binary is not None:
         monkeypatch.setenv(core.BIN_ENV, core_binary)
-    return
