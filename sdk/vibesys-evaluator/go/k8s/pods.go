@@ -26,7 +26,16 @@ const (
 	PodLabel = "vibesys.dev/evaluator-pod"
 )
 
-var wrapper = fmt.Sprintf(`set -u
+// pathFixup makes loadgen findable in the pod however the task image installed vibesys-evaluator:
+// on PATH, next to the vibesys-evaluator binary (the wheel keeps both in its _bin directory), or in
+// the wheel's _bin directory itself. Directories are appended, so what is already on PATH wins.
+const pathFixup = `for d in "$(dirname "$(readlink -f "$(command -v vibesys-evaluator 2>/dev/null)" 2>/dev/null)" 2>/dev/null)" "$(python -c 'import os, vibesys_evaluator; print(os.path.join(os.path.dirname(vibesys_evaluator.__file__), "_bin"))' 2>/dev/null)"; do
+  if [ -x "$d/loadgen" ]; then PATH="$PATH:$d"; fi
+done
+export PATH
+`
+
+var wrapper = pathFixup + fmt.Sprintf(`set -u
 mkdir -p %[1]s %[2]s
 until [ -e %[2]s/%[3]s ]; do sleep 0.2; done
 "$@"
