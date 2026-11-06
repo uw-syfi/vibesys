@@ -17,7 +17,7 @@ func (r *rig) toolCalls(agent string) []*pb.ToolCall {
 	defer cancel()
 	connection := r.dial(ctx)
 	defer connection.Close()
-	response, err := pb.NewOrchestratorServiceClient(connection).ListItems(ctx, &pb.ListItemsRequest{AgentId: agent, PageSize: 1000})
+	response, err := pb.NewOrchestratorServiceClient(connection).ListItems(ctx, &pb.ListItemsRequest{AgentId: agent, BeforeOrdinal: 1 << 30, PageSize: 1000})
 	if err != nil {
 		r.t.Fatalf("list the items of %s: %v", agent, err)
 	}
