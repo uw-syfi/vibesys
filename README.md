@@ -61,7 +61,8 @@ See the [skills installation guide](skills/README.md#install) for Codex,
 `npx skills`, and domain plugins for databases, microservices, and kernels.
 
 To run managed optimizations with `vibesys-client` instead, see
-[Install for managed runs](orchestrator/README.md#install-for-managed-runs).
+[Install for managed runs](orchestrator/README.md#install-for-managed-runs). To remove it, see
+[Removing VibeSys](orchestrator/README.md#removing-vibesys).
 
 ## Performance highlights
 

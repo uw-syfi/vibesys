@@ -83,7 +83,7 @@ func get(ctx context.Context, c *call, args []string) error {
 	if len(positional) == 1 {
 		arg = positional[0]
 	}
-	s, _, err := c.join(ctx, arg, mostRecent)
+	s, _, err := c.join(ctx, arg)
 	if err != nil {
 		return err
 	}

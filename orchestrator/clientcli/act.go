@@ -27,11 +27,14 @@ func steer(ctx context.Context, c *call, args []string) error {
 	default:
 		return usageError("run steer takes [RUN] TEXT, got %d arguments", len(positional))
 	}
-	s, ctx, err := c.join(ctx, arg, onlyLive)
+	s, ctx, err := c.join(ctx, arg)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
+	if run := s.view.Run; !live(run) {
+		return failed("run %s has already %s, so nothing would act on a steer; it was not sent. Start a new run with `run start`", run.GetId(), statusWord(run.GetStatus().String(), "RUN_STATUS_"))
+	}
 	target := *agent
 	if target == "" {
 		target = s.view.Run.GetLeadAgentId()
@@ -108,7 +111,7 @@ func stop(ctx context.Context, c *call, args []string) error {
 	if len(positional) == 1 {
 		arg = positional[0]
 	}
-	s, ctx, err := c.join(ctx, arg, mostRecent)
+	s, ctx, err := c.join(ctx, arg)
 	if err != nil {
 		return err
 	}
