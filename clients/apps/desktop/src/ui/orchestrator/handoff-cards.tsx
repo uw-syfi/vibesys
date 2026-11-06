@@ -68,23 +68,33 @@ function bodyRows(handoff: Handoff): {
   switch (body.case) {
     case 'worker': {
       const outcome = body.value.outcome;
-      if (outcome.case === 'candidate') {
-        const c = outcome.value;
-        return {
-          attempt: true,
-          kept: true,
-          rows: [
-            {key: 'Checks', value: c.checks},
-            {key: 'Measured (the agent’s words)', value: c.measurement},
-            {key: 'Change', value: `${c.commit} on ${c.branch}`, mono: true},
-          ],
-        };
+      switch (outcome.case) {
+        case 'candidate':
+          return {
+            attempt: true,
+            kept: true,
+            rows: [
+              {key: 'Checks', value: outcome.value.checks},
+              {key: 'Measured (the agent’s words)', value: outcome.value.measurement},
+              {
+                key: 'Change',
+                value: `${outcome.value.commit} on ${outcome.value.branch}`,
+                mono: true,
+              },
+            ],
+          };
+        case 'noCandidate':
+          return {
+            attempt: true,
+            kept: false,
+            rows: [{key: 'What stopped it', value: outcome.value.blocker}],
+          };
+        case undefined:
+          return {attempt: true, kept: false, rows: []};
+        default:
+          outcome satisfies never;
+          return {attempt: true, kept: false, rows: []};
       }
-      return {
-        attempt: true,
-        kept: false,
-        rows: [{key: 'What stopped it', value: outcome.value?.blocker ?? ''}],
-      };
     }
     case 'planner':
       return {
@@ -132,6 +142,9 @@ function bodyRows(handoff: Handoff): {
         ],
       };
     case undefined:
+      return {attempt: false, kept: false, rows: []};
+    default:
+      body satisfies never;
       return {attempt: false, kept: false, rows: []};
   }
 }
