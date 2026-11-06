@@ -174,7 +174,7 @@ func (d *Daemon) sidecar(ctx context.Context, session core.Session) (Sidecar, er
 	})
 	switch {
 	case errors.Is(err, ErrSidecarGone):
-		return nil, d.lose(session, "the session's sidecar was not found when the daemon looked for it")
+		return nil, d.lose(session, "the agent session was not found when the daemon looked for it", "")
 	case err != nil:
 		return nil, fmt.Errorf("attach %s/%d: %w", session.Agent, session.N, err)
 	}
@@ -187,12 +187,12 @@ func (d *Daemon) sidecar(ctx context.Context, session core.Session) (Sidecar, er
 const maxDetail = 500
 
 // lose reports a session's sidecar gone and forgets what the daemon held for it. detail says why.
-func (d *Daemon) lose(session core.Session, detail string) error {
+func (d *Daemon) lose(session core.Session, detail string, start core.StartFailure) error {
 	d.forget(session)
 	if r := []rune(detail); len(r) > maxDetail {
 		detail = string(r[:maxDetail]) + "..."
 	}
-	_, err := d.Apply(core.SidecarLost{Session: session, Detail: detail})
+	_, err := d.Apply(core.SidecarLost{Session: session, Detail: detail, StartFailure: start})
 	return err
 }
 
@@ -339,7 +339,10 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 		return err
 	case core.LaunchSession:
 		if !isLive(state, b.Session) {
-			return nil
+			// The session ended before this launch was carried out, such as one that did not open in
+			// time. A launch that outlived its bound may have started the process, so find it and
+			// hold it for the sweep that ends the processes of sessions that are over.
+			return d.releaseUnattached(ctx, b.Session)
 		}
 		return d.launch(ctx, b)
 	}
@@ -369,7 +372,7 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 	}
 	err = bounded(d.cfg.Bounds, ctx, func(c context.Context) error { return sc.Send(c, cmd) })
 	if errors.Is(err, ErrSidecarGone) {
-		return d.lose(session, "the session's sidecar went away while the daemon was sending it a command")
+		return d.lose(session, "the agent session went away while the daemon was sending it a command", "")
 	}
 	return err
 }
@@ -417,7 +420,12 @@ func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
 		// A launch that fails is a session that is lost: the core resumes it a bounded number of
 		// times and then gives up, where retrying here would never end. The reason goes with it.
 		d.Log.Warn("launching a session failed", "agent", l.Session.Agent, "session", l.Session.N, "err", err)
-		return d.lose(l.Session, fmt.Sprintf("the sidecar could not be launched: %v", err))
+		var failed *LaunchError
+		start := core.StartOther
+		if errors.As(err, &failed) {
+			start = failed.Reason
+		}
+		return d.lose(l.Session, fmt.Sprintf("could not start the agent: %v", err), start)
 	}
 	d.conns[l.Session] = sc
 	delete(d.toAttach, l.Session)
@@ -467,7 +475,7 @@ func (d *Daemon) pump(ctx context.Context, session core.Session) (bool, error) {
 		})
 		switch {
 		case errors.Is(err, ErrSidecarGone):
-			return true, d.lose(session, "the session's sidecar went away before its events could be read")
+			return true, d.lose(session, "the agent session went away before its events could be read", "")
 		case err != nil:
 			return false, fmt.Errorf("follow %s/%d: %w", session.Agent, session.N, err)
 		}
@@ -483,7 +491,7 @@ func (d *Daemon) pump(ctx context.Context, session core.Session) (bool, error) {
 			case errors.Is(err, ErrIdle):
 				return progress, nil
 			case errors.Is(err, ErrSidecarGone):
-				return true, d.lose(session, "the session's sidecar ended while the daemon was reading its events")
+				return true, d.lose(session, "the agent session ended while the daemon was reading its events", "")
 			case err != nil:
 				// The stream broke; the next step reopens it after the committed offset.
 				f.stream.Close()

@@ -16,9 +16,13 @@ from agentshim import (
     Agent,
     AgentShimError,
     ApprovalPolicy,
+    CliNotFoundError,
+    FailureKind,
     McpScope,
+    McpServerState,
     NativePermissions,
     NoRunningTurnError,
+    PluginInstallError,
     PluginRef,
     ProviderCapabilityError,
     ProviderUsage,
@@ -27,6 +31,7 @@ from agentshim import (
     StdioMcpServer,
     TransportKind,
     TurnCancelledError,
+    TurnFailedError,
     TurnRequest,
     interactive_env,
 )
@@ -64,6 +69,43 @@ class TurnResult:
     detail: str = ""
 
 
+#: How long, once the agent is up, to wait for its tool servers to connect before the session is
+#: called open. A server that has not said by then is unknown, not failed.
+TOOLS_WAIT_SECONDS = 30.0
+
+
+class StartError(Exception):
+    """The session could not be opened. ``reason`` is a ``StartFailureReason``; the text says what."""
+
+    def __init__(self, reason: int, detail: str) -> None:
+        """Record why the session did not open, in the provider's words where it has them."""
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+
+
+def classify_start_error(error: BaseException, workdir: str | None) -> int:
+    """The ``StartFailureReason`` of an error raised while a session was opening.
+
+    Only what the error's type says is read, never its text. An error that is none of the known
+    kinds is ``OTHER``.
+    """
+    if isinstance(error, PluginInstallError):
+        return orch.START_FAILURE_REASON_PLUGIN_UNAVAILABLE
+    if isinstance(error, CliNotFoundError):
+        return orch.START_FAILURE_REASON_AGENT_NOT_INSTALLED
+    if isinstance(error, TurnFailedError) and error.kind is FailureKind.AUTH:
+        return orch.START_FAILURE_REASON_NOT_SIGNED_IN
+    # A provider may wrap the operating system's refusal to enter the directory, so its cause is
+    # read as well.
+    cause: BaseException | None = error
+    while cause is not None:
+        if isinstance(cause, OSError) and workdir is not None and cause.filename == workdir:
+            return orch.START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE
+        cause = cause.__cause__
+    return orch.START_FAILURE_REASON_OTHER
+
+
 class SteerRefusedError(Exception):
     """The provider could not take a steer now (no turn is running, or it cannot steer)."""
 
@@ -79,7 +121,11 @@ class Driver(Protocol):
     """
 
     def open(self) -> Opened:
-        """Start (or resume) the provider session and say what it can do."""
+        """Start (or resume) the provider session and say what it can do.
+
+        Returns only once the agent is up with the tools it was given. Raises ``StartError``,
+        with the reason, when it cannot be, and leaves no process behind.
+        """
         ...
 
     def begin_turn(self, turn_id: str, prompt: str, *, message: orch.Message | None = None) -> None:
@@ -142,11 +188,19 @@ class AgentshimDriver:
     """
 
     def __init__(
-        self, factory: Callable[[str | None], Session], preferred_id: str | None = None
+        self,
+        factory: Callable[[str | None], Session],
+        preferred_id: str | None = None,
+        workdir: str | None = None,
     ) -> None:
-        """Drive sessions built by *factory*, asking first for *preferred_id*."""
+        """Drive sessions built by *factory*, asking first for *preferred_id*.
+
+        *workdir* is the agent's working directory, which a start error is held against to tell
+        a directory that cannot be entered from any other failure.
+        """
         self._factory = factory
         self._preferred_id = preferred_id
+        self._workdir = workdir
         self._session: Session | None = None
         # Guards ``_active`` only, and is never held while calling into the session, so it cannot
         # wait on a turn.
@@ -155,21 +209,60 @@ class AgentshimDriver:
 
     def open(self) -> Opened:
         """See ``Driver.open``. Opens the conversation now so its id is known before a turn."""
-        session = self._factory(self._preferred_id)
         try:
-            conversation_id = session.warm()
-        except ProviderCapabilityError:
-            if self._preferred_id is None:
-                raise
+            session, conversation_id = self._warm()
+        except (AgentShimError, OSError, ValueError) as error:
+            reason = classify_start_error(error, self._workdir)
+            raise StartError(reason, f"{type(error).__name__}: {error}") from error
+        try:
+            self._require_tools(session)
+        except BaseException:
             session.close()
-            session = self._factory(None)
-            conversation_id = session.warm()
+            raise
         self._session = session
         profile = session.profile
         capabilities = orch.Capabilities(
             streams_text=True, steers=profile.supports_steer, resumes=profile.supports_resume
         )
         return Opened(conversation_id or "", capabilities)
+
+    def _warm(self) -> tuple[Session, str | None]:
+        """Build the provider session and open its conversation."""
+        session = self._factory(self._preferred_id)
+        try:
+            return session, session.warm()
+        except ProviderCapabilityError:
+            session.close()
+            if self._preferred_id is None:
+                raise
+            session = self._factory(None)
+            try:
+                return session, session.warm()
+            except BaseException:
+                session.close()
+                raise
+        except BaseException:
+            session.close()
+            raise
+
+    @staticmethod
+    def _require_tools(session: Session) -> None:
+        """Raise ``StartError`` if the provider says a tool server of the session failed.
+
+        A provider that cannot say, a server it has not settled and a state it did not name are
+        unknown, and unknown does not fail a session: only what the provider reported does.
+        """
+        failed = [
+            status
+            for status in session.report_tools(TOOLS_WAIT_SECONDS) or ()
+            if status.state is McpServerState.FAILED
+        ]
+        if failed:
+            detail = "; ".join(
+                f"tool server {status.name} failed: {status.error or 'no reason given'}"
+                for status in failed
+            )
+            raise StartError(orch.START_FAILURE_REASON_TOOLS_UNAVAILABLE, detail)
 
     @property
     def _live(self) -> Session:

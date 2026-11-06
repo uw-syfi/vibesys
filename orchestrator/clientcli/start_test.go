@@ -65,6 +65,25 @@ func TestStartOnARunThatFailsExitsOneWithTheAgentsReason(t *testing.T) {
 	contains(t, "stderr", got.stderr, "failed", "the agent image is missing")
 }
 
+func TestStartOnAnAgentWithoutItsToolsExitsOneNamingTheReason(t *testing.T) {
+	l := newLive(t, nil)
+	l.Sidecars.Opening = func(core.LaunchSession) []*pb.SidecarEvent {
+		return []*pb.SidecarEvent{{Body: &pb.SidecarEvent_Failed{Failed: &pb.SessionFailed{
+			Detail:             "could not start the agent: the tool server vibesys did not connect",
+			StartFailureReason: pb.StartFailureReason_START_FAILURE_REASON_TOOLS_UNAVAILABLE,
+		}}}}
+	}
+	w := newWorld(t, l.Listener.Dial)
+	got := w.run(context.Background(), "run", "start", "--task", "toy")
+	if got.code != 1 {
+		t.Fatalf("exit %d, want 1; stdout %q stderr %q", got.code, got.stdout, got.stderr)
+	}
+	contains(t, "stderr", got.stderr, "could not start the agent", "the tool server vibesys did not connect", "tools unavailable")
+	if strings.Contains(got.stderr, "sidecar") {
+		t.Errorf("stderr names the sidecar: %q", got.stderr)
+	}
+}
+
 func TestStartRefusalPrintsTheServicesReason(t *testing.T) {
 	f := &fakeService{dispatch: func(cmd *pb.Command) (*pb.DispatchResponse, error) {
 		return &pb.DispatchResponse{Receipt: &pb.Receipt{CommandId: cmd.GetId(), Refusal: pb.Refusal_REFUSAL_DEADLINE_PASSED}}, nil

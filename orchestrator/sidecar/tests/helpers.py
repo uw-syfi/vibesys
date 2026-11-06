@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from agentshim import Agent, ApprovalPolicy, NativePermissions, TransportKind
+from agentshim import Agent, ApprovalPolicy, NativePermissions, StdioMcpServer, TransportKind
 from agentshim.testing import (
     ClaudeFramePeer,
     ClaudeStreamPeers,
@@ -190,20 +190,38 @@ def claude_replay_factory(
     return _factory("claude", FakeExecutor([], peers=peers.peer), {})
 
 
+def driver_factory_over(
+    provider: str,
+    executor: FakeExecutor,
+    *,
+    mcp_servers: Sequence[StdioMcpServer] = (),
+    launch_fields: Mapping[str, Any] | None = None,
+) -> Callable[[Callable[[RawFrame], None]], Driver]:
+    """A driver factory over *executor*, for a session given *mcp_servers*."""
+    return _factory(provider, executor, {}, mcp_servers, launch_fields or {})
+
+
 def _factory(
-    provider: str, executor: FakeExecutor, options: dict[str, Any]
+    provider: str,
+    executor: FakeExecutor,
+    options: dict[str, Any],
+    mcp_servers: Sequence[StdioMcpServer] = (),
+    launch_fields: Mapping[str, Any] | None = None,
 ) -> Callable[[Callable[[RawFrame], None]], Driver]:
     agent = scripted_agents(provider, executor, **options)
+    fields = dict(launch_fields or {})
 
     def make(raw_sink: Callable[[RawFrame], None]) -> Driver:
         return AgentshimDriver(
             lambda conversation_id: build_session(
-                launch(),
+                launch(**fields),
                 agent=agent,
+                mcp_servers=mcp_servers,
                 raw_sink=raw_sink,
                 new_conversation_id=conversation_id,
             ),
             preferred_id="11111111-1111-4111-8111-111111111111",
+            workdir=launch(**fields).worktree,
         )
 
     return make

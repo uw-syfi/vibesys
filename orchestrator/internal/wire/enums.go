@@ -127,8 +127,19 @@ var (
 		core.RefuseDeadlinePassed:  pb.Refusal_REFUSAL_DEADLINE_PASSED,
 		core.RefuseRepositoryInUse: pb.Refusal_REFUSAL_REPOSITORY_IN_USE,
 	})
+	startFailures = newEnum(map[core.StartFailure]pb.StartFailureReason{
+		"":                              pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED,
+		core.StartAgentNotInstalled:     pb.StartFailureReason_START_FAILURE_REASON_AGENT_NOT_INSTALLED,
+		core.StartNotSignedIn:           pb.StartFailureReason_START_FAILURE_REASON_NOT_SIGNED_IN,
+		core.StartPluginUnavailable:     pb.StartFailureReason_START_FAILURE_REASON_PLUGIN_UNAVAILABLE,
+		core.StartToolsUnavailable:      pb.StartFailureReason_START_FAILURE_REASON_TOOLS_UNAVAILABLE,
+		core.StartWorkingDirUnavailable: pb.StartFailureReason_START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE,
+		core.StartTimedOut:              pb.StartFailureReason_START_FAILURE_REASON_TIMED_OUT,
+		core.StartOther:                 pb.StartFailureReason_START_FAILURE_REASON_OTHER,
+	})
 	timerKinds = newEnum(map[core.TimerKind]pb.TimerKind{
-		core.TimerRunDeadline: pb.TimerKind_TIMER_KIND_RUN_DEADLINE,
-		core.TimerStopGrace:   pb.TimerKind_TIMER_KIND_STOP_GRACE,
+		core.TimerRunDeadline:    pb.TimerKind_TIMER_KIND_RUN_DEADLINE,
+		core.TimerStopGrace:      pb.TimerKind_TIMER_KIND_STOP_GRACE,
+		core.TimerLaunchDeadline: pb.TimerKind_TIMER_KIND_LAUNCH_DEADLINE,
 	})
 )

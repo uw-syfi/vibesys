@@ -88,6 +88,16 @@ type Sidecars interface {
 	Attach(ctx context.Context, session core.Session) (Sidecar, error)
 }
 
+// LaunchError is what Launch returns when it knows why a session could not start: the reason goes
+// to the core with the error's text. Any other error from Launch is read as core.StartOther.
+type LaunchError struct {
+	Reason core.StartFailure
+	Err    error
+}
+
+func (e *LaunchError) Error() string { return e.Err.Error() }
+func (e *LaunchError) Unwrap() error { return e.Err }
+
 // Sidecar is the daemon's side of one session's SidecarService.
 type Sidecar interface {
 	// Send carries out a command. A repeated effect id answers as the first delivery did. It

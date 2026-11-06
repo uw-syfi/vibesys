@@ -37,9 +37,9 @@ func (t *tx) fact(f SidecarFact) {
 	case UsageReported:
 		t.usage(a, b)
 	case SessionFailed:
-		t.sessionOver(a.ID, AgentFailed, b.Detail)
+		t.sessionOver(a.ID, AgentFailed, b.Detail, b.StartFailure)
 	case SessionClosed:
-		t.sessionOver(a.ID, AgentEnded, "")
+		t.sessionOver(a.ID, AgentEnded, "", "")
 	default:
 		panic(fmt.Sprintf("core: unknown fact %T", f.Body))
 	}
@@ -133,7 +133,7 @@ func (t *tx) lost(b SidecarLost) {
 	if !ok {
 		return
 	}
-	t.sessionOver(a.ID, AgentLost, b.Detail)
+	t.sessionOver(a.ID, AgentLost, b.Detail, b.StartFailure)
 	t.sweep(a.Run)
 }
 
@@ -161,7 +161,13 @@ func (t *tx) timer(b TimerFired) {
 	case TimerStopGrace:
 		if a, ok := t.live(b.Timer.Session); ok && a.Stop != StopNone {
 			t.effect(CloseSession{Session: b.Timer.Session, Force: true})
-			t.sessionOver(a.ID, AgentLost, "no answer to a stop")
+			t.sessionOver(a.ID, AgentLost, "no answer to a stop", "")
+			t.sweep(a.Run)
+		}
+	case TimerLaunchDeadline:
+		if a, ok := t.live(b.Timer.Session); ok && a.Status == AgentLaunching {
+			t.effect(CloseSession{Session: b.Timer.Session, Force: true})
+			t.sessionOver(a.ID, AgentFailed, fmt.Sprintf("the session did not open within %s", LaunchTimeout), StartTimedOut)
 			t.sweep(a.Run)
 		}
 	default:

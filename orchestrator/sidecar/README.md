@@ -65,6 +65,33 @@ which the sidecar's tests and the vibesys-cli's tests both read:
 A location value that is empty unsets its name, so the agent resolves the place as the orchestrator's
 own process would; `HOME` is the exception and is kept, because the provider's own CLI needs it.
 
+## When a session counts as open
+
+`ConversationOpened` is the sidecar saying the session is ready, so it is only said once the agent is
+up with what it was given. `AgentshimDriver.open` starts the provider session, then asks agentshim
+whether the tool servers it was given connected (`Session.report_tools`, up to `TOOLS_WAIT_SECONDS`).
+Anything that fails before that ends the session at once with one `SessionFailed` and no
+`ConversationOpened`, carrying a `StartFailureReason` and the provider's words after "could not start
+the agent:". The agent process is closed first, so nothing is left running.
+
+| Stage | Reason | Read from |
+| --- | --- | --- |
+| the agent program | `AGENT_NOT_INSTALLED` | `CliNotFoundError` |
+| sign-in | `NOT_SIGNED_IN` | a `TurnFailedError` of kind `AUTH` while starting |
+| plugin install | `PLUGIN_UNAVAILABLE` | `PluginInstallError` |
+| working directory | `WORKING_DIRECTORY_UNAVAILABLE` | an `OSError` (or its cause) naming the directory |
+| tool servers | `TOOLS_UNAVAILABLE` | a server agentshim reports `FAILED` |
+| anything else | `OTHER` | |
+
+The reason comes from the type of the error and never its text. What each harness can prove about
+tools: Claude Code answers `mcp_status` before the first prompt and is asked again while a server is
+connecting; Codex reports each server's start-up as it happens. A server that has not settled by
+`TOOLS_WAIT_SECONDS`, a provider that refuses the question, a state agentshim does not know and a
+server the provider does not list are all unknown, and unknown opens the session. Neither harness reports
+which plugin skills loaded, so a plugin is proven only by its install having succeeded, not by the
+agent using it. An agent that is signed out but starts (the usual case) fails its first turn, not its
+start. The daemon's own timer (`core.LaunchTimeout`) ends a session that never says anything.
+
 ## Behaviour a client can rely on
 
 - **Effects.** An effect id is recorded before its command runs, in `effects.log`. A repeat, also

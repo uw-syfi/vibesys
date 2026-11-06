@@ -131,7 +131,7 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 	}
 	dir := s.sessionDir(l.Session)
 	if sock := filepath.Join(dir, "sock"); len(sock) > maxSocketPath {
-		return nil, fmt.Errorf("the sidecar socket path %s is longer than %d bytes, which a Unix socket cannot hold: set a shorter VIBESYS_ORCHESTRATOR_STATE_DIR", sock, maxSocketPath)
+		return nil, fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold: set a shorter VIBESYS_ORCHESTRATOR_STATE_DIR", sock, maxSocketPath)
 	}
 	s.reapAgent(l.Session.Agent)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -163,7 +163,7 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 	cmd.Stdout, cmd.Stderr = &out, &out
 	// The sidecar detaches itself (it forks twice), so this returns once it is on its own.
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("start the sidecar with %s: %w: %s", strings.Join(s.Command, " "), err, strings.TrimSpace(out.String()))
+		return nil, fmt.Errorf("start the agent session with %s: %w: %s", strings.Join(s.Command, " "), err, strings.TrimSpace(out.String()))
 	}
 	return s.awaitReady(ctx, l.Session, dir)
 }
@@ -179,7 +179,7 @@ func (s *ProcessSidecars) launchSpec(ctx context.Context, l core.LaunchSession) 
 	}
 	if launch.Worktree == "" {
 		if launch.Worktree, err = s.worktree(ctx, l); err != nil {
-			return nil, err
+			return nil, &daemon.LaunchError{Reason: core.StartWorkingDirUnavailable, Err: err}
 		}
 	}
 	home := filepath.Join(s.agentDir(l.Session.Agent), "plugin-home")
@@ -207,7 +207,7 @@ func (s *ProcessSidecars) awaitReady(ctx context.Context, session core.Session, 
 	for {
 		if pid, ok := readPid(dir); ok {
 			if !running(pid, dir) {
-				return nil, fmt.Errorf("the sidecar exited at start: %s", tail(filepath.Join(dir, "sidecar.log")))
+				return nil, fmt.Errorf("the agent session exited at start: %s", tail(filepath.Join(dir, "sidecar.log")))
 			}
 			if conn, err := (&net.Dialer{}).DialContext(ctx, "unix", filepath.Join(dir, "sock")); err == nil {
 				conn.Close()
@@ -216,7 +216,7 @@ func (s *ProcessSidecars) awaitReady(ctx context.Context, session core.Session, 
 		}
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("the sidecar did not answer on %s: %w: %s", filepath.Join(dir, "sock"), ctx.Err(), tail(filepath.Join(dir, "sidecar.log")))
+			return nil, fmt.Errorf("the agent session did not answer on %s: %w: %s", filepath.Join(dir, "sock"), ctx.Err(), tail(filepath.Join(dir, "sidecar.log")))
 		case <-time.After(50 * time.Millisecond):
 		}
 	}

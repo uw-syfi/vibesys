@@ -239,6 +239,18 @@ def _late_steer_refused(events: Sequence[sc.SidecarEvent], scenario: Scenario, *
         )
 
 
+def _start_failure_is_typed(
+    events: Sequence[sc.SidecarEvent], scenario: Scenario, *_: object
+) -> None:
+    assert [e.WhichOneof("body") for e in events] == ["failed"], (
+        "a session that cannot start says only that it failed"
+    )
+    assert events[0].failed.start_failure_reason == getattr(
+        orch, scenario.expect["start_failure"]
+    ), "the reason is the scenario's"
+    assert events[0].failed.detail.startswith("could not start the agent: ")
+
+
 def _close_is_last(events: Sequence[sc.SidecarEvent], *_: object) -> None:
     assert events[-1].HasField("closed")
     assert sum(e.HasField("closed") for e in events) == 1
@@ -256,4 +268,5 @@ CHECKS: dict[str, Callable[..., None]] = {
     "follow_resumes": _follow_resumes,
     "late_steer_refused": _late_steer_refused,
     "close_is_last": _close_is_last,
+    "start_failure_is_typed": _start_failure_is_typed,
 }

@@ -76,7 +76,7 @@ What this gives the daemon to come:
   it out. Delivery is at least once, with no duplicates seen by the agent.
 - A sidecar fact counts once. A stream resumed from the last committed offset changes nothing it
   already changed, and a fact from a session that has been replaced changes nothing at all.
-- No wait is open forever. A session that does not answer a stop is written off by a timer, a
+- No wait is open forever. A session that does not open, or does not answer a stop, is written off by a timer, a
   subagent that stops without a handoff tells its lead, and retries are bounded.
 
 ## The store
@@ -157,7 +157,7 @@ vibesys-client run stop [RUN] [--yes]
 repository of a new run is the root of the repository around the working directory unless `--repository`
 says otherwise. Exit codes: 0 ok, 1 failed or refused, 2 usage, 3 timeout, 4 service unavailable. With no
 terminal nothing prompts. `run start` follows the stream until the lead is live and exits 1, with the lead's
-own reason, when the run died first. `run get --json` is the service's `RunsSnapshot` filtered to one run,
+own detail and the start failure reason, when the run died first. `run get --json` is the service's `RunsSnapshot` filtered to one run,
 with its `searches` as the snapshot carried them; a snapshot cut to fit says `truncated`, and the human
 summary then omits the counts it cannot stand behind.
 
@@ -172,6 +172,48 @@ fails is tried again by the next step; a daemon that stopped before it made the 
 of the sessions it finds over when it starts (`Reattach`). A process id is only signalled when the
 process's command line carries the session's directory, so a number the system has given to another
 program is never killed.
+
+### How a session starts: one outcome
+
+Starting a session has one outcome, within a time limit: it opens, or it fails with a typed reason.
+The rest of the system does not care how the session is held.
+
+```
+start session  ->  opened | failed(StartFailureReason, detail)
+```
+
+A session is not live when its process answers. The core treats it as live (`ConversationOpened`)
+only when its sidecar says it is, and the sidecar says so only once the agent is up, in its working
+directory, with the plugin installed and the tool servers it was given connected. The tools check is
+the provider's own answer, asked of agentshim before the first turn (`Session.report_tools`): a tool
+server it reports failed ends the start as `TOOLS_UNAVAILABLE`. What a provider does not say, or says in
+words nobody knows, is unknown, and unknown opens the session: a run never fails on missing evidence.
+Claude Code is asked with `mcp_status` and Codex's own start-up reports are read, so both can answer
+before the first prompt.
+
+The reason is the closed enum `StartFailureReason` on `Agent.start_failure_reason` and on the sidecar's
+`SessionFailed`, beside the free-text `end_detail`, which keeps the provider's own words and always
+begins "could not start the agent:".
+
+| Reason | What failed | Who knows |
+| --- | --- | --- |
+| `AGENT_NOT_INSTALLED` | the agent program is not on the host | sidecar, from the type of the error |
+| `NOT_SIGNED_IN` | the agent refused its sign-in while starting | sidecar, only when the agent fails at start; an agent that starts and is refused on its first request is a failed turn |
+| `PLUGIN_UNAVAILABLE` | the plugin could not be installed | sidecar |
+| `TOOLS_UNAVAILABLE` | a tool server of the session failed to connect | sidecar, from the provider's report |
+| `WORKING_DIRECTORY_UNAVAILABLE` | the agent's directory could not be made or entered | the daemon (a worktree that cannot be created), or the sidecar |
+| `TIMED_OUT` | the session did not open within `core.LaunchTimeout` | the core |
+| `OTHER` | none of these, including a sidecar that could not be started or reached | the daemon or the sidecar |
+
+The time limit is a timer the core arms through `Decide` with every `LaunchSession` (`TimerLaunchDeadline`,
+an `ArmTimer` effect like the run's deadline), so it is injected and fired like any other and survives a
+restart. `LaunchTimeout` is 5 minutes: longer than the bounds inside a launch added together (plugin
+install, two commands of 60 s each; the agent's start, 60 s; the wait for tools, 30 s; the sidecar's
+start, 30 s), so a launch that is only slow ends with its own reason and the timer is the backstop for
+one that ends with none. When it fires on a session still launching the session fails as `TIMED_OUT` and
+the existing path ends its process. A launch whose session ended before the daemon carried it out looks
+for the process it may have started and ends that too. A restart of the daemon during a launch changes
+none of this: the session opens, fails with its reason, or is written off by the timer.
 
 A snapshot holds runs and agents, and every turn and message of those runs, not items, so `run attach`
 shows an agent's turns and the handoffs and reports a late watcher missed, and not what the agent said
@@ -231,7 +273,7 @@ is dispatched, for every client, and makes no run, event or receipt: `InvalidArg
 repository path is not absolute, does not exist, is not the root of a git work tree (it has no
 `.git`), has no `.vibesys/tasks/TASK/` (a task name is one folder name, so `../x` is refused), has no
 commit yet, or does not hold the task in its latest commit; and `FailedPrecondition` when the host
-has no sidecar launcher, with the launcher's own reason. The last two are because subagents work in
+has no way to start agent sessions, with its own reason. The last two are because subagents work in
 copies of the repository made from its latest commit (`git worktree add --detach`), so a repository
 with no commit, or whose task is only in the working tree, would fail at the first `spawn_agent` or
 leave them without the task. Edits to the task's files that are not committed are accepted here: the

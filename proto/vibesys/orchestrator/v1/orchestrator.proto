@@ -138,6 +138,29 @@ enum Rejection {
   REJECTION_ATTEMPTS_EXHAUSTED = 5;
 }
 
+// StartFailureReason says why an agent's session never opened. A session opens only once its
+// agent is installed, signed in, has its working directory and its plugin, and can reach its tools,
+// within a time limit; the first of these that fails is the reason. The values name what failed for
+// the user and nothing of how the session is run. The provider's own words are in end_detail.
+enum StartFailureReason {
+  // The session did not fail to start: it opened, or it is still opening.
+  START_FAILURE_REASON_UNSPECIFIED = 0;
+  // The agent program is not installed, or cannot be found.
+  START_FAILURE_REASON_AGENT_NOT_INSTALLED = 1;
+  // The agent is installed but its account is not signed in, or the sign-in was refused.
+  START_FAILURE_REASON_NOT_SIGNED_IN = 2;
+  // The vibesys plugin could not be installed or loaded for the agent.
+  START_FAILURE_REASON_PLUGIN_UNAVAILABLE = 3;
+  // The agent started without the tools the orchestrator gives it, so it could not do its work.
+  START_FAILURE_REASON_TOOLS_UNAVAILABLE = 4;
+  // The agent's working directory could not be created or entered.
+  START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE = 5;
+  // The session did not open within the time allowed.
+  START_FAILURE_REASON_TIMED_OUT = 6;
+  // The session failed to start for a reason none of the others names.
+  START_FAILURE_REASON_OTHER = 7;
+}
+
 // JobOutcome is how a vibesys-cli job finished.
 enum JobOutcome {
   JOB_OUTCOME_UNSPECIFIED = 0;
@@ -224,6 +247,9 @@ message Agent {
   // Why the current session ended, when it was lost or failed: the launch error, for one that never
   // started. Empty while the session is live.
   string end_detail = 19 [(buf.validate.field).string.max_len = 1000];
+  // Why the session never opened, when it was lost or failed while launching. Unspecified for a
+  // session that opened, and while one is live. end_detail has the details.
+  StartFailureReason start_failure_reason = 20 [(buf.validate.field).enum.defined_only = true];
 }
 
 // Capabilities are what a session can do. The sidecar reports them when the session opens, so

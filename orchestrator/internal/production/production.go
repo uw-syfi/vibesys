@@ -344,7 +344,7 @@ type NoSidecars struct{}
 
 // Launch implements daemon.Sidecars.
 func (NoSidecars) Launch(context.Context, core.LaunchSession, daemon.LaunchEnv) (daemon.Sidecar, error) {
-	return nil, errors.New("this build has no sidecar launcher wired in, so no agent session can start")
+	return nil, errors.New("this build has no way to start agent sessions, so none can start")
 }
 
 // Attach implements daemon.Sidecars.

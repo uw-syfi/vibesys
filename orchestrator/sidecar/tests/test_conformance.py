@@ -22,6 +22,7 @@ from agentshim import (
 from tests import conformance
 from tests.fakes import CrashError, ScriptedDriver, TurnScript
 from tests.helpers import launch
+from vs_sidecar.driver import StartError
 from vs_sidecar.engine import Engine
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
@@ -65,6 +66,11 @@ def script_of(turn: Sequence[Mapping[str, Any]]) -> TurnScript:
     return TurnScript(events, status, usage)
 
 
+def _starts(turn: Sequence[Mapping[str, Any]]) -> bool:
+    """Whether the abstract provider turn is the session failing to start."""
+    return any("start_fails" in step for step in turn)
+
+
 def _usage(counts: Mapping[str, int]) -> ProviderUsage:
     return ProviderUsage(
         tokens=TokenUsage(input_tokens=counts["input"], output_tokens=counts["output"])
@@ -82,7 +88,14 @@ class GrpcClient:
 
     def _start(self) -> None:
         wakeup = Wakeup()
-        driver = ScriptedDriver([script_of(turn) for turn in self._provider])
+        starts = [step for turn in self._provider for step in turn if "start_fails" in step]
+        failure = None
+        if starts:
+            reason = getattr(orch, f"START_FAILURE_REASON_{starts[0]['start_fails']}")
+            failure = StartError(reason, starts[0]["detail"])
+        driver = ScriptedDriver(
+            [script_of(turn) for turn in self._provider if not _starts(turn)], start_error=failure
+        )
         self._provider = []  # a restarted sidecar has lost the agent: it has nothing to play
         engine = Engine(
             launch(), FileStore.at(self._state / "store"), lambda _sink: driver, wakeup.notify

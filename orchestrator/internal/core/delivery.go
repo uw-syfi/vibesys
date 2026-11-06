@@ -41,13 +41,14 @@ func (t *tx) route(m *Message, a agentState) {
 
 // resume opens a new session on an agent whose last one is over.
 func (t *tx) resume(a agentState) {
-	a.Status, a.Stop, a.Session, a.EndedAt, a.HandedOff, a.EndDetail = AgentLaunching, StopNone, a.Session+1, time.Time{}, false, ""
+	a.Status, a.Stop, a.Session, a.EndedAt, a.HandedOff, a.EndDetail, a.StartFailure = AgentLaunching, StopNone, a.Session+1, time.Time{}, false, "", ""
 	t.emit(a.Run, a.Agent)
 	run := t.s.runs[a.Run]
 	t.effect(LaunchSession{
 		Session: Session{a.ID, a.Session}, Run: run.ID, Repository: run.Repository, Task: run.Task, Role: a.Role, Spec: a.Spec,
 		Location: run.Location, ConversationID: a.ConversationID, Worktree: a.Worktree,
 	})
+	t.armLaunchDeadline(run.ID, Session{a.ID, a.Session})
 }
 
 // sweep brings a run to rest after a change: it starts the turn each agent is due, closes the
@@ -195,8 +196,16 @@ func (t *tx) endTurn(a agentState, status TurnStatus, usage Usage) {
 
 // sessionOver records the end of a session. The lead of a live run comes back if it can, because a
 // run has no use without one; any other agent stays down and its lead hears of it.
-func (t *tx) sessionOver(id AgentID, status AgentStatus, detail string) {
+//
+// A session that ends while it is still launching never opened, and records why: the reason it was
+// given, else StartOther. One that had opened records none.
+func (t *tx) sessionOver(id AgentID, status AgentStatus, detail string, start StartFailure) {
 	a := t.s.agents[id]
+	if a.Status != AgentLaunching {
+		start = ""
+	} else if start == "" && status != AgentEnded {
+		start = StartOther
+	}
 	unasked := a.Stop == StopNone
 	if a.turn != nil {
 		turnStatus := TurnFailed
@@ -206,7 +215,7 @@ func (t *tx) sessionOver(id AgentID, status AgentStatus, detail string) {
 		t.endTurn(a, turnStatus, Usage{})
 		a = t.s.agents[id]
 	}
-	a.Status, a.Stop, a.EndedAt, a.EndDetail = status, StopNone, t.in.At, detail
+	a.Status, a.Stop, a.EndedAt, a.EndDetail, a.StartFailure = status, StopNone, t.in.At, detail, start
 	if unasked {
 		a.SessionFailures++
 	}

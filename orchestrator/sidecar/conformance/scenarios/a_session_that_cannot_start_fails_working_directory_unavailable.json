@@ -1,0 +1,26 @@
+{
+  "name": "a_session_that_cannot_start_fails_working_directory_unavailable",
+  "doc": "The session cannot be opened. Its log is one failure with the reason, and never an opened conversation: nothing ran, so nothing is left to settle.",
+  "provider": [
+    [
+      {
+        "start_fails": "WORKING_DIRECTORY_UNAVAILABLE",
+        "detail": "No such file or directory: /work"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "await": {
+        "failed": true
+      }
+    }
+  ],
+  "checks": [
+    "offsets_increase",
+    "start_failure_is_typed"
+  ],
+  "expect": {
+    "start_failure": "START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE"
+  }
+}

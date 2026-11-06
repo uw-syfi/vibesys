@@ -191,6 +191,12 @@ func (t *tx) launch(run Run, a Agent) {
 		Session: Session{a.ID, 1}, Run: run.ID, Repository: run.Repository, Task: run.Task, Role: a.Role, Spec: a.Spec,
 		Location: run.Location,
 	})
+	t.armLaunchDeadline(run.ID, Session{a.ID, 1})
+}
+
+// armLaunchDeadline asks for the timer that ends a session still launching after LaunchTimeout.
+func (t *tx) armLaunchDeadline(run RunID, session Session) {
+	t.effect(ArmTimer{Kind: TimerLaunchDeadline, Run: run, Session: session, FireAt: t.in.At.Add(LaunchTimeout)})
 }
 
 func (t *tx) stopRun(b StopRun, r *Receipt) RunID {

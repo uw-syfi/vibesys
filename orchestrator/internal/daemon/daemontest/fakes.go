@@ -138,6 +138,10 @@ type Sidecars struct {
 	Stall     int
 	Elapse    func()
 	Unbounded int
+	// Opening, when set, is what a launched session says as it starts, in place of opening at once.
+	// It returns the session's first events: a failure to start, or none, which leaves the session
+	// launching until something else ends it.
+	Opening func(l core.LaunchSession) []*pb.SidecarEvent
 	// LaunchError, when set, is what a failing launch reports.
 	LaunchError error
 	// KillFailures makes that many Kill calls fail before any succeeds, as a signal that cannot be
@@ -213,6 +217,12 @@ func (h *Sidecars) Launch(ctx context.Context, l core.LaunchSession, env daemon.
 	}
 	s := &Session{Launch: l, Env: env, seen: map[string]bool{}, host: h}
 	h.sessions[l.Session] = s
+	if h.Opening != nil {
+		for _, ev := range h.Opening(l) {
+			s.Emit(ev)
+		}
+		return &conn{host: h, s: s}, nil
+	}
 	conversation := l.ConversationID
 	if conversation == "" {
 		conversation = fmt.Sprintf("conv-%s", l.Session.Agent)

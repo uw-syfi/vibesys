@@ -98,7 +98,7 @@ func (c StartChecks) CheckStart(repository, task string) (string, error) {
 	case refusedSidecars:
 		return "", &daemon.StartRefusal{Reason: "no agent can be launched: " + launcher.reason, NotReady: true}
 	case NoSidecars:
-		return "", &daemon.StartRefusal{Reason: "no agent can be launched: this build has no sidecar launcher wired in", NotReady: true}
+		return "", &daemon.StartRefusal{Reason: "no agent can be launched: this build has no way to start agent sessions", NotReady: true}
 	}
 	refuse := func(format string, args ...any) (string, error) {
 		return "", &daemon.StartRefusal{Reason: fmt.Sprintf(format, args...)}

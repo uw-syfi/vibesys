@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from vs_sidecar.driver import Opened, SteerRefusedError, TurnResult
+from vs_sidecar.driver import Opened, StartError, SteerRefusedError, TurnResult
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 
 if TYPE_CHECKING:
@@ -57,6 +57,8 @@ class ScriptedDriver:
     interrupts: list[str] = field(default_factory=list)
     ignored_interrupts: list[str] = field(default_factory=list)
     closed: bool = False
+    #: When set, ``open`` raises it: the session cannot start.
+    start_error: StartError | None = None
     #: Called when the turn has begun and the provider has not started it.
     at_start: Callable[[], None] | None = None
     #: Called when the provider is done with the turn and the engine does not know yet.
@@ -68,6 +70,8 @@ class ScriptedDriver:
 
     def open(self) -> Opened:
         """See ``Driver.open``."""
+        if self.start_error is not None:
+            raise self.start_error
         return Opened(
             self.conversation_id, orch.Capabilities(streams_text=True, steers=True, resumes=True)
         )
