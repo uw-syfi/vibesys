@@ -75,7 +75,7 @@ const help = `usage:
                    [--timeout S] [--buffer N] [--record-clients] [--format binpb|json]
                    -- GENERATOR [ARG...]
   loadgen probe    --target URL --requests F --rounds N --deadline S [--timeout S] [--format binpb|json]
-  loadgen selftest --summary F [--step-secs S] [--max-rate R] [--format binpb|json]
+  loadgen selftest --summary F [--step-secs S] [--max-rate R] [--accept-any-rate] [--format binpb|json]
   loadgen --capabilities [--format binpb|json]
 `
 
@@ -431,6 +431,7 @@ func selftestCommand(ctx context.Context, args []string, stderr io.Writer) error
 	summaryPath := set.String("summary", "", "selftest file to write")
 	step := set.Float64("step-secs", 2, "window of each trial rate, seconds")
 	maxRate := set.Float64("max-rate", 200_000, "highest rate tried, operations/s")
+	acceptAny := set.Bool("accept-any-rate", false, "count every trial as sustained, so the file is well-formed but not a measurement (for checking the format)")
 	if err := parse(set, args, "summary"); err != nil {
 		return err
 	}
@@ -438,7 +439,7 @@ func selftestCommand(ctx context.Context, args []string, stderr io.Writer) error
 	if err != nil {
 		return err
 	}
-	result, err := selftest.Run(ctx, selftest.Options{Step: stepDuration, MaxRate: *maxRate})
+	result, err := selftest.Run(ctx, selftest.Options{Step: stepDuration, MaxRate: *maxRate, AcceptAnyRate: *acceptAny})
 	if err != nil {
 		return err
 	}

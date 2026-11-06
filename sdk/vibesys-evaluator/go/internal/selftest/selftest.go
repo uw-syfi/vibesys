@@ -39,6 +39,10 @@ type Options struct {
 	Step time.Duration
 	// MaxRate caps the search, operations/s.
 	MaxRate float64
+	// AcceptAnyRate counts every trial as sustained, so the search ends at MaxRate on any host. The
+	// result is then a well-formed file and not a measurement: it is for checking what loadgen
+	// writes, where a busy host must not change the answer.
+	AcceptAnyRate bool
 }
 
 // Run measures and returns the result.
@@ -61,7 +65,7 @@ func Run(ctx context.Context, options Options) (*pb.SelftestResult, error) {
 		return nil, err
 	}
 	defer client.Close()
-	m := measurer{ctx: ctx, client: client, step: options.Step}
+	m := measurer{ctx: ctx, client: client, step: options.Step, acceptAny: options.AcceptAnyRate}
 
 	pass, fail := 0.0, 0.0
 	for rate := float64(startRate); ; rate = math.Min(rate*2, options.MaxRate) {
@@ -111,6 +115,8 @@ type measurer struct {
 	ctx    context.Context
 	client *call.Client
 	step   time.Duration
+	// acceptAny passes every trial; see Options.AcceptAnyRate.
+	acceptAny bool
 }
 
 // trial runs one open loop at rate and reports whether it passed the guard.
@@ -145,7 +151,7 @@ func (m measurer) trial(rate float64) (bool, *pb.PhaseSummary, error) {
 	if err != nil {
 		return false, nil, err
 	}
-	ok := phase.GetSustained() && lag <= maxLagP99Micros && phase.GetErrors() == 0
+	ok := m.acceptAny || phase.GetSustained() && lag <= maxLagP99Micros && phase.GetErrors() == 0
 	return ok, phase, nil
 }
 
