@@ -6,8 +6,8 @@ import "time"
 type Options struct {
 	// PartitionTimeout bounds one partition's search; past it the partition is undecided.
 	PartitionTimeout time.Duration
-	// TotalTimeout bounds the searches of the whole check; partitions not started by then are
-	// undecided.
+	// TotalTimeout bounds the whole check, from projection to the last search: partitions not
+	// started by then are undecided (status skipped). Explaining failures has its own budget.
 	TotalTimeout time.Duration
 	// MaxSearchSteps bounds one partition's search in model steps, a budget that does not depend
 	// on the machine's speed. Negative: no bound (the default).

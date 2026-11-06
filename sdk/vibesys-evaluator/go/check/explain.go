@@ -19,7 +19,7 @@ import (
 // this cannot.
 func explain[S, I, O any](sp *Spec[S, I, O], r *runner, p *partition[I, O], faults []Fault, horizon int64) Failure {
 	f := Failure{Partition: p.name}
-	c := r.begin(r.o.ExplainTimeout)
+	c := r.begin(r.o.ExplainTimeout, false)
 	defer r.end(c)
 	search := func(q *partition[I, O], fs []Fault, verbose bool) (porcupine.CheckResult, porcupine.LinearizationInfo, []porcupine.Operation, porcupine.Model) {
 		var scratch PartitionReport

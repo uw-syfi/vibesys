@@ -86,10 +86,11 @@ func (r *runner) collect() {
 	}
 }
 
-// begin registers a search with its own time budget.
-func (r *runner) begin(timeout time.Duration) *control {
+// begin registers a search with its own time budget, capped by the total one unless it explains
+// a failure (a FAIL is worth its explanation even when the total budget is spent).
+func (r *runner) begin(timeout time.Duration, capped bool) *control {
 	deadline := time.Now().Add(timeout)
-	if deadline.After(r.deadline) {
+	if capped && deadline.After(r.deadline) {
 		deadline = r.deadline
 	}
 	c := &control{deadline: deadline}
@@ -511,7 +512,7 @@ func searchPartition[S, I, O any](sp *Spec[S, I, O], r *runner, p *partition[I, 
 		return pr
 	}
 	began := time.Now()
-	c := r.begin(r.o.PartitionTimeout)
+	c := r.begin(r.o.PartitionTimeout, true)
 	model := porcupineModel(sp, p.keys, r, c)
 	res := porcupine.Ok
 	for _, t := range prefixCuts(p.events) {
