@@ -35,6 +35,7 @@ __all__ = [
     "WORK_DIR",
     "Deployment",
     "ExecResult",
+    "OwnedDeployment",
     "PodOutOfMemoryError",
     "ReplacedPod",
     "attach",
@@ -141,11 +142,6 @@ class Deployment:
         self._target = dict(target)
         self._scratch = scratch
         self._pods = 0
-
-    @property
-    def _gateway_url(self) -> str:
-        """The base URL of the app's gateway as the phase pods reach it."""
-        return _validate.parse_gateway(self._app.gateway).url
 
     @property
     def namespace(self) -> str:
@@ -260,9 +256,16 @@ class Deployment:
         """Scale the ``restartable`` Deployments back to the manifest's replicas; wait; probe."""
         call("start", {"target": self._target})
 
-    # -- what the phase runner uses (not part of the public API) ------------------------------
 
-    def _run_pod(
+class OwnedDeployment(Deployment):
+    """A Deployment the deploy layer made (not public): the phase runner's and teardown's calls."""
+
+    @property
+    def gateway_url(self) -> str:
+        """The base URL of the app's gateway as the phase pods reach it."""
+        return _validate.parse_gateway(self._app.gateway).url
+
+    def run_pod(
         self,
         role: str,
         argv: Sequence[str],
@@ -287,14 +290,14 @@ class Deployment:
             },
         )
 
-    def _usage(self, label: str) -> None:
+    def usage(self, label: str) -> None:
         """Diagnostics only: per-pod CPU is logged by the core and saved in the artifacts."""
         try:
             call("usage", {"target": self._target, "label": label})
         except DeployError as error:
             print(f"vibesys-evaluator: pod usage {label}: {error}", file=sys.stderr, flush=True)
 
-    def _teardown(self, *, fast: bool, failed: bool) -> None:
+    def teardown(self, *, fast: bool, failed: bool) -> None:
         call("teardown", {"target": self._target, "fast": fast, "failed": failed}, grace=True)
 
 

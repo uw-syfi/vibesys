@@ -21,6 +21,7 @@ from vibesys_evaluator.microservices._k8s._deployment import (
     NAMESPACE_VARIABLE,
     WORK_DIR,
     Deployment,
+    OwnedDeployment,
     PodOutOfMemoryError,
     app_message,
     attach,
@@ -67,7 +68,7 @@ def _out_of_memory(job: PhaseJob, error: PodOutOfMemoryError) -> str:
 class KubePhaseRunner:
     """Runs each phase as `task.phase(...)` in a phase pod (6 CPUs, 4 GiB) of the namespace."""
 
-    deployment: Deployment
+    deployment: OwnedDeployment
     task: TaskCommand
     scratch: Path
 
@@ -75,9 +76,9 @@ class KubePhaseRunner:
         """Run the phase; copy the files it left in its work directory and its log into out_dir."""
         input_file = self.scratch / f"{job.name}.{PHASE_INPUT_FILE}"
         input_file.write_bytes(job.phase_input)
-        argv = self.task.phase(work_dir=WORK_DIR, target=self.deployment._gateway_url)  # noqa: SLF001
+        argv = self.task.phase(work_dir=WORK_DIR, target=self.deployment.gateway_url)
         try:
-            run = self.deployment._run_pod(  # noqa: SLF001
+            run = self.deployment.run_pod(
                 "phase",
                 argv,
                 inputs={PHASE_INPUT_FILE: input_file},
@@ -93,7 +94,7 @@ class KubePhaseRunner:
         log = str(run.get("log", ""))
         exit_code = int(run.get("exit_code", 0))
         (out_dir / PHASE_LOG_FILE).write_text(log)
-        self.deployment._usage(job.name)  # noqa: SLF001
+        self.deployment.usage(job.name)
         if exit_code != 0:
             raise PhaseRunError(
                 f"{job.name} exited {exit_code} after {float(run.get('seconds', 0)):.0f}s; "
@@ -132,7 +133,7 @@ class KubeDeployer:
                     "argv": list(context.task.seed(dataset_digest=context.dataset_digest))
                 }
             reply = call("deploy", request, grace=True)
-            deployment = Deployment(self._app, reply["target"])
+            deployment = OwnedDeployment(self._app, reply["target"])
             failure: BaseException | None = None
             try:
                 (context.artifacts / NAMESPACE_FILE).write_text(deployment.namespace + "\n")
@@ -146,12 +147,12 @@ class KubeDeployer:
 
 
 def _close(
-    deployment: Deployment, failure: BaseException | None, log: Callable[[str], None]
+    deployment: OwnedDeployment, failure: BaseException | None, log: Callable[[str], None]
 ) -> None:
     """Delete the namespace; after a signal only ask for it, and never hide the original failure."""
     stopping = failure is not None and not isinstance(failure, Exception)
     try:
-        deployment._teardown(fast=stopping, failed=failure is not None)  # noqa: SLF001
+        deployment.teardown(fast=stopping, failed=failure is not None)
     except DeployError as error:
         if failure is None:
             raise
