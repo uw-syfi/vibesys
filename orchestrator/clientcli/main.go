@@ -43,8 +43,9 @@ what is in flight when the limit is reached, and a turn whose provider reports n
 model the agent library cannot price, --max-cost never takes effect, and run get says so once a turn has
 finished with no cost reported.
 RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository. When
-no run is live there, an omitted RUN means its most recent run to run get, run stop and run attach: get
-shows it, attach replays it, and stop says it has already ended and exits 0, as for any RUN that has.
+no run is live there, an omitted RUN means its most recent run, for every verb but steer: get shows it,
+attach replays it, wait returns at once as for any RUN that has ended, and stop says the run has
+already ended and exits 0. steer to a run that has ended is an error, since nothing would read the message.
 run start and host restart are the only verbs that replace a host, and only once a new one is shown to
 be able to start: run start replaces one that is older, another build or on another configuration, when
 it has no live run and no other client; host restart replaces any host with no live run. No other verb
@@ -209,9 +210,9 @@ func (s *session) Close() {
 }
 
 // join opens the service, reads the snapshot and picks the run named by arg, which may be empty, in
-// which case omitted says which it means.
+// which case it means the run resolve picks.
 // The returned context ends the stream and must be used for every later call.
-func (c *call) join(ctx context.Context, arg string, omitted omission) (*session, context.Context, error) {
+func (c *call) join(ctx context.Context, arg string) (*session, context.Context, error) {
 	repo := ""
 	if arg == "" {
 		var err error
@@ -230,7 +231,7 @@ func (c *call) join(ctx context.Context, arg string, omitted omission) (*session
 		s.Close()
 		return nil, nil, err
 	}
-	run, err := resolve(arg, repo, snapshot.GetRuns(), c.Canonical, omitted)
+	run, err := resolve(arg, repo, snapshot.GetRuns(), c.Canonical)
 	if err != nil {
 		s.Close()
 		return nil, nil, err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"regexp"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -279,15 +280,120 @@ func TestRunAttachWithNoRunReplaysTheMostRecentRunHere(t *testing.T) {
 	}
 }
 
-// A verb that can do nothing with a run that ended still wants a live one, and now names the ended ones.
-func TestAVerbThatNeedsALiveRunNamesTheEndedOnesItFound(t *testing.T) {
-	for _, args := range [][]string{{"run", "steer", "hello"}, {"run", "wait", "--until", "ended", "--timeout", "1m"}} {
-		_, w := endedHere(t)
+// run steer to a run that has ended is an error: the message would be lost. It says so, sends nothing,
+// and is the same whether the run is named or found.
+func TestSteerOfARunThatHasEndedIsRefusedPlainly(t *testing.T) {
+	for _, args := range [][]string{{"run", "steer", "hello"}, {"run", "steer", "run-newer", "hello"}} {
+		f, w := endedHere(t)
+		got := w.run(context.Background(), args...)
+		if got.code != 1 || len(f.sent()) != 0 {
+			t.Errorf("%v: exit %d, %d commands sent", args, got.code, len(f.sent()))
+		}
+		contains(t, "stderr", got.stderr, "run-newer", "already ended", "not sent")
+	}
+}
+
+// Finding: leaving a run and coming back after it ended, run wait with no RUN said "no live run". It
+// now returns at once, as wait for the same RUN does, for every --until.
+func TestWaitWithNoRunOnARunThatEndedIsWaitForThatRun(t *testing.T) {
+	for until := range goalNames {
+		var ids [2]string
+		var codes [2]int
+		for i, name := range []string{"", "run-newer"} {
+			_, w := endedHere(t)
+			args := []string{"run", "wait", "--until", until, "--timeout", "1m"}
+			if name != "" {
+				args = append(args, name)
+			}
+			got := w.run(context.Background(), args...)
+			codes[i], ids[i] = got.code, waitedRun(got.stderr)
+		}
+		if ids[0] != "run-newer" || ids[1] != "run-newer" || codes[0] != codes[1] || codes[0] == 3 || codes[0] == 4 {
+			t.Errorf("--until %s: no RUN gave run %q exit %d, RUN given gave run %q exit %d", until, ids[0], codes[0], ids[1], codes[1])
+		}
+	}
+}
+
+// With no run ever started in the repository, the error names run start.
+func TestAVerbWithNoRunInTheRepositoryNamesRunStart(t *testing.T) {
+	for _, args := range [][]string{{"run", "get"}, {"run", "steer", "hi"}, {"run", "stop"}, {"run", "wait", "--until", "ended", "--timeout", "1m"}} {
+		runs := []*pb.Run{runOf("run-there", "/work/other", pb.RunStatus_RUN_STATUS_RUNNING, 9)}
+		w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(1, false, runs, nil)}}))
 		got := w.run(context.Background(), args...)
 		if got.code != 1 {
 			t.Errorf("%v: exit %d", args, got.code)
 		}
-		contains(t, "stderr", got.stderr, "no live run", "run-newer", "run-older")
+		contains(t, "stderr", got.stderr, "run start", "run-there")
+	}
+}
+
+var goalNames = map[string]bool{"started": true, "report": true, "progress": true, "stalled": true, "ended": true}
+
+var waitedRunLine = regexp.MustCompile(`on run (\S+) \(`)
+
+// waitedRun is the run a wait says it is waiting on.
+func waitedRun(stderr string) string {
+	if m := waitedRunLine.FindStringSubmatch(stderr); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+var stoppedRunLine = regexp.MustCompile(`run (\S+) has already|stopping run (\S+);`)
+
+// run get, run wait and run stop with no RUN mean one run, over a repository with no runs, one live
+// run, one ended, several ended, and live with ended, with runs elsewhere mixed in.
+func TestOmittedRunMeansTheSameRunForGetWaitAndStop(t *testing.T) {
+	r := rand.New(rand.NewPCG(3, 5))
+	for i := range 80 {
+		var runs []*pb.Run
+		var agents []*pb.Agent
+		add := func(repo string, status pb.RunStatus) {
+			id := fmt.Sprintf("run-%d", len(runs))
+			runs = append(runs, runOf(id, repo, status, len(runs)))
+			if status == pb.RunStatus_RUN_STATUS_RUNNING {
+				agents = append(agents, leadOf(id, pb.AgentStatus_AGENT_STATUS_IDLE))
+			}
+		}
+		for range r.IntN(4) { // ended here: none, one, several
+			add("/work/repo", allStatuses[3+r.IntN(2)])
+		}
+		if r.IntN(2) == 0 { // one live here
+			add("/work/repo", pb.RunStatus_RUN_STATUS_RUNNING)
+		}
+		for range r.IntN(3) { // other repositories
+			add("/work/other", allStatuses[r.IntN(len(allStatuses))])
+		}
+		r.Shuffle(len(runs), func(a, b int) { runs[a], runs[b] = runs[b], runs[a] })
+		t.Run(fmt.Sprintf("set-%d", i), func(t *testing.T) {
+			ask := func(args ...string) result {
+				w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(1, false, runs, agents)}}))
+				return w.run(context.Background(), args...)
+			}
+			gotGet := ask("run", "get", "--json")
+			if gotGet.code != 0 {
+				// No run here, or none to choose: wait and stop must fail the same way, naming the candidates.
+				for _, args := range [][]string{{"run", "stop", "--yes"}, {"run", "wait", "--until", "started", "--timeout", "1m"}} {
+					if got := ask(args...); got.code != 1 || got.stderr != gotGet.stderr {
+						t.Errorf("%v: exit %d, %q; get said %q", args, got.code, got.stderr, gotGet.stderr)
+					}
+				}
+				return
+			}
+			var snapshot pb.RunsSnapshot
+			if err := protojson.Unmarshal([]byte(gotGet.stdout), &snapshot); err != nil || len(snapshot.GetRuns()) != 1 {
+				t.Fatalf("get: %q: %v", gotGet.stdout, err)
+			}
+			want := snapshot.GetRuns()[0].GetId()
+			if got := ask("run", "wait", "--until", "started", "--timeout", "1m"); waitedRun(got.stderr) != want {
+				t.Errorf("wait chose %q (exit %d, %q), get chose %q", waitedRun(got.stderr), got.code, got.stderr, want)
+			}
+			got := ask("run", "stop", "--yes")
+			m := stoppedRunLine.FindStringSubmatch(got.stdout)
+			if got.code != 0 || m == nil || m[1]+m[2] != want {
+				t.Errorf("stop chose %v (exit %d, %q), get chose %q", m, got.code, got.stdout, want)
+			}
+		})
 	}
 }
 

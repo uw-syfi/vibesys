@@ -89,7 +89,7 @@ func wait(ctx context.Context, c *call, args []string) error {
 	}
 	bounded, expired, cancel := bound(ctx, c.Clock, *timeout)
 	defer cancel()
-	s, streamCtx, err := c.join(bounded, arg, onlyLive)
+	s, streamCtx, err := c.join(bounded, arg)
 	if err != nil {
 		return c.interrupted(ctx, expired, g, *timeout, nil, c.Clock.Now(), err)
 	}

@@ -14,7 +14,7 @@ func attach(ctx context.Context, c *call, args []string) error {
 	if err != nil {
 		return err
 	}
-	s, ctx, err := c.join(ctx, arg, mostRecent)
+	s, ctx, err := c.join(ctx, arg)
 	if err != nil {
 		return err
 	}

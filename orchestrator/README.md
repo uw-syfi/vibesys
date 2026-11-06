@@ -295,8 +295,10 @@ repairing an install under a running host needs no restart. The home is resolved
 home reached by either path is one host.
 
 `RUN` is a run id, a unique prefix, or omitted for the one live run in the current repository. With no run
-live there, an omitted `RUN` means the repository's most recent run to `run get`, `run attach` (which
-replays it) and `run stop` (which says it has already ended and exits 0, as it does for any `RUN` that has). The
+live there, an omitted `RUN` means the repository's most recent run to every verb but `run steer`: `run get` shows it,
+`run attach` replays it, `run wait` returns at once as it does for any `RUN` that has ended, and `run stop` says it
+has already ended and exits 0. `run steer` to a run that has ended is an error, since the message would be lost;
+with no run ever started there, every verb says so and names `run start`. The
 repository of a new run is the root of the repository around the working directory unless `--repository`
 says otherwise. Exit codes: 0 ok, 1 failed or refused, 2 usage, 3 timeout, 4 service unavailable. With no
 terminal nothing prompts. `run start` follows the stream until the lead is live and exits 1, with the lead's
@@ -627,6 +629,49 @@ a start with no harness installed fails naming the missing harness (the release 
 sidecar), and a run with scripted agents (`sidecar/e2e`, selected by
 `vibesys-client host configure --session-holder`, no model called) is started, waited on, listed, stopped and shown to
 leave no process behind.
+
+## Removing VibeSys
+
+`install.sh` has no uninstall mode. Removal is the steps below, in this order. The paths are the
+defaults; if you installed with `VIBESYS_HOME` or `VIBESYS_INSTALL_DIR`, or configured a state
+directory (`vibesys-client host configure --state-directory`), use those instead.
+
+1. Stop every run and the host. `host stop --if-no-live-runs` refuses while a run is live, and
+   `host stop` without it leaves a live run's agents running until the next host starts, so stop
+   the runs first:
+
+   ```bash
+   vibesys-client run list                 # then: vibesys-client run stop RUN --yes, for each live one
+   vibesys-client host stop
+   ```
+
+2. Stop the job daemon. `host stop` does not: the job daemon (`vibesys-cli daemon`) belongs to your
+   user, not to the host, may serve `vibesys-cli` commands you ran yourself, and only
+   `vibesys-client` is on your PATH. Check it, then stop it with the copy in the release:
+
+   ```bash
+   ~/.vibesys/current/bin/vibesys-cli daemon status
+   ~/.vibesys/current/bin/vibesys-cli daemon stop
+   ```
+
+   A job that is running has its own supervisor process and goes on after the daemon stops, so
+   read `daemon status` first if you have submitted jobs outside a run.
+
+3. Delete what the install made:
+
+   | Path | Holds |
+   | --- | --- |
+   | `~/.local/bin/vibesys-client` | The link to the client. |
+   | `~/.vibesys/` | Every release, the `current` link, the host's socket, lock, log and `host-config.json`, and `uv` if the installer put it there. |
+   | `~/.local/state/vibesys/` | The orchestrator's state under `orchestrator/`: the record of every run, and each agent's session files and working copy. This is where most of the disk goes. It also holds the job tool's task index, so keep it if you use `vibesys-cli` on its own. |
+
+   uv keeps its cache and the Python it fetched in its own places, outside `~/.vibesys`; `uv cache dir`
+   and `uv python dir` print them if you want those gone too.
+
+Not removed, and yours to keep or delete: in each repository where you ran a task, the
+`.vibesys-state` directory (plans, measurements and scratch output) and the result branches
+`vibesys/result/<task>` that hold the best commits. Deleting VibeSys touches neither, and a result
+branch you delete cannot be recovered once nothing else refers to its commits.
 
 ## Testing
 
