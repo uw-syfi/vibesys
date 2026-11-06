@@ -173,7 +173,9 @@ def test_identity_wins_over_a_servers_own_environment(
 
 def test_the_old_id_names_are_gone() -> None:
     launch = h.launch(orch.HARNESS_CLAUDE_CODE)
-    executor, _driver = _open(launch, [StdioMcpServer("vibesys", "/bin/vibesys-host", ("mcp",), {})])
+    executor, _driver = _open(
+        launch, [StdioMcpServer("vibesys", "/bin/vibesys-host", ("mcp",), {})]
+    )
     names = set(executor.spawns[0].env) | set(
         json.loads(executor.spawns[0].argv[executor.spawns[0].argv.index("--mcp-config") + 1])[
             "mcpServers"

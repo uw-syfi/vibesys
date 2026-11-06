@@ -195,6 +195,7 @@ def driver_factory(
                 launch, mcp_servers=servers, raw_sink=raw_sink, new_conversation_id=conversation_id
             ),
             preferred_id=preferred,
+            workdir=launch.worktree,
         )
 
     return make

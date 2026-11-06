@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 import protovalidate
 from agentshim import AgentShimError
 
-from vs_sidecar.driver import SteerRefusedError
+from vs_sidecar.driver import StartError, SteerRefusedError
 from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
@@ -104,13 +104,24 @@ class Engine:
         driver = self._driver_factory(self._on_raw)
         try:
             opened = driver.open()
+        except StartError as failure:
+            with self._lock:
+                self._fail(f"could not start the agent: {failure.detail}", failure.reason)
+            return
         except (AgentShimError, OSError, ValueError) as error:
             with self._lock:
-                self._fail(f"could not open the session: {type(error).__name__}: {error}")
+                self._fail(
+                    f"could not start the agent: {type(error).__name__}: {error}",
+                    orch.START_FAILURE_REASON_OTHER,
+                )
             return
         with self._lock:
             if not opened.conversation_id:
-                self._fail("the provider did not name the conversation")
+                self._fail(
+                    "could not start the agent: the provider did not name the conversation",
+                    orch.START_FAILURE_REASON_OTHER,
+                )
+                driver.close()
                 return
             self._driver = driver
             self._append(
@@ -154,13 +165,20 @@ class Engine:
                     )
                 )
         if "failed" not in kinds:
-            self._fail("the sidecar restarted and lost the agent process")
+            self._fail("the agent session restarted and lost the agent process")
         self._failed = True
 
-    def _fail(self, detail: str) -> None:
+    def _fail(
+        self, detail: str, start_failure: int = orch.START_FAILURE_REASON_UNSPECIFIED
+    ) -> None:
+        """End the session as failed. *start_failure* is why it never opened, when it did not."""
         self._failed = True
         self._end_idle(orch.TURN_STATUS_FAILED)
-        self._append(sc.SidecarEvent(failed=sc.SessionFailed(detail=detail)))
+        self._append(
+            sc.SidecarEvent(
+                failed=sc.SessionFailed(detail=detail, start_failure_reason=start_failure)
+            )
+        )
 
     # -- reading
 
@@ -387,7 +405,7 @@ class Engine:
         if not alive:
             with self._lock:
                 if not self._unusable:
-                    self._fail("the agent process ended")
+                    self._fail("the agent session ended: its process is gone")
         return alive
 
     def _end_idle(self, status: int) -> None:

@@ -9,7 +9,7 @@ the daemon tests against. A scenario is one JSON file in `scenarios/`:
   `{"tool_left_running": command, "id": call}` (a call that never reports a result),
   `{"report": {"input": n, "output": n}}` (a usage report during the turn, which is not a total),
   `{"total": {"input": n, "output": n}}` (the usage of the turn's result), `{"end": "failed"}`
-  (the turn fails, with no result) and `{"crash": true}` (the sidecar process dies here). An
+  (the turn fails, with no result), `{"crash": true}` (the sidecar process dies here) and `{"start_fails": REASON, "detail": text}` (a turn of its own: the session cannot start, for the `StartFailureReason` named without its prefix). An
   implementation maps these to whatever drives it (the Python runner builds agentshim events; a
   Fake plays them directly).
 - `steps`: `{"send": SidecarCommand}` (protobuf JSON, so `startTurn.turnId`) sends a command;
@@ -22,7 +22,7 @@ the daemon tests against. A scenario is one JSON file in `scenarios/`:
 - `expect`: data a check reads.
 
 The Python runner is `tests/conformance.py`; `tests/test_conformance.py` runs every scenario over a
-real Unix socket. The Go side reads the same files and implements the same check names.
+real Unix socket. The Go daemon tests read the scenarios about a session that cannot start (`internal/daemon/conformance_test.go`): the Fake plays what the file says a sidecar sends and the daemon must record the reason it names.
 
 ## Checks
 
@@ -39,5 +39,6 @@ real Unix socket. The Go side reads the same files and implements the same check
 | `follow_resumes` | `Follow(after_offset=k)` returns exactly the events with offset above `k` |
 | `late_steer_refused` | a `SteerOutcome` for each message in `expect.steer` has the stated `accepted` and follows a `TurnEnded` |
 | `close_is_last` | `SessionClosed` is the last event and appears once |
+| `start_failure_is_typed` | the log is exactly one `SessionFailed` (no `ConversationOpened`), its `start_failure_reason` is `expect.start_failure`, and its detail begins "could not start the agent: " |
 
 Adding a scenario or a check changes this contract: update this table and the Go Fake with it.
