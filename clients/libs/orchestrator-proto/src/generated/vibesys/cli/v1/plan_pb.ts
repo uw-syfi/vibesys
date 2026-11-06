@@ -4,6 +4,7 @@
 
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { Job } from "./job_pb.js";
@@ -16,7 +17,35 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/plan.proto.
  */
 export const file_vibesys_cli_v1_plan: GenFile = /*@__PURE__*/
-  fileDesc("Chl2aWJlc3lzL2NsaS92MS9wbGFuLnByb3RvEg52aWJlc3lzLmNsaS52MSJSCgtQbGFuQ29tbWVudBIMCgR0ZXh0GAEgASgJEiYKAmF0GAIgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBINCgVhZ2VudBgDIAEoCSLuAQoEUGxhbhIOCgZudW1iZXIYASABKA0SDQoFdGl0bGUYAiABKAkSDAoEYm9keRgDIAEoCRIqCgZzdGF0dXMYBCABKA4yGi52aWJlc3lzLmNsaS52MS5QbGFuU3RhdHVzEi0KCGNvbW1lbnRzGAUgAygLMhsudmliZXN5cy5jbGkudjEuUGxhbkNvbW1lbnQSLgoKY3JlYXRlZF9hdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLgoKdXBkYXRlZF9hdBgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiVwoJTGlua2VkSm9iEiAKA2pvYhgBIAEoCzITLnZpYmVzeXMuY2xpLnYxLkpvYhIoCgd2ZXJkaWN0GAIgASgLMhcudmliZXN5cy5jbGkudjEuVmVyZGljdCJXCghQbGFuVmlldxIiCgRwbGFuGAEgASgLMhQudmliZXN5cy5jbGkudjEuUGxhbhInCgRqb2JzGAIgAygLMhkudmliZXN5cy5jbGkudjEuTGlua2VkSm9iKp4BCgpQbGFuU3RhdHVzEhsKF1BMQU5fU1RBVFVTX1VOU1BFQ0lGSUVEEAASFAoQUExBTl9TVEFUVVNfT1BFThABEhYKElBMQU5fU1RBVFVTX0NIT1NFThACEhMKD1BMQU5fU1RBVFVTX1dPThADEhYKElBMQU5fU1RBVFVTX1BBUktFRBAEEhgKFFBMQU5fU1RBVFVTX1JFSkVDVEVEEAVCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_google_protobuf_timestamp, file_vibesys_cli_v1_job, file_vibesys_cli_v1_verdict]);
+  fileDesc("Chl2aWJlc3lzL2NsaS92MS9wbGFuLnByb3RvEg52aWJlc3lzLmNsaS52MSJ0Cg1QbGFuR2FpbkJvdW5kEh8KBXNoYXJlGAEgASgBQhC6SA0SC0ABKQAAAAAAAAAAEkIKC3JlbGF0aXZlX3RvGAIgASgOMiEudmliZXN5cy5jbGkudjEuUGxhbkdhaW5SZWZlcmVuY2VCCrpIB4IBBBABIAAiUgoLUGxhbkNvbW1lbnQSDAoEdGV4dBgBIAEoCRImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFYWdlbnQYAyABKAkioQIKBFBsYW4SDgoGbnVtYmVyGAEgASgNEg0KBXRpdGxlGAIgASgJEgwKBGJvZHkYAyABKAkSKgoGc3RhdHVzGAQgASgOMhoudmliZXN5cy5jbGkudjEuUGxhblN0YXR1cxItCghjb21tZW50cxgFIAMoCzIbLnZpYmVzeXMuY2xpLnYxLlBsYW5Db21tZW50Ei4KCmNyZWF0ZWRfYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEi4KCnVwZGF0ZWRfYXQYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEjEKCmdhaW5fYm91bmQYCCABKAsyHS52aWJlc3lzLmNsaS52MS5QbGFuR2FpbkJvdW5kIlcKCUxpbmtlZEpvYhIgCgNqb2IYASABKAsyEy52aWJlc3lzLmNsaS52MS5Kb2ISKAoHdmVyZGljdBgCIAEoCzIXLnZpYmVzeXMuY2xpLnYxLlZlcmRpY3QiVwoIUGxhblZpZXcSIgoEcGxhbhgBIAEoCzIULnZpYmVzeXMuY2xpLnYxLlBsYW4SJwoEam9icxgCIAMoCzIZLnZpYmVzeXMuY2xpLnYxLkxpbmtlZEpvYiLhBAoNUGxhbkdhaW5DaGVjaxIfCgVzaGFyZRgBIAEoAUIQukgNEgtAASkAAAAAAAAAABI6CgZhbnN3ZXIYAiABKA4yHi52aWJlc3lzLmNsaS52MS5QbGFuR2FpbkFuc3dlckIKukgHggEEEAEgABIPCgdjb3VudGVkGAMgASgNEjEKCGJsb2NrZXJzGAQgAygLMh8udmliZXN5cy5jbGkudjEuUGxhbkdhaW5CbG9ja2VyOq4DukiqAxrvAQoncGxhbl9nYWluX2NoZWNrLmFuc3dlcl9mb2xsb3dzX2Jsb2NrZXJzEmN0aGUgYW5zd2VyIGlzIGFsbCB1bmRlciBleGFjdGx5IHdoZW4gdGhlcmUgaXMgbm8gYmxvY2tlciwgYW5kIGEgYmxvY2tlciBpcyBvbmUgb2YgdGhlIGNvdW50ZWQgcGxhbnMaXyh0aGlzLmFuc3dlciA9PSAxKSA9PSAodGhpcy5ibG9ja2Vycy5zaXplKCkgPT0gMCkgJiYgdWludCh0aGlzLmJsb2NrZXJzLnNpemUoKSkgPD0gdGhpcy5jb3VudGVkGrUBCiZwbGFuX2dhaW5fY2hlY2suYmxvY2tlcnNfYXJlX25vdF91bmRlchI9YSBibG9ja2VyIHN0YXRlcyBubyBib3VuZCwgb3Igb25lIHRoYXQgaXMgbm90IGJlbG93IHRoZSBzaGFyZRpMdGhpcy5ibG9ja2Vycy5hbGwoYiwgIWhhcyhiLmdhaW5fYm91bmQpIHx8IGIuZ2Fpbl9ib3VuZC5zaGFyZSA+PSB0aGlzLnNoYXJlKSKkAQoPUGxhbkdhaW5CbG9ja2VyEhcKBm51bWJlchgBIAEoDUIHukgEKgIgABINCgV0aXRsZRgCIAEoCRI2CgZzdGF0dXMYAyABKA4yGi52aWJlc3lzLmNsaS52MS5QbGFuU3RhdHVzQgq6SAeCAQQYARgEEjEKCmdhaW5fYm91bmQYBCABKAsyHS52aWJlc3lzLmNsaS52MS5QbGFuR2FpbkJvdW5kKp4BCgpQbGFuU3RhdHVzEhsKF1BMQU5fU1RBVFVTX1VOU1BFQ0lGSUVEEAASFAoQUExBTl9TVEFUVVNfT1BFThABEhYKElBMQU5fU1RBVFVTX0NIT1NFThACEhMKD1BMQU5fU1RBVFVTX1dPThADEhYKElBMQU5fU1RBVFVTX1BBUktFRBAEEhgKFFBMQU5fU1RBVFVTX1JFSkVDVEVEEAUqWgoRUGxhbkdhaW5SZWZlcmVuY2USIwofUExBTl9HQUlOX1JFRkVSRU5DRV9VTlNQRUNJRklFRBAAEiAKHFBMQU5fR0FJTl9SRUZFUkVOQ0VfSEVBRExJTkUQASp2Cg5QbGFuR2FpbkFuc3dlchIgChxQTEFOX0dBSU5fQU5TV0VSX1VOU1BFQ0lGSUVEEAASHgoaUExBTl9HQUlOX0FOU1dFUl9BTExfVU5ERVIQARIiCh5QTEFOX0dBSU5fQU5TV0VSX05PVF9BTExfVU5ERVIQAkI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_cli_v1_job, file_vibesys_cli_v1_verdict]);
+
+/**
+ * PlanGainBound is the most a plan could gain, as its planner states it: a share of a reference,
+ * 0.05 for five percent of the headline. A plan states it so that a decision to go on or to stop
+ * does not have to read the plan's prose.
+ *
+ * @generated from message vibesys.cli.v1.PlanGainBound
+ */
+export type PlanGainBound = Message<"vibesys.cli.v1.PlanGainBound"> & {
+  /**
+   * At least 0, and finite. It may exceed 1: an idea can claim to more than double a metric.
+   *
+   * @generated from field: double share = 1;
+   */
+  share: number;
+
+  /**
+   * @generated from field: vibesys.cli.v1.PlanGainReference relative_to = 2;
+   */
+  relativeTo: PlanGainReference;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.PlanGainBound.
+ * Use `create(PlanGainBoundSchema)` to create a new message.
+ */
+export const PlanGainBoundSchema: GenMessage<PlanGainBound> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_plan, 0);
 
 /**
  * @generated from message vibesys.cli.v1.PlanComment
@@ -43,7 +72,7 @@ export type PlanComment = Message<"vibesys.cli.v1.PlanComment"> & {
  * Use `create(PlanCommentSchema)` to create a new message.
  */
 export const PlanCommentSchema: GenMessage<PlanComment> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_plan, 0);
+  messageDesc(file_vibesys_cli_v1_plan, 1);
 
 /**
  * Plan is stored the way an issue is: a number the CLI assigns, a free-form markdown body, and
@@ -86,6 +115,13 @@ export type Plan = Message<"vibesys.cli.v1.Plan"> & {
    * @generated from field: google.protobuf.Timestamp updated_at = 7;
    */
   updatedAt?: Timestamp | undefined;
+
+  /**
+   * The bound on the plan's possible gain. Absent when the plan states none.
+   *
+   * @generated from field: vibesys.cli.v1.PlanGainBound gain_bound = 8;
+   */
+  gainBound?: PlanGainBound | undefined;
 };
 
 /**
@@ -93,7 +129,7 @@ export type Plan = Message<"vibesys.cli.v1.Plan"> & {
  * Use `create(PlanSchema)` to create a new message.
  */
 export const PlanSchema: GenMessage<Plan> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_plan, 1);
+  messageDesc(file_vibesys_cli_v1_plan, 2);
 
 /**
  * LinkedJob is a job a plan was linked to, with its commit's verdict against the current result
@@ -118,7 +154,7 @@ export type LinkedJob = Message<"vibesys.cli.v1.LinkedJob"> & {
  * Use `create(LinkedJobSchema)` to create a new message.
  */
 export const LinkedJobSchema: GenMessage<LinkedJob> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_plan, 2);
+  messageDesc(file_vibesys_cli_v1_plan, 3);
 
 /**
  * @generated from message vibesys.cli.v1.PlanView
@@ -140,7 +176,89 @@ export type PlanView = Message<"vibesys.cli.v1.PlanView"> & {
  * Use `create(PlanViewSchema)` to create a new message.
  */
 export const PlanViewSchema: GenMessage<PlanView> = /*@__PURE__*/
-  messageDesc(file_vibesys_cli_v1_plan, 3);
+  messageDesc(file_vibesys_cli_v1_plan, 4);
+
+/**
+ * PlanGainCheck is the answer to "is every plan that is still open or parked under this share of
+ * its reference?" (`vibesys-cli plan check-gain --under`). A plan counts when its status is open or
+ * parked. A plan that states no bound is not under any share.
+ *
+ * @generated from message vibesys.cli.v1.PlanGainCheck
+ */
+export type PlanGainCheck = Message<"vibesys.cli.v1.PlanGainCheck"> & {
+  /**
+   * The share asked about.
+   *
+   * @generated from field: double share = 1;
+   */
+  share: number;
+
+  /**
+   * It is an enum and not a bool so that a JSON reader sees it either way: a false bool is left out.
+   *
+   * @generated from field: vibesys.cli.v1.PlanGainAnswer answer = 2;
+   */
+  answer: PlanGainAnswer;
+
+  /**
+   * How many plans count.
+   *
+   * @generated from field: uint32 counted = 3;
+   */
+  counted: number;
+
+  /**
+   * The plans that count and are not under the share, by number.
+   *
+   * @generated from field: repeated vibesys.cli.v1.PlanGainBlocker blockers = 4;
+   */
+  blockers: PlanGainBlocker[];
+};
+
+/**
+ * Describes the message vibesys.cli.v1.PlanGainCheck.
+ * Use `create(PlanGainCheckSchema)` to create a new message.
+ */
+export const PlanGainCheckSchema: GenMessage<PlanGainCheck> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_plan, 5);
+
+/**
+ * PlanGainBlocker is a plan that keeps PlanGainCheck from being all under.
+ *
+ * @generated from message vibesys.cli.v1.PlanGainBlocker
+ */
+export type PlanGainBlocker = Message<"vibesys.cli.v1.PlanGainBlocker"> & {
+  /**
+   * @generated from field: uint32 number = 1;
+   */
+  number: number;
+
+  /**
+   * @generated from field: string title = 2;
+   */
+  title: string;
+
+  /**
+   * Open or parked.
+   *
+   * @generated from field: vibesys.cli.v1.PlanStatus status = 3;
+   */
+  status: PlanStatus;
+
+  /**
+   * The bound it states, which is at or above the share. Absent when it states none.
+   *
+   * @generated from field: vibesys.cli.v1.PlanGainBound gain_bound = 4;
+   */
+  gainBound?: PlanGainBound | undefined;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.PlanGainBlocker.
+ * Use `create(PlanGainBlockerSchema)` to create a new message.
+ */
+export const PlanGainBlockerSchema: GenMessage<PlanGainBlocker> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_plan, 6);
 
 /**
  * PlanStatus is where a plan stands. Agents own what a plan says and which status it takes: the
@@ -185,4 +303,63 @@ export enum PlanStatus {
  */
 export const PlanStatusSchema: GenEnum<PlanStatus> = /*@__PURE__*/
   enumDesc(file_vibesys_cli_v1_plan, 0);
+
+/**
+ * PlanGainReference is what a plan's gain bound is a share of.
+ *
+ * @generated from enum vibesys.cli.v1.PlanGainReference
+ */
+export enum PlanGainReference {
+  /**
+   * @generated from enum value: PLAN_GAIN_REFERENCE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The headline: the metric value of the task's current result, or the base's value before a first
+   * promotion. It moves as the work improves it, so a bound stated against an earlier headline is
+   * the planner's claim at that time, and whoever decides on it asks again when the headline moved.
+   *
+   * @generated from enum value: PLAN_GAIN_REFERENCE_HEADLINE = 1;
+   */
+  HEADLINE = 1,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.PlanGainReference.
+ */
+export const PlanGainReferenceSchema: GenEnum<PlanGainReference> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_plan, 1);
+
+/**
+ * PlanGainAnswer is whether every plan that counts states a bound below the share.
+ *
+ * @generated from enum vibesys.cli.v1.PlanGainAnswer
+ */
+export enum PlanGainAnswer {
+  /**
+   * @generated from enum value: PLAN_GAIN_ANSWER_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Every plan that counts does, and so does a check in which none counts.
+   *
+   * @generated from enum value: PLAN_GAIN_ANSWER_ALL_UNDER = 1;
+   */
+  ALL_UNDER = 1,
+
+  /**
+   * Some plan that counts states none, or one that is not below the share.
+   *
+   * @generated from enum value: PLAN_GAIN_ANSWER_NOT_ALL_UNDER = 2;
+   */
+  NOT_ALL_UNDER = 2,
+}
+
+/**
+ * Describes the enum vibesys.cli.v1.PlanGainAnswer.
+ */
+export const PlanGainAnswerSchema: GenEnum<PlanGainAnswer> = /*@__PURE__*/
+  enumDesc(file_vibesys_cli_v1_plan, 2);
 
