@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"math"
 	"path"
 	"slices"
 	"sort"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 )
 
@@ -440,18 +440,6 @@ type resultSection struct {
 	Metric       string `toml:"metric"`
 }
 
-// objectivesFile is objectives.toml.
-type objectivesFile struct {
-	Objective []struct {
-		Name          string   `toml:"name"`
-		Direction     string   `toml:"direction"`
-		RelativeNoise *float64 `toml:"relative_noise"`
-	} `toml:"objective"`
-	Pareto *struct {
-		RelativeNoise float64 `toml:"relative_noise"`
-	} `toml:"pareto"`
-}
-
 // opaque lists the manifest sections held as data: the decoder reports the keys nested inside
 // them as undecoded, and they are accepted without being read.
 var opaque = map[string]bool{
@@ -488,11 +476,9 @@ func Parse(name string, manifestTOML, objectivesTOML []byte) (Task, error) {
 	if err != nil {
 		return Task{}, err
 	}
-	var o objectivesFile
-	if objectivesTOML != nil {
-		if err := decode(ObjectiveName, objectivesTOML, &o, nil); err != nil {
-			return Task{}, err
-		}
+	o, err := ParseObjectives(objectivesTOML)
+	if err != nil {
+		return Task{}, err
 	}
 	if schema == Schema02 {
 		return parseV02(name, table, o)
@@ -505,7 +491,7 @@ func Parse(name string, manifestTOML, objectivesTOML []byte) (Task, error) {
 }
 
 // build reads a manifest of task schema 0.1, the single-image format.
-func build(name string, m manifest, o objectivesFile) (Task, error) {
+func build(name string, m manifest, o *cliv1.TaskObjectives) (Task, error) {
 	if m.Evaluator != nil {
 		return Task{}, unsupported("%s: [evaluator] tasks are not supported by this build; their commands are run by an evaluator package", ManifestName)
 	}
@@ -569,19 +555,16 @@ func build(name string, m manifest, o objectivesFile) (Task, error) {
 
 // score reads what the benchmark reports and what it is judged on, from the manifest's benchmark
 // and metric and from the objectives.
-func score(t *Task, bench *benchSection, metric string, o objectivesFile) error {
-	axes, err := objectives(o)
-	if err != nil {
-		return err
-	}
+func score(t *Task, bench *benchSection, metric string, o *cliv1.TaskObjectives) error {
+	axes := axesOf(o)
 	if err := resultOf(t, bench, metric, axes); err != nil {
 		return err
 	}
-	if o.Pareto != nil && len(axes) > 1 {
+	if o.GetPareto() != nil && len(axes) > 1 {
 		if !t.Result.Protocol2 {
 			return invalid("%s: a [pareto] task with %d objectives needs result_protocol = 2 in [benchmark], so every sample reports every objective; [benchmark.result] reads one field", ObjectiveName, len(axes))
 		}
-		t.Objectives.RelativeNoise = o.Pareto.RelativeNoise
+		t.Objectives.RelativeNoise = o.GetPareto().GetRelativeNoise()
 		for _, a := range axes {
 			t.Objectives.Metrics = append(t.Objectives.Metrics, core.Metric{Name: a.name, Direction: a.direction})
 			if a.noise != nil {
@@ -690,48 +673,6 @@ func checkPlaceholders(c Command, also ...string) error {
 		}
 	}
 	return nil
-}
-
-type axis struct {
-	name      string
-	direction core.Direction
-	noise     *float64 // the objective's own relative_noise, nil when it declares none
-}
-
-func objectives(o objectivesFile) ([]axis, error) {
-	var axes []axis
-	seen := map[string]bool{}
-	for i, obj := range o.Objective {
-		if obj.Name == "" {
-			return nil, invalid("%s: objective %d has no name", ObjectiveName, i+1)
-		}
-		if seen[obj.Name] {
-			return nil, invalid("%s: objective %q is declared twice", ObjectiveName, obj.Name)
-		}
-		seen[obj.Name] = true
-		var d core.Direction
-		switch obj.Direction {
-		case "max":
-			d = core.Maximize
-		case "min":
-			d = core.Minimize
-		default:
-			return nil, invalid("%s: objective %q: direction must be \"max\" or \"min\", got %q", ObjectiveName, obj.Name, obj.Direction)
-		}
-		if n := obj.RelativeNoise; n != nil {
-			if math.IsNaN(*n) || *n < 0 || *n >= 1 {
-				return nil, invalid("%s: objective %q: relative_noise must be at least 0 and less than 1, got %v", ObjectiveName, obj.Name, *n)
-			}
-			if o.Pareto == nil || len(o.Objective) < 2 {
-				return nil, invalid("%s: objective %q: relative_noise needs a [pareto] section and more than one objective", ObjectiveName, obj.Name)
-			}
-		}
-		axes = append(axes, axis{name: obj.Name, direction: d, noise: obj.RelativeNoise})
-	}
-	if o.Pareto != nil && (o.Pareto.RelativeNoise < 0 || o.Pareto.RelativeNoise >= 1) {
-		return nil, invalid("%s: [pareto] relative_noise must be at least 0 and less than 1, got %v", ObjectiveName, o.Pareto.RelativeNoise)
-	}
-	return axes, nil
 }
 
 func find(axes []axis, name string) (axis, bool) {

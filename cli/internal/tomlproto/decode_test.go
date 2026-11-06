@@ -2,6 +2,7 @@ package tomlproto_test
 
 import (
 	"fmt"
+	"math"
 	"math/rand/v2"
 	"strings"
 	"testing"
@@ -154,5 +155,20 @@ func TestUnknownKeysAndWrongTypesAreRefusedByName(t *testing.T) {
 	}
 	if got := m.Get(md.Fields().ByName("workers")).Uint(); got != 4 {
 		t.Fatalf("workers %d", got)
+	}
+}
+
+// TOML has nan and inf, JSON does not: a file that writes one is decoded to the value, and the
+// message's own rules decide whether the field may hold it, naming the key.
+func TestNonFiniteNumbersDecodeToTheValueInsteadOfFailingWithoutAKey(t *testing.T) {
+	for text, check := range map[string]func(float64) bool{
+		"relative_noise = nan":  math.IsNaN,
+		"relative_noise = inf":  func(f float64) bool { return math.IsInf(f, 1) },
+		"relative_noise = -inf": func(f float64) bool { return math.IsInf(f, -1) },
+	} {
+		var m cliv1.TaskPareto
+		if err := tomlproto.Decode([]byte(text), &m, tomlproto.Options{}); err != nil || !check(m.GetRelativeNoise()) {
+			t.Errorf("%q: %v, %v", text, m.GetRelativeNoise(), err)
+		}
 	}
 }

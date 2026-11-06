@@ -245,3 +245,65 @@ message TaskAgentV02 {
     (buf.validate.field).string.pattern = "^(inprocess|service)?$"
   ];
 }
+
+// TaskObjectiveDirection is the way an objective improves.
+enum TaskObjectiveDirection {
+  TASK_OBJECTIVE_DIRECTION_UNSPECIFIED = 0;
+  // Larger is better, written `direction = "max"`.
+  TASK_OBJECTIVE_DIRECTION_MAX = 1;
+  // Smaller is better, written `direction = "min"`.
+  TASK_OBJECTIVE_DIRECTION_MIN = 2;
+}
+
+// TaskObjectives is objectives.toml, beside a task's manifest, of every task schema: what a
+// benchmark's result is judged on. vibesys-cli decodes the TOML file into it by its field names,
+// refuses a key this message has no field for, naming the key, and holds it to its protovalidate
+// rules. A task with [pareto] and more than one objective is judged on all of them together; any
+// other task is judged on the one metric it scores. A task with no file has no objectives, and its
+// manifest must then say what it measures.
+message TaskObjectives {
+  option (buf.validate.message).cel = {
+    id: "objectives.names_unique"
+    expression: "this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1).size() == 0 ? '' : 'objective \"' + this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1)[0].name + '\" is declared twice'"
+  };
+  option (buf.validate.message).cel = {
+    id: "objectives.noise_needs_pareto"
+    expression: "!this.objective.exists(o, has(o.relative_noise)) || (has(this.pareto) && this.objective.size() > 1) ? '' : 'objective \"' + this.objective.filter(o, has(o.relative_noise))[0].name + '\": relative_noise needs a [pareto] section and more than one objective'"
+  };
+
+  // The objectives, each `[[objective]]`, in the order the file lists them. The first is the one a
+  // protocol 2 benchmark scores unless the manifest names another.
+  repeated TaskObjective objective = 1;
+  // `[pareto]`: the task is judged on every objective together.
+  TaskPareto pareto = 2;
+}
+
+// TaskObjective is one `[[objective]]`: a measured quantity and the way it improves.
+message TaskObjective {
+  option (buf.validate.message).cel = {
+    id: "objective.relative_noise_range"
+    expression: "!has(this.relative_noise) || (!this.relative_noise.isNan() && this.relative_noise >= 0.0 && this.relative_noise < 1.0) ? '' : 'objective \"' + this.name + '\": relative_noise must be at least 0 and less than 1, got ' + string(this.relative_noise)"
+  };
+
+  // The name of the quantity: the field of the benchmark's result, or the series of a protocol 2
+  // record.
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  TaskObjectiveDirection direction = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The relative change below which two measurements of this objective are one, for this objective
+  // alone, instead of the [pareto] floor. Zero declares no floor. Absent takes the [pareto] floor.
+  optional double relative_noise = 3;
+}
+
+// TaskPareto is `[pareto]`.
+message TaskPareto {
+  // The relative change below which two measurements of an objective are one, unless the objective
+  // declares its own. At least 0 and less than 1.
+  double relative_noise = 1 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+    lt: 1
+  }];
+}

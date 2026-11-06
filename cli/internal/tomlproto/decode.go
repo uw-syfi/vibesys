@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 
@@ -206,6 +207,16 @@ func (d decoder) single(v any, fd protoreflect.FieldDescriptor, at string) (any,
 	case protoreflect.DoubleKind, protoreflect.FloatKind:
 		switch n := v.(type) {
 		case float64:
+			// JSON has no NaN or infinity; protojson reads them by these names, and the message's
+			// rules decide whether the field may hold one, naming it.
+			switch {
+			case math.IsNaN(n):
+				return "NaN", nil
+			case math.IsInf(n, 1):
+				return "Infinity", nil
+			case math.IsInf(n, -1):
+				return "-Infinity", nil
+			}
 		case int64:
 			return float64(n), nil
 		default:

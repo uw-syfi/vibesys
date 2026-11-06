@@ -546,8 +546,14 @@ when fields are added, and a changed protovalidate rule fails ("tightening
 needs a new major; loosening needs a reviewed waiver"). `buf breaking` already
 refuses a renamed or removed field.
 
+`objectives.toml` is the message `TaskObjectives` (with `TaskObjective` and
+`TaskPareto`), read by `tomlproto` for tasks of every schema: an unknown key is
+refused naming the file and the key, and the rules on the message hold. It has
+no schema version of its own.
+
 Schema 0.1 has no message in `task.proto` yet: its reader is the earlier Go
-reader, unchanged. Moving it into a `TaskManifestV01` message is left for
+reader, unchanged. Of 0.1 the example tasks and the Python input synthesis still
+write it, so it is not removed. Moving it into a `TaskManifestV01` message is left for
 later; until then the check covers 1.0 and every later schema.
 
 ## What is not done
