@@ -576,3 +576,17 @@ directory = "."
 # version over the running host. The timeout guards against a hang only.
 timeout_seconds = 600
 commands = [["./scripts/tests/test_install.sh"]]
+
+[[check_groups]]
+name = "managed_install_macos_tests"
+trigger_job = "managed_install"
+local_skip = "needs an Apple Silicon Mac and the network; run scripts/tests/test_install_macos.sh"
+language = "docker"
+directory = "."
+# The managed_install_tests checks on a Mac, with no container: builds the darwin/arm64 bundles of
+# two versions, installs one with install.sh into a temporary HOME with no environment set, runs a
+# managed run with scripted agents and the verbs a person uses on it, kills a host and a session
+# process, and checks what only a Mac has (signatures, Gatekeeper, a root too long for a socket
+# address). The timeout guards against a hang only.
+timeout_seconds = 540
+commands = [["./scripts/tests/test_install_macos.sh"]]

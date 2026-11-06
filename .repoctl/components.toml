@@ -399,4 +399,4 @@ job = "managed_install"
 # workflow that publishes bundles, what a bundle carries (the sidecar, the skills and the plugin
 # manifest), or the code of the binaries it holds (gateway, cli and orchestrator) changes.
 roots = ["gateway", "cli", "orchestrator", "skills"]
-files = ["install.sh", "scripts/build_release_bundle.sh", "scripts/tests/test_install.sh", "scripts/tests/test_install_in_container.sh", ".github/workflows/managed-release.yml", ".claude-plugin/marketplace.json"]
+files = ["install.sh", "scripts/build_release_bundle.sh", "scripts/tests/test_install.sh", "scripts/tests/test_install_in_container.sh", "scripts/tests/test_install_macos.sh", ".github/workflows/managed-release.yml", ".claude-plugin/marketplace.json"]

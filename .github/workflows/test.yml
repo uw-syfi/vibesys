@@ -678,6 +678,35 @@ jobs:
       - name: Install on a clean machine
         run: ./support/repoctl/repoctl run-checks --group managed_install_tests
 
+  # The same installed product on an Apple Silicon Mac, which a user meets as often as a Linux one and
+  # which nothing else here runs on: builds the darwin/arm64 bundles, installs them with install.sh
+  # into a temporary HOME with no environment set, and runs the phases managed-install runs plus the
+  # ones only a Mac has (code signatures, Gatekeeper, a root too long for a socket address). The full
+  # stage only, on the paths managed-install is selected by; macOS runner minutes cost ten times
+  # a Linux one's and this job runs several minutes.
+  managed-install-macos:
+    needs: changes
+    if: needs.changes.outputs.managed_install == 'true' # TEMP-PR
+    runs-on: macos-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: |
+            gateway/go.sum
+            cli/go.sum
+
+      - name: Set up repoctl
+        uses: ./.github/actions/setup-repoctl
+
+      - name: Install on a Mac
+        run: ./support/repoctl/repoctl run-checks --group managed_install_macos_tests
+
   impact-tool:
     needs: changes
     if: needs.changes.outputs.impact == 'true'
@@ -1690,6 +1719,7 @@ jobs:
       - orchestrator
       - desktop-path
       - managed-install
+      - managed-install-macos
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
@@ -1764,6 +1794,7 @@ jobs:
       - orchestrator
       - desktop-path
       - managed-install
+      - managed-install-macos
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
