@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/uw-syfi/vibesys/gateway/internal/buildinfo"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
 	"github.com/uw-syfi/vibesys/orchestrator/hosted"
@@ -23,7 +24,7 @@ func startOrchestrator(ctx context.Context) (*hosted.Orchestrator, error) {
 	}
 	getenv, home := hosted.Environ()
 	return hosted.Start(ctx, hosted.Options{
-		Version: version, Executable: binary, Log: slog.New(slog.NewTextHandler(os.Stderr, nil)),
+		Version: buildinfo.Version, Executable: binary, Log: slog.New(slog.NewTextHandler(os.Stderr, nil)),
 		Getenv: getenv, Home: home,
 	}), nil
 }

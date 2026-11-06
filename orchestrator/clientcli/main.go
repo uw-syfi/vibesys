@@ -24,6 +24,7 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ...
   run wait [RUN] --until started|report|ended --timeout DURATION [--json]
   run steer [RUN] TEXT [--agent AGENT] [--json]
   run stop [RUN] [--yes]
+  --version
 
 RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository.
 Exit codes: 0 ok, 1 failed or refused, 2 usage, 3 timeout, 4 service unavailable.
@@ -61,6 +62,10 @@ func execute(ctx context.Context, args []string, env Env) error {
 	}
 	if len(args) == 0 {
 		return usageError("a verb is needed")
+	}
+	if len(args) == 1 && args[0] == "--version" {
+		_, err := fmt.Fprintf(env.Stdout, "%s %s\n", Program, env.Version)
+		return err
 	}
 	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		return flag.ErrHelp

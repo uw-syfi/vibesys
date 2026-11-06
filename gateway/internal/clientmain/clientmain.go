@@ -19,6 +19,7 @@ import (
 
 	"github.com/mattn/go-isatty"
 
+	"github.com/uw-syfi/vibesys/gateway/internal/buildinfo"
 	"github.com/uw-syfi/vibesys/gateway/internal/connect"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
@@ -27,7 +28,6 @@ import (
 )
 
 const (
-	version = "0.2.0"
 	// hostProgram is the executable that serves the host; it is found beside this program.
 	hostProgram = "vibesys-host"
 	// startup bounds how long a connection waits for a host it has started.
@@ -46,7 +46,7 @@ func Main(args []string) int {
 		return clientcli.ExitFailed
 	}
 	return clientcli.Main(ctx, args, clientcli.Env{
-		Version: version, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
+		Version: buildinfo.Version, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		Terminal: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
 		Dir:      dir, FS: os.DirFS("/"), Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
 		Connect: connector,

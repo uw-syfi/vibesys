@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/uw-syfi/vibesys/gateway/internal/buildinfo"
 	"github.com/uw-syfi/vibesys/gateway/internal/connect"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/gateway/internal/pipe"
@@ -19,8 +20,6 @@ import (
 	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
 	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
-
-const version = "0.2.0"
 
 // Main runs the host command and returns its process exit status.
 func Main(args []string) int {
@@ -41,8 +40,12 @@ func Main(args []string) int {
 }
 
 func run(ctx context.Context, args []string) error {
+	if len(args) == 1 && args[0] == "--version" {
+		_, err := fmt.Fprintf(os.Stdout, "%s %s\n", hosted.HostProgram, buildinfo.Version)
+		return err
+	}
 	if len(args) > 0 && hosted.IsCommand(args[0]) {
-		if code := hosted.Command(ctx, version, args, os.Stdin, os.Stdout, os.Stderr); code != 0 {
+		if code := hosted.Command(ctx, buildinfo.Version, args, os.Stdin, os.Stdout, os.Stderr); code != 0 {
 			return exitCode(code)
 		}
 		return nil
@@ -102,7 +105,7 @@ func serve(ctx context.Context, root string, idle time.Duration) error {
 	go holdWhileLive(ctx, orchestrator.Live(), monitor)
 	served := make(chan error, 1)
 	go func() {
-		served <- server.Serve(ctx, lifecycle.Track(endpoint.Listener, monitor), server.Config{Root: root, Version: version, Register: orchestrator.Register})
+		served <- server.Serve(ctx, lifecycle.Track(endpoint.Listener, monitor), server.Config{Root: root, Version: buildinfo.Version, Register: orchestrator.Register})
 	}()
 	select {
 	case err := <-served:

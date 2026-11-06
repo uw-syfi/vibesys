@@ -26,13 +26,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// stamped is the release version the test builds the host with, as scripts/build_release_bundle.sh
+// does, so what the host reports can only come from the build.
+const stamped = "7.8.9-test"
+
 // The single CLI process integration verifies real stdio descriptors, including
 // unblocking the stdin reader when the client closes its gRPC connection.
 func TestConnectCLI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	binary := filepath.Join(t.TempDir(), "vibesys-host")
-	build := exec.CommandContext(ctx, "go", "build", "-o", binary, ".")
+	build := exec.CommandContext(ctx, "go", "build", "-ldflags", "-X github.com/uw-syfi/vibesys/gateway/internal/buildinfo.Version="+stamped, "-o", binary, ".")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
@@ -43,6 +47,12 @@ func TestConnectCLI(t *testing.T) {
 			}
 		})
 	}
+	t.Run("version", func(t *testing.T) {
+		output, err := exec.CommandContext(ctx, binary, "--version").Output()
+		if want := "vibesys-host " + stamped + "\n"; err != nil || string(output) != want {
+			t.Fatalf("--version = %q, %v; want %q", output, err, want)
+		}
+	})
 	t.Run("second-serve", func(t *testing.T) { testSecondServe(t, binary) })
 	t.Run("Tail", func(t *testing.T) { testTailCLI(t, binary) })
 	t.Run("closed-output", func(t *testing.T) { testClosedOutput(t, binary) })
@@ -321,7 +331,7 @@ func testSecondServe(t *testing.T, binary string) {
 	client := apiv1.NewHostServiceClient(connection)
 	hello := func() {
 		response, err := client.Hello(ctx, &apiv1.HelloRequest{ApiSchemaHash: schemahash.APISchemaHash}, grpc.WaitForReady(true))
-		if err != nil || response.GetGatewayVersion() != "0.2.0" {
+		if err != nil || response.GetGatewayVersion() != stamped {
 			t.Fatalf("Hello = %v, %v", response, err)
 		}
 	}
