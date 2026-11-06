@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/accuracy"
-
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/phase"
 )
 
