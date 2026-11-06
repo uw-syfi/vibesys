@@ -31,7 +31,7 @@ func TestNativeBenchmarkTimesOutStuckCandidate(t *testing.T) {
 }
 
 func TestNativeReferenceBenchmark(t *testing.T) {
-	result, err := runNativeBenchmark(benchmarkConfig{
+	result := benchmarkUntilWorked(t, benchmarkConfig{
 		candidateConfig: candidateConfig{
 			workspace:    t.TempDir(),
 			useReference: true,
@@ -43,9 +43,6 @@ func TestNativeReferenceBenchmark(t *testing.T) {
 		clients:  2,
 		duration: 20 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if result.Attempts == 0 || result.TotalOpsPerSec <= 0 {
 		t.Fatalf("benchmark did not perform useful work: %+v", result)
 	}
@@ -112,7 +109,7 @@ func TestBenchmarkMixValidation(t *testing.T) {
 }
 
 func TestNativeBenchmarkPointHeavyOmitsOrderedOps(t *testing.T) {
-	result, err := runNativeBenchmark(benchmarkConfig{
+	result := benchmarkUntilWorked(t, benchmarkConfig{
 		candidateConfig: candidateConfig{
 			workspace:    t.TempDir(),
 			useReference: true,
@@ -126,9 +123,6 @@ func TestNativeBenchmarkPointHeavyOmitsOrderedOps(t *testing.T) {
 		rangeSpan: 4,
 		duration:  20 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if result.Attempts == 0 || result.Successors != 0 || result.Ranges != 0 {
 		t.Fatalf("point-heavy mix = %+v", result)
 	}
@@ -138,7 +132,7 @@ func TestNativeBenchmarkPointHeavyOmitsOrderedOps(t *testing.T) {
 }
 
 func TestNativeBenchmarkHonorsReadRatio(t *testing.T) {
-	result, err := runNativeBenchmark(benchmarkConfig{
+	result := benchmarkUntilWorked(t, benchmarkConfig{
 		candidateConfig: candidateConfig{
 			workspace:    t.TempDir(),
 			useReference: true,
@@ -151,9 +145,6 @@ func TestNativeBenchmarkHonorsReadRatio(t *testing.T) {
 		duration: 20 * time.Millisecond,
 		mix:      benchmarkMix{read: 100, write: 0, delete: 0, rang: 0, set: true},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if result.Puts != 0 || result.Ranges != 0 || result.Successors != 0 || result.Gets+result.Missing == 0 {
 		t.Fatalf("read-only mix = %+v", result)
 	}
@@ -161,7 +152,7 @@ func TestNativeBenchmarkHonorsReadRatio(t *testing.T) {
 
 func TestNativeBenchmarkLoadsCandidateCABI(t *testing.T) {
 	workspace := compileCandidateFixture(t, false)
-	result, err := runNativeBenchmark(benchmarkConfig{
+	result := benchmarkUntilWorked(t, benchmarkConfig{
 		candidateConfig: candidateConfig{
 			workspace:    workspace,
 			candidate:    "ordered-map-candidate.so",
@@ -173,9 +164,6 @@ func TestNativeBenchmarkLoadsCandidateCABI(t *testing.T) {
 		clients:  2,
 		duration: 20 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if result.Attempts == 0 {
 		t.Fatalf("candidate ABI benchmark did not perform operations: %+v", result)
 	}

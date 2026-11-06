@@ -118,7 +118,9 @@ func TestReadPlansOnSameFixtureDoNotSerialize(t *testing.T) {
 		application.FinishOperation(plan)
 	case buildErr := <-secondError:
 		t.Fatal(buildErr)
-	case <-time.After(250 * time.Millisecond):
+	// The first plan is still held, so a serialized second plan blocks until the test ends: this
+	// bound only guards against that hang and is far above a passing run.
+	case <-time.After(30 * time.Second):
 		t.Fatal("read-only plans on the same fixture were serialized")
 	}
 }
