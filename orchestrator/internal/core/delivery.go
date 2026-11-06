@@ -172,6 +172,7 @@ func (t *tx) finishRun(id RunID) {
 	run.Status, run.EndedAt = RunEnded, t.in.At
 	if run.StopReason == StopLeadGone {
 		run.Status = RunFailed
+		run.NeverOpened = t.s.agents[run.Lead].turns == 0
 	}
 	t.emit(id, run)
 	t.effect(ReleaseCheckouts{Run: id})

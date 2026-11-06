@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
@@ -140,6 +141,15 @@ func (v *View) ApplySearch(s *pb.SearchState) []Change {
 	measured := map[string]bool{}
 	for _, r := range v.Search.GetResults() {
 		measured[r.GetJobId()] = true
+	}
+	// A host that has just started has read nothing yet, and says so as an unreadable view with no
+	// jobs. That is not the run having none: what this view already knew stays, with the new health,
+	// so a count never goes down.
+	if s.GetHealth().GetUnreadable() != nil && len(s.GetJobs()) == 0 && len(s.GetResults()) == 0 &&
+		(len(v.Search.GetJobs()) > 0 || len(v.Search.GetResults()) > 0) {
+		kept := proto.Clone(v.Search).(*pb.SearchState)
+		kept.Health, kept.Revision = s.GetHealth(), s.GetRevision()
+		s = kept
 	}
 	v.Search = s
 	var out []Change

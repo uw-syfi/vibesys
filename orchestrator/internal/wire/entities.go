@@ -17,6 +17,7 @@ func runOut(r core.Run) *pb.Run {
 		ReportsPosted: r.ReportsPosted, FinalReported: r.FinalReported, StalledSince: when(r.StalledSince),
 		ActiveJobs: r.ActiveJobs, LeadReminders: r.LeadReminders, Usage: usageOut(r.Usage),
 		AllowedAgents: choicesOut(r.Allowed), KeptCheckouts: checkoutsOut(r.Kept),
+		NeverOpened: r.NeverOpened,
 	}
 }
 
@@ -52,6 +53,7 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		ReportsPosted: r.GetReportsPosted(), FinalReported: r.GetFinalReported(), StalledSince: moment(r.GetStalledSince(), errs),
 		ActiveJobs: r.GetActiveJobs(), LeadReminders: r.GetLeadReminders(), Usage: usageIn(r.GetUsage()),
 		Allowed: choicesIn(r.GetAllowedAgents(), errs), Kept: checkoutsIn(r.GetKeptCheckouts()),
+		NeverOpened: r.GetNeverOpened(),
 	}
 }
 

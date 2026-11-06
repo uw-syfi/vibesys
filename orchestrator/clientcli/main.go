@@ -18,7 +18,7 @@ const Program = "vibesys-client"
 const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... | release verify ...
   run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--fanout N]
             [--model M] [--effort E] [--allow-agent HARNESS[:MODEL]]... [--deadline RFC3339] [--detach] [--json]
-  run list [--json]
+  run list [--all] [--json]
   run attach [RUN]
   run get [RUN] [--json]
   run wait [RUN] --until started|report|progress|stalled|ended --timeout DURATION [--after N] [--json]

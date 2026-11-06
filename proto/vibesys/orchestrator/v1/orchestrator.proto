@@ -230,6 +230,10 @@ message Run {
   // because they hold changes git does not have. Empty while the run is live, and for a run that left
   // none. The run's operator decides what becomes of them.
   repeated KeptCheckout kept_checkouts = 19;
+  // The run failed and its lead never ran a turn: it never opened, usually because the host could
+  // not start the agent. Such a run is a refused start more than a run, so a listing leaves it out
+  // unless asked. False for every other run, and for runs recorded before this was known.
+  bool never_opened = 21;
 }
 
 // KeptCheckout is one agent's working copy of the run's repository, left in place because removing

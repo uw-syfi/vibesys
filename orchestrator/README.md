@@ -218,7 +218,7 @@ followed, so `~/.local/bin/vibesys-client` finds the release directory's host), 
 
 ```sh
 vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--detach] [--json]
-vibesys-client run list                       # every run, newest first
+vibesys-client run list                       # runs, newest first; starts that never ran are hidden, `--all` shows them
 vibesys-client run attach [RUN]               # follow a run; Ctrl-C detaches and never stops it
 vibesys-client run get [RUN] [--json]         # status, agents, cost, checks, best, last report
 vibesys-client run wait [RUN] --until started|report|progress|stalled|ended --timeout 30m [--after N]
