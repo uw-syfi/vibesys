@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
 
 // fakeFiles is a file system of executable paths.
@@ -94,31 +92,5 @@ func TestNoCLIAnywhereIsAnErrorNamingTheSettingAndNotAGuess(t *testing.T) {
 	got, err := ResolveCLI("", []string{"/usr/bin", "relative"}, developerBuild, fakeFiles{"relative/vibesys-cli": true})
 	if err == nil || got != "" || !strings.Contains(err.Error(), SettingJobTool) {
 		t.Fatalf("got %q, %v, want an error naming %s", got, err, SettingJobTool)
-	}
-}
-
-// The location a run records is exactly the daemon's own absolute settings: a value the
-// vibesys-cli would treat as unset (empty or relative) is recorded as unset, and an absolute one
-// is kept as it is (cleaned), so an agent resolves each place as the daemon would.
-func TestTheLocationRecordsEachAbsoluteSettingAndNothingElse(t *testing.T) {
-	values := []string{"", "relative/dir", "/abs/dir", "/abs//dir/", "/"}
-	for seed := uint64(1); seed <= 200; seed++ {
-		rng := rand.New(rand.NewPCG(seed, 9))
-		pick := func() string { return values[rng.IntN(len(values))] }
-		env := map[string]string{"XDG_RUNTIME_DIR": pick(), "XDG_STATE_HOME": pick(), "HOME": "/ignored", "PATH": "/bin"}
-		home, cli := pick(), pick()
-		got := LocationFor(func(k string) string { return env[k] }, home, cli)
-		want := func(v string) string {
-			if v == "" || v[0] != '/' {
-				return ""
-			}
-			return filepath.Clean(v)
-		}
-		wantLocation := core.CliLocation{
-			CLI: want(cli), RuntimeDir: want(env["XDG_RUNTIME_DIR"]), StateHome: want(env["XDG_STATE_HOME"]), Home: want(home),
-		}
-		if got != wantLocation {
-			t.Fatalf("seed %d: env %v home %q cli %q gave %+v, want %+v", seed, env, home, cli, got, wantLocation)
-		}
 	}
 }

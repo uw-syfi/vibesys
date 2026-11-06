@@ -109,6 +109,18 @@ message HelloResponse {
 
 message StatusRequest {}
 
+// DaemonEnsureResponse is what `vibesys-cli daemon ensure --json` prints when a daemon answers: how to
+// reach it, for a program that starts the daemon and then talks to it, and where it is, for the
+// processes that program hands the tool to (JobToolPlace).
+message DaemonEnsureResponse {
+  // The daemon's Unix socket.
+  string socket = 1 [(buf.validate.field).string.pattern = "^/"];
+  // The build of the daemon that answers.
+  BuildVersions versions = 2;
+  // The runtime directory the daemon serves.
+  string runtime_directory = 3 [(buf.validate.field).string.pattern = "^/"];
+}
+
 message StatusResponse {
   BuildVersions versions = 1;
   uint32 pid = 2;

@@ -16,6 +16,11 @@ func Ensure(ctx context.Context, opts Options) (*cliv1.StatusResponse, error) {
 	opts = opts.withDefaults()
 	ctx, done := clock.Deadline(ctx, opts.Timers, 2*time.Minute)
 	defer done()
+	if opts.SetUp != nil {
+		if err := opts.SetUp(); err != nil {
+			return nil, err
+		}
+	}
 	c, err := Connect(ctx, opts)
 	var status *cliv1.StatusResponse
 	if err == nil {

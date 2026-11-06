@@ -14,21 +14,21 @@ func runOut(r core.Run) *pb.Run {
 		Id: string(r.ID), Repository: r.Repository, Task: r.Task, Status: runStatuses.out(r.Status),
 		LeadAgentId: string(r.Lead), FanoutLimit: r.FanoutLimit, Deadline: when(r.Deadline),
 		CreatedAt: when(r.CreatedAt), StopReason: stopReasons.out(r.StopReason), EndedAt: when(r.EndedAt),
-		CliLocation: locationOut(r.Location), ReportsPosted: r.ReportsPosted, FinalReported: r.FinalReported, StalledSince: when(r.StalledSince),
+		JobTool: jobToolOut(r.JobTool), ReportsPosted: r.ReportsPosted, FinalReported: r.FinalReported, StalledSince: when(r.StalledSince),
 		ActiveJobs: r.ActiveJobs, LeadReminders: r.LeadReminders, Usage: usageOut(r.Usage),
 		AllowedAgents: choicesOut(r.Allowed), KeptCheckouts: checkoutsOut(r.Kept),
 	}
 }
 
-func locationOut(l core.CliLocation) *pb.CliLocation {
-	if l == (core.CliLocation{}) {
+func jobToolOut(l core.JobToolEndpoint) *pb.JobToolEndpoint {
+	if l == (core.JobToolEndpoint{}) {
 		return nil
 	}
-	return &pb.CliLocation{Cli: l.CLI, XdgRuntimeDir: l.RuntimeDir, XdgStateHome: l.StateHome, Home: l.Home}
+	return &pb.JobToolEndpoint{Executable: l.Executable, RuntimeDirectory: l.RuntimeDirectory}
 }
 
-func locationIn(l *pb.CliLocation) core.CliLocation {
-	return core.CliLocation{CLI: l.GetCli(), RuntimeDir: l.GetXdgRuntimeDir(), StateHome: l.GetXdgStateHome(), Home: l.GetHome()}
+func jobToolIn(l *pb.JobToolEndpoint) core.JobToolEndpoint {
+	return core.JobToolEndpoint{Executable: l.GetExecutable(), RuntimeDirectory: l.GetRuntimeDirectory()}
 }
 
 func runIn(r *pb.Run, errs *errorList) core.Run {
@@ -37,7 +37,7 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		Status: runStatuses.in(r.GetStatus(), errs), Lead: core.AgentID(r.GetLeadAgentId()),
 		FanoutLimit: r.GetFanoutLimit(), Deadline: moment(r.GetDeadline(), errs),
 		CreatedAt: moment(r.GetCreatedAt(), errs), StopReason: stopReasons.in(r.GetStopReason(), errs),
-		EndedAt: moment(r.GetEndedAt(), errs), Location: locationIn(r.GetCliLocation()),
+		EndedAt: moment(r.GetEndedAt(), errs), JobTool: jobToolIn(r.GetJobTool()),
 		ReportsPosted: r.GetReportsPosted(), FinalReported: r.GetFinalReported(), StalledSince: moment(r.GetStalledSince(), errs),
 		ActiveJobs: r.GetActiveJobs(), LeadReminders: r.GetLeadReminders(), Usage: usageIn(r.GetUsage()),
 		Allowed: choicesIn(r.GetAllowedAgents(), errs), Kept: checkoutsIn(r.GetKeptCheckouts()),

@@ -1003,10 +1003,6 @@ type Run struct {
 	// Set when the run left RUNNING.
 	StopReason RunStopReason          `protobuf:"varint,9,opt,name=stop_reason,json=stopReason,proto3,enum=vibesys.orchestrator.v1.RunStopReason" json:"stop_reason,omitempty"`
 	EndedAt    *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
-	// Where this run's agents find the vibesys-cli and the daemon and store it talks to. Recorded
-	// when the run starts and never changed, so a relaunch of any of its sessions meets the same
-	// ones. Empty for a run that started before it was recorded.
-	CliLocation *CliLocation `protobuf:"bytes,11,opt,name=cli_location,json=cliLocation,proto3" json:"cli_location,omitempty"`
 	// How many reports the run's lead has posted. The next report is numbered one more.
 	ReportsPosted uint32 `protobuf:"varint,12,opt,name=reports_posted,json=reportsPosted,proto3" json:"reports_posted,omitempty"`
 	// Set while the run has nothing left that could move it: its lead is idle, no other agent is
@@ -1030,6 +1026,10 @@ type Run struct {
 	// because they hold changes git does not have. Empty while the run is live, and for a run that left
 	// none. The run's operator decides what becomes of them.
 	KeptCheckouts []*KeptCheckout `protobuf:"bytes,19,rep,name=kept_checkouts,json=keptCheckouts,proto3" json:"kept_checkouts,omitempty"`
+	// The job tool this run's agents use. Recorded when the run starts and never changed, so a relaunch
+	// of any of its sessions meets the same daemon. It is stored; item 10 of the redesign moves it out
+	// of what clients receive.
+	JobTool       *JobToolEndpoint `protobuf:"bytes,20,opt,name=job_tool,json=jobTool,proto3" json:"job_tool,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1134,13 +1134,6 @@ func (x *Run) GetEndedAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *Run) GetCliLocation() *CliLocation {
-	if x != nil {
-		return x.CliLocation
-	}
-	return nil
-}
-
 func (x *Run) GetReportsPosted() uint32 {
 	if x != nil {
 		return x.ReportsPosted
@@ -1193,6 +1186,13 @@ func (x *Run) GetAllowedAgents() []*AllowedAgent {
 func (x *Run) GetKeptCheckouts() []*KeptCheckout {
 	if x != nil {
 		return x.KeptCheckouts
+	}
+	return nil
+}
+
+func (x *Run) GetJobTool() *JobToolEndpoint {
+	if x != nil {
+		return x.JobTool
 	}
 	return nil
 }
@@ -1307,36 +1307,33 @@ func (x *AllowedAgent) GetModel() string {
 	return ""
 }
 
-// CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
-// store from. Each value is an absolute path, or empty for "not set": an empty value is unset in
-// the agent's environment, not set to the empty string. The cli becomes SkillEnvironment.cli
-// (vibesys/cli/v1/env.proto), and the places become the job tool's places until the job tool's
-// endpoint replaces them.
-type CliLocation struct {
+// JobToolEndpoint is the vibesys-cli a run's agents run and the daemon it serves, as that tool named
+// it when the run started (`daemon ensure --json`). Both are absolute paths, and neither says
+// anything about how the tool lays out what it keeps there.
+type JobToolEndpoint struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The vibesys-cli the orchestrator chose for its agents.
-	Cli           string `protobuf:"bytes,1,opt,name=cli,proto3" json:"cli,omitempty"`
-	XdgRuntimeDir string `protobuf:"bytes,2,opt,name=xdg_runtime_dir,json=xdgRuntimeDir,proto3" json:"xdg_runtime_dir,omitempty"`
-	XdgStateHome  string `protobuf:"bytes,3,opt,name=xdg_state_home,json=xdgStateHome,proto3" json:"xdg_state_home,omitempty"`
-	Home          string `protobuf:"bytes,4,opt,name=home,proto3" json:"home,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// The program the agents run. It becomes SkillEnvironment.cli (vibesys/cli/v1/env.proto).
+	Executable string `protobuf:"bytes,1,opt,name=executable,proto3" json:"executable,omitempty"`
+	// The tool's runtime directory. It becomes JobToolPlace.runtime_directory.
+	RuntimeDirectory string `protobuf:"bytes,2,opt,name=runtime_directory,json=runtimeDirectory,proto3" json:"runtime_directory,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
-func (x *CliLocation) Reset() {
-	*x = CliLocation{}
+func (x *JobToolEndpoint) Reset() {
+	*x = JobToolEndpoint{}
 	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CliLocation) String() string {
+func (x *JobToolEndpoint) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CliLocation) ProtoMessage() {}
+func (*JobToolEndpoint) ProtoMessage() {}
 
-func (x *CliLocation) ProtoReflect() protoreflect.Message {
+func (x *JobToolEndpoint) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -1348,35 +1345,21 @@ func (x *CliLocation) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CliLocation.ProtoReflect.Descriptor instead.
-func (*CliLocation) Descriptor() ([]byte, []int) {
+// Deprecated: Use JobToolEndpoint.ProtoReflect.Descriptor instead.
+func (*JobToolEndpoint) Descriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *CliLocation) GetCli() string {
+func (x *JobToolEndpoint) GetExecutable() string {
 	if x != nil {
-		return x.Cli
+		return x.Executable
 	}
 	return ""
 }
 
-func (x *CliLocation) GetXdgRuntimeDir() string {
+func (x *JobToolEndpoint) GetRuntimeDirectory() string {
 	if x != nil {
-		return x.XdgRuntimeDir
-	}
-	return ""
-}
-
-func (x *CliLocation) GetXdgStateHome() string {
-	if x != nil {
-		return x.XdgStateHome
-	}
-	return ""
-}
-
-func (x *CliLocation) GetHome() string {
-	if x != nil {
-		return x.Home
+		return x.RuntimeDirectory
 	}
 	return ""
 }
@@ -3557,7 +3540,7 @@ var File_vibesys_orchestrator_v1_orchestrator_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\n" +
-	"*vibesys/orchestrator/v1/orchestrator.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xf3\a\n" +
+	"*vibesys/orchestrator/v1/orchestrator.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\x83\b\n" +
 	"\x03Run\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12'\n" +
 	"\n" +
@@ -3574,8 +3557,7 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\vstop_reason\x18\t \x01(\x0e2&.vibesys.orchestrator.v1.RunStopReasonB\b\xbaH\x05\x82\x01\x02\x10\x01R\n" +
 	"stopReason\x125\n" +
 	"\bended_at\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12G\n" +
-	"\fcli_location\x18\v \x01(\v2$.vibesys.orchestrator.v1.CliLocationR\vcliLocation\x12%\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12%\n" +
 	"\x0ereports_posted\x18\f \x01(\rR\rreportsPosted\x12?\n" +
 	"\rstalled_since\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\fstalledSince\x12\x1f\n" +
 	"\vactive_jobs\x18\x0e \x01(\rR\n" +
@@ -3584,19 +3566,20 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x05usage\x18\x10 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageR\x05usage\x12%\n" +
 	"\x0efinal_reported\x18\x11 \x01(\bR\rfinalReported\x12L\n" +
 	"\x0eallowed_agents\x18\x12 \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgents\x12L\n" +
-	"\x0ekept_checkouts\x18\x13 \x03(\v2%.vibesys.orchestrator.v1.KeptCheckoutR\rkeptCheckouts\"b\n" +
+	"\x0ekept_checkouts\x18\x13 \x03(\v2%.vibesys.orchestrator.v1.KeptCheckoutR\rkeptCheckouts\x12C\n" +
+	"\bjob_tool\x18\x14 \x01(\v2(.vibesys.orchestrator.v1.JobToolEndpointR\ajobToolJ\x04\b\v\x10\fR\fcli_location\"b\n" +
 	"\fKeptCheckout\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12.\n" +
 	"\blocation\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]+$R\blocation\"l\n" +
 	"\fAllowedAgent\x12F\n" +
 	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aharness\x12\x14\n" +
-	"\x05model\x18\x02 \x01(\tR\x05model\"\xdd\x01\n" +
-	"\vCliLocation\x12'\n" +
-	"\x03cli\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\x03cli\x12=\n" +
-	"\x0fxdg_runtime_dir\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\rxdgRuntimeDir\x12;\n" +
-	"\x0exdg_state_home\x18\x03 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\fxdgStateHome\x12)\n" +
-	"\x04home\x18\x04 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\x04home\"\xc6\b\n" +
+	"\x05model\x18\x02 \x01(\tR\x05model\"\x86\x01\n" +
+	"\x0fJobToolEndpoint\x122\n" +
+	"\n" +
+	"executable\x18\x01 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]*$R\n" +
+	"executable\x12?\n" +
+	"\x11runtime_directory\x18\x02 \x01(\tB\x12\xbaH\x0fr\r2\v^/[^\\x00]*$R\x10runtimeDirectory\"\xc6\b\n" +
 	"\x05Agent\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12\x1e\n" +
 	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12&\n" +
@@ -3936,7 +3919,7 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(*Run)(nil),                   // 16: vibesys.orchestrator.v1.Run
 	(*KeptCheckout)(nil),          // 17: vibesys.orchestrator.v1.KeptCheckout
 	(*AllowedAgent)(nil),          // 18: vibesys.orchestrator.v1.AllowedAgent
-	(*CliLocation)(nil),           // 19: vibesys.orchestrator.v1.CliLocation
+	(*JobToolEndpoint)(nil),       // 19: vibesys.orchestrator.v1.JobToolEndpoint
 	(*Agent)(nil),                 // 20: vibesys.orchestrator.v1.Agent
 	(*Capabilities)(nil),          // 21: vibesys.orchestrator.v1.Capabilities
 	(*Usage)(nil),                 // 22: vibesys.orchestrator.v1.Usage
@@ -3968,11 +3951,11 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	43, // 2: vibesys.orchestrator.v1.Run.created_at:type_name -> google.protobuf.Timestamp
 	1,  // 3: vibesys.orchestrator.v1.Run.stop_reason:type_name -> vibesys.orchestrator.v1.RunStopReason
 	43, // 4: vibesys.orchestrator.v1.Run.ended_at:type_name -> google.protobuf.Timestamp
-	19, // 5: vibesys.orchestrator.v1.Run.cli_location:type_name -> vibesys.orchestrator.v1.CliLocation
-	43, // 6: vibesys.orchestrator.v1.Run.stalled_since:type_name -> google.protobuf.Timestamp
-	22, // 7: vibesys.orchestrator.v1.Run.usage:type_name -> vibesys.orchestrator.v1.Usage
-	18, // 8: vibesys.orchestrator.v1.Run.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
-	17, // 9: vibesys.orchestrator.v1.Run.kept_checkouts:type_name -> vibesys.orchestrator.v1.KeptCheckout
+	43, // 5: vibesys.orchestrator.v1.Run.stalled_since:type_name -> google.protobuf.Timestamp
+	22, // 6: vibesys.orchestrator.v1.Run.usage:type_name -> vibesys.orchestrator.v1.Usage
+	18, // 7: vibesys.orchestrator.v1.Run.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	17, // 8: vibesys.orchestrator.v1.Run.kept_checkouts:type_name -> vibesys.orchestrator.v1.KeptCheckout
+	19, // 9: vibesys.orchestrator.v1.Run.job_tool:type_name -> vibesys.orchestrator.v1.JobToolEndpoint
 	8,  // 10: vibesys.orchestrator.v1.AllowedAgent.harness:type_name -> vibesys.orchestrator.v1.Harness
 	2,  // 11: vibesys.orchestrator.v1.Agent.role:type_name -> vibesys.orchestrator.v1.AgentRole
 	8,  // 12: vibesys.orchestrator.v1.Agent.harness:type_name -> vibesys.orchestrator.v1.Harness

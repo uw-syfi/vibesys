@@ -179,6 +179,7 @@ var rules = map[string][]string{
 
 	// The wiring of the shipped binary.
 	"internal/production": {
+		"envcodec",
 		"internal/app", "internal/app/filestores", "internal/backend/cpu", "internal/client", "internal/clock",
 		"internal/core", "internal/daemon", "internal/environment", "internal/environment/docker",
 		"internal/environment/docker/dockercli", "internal/environment/host", "internal/gitrepo",

@@ -40,7 +40,6 @@ var boundaries = map[string]allowance{
 	"internal/production/agentcli.go":            {reason: "checks that the chosen vibesys-cli is an executable file", reads: 1},
 	"internal/production/checkouts.go":           {reason: "removes the clean worktrees agents made when their run is over, keeps the others, and holds the commits they made under a ref of the run; process-boundaries.md, session lock", reads: 2, exec: 5},
 	"internal/production/cli_ensure.go":          {reason: "the callee owns shared daemon startup through daemon ensure; process-boundaries.md, job tool endpoint", env: 1, exec: 1},
-	"internal/production/cli_transport.go":       {reason: "the callee-owned discovery contract requires inspecting socket directory metadata", reads: 1},
 	"internal/production/holder.go":              {reason: "the orchestrator's own holder record; process-boundaries.md, host control", reads: 1, writes: 2},
 	"internal/production/holders.go":             {reason: "the holder's log, the agents' directory listing, a group leader's start time from ps and git worktree creation; process-boundaries.md, process identity", reads: 3, writes: 2, exec: 3},
 	"internal/production/production.go":          {reason: "the orchestrator's own boot identity and state directory", reads: 1, writes: 6},
@@ -89,8 +88,8 @@ func capabilities(name, source string) []string {
 			alias = imp.Name.Name
 		}
 		aliases[alias] = target
-		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") && rel != "internal/production/agentenv.go" {
-			report("cli-contract-importers", "CLI contract belongs to clidaemon, search, the client verbs that show a search view, and the agent environment, whose messages are the CLI's")
+		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") && rel != "internal/production/agentenv.go" && rel != "internal/production/cli_ensure.go" {
+			report("cli-contract-importers", "CLI contract belongs to clidaemon, search, the client verbs that show a search view, the agent environment and the job tool's answer, whose messages are the CLI's")
 		}
 		if target == "os/exec" && execFiles[rel] == "" {
 			report("exec-confined", "process execution belongs to listed production files")

@@ -11,13 +11,13 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
 )
 
-// Subscription is one CLI task stream, shared by every live run at this location.
+// Subscription is one CLI task stream, shared by every live run of this job tool.
 type Subscription struct {
-	Location         core.CliLocation
+	JobTool          core.JobToolEndpoint
 	Repository, Task string
 }
 
-func subscription(r core.Run) Subscription { return Subscription{r.Location, r.Repository, r.Task} }
+func subscription(r core.Run) Subscription { return Subscription{r.JobTool, r.Repository, r.Task} }
 
 // Plan computes deterministic start/stop sets, independent of run multiplicity.
 func Plan(live []core.Run, followed []Subscription) (start, stop []Subscription) {
@@ -44,7 +44,7 @@ func Plan(live []core.Run, followed []Subscription) (start, stop []Subscription)
 	less := func(xs []Subscription) {
 		sort.Slice(xs, func(i, j int) bool {
 			a, b := xs[i], xs[j]
-			x, y := []string{a.Location.CLI, a.Location.RuntimeDir, a.Location.StateHome, a.Location.Home, a.Repository, a.Task}, []string{b.Location.CLI, b.Location.RuntimeDir, b.Location.StateHome, b.Location.Home, b.Repository, b.Task}
+			x, y := []string{a.JobTool.Executable, a.JobTool.RuntimeDirectory, a.Repository, a.Task}, []string{b.JobTool.Executable, b.JobTool.RuntimeDirectory, b.Repository, b.Task}
 			for n := range x {
 				if x[n] != y[n] {
 					return x[n] < y[n]
@@ -165,11 +165,10 @@ func (r *Reconciler) Close() {
 // SearchFor wires the production edges around the read-only link library.
 func SearchFor() *Reconciler {
 	return &Reconciler{Store: new(search.Store), Follow: func(ctx context.Context, k Subscription, publish func(search.View)) {
-		loc := clidaemon.Location{XDGRuntimeDir: k.Location.RuntimeDir, XDGStateHome: k.Location.StateHome, Home: k.Location.Home}
 		var view search.View
 		f := clidaemon.Follower{
-			Location: loc, Ensurer: ExecEnsurer{Executable: k.Location.CLI, Runner: ExecRunner{}},
-			Connect: func(ctx context.Context) (clidaemon.Connection, error) { return connectCLI(ctx, loc) },
+			Ensurer: ExecEnsurerFor(k.JobTool, ExecRunner{}),
+			Connect: connectCLI,
 			Bound: func(ctx context.Context) (context.Context, context.CancelFunc) {
 				return context.WithTimeout(ctx, 10*time.Second)
 			},

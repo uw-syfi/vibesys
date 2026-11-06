@@ -58,6 +58,8 @@ func (p *ensurePeer) Hello(ctx context.Context, _ *cliv1.HelloRequest) (*cliv1.H
 func (p *ensurePeer) Stop(ctx context.Context, _ *cliv1.StopRequest) (*cliv1.StopResponse, error) {
 	return nil, p.wait(ctx)
 }
+func (*ensurePeer) Place() client.Place { return client.Place{} }
+
 func (p *ensurePeer) Status(ctx context.Context, _ *cliv1.StatusRequest) (*cliv1.StatusResponse, error) {
 	return nil, p.wait(ctx)
 }

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"buf.build/go/protovalidate"
 	"encoding/json"
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/task"
 	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
+	"google.golang.org/protobuf/encoding/protojson"
 	"strings"
 	"sync"
 	"testing"
@@ -60,15 +63,23 @@ func TestDaemonEnsureRejectsAMalformedCommand(t *testing.T) {
 	}
 }
 
-func TestDaemonEnsureJSONIsTheStatus(t *testing.T) {
+// With --json the answer is the typed message: the socket a caller dials and the directory it hands
+// on, each of them the tool's own word and absolute, with the build that answers.
+func TestDaemonEnsureJSONIsTheEndpoint(t *testing.T) {
 	c := newCLI(t)
 	r := c.run("daemon", "ensure", "--json")
 	if r.code != exitOK {
 		t.Fatalf("ensure --json = %+v", r)
 	}
-	var got map[string]any
-	if err := json.Unmarshal([]byte(r.stdout), &got); err != nil {
-		t.Fatalf("stdout %q is not JSON: %v", r.stdout, err)
+	answer := &cliv1.DaemonEnsureResponse{}
+	if err := protojson.Unmarshal([]byte(r.stdout), answer); err != nil {
+		t.Fatalf("stdout %q is not the message: %v", r.stdout, err)
+	}
+	if err := protovalidate.Validate(answer); err != nil {
+		t.Fatalf("%q breaks the message's rules: %v", r.stdout, err)
+	}
+	if answer.GetVersions().GetProtocolVersion() == 0 {
+		t.Fatalf("%q names no build", r.stdout)
 	}
 }
 

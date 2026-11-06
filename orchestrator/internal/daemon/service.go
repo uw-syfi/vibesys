@@ -56,6 +56,11 @@ type ServiceDeps struct {
 	Binary string
 	// Starts refuses a StartRun that cannot work before it is decided.
 	Starts StartChecks
+	// JobTool is what the agents of a run that starts now use, as the tool itself answers. It may start
+	// or replace the tool's daemon, so it is asked before the command reaches the engine, whose lock it
+	// must not hold, and its failure refuses the start. It is bounded by the caller's context. Nil means
+	// a host with no job tool, and its runs record none.
+	JobTool func(context.Context) (core.JobToolEndpoint, error)
 }
 
 // Service is OrchestratorService over an Engine and the hub, for one Audience.
@@ -154,7 +159,7 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	cmd, err = s.checkStart(cmd)
+	cmd, err = s.checkStart(ctx, cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +178,7 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 // Decide holds however the repository was spelled. The command's digest stays that of what the
 // client sent, so a retry of it is the same command. A retry of a command that already has a
 // receipt skips the check, so it still gets that receipt.
-func (s *Service) checkStart(cmd core.Command) (core.Command, error) {
+func (s *Service) checkStart(ctx context.Context, cmd core.Command) (core.Command, error) {
 	start, ok := cmd.Body.(core.StartRun)
 	if _, operator := cmd.Caller.(core.Operator); !ok || !operator {
 		// Only the operator may start a run; Decide refuses an agent that tries, with a receipt.
@@ -187,6 +192,12 @@ func (s *Service) checkStart(cmd core.Command) (core.Command, error) {
 	switch {
 	case err == nil:
 		start.Repository = canonical
+		if s.JobTool != nil {
+			start.JobTool, err = s.JobTool(ctx)
+			if err != nil {
+				return cmd, status.Error(codes.FailedPrecondition, err.Error())
+			}
+		}
 		cmd.Body = start
 		return cmd, nil
 	case errors.As(err, &refusal) && refusal.NotReady:

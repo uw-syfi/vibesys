@@ -2,7 +2,6 @@ package clidaemon_test
 
 import (
 	"context"
-	"io/fs"
 	"net"
 	"testing"
 	"time"
@@ -31,7 +30,7 @@ func TestClientAgainstDaemon(t *testing.T) {
 		pb.RegisterDaemonServiceServer(grpcServer, server)
 		go func() { _ = grpcServer.Serve(listener) }()
 		t.Cleanup(func() { grpcServer.Stop(); listener.Close() })
-		socket, err := clidaemon.Locate(clidaemon.Location{}, 7, &fakeFS{info: clidaemon.Directory{Mode: 0700 | fs.ModeDir, UID: 7}})
+		socket, err := clidaemon.SocketFrom("/run/test/daemon.sock")
 		if err != nil {
 			t.Fatal(err)
 		}

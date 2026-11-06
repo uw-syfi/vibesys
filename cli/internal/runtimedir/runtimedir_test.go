@@ -1,9 +1,7 @@
 package runtimedir_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -179,37 +177,4 @@ func TestWaitLockGivesUpWithItsContext(t *testing.T) {
 		t.Fatalf("the abandoned wait kept the lock: %v", err)
 	}
 	l.Unlock()
-}
-
-// Where the socket is for an environment and a user is the golden file's, which the other readers
-// of the daemon's socket check too. No runtime directory is made for it: Resolve only names one.
-func TestLocateIsTheGolden(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "proto", "vibesys", "cli", "v1", "conformance", "locate.golden.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var golden struct {
-		SocketFile    string `json:"socket_file"`
-		DirectoryName string `json:"directory_name"`
-		Cases         []struct {
-			Name   string            `json:"name"`
-			Env    map[string]string `json:"env"`
-			UID    int               `json:"uid"`
-			Socket string            `json:"socket"`
-		} `json:"cases"`
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&golden); err != nil || len(golden.Cases) == 0 {
-		t.Fatalf("locate.golden.json: %v (%d cases)", err, len(golden.Cases))
-	}
-	for _, c := range golden.Cases {
-		dir := runtimedir.Resolve(func(k string) string { return c.Env[k] }, c.UID)
-		if got := filepath.Join(dir, golden.SocketFile); got != c.Socket {
-			t.Errorf("%s: the socket is %q, golden says %q", c.Name, got, c.Socket)
-		}
-		if filepath.Base(dir) != golden.DirectoryName && !strings.HasPrefix(filepath.Base(dir), golden.DirectoryName+"-") {
-			t.Errorf("%s: the directory %q is not named %q", c.Name, dir, golden.DirectoryName)
-		}
-	}
 }

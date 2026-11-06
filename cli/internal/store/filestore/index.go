@@ -34,13 +34,24 @@ type Index struct {
 	dir string
 }
 
-// IndexDir returns where a user's index is: under XDG_STATE_HOME when it is set to an absolute
-// path, and otherwise under the state directory of the user's home.
-func IndexDir(getenv func(string) string, home string) string {
-	if state := getenv("XDG_STATE_HOME"); state != "" && path.IsAbs(state) {
-		return path.Join(state, "vibesys")
+// EnvStateHome names the variable that moves a user's state.
+const EnvStateHome = "XDG_STATE_HOME"
+
+// StateHome returns the directory an environment keeps state under: EnvStateHome when it is set to an
+// absolute path, and otherwise the state directory of the user's home.
+func StateHome(getenv func(string) string, home string) string {
+	if state := getenv(EnvStateHome); state != "" && path.IsAbs(state) {
+		return path.Clean(state)
 	}
-	return path.Join(home, ".local", "state", "vibesys")
+	return path.Join(home, ".local", "state")
+}
+
+// IndexDirIn returns where the index of a state home is.
+func IndexDirIn(stateHome string) string { return path.Join(stateHome, "vibesys") }
+
+// IndexDir returns where a user's index is, for the state home of the environment.
+func IndexDir(getenv func(string) string, home string) string {
+	return IndexDirIn(StateHome(getenv, home))
 }
 
 const tasksDir = "tasks"

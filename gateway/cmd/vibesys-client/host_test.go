@@ -660,7 +660,13 @@ func TestAHostStartedFromAHostileEnvironmentKeepsTheJobToolSettings(t *testing.T
 	if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "marketplace.json"), []byte(`{"plugins":[{"name":"vibesys"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := hostconfig.Save(root, &pb.HostConfig{SessionHolderCommand: holder, JobTool: p.client, SkillsDirectory: root}); err != nil {
+	// A start asks the job tool for its daemon; this one answers with one that nobody needs to reach.
+	tool := filepath.Join(root, "job-tool.sh")
+	answer := `{"socket":"` + root + `/rt/daemon.sock","runtimeDirectory":"` + root + `/rt"}`
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\necho '"+answer+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostconfig.Save(root, &pb.HostConfig{SessionHolderCommand: holder, JobTool: tool, SkillsDirectory: root}); err != nil {
 		t.Fatal(err)
 	}
 	repository := gitRepository(t)

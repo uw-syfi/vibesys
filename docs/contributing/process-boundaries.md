@@ -261,9 +261,23 @@ The session's token is on the tool server's environment only: it is a field of
 test holds it out of the agent's own environment and out of every argument.
 
 The agent's `HOME` and `XDG_*` are not rewritten to steer the job tool. The job
-tool's place is one variable naming its runtime directory; `daemon ensure
---json` answers with the socket, and the directory records where its daemon
-keeps state.
+tool's place is one variable naming its runtime directory, a field of
+`JobToolPlace`. The tool answers `daemon ensure --json` with
+`DaemonEnsureResponse`, the socket and the directory, so the host holds no rule
+for either. The directory records where its daemon keeps state in
+`DaemonPlaces`, written before the first daemon starts there, and any later
+start reuses it.
+
+A start asks the tool before the command is decided, and a start the tool cannot
+answer is refused in the tool's words. A run records `JobToolEndpoint`, the
+program and the directory. A process told a directory that records nothing does
+not start a daemon: its environment is not the one that chose that daemon, so it
+exits 4 and says so. `daemon ensure` is the one command that sets a directory up
+again, which is what the host's follower does after a reboot. The host keeps
+`XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and
+`VIBESYS_CLI_CONFIG` from its starter: they are what its `daemon ensure` resolves
+the operator's daemon, store and settings from, so that the host and the
+operator's own shell meet one daemon.
 
 ### Tools the agent calls
 
@@ -345,7 +359,6 @@ part they wait for.
 
 | Part | Not built | Removes |
 | --- | --- | --- |
-| Job tool endpoint | `JobToolEndpoint`, `daemon ensure --json`, `DaemonPlaces` | `CliLocation`, the `XDG_*` and `HOME` rewrite, the host's copy of the socket rule, and the `XDG_*` and `VIBESYS_CLI_CONFIG` a host keeps from its starter for the job tool |
 | Client records | `AgentRecord`, `RunRecord`, `ReceiptRecord`, `RunChange` | private fields served to clients |
 | Tool calls | the `ToolCall` `oneof` | `args_json`, `provider_call_id`, the screen's `cmd`/`command` guess |
 | Result records | `ResultRecord` generated for Go and the SDK | the hand parser and writer |
@@ -394,7 +407,7 @@ validated message; the other rows are what the parts above replace.
 | Boundary | Carrier | Owner | State |
 | --- | --- | --- | --- |
 | identity into the job tool | `VIBESYS_{REPO,TASK,RUN,AGENT,HARNESS,CLI,PLACEMENT}` | `AgentContext`, `OperatorContext`, `SkillEnvironment` (`env.proto`) | typed |
-| the job tool's place | `HOME` and `XDG_*` rewritten for the agent | `CliLocation` | leaks: job tool endpoint |
+| the job tool's place | `VIBESYS_CLI_RUNTIME_DIR` | `JobToolPlace` in `cli/v1/env.proto` | typed |
 | tool server credentials | `VIBESYS_ORCHESTRATOR_*` | `ToolServerCredentials` (`tool_server.proto`) | typed |
 | tool server to host | gRPC metadata for agent, session and token | `service.go` | typed |
 | agent to tool server | MCP over stdio | MCP; framing confined to `internal/mcp` | external |

@@ -9,63 +9,22 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/clidaemon/clidaemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
-	"io/fs"
 	"math/rand/v2"
 	"os"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 )
 
-type fakeFS struct {
-	info clidaemon.Directory
-	err  error
-	path string
-}
-
-func (f *fakeFS) LstatDirectory(p string) (clidaemon.Directory, error) {
-	f.path = p
-	return f.info, f.err
-}
-func TestLocateGolden(t *testing.T) {
-	raw, err := os.ReadFile("../../../proto/vibesys/cli/v1/conformance/locate.golden.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var golden struct {
-		Cases []struct {
-			Name   string
-			Env    map[string]string
-			UID    int
-			Socket string
+// A socket is only ever what a tool answered, and an answer that is no absolute path is no socket.
+func TestASocketIsAnAbsolutePath(t *testing.T) {
+	for _, bad := range []string{"", "daemon.sock", "./daemon.sock", "run/daemon.sock"} {
+		if socket, err := clidaemon.SocketFrom(bad); err == nil {
+			t.Fatalf("%q was accepted as %v", bad, socket)
 		}
 	}
-	if err := json.Unmarshal(raw, &golden); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range golden.Cases {
-		t.Run(tc.Name, func(t *testing.T) {
-			f := &fakeFS{info: clidaemon.Directory{Mode: fs.ModeDir | 0700, UID: tc.UID}}
-			socket, err := clidaemon.Locate(clidaemon.Location{XDGRuntimeDir: tc.Env["XDG_RUNTIME_DIR"]}, tc.UID, f)
-			if err != nil || socket.Path() != tc.Socket {
-				t.Fatalf("Locate: %v, %v", socket, err)
-			}
-		})
-	}
-}
-func TestLocateRejectsUnsafeDirectories(t *testing.T) {
-	for _, info := range []clidaemon.Directory{{Mode: fs.ModeSymlink | 0700}, {Mode: 0700}, {Mode: fs.ModeDir | 0755}, {Mode: fs.ModeDir | 0700, UID: 1}, {Mode: fs.ModeDir | 0700, Network: true}} {
-		_, err := clidaemon.Locate(clidaemon.Location{}, 0, &fakeFS{info: info})
-		var u *clidaemon.Unreadable
-		if !errors.As(err, &u) || u.Reason != core.NoDaemon {
-			t.Fatalf("accepted %v: %v", info, err)
-		}
-	}
-	for _, loc := range []clidaemon.Location{{}, {XDGRuntimeDir: "/" + strings.Repeat("x", 100)}} {
-		if _, err := clidaemon.Locate(loc, 0, &fakeFS{err: fs.ErrNotExist}); err == nil {
-			t.Fatal("missing/oversized accepted")
-		}
+	if socket, err := clidaemon.SocketFrom("/run/x/daemon.sock"); err != nil || socket.Path() != "/run/x/daemon.sock" {
+		t.Fatal(socket, err)
 	}
 }
 

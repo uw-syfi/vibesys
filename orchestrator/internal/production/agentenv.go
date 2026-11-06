@@ -14,22 +14,22 @@ import (
 )
 
 // agentEnvironment is what the session's processes get over their login environment. The run's
-// identity is an AgentContext and the path the skills run is a SkillEnvironment, each written by the
-// environment codec, so the names are the env_name of their fields (proto/vibesys/cli/v1/env.proto)
-// and nothing here spells one. An empty value unsets its name, so the program resolves it as this
-// process would. The job tool's places (XDG_RUNTIME_DIR, XDG_STATE_HOME and HOME) are the one part
-// not yet a message; they stay until the job tool's endpoint replaces them, and HOME is kept when
-// empty because the agent's own program needs it. The token of the session is never here: it goes to
-// the tool server alone, see toolServerEnvironment.
+// identity is an AgentContext, the path the skills run is a SkillEnvironment and the daemon that tool
+// serves is a JobToolPlace, each written by the environment codec, so the names are the env_name of
+// their fields (proto/vibesys/cli/v1/env.proto) and nothing here spells one. An empty value unsets its
+// name, so the program resolves it as this process would. Nothing else of the operator's environment
+// changes: HOME and every XDG name stay theirs, for the agent, its tools and git alike. The token of
+// the session is never here: it goes to the tool server alone, see toolServerEnvironment.
 func agentEnvironment(start daemon.SessionStart) (*pb.AgentEnvironment, error) {
-	l, where := start.Launch, start.Location
+	l, tool := start.Launch, start.JobTool
 	out := &pb.AgentEnvironment{Set: map[string]string{}}
 	for _, m := range []proto.Message{
 		&cliv1.AgentContext{
 			Repository: start.Repository, Task: start.Task, RunId: string(l.Run), Agent: string(l.Session.Agent),
 			Harness: strings.ReplaceAll(string(l.Spec.Harness), "_", "-"),
 		},
-		&cliv1.SkillEnvironment{Cli: where.CLI},
+		&cliv1.SkillEnvironment{Cli: tool.Executable},
+		&cliv1.JobToolPlace{RuntimeDirectory: tool.RuntimeDirectory},
 	} {
 		encoded, err := envcodec.Encode(m)
 		if err != nil {
@@ -37,18 +37,6 @@ func agentEnvironment(start daemon.SessionStart) (*pb.AgentEnvironment, error) {
 		}
 		maps.Copy(out.Set, encoded.Set)
 		out.Unset = append(out.Unset, encoded.Unset...)
-	}
-	for _, name := range []struct{ name, value string }{
-		{"XDG_RUNTIME_DIR", where.RuntimeDir},
-		{"XDG_STATE_HOME", where.StateHome},
-		{"HOME", where.Home},
-	} {
-		switch {
-		case name.value != "":
-			out.Set[name.name] = name.value
-		case name.name != "HOME":
-			out.Unset = append(out.Unset, name.name)
-		}
 	}
 	return out, nil
 }

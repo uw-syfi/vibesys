@@ -251,8 +251,9 @@ variable.
 | `VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_HARNESS`, `VIBESYS_AGENT` | The defaults of the context flags above. |
 | `VIBESYS_PLACEMENT` | The default of `--placement`, an optional restriction an operator sets at a run's start. |
 | `XDG_RUNTIME_DIR` | Where the runtime directory is (see "The daemon and the supervisors"). Ignored unless it is an absolute path. |
-| `VIBESYS_CLI_SANDBOX` | `1` makes the daemon a sandbox daemon, beside the one that holds the machine, in the runtime directory of `XDG_RUNTIME_DIR`, which it needs (see "The daemon and the supervisors"). Any other value is refused. |
-| `XDG_STATE_HOME` | Where the task index is: `$XDG_STATE_HOME/vibesys`, else `~/.local/state/vibesys`. Ignored unless it is an absolute path. |
+| `VIBESYS_CLI_RUNTIME_DIR` | The runtime directory itself, in place of the one `XDG_RUNTIME_DIR` gives. The orchestrator sets it for its agents, so they reach the daemon it chose whatever else their environment says. A value that is not an absolute path is refused. |
+| `VIBESYS_CLI_SANDBOX` | `1` makes the daemon a sandbox daemon, beside the one that holds the machine, in a runtime directory of its own, which `XDG_RUNTIME_DIR` or `VIBESYS_CLI_RUNTIME_DIR` must name (see "The daemon and the supervisors"). Any other value is refused. |
+| `XDG_STATE_HOME` | Where the task index is: `$XDG_STATE_HOME/vibesys`, else `~/.local/state/vibesys`. Ignored unless it is an absolute path. Read once per runtime directory: the first start records the answer in `daemon-places.json` there, and later starts reuse it. |
 | `HOME` | The home directory the index falls back to. |
 
 The orchestrator also sets `VIBESYS_CLI`, the absolute path of this binary for the skills to run
@@ -283,7 +284,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `plan comment <n> --body text \| --body-file path` | Add a comment, which carries a decision or a result. |
 | `plan close <n> --status s [--comment text \| --comment-file path]` | Set a status other than `open` and add a comment, as one change. |
 | `plan check-gain --under share` | Whether every plan that is `open` or `parked` states a gain bound below the share (`0.1` or `10%`). It prints `yes: ...` or `no: ...` followed by one line for each plan that is not under (a plan that states no bound is not under), and exits `0` for either answer. With `--json` the answer is `answer` (`PLAN_GAIN_ANSWER_ALL_UNDER` or `PLAN_GAIN_ANSWER_NOT_ALL_UNDER`), `counted` and `blockers`. A bound equal to the share is not below it. |
-| `daemon ensure` | Make sure a compatible daemon answers, starting one if none runs (the start protocol below). It prints `ready`, the pid and the version, or the daemon's status with `--json`. It exits `0` when a daemon answers and `4` when none does, whatever the reason, and the message says why; only a malformed command exits `2`. A program that starts the daemon, such as the orchestrator, runs this and reads the exit code. |
+| `daemon ensure` | Make sure a compatible daemon answers, starting one if none runs (the start protocol below). It prints `ready`, the pid and the version, or with `--json` a `DaemonEnsureResponse`: the socket, the build, and the runtime directory. It exits `0` when a daemon answers and `4` when none does, whatever the reason, and the message says why; only a malformed command exits `2`. A program that starts the daemon, such as the orchestrator, runs this with `--json` and rebuilds no path. |
 | `daemon status\|stop\|restart` | Report on, stop, or restart the daemon. `daemon status` also says what every job inherits from the daemon: the directory clean checkouts are made in (`checkouts`, from the daemon's `TMPDIR`), and one `env` line per environment variable, sorted, with its value only for `PATH`, `HOME`, `TMPDIR` and a `VIBESYS_` variable whose name has none of `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL` (with `--json`, `environment` and `checkout_directory`). Jobs see the environment the daemon was started with, so a variable set later reaches them only after `daemon restart` from a shell that has it. `daemon status` with no daemon prints `not running` (with `--json`, an `UNAVAILABLE` `Failure`) and exits `4`. `daemon install` is not available yet (exit `2`). |
 | `daemon forget <repository>` | Give up a repository that is gone for good, such as a store an older daemon made inside a removed linked worktree: its commands are ended, then its jobs leave the daemon, what is left of their supervisors is let go of, and its stores leave the index. A command that does not end when told is reported left, and the next job waits while it can run, up to its time limit. The answer comes after the supervisor directories of the repository's other jobs are removed, so none is listed after it but the ones reported left. Nothing is touched where the repository was. A repository that is there, one whose directory cannot be read (a disk that is not mounted or does not answer), or one the daemon does not know, is refused: only a repository whose directory is not there is gone. |
 
@@ -403,6 +404,14 @@ to run `daemon restart`, which replaces the daemon while its jobs keep running u
 supervisors. `daemon status` and `daemon stop` address whichever daemon runs and do not apply this
 rule. A daemon older than the protocol the command line needs is replaced as before, jobs or not,
 since its jobs outlive it.
+
+The runtime directory records where its daemon keeps state, in `daemon-places.json` (`DaemonPlaces`),
+written before the first daemon starts there, and every later start reuses it, whatever its own
+environment says; a daemon that starts with an environment saying otherwise logs both. To move the
+store of a runtime directory, stop the daemon and remove the file. A command run with
+`VIBESYS_CLI_RUNTIME_DIR` starts a daemon only if the directory records its places. If it does not, as
+after a reboot, the command starts nothing and exits 4 saying so, because its environment is not the one
+that chose that daemon; `daemon ensure` records them again, which is what the orchestrator does.
 
 `daemon ensure` is that same start protocol as a command: it holds `start.lock`, so any number of
 `ensure` commands and other commands that run at once start one daemon between them. A new client

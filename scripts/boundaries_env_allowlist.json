@@ -48,18 +48,6 @@
   "orchestrator/internal/localfs/localfs.go": {
     "XDG_STATE_HOME": 1
   },
-  "orchestrator/internal/production/agentcli.go": {
-    "XDG_RUNTIME_DIR": 1,
-    "XDG_STATE_HOME": 1
-  },
-  "orchestrator/internal/production/agentenv.go": {
-    "XDG_RUNTIME_DIR": 1,
-    "XDG_STATE_HOME": 1
-  },
-  "orchestrator/internal/production/cli_ensure.go": {
-    "XDG_RUNTIME_DIR": 2,
-    "XDG_STATE_HOME": 2
-  },
   "sdk/vibesys-evaluator/go/evaluator/files.go": {
     "VIBESYS_ARTIFACTS_DIR": 1,
     "VIBESYS_SAMPLE_SEED": 1

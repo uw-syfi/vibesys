@@ -59,10 +59,17 @@ func (r *recorder) names() []string {
 // Every command line, and the binary's wiring to its daemon and store, reads its environment through
 // the one getenv it is given, and the VIBESYS_ names it asks for are exactly the fields of the
 // context messages. A name the binary starts to read that no message declares fails here, as does a
-// field it no longer reads. The places of its daemon and store (HOME and the XDG names) are the job
-// tool's endpoint, a message of its own later, and are not held here.
+// field it no longer reads. The user's own defaults for its daemon and store (HOME and the XDG names)
+// are not held here: they are what a person's plain command resolves.
 func TestTheCLIReadsExactlyTheNamesTheContextMessagesDeclare(t *testing.T) {
 	want := declaredContextNames(t)
+	// The usage does not name the place: the host sets it for its agents, and it is no flag's default.
+	place, err := envcodec.Names(&cliv1.JobToolPlace{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = append(want, place...)
+	slices.Sort(want)
 	rec := &recorder{asked: map[string]bool{}, env: map[string]string{}}
 	for _, name := range want {
 		rec.env[name] = "/value/" + strings.ToLower(name)
@@ -82,10 +89,11 @@ func TestTheCLIReadsExactlyTheNamesTheContextMessagesDeclare(t *testing.T) {
 			t.Fatalf("%v -h exited %d: %s", args, code, stderr.String())
 		}
 	}
-	// Reaching the daemon starts from where the runtime directory is, and the daemon process from
-	// where the task index is. Neither is opened: that touches the file system.
-	_ = d.process.RuntimePath()
-	_ = d.process.IndexDir()
+	// Reaching the daemon starts from where the runtime directory is. It is not opened: that touches
+	// the file system.
+	if _, err := d.process.RuntimePath(); err != nil {
+		t.Fatal(err)
+	}
 
 	var got []string
 	for _, name := range rec.names() {
