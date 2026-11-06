@@ -100,6 +100,9 @@ func newRig(t *testing.T) *rig {
 		}
 	}
 	r.useMarketplace()
+	// Cleanups run last first: the gateway and the sidecars stop, then vibesys-cli's daemon, and
+	// only then is the directory its binary is in removed.
+	t.Cleanup(func() { r.stopCLIDaemon(cli) })
 	t.Cleanup(r.killSidecars)
 	return r
 }

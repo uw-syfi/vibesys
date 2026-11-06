@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"os"
@@ -48,7 +49,9 @@ func (r *rig) useCLI() {
 // directory in the environment, so the stop must run with the rig's environment: without it the
 // stop reaches no daemon (or the developer's own) and the rig's daemon outlives the test.
 func (r *rig) stopCLIDaemon(binary string) {
-	cmd := exec.Command(binary, "daemon", "stop")
+	ctx, cancel := context.WithTimeout(context.Background(), bound)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "daemon", "stop")
 	cmd.Env = r.env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		r.t.Errorf("vibesys-cli daemon stop: %v\n%s", err, out)
