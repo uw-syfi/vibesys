@@ -37,7 +37,7 @@ type OrchestratorServiceClient interface {
 	// Dispatch carries out a command as the operator. Retrying an id answers with the same receipt,
 	// and reusing an id for another command is an error.
 	Dispatch(ctx context.Context, in *DispatchRequest, opts ...grpc.CallOption) (*DispatchResponse, error)
-	// Snapshot of runs and agents, then every event after its sequence.
+	// Snapshot of runs and agents, then every change after its sequence.
 	WatchRuns(ctx context.Context, in *WatchRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunsResponse], error)
 	// One agent: a page of items, then items and deltas after the sequence.
 	WatchAgent(ctx context.Context, in *WatchAgentRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchAgentResponse], error)
@@ -132,7 +132,7 @@ type OrchestratorServiceServer interface {
 	// Dispatch carries out a command as the operator. Retrying an id answers with the same receipt,
 	// and reusing an id for another command is an error.
 	Dispatch(context.Context, *DispatchRequest) (*DispatchResponse, error)
-	// Snapshot of runs and agents, then every event after its sequence.
+	// Snapshot of runs and agents, then every change after its sequence.
 	WatchRuns(*WatchRunsRequest, grpc.ServerStreamingServer[WatchRunsResponse]) error
 	// One agent: a page of items, then items and deltas after the sequence.
 	WatchAgent(*WatchAgentRequest, grpc.ServerStreamingServer[WatchAgentResponse]) error

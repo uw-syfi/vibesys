@@ -119,9 +119,11 @@
   "proto/vibesys/orchestrator/v1/orchestrator.proto": [
     "Harness.HARNESS_CLAUDE_CODE",
     "Harness.HARNESS_CODEX",
-    "JobToolEndpoint.runtime_directory",
     "StartFailureReason.START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE",
     "ToolCall.args_json",
     "ToolCall.provider_call_id"
+  ],
+  "proto/vibesys/orchestrator/v1/stored.proto": [
+    "JobToolEndpoint.runtime_directory"
   ]
 }

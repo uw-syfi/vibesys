@@ -9,7 +9,7 @@ import {
 import fc from 'fast-check';
 import {generateScenario} from '../testing/orchestrator/index.js';
 import {applyHostFrame, emptyHostModel, type HostFrame, runsCursor} from './host-model.js';
-import {applyEvent} from './orchestrator/fold.js';
+import {applyChange} from './orchestrator/fold.js';
 import {emptyState} from './orchestrator/state.js';
 
 const scenarios = fc.record({
@@ -18,20 +18,20 @@ const scenarios = fc.record({
   live: fc.boolean(),
 });
 
-const eventFrame = (event: ReturnType<typeof generateScenario>['events'][number]): HostFrame => ({
+const eventFrame = (event: ReturnType<typeof generateScenario>['changes'][number]): HostFrame => ({
   from: 'runs',
-  body: create(WatchRunsResponseSchema, {body: {case: 'event', value: event}}).body,
+  body: create(WatchRunsResponseSchema, {body: {case: 'change', value: event}}).body,
 });
 
 describe('the host model', () => {
-  it('folds run events as the fold does, and the run stream never moves an agent cursor', () => {
+  it('folds run changes as the fold does, and the run stream never moves an agent cursor', () => {
     fc.assert(
       fc.property(scenarios, options => {
-        const {events} = generateScenario(options);
-        const model = events.map(eventFrame).reduce(applyHostFrame, emptyHostModel);
-        expect(model.data).toEqual(events.reduce(applyEvent, emptyState));
+        const {changes} = generateScenario(options);
+        const model = changes.map(eventFrame).reduce(applyHostFrame, emptyHostModel);
+        expect(model.data).toEqual(changes.reduce(applyChange, emptyState));
         expect(model.agentCursors).toEqual({});
-        expect(runsCursor(model)).toBe(BigInt(events.length));
+        expect(runsCursor(model)).toBe(BigInt(changes.length));
       }),
       {numRuns: 40},
     );
@@ -79,11 +79,11 @@ describe('the host model', () => {
   });
 
   it('restarts a run stream from a snapshot while a gap stands, and from the sequence otherwise', () => {
-    const {events} = generateScenario({seed: 3, subagents: 2, live: false});
-    const skipped = events.slice(2, 3).map(eventFrame).reduce(applyHostFrame, emptyHostModel);
+    const {changes} = generateScenario({seed: 3, subagents: 2, live: false});
+    const skipped = changes.slice(2, 3).map(eventFrame).reduce(applyHostFrame, emptyHostModel);
     expect(skipped.data.gap).not.toBeNull();
     expect(runsCursor(skipped)).toBe(0n);
-    const first = events.slice(0, 1).map(eventFrame).reduce(applyHostFrame, emptyHostModel);
+    const first = changes.slice(0, 1).map(eventFrame).reduce(applyHostFrame, emptyHostModel);
     expect(runsCursor(first)).toBe(1n);
   });
 });

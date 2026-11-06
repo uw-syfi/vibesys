@@ -7,7 +7,7 @@ import (
 )
 
 // DecodeWatchRuns classifies a frame for test readers, panicking on unknown or missing bodies.
-func DecodeWatchRuns(frame *pb.WatchRunsResponse) (*pb.RunsSnapshot, *pb.Event, *pb.SearchState) {
+func DecodeWatchRuns(frame *pb.WatchRunsResponse) (*pb.RunsSnapshot, *pb.RunChange, *pb.SearchState) {
 	s, e, search, err := classifyWatchRuns(frame)
 	if err != nil {
 		panic(err)
@@ -15,12 +15,12 @@ func DecodeWatchRuns(frame *pb.WatchRunsResponse) (*pb.RunsSnapshot, *pb.Event, 
 	return s, e, search
 }
 
-func classifyWatchRuns(frame *pb.WatchRunsResponse) (*pb.RunsSnapshot, *pb.Event, *pb.SearchState, error) {
+func classifyWatchRuns(frame *pb.WatchRunsResponse) (*pb.RunsSnapshot, *pb.RunChange, *pb.SearchState, error) {
 	switch body := frame.GetBody().(type) {
 	case *pb.WatchRunsResponse_Snapshot:
 		return body.Snapshot, nil, nil, nil
-	case *pb.WatchRunsResponse_Event:
-		return nil, body.Event, nil, nil
+	case *pb.WatchRunsResponse_Change:
+		return nil, body.Change, nil, nil
 	case *pb.WatchRunsResponse_Search:
 		return nil, nil, body.Search, nil
 	default:

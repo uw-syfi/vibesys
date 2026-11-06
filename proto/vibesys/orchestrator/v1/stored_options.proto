@@ -1,0 +1,13 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+extend google.protobuf.FieldOptions {
+  // The field is the host's own: it is stored and never reaches a client. A check walks every message
+  // a service sends or receives and refuses one that can hold such a field, or any message of
+  // stored.proto (orchestrator/internal/archcheck).
+  bool stored_only = 50130;
+}

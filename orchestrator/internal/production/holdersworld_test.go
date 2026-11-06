@@ -68,7 +68,7 @@ func newHolderWorld() *holderWorld {
 		crashes: map[string]bool{}, deaths: map[string]bool{}, probes: map[string]bool{}, protocol: current,
 		outcome: func(*pb.OpenSessionRequest) []*pb.SessionEvent {
 			return []*pb.SessionEvent{{Body: &pb.SessionEvent_Opened{Opened: &pb.SessionOpened{
-				ResumeToken: []byte("token"), Capabilities: &pb.Capabilities{StreamsText: true, Steers: true, Resumes: true},
+				ResumeToken: []byte("token"), Capabilities: &pb.Capabilities{Steers: true, Resumes: true},
 			}}}}
 		},
 	}

@@ -59,7 +59,7 @@ func TestARetryGetsTheSameReceiptAndAReusedIDIsAConflict(t *testing.T) {
 	r := daemontest.NewRig(t)
 	first := dispatch(t, r, startRun("c1"))
 	again := dispatch(t, r, startRun("c1"))
-	if first.GetRunId() != again.GetRunId() || first.GetCommandDigest() != again.GetCommandDigest() {
+	if first.GetRunId() != again.GetRunId() {
 		t.Fatalf("a retry answered %v, want %v", again, first)
 	}
 	other := startRun("c1")

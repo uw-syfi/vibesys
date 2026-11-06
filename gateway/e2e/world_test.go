@@ -75,29 +75,29 @@ func newWorld() *world {
 	return &world{agents: map[string]*agentView{}, messages: map[string]*messageView{}}
 }
 
-// fold applies one line of the stream of runs. A line that is not an event (a snapshot) changes nothing.
+// fold applies one line of the stream of runs. A line that is not a change (a snapshot) changes nothing.
 func (w *world) fold(line string) {
 	var l struct {
-		Event *struct {
-			Sequence       string       `json:"sequence"`
-			AgentUpdated   *agentView   `json:"agentUpdated"`
-			MessageUpdated *messageView `json:"messageUpdated"`
-			RunUpdated     *runView     `json:"runUpdated"`
-		} `json:"event"`
+		Change *struct {
+			Sequence string       `json:"sequence"`
+			Agent    *agentView   `json:"agent"`
+			Message  *messageView `json:"message"`
+			Run      *runView     `json:"run"`
+		} `json:"change"`
 	}
-	if json.Unmarshal([]byte(line), &l) != nil || l.Event == nil {
+	if json.Unmarshal([]byte(line), &l) != nil || l.Change == nil {
 		return
 	}
-	if n, err := strconv.ParseUint(l.Event.Sequence, 10, 64); err == nil {
+	if n, err := strconv.ParseUint(l.Change.Sequence, 10, 64); err == nil {
 		w.last = n
 	}
-	if a := l.Event.AgentUpdated; a != nil {
+	if a := l.Change.Agent; a != nil {
 		w.agents[a.ID] = a
 	}
-	if m := l.Event.MessageUpdated; m != nil {
+	if m := l.Change.Message; m != nil {
 		w.messages[m.ID] = m
 	}
-	if run := l.Event.RunUpdated; run != nil {
+	if run := l.Change.Run; run != nil {
 		w.run = *run
 	}
 }

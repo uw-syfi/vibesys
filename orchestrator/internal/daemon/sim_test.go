@@ -90,14 +90,28 @@ type view struct {
 	runs   map[string]*pb.Run
 	agents map[string]*pb.Agent
 	seq    uint64
-	// messages and turns are what the last snapshot held. Events after it are not folded into them.
+	// messages and turns are what the last snapshot held. Changes after it are not folded into them.
 	messages []*pb.Message
 	turns    []*pb.Turn
+	// foldedMessages and foldedTurns start from the last snapshot, with the changes after it folded in.
+	foldedMessages map[string]*pb.Message
+	foldedTurns    map[string]*pb.Turn
+	// truncated says the last snapshot left history out, so a fold cannot hold it all.
+	truncated bool
+	// foldedComplete says the fold began at a snapshot, so it holds the whole history.
+	foldedComplete bool
 }
 
 func (v *view) snapshot(snap *pb.RunsSnapshot) {
 	v.runs, v.agents, v.seq = map[string]*pb.Run{}, map[string]*pb.Agent{}, snap.GetSequence()
 	v.messages, v.turns = snap.GetMessages(), snap.GetTurns()
+	v.foldedMessages, v.foldedTurns, v.truncated, v.foldedComplete = map[string]*pb.Message{}, map[string]*pb.Turn{}, snap.GetTruncated(), true
+	for _, m := range snap.GetMessages() {
+		v.foldedMessages[m.GetId()] = m
+	}
+	for _, t := range snap.GetTurns() {
+		v.foldedTurns[t.GetId()] = t
+	}
 	for _, r := range snap.GetRuns() {
 		v.runs[r.GetId()] = r
 	}
@@ -119,7 +133,10 @@ func (s *sim) openRuns(after uint64, held view) *simWatcher {
 	if err != nil {
 		s.fail("open a runs watch after %d: %v", after, err)
 	}
-	sw := &simWatcher{w: w, v: view{runs: map[string]*pb.Run{}, agents: map[string]*pb.Agent{}, seq: after}}
+	sw := &simWatcher{w: w, v: view{
+		runs: map[string]*pb.Run{}, agents: map[string]*pb.Agent{}, seq: after,
+		foldedMessages: map[string]*pb.Message{}, foldedTurns: map[string]*pb.Turn{},
+	}}
 	if after > 0 {
 		sw.v = held
 	}
@@ -146,10 +163,14 @@ func (s *sim) feed(sw *simWatcher, msgs []*pb.WatchRunsResponse) {
 		}
 		sw.v.seq = ev.GetSequence()
 		switch b := ev.GetBody().(type) {
-		case *pb.Event_RunUpdated:
-			sw.v.runs[b.RunUpdated.GetId()] = b.RunUpdated
-		case *pb.Event_AgentUpdated:
-			sw.v.agents[b.AgentUpdated.GetId()] = b.AgentUpdated
+		case *pb.RunChange_Run:
+			sw.v.runs[b.Run.GetId()] = b.Run
+		case *pb.RunChange_Agent:
+			sw.v.agents[b.Agent.GetId()] = b.Agent
+		case *pb.RunChange_Turn:
+			sw.v.foldedTurns[b.Turn.GetId()] = b.Turn
+		case *pb.RunChange_Message:
+			sw.v.foldedMessages[b.Message.GetId()] = b.Message
 		}
 	}
 }
@@ -752,6 +773,10 @@ func (s *sim) finish() {
 	if !sameSet(fresh.v.messages, wantMessages) || !sameSet(fresh.v.turns, wantTurns) {
 		s.fail("a snapshot holds %d messages and %d turns, the store holds %d and %d", len(fresh.v.messages), len(fresh.v.turns), len(wantMessages), len(wantTurns))
 	}
+	// A fold of the changes a watcher was sent holds what that snapshot says.
+	for i, w := range s.runs {
+		s.compareFold(i, w, fresh)
+	}
 	for id, iw := range s.agents {
 		msgs, err := iw.w.Poll()
 		if err != nil {
@@ -782,6 +807,28 @@ func sameSet[M proto.Message](a, b []M) bool {
 		}
 	}
 	return true
+}
+
+// compareFold holds a watcher's fold to a fresh snapshot, unless a snapshot left history out. A
+// watcher that opened after a sequence and saw no snapshot holds only what it was sent, so it is held
+// to agree on what it has.
+func (s *sim) compareFold(i int, w *simWatcher, fresh *simWatcher) {
+	if w.v.truncated || fresh.v.truncated {
+		return
+	}
+	for id, got := range w.v.foldedTurns {
+		if want, ok := fresh.v.foldedTurns[id]; !ok || !proto.Equal(got, want) {
+			s.fail("watcher %d folded turn %v, a snapshot says %v", i, got, want)
+		}
+	}
+	for id, got := range w.v.foldedMessages {
+		if want, ok := fresh.v.foldedMessages[id]; !ok || !proto.Equal(got, want) {
+			s.fail("watcher %d folded message %v, a snapshot says %v", i, got, want)
+		}
+	}
+	if w.v.foldedComplete && (len(w.v.foldedTurns) != len(fresh.v.foldedTurns) || len(w.v.foldedMessages) != len(fresh.v.foldedMessages)) {
+		s.fail("watcher %d folded %d turns and %d messages, a snapshot holds %d and %d", i, len(w.v.foldedTurns), len(w.v.foldedMessages), len(fresh.v.foldedTurns), len(fresh.v.foldedMessages))
+	}
 }
 
 func (s *sim) compare(i int, w *simWatcher) {

@@ -43,7 +43,7 @@ func TestARunIsRecordedUnderTheCanonicalRepository(t *testing.T) {
 	if run.Repository != "/real" {
 		t.Fatalf("the run's repository is %q, want /real", run.Repository)
 	}
-	if again := dispatch(t, r, startIn("c1", "/link", "task")); again.GetRunId() != first.GetRunId() || again.GetCommandDigest() != first.GetCommandDigest() {
+	if again := dispatch(t, r, startIn("c1", "/link", "task")); again.GetRunId() != first.GetRunId() {
 		t.Fatalf("a retry answered %v, want %v", again, first)
 	}
 }

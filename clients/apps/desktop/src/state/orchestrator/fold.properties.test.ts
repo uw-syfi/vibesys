@@ -3,20 +3,20 @@ import {timestampFromMs} from '@bufbuild/protobuf/wkt';
 import {describe, expect, it} from '@effect/vitest';
 import {
   DeltaSchema,
-  type Event,
-  EventSchema,
   type Item,
   ItemSchema,
   ItemStatus,
   ItemsPageSchema,
   oneofIs,
   ReceiptSchema,
+  type RunChange,
+  RunChangeSchema,
   type WatchAgentResponse,
   WatchAgentResponseSchema,
 } from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {FakeDaemon, generateScenario} from '../../testing/orchestrator/index.js';
-import {applyAgentFeed, applyEvent, applySnapshot} from './fold.js';
+import {applyAgentFeed, applyChange, applySnapshot} from './fold.js';
 import {emptyState, type OrchestratorState} from './state.js';
 
 const scenarios = fc.record({
@@ -25,8 +25,8 @@ const scenarios = fc.record({
   live: fc.boolean(),
 });
 
-const fold = (events: readonly Event[], from: OrchestratorState = emptyState) =>
-  events.reduce(applyEvent, from);
+const fold = (changes: readonly RunChange[], from: OrchestratorState = emptyState) =>
+  changes.reduce(applyChange, from);
 
 const NO_GAP = (state: OrchestratorState) => ({...state, gap: null});
 
@@ -40,8 +40,8 @@ const known = (state: OrchestratorState) => ({
 });
 
 /** Delivery orders: the stream cut at an arbitrary place, with arbitrary repeats and reorderings. */
-const delivery = (events: readonly Event[]) =>
-  fc.array(fc.nat({max: Math.max(0, events.length - 1)}), {maxLength: events.length * 3});
+const delivery = (changes: readonly RunChange[]) =>
+  fc.array(fc.nat({max: Math.max(0, changes.length - 1)}), {maxLength: changes.length * 3});
 
 /** Two copies of one item chosen by `a` and `b`, the one committed earlier first. */
 function pairOf<T>(
@@ -66,9 +66,9 @@ describe('the event fold', () => {
   it('folding any split of the stream equals folding it whole', () => {
     fc.assert(
       fc.property(scenarios, fc.nat(), (options, cut) => {
-        const {events} = generateScenario(options);
-        const at = cut % (events.length + 1);
-        expect(fold(events.slice(at), fold(events.slice(0, at)))).toEqual(fold(events));
+        const {changes} = generateScenario(options);
+        const at = cut % (changes.length + 1);
+        expect(fold(changes.slice(at), fold(changes.slice(0, at)))).toEqual(fold(changes));
       }),
       {numRuns: 80},
     );
@@ -77,30 +77,32 @@ describe('the event fold', () => {
   it('reconnecting from any earlier sequence, and stopping anywhere, gives the state of the furthest event', () => {
     fc.assert(
       fc.property(scenarios, fc.nat(), fc.nat(), fc.nat(), (options, reached, back, stop) => {
-        const {events} = generateScenario(options);
-        const upTo = reached % (events.length + 1);
+        const {changes} = generateScenario(options);
+        const upTo = reached % (changes.length + 1);
         const from = back % (upTo + 1);
-        const end = from + (stop % (events.length - from + 1));
-        const held = fold(events.slice(0, upTo));
-        // The client asks for events after `from`, which repeats what it already holds, and the
+        const end = from + (stop % (changes.length - from + 1));
+        const held = fold(changes.slice(0, upTo));
+        // The client asks for changes after `from`, which repeats what it already holds, and the
         // connection ends after `end`.
-        const resumed = fold(events.slice(from, end), held);
-        expect(resumed).toEqual(fold(events.slice(0, Math.max(upTo, end))));
+        const resumed = fold(changes.slice(from, end), held);
+        expect(resumed).toEqual(fold(changes.slice(0, Math.max(upTo, end))));
       }),
       {numRuns: 80},
     );
   });
 
-  it('events shuffled and repeated give the state of the longest in-order prefix, whole', () => {
+  it('changes shuffled and repeated give the state of the longest in-order prefix, whole', () => {
     fc.assert(
       fc.property(scenarios, fc.nat(), (options, salt) => {
-        const {events} = generateScenario(options);
+        const {changes} = generateScenario(options);
         fc.assert(
-          fc.property(delivery(events), picks => {
-            const received = picks.map(pick => events[(pick + salt) % events.length] as Event);
+          fc.property(delivery(changes), picks => {
+            const received = picks.map(
+              pick => changes[(pick + salt) % changes.length] as RunChange,
+            );
             const state = fold(received);
-            // Whatever arrived, the state is the fold of exactly the events up to its sequence.
-            expect(NO_GAP(state)).toEqual(NO_GAP(fold(events.slice(0, Number(state.sequence)))));
+            // Whatever arrived, the state is the fold of exactly the changes up to its sequence.
+            expect(NO_GAP(state)).toEqual(NO_GAP(fold(changes.slice(0, Number(state.sequence)))));
             if (state.gap !== null) expect(state.gap.expected).toBe(state.sequence + 1n);
           }),
           {numRuns: 15},
@@ -113,15 +115,15 @@ describe('the event fold', () => {
   it('a skipped event records a gap and changes nothing else', () => {
     fc.assert(
       fc.property(scenarios, fc.nat(), (options, cut) => {
-        const {events} = generateScenario(options);
-        if (events.length < 3) return;
-        const at = 1 + (cut % (events.length - 2));
-        const held = fold(events.slice(0, at));
-        const skipped = applyEvent(held, events[at + 1] as never);
+        const {changes} = generateScenario(options);
+        if (changes.length < 3) return;
+        const at = 1 + (cut % (changes.length - 2));
+        const held = fold(changes.slice(0, at));
+        const skipped = applyChange(held, changes[at + 1] as never);
         expect({...skipped, gap: null}).toEqual({...held, gap: null});
         expect(skipped.gap).toEqual({expected: BigInt(at + 1), got: BigInt(at + 2)});
         // The skipped event arriving later closes the gap.
-        expect(applyEvent(skipped, events[at] as never).gap).toBeNull();
+        expect(applyChange(skipped, changes[at] as never).gap).toBeNull();
       }),
       {numRuns: 60},
     );
@@ -133,13 +135,13 @@ describe('a snapshot', () => {
     fc.assert(
       fc.property(scenarios, fc.nat(), fc.nat(), (options, held, joined) => {
         const scenario = generateScenario(options);
-        const total = scenario.events.length;
+        const total = scenario.changes.length;
         const a = held % (total + 1);
         const b = a + (joined % (total - a + 1));
-        // The client holds events up to `a`, and the answer to a command no snapshot carries.
-        const receipt = create(ReceiptSchema, {commandId: 'c-held', commandDigest: 'a'.repeat(64)});
-        const before = {...fold(scenario.events.slice(0, a)), receipts: {'c-held': receipt}};
-        // A resync reads a snapshot current to `b`, then the events after it.
+        // The client holds changes up to `a`, and the answer to a command no snapshot carries.
+        const receipt = create(ReceiptSchema, {commandId: 'c-held'});
+        const before = {...fold(scenario.changes.slice(0, a)), receipts: {'c-held': receipt}};
+        // A resync reads a snapshot current to `b`, then the changes after it.
         const daemon = new FakeDaemon(scenario, b);
         const snapshot = daemon.snapshot();
         const resynced = applySnapshot(before, snapshot);
@@ -149,8 +151,8 @@ describe('a snapshot', () => {
         // The snapshot is a read, so reading it twice changes nothing.
         expect(applySnapshot(resynced, snapshot)).toEqual(resynced);
         daemon.commit(total);
-        const caughtUp = fold(daemon.eventsAfter(resynced.sequence), resynced);
-        expect(known(caughtUp)).toEqual(known(fold(scenario.events)));
+        const caughtUp = fold(daemon.changesAfter(resynced.sequence), resynced);
+        expect(known(caughtUp)).toEqual(known(fold(scenario.changes)));
       }),
       {numRuns: 60},
     );
@@ -160,10 +162,10 @@ describe('a snapshot', () => {
     fc.assert(
       fc.property(scenarios, fc.nat(), (options, cut) => {
         const scenario = generateScenario(options);
-        const total = scenario.events.length;
+        const total = scenario.changes.length;
         const at = 1 + (cut % total);
         const stale = new FakeDaemon(scenario, at - 1).snapshot();
-        const held = fold(scenario.events.slice(0, at));
+        const held = fold(scenario.changes.slice(0, at));
         expect(applySnapshot(held, stale)).toEqual({...held, searches: {}});
       }),
       {numRuns: 40},
@@ -174,13 +176,13 @@ describe('a snapshot', () => {
     fc.assert(
       fc.property(scenarios, fc.nat(), fc.nat(), (options, cut, back) => {
         const scenario = generateScenario(options);
-        const total = scenario.events.length;
+        const total = scenario.changes.length;
         fc.pre(total >= 3);
-        // The client holds events up to `at` and then sees one that skips the next.
+        // The client holds changes up to `at` and then sees one that skips the next.
         const at = 1 + (cut % (total - 2));
-        const gapped = applyEvent(
-          fold(scenario.events.slice(0, at)),
-          scenario.events[at + 1] as Event,
+        const gapped = applyChange(
+          fold(scenario.changes.slice(0, at)),
+          scenario.changes[at + 1] as RunChange,
         );
         expect(gapped.gap).not.toBeNull();
         // The daemon answers the resync from a sequence below the one held.
@@ -200,7 +202,7 @@ describe('a snapshot', () => {
 
 /** A hand-made history of items: each has running versions, and maybe a final one, committed in any order. */
 interface Versioned {
-  readonly events: readonly Event[];
+  readonly changes: readonly RunChange[];
   /** For each item id, its versions in commit order. */
   readonly versions: ReadonlyMap<
     string,
@@ -234,7 +236,7 @@ const histories: fc.Arbitrary<Versioned> = fc
       .map((order): Versioned => {
         const next = new Map<number, number>();
         const versions = new Map<string, {item: Item; sequence: bigint}[]>();
-        const events = order.map((index, position) => {
+        const changes = order.map((index, position) => {
           const shape = shapes[index] as (typeof shapes)[number];
           const version = next.get(index) ?? 0;
           next.set(index, version + 1);
@@ -247,13 +249,13 @@ const histories: fc.Arbitrary<Versioned> = fc
           );
           const sequence = BigInt(position + 1);
           versions.set(id, [...(versions.get(id) ?? []), {item, sequence}]);
-          return create(EventSchema, {
+          return create(RunChangeSchema, {
             sequence,
             at: timestampFromMs(1000 * (position + 1)),
-            body: {case: 'itemUpdated', value: item},
+            body: {case: 'item', value: item},
           });
         });
-        return {events, versions};
+        return {changes, versions};
       });
   });
 
@@ -263,29 +265,29 @@ const frame = (body: WatchAgentResponse['body'], sequence: bigint): WatchAgentRe
 /** What the agent stream sends after opening at `cut`: a page of the newest versions, then each later one with its progress. */
 function agentSession(history: Versioned, cut: number): WatchAgentResponse[] {
   const newest = new Map<string, Item>();
-  for (const event of history.events.slice(0, cut)) {
+  for (const event of history.changes.slice(0, cut)) {
     if (
-      oneofIs(event.body, 'itemUpdated', {
-        runUpdated: true,
-        agentUpdated: true,
-        turnUpdated: true,
-        itemUpdated: true,
-        messageUpdated: true,
-        receiptRecorded: true,
+      oneofIs(event.body, 'item', {
+        run: true,
+        agent: true,
+        turn: true,
+        item: true,
+        message: true,
+        receipt: true,
       })
     )
       newest.set(event.body.value.id, event.body.value);
   }
   const page = create(ItemsPageSchema, {items: [...newest.values()], sequence: BigInt(cut)});
-  const later = history.events.slice(cut).flatMap(event => {
+  const later = history.changes.slice(cut).flatMap(event => {
     if (
-      !oneofIs(event.body, 'itemUpdated', {
-        runUpdated: true,
-        agentUpdated: true,
-        turnUpdated: true,
-        itemUpdated: true,
-        messageUpdated: true,
-        receiptRecorded: true,
+      !oneofIs(event.body, 'item', {
+        run: true,
+        agent: true,
+        turn: true,
+        item: true,
+        message: true,
+        receipt: true,
       })
     )
       return [];
@@ -311,12 +313,12 @@ function agentSession(history: Versioned, cut: number): WatchAgentResponse[] {
 }
 
 type Step =
-  | {readonly from: 'run'; readonly event: Event}
+  | {readonly from: 'run'; readonly event: RunChange}
   | {readonly from: 'agent'; readonly frame: WatchAgentResponse};
 
 /** Both streams, each in its own order and with repeats, interleaved by `turns`. */
 function interleave(
-  run: readonly Event[],
+  run: readonly RunChange[],
   agent: readonly WatchAgentResponse[],
   turns: readonly boolean[],
 ): Step[] {
@@ -325,10 +327,10 @@ function interleave(
   let a = 0;
   for (const takeRun of turns) {
     if ((takeRun && r < run.length) || a >= agent.length) {
-      if (r < run.length) steps.push({from: 'run', event: run[r++] as Event});
+      if (r < run.length) steps.push({from: 'run', event: run[r++] as RunChange});
     } else steps.push({from: 'agent', frame: agent[a++] as WatchAgentResponse});
   }
-  while (r < run.length) steps.push({from: 'run', event: run[r++] as Event});
+  while (r < run.length) steps.push({from: 'run', event: run[r++] as RunChange});
   while (a < agent.length) steps.push({from: 'agent', frame: agent[a++] as WatchAgentResponse});
   return steps;
 }
@@ -336,7 +338,7 @@ function interleave(
 const play = (steps: readonly Step[]): OrchestratorState =>
   steps.reduce(
     (state, step) =>
-      step.from === 'run' ? applyEvent(state, step.event) : applyAgentFeed(state, step.frame),
+      step.from === 'run' ? applyChange(state, step.event) : applyAgentFeed(state, step.frame),
     emptyState,
   );
 
@@ -358,7 +360,7 @@ describe('whole items from the run stream and the agent stream', () => {
   it('every item ends as its newest version, however the streams interleave, repeat or restart', () => {
     fc.assert(
       fc.property(plans, ({history, firstCut, secondCut, runDups, agentDups, turns, redial}) => {
-        const total = history.events.length;
+        const total = history.changes.length;
         const first = firstCut % (total + 1);
         const second = first + (secondCut % (total - first + 1));
         // A redial opens a second session at a later cut, and the first one's frames are not repeated.
@@ -367,7 +369,7 @@ describe('whole items from the run stream and the agent stream', () => {
           ...(redial ? agentSession(history, second) : []),
         ];
         const state = play(
-          interleave(repeated(history.events, runDups), repeated(agent, agentDups), turns),
+          interleave(repeated(history.changes, runDups), repeated(agent, agentDups), turns),
         );
         for (const [id, versions] of history.versions) {
           const newest = versions[versions.length - 1];
@@ -380,7 +382,7 @@ describe('whole items from the run stream and the agent stream', () => {
 
   it('a final item is never replaced by a running one, and a running one by an older running one', () => {
     fc.assert(
-      fc.property(histories, fc.nat(), fc.nat(), ({events, versions}, a, b) => {
+      fc.property(histories, fc.nat(), fc.nat(), ({changes, versions}, a, b) => {
         // Every pair of copies of one item, delivered in either order.
         for (const [id, copies] of versions) {
           const [older, newer] = pairOf(copies, a, b);
@@ -392,7 +394,7 @@ describe('whole items from the run stream and the agent stream', () => {
             expect(deliver(order).items[id]).toEqual(newer.item);
           }
         }
-        expect(events.length).toBeGreaterThan(0);
+        expect(changes.length).toBeGreaterThan(0);
       }),
       {numRuns: 100},
     );
@@ -401,10 +403,10 @@ describe('whole items from the run stream and the agent stream', () => {
   it('progress is only what the stored item does not hold, and never survives a final item', () => {
     fc.assert(
       fc.property(plans, ({history, firstCut, runDups, agentDups, turns}) => {
-        const first = firstCut % (history.events.length + 1);
+        const first = firstCut % (history.changes.length + 1);
         const agent = agentSession(history, first);
         const steps = interleave(
-          repeated(history.events, runDups),
+          repeated(history.changes, runDups),
           repeated(agent, agentDups),
           turns,
         );
@@ -412,7 +414,9 @@ describe('whole items from the run stream and the agent stream', () => {
         let state = emptyState;
         for (const step of steps) {
           state =
-            step.from === 'run' ? applyEvent(state, step.event) : applyAgentFeed(state, step.frame);
+            step.from === 'run'
+              ? applyChange(state, step.event)
+              : applyAgentFeed(state, step.frame);
           for (const [id, overlay] of Object.entries(state.overlays)) {
             const stored = state.items[id];
             const stamp = state.itemSequences[id] ?? 0n;
@@ -430,7 +434,7 @@ describe('whole items from the run stream and the agent stream', () => {
 describe('progress on running items', () => {
   it('is laid over the stored item, and dropped when the final item arrives', () => {
     const scenario = generateScenario({seed: 3, subagents: 2, live: true});
-    const state = fold(scenario.events);
+    const state = fold(scenario.changes);
     const running = Object.values(state.items).find(item => item.status === ItemStatus.RUNNING);
     if (running === undefined) throw new Error('the live fixture has a running item');
     const at = state.sequence;
@@ -463,7 +467,7 @@ describe('progress on running items', () => {
 
   it('made before the stored item was committed is already in it and is not added again', () => {
     const scenario = generateScenario({seed: 3, subagents: 2, live: true});
-    const state = fold(scenario.events);
+    const state = fold(scenario.changes);
     const running = Object.values(state.items).find(item => item.status === ItemStatus.RUNNING);
     if (running === undefined) throw new Error('the live fixture has a running item');
     const stamp = state.itemSequences[running.id] ?? 0n;
@@ -489,18 +493,18 @@ describe('progress on running items', () => {
       fc.property(scenarios, fc.integer({min: 1, max: 6}), (options, pageSize) => {
         const scenario = generateScenario(options);
         const daemon = new FakeDaemon(scenario);
-        const agent = Object.keys(fold(scenario.events).agents)[0];
+        const agent = Object.keys(fold(scenario.changes).agents)[0];
         if (agent === undefined) return;
         let state = fold(
-          scenario.events.filter(
+          scenario.changes.filter(
             event =>
-              !oneofIs(event.body, 'itemUpdated', {
-                runUpdated: true,
-                agentUpdated: true,
-                turnUpdated: true,
-                itemUpdated: true,
-                messageUpdated: true,
-                receiptRecorded: true,
+              !oneofIs(event.body, 'item', {
+                run: true,
+                agent: true,
+                turn: true,
+                item: true,
+                message: true,
+                receipt: true,
               }),
           ),
         );
@@ -519,7 +523,7 @@ describe('progress on running items', () => {
             .filter(item => item.agentId === agent)
             .map(item => item.id)
             .sort();
-        expect(mine(state.items)).toEqual(mine(fold(scenario.events).items));
+        expect(mine(state.items)).toEqual(mine(fold(scenario.changes).items));
       }),
       {numRuns: 40},
     );

@@ -16,13 +16,13 @@ func TestDecodeEveryWatchRunsKind(t *testing.T) {
 			frame := &pb.WatchRunsResponse{}
 			reflected := frame.ProtoReflect()
 			reflected.Set(field, reflected.NewField(field))
-			snapshot, event, search := client.DecodeWatchRuns(frame)
+			snapshot, change, search := client.DecodeWatchRuns(frame)
 			var decoded proto.Message
 			switch field.Name() {
 			case "snapshot":
 				decoded = snapshot
-			case "event":
-				decoded = event
+			case "change":
+				decoded = change
 			case "search":
 				decoded = search
 			default:

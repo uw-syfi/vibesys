@@ -9,8 +9,6 @@ import {
   AgentStatus,
   type Command,
   Delivery,
-  type Event,
-  EventSchema,
   type Item,
   type ItemsPage,
   ItemsPageSchema,
@@ -22,10 +20,12 @@ import {
   ReceiptSchema,
   Refusal,
   Rejection,
+  type RunChange,
+  RunChangeSchema,
   type RunsSnapshot,
   RunsSnapshotSchema,
 } from '@vibesys/orchestrator-proto';
-import {applyEvent} from '../../state/orchestrator/fold.js';
+import {applyChange} from '../../state/orchestrator/fold.js';
 import {emptyState, type OrchestratorState} from '../../state/orchestrator/state.js';
 import {invokeCallback} from '../callback-errors.js';
 import type {Scenario} from './scenario.js';
@@ -34,16 +34,16 @@ import {searchFixture} from './search.js';
 const FINAL = new Set([AgentStatus.ENDED, AgentStatus.FAILED, AgentStatus.LOST]);
 
 export class FakeDaemon {
-  readonly #log: Event[];
+  readonly #log: RunChange[];
   #visible: number;
   readonly #receipts = new Map<string, Receipt>();
   readonly #watchers = new Set<() => void>();
 
   constructor(
     readonly scenario: Scenario,
-    visible: number = scenario.events.length,
+    visible: number = scenario.changes.length,
   ) {
-    this.#log = [...scenario.events];
+    this.#log = [...scenario.changes];
     this.#visible = visible;
   }
 
@@ -68,7 +68,7 @@ export class FakeDaemon {
   }
 
   #state(upTo: number): OrchestratorState {
-    return this.#log.slice(0, upTo).reduce(applyEvent, emptyState);
+    return this.#log.slice(0, upTo).reduce(applyChange, emptyState);
   }
 
   snapshot(): RunsSnapshot {
@@ -93,7 +93,7 @@ export class FakeDaemon {
     });
   }
 
-  eventsAfter(sequence: bigint): Event[] {
+  changesAfter(sequence: bigint): RunChange[] {
     return this.#log.slice(Number(sequence), this.#visible);
   }
 
@@ -145,26 +145,21 @@ export class FakeDaemon {
     const message = this.#state(this.#visible).messages[messageId];
     if (message === undefined) return;
     const at = Date.parse('2026-11-01T18:00:00Z') + this.#log.length * 1000;
-    this.#append(
-      at,
-      {
-        case: 'messageUpdated',
-        value: create(MessageSchema, {...message, delivery: Delivery.REJECTED, rejection}),
-      },
-      '',
-    );
+    this.#append(at, {
+      case: 'message',
+      value: create(MessageSchema, {...message, delivery: Delivery.REJECTED, rejection}),
+    });
   }
 
   #refuse(commandId: string, refusal: Refusal, agentId: string, atMs: number): Receipt {
     const runId = Object.keys(this.#state(this.#visible).runs)[0] ?? '';
     const receipt = create(ReceiptSchema, {
       commandId,
-      commandDigest: 'b'.repeat(64),
       refusal,
       runId,
       agentId,
     });
-    this.#append(atMs, {case: 'receiptRecorded', value: receipt}, commandId);
+    this.#append(atMs, {case: 'receipt', value: receipt});
     return receipt;
   }
 
@@ -188,30 +183,28 @@ export class FakeDaemon {
       at: timestampFromMs(atMs),
       body: {case: 'text', value: text},
     });
-    this.#append(atMs, {case: 'messageUpdated', value: message}, commandId);
+    this.#append(atMs, {case: 'message', value: message});
     const receipt = create(ReceiptSchema, {
       commandId,
-      commandDigest: 'b'.repeat(64),
       runId: agent.runId,
       agentId: agent.id,
       messageId: message.id,
       delivery,
       sequence: BigInt(this.#log.length + 1),
     });
-    this.#append(atMs, {case: 'receiptRecorded', value: receipt}, commandId);
+    this.#append(atMs, {case: 'receipt', value: receipt});
     return receipt;
   }
 
-  #append(atMs: number, body: Event['body'], commandId: string): void {
+  #append(atMs: number, body: RunChange['body']): void {
     // Appended facts come after everything the scenario holds back, so they commit last.
-    const event = create(EventSchema, {
+    const change = create(RunChangeSchema, {
       sequence: BigInt(this.#log.length + 1),
       runId: this.scenario.runId,
-      commandId,
       at: timestampFromMs(atMs),
       body,
     });
-    this.#log.push(event);
+    this.#log.push(change);
     this.#visible = this.#log.length;
     for (const watcher of this.#watchers) invokeCallback(watcher);
   }

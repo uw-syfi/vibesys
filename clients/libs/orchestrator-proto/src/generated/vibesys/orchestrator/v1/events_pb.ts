@@ -16,130 +16,85 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/events.proto.
  */
 export const file_vibesys_orchestrator_v1_events: GenFile = /*@__PURE__*/
-  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ldmVudHMucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIl0KDVNlc3Npb25Tb3VyY2USGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESGAoHc2Vzc2lvbhgCIAEoDUIHukgEKgIgABIXCgZvZmZzZXQYAyABKARCB7pIBDICIAAilAQKBUV2ZW50EhkKCHNlcXVlbmNlGAEgASgEQge6SAQyAiAAEg4KBnJ1bl9pZBgCIAEoCRISCgpjb21tYW5kX2lkGAMgASgJEi4KAmF0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEjYKBnNvdXJjZRgFIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25Tb3VyY2USMwoLcnVuX3VwZGF0ZWQYCiABKAsyHC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW5IABI3Cg1hZ2VudF91cGRhdGVkGAsgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRIABI1Cgx0dXJuX3VwZGF0ZWQYDCABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuSAASNQoMaXRlbV91cGRhdGVkGA0gASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbUgAEjsKD21lc3NhZ2VfdXBkYXRlZBgOIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2VIABI8ChByZWNlaXB0X3JlY29yZGVkGA8gASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVjZWlwdEgAQg0KBGJvZHkSBbpIAggBInUKBURlbHRhEhkKCGFnZW50X2lkGAEgASgJQge6SARyAhABEhgKB2l0ZW1faWQYAiABKAlCB7pIBHICEAESDgoEdGV4dBgDIAEoCUgAEhgKDmNvbW1hbmRfb3V0cHV0GAQgASgJSABCDQoEYm9keRIFukgCCAEicQoJQWdlbnRTcGVjEjsKB2hhcm5lc3MYASABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgi6SAWCAQIQARINCgVtb2RlbBgCIAEoCRIYChByZWFzb25pbmdfZWZmb3J0GAMgASgJItECCghTdGFydFJ1bhIbCgpyZXBvc2l0b3J5GAEgASgJQge6SARyAhABEhUKBHRhc2sYAiABKAlCB7pIBHICEAESFAoMZmFub3V0X2xpbWl0GAMgASgNEiwKCGRlYWRsaW5lGAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBKAAQoEbGVhZBgFIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50U3BlY0JOukhLugFFChZzdGFydF9ydW4ubGVhZC5oYXJuZXNzEhh0aGUgbGVhZCBuZWVkcyBhIGhhcm5lc3MaEXRoaXMuaGFybmVzcyAhPSAwyAEBEg0KBWJyaWVmGAYgASgJEjsKDGFsbG93X2FnZW50cxgHIAMoCzIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFsbG93ZWRBZ2VudCIiCgdTdG9wUnVuEhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQASLEAQoKU3Bhd25BZ2VudBIXCgZydW5faWQYASABKAlCB7pIBHICEAESPgoEcm9sZRgCIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIMukgJggEGEAEgACABEjAKBHNwZWMYAyABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudFNwZWMSEwoLcGxhbl9udW1iZXIYBCABKA0SFgoFYnJpZWYYBSABKAlCB7pIBHICEAEiqgEKCVN0b3BBZ2VudBIyCghhZ2VudF9pZBgBIAEoCUIgukgEcgIQAaq7GBVUaGUgc3ViYWdlbnQgdG8gc3RvcC46aaq7GGUKCnN0b3BfYWdlbnQSV1N0b3Agb25lIHN1YmFnZW50IG9mIHlvdXIgcnVuLiBJdCBpcyBhc2tlZCB0byBmaW5pc2ggaXRzIHR1cm4sIHRoZW4gaXRzIHNlc3Npb24gY2xvc2VzLiL6AQoLU2VuZE1lc3NhZ2USLwoIYWdlbnRfaWQYASABKAlCHbpIBHICEAGquxgSVGhlIGFnZW50IHRvIHRlbGwuEiUKBHRleHQYAiABKAlCF7pIBHICEAGquxgMV2hhdCB0byBzYXkuOpIBqrsYjQEKDHNlbmRfbWVzc2FnZRJ9U2VuZCB0ZXh0IHRvIG9uZSBhZ2VudCBvZiB5b3VyIHJ1bi4gSXQgcmVhY2hlcyB0aGUgYWdlbnQgYXMgc3RlZXJpbmcgaWYgaXQgaXMgd29ya2luZywgb3Igc3RhcnRzIGl0cyBuZXh0IHR1cm4gaWYgaXQgaXMgaWRsZS4iSAoLUG9zdEhhbmRvZmYSOQoHaGFuZG9mZhgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhhbmRvZmZCBrpIA8gBASJFCgpQb3N0UmVwb3J0EjcKBnJlcG9ydBgBIAEoCzIfLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlcG9ydEIGukgDyAEBIskDCgdDb21tYW5kEhMKAmlkGAEgASgJQge6SARyAhABEjYKCXN0YXJ0X3J1bhgKIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0YXJ0UnVuSAASNAoIc3RvcF9ydW4YCyABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wUnVuSAASOgoLc3Bhd25fYWdlbnQYDCABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TcGF3bkFnZW50SAASOAoKc3RvcF9hZ2VudBgNIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0b3BBZ2VudEgAEjwKDHNlbmRfbWVzc2FnZRgOIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlbmRNZXNzYWdlSAASPAoMcG9zdF9oYW5kb2ZmGA8gASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUG9zdEhhbmRvZmZIABI6Cgtwb3N0X3JlcG9ydBgQIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBvc3RSZXBvcnRIAEINCgRib2R5EgW6SAIIASLYAgoHUmVjZWlwdBIbCgpjb21tYW5kX2lkGAEgASgJQge6SARyAhABEi0KDmNvbW1hbmRfZGlnZXN0GAIgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSOwoHcmVmdXNhbBgDIAEoDjIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlZnVzYWxCCLpIBYIBAhABEg4KBnJ1bl9pZBgEIAEoCRIQCghhZ2VudF9pZBgFIAEoCRISCgptZXNzYWdlX2lkGAYgASgJEj0KCGRlbGl2ZXJ5GAcgASgOMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRGVsaXZlcnlCCLpIBYIBAhABEhAKCHNlcXVlbmNlGAggASgEEj0KDmFsbG93ZWRfYWdlbnRzGAkgAygLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWxsb3dlZEFnZW50Kt0CCgdSZWZ1c2FsEhcKE1JFRlVTQUxfVU5TUEVDSUZJRUQQABIZChVSRUZVU0FMX1JVTl9OT1RfRk9VTkQQARIbChdSRUZVU0FMX0FHRU5UX05PVF9GT1VORBACEhkKFVJFRlVTQUxfTk9UX1BFUk1JVFRFRBADEhsKF1JFRlVTQUxfUlVOX05PVF9SVU5OSU5HEAQSGAoUUkVGVVNBTF9GQU5PVVRfTElNSVQQBRIZChVSRUZVU0FMX0FHRU5UX0lTX0xFQUQQBhIaChZSRUZVU0FMX0FHRU5UX05PVF9MSVZFEAcSGwoXUkVGVVNBTF9ERUFETElORV9QQVNTRUQQCBIdChlSRUZVU0FMX1JFUE9TSVRPUllfSU5fVVNFEAkSHQoZUkVGVVNBTF9BR0VOVF9OT1RfQUxMT1dFRBAKEh0KGVJFRlVTQUxfSEFORE9GRl9OT1RfWU9VUlMQC0JUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_tool_options]);
+  fileDesc("CiR2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ldmVudHMucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIpsDCglSdW5DaGFuZ2USGQoIc2VxdWVuY2UYASABKARCB7pIBDICIAASLgoCYXQYAiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESDgoGcnVuX2lkGAMgASgJEisKA3J1bhgKIAEoCzIcLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1bkgAEi8KBWFnZW50GAsgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRIABItCgR0dXJuGAwgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybkgAEi0KBGl0ZW0YDSABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtSAASMwoHbWVzc2FnZRgOIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2VIABIzCgdyZWNlaXB0GA8gASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVjZWlwdEgAQg0KBGJvZHkSBbpIAggBInUKBURlbHRhEhkKCGFnZW50X2lkGAEgASgJQge6SARyAhABEhgKB2l0ZW1faWQYAiABKAlCB7pIBHICEAESDgoEdGV4dBgDIAEoCUgAEhgKDmNvbW1hbmRfb3V0cHV0GAQgASgJSABCDQoEYm9keRIFukgCCAEicQoJQWdlbnRTcGVjEjsKB2hhcm5lc3MYASABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgi6SAWCAQIQARINCgVtb2RlbBgCIAEoCRIYChByZWFzb25pbmdfZWZmb3J0GAMgASgJItECCghTdGFydFJ1bhIbCgpyZXBvc2l0b3J5GAEgASgJQge6SARyAhABEhUKBHRhc2sYAiABKAlCB7pIBHICEAESFAoMZmFub3V0X2xpbWl0GAMgASgNEiwKCGRlYWRsaW5lGAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBKAAQoEbGVhZBgFIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50U3BlY0JOukhLugFFChZzdGFydF9ydW4ubGVhZC5oYXJuZXNzEhh0aGUgbGVhZCBuZWVkcyBhIGhhcm5lc3MaEXRoaXMuaGFybmVzcyAhPSAwyAEBEg0KBWJyaWVmGAYgASgJEjsKDGFsbG93X2FnZW50cxgHIAMoCzIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFsbG93ZWRBZ2VudCIiCgdTdG9wUnVuEhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQASLEAQoKU3Bhd25BZ2VudBIXCgZydW5faWQYASABKAlCB7pIBHICEAESPgoEcm9sZRgCIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIMukgJggEGEAEgACABEjAKBHNwZWMYAyABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudFNwZWMSEwoLcGxhbl9udW1iZXIYBCABKA0SFgoFYnJpZWYYBSABKAlCB7pIBHICEAEiqgEKCVN0b3BBZ2VudBIyCghhZ2VudF9pZBgBIAEoCUIgukgEcgIQAaq7GBVUaGUgc3ViYWdlbnQgdG8gc3RvcC46aaq7GGUKCnN0b3BfYWdlbnQSV1N0b3Agb25lIHN1YmFnZW50IG9mIHlvdXIgcnVuLiBJdCBpcyBhc2tlZCB0byBmaW5pc2ggaXRzIHR1cm4sIHRoZW4gaXRzIHNlc3Npb24gY2xvc2VzLiL6AQoLU2VuZE1lc3NhZ2USLwoIYWdlbnRfaWQYASABKAlCHbpIBHICEAGquxgSVGhlIGFnZW50IHRvIHRlbGwuEiUKBHRleHQYAiABKAlCF7pIBHICEAGquxgMV2hhdCB0byBzYXkuOpIBqrsYjQEKDHNlbmRfbWVzc2FnZRJ9U2VuZCB0ZXh0IHRvIG9uZSBhZ2VudCBvZiB5b3VyIHJ1bi4gSXQgcmVhY2hlcyB0aGUgYWdlbnQgYXMgc3RlZXJpbmcgaWYgaXQgaXMgd29ya2luZywgb3Igc3RhcnRzIGl0cyBuZXh0IHR1cm4gaWYgaXQgaXMgaWRsZS4iSAoLUG9zdEhhbmRvZmYSOQoHaGFuZG9mZhgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhhbmRvZmZCBrpIA8gBASJFCgpQb3N0UmVwb3J0EjcKBnJlcG9ydBgBIAEoCzIfLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlcG9ydEIGukgDyAEBIskDCgdDb21tYW5kEhMKAmlkGAEgASgJQge6SARyAhABEjYKCXN0YXJ0X3J1bhgKIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0YXJ0UnVuSAASNAoIc3RvcF9ydW4YCyABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wUnVuSAASOgoLc3Bhd25fYWdlbnQYDCABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TcGF3bkFnZW50SAASOAoKc3RvcF9hZ2VudBgNIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0b3BBZ2VudEgAEjwKDHNlbmRfbWVzc2FnZRgOIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlbmRNZXNzYWdlSAASPAoMcG9zdF9oYW5kb2ZmGA8gASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUG9zdEhhbmRvZmZIABI6Cgtwb3N0X3JlcG9ydBgQIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBvc3RSZXBvcnRIAEINCgRib2R5EgW6SAIIASK/AgoHUmVjZWlwdBIbCgpjb21tYW5kX2lkGAEgASgJQge6SARyAhABEjsKB3JlZnVzYWwYAyABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SZWZ1c2FsQgi6SAWCAQIQARIOCgZydW5faWQYBCABKAkSEAoIYWdlbnRfaWQYBSABKAkSEgoKbWVzc2FnZV9pZBgGIAEoCRI9CghkZWxpdmVyeRgHIAEoDjIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkRlbGl2ZXJ5Qgi6SAWCAQIQARIQCghzZXF1ZW5jZRgIIAEoBBI9Cg5hbGxvd2VkX2FnZW50cxgJIAMoCzIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFsbG93ZWRBZ2VudEoECAIQA1IOY29tbWFuZF9kaWdlc3Qq3QIKB1JlZnVzYWwSFwoTUkVGVVNBTF9VTlNQRUNJRklFRBAAEhkKFVJFRlVTQUxfUlVOX05PVF9GT1VORBABEhsKF1JFRlVTQUxfQUdFTlRfTk9UX0ZPVU5EEAISGQoVUkVGVVNBTF9OT1RfUEVSTUlUVEVEEAMSGwoXUkVGVVNBTF9SVU5fTk9UX1JVTk5JTkcQBBIYChRSRUZVU0FMX0ZBTk9VVF9MSU1JVBAFEhkKFVJFRlVTQUxfQUdFTlRfSVNfTEVBRBAGEhoKFlJFRlVTQUxfQUdFTlRfTk9UX0xJVkUQBxIbChdSRUZVU0FMX0RFQURMSU5FX1BBU1NFRBAIEh0KGVJFRlVTQUxfUkVQT1NJVE9SWV9JTl9VU0UQCRIdChlSRUZVU0FMX0FHRU5UX05PVF9BTExPV0VEEAoSHQoZUkVGVVNBTF9IQU5ET0ZGX05PVF9ZT1VSUxALQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_tool_options]);
 
 /**
- * SessionSource names the session event a stored event came from, so that a replay knows how far
- * each session's stream was committed. It is what a restarted daemon resumes that stream from.
+ * RunChange is what a watcher of runs receives for one committed event: the public part of it. A
+ * client that folds these over a snapshot holds what a later snapshot would say.
  *
- * @generated from message vibesys.orchestrator.v1.SessionSource
+ * @generated from message vibesys.orchestrator.v1.RunChange
  */
-export type SessionSource = Message<"vibesys.orchestrator.v1.SessionSource"> & {
+export type RunChange = Message<"vibesys.orchestrator.v1.RunChange"> & {
   /**
-   * @generated from field: string agent_id = 1;
-   */
-  agentId: string;
-
-  /**
-   * @generated from field: uint32 session = 2;
-   */
-  session: number;
-
-  /**
-   * @generated from field: uint64 offset = 3;
-   */
-  offset: bigint;
-};
-
-/**
- * Describes the message vibesys.orchestrator.v1.SessionSource.
- * Use `create(SessionSourceSchema)` to create a new message.
- */
-export const SessionSourceSchema: GenMessage<SessionSource> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 0);
-
-/**
- * Event is one committed fact. The state is a fold of these, so nothing that a decision depends on
- * lives anywhere else. One input's events commit as one transaction.
- *
- * @generated from message vibesys.orchestrator.v1.Event
- */
-export type Event = Message<"vibesys.orchestrator.v1.Event"> & {
-  /**
-   * Global, gap-free, assigned at commit.
+   * Global and gap-free across runs. A stream limited to one run skips the sequences of the others.
    *
    * @generated from field: uint64 sequence = 1;
    */
   sequence: bigint;
 
   /**
-   * Empty only on the receipt of a command refused before it reached a run.
-   *
-   * @generated from field: string run_id = 2;
-   */
-  runId: string;
-
-  /**
-   * Empty unless a command caused the event.
-   *
-   * @generated from field: string command_id = 3;
-   */
-  commandId: string;
-
-  /**
-   * @generated from field: google.protobuf.Timestamp at = 4;
+   * @generated from field: google.protobuf.Timestamp at = 2;
    */
   at?: Timestamp | undefined;
 
   /**
-   * Absent unless a session event caused the event.
+   * The run the change belongs to, for a client that follows one run on a stream of all of them. Empty
+   * only on the receipt of a command refused before it reached a run.
    *
-   * @generated from field: vibesys.orchestrator.v1.SessionSource source = 5;
+   * @generated from field: string run_id = 3;
    */
-  source?: SessionSource | undefined;
+  runId: string;
 
   /**
-   * @generated from oneof vibesys.orchestrator.v1.Event.body
+   * @generated from oneof vibesys.orchestrator.v1.RunChange.body
    */
   body: {
     /**
-     * @generated from field: vibesys.orchestrator.v1.Run run_updated = 10;
+     * @generated from field: vibesys.orchestrator.v1.Run run = 10;
      */
     value: Run;
-    case: "runUpdated";
+    case: "run";
   } | {
     /**
-     * @generated from field: vibesys.orchestrator.v1.Agent agent_updated = 11;
+     * @generated from field: vibesys.orchestrator.v1.Agent agent = 11;
      */
     value: Agent;
-    case: "agentUpdated";
+    case: "agent";
   } | {
     /**
-     * @generated from field: vibesys.orchestrator.v1.Turn turn_updated = 12;
+     * @generated from field: vibesys.orchestrator.v1.Turn turn = 12;
      */
     value: Turn;
-    case: "turnUpdated";
+    case: "turn";
   } | {
     /**
      * The whole item, so a client replaces by id.
      *
-     * @generated from field: vibesys.orchestrator.v1.Item item_updated = 13;
+     * @generated from field: vibesys.orchestrator.v1.Item item = 13;
      */
     value: Item;
-    case: "itemUpdated";
+    case: "item";
   } | {
     /**
-     * @generated from field: vibesys.orchestrator.v1.Message message_updated = 14;
+     * @generated from field: vibesys.orchestrator.v1.Message message = 14;
      */
     value: Message$1;
-    case: "messageUpdated";
+    case: "message";
   } | {
     /**
-     * Every command ends in one, so a refused command is idempotent across a restart too.
-     *
-     * @generated from field: vibesys.orchestrator.v1.Receipt receipt_recorded = 15;
+     * @generated from field: vibesys.orchestrator.v1.Receipt receipt = 15;
      */
     value: Receipt;
-    case: "receiptRecorded";
+    case: "receipt";
   } | { case: undefined; value?: undefined };
 };
 
 /**
- * Describes the message vibesys.orchestrator.v1.Event.
- * Use `create(EventSchema)` to create a new message.
+ * Describes the message vibesys.orchestrator.v1.RunChange.
+ * Use `create(RunChangeSchema)` to create a new message.
  */
-export const EventSchema: GenMessage<Event> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 1);
+export const RunChangeSchema: GenMessage<RunChange> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_events, 0);
 
 /**
  * Delta is progress on a running item. It is never stored and never reaches the decision core: the
@@ -181,7 +136,7 @@ export type Delta = Message<"vibesys.orchestrator.v1.Delta"> & {
  * Use `create(DeltaSchema)` to create a new message.
  */
 export const DeltaSchema: GenMessage<Delta> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 2);
+  messageDesc(file_vibesys_orchestrator_v1_events, 1);
 
 /**
  * AgentSpec says what to run an agent on. An absent harness takes the lead's. An absent model takes
@@ -213,7 +168,7 @@ export type AgentSpec = Message<"vibesys.orchestrator.v1.AgentSpec"> & {
  * Use `create(AgentSpecSchema)` to create a new message.
  */
 export const AgentSpecSchema: GenMessage<AgentSpec> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 3);
+  messageDesc(file_vibesys_orchestrator_v1_events, 2);
 
 /**
  * @generated from message vibesys.orchestrator.v1.StartRun
@@ -269,7 +224,7 @@ export type StartRun = Message<"vibesys.orchestrator.v1.StartRun"> & {
  * Use `create(StartRunSchema)` to create a new message.
  */
 export const StartRunSchema: GenMessage<StartRun> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 4);
+  messageDesc(file_vibesys_orchestrator_v1_events, 3);
 
 /**
  * @generated from message vibesys.orchestrator.v1.StopRun
@@ -286,7 +241,7 @@ export type StopRun = Message<"vibesys.orchestrator.v1.StopRun"> & {
  * Use `create(StopRunSchema)` to create a new message.
  */
 export const StopRunSchema: GenMessage<StopRun> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 5);
+  messageDesc(file_vibesys_orchestrator_v1_events, 4);
 
 /**
  * @generated from message vibesys.orchestrator.v1.SpawnAgent
@@ -325,7 +280,7 @@ export type SpawnAgent = Message<"vibesys.orchestrator.v1.SpawnAgent"> & {
  * Use `create(SpawnAgentSchema)` to create a new message.
  */
 export const SpawnAgentSchema: GenMessage<SpawnAgent> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 6);
+  messageDesc(file_vibesys_orchestrator_v1_events, 5);
 
 /**
  * StopAgent is also the input of the stop_agent tool.
@@ -344,7 +299,7 @@ export type StopAgent = Message<"vibesys.orchestrator.v1.StopAgent"> & {
  * Use `create(StopAgentSchema)` to create a new message.
  */
 export const StopAgentSchema: GenMessage<StopAgent> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 7);
+  messageDesc(file_vibesys_orchestrator_v1_events, 6);
 
 /**
  * SendMessage is also the input of the send_message tool.
@@ -368,7 +323,7 @@ export type SendMessage = Message<"vibesys.orchestrator.v1.SendMessage"> & {
  * Use `create(SendMessageSchema)` to create a new message.
  */
 export const SendMessageSchema: GenMessage<SendMessage> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 8);
+  messageDesc(file_vibesys_orchestrator_v1_events, 7);
 
 /**
  * @generated from message vibesys.orchestrator.v1.PostHandoff
@@ -385,7 +340,7 @@ export type PostHandoff = Message<"vibesys.orchestrator.v1.PostHandoff"> & {
  * Use `create(PostHandoffSchema)` to create a new message.
  */
 export const PostHandoffSchema: GenMessage<PostHandoff> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 9);
+  messageDesc(file_vibesys_orchestrator_v1_events, 8);
 
 /**
  * @generated from message vibesys.orchestrator.v1.PostReport
@@ -402,7 +357,7 @@ export type PostReport = Message<"vibesys.orchestrator.v1.PostReport"> & {
  * Use `create(PostReportSchema)` to create a new message.
  */
 export const PostReportSchema: GenMessage<PostReport> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 10);
+  messageDesc(file_vibesys_orchestrator_v1_events, 9);
 
 /**
  * Command is what clients and agents ask for. It names no caller: the daemon adds who is asking
@@ -471,7 +426,7 @@ export type Command = Message<"vibesys.orchestrator.v1.Command"> & {
  * Use `create(CommandSchema)` to create a new message.
  */
 export const CommandSchema: GenMessage<Command> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 11);
+  messageDesc(file_vibesys_orchestrator_v1_events, 10);
 
 /**
  * Receipt is the answer to a command, and the same answer to each retry of it.
@@ -483,13 +438,6 @@ export type Receipt = Message<"vibesys.orchestrator.v1.Receipt"> & {
    * @generated from field: string command_id = 1;
    */
   commandId: string;
-
-  /**
-   * SHA-256 of the command, so that one id reused for another command is a conflict.
-   *
-   * @generated from field: string command_digest = 2;
-   */
-  commandDigest: string;
 
   /**
    * Unspecified when the command was accepted.
@@ -542,7 +490,7 @@ export type Receipt = Message<"vibesys.orchestrator.v1.Receipt"> & {
  * Use `create(ReceiptSchema)` to create a new message.
  */
 export const ReceiptSchema: GenMessage<Receipt> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_events, 12);
+  messageDesc(file_vibesys_orchestrator_v1_events, 11);
 
 /**
  * Refusal says why a command was not carried out.

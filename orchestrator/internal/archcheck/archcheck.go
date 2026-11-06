@@ -41,7 +41,7 @@ var rules = map[string][]string{
 	"internal/prompts":                 {"internal/core"},
 	"internal/jobs/jobstest":           {"internal/core", "internal/jobs"},
 	"internal/wire":                    {"internal/core", "gen/vibesys/orchestrator/"},
-	"internal/archcheck":               {},
+	"internal/archcheck":               {"gen/vibesys/orchestrator/"},
 	"internal/store":                   {"internal/core", "internal/wire", "internal/localfs", "hostlock"},
 	"internal/store/storetest":         {"internal/core", "internal/store", "internal/wire"},
 	"internal/localfs":                 {},

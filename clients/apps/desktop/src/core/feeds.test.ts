@@ -16,7 +16,7 @@ import * as Schema from 'effect/Schema';
 import * as Stream from 'effect/Stream';
 import * as SubscriptionRef from 'effect/SubscriptionRef';
 import {
-  applyEvent,
+  applyChange,
   emptyHostModel,
   emptyState,
   type FeedStatus,
@@ -45,7 +45,7 @@ const between = (minimum: number, maximum: number) =>
 const upTo = <S extends Schema.Top>(max: number, item: S) =>
   Schema.Array(item).check(Schema.isMaxLength(max));
 const scenario = generateScenario({seed: 7, subagents: 2, live: false});
-const TOTAL = scenario.events.length;
+const TOTAL = scenario.changes.length;
 const daemonAt = (visible: number = TOTAL) => new FakeDaemon(scenario, visible);
 
 /** What the run stream defines of the state: a snapshot and the events after it agree on it. */
@@ -56,7 +56,7 @@ const runStreamShape = (s: OrchestratorState) => ({
   turns: s.turns,
   gap: s.gap,
 });
-const everything = runStreamShape(scenario.events.reduce(applyEvent, emptyState));
+const everything = runStreamShape(scenario.changes.reduce(applyChange, emptyState));
 
 const agentIdOf = (daemon: FakeDaemon): string => {
   const [agent] = daemon.snapshot().agents;
@@ -162,7 +162,7 @@ describe('the run stream', () => {
 
   describe('a gap in the stream', () => {
     const START = Math.floor(TOTAL / 2);
-    const skippedEvent = scenario.events[START + 1];
+    const skippedEvent = scenario.changes[START + 1];
 
     /** The frame of an event two ahead of the snapshot, so one event is missing. */
     const gapFrame = (): Step | undefined =>
@@ -171,7 +171,7 @@ describe('the run stream', () => {
         : {
             frame: toBinary(
               WatchRunsResponseSchema,
-              create(WatchRunsResponseSchema, {body: {case: 'event', value: skippedEvent}}),
+              create(WatchRunsResponseSchema, {body: {case: 'change', value: skippedEvent}}),
             ),
           };
 
@@ -466,12 +466,12 @@ describe('a stream that keeps ending', () => {
   /** The frames of one misbehaving pass: `inOrder` frames in order, then the way it ends. */
   const passSteps = (inOrder: number, terminal: Terminal): ReadonlyArray<Step> => {
     const steps: Step[] = [encode({body: {case: 'snapshot', value: empty.snapshot()}})];
-    for (const event of scenario.events.slice(0, inOrder - 1)) {
-      steps.push(encode({body: {case: 'event', value: event}}));
+    for (const event of scenario.changes.slice(0, inOrder - 1)) {
+      steps.push(encode({body: {case: 'change', value: event}}));
     }
-    const skipped = scenario.events[inOrder];
+    const skipped = scenario.changes[inOrder];
     if (terminal === 'gap' && skipped !== undefined) {
-      return [...steps, encode({body: {case: 'event', value: skipped}}), {hang: true}];
+      return [...steps, encode({body: {case: 'change', value: skipped}}), {hang: true}];
     }
     return [...steps, terminal === 'overflow' ? {overflow: true} : {close: true}];
   };
@@ -646,7 +646,7 @@ it.effect(
           },
         },
       });
-      const last = scenario.events.at(-1);
+      const last = scenario.changes.at(-1);
       if (last === undefined) throw new Error('scenario must have an event');
       const cursors: bigint[] = [];
       const h = yield* hostHarness(daemonAt(TOTAL - 1), {
@@ -660,7 +660,7 @@ it.effect(
                 {
                   frame: toBinary(
                     WatchRunsResponseSchema,
-                    create(WatchRunsResponseSchema, {body: {case: 'event', value: last}}),
+                    create(WatchRunsResponseSchema, {body: {case: 'change', value: last}}),
                   ),
                 },
                 {close: true},

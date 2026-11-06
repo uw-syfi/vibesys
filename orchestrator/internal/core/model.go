@@ -71,9 +71,8 @@ type AgentSpec struct {
 // session opens, which is the safe answer: nothing is steered into or resumed from a session that
 // has not said it can.
 type Capabilities struct {
-	StreamsText bool
-	Steers      bool
-	Resumes     bool
+	Steers  bool
+	Resumes bool
 }
 
 // Agent is one session we launched, in a tree under the lead.

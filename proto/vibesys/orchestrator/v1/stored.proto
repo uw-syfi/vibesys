@@ -1,0 +1,88 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/orchestrator/v1/events.proto";
+import "vibesys/orchestrator/v1/orchestrator.proto";
+import "vibesys/orchestrator/v1/stored_options.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// This file is what the host keeps and no client receives. A record holds the public message plus
+// its private part, so that no field is defined twice and a client's type cannot name a private
+// fact. No service's message may hold anything from here: orchestrator/internal/archcheck reads the
+// descriptors and refuses it.
+
+// AgentRecord is an agent as it is stored.
+message AgentRecord {
+  Agent agent = 1 [(buf.validate.field).required = true];
+  // What the next session of this agent resumes with. Opaque; empty until a session that can resume
+  // opened.
+  bytes resume_token = 2 [
+    (buf.validate.field).bytes.max_len = 4096,
+    (stored_only) = true
+  ];
+}
+
+// RunRecord is a run as it is stored.
+message RunRecord {
+  Run run = 1 [(buf.validate.field).required = true];
+  // The job tool this run's agents use. Recorded when the run starts and never changed, so a relaunch
+  // of any of its sessions meets the same daemon.
+  JobToolEndpoint job_tool = 2 [(stored_only) = true];
+}
+
+// ReceiptRecord is a receipt as it is stored.
+message ReceiptRecord {
+  Receipt receipt = 1 [(buf.validate.field).required = true];
+  // SHA-256 of the command, so that one id reused for another command is a conflict.
+  string command_digest = 2 [
+    (buf.validate.field).string.pattern = "^[0-9a-f]{64}$",
+    (stored_only) = true
+  ];
+}
+
+// JobToolEndpoint is the vibesys-cli a run's agents run and the daemon it serves, as that tool named
+// it when the run started (`daemon ensure --json`). Both are absolute paths, and neither says
+// anything about how the tool lays out what it keeps there.
+message JobToolEndpoint {
+  // The program the agents run. It becomes SkillEnvironment.cli (vibesys/cli/v1/env.proto).
+  string executable = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
+  // The tool's runtime directory. It becomes JobToolPlace.runtime_directory.
+  string runtime_directory = 2 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
+}
+
+// SessionSource names the session event a stored event came from, so that a replay knows how far
+// each session's stream was committed. It is what a restarted daemon resumes that stream from.
+message SessionSource {
+  string agent_id = 1 [(buf.validate.field).string.min_len = 1];
+  uint32 session = 2 [(buf.validate.field).uint32.gt = 0];
+  uint64 offset = 3 [(buf.validate.field).uint64.gt = 0];
+}
+
+// Event is one committed fact, in the log and nowhere else: watchers get RunChange. The state is a
+// fold of these, so nothing that a decision depends on lives anywhere else. One input's events commit
+// as one transaction.
+message Event {
+  // Global, gap-free, assigned at commit.
+  uint64 sequence = 1 [(buf.validate.field).uint64.gt = 0];
+  // Empty only on the receipt of a command refused before it reached a run.
+  string run_id = 2;
+  // Empty unless a command caused the event.
+  string command_id = 3;
+  google.protobuf.Timestamp at = 4 [(buf.validate.field).required = true];
+  // Absent unless a session event caused the event.
+  SessionSource source = 5 [(stored_only) = true];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    RunRecord run_updated = 10;
+    AgentRecord agent_updated = 11;
+    Turn turn_updated = 12;
+    // The whole item.
+    Item item_updated = 13;
+    Message message_updated = 14;
+    // Every command ends in one, so a refused command is idempotent across a restart too.
+    ReceiptRecord receipt_recorded = 15;
+  }
+}

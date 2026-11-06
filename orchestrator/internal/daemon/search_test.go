@@ -49,8 +49,8 @@ func TestSearchWatchConvergesAcrossLagAndReconnect(t *testing.T) {
 				t.Fatal(err)
 			}
 			if i%3 == 0 {
-				r.Hub.PublishStored(hub.Stored{Event: &pb.Event{Sequence: 1}})
-				r.Hub.PublishStored(hub.Stored{Event: &pb.Event{Sequence: 2}})
+				r.Hub.PublishStored(hub.Stored{Change: &pb.RunChange{Sequence: 1}})
+				r.Hub.PublishStored(hub.Stored{Change: &pb.RunChange{Sequence: 2}})
 			}
 			if n%5 == 0 {
 				continue

@@ -65,12 +65,12 @@ func (f *feed) next(v *View) ([]Change, error) {
 	if err != nil {
 		return nil, classify(err)
 	}
-	snapshot, event, search := client.DecodeWatchRuns(frame)
+	snapshot, change, search := client.DecodeWatchRuns(frame)
 	switch {
 	case snapshot != nil:
 		return v.Load(snapshot), nil
-	case event != nil:
-		return v.Apply(event), nil
+	case change != nil:
+		return v.Apply(change), nil
 	}
 	return v.ApplySearch(search), nil
 }

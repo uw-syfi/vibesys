@@ -83,7 +83,7 @@ class OrchestratorServiceServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def WatchRuns(self, request, context):
-        """Snapshot of runs and agents, then every event after its sequence.
+        """Snapshot of runs and agents, then every change after its sequence.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
