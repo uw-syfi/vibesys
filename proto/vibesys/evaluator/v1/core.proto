@@ -1,0 +1,166 @@
+syntax = "proto3";
+
+// What a language SDK and the `vibesys-evaluator` binary (the domain-neutral core,
+// sdk/vibesys-evaluator/go/evaluator) exchange for one coarse operation: the request is one
+// proto3 JSON message on standard input, the response one on standard output. Every
+// subcommand is `vibesys-evaluator <group> <verb>`. Exit status 0 is OK; 1 is a domain error,
+// and standard output then holds an Error; any other status means the core itself broke.
+// Progress and logs go to standard error. See sdk/vibesys-evaluator/docs/spec.md ("The core
+// command line").
+//
+// Groups here: `sample` (start, phase, combine), `records` (write) and `hist` (summarize).
+package vibesys.evaluator.v1;
+
+option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1";
+
+// Error is the response of a subcommand that exits 1.
+message Error {
+  // What kind of error: a stable word the SDK maps to its own exception type.
+  string error_kind = 1;
+  // What is wrong, for people; names the metric, rule, key or file.
+  string message = 2;
+}
+
+// Direction says which way a metric is better.
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_MAX = 1;
+  DIRECTION_MIN = 2;
+}
+
+// MetricSpec declares one metric of a benchmark (a `hello` record's entry).
+message MetricSpec {
+  string name = 1;
+  // Its unit, for people ("ops/s", "ms"); may be empty.
+  string unit = 2;
+  Direction direction = 3;
+}
+
+// MetricValue is one reported value.
+message MetricValue {
+  string name = 1;
+  double value = 2;
+}
+
+// Partial is what a failed sample measured before it stopped (an `error` record's `partial`).
+message Partial {
+  string name = 1;
+  double value = 2;
+  Direction direction = 3;
+  string unit = 4;
+}
+
+// SampleStartRequest starts a sample: resolves its seed and directory (`sample start`).
+message SampleStartRequest {
+  // "check", "benchmark" or "profile".
+  string mode = 1;
+  // The `--seed` flag as the user wrote it, decimal; absent when not given.
+  optional string seed_flag = 2;
+  // The sample seed environment variable's value (VIBESYS_SAMPLE_SEED), if set.
+  string env_seed = 3;
+  // The artifacts directory (VIBESYS_ARTIFACTS_DIR), if set; else `scratch_dir/artifacts`.
+  string env_artifacts_dir = 4;
+  // A directory the SDK removes when the sample ends.
+  string scratch_dir = 5;
+}
+
+// SampleStartResponse is a started sample: `seeds.json` is written in `artifacts_dir`.
+message SampleStartResponse {
+  uint64 seed = 1;
+  // Where the seed came from: "--seed", "VIBESYS_SAMPLE_SEED" or "drawn".
+  string seed_source = 2;
+  string artifacts_dir = 3;
+}
+
+// SamplePhaseRequest creates one phase's directory (`sample phase`).
+message SamplePhaseRequest {
+  string artifacts_dir = 1;
+  string name = 2;
+}
+
+// SamplePhaseResponse names the new, empty directory `<artifacts_dir>/<name>`.
+message SamplePhaseResponse {
+  string path = 1;
+}
+
+// Aggregation says how trials combine into one value.
+enum Aggregation {
+  AGGREGATION_UNSPECIFIED = 0;
+  AGGREGATION_MEDIAN = 1;
+  AGGREGATION_MEAN = 2;
+  AGGREGATION_MIN = 3;
+  AGGREGATION_MAX = 4;
+  AGGREGATION_SUM = 5;
+}
+
+// Series is the trials of one metric.
+message Series {
+  string name = 1;
+  Aggregation aggregation = 2;
+  repeated double values = 3;
+}
+
+// SampleCombineRequest combines the trials of each metric into the sample's value
+// (`sample combine`).
+message SampleCombineRequest {
+  repeated Series series = 1;
+}
+
+// SampleCombineResponse holds one value per series, in the request's order.
+message SampleCombineResponse {
+  repeated MetricValue values = 1;
+}
+
+// WriteRecordRequest appends one result-protocol-2 record to a stream file (`records write`).
+// The core reads the file to enforce the protocol: hello first and once, one outcome, declared
+// metrics only.
+message WriteRecordRequest {
+  // The `--vs-output` file.
+  string path = 1;
+  oneof record {
+    HelloRecord hello = 2;
+    ResultRecord result = 3;
+    ErrorRecord error = 4;
+  }
+  // The first record of a new stream: the file is replaced, not read. Without it the file must
+  // hold the stream so far.
+  bool fresh = 5;
+}
+
+// HelloRecord declares the metrics, in order; it creates (truncates) the file.
+message HelloRecord {
+  repeated MetricSpec metrics = 1;
+}
+
+// ResultRecord is the measured row: every declared metric, finite.
+message ResultRecord {
+  repeated MetricValue values = 1;
+}
+
+// ErrorRecord ends the stream with what failed.
+message ErrorRecord {
+  string message = 1;
+  optional Partial partial = 2;
+}
+
+// WriteRecordResponse says which outcome the stream has now: "result", "error" or "" (hello).
+message WriteRecordResponse {
+  string outcome = 1;
+}
+
+// HistSummaryRequest merges histograms and reads percentiles (`hist summary`).
+message HistSummaryRequest {
+  // Histograms in the compressed HdrHistogram V2 encoding (raw bytes, as loadgen writes them,
+  // or their base64 text).
+  repeated bytes histograms = 1;
+  // Percentiles to read from the merged histogram: 0 to 100 (others are clamped to it).
+  repeated double percentiles = 2;
+}
+
+// HistSummaryResponse is the merged histogram's count, maximum and the percentiles asked for,
+// in the units of the recorded values.
+message HistSummaryResponse {
+  int64 count = 1;
+  int64 max = 2;
+  repeated int64 values = 3;
+}
