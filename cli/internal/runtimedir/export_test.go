@@ -5,3 +5,6 @@ var ResolveMachineIn = resolveMachine
 
 // ResolveLeasesIn is ResolveLeases with the parents it tries given by a test.
 var ResolveLeasesIn = resolveLeases
+
+// LocalDiskAdvice is the advice a runtime directory on a network file system gets.
+var LocalDiskAdvice = localDiskAdvice

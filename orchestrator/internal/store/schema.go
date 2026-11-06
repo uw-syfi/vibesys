@@ -1,8 +1,10 @@
 package store
 
-// schemaVersion is stored in meta. A store written under any other version is refused, with what to
-// do about it: nothing has been released, so the stored format changes in place and old rows are not
-// upgraded (docs/contributing/process-boundaries.md). Version 4 added report kinds and numbers, the
+// schemaVersion is stored in meta. A store written under any other version, older or newer, is
+// refused, with what to do about it. Version 12 is the stored format of the first vibesys-v* tag; the
+// versions below it were written by development builds only, and a store of one is refused for good.
+// From the tag on, raising this number is a public change that needs either a reader of the version
+// before or a refusal chosen on purpose (docs/contributing/process-boundaries.md). Version 4 added report kinds and numbers, the
 // stall and usage fields of a run, and the reminders. Version 5 took the worktree off an agent and
 // renamed its provider conversation id to a resume token. Version 6 gave a run the agents it may use. Version 7 gave a finished run the working copies it kept.
 // Version 8 gave a handoff the body of its role, so a stored handoff no longer has the flat fields of the version before.

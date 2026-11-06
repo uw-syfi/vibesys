@@ -191,6 +191,17 @@ phase_install() {
     sh "$install_sh" >$scratch/rosetta.log 2>&1 || true
   grep -q "vibesys_9.9.9_darwin_arm64.tar.gz" $scratch/rosetta.log || die "Rosetta did not choose arm64: $(cat $scratch/rosetta.log)"
 
+  check "--version names a pre-release, which is fetched under its own tag; it wins over VIBESYS_VERSION"
+  # No release is served at the address, so the failure names the URL that was asked for.
+  PATH="$scratch/mac:$PATH" FAKE_ARM64=1 VIBESYS_VERSION=9.9.9 VIBESYS_RELEASES_URL=http://127.0.0.1:9 \
+    sh "$install_sh" --version 9.9.9-rc.1 >$scratch/rc.log 2>&1 || true
+  grep -q "vibesys-v9.9.9-rc.1/vibesys_9.9.9-rc.1_darwin_arm64.tar.gz" $scratch/rc.log || die "--version did not choose the pre-release: $(cat $scratch/rc.log)"
+  PATH="$scratch/mac:$PATH" FAKE_ARM64=1 VIBESYS_RELEASES_URL=http://127.0.0.1:9 \
+    sh "$install_sh" --version=v9.9.9-rc.1 >$scratch/rc2.log 2>&1 || true
+  grep -q "vibesys-v9.9.9-rc.1/" $scratch/rc2.log || die "--version=v... did not choose the pre-release: $(cat $scratch/rc2.log)"
+  if sh "$install_sh" --version >$scratch/novalue.log 2>&1; then die "--version with no value was accepted"; fi
+  grep -q "needs a version" $scratch/novalue.log || die "--version with no value did not say so: $(cat $scratch/novalue.log)"
+
   check "with no stable release published, the newest version cannot be found and the error says what to pass"
   if VIBESYS_RELEASES_URL=http://127.0.0.1:9 sh "$install_sh" >$scratch/nolatest.log 2>&1; then die "an install with no version and no release was accepted"; fi
   grep -q "VIBESYS_VERSION=" $scratch/nolatest.log || die "the error does not tell the user to pass VIBESYS_VERSION: $(cat $scratch/nolatest.log)"

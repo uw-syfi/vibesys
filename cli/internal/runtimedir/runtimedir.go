@@ -42,7 +42,7 @@ type Dir struct{ path string }
 // that is the user's but too open is made private. The paths in it must fit in a Unix socket
 // address.
 func Open(path string, uid int, fsys FS) (Dir, error) {
-	if err := private(path, uid, fsys, "the runtime directory", "set XDG_RUNTIME_DIR to a directory on local disk"); err != nil {
+	if err := private(path, uid, fsys, "the runtime directory", localDiskAdvice(path, uid)); err != nil {
 		return Dir{}, err
 	}
 	d := Dir{path: path}
@@ -54,6 +54,18 @@ func Open(path string, uid int, fsys FS) (Dir, error) {
 		return Dir{}, fmt.Errorf("creating the supervisor directory: %w", err)
 	}
 	return d, nil
+}
+
+// localDiskAdvice says what to do about a runtime directory on a network file system. The default
+// directory under /tmp is what Resolve picks when XDG_RUNTIME_DIR is not an absolute path, which is
+// the usual case on macOS, where nothing sets that variable: there the variable is not the way out,
+// and the advice is to give it a local directory. Elsewhere the variable put the directory there, so
+// it is the one to change or unset.
+func localDiskAdvice(path string, uid int) string {
+	if path == fmt.Sprintf("/tmp/vibesys-cli-%d", uid) {
+		return "/tmp is on a network file system here, so the daemon needs a local directory of its own: an XDG_RUNTIME_DIR that is an absolute path on local disk is used in its place"
+	}
+	return "it comes from XDG_RUNTIME_DIR: set that to an absolute path on local disk, or unset it to use /tmp"
 }
 
 // private makes the directory if it is missing and checks it: a real directory (not a link someone

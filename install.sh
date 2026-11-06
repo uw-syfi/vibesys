@@ -13,7 +13,9 @@
 # Options and settings, all optional:
 #
 #   --force                  switch versions without asking a running vibesys-host to stop, even with live runs
-#   VIBESYS_VERSION          install this version (for example 0.2.0) instead of the newest
+#   --version VERSION        install this version (for example 0.2.0, or 0.2.0-rc.1 for a pre-release)
+#                            instead of the newest stable one. Piped from curl: sh -s -- --version VERSION
+#   VIBESYS_VERSION          the same, as a setting; --version wins when both are given
 #   VIBESYS_INSTALL_DIR      put the vibesys-client link here instead of $HOME/.local/bin
 #   VIBESYS_HOME             keep releases here instead of $HOME/.vibesys
 #   VIBESYS_INSTALL_BUNDLE   install from this local vibesys_<version>_<os>_<arch>.tar.gz and never
@@ -189,11 +191,19 @@ find_uv() {
 
 main() {
   force=0
-  for arg in "$@"; do
-    case "$arg" in
+  version_arg=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
       --force) force=1 ;;
-      *) fail "unknown option '$arg'; the only option is --force" ;;
+      --version=*) version_arg="${1#--version=}" ;;
+      --version)
+        [ "$#" -ge 2 ] || fail "--version needs a version, for example --version 0.2.0-rc.1"
+        version_arg="$2"
+        shift
+        ;;
+      *) fail "unknown option '$1'; the options are --force and --version VERSION" ;;
     esac
+    shift
   done
 
   step="reading settings"
@@ -202,10 +212,11 @@ main() {
   install_dir="${VIBESYS_INSTALL_DIR:-$HOME/.local/bin}"
   releases_url="${VIBESYS_RELEASES_URL:-https://github.com/uw-syfi/vibesys/releases/download}"
   releases_url="${releases_url%/}"
-  version="${VIBESYS_VERSION:-}"
+  # --version wins over VIBESYS_VERSION.
+  version="${version_arg:-${VIBESYS_VERSION:-}}"
   version="${version#v}"
   case "$version" in
-    *[!0-9A-Za-z.-]*) fail "VIBESYS_VERSION '$version' is not a version such as 0.2.0" ;;
+    *[!0-9A-Za-z.-]*) fail "the version '$version' is not a version such as 0.2.0 or 0.2.0-rc.1" ;;
   esac
 
   # fail exits only the substitution it runs in, so each caller stops on its status.
@@ -242,7 +253,7 @@ main() {
     step="finding the newest version"
     # vibesys-latest names stable versions only, so it does not exist while only pre-releases do.
     try_fetch "$releases_url/vibesys-latest/VERSION" "$work/VERSION" ||
-      fail "cannot find the newest version at $releases_url/vibesys-latest/VERSION. No stable release may be published yet; name the version to install, for example VIBESYS_VERSION=0.2.0-rc.1"
+      fail "cannot find the newest version at $releases_url/vibesys-latest/VERSION. No stable release may be published yet; name the version to install, for example 'sh -s -- --version 0.2.0-rc.1' when piping from curl, or VIBESYS_VERSION=0.2.0-rc.1"
     version="$(tr -d ' \n\r' <"$work/VERSION")"
     case "$version" in
       "" | *[!0-9A-Za-z.-]*) fail "the published VERSION file is not a version" ;;

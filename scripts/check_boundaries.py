@@ -365,8 +365,9 @@ ORCHESTRATOR_PATH = "--path proto/vibesys/orchestrator/v1"
 def release_violations(breaking_script: str) -> list[str]:
     """Diagnostics when the breaking check leaves the orchestrator contract out.
 
-    The contract is exempt until the first ``vibesys-v*`` tag; the release workflow runs this, so a
-    tag cannot publish a contract that ``buf breaking`` does not hold.
+    A ``vibesys-v*`` tag makes the contract public; the release workflow runs this, so a tag cannot
+    publish a contract that ``buf breaking`` does not hold. This reads the script's text only;
+    ``scripts/tests/test_proto_breaking.sh`` runs buf to prove the path in it fails a breaking change.
     """
     active = [line for line in breaking_script.splitlines() if not line.lstrip().startswith("#")]
     # The directory itself; a path to one file inside it does not hold the rest of the contract.
