@@ -1,8 +1,8 @@
 name: Build and publish the managed-run bundles
 
-# A tag vibesys-v<version> publishes the bundles install.sh installs for managed runs, for Linux and
-# macOS, amd64 and arm64: vibesys-client, vibesys-host and vibesys-cli plus the sidecar source and
-# the skills marketplace. See "Install for managed runs" in orchestrator/README.md.
+# A tag vibesys-v<version> publishes the bundles install.sh installs for managed runs, for Linux
+# (amd64 and arm64) and Apple Silicon macOS: vibesys-client, vibesys-host and vibesys-cli plus the
+# sidecar source and the skills marketplace. See "Install for managed runs" in orchestrator/README.md.
 on:
   push:
     tags:
@@ -54,7 +54,7 @@ jobs:
       - name: Build the bundles
         run: |
           version="${TAG#vibesys-v}"
-          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
+          for target in linux/amd64 linux/arm64 darwin/arm64; do
             ./scripts/build_release_bundle.sh "$version" "${target%/*}" "${target#*/}" "$RUNNER_TEMP/release"
           done
           printf '%s\n' "$version" > "$RUNNER_TEMP/release/VERSION"
@@ -101,7 +101,7 @@ jobs:
           if ! gh release view "$TAG" > /dev/null 2>&1; then
             gh release create "$TAG" --verify-tag --latest=false "${prerelease[@]}" \
               --title "VibeSys $version" \
-              --notes "Bundles for managed runs on Linux and macOS, amd64 and arm64. Install with install.sh at the repository root. Each file has a build attestation: gh attestation verify <file> --repo $GITHUB_REPOSITORY"
+              --notes "Bundles for managed runs on Linux (amd64 and arm64) and Apple Silicon macOS. Install with install.sh at the repository root. Each file has a build attestation: gh attestation verify <file> --repo $GITHUB_REPOSITORY"
           fi
           # A re-run after a partial failure replaces assets with identical content. The bundles
           # go first and the files that name them last.

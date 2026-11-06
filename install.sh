@@ -66,19 +66,23 @@ detect_os() {
   esac
 }
 
-# detect_arch OS: print amd64 or arm64.
+# detect_arch OS: print amd64 or arm64. Releases cover linux/amd64, linux/arm64 and darwin/arm64.
 detect_arch() {
   case "$(uname -m)" in
     x86_64 | amd64)
-      # A shell running under Rosetta reports x86_64 on an Apple Silicon Mac.
-      if [ "$1" = darwin ] && [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
-        echo arm64
+      if [ "$1" = darwin ]; then
+        # A shell running under Rosetta reports x86_64 on an Apple Silicon Mac, which gets arm64.
+        if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" = 1 ]; then
+          echo arm64
+        else
+          fail "VibeSys releases do not cover Intel Macs; they cover Apple Silicon Macs and Linux (amd64 and arm64)"
+        fi
       else
         echo amd64
       fi
       ;;
     aarch64 | arm64) echo arm64 ;;
-    *) fail "unsupported architecture '$(uname -m)'; releases cover amd64 and arm64" ;;
+    *) fail "unsupported architecture '$(uname -m)'; releases cover amd64 and arm64 on Linux and arm64 on macOS" ;;
   esac
 }
 
@@ -185,8 +189,9 @@ main() {
     *[!0-9A-Za-z.-]*) fail "VIBESYS_VERSION '$version' is not a version such as 0.2.0" ;;
   esac
 
-  os="$(detect_os)"
-  arch="$(detect_arch "$os")"
+  # fail exits only the substitution it runs in, so each caller stops on its status.
+  os="$(detect_os)" || exit 1
+  arch="$(detect_arch "$os")" || exit 1
 
   mkdir -p "$home/releases" || fail "cannot create $home/releases"
   mkdir -p "$install_dir" || fail "cannot create $install_dir"
