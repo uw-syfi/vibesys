@@ -190,9 +190,11 @@ func TestALabRunsWhatItIsAskedAndSavesNoResult(t *testing.T) {
 		t.Fatalf("detached exec: %+v, %v", answer, err)
 	}
 	awaitOutput(t, r.a, lab.ID, "[p2] serving")
+	// Regression: lab kill answered the process as it was before the signal, running; it answers
+	// how the process ended once it did, within the stop's grace.
 	_, answer, err = r.call(t, lab.ID, core.LabKillCall{Handle: p.Handle, Signal: core.LabTerm})
-	if err != nil {
-		t.Fatal(err)
+	if killed, ok := answer.(core.LabProcess); err != nil || !ok || killed.End == nil || *killed.End != (core.LabExit{Code: 143}) {
+		t.Fatalf("kill answered %+v, %v; want %s ended by SIGTERM, exit 143", answer, err, p.Handle)
 	}
 	if _, answer, _ = r.call(t, lab.ID, core.LabStatusCall{}); len(answer.(core.LabStatus).Processes) != 2 {
 		t.Fatalf("ps lists %+v", answer)

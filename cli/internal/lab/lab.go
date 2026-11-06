@@ -209,7 +209,7 @@ func (l *Lab) Call(ctx context.Context, call core.LabCall, emit func(core.LabRep
 	case core.LabExec:
 		return l.exec(ctx, c, emit)
 	case core.LabKillCall:
-		return l.kill(c, emit)
+		return l.kill(ctx, c, emit)
 	case core.LabCheckoutCall:
 		return l.checkout(ctx, c, emit)
 	case core.LabPull:
@@ -371,7 +371,7 @@ func (l *Lab) exec(ctx context.Context, c core.LabExec, emit func(core.LabReply)
 	return emit(*p.end)
 }
 
-func (l *Lab) kill(c core.LabKillCall, emit func(core.LabReply) error) error {
+func (l *Lab) kill(ctx context.Context, c core.LabKillCall, emit func(core.LabReply) error) error {
 	l.mu.Lock()
 	var p *process
 	for _, have := range l.procs {
@@ -394,8 +394,28 @@ func (l *Lab) kill(c core.LabKillCall, emit func(core.LabReply) error) error {
 	default:
 		l.signal(p, c.Signal)
 		l.logf("%s sent %s", p.handle, c.Signal)
+		l.awaitEnd(ctx, p)
 	}
 	return emit(p.state())
+}
+
+// awaitEnd waits for the process to end, for at most the bench's grace, so that a signal's answer
+// says how the process ended rather than that it ran when the signal was sent. A process that
+// outlives the grace, such as one that ignores SIGTERM, is answered as running.
+func (l *Lab) awaitEnd(ctx context.Context, p *process) {
+	l.mu.Lock()
+	grace := l.bench.Grace
+	l.mu.Unlock()
+	if grace == nil {
+		return
+	}
+	fired, stop := grace()
+	defer stop()
+	select {
+	case <-p.done:
+	case <-fired:
+	case <-ctx.Done():
+	}
 }
 
 // signal sends the signal to one process of the lab. In a room with a shell (Bench.Shell) it goes
