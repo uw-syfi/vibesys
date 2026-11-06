@@ -1,0 +1,13 @@
+Agent {{.From}} handed off plan {{.PlanNumber}}.
+{{if .HasCandidate -}}
+Candidate: commit {{.Commit}} on branch {{.Branch}} (parent {{.ParentCommit}}).
+Claim: {{.Claim}}
+Checks: {{.Checks}}
+Measurement: {{.Measurement}}
+{{else -}}
+It produced no candidate.
+{{end -}}
+Learned: {{.Learned}}
+Next: {{.Next}}
+{{if .OpenItems}}Open items: {{.OpenItems}}
+{{end}}

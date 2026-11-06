@@ -171,7 +171,8 @@ export type StartTurn = Message<"vibesys.orchestrator.v1.StartTurn"> & {
   turnId: string;
 
   /**
-   * The data a template renders into the prompt.
+   * The typed message, kept as it is. The host renders it into words each time it sends the effect,
+   * so a delivery that is retried sends the same words.
    *
    * @generated from field: vibesys.orchestrator.v1.Message message = 3;
    */
@@ -200,6 +201,8 @@ export type Steer = Message<"vibesys.orchestrator.v1.Steer"> & {
   turnId: string;
 
   /**
+   * The typed message, rendered when sent like StartTurn's.
+   *
    * @generated from field: vibesys.orchestrator.v1.Message message = 3;
    */
   message?: Message$1 | undefined;

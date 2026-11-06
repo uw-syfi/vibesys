@@ -1,0 +1,8 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "id": "m1",
+  "runId": "r1",
+  "text": "\u001c\u001d lead and trail \u001e\u001f\u2003\u3000",
+  "toAgentId": "agent-a"
+}

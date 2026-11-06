@@ -1,0 +1,8 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "id": "m1",
+  "runId": "r1",
+  "text": "r\u00e9sum\u00e9 \u2192 \u65e5\u672c\u8a9e \ud83d\ude00 \u00a0nbsp\u00a0",
+  "toAgentId": "agent-a"
+}

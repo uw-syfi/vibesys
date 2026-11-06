@@ -1,0 +1,13 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "id": "m1",
+  "jobFinished": {
+    "detail": "exit status 2\nsecond line",
+    "jobId": "job-7",
+    "outcome": "JOB_OUTCOME_CANCELLED",
+    "submittedByAgentId": "agent-w1"
+  },
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

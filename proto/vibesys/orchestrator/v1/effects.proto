@@ -51,13 +51,15 @@ message LaunchSession {
 message StartTurn {
   SessionRef session = 1 [(buf.validate.field).required = true];
   string turn_id = 2 [(buf.validate.field).string.min_len = 1];
-  // The data a template renders into the prompt.
+  // The typed message, kept as it is. The host renders it into words each time it sends the effect,
+  // so a delivery that is retried sends the same words.
   Message message = 3 [(buf.validate.field).required = true];
 }
 
 message Steer {
   SessionRef session = 1 [(buf.validate.field).required = true];
   string turn_id = 2 [(buf.validate.field).string.min_len = 1];
+  // The typed message, rendered when sent like StartTurn's.
   Message message = 3 [(buf.validate.field).required = true];
 }
 

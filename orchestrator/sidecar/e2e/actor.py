@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from e2e.effects import UnscriptedError, perform
-from e2e.scripts import ROLES, lead
+from e2e.scripts import ROLES, is_job_finished, lead
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from e2e.effects import Machine, Performed, Script
     from e2e.scripts import Me
-    from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 
 
 @dataclass
@@ -31,7 +29,6 @@ class Actor:
     machine: Machine
     record: Path
     messages: list[str] = field(default_factory=list)
-    pending: deque[orch.Message] = field(default_factory=deque)
     received: int = 0
 
     def _script(self) -> Script:
@@ -47,11 +44,8 @@ class Actor:
         prompts = self.record / "prompts"
         prompts.mkdir(parents=True, exist_ok=True)
         (prompts / f"{self.received}.md").write_text(message)
-        source = self.pending.popleft() if self.pending else None
-        if self.role == "lead" and source is not None and source.HasField("job_finished"):
-            return perform(
-                lead(self.me, tuple(self.messages), notification=source.job_finished), self.machine
-            )
+        if self.role == "lead" and is_job_finished(message):
+            return perform(lead(self.me, tuple(self.messages), notification=True), self.machine)
         self.messages.append(message)
         try:
             return perform(self._script(), self.machine)

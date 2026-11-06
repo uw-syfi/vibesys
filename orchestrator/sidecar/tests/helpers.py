@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from agentshim import RawFrame
-    from google.protobuf.timestamp_pb2 import Timestamp
 
 REF = fx.SessionRef(agent_id="agent-1", session=1)
 
@@ -113,37 +112,20 @@ def open_request(harness: int = orch.HARNESS_CODEX, **fields: Any) -> sc.OpenSes
     return sc.OpenSessionRequest(**base)
 
 
-def message(message_id: str = "m1", text: str = "do the thing") -> orch.Message:
-    """A text message addressed to the agent."""
-    stamp: Timestamp = orch.Message().at.__class__()
-    stamp.FromSeconds(1)
-    return orch.Message(
-        id=message_id,
-        run_id="run-1",
-        to_agent_id="agent-1",
-        delivery=orch.DELIVERY_QUEUED,
-        at=stamp,
-        text=text,
-    )
-
-
 def start_turn(effect_id: str, turn_id: str, text: str = "do the thing") -> sc.SessionCommand:
-    """A ``StartTurn`` command."""
+    """A start-turn command carrying the words *text*."""
     return sc.SessionCommand(
-        effect_id=effect_id,
-        start_turn=fx.StartTurn(
-            session=REF, turn_id=turn_id, message=message(f"msg-{turn_id}", text)
-        ),
+        effect_id=effect_id, start_turn=sc.SessionStartTurn(turn_id=turn_id, prompt=text)
     )
 
 
 def steer(
     effect_id: str, turn_id: str, message_id: str, text: str = "also this"
 ) -> sc.SessionCommand:
-    """A ``Steer`` command."""
+    """A steer command carrying the words *text*."""
     return sc.SessionCommand(
         effect_id=effect_id,
-        steer=fx.Steer(session=REF, turn_id=turn_id, message=message(message_id, text)),
+        steer=sc.SessionSteer(turn_id=turn_id, message_id=message_id, prompt=text),
     )
 
 

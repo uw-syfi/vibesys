@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from collections.abc import Generator, Sequence
 
     from e2e.effects import Effect, Script
-    from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 
 TASK = "toy"
 CLI = "vibesys-cli"
@@ -160,11 +159,20 @@ def _judged(me: Me, messages: Sequence[str]) -> Script:
 LEAD_STEPS = {1: _start, 2: _first_handoff, 3: _second_handoff, 4: _judged}
 
 
-def lead(
-    me: Me, messages: Sequence[str], *, notification: orch.JobFinished | None = None
-) -> Script:
+#: How the orchestrator words a job that finished. The lead is woken by it at any point of its
+#: script, so it is the one message that is told apart by its words: its other messages are
+#: answered by their place, and read by the facts they carry.
+_JOB_FINISHED = re.compile(r"Job \S+ finished: [a-z]+\.")
+
+
+def is_job_finished(message: str) -> bool:
+    """Whether *message* is the notice that a job finished, which advances no script."""
+    return _JOB_FINISHED.match(message) is not None
+
+
+def lead(me: Me, messages: Sequence[str], *, notification: bool = False) -> Script:
     """The lead: base, two workers, a judge, promote, report."""
-    if notification is not None:
+    if notification:
         return "Noted job completion."
     step = LEAD_STEPS.get(len(messages))
     if step is None:

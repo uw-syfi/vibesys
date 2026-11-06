@@ -36,7 +36,7 @@ service AgentSessionService {
 // that both get it from this file. CURRENT rises when a change here breaks a peer.
 enum SessionProtocolVersion {
   SESSION_PROTOCOL_VERSION_UNSPECIFIED = 0;
-  SESSION_PROTOCOL_VERSION_CURRENT = 1;
+  SESSION_PROTOCOL_VERSION_CURRENT = 2;
 }
 
 // SessionBootstrap is the one message a session's process reads, as binary, from its standard input
@@ -223,11 +223,28 @@ message SessionCommand {
   string effect_id = 1 [(buf.validate.field).string.min_len = 1];
   oneof body {
     option (buf.validate.oneof).required = true;
-    StartTurn start_turn = 2;
-    Steer steer = 3;
+    SessionStartTurn start_turn = 2;
+    SessionSteer steer = 3;
     Interrupt interrupt = 4;
     CloseSession close = 5;
   }
+}
+
+// SessionStartTurn starts a turn with the words the agent is sent. The holder sends them as they are:
+// what they say, and which skill or tool they name, is the caller's.
+message SessionStartTurn {
+  string turn_id = 1 [(buf.validate.field).string.min_len = 1];
+  // May be empty: a message of only blanks has no words, and its turn must still start and end.
+  string prompt = 2;
+}
+
+// SessionSteer adds words to the running turn turn_id. message_id names the steer in the SteerOutcome
+// that answers it; the holder does not read it otherwise.
+message SessionSteer {
+  string turn_id = 1 [(buf.validate.field).string.min_len = 1];
+  string message_id = 2 [(buf.validate.field).string.min_len = 1];
+  // May be empty, as SessionStartTurn's.
+  string prompt = 3;
 }
 
 message SendRequest {

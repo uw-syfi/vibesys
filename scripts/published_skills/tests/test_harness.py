@@ -6,8 +6,8 @@ from scripts.published_skills.skills import check_identity_assets
 def test_identity_assets_reject_only_retired_names(tmp_path: Path) -> None:
     for folder in (
         "skills/search/optimize",
-        "orchestrator/sidecar/src/vs_sidecar/prompts",
-        "orchestrator/sidecar/tests/goldens",
+        "orchestrator/internal/prompts/templates",
+        "orchestrator/internal/prompts/testdata",
     ):
         asset = tmp_path / folder / "example.md"
         asset.parent.mkdir(parents=True)

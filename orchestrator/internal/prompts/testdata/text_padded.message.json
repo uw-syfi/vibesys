@@ -1,0 +1,8 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "id": "m1",
+  "runId": "r1",
+  "text": "\n\n  padded with blanks  \n\t\n",
+  "toAgentId": "agent-a"
+}

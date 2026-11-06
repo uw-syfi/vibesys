@@ -1,0 +1,9 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-a",
+  "id": "m1",
+  "runId": "r1",
+  "text": "Please also check the edge case with empty input.",
+  "toAgentId": "agent-a"
+}

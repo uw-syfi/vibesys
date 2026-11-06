@@ -35,6 +35,7 @@ plan reader is a placeholder in production and the job source is left unwired un
 | `internal/jobs` | `JobSource`, the interface over `vibesys-cli` jobs | `core` |
 | `internal/jobs/jobstest` | The in-memory `JobSource` and the contract every one passes | `core`, `jobs` |
 | `internal/wire` | Bytes to core types and back, once, at the edge | `core`, `gen` |
+| `internal/prompts` | The words an agent is sent for a message: Go templates, goldens from the Python renderer they replaced | `core` |
 | `internal/localfs` | Proof that the state directory is on a local filesystem | Nothing of this module |
 | `internal/store` | The durable record: atomic commits, recovery, outbox, paged reads, retention | `core`, `wire`, `localfs` |
 | `internal/store/storetest` | The contract every store passes, a workload from the real core, and a model | `core`, `store`, `wire` |

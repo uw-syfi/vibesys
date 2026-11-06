@@ -1,3 +1,0 @@
-Nothing has happened in this run for 10 minutes: no agent is working, no job is running and no message is waiting for you.
-
-Read the state (`list_agents`, the plans and the jobs) and take the next step, such as starting a subagent or a measurement. If the work is finished, or you cannot go on, send a report of kind `final` with `post_report` that says which. Do not end your turn to wait: nothing will wake you.
