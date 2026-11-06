@@ -249,6 +249,12 @@ func (e *Engine) Image(ctx context.Context, ref string) (docker.Image, bool, err
 	return e.cfg.Local.Image(ctx, ref)
 }
 
+// Content implements docker.Engine: the content of the local engine's image, which its SIF is
+// named by.
+func (e *Engine) Content(ctx context.Context, image string) (string, error) {
+	return e.cfg.Export.Content(ctx, image)
+}
+
 // Build implements docker.Engine: the local engine builds, and the image is converted to a SIF and
 // copied to the cluster as part of its build, so that the build's log says what converted it.
 func (e *Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer) error {

@@ -252,6 +252,11 @@ func (e Engine) Image(ctx context.Context, ref string) (docker.Image, bool, erro
 	return e.Inner.Image(ctx, ref)
 }
 
+// Content implements docker.Engine.
+func (e Engine) Content(ctx context.Context, image string) (string, error) {
+	return e.Inner.Content(ctx, image)
+}
+
 // Build implements docker.Engine. A build that did not finish has its allocation cancelled, so a
 // build cut short does not keep the node.
 func (e Engine) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer) error {

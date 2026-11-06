@@ -269,7 +269,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `lab exec <lab> [--in candidate\|task] [--detach] [--env K=V]... -- <argv...>` | Run a command in a container of the lab, as the invoking user, in the checkout. In the foreground it streams the command's output (standard output and standard error as one stream) and exits with its exit code, or `4` when how it ended is not known; with `--detach` it prints the process's handle (`p1`, `p2`, ...) and the process's lines go to the lab's log (`logs <lab>`), each under its handle. A shell is a command: `-- sh -c '...'`. |
 | `lab ps <lab> [--wait]` | Where the lab is (`queued`, `starting`, `ready`, `ended`), its commit, until when it lasts, its containers, the port free for a server, and every process it started with how it ended. |
 | `lab kill <lab> <pN> [--signal term\|kill]` | Send SIGTERM (the default) to a process the lab started, or SIGKILL to it and every process it started; no other process of the lab is touched. Another signal: `lab exec <lab> -- kill -s <signal> <pid>`. |
-| `lab checkout <lab> <commit>` | Replace the lab's checkout, in place, with a clean checkout of another commit, while no process of the lab runs. A commit whose task or candidate image differs from the lab's is refused (`1`): start a new lab for it. |
+| `lab checkout <lab> <commit>` | Replace the lab's checkout, in place, with a clean checkout of another commit, while no process of the lab runs. A commit whose task differs from the lab's, or whose candidate image holds something other than what the lab's runs, is refused (`1`): start a new lab for it. A commit that changes only files of the candidate's build context its Dockerfile does not copy, such as the candidate's code, is taken (see "Labs"). |
 | `lab cp <lab>:<path> <local>`, `lab cp <local> <lab>:<path>` | Copy a file or a directory out of or into the lab's artifacts directory, which both containers see at `/vibesys/artifacts`. `<path>` is relative to it or absolute under it, and a path outside it is refused (`2`). |
 | `lab end <lab>` | End the lab now and print its job once it has ended, its artifacts kept. Ending a queued lab cancels it. |
 | `lab list [--state s]` | The task's labs, oldest first, as `jobs --kind lab` lists them. |
@@ -1089,8 +1089,16 @@ How it is scheduled, and what it may not do:
 - A lab saves no result, as no command job does, so nothing it runs can be compared, promoted or
   added to the frontier, and its numbers are never official. The task's scored commands and images
   are the task's: a lab runs the task's image and the candidate's as a run builds them, and changes
-  neither. `lab checkout` keeps them, refusing a commit whose task version or candidate image build
-  (Dockerfile and context) differs.
+  neither. `lab checkout` keeps them. It refuses, before building anything, a commit whose task
+  version differs, or whose candidate's Dockerfile or build context is another path. For any other
+  commit of a task of two images it builds the commit's candidate image as `lab start` built the
+  lab's, by the same placement's engine (for `local` and `apptainer`, the only placements that hold
+  a lab of two images, the operator machine's Docker), and compares what a container of each runs:
+  its config, platform and layers, not its ID, which BuildKit's attestations make differ between
+  two builds of one content. A commit that changes only files the Dockerfile does not copy, such as
+  code a container reads from the checkout, finds every layer in the build cache and builds the
+  same image in moments, and is taken; one that changes what the image holds (the Dockerfile, or a
+  copied file such as `requirements.txt`) is refused. The build's lines go to the lab's log.
 - A lab's time is capped at a placement's `[slurm] max_time_seconds` less the stop's margin (10
   minutes), so that Slurm does not end its allocation under it.
 

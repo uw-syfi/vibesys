@@ -8,7 +8,6 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
-	"github.com/uw-syfi/vibesys/cli/internal/task"
 )
 
 // Lab makes one call on a lab job (core.LabSpec) and passes the replies to emit, the answer last.
@@ -136,10 +135,12 @@ func (a *App) labCall(ctx context.Context, c core.CallContext, ref lifecycle.Ref
 	return nil
 }
 
-// sameImages refuses a checkout of a lab to a commit whose images differ from the ones the lab
-// runs: the task's, which its version names, and, for a task of two images, the candidate's, which
-// the digest of its Dockerfile and build context names. The lab's containers run their images
-// from the start to the end, so another image takes another lab.
+// sameImages refuses a checkout of a lab to a commit whose images may not be the ones the lab
+// runs: the task's, which its version names, and, for a task of two images, the candidate's, when
+// the commit builds it from another Dockerfile or build context. The lab's containers run their
+// images from the start to the end, so another image takes another lab. Whether a commit of the
+// same build makes the same candidate's image is the lab's supervisor's to say, by what a container
+// of it runs: a commit that changes only files its Dockerfile does not copy makes the same image.
 func (a *App) sameImages(ctx context.Context, scope core.Scope, h supervisor.Handle, to core.Commit) error {
 	var now core.LabStatus
 	if err := h.Lab(ctx, core.LabStatusCall{}, func(r core.LabReply) error {
@@ -167,42 +168,12 @@ func (a *App) sameImages(ctx context.Context, scope core.Scope, h supervisor.Han
 	if was.Version != will.Version {
 		return refuse(fmt.Sprintf("task %q, so another task image,", name))
 	}
-	if was.Candidate == nil {
-		return nil
-	}
-	if will.Candidate == nil || !sameBuild(was.Candidate.Build, will.Candidate.Build) {
+	if was.Candidate != nil && (will.Candidate == nil || !sameBuild(was.Candidate.Build, will.Candidate.Build)) {
 		return refuse("candidate image build")
-	}
-	if a.cfg.Files == nil {
-		return &core.Failure{Kind: core.FailureUnavailable, Message: "this daemon cannot read a commit's files, so it cannot compare the candidate's images of two commits"}
-	}
-	before, err := a.candidateDigest(ctx, repository, now.Commit, was.Candidate.Build)
-	if err != nil {
-		return err
-	}
-	after, err := a.candidateDigest(ctx, repository, to, will.Candidate.Build)
-	if err != nil {
-		return err
-	}
-	if before != after {
-		return refuse(fmt.Sprintf("candidate image (its Dockerfile %s or build context %s changed)", will.Candidate.Build.Dockerfile, will.Candidate.Build.Context))
 	}
 	return nil
 }
 
 func sameBuild(a, b core.CandidateBuild) bool {
 	return a.Dockerfile == b.Dockerfile && a.Context == b.Context
-}
-
-// candidateDigest names what builds the candidate's image at the commit.
-func (a *App) candidateDigest(ctx context.Context, repository string, commit core.Commit, b core.CandidateBuild) (string, error) {
-	tree, err := a.cfg.Files.Files(ctx, repository, commit, task.CandidatePaths(b))
-	if err != nil {
-		return "", err
-	}
-	c, err := task.ReadCandidate(tree, b)
-	if err != nil {
-		return "", err
-	}
-	return c.Digest, nil
 }

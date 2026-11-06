@@ -68,6 +68,9 @@ type Supervisor struct {
 	outcome      lifecycle.Outcome
 	// checkout is the lab's checkout once it is made, which a lab's Switch replaces in place.
 	checkout core.Checkout
+	// candidate is the candidate's image the lab's containers run, for a lab of a task of two
+	// images, once it is built.
+	candidate *core.CandidateImage
 }
 
 // New returns a parked supervisor for the launch.
@@ -83,6 +86,9 @@ func New(cfg Config) *Supervisor {
 			Clock: cfg.Host.Clock, Log: writer{s}, Files: cfg.Host.Files, Artifacts: s.labArtifacts(),
 			Commit: l.Spec.Commit, Time: command.Timeout,
 			Switch: func(ctx context.Context, commit core.Commit) error {
+				if err := s.sameCandidate(ctx, commit); err != nil {
+					return err
+				}
 				s.mu.Lock()
 				co := s.checkout
 				s.mu.Unlock()
@@ -345,12 +351,50 @@ func (s *Supervisor) executeLab(spec core.JobSpec) core.Attempt {
 			return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
 		}
 		x.Candidate = &core.CandidateRun{Image: img.ID}
+		s.mu.Lock()
+		s.candidate = &img
+		s.mu.Unlock()
 	}
 	if err := h.Files.MakeDir(s.ctx, artifacts); err != nil {
 		return core.NotStarted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("making the artifacts directory: %v", err)}}
 	}
 	_, _ = fmt.Fprintf(writer{s}, "[lab] artifacts: %s\n", artifacts)
 	return env.Lab(s.ctx, x, writer{s}, s.lab.Hold)
+}
+
+// sameCandidate refuses, with core.FailureConflict, a commit whose candidate's image a container
+// of the lab's candidate's image does not run. It builds that image as the lab's was built, by the
+// same environment, on the engine that built the lab's, which finds it already built, or builds it
+// from its layers' cache, when the commit changed no file the Dockerfile copies; and compares what
+// a container of each runs (core.CandidateImage.SameAs), not what built them. The daemon refused
+// already a commit of another task or another Dockerfile or build context path, so the lab's build
+// is the commit's.
+func (s *Supervisor) sameCandidate(ctx context.Context, commit core.Commit) error {
+	s.mu.Lock()
+	had := s.candidate
+	s.mu.Unlock()
+	command, _ := s.cfg.Launch.Spec.Settings.(core.CommandSettings)
+	if had == nil || command.Candidate == nil {
+		return nil
+	}
+	b := command.Candidate.Build
+	target := s.target()
+	was := target.Commit
+	target.Commit = commit
+	env, err := s.cfg.Environments.Environment(s.cfg.Launch.Spec.Environment, target)
+	if err != nil {
+		return err
+	}
+	img, err := env.Candidate(ctx, b, writer{s})
+	if err != nil {
+		return err
+	}
+	if !img.SameAs(*had) {
+		return &core.Failure{Kind: core.FailureConflict, Message: fmt.Sprintf(
+			"commit %s has another candidate image (its Dockerfile %s or build context %s changed) than the lab's commit %s, "+
+				"and a lab keeps the images it started with: start a new lab for it", commit, b.Dockerfile, b.Context, was)}
+	}
+	return nil
 }
 
 // executePlan drives a check or a measure job through its plan and says how it ended. The plan is

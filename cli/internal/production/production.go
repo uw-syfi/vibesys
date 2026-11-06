@@ -156,7 +156,6 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			Branches:     gitrepo.System{},
 			Repositories: gitrepo.System{},
 			Tasks:        gitwork.Tasks{},
-			Files:        gitwork.Tasks{},
 			Scheduler:    scheduler,
 			Leasing:      p.leasingOf(op, scope, machines.claims, clk, logf),
 			Neighbors:    neighborsOf,

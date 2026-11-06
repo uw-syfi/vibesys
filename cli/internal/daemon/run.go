@@ -45,8 +45,6 @@ type Runtime struct {
 	// Tasks reads the task of a check or a measure job as its commit has it. Without it those
 	// jobs are refused as unavailable.
 	Tasks task.Source
-	// Files reads a commit's files (app.Config.Files).
-	Files task.Files
 	// Scheduler is how the machine is shared between jobs. The zero value runs one job at a time.
 	Scheduler app.Scheduler
 	// Leasing is how the resources jobs hold alone are shared with other daemons. The zero value
@@ -157,7 +155,6 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Branches:      cfg.Runtime.Branches,
 		Repositories:  cfg.Runtime.Repositories,
 		Tasks:         named(cfg.Runtime.Tasks, cfg.Version),
-		Files:         cfg.Runtime.Files,
 		Scheduler:     cfg.Runtime.Scheduler,
 		Leasing:       cfg.Runtime.Leasing,
 		Drains:        drainFile{dir: cfg.Dir},

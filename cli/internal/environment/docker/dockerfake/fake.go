@@ -314,16 +314,19 @@ func (c *Client) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	}
 	// The image is what its context makes on the daemon's local image of each base, as docker
 	// builds FROM a local image when it has one.
-	seed := slices.Clone(spec.Context)
+	// Its content is what of the context the Dockerfile copies into it, as docker's layer cache
+	// makes the same layers of the same copied files, while its ID is of the whole context.
+	var bases []byte
 	for _, ref := range fromRefs(spec.Context) {
 		if img, ok := c.d.images[ref]; ok {
-			seed = fmt.Appendf(seed, "\nFROM %s", img.ID)
+			bases = fmt.Appendf(bases, "\nFROM %s", img.ID)
 		}
 	}
 	if !c.d.reproducible {
-		seed = fmt.Appendf(seed, "\nbuild %d", n)
+		bases = fmt.Appendf(bases, "\nbuild %d", n)
 	}
-	content := sha256.Sum256(append([]byte("content of "), seed...))
+	seed := append(slices.Clone(spec.Context), bases...)
+	content := sha256.Sum256(append(append([]byte("content of "), copiedOf(spec.Context)...), bases...))
 	if c.d.attested {
 		seed = fmt.Appendf(slices.Clone(seed), "\nattestation of build %d", n)
 	}
@@ -391,8 +394,9 @@ func (c *Client) Sizes(ctx context.Context, image string) (unpacked, stored int6
 	return 0, 0, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
 }
 
-// Content returns the digest of the content of the image, found by its ID or a tag: of its build
-// context, and of the build for a daemon of NonReproducibleBuilds, never of its ID.
+// Content implements docker.Engine: the digest of the content of the image, found by its ID or a
+// tag: of its Dockerfile, of the files of its build context that the Dockerfile copies (COPY or
+// ADD), of its bases, and of the build for a daemon of NonReproducibleBuilds, never of its ID.
 func (c *Client) Content(ctx context.Context, image string) (string, error) {
 	fault, err := c.enter(ctx, Call{OpSave, image})
 	if err != nil {

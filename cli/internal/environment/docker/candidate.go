@@ -75,7 +75,7 @@ func candidateTag(taskName, key string) string {
 // Candidate implements environment.Environment: the candidate's image, built from the target's
 // commit when the engine has no image of the same build key: the digest of the candidate's files,
 // and the engine's local image of each base its Dockerfile builds on. A build that fails says why, with the
-// end of its output.
+// end of its output. The image's content is the engine's (Engine.Content).
 func (e *env) Candidate(ctx context.Context, b core.CandidateBuild, log io.Writer) (core.CandidateImage, error) {
 	p := e.p
 	if p.cfg.Candidates == nil {
@@ -110,8 +110,12 @@ func (e *env) Candidate(ctx context.Context, b core.CandidateBuild, log io.Write
 	if err != nil {
 		return core.CandidateImage{}, err
 	}
-	_, _ = fmt.Fprintf(log, "[candidate] %s is %s\n", tag, img.ID)
-	return core.CandidateImage{ID: img.ID, Tag: tag}, nil
+	content, err := p.cfg.Engine.Content(ctx, img.ID)
+	if err != nil {
+		return core.CandidateImage{}, err
+	}
+	_, _ = fmt.Fprintf(log, "[candidate] %s is %s, of content %s\n", tag, img.ID, content)
+	return core.CandidateImage{ID: img.ID, Tag: tag, Content: content}, nil
 }
 
 // PortOf is a port taken from a seed, such as a run's id, for an engine whose containers have a

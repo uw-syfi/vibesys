@@ -81,7 +81,7 @@ func (w *World) Runtime() daemon.Runtime {
 	clk := clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Millisecond)
 	host := supervisor.Host{Files: w.Files, Clock: clk, Artifacts: w.Artifacts}
 	return daemon.Runtime{
-		Stores: w.Stores, Environments: envs, Branches: w.Branches, Repositories: w.Git, Tasks: w.Tasks, Files: w.Tasks,
+		Stores: w.Stores, Environments: envs, Branches: w.Branches, Repositories: w.Git, Tasks: w.Tasks,
 		Supervisors: supervisor.NewInProcess(envs, w.Checkouts, w.Survivors).WithHost(host),
 	}
 }

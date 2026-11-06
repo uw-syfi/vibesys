@@ -45,6 +45,16 @@ type CandidateImage struct {
 	ID string
 	// Tag names the image by the task and the digest of what built it.
 	Tag string
+	// Content is the digest of what a container of the image runs (docker.Engine.Content), the
+	// same for two images of one content whatever their IDs, or empty when the environment cannot
+	// say it.
+	Content string
+}
+
+// SameAs reports whether a container of the image runs what a container of o runs: they are one
+// image, or two of one known content.
+func (i CandidateImage) SameAs(o CandidateImage) bool {
+	return i.ID == o.ID || (i.Content != "" && i.Content == o.Content)
 }
 
 // ValidImageDigest reports whether s is an exact image digest.

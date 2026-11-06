@@ -32,6 +32,13 @@ type Engine interface {
 	// layers, and may produce a different image if the Dockerfile is not reproducible.
 	Build(ctx context.Context, spec BuildSpec, log io.Writer) error
 
+	// Content returns the digest of what a container of the local image, found by its ID or a
+	// tag, runs, as "sha256:" and 64 lower-case hexadecimal digits: of its config, its platform and
+	// its layers, and not of what names one build of it. Two images of one content have one digest
+	// whatever their IDs, such as two builds of one Dockerfile whose build contexts differ only in
+	// files the Dockerfile does not copy.
+	Content(ctx context.Context, image string) (string, error)
+
 	// Containers returns the names of the containers, running or not, that carry every one of
 	// the labels.
 	Containers(ctx context.Context, match Labels) ([]string, error)

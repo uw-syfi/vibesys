@@ -55,7 +55,8 @@ type Environment interface {
 
 	// Candidate returns the candidate's image of a task of two images, as the target's commit has
 	// its Dockerfile and build context, building it when the environment does not have an image of
-	// the same Dockerfile and context already. The build's output goes to log. It fails with
+	// the same Dockerfile and context already, with its content when the environment can say it
+	// (core.CandidateImage.Content). The build's output goes to log. It fails with
 	// core.FailureInvalidInput naming the path for a Dockerfile or a context the commit lacks, or a
 	// base the task does not allow, with the end of the build's output for a build that failed, and
 	// with core.FailureInvalidInput for an environment that runs no images, such as the host: a

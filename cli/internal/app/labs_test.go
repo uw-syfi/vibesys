@@ -2,7 +2,10 @@ package app_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"io"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +13,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/cli/internal/app"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/fakeenv"
 	"github.com/uw-syfi/vibesys/cli/internal/schedule"
 	"github.com/uw-syfi/vibesys/cli/internal/supervisor"
@@ -24,6 +28,38 @@ type labRig struct {
 	a      *app.App
 	envs   onPlacements
 	offers []core.PlacementOffer
+	// images is the candidate's image each commit builds, set before the lab starts; a commit
+	// with none builds the placement's.
+	images map[core.Commit]core.CandidateImage
+}
+
+// candidatesByCommit is the rig's environments, whose candidate's image at a commit is the one
+// the rig gives it, if any.
+type candidatesByCommit struct {
+	onPlacements
+	images map[core.Commit]core.CandidateImage
+}
+
+func (c candidatesByCommit) Environment(kind core.EnvironmentKind, target environment.Target) (environment.Environment, error) {
+	e, err := c.onPlacements.Environment(kind, target)
+	if img, ok := c.images[target.Commit]; ok && err == nil {
+		return candidateAt{Environment: e, img: img}, nil
+	}
+	return e, err
+}
+
+// candidateAt is an environment whose candidate's image is img; its builds are recorded as the
+// environment's.
+type candidateAt struct {
+	environment.Environment
+	img core.CandidateImage
+}
+
+func (c candidateAt) Candidate(ctx context.Context, b core.CandidateBuild, log io.Writer) (core.CandidateImage, error) {
+	if _, err := c.Environment.Candidate(ctx, b, log); err != nil {
+		return core.CandidateImage{}, err
+	}
+	return c.img, nil
 }
 
 // artifactsOf is where the rig keeps a job's artifacts.
@@ -45,7 +81,7 @@ func newLabRig(t *testing.T, tree task.Tree, offers ...core.PlacementOffer) *lab
 		Resources: []schedule.Resource{{ID: schedule.PlacementOf("local"), Capacity: 2}, {ID: "host", Capacity: 1}},
 		Demand:    schedule.PlacementDemand{Placements: map[string]schedule.Offered{"local": {}}, Host: "host"},
 	}
-	r := &labRig{w: w, envs: newOnPlacements(w, "local"), offers: offers}
+	r := &labRig{w: w, envs: newOnPlacements(w, "local"), offers: offers, images: map[core.Commit]core.CandidateImage{}}
 	t.Cleanup(func() {
 		if n := r.envs.docker["local"].Active(); n != 0 {
 			t.Errorf("%d labs or commands still run after the test", n)
@@ -58,9 +94,10 @@ func newLabRig(t *testing.T, tree task.Tree, offers ...core.PlacementOffer) *lab
 // start starts a daemon over the rig's world; another after the first is closed is a restart.
 func (r *labRig) start() *app.App {
 	w := r.w
-	sups := supervisor.NewInProcess(r.envs, w.checkouts, w.survivors).WithHost(supervisor.Host{Files: w.files, Clock: w.clock, Artifacts: artifactsOf})
+	envs := candidatesByCommit{onPlacements: r.envs, images: r.images}
+	sups := supervisor.NewInProcess(envs, w.checkouts, w.survivors).WithHost(supervisor.Host{Files: w.files, Clock: w.clock, Artifacts: artifactsOf})
 	a := app.New(instant(app.Config{
-		Clock: w.clock, Stores: w.stores, Environments: r.envs, Supervisors: sups, Tasks: w.tasks, Files: w.tasks,
+		Clock: w.clock, Stores: w.stores, Environments: envs, Supervisors: sups, Tasks: w.tasks,
 		Repositories: w.git, Placements: r.offers, Scheduler: w.scheduler,
 	}))
 	w.apps = append(w.apps, a)
@@ -368,6 +405,61 @@ func TestALabChecksOutAnotherCommitOfTheSameImages(t *testing.T) {
 	}
 	if _, _, err := r.call(t, lab.ID, core.LabCheckoutCall{Commit: commit}); failureKind(err) != core.FailureConflict || !strings.Contains(err.Error(), "p1") {
 		t.Fatalf("checkout under a running process: %v", err)
+	}
+	r.end(t, lab.ID)
+}
+
+// Regression: a lab of a task of two images refused a commit that changed only files of the
+// candidate's build context that its Dockerfile does not copy, such as the candidate's code, though
+// that commit builds the image the lab runs. The lab takes a commit whose candidate's image is of
+// the content it runs, whatever the image's ID, and refuses one of another content, and one of
+// another task before building anything.
+func TestALabChecksOutACommitWhoseCandidateImageHasTheContentItRuns(t *testing.T) {
+	repo := string(call.Scope.Repository())
+	at := func(files map[string]string) task.Tree {
+		tree := twoImageTask(passes, protocol2Scores)
+		base := map[string]string{
+			"serve/Dockerfile":       "FROM busybox:1.36.1\nCOPY requirements.txt /srv/\n",
+			"serve/requirements.txt": "numpy\n",
+			"serve/app.py":           "print(1)\n",
+		}
+		maps.Copy(base, files)
+		for name, text := range base {
+			tree[name] = task.File{Data: []byte(text)}
+		}
+		return tree
+	}
+	r := newLabRig(t, at(nil))
+	code, deps, other := core.Commit(strings.Repeat("c", 40)), core.Commit(strings.Repeat("d", 40)), core.Commit(strings.Repeat("e", 40))
+	r.w.tasks.Put(repo, code, at(map[string]string{"serve/app.py": "print(2)\n"}))
+	r.w.tasks.Put(repo, deps, at(map[string]string{"serve/requirements.txt": "numpy\nscipy\n"}))
+	changedTask := at(nil)
+	changedTask[task.TasksDir+"/task/Dockerfile"] = task.File{Data: []byte("FROM busybox:1.37.0\n")}
+	r.w.tasks.Put(repo, other, changedTask)
+	image := func(id, content byte) core.CandidateImage {
+		return core.CandidateImage{ID: "sha256:" + strings.Repeat(string(id), 64), Content: "sha256:" + strings.Repeat(string(content), 64)}
+	}
+	// Each build of the image has an ID of its own, as BuildKit's attestations make it.
+	r.images[commit], r.images[code], r.images[deps], r.images[other] = image('1', 'a'), image('2', 'a'), image('3', 'b'), image('4', 'a')
+
+	lab := r.startLab(t, time.Hour)
+	r.ready(t, lab.ID)
+	_, answer, err := r.call(t, lab.ID, core.LabCheckoutCall{Commit: code})
+	if err != nil || answer.(core.LabStatus).Commit != code || !slices.Equal(r.w.checkouts.Switched(), []core.Commit{code}) {
+		t.Fatalf("checkout of a commit that changed only the candidate's code: %+v, %v, switched %v", answer, err, r.w.checkouts.Switched())
+	}
+	if _, _, err := r.call(t, lab.ID, core.LabCheckoutCall{Commit: deps}); failureKind(err) != core.FailureConflict || !strings.Contains(err.Error(), "candidate image") || !strings.Contains(err.Error(), "new lab") {
+		t.Fatalf("checkout of a commit whose candidate's image holds another content: %v", err)
+	}
+	builds := len(r.envs.docker["local"].CandidatesBuilt())
+	if _, _, err := r.call(t, lab.ID, core.LabCheckoutCall{Commit: other}); failureKind(err) != core.FailureConflict || !strings.Contains(err.Error(), "task image") {
+		t.Fatalf("checkout of a commit of another task: %v", err)
+	}
+	if n := len(r.envs.docker["local"].CandidatesBuilt()); n != builds {
+		t.Fatalf("a commit of another task built the candidate's image (%d builds after %d)", n, builds)
+	}
+	if s := r.ready(t, lab.ID); s.Commit != code || !slices.Equal(r.w.checkouts.Switched(), []core.Commit{code}) {
+		t.Fatalf("after two refused checkouts the lab is at %s, switched %v; want it left at %s", s.Commit, r.w.checkouts.Switched(), code)
 	}
 	r.end(t, lab.ID)
 }
