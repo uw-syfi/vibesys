@@ -147,7 +147,11 @@ def _judged(me: Me, messages: Sequence[str]) -> Script:
     value = json.loads(result.text)["current"]["result"]["measure"]["value"]
     yield Mcp(
         "post_report",
-        {"headline": f"best score {value} at {best.commit}", "changed": f"promoted {best.commit}"},
+        {
+            "kind": "final",
+            "headline": f"best score {value} at {best.commit}",
+            "changed": f"promoted {best.commit}",
+        },
     )
     return "Reported."
 

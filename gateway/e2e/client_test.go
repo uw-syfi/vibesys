@@ -25,7 +25,7 @@ func TestAClientCanStartLeaveCheckAndStopARun(t *testing.T) {
 	if started.RunID == "" {
 		t.Fatalf("run start printed no run: %+v", started)
 	}
-	if out := r.client("run", "wait", started.RunID, "--until", "report", "--timeout", "80s"); !strings.Contains(out, "report:") {
+	if out := r.client("run", "wait", started.RunID, "--until", "report", "--timeout", "80s"); !strings.Contains(out, "final report 1:") {
 		t.Errorf("wait --until report printed %q", out)
 	}
 

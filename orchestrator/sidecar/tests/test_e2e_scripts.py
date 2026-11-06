@@ -102,6 +102,7 @@ def test_the_lead_promotes_the_better_commit_and_reports_the_measured_number(
     assert best in promote.argv
     report = [e for e in machine.effects if isinstance(e, Mcp)][-1]
     assert report.tool == "post_report"
+    assert report.arguments["kind"] == "final"
     assert report.arguments["headline"] == f"best score 17.01 at {best}"
 
 
