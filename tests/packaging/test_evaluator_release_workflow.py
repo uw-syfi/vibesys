@@ -170,8 +170,11 @@ def test_the_release_builds_every_platform_wheel_and_verifies_it_before_anything
     assert names.index("Set up Go") < names.index("Build the wheels")
     # The wheel is installed with no Go toolchain, and a main() sample runs through its core.
     install = steps[names.index("Install the wheel in a clean environment")]["run"]
-    assert 'clean_path="/usr/bin:/bin"' in install
-    assert "command -v go" in install
+    # The clean PATH links the system commands but the Go toolchain's (the runner has go in
+    # /usr/bin), and the step refuses to run if go is still reachable on it.
+    assert 'clean_path="$root/clean-bin"' in install
+    assert "go | gofmt | go[0-9]*) continue" in install
+    assert 'PATH="$clean_path" command -v go' in install
     assert "evaluator_wheel_smoke.py" in install
     assert "benchmark --vs-output" in install
     # musl: the static Linux binaries run on Alpine.

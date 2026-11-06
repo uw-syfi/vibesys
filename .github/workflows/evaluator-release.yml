@@ -161,8 +161,16 @@ jobs:
           wheel="$root/$(basename "$WHEEL")"
           uv_bin="$(command -v uv)"
           python_path="$(uv python find 3.12)"
-          # No Go toolchain on this PATH: the wheel alone must carry everything.
-          clean_path="/usr/bin:/bin"
+          # No Go toolchain on this PATH: the wheel alone must carry everything. The runner image
+          # has go in /usr/bin, so the clean PATH is one directory linking every system command
+          # but the Go toolchain's.
+          clean_path="$root/clean-bin"
+          mkdir -p "$clean_path"
+          for cmd in /usr/bin/* /bin/*; do
+            name="$(basename "$cmd")"
+            case "$name" in go | gofmt | go[0-9]*) continue ;; esac
+            [[ -e "$clean_path/$name" ]] || ln -s "$cmd" "$clean_path/$name"
+          done
           if PATH="$clean_path" command -v go > /dev/null; then
             echo "::error::a Go toolchain is on the clean PATH ($clean_path); the smoke test needs none"
             exit 1
