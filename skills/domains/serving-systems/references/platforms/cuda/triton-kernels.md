@@ -64,6 +64,18 @@ torch.cuda.synchronize()
 
 Cover the shapes you expect. Also captures all JIT compilation, which is in the launch path the first time.
 
+### Integer arguments recompile a kernel mid-serving
+
+Without autotune, Triton still compiles a new variant when a plain integer argument changes class:
+equal to 1, divisible by 16, or neither. In serving, per-call integers (a chunk's length or offset, a
+split count, a sequence position) change class on live traffic, so a shape warm-up that covers
+"typical" sizes still leaves compiles of seconds each in the request path, stalling every lane that
+shares the forward. Mark per-call integers with `do_not_specialize` (or pass them in a tensor) so the
+compile depends only on `tl.constexpr` options; warm what remains (for example each power-of-two split
+count) at startup; and check it: log compiles, or after warm-up run a random sweep of lengths and
+offsets and assert that nothing new compiles. Divisibility hints lost this way rarely matter for
+memory-bound kernels; measure the steady-state time before and after.
+
 ## CUDA graph compatibility
 
 Triton kernels are graph-safe **after** compile + autotune. The pitfalls:
