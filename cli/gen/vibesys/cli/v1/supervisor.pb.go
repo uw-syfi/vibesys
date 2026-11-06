@@ -1813,11 +1813,11 @@ const file_vibesys_cli_v1_supervisor_proto_rawDesc = "" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x13\n" +
 	"\x11CancelJobResponse\"\x10\n" +
 	"\x0eReleaseRequest\"\x11\n" +
-	"\x0fReleaseResponse\"=\n" +
-	"\x0eLabCallRequest\x12+\n" +
-	"\x04call\x18\x01 \x01(\v2\x17.vibesys.cli.v1.LabCallR\x04call\"A\n" +
-	"\x0fLabCallResponse\x12.\n" +
-	"\x05reply\x18\x01 \x01(\v2\x18.vibesys.cli.v1.LabReplyR\x05reply*\xef\x01\n" +
+	"\x0fReleaseResponse\"E\n" +
+	"\x0eLabCallRequest\x123\n" +
+	"\x04call\x18\x01 \x01(\v2\x17.vibesys.cli.v1.LabCallB\x06\xbaH\x03\xc8\x01\x01R\x04call\"I\n" +
+	"\x0fLabCallResponse\x126\n" +
+	"\x05reply\x18\x01 \x01(\v2\x18.vibesys.cli.v1.LabReplyB\x06\xbaH\x03\xc8\x01\x01R\x05reply*\xef\x01\n" +
 	"\rExecutionKind\x12\x1e\n" +
 	"\x1aEXECUTION_KIND_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15EXECUTION_KIND_EXITED\x10\x01\x12\x1c\n" +

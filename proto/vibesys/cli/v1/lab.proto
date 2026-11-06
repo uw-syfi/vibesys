@@ -67,7 +67,7 @@ message LabExec {
 // LabStatusRequest asks where the lab is and what runs in it.
 message LabStatusRequest {
   // Answer once the lab is ready or has ended, and not while it is queued or starting.
-  bool wait = 1;
+  bool wait = 1 [(buf.validate.field).ignore = IGNORE_ALWAYS];
 }
 
 // LabKill signals a process of the lab the lab started.
@@ -128,8 +128,8 @@ message LabCall {
 // LabProcess is a process the lab started for a detached exec.
 message LabProcess {
   // The lab's name for it, p1, p2, ... in the order they started.
-  string handle = 1;
-  LabRoom room = 2;
+  string handle = 1 [(buf.validate.field).string.min_len = 1];
+  LabRoom room = 2 [(buf.validate.field).enum.defined_only = true];
   repeated string argv = 3;
   google.protobuf.Timestamp started_at = 4;
   oneof state {
@@ -144,12 +144,12 @@ message LabProcess {
 
 // LabStatus is where a lab is and what runs in it.
 message LabStatus {
-  LabPhase phase = 1;
+  LabPhase phase = 1 [(buf.validate.field).enum.defined_only = true];
   // The commit the checkout is at now.
-  string commit = 2;
+  string commit = 2 [(buf.validate.field).string.pattern = "^([0-9a-f]{40})?$"];
   // A TCP port of the candidate's container on which nothing listened when the lab started, for a
   // server the caller starts there. The task's container reaches it at 127.0.0.1.
-  uint32 port = 3;
+  uint32 port = 3 [(buf.validate.field).uint32.lte = 65535];
   // When the lab ends on its own.
   google.protobuf.Timestamp until = 4;
   repeated LabRoom rooms = 5;
@@ -161,9 +161,9 @@ message LabStatus {
 // LabFile is one piece of a file a pull copies back.
 message LabFile {
   // The file's path relative to the path pulled; empty when that path is the file.
-  string path = 1;
+  string path = 1 [(buf.validate.field).string.max_len = 4096];
   uint64 offset = 2;
-  bytes data = 3;
+  bytes data = 3 [(buf.validate.field).bytes.max_len = 1048576];
   bool executable = 4;
 }
 
@@ -179,13 +179,19 @@ message LabExit {
 
 // LabPulled ends a pull: how many files and bytes it sent.
 message LabPulled {
+  option (buf.validate.message).cel = {
+    id: "lab_pulled.bytes_need_files"
+    message: "bytes pulled need at least one file"
+    expression: "this.files > 0u || this.bytes == 0u"
+  };
   uint32 files = 1;
   uint64 bytes = 2;
 }
 
 // LabPushed answers a push: the file's size so far.
 message LabPushed {
-  uint64 size = 1;
+  // A count the receiver takes as it comes; there is nothing to refuse.
+  uint64 size = 1 [(buf.validate.field).ignore = IGNORE_ALWAYS];
 }
 
 // LabReply is one message of a lab call's answer. A call streams output or file pieces, and its
@@ -193,6 +199,7 @@ message LabPushed {
 // status for the others.
 message LabReply {
   oneof item {
+    option (buf.validate.oneof).required = true;
     // Output of a foreground exec, standard output and standard error as one stream.
     bytes output = 1;
     LabFile file = 2;

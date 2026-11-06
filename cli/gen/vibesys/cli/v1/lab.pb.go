@@ -1177,8 +1177,9 @@ func (x *LabPulled) GetBytes() uint64 {
 
 // LabPushed answers a push: the file's size so far.
 type LabPushed struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Size          uint64                 `protobuf:"varint,1,opt,name=size,proto3" json:"size,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A count the receiver takes as it comes; there is nothing to refuse.
+	Size          uint64 `protobuf:"varint,1,opt,name=size,proto3" json:"size,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1399,9 +1400,9 @@ const file_vibesys_cli_v1_lab_proto_rawDesc = "" +
 	"\x06detach\x18\x04 \x01(\bR\x06detach\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"&\n" +
-	"\x10LabStatusRequest\x12\x12\n" +
-	"\x04wait\x18\x01 \x01(\bR\x04wait\"{\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\".\n" +
+	"\x10LabStatusRequest\x12\x1a\n" +
+	"\x04wait\x18\x01 \x01(\bB\x06\xbaH\x03\xd8\x01\x03R\x04wait\"{\n" +
 	"\aLabKill\x121\n" +
 	"\x06handle\x18\x01 \x01(\tB\x19\xbaH\x16r\x142\x12^p[1-9][0-9]{0,8}$R\x06handle\x12=\n" +
 	"\x06signal\x18\x02 \x01(\x0e2\x19.vibesys.cli.v1.LabSignalB\n" +
@@ -1428,42 +1429,43 @@ const file_vibesys_cli_v1_lab_proto_rawDesc = "" +
 	"\x04pull\x18\x05 \x01(\v2\x17.vibesys.cli.v1.LabPullH\x00R\x04pull\x12-\n" +
 	"\x04push\x18\x06 \x01(\v2\x17.vibesys.cli.v1.LabPushH\x00R\x04push\x12*\n" +
 	"\x03end\x18\a \x01(\v2\x16.vibesys.cli.v1.LabEndH\x00R\x03endB\v\n" +
-	"\x02op\x12\x05\xbaH\x02\b\x01\"\xfa\x01\n" +
+	"\x02op\x12\x05\xbaH\x02\b\x01\"\x8d\x02\n" +
 	"\n" +
-	"LabProcess\x12\x16\n" +
-	"\x06handle\x18\x01 \x01(\tR\x06handle\x12+\n" +
-	"\x04room\x18\x02 \x01(\x0e2\x17.vibesys.cli.v1.LabRoomR\x04room\x12\x12\n" +
+	"LabProcess\x12\x1f\n" +
+	"\x06handle\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06handle\x125\n" +
+	"\x04room\x18\x02 \x01(\x0e2\x17.vibesys.cli.v1.LabRoomB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04room\x12\x12\n" +
 	"\x04argv\x18\x03 \x03(\tR\x04argv\x129\n" +
 	"\n" +
 	"started_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12\x1a\n" +
 	"\arunning\x18\x05 \x01(\bH\x00R\arunning\x12\x1d\n" +
 	"\texit_code\x18\x06 \x01(\x05H\x00R\bexitCode\x12\x14\n" +
 	"\x04lost\x18\a \x01(\tH\x00R\x04lostB\a\n" +
-	"\x05state\"\xa0\x02\n" +
-	"\tLabStatus\x12.\n" +
-	"\x05phase\x18\x01 \x01(\x0e2\x18.vibesys.cli.v1.LabPhaseR\x05phase\x12\x16\n" +
-	"\x06commit\x18\x02 \x01(\tR\x06commit\x12\x12\n" +
-	"\x04port\x18\x03 \x01(\rR\x04port\x120\n" +
+	"\x05state\"\xcf\x02\n" +
+	"\tLabStatus\x128\n" +
+	"\x05phase\x18\x01 \x01(\x0e2\x18.vibesys.cli.v1.LabPhaseB\b\xbaH\x05\x82\x01\x02\x10\x01R\x05phase\x120\n" +
+	"\x06commit\x18\x02 \x01(\tB\x18\xbaH\x15r\x132\x11^([0-9a-f]{40})?$R\x06commit\x12\x1d\n" +
+	"\x04port\x18\x03 \x01(\rB\t\xbaH\x06*\x04\x18\xff\xff\x03R\x04port\x120\n" +
 	"\x05until\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\x05until\x12-\n" +
 	"\x05rooms\x18\x05 \x03(\x0e2\x17.vibesys.cli.v1.LabRoomR\x05rooms\x128\n" +
 	"\tprocesses\x18\x06 \x03(\v2\x1a.vibesys.cli.v1.LabProcessR\tprocesses\x12\x1c\n" +
-	"\tartifacts\x18\a \x01(\tR\tartifacts\"i\n" +
-	"\aLabFile\x12\x12\n" +
-	"\x04path\x18\x01 \x01(\tR\x04path\x12\x16\n" +
-	"\x06offset\x18\x02 \x01(\x04R\x06offset\x12\x12\n" +
-	"\x04data\x18\x03 \x01(\fR\x04data\x12\x1e\n" +
+	"\tartifacts\x18\a \x01(\tR\tartifacts\"~\n" +
+	"\aLabFile\x12\x1c\n" +
+	"\x04path\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x04path\x12\x16\n" +
+	"\x06offset\x18\x02 \x01(\x04R\x06offset\x12\x1d\n" +
+	"\x04data\x18\x03 \x01(\fB\t\xbaH\x06z\x04\x18\x80\x80@R\x04data\x12\x1e\n" +
 	"\n" +
 	"executable\x18\x04 \x01(\bR\n" +
 	"executable\"C\n" +
 	"\aLabExit\x12\x14\n" +
 	"\x04code\x18\x01 \x01(\x05H\x00R\x04code\x12\x14\n" +
 	"\x04lost\x18\x02 \x01(\tH\x00R\x04lostB\f\n" +
-	"\x03end\x12\x05\xbaH\x02\b\x01\"7\n" +
+	"\x03end\x12\x05\xbaH\x02\b\x01\"\xa5\x01\n" +
 	"\tLabPulled\x12\x14\n" +
 	"\x05files\x18\x01 \x01(\rR\x05files\x12\x14\n" +
-	"\x05bytes\x18\x02 \x01(\x04R\x05bytes\"\x1f\n" +
-	"\tLabPushed\x12\x12\n" +
-	"\x04size\x18\x01 \x01(\x04R\x04size\"\xe1\x02\n" +
+	"\x05bytes\x18\x02 \x01(\x04R\x05bytes:l\xbaHi\x1ag\n" +
+	"\x1blab_pulled.bytes_need_files\x12#bytes pulled need at least one file\x1a#this.files > 0u || this.bytes == 0u\"'\n" +
+	"\tLabPushed\x12\x1a\n" +
+	"\x04size\x18\x01 \x01(\x04B\x06\xbaH\x03\xd8\x01\x03R\x04size\"\xe8\x02\n" +
 	"\bLabReply\x12\x18\n" +
 	"\x06output\x18\x01 \x01(\fH\x00R\x06output\x12-\n" +
 	"\x04file\x18\x02 \x01(\v2\x17.vibesys.cli.v1.LabFileH\x00R\x04file\x12-\n" +
@@ -1471,8 +1473,8 @@ const file_vibesys_cli_v1_lab_proto_rawDesc = "" +
 	"\aprocess\x18\x04 \x01(\v2\x1a.vibesys.cli.v1.LabProcessH\x00R\aprocess\x123\n" +
 	"\x06status\x18\x05 \x01(\v2\x19.vibesys.cli.v1.LabStatusH\x00R\x06status\x123\n" +
 	"\x06pulled\x18\x06 \x01(\v2\x19.vibesys.cli.v1.LabPulledH\x00R\x06pulled\x123\n" +
-	"\x06pushed\x18\a \x01(\v2\x19.vibesys.cli.v1.LabPushedH\x00R\x06pushedB\x06\n" +
-	"\x04item*N\n" +
+	"\x06pushed\x18\a \x01(\v2\x19.vibesys.cli.v1.LabPushedH\x00R\x06pushedB\r\n" +
+	"\x04item\x12\x05\xbaH\x02\b\x01*N\n" +
 	"\aLabRoom\x12\x18\n" +
 	"\x14LAB_ROOM_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12LAB_ROOM_CANDIDATE\x10\x01\x12\x11\n" +

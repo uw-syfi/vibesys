@@ -273,9 +273,9 @@ message ReleaseRequest {}
 message ReleaseResponse {}
 
 message LabCallRequest {
-  LabCall call = 1;
+  LabCall call = 1 [(buf.validate.field).required = true];
 }
 
 message LabCallResponse {
-  LabReply reply = 1;
+  LabReply reply = 1 [(buf.validate.field).required = true];
 }

@@ -200,12 +200,12 @@ message StopResponse {}
 
 message DrainRequest {
   // Who asks, in the caller's own words.
-  string agent = 1;
-  string reason = 2;
+  string agent = 1 [(buf.validate.field).string.max_len = 4096];
+  string reason = 2 [(buf.validate.field).string.max_len = 4096];
 }
 
 message DrainResponse {
-  DaemonDrain drain = 1;
+  DaemonDrain drain = 1 [(buf.validate.field).required = true];
 }
 
 message ResumeRequest {}
@@ -330,34 +330,34 @@ message AddNoteResponse {
 
 message HoldJobRequest {
   CallContext context = 1;
-  string job_id = 2;
-  string reason = 3;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+  string reason = 3 [(buf.validate.field).string.max_len = 4096];
 }
 
 message HoldJobResponse {
-  Job job = 1;
+  Job job = 1 [(buf.validate.field).required = true];
 }
 
 message ReleaseJobRequest {
   CallContext context = 1;
-  string job_id = 2;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 message ReleaseJobResponse {
-  Job job = 1;
+  Job job = 1 [(buf.validate.field).required = true];
 }
 
 message SetJobPriorityRequest {
   CallContext context = 1;
-  string job_id = 2;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
   // The job's own priority; unspecified inherits its plans'.
-  Priority priority = 3;
+  Priority priority = 3 [(buf.validate.field).enum.defined_only = true];
   // Why, required.
   string reason = 4;
 }
 
 message SetJobPriorityResponse {
-  Job job = 1;
+  Job job = 1 [(buf.validate.field).required = true];
 }
 
 message ListJobsRequest {
@@ -390,13 +390,13 @@ message ListJobsResponse {
 }
 
 message QueueRequest {
-  CallContext context = 1;
+  CallContext context = 1 [(buf.validate.field).required = true];
 }
 
 message QueueResponse {
   // The plans that have a queued or running job, by number, then the group of the jobs linked to
   // no plan, which has no plan. A job linked to several plans is in the group of the first.
-  repeated QueueGroup groups = 1;
+  repeated QueueGroup groups = 1 [(buf.validate.field).repeated.max_items = 100000];
   // Set while the daemon is draining.
   DaemonDrain drain = 2;
 }
@@ -406,12 +406,17 @@ message QueueResponse {
 message QueueGroup {
   // Unset for the jobs linked to no plan.
   Plan plan = 1;
-  repeated QueuedJob jobs = 2;
+  repeated QueuedJob jobs = 2 [(buf.validate.field).repeated.min_items = 1];
 }
 
 // QueuedJob is a queued or running job, with what a lead decides by.
 message QueuedJob {
-  Job job = 1;
+  option (buf.validate.message).cel = {
+    id: "queued_job.estimate_has_a_basis"
+    message: "estimated_from counts the jobs behind an estimate: positive with one, zero without"
+    expression: "has(this.estimate) == (this.estimated_from > 0u)"
+  };
+  Job job = 1 [(buf.validate.field).required = true];
   // The priority the job counts as now: its own or its plans', aged by how long it has waited.
   Priority priority = 2;
   // Why a queued job has not started, as the scheduler last decided. Unset for a running job and

@@ -5087,12 +5087,12 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tH\x00R\x05value\x88\x01\x01B\b\n" +
 	"\x06_value\"\r\n" +
 	"\vStopRequest\"\x0e\n" +
-	"\fStopResponse\"<\n" +
-	"\fDrainRequest\x12\x14\n" +
-	"\x05agent\x18\x01 \x01(\tR\x05agent\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"B\n" +
-	"\rDrainResponse\x121\n" +
-	"\x05drain\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.DaemonDrainR\x05drain\"\x0f\n" +
+	"\fStopResponse\"P\n" +
+	"\fDrainRequest\x12\x1e\n" +
+	"\x05agent\x18\x01 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x05agent\x12 \n" +
+	"\x06reason\x18\x02 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06reason\"J\n" +
+	"\rDrainResponse\x129\n" +
+	"\x05drain\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.DaemonDrainB\x06\xbaH\x03\xc8\x01\x01R\x05drain\"\x0f\n" +
 	"\rResumeRequest\"\x10\n" +
 	"\x0eResumeResponse\"9\n" +
 	"\x17ForgetRepositoryRequest\x12\x1e\n" +
@@ -5141,25 +5141,25 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x06job_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12\x1b\n" +
 	"\x04text\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04text\"8\n" +
 	"\x0fAddNoteResponse\x12%\n" +
-	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"v\n" +
+	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"\x89\x01\n" +
 	"\x0eHoldJobRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x15\n" +
-	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\"8\n" +
-	"\x0fHoldJobResponse\x12%\n" +
-	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"a\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1e\n" +
+	"\x06job_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12 \n" +
+	"\x06reason\x18\x03 \x01(\tB\b\xbaH\x05r\x03\x18\x80 R\x06reason\"@\n" +
+	"\x0fHoldJobResponse\x12-\n" +
+	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobB\x06\xbaH\x03\xc8\x01\x01R\x03job\"j\n" +
 	"\x11ReleaseJobRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x15\n" +
-	"\x06job_id\x18\x02 \x01(\tR\x05jobId\";\n" +
-	"\x12ReleaseJobResponse\x12%\n" +
-	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"\xb3\x01\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1e\n" +
+	"\x06job_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\"C\n" +
+	"\x12ReleaseJobResponse\x12-\n" +
+	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobB\x06\xbaH\x03\xc8\x01\x01R\x03job\"\xc6\x01\n" +
 	"\x15SetJobPriorityRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x15\n" +
-	"\x06job_id\x18\x02 \x01(\tR\x05jobId\x124\n" +
-	"\bpriority\x18\x03 \x01(\x0e2\x18.vibesys.cli.v1.PriorityR\bpriority\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\"?\n" +
-	"\x16SetJobPriorityResponse\x12%\n" +
-	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\"\x99\x02\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1e\n" +
+	"\x06job_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12>\n" +
+	"\bpriority\x18\x03 \x01(\x0e2\x18.vibesys.cli.v1.PriorityB\b\xbaH\x05\x82\x01\x02\x10\x01R\bpriority\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"G\n" +
+	"\x16SetJobPriorityResponse\x12-\n" +
+	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobB\x06\xbaH\x03\xc8\x01\x01R\x03job\"\x99\x02\n" +
 	"\x0fListJobsRequest\x125\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x120\n" +
 	"\x06commit\x18\x02 \x01(\tB\x18\xbaH\x15r\x132\x11^([0-9a-f]{40})?$R\x06commit\x12A\n" +
@@ -5175,23 +5175,25 @@ const file_vibesys_cli_v1_service_proto_rawDesc = "" +
 	"\x05reply\x18\x01 \x01(\v2\x18.vibesys.cli.v1.LabReplyB\x06\xbaH\x03\xc8\x01\x01R\x05reply\"j\n" +
 	"\x10ListJobsResponse\x12'\n" +
 	"\x04jobs\x18\x01 \x03(\v2\x13.vibesys.cli.v1.JobR\x04jobs\x12-\n" +
-	"\x05waits\x18\x02 \x03(\v2\x17.vibesys.cli.v1.JobWaitR\x05waits\"E\n" +
-	"\fQueueRequest\x125\n" +
-	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\"v\n" +
-	"\rQueueResponse\x122\n" +
-	"\x06groups\x18\x01 \x03(\v2\x1a.vibesys.cli.v1.QueueGroupR\x06groups\x121\n" +
-	"\x05drain\x18\x02 \x01(\v2\x1b.vibesys.cli.v1.DaemonDrainR\x05drain\"e\n" +
+	"\x05waits\x18\x02 \x03(\v2\x17.vibesys.cli.v1.JobWaitR\x05waits\"M\n" +
+	"\fQueueRequest\x12=\n" +
+	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextB\x06\xbaH\x03\xc8\x01\x01R\acontext\"\x82\x01\n" +
+	"\rQueueResponse\x12>\n" +
+	"\x06groups\x18\x01 \x03(\v2\x1a.vibesys.cli.v1.QueueGroupB\n" +
+	"\xbaH\a\x92\x01\x04\x10\xa0\x8d\x06R\x06groups\x121\n" +
+	"\x05drain\x18\x02 \x01(\v2\x1b.vibesys.cli.v1.DaemonDrainR\x05drain\"o\n" +
 	"\n" +
 	"QueueGroup\x12(\n" +
-	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\x12-\n" +
-	"\x04jobs\x18\x02 \x03(\v2\x19.vibesys.cli.v1.QueuedJobR\x04jobs\"\xa3\x02\n" +
-	"\tQueuedJob\x12%\n" +
-	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobR\x03job\x124\n" +
+	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\x127\n" +
+	"\x04jobs\x18\x02 \x03(\v2\x19.vibesys.cli.v1.QueuedJobB\b\xbaH\x05\x92\x01\x02\b\x01R\x04jobs\"\xdc\x03\n" +
+	"\tQueuedJob\x12-\n" +
+	"\x03job\x18\x01 \x01(\v2\x13.vibesys.cli.v1.JobB\x06\xbaH\x03\xc8\x01\x01R\x03job\x124\n" +
 	"\bpriority\x18\x02 \x01(\x0e2\x18.vibesys.cli.v1.PriorityR\bpriority\x12.\n" +
 	"\x04wait\x18\x03 \x01(\v2\x1a.vibesys.cli.v1.WaitReasonR\x04wait\x12+\n" +
 	"\x03age\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x03age\x125\n" +
 	"\bestimate\x18\x05 \x01(\v2\x19.google.protobuf.DurationR\bestimate\x12%\n" +
-	"\x0eestimated_from\x18\x06 \x01(\rR\restimatedFrom\"\x98\x01\n" +
+	"\x0eestimated_from\x18\x06 \x01(\rR\restimatedFrom:\xae\x01\xbaH\xaa\x01\x1a\xa7\x01\n" +
+	"\x1fqueued_job.estimate_has_a_basis\x12Restimated_from counts the jobs behind an estimate: positive with one, zero without\x1a0has(this.estimate) == (this.estimated_from > 0u)\"\x98\x01\n" +
 	"\x0fReadLogsRequest\x125\n" +
 	"\acontext\x18\x01 \x01(\v2\x1b.vibesys.cli.v1.CallContextR\acontext\x12\x1e\n" +
 	"\x06job_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05jobId\x12\x16\n" +

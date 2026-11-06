@@ -5,6 +5,15 @@
   "proto/vibesys/cli/v1/job.proto": [
     "LeaseHolder.pid"
   ],
+  "proto/vibesys/cli/v1/lab.proto": [
+    "LabFile",
+    "LabFile.path",
+    "LabProcess",
+    "LabPull.path",
+    "LabPush.path",
+    "LabReply.file",
+    "LabReply.process"
+  ],
   "proto/vibesys/cli/v1/machine.proto": [
     "MachineDaemon.pid",
     "MachineDaemon.runtime_dir"
