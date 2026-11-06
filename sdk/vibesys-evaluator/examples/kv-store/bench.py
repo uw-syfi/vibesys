@@ -22,9 +22,11 @@ import json
 import urllib.request
 
 import vibesys_evaluator as vse
-from vibesys_evaluator import Call, Rand, Versions
-from vibesys_evaluator.deploy import k8s
-from vibesys_evaluator.service import Operation, Request, Step, Template, Workload, get, post, put, ref
+from vibesys_evaluator import microservices as ms
+from vibesys_evaluator import Rand
+from vibesys_evaluator.microservices import Call, Versions
+from vibesys_evaluator.microservices import k8s
+from vibesys_evaluator.microservices import Operation, Request, Step, Template, Workload, get, post, put, ref
 
 SEED = 7
 KEYS = 100_000
@@ -116,7 +118,7 @@ def apply_write(m: Model, call: Call) -> None:
 def check_read(m: Model, call: Call) -> str | None:
     assert call.start is not None and call.end is not None
     key = call.info["key"]
-    response: vse.Response = call.responses[1]
+    response: ms.Response = call.responses[1]
     got = response.body if response.status == 200 else None
     allowed = m.values.allowed(key, m.seeded(key), start=call.start, end=call.end)
     return None if got in allowed else f"k{key}: {got!r:.40}, allowed {len(allowed)} values"
@@ -138,8 +140,8 @@ WORKLOAD = Workload(
 
 # ------------------------------------------------------------ (4) benchmark
 
-def benchmark(run: vse.Run) -> None:
-    phase: vse.PhaseResult = run.open_loop(rate=RATE, secs=60, warmup=15)  # Poisson arrivals
+def benchmark(run: ms.Run) -> None:
+    phase: ms.PhaseResult = run.open_loop(rate=RATE, secs=60, warmup=15)  # Poisson arrivals
     run.report({"latency_ms.p50": phase.p50_ms, "latency_ms.p99": phase.p99_ms,
                 "operations_per_second": phase.ops_per_sec})
 
@@ -147,7 +149,7 @@ def benchmark(run: vse.Run) -> None:
 # ------------------------------------------------------------- (5) validity
 
 if __name__ == "__main__":
-    vse.main(
+    ms.main(
         dataset=Data,
         system=SYSTEM,
         workload=WORKLOAD,

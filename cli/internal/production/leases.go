@@ -34,7 +34,7 @@ import (
 // gives is leased in the cluster itself, as a coordination.k8s.io Lease that kubectl writes on the
 // engine's machine, so the daemons of machines that share the cluster take turns at it. GPUs need
 // no lease of their own: they are a machine's, whose lease a job that holds them alone takes. A
-// Slurm placement leases nothing, since Slurm's exclusive allocation arbitrates its nodes.
+// Slurm or Apptainer placement leases nothing, since Slurm's exclusive allocation arbitrates its nodes.
 //
 // scope says where each kind of lease is kept, so that a sandbox daemon's are its own. claims are what the resources of each placement claim, by
 // placement name, as the scheduler has them.
@@ -56,7 +56,7 @@ func (p Process) leasingOf(op *cliv1.OperatorConfig, scope leaseScope, claims ma
 			r := pl.GetRemote()
 			ssh := remote.SSH{Host: r.GetHost(), Program: orDefault(r.GetSshCommand(), "ssh")}
 			shell, machine = ssh, scope.remote(ssh)
-		case cliv1.PlacementKind_PLACEMENT_KIND_SLURM, cliv1.PlacementKind_PLACEMENT_KIND_UNSPECIFIED:
+		case cliv1.PlacementKind_PLACEMENT_KIND_SLURM, cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER, cliv1.PlacementKind_PLACEMENT_KIND_UNSPECIFIED:
 			continue
 		}
 		book[string(schedule.PlacementOf(name))] = lease.Place{Leases: machine, Key: machineKey}

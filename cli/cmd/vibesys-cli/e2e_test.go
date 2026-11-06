@@ -76,6 +76,11 @@ func TestMain(m *testing.M) {
 	case "ready":
 		fmt.Print(readyPipe() != nil)
 		os.Exit(0)
+	case "":
+		// The tool, mounted in a task's container, probing a candidate's server.
+		if len(os.Args) > 1 && os.Args[1] == "probe-ready" {
+			os.Exit(run(os.Args[1:], realDeps(os.Stdout, os.Stderr)))
+		}
 	case roleCLI:
 		// The test binary as the shipped tool: its daemon and supervisor processes are this binary
 		// again, composed by internal/production as the release is, over the real machine.
@@ -86,6 +91,8 @@ func TestMain(m *testing.M) {
 		}
 		os.Exit(run(os.Args[1:], d))
 	}
+	// The tests start from none of the operator's names, whatever shell runs them.
+	scrubOperatorEnvironment()
 	os.Exit(m.Run())
 }
 

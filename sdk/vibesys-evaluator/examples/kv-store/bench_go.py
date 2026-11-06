@@ -16,14 +16,15 @@ dataset file, the JSON of bench.py's Data.
 from __future__ import annotations
 
 import bench
+
 import vibesys_evaluator as vse
-from vibesys_evaluator.service import Generator
+from vibesys_evaluator import microservices as ms
 
 if __name__ == "__main__":
-    vse.main(
+    ms.main(
         dataset=bench.Data,
         system=bench.SYSTEM,
-        workload=Generator(["./kv-generator"]),  # relative to this script's directory
+        workload=ms.Generator(["./kv-generator"]),  # relative to this script's directory
         benchmark=bench.benchmark,
         metrics={
             "latency_ms.p50": vse.Metric(unit="ms", direction="min"),

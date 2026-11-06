@@ -50,8 +50,17 @@ type Config struct {
 	Placement string
 	// Resources are what the placement gives every container, at most one of each kind: GPUs,
 	// a cluster, read-only directories. A task that needs a kind the placement does not give is
-	// refused, and so is a task for an accelerator without GPUs.
+	// refused, and so is a task for an accelerator without GPUs. For a task of two images, the GPUs
+	// go to the candidate's container alone.
 	Resources []resource.Resource
+
+	// Candidates reads what builds a candidate's image, for a task of two images. Nil builds none.
+	Candidates CandidateSource
+	// Probe is the absolute path, on the engine's machine, of a program for the engine's platform
+	// that asks a URL once and exits 0 for a 2xx answer, when called with ProbeCommand and the URL:
+	// this binary, which is static. It is mounted read-only at ProbeMount in the container of a
+	// task's image, to probe the candidate's server beside it. Empty runs no task of two images.
+	Probe string
 }
 
 // Provider makes the docker environments of one process. They share what must be one per
@@ -83,6 +92,8 @@ func New(cfg Config) (*Provider, error) {
 		return nil, missing("Timers")
 	case cfg.IDs == nil:
 		return nil, missing("IDs")
+	case cfg.Probe != "" && cfg.Probe[0] != '/':
+		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: the probe program %q is not an absolute path", cfg.Probe)}
 	case cfg.User.UID < 0 || cfg.User.GID < 0:
 		return nil, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("docker: the user %d:%d is negative", cfg.User.UID, cfg.User.GID)}
 	}
@@ -205,8 +216,8 @@ func (e *env) Machine(ctx context.Context) (core.MachineFacts, error) {
 // Load implements environment.Environment.
 func (e *env) Load(ctx context.Context) (core.MachineLoad, error) { return e.p.cfg.Backend.Load(ctx) }
 
-// image returns the image the task's files build. An image the engine already has under their
-// tag is not built again. Builds are one at a time, so that a Fingerprint and a Run that ask for
+// image returns the image the task's files build on the engine's local images of its bases. An
+// image the engine already has under their tag (buildKey) is not built again. Builds are one at a time, so that a Fingerprint and a Run that ask for
 // the same image build it once; the build's progress goes to log.
 func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, error) {
 	select {
@@ -219,7 +230,11 @@ func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, 
 	if err != nil {
 		return Image{}, err
 	}
-	tag := imageTag(buildContext)
+	bases, err := p.bases(ctx, spec.Dockerfile)
+	if err != nil {
+		return Image{}, err
+	}
+	tag := imageTag(buildKey(buildContext, bases))
 	if img, ok, err := p.cfg.Engine.Image(ctx, tag); err != nil || ok {
 		return checked(img, err)
 	}
@@ -231,6 +246,23 @@ func (p *Provider) image(ctx context.Context, spec Spec, log io.Writer) (Image, 
 		err = &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: the engine built %s and does not have it", tag)}
 	}
 	return checked(img, err)
+}
+
+// bases looks up the engine's local image of each image the Dockerfile builds on (baseRefs).
+func (p *Provider) bases(ctx context.Context, dockerfile []byte) ([]base, error) {
+	var out []base
+	for _, ref := range baseRefs(dockerfile) {
+		img, ok, err := p.cfg.Engine.Image(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		b := base{Ref: ref}
+		if ok {
+			b.ID = img.ID
+		}
+		out = append(out, b)
+	}
+	return out, nil
 }
 
 // checked passes err on, and refuses an image the fingerprint could not pin.

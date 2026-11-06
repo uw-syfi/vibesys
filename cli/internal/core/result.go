@@ -63,6 +63,10 @@ type Result struct {
 	Load          MachineLoad
 	RecordedAt    time.Time
 	Outcome       Outcome
+	// CandidateImage is the exact digest of the candidate's image the result was taken against, for
+	// a task of two images, and empty otherwise. It is recorded and takes no part in the key: a
+	// dependency the candidate changes is part of the candidate, as its code is.
+	CandidateImage string
 }
 
 // ResultFilter selects results. Fields combine with AND and the zero value matches every result.

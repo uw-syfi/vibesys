@@ -41,12 +41,14 @@ done
 # lets the fakes stand in for Docker in every other test, and the tool as shipped runs a task of a
 # Dockerfile through them. They build and start real containers, so they get a longer bound, and they
 # spend their time waiting for the daemon, so they run while the race run keeps the cores busy and
-# not after it. They run where a daemon is reachable, and are only compiled elsewhere.
+# not after it. They run where a daemon is reachable, and are only compiled elsewhere. They build
+# without cgo, as a release is: a task of two images mounts the tool itself in a container as the
+# probe of the candidate's server, which only a static build can run whatever the image holds.
 docker_log=""
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   docker_log="$(mktemp)"
   trap 'rm -f "$docker_log"' EXIT
-  go test -tags docker -count=1 -timeout 600s ./internal/environment/docker/... ./cmd/vibesys-cli >"$docker_log" 2>&1 &
+  CGO_ENABLED=0 go test -tags docker -count=1 -timeout 600s ./internal/environment/docker/... ./cmd/vibesys-cli >"$docker_log" 2>&1 &
   docker_pid=$!
 else
   printf 'No Docker daemon is reachable: the tests against a real one were compiled and not run.\n' >&2

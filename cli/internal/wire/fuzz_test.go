@@ -81,6 +81,37 @@ func FuzzDecodeJob(f *testing.F) {
 	})
 }
 
+// A command job's candidate and profile request, decoded from anything, are what the job runs:
+// a candidate with a Dockerfile and a context, a server with a program and a startup time, and a
+// wrapper of no empty word.
+func FuzzDecodeCommandCandidateAndProfile(f *testing.F) {
+	seedMessages(f,
+		&cliv1.CommandSettings{Profile: &cliv1.ProfileRequest{Wrap: []string{"nsys", "profile"}}, Candidate: &cliv1.CandidateSetup{
+			Build: &cliv1.CandidateBuild{Dockerfile: "serve/Dockerfile", Context: "serve", AllowedBases: []string{"python:3.12"}},
+			Serve: &cliv1.CandidateServe{Argv: []string{"serve", "${PORT}"}, Ready: "/health", StartupTimeout: durationpb.New(time.Minute)},
+		}},
+		&cliv1.CommandSettings{Profile: &cliv1.ProfileRequest{Wrap: []string{""}}},
+		&cliv1.CommandSettings{Candidate: &cliv1.CandidateSetup{Build: &cliv1.CandidateBuild{}}},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.CommandSettings{}
+		decode(t, data, message)
+		if p, err := wire.ToProfileRequest("profile", message.GetProfile()); err == nil && p != nil && slices.Contains(p.Wrap, "") {
+			t.Fatalf("a decoded profile wraps the server in an empty word: %+v", p)
+		}
+		c, err := wire.ToCommandCandidate("candidate", message.GetCandidate())
+		if err != nil || c == nil {
+			return
+		}
+		if c.Build.Dockerfile == "" || c.Build.Context == "" {
+			t.Fatalf("a decoded candidate has no Dockerfile or context: %+v", c.Build)
+		}
+		if s := c.Serve; s != nil && (len(s.Argv) == 0 || s.StartupTimeout <= 0) {
+			t.Fatalf("a decoded server has no program or no startup time: %+v", s)
+		}
+	})
+}
+
 func FuzzDecodeWaitRequest(f *testing.F) {
 	seedMessages(f,
 		&cliv1.WaitRequest{JobIds: []string{"j1"}},

@@ -23,12 +23,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-# test-isolation: the dataset file is what the phase pod writes for a generator; the
-# PhaseInput and the stream's messages are the schema's.
-from vibesys_evaluator._private import dataset as dataset_file
 from vibesys_evaluator._private.files import read_summary
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
+
+# test-isolation: the dataset file is what the phase pod writes for a generator; the
+# PhaseInput and the stream's messages are the schema's.
+from vibesys_evaluator.microservices._private import dataset as dataset_file
 from vs_evaluator_protocol.api import parse_records, read_measurement
 
 from ..vse_support import kv

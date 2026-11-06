@@ -142,7 +142,7 @@ func clip(s string) string {
 	return s
 }
 
-// Rsync copies directories between this machine and an ssh host.
+// Rsync copies directories, and files to the host, between this machine and an ssh host.
 type Rsync struct {
 	SSH SSH
 	// Program is rsync and any arguments of the operator's.
@@ -152,6 +152,11 @@ type Rsync struct {
 // Push makes remote a copy of local. With mirror, files that local does not have are deleted.
 func (r Rsync) Push(ctx context.Context, local, remote string, mirror bool) error {
 	return r.copy(ctx, strings.TrimSuffix(local, "/")+"/", r.SSH.Host+":"+strings.TrimSuffix(remote, "/")+"/", mirror)
+}
+
+// PushFile copies the file local to the path remote, which is replaced if it exists.
+func (r Rsync) PushFile(ctx context.Context, local, remote string) error {
+	return r.copy(ctx, local, r.SSH.Host+":"+remote, false)
 }
 
 // Pull makes local a copy of remote. With mirror, files that remote does not have are deleted.

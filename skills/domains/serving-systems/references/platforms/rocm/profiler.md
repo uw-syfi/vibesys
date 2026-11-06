@@ -10,6 +10,11 @@ a specific serving engine needs to be launched and shut down for a clean
 capture), see
 [`tooling/profiling-serving-engines.md`](../../tooling/profiling-serving-engines.md).
 
+> **Running through `vibesys-cli`?** Capture with the `kernel-rocprof-analysis` skill's
+> `capture.py` wrapper as a job's argv prefix and analyze the copied-back files with its
+> `analyze.py`; the `rocprof_profiler/` workspace tools below exist only in VibeSys runs.
+> The flags, costs and pitfalls in this file apply to both.
+
 > **Status.** The `rocprof` profiler kind is wired up: system trace, PMC
 > counters, thread trace, kernel-internal, and paired A/B timing all have a
 > workspace tool (`rocprof_profiler/`, below). PMC counter capture, tool

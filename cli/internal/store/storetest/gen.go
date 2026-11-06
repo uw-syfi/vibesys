@@ -123,6 +123,11 @@ func (g *gen) settings() core.Settings {
 			Argv:    g.strs(),
 			Service: &core.ServiceSpec{Argv: g.strs(), Probe: g.strs()},
 			Timeout: time.Duration(1 + g.r.Int64N(1<<40)),
+			Profile: &core.ProfileRequest{Wrap: g.strs()},
+			Candidate: &core.CommandCandidate{
+				Build: core.CandidateBuild{Dockerfile: g.text(), Context: g.text(), AllowedBases: g.strs()},
+				Serve: &core.CandidateServe{Argv: g.strs(), Ready: "/" + g.text(), StartupTimeout: time.Duration(1 + g.r.Int64N(1<<40))},
+			},
 		}
 	}
 	return core.MeasureSettings{Samples: 1 + g.r.Uint32(), Recheck: true}
@@ -184,6 +189,7 @@ func (g *gen) result(job core.JobID, key core.JobKey, c core.Commit, measure boo
 	return core.Result{
 		Job: job, Key: key, Task: g.text(), TaskVersion: g.text(), Commit: c, SchemaVersion: 1 + g.r.Uint32(),
 		Environment: g.fingerprint(), Machine: g.machine(), Load: g.load(), RecordedAt: g.instant(), Outcome: g.outcome(measure),
+		CandidateImage: fmt.Sprintf("sha256:%016x%016x%016x%016x", g.r.Uint64(), g.r.Uint64(), g.r.Uint64(), g.r.Uint64()),
 	}
 }
 

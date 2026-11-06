@@ -63,6 +63,10 @@ func runArgs(spec docker.ContainerSpec) []string {
 		env = append(env, k+"="+v)
 	}
 	switch g := spec.GPUs; {
+	case g.ROCm:
+		// The kernel driver's devices, and the group that may open them; ROCm's runtime is the
+		// image's own.
+		args = append(args, "--device", "/dev/kfd", "--device", "/dev/dri", "--group-add", "video")
 	case g.Devices == "":
 	case g.Runtime != "":
 		// The runtime reads the devices from a variable the GPU resource sets in Env.
@@ -217,6 +221,15 @@ func (h *handle) Start(argv []string, sink io.Writer) (environment.Process, erro
 	h.procs = append(h.procs, p)
 	h.wg.Go(func() { p.exited <- h.finish(cmd.Wait(), stderr.String()) })
 	return p, nil
+}
+
+// Port implements docker.Container: the container has a network of its own, so any port is free
+// in it, and the run's id chooses one.
+func (h *handle) Port(ctx context.Context, seed string) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return docker.PortOf(seed), nil
 }
 
 // terminate signals every process of the container with SIGTERM. A container that is gone, or an

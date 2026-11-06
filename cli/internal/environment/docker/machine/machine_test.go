@@ -163,3 +163,31 @@ func TestALocalMachineSharesTheCallersDirectories(t *testing.T) {
 		t.Errorf("the cache directory was not made")
 	}
 }
+
+// A program is placed there by its content, runnable, and placed again only when its content
+// changes. Regression: it was copied as a directory, which rsync refuses for a file.
+func TestARemoteMachinePlacesAProgramOnceByItsContent(t *testing.T) {
+	m, dir := remoteMachine(t)
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	local := filepath.Join(dir, "local", "probe-ready")
+	write(t, local, "#!/bin/sh\necho v1\n")
+	first, err := m.Program(ctx, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.CommandContext(ctx, first).Output(); err != nil || string(out) != "v1\n" {
+		t.Fatalf("the placed program %s ran with %q, %v", first, out, err)
+	}
+	if again, err := m.Program(ctx, local); err != nil || again != first {
+		t.Errorf("the same program was placed at %s (%v), want %s", again, err, first)
+	}
+	write(t, local, "#!/bin/sh\necho v2\n")
+	second, err := m.Program(ctx, local)
+	if err != nil || second == first || filepath.Base(second) != "probe-ready" {
+		t.Fatalf("the changed program was placed at %s (%v), after %s", second, err, first)
+	}
+	if out, err := exec.CommandContext(ctx, second).Output(); err != nil || string(out) != "v2\n" {
+		t.Errorf("the changed program ran with %q, %v", out, err)
+	}
+}

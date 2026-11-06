@@ -116,7 +116,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "scripts/published_skills/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "sdk/vibesys-evaluator/python/tests", "skills/search/commit/tests"]
+testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "scripts/published_skills/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests", "sdk/vibesys-evaluator/python/tests", "skills/search/commit/tests", "skills/domains/kernel-rocprof-analysis/tests"]
 # Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
 sim_smoke_slow = ["libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
@@ -253,7 +253,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # Glob patterns of directories scanned for Python tests and `*.test.ts`.
 # Python roots mirror `[tool.pytest.ini_options] testpaths`; `clients` adds the
 # TypeScript workspaces. `__pycache__` and `fixtures` directories are skipped.
-roots = ["tests", "libs/*/tests", "sdk/*/tests", "scripts/corevalue/tests", "skills/search/*/tests", "clients"]
+roots = ["tests", "libs/*/tests", "sdk/*/tests", "scripts/corevalue/tests", "skills/search/*/tests", "skills/domains/*/tests", "clients"]
 
 # Repo-relative JSONL baseline, one {"path", "rule", "count"} entry per line.
 baseline = "tests/quality/isolation_baseline.jsonl"
@@ -371,10 +371,11 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "vs_core._outcomes.Outco
 # Template, Request, Run expose no attributes by design, see api/public-api.txt). Public
 # accessors would add API; a noqa on every such line would bury the code.
 "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_private/**" = ["SLF001"]
+"sdk/vibesys-evaluator/python/src/vibesys_evaluator/microservices/_private/**" = ["SLF001"]
 # TRY003: the deploy layer has one error type per boundary (DeployError, KubeError,
 # ManifestError, BuildError) whose messages name the step, object or field and say what to
 # fix (the package's error rule); a subclass per message would add dozens of one-use types.
-"sdk/vibesys-evaluator/python/src/vibesys_evaluator/deploy/**" = ["TRY003"]
+"sdk/vibesys-evaluator/python/src/vibesys_evaluator/microservices/_k8s/**" = ["TRY003"]
 # The real tier must be its own directory (sim_real_tiers) and shares the deterministic tests'
 # application (tests/vse_support): the tests directory is not an importable package, so the
 # parent-relative import is the only one that reaches it.

@@ -70,7 +70,7 @@ func Prepare(in Starting) (Plan, error) {
 	t := in.Task
 	p := Plan{
 		Kind: kind, Task: t.Name, TaskVersion: t.Version, Key: key, Environment: in.Environment,
-		Build: t.Build, Check: t.Check,
+		Build: t.Build, Check: t.Check, Candidate: t.Candidate,
 	}
 	if kind == core.JobCheck {
 		return p, nil

@@ -27,14 +27,22 @@ type Run struct {
 	Timeout time.Duration
 	// Read, when set, is a file to read after the command ends, whatever its outcome.
 	Read string
+	// Candidate, for a task of two images, is the candidate's image and the server the command runs
+	// against. The Timeout covers the server's startup time as well as the command's own limit.
+	Candidate *core.CandidateRun
 }
 
 // Observe asks for the machine's facts and its load now.
 type Observe struct{}
 
-func (Checkout) request() {}
-func (Run) request()      {}
-func (Observe) request()  {}
+// BuildCandidate asks for the candidate's image of a task of two images, built from the job's
+// commit unless an image of the same Dockerfile and context is there already.
+type BuildCandidate struct{ Build core.CandidateBuild }
+
+func (Checkout) request()       {}
+func (Run) request()            {}
+func (Observe) request()        {}
+func (BuildCandidate) request() {}
 
 // Event is the answer to the last request, or news the shell has: a cancel.
 type Event interface{ event() }
@@ -57,6 +65,8 @@ type Ran struct {
 	Output    []byte
 	Found     bool
 	ReadError string
+	// ServiceLog is the last lines the candidate's server wrote, when it ended the run.
+	ServiceLog string
 }
 
 // NotRan answers Run when the command never started, such as an environment that is not there.
@@ -74,6 +84,10 @@ type Observed struct {
 	Load    core.MachineLoad
 }
 
+// CandidateBuilt answers BuildCandidate with the image. A build that failed, or a Dockerfile the
+// task does not allow, is answered with NotRan.
+type CandidateBuilt struct{ Image core.CandidateImage }
+
 // Cancelled says the job was cancelled while no command was running: the shell stopped before
 // its next request. A command that was running when the cancel came answers with Ran and
 // ExecCancelled instead; the machine treats both alike.
@@ -85,6 +99,7 @@ func (Ran) event()            {}
 func (NotRan) event()         {}
 func (Unseen) event()         {}
 func (Observed) event()       {}
+func (CandidateBuilt) event() {}
 func (Cancelled) event()      {}
 
 // Verdict is how the job ended: Passed, NotAttempted, Rejected, Stopped or Lost. The set is closed, so a
@@ -155,13 +170,14 @@ func Ending(v Verdict) (Stage, string) {
 type phase string
 
 const (
-	phaseCheckout phase = "checkout"
-	phaseBuild    phase = "build"
-	phaseCheck    phase = "check"
-	phaseBefore   phase = "observe-before"
-	phaseSample   phase = "sample"
-	phaseAfter    phase = "observe-after"
-	phaseDone     phase = "done"
+	phaseCheckout  phase = "checkout"
+	phaseBuild     phase = "build"
+	phaseCandidate phase = "candidate"
+	phaseCheck     phase = "check"
+	phaseBefore    phase = "observe-before"
+	phaseSample    phase = "sample"
+	phaseAfter     phase = "observe-after"
+	phaseDone      phase = "done"
 )
 
 // State is where the machine is. It is a value: Step returns a new one and leaves the old one as
@@ -173,6 +189,7 @@ type State struct {
 	scratch string
 
 	checkTook time.Duration
+	candidate core.CandidateImage
 	machine   core.MachineFacts
 	haveFacts bool
 	samples   []float64
@@ -234,6 +251,20 @@ func Step(s State, e Event) (State, Request) {
 		if v, ok := s.unrun(StageBuild, e); ok {
 			return s.end(v), nil
 		}
+	case phaseCandidate:
+		switch e := e.(type) {
+		case CandidateBuilt:
+			if !core.ValidImageDigest(e.Image.ID) {
+				return s.refuse(fmt.Sprintf("the candidate's image was answered with %q, which is not an exact digest", e.Image.ID)), nil
+			}
+			s.candidate = e.Image
+			return s.afterCandidate()
+		case NotRan:
+			f := e.Failure
+			return s.end(NotAttempted{Stage: StageCandidate, Failure: f, Reason: "the candidate's image could not be built: " + f.Message}), nil
+		default:
+			// Any other answer is refused with the rest, below.
+		}
 	case phaseCheck:
 		if r, ok := e.(Ran); ok {
 			if v, ended := s.commandEnded(StageCheck, r); ended {
@@ -278,6 +309,14 @@ func (s State) afterCheckout() (State, Request) {
 }
 
 func (s State) afterBuild() (State, Request) {
+	if c := s.plan.Candidate; c != nil {
+		s.phase = phaseCandidate
+		return s, BuildCandidate{Build: c.Build}
+	}
+	return s.afterCandidate()
+}
+
+func (s State) afterCandidate() (State, Request) {
 	if s.plan.RunsCheck() {
 		s.phase = phaseCheck
 		return s, s.run(StageCheck, s.plan.Check, "")
@@ -298,12 +337,21 @@ func (s State) nextSample() (State, Request) {
 	s.phase = phaseSample
 	out := path.Join(s.scratch, fmt.Sprintf("sample-%d.out", len(s.samples)))
 	c := s.plan.Benchmark
-	argv := append(c.Resolve(s.dir), s.plan.Result.OutputFlag(), out)
-	return s, Run{Stage: StageBenchmark, Argv: argv, Timeout: c.Timeout, Read: out}
+	r := s.run(StageBenchmark, c, out)
+	r.Argv = append(r.Argv, s.plan.Result.OutputFlag(), out)
+	return s, r
 }
 
+// run is the request to run a command of the task: against the candidate's server, for a task of
+// two images, whose startup time the limit then covers too.
 func (s State) run(stage Stage, c task.Command, read string) Run {
-	return Run{Stage: stage, Argv: c.Resolve(s.dir), Timeout: c.Timeout, Read: read}
+	r := Run{Stage: stage, Argv: c.Resolve(s.dir), Timeout: c.Timeout, Read: read}
+	if cand := s.plan.Candidate; cand != nil {
+		serve := cand.ServeAt(s.dir, nil)
+		r.Candidate = &core.CandidateRun{Image: s.candidate.ID, Serve: &serve}
+		r.Timeout += cand.StartupTimeout
+	}
+	return r
 }
 
 // observe keeps the first facts it is given: they do not change while the job runs.
@@ -417,6 +465,10 @@ func (s State) commandEnded(stage Stage, r Ran) (Verdict, bool) {
 		return stopped(fmt.Sprintf("the %s step ran past its time limit and was ended", stage))
 	case r.Exec.Kind == core.ExecCancelled:
 		return stopped("the job was cancelled during the " + string(stage) + " step")
+	case r.Exec.Kind == core.ExecServiceNotReady && s.plan.Candidate != nil:
+		return stopped(withLog(fmt.Sprintf("the candidate's server was not ready at %s within %v, in the %s step", s.plan.Candidate.Ready, s.plan.Candidate.StartupTimeout, stage), r.ServiceLog))
+	case r.Exec.Kind == core.ExecServiceExited && s.plan.Candidate != nil:
+		return stopped(withLog(fmt.Sprintf("the candidate's server exited during the %s step", stage), r.ServiceLog))
 	}
 	return stopped(fmt.Sprintf("the %s step ended in a way that is neither success nor failure (%s)", stage, r.Exec.Kind))
 }
@@ -437,8 +489,16 @@ func (s State) unrun(stage Stage, e Event) (v Verdict, ok bool) {
 	}
 }
 
+// withLog adds the server's last lines to a reason, when there are any.
+func withLog(reason, log string) string {
+	if log == "" {
+		return reason
+	}
+	return reason + "; its last lines:\n" + log
+}
+
 func (s State) passed(o Observed) State {
-	f := Findings{CheckTook: s.checkTook, Machine: s.machine, Load: o.Load}
+	f := Findings{CheckTook: s.checkTook, Machine: s.machine, Load: o.Load, CandidateImage: s.candidate.ID}
 	if s.plan.Kind == core.JobMeasure {
 		f.Samples = slices.Clone(s.samples)
 		f.Observations = s.others
@@ -463,6 +523,8 @@ func (s State) stage() Stage {
 		return StageCheckout
 	case phaseBuild:
 		return StageBuild
+	case phaseCandidate:
+		return StageCandidate
 	case phaseCheck:
 		return StageCheck
 	case phaseSample:

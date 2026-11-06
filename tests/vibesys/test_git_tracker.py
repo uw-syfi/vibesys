@@ -492,7 +492,7 @@ def test_repository_tasks_are_trusted_but_generated_state_is_not(tmp_path: Path)
     task.mkdir(parents=True)
     objective = task / "OBJECTIVE.md"
     objective.write_text("original\n", encoding="utf-8")
-    (task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
+    (task / "vibesys.input.toml").write_text('version = "0.1"\n', encoding="utf-8")
     (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     tracker = real_git_tracker(
         tmp_path,

@@ -282,26 +282,19 @@ change accuracy or benchmark acceptance.
 
 ## AgentX task
 
-The same candidate also has an [`agentx` task](.vibesys/tasks/agentx/OBJECTIVE.md),
-which optimizes the throughput/TTFT/TPOT frontier on the pinned public
-AgentX coding corpus. Select `agentx` in New run or with `--task agentx`.
-Its evaluator uses streaming chat, the model's native 262K context window and
-four concurrent session trees; the existing seed needs chat and long-context
-support before it can pass. The HF-golden accuracy gate remains shared with
-`default`. The task declares a vLLM comparison for independent harness checks.
+The [`agentx` task](.vibesys/tasks/agentx/OBJECTIVE.md) optimizes the
+throughput/TTFT/TPOT frontier on the pinned public AgentX coding corpus, with
+streaming chat, the model's native 262K context window and four concurrent
+session trees. The existing seed needs chat and long-context support before it
+can pass.
 
-For a small diagnostic against a running chat-capable Qwen server:
-
-```bash
-uv run --locked --script /path/to/vibesys/resources/evaluators/agentx/agentx_eval.py \
-  --mode smoke --concurrency 1 --url http://127.0.0.1:8000 \
-  --model Qwen/Qwen3.5-9B --tokenizer Qwen/Qwen3.5-9B \
-  --tokenizer-revision c202236235762e1c871ad0ccb60c8ee5ba337b9a \
-  --max-context-length 262144 \
-  --artifact-dir /path/to/empty-agentx-smoke
-```
-
-This requires public corpus access and the pinned tokenizer (or its cached
-snapshot). Smoke results are unscored. Full measurements run for 15 minutes,
-plus dataset preparation, warmup and drain; see the task objective for the
-exact recipe and comparability limits.
+It is a two-image task (`version = "0.2"`) that only vibesys-cli runs; this
+app refuses it. The candidate's server runs in the image `engine/Dockerfile`
+builds from the candidate's commit (a ROCm 6.4 PyTorch base pinned by digest,
+Python packages pinned with hashes). The task image
+(`.vibesys/tasks/agentx/Dockerfile`) is the `vibesys-evaluator-llm-serving`
+image plus the task directory; `bench.py` runs the golden gate (`check`), the
+scored AgentX replay (`benchmark`) and a smoke replay to profile (`profile`)
+against the server at `VIBESYS_SERVICE_URL`. Full measurements run for 15
+minutes, plus dataset preparation, warmup and drain; see the task objective
+for the exact recipe and comparability limits.

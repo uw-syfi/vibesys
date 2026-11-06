@@ -7,6 +7,7 @@ package environment
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -38,7 +39,9 @@ type Environment interface {
 	Fingerprint(ctx context.Context) (core.Fingerprint, error)
 
 	// Run executes one command in the checkout, with its service if the execution names one,
-	// writing the combined output to out as it appears.
+	// writing the combined output to out as it appears. An environment that waits before the
+	// command starts, as for a cluster's queue, may first write to out whole lines that say why,
+	// each starting with "[" and its name; it writes nothing of its own otherwise.
 	//
 	// It ends the whole process group of the command and of the service on every path: normal
 	// exit, timeout, cancellation of ctx and a service that never became ready, so nothing
@@ -49,6 +52,21 @@ type Environment interface {
 	// endings. An attempt that failed while ctx was being cancelled is core.Ended with
 	// core.ExecCancelled: the cancel is what ended it.
 	Run(ctx context.Context, execution core.Execution, out io.Writer) core.Attempt
+
+	// Candidate returns the candidate's image of a task of two images, as the target's commit has
+	// its Dockerfile and build context, building it when the environment does not have an image of
+	// the same Dockerfile and context already. The build's output goes to log. It fails with
+	// core.FailureInvalidInput naming the path for a Dockerfile or a context the commit lacks, or a
+	// base the task does not allow, with the end of the build's output for a build that failed, and
+	// with core.FailureInvalidInput for an environment that runs no images, such as the host: a
+	// task of two images runs only where images do.
+	Candidate(ctx context.Context, build core.CandidateBuild, log io.Writer) (core.CandidateImage, error)
+}
+
+// NoImages is what an environment that runs no images answers Candidate with.
+func NoImages(kind core.EnvironmentKind) error {
+	return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+		"the %s environment runs no images, and a task of two images runs its candidate in an image of its own; run it in docker", kind)}
 }
 
 // MachineReader reads a machine. A job's results record what it reads of the machine the job ran

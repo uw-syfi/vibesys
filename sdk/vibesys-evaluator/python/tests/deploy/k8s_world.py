@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from vibesys_evaluator.deploy import k8s
-from vibesys_evaluator.deploy._k8s import (
+from vibesys_evaluator.microservices import k8s
+from vibesys_evaluator.microservices._k8s import (
     AppSource,
     Cluster,
     Environment,

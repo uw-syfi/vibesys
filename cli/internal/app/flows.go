@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -71,11 +72,21 @@ func (a *App) keyFlow(ctx context.Context, sub core.Submission) (core.Submission
 // host job runs on no placement, whatever was asked, as for a check or a measure. The submission
 // records the environment, the restriction and the needs. A command job has no key, so nothing is
 // fingerprinted, and a host one names no task to read.
+//
+// A command job of a task of two images runs with the candidate's image (commandOfTwoImages),
+// which the submission records as the daemon decided it, whatever the caller sent.
 func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submission, error) {
 	c, spec := sub.Context, sub.Spec
+	command, _ := spec.Settings.(core.CommandSettings)
+	command.Candidate = nil
 	var needs []core.ResourceKind
-	if spec.Environment == core.EnvironmentAuto || spec.Environment == core.EnvironmentDocker && len(a.cfg.Placements) > 0 {
-		t, err := a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
+	var t task.Task
+	read := spec.Environment == core.EnvironmentAuto ||
+		spec.Environment == core.EnvironmentDocker && len(a.cfg.Placements) > 0 ||
+		command.Profile != nil
+	if read {
+		var err error
+		t, err = a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
 		if err != nil {
 			return sub, err
 		}
@@ -83,6 +94,13 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 			return sub, err
 		}
 		needs = t.Needs
+	}
+	command, err := commandOfTwoImages(command, t)
+	if err != nil {
+		return sub, err
+	}
+	if _, ok := spec.Settings.(core.CommandSettings); ok {
+		spec.Settings = command
 	}
 	if _, err := a.eligibleOf(spec.Environment, needs, spec.Placement); err != nil {
 		return sub, err
@@ -92,6 +110,40 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 	}
 	sub.Spec, sub.Needs = spec, needsOf(spec.Environment, needs)
 	return sub, nil
+}
+
+// commandOfTwoImages is a command job's settings as a task of two images runs them: the command in
+// the candidate's image, built from the job's commit; or, for a profile, the task's [profile] load
+// in the task's image against the candidate's server, which starts under the caller's wrapper.
+// A profile of any other task, or of one with no [profile], is refused, and so is one that names a
+// command or a service of its own, as the load and the server are the task's.
+func commandOfTwoImages(c core.CommandSettings, t task.Task) (core.CommandSettings, error) {
+	invalid := func(format string, args ...any) error {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(format, args...)}
+	}
+	cand := t.Candidate
+	switch {
+	case cand == nil && c.Profile != nil:
+		return c, invalid("task %q has no candidate image of its own (a task of schema %s does), so it has no standard profile; profile with submit command --wrap instead", t.Name, task.Schema02)
+	case cand == nil:
+		return c, nil
+	case c.Profile == nil:
+		c.Candidate = &core.CommandCandidate{Build: cand.Build}
+		return c, nil
+	case t.Profile == nil:
+		return c, invalid("task %q declares no [profile] load; profile with submit command --wrap instead", t.Name)
+	case len(c.Argv) > 0 || c.Service != nil:
+		return c, invalid("a profile runs the task's [profile] load against the candidate's server, and takes no command or service of its own")
+	}
+	serve := core.CandidateServe{Argv: append(slices.Clone(c.Profile.Wrap), cand.Serve...), Ready: cand.Ready, StartupTimeout: cand.StartupTimeout}
+	c.Argv = slices.Clone(t.Profile.Argv)
+	limit := t.Profile.Timeout
+	if c.Timeout > 0 {
+		limit = c.Timeout
+	}
+	c.Timeout = limit + cand.StartupTimeout
+	c.Candidate = &core.CommandCandidate{Build: cand.Build, Serve: &serve}
+	return c, nil
 }
 
 // needsOf is what a job of the kind needs of a placement: what its task needs, for a docker job,

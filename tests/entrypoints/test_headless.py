@@ -117,7 +117,7 @@ def _write_input_project(parent: Path, name: str = "queue-spsc") -> Path:
     write_task(
         project,
         """\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"
@@ -147,7 +147,7 @@ def _write_repository_task(project: Path, name: str, *, resources: bool = False)
     (task / "OBJECTIVE.md").write_text(f"Optimize {name}.\n")
     (task / "vibesys.input.toml").write_text(
         """\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"
@@ -2424,7 +2424,7 @@ def _write_microservice_project(parent: Path, *, traced: bool, name: str = "hote
     write_task(
         project,
         f"""\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "microservices"

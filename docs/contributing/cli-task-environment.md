@@ -42,10 +42,77 @@ A task is three things in `.vibesys/tasks/<task>/`:
      path after `--vs-output`.
    - Each has a `timeout_seconds`.
 
-The manifest has no notion of a server, a step graph or a background process:
-those are a script's business, inside one container. The older `[evaluator]`
-and `entrypoint` forms belong to the Python evaluator package and stay
-refused.
+The manifest declares the task schema it is written in, as a quoted
+`MAJOR.MINOR` string: `version = "0.1"` for the single-image format above, or
+`version = "0.2"` for a task of two images (below). In 0.1 the manifest has no
+notion of a server, a step graph or a background process: those are a script's
+business, inside one container. The older `[evaluator]` and `entrypoint` forms
+belong to the Python evaluator package and stay refused.
+
+### A task of two images (schema 0.2)
+
+Schema 0.2 splits the judge from the candidate. The task's `Dockerfile` still
+builds the task image, which runs the check, the benchmark and the profile
+load. The candidate's commit builds a second image, the candidate image, from
+a Dockerfile and context it names, and its server runs there:
+
+```toml
+version = "0.2"
+backends = ["cuda"]
+
+[agent]
+domain = "model-serving"
+
+[candidate]
+dockerfile = "serve/Dockerfile"      # in the candidate's checkout
+context = "serve"                    # its .dockerignore is honored
+serve = ["python", "${PROJECT_ROOT}/serve/server.py", "--port", "${PORT}"]
+ready = "/health"                    # polled until it answers 2xx
+startup_timeout_seconds = 600
+allowed_bases = ["vllm/vllm-openai:v0.6.3"]   # optional: the first FROM must be one
+
+[accuracy]
+command = ["python", "/task/check.py"]
+timeout_seconds = 1800
+
+[benchmark]
+command = ["python", "/task/bench.py"]
+timeout_seconds = 3600
+result_protocol = 2
+
+[profile]
+command = ["python", "/task/bench.py", "--short"]
+timeout_seconds = 900
+
+[environment]
+needs = ["gpu", "mounts"]
+```
+
+The schema is `TaskManifestV02` in `proto/vibesys/cli/v1/task.proto`, the only
+definition of its keys; the CLI decodes the TOML into it and refuses an
+unknown key by name. Its keys are every key of 0.1, with the same meaning,
+except `[evaluator]` and a command's `entrypoint` and `args`, which it refuses
+by name, plus `[candidate]`; and `[profile]` holds a command:
+
+- `version`, `backends`, `metric`;
+- `[agent]` `domain` and `interface`;
+- `[build]`, `[accuracy]` (or `[check]`), `[benchmark]` (or `[measure]`) and
+  `[profile]`, each with `command` and `timeout_seconds`; the benchmark also
+  has `result_protocol`, `[benchmark.result]` (`json_argument`, `metric`) and
+  `requires_accuracy`;
+- `[candidate]` `dockerfile`, `context`, `serve`, `ready`,
+  `startup_timeout_seconds` and `allowed_bases`;
+- `[environment]` `needs`, `docker_in_docker` and `modal` (refused, as in 0.1);
+- `[profile_guided]`, `[resources]`, `[workspace]`, `[plan]`, `[catalogue]` and
+  `[[comparison]]`, accepted without being read, as in 0.1.
+
+Every command of a job then runs in two containers: the candidate's server
+(`serve`, from the checkout's root, with `${PORT}` replaced by the port of the
+job) in the candidate image, and the command in the task image, joined to the
+server's network namespace, with `VIBESYS_SERVICE_URL=http://127.0.0.1:<port>`.
+`submit profile <commit> --wrap '<prefix>'` starts the server under the prefix,
+such as a profiler's command line, and drives it with `[profile]`; it is a
+command job, never cached or scored, and its artifacts are kept with it.
 
 ## What the CLI owns
 
@@ -129,9 +196,12 @@ one passes the same environment contract suite (`envtest`).
 
 The build context is a tar of the task directory, sent on standard input, so
 the build sees the task's files and nothing else; files a tool generates
-(`__pycache__`, `*.pyc`) are left out, as they are of the task version. The image tag is the task
-version (the digest of every file and symbolic link in the directory), so the image changes
-exactly when the task does.
+(`__pycache__`, `*.pyc`) are left out, as they are of the task version. The image tag is a digest
+of the task version (the digest of every file and symbolic link in the directory) and of the
+local image ID of each image the Dockerfile builds on (`FROM`, `COPY --from=`),
+so the image changes exactly when the task does or a base changes under its
+tag; docker builds on its local image of a tag, so a key of files alone would
+keep an image built on a base that was since rebuilt.
 
 A symbolic link in the task directory is a link in the build context, to the
 target it holds, so `COPY` puts it in the image as it is in the repository. It
@@ -299,8 +369,91 @@ and after a build that did not finish.
 The Spark's Docker 29.2.1 has the `nvidia` runtime registered and no CDI
 devices, so `--gpus all` (through the NVIDIA hook) or `--runtime nvidia` with
 `NVIDIA_VISIBLE_DEVICES` work and CDI names do not. A task for the `cuda`
-backend is refused unless the operator config passes GPUs; other accelerator
+backend is refused unless the operator config passes GPUs; a task for the
+`rocm` backend unless it gives a `rocm` resource (below); other accelerator
 backends are refused.
+
+### AMD GPUs are a resource of their own, checked in the container
+
+`rocm` is a resource kind beside `gpu`, not a vendor setting of it: what the
+container gets differs (`--device /dev/kfd --device /dev/dri --group-add
+video` under Docker, `--rocm` under Apptainer, and no `--gpus`), its facts
+differ (`amd_gpu_model`, `amd_gpu_count` and `amdgpu_driver`, read with
+`rocminfo`, or `amd-smi` when it lists none, and `/sys/module/amdgpu/version`),
+and a task needs one or the other by its backend. A variable in which Slurm
+names the GPUs it assigned (`ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`,
+`GPU_DEVICE_ORDINAL`, `CUDA_VISIBLE_DEVICES`) is passed on when it is set and
+not required, since a partition that does not isolate its nodes' GPUs sets
+none.
+
+A ROCm image runs on the node's kernel driver, which may be older or newer than
+the image's ROCm supports, and then the runtime sees no GPU and the command
+fails in a way that blames the task. So the container first runs a check, a
+POSIX shell script, before the command: it asks `rocminfo` (or `amd-smi`) for a
+GPU agent and, when there is none, fails the job before its command with
+`the container's ROCm runtime does not see the GPU: … (the image's ROCm X, the
+node's amdgpu driver Y)`. In a task of two images the GPUs and the check are the
+server's.
+
+### Apptainer: a multi-node cluster without Docker
+
+A cluster whose compute nodes run Apptainer and no Docker, reached through a
+login node, is the placement kind `apptainer`, not a runtime setting of the
+`slurm` kind: the engine, the sections and the lifecycle all differ, and the
+`slurm` kind's configs stay as they were. It is a `docker.Engine`, so the docker
+environment's decisions (images, the two containers of a task of two images,
+the resources, the stop) hold unchanged; only how a container exists differs.
+
+- The image is built by the caller's own Docker, and converted to a SIF on
+  the caller's machine by its own `apptainer`, which the placement requires
+  on the daemon's `PATH`; the SIF is copied over ssh to the shared file
+  system, named by its digest, once, and later runs and other daemons copy
+  nothing. The cluster's apptainer only runs SIFs. Converting where the image
+  already is was chosen over converting on the cluster after measuring both
+  on a 47 GB ROCm image: a node's scratch space (25 GB) cannot hold the image
+  unpacked; an unpacked sandbox built on the shared file system (WekaFS)
+  wrote 121k of its several hundred thousand files in 30 minutes, an hour or
+  two per image; and `mksquashfs` stalls there. Locally, `docker save` took
+  202 s and `apptainer build` 475 s, to an 11 GB SIF, which is the one
+  transfer. Building on the cluster from the Dockerfile was not an option
+  either: its nodes have no Docker, and `apptainer build` of a Dockerfile
+  would make another image than the one the result records, so Dockerfiles
+  stay the only image recipe.
+- `docker save` streams into the conversion and the SIF streams to the
+  cluster, so no archive is copied anywhere: the archive is written once, in
+  the conversion's own directory under the operator's `local_scratch_dir`,
+  beside Apptainer's `APPTAINER_TMPDIR` and `APPTAINER_CACHEDIR`, and the
+  directory is removed when the conversion ends. That file system is checked
+  first for the image's unpacked size (`docker image ls`; with Docker's
+  containerd image store `docker image inspect` reports the compressed
+  layers) and twice its stored size (the archive and the SIF), and too
+  little fails naming the space needed and the space there is.
+- Publishing is a write to a file of the publisher's own and a rename once its
+  size is what was sent, so concurrent publishers each rename a whole file,
+  and a copy cut short, or a conversion that fails, is never there. What
+  converted a SIF, with its version, goes to the build's log and to
+  `<digest>.sif.built-by` beside it.
+- One batch allocation per run holds both containers, which share the node's
+  network; the server's port is chosen free in the allocation, from the node's
+  `/proc/net/tcp`, not from the run's id, since other jobs share the node's
+  network. The allocation is `sbatch --no-requeue --wrap 'exec sleep infinity'`
+  through the operator's submit command, so a site's wrapper and the options it
+  requires are configuration. Its processes are `srun --jobid --overlap` steps
+  started from the login node. A holder step reads its standard input and
+  cancels the allocation when it ends, which is when the run closes it or the
+  daemon dies and its ssh connection with it; the run also cancels by name and
+  confirms with `squeue` then `sacct`, and a run sweeps its scope's leftovers
+  by name.
+- A container's processes carry a variable naming it, set inside the container
+  only, by which SIGTERM and SIGKILL reach every one of them; the step itself is
+  not signalled, so the grace works as under Docker.
+- Machine facts, load and GPU facts are read on the node inside the allocation.
+  The daemon fingerprints before a job has a node, so it reports the last node
+  its scope read, kept on the shared file system, which assumes the partition's
+  nodes are alike; the facts are recorded and compared by nothing.
+- A step whose command never started (srun or apptainer failed first, which
+  the wrapper's start marker on standard error tells) or whose ssh exit is 255
+  is unknown, never the command's exit.
 
 ### One daemon per user per machine, and a sandbox beside it
 
@@ -318,14 +471,101 @@ status lists it while it runs. A task's store lives in the repository
 second instance that must not touch a running one's store works in a separate
 clone.
 
+### Two images, two containers, one network
+
+The judge must not be the candidate's to change, and the candidate's server
+may need a stack the judge does not (a serving framework, a CUDA build). One
+image could not give both: either the candidate edits the image that judges it,
+or the judge's image carries every candidate's stack. So the task image is
+built from the task directory, as before, and the candidate image from the
+candidate's commit, never from a working tree. It is named
+`vibesys-candidate:<task>-<digest>`, the digest being that of its Dockerfile
+and the files of its context that its `.dockerignore` keeps, and is built only
+when the engine lacks it. A failed build fails the job before anything runs,
+with the end of the build's output. The image's id is recorded with each result
+(`Result.candidate_image`) and is not part of the result's key: the commit
+already names the candidate, and a rebuild of the same commit that makes
+another image (a base that moved) answers from the saved result.
+
+The two containers share a network namespace (`--network container:<server>`),
+so the server is at `127.0.0.1` and nothing listens beyond the job. The port is
+taken from the job's run id. The server's readiness is polled from the task's
+container by the CLI's own binary, mounted read-only at
+`/vibesys/bin/vibesys-cli` and run as `vibesys-cli probe-ready <url>`: the task
+image needs no HTTP client, and only a static build can run whatever the image
+holds, so a placement of a build with cgo (a developer's `go build`) or of
+another system refuses tasks of two images, naming why. A server that is not
+ready within `startup_timeout_seconds`, or that exits, fails the step with the
+last lines of the server's output. Both containers are stopped on every path,
+the command's first: SIGTERM, the grace period, then removal.
+
+The placement's resources are shared by what each container is for, from
+`[environment] needs`:
+
+| Resource | Candidate's container | Task's container |
+| --- | --- | --- |
+| `gpu` | yes, with the variables that pass the GPUs | no |
+| `mounts` | yes, read-only (model weights) | yes, read-only (tokenizer files) |
+| `kubernetes` | no | yes |
+
+A resource that sets a network mode (a `kubernetes` cluster reached over the
+host's network) cannot be given to either container, since the task's joins
+the server's network; such a placement refuses tasks of two images, naming the
+mode. The decisions live in the pure flow (`flow.BuildCandidate`, then each
+`flow.Run` with its candidate) and in the docker environment's per-container
+specs; a Slurm or Apptainer placement implements the same `Environment`
+(`Candidate`, and a run of two containers in one allocation that share a
+network namespace) without a change to the flow.
+
+### Task schema versions are MAJOR.MINOR, and 0.x is frozen
+
+A manifest declares its schema as a string, `version = "0.2"`. The integer
+`version = 1` of the earliest tasks is refused, saying to write `"0.1"`: a
+number would read as a float or an int depending on how it was written. While
+the major version is 0, every minor version is a format of its own: the CLI
+reads exactly the versions it has (`vibesys-cli --version` lists them),
+refuses a newer one saying to run `vibesys-cli upgrade`, and refuses a
+malformed one (`"2"`, `"2.x"`, `"02.0"`). From 1.0 a minor version only adds
+optional keys: a reader of M.N reads M.0 to M.N, and a file that declares M.K
+may set only the keys of M.0 to M.K (each field carries
+`task_schema_since_minor`). A major version is a new message beside the old.
+
+`./scripts/check_task_schema.sh`, in the proto check group beside
+`buf breaking`, compares the schemas with the merge base: any change to a 0.x
+schema fails; from 1.0, every field declares its minor version, a field added
+since the base declares the current minor version, the minor version must rise
+when fields are added, and a changed protovalidate rule fails ("tightening
+needs a new major; loosening needs a reviewed waiver"). `buf breaking` already
+refuses a renamed or removed field.
+
+Schema 0.1 has no message in `task.proto` yet: its reader is the earlier Go
+reader, unchanged. Moving it into a `TaskManifestV01` message is left for
+later; until then the check covers 0.2 and every later schema.
+
 ## What is not done
 
-- Multi-node Slurm clusters, where the ssh host is a login node: images, exec
-  and removal would have to go through `srun --overlap` into the allocation, and
-  the machine facts and load a result records, which the environment reads over
-  ssh, would have to be read on the allocated node.
+- Tasks of two images on `ssh` and `slurm` placements: they have no probe
+  program and refuse such tasks. The `apptainer` placement has one (the binary
+  is copied to the cluster) and runs both containers in one allocation.
+- Schema 0.1 as a proto message (above).
+
+- Multi-node Slurm clusters with Docker on the compute nodes, where the ssh
+  host is a login node: the `slurm` kind still needs the ssh host to be the
+  node Docker runs on. Such a cluster without Docker is the `apptainer` kind,
+  which goes through the login node with `srun --overlap` and reads the
+  machine on the allocated node.
+- Under `apptainer`, the image's own files are read-only (no writable overlay),
+  where a Docker container's are not; a task that writes outside its mounts,
+  `/tmp` and its home fails there. The site's bind paths are not mounted
+  (`--no-mount bind-paths`): a probe found the shared file system bound
+  read-write into every container by them, through which a container wrote
+  into a shared image; only the node's `/etc/hosts` is bound back. A machine
+  that cannot run Apptainer, such as macOS, has no `apptainer` placement.
+  The node's GPUs are passed with `--rocm`,
+  and whether a step on a partition that isolates GPUs gets the job's GPUs
+  without `--gres` on the step is not verified.
 - Passing exactly the GPUs Slurm allocated on a node with several, instead of
-  the configured `--gpus` value.
+  the configured `--gpus` value, under `slurm`.
 - A build's log is kept only when the build fails (its last lines are in the
   error); a successful build's output is discarded, so its duration is not in
   the job's log.

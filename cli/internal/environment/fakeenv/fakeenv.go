@@ -2,10 +2,14 @@ package fakeenv
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"io"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
@@ -56,6 +60,48 @@ type Environment struct {
 	// hold, when set, is the gate Fingerprint waits at, as a real environment waits for an
 	// image build.
 	hold string
+	// candidates builds a candidate's image; nil builds every one to a digest of its build.
+	candidates func(core.CandidateBuild) (core.CandidateImage, error)
+	built      []core.CandidateBuild
+}
+
+// CandidatePort is the port a fake environment's candidate server is told to listen on.
+const CandidatePort = 18080
+
+// WithCandidates sets how the environment builds a candidate's image, such as a build that fails.
+// The default builds every one, to an image whose digest is that of its build.
+func WithCandidates(build func(core.CandidateBuild) (core.CandidateImage, error)) Option {
+	return func(e *Environment) { e.candidates = build }
+}
+
+// Candidate implements environment.Environment.
+func (e *Environment) Candidate(ctx context.Context, b core.CandidateBuild, log io.Writer) (core.CandidateImage, error) {
+	if err := ctx.Err(); err != nil {
+		return core.CandidateImage{}, err
+	}
+	e.mu.Lock()
+	e.built = append(e.built, b)
+	build := e.candidates
+	e.mu.Unlock()
+	if e.kind != core.EnvironmentDocker {
+		return core.CandidateImage{}, environment.NoImages(e.kind)
+	}
+	if build != nil {
+		return build(b)
+	}
+	sum := sha256.Sum256([]byte(b.Dockerfile + "\x00" + b.Context))
+	img := core.CandidateImage{ID: "sha256:" + hex.EncodeToString(sum[:]), Tag: "vibesys-candidate:fake"}
+	if log != nil {
+		_, _ = fmt.Fprintf(log, "built %s\n", img.ID)
+	}
+	return img, nil
+}
+
+// CandidatesBuilt returns every build Candidate was asked for, in order.
+func (e *Environment) CandidatesBuilt() []core.CandidateBuild {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.built)
 }
 
 var _ environment.Environment = (*Environment)(nil)
@@ -239,6 +285,9 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	if err := environment.Validate(x); err != nil {
 		return core.NotStarted{Failure: core.AsFailure(err)}
 	}
+	if x.Candidate != nil && e.kind != core.EnvironmentDocker {
+		return core.NotStarted{Failure: core.AsFailure(environment.NoImages(e.kind))}
+	}
 	if ctx.Err() != nil {
 		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
 	}
@@ -248,17 +297,28 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	limit, stop := e.timers.Timeout(ctx, x.Timeout)
 	defer stop()
 	var wg sync.WaitGroup
-	// Several processes of the script write to out at once.
-	l := &launcher{in: &interpreter{gates: e.gates, dir: x.Checkout.Dir, files: e.files}, wg: &wg}
+	// Several processes of the script write to out at once. The candidate's server, when the
+	// execution has one, runs on the same fake machine as the command: they share its network.
+	l := &launcher{in: &interpreter{gates: e.gates, dir: x.Checkout.Dir, files: e.files, ready: &atomic.Bool{}}, wg: &wg}
 	out = &syncWriter{w: out}
-	attempt := environment.Execute(x, l, environment.Events{
+	ev := environment.Events{
 		Limit:     limit,
 		Cancelled: ctx.Done(),
 		Pause:     func() (<-chan struct{}, func()) { return e.timers.Timeout(ctx, e.pause) },
 		Grace:     func() (<-chan struct{}, func()) { return e.timers.Timeout(ctx, environment.DefaultGrace) },
-	}, out)
+	}
+	places := environment.Places{Command: l, Service: l}
+	tail := &environment.Tail{}
+	if c := x.Candidate; c != nil && c.Serve != nil {
+		startup, stopStartup := e.timers.Timeout(ctx, c.Serve.StartupTimeout)
+		defer stopStartup()
+		ev.Startup = startup
+		x.Service = &core.ServiceSpec{Argv: environment.ResolvePort(c.Serve.Argv, CandidatePort), Probe: []string{ProbeReady}}
+		places.Service = environment.Teeing(l, tail)
+	}
+	attempt := environment.ExecuteBeside(x, places, ev, out)
 	l.end()
-	return environment.Finish(ctx, attempt, nil)
+	return environment.WithServiceLog(environment.Finish(ctx, attempt, nil), tail)
 }
 
 // syncWriter serializes the writes of the several processes of one run.

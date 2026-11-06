@@ -43,6 +43,9 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import ResolvedEvaluatorPackage
 
 MANIFEST_NAME = "vibesys.input.toml"
+#: The one task schema version this reader knows. ``"0.2"`` (the two-image format) and later
+#: versions are read only by vibesys-cli.
+SCHEMA_VERSION = "0.1"
 _MIN_COMMIT_HASH_LENGTH = 7
 _MAX_COMMIT_HASH_LENGTH = 64
 PROTOCOL_OUTPUT_FLAG = "--vs-output"
@@ -434,7 +437,7 @@ class InputManifest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    version: Literal[1]
+    version: Literal["0.1"]
     backends: tuple[ComputeBackend, ...] = ()
     """The compute backends the task targets, in preference order; the run takes its backend from
     them (one it can run on the host, when several). Empty means undeclared: the run falls back
@@ -459,6 +462,25 @@ class InputManifest(BaseModel):
     """What an example task is about, for the catalogue a client offers; inert for a run."""
     comparison: tuple[ComparisonInput, ...] = ()
     """The engines measured beside the input with the task's benchmark (``[[comparison]]``)."""
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def _known_version(cls, value: object) -> object:
+        """Accept exactly schema 0.1; name any other version, and who reads a newer one."""
+        if value == SCHEMA_VERSION and isinstance(value, str):
+            return value
+        if isinstance(value, int) and not isinstance(value, bool) and value == 1:
+            message = (
+                f'version = 1 is no longer a task schema version: write version = "{SCHEMA_VERSION}" '
+                "(the same format)"
+            )
+            raise ValueError(message)
+        message = (
+            f"task schema version {value!r} is not one this VibeSys reads (it reads "
+            f'"{SCHEMA_VERSION}"); a task with version = "0.2" or later is for vibesys-cli: '
+            "run it with vibesys-cli"
+        )
+        raise ValueError(message)
 
     @model_validator(mode="before")
     @classmethod
@@ -589,7 +611,7 @@ def _toml_array(values: tuple[str, ...]) -> str:
 
 def render_input_manifest(manifest: InputManifest) -> str:
     """Serialize a validated input manifest as deterministic TOML."""
-    lines = [f"version = {manifest.version}"]
+    lines = [f"version = {_toml_string(manifest.version)}"]
     if manifest.metric is not None:
         lines.append(f"metric = {_toml_string(manifest.metric)}")
     if manifest.backends:

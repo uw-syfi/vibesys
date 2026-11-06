@@ -35,7 +35,7 @@ const (
 )
 
 // ProjectRoot is the placeholder a command spells the checkout's root with.
-const ProjectRoot = "${PROJECT_ROOT}"
+const ProjectRoot = core.ProjectRootPlaceholder
 
 // OutputFlagProtocol2 is the flag a benchmark that speaks the evaluator result protocol takes
 // the path of its record stream after.
@@ -51,11 +51,7 @@ type Command struct {
 
 // Resolve returns the argv with ${PROJECT_ROOT} replaced by the checkout's root.
 func (c Command) Resolve(root string) []string {
-	out := make([]string, len(c.Argv))
-	for i, a := range c.Argv {
-		out[i] = strings.ReplaceAll(a, ProjectRoot, root)
-	}
-	return out
+	return core.ResolveProjectRoot(c.Argv, root)
 }
 
 // Result says how a benchmark reports what it measured.
@@ -121,11 +117,20 @@ type Task struct {
 	// in the order declared, under the [pareto] relative_noise. It is the zero value for any other
 	// task, which is judged on Metric alone.
 	Objectives core.Objectives
+
+	// Schema is the task schema the manifest declares.
+	Schema SchemaVersion
+	// Candidate is set for a task of two images (Schema02): the candidate's image and server. Its
+	// Check, Benchmark and Profile run in the task's image against that server.
+	Candidate *Candidate
+	// Profile is the standard profile load of a task of two images, when it declares one. It is
+	// never scored.
+	Profile *Command
 }
 
 // Setup is what the task declares that decides where its jobs run.
 func (t Task) Setup() core.TaskSetup {
-	return core.TaskSetup{Backend: t.Backend, HasDockerfile: t.HasDockerfile}
+	return core.TaskSetup{Backend: t.Backend, HasDockerfile: t.HasDockerfile, TwoImages: t.Candidate != nil}
 }
 
 // ValidName says whether name is a task name: one path element, which cannot reach outside the
@@ -168,6 +173,9 @@ func Read(fsys fs.FS, name string) (Task, error) {
 	tree, err := versioned(fsys, dir)
 	if err != nil {
 		return Task{}, err
+	}
+	if t.Candidate != nil && !t.HasDockerfile {
+		return Task{}, invalid("task %q: a task of schema %s needs a %s in %s, which builds the task's image; the candidate's image is built from %s", name, t.Schema, dockerfile, dir, t.Candidate.Build.Dockerfile)
 	}
 	t.Files = fingerprints(tree)
 	t.Version = versionOf(t.Files)
@@ -377,7 +385,7 @@ func unsupported(format string, args ...any) error {
 // held as data so that it is accepted without being interpreted; the Python product validates
 // them. Every key that is not in a section below is an error.
 type manifest struct {
-	Version  int      `toml:"version"`
+	Version  string   `toml:"version"`
 	Backends []string `toml:"backends"`
 	Metric   string   `toml:"metric"`
 
@@ -462,10 +470,16 @@ func decode(file string, data []byte, v any, skip map[string]bool) error {
 }
 
 // Parse reads a manifest and an objectives file (nil when the task has none) without touching
-// the task's directory. Version and HasDockerfile are left for Read, which sees the directory.
+// the task's directory. Version and HasDockerfile are left for Read, which sees the directory. The
+// manifest's version says which schema it is read by: 0.1, the single-image format, or 0.2, the
+// format of two images (TaskManifestV02 in task.proto).
 func Parse(name string, manifestTOML, objectivesTOML []byte) (Task, error) {
-	var m manifest
-	if err := decode(ManifestName, manifestTOML, &m, opaque); err != nil {
+	var table map[string]any
+	if _, err := toml.Decode(string(manifestTOML), &table); err != nil {
+		return Task{}, invalid("%s: %v", ManifestName, err)
+	}
+	schema, err := declaredVersion(table)
+	if err != nil {
 		return Task{}, err
 	}
 	var o objectivesFile
@@ -474,20 +488,25 @@ func Parse(name string, manifestTOML, objectivesTOML []byte) (Task, error) {
 			return Task{}, err
 		}
 	}
+	if schema == Schema02 {
+		return parseV02(name, table, o)
+	}
+	var m manifest
+	if err := decode(ManifestName, manifestTOML, &m, opaque); err != nil {
+		return Task{}, err
+	}
 	return build(name, m, o)
 }
 
+// build reads a manifest of task schema 0.1, the single-image format.
 func build(name string, m manifest, o objectivesFile) (Task, error) {
-	if m.Version != 1 {
-		return Task{}, invalid("%s: version must be 1, got %d", ManifestName, m.Version)
-	}
 	if m.Evaluator != nil {
 		return Task{}, unsupported("%s: [evaluator] tasks are not supported by this build; their commands are run by an evaluator package", ManifestName)
 	}
 	if _, modal := m.Environment["modal"]; modal {
 		return Task{}, unsupported("%s: [environment.modal] cannot be honored on this machine", ManifestName)
 	}
-	t := Task{Name: name, Samples: DefaultSamples}
+	t := Task{Name: name, Samples: DefaultSamples, Schema: Schema01}
 	nested, err := nestedDocker(m.Environment)
 	if err != nil {
 		return Task{}, err
@@ -536,16 +555,25 @@ func build(name string, m manifest, o objectivesFile) (Task, error) {
 			return Task{}, err
 		}
 	}
-	axes, err := objectives(o)
-	if err != nil {
+	if err := score(&t, bench, m.Metric, o); err != nil {
 		return Task{}, err
 	}
-	if err := resultOf(&t, bench, m.Metric, axes); err != nil {
-		return Task{}, err
+	return t, nil
+}
+
+// score reads what the benchmark reports and what it is judged on, from the manifest's benchmark
+// and metric and from the objectives.
+func score(t *Task, bench *benchSection, metric string, o objectivesFile) error {
+	axes, err := objectives(o)
+	if err != nil {
+		return err
+	}
+	if err := resultOf(t, bench, metric, axes); err != nil {
+		return err
 	}
 	if o.Pareto != nil && len(axes) > 1 {
 		if !t.Result.Protocol2 {
-			return Task{}, invalid("%s: a [pareto] task with %d objectives needs result_protocol = 2 in [benchmark], so every sample reports every objective; [benchmark.result] reads one field", ObjectiveName, len(axes))
+			return invalid("%s: a [pareto] task with %d objectives needs result_protocol = 2 in [benchmark], so every sample reports every objective; [benchmark.result] reads one field", ObjectiveName, len(axes))
 		}
 		t.Objectives.RelativeNoise = o.Pareto.RelativeNoise
 		for _, a := range axes {
@@ -555,7 +583,7 @@ func build(name string, m manifest, o objectivesFile) (Task, error) {
 			}
 		}
 	}
-	return t, nil
+	return nil
 }
 
 func backendOf(names []string) (core.BackendKind, error) {
@@ -634,17 +662,25 @@ func makeCommand(section string, argv []string, seconds int) (Command, error) {
 	return Command{Argv: append([]string(nil), argv...), Timeout: timeout}, nil
 }
 
-// checkPlaceholders refuses a ${...} other than ${PROJECT_ROOT}: it would reach the program
-// unreplaced.
-func checkPlaceholders(c Command) error {
+// checkPlaceholders refuses a ${...} other than ${PROJECT_ROOT} and the ones also allowed: it
+// would reach the program unreplaced.
+func checkPlaceholders(c Command, also ...string) error {
+	allowed := append([]string{ProjectRoot}, also...)
 	for _, a := range c.Argv {
-		rest := strings.ReplaceAll(a, ProjectRoot, "")
+		rest := a
+		for _, p := range allowed {
+			rest = strings.ReplaceAll(rest, p, "")
+		}
 		if i := strings.Index(rest, "${"); i >= 0 {
 			end := strings.IndexByte(rest[i:], '}')
 			if end < 0 {
 				end = len(rest) - i - 1
 			}
-			return unsupported("%s: the placeholder %s is not supported; only %s is", ManifestName, rest[i:i+end+1], ProjectRoot)
+			verb := "is"
+			if len(allowed) > 1 {
+				verb = "are"
+			}
+			return unsupported("%s: the placeholder %s is not supported here; only %s %s", ManifestName, rest[i:i+end+1], strings.Join(allowed, " and "), verb)
 		}
 	}
 	return nil

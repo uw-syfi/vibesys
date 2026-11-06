@@ -76,7 +76,7 @@ func TestTheReleaseBuildMakesWhatUpgradeAndInstallRead(t *testing.T) {
 	must(t, err)
 	reported, err := exec.CommandContext(ctx, filepath.Join(out, hostAsset), "--version").Output()
 	must(t, err)
-	if got, want := string(reported), "vibesys-cli "+version+"\n"; got != want {
+	if got, want := string(reported), "vibesys-cli "+version+" (task schemas 0.1, 0.2)\n"; got != want {
 		t.Fatalf("--version = %q, want %q", got, want)
 	}
 

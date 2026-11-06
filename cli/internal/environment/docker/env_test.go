@@ -179,7 +179,10 @@ func TestWhatAContainerCannotGiveIsRefusedBeforeAnythingStarts(t *testing.T) {
 		kind core.FailureKind
 	}{
 		"cuda with no GPU passed":   {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendCUDA}}, "gpu resource", core.FailureUnavailable},
-		"an accelerator not NVIDIA": {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendROCm}, configure: withGPUs}, "--env host", core.FailureUnavailable},
+		"rocm with NVIDIA GPUs":     {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendROCm}, configure: withGPUs}, "rocm resource", core.FailureUnavailable},
+		"rocm with no GPU passed":   {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendROCm}}, "rocm resource", core.FailureUnavailable},
+		"cuda with AMD GPUs":        {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendCUDA}, configure: withAMDGPUs}, "gpu resource", core.FailureUnavailable},
+		"an accelerator of neither": {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), Backend: core.BackendTrainium}, configure: withGPUs}, "--env host", core.FailureUnavailable},
 		"nested docker":             {options{spec: docker.Spec{Dockerfile: []byte(simpleDockerfile), NestedDocker: true}}, "docker_in_docker", core.FailureUnavailable},
 		"no Dockerfile":             {options{spec: docker.Spec{Dockerfile: []byte{}, Files: task.Tree{"run.sh": {Data: []byte("true")}}}}, "Dockerfile", core.FailureInvalidInput},
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/clock"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/lease"
@@ -36,6 +37,10 @@ var configs = []string{
 	"[placements.a]\nkind = \"local\"\n[placements.b]\nkind = \"local\"\n",
 	"[placements.a]\nkind = \"local\"\n[placements.a.resources.gpu]\ndevices = \"all\"\n[placements.a.resources.kubernetes]\nkubeconfig = \"/k\"\n" +
 		"[placements.b]\nkind = \"ssh\"\n[placements.b.remote]\nhost = \"host-b\"\nremote_workspace_root = \"/w\"\n[placements.b.resources.kubernetes]\nkubeconfig = \"/k\"\n",
+	"[placements.mi210]\nkind = \"apptainer\"\n[placements.mi210.remote]\nhost = \"login\"\nremote_workspace_root = \"/w\"\n[placements.mi210.slurm]\npartition = \"gpu\"\n" +
+		"[placements.mi210.resources.rocm]\n",
+	"[placements.mi300]\nkind = \"apptainer\"\n[placements.mi300.remote]\nhost = \"login\"\nremote_workspace_root = \"/w\"\n[placements.mi300.slurm]\npartition = \"gpu\"\n" +
+		"[placements.mi300.apptainer]\nlocal_scratch_dir = \"/scratch/me\"\nconvert_timeout_seconds = 5400\n",
 }
 
 // claimsOf are what the resources of each placement claim, as machineEnvironments has them: the
@@ -50,6 +55,14 @@ func claimsOf(t *testing.T, text string) map[string][]core.Claim {
 		}
 		if pl.GetResources().GetGpu() != nil {
 			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceGPU) + ":" + where + "/all", Amount: 1})
+		}
+		if pl.GetResources().GetRocm() != nil {
+			gpus := where
+			if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
+				// Each job gets the GPUs of an allocation of its own: they are the placement's.
+				gpus = name + "@" + where
+			}
+			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceROCm) + ":" + gpus, Amount: 1})
 		}
 		if k := pl.GetResources().GetKubernetes(); k != nil {
 			out[name] = append(out[name], core.Claim{Resource: string(core.ResourceKubernetes) + ":" + where + k.GetKubeconfig(), Amount: 1, Exclusive: true})

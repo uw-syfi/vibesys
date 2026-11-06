@@ -67,7 +67,7 @@ def _run(
     (project_root / "queue.py").write_text("VALUE = 1\n")
     write_task(
         project_root,
-        'version = 1\n[agent]\ndomain = "generic"\n'
+        'version = "0.1"\n[agent]\ndomain = "generic"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
         objective="Improve the queue.\n",
     )

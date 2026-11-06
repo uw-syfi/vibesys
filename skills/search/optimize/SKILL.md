@@ -98,13 +98,21 @@ It selects a working CLI or installs one only after explicit user approval.
 - The result branch moves only through `vibesys-cli promote <sha>`, and only for a candidate whose
   judge verdict is `pass`. Never move it with git (`branch -f`, `update-ref`, `reset`, `push`),
   and never create it again after it exists. Exit 0 promoted. Exit 1 refused: the reasons are
-  on stdout, one of `unmeasured`, `check_missing`, `worse`, `within_noise`, `inconclusive`, `stale`
-  or `environment_mismatch`; show the user a refusal as the CLI printed it. A candidate that does
+  on stdout, one of `unmeasured`, `check_missing`, `worse`, `within_noise`, `inconclusive`, `stale`,
+  `environment_mismatch` or `tradeoff`; show the user a refusal as the CLI printed it. A candidate that does
   not contain the head also exits 1, with a `conflict` failure on stderr: dispatch a combine of
   the candidate onto the current head and measure the result; never merge into the result branch.
   The commits from the candidate's parent to its head land, `wip` checkpoints included; the judge
   reviews the whole diff from the parent. Never squash or rewrite a measured commit
   (`vibesys:commit`).
+- **Multi-objective tasks** (`objectives.toml` has `[pareto]`): the result branch still moves only on
+  an overall `better` (better on some objective, worse on none). The task's goal is the Pareto
+  frontier, which `vibesys-cli frontier add|list` keeps. Once the base is measured, add it
+  (`frontier add <base>`). A judged-`pass` candidate whose `compare` against the head is
+  `tradeoff` goes to the frontier with `frontier add <sha>`, not to `promote`. Branch later work
+  from the result branch head or from a frontier member, and name which in the brief; a later
+  candidate built on a member is promoted when it is `better` than the head and is otherwise
+  offered to the frontier. Report every member's numbers from `frontier list`.
 - A judge verdict `unmeasured` is not a pass: re-judge after the measurement.
 - A number reported to the user is the `value` the CLI printed in `vibesys-cli result --json`
   (`current.result.measure.value`), never one you computed from samples. If `result` exits 1, there

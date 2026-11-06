@@ -34,6 +34,8 @@ enum ResourceKind {
   RESOURCE_KIND_KUBERNETES = 2;
   // Read-only directories of the engine's machine.
   RESOURCE_KIND_MOUNTS = 3;
+  // AMD GPUs passed into the container, through the ROCm kernel driver.
+  RESOURCE_KIND_ROCM = 4;
 }
 
 // EnvironmentFingerprint identifies the environment a result was taken in. Two results are

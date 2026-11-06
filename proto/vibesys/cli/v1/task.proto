@@ -1,0 +1,249 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/descriptor.proto";
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// The task manifest, vibesys.input.toml, of task schema 0.2: a task of two images, the trusted task
+// image and the agent's candidate image. vibesys-cli decodes the TOML file into TaskManifestV02 by
+// its field names, refuses a key this message has no field for, naming the key, and holds the
+// message to its protovalidate rules. This file is the only definition of the schema; the Go types
+// are generated from it.
+//
+// Schema versions are MAJOR.MINOR strings, `version = "0.2"`. The single-image format of the
+// earlier tasks is "0.1", which vibesys-cli still reads with its own reader (it has no message here
+// yet). How the schema evolves (scripts/check_task_schema.py holds a change to these rules against
+// the merge base, beside buf breaking, which already refuses a renamed or removed field):
+//
+// - Every manifest message carries the schema version it is (task_schema), and every field of it
+//   and of the messages it holds the minor version that introduced the field
+//   (task_schema_since_minor). The reader dispatches on the version a file declares.
+// - While the major version is 0, any minor version may be incompatible: each 0.x version is a
+//   message of its own (TaskManifestV02, with its sections TaskCandidateV02 and so on), a reader
+//   accepts exactly the 0.x versions it has messages for, and a change of any kind to an existing
+//   0.x message is refused: it is a new 0.x version.
+// - From 1.0 on, a minor version adds optional keys or sections and nothing else. A field added
+//   since the base declares the message's current minor version, and adding one raises that minor
+//   version by one. A manifest that declares M.N may set only the keys of M.0 to M.N, so the version
+//   a task declares is the one it needs. An existing field's protovalidate rules do not change: a
+//   tightening needs a new major version, and a loosening a reviewed waiver.
+// - A major version is an incompatible change: a key removed or renamed, or a meaning changed. It is
+//   a new message beside the old one (TaskManifestV1, TaskManifestV2), never an edit of it.
+
+// TaskSchema is the schema version a manifest message is: its major version, and the newest minor
+// version its fields belong to.
+message TaskSchema {
+  uint32 major = 1;
+  uint32 minor = 2;
+}
+
+extend google.protobuf.MessageOptions {
+  // The schema version of a manifest message: for major 0 the one version it is, and from 1.0 on
+  // the newest minor version its fields belong to.
+  TaskSchema task_schema = 51001;
+}
+
+extend google.protobuf.FieldOptions {
+  // The minor version, of its message's major version, that introduced the field. A manifest that
+  // declares an earlier minor version is refused when it sets the field, naming the key and the
+  // minor version it needs.
+  optional uint32 task_schema_since_minor = 51002;
+}
+
+// TaskManifestV02 is vibesys.input.toml of schema 0.2. The task's own Dockerfile, beside the manifest,
+// builds the task image: the judge and the load generator, which the candidate cannot change. The
+// candidate's Dockerfile, in the candidate's commit, builds the image its server runs in. The task
+// container reaches the candidate only over HTTP, at VIBESYS_SERVICE_URL.
+//
+// It has every key of the single-image format 0.1, with the same meaning, except [evaluator] and the
+// entrypoint and args of a command, which it refuses by name; and it adds [candidate] and gives
+// [profile] a command. The sections 0.1 accepts without reading them are accepted the same way here.
+message TaskManifestV02 {
+  option (task_schema) = {
+    major: 0
+    minor: 2
+  };
+
+  // The schema version, "0.2".
+  string version = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.pattern = "^0\\.2$"
+  ];
+  // The compute stack the candidate targets, at most one: cpu (the default), cuda or rocm.
+  repeated string backends = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).repeated.max_items = 1
+  ];
+  // The scored metric of a protocol 2 benchmark. Empty scores the first objective of
+  // objectives.toml.
+  string metric = 3 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.max_len = 256
+  ];
+  // The candidate's image and server.
+  TaskCandidateV02 candidate = 4 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).required = true
+  ];
+  // The check: run in the task container against the candidate's server; exit 0 passes. [check] is
+  // the same section by its other name; a manifest has one of them.
+  TaskCommandV02 accuracy = 5 [(task_schema_since_minor) = 2];
+  // The benchmark: run in the task container against the candidate's server, once per sample.
+  // [measure] is the same section by its other name; a manifest has one of them.
+  TaskBenchmarkV02 benchmark = 6 [(task_schema_since_minor) = 2];
+  // The standard profile load: run in the task container against the candidate's server, which a
+  // profile job starts under its wrapper. It is never scored.
+  TaskCommandV02 profile = 7 [(task_schema_since_minor) = 2];
+  // What the task needs of the placement a job runs on.
+  TaskEnvironmentV02 environment = 8 [(task_schema_since_minor) = 2];
+  // A build, run in the task container from the checkout's root before the check.
+  TaskBuildV02 build = 9 [(task_schema_since_minor) = 2];
+  // [accuracy] by its other name.
+  TaskCommandV02 check = 10 [(task_schema_since_minor) = 2];
+  // [benchmark] by its other name.
+  TaskBenchmarkV02 measure = 11 [(task_schema_since_minor) = 2];
+  // The agent loop's metadata, which the optimize skill reads to choose its domain plugins.
+  TaskAgentV02 agent = 12 [(task_schema_since_minor) = 2];
+
+  // The sections below are the Python product's: vibesys-cli accepts them, as 0.1 does, without
+  // reading them, so their keys are not held here.
+  google.protobuf.Struct profile_guided = 13 [(task_schema_since_minor) = 2];
+  google.protobuf.Struct resources = 14 [(task_schema_since_minor) = 2];
+  google.protobuf.Struct workspace = 15 [(task_schema_since_minor) = 2];
+  google.protobuf.Struct plan = 16 [(task_schema_since_minor) = 2];
+  google.protobuf.Struct catalogue = 17 [(task_schema_since_minor) = 2];
+  repeated google.protobuf.Struct comparison = 18 [(task_schema_since_minor) = 2];
+}
+
+// TaskCandidateV02 is how the candidate's image is built from its commit, and how its server starts.
+message TaskCandidateV02 {
+  // The Dockerfile, a path in the candidate's checkout.
+  string dockerfile = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // The build context, a directory in the candidate's checkout. A .dockerignore in it is honored.
+  string context = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // The server, run in the candidate container from the checkout's root. ${PROJECT_ROOT} is the
+  // checkout's root and ${PORT} the port the CLI chose for the job.
+  repeated string serve = 3 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).repeated.min_items = 1,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  // The HTTP path polled on 127.0.0.1:${PORT} until it answers 2xx.
+  string ready = 4 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.pattern = "^/[^\\s]*$"
+  ];
+  // How long the server may take to become ready.
+  uint32 startup_timeout_seconds = 5 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).uint32 = {
+      gte: 1
+      lte: 86400
+    }
+  ];
+  // The images the candidate's Dockerfile may start FROM, by the exact reference its first FROM
+  // names. Empty allows any base.
+  repeated string allowed_bases = 6 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+}
+
+// TaskCommandV02 is a command of the task container, run from the checkout's root.
+
+// TaskCommandV02 is a command of the task container, run from the checkout's root.
+message TaskCommandV02 {
+  repeated string command = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).repeated.min_items = 1,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  // The command's time limit. Zero means 30 minutes.
+  uint32 timeout_seconds = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).uint32.lte = 604800
+  ];
+}
+
+// TaskBuildV02 is the build: its program is a name or a path in the checkout, never absolute.
+message TaskBuildV02 {
+  repeated string command = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).repeated.min_items = 1,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  uint32 timeout_seconds = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).uint32.lte = 604800
+  ];
+}
+
+// TaskBenchmarkV02 is the benchmark. With result_protocol = 2 it writes evaluator result protocol 2
+// records to the path the CLI appends after --vs-output; otherwise [benchmark.result] says which flag
+// takes the path of the JSON file it writes, and which field of it is the metric.
+message TaskBenchmarkV02 {
+  repeated string command = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).repeated.min_items = 1,
+    (buf.validate.field).repeated.items.string.min_len = 1
+  ];
+  uint32 timeout_seconds = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).uint32.lte = 604800
+  ];
+  // The result protocol, 2, when the benchmark speaks it.
+  optional uint32 result_protocol = 3 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).uint32.const = 2
+  ];
+  TaskResultV02 result = 4 [(task_schema_since_minor) = 2];
+  // Whether a measurement needs a passing check first. Only true is supported: a measurement is
+  // saved only after its check passed.
+  optional bool requires_accuracy = 5 [(task_schema_since_minor) = 2];
+}
+
+// TaskResultV02 is [benchmark.result]: the JSON file a benchmark of no result protocol writes.
+message TaskResultV02 {
+  // The flag the CLI passes the file's path after.
+  string json_argument = 1 [(task_schema_since_minor) = 2];
+  // The field of the file that is the metric.
+  string metric = 2 [(task_schema_since_minor) = 2];
+}
+
+// TaskEnvironmentV02 is what the task needs of the placement a job runs on. For a task of two
+// images, gpu is given to the candidate's container only, mounts to both containers read-only, and
+// kubernetes to the task's container only.
+message TaskEnvironmentV02 {
+  // The resources a placement must give the containers, each once: gpu, kubernetes, mounts.
+  repeated string needs = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).repeated.unique = true
+  ];
+  // The candidate is a container topology and needs a Docker daemon of its own.
+  bool docker_in_docker = 2 [(task_schema_since_minor) = 2];
+  // A Modal environment, which vibesys-cli cannot honor and refuses, as 0.1 does.
+  google.protobuf.Struct modal = 3 [(task_schema_since_minor) = 2];
+}
+
+// TaskAgentV02 is [agent]: what the agent loop optimizes.
+message TaskAgentV02 {
+  // The domain, which chooses the domain plugins.
+  string domain = 1 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.min_len = 1
+  ];
+  // How the evaluator reaches the candidate: inprocess or service. Empty leaves it to the flag.
+  string interface = 2 [
+    (task_schema_since_minor) = 2,
+    (buf.validate.field).string.pattern = "^(inprocess|service)?$"
+  ];
+}

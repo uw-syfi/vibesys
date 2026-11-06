@@ -71,6 +71,29 @@ type CommandSettings struct {
 	Service *ServiceSpec
 	// Timeout is zero for the default limit.
 	Timeout time.Duration
+	// Profile, when set, asks for the task's standard profile, a job of a task of two images: the
+	// task's [profile] load against the candidate's server started under the wrapper. A submission
+	// gives no Argv, and the daemon sets it, Timeout and Candidate from the task.
+	Profile *ProfileRequest
+	// Candidate is set by the daemon for a job of a task of two images: how the job's candidate image
+	// is built, and the server the command runs against for a profile. It is never the caller's.
+	Candidate *CommandCandidate
+}
+
+// ProfileRequest is what a profile submission asks for.
+type ProfileRequest struct {
+	// Wrap is an argv prefix the candidate's server starts under, such as a profiler's command
+	// line. The daemon never reads it.
+	Wrap []string
+}
+
+// CommandCandidate is how a command job of a task of two images uses the candidate's image.
+type CommandCandidate struct {
+	Build CandidateBuild
+	// Serve, set for a profile, starts the server in the candidate's image, with the checkout's root
+	// not yet resolved, and the command runs in the task's image against it. Nil runs the command in
+	// the candidate's image.
+	Serve *CandidateServe
 }
 
 // MeasureSettings configures a measure job.

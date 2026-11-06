@@ -114,7 +114,7 @@ def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
     task = write_task(
         root,
         f"""\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"
@@ -144,7 +144,7 @@ def _write_serving_task(root: Path, name: str = "latency") -> Path:
     (task / "OBJECTIVE.md").write_text("Reduce latency.\n", encoding="utf-8")
     (task / "vibesys.input.toml").write_text(
         """\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "llm-serving"
@@ -664,7 +664,7 @@ def test_repository_task_exposes_its_actual_reference_path(tmp_path: Path) -> No
     (task / "OBJECTIVE.md").write_text("Reduce latency.\n", encoding="utf-8")
     (task / "vibesys.input.toml").write_text(
         """\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"

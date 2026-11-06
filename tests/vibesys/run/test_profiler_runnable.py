@@ -100,7 +100,7 @@ def requests(tmp_path_factory: pytest.TempPathFactory) -> dict[DomainName, RunRe
         project.mkdir()
         write_task(
             project,
-            f'version = 1\n[agent]\ndomain = "{domain.value}"\n'
+            f'version = "0.1"\n[agent]\ndomain = "{domain.value}"\n'
             '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
         )
         built[domain] = RunRequest(

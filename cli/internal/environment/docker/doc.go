@@ -4,8 +4,9 @@
 // # What a run does
 //
 // A run takes the files of the task's directory at the job's commit as the build context, with the
-// Dockerfile at its root, and tags the image it builds by a digest of the context, so a task that
-// did not change finds its image already built and builds nothing. The build sees the task's files
+// Dockerfile at its root, and tags the image it builds by a digest of the context and of the
+// engine's local image of each base the Dockerfile builds on, so a task that did not change finds
+// its image already built and builds nothing, and a base rebuilt under the same tag builds it again. The build sees the task's files
 // and no file of the candidate. The fingerprint pins the image's exact digest, the machine and the
 // GPUs, and the container is made from that digest and not from the tag, so a result is a result
 // of the image that is recorded with it.

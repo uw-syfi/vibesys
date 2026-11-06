@@ -58,6 +58,10 @@ enum PlacementKind {
   PLACEMENT_KIND_SSH = 2;
   // SSH, with every container, and every image build, inside an allocation of the machine's Slurm.
   PLACEMENT_KIND_SLURM = 3;
+  // A Slurm cluster reached through a login node over ssh, whose compute nodes run Apptainer and no
+  // Docker: images are built by this machine's Docker, copied to the cluster and converted there, and
+  // every run's containers are processes of one batch allocation.
+  PLACEMENT_KIND_APPTAINER = 4;
 }
 
 // Placement is one place a docker job's container can run, and what it gives the container.
@@ -74,9 +78,13 @@ message Placement {
   SlurmSettings slurm = 4;
   // What the placement gives every container it runs.
   Resources resources = 5;
+  // How a batch allocation is submitted and Apptainer run, for the apptainer kind.
+  ApptainerSettings apptainer = 6;
 }
 
-// RemoteSettings is the machine the engine runs on, for the ssh and slurm kinds.
+// RemoteSettings is the machine the engine runs on, for the ssh and slurm kinds, and the login node
+// of the cluster for the apptainer kind, where remote_workspace_root is on the file system the
+// compute nodes share.
 message RemoteSettings {
   // An ssh destination or an alias of the user's ssh config, without options or whitespace.
   string host = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_.@-]*$"];
@@ -87,7 +95,8 @@ message RemoteSettings {
   string remote_workspace_root = 4 [(buf.validate.field).string.pattern = "^/.*[^/].*$"];
 }
 
-// SlurmSettings is how an allocation is asked for.
+// SlurmSettings is how an allocation is asked for: with srun for the slurm kind, and with the submit
+// command of [apptainer] for the apptainer kind, which takes no srun_arguments.
 message SlurmSettings {
   string partition = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9=,:._/+-]*$"];
   // What a measured container asks for; a build asks for no GRES.
@@ -109,6 +118,24 @@ message SlurmSettings {
   double queue_timeout_seconds = 9 [(buf.validate.field).double.gte = 0];
 }
 
+// ApptainerSettings is how the apptainer kind makes an allocation and runs a container in it.
+message ApptainerSettings {
+  // The program, with its arguments, that submits a batch job on the login node: sbatch, or a site's
+  // wrapper of it that takes sbatch's arguments. Unset means sbatch.
+  repeated string submit_command = 1 [(buf.validate.field).repeated.items.string.min_len = 1];
+  // Passed to the submit command after the options the CLI sets, such as an account (--account=x) or
+  // a QOS a site requires on every job. Each is an option.
+  repeated string submit_arguments = 2 [(buf.validate.field).repeated.items.string.pattern = "^-"];
+  // The apptainer program of the compute nodes, which runs the SIFs. Unset means apptainer.
+  string program = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_./+-]*$"];
+  // The absolute directory of this machine where an image is converted to a SIF by this machine's
+  // apptainer (on the daemon's PATH): the archive, the image unpacked (APPTAINER_TMPDIR) and the
+  // SIF. Unset means apptainer/ under the user's cache directory.
+  string local_scratch_dir = 4 [(buf.validate.field).string.pattern = "^(/.*[^/])?$"];
+  // The bound on converting one image and copying its SIF to the cluster. Zero means an hour.
+  double convert_timeout_seconds = 5 [(buf.validate.field).double.gte = 0];
+}
+
 // Resources are what a placement gives every container it runs, by kind (ResourceKind). Each kind
 // is a table of its own: [placements.<name>.resources.<kind>].
 message Resources {
@@ -120,7 +147,15 @@ message Resources {
     (buf.validate.field).map.keys.string.pattern = "^[a-z0-9][a-z0-9_-]{0,62}$",
     (buf.validate.field).map.values.string.pattern = "^/[^:,\"\\n\\r]*$"
   ];
+  RocmResource rocm = 4;
 }
+
+// RocmResource passes the machine's AMD GPUs into the container, for tasks of the rocm backend: the
+// kernel driver's devices (/dev/kfd and /dev/dri) and the video group under docker, and --rocm under
+// Apptainer. An empty table gives them. A variable Slurm sets to name the GPUs it assigned
+// (ROCR_VISIBLE_DEVICES, HIP_VISIBLE_DEVICES, GPU_DEVICE_ORDINAL, CUDA_VISIBLE_DEVICES) is passed on
+// when it is set.
+message RocmResource {}
 
 // GpuResource passes GPUs into the container.
 message GpuResource {

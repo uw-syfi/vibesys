@@ -1,5 +1,5 @@
 // Package workload is the Go front end of vibesys-evaluator: a task's request generator written
-// in Go. It has the concepts of the Python SDK's vibesys_evaluator.service: a Workload is a
+// in Go. It has the concepts of the Python SDK's vibesys_evaluator.microservices: a Workload is a
 // dataset, a model built from it, and a weighted mix of Operations; each Operation builds a
 // Request (Steps from Get, Post and Put, a Template filled from an earlier step's response, the
 // info it was built from, an exclusive key), a write's Apply updates the model, and Check says

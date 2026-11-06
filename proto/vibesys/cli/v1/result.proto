@@ -105,4 +105,8 @@ message Result {
     CheckResult check = 11;
     MeasureResult measure = 12;
   }
+  // For a task of two images, the exact digest of the candidate's image the commands ran against.
+  // It is recorded and never part of the key: a dependency the candidate changes is part of the
+  // candidate, as its code is.
+  string candidate_image = 13;
 }

@@ -1,0 +1,9 @@
+Correlation_Id,Dispatch_Id,Agent_Id,Queue_Id,Process_Id,Thread_Id,Grid_Size,Kernel_Id,Kernel_Name,Workgroup_Size,LDS_Block_Size,Scratch_Size,VGPR_Count,Accum_VGPR_Count,SGPR_Count,Counter_Name,Counter_Value,Start_Timestamp,End_Timestamp
+1,1,1,1,200,200,131072,1,Cijk_Ailk_Bljk_BBS_BH_MT128x128x32_MI32x32x8_ISA90a_WG128_2_1,256,0,0,128,0,80,SQ_WAVES,2048.0,2000000,2400000
+1,1,1,1,200,200,131072,1,Cijk_Ailk_Bljk_BBS_BH_MT128x128x32_MI32x32x8_ISA90a_WG128_2_1,256,0,0,128,0,80,GRBM_GUI_ACTIVE,600000.0,2000000,2400000
+1,1,1,1,200,200,131072,1,Cijk_Ailk_Bljk_BBS_BH_MT128x128x32_MI32x32x8_ISA90a_WG128_2_1,256,0,0,128,0,80,TCC_HIT_sum,9000.0,2000000,2400000
+1,1,1,1,200,200,131072,1,Cijk_Ailk_Bljk_BBS_BH_MT128x128x32_MI32x32x8_ISA90a_WG128_2_1,256,0,0,128,0,80,TCC_MISS_sum,1000.0,2000000,2400000
+2,2,1,1,200,200,131072,2,"void ck_tile::kentry<256, 2, ck_tile::FmhaFwdKernel<Problem>>(Kargs)",256,0,0,128,0,80,SQ_WAVES,1024.0,3000000,3400000
+2,2,1,1,200,200,131072,2,"void ck_tile::kentry<256, 2, ck_tile::FmhaFwdKernel<Problem>>(Kargs)",256,0,0,128,0,80,GRBM_GUI_ACTIVE,600000.0,3000000,3400000
+2,2,1,1,200,200,131072,2,"void ck_tile::kentry<256, 2, ck_tile::FmhaFwdKernel<Problem>>(Kargs)",256,0,0,128,0,80,TCC_HIT_sum,5000.0,3000000,3400000
+2,2,1,1,200,200,131072,2,"void ck_tile::kentry<256, 2, ck_tile::FmhaFwdKernel<Problem>>(Kargs)",256,0,0,128,0,80,TCC_MISS_sum,5000.0,3000000,3400000

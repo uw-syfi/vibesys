@@ -59,6 +59,13 @@ type Container interface {
 	// Err that is ErrLost if the engine cannot say how it ended, such as a container lost under it.
 	environment.Launcher
 
+	// Port returns a TCP port of the container's network on which no process listens now, for a
+	// server the run starts in the container. An engine whose containers have a network of their
+	// own may return any port, and takes it from seed, the run's id, so that no two runs assume one
+	// fixed port; an engine whose containers share a machine's network with other work reads which
+	// ports are free there.
+	Port(ctx context.Context, seed string) (int, error)
+
 	// Close releases everything the engine holds for the container and waits for it, so that
 	// nothing writes to a sink afterwards. It does not remove the container: one that still
 	// exists stops by itself, because Close ends the caller's side of the container's input.
@@ -108,11 +115,15 @@ type User struct{ UID, GID int }
 
 // GPUs says which GPUs a container gets, and how.
 type GPUs struct {
-	// Devices is a docker --gpus value, such as "all" or "device=0,1". Empty passes no GPU.
+	// Devices is a docker --gpus value of NVIDIA GPUs, such as "all" or "device=0,1". Empty passes
+	// no NVIDIA GPU.
 	Devices string
 	// Runtime, when set, is the container runtime that passes them ("nvidia"), with the devices in
 	// NVIDIA_VISIBLE_DEVICES, instead of --gpus.
 	Runtime string
+	// ROCm passes the machine's AMD GPUs through the ROCm kernel driver: its devices, /dev/kfd and
+	// /dev/dri, and the video group that may use them. It is never set with Devices.
+	ROCm bool
 }
 
 // ContainerSpec is a container to start.
@@ -131,7 +142,8 @@ type ContainerSpec struct {
 	// GPUs are the GPUs the container gets. The zero value gives it none.
 	GPUs GPUs
 	// Network is the container's network mode (docker run --network). Empty leaves the engine's
-	// default.
+	// default. NetworkOf a container joins that container's network, as the command's container of
+	// a task of two images joins its candidate's server's.
 	Network string
 	// Limit is the longest the container's commands may run. An engine that places the container
 	// in an allocation with a time limit of its own bounds the allocation by it; zero means the
@@ -140,6 +152,10 @@ type ContainerSpec struct {
 	// Measured says the container's commands are timed: an engine that places the container in
 	// an allocation gives it the whole machine, and an unmeasured container only its share.
 	Measured bool
+	// Log, when set, is the run's output, where an engine that waits while it starts the container,
+	// as for a cluster's queue, says why in whole lines (environment.Environment.Run). It writes
+	// nothing there otherwise, and nothing once Start has returned.
+	Log io.Writer
 }
 
 var (
@@ -148,7 +164,7 @@ var (
 	envNamePattern       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	gpuDevicesPattern    = regexp.MustCompile(`^[A-Za-z0-9=,:._-]*$`)
 	runtimePattern       = regexp.MustCompile(`^[a-z0-9._-]*$`)
-	networkPattern       = regexp.MustCompile(`^([A-Za-z0-9][A-Za-z0-9_.-]*)?$`)
+	networkPattern       = regexp.MustCompile(`^((container:)?[A-Za-z0-9][A-Za-z0-9_.-]*)?$`)
 )
 
 // Validate refuses a spec an engine would have to refuse or misread, with a *core.Failure of kind
@@ -172,6 +188,8 @@ func (s ContainerSpec) Validate() error {
 		return invalid("%q is not a container runtime name", s.GPUs.Runtime)
 	case s.GPUs.Runtime != "" && s.GPUs.Devices == "":
 		return invalid("the runtime %q is for GPUs, and no GPU is given", s.GPUs.Runtime)
+	case s.GPUs.ROCm && s.GPUs.Devices != "":
+		return invalid("the GPUs are passed both as AMD GPUs and with the --gpus value %q", s.GPUs.Devices)
 	case !networkPattern.MatchString(s.Network):
 		return invalid("%q is not a network mode", s.Network)
 	case s.Limit < 0:

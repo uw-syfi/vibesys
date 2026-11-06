@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +52,9 @@ func (l Local) Cache(ctx context.Context, key string) (string, error) {
 // User implements docker.Machine.
 func (l Local) User(context.Context) (docker.User, error) { return l.As, nil }
 
+// Program implements docker.Machine: the engine runs on this machine.
+func (Local) Program(_ context.Context, local string) (string, error) { return local, nil }
+
 // CallTimeout bounds each call to the remote machine that should answer at once.
 const CallTimeout = 2 * time.Minute
 
@@ -64,6 +68,8 @@ type Remote struct {
 	Root   string
 	Scope  string
 	Timers clock.Timers
+	// Arch is the Go architecture of the programs Program places; empty is this build's.
+	Arch string
 
 	mu   sync.Mutex
 	user *docker.User
@@ -146,6 +152,59 @@ func (r *Remote) Cache(ctx context.Context, key string) (string, error) {
 		return "", fmt.Errorf("making the cache directory on %s: %w", r.Shell.Where(), err)
 	}
 	return dir, nil
+}
+
+// programScript says whether the machine runs programs of the platform $3 (uname -m) and, when it
+// does, whether the program is already at $1; when it is not, it makes its directory and prints
+// "copy". It prints "platform <the machine's>" for another platform.
+const programScript = `set -eu
+m=$(uname -m)
+[ "$m" = "$3" ] || { echo "platform $m"; exit 0; }
+[ -x "$1" ] && { echo present; exit 0; }
+mkdir -p "$2"
+echo copy`
+
+// unameOf names Go's architectures as uname -m names them on Linux.
+var unameOf = map[string]string{"amd64": "x86_64", "arm64": "aarch64", "ppc64le": "ppc64le", "s390x": "s390x", "riscv64": "riscv64"}
+
+// Program implements docker.Machine. The program is copied under Root by the digest of its
+// content, once, and published by a rename, so a run of another process that copies the same
+// program at the same moment finds it whole. Arch is the platform the program is built for.
+func (r *Remote) Program(ctx context.Context, local string) (string, error) {
+	data, err := os.ReadFile(local)
+	if err != nil {
+		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("reading the program %s: %v", local, err)}
+	}
+	sum := sha256.Sum256(data)
+	dir := path.Join(r.Root, "bin", hex.EncodeToString(sum[:12]))
+	dest := path.Join(dir, path.Base(local))
+	arch := r.Arch
+	if arch == "" {
+		arch = runtime.GOARCH
+	}
+	uname, ok := unameOf[arch]
+	if !ok {
+		uname = arch
+	}
+	said, err := r.run(ctx, programScript, dest, dir, uname)
+	if err != nil {
+		return "", fmt.Errorf("placing the program %s on %s: %w", path.Base(local), r.Shell.Where(), err)
+	}
+	switch said = strings.TrimSpace(said); {
+	case said == "present":
+		return dest, nil
+	case strings.HasPrefix(said, "platform "):
+		return "", &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf(
+			"%s is a %s machine, and the program %s is built for %s", r.Shell.Where(), strings.TrimPrefix(said, "platform "), local, uname)}
+	}
+	tmp := fmt.Sprintf("%s.tmp-%d", dest, os.Getpid())
+	if err := r.Rsync.PushFile(ctx, local, tmp); err != nil {
+		return "", fmt.Errorf("copying the program %s to %s: %w", path.Base(local), r.Shell.Where(), err)
+	}
+	if _, err := r.run(ctx, `chmod 0755 "$1" && mv -f "$1" "$2"`, tmp, dest); err != nil {
+		return "", fmt.Errorf("placing the program %s on %s: %w", path.Base(local), r.Shell.Where(), err)
+	}
+	return dest, nil
 }
 
 // User implements docker.Machine: the ssh user's ids there, read once.

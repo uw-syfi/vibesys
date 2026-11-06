@@ -17,9 +17,11 @@ from typing import Any
 
 import dataset as ds
 import vibesys_evaluator as vse
-from vibesys_evaluator import Call, Rand, Versions
-from vibesys_evaluator.deploy import k8s
-from vibesys_evaluator.service import Operation, Request, Workload, get, post
+from vibesys_evaluator import microservices as ms
+from vibesys_evaluator import Rand
+from vibesys_evaluator.microservices import Call, Versions
+from vibesys_evaluator.microservices import k8s
+from vibesys_evaluator.microservices import Operation, Request, Workload, get, post
 
 PAGE = 10
 BOUND_SECS = 1.0  # INTERFACE.md: home timelines and follow changes, 1 s after acknowledgement
@@ -393,7 +395,7 @@ WORKLOAD = Workload(
 
 # ------------------------------------------------------------ (4) benchmark
 
-def benchmark(run: vse.Run) -> None:
+def benchmark(run: ms.Run) -> None:
     """Closed-loop capacity (2 trials), then p99 at 0.7x of it (3 open-loop trials).
 
     The open phases see every compose and follow change of the closed ones:
@@ -412,7 +414,7 @@ def benchmark(run: vse.Run) -> None:
 # ------------------------------------------------------------- (5) validity
 
 if __name__ == "__main__":
-    vse.main(
+    ms.main(
         dataset=ds.generate,
         system=SYSTEM,
         workload=WORKLOAD,

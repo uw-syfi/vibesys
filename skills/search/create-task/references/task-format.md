@@ -24,7 +24,7 @@ commands run into the task directory.
 ## `vibesys.input.toml`
 
 ```toml
-version = 1
+version = "0.1"
 backends = ["cpu"]            # one backend; a "cuda" task needs the gpu resource
 
 [agent]
@@ -50,6 +50,8 @@ json_argument = "--output-json"   # the CLI appends this flag and a path
 metric = "requests_per_sec"       # the top-level field of that JSON file
 ```
 
+- `version = "0.1"` is the format on this page; `version = 1` is refused (write `"0.1"`). A
+  `version = "0.2"` task (a candidate server image and a task image) runs only under vibesys-cli.
 - Commands are argv lists, run from the checkout's root. The only placeholder is
   `${PROJECT_ROOT}`, the checkout's root.
 - The benchmark is called with the `json_argument` flag and a path appended; it must write one

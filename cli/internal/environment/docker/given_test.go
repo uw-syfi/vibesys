@@ -36,6 +36,18 @@ func gpuOf(facts map[string]string) *fakeresource.Fake {
 
 func withGPUs(c *docker.Config) { c.Resources = append(c.Resources, gpuOf(someGPU)) }
 
+// someAMDGPU are the facts a fake machine's AMD GPUs report.
+var someAMDGPU = map[string]string{"amd_gpu_model": "AMD Instinct MI210", "amd_gpu_count": "1", "amdgpu_driver": "6.16.13"}
+
+// amdOf is a resource that attaches AMD GPUs the way the rocm resource does: the GPUs, and a check
+// the container runs first, here a script of the fake's.
+func amdOf(check ...string) *fakeresource.Fake {
+	return &fakeresource.Fake{
+		Of: core.ResourceROCm, Facts: someAMDGPU, Attached: resource.Attachment{GPUs: resource.GPUs{ROCm: true}, Check: check},
+		Claimed: []core.Claim{{Resource: "rocm:local", Amount: 1}},
+	}
+}
+
 // remoteMachine is a Machine whose directories live under another root, as a machine reached
 // over ssh has them, and that records what it was asked.
 type remoteMachine struct {
@@ -76,6 +88,10 @@ func (m *remoteMachine) Cache(_ context.Context, key string) (string, error) {
 
 func (m *remoteMachine) User(context.Context) (docker.User, error) {
 	return docker.User{UID: 1002, GID: 1002}, nil
+}
+
+func (m *remoteMachine) Program(_ context.Context, local string) (string, error) {
+	return "/far/bin" + local, nil
 }
 
 func runIn(t *testing.T, s *scene, x core.Execution) core.Attempt {
@@ -328,6 +344,89 @@ func TestAChangedScriptBuildsANewImage(t *testing.T) {
 	}
 	if s.daemon.Builds() != 2 || first.ImageDigest == second.ImageDigest {
 		t.Errorf("%d builds, digests %s and %s: a changed script must build a new image", s.daemon.Builds(), first.ImageDigest, second.ImageDigest)
+	}
+}
+
+// Regression: the task's image was named by the task's files alone, so a base image rebuilt under
+// the same tag (FROM a locally built image:tag) left the task on the image built on the old base
+// until the operator removed it by hand.
+func TestABaseImageRebuiltUnderTheSameTagBuildsTheTasksImageAgain(t *testing.T) {
+	const ref = "registry.example/team/base:dev"
+	s := newScene(t, options{spec: docker.Spec{Dockerfile: []byte("FROM " + ref + "\nRUN true\n")}})
+	s.daemon.Load(ref, "base v1")
+	first := s.fingerprint()
+	s.mustRun("print", "a")
+	if again := s.fingerprint(); !again.Equal(first) || s.daemon.Builds() != 1 {
+		t.Fatalf("an unchanged base: %d builds, fingerprints %v and %v", s.daemon.Builds(), first, again)
+	}
+	s.daemon.Load(ref, "base v2")
+	rebuilt := s.fingerprint()
+	if s.daemon.Builds() != 2 || rebuilt.ImageDigest == first.ImageDigest {
+		t.Fatalf("the base %s changed under its tag: %d builds, digests %s and %s; want the task's image built again on it", ref, s.daemon.Builds(), first.ImageDigest, rebuilt.ImageDigest)
+	}
+}
+
+// Every way a Dockerfile names an image it builds on from outside the build (FROM, COPY --from, an
+// ARG default, a stage of a multi-stage build, a continued line, another escape character, either
+// line ending, any case) makes a change of that image under its reference build the task's image
+// again; a change of an image the Dockerfile does not name, or of nothing, builds nothing.
+func TestEveryBaseADockerfileNamesIsPartOfTheImagesName(t *testing.T) {
+	shapes := []func(repo, tag string) string{
+		func(repo, tag string) string { return "FROM " + repo + ":" + tag + "\nRUN true\n" },
+		func(repo, tag string) string { return "from " + repo + ":" + tag + " as base\nrun true\n" },
+		func(repo, tag string) string {
+			return "# escape=`\nFROM `\n  " + repo + ":" + tag + "\nRUN true\n"
+		},
+		func(repo, tag string) string {
+			return "ARG BASE=" + repo + ":" + tag + "\nFROM ${BASE} AS build\nRUN make\nFROM build\nRUN true\n"
+		},
+		func(repo, tag string) string {
+			return "ARG TAG=" + tag + "\nFROM " + repo + ":$TAG\nARG TAG=other\nRUN true\n"
+		},
+		func(repo, tag string) string {
+			return "FROM --platform=linux/amd64 " + repo + ":" + tag + " AS deps\nFROM scratch\nCOPY --from=deps /x /x\nCOPY --from=0 /y /y\n"
+		},
+		func(repo, tag string) string {
+			return "FROM scratch\r\n# a comment\r\nCOPY --chown=1:1 \\\r\n  --from=" + repo + ":" + tag + " /opt /opt\r\n"
+		},
+	}
+	rng := rand.New(rand.NewPCG(3, 4))
+	for i := range 40 {
+		repo := fmt.Sprintf("registry.example/team%d/base", rng.IntN(1000))
+		tag := fmt.Sprintf("v%d", rng.IntN(1000))
+		shape := rng.IntN(len(shapes))
+		dockerfile := shapes[shape](repo, tag)
+		s := newScene(t, options{spec: docker.Spec{Dockerfile: []byte(dockerfile)}})
+		s.daemon.Load(repo+":"+tag, "one")
+		s.daemon.Load(repo+":unrelated", "one")
+		s.fingerprint()
+		s.daemon.Load(repo+":unrelated", "two")
+		s.fingerprint()
+		if n := s.daemon.Builds(); n != 1 {
+			t.Fatalf("case %d (shape %d): %d builds with the base unchanged, want 1:\n%s", i, shape, n, dockerfile)
+		}
+		s.daemon.Load(repo+":"+tag, "two")
+		s.fingerprint()
+		s.fingerprint()
+		if n := s.daemon.Builds(); n != 2 {
+			t.Fatalf("case %d (shape %d): %d builds after %s:%s changed, want 2:\n%s", i, shape, n, repo, tag, dockerfile)
+		}
+	}
+}
+
+// A reference that names a variable the Dockerfile gives no value is not looked up, and the image
+// is built as before.
+func TestABaseNamedByAnUnsetVariableIsNotLookedUp(t *testing.T) {
+	s := newScene(t, options{spec: docker.Spec{Dockerfile: []byte("ARG TAG\nFROM registry.example/team/base:${TAG}\nRUN true\n")}})
+	s.daemon.SetFaults(func(c dockerfake.Call) *dockerfake.Fault {
+		if c.Op == dockerfake.OpImage && strings.Contains(c.Name, "$") {
+			return &dockerfake.Fault{Err: errors.New("invalid reference format")}
+		}
+		return nil
+	})
+	s.fingerprint()
+	if n := s.daemon.Builds(); n != 1 {
+		t.Fatalf("%d builds, want 1", n)
 	}
 }
 

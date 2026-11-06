@@ -56,6 +56,14 @@ type Attachment struct {
 	Network string
 	// GPUs are the GPUs the container gets. The zero value gives it none.
 	GPUs GPUs
+	// GPUEnv is set, beside Env, for every process of a container that gets the GPUs: the variables
+	// that pass them, which a container that gets none, such as the task's container beside a
+	// candidate's server, does not get either.
+	GPUEnv map[string]string
+	// Check, when set, is a command the container runs before anything else: a program and its
+	// arguments that exits 0 when the resource works in the container's image, and otherwise prints
+	// why it does not, which is what the run that needed it fails with.
+	Check []string
 }
 
 // Mount is a directory or a file of the engine's machine that the container sees.
@@ -66,11 +74,18 @@ type Mount struct {
 
 // GPUs says which GPUs a container gets, and how.
 type GPUs struct {
-	// Devices is a docker --gpus value, such as "all" or "device=0,1". Empty passes no GPU.
+	// Devices is a docker --gpus value, such as "all" or "device=0,1", of NVIDIA GPUs. Empty passes
+	// no NVIDIA GPU.
 	Devices string
 	// Runtime, when set, is the container runtime that passes the devices instead of --gpus.
 	Runtime string
+	// ROCm passes the machine's AMD GPUs through the ROCm kernel driver: its devices and the group
+	// that may use them under docker, --rocm under Apptainer. It is never set with Devices.
+	ROCm bool
 }
+
+// Given reports whether the container gets GPUs of either kind.
+func (g GPUs) Given() bool { return g.Devices != "" || g.ROCm }
 
 var (
 	factName    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
@@ -106,10 +121,21 @@ func (a Attachment) Validate() error {
 			return err
 		}
 	}
-	for _, k := range slices.Sorted(maps.Keys(a.Env)) {
-		if !envName.MatchString(k) || strings.ContainsAny(a.Env[k], "\x00\n") {
-			return invalid("the environment variable %q=%q is not valid", k, a.Env[k])
+	for _, env := range []map[string]string{a.Env, a.GPUEnv} {
+		for _, k := range slices.Sorted(maps.Keys(env)) {
+			if !envName.MatchString(k) || strings.ContainsAny(env[k], "\x00\n") {
+				return invalid("the environment variable %q=%q is not valid", k, env[k])
+			}
+			if _, both := a.Env[k]; both && len(a.GPUEnv) > 0 && a.GPUEnv[k] != "" {
+				return invalid("the environment variable %q is set with the GPUs and without them", k)
+			}
 		}
+	}
+	if len(a.GPUEnv) > 0 && !a.GPUs.Given() {
+		return invalid("variables are set to pass GPUs, and no GPU is given")
+	}
+	if len(a.Check) > 0 && a.Check[0] == "" {
+		return invalid("the check has no program")
 	}
 	switch {
 	case !networkName.MatchString(a.Network):
@@ -120,6 +146,8 @@ func (a Attachment) Validate() error {
 		return invalid("%q is not a container runtime name", a.GPUs.Runtime)
 	case a.GPUs.Runtime != "" && a.GPUs.Devices == "":
 		return invalid("the runtime %q is for GPUs, and no GPU is given", a.GPUs.Runtime)
+	case a.GPUs.ROCm && a.GPUs.Devices != "":
+		return invalid("the GPUs are passed both as AMD GPUs and with the --gpus value %q", a.GPUs.Devices)
 	}
 	return nil
 }
@@ -127,7 +155,7 @@ func (a Attachment) Validate() error {
 // Combine joins the attachments of a placement's resources into one, and refuses two that ask
 // for different values of one thing: one container path, one variable, the network or the GPUs.
 func Combine(attachments []Attachment) (Attachment, error) {
-	out := Attachment{Env: map[string]string{}}
+	out := Attachment{Env: map[string]string{}, GPUEnv: map[string]string{}}
 	targets := map[string]bool{}
 	for _, a := range attachments {
 		if err := a.Validate(); err != nil {
@@ -146,6 +174,12 @@ func Combine(attachments []Attachment) (Attachment, error) {
 			}
 			out.Env[k] = v
 		}
+		for k, v := range a.GPUEnv {
+			if old, ok := out.GPUEnv[k]; ok && old != v {
+				return Attachment{}, invalid("two resources set %s, to %q and %q", k, old, v)
+			}
+			out.GPUEnv[k] = v
+		}
 		if a.Network != "" {
 			if out.Network != "" && out.Network != a.Network {
 				return Attachment{}, invalid("two resources ask for the networks %q and %q", out.Network, a.Network)
@@ -157,6 +191,12 @@ func Combine(attachments []Attachment) (Attachment, error) {
 				return Attachment{}, invalid("two resources pass GPUs")
 			}
 			out.GPUs = a.GPUs
+		}
+		if len(a.Check) > 0 {
+			if len(out.Check) > 0 {
+				return Attachment{}, invalid("two resources check the container")
+			}
+			out.Check = slices.Clone(a.Check)
 		}
 	}
 	return out, nil

@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.asyncio
 
 _DIGEST = "d" * 64
-_MANIFEST = f"""version = 1
+_MANIFEST = f"""version = "0.1"
 [agent]
 domain = "generic"
 interface = "service"

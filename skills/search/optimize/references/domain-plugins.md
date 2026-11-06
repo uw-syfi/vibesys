@@ -18,7 +18,10 @@ no domain plugin.
 
 A skill is installed when it appears among the skills your harness offers you, by its plugin
 name (`vibesys-kernels-cuda:kernel-performance`) or, where the harness has no plugin prefix, its
-bare name. Do not search the filesystem for it. When one is missing, stop and tell the user to
+bare name. It is also available when the user or the operator's instructions name a directory
+that holds it (such as a vibesys checkout's `skills/domains/<skill>/SKILL.md`): then point every
+brief at that file by its absolute path instead of the plugin name, so a fix to the skill reaches
+the next subagent. Otherwise do not search the filesystem for it. When one is missing, stop and tell the user to
 run, for Claude Code:
 
 ```

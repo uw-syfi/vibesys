@@ -33,7 +33,7 @@ func (m *machine) commitDockerTask() {
 	m.write("src.txt", "committed\n", 0o644)
 	dir := task.TasksDir + "/bench/"
 	m.write(dir+task.ManifestName, `
-version = 1
+version = "0.1"
 backends = ["cpu"]
 
 [accuracy]

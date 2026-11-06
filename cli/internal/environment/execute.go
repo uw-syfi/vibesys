@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,8 +43,37 @@ func Validate(x core.Execution) error {
 			return invalid("the service's probe has an empty program name")
 		}
 	}
+	if c := x.Candidate; c != nil {
+		if !core.ValidImageDigest(c.Image) {
+			return invalid("the candidate's image %q is not an exact digest (sha256:<64 hex digits>)", c.Image)
+		}
+		if s := c.Serve; s != nil {
+			switch {
+			case x.Service != nil:
+				return invalid("the command runs against the candidate's server, and has no service of its own")
+			case len(s.Argv) == 0 || s.Argv[0] == "":
+				return invalid("the candidate's server has no command to run")
+			case !strings.HasPrefix(s.Ready, "/") || strings.ContainsAny(s.Ready, " \t\n"):
+				return invalid("the candidate's readiness path %q is not an absolute HTTP path", s.Ready)
+			case s.StartupTimeout <= 0:
+				return invalid("the candidate's startup time must be positive, got %v", s.StartupTimeout)
+			}
+		}
+	}
 	return nil
 }
+
+// ResolvePort is the candidate's server command with the port it is to listen on.
+func ResolvePort(argv []string, port int) []string {
+	out := make([]string, len(argv))
+	for i, a := range argv {
+		out[i] = strings.ReplaceAll(a, core.PortPlaceholder, strconv.Itoa(port))
+	}
+	return out
+}
+
+// ServiceURL is where the commands of the task's image reach the candidate's server.
+func ServiceURL(port int) string { return fmt.Sprintf("http://127.0.0.1:%d", port) }
 
 // overlap reports whether one absolute directory is the other or inside it.
 func overlap(a, b string) bool {
@@ -86,6 +116,9 @@ type Launcher interface {
 type Events struct {
 	// Limit is closed when the execution's Timeout is reached.
 	Limit <-chan struct{}
+	// Startup, when set, is closed when the service has had its time to become ready: a service
+	// not ready by then is ExecServiceNotReady, as at the limit. Nil gives it until the limit.
+	Startup <-chan struct{}
 	// Cancelled is closed when the caller cancels the execution.
 	Cancelled <-chan struct{}
 	// Pause returns a channel closed after the pause between two readiness probes, and the
@@ -135,6 +168,23 @@ func (ev Events) terminate(procs ...Process) {
 // It starts processes through the launcher and ends none of them: ending the groups, and
 // everything else that must hold when the execution is over, is the caller's, on every path.
 func Execute(x core.Execution, l Launcher, ev Events, out io.Writer) core.Attempt {
+	return ExecuteBeside(x, Places{Command: l, Service: l}, ev, out)
+}
+
+// Places are where an execution's processes start: the command and the service's probe in one
+// place, and the service in another, or in the same.
+type Places struct {
+	Command Launcher
+	Service Launcher
+}
+
+// ExecuteBeside is Execute with the service started in a place of its own, as the candidate's
+// server of a task of two images is, in its own container beside the command's. For such an
+// execution (one whose Candidate serves) the service is asked to terminate, and given the grace
+// period to end, on every path the command ended by, so that a server under a profiler writes what
+// it gathered before its container is removed.
+func ExecuteBeside(x core.Execution, places Places, ev Events, out io.Writer) core.Attempt {
+	l := places.Command
 	started := false
 	failed := func(err error) core.Attempt {
 		if started {
@@ -144,8 +194,10 @@ func Execute(x core.Execution, l Launcher, ev Events, out io.Writer) core.Attemp
 	}
 	var serviceExited <-chan Exit
 	var running []Process // the groups a limit or a cancel asks to terminate
+	var svc Process
 	if s := x.Service; s != nil {
-		svc, err := l.Start(s.Argv, out)
+		var err error
+		svc, err = places.Service.Start(s.Argv, out)
 		if err != nil {
 			return failed(err)
 		}
@@ -166,9 +218,16 @@ func Execute(x core.Execution, l Launcher, ev Events, out io.Writer) core.Attemp
 	}
 	started = true
 	running = append([]Process{main}, running...)
+	// A candidate's server is ended gently once the command has ended, however it ended.
+	gentle := func(a core.Attempt) core.Attempt {
+		if svc != nil && x.Candidate != nil && x.Candidate.Serve != nil {
+			ev.terminate(svc)
+		}
+		return a
+	}
 	select {
 	case st := <-main.Exited():
-		return exited(st)
+		return gentle(exited(st))
 	case <-serviceExited:
 		// The command may have ended at the same time: a finished command is the result.
 		select {
@@ -222,6 +281,10 @@ func awaitReady(l Launcher, probe []string, svc Process, ev Events) (*core.ExecO
 			p.Kill()
 			ev.terminate(svc)
 			return end(core.ExecServiceNotReady)
+		case <-ev.Startup:
+			p.Kill()
+			ev.terminate(svc)
+			return end(core.ExecServiceNotReady)
 		case <-ev.Cancelled:
 			p.Kill()
 			ev.terminate(svc)
@@ -235,6 +298,10 @@ func awaitReady(l Launcher, probe []string, svc Process, ev Events) (*core.ExecO
 			stop()
 			return end(core.ExecServiceExited)
 		case <-ev.Limit:
+			stop()
+			ev.terminate(svc)
+			return end(core.ExecServiceNotReady)
+		case <-ev.Startup:
 			stop()
 			ev.terminate(svc)
 			return end(core.ExecServiceNotReady)

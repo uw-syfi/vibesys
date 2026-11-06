@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -31,10 +32,14 @@ const (
 	OpStart      Op = "start"
 	// OpExec is the start of a process in a container.
 	OpExec Op = "exec"
+	// OpPort is the choice of a container's free port.
+	OpPort Op = "port"
+	// OpSave is the export of an image as a docker archive.
+	OpSave Op = "save"
 )
 
 // Ops lists every call a fault can fail.
-var Ops = []Op{OpImage, OpBuild, OpContainers, OpRemove, OpStart, OpExec}
+var Ops = []Op{OpImage, OpBuild, OpContainers, OpRemove, OpStart, OpExec, OpPort, OpSave}
 
 // Call is one call of the engine, as a fault sees it.
 type Call struct {
@@ -61,12 +66,14 @@ type Faults func(Call) *Fault
 type Daemon struct {
 	gates        fakeenv.Gates
 	reproducible bool
+	attested     bool
 
-	mu     sync.Mutex
-	faults Faults
-	images map[string]docker.Image // by tag
-	builds int
-	boxes  map[string]*box // containers, by name
+	mu       sync.Mutex
+	faults   Faults
+	images   map[string]docker.Image // by tag
+	contents map[string]string       // the digest of each image's content, by its ID
+	builds   int
+	boxes    map[string]*box // containers, by name
 }
 
 // box is a container.
@@ -84,9 +91,14 @@ type Option func(*Daemon)
 // downloads something that changes does. By default the same Dockerfile builds the same image.
 func NonReproducibleBuilds() Option { return func(d *Daemon) { d.reproducible = false } }
 
+// AttestedBuilds makes every build produce an image of a different ID and of the same content as
+// another build of the same Dockerfile, as BuildKit's attestations do under the containerd image
+// store, where an image's ID is the digest of its index.
+func AttestedBuilds() Option { return func(d *Daemon) { d.attested = true } }
+
 // NewDaemon returns an empty daemon whose containers run scripts that wait at the gates.
 func NewDaemon(gates fakeenv.Gates, opts ...Option) *Daemon {
-	d := &Daemon{gates: gates, reproducible: true, images: map[string]docker.Image{}, boxes: map[string]*box{}}
+	d := &Daemon{gates: gates, reproducible: true, images: map[string]docker.Image{}, contents: map[string]string{}, boxes: map[string]*box{}}
 	for _, opt := range opts {
 		opt(d)
 	}
@@ -108,6 +120,18 @@ func (d *Daemon) Builds() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.builds
+}
+
+// Load gives the daemon an image under the reference whose ID is a digest of what it holds, as a
+// local build or a pull of a base image does: what a task's Dockerfile builds FROM. Loading other
+// content under the same reference moves the reference to a new image.
+func (d *Daemon) Load(ref, content string) docker.Image {
+	sum := sha256.Sum256([]byte("loaded " + content))
+	img := docker.Image{ID: "sha256:" + hex.EncodeToString(sum[:]), Platform: Platform}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.images[ref] = img
+	return img
 }
 
 // Prune removes every image, as an image prune does.
@@ -265,18 +289,103 @@ func (c *Client) Build(ctx context.Context, spec docker.BuildSpec, log io.Writer
 	}
 	c.d.mu.Lock()
 	c.d.builds++
-	seed := spec.Context
+	// The image is what its context makes on the daemon's local image of each base, as docker
+	// builds FROM a local image when it has one.
+	seed := slices.Clone(spec.Context)
+	for _, ref := range fromRefs(spec.Context) {
+		if img, ok := c.d.images[ref]; ok {
+			seed = fmt.Appendf(seed, "\nFROM %s", img.ID)
+		}
+	}
 	if !c.d.reproducible {
-		seed = fmt.Appendf(slices.Clone(spec.Context), "\nbuild %d", c.d.builds)
+		seed = fmt.Appendf(seed, "\nbuild %d", c.d.builds)
+	}
+	content := sha256.Sum256(append([]byte("content of "), seed...))
+	if c.d.attested {
+		seed = fmt.Appendf(slices.Clone(seed), "\nattestation of build %d", c.d.builds)
 	}
 	sum := sha256.Sum256(seed)
-	c.d.images[spec.Tag] = docker.Image{ID: "sha256:" + hex.EncodeToString(sum[:]), Platform: Platform}
+	id := "sha256:" + hex.EncodeToString(sum[:])
+	c.d.images[spec.Tag] = docker.Image{ID: id, Platform: Platform}
+	c.d.contents[id] = "sha256:" + hex.EncodeToString(content[:])
 	c.d.mu.Unlock()
 	_, _ = fmt.Fprintf(log, "built %s\n", spec.Tag)
 	if fault != nil {
 		return fault.Err
 	}
 	return nil
+}
+
+// Save writes the image, found by its ID or a tag, as an archive: what Archive returns of it.
+func (c *Client) Save(ctx context.Context, image string, w io.Writer) error {
+	fault, err := c.enter(ctx, Call{OpSave, image})
+	if err != nil {
+		return err
+	}
+	if fault != nil {
+		return fault.Err
+	}
+	c.d.mu.Lock()
+	var id string
+	for tag, img := range c.d.images {
+		if tag == image || img.ID == image {
+			id = img.ID
+		}
+	}
+	c.d.mu.Unlock()
+	if id == "" {
+		return &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
+	}
+	_, err = w.Write(Archive(id))
+	return err
+}
+
+// Archive is the archive Save writes of the image with the ID.
+func Archive(id string) []byte { return []byte("docker archive of " + id + "\n") }
+
+// UnpackedFactor is how many times larger than its archive an image of the fake is unpacked: the
+// layers of an archive are compressed.
+const UnpackedFactor = 4
+
+// Sizes returns the sizes of the image, found by its ID or a tag: unpacked, UnpackedFactor times
+// its archive's, and stored, its archive's.
+func (c *Client) Sizes(ctx context.Context, image string) (unpacked, stored int64, err error) {
+	fault, err := c.enter(ctx, Call{OpSave, image})
+	if err != nil {
+		return 0, 0, err
+	}
+	if fault != nil {
+		return 0, 0, fault.Err
+	}
+	c.d.mu.Lock()
+	defer c.d.mu.Unlock()
+	for tag, img := range c.d.images {
+		if tag == image || img.ID == image {
+			n := int64(len(Archive(img.ID)))
+			return UnpackedFactor * n, n, nil
+		}
+	}
+	return 0, 0, &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
+}
+
+// Content returns the digest of the content of the image, found by its ID or a tag: of its build
+// context, and of the build for a daemon of NonReproducibleBuilds, never of its ID.
+func (c *Client) Content(ctx context.Context, image string) (string, error) {
+	fault, err := c.enter(ctx, Call{OpSave, image})
+	if err != nil {
+		return "", err
+	}
+	if fault != nil {
+		return "", fault.Err
+	}
+	c.d.mu.Lock()
+	defer c.d.mu.Unlock()
+	for tag, img := range c.d.images {
+		if tag == image || img.ID == image {
+			return c.d.contents[img.ID], nil
+		}
+	}
+	return "", &core.Failure{Kind: core.FailureNotFound, Message: fmt.Sprintf("docker: no such image: %s", image)}
 }
 
 // Containers implements docker.Engine.
@@ -351,6 +460,12 @@ func (c *Client) Start(ctx context.Context, spec docker.ContainerSpec) (docker.C
 		known = known || img.ID == spec.Image
 	}
 	_, taken := c.d.boxes[spec.Name]
+	if joined, ok := strings.CutPrefix(spec.Network, "container:"); ok {
+		if host := c.d.boxes[joined]; host == nil || !host.running {
+			c.d.mu.Unlock()
+			return nil, &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("docker: cannot join the network of container %q, which is not running", joined)}
+		}
+	}
 	if !known || taken {
 		c.d.mu.Unlock()
 		if taken {
@@ -403,8 +518,53 @@ func (h *handle) Start(argv []string, sink io.Writer) (environment.Process, erro
 		_, _ = h.b.machine.Start(argv, io.Discard)
 		return nil, fault.Err
 	}
+	if len(argv) == 3 && argv[0] == docker.ProbeMount && argv[1] == docker.ProbeCommand {
+		return h.probe(), nil
+	}
 	return h.b.machine.Start(argv, sink)
 }
+
+// Port implements docker.Container: a container of the fake has a network of its own, as a real
+// one has.
+func (h *handle) Port(ctx context.Context, seed string) (int, error) {
+	if _, err := h.c.enter(ctx, Call{OpPort, h.b.spec.Name}); err != nil {
+		return 0, err
+	}
+	return docker.PortOf(seed), nil
+}
+
+// probe is the probe program asking the server whose network the container joined: it answers
+// once a process of that container ran the `ready` step. A container without the program mounted
+// cannot run it, as a shell cannot (127).
+func (h *handle) probe() environment.Process {
+	h.c.d.mu.Lock()
+	defer h.c.d.mu.Unlock()
+	mounted := slices.ContainsFunc(h.b.spec.Mounts, func(m docker.Mount) bool { return m.Container == docker.ProbeMount })
+	if !mounted {
+		return newExitedProcess(127)
+	}
+	joined, _ := strings.CutPrefix(h.b.spec.Network, "container:")
+	server := h.c.d.boxes[joined]
+	if server == nil || !server.running || !server.machine.Ready() {
+		return newExitedProcess(1)
+	}
+	return newExitedProcess(0)
+}
+
+// exitedProcess is a process that has already exited with a code.
+type exitedProcess struct{ exited chan environment.Exit }
+
+func newExitedProcess(code int) *exitedProcess {
+	p := &exitedProcess{exited: make(chan environment.Exit, 1)}
+	p.exited <- environment.Exit{Code: code}
+	return p
+}
+
+func (p *exitedProcess) Exited() <-chan environment.Exit { return p.exited }
+
+func (*exitedProcess) Terminate() {}
+
+func (*exitedProcess) Kill() {}
 
 // Close implements docker.Container: the connection stops holding the container's input, so the
 // container stops. It does not remove it.

@@ -61,7 +61,7 @@ def test_a_domain_without_server_causes_gets_only_the_generic_facts(name: Domain
 def test_the_plan_carries_the_causes_the_wiring_passes(name: DomainName, tmp_path: Path) -> None:
     write_task(
         tmp_path,
-        f'version = 1\n[agent]\ndomain = "{name.value}"\n'
+        f'version = "0.1"\n[agent]\ndomain = "{name.value}"\n'
         '[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
     )
 

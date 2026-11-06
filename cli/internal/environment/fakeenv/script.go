@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
@@ -117,7 +118,14 @@ type interpreter struct {
 	// lostOnEnd is the error of a wait that its group ended, and nil for the default, a cancelled
 	// command: a machine whose processes die with it cannot say how they ended.
 	lostOnEnd error
+	// ready is set once a process of the machine ran the `ready` step: a server that answers its
+	// readiness path from then on, which the `probe-ready` step asks.
+	ready *atomic.Bool
 }
+
+// ProbeReady is the script a fake runs as the readiness probe of a candidate's server: it exits 0
+// once a process of the server's machine ran the `ready` step, and 1 before.
+const ProbeReady = "probe-ready"
 
 // splitOutput separates the output file a command is told about from the rest of its script: a
 // last argument that is an absolute path, after one that is a flag, as a benchmark is run with
@@ -173,6 +181,12 @@ func (in *interpreter) runWith(g *group, steps []step, out io.Writer, file strin
 		case "dir":
 			if _, err := fmt.Fprintln(out, in.dir); err != nil {
 				return core.ExecOutcome{}, err
+			}
+		case "ready":
+			in.ready.Store(true)
+		case ProbeReady:
+			if !in.ready.Load() {
+				return exited(1)
 			}
 		case "hold":
 			if len(w) != 2 {

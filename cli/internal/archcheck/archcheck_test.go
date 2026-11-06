@@ -218,6 +218,7 @@ func TestSupportPackagesAreImportedByTestsOnly(t *testing.T) {
 		"internal/store/storetest", "internal/environment/envtest", "internal/backend/backendtest",
 		"internal/environment/fakeenv/fakeworld", "internal/environment/docker/dockerfake",
 		"internal/environment/docker/dockertest", "internal/resource/resourcetest", "internal/resource/fakeresource",
+		"internal/environment/apptainer/clusterfake",
 	}
 	var productDirs []string
 	for dir := range archcheck.Rules() {

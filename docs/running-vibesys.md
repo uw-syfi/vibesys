@@ -140,7 +140,7 @@ form names the stages `build` (optional), `check` and `measure`, and the
 headline `metric`:
 
 ```toml
-version = 1
+version = "0.1"
 metric = "total_ops_per_sec"
 
 [agent]
@@ -419,7 +419,7 @@ A task declares the compute backends it targets, as a top-level key of its
 `vibesys.input.toml`:
 
 ```toml
-version = 1
+version = "0.1"
 backends = ["cpu"]            # or ["cuda"], ["rocm"], ["trainium"], ["metal"]
 ```
 

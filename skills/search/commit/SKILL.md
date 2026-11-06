@@ -46,7 +46,11 @@ Plan: NNN
 ```
 
 Types: `feat fix perf refactor test docs build chore revert`, plus `wip`. `Checks` is required on
-every full commit: say `pass` only for checks you ran on this commit. `Plan: NNN` is required on
+every full commit: say `pass` only for checks you ran on this commit's tree before committing
+(its tests, a local build). It does not wait for `vibesys-cli submit check`, which runs on a
+commit afterwards: results are keyed by SHA, so make the full commit first and submit its check
+on that SHA. A check of a `wip` commit is not reused by the full commit on top of it, even with
+the same tree, and costs a second check. `Plan: NNN` is required on
 a `vibesys-work/<task>/plan-NNN` branch and must match the branch number.
 
 Check before you finish: `python3 <this skill>/scripts/commit_schema.py check-range <base>..HEAD`.

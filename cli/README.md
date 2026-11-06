@@ -35,10 +35,10 @@ install in place.
 | `VIBESYS_CLI_INSTALL_DIR=/path` | Install there instead of `~/.local/bin`. |
 | `VIBESYS_CLI_RELEASES_URL=https://host/path` | Read release assets from a mirror. The default is `https://github.com/uw-syfi/vibesys/releases/download`. |
 
-Check what you installed:
+Check what you installed, and the task schema versions it reads:
 
 ```sh
-vibesys-cli --version
+vibesys-cli --version    # vibesys-cli v0.x.y (task schemas 0.1, 0.2)
 ```
 
 The checksum guards against a damaged or truncated download. To check that a binary was built by
@@ -129,8 +129,15 @@ is. Publishing details are in [docs/contributing/publishing.md](../docs/contribu
 | `internal/environment/docker/dockertest/` | The one contract suite every `Engine` passes. Tests only. |
 | `internal/environment/docker/machine/` | Where a docker engine's containers find a run's directories: `Local` (this machine's own directories, and its caches) and `Remote` (copies made with rsync on a machine reached over ssh, copied back when the command ends). |
 | `internal/environment/slurm/` | The Slurm placement: an `Allocator` that runs a container's first process and every image build under `srun`, and an `Engine` that removes a container and then cancels and confirms the end of its allocation, and sweeps the allocations a dead run left. Passes the environment contract suite over the fake engine. |
+| `internal/environment/apptainer/` | The apptainer placement: an `Engine` that places the docker environment's containers on a Slurm cluster whose nodes run Apptainer and no Docker. It converts each image to a SIF on this machine with its apptainer program and copies the SIF to the cluster once, by the digest of the image's content, runs a run's containers as steps of one batch allocation, and reads the machine and the GPUs on the node. It decides over a `Cluster`, the narrow interface to the cluster. |
+| `internal/environment/apptainer/clustercli/` | The `Cluster` that runs Slurm's and Apptainer's programs through ssh on the login node. Its tests run it against fake `srun`, `apptainer` and `scancel` programs. |
+| `internal/environment/apptainer/clusterfake/` | A `Cluster` that keeps a cluster in memory, with queued jobs, nodes that run the fake world's scripts, and faults, and a `Converter` that builds SIFs in memory. Tests only. |
+| `internal/environment/apptainer/localsif/` | The `Converter` that runs this machine's `apptainer build`, found on the daemon's `PATH`, in a scratch directory of its own. Its tests run it against a fake `apptainer` program. |
 | `internal/remote/` | Running programs on a machine and copying directories to and from it: this one, or another over ssh and rsync. An exit code that is ssh's own is never taken for the program's. |
 | `internal/backend/nvidia/` | The GPU facts of a machine (model, count, driver, the driver's CUDA version) for a fingerprint, read with `nvidia-smi`. |
+| `internal/backend/amd/` | The AMD GPU facts of a machine (model, count, the amdgpu driver's version) for a fingerprint, read with `rocminfo` or `amd-smi` and `/sys/module/amdgpu/version`. |
+| `internal/resource/rocm/` | The `rocm` resource: the machine's AMD GPUs, and a check, run in the container before the command, that the image's ROCm runtime sees them. |
+| `internal/tomlproto/` | Decoding TOML into a proto message by its field names, refusing an unknown key by name, and a key newer than the schema version the file declares (`task_schema_since_minor`). The task manifest and the operator config are read with it. |
 | `internal/operator/` | The operator config (`cli.toml`), decoded into `OperatorConfig` in `operator.proto` with unknown keys refused by name: its named placements, each placement's kind and sections, and a file of the earlier shape read as the placement `default`. What a kind's section means is that kind's package's business. |
 | `internal/resource/` | `Resource`: what a placement gives every container (`Kind`, `Claims` for scheduling, `Fingerprint`, and `Attach`, the mounts, variables, network and GPUs a container is made with), and the contract suite in `resourcetest/` every resource passes, with the Fake in `fakeresource/` (tests only). |
 | `internal/resource/gpu/` | The `gpu` resource: GPUs passed with `--gpus`, or by a runtime that reads `NVIDIA_VISIBLE_DEVICES`; its fingerprint is the GPUs' facts. |
@@ -254,7 +261,8 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | --- | --- |
 | `submit check <commit> [flags]` | Queue the task's check. A pass already saved for the commit answers it without running. Also `--wait`, `--note`, `--no-cache`, `--plan` and `--env`. |
 | `submit measure <commit> [--samples n] [--recheck] [flags]` | Queue the task's benchmark for `n` samples (the task's default when omitted). Saved samples count: only the missing ones run. Flags as for `check`. |
-| `submit command <commit> [flags] -- <argv...>` | Queue a job and print its id. Returns at once; `--wait` blocks as `wait` does. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service` and `--probe`. A revision is resolved to a full commit id. `--service` and `--probe` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. |
+| `submit command <commit> [flags] -- <argv...>` | Queue a job and print its id. Returns at once; `--wait` blocks as `wait` does. Also `--note`, `--no-cache`, `--plan`, `--env`, `--timeout`, `--service`, `--probe` and `--wrap`. A revision is resolved to a full commit id. `--service`, `--probe` and `--wrap` are split into words as a shell would split them, with single quotes, double quotes and backslashes, and nothing else of a shell. `--wrap` is put in front of `--service` when it is given, and of the command otherwise. For a task of two images the command runs in the candidate's image. |
+| `submit profile <commit> [--wrap prefix] [flags]` | For a task of two images: start the candidate's server under the prefix (such as a profiler's command line) and drive it with the task's `[profile]` command. A command job: never cached or scored, its artifacts kept with it. Also `--timeout`, `--note`, `--plan`, `--wait`. |
 | `wait <job>... [--any] [--timeout d]` | Block until the jobs are final, or with `--any` until one is. The daemon decides how the wait ended and keeps the timeout. |
 | `cancel <job> [--reason text]` | Stop a job and print it once it is final. Cancelling a final job prints it unchanged. |
 | `note <job> <text>` | Add a note to a job in any state. |
@@ -428,8 +436,10 @@ queued jobs start from `schedule`:
   waits. A job that started stays where it started, and a job no placement fits is refused.
 - A job holds claims from its launch until its end is recorded. A docker job claims a slot of
   `placement:<name>`, the placement it runs on, which has the placement's `max_jobs` slots, and
-  what the placement's resources claim: `kubernetes:<machine><kubeconfig>` for a cluster and
-  `gpu:<machine>/<devices>` for GPUs, which every placement that gives the same one shares. A host
+  what the placement's resources claim: `kubernetes:<machine><kubeconfig>` for a cluster,
+  `gpu:<machine>/<devices>` and `rocm:<machine>` for GPUs, which every placement that gives the
+  same one shares, and `rocm:<placement>@<login node>` for the AMD GPUs of an `apptainer`
+  placement, whose jobs each get the GPUs of a Slurm allocation of their own. A host
   job claims a slot of `placement:default` when that placement is local, and otherwise of `host`,
   one slot of its own. A measure job claims each of them whole, so a benchmark sample never runs
   beside another job of its placement or of another placement on its cluster or GPUs, while the
@@ -463,7 +473,7 @@ other users' daemons on the same machine, and daemons on other machines that sha
   one daemon or of several, take turns. Host jobs that claim a slot of their own (`host`) take this
   machine's lease. A Kubernetes cluster a placement gives is leased in the cluster (below), by
   every job that runs with it. GPUs
-  take no lease of their own, since their machine's lease covers them, and a `slurm` placement takes
+  take no lease of their own, since their machine's lease covers them, and a `slurm` or `apptainer` placement takes
   none, since Slurm's exclusive allocation arbitrates. A claim that shares its resource takes no
   lease.
 - The directory of leases is `vibesys-leases` in the first of `/run/lock`, `/var/tmp` and
@@ -598,6 +608,13 @@ ways: it writes a JSON file at the path given after the flag in `[benchmark.resu
 `--vs-output`. Tasks that declare an `[evaluator]` or an `entrypoint` are refused: their commands
 belong to an evaluator package. `${PROJECT_ROOT}` in a command is the checkout's root.
 
+A manifest declares its task schema as `version = "0.1"` (one image) or `version = "0.2"` (two
+images: `TaskManifestV02` in `proto/vibesys/cli/v1/task.proto`). A 0.2 task builds the candidate's
+image from the commit's `[candidate]` Dockerfile, runs its server in that image with the placement's
+GPUs, and runs each command in the task's image beside it, at `VIBESYS_SERVICE_URL`; the
+candidate's image is recorded with each result and is not part of its key. See
+[the task environment](../docs/contributing/cli-task-environment.md) for the keys and the decisions.
+
 The lifecycle commands above work end to end against a `fakeenv` in tests, and the check and measure
 flows run on the same fake in `app` and `daemontest`, so a test of the whole daemon needs no
 process. `show`, `compare`, `promote` and `result` read what the stores hold, so they work on results
@@ -616,8 +633,15 @@ refused with the reason.
   is refused when it is read if a link is absolute, leaves the directory, points at a path the
   commit does not have, or is part of a cycle, since it would lead to nothing in the image; the
   error names the link (see [task environment](../docs/contributing/cli-task-environment.md)). The
-  image is tagged by a digest of those files and links, so it is built again exactly when one of
-  them changes. The first `submit` of a task builds the image before the
+  image is tagged (`vibesys-cli-task:<key>`) by a digest of those files and links and of the image ID, as the engine has it locally, of each image the Dockerfile builds on:
+  each `FROM` and `COPY --from=` that is not a stage of the same Dockerfile or `scratch`, with the
+  defaults of `ARG`s declared before the first `FROM` substituted. So it is built again exactly
+  when a file of the task changes or when one of those images changes under its reference, such
+  as a base rebuilt locally under the same tag; nothing needs removing by hand. A base the engine
+  does not have yet is pulled by the build, and the next job builds once more on it, from the
+  build cache. A reference that names a variable with no default is not looked up, and a change of
+  its image is not seen. The candidate's image of a task of two images is named the same way, by
+  the digest of its files and its Dockerfile's bases (`vibesys-candidate:<task>-<key>`). The first `submit` of a task builds the image before the
   job is queued, so that submission takes as long as the build. The image digest is recorded with
   each result and is what makes two docker results comparable, with the backend, so results from
   different images are never mixed.
@@ -625,7 +649,8 @@ refused with the reason.
   checkout and the job's scratch directory are mounted at their own paths, so a path a command is
   given means the same inside. A task with `docker_in_docker = true` is refused: the container has
   no container runtime. A task for the `cuda` backend runs when its placement has a `gpu`
-  resource, and is refused otherwise; other accelerator backends are refused.
+  resource, and a task for the `rocm` backend when it has a `rocm` resource; each is refused
+  otherwise, with the resource it lacks named. Other accelerator backends are refused.
 - A container also gets the cache directory of the task's image at `/vibesys/cache`, kept across
   commits and jobs, and an empty `/vibesys/artifacts` that is kept with the job; the variables
   `VIBESYS_CACHE_DIR` and `VIBESYS_ARTIFACTS_DIR` name them. Why the task environment is shaped this
@@ -638,14 +663,15 @@ refused with the reason.
   | `gpu` | The GPUs, by `--gpus`, or by the runtime with `NVIDIA_VISIBLE_DEVICES`. |
   | `kubernetes` | The kubeconfig, read-only, at `/vibesys/kubeconfig`, with `KUBECONFIG` naming it; the network mode (`docker run --network`), such as `host` for a cluster whose API server listens on the machine's loopback address; `VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER` when the config names them. The task deploys to the cluster and cleans up after itself; the daemon does not manage the cluster. |
   | `mounts` | Each directory, read-only, at `/vibesys/mounts/<name>`, with `VIBESYS_MOUNTS` listing the names. |
+  | `rocm` | The machine's AMD GPUs: `--device /dev/kfd --device /dev/dri --group-add video` under docker, `--rocm` under Apptainer, and each of `ROCR_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL` and `CUDA_VISIBLE_DEVICES` that Slurm set. Before the command, the container checks that its ROCm runtime sees a GPU; when it does not, the job fails before its command with why, naming the image's ROCm version and the machine's amdgpu driver version. In a task of two images the GPUs are the server's. |
 
   A task names the resources its jobs need in its manifest, `[environment] needs = ["kubernetes"]`
-  (any of `gpu`, `kubernetes`, `mounts`). A job runs only on a placement that gives them all, and
+  (any of `gpu`, `kubernetes`, `mounts`, `rocm`). A job runs only on a placement that gives them all, and
   one restricted to a placement that lacks one is refused before anything is built, with
   `placement "<name>" has no resource "<kind>"`.
 - A result's environment fingerprint records where it was taken, for telling where a number came
   from: the placement (`placement`), the machine, and what identifies each resource: the GPUs'
-  model, count and driver, the cluster's server and version (`kubernetes_server`,
+  model, count and driver (`amd_gpu_model`, `amd_gpu_count` and `amdgpu_driver` for AMD GPUs), the cluster's server and version (`kubernetes_server`,
   `kubernetes_version`), the mounts' names. `show` and `jobs` name the placement. None of it decides
   which results are compared or reused (see "Placements are interchangeable").
 - Every container is named and labelled for the daemon that started it. A cancelled or timed out
@@ -706,6 +732,20 @@ partition = "a100"
 gres = "gpu:1"
 [placements.a100.resources.gpu]
 devices = "all"
+
+[placements.mi210]
+kind = "apptainer"
+[placements.mi210.remote]
+host = "host-a"
+remote_workspace_root = "/shared/vibesys"
+[placements.mi210.slurm]
+partition = "mi210"
+[placements.mi210.apptainer]
+submit_command = ["/opt/site/bin/sbatch-wrapper"]
+submit_arguments = ["--account=acct-a"]
+[placements.mi210.resources.rocm]
+[placements.mi210.resources.mounts]
+hf = "/shared/hf-cache"
 ```
 
 | Key | Meaning |
@@ -713,15 +753,19 @@ devices = "all"
 | `[scheduler] policy` | Which job starts next: `fifo` (default) or `fair-share`. |
 | `stop_grace_seconds` | How long a job's commands get to clean up after a cancel or the time limit asks them to terminate, before they are killed, on the host and on every placement (30 by default, at most 240). See "Stopping a command". |
 | `[scheduler] max_jobs` | In a file of the earlier shape only: the `max_jobs` of its one placement. |
-| `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh) or `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`). A name is lower-case letters, digits, `_` and `-`. |
+| `[placements.<name>] kind` | `local` (this machine's docker), `ssh` (docker runs on `remote.host`, reached over ssh), `slurm` (as `ssh`, with every container and image build inside a new allocation made by `srun`) or `apptainer` (a Slurm cluster reached through its login node `remote.host`, whose compute nodes run Apptainer and no Docker; see "The apptainer placement"). A name is lower-case letters, digits, `_` and `-`. |
 | `[placements.<name>] max_jobs` | How many jobs may run on the placement at once (1 by default). A measure job runs alone on it. More than 1 needs kind `local`, since another machine stages and sweeps one job at a time. |
-| `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh` and `slurm`: the ssh destination and the programs that reach it. |
-| `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). |
+| `[placements.<name>.remote] host`, `ssh_command`, `rsync_command` | For `ssh`, `slurm` and `apptainer`: the ssh destination (the login node, for `apptainer`) and the programs that reach it. |
+| `[placements.<name>.remote] remote_workspace_root` | An absolute directory there for the copies of runs' directories (`staged/`) and the caches (`cache/`). For `apptainer` it must be on the file system the compute nodes share, and also holds the images (`images/`), the probe program (`bin/`) and the last reading of a node (`nodes/`). |
 | `[placements.<name>.slurm] partition`, `gres`, `shared_gres`, `exclusive`, `cpus`, `memory`, `srun_arguments` | For `slurm`: what an allocation asks for, by what it runs: an image build asks for `cpus` (8 by default) and `memory` only, and builds in a BuildKit builder confined to them; a check asks for `shared_gres` (such as `shard:1` of a GPU Slurm shares; `gres` when unset) and the same share of the node; a benchmark sample asks for `gres` and, with `exclusive` (true by default), the whole node. Every container is confined to its allocation's CPUs. |
 | `[placements.<name>.slurm] poll_interval_seconds`, `queue_timeout_seconds` | The pause between reads of a job's state while its cancel is confirmed, and the bound on the wait for an allocation (24 hours by default). |
+| `[placements.<name>.slurm]` for `apptainer` | The same keys but `srun_arguments`, which is refused: a run's allocation is a batch job, which asks for `gres` and, with `exclusive`, the whole node when it measures, and `shared_gres` (or `gres`), `cpus` and `memory` when it does not. |
+| `[placements.<name>.apptainer] submit_command`, `submit_arguments`, `program` | For `apptainer`, all optional: the command that submits a batch job on the login node (`sbatch`, or a site's wrapper that takes its arguments), the options passed to it after the ones the CLI sets (such as an account or a QOS the site requires on every job), and the apptainer program of the compute nodes (`apptainer`), which only runs SIFs. |
+| `[placements.<name>.apptainer] local_scratch_dir`, `convert_timeout_seconds` | For `apptainer`, optional: the absolute directory of this machine where an image is converted to a SIF (the archive, the image unpacked and the SIF, which is kept there until the cluster has it; `vibesys-cli/apptainer` under `XDG_CACHE_HOME` or `~/.cache` by default), and the bound on converting one image and copying its SIF (3600 by default). See "The apptainer placement". |
 | `[placements.<name>.resources.gpu] devices`, `runtime` | A `docker --gpus` value such as `all`; with `runtime` (such as `nvidia`) the GPUs are passed by that runtime and `NVIDIA_VISIBLE_DEVICES` instead of `--gpus`. |
 | `[placements.<name>.resources.kubernetes] kubeconfig`, `registry`, `builder`, `network` | An absolute path of the kubeconfig on the engine's machine (required), the registry and image builder addresses the container gets, and its network mode (empty leaves docker's default). |
-| `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`. |
+| `[placements.<name>.resources.mounts] <name> = "<dir>"` | A directory of the engine's machine every container sees read-only at `/vibesys/mounts/<name>`; for `apptainer`, a directory of the compute nodes, such as one on the shared file system. |
+| `[placements.<name>.resources.rocm]` | An empty table: the machine's AMD GPUs, for tasks of the `rocm` backend. An `apptainer` placement gives GPUs only this way; it refuses `gpu` and `kubernetes`. |
 
 A file of the earlier shape is read as the one placement `default`, and needs no edit: `[docker]
 placement` is its kind, `[remote]` and `[slurm]` its sections, `[docker] gpus` and `runtime` its
@@ -735,6 +779,99 @@ is removed and then its allocation is cancelled and confirmed ended, on every pa
 Docker daemon runs outside Slurm's cgroups; a run first cancels any allocation of its scope that a
 dead run left. The queue wait does not count against a command's timeout. The ssh host must be the
 node Docker runs on.
+
+### The apptainer placement
+
+An `apptainer` placement runs the same docker environment on a multi-node Slurm cluster reached
+through its login node, whose compute nodes have Slurm and Apptainer and no Docker. This machine
+needs Apptainer too, on the daemon's `PATH`: a placement of the kind is refused at the daemon's
+start without it, saying to install it.
+
+- The images are built by this machine's Docker, as for every placement, and converted to SIFs here,
+  where they already are, by this machine's `apptainer build`: neither the nodes' scratch space nor
+  the shared file system limits the conversion, and only the SIF crosses the network. Before a
+  container of an image starts (and as part of a build, whose log then says which apptainer, of
+  which version, converted it), unless the cluster has the image's SIF, `docker save` streams the
+  image into a directory of its own under `local_scratch_dir`, which also holds Apptainer's
+  temporary files (`APPTAINER_TMPDIR`, `APPTAINER_CACHEDIR`) and is removed when the conversion
+  ends; the SIF is renamed from it to `sif/<digest>.sif` under `local_scratch_dir`, where it is
+  kept until the cluster has it. A run that finds a SIF kept there copies it and converts nothing.
+  The directory's file system is checked first for the image unpacked (as `docker image ls`
+  reports it) and its archive and SIF (each about the image's stored layers); when it has too
+  little, the run fails before its command naming the space needed, the directory, and the space
+  there is. A 47 GB ROCm image converts in about ten minutes to an 11 GB SIF.
+- A SIF, the SIF kept here, and the lock of its conversion are named by the digest of the image's
+  content, `<digest>` below: a SHA-256 over what `docker image inspect` says a container of it
+  runs, its `Config` (keys sorted), its `Os`, `Architecture` and `Variant`, and its `RootFS` layers'
+  diff IDs, in order. They are not named by the image's ID: under Docker's containerd image store
+  the ID is the digest of the image's manifest or index, and BuildKit's attestations make it
+  differ from one build to the next of the same Dockerfile and files, so a commit that changes only
+  files the Dockerfile never copies would otherwise convert and copy the whole image again. Builds
+  of one content share one SIF. SIFs that earlier versions named by image ID stay on the cluster,
+  used by nothing; remove `images/` files older than the upgrade to reclaim their space.
+- The jobs of this machine convert one image one at a time, whichever process runs each: a
+  conversion holds a lock on the file `vibesys-convert-<digest>.lock` in `local_scratch_dir`
+  (`flock`, which the machine lets go of when the process ends, however it ends). A job that finds
+  it held says in its log that another process of this machine is converting the image, tries
+  again every `[slurm] poll_interval_seconds` (5 by default) for up to `convert_timeout_seconds`,
+  and then uses the SIF the other copied, or carries on where the other stopped: it copies the SIF
+  the other kept, or converts the image itself. The lock files stay, one per image converted.
+  Conversions of different images still run at once, and the check of the free space does not count
+  what the others are about to write, so two that start together can each find room for itself and
+  not for both.
+- Once the conversion has ended, the SIF is copied over ssh to `images/<digest>.sif` under
+  `remote_workspace_root`, with `images/<digest>.sif.built-by` beside it naming what converted it:
+  no connection waits on the conversion. The copy is written to a file of its own and renamed into
+  place once its size is what was sent, so daemons of different machines that copy one image at
+  once each publish a whole file, and a copy cut short, or a conversion that fails, leaves none.
+  A copy whose ssh connection fails (ssh's exit status 255) is made again after `[slurm]
+  poll_interval_seconds`, up to 3 copies in all, each said in the job's log; a copy that fails
+  otherwise, or the third time, fails the run and leaves the SIF kept here for the next run of the
+  image. Once the cluster has the SIF, the one kept here is removed; one kept for more than a day
+  (its copies failed, and no run of its image came since) is removed by the next conversion. Every
+  later run, of any daemon, finds the SIF on the cluster. `convert_timeout_seconds` bounds the
+  conversion and the copy together.
+- A run's first container is a batch allocation of its own (`sbatch --parsable --no-requeue`, or the
+  site's `submit_command`, with the `[slurm]` options and `submit_arguments`), named by the
+  container and commented with the daemon's scope. Its time limit is the command's limit and 10
+  minutes for the stop. A holder step keeps it for the run: when the run ends, or the daemon dies
+  and its ssh connection with it, the holder cancels the allocation.
+- A run is one command of a job, so each command has an allocation of its own: a check job's
+  stages, and a measure's check and each of its benchmark samples, each wait in Slurm's queue
+  again. On a busy partition a measure can wait between its samples. While an allocation waits, the
+  run says why in the job's log, before its command's output: Slurm's state of the allocation, its
+  reason and its estimate of the start (`squeue -o %T|%r|%S`) when the wait begins and each time
+  one of them changes, and the node and how long it waited once it runs. A run whose allocation
+  runs at once writes nothing of it. `vibesys-cli jobs` shows such a job as running.
+- The AMD GPUs a job gets are its allocation's: Slurm keeps two allocations off one GPU, and gives
+  a measure the whole node with `[slurm] exclusive` (the default). So the GPUs are claimed per
+  placement, `rocm:<placement>@<login node>`: a measure holds its own placement alone, and the
+  jobs of the cluster's other placements run beside it, in allocations of their own. With
+  `exclusive = false`, a measure's allocation is a slice of a node whose other slices may run
+  other jobs, of this daemon's other placements or of anyone. Nothing of a placement of this kind
+  is leased between daemons: Slurm, which grants each its own allocations, is what keeps them
+  apart.
+- The machine's facts and load, and the AMD GPUs' facts, are read on the node inside the
+  allocation, never on the login node. A daemon fingerprints a placement before it has a node, so
+  its fingerprint names the last node a run of its scope read (kept at `nodes/<scope>.json`), and
+  says `unread` before any.
+- Each of a container's processes is a step of the allocation (`srun --jobid --overlap`) that runs
+  `apptainer exec` of the SIF with a clean environment, the container's variables, its mounts
+  (read-only ones with `:ro`), the run's directories (staged under `remote_workspace_root` as for
+  `ssh`), a private home at `/tmp`, `--rocm` with a `rocm` resource, and none of the site's bind
+  paths (`--no-mount bind-paths`), which can bind the whole shared file system read-write and would
+  let a container write the SIFs and other runs' directories; the node's `/etc/hosts` is bound back
+  read-only, so `localhost` resolves. The image's own files are read-only, unlike in a docker
+  container. SIGTERM and SIGKILL go to every process of the container,
+  found by a variable each carries; the grace and the kill are as under docker.
+- In a task of two images, the command's container joins the server's allocation, so both run on
+  one node and share its network. The server's port is one the node has free, chosen in the
+  allocation, and the command's container probes it with this binary, which is copied to the
+  cluster (`bin/`) once and must be a static Linux build, as a release is.
+- Removing a run's first container cancels its allocation and confirms it ended, with `squeue` and
+  then `sacct`; a run first cancels every allocation of its scope a dead run left. An exit code that
+  is ssh's own (255), or a step that never started its command, is never taken for the command's:
+  the command's ending is then unknown.
 
 ### Placements are interchangeable
 
@@ -934,6 +1071,12 @@ How the daemon is checked:
 The tests open real stores under `TMPDIR`, and a store refuses a file system without working locks,
 such as NFS mounted with `nolock`. Where `/tmp` is such a mount, set `TMPDIR` to a directory on a
 local disk.
+
+The tests can run from a shell that has a live daemon's environment. The tests of
+`cmd/vibesys-cli` start the tool, its daemon and its supervisors, and their `TestMain` removes
+every `VIBESYS_` and `XDG_` variable before they run. So a test reaches no live daemon's socket,
+index or operator config; each test sets only the names it needs. A test runs the test binary with
+these names set to directories of its own, and checks that it passes and writes nothing there.
 
 The module pins Go 1.25.9 with a `toolchain` line: under `testing/synctest`, Go 1.25.0 corrupts its
 own runtime state at random, which the simulator hit as fatal errors and stalls.

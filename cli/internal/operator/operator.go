@@ -2,7 +2,8 @@
 // jobs, which belong to whoever runs the CLI and never to a task. The schema is OperatorConfig in
 // proto/vibesys/cli/v1/operator.proto, validated by its protovalidate rules: the file names
 // placements (where a docker job's container runs: this machine, another one over ssh, or another
-// one inside a Slurm allocation), and what each gives a container, by resource kind.
+// one inside a Slurm allocation, or the compute nodes of a Slurm cluster under Apptainer), and what
+// each gives a container, by resource kind.
 //
 // This package keeps only the outer structure: it decodes the TOML into the message, refuses what
 // the message has no field for, naming the key, reads a file of the earlier shape as the one
@@ -23,12 +24,11 @@ import (
 	"strings"
 
 	"buf.build/go/protovalidate"
-	"github.com/BurntSushi/toml"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/tomlproto"
 )
 
 // EnvConfig names the variable that points at another operator config file.
@@ -77,7 +77,7 @@ func invalid(format string, args ...any) error {
 // of the placement "default". Its stop_grace_seconds is the file's, or unset.
 func Parse(data []byte) (*cliv1.OperatorConfig, error) {
 	c := &cliv1.OperatorConfig{}
-	if err := decode(data, c); err != nil {
+	if err := tomlproto.Decode(data, c, tomlproto.Options{}); err != nil {
 		return nil, err
 	}
 	if err := protovalidate.Validate(c); err != nil {
@@ -118,7 +118,7 @@ func Parse(data []byte) (*cliv1.OperatorConfig, error) {
 		}
 		names := sectionNames{
 			kind: "placements." + name + ".kind", remote: "[placements." + name + ".remote]", slurm: "[placements." + name + ".slurm]",
-			maxJobs: "placements." + name + ".max_jobs",
+			apptainer: "[placements." + name + ".apptainer]", maxJobs: "placements." + name + ".max_jobs",
 		}
 		if legacy || (!named && sched.MaxJobs != nil) {
 			names = legacyNames
@@ -153,17 +153,19 @@ func fromLegacy(c *cliv1.OperatorConfig) (*cliv1.Placement, error) {
 }
 
 // sectionNames are how a placement's settings are spelled in the file, for its errors.
-type sectionNames struct{ kind, remote, slurm, maxJobs string }
+type sectionNames struct{ kind, remote, slurm, apptainer, maxJobs string }
 
-// legacyNames are how the earlier shape spells its one placement's settings.
-var legacyNames = sectionNames{kind: "docker.placement", remote: "[remote]", slurm: "[slurm]", maxJobs: "scheduler.max_jobs"}
+// legacyNames are how the earlier shape spells its one placement's settings. It has no apptainer
+// section, which its one placement takes the defaults of.
+var legacyNames = sectionNames{kind: "docker.placement", remote: "[remote]", slurm: "[slurm]", apptainer: "[apptainer]", maxJobs: "scheduler.max_jobs"}
 
 // sections refuses a placement without a section its kind needs, or with one its kind does not
 // use: a setting quietly left out would run jobs somewhere the operator did not mean.
 func sections(p *cliv1.Placement, n sectionNames) error {
 	kind := kindName(p.GetKind())
 	remote := p.GetKind() != cliv1.PlacementKind_PLACEMENT_KIND_LOCAL
-	slurm := p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_SLURM
+	apptainer := p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER
+	slurm := p.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_SLURM || apptainer
 	switch {
 	case remote && p.GetRemote() == nil:
 		return invalid("%s %q needs a %s section with the host", n.kind, kind, n.remote)
@@ -173,6 +175,16 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 		return invalid("%s %q needs a %s section", n.kind, kind, n.slurm)
 	case !slurm && p.GetSlurm() != nil:
 		return invalid("%s is set, and %s %q does not use it", n.slurm, n.kind, kind)
+	case !apptainer && p.GetApptainer() != nil:
+		return invalid("%s is set, and %s %q does not use it", n.apptainer, n.kind, kind)
+	case apptainer && len(p.GetSlurm().GetSrunArguments()) > 0:
+		// The apptainer kind's allocations are batch jobs of the submit command, whose own options
+		// are submit_arguments.
+		return invalid("%s srun_arguments: %s %q submits batch jobs; set the options in %s submit_arguments", n.slurm, n.kind, kind, n.apptainer)
+	case apptainer && p.GetResources().GetGpu() != nil:
+		return invalid("%s %q gives AMD GPUs only, with a rocm resource; it has no gpu resource", n.kind, kind)
+	case apptainer && p.GetResources().GetKubernetes() != nil:
+		return invalid("%s %q gives no kubernetes resource", n.kind, kind)
 	case remote && p.GetMaxJobs() > 1:
 		// A remote placement stages each job's directories and sweeps its Slurm allocations as the
 		// one job of its scope, so a second one beside it would be swept away.
@@ -184,26 +196,4 @@ func sections(p *cliv1.Placement, n sectionNames) error {
 // kindName is how the file spells a placement kind.
 func kindName(k cliv1.PlacementKind) string {
 	return strings.ToLower(strings.TrimPrefix(k.String(), "PLACEMENT_KIND_"))
-}
-
-// decode decodes TOML into m by m's field names, refusing a key m has no field for and a value of
-// the wrong type, naming the key. An enum value is written as its name without the enum's prefix,
-// in lower case.
-func decode(data []byte, m proto.Message) error {
-	var raw map[string]any
-	if _, err := toml.Decode(string(data), &raw); err != nil {
-		return invalid("%v", err)
-	}
-	j, err := message(raw, m.ProtoReflect().Descriptor(), "")
-	if err != nil {
-		return err
-	}
-	text, err := jsonOf(j)
-	if err != nil {
-		return invalid("%v", err)
-	}
-	if err := protojson.Unmarshal(text, m); err != nil {
-		return invalid("%v", err)
-	}
-	return nil
 }

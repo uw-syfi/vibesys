@@ -6,7 +6,9 @@
    members. ``--write`` regenerates it; otherwise a difference fails with the diff.
 2. ``griffe check`` against the last release (the newest
    ``sdk/vibesys-evaluator/loadgen/vX.Y.Z`` tag) reports breaking changes;
-   skipped, with a note, until a release exists.
+   skipped, with a note, until a release exists. Breaks the user approved
+   are recorded in ``api/approved-breaks.toml`` against that release tag; they
+   are printed but do not fail, until the next release makes the file stale.
 3. ``pyright --verifytypes vibesys_evaluator`` finds no public symbol without a
    complete type.
 4. Each example under ``examples/`` imports and type-checks (pyright, basic)
@@ -30,6 +32,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -46,8 +49,18 @@ GO_SNAPSHOT = SDK / "api" / "go-workload.txt"
 EXAMPLES = SDK / "examples"
 PACKAGE = "vibesys_evaluator"
 #: The public modules, in the snapshot's order.
-PUBLIC_MODULES = ("vibesys_evaluator", "vibesys_evaluator.service", "vibesys_evaluator.deploy.k8s")
+PUBLIC_MODULES = (
+    "vibesys_evaluator",
+    "vibesys_evaluator.microservices",
+    "vibesys_evaluator.microservices.k8s",
+    "vibesys_evaluator.llm_serving",
+    "vibesys_evaluator.llm_serving.agentx",
+    "vibesys_evaluator.llm_serving.golden",
+)
 RELEASE_TAG_PREFIX = "sdk/vibesys-evaluator/loadgen/v"
+#: The user's approval of the breaking changes since one release (AGENTS.md, "Public API rule").
+#: It names that release, so it stops applying once the next release is tagged.
+APPROVED_BREAKS = SDK / "api" / "approved-breaks.toml"
 #: Special methods that are not API of their own (construction, printing, comparison).
 _NOT_API = frozenset({"__init__", "__post_init__", "__repr__", "__str__", "__eq__", "__hash__"})
 
@@ -201,7 +214,33 @@ def check_release() -> bool:
         ],
         cwd=REPO,
     )
-    return done.returncode == 0
+    if done.returncode == 0:
+        return True
+    approved = _approved_break(tag)
+    if approved is None:
+        return False
+    print(
+        f"griffe check: the breaks above against {tag} are approved in "
+        f"{APPROVED_BREAKS.relative_to(REPO)}: {approved}"
+    )
+    return True
+
+
+def _approved_break(tag: str) -> str | None:
+    """The approval of breaking changes against ``tag``, if the user gave one (its reason)."""
+    if not APPROVED_BREAKS.is_file():
+        return None
+    approval = tomllib.loads(APPROVED_BREAKS.read_text())
+    if set(approval) != {"against", "approved_by", "reason"}:
+        msg = f"{APPROVED_BREAKS}: keys are against, approved_by and reason"
+        raise SystemExit(msg)
+    if approval["against"] != tag:
+        print(
+            f"griffe check: {APPROVED_BREAKS.relative_to(REPO)} approves breaks against "
+            f"{approval['against']}, not the last release {tag}; delete it"
+        )
+        return None
+    return f"{approval['reason']} (approved by {approval['approved_by']})"
 
 
 def check_go_release() -> bool:

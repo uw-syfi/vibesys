@@ -101,7 +101,7 @@ func (g *GPU) Attach(ctx context.Context) (resource.Attachment, error) {
 	a := resource.Attachment{GPUs: resource.GPUs{Devices: g.cfg.Devices, Runtime: g.cfg.Runtime}}
 	if g.cfg.Runtime != "" {
 		// The runtime's own hook passes the devices the variable names; CDI is not used.
-		a.Env = map[string]string{EnvVisibleDevices: strings.TrimPrefix(g.cfg.Devices, "device=")}
+		a.GPUEnv = map[string]string{EnvVisibleDevices: strings.TrimPrefix(g.cfg.Devices, "device=")}
 	}
 	return a, nil
 }

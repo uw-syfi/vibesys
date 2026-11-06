@@ -2,43 +2,57 @@
 
 Status: draft. The public Python API is
 [`api/public-api.txt`](../api/public-api.txt), the public Go API (the
-request-generator SDK) is [`api/go-workload.txt`](../api/go-workload.txt), the
-schema is [`loadgen.proto`](../../../proto/vibesys/evaluator/v1/loadgen.proto)
-and [`phase.proto`](../../../proto/vibesys/evaluator/v1/phase.proto), and three
+microservices request-generator SDK) is
+[`api/go-workload.txt`](../api/go-workload.txt), the microservices schema is
+[`loadgen.proto`](../../../proto/vibesys/evaluator/v1/loadgen.proto) and
+[`phase.proto`](../../../proto/vibesys/evaluator/v1/phase.proto), and the
 example tasks written against them are in [`examples/`](../examples).
 
 ## What it is
 
 `vibesys-evaluator` is the package a task writer builds a benchmark on. A task
 (see [the vibesys-cli task environment](../../../docs/contributing/cli-task-environment.md))
-is a Dockerfile, `vibesys.input.toml`, `objectives.toml`, `OBJECTIVE.md`, the
-application's deploy files and, with this package, two Python files:
-
-- `bench.py`: (1) the system under test (build, deploy, readiness), (2) the
-  initial data (seed), (3) the workload (operation functions and the model
-  they are checked against), (4) a `benchmark(run)` function that is the
-  scoring definition, (5) the validity rules. The workload can instead be a
-  Go program built on the Go SDK (`loadgen/workload`), for a request
-  generator that must be fast or that reuses a task's Go reference model;
-  `bench.py` then names its command (`service.Generator`).
-- `dataset.py`: a deterministic generator of the initial data.
-
-The Dockerfile is `FROM vibesys-evaluator:<ver>@sha256:...` plus
-`COPY . /task` (and any client libraries the seed needs, such as pymongo).
-One benchmark run is one sample; it writes result-protocol-2 records
-([PROTOCOL.md](../../vs-evaluator/PROTOCOL.md)) to the path after
+is a Dockerfile, `vibesys.input.toml`, `objectives.toml`, `OBJECTIVE.md` and,
+with this package, a `bench.py` whose `__main__` calls one `main`. The
+Dockerfile is `FROM vibesys-evaluator-<domain>:<ver>@sha256:...` plus
+`COPY . /task`. One benchmark run is one sample; it writes result-protocol-2
+records ([PROTOCOL.md](../../vs-evaluator/PROTOCOL.md)) to the path after
 `--vs-output`.
 
-The package has two parts in one image and one version: the Python package
-`vibesys_evaluator`, and **loadgen**, a Go binary that sends the requests.
-Microservices over HTTP on Kubernetes come first. The yardsticks are the
-`hotel-k8s` and `social-network-k8s` tasks of the DeathStarBench fork,
-rewritten on it with no code shared between them, each measuring within
-noise of its current `run.py`.
+The package is a **domain-free core** and **domains** built on it (see
+"Layout"):
+
+- The core, `vibesys_evaluator`: the sample lifecycle, the modes `check`,
+  `benchmark` and `profile`, result-protocol-2 records, `Metric`,
+  `Validity`, `Rand`, `Run` (named phase directories and `report`) and
+  teardown on every exit path. It knows no system under test.
+- `vibesys_evaluator.microservices`: microservices over HTTP on Kubernetes,
+  with **loadgen**, a Go binary that sends the requests. A task's `bench.py`
+  holds (1) the system under test (build, deploy, readiness), (2) the
+  initial data (seed, from `dataset.py`, a deterministic generator), (3) the
+  workload (operation functions and the model they are checked against),
+  (4) a `benchmark(run)` function that is the scoring definition, and (5)
+  the validity rules. The yardsticks are the `hotel-k8s` and
+  `social-network-k8s` tasks of the DeathStarBench fork, rewritten on it
+  with no code shared between them, each measuring within noise of its
+  current `run.py`.
+- `vibesys_evaluator.llm_serving`: an OpenAI-compatible LLM server that the
+  agent's candidate image runs and the task container reaches only over
+  HTTP (see "LLM serving").
+
+Each domain ships as its own image (see "Versioning"); everything has one
+version.
 
 ## Decisions this spec builds on
 
 Recorded with the user before this spec; not reopened here.
+
+- The core is domain-free; each system kind is a domain package on top of
+  it. Domains import the core only, never each other, and a mechanism of
+  the core (the sample, the records, the modes, the harness runner) names no
+  domain. Each domain is published as its own image.
+
+The microservices domain:
 
 - No recipe concept: `benchmark(run)` composed from phase primitives
   (`run.closed_loop`, `run.open_loop`) is the scoring definition.
@@ -56,7 +70,7 @@ Recorded with the user before this spec; not reopened here.
 - The request stream is deterministic: request `i` depends only on the sample
   seed, the phase and the requests before it (the model as the planned writes
   left it), never on timing; timing decides only how many are consumed.
-- Front ends: the Python SDK (`vibesys_evaluator.service`) and the Go SDK
+- Front ends: the Python SDK (`vibesys_evaluator.microservices`) and the Go SDK
   (`loadgen/workload`) are two languages for one contract (the generator
   command line and the stream); the same workload writes the same stream in
   both, and checks run in the front end's language.
@@ -70,7 +84,7 @@ Recorded with the user before this spec; not reopened here.
 - The schema is protobuf with protovalidate, length-delimited binary by
   default, proto3 JSON lines for debugging, a file header with a schema
   version, additive-only within v1.
-- One version for the Python package, the Go module tag and the image.
+- One version for the Python package, the Go module tag and the images.
 - Public API rule: see [`AGENTS.md`](../AGENTS.md).
 
 ## Architecture
@@ -79,9 +93,9 @@ Recorded with the user before this spec; not reopened here.
  vibesys-cli ── docker run ──▶ task container (task image)
                                python /task/bench.py benchmark --vs-output F
                                ┌────────────────────────────────────────────┐
-                               │ orchestrator (vibesys_evaluator.main)       │
+                               │ orchestrator (microservices.main)           │
                                │  hello record ─▶ F                          │
-                               │  deploy.k8s: build images (buildctl), fresh │
+                               │  k8s.App: build images (buildctl), fresh    │
                                │  namespace, data tier, seed Job, services,  │
                                │  readiness                                  │
                                │  benchmark(run): for each phase ─┐          │
@@ -105,10 +119,44 @@ Recorded with the user before this spec; not reopened here.
  └───────────────────────────────────────────────────────────────────────────┘
 ```
 
-Dependencies point one way: `bench.py` imports `vibesys_evaluator`; a Go
-generator imports `loadgen/workload`; the phase pod runs loadgen and the
-generator as subprocesses that speak the `.proto`; loadgen knows nothing of
-operations, models or tasks.
+The diagram is the microservices domain. Dependencies point one way:
+`bench.py` imports `vibesys_evaluator.microservices`; a Go generator imports
+`loadgen/workload`; the phase pod runs loadgen and the generator as
+subprocesses that speak the `.proto`; loadgen knows nothing of operations,
+models or tasks.
+
+## Layout
+
+```text
+ bench.py ──▶ vibesys_evaluator.microservices ──┐
+          └─▶ vibesys_evaluator.llm_serving ────┼──▶ vibesys_evaluator (core)
+          └─▶ vibesys_evaluator (core) ─────────┘
+ a Go generator ──▶ loadgen/workload (the microservices domain's Go SDK)
+```
+
+The core owns one concern per seam, each a private module behind the public
+names:
+
+| Concern | Seam |
+| --- | --- |
+| The sample | `Sample`: the mode, the seed, the artifacts directory, the records, a partial result for an error record, named phase directories |
+| Modes and the command line | `main(metrics=, benchmark=, check=, profile=)`: `check`, `benchmark --vs-output F [--seed N]`, `profile [--seed N]`; a mode the task does not define exits 2 |
+| Records | result protocol 2: `hello`, then one `result` or `error`; an error carries the partial result |
+| Expected failures | `SampleError(message, partial=)`: a typed failure that ends the sample with an `error` record, not a traceback |
+| Signals | SIGTERM, SIGINT and SIGHUP stop the sample through the same teardown as a return; the exit status is 128 plus the signal |
+| A harness subprocess | `Runner(argv, timeout_secs=, cwd=)`: runs in its own process group, killed with the group on every exit path |
+
+A domain composes these into its own `main` and may subclass `Run` with its
+phase primitives (`microservices.Run` adds `closed_loop` and `open_loop`).
+The core's `main` is enough for a domain whose phases are plain functions
+(`llm_serving`). A domain's `main` has its own command line: the
+microservices script's commands are `benchmark`, `phase`, `generate`,
+`check` (the generator's, see "Generator command line"), `seed` and `ctl`.
+
+The rule "the core imports no domain; a domain imports the core and itself
+only" is checked by `python/tests/test_layering.py`, which reads every
+module's imports (the repository's tach graph does not cover `sdk/`). The Go
+SDK is microservices code in Go; it imports only loadgen's generated schema.
 
 ## The runtime, phase by phase
 
@@ -117,7 +165,7 @@ operations, models or tasks.
 1. Parse the command line: `benchmark --project-root DIR --vs-output FILE`
    (and `ctl ...`, see "Deploy layer"). Draw the sample seed; write and flush
    `hello` with the declared metrics.
-2. Deploy (`deploy.k8s.App`): sweep this task's stale namespaces; build the
+2. Deploy (`microservices.k8s.App`): sweep this task's stale namespaces; build the
    candidate images and the in-cluster copy of the task image; create a fresh
    labelled namespace; apply the data tier and wait until Available; run the
    seed Job; apply the rest; wait until every Deployment has all replicas
@@ -190,13 +238,18 @@ the skew of a cluster's synchronized clocks.
 
 ## The Python API
 
-Twenty public names (listing: [`api/public-api.txt`](../api/public-api.txt)):
+Listing: [`api/public-api.txt`](../api/public-api.txt).
 
 | Module | Names |
 | --- | --- |
-| `vibesys_evaluator` | `main`, `Run`, `PhaseResult`, `Metric`, `Validity`, `Rand`, `Versions`, `Call`, `Response` |
-| `vibesys_evaluator.service` | `Workload`, `Generator`, `Operation`, `Request`, `Step`, `Template`, `get`, `post`, `put`, `ref` |
-| `vibesys_evaluator.deploy.k8s` | `App` |
+| `vibesys_evaluator` | `main`, `Run`, `Metric`, `Validity`, `Rand` |
+| `vibesys_evaluator.microservices` | `main`, `Run`, `PhaseResult`, `Versions`, `Call`, `Response`, `Workload`, `Generator`, `Operation`, `Request`, `Step`, `Template`, `get`, `post`, `put`, `ref` |
+| `vibesys_evaluator.microservices.k8s` | `App` |
+| `vibesys_evaluator.llm_serving` | `endpoint` |
+| `vibesys_evaluator.llm_serving.agentx` | `replay`, `METRICS`, `HARNESS_VERSION` |
+| `vibesys_evaluator.llm_serving.golden` | `logprobs`, `Thresholds` |
+
+The microservices names:
 
 - `Operation(name, weight, build, check, apply, sample)`. `apply` makes an
   operation a write; `sample` defaults to 1.0 for writes and 0.1 otherwise,
@@ -224,12 +277,13 @@ Twenty public names (listing: [`api/public-api.txt`](../api/public-api.txt)):
   (generation: pending writes included), `allowed(key, default, start=, end=)`
   (checks).
 - `Run.closed_loop(clients, secs, warmup)`,
-  `Run.open_loop(rate, secs, warmup, arrivals)`, `Run.report(values)`.
-  `PhaseResult` has `ops_per_sec`, `p50_ms`, `p99_ms`.
+  `Run.open_loop(rate, secs, warmup, arrivals)`, and the core's
+  `Run.report(values)` and `Run.phase(name)`. `PhaseResult` has
+  `ops_per_sec`, `p50_ms`, `p99_ms`.
 - `Generator(command)`: a workload whose requests and checks are another
   program (a Go generator built on `loadgen/workload`, in the task image),
   run as `command + ["generate", ...]` and `command + ["check", ...]`
-  ("Generator command line"); `main(workload=Generator([...]))`.
+  ("Generator command line"); `microservices.main(workload=Generator([...]))`.
 - `main(dataset, system, workload, benchmark, metrics, validity)`.
 
 ## The Go SDK
@@ -270,7 +324,7 @@ GENERATOR check    --phase-input F --dataset F --state DIR
 ```
 
 - `GENERATOR` is `python bench.py` for a Python workload (its `generate` and
-  `check` commands) or the `service.Generator` command.
+  `check` commands) or the `microservices.Generator` command.
 - `generate` writes the request stream (`FileHeader` kind requests,
   `RequestsHeader`, then `PlannedOperation`s, binpb) to standard output until
   the stream is closed, then exits 0. It keeps a `KeptOperation` for every
@@ -434,7 +488,7 @@ refuse a target rate above what loadgen can send.
 Every request of a sample is a function of the dataset, the sample seed and
 the outcomes of the earlier phases' writes.
 
-## Deploy layer (`deploy.k8s.App`)
+## Deploy layer (`microservices.k8s.App`)
 
 Generic over the application, from hotel-k8s' and social-network-k8s'
 run.py: the cluster comes from the vibesys-cli `kubernetes` resource
@@ -458,21 +512,66 @@ run.py: the cluster comes from the vibesys-cli `kubernetes` resource
   the outputs copied out with `kubectl cp`, so no ConfigMap size limit
   applies; pods of the package carry its labels and die with the namespace.
 
+## LLM serving (`llm_serving`)
+
+The candidate image runs an OpenAI-compatible server; vibesys-cli starts it,
+waits for its ready path and sets `VIBESYS_SERVICE_URL` in the task
+container to its base URL (scheme, host and port, no path) for the
+`[accuracy]`, `[benchmark]` and `[profile]` commands of a `version = "0.2"`
+task. The task container has no GPU; nothing the candidate installs reaches
+it.
+
+- `endpoint()` reads `VIBESYS_SERVICE_URL`, strips a trailing slash and
+  refuses an unset, empty or non-`http(s)://host[:port]` value with a
+  message naming the variable and who sets it.
+- `agentx.replay(model=, tokenizer=, tokenizer_revision=, concurrency=,
+  max_context_length=, artifacts=, url=None, mode="full")` is a light
+  wrapper over `agentx-harness` (AIPerf) at `HARNESS_VERSION` (1.0.7), which
+  the llm-serving image pins: it checks the installed harness is that
+  version before anything runs, builds the `agentx submit` command (scenario
+  `agentx`, the date-pinned corpus, seed 42, trajectory start ratios
+  0.25 to 0.75; `full`: 900 s after ten warmup requests per lane; `smoke`:
+  60 s, one warmup request, two corpus entries), runs it through the core's
+  harness runner in an empty `artifacts` directory, and translates the
+  export into the six `METRICS` (output tokens/s, TTFT and TPOT p50/p90, p90
+  request latency). It fails closed: a missing or invalid submission, no
+  measured request, any error (the error summary must be present and empty),
+  an unexpected unit, or a non-finite or negative value is an
+  `error` record with the partial values, never a score.
+- `golden.logprobs(path, url=None, model=None, thresholds=None, report=None)`
+  is the accuracy gate, ported from the Qwen task's HTTP checker: free-run
+  divergences only at near-ties of the reference, no decisive teacher-forced
+  argmax flips, bounded mean and p99 |Δlogprob|, a minimum matched-prefix
+  fraction, the same over chained session rounds (the prefix-cache resume
+  path), and a streamed response equal to the non-streamed one with a
+  correct usage chunk. It returns `None` on a pass or what failed; `Thresholds`
+  holds the bounds.
+
+A task's `bench.py` passes its `check`, `benchmark` and `profile` functions
+to the core's `main`; `profile` runs a smoke replay, the load a profiler
+records, and is never scored. Example:
+`examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/agentx/` in the
+repository, and [`examples/agentx-llm/bench.py`](../examples/agentx-llm/bench.py).
+
 ## Versioning
 
 One version `X.Y.Z` for the Python package, the Go module
-(`sdk/vibesys-evaluator/loadgen/vX.Y.Z`) and the image
-`vibesys-evaluator:X.Y.Z`. Python and loadgen ship together, and the Python
+(`sdk/vibesys-evaluator/loadgen/vX.Y.Z`) and the images, one per domain:
+`vibesys-evaluator-microservices:X.Y.Z` (the package and loadgen) and
+`vibesys-evaluator-llm-serving:X.Y.Z` (the package and `agentx-harness`,
+installed from a hash-pinned lock in `image/llm-serving/`; task writers never
+install the harness). Python and loadgen ship together, and the Python
 side still reads `loadgen --capabilities` before deploying. The schema is
 `vibesys.evaluator.v1` with `schema_version` 1; `buf breaking` keeps v1
 additive; a reader rejects a schema version it does not implement. The
 public Python API is the generated snapshot `api/public-api.txt`, checked by
 CI against the code (griffe) and against the last release (`griffe check`);
-the public Go API is `api/go-workload.txt` (`go doc -all` of
+breaking it needs the user's approval ([`AGENTS.md`](../AGENTS.md)), and
+an approved Python break is recorded in `api/approved-breaks.toml` against
+the release it breaks, which the check then accepts for that release only.
+The public Go API is `api/go-workload.txt` (`go doc -all` of
 `loadgen/workload`), checked against the code (a Go test) and against the last
-release (no declaration of it may change or go away); breaking either needs
-the user's approval
-([`AGENTS.md`](../AGENTS.md)).
+release (no declaration of it may change or go away).
 `Rand`'s algorithms are part of the API: changing a stream is a break.
 
 ## Out of scope
@@ -481,8 +580,9 @@ Request Factory and LLM-written requests, library and job kits, gRPC and
 Thrift calls (Thrift is a reserved placeholder), a Rust loadgen (the CLI and
 files are designed so one can replace the Go build), Docker Compose and
 local-process deploys, CLI additions (sample seed from vibesys, diagnostics,
-profile entrypoint, scope paths), the checker kit (accuracy). The deploy
-layer offers the restart and flush hooks the current checkers use.
+scope paths), a checker kit for microservices (the deploy layer offers the
+restart and flush hooks the current checkers use), and LLM serving
+workloads other than AgentX replay and the golden-logprob gate.
 
 ## Open questions
 

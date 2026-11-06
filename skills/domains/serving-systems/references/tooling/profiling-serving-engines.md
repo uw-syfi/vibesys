@@ -189,6 +189,7 @@ Two limits to know before reaching for it:
 
 ## See also
 
+- [`tooling/engine-profiling-conventions.md`](engine-profiling-conventions.md): what the engine itself does so any wrapped profiler yields a readable trace
 - [`tooling/profiler.md`](profiler.md): the portable profiling discipline
 - [`platforms/`](../platforms/): the selected backend's capture mechanics and output formats
 - [`engines/`](../engines/): source-code maps for these engines (not profiling-specific)

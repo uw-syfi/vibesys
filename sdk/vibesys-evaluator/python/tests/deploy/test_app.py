@@ -1,4 +1,4 @@
-"""deploy.k8s.App: every field is checked at construction, and errors name the field."""
+"""microservices.k8s.App: every field is checked at construction, and errors name the field."""
 
 from __future__ import annotations
 

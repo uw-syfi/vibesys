@@ -136,7 +136,7 @@ def _parse(argv: list[str]) -> Namespace:
 
 _DOCKER_INFO = ("docker", "info", "--format", "{{json .Runtimes}}")
 _DOCKER_IN_DOCKER_TASK = """\
-version = 1
+version = "0.1"
 
 [agent]
 domain = "generic"
@@ -191,7 +191,7 @@ def _project_declaring(tmp_path: Path, backends: str) -> Path:
     write_task(
         project,
         f"""\
-version = 1
+version = "0.1"
 backends = [{backends}]
 
 [agent]
