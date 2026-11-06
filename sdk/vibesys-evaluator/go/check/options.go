@@ -6,8 +6,9 @@ import "time"
 type Options struct {
 	// PartitionTimeout bounds one partition's search; past it the partition is undecided.
 	PartitionTimeout time.Duration
-	// TotalTimeout bounds the whole check, from projection to the last search: partitions not
-	// started by then are undecided (status skipped). Explaining failures has its own budget.
+	// TotalTimeout bounds the whole check, from projection to the last search (searches look at
+	// it from inside their steps, so it holds whatever the history): partitions not started by
+	// then are undecided (status skipped). Explaining failures has its own budget.
 	TotalTimeout time.Duration
 	// MaxSearchSteps bounds one partition's search in model steps, a budget that does not depend
 	// on the machine's speed. Negative: no bound (the default).
@@ -24,8 +25,9 @@ type Options struct {
 	// MaxOpsPerPartition: a partition with more ops than this after sampling is not searched
 	// (undecided, status too-large).
 	MaxOpsPerPartition int
-	// MaxLostShare is the largest share of pieces with an unknown outcome (Piece.Unknown: lost
-	// responses and 5xx alike) a spec accepts; above it the check fails, since at the check's
+	// MaxLostShare is the largest share of calls with an unknown outcome (some piece of the call
+	// is Piece.Unknown: lost responses and 5xx alike, however many pieces the projection makes of
+	// the call) a spec accepts; above it the check fails, before any search, since at the check's
 	// fixed low load they are the candidate's fault. Negative: no limit.
 	MaxLostShare float64
 	// OverlapWarning: a partition with more ops in flight at once than this gets a warning, since

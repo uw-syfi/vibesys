@@ -51,7 +51,7 @@ func run(args []string, oracle func(h *History) ([]AnySpec, error), stdout, stde
 	fs.IntVar(&o.Workers, "workers", 0, "partitions searched at once (0: GOMAXPROCS)")
 	fs.IntVar(&o.MaxReadsPerKey, "max-reads-per-key", d.MaxReadsPerKey, "reads kept per key (negative: all)")
 	fs.IntVar(&o.MaxOpsPerPartition, "max-ops-per-partition", d.MaxOpsPerPartition, "larger partitions are not searched")
-	fs.Float64Var(&o.MaxLostShare, "max-lost-share", d.MaxLostShare, "the largest share of unknown outcomes that passes (negative: no limit)")
+	fs.Float64Var(&o.MaxLostShare, "max-lost-share", d.MaxLostShare, "the largest share of calls with an unknown outcome that passes (negative: no limit)")
 	fs.Int64Var(&o.Seed, "seed", d.Seed, "the read sample's seed")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(stderr, "UNKNOWN: %v\n", err)
