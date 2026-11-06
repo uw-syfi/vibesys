@@ -72,8 +72,7 @@ func TestAViewNeverShowsFewerFinishedJobsAfterAHostRestart(t *testing.T) {
 // finished.
 func TestGetSaysTheCountsAreLoadingWhileTheHostHasReadNothing(t *testing.T) {
 	run := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)
-	frame := snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ACTIVE)})
-	frame.GetSnapshot().Searches = []*pb.SearchState{unreadView("run-1", 1)}
+	frame := snapshotWithSearch(5, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ACTIVE)}, unreadView("run-1", 1))
 	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
 	got := w.run(context.Background(), "run", "get", "run-1")
 	if got.code != 0 {
@@ -88,8 +87,7 @@ func TestGetSaysTheCountsAreLoadingWhileTheHostHasReadNothing(t *testing.T) {
 // Once the job log is read the counts are shown as they are.
 func TestGetShowsTheCountsOnceTheHostHasRead(t *testing.T) {
 	run := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)
-	frame := snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ACTIVE)})
-	frame.GetSnapshot().Searches = []*pb.SearchState{liveView("run-1", 2, 3)}
+	frame := snapshotWithSearch(5, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ACTIVE)}, liveView("run-1", 2, 3))
 	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
 	got := w.run(context.Background(), "run", "get", "run-1")
 	contains(t, "get", got.stdout, "measures    2 finished, 0 failed")
