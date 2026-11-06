@@ -113,14 +113,16 @@ enum TimerKind {
   TIMER_KIND_RUN_DEADLINE = 1;
   // How long a session has to confirm a close.
   TIMER_KIND_STOP_GRACE = 2;
+  // How long a session has to open before it is written off as failed to start.
+  TIMER_KIND_LAUNCH_DEADLINE = 3;
 }
 
 // ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
 message ArmTimer {
   option (buf.validate.message).cel = {
     id: "arm_timer.session"
-    message: "a stop grace names a session and a run deadline does not"
-    expression: "has(this.session) == (this.kind == 2)"
+    message: "a stop grace and a launch deadline name a session and a run deadline does not"
+    expression: "has(this.session) == (this.kind != 1)"
   };
 
   TimerKind kind = 1 [(buf.validate.field).enum = {
@@ -128,7 +130,7 @@ message ArmTimer {
     not_in: [0]
   }];
   string run_id = 2 [(buf.validate.field).string.min_len = 1];
-  // Set on a stop grace.
+  // Set on a stop grace and a launch deadline.
   SessionRef session = 3;
   google.protobuf.Timestamp fire_at = 4 [(buf.validate.field).required = true];
 }

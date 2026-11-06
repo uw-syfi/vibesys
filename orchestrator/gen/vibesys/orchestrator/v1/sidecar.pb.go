@@ -775,10 +775,13 @@ func (x *UsageReported) GetUsage() *Usage {
 }
 
 type SessionFailed struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Detail        string                 `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Detail string                 `protobuf:"bytes,1,opt,name=detail,proto3" json:"detail,omitempty"`
+	// Why the session never opened, when it failed before it did. Unspecified for a failure of a
+	// session that had opened.
+	StartFailureReason StartFailureReason `protobuf:"varint,2,opt,name=start_failure_reason,json=startFailureReason,proto3,enum=vibesys.orchestrator.v1.StartFailureReason" json:"start_failure_reason,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *SessionFailed) Reset() {
@@ -816,6 +819,13 @@ func (x *SessionFailed) GetDetail() string {
 		return x.Detail
 	}
 	return ""
+}
+
+func (x *SessionFailed) GetStartFailureReason() StartFailureReason {
+	if x != nil {
+		return x.StartFailureReason
+	}
+	return StartFailureReason_START_FAILURE_REASON_UNSPECIFIED
 }
 
 // SessionClosed confirms a session is over. It is the last event of a session.
@@ -1092,9 +1102,10 @@ const file_vibesys_orchestrator_v1_sidecar_proto_rawDesc = "" +
 	"\baccepted\x18\x02 \x01(\bR\baccepted\"o\n" +
 	"\rUsageReported\x12 \n" +
 	"\aturn_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06turnId\x12<\n" +
-	"\x05usage\x18\x02 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageB\x06\xbaH\x03\xc8\x01\x01R\x05usage\"0\n" +
+	"\x05usage\x18\x02 \x01(\v2\x1e.vibesys.orchestrator.v1.UsageB\x06\xbaH\x03\xc8\x01\x01R\x05usage\"\x99\x01\n" +
 	"\rSessionFailed\x12\x1f\n" +
-	"\x06detail\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06detail\"\x0f\n" +
+	"\x06detail\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06detail\x12g\n" +
+	"\x14start_failure_reason\x18\x02 \x01(\x0e2+.vibesys.orchestrator.v1.StartFailureReasonB\b\xbaH\x05\x82\x01\x02\x10\x01R\x12startFailureReason\"\x0f\n" +
 	"\rSessionClosed\"\xc8\x04\n" +
 	"\fSidecarEvent\x12\x1f\n" +
 	"\x06offset\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x06offset\x12E\n" +
@@ -1151,6 +1162,7 @@ var file_vibesys_orchestrator_v1_sidecar_proto_goTypes = []any{
 	(*ToolCall)(nil),           // 21: vibesys.orchestrator.v1.ToolCall
 	(TurnStatus)(0),            // 22: vibesys.orchestrator.v1.TurnStatus
 	(*Usage)(nil),              // 23: vibesys.orchestrator.v1.Usage
+	(StartFailureReason)(0),    // 24: vibesys.orchestrator.v1.StartFailureReason
 }
 var file_vibesys_orchestrator_v1_sidecar_proto_depIdxs = []int32{
 	14, // 0: vibesys.orchestrator.v1.SidecarCommand.start_turn:type_name -> vibesys.orchestrator.v1.StartTurn
@@ -1168,23 +1180,24 @@ var file_vibesys_orchestrator_v1_sidecar_proto_depIdxs = []int32{
 	22, // 12: vibesys.orchestrator.v1.TurnEnded.status:type_name -> vibesys.orchestrator.v1.TurnStatus
 	23, // 13: vibesys.orchestrator.v1.TurnEnded.usage:type_name -> vibesys.orchestrator.v1.Usage
 	23, // 14: vibesys.orchestrator.v1.UsageReported.usage:type_name -> vibesys.orchestrator.v1.Usage
-	5,  // 15: vibesys.orchestrator.v1.SidecarEvent.opened:type_name -> vibesys.orchestrator.v1.ConversationOpened
-	6,  // 16: vibesys.orchestrator.v1.SidecarEvent.item:type_name -> vibesys.orchestrator.v1.SidecarItem
-	7,  // 17: vibesys.orchestrator.v1.SidecarEvent.delta:type_name -> vibesys.orchestrator.v1.SidecarDelta
-	8,  // 18: vibesys.orchestrator.v1.SidecarEvent.turn_ended:type_name -> vibesys.orchestrator.v1.TurnEnded
-	9,  // 19: vibesys.orchestrator.v1.SidecarEvent.steer:type_name -> vibesys.orchestrator.v1.SteerOutcome
-	10, // 20: vibesys.orchestrator.v1.SidecarEvent.usage:type_name -> vibesys.orchestrator.v1.UsageReported
-	11, // 21: vibesys.orchestrator.v1.SidecarEvent.failed:type_name -> vibesys.orchestrator.v1.SessionFailed
-	12, // 22: vibesys.orchestrator.v1.SidecarEvent.closed:type_name -> vibesys.orchestrator.v1.SessionClosed
-	1,  // 23: vibesys.orchestrator.v1.SidecarService.Send:input_type -> vibesys.orchestrator.v1.SendRequest
-	3,  // 24: vibesys.orchestrator.v1.SidecarService.Follow:input_type -> vibesys.orchestrator.v1.FollowRequest
-	2,  // 25: vibesys.orchestrator.v1.SidecarService.Send:output_type -> vibesys.orchestrator.v1.SendResponse
-	4,  // 26: vibesys.orchestrator.v1.SidecarService.Follow:output_type -> vibesys.orchestrator.v1.FollowResponse
-	25, // [25:27] is the sub-list for method output_type
-	23, // [23:25] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	24, // 15: vibesys.orchestrator.v1.SessionFailed.start_failure_reason:type_name -> vibesys.orchestrator.v1.StartFailureReason
+	5,  // 16: vibesys.orchestrator.v1.SidecarEvent.opened:type_name -> vibesys.orchestrator.v1.ConversationOpened
+	6,  // 17: vibesys.orchestrator.v1.SidecarEvent.item:type_name -> vibesys.orchestrator.v1.SidecarItem
+	7,  // 18: vibesys.orchestrator.v1.SidecarEvent.delta:type_name -> vibesys.orchestrator.v1.SidecarDelta
+	8,  // 19: vibesys.orchestrator.v1.SidecarEvent.turn_ended:type_name -> vibesys.orchestrator.v1.TurnEnded
+	9,  // 20: vibesys.orchestrator.v1.SidecarEvent.steer:type_name -> vibesys.orchestrator.v1.SteerOutcome
+	10, // 21: vibesys.orchestrator.v1.SidecarEvent.usage:type_name -> vibesys.orchestrator.v1.UsageReported
+	11, // 22: vibesys.orchestrator.v1.SidecarEvent.failed:type_name -> vibesys.orchestrator.v1.SessionFailed
+	12, // 23: vibesys.orchestrator.v1.SidecarEvent.closed:type_name -> vibesys.orchestrator.v1.SessionClosed
+	1,  // 24: vibesys.orchestrator.v1.SidecarService.Send:input_type -> vibesys.orchestrator.v1.SendRequest
+	3,  // 25: vibesys.orchestrator.v1.SidecarService.Follow:input_type -> vibesys.orchestrator.v1.FollowRequest
+	2,  // 26: vibesys.orchestrator.v1.SidecarService.Send:output_type -> vibesys.orchestrator.v1.SendResponse
+	4,  // 27: vibesys.orchestrator.v1.SidecarService.Follow:output_type -> vibesys.orchestrator.v1.FollowResponse
+	26, // [26:28] is the sub-list for method output_type
+	24, // [24:26] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_sidecar_proto_init() }

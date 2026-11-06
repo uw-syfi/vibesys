@@ -103,6 +103,9 @@ message UsageReported {
 
 message SessionFailed {
   string detail = 1 [(buf.validate.field).string.min_len = 1];
+  // Why the session never opened, when it failed before it did. Unspecified for a failure of a
+  // session that had opened.
+  StartFailureReason start_failure_reason = 2 [(buf.validate.field).enum.defined_only = true];
 }
 
 // SessionClosed confirms a session is over. It is the last event of a session.

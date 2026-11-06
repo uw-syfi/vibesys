@@ -11,6 +11,12 @@ const (
 	// interrupted or fails leaves its message undelivered, and a message that keeps killing turns
 	// must not do so forever.
 	MaxDeliveryAttempts = 3
+	// LaunchTimeout is how long a session has to open before it is written off as failed to start.
+	// It is longer than every bound inside a launch added together: installing the plugin (two
+	// commands of 60 s each), the agent's own start (60 s), waiting for its tools (30 s) and starting
+	// the process that holds it (30 s) come to four minutes, so a launch that is only slow ends with
+	// its own typed reason and this timer is the backstop for one that ends with none.
+	LaunchTimeout = 5 * time.Minute
 	// MaxLeadResumes is how many sessions in a row the lead may lose before its run fails.
 	MaxLeadResumes = 3
 )
@@ -188,6 +194,20 @@ const (
 	RefuseRepositoryInUse Refusal = "repository_in_use"
 )
 
+// StartFailure says why a session never opened. The empty value means it did not fail to start.
+type StartFailure string
+
+// The start failures.
+const (
+	StartAgentNotInstalled     StartFailure = "agent_not_installed"
+	StartNotSignedIn           StartFailure = "not_signed_in"
+	StartPluginUnavailable     StartFailure = "plugin_unavailable"
+	StartToolsUnavailable      StartFailure = "tools_unavailable"
+	StartWorkingDirUnavailable StartFailure = "working_directory_unavailable"
+	StartTimedOut              StartFailure = "timed_out"
+	StartOther                 StartFailure = "other"
+)
+
 // TimerKind says what a timer is for.
 type TimerKind string
 
@@ -195,4 +215,6 @@ type TimerKind string
 const (
 	TimerRunDeadline TimerKind = "run_deadline"
 	TimerStopGrace   TimerKind = "stop_grace"
+	// TimerLaunchDeadline ends a session that has not opened within LaunchTimeout.
+	TimerLaunchDeadline TimerKind = "launch_deadline"
 )

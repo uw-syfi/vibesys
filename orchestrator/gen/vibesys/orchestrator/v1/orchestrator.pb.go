@@ -684,6 +684,82 @@ func (Rejection) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{10}
 }
 
+// StartFailureReason says why an agent's session never opened. A session opens only once its
+// agent is installed, signed in, has its working directory and its plugin, and can reach its tools,
+// within a time limit; the first of these that fails is the reason. The values name what failed for
+// the user and nothing of how the session is run. The provider's own words are in end_detail.
+type StartFailureReason int32
+
+const (
+	// The session did not fail to start: it opened, or it is still opening.
+	StartFailureReason_START_FAILURE_REASON_UNSPECIFIED StartFailureReason = 0
+	// The agent program is not installed, or cannot be found.
+	StartFailureReason_START_FAILURE_REASON_AGENT_NOT_INSTALLED StartFailureReason = 1
+	// The agent is installed but its account is not signed in, or the sign-in was refused.
+	StartFailureReason_START_FAILURE_REASON_NOT_SIGNED_IN StartFailureReason = 2
+	// The vibesys plugin could not be installed or loaded for the agent.
+	StartFailureReason_START_FAILURE_REASON_PLUGIN_UNAVAILABLE StartFailureReason = 3
+	// The agent started without the tools the orchestrator gives it, so it could not do its work.
+	StartFailureReason_START_FAILURE_REASON_TOOLS_UNAVAILABLE StartFailureReason = 4
+	// The agent's working directory could not be created or entered.
+	StartFailureReason_START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE StartFailureReason = 5
+	// The session did not open within the time allowed.
+	StartFailureReason_START_FAILURE_REASON_TIMED_OUT StartFailureReason = 6
+	// The session failed to start for a reason none of the others names.
+	StartFailureReason_START_FAILURE_REASON_OTHER StartFailureReason = 7
+)
+
+// Enum value maps for StartFailureReason.
+var (
+	StartFailureReason_name = map[int32]string{
+		0: "START_FAILURE_REASON_UNSPECIFIED",
+		1: "START_FAILURE_REASON_AGENT_NOT_INSTALLED",
+		2: "START_FAILURE_REASON_NOT_SIGNED_IN",
+		3: "START_FAILURE_REASON_PLUGIN_UNAVAILABLE",
+		4: "START_FAILURE_REASON_TOOLS_UNAVAILABLE",
+		5: "START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE",
+		6: "START_FAILURE_REASON_TIMED_OUT",
+		7: "START_FAILURE_REASON_OTHER",
+	}
+	StartFailureReason_value = map[string]int32{
+		"START_FAILURE_REASON_UNSPECIFIED":                   0,
+		"START_FAILURE_REASON_AGENT_NOT_INSTALLED":           1,
+		"START_FAILURE_REASON_NOT_SIGNED_IN":                 2,
+		"START_FAILURE_REASON_PLUGIN_UNAVAILABLE":            3,
+		"START_FAILURE_REASON_TOOLS_UNAVAILABLE":             4,
+		"START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE": 5,
+		"START_FAILURE_REASON_TIMED_OUT":                     6,
+		"START_FAILURE_REASON_OTHER":                         7,
+	}
+)
+
+func (x StartFailureReason) Enum() *StartFailureReason {
+	p := new(StartFailureReason)
+	*p = x
+	return p
+}
+
+func (x StartFailureReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StartFailureReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[11].Descriptor()
+}
+
+func (StartFailureReason) Type() protoreflect.EnumType {
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[11]
+}
+
+func (x StartFailureReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StartFailureReason.Descriptor instead.
+func (StartFailureReason) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{11}
+}
+
 // JobOutcome is how a vibesys-cli job finished.
 type JobOutcome int32
 
@@ -724,11 +800,11 @@ func (x JobOutcome) String() string {
 }
 
 func (JobOutcome) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[11].Descriptor()
+	return file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[12].Descriptor()
 }
 
 func (JobOutcome) Type() protoreflect.EnumType {
-	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[11]
+	return &file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes[12]
 }
 
 func (x JobOutcome) Number() protoreflect.EnumNumber {
@@ -737,7 +813,7 @@ func (x JobOutcome) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use JobOutcome.Descriptor instead.
 func (JobOutcome) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{11}
+	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{12}
 }
 
 type Run struct {
@@ -973,9 +1049,12 @@ type Agent struct {
 	SessionFailures uint32 `protobuf:"varint,18,opt,name=session_failures,json=sessionFailures,proto3" json:"session_failures,omitempty"`
 	// Why the current session ended, when it was lost or failed: the launch error, for one that never
 	// started. Empty while the session is live.
-	EndDetail     string `protobuf:"bytes,19,opt,name=end_detail,json=endDetail,proto3" json:"end_detail,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	EndDetail string `protobuf:"bytes,19,opt,name=end_detail,json=endDetail,proto3" json:"end_detail,omitempty"`
+	// Why the session never opened, when it was lost or failed while launching. Unspecified for a
+	// session that opened, and while one is live. end_detail has the details.
+	StartFailureReason StartFailureReason `protobuf:"varint,20,opt,name=start_failure_reason,json=startFailureReason,proto3,enum=vibesys.orchestrator.v1.StartFailureReason" json:"start_failure_reason,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Agent) Reset() {
@@ -1139,6 +1218,13 @@ func (x *Agent) GetEndDetail() string {
 		return x.EndDetail
 	}
 	return ""
+}
+
+func (x *Agent) GetStartFailureReason() StartFailureReason {
+	if x != nil {
+		return x.StartFailureReason
+	}
+	return StartFailureReason_START_FAILURE_REASON_UNSPECIFIED
 }
 
 // Capabilities are what a session can do. The sidecar reports them when the session opens, so
@@ -2341,7 +2427,7 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x03cli\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\x03cli\x12=\n" +
 	"\x0fxdg_runtime_dir\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\rxdgRuntimeDir\x12;\n" +
 	"\x0exdg_state_home\x18\x03 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\fxdgStateHome\x12)\n" +
-	"\x04home\x18\x04 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\x04home\"\xa5\a\n" +
+	"\x04home\x18\x04 \x01(\tB\x15\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$R\x04home\"\x8e\b\n" +
 	"\x05Agent\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12\x1e\n" +
 	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12&\n" +
@@ -2371,7 +2457,8 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"handed_off\x18\x11 \x01(\bR\thandedOff\x12)\n" +
 	"\x10session_failures\x18\x12 \x01(\rR\x0fsessionFailures\x12'\n" +
 	"\n" +
-	"end_detail\x18\x13 \x01(\tB\b\xbaH\x05r\x03\x18\xe8\aR\tendDetail\"c\n" +
+	"end_detail\x18\x13 \x01(\tB\b\xbaH\x05r\x03\x18\xe8\aR\tendDetail\x12g\n" +
+	"\x14start_failure_reason\x18\x14 \x01(\x0e2+.vibesys.orchestrator.v1.StartFailureReasonB\b\xbaH\x05\x82\x01\x02\x10\x01R\x12startFailureReason\"c\n" +
 	"\fCapabilities\x12!\n" +
 	"\fstreams_text\x18\x01 \x01(\bR\vstreamsText\x12\x16\n" +
 	"\x06steers\x18\x02 \x01(\bR\x06steers\x12\x18\n" +
@@ -2556,7 +2643,16 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x16REJECTION_FANOUT_LIMIT\x10\x02\x12\x1c\n" +
 	"\x18REJECTION_AGENT_STOPPING\x10\x03\x12\x1a\n" +
 	"\x16REJECTION_RUN_STOPPING\x10\x04\x12 \n" +
-	"\x1cREJECTION_ATTEMPTS_EXHAUSTED\x10\x05*\x8d\x01\n" +
+	"\x1cREJECTION_ATTEMPTS_EXHAUSTED\x10\x05*\xe5\x02\n" +
+	"\x12StartFailureReason\x12$\n" +
+	" START_FAILURE_REASON_UNSPECIFIED\x10\x00\x12,\n" +
+	"(START_FAILURE_REASON_AGENT_NOT_INSTALLED\x10\x01\x12&\n" +
+	"\"START_FAILURE_REASON_NOT_SIGNED_IN\x10\x02\x12+\n" +
+	"'START_FAILURE_REASON_PLUGIN_UNAVAILABLE\x10\x03\x12*\n" +
+	"&START_FAILURE_REASON_TOOLS_UNAVAILABLE\x10\x04\x126\n" +
+	"2START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE\x10\x05\x12\"\n" +
+	"\x1eSTART_FAILURE_REASON_TIMED_OUT\x10\x06\x12\x1e\n" +
+	"\x1aSTART_FAILURE_REASON_OTHER\x10\a*\x8d\x01\n" +
 	"\n" +
 	"JobOutcome\x12\x1b\n" +
 	"\x17JOB_OUTCOME_UNSPECIFIED\x10\x00\x12\x19\n" +
@@ -2577,7 +2673,7 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_rawDescGZIP() []byte {
 	return file_vibesys_orchestrator_v1_orchestrator_proto_rawDescData
 }
 
-var file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 12)
+var file_vibesys_orchestrator_v1_orchestrator_proto_enumTypes = make([]protoimpl.EnumInfo, 13)
 var file_vibesys_orchestrator_v1_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_vibesys_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(RunStatus)(0),                // 0: vibesys.orchestrator.v1.RunStatus
@@ -2591,64 +2687,66 @@ var file_vibesys_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(Harness)(0),                  // 8: vibesys.orchestrator.v1.Harness
 	(Delivery)(0),                 // 9: vibesys.orchestrator.v1.Delivery
 	(Rejection)(0),                // 10: vibesys.orchestrator.v1.Rejection
-	(JobOutcome)(0),               // 11: vibesys.orchestrator.v1.JobOutcome
-	(*Run)(nil),                   // 12: vibesys.orchestrator.v1.Run
-	(*CliLocation)(nil),           // 13: vibesys.orchestrator.v1.CliLocation
-	(*Agent)(nil),                 // 14: vibesys.orchestrator.v1.Agent
-	(*Capabilities)(nil),          // 15: vibesys.orchestrator.v1.Capabilities
-	(*Usage)(nil),                 // 16: vibesys.orchestrator.v1.Usage
-	(*Turn)(nil),                  // 17: vibesys.orchestrator.v1.Turn
-	(*Item)(nil),                  // 18: vibesys.orchestrator.v1.Item
-	(*Text)(nil),                  // 19: vibesys.orchestrator.v1.Text
-	(*ToolCall)(nil),              // 20: vibesys.orchestrator.v1.ToolCall
-	(*Handoff)(nil),               // 21: vibesys.orchestrator.v1.Handoff
-	(*Report)(nil),                // 22: vibesys.orchestrator.v1.Report
-	(*JobFinished)(nil),           // 23: vibesys.orchestrator.v1.JobFinished
-	(*SubagentSettled)(nil),       // 24: vibesys.orchestrator.v1.SubagentSettled
-	(*Message)(nil),               // 25: vibesys.orchestrator.v1.Message
-	(*LeadBrief)(nil),             // 26: vibesys.orchestrator.v1.LeadBrief
-	(*timestamppb.Timestamp)(nil), // 27: google.protobuf.Timestamp
+	(StartFailureReason)(0),       // 11: vibesys.orchestrator.v1.StartFailureReason
+	(JobOutcome)(0),               // 12: vibesys.orchestrator.v1.JobOutcome
+	(*Run)(nil),                   // 13: vibesys.orchestrator.v1.Run
+	(*CliLocation)(nil),           // 14: vibesys.orchestrator.v1.CliLocation
+	(*Agent)(nil),                 // 15: vibesys.orchestrator.v1.Agent
+	(*Capabilities)(nil),          // 16: vibesys.orchestrator.v1.Capabilities
+	(*Usage)(nil),                 // 17: vibesys.orchestrator.v1.Usage
+	(*Turn)(nil),                  // 18: vibesys.orchestrator.v1.Turn
+	(*Item)(nil),                  // 19: vibesys.orchestrator.v1.Item
+	(*Text)(nil),                  // 20: vibesys.orchestrator.v1.Text
+	(*ToolCall)(nil),              // 21: vibesys.orchestrator.v1.ToolCall
+	(*Handoff)(nil),               // 22: vibesys.orchestrator.v1.Handoff
+	(*Report)(nil),                // 23: vibesys.orchestrator.v1.Report
+	(*JobFinished)(nil),           // 24: vibesys.orchestrator.v1.JobFinished
+	(*SubagentSettled)(nil),       // 25: vibesys.orchestrator.v1.SubagentSettled
+	(*Message)(nil),               // 26: vibesys.orchestrator.v1.Message
+	(*LeadBrief)(nil),             // 27: vibesys.orchestrator.v1.LeadBrief
+	(*timestamppb.Timestamp)(nil), // 28: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	0,  // 0: vibesys.orchestrator.v1.Run.status:type_name -> vibesys.orchestrator.v1.RunStatus
-	27, // 1: vibesys.orchestrator.v1.Run.deadline:type_name -> google.protobuf.Timestamp
-	27, // 2: vibesys.orchestrator.v1.Run.created_at:type_name -> google.protobuf.Timestamp
+	28, // 1: vibesys.orchestrator.v1.Run.deadline:type_name -> google.protobuf.Timestamp
+	28, // 2: vibesys.orchestrator.v1.Run.created_at:type_name -> google.protobuf.Timestamp
 	1,  // 3: vibesys.orchestrator.v1.Run.stop_reason:type_name -> vibesys.orchestrator.v1.RunStopReason
-	27, // 4: vibesys.orchestrator.v1.Run.ended_at:type_name -> google.protobuf.Timestamp
-	13, // 5: vibesys.orchestrator.v1.Run.cli_location:type_name -> vibesys.orchestrator.v1.CliLocation
+	28, // 4: vibesys.orchestrator.v1.Run.ended_at:type_name -> google.protobuf.Timestamp
+	14, // 5: vibesys.orchestrator.v1.Run.cli_location:type_name -> vibesys.orchestrator.v1.CliLocation
 	2,  // 6: vibesys.orchestrator.v1.Agent.role:type_name -> vibesys.orchestrator.v1.AgentRole
 	8,  // 7: vibesys.orchestrator.v1.Agent.harness:type_name -> vibesys.orchestrator.v1.Harness
 	3,  // 8: vibesys.orchestrator.v1.Agent.status:type_name -> vibesys.orchestrator.v1.AgentStatus
-	15, // 9: vibesys.orchestrator.v1.Agent.capabilities:type_name -> vibesys.orchestrator.v1.Capabilities
-	27, // 10: vibesys.orchestrator.v1.Agent.started_at:type_name -> google.protobuf.Timestamp
-	27, // 11: vibesys.orchestrator.v1.Agent.ended_at:type_name -> google.protobuf.Timestamp
+	16, // 9: vibesys.orchestrator.v1.Agent.capabilities:type_name -> vibesys.orchestrator.v1.Capabilities
+	28, // 10: vibesys.orchestrator.v1.Agent.started_at:type_name -> google.protobuf.Timestamp
+	28, // 11: vibesys.orchestrator.v1.Agent.ended_at:type_name -> google.protobuf.Timestamp
 	4,  // 12: vibesys.orchestrator.v1.Agent.stop_stage:type_name -> vibesys.orchestrator.v1.AgentStopStage
-	5,  // 13: vibesys.orchestrator.v1.Turn.trigger:type_name -> vibesys.orchestrator.v1.TurnTrigger
-	6,  // 14: vibesys.orchestrator.v1.Turn.status:type_name -> vibesys.orchestrator.v1.TurnStatus
-	16, // 15: vibesys.orchestrator.v1.Turn.usage:type_name -> vibesys.orchestrator.v1.Usage
-	27, // 16: vibesys.orchestrator.v1.Turn.started_at:type_name -> google.protobuf.Timestamp
-	27, // 17: vibesys.orchestrator.v1.Turn.ended_at:type_name -> google.protobuf.Timestamp
-	7,  // 18: vibesys.orchestrator.v1.Item.status:type_name -> vibesys.orchestrator.v1.ItemStatus
-	27, // 19: vibesys.orchestrator.v1.Item.at:type_name -> google.protobuf.Timestamp
-	19, // 20: vibesys.orchestrator.v1.Item.assistant:type_name -> vibesys.orchestrator.v1.Text
-	19, // 21: vibesys.orchestrator.v1.Item.reasoning:type_name -> vibesys.orchestrator.v1.Text
-	19, // 22: vibesys.orchestrator.v1.Item.prompt:type_name -> vibesys.orchestrator.v1.Text
-	20, // 23: vibesys.orchestrator.v1.Item.tool:type_name -> vibesys.orchestrator.v1.ToolCall
-	11, // 24: vibesys.orchestrator.v1.JobFinished.outcome:type_name -> vibesys.orchestrator.v1.JobOutcome
-	3,  // 25: vibesys.orchestrator.v1.SubagentSettled.status:type_name -> vibesys.orchestrator.v1.AgentStatus
-	9,  // 26: vibesys.orchestrator.v1.Message.delivery:type_name -> vibesys.orchestrator.v1.Delivery
-	27, // 27: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
-	10, // 28: vibesys.orchestrator.v1.Message.rejection:type_name -> vibesys.orchestrator.v1.Rejection
-	21, // 29: vibesys.orchestrator.v1.Message.handoff:type_name -> vibesys.orchestrator.v1.Handoff
-	22, // 30: vibesys.orchestrator.v1.Message.report:type_name -> vibesys.orchestrator.v1.Report
-	23, // 31: vibesys.orchestrator.v1.Message.job_finished:type_name -> vibesys.orchestrator.v1.JobFinished
-	24, // 32: vibesys.orchestrator.v1.Message.subagent_settled:type_name -> vibesys.orchestrator.v1.SubagentSettled
-	26, // 33: vibesys.orchestrator.v1.Message.lead_brief:type_name -> vibesys.orchestrator.v1.LeadBrief
-	34, // [34:34] is the sub-list for method output_type
-	34, // [34:34] is the sub-list for method input_type
-	34, // [34:34] is the sub-list for extension type_name
-	34, // [34:34] is the sub-list for extension extendee
-	0,  // [0:34] is the sub-list for field type_name
+	11, // 13: vibesys.orchestrator.v1.Agent.start_failure_reason:type_name -> vibesys.orchestrator.v1.StartFailureReason
+	5,  // 14: vibesys.orchestrator.v1.Turn.trigger:type_name -> vibesys.orchestrator.v1.TurnTrigger
+	6,  // 15: vibesys.orchestrator.v1.Turn.status:type_name -> vibesys.orchestrator.v1.TurnStatus
+	17, // 16: vibesys.orchestrator.v1.Turn.usage:type_name -> vibesys.orchestrator.v1.Usage
+	28, // 17: vibesys.orchestrator.v1.Turn.started_at:type_name -> google.protobuf.Timestamp
+	28, // 18: vibesys.orchestrator.v1.Turn.ended_at:type_name -> google.protobuf.Timestamp
+	7,  // 19: vibesys.orchestrator.v1.Item.status:type_name -> vibesys.orchestrator.v1.ItemStatus
+	28, // 20: vibesys.orchestrator.v1.Item.at:type_name -> google.protobuf.Timestamp
+	20, // 21: vibesys.orchestrator.v1.Item.assistant:type_name -> vibesys.orchestrator.v1.Text
+	20, // 22: vibesys.orchestrator.v1.Item.reasoning:type_name -> vibesys.orchestrator.v1.Text
+	20, // 23: vibesys.orchestrator.v1.Item.prompt:type_name -> vibesys.orchestrator.v1.Text
+	21, // 24: vibesys.orchestrator.v1.Item.tool:type_name -> vibesys.orchestrator.v1.ToolCall
+	12, // 25: vibesys.orchestrator.v1.JobFinished.outcome:type_name -> vibesys.orchestrator.v1.JobOutcome
+	3,  // 26: vibesys.orchestrator.v1.SubagentSettled.status:type_name -> vibesys.orchestrator.v1.AgentStatus
+	9,  // 27: vibesys.orchestrator.v1.Message.delivery:type_name -> vibesys.orchestrator.v1.Delivery
+	28, // 28: vibesys.orchestrator.v1.Message.at:type_name -> google.protobuf.Timestamp
+	10, // 29: vibesys.orchestrator.v1.Message.rejection:type_name -> vibesys.orchestrator.v1.Rejection
+	22, // 30: vibesys.orchestrator.v1.Message.handoff:type_name -> vibesys.orchestrator.v1.Handoff
+	23, // 31: vibesys.orchestrator.v1.Message.report:type_name -> vibesys.orchestrator.v1.Report
+	24, // 32: vibesys.orchestrator.v1.Message.job_finished:type_name -> vibesys.orchestrator.v1.JobFinished
+	25, // 33: vibesys.orchestrator.v1.Message.subagent_settled:type_name -> vibesys.orchestrator.v1.SubagentSettled
+	27, // 34: vibesys.orchestrator.v1.Message.lead_brief:type_name -> vibesys.orchestrator.v1.LeadBrief
+	35, // [35:35] is the sub-list for method output_type
+	35, // [35:35] is the sub-list for method input_type
+	35, // [35:35] is the sub-list for extension type_name
+	35, // [35:35] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_orchestrator_proto_init() }
@@ -2678,7 +2776,7 @@ func file_vibesys_orchestrator_v1_orchestrator_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc), len(file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc)),
-			NumEnums:      12,
+			NumEnums:      13,
 			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,

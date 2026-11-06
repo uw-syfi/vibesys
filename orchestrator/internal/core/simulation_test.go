@@ -45,6 +45,9 @@ type session struct {
 	items int
 	// seen holds the effect ids carried out, as a real sidecar would to drop a repeat.
 	seen map[core.EffectID]bool
+	// opening says the session was launched and has not said whether it opened: only a later word
+	// from it, or the launch timer, ends the wait.
+	opening bool
 }
 
 func (s *session) say(f core.FactBody) { s.stream = append(s.stream, f) }
@@ -88,6 +91,8 @@ type sim struct {
 	kept   []kept
 	caps   map[core.AgentID]core.Capabilities
 	plan   []action
+	// slowStarts says some launches of this seed do not open at once.
+	slowStarts bool
 
 	inputs  int
 	nonce   int
@@ -465,11 +470,11 @@ func (w *sim) carryOut(e core.Effect) {
 		if b.ConversationID != "" && !strings.HasPrefix(b.ConversationID, "conv-") {
 			w.fail("a resume got conversation %q", b.ConversationID)
 		}
-		conversation := b.ConversationID
-		if conversation == "" {
-			conversation = "conv-" + string(b.Session.Agent)
+		if w.slowStarts && w.r.IntN(3) == 0 {
+			s.opening = true
+			return
 		}
-		s.say(core.ConversationOpened{ConversationID: conversation, Capabilities: s.caps, Worktree: "/w/" + string(b.Session.Agent)})
+		w.open(s, b.ConversationID)
 		return
 	case core.StartTurn:
 		id = b.Session
@@ -480,6 +485,20 @@ func (w *sim) carryOut(e core.Effect) {
 	case core.CloseSession:
 		id = b.Session
 	}
+	w.cooperate(e, id)
+}
+
+// open has a session report that it is ready.
+func (w *sim) open(s *session, conversation string) {
+	if conversation == "" {
+		conversation = "conv-" + string(s.id.Agent)
+	}
+	s.opening = false
+	s.say(core.ConversationOpened{ConversationID: conversation, Capabilities: s.caps, Worktree: "/w/" + string(s.id.Agent)})
+}
+
+// cooperate carries out a command a session is sent, as a cooperative sidecar does.
+func (w *sim) cooperate(e core.Effect, id core.Session) {
 	s, ok := w.sessions[id]
 	if !ok || s.dead || s.closed || s.seen[e.ID()] {
 		return
@@ -662,12 +681,39 @@ type action struct {
 // two times its weight, so that some seeds leave a fault out altogether and let the others go deep.
 func (w *sim) drawPlan() []action {
 	fault := func(weight int) int { return weight * w.r.IntN(3) }
+	w.slowStarts = w.r.IntN(2) == 0
 	return []action{
-		{20, w.startAnotherRun}, {100, w.spawn}, {80, w.send}, {60, w.handoff}, {40, w.pollJobs},
+		{40, w.finishStart}, {20, w.startAnotherRun}, {100, w.spawn}, {80, w.send}, {60, w.handoff}, {40, w.pollJobs},
 		{fault(10), w.stopSubagent}, {fault(2), w.stopRun}, {fault(15), w.retry}, {fault(5), w.crash},
 		{fault(20), w.killSidecar}, {fault(5), w.silence}, {20, func() { w.fireTimer(false) }},
 		{200, w.work}, {160, w.act}, {230, func() { w.readSidecar() }},
 	}
+}
+
+// startFailures are the reasons a session that cannot open gives.
+var startFailures = []core.StartFailure{
+	core.StartAgentNotInstalled, core.StartNotSignedIn, core.StartPluginUnavailable, core.StartToolsUnavailable,
+	core.StartWorkingDirUnavailable, core.StartOther,
+}
+
+// finishStart has a session that was slow to open say how it went: it opens, or fails to.
+func (w *sim) finishStart() {
+	var waiting []*session
+	for _, s := range w.openSessions() {
+		if s.opening {
+			waiting = append(waiting, s)
+		}
+	}
+	s, ok := pick(w, waiting)
+	if !ok {
+		return
+	}
+	if w.r.IntN(3) == 0 {
+		s.opening = false
+		s.say(core.SessionFailed{Detail: "could not start the agent", StartFailure: startFailures[w.r.IntN(len(startFailures))]})
+		return
+	}
+	w.open(s, "")
 }
 
 func (w *sim) silence() {

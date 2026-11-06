@@ -144,7 +144,12 @@ type (
 		Usage Usage
 	}
 	// SessionFailed says the session cannot go on.
-	SessionFailed struct{ Detail string }
+	SessionFailed struct {
+		Detail string
+		// StartFailure is set when the session failed before it opened. It is ignored for one that
+		// had opened.
+		StartFailure StartFailure
+	}
 	// SessionClosed confirms the session is over.
 	SessionClosed struct{}
 )
@@ -164,6 +169,9 @@ type SidecarLost struct {
 	// Detail says why, such as the error that stopped a launch. It reaches the agent's record and,
 	// for a subagent, its lead.
 	Detail string
+	// StartFailure says why a session that was never opened could not be, when the shell can tell.
+	// Empty is read as StartOther for a session that was launching, and ignored for one that was not.
+	StartFailure StartFailure
 }
 
 func (SidecarLost) inputBody() {}

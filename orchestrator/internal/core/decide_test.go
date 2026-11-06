@@ -169,7 +169,7 @@ func (w *script) startRun(task string, fanout uint32, caps core.Capabilities) (c
 func (w *script) startRunIn(repository, task string, fanout uint32, caps core.Capabilities) (core.RunID, core.AgentID) {
 	w.t.Helper()
 	r := w.command(operator, core.StartRun{Repository: repository, Task: task, FanoutLimit: fanout, Lead: lead, Brief: "go"})
-	w.wantEffects("LaunchSession")
+	w.wantEffects("LaunchSession", "ArmTimer")
 	w.open(r.Agent, caps)
 	if got := w.turn(r.Agent).Trigger; got != core.TriggerBrief {
 		w.t.Fatalf("the first turn's trigger = %s", got)
@@ -357,14 +357,14 @@ func TestDeliveryByAgentStateAndCapability(t *testing.T) {
 			a := w.spawn(run, leadID, steers)
 			w.fact(a, core.SessionClosed{})
 			return w, a
-		}, core.DeliveryQueued, []string{"LaunchSession"}},
+		}, core.DeliveryQueued, []string{"LaunchSession", "ArmTimer"}},
 		{"lost and capable resumes", func(t *testing.T) (*script, core.AgentID) {
 			w, run, leadID := started(t, 1, steers)
 			a := w.spawn(run, leadID, steers)
 			got, _ := w.s.Agent(a)
 			w.step(core.SidecarLost{Session: core.Session{Agent: a, N: got.Session}})
 			return w, a
-		}, core.DeliveryQueued, []string{"LaunchSession"}},
+		}, core.DeliveryQueued, []string{"LaunchSession", "ArmTimer"}},
 		{"ended and not capable is rejected", func(t *testing.T) (*script, core.AgentID) {
 			w, run, leadID := started(t, 1, bare)
 			a := w.spawn(run, leadID, bare)
@@ -637,7 +637,7 @@ func TestALostSidecarFailsItsTurnAndHoldsItsMessageForTheResume(t *testing.T) {
 	turn := w.turn(leadID)
 	w.fact(leadID, core.ItemObserved{ID: "i1", Turn: turn.ID, Status: core.ItemRunning, Body: core.Assistant{Text: "hm"}})
 	w.step(core.SidecarLost{Session: core.Session{Agent: leadID, N: 1}})
-	w.wantEffects("LaunchSession")
+	w.wantEffects("LaunchSession", "ArmTimer")
 	var item core.Item
 	var ended core.Turn
 	for _, e := range w.events {
@@ -663,7 +663,7 @@ func TestALeadThatKeepsDyingFailsTheRun(t *testing.T) {
 	for range core.MaxLeadResumes {
 		a, _ := w.s.Agent(leadID)
 		w.step(core.SidecarLost{Session: core.Session{Agent: leadID, N: a.Session}})
-		w.wantEffects("LaunchSession")
+		w.wantEffects("LaunchSession", "ArmTimer")
 		w.open(leadID, steers)
 	}
 	a, _ := w.s.Agent(leadID)
@@ -709,7 +709,7 @@ func TestTheDeadlineStopsARunOnce(t *testing.T) {
 	w := newScript(t)
 	deadline := epoch.Add(time.Hour)
 	r := w.command(operator, core.StartRun{Repository: "r", Task: "t", Deadline: deadline, Lead: lead, Brief: "b"})
-	w.wantEffects("ArmTimer", "LaunchSession")
+	w.wantEffects("ArmTimer", "LaunchSession", "ArmTimer")
 	timer := w.effects[0].(core.ArmTimer)
 	if !timer.FireAt.Equal(deadline) {
 		t.Fatalf("timer = %+v", timer)

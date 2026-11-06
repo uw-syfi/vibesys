@@ -70,6 +70,9 @@ type Agent struct {
 	// EndDetail says why the current session ended when it was lost or failed, such as the launch
 	// error. It is empty while the session is live and when the end had no reason to give.
 	EndDetail string
+	// StartFailure says why the session never opened, when it was lost or failed while launching.
+	// It is empty for a session that opened and while one is live.
+	StartFailure StartFailure
 }
 
 // Usage is what a turn has cost. Fields a provider does not report are nil, never zero.

@@ -88,7 +88,7 @@ func ParseSidecarEvent(from core.Session, data []byte) (core.SidecarFact, *pb.De
 	case *pb.SidecarEvent_Usage:
 		f.Body = core.UsageReported{Turn: core.TurnID(b.Usage.GetTurnId()), Usage: usageIn(b.Usage.GetUsage())}
 	case *pb.SidecarEvent_Failed:
-		f.Body = core.SessionFailed{Detail: b.Failed.GetDetail()}
+		f.Body = core.SessionFailed{Detail: b.Failed.GetDetail(), StartFailure: startFailures.in(b.Failed.GetStartFailureReason(), &errs)}
 	case *pb.SidecarEvent_Closed:
 		f.Body = core.SessionClosed{}
 	default:

@@ -1,0 +1,26 @@
+{
+  "name": "a_session_that_cannot_start_fails_not_signed_in",
+  "doc": "The session cannot be opened. Its log is one failure with the reason, and never an opened conversation: nothing ran, so nothing is left to settle.",
+  "provider": [
+    [
+      {
+        "start_fails": "NOT_SIGNED_IN",
+        "detail": "Invalid API key, please sign in"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "await": {
+        "failed": true
+      }
+    }
+  ],
+  "checks": [
+    "offsets_increase",
+    "start_failure_is_typed"
+  ],
+  "expect": {
+    "start_failure": "START_FAILURE_REASON_NOT_SIGNED_IN"
+  }
+}

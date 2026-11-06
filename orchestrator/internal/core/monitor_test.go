@@ -16,6 +16,7 @@ func timestamp(t time.Time) *timestamppb.Timestamp { return timestamppb.New(t) }
 type coverage struct {
 	handoffs, handoffTurns, steers, resumes, refusedSpawns, stops, lost, rejected, jobs int
 	retriedDeliveries, operatorStops, deadlineStops, runsFailed, leadsOutOfResumes      int
+	startsFailed, startsTimedOut                                                        int
 }
 
 func (c *coverage) add(o coverage) {
@@ -33,6 +34,8 @@ func (c *coverage) add(o coverage) {
 	c.deadlineStops += o.deadlineStops
 	c.runsFailed += o.runsFailed
 	c.leadsOutOfResumes += o.leadsOutOfResumes
+	c.startsFailed += o.startsFailed
+	c.startsTimedOut += o.startsTimedOut
 }
 
 func (c coverage) require(t *testing.T) {
@@ -43,6 +46,7 @@ func (c coverage) require(t *testing.T) {
 		"refused spawns": c.refusedSpawns, "stops": c.stops, "lost agents": c.lost, "rejected messages": c.rejected,
 		"finished jobs": c.jobs, "redelivered messages": c.retriedDeliveries, "operator stops": c.operatorStops,
 		"deadline stops": c.deadlineStops, "failed runs": c.runsFailed, "leads out of resumes": c.leadsOutOfResumes,
+		"sessions that failed to start": c.startsFailed, "sessions that timed out opening": c.startsTimedOut,
 	} {
 		if n == 0 {
 			t.Errorf("the simulation never reached: %s", name)
@@ -119,10 +123,24 @@ func (m *monitor) commit(body core.InputBody, events []core.Event) error {
 			return err
 		}
 	}
+	var launchTimer *core.Session
+	if fired, ok := body.(core.TimerFired); ok && fired.Timer.Kind == core.TimerLaunchDeadline && len(events) > 0 {
+		session := fired.Timer.Session
+		if pre := m.agents[session.Agent]; pre.Status != core.AgentLaunching || pre.Session != session.N {
+			return fmt.Errorf("the launch timer of %v ended %+v, which was not launching that session", session, pre)
+		}
+		launchTimer = &session
+	}
 	for _, e := range events {
 		if err := m.observe(e); err != nil {
 			return err
 		}
+	}
+	if launchTimer != nil {
+		if post := m.agents[launchTimer.Agent]; post.Status != core.AgentFailed || post.StartFailure != core.StartTimedOut {
+			return fmt.Errorf("the launch timer of %v left %+v, want failed as timed out", *launchTimer, post)
+		}
+		m.covered.startsTimedOut++
 	}
 	return m.settled()
 }
@@ -238,6 +256,17 @@ func (m *monitor) agent(a core.Agent) error {
 		delete(m.handed, a.ID)
 		m.resumed[a.ID] = true
 	}
+	switch {
+	case !a.Status.Over() && a.StartFailure != "":
+		return fmt.Errorf("agent %s is %s with start failure %q", a.ID, a.Status, a.StartFailure)
+	case a.Status.Over() && !old.Status.Over() && old.Status == core.AgentLaunching && a.Status != core.AgentEnded:
+		if a.StartFailure == "" {
+			return fmt.Errorf("agent %s failed while launching with no start failure: %+v", a.ID, a)
+		}
+		m.covered.startsFailed++
+	case a.Status.Over() && !old.Status.Over() && old.Status != core.AgentLaunching && a.StartFailure != "":
+		return fmt.Errorf("agent %s was open and ended with start failure %q", a.ID, a.StartFailure)
+	}
 	if a.Status.Over() && !old.Status.Over() {
 		m.over[a.ID] = true
 		if old.Stop == core.StopNone {
@@ -277,6 +306,9 @@ func (m *monitor) turn(t core.Turn) error {
 	case !known:
 		if busy {
 			return fmt.Errorf("agent %s started turn %s while turn %s runs", t.Agent, t.ID, running)
+		}
+		if agent := m.agents[t.Agent]; agent.Status == core.AgentLaunching || agent.Status.Over() {
+			return fmt.Errorf("turn %s started on agent %s, which is %s: a session works only once it has opened", t.ID, t.Agent, agent.Status)
 		}
 		if t.Status != core.TurnRunning || t.Ordinal != m.ordinals[t.Agent]+1 {
 			return fmt.Errorf("turn %s starts as %+v after ordinal %d", t.ID, t, m.ordinals[t.Agent])
@@ -417,6 +449,11 @@ func (m *monitor) final() error {
 	}
 	for agent, turn := range m.running {
 		return fmt.Errorf("agent %s still runs turn %s", agent, turn)
+	}
+	for id, a := range m.agents {
+		if a.Status == core.AgentLaunching {
+			return fmt.Errorf("agent %s is still launching: a launch ends opened or failed", id)
+		}
 	}
 	return nil
 }
