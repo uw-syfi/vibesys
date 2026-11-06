@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -488,8 +487,8 @@ def main() -> None:
     ap.add_argument("--theme", choices=THEMES, default="light")
     ap.add_argument(
         "--cli",
-        default=os.environ.get("VIBESYS_CLI", "vibesys-cli"),
-        help="the vibesys-cli to run; $VIBESYS_CLI by default",
+        default="vibesys-cli",
+        help="the vibesys-cli to run, by default the one on the path",
     )
     a = ap.parse_args()
     build(cli_runner(a.cli), branch_commits(a.repo, a.branch), a.out, a.theme)
