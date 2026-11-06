@@ -69,14 +69,16 @@ It selects a working CLI or installs one only after explicit user approval.
    chance alone is no reason to drop it. Keep one bold track alive.
 2. Read the proposals (`vibesys-cli plan list`, `plan view <n>`). Dedupe, check each against the
    rules in `OBJECTIVE.md` before funding it, check that chosen plans touch disjoint files, and
-   write each decision as a plan comment, then set the status (`vibesys:state`).
+   write each decision as a plan comment, then set the status (`vibesys:state`). When you fund a
+   plan, set its priority with a reason: high for work that gates others or has the best expected
+   value per GPU-minute, low for exploratory work ([queue.md](references/queue.md)).
 3. Dispatch workers for chosen plans with a self-contained brief from briefs.md; save the brief
    text as a plan comment. Branch new ideas from the current result branch head.
 4. Measure every returned candidate commit, then dispatch a judge. A candidate is a full commit with
    `Checks: pass` (`vibesys:commit`); `wip` commits below it are not measured. Combine parked or won
    plans with combine-candidates, and use profile-revision when a question needs evidence. Record
-   outcomes and lessons as plan comments, link every job to its plan (`--plan`), and close the plan
-   with its gain or its reason.
+   outcomes and lessons as plan comments, link every job to its plan (`--plan` on every `submit`;
+   the CLI warns when a run's job has none), and close the plan with its gain or its reason.
 5. Keep slots busy; when you leave one idle, state the reason in your next report.
 6. After every profile or promotion that moves the bottleneck, re-triage the parked and rejected
    plans: reopen any whose reason no longer holds (time, size, an old profile, a gain that was
@@ -122,9 +124,13 @@ It selects a working CLI or installs one only after explicit user approval.
 - Workers may submit their own jobs. The daemon runs as many at once as its capacity allows, and
   a measure job runs alone where it lands, so a measure may queue behind other measures and
   running checks when capacity is short.
-  `vibesys-cli jobs` says under each queued job why it waits; a queued job with a reason is
-  waiting its turn, not stuck. Give each brief a budget in samples and jobs, and look at
-  `vibesys-cli jobs` before you fund more.
+  `vibesys-cli queue` groups the queued and running jobs by plan and says why each waits; a queued
+  job with a reason is waiting its turn, not stuck. Give each brief a budget in samples and jobs,
+  and read `vibesys-cli queue` before you fund more.
+- Only you steer the queue, and never by cancelling: change a priority, or `hold` and `release`
+  a job, which keeps its place. To roll out a new CLI, `daemon drain`, wait for the running jobs,
+  restart, then `daemon resume`; nothing is resubmitted. Workers never change a priority or hold
+  another agent's job. How: [queue.md](references/queue.md).
 - Run fully autonomously and never block on a question to the user, unless the user asked to be
   consulted. Decide, write the decision into the plan, keep going, and report it in the next
   report so the user can reverse it.

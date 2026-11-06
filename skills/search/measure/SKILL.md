@@ -34,7 +34,9 @@ Commit first: a job runs a commit, never a working copy, so what is not committe
 | The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5` |
 | Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> -- <argv...>` |
 
-Each prints a job id and returns at once. Useful flags: `--plan <n>` links the job to your plan,
+Each prints a job id and returns at once. Always pass `--plan <n>`, which links the job to your
+plan and gives it the plan's priority (the CLI warns on stderr when a run's job has none). Other
+useful flags:
 `--note "<text>"` says why you ran it (notes are for readers; they change no result), and
 `--service` with `--probe` runs the command against a service the CLI starts and stops.
 `--no-cache` and `--recheck` force fresh work; only a reason to doubt a saved result justifies
@@ -51,6 +53,11 @@ together and the numbers stay clean: a measure job holds its placement alone, wh
 command jobs may share it up to the placement's `max_jobs`. Do not start a benchmark, a profiler
 or a server in your own shell. Unit tests and in-process microbenchmarks that finish in seconds
 are checks, not load: run them in your worktree.
+
+`vibesys-cli queue` shows the task's queued and running jobs by plan, why each waits and an
+estimate of how long its kind takes. `vibesys-cli hold <job> --reason "<why>"` keeps one of your
+own queued jobs from starting without losing its place, and `vibesys-cli release <job>` lets it
+go; the lead alone steers other agents' jobs and sets priorities.
 
 ## Wait
 
