@@ -103,7 +103,7 @@ The gateway that hosts the orchestrator is found through its root, and the root 
 directory: without `--root`, `vibesys-host serve`, `connect` and the client verbs (`run`, `send`, `mcp`)
 use `$VIBESYS_ORCHESTRATOR_STATE_DIR/host` when the variable is set, and `~/.vibesys` when it is not.
 So `run start` with the variable set reaches, or starts, the gateway of that state directory and
-never one that serves another; `--root` overrides both. The rule is `hosted.GatewayRoot`.
+never one that serves another; `--root` overrides both. The rule is `gatewayroot.For`.
 
 Writes never block reads, and the long ones never block the writer for long. `Verify` and the
 read-heavy part of `Compact` run on a snapshot beside the writer. `Compact` writes in steps of at

@@ -11,6 +11,7 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/connect"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
+	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
 	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
 
@@ -57,10 +58,10 @@ func holdWhileLive(ctx context.Context, live <-chan bool, monitor *lifecycle.Mon
 }
 
 // gatewayRoot is the root every verb of this process dials or serves: the --root flag, else the one
-// derived from the orchestrator state directory, else ~/.vibesys (hosted.GatewayRoot).
+// derived from the orchestrator state directory, else ~/.vibesys (gatewayroot.For).
 func gatewayRoot(flag string) (string, error) {
 	getenv, home := hosted.Environ()
-	return hosted.GatewayRoot(flag, getenv, home)
+	return gatewayroot.For(flag, getenv, home)
 }
 
 // orchestratorVerb says whether args name an orchestrator verb, after an optional leading

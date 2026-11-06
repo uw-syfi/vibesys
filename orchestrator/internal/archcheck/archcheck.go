@@ -43,6 +43,7 @@ var rules = map[string][]string{
 	"internal/store":                   {"internal/core", "internal/wire", "internal/localfs"},
 	"internal/store/storetest":         {"internal/core", "internal/store", "internal/wire"},
 	"internal/localfs":                 {},
+	"gatewayroot":                      {"internal/localfs"},
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/client":                  {"gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "gen/vibesys/orchestrator/"},

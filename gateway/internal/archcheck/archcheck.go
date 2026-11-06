@@ -72,6 +72,6 @@ func allowed(target string) bool {
 	return slices.Contains([]string{
 		module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
 		module + "gateway/internal/pipe", module + "gateway/internal/server",
-		module + "gateway/schemahash", module + "orchestrator/hosted",
+		module + "gateway/schemahash", module + "orchestrator/gatewayroot", module + "orchestrator/hosted",
 	}, target)
 }
