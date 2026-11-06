@@ -5,11 +5,12 @@
 # container fetches uv, Python 3.12 and the sidecar's locked dependencies, as a user's machine does).
 #
 # The container starts with curl and nothing else: no Go, no Python, no uv, no git, no repository.
-# Two phases run there, both in test_install_in_container.sh, which this script mounts:
+# Three phases run there, all in test_install_in_container.sh, which this script mounts:
 #
 #   install  the installer and the layout it makes, with no git in the image;
 #   product  git is added (a task lives in a git repository), then a run is started with the
-#            installed vibesys-client and no setting, and again with scripted agents.
+#            installed vibesys-client and no setting, and again with scripted agents;
+#   client   a person's verbs on a run: attach, steer, a host killed, a session process killed.
 #
 # The scripted agents are orchestrator/sidecar/e2e, copied into the container as test code. They
 # replace only the session holder, named by `vibesys-client host configure`; the host, client,
@@ -58,5 +59,6 @@ docker run --rm \
     runuser -u tester -- bash /opt/checks.sh install
     apt-get install -y -qq --no-install-recommends git >/dev/null
     runuser -u tester -- bash /opt/checks.sh product
+    runuser -u tester -- bash /opt/checks.sh client
   '
 echo "test_install.sh: ok"
