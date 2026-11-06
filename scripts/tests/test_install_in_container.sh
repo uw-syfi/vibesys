@@ -280,7 +280,7 @@ configure_scripted_holder() {
 # start_run: start a run of the toy task, leave it, and print its id.
 start_run() {
   local started run
-  started="$(vibesys-client run start --task toy --detach --json)" || die "run start --detach failed"
+  started="$(vibesys-client run start --task toy --detach --allow-agent codex --json)" || die "run start --detach failed"
   echo "$started" >&2
   run="$("$home/current/sidecar/.venv/bin/python" -c 'import json,sys; print(json.load(sys.stdin)["runId"])' <<<"$started")"
   [ -n "$run" ] || die "run start printed no run id"
