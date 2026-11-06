@@ -229,5 +229,8 @@ export function describeCall(call: ToolCall): CallWords {
       return {name: otherName(use.value.name), asked: orNull(use.value.text)};
     case undefined:
       return {name: 'Tool', asked: null};
+    default:
+      use satisfies never;
+      return {name: 'Tool', asked: null};
   }
 }
