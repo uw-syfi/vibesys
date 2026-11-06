@@ -2,10 +2,10 @@
 # requires-python = ">=3.11"
 # dependencies = ["matplotlib>=3.8"]
 # ///
-"""Plot an optimization's progress from its state directory.
+"""Plot an optimization's progress from what vibesys-cli reports.
 
-Reads `<state>/measurements/*.jsonl` (written by measure's measurements.py), `<state>/plans/*.md`,
-the task's `objectives.toml` and the result branch, and writes to `--out`:
+Reads the `--json` output of `vibesys-cli jobs`, `show` and `plan list` (the CLI is run for you; its
+messages are the contract) and the result branch's history from git, and writes to `--out`:
 
   progress.png  every experiment in run order, with the best so far as a line
   frontier.png  headline versus each latency objective, with the Pareto frontier
@@ -13,69 +13,106 @@ the task's `objectives.toml` and the result branch, and writes to `--out`:
   plans.png     plans by outcome
   report.md     the promoted heads as a table, and the images
 
-The inputs must follow the formats in `vibesys:state` and `vibesys:measure`; nothing is repaired.
+Nothing is repaired: a reply the CLI should not send is an error. A commit's point is its newest
+measurement (one environment, one task version), with the headline numbers the CLI computed.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
+import os
 import subprocess
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import matplotlib as mpl
-import tomllib
 
 mpl.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
     from matplotlib.figure import Figure
+
+    #: Runs vibesys-cli with these arguments and returns its standard output.
+    CliRun = Callable[[Sequence[str]], str]
+
 
 Theme = dict[str, str]
 THEMES: dict[str, Theme] = {
-    "light": {"surface": "#fcfcfb", "ink": "#0b0b0b", "ink2": "#52514e", "muted": "#8a8984",
-              "grid": "#e6e5e1", "blue": "#2a78d6", "orange": "#eb6834"},
-    "dark": {"surface": "#1a1a19", "ink": "#f0efec", "ink2": "#c3c2b7", "muted": "#8a8984",
-             "grid": "#2e2e2c", "blue": "#3987e5", "orange": "#d95926"},
+    "light": {
+        "surface": "#fcfcfb",
+        "ink": "#0b0b0b",
+        "ink2": "#52514e",
+        "muted": "#8a8984",
+        "grid": "#e6e5e1",
+        "blue": "#2a78d6",
+        "orange": "#eb6834",
+    },
+    "dark": {
+        "surface": "#1a1a19",
+        "ink": "#f0efec",
+        "ink2": "#c3c2b7",
+        "muted": "#8a8984",
+        "grid": "#2e2e2c",
+        "blue": "#3987e5",
+        "orange": "#d95926",
+    },
 }
-STATUSES = ["won", "returned", "chosen", "proposed", "parked", "rejected"]
+STATUSES = ["won", "chosen", "open", "parked", "rejected"]
+ENUM_PREFIXES = {"direction": "DIRECTION_", "status": "PLAN_STATUS_"}
 
 
 @dataclass
 class Point:
-    """One commit's pooled measurements."""
+    """One commit's newest measurement."""
 
     commit: str
-    time: str
+    time: datetime
     label: str
     values: dict[str, list[float]] = field(default_factory=lambda: defaultdict(list))
+    #: The headline number of each series as the CLI computed it; a series without one (an older
+    #: daemon) falls back to the mean of its samples.
+    reported: dict[str, float] = field(default_factory=dict)
     on_main: bool = False
     order: int = -1
 
     def mean(self, name: str) -> float | None:
-        """Mean of the pooled samples for `name`, or None if unmeasured."""
+        """The CLI's number for `name`, else the mean of its samples, or None if unmeasured."""
+        if name in self.reported:
+            return self.reported[name]
         v = self.values.get(name)
         return sum(v) / len(v) if v else None
 
     def span(self, name: str) -> tuple[float, float]:
-        """Min and max of the pooled samples for `name`."""
+        """Min and max of the samples for `name`."""
         return min(self.values[name]), max(self.values[name])
 
 
 @dataclass
 class Headline:
-    """The headline metric, its direction, every objective's direction and the noise tolerance."""
+    """The headline metric, its direction, every objective's direction and noise tolerance."""
 
     metric: str
     direction: str
     objs: dict[str, str]
-    tol: float
+    tols: dict[str, float]
+
+
+def direction_of(name: str) -> str:
+    """`max` or `min` from a protojson `Direction` name."""
+    return {"DIRECTION_MAXIMIZE": "max", "DIRECTION_MINIMIZE": "min"}[name]
+
+
+def moment(text: str) -> datetime:
+    """A protojson timestamp."""
+    return datetime.fromisoformat(text)
 
 
 def pretty(name: str) -> str:
@@ -83,25 +120,57 @@ def pretty(name: str) -> str:
     return name.replace("_", " ").capitalize()
 
 
-def load_points(state: Path) -> tuple[list[Point], str, str]:
-    """Pool every passing record's samples into one point per commit.
+def load_points(run: CliRun) -> tuple[list[Point], Headline | None]:
+    """One point per measured commit, by time, and the headline of the newest.
 
-    Returns the points by time, the headline metric and its direction.
+    `run` is vibesys-cli. The commits are the ones with a measure job; `show` gives each its
+    measurements, and the newest is the point. The headline's objectives come from that
+    measurement; a single-metric task has only its metric.
     """
-    points: dict[str, Point] = {}
-    metric = direction = ""
-    for f in sorted((state / "measurements").glob("*.jsonl")):
-        for line in f.read_text().splitlines():
-            r = json.loads(line)
-            if r["check"] != "pass":
-                continue
-            metric, direction = r["metric"], r["direction"]
-            p = points.setdefault(r["commit"], Point(r["commit"], r["recorded_at"], r["label"]))
-            p.time = min(p.time, r["recorded_at"])
-            p.values[metric] += r["samples"]
-            for name, v in r.get("observations", {}).items():
-                p.values[name] += v
-    return sorted(points.values(), key=lambda p: p.time), metric, direction
+    jobs = json.loads(run(["jobs", "--json", "--kind", "measure"])).get("jobs", [])
+    labels: dict[str, str] = {}
+    for job in jobs:
+        notes = job.get("notes", [])
+        labels.setdefault(job["spec"]["commit"], notes[0]["text"] if notes else "")
+    points: list[Point] = []
+    newest: dict | None = None
+    for commit, label in labels.items():
+        shown = json.loads(run(["show", "--json", commit]))
+        measurements = shown.get("measurements", [])
+        if not measurements:
+            continue
+        chosen = measurements[-1]
+        measure = chosen["measure"]
+        taken = [
+            moment(r["recorded_at"])
+            for r in shown.get("results", [])
+            if r.get("job_id") in chosen.get("job_ids", []) and "recorded_at" in r
+        ]
+        metric = measure["metric"]["name"]
+        point = Point(commit, min(taken), label or commit[:7])
+        point.values[metric] += measure.get("samples", [])
+        point.reported[metric] = measure["value"]
+        for obs in measure.get("observations", []):
+            point.values[obs["name"]] += obs.get("values", [])
+            if "value" in obs:
+                point.reported[obs["name"]] = obs["value"]
+        points.append(point)
+        if newest is None or point.time >= max(p.time for p in points):
+            newest = measure
+    points.sort(key=lambda p: p.time)
+    if newest is None:
+        return points, None
+    metric = newest["metric"]["name"]
+    direction = direction_of(newest["metric"]["direction"])
+    spec = newest.get("objectives")
+    objs = (
+        {m["name"]: direction_of(m["direction"]) for m in spec["metrics"]}
+        if spec
+        else {metric: direction}
+    )
+    base = spec.get("relative_noise", 0.0) if spec else 0.0
+    own = {n["name"]: n.get("relative_noise", 0.0) for n in spec.get("noise", [])} if spec else {}
+    return points, Headline(metric, direction, objs, {n: own.get(n, base) for n in objs})
 
 
 def branch_commits(repo: Path, branch: str) -> list[str]:
@@ -119,16 +188,10 @@ def mark_main(points: list[Point], shas: list[str]) -> None:
             p.on_main, p.order = True, rank[p.commit]
 
 
-def read_objectives(task_dir: Path) -> tuple[dict[str, str], float]:
-    """Objective directions by name and the Pareto relative-noise tolerance."""
-    cfg = tomllib.loads((task_dir / "objectives.toml").read_text())
-    return {o["name"]: o["direction"] for o in cfg["objective"]}, cfg["pareto"]["relative_noise"]
-
-
-def read_plan_statuses(state: Path) -> list[str]:
-    """The `status:` of every plan file."""
-    return [re.search(r"^status:\s*(\S+)", f.read_text(), re.MULTILINE).group(1)
-            for f in sorted((state / "plans").glob("plan-*.md"))]
+def read_plan_statuses(run: CliRun) -> list[str]:
+    """The status of every plan `vibesys-cli plan list` reports, lower case."""
+    plans = json.loads(run(["plan", "list", "--json"])).get("plans", [])
+    return [p["status"].removeprefix(ENUM_PREFIXES["status"]).lower() for p in plans]
 
 
 def beats(a: float, b: float, direction: str, tol: float) -> bool:
@@ -141,39 +204,64 @@ def no_worse(a: float, b: float, direction: str, tol: float) -> bool:
     return a >= b * (1 - tol) if direction == "max" else a <= b * (1 + tol)
 
 
-def frontier(points: list[Point], objs: dict[str, str], tol: float) -> list[Point]:
+def frontier(points: list[Point], objs: dict[str, str], tols: dict[str, float]) -> list[Point]:
     """Return the points no other point dominates.
 
-    q dominates p when q is no worse than p on every objective and better beyond the noise
-    tolerance on at least one. Only points measured on every objective are comparable.
+    q dominates p when q is no worse than p on every objective and better beyond that objective's
+    noise tolerance on at least one. Only points measured on every objective are comparable.
     """
     comparable = [p for p in points if all(p.mean(n) is not None for n in objs)]
 
     def dominates(q: Point, p: Point) -> bool:
-        return (all(no_worse(q.mean(n), p.mean(n), d, tol) for n, d in objs.items())
-                and any(beats(q.mean(n), p.mean(n), d, tol) for n, d in objs.items()))
+        return all(no_worse(q.mean(n), p.mean(n), d, tols[n]) for n, d in objs.items()) and any(
+            beats(q.mean(n), p.mean(n), d, tols[n]) for n, d in objs.items()
+        )
 
     return [p for p in comparable if not any(dominates(q, p) for q in comparable if q is not p)]
 
 
 # ---------------------------------------------------------------- drawing
 
+
 def style(th: Theme) -> None:
     """Apply the theme to matplotlib's rcParams."""
-    plt.rcParams.update({
-        "figure.facecolor": th["surface"], "axes.facecolor": th["surface"], "savefig.facecolor": th["surface"],
-        "text.color": th["ink"], "axes.labelcolor": th["ink2"], "xtick.color": th["ink2"],
-        "ytick.color": th["ink2"], "axes.edgecolor": th["grid"], "axes.spines.top": False,
-        "axes.spines.right": False, "axes.grid": True, "grid.color": th["grid"], "grid.linewidth": 0.8,
-        "axes.axisbelow": True, "font.size": 11, "axes.titlesize": 13, "axes.titleweight": "bold",
-        "axes.titlelocation": "left", "legend.frameon": False,
-    })
+    plt.rcParams.update(
+        {
+            "figure.facecolor": th["surface"],
+            "axes.facecolor": th["surface"],
+            "savefig.facecolor": th["surface"],
+            "text.color": th["ink"],
+            "axes.labelcolor": th["ink2"],
+            "xtick.color": th["ink2"],
+            "ytick.color": th["ink2"],
+            "axes.edgecolor": th["grid"],
+            "axes.spines.top": False,
+            "axes.spines.right": False,
+            "axes.grid": True,
+            "grid.color": th["grid"],
+            "grid.linewidth": 0.8,
+            "axes.axisbelow": True,
+            "font.size": 11,
+            "axes.titlesize": 13,
+            "axes.titleweight": "bold",
+            "axes.titlelocation": "left",
+            "legend.frameon": False,
+        }
+    )
 
 
 def dot(face: str, edge: str) -> Line2D:
     """Legend marker for a scatter point."""
-    return Line2D([], [], marker="o", ls="", markerfacecolor=face, markeredgecolor=edge,
-                  markeredgewidth=1.8, markersize=7)
+    return Line2D(
+        [],
+        [],
+        marker="o",
+        ls="",
+        markerfacecolor=face,
+        markeredgecolor=edge,
+        markeredgewidth=1.8,
+        markersize=7,
+    )
 
 
 def save(fig: Figure, out: Path, name: str) -> None:
@@ -200,17 +288,35 @@ def draw_progress(th: Theme, points: list[Point], hl: Headline, out: Path) -> No
     ax.step(range(len(seq)), line, where="post", color=th["blue"], lw=2.4, zorder=3)
     for on_main in (False, True):
         sel = [(i, p) for i, p in enumerate(seq) if p.on_main == on_main]
-        ax.scatter([i for i, _ in sel], [p.mean(metric) for _, p in sel], s=58, zorder=4, linewidth=1.8,
-                   facecolor=th["blue"] if on_main else th["surface"],
-                   edgecolor=th["blue"] if on_main else th["muted"])
+        ax.scatter(
+            [i for i, _ in sel],
+            [p.mean(metric) for _, p in sel],
+            s=58,
+            zorder=4,
+            linewidth=1.8,
+            facecolor=th["blue"] if on_main else th["surface"],
+            edgecolor=th["blue"] if on_main else th["muted"],
+        )
     for i in (records[0], records[-1]):
-        ax.annotate(f"{seq[i].mean(metric):.0f}", (i, seq[i].mean(metric)), xytext=(0, 10),
-                    textcoords="offset points", ha="center", fontsize=9, color=th["ink2"])
+        ax.annotate(
+            f"{seq[i].mean(metric):.0f}",
+            (i, seq[i].mean(metric)),
+            xytext=(0, 10),
+            textcoords="offset points",
+            ha="center",
+            fontsize=9,
+            color=th["ink2"],
+        )
     ax.set_xlabel("Experiment")
     ax.set_ylabel(pretty(metric))
-    ax.set_title(f"{pretty(metric)}: best promoted {seq[records[0]].mean(metric):.0f} → {line[-1]:.0f}")
-    ax.legend([dot(th["blue"], th["blue"]), dot(th["surface"], th["muted"])], ["Promoted", "Not promoted"],
-              loc="lower right")
+    ax.set_title(
+        f"{pretty(metric)}: best promoted {seq[records[0]].mean(metric):.0f} → {line[-1]:.0f}"
+    )
+    ax.legend(
+        [dot(th["blue"], th["blue"]), dot(th["surface"], th["muted"])],
+        ["Promoted", "Not promoted"],
+        loc="lower right",
+    )
     ax.set_xlim(-1, len(seq))
     ax.margins(y=0.12)
     ax.set_ylim(bottom=0)
@@ -221,27 +327,54 @@ def draw_frontier(th: Theme, points: list[Point], hl: Headline, out: Path) -> No
     """Headline versus each latency objective, with the Pareto frontier."""
     metric, objs = hl.metric, hl.objs
     latency = [n for n in objs if n != metric and any(p.mean(n) for p in points)]
-    front = frontier(points, objs, hl.tol)
+    if not latency:
+        return
+    front = frontier(points, objs, hl.tols)
     rows = -(-len(latency) // 2)
     fig, axes = plt.subplots(rows, 2, figsize=(11.2, 4.6 * rows), squeeze=False, sharey=True)
     for ax, name in zip(axes.flat, latency, strict=False):
         for p in (q for q in points if q.mean(name)):
-            ax.scatter([p.mean(name)], [p.mean(metric)], s=60, linewidth=1.8, zorder=3,
-                       facecolor=th["blue"] if p.on_main else th["surface"],
-                       edgecolor=th["blue"] if p.on_main else th["muted"])
+            ax.scatter(
+                [p.mean(name)],
+                [p.mean(metric)],
+                s=60,
+                linewidth=1.8,
+                zorder=3,
+                facecolor=th["blue"] if p.on_main else th["surface"],
+                edgecolor=th["blue"] if p.on_main else th["muted"],
+            )
         fr = sorted((p for p in front if p.mean(name)), key=lambda p: p.mean(name))
-        ax.plot([p.mean(name) for p in fr], [p.mean(metric) for p in fr], color=th["orange"], lw=2, zorder=2)
-        ax.scatter([p.mean(name) for p in fr], [p.mean(metric) for p in fr], s=120, facecolor="none",
-                   edgecolor=th["orange"], linewidth=2, zorder=4)
+        ax.plot(
+            [p.mean(name) for p in fr],
+            [p.mean(metric) for p in fr],
+            color=th["orange"],
+            lw=2,
+            zorder=2,
+        )
+        ax.scatter(
+            [p.mean(name) for p in fr],
+            [p.mean(metric) for p in fr],
+            s=120,
+            facecolor="none",
+            edgecolor=th["orange"],
+            linewidth=2,
+            zorder=4,
+        )
         ax.set_xlabel(pretty(name))
         ax.set_ylim(0, max(p.mean(metric) for p in points if p.mean(metric)) * 1.1)
-    for ax in axes.flat[len(latency):]:
+    for ax in axes.flat[len(latency) :]:
         ax.set_visible(False)
     for row in axes:
         row[0].set_ylabel(pretty(metric))
-    axes.flat[0].legend([dot(th["blue"], th["blue"]), dot(th["surface"], th["muted"]),
-                         Line2D([], [], color=th["orange"], lw=2)],
-                        ["Promoted", "Not promoted", "Pareto frontier"], loc="lower left")
+    axes.flat[0].legend(
+        [
+            dot(th["blue"], th["blue"]),
+            dot(th["surface"], th["muted"]),
+            Line2D([], [], color=th["orange"], lw=2),
+        ],
+        ["Promoted", "Not promoted", "Pareto frontier"],
+        loc="lower left",
+    )
     save(fig, out, "frontier.png")
 
 
@@ -249,12 +382,22 @@ def draw_latency(th: Theme, points: list[Point], hl: Headline, out: Path) -> Non
     """Each latency objective along the result branch."""
     metric, objs = hl.metric, hl.objs
     names = [n for n in objs if n != metric]
+    if not names:
+        return
     main = sorted((p for p in points if p.on_main), key=lambda p: p.order)
     fig, axes = plt.subplots(1, len(names), figsize=(4.4 * len(names), 4.2), squeeze=False)
     for ax, name in zip(axes[0], names, strict=True):
         pts = [p for p in main if p.mean(name)]
-        ax.plot(range(len(pts)), [p.mean(name) for p in pts], color=th["blue"], lw=2, marker="o", markersize=7,
-                markeredgecolor=th["surface"], markeredgewidth=2)
+        ax.plot(
+            range(len(pts)),
+            [p.mean(name) for p in pts],
+            color=th["blue"],
+            lw=2,
+            marker="o",
+            markersize=7,
+            markeredgecolor=th["surface"],
+            markeredgewidth=2,
+        )
         for i, p in enumerate(pts):
             ax.vlines(i, *p.span(name), color=th["blue"], lw=2, alpha=0.3)
         ax.set_title(pretty(name))
@@ -272,8 +415,12 @@ def draw_plans(th: Theme, statuses: list[str], out: Path) -> None:
     counts = [statuses.count(s) for s in order]
     fig, ax = plt.subplots(figsize=(7.5, 0.7 * len(order) + 1.6))
     colors = {"won": th["blue"], "rejected": th["orange"]}
-    ax.barh([s.capitalize() for s in order][::-1], counts[::-1], height=0.6,
-            color=[colors.get(s, th["muted"]) for s in order][::-1])
+    ax.barh(
+        [s.capitalize() for s in order][::-1],
+        counts[::-1],
+        height=0.6,
+        color=[colors.get(s, th["muted"]) for s in order][::-1],
+    )
     for i, c in enumerate(counts[::-1]):
         ax.text(c + 0.15, i, str(c), va="center", color=th["ink2"])
     ax.set_title("Plans by outcome")
@@ -288,37 +435,64 @@ def write_report(out: Path, points: list[Point], metric: str) -> None:
     for i, p in enumerate(main):
         change = "" if i == 0 else f"{p.mean(metric) / main[i - 1].mean(metric) - 1:+.1%}"
         rows.append(f"| `{p.commit[:7]}` | {p.mean(metric):.1f} | {change} | {p.label} |")
-    images = [f"![{n}]({n})" for n in ("progress.png", "frontier.png", "latency.png", "plans.png")]
-    (out / "report.md").write_text("\n".join(["# Optimization progress", "", *rows, "", *images, ""]))
+    images = [
+        f"![{n}]({n})"
+        for n in ("progress.png", "frontier.png", "latency.png", "plans.png")
+        if (out / n).exists()
+    ]
+    (out / "report.md").write_text(
+        "\n".join(["# Optimization progress", "", *rows, "", *images, ""])
+    )
 
 
-def build(state: Path, task_dir: Path, promoted: list[str], out: Path, theme: str = "light") -> None:
-    """Write the charts and report for a state directory; `promoted` is the branch history."""
-    points, metric, direction = load_points(state)
+def build(run: CliRun, promoted: list[str], out: Path, theme: str = "light") -> None:
+    """Write the charts and report from vibesys-cli's reports; `promoted` is the branch history."""
+    points, hl = load_points(run)
+    if hl is None:
+        msg = "vibesys-cli reports no measured commit for this task: nothing to plot"
+        raise SystemExit(msg)
     mark_main(points, promoted)
-    objs, tol = read_objectives(task_dir)
     th = THEMES[theme]
     style(th)
     out.mkdir(parents=True, exist_ok=True)
-    hl = Headline(metric, direction, objs, tol)
     draw_progress(th, points, hl, out)
     draw_frontier(th, points, hl, out)
     draw_latency(th, points, hl, out)
-    draw_plans(th, read_plan_statuses(state), out)
-    write_report(out, points, metric)
+    draw_plans(th, read_plan_statuses(run), out)
+    write_report(out, points, hl.metric)
+
+
+def cli_runner(cli: str) -> CliRun:
+    """Run the vibesys-cli at `cli`; a failed call stops the script with the CLI's own message."""
+
+    def run(args: Sequence[str]) -> str:
+        argv = [cli, *args]
+        # lint-waiver: LW-715302 [S603]; a fixed argv with no shell; calling vibesys-cli is the point.
+        done = subprocess.run(argv, capture_output=True, text=True, check=False)  # noqa: S603
+        if done.returncode:
+            msg = f"{' '.join(argv)} exited {done.returncode}: {done.stderr.strip() or done.stdout.strip()}"
+            raise SystemExit(msg)
+        return done.stdout
+
+    return run
 
 
 def main() -> None:
     """Parse the command line and build the charts."""
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--state", required=True, type=Path, help=".vibesys-state/optimize/<task>")
-    ap.add_argument("--task-dir", required=True, type=Path, help=".vibesys/tasks/<task>")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--branch", required=True, help="result branch, vibesys/<task>")
     ap.add_argument("--repo", type=Path, default=Path())
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--theme", choices=THEMES, default="light")
+    ap.add_argument(
+        "--cli",
+        default=os.environ.get("VIBESYS_CLI", "vibesys-cli"),
+        help="the vibesys-cli to run; $VIBESYS_CLI by default",
+    )
     a = ap.parse_args()
-    build(a.state, a.task_dir, branch_commits(a.repo, a.branch), a.out, a.theme)
+    build(cli_runner(a.cli), branch_commits(a.repo, a.branch), a.out, a.theme)
 
 
 if __name__ == "__main__":
