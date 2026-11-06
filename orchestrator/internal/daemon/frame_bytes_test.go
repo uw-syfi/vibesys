@@ -20,7 +20,7 @@ import (
 
 func startNamedRun(t *testing.T, r *daemontest.Rig, id string) core.RunID {
 	t.Helper()
-	resp, err := r.Service.Dispatch(context.Background(), &pb.DispatchRequest{Command: &pb.Command{Id: id, Body: &pb.Command_StartRun{StartRun: &pb.StartRun{Repository: "/repo", Task: "task", Brief: "go", FanoutLimit: 1, Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}}}}})
+	resp, err := r.Service.Dispatch(context.Background(), &pb.DispatchRequest{Command: &pb.Command{Id: id, Body: &pb.Command_StartRun{StartRun: &pb.StartRun{Repository: "/repo-" + id, Task: "task", Brief: "go", FanoutLimit: 1, Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

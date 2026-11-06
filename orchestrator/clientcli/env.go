@@ -41,6 +41,10 @@ type Env struct {
 	Dir string
 	// FS is the file system rooted at "/", used to look for a repository's .git.
 	FS fs.FS
+	// Canonical returns the path with every symbolic link resolved, or the path unchanged when it
+	// cannot be resolved (it no longer exists). The service names a run's repository in this form,
+	// so a RUN left out is found by comparing canonical forms and not the text a person typed.
+	Canonical func(path string) string
 	// Zone is the time zone times are shown in.
 	Zone  *time.Location
 	Clock Clock

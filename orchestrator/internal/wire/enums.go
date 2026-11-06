@@ -116,15 +116,16 @@ var (
 		core.JobLost:      pb.JobOutcome_JOB_OUTCOME_LOST,
 	})
 	refusals = newEnum(map[core.Refusal]pb.Refusal{
-		"":                        pb.Refusal_REFUSAL_UNSPECIFIED,
-		core.RefuseRunNotFound:    pb.Refusal_REFUSAL_RUN_NOT_FOUND,
-		core.RefuseAgentNotFound:  pb.Refusal_REFUSAL_AGENT_NOT_FOUND,
-		core.RefuseNotPermitted:   pb.Refusal_REFUSAL_NOT_PERMITTED,
-		core.RefuseRunNotRunning:  pb.Refusal_REFUSAL_RUN_NOT_RUNNING,
-		core.RefuseFanoutLimit:    pb.Refusal_REFUSAL_FANOUT_LIMIT,
-		core.RefuseAgentIsLead:    pb.Refusal_REFUSAL_AGENT_IS_LEAD,
-		core.RefuseAgentNotLive:   pb.Refusal_REFUSAL_AGENT_NOT_LIVE,
-		core.RefuseDeadlinePassed: pb.Refusal_REFUSAL_DEADLINE_PASSED,
+		"":                         pb.Refusal_REFUSAL_UNSPECIFIED,
+		core.RefuseRunNotFound:     pb.Refusal_REFUSAL_RUN_NOT_FOUND,
+		core.RefuseAgentNotFound:   pb.Refusal_REFUSAL_AGENT_NOT_FOUND,
+		core.RefuseNotPermitted:    pb.Refusal_REFUSAL_NOT_PERMITTED,
+		core.RefuseRunNotRunning:   pb.Refusal_REFUSAL_RUN_NOT_RUNNING,
+		core.RefuseFanoutLimit:     pb.Refusal_REFUSAL_FANOUT_LIMIT,
+		core.RefuseAgentIsLead:     pb.Refusal_REFUSAL_AGENT_IS_LEAD,
+		core.RefuseAgentNotLive:    pb.Refusal_REFUSAL_AGENT_NOT_LIVE,
+		core.RefuseDeadlinePassed:  pb.Refusal_REFUSAL_DEADLINE_PASSED,
+		core.RefuseRepositoryInUse: pb.Refusal_REFUSAL_REPOSITORY_IN_USE,
 	})
 	timerKinds = newEnum(map[core.TimerKind]pb.TimerKind{
 		core.TimerRunDeadline: pb.TimerKind_TIMER_KIND_RUN_DEADLINE,

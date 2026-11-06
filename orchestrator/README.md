@@ -214,16 +214,44 @@ run `uv sync --frozen --project orchestrator/sidecar` once, set `VIBESYS_ORCHEST
 `vibesys-client run start ...` starts a gateway if none serves. Each session's files, logs and socket are
 under `STATE/sessions/`.
 
+To start a run and leave it, use `run start --detach`, then come back with `run attach`, `run get`,
+`run wait` and `run stop`. Two things outside this program can end a run when you log out. On a
+systemd machine, `KillUserProcesses=yes` (in `logind.conf`, and the default in some distributions)
+kills a user's processes when the last login ends, the host and the agents included; this is not solved
+here: run the host under `systemd-run --user` with lingering on (`loginctl enable-linger USER`), a
+terminal multiplexer, or set `KillUserProcesses=no`. And `vibesys-cli`'s own daemon keeps its socket in
+`XDG_RUNTIME_DIR` (see its README), which agents use for measurement: without lingering that directory
+goes with the last login, so a run's measurements fail after you log out. Enable lingering for runs that
+outlive your session.
+
 The lead's first message is rendered by the sidecar from the run's task, its `--fanout` and the
 optional `--brief`, the operator's steering text: it tells the lead to run `vibesys:optimize` for the
 task, so the repository must hold `.vibesys/tasks/TASK/`. A start that cannot work is refused when it
 is dispatched, for every client, and makes no run, event or receipt: `InvalidArgument` when the
-repository path is not absolute, is not the root of a git work tree (it has no `.git`), or has no
-`.vibesys/tasks/TASK/` (a task name is one folder name, so `../x` is refused), and
-`FailedPrecondition` when the host has no sidecar launcher, with the launcher's own reason. The
-message names the offending path or setting. A retry of a command id that already has a receipt
-gets that receipt without the check. The check is `daemon.StartChecks`, implemented by
-`production.StartChecks`; only the operator's `StartRun` is checked.
+repository path is not absolute, does not exist, is not the root of a git work tree (it has no
+`.git`), has no `.vibesys/tasks/TASK/` (a task name is one folder name, so `../x` is refused), has no
+commit yet, or does not hold the task in its latest commit; and `FailedPrecondition` when the host
+has no sidecar launcher, with the launcher's own reason. The last two are because subagents work in
+copies of the repository made from its latest commit (`git worktree add --detach`), so a repository
+with no commit, or whose task is only in the working tree, would fail at the first `spawn_agent` or
+leave them without the task. Edits to the task's files that are not committed are accepted here: the
+`optimize` skill stops the lead when tracked files are modified, and that rule is not repeated. A
+detached HEAD is accepted. The message names the offending path and what to do. A retry of a command
+id that already has a receipt gets that receipt without the check. The check is `daemon.StartChecks`,
+implemented by `production.StartChecks`; only the operator's `StartRun` is checked. It also returns the repository
+with its symbolic links resolved, and the service starts the run in that form, so one directory is one
+repository whichever name a client used (the command's digest stays that of what the client sent, so a
+retry is the same command). `vibesys-client` resolves links the same way when it compares the working
+directory with a run's repository (`Env.Canonical`).
+
+**One live run per repository.** The lead works in the repository itself, so two runs would share one
+git checkout. `Decide` refuses a `StartRun` while any run that is not over (`starting`, `running` or
+`stopping`) has the same repository, whatever its task, with `REFUSAL_REPOSITORY_IN_USE`; the
+receipt's `run_id` is that run (the oldest, if an old log holds more than one), and `vibesys-client`
+prints it with how to attach or stop it. The rule is in the pure core, so it holds for every client and
+is a simulation invariant. It is checked only when a start is decided, not by `State.Violations` or
+replay, so a log written before the rule that holds two live runs in one repository replays as it was
+written and those runs can still be stopped.
 
 ### Which `vibesys-cli` the agents run, and where it finds its daemon
 
@@ -268,6 +296,13 @@ The daemon serves two sockets, and which one a caller reached decides who it is:
   agent's. It is the gateway socket that `vibesys-client` and `vibesys-host connect` use, and it is never put in
   an agent's environment.
 - The **agent socket** is the only socket a launched session is told (`VIBESYS_ORCHESTRATOR_SOCKET`).
+  It is `agent.sock` in the state directory, not in `XDG_RUNTIME_DIR`: on a systemd machine without
+  lingering, the runtime directory (`/run/user/UID`) is removed when the user's last login ends, and a
+  run that was left running would lose its tools' socket. A state directory whose path makes the socket
+  address too long for a Unix socket (100 bytes here) is an error naming
+  `VIBESYS_ORCHESTRATOR_STATE_DIR`. The sidecar sockets are under `STATE/sessions` and the gateway socket
+  under the host root (`~/.vibesys`, or `host/` in a state directory), so none of ours is in the runtime
+  directory.
   Every call on it needs the credentials of the agent's current session (agent id, session number
   and an HMAC token the daemon derives from a secret), and the daemon never reads the caller from a
   request body. An agent may issue the commands its role allows and read the snapshot of its run.

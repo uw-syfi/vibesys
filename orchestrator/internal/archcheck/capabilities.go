@@ -28,8 +28,9 @@ var fsReads = map[string]allowance{
 	"internal/production/cli_transport.go": {1, "the callee-owned discovery contract requires inspecting socket directory metadata"},
 }
 var execFiles = map[string]string{
-	"internal/production/cli_ensure.go": "the callee owns shared daemon startup through daemon ensure",
-	"internal/production/sidecars.go":   "sidecar lifetime and git worktree creation",
+	"internal/production/cli_ensure.go":  "the callee owns shared daemon startup through daemon ensure",
+	"internal/production/sidecars.go":    "sidecar lifetime and git worktree creation",
+	"internal/production/startchecks.go": "start checks read the repository's history with git",
 }
 
 func capabilities(name, source string) []string {

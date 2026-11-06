@@ -41,6 +41,8 @@ const (
 	Refusal_REFUSAL_AGENT_NOT_LIVE Refusal = 7
 	// The deadline had passed when the command arrived.
 	Refusal_REFUSAL_DEADLINE_PASSED Refusal = 8
+	// Another run that is not over already works in the repository. The receipt's run_id is that run.
+	Refusal_REFUSAL_REPOSITORY_IN_USE Refusal = 9
 )
 
 // Enum value maps for Refusal.
@@ -55,17 +57,19 @@ var (
 		6: "REFUSAL_AGENT_IS_LEAD",
 		7: "REFUSAL_AGENT_NOT_LIVE",
 		8: "REFUSAL_DEADLINE_PASSED",
+		9: "REFUSAL_REPOSITORY_IN_USE",
 	}
 	Refusal_value = map[string]int32{
-		"REFUSAL_UNSPECIFIED":     0,
-		"REFUSAL_RUN_NOT_FOUND":   1,
-		"REFUSAL_AGENT_NOT_FOUND": 2,
-		"REFUSAL_NOT_PERMITTED":   3,
-		"REFUSAL_RUN_NOT_RUNNING": 4,
-		"REFUSAL_FANOUT_LIMIT":    5,
-		"REFUSAL_AGENT_IS_LEAD":   6,
-		"REFUSAL_AGENT_NOT_LIVE":  7,
-		"REFUSAL_DEADLINE_PASSED": 8,
+		"REFUSAL_UNSPECIFIED":       0,
+		"REFUSAL_RUN_NOT_FOUND":     1,
+		"REFUSAL_AGENT_NOT_FOUND":   2,
+		"REFUSAL_NOT_PERMITTED":     3,
+		"REFUSAL_RUN_NOT_RUNNING":   4,
+		"REFUSAL_FANOUT_LIMIT":      5,
+		"REFUSAL_AGENT_IS_LEAD":     6,
+		"REFUSAL_AGENT_NOT_LIVE":    7,
+		"REFUSAL_DEADLINE_PASSED":   8,
+		"REFUSAL_REPOSITORY_IN_USE": 9,
 	}
 )
 
@@ -1275,7 +1279,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"message_id\x18\x06 \x01(\tR\tmessageId\x12G\n" +
 	"\bdelivery\x18\a \x01(\x0e2!.vibesys.orchestrator.v1.DeliveryB\b\xbaH\x05\x82\x01\x02\x10\x01R\bdelivery\x12\x1a\n" +
-	"\bsequence\x18\b \x01(\x04R\bsequence*\x80\x02\n" +
+	"\bsequence\x18\b \x01(\x04R\bsequence*\x9f\x02\n" +
 	"\aRefusal\x12\x17\n" +
 	"\x13REFUSAL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15REFUSAL_RUN_NOT_FOUND\x10\x01\x12\x1b\n" +
@@ -1285,7 +1289,8 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x14REFUSAL_FANOUT_LIMIT\x10\x05\x12\x19\n" +
 	"\x15REFUSAL_AGENT_IS_LEAD\x10\x06\x12\x1a\n" +
 	"\x16REFUSAL_AGENT_NOT_LIVE\x10\a\x12\x1b\n" +
-	"\x17REFUSAL_DEADLINE_PASSED\x10\bBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x17REFUSAL_DEADLINE_PASSED\x10\b\x12\x1d\n" +
+	"\x19REFUSAL_REPOSITORY_IN_USE\x10\tBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_events_proto_rawDescOnce sync.Once

@@ -153,7 +153,8 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	if err := s.checkStart(cmd); err != nil {
+	cmd, err = s.checkStart(cmd)
+	if err != nil {
 		return nil, err
 	}
 	answer, err := s.e.Command(cmd)
@@ -167,28 +168,32 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 }
 
 // checkStart refuses a new StartRun whose repository, task or launcher cannot work, before the
-// command reaches Decide. A retry of a command that already has a receipt skips the check, so it
-// still gets that receipt.
-func (s *Service) checkStart(cmd core.Command) error {
+// command reaches Decide, and names its repository in canonical form, so that the one-run rule of
+// Decide holds however the repository was spelled. The command's digest stays that of what the
+// client sent, so a retry of it is the same command. A retry of a command that already has a
+// receipt skips the check, so it still gets that receipt.
+func (s *Service) checkStart(cmd core.Command) (core.Command, error) {
 	start, ok := cmd.Body.(core.StartRun)
 	if _, operator := cmd.Caller.(core.Operator); !ok || !operator {
 		// Only the operator may start a run; Decide refuses an agent that tries, with a receipt.
-		return nil
+		return cmd, nil
 	}
 	if _, recall := s.e.State().Recall(cmd.ID, cmd.Digest); recall != core.RecallNew {
-		return nil
+		return cmd, nil
 	}
-	err := s.Starts.CheckStart(start.Repository, start.Task)
+	canonical, err := s.Starts.CheckStart(start.Repository, start.Task)
 	var refusal *StartRefusal
 	switch {
 	case err == nil:
-		return nil
+		start.Repository = canonical
+		cmd.Body = start
+		return cmd, nil
 	case errors.As(err, &refusal) && refusal.NotReady:
-		return status.Error(codes.FailedPrecondition, refusal.Reason)
+		return cmd, status.Error(codes.FailedPrecondition, refusal.Reason)
 	case errors.As(err, &refusal):
-		return status.Error(codes.InvalidArgument, refusal.Reason)
+		return cmd, status.Error(codes.InvalidArgument, refusal.Reason)
 	}
-	return status.Error(codes.Unavailable, err.Error())
+	return cmd, status.Error(codes.Unavailable, err.Error())
 }
 
 // runOf is the run an agent caller belongs to.

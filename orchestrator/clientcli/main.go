@@ -174,7 +174,7 @@ func (c *call) join(ctx context.Context, arg string) (*session, context.Context,
 		s.Close()
 		return nil, nil, err
 	}
-	run, err := resolve(arg, repo, snapshot.GetRuns())
+	run, err := resolve(arg, repo, snapshot.GetRuns(), c.Canonical)
 	if err != nil {
 		s.Close()
 		return nil, nil, err

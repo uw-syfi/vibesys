@@ -162,6 +162,10 @@ func refusal(r *pb.Receipt) error {
 	if r.GetRefusal() == pb.Refusal_REFUSAL_UNSPECIFIED {
 		return nil
 	}
+	if r.GetRefusal() == pb.Refusal_REFUSAL_REPOSITORY_IN_USE {
+		return failed("refused: run %[1]s is already working in this repository, and one repository takes one run at a time.\n"+
+			"  to follow it:  vibesys-client run attach %[1]s\n  to end it:     vibesys-client run stop %[1]s", r.GetRunId())
+	}
 	return failed("refused: %s", statusWord(r.GetRefusal().String(), "REFUSAL_"))
 }
 

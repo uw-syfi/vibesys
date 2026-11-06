@@ -161,7 +161,14 @@ func started(t *testing.T, fanout uint32, caps core.Capabilities) (*script, core
 // startRun adds a run on a task to the script and rests its lead after its brief.
 func (w *script) startRun(task string, fanout uint32, caps core.Capabilities) (core.RunID, core.AgentID) {
 	w.t.Helper()
-	r := w.command(operator, core.StartRun{Repository: "repo", Task: task, FanoutLimit: fanout, Lead: lead, Brief: "go"})
+	return w.startRunIn("repo", task, fanout, caps)
+}
+
+// startRunIn is startRun in a repository of the caller's choice. One repository holds one run at a
+// time, so a script with several runs gives each its own.
+func (w *script) startRunIn(repository, task string, fanout uint32, caps core.Capabilities) (core.RunID, core.AgentID) {
+	w.t.Helper()
+	r := w.command(operator, core.StartRun{Repository: repository, Task: task, FanoutLimit: fanout, Lead: lead, Brief: "go"})
 	w.wantEffects("LaunchSession")
 	w.open(r.Agent, caps)
 	if got := w.turn(r.Agent).Trigger; got != core.TriggerBrief {
@@ -528,8 +535,8 @@ func TestTwoRunsThatEachFinishJobJ1AreBothTold(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			w := newScript(t)
-			runA, leadA := w.startRun(tasks[0], 1, noSteer)
-			runB, leadB := w.startRun(tasks[1], 1, noSteer)
+			runA, leadA := w.startRunIn("repo-a", tasks[0], 1, noSteer)
+			runB, leadB := w.startRunIn("repo-b", tasks[1], 1, noSteer)
 			w.step(core.JobUpdate{Job: "j1", Run: runA, State: core.JobSucceeded})
 			if got := w.turn(leadA).Trigger; got != core.TriggerJobFinished {
 				t.Fatalf("the first lead woke for %s", got)
@@ -571,7 +578,7 @@ func TestEachEndedJobOfEachRunIsToldExactlyOnceAcrossRestarts(t *testing.T) {
 		w := newScript(t)
 		var runs []core.RunID
 		for i := range 2 + r.IntN(3) {
-			run, _ := w.startRun(fmt.Sprintf("task-%d", r.IntN(2)+i%2), 1, noSteer)
+			run, _ := w.startRunIn(fmt.Sprintf("repo-%d", i), fmt.Sprintf("task-%d", r.IntN(2)+i%2), 1, noSteer)
 			runs = append(runs, run)
 		}
 		start := len(w.log)

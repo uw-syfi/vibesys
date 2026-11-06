@@ -10,11 +10,24 @@ import (
 type StartCall struct{ Repository, Task string }
 
 // StartChecks is a daemon.StartChecks that accepts every start until a test makes it refuse, and
-// remembers what it was asked.
+// remembers what it was asked. It is a tree of repositories that are all fit to start in, with
+// links between their names.
 type StartChecks struct {
 	mu      sync.Mutex
 	refusal *daemon.StartRefusal
 	calls   []StartCall
+	links   map[string]string
+}
+
+// Link makes the repository name from a symbolic link to the repository to, which is what a start
+// of from then runs in.
+func (s *StartChecks) Link(from, to string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.links == nil {
+		s.links = map[string]string{}
+	}
+	s.links[from] = to
 }
 
 // Refuse makes every later check answer with refusal. Nil accepts again.
@@ -32,12 +45,19 @@ func (s *StartChecks) Calls() []StartCall {
 }
 
 // CheckStart implements daemon.StartChecks.
-func (s *StartChecks) CheckStart(repository, task string) error {
+func (s *StartChecks) CheckStart(repository, task string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, StartCall{repository, task})
 	if s.refusal != nil {
-		return s.refusal
+		return "", s.refusal
 	}
-	return nil
+	for range len(s.links) + 1 {
+		to, linked := s.links[repository]
+		if !linked {
+			return repository, nil
+		}
+		repository = to
+	}
+	return "", &daemon.StartRefusal{Reason: "repository " + repository + " is a link that leads back to itself"}
 }

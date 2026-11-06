@@ -48,9 +48,17 @@ func Main(args []string) int {
 	return clientcli.Main(ctx, args, clientcli.Env{
 		Version: buildinfo.Version, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		Terminal: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
-		Dir:      dir, FS: os.DirFS("/"), Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
+		Dir:      dir, FS: os.DirFS("/"), Canonical: canonical, Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
 		Connect: connector,
 	})
+}
+
+// canonical resolves the symbolic links of a path, and leaves it as it is when it cannot.
+func canonical(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }
 
 type systemClock struct{}

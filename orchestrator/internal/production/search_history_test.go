@@ -28,14 +28,15 @@ func TestRandomJobHistoriesTellEveryLiveSubmitterExactlyOnce(t *testing.T) {
 				rig := daemontest.NewRig(t)
 				var runs []core.RunID
 				for i := range 2 {
-					resp, err := rig.Service.Dispatch(context.Background(), &pb.DispatchRequest{Command: &pb.Command{Id: fmt.Sprint("start", i), Body: &pb.Command_StartRun{StartRun: &pb.StartRun{Repository: "/repo", Task: "task", FanoutLimit: 1, Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}}}}})
+					resp, err := rig.Service.Dispatch(context.Background(), &pb.DispatchRequest{Command: &pb.Command{Id: fmt.Sprint("start", i), Body: &pb.Command_StartRun{StartRun: &pb.StartRun{Repository: fmt.Sprint("/repo-", i), Task: "task", FanoutLimit: 1, Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}}}}})
 					if err != nil {
 						t.Fatal(err)
 					}
 					runs = append(runs, core.RunID(resp.Receipt.RunId))
 				}
 				rig.Settle(t)
-				fake := clidaemontest.New()
+				// Each repository has a task store of its own, holding the jobs its one live run submitted.
+				fakes := [2]*clidaemontest.Fake{clidaemontest.New(), clidaemontest.New()}
 				offline := false
 				var r *Reconciler
 				var resume chan struct{}
@@ -47,7 +48,7 @@ func TestRandomJobHistoriesTellEveryLiveSubmitterExactlyOnce(t *testing.T) {
 							if offline {
 								return nil, &clidaemon.Unreadable{Reason: clidaemon.StreamLost, Detail: "offline"}
 							}
-							return fake, nil
+							return fakes[map[string]int{"/repo-0": 0, "/repo-1": 1}[k.Repository]], nil
 						}, Bound: func(c context.Context) (context.Context, context.CancelFunc) {
 							return context.WithDeadline(c, time.Unix(1<<40, 0))
 						}, Sleep: func(c context.Context, _ time.Duration) error {
@@ -149,25 +150,25 @@ func TestRandomJobHistoriesTellEveryLiveSubmitterExactlyOnce(t *testing.T) {
 					if step == 49 {
 						offline = false
 					}
-					var facts search.Facts
-					for i, j := range jobs {
-						if !j.present {
-							continue
-						}
-						job := &cli.Job{Id: fmt.Sprintf("j%d", i), State: j.state, CancelReason: "user cancelled"}
-						for k, sub := range j.subs {
-							if sub {
-								job.Submitters = append(job.Submitters, &cli.Submitter{RunId: string(runs[k]), At: timestamppb.New(time.Unix(1, 0))})
+					for store, fake := range fakes {
+						var facts search.Facts
+						for i, j := range jobs {
+							if !j.present {
+								continue
 							}
+							job := &cli.Job{Id: fmt.Sprintf("j%d", i), State: j.state, CancelReason: "user cancelled"}
+							if j.subs[store] {
+								job.Submitters = append(job.Submitters, &cli.Submitter{RunId: string(runs[store]), At: timestamppb.New(time.Unix(1, 0))})
+							}
+							facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Job{Job: job}})
 						}
-						facts = append(facts, &cli.TaskFact{Fact: &cli.TaskFact_Job{Job: job}})
+						fake.SetFacts(facts)
 					}
-					fake.SetFacts(facts)
 					live := rig.Daemon.State().Runs()
 					r.Sync(context.Background(), live)
 					synctest.Wait()
 					// Release exactly one reconnect; Wait reaches the next injected Sleep.
-					if len(r.active) > 0 {
+					for range len(r.active) {
 						resume <- struct{}{}
 						synctest.Wait()
 					}

@@ -135,7 +135,7 @@ func TestIdentityUpgradeDeliversBothRunsAndAttachesExistingSessions(t *testing.T
 }
 
 func startUpgrade(id string) *pb.Command {
-	return &pb.Command{Id: id, Body: &pb.Command_StartRun{StartRun: &pb.StartRun{Repository: "/repo", Task: "task", FanoutLimit: 1, Brief: "go", Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}}}}
+	return &pb.Command{Id: id, Body: &pb.Command_StartRun{StartRun: &pb.StartRun{Repository: "/repo-" + id, Task: "task", FanoutLimit: 1, Brief: "go", Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE}}}}
 }
 func dispatchUpgrade(t *testing.T, r *daemontest.Rig, c *pb.Command) *pb.Receipt {
 	t.Helper()
