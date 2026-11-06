@@ -112,10 +112,10 @@ func TestEnsureReportsMissingBinaryAndStartFailure(t *testing.T) {
 	defer cancel()
 	for _, tc := range []struct {
 		err  error
-		want clidaemon.Reason
-	}{{os.ErrNotExist, clidaemon.CLINotInstalled}, {errors.New("exit 4"), clidaemon.StartFailed}} {
+		want core.ViewReason
+	}{{os.ErrNotExist, core.CLINotInstalled}, {errors.New("exit 4"), core.StartFailed}} {
 		e := production.ExecEnsurer{Executable: "/opt/custom/vibesys-cli", Runner: &runner{err: tc.err}}
-		err := clidaemon.Ensure(ctx, e, clidaemon.Location{}, clidaemon.NoDaemon)
+		err := clidaemon.Ensure(ctx, e, clidaemon.Location{}, core.NoDaemon)
 		var unreadable *clidaemon.Unreadable
 		if !errors.As(err, &unreadable) || unreadable.Reason != tc.want {
 			t.Fatalf("%v", err)
@@ -130,7 +130,7 @@ func TestEnsureRejectsEmptyAndRelativeCLI(t *testing.T) {
 		r := new(runner)
 		err := (production.ExecEnsurer{Executable: path, Runner: r}).Ensure(ctx, clidaemon.Location{})
 		var u *clidaemon.Unreadable
-		if !errors.As(err, &u) || u.Reason != clidaemon.CLINotInstalled || r.program != "" {
+		if !errors.As(err, &u) || u.Reason != core.CLINotInstalled || r.program != "" {
 			t.Fatalf("path %q: %v, runner %+v", path, err, r)
 		}
 	}

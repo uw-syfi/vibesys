@@ -19,11 +19,11 @@ func (e *Engine) searchState(run core.RunID) *pb.SearchState {
 	if old != nil && (revision == 0 || revision+1 == old.Revision) {
 		return old
 	}
-	v := search.View{Reason: search.NoDaemon}
+	v := search.View{Reason: core.NoDaemon}
 	if e.Search != nil {
 		v, revision = e.Search.Get(run)
 		if revision == 0 {
-			v.Reason = search.NoDaemon
+			v.Reason = core.NoDaemon
 		}
 	}
 	// Reserve the first revision for a run that has not received a CLI view yet.
@@ -38,7 +38,7 @@ func (e *Engine) searchState(run core.RunID) *pb.SearchState {
 	}
 	s := &pb.SearchState{RunId: string(run), Revision: revision}
 	at := timestamppb.New(e.Clock.Now())
-	if v.Reason == search.Readable {
+	if v.Reason == core.Readable {
 		s.Health = &pb.SearchHealth{State: &pb.SearchHealth_LiveSince{LiveSince: at}}
 		if old != nil && old.Health.GetLiveSince() != nil {
 			s.Health = old.Health
@@ -55,24 +55,26 @@ func (e *Engine) searchState(run core.RunID) *pb.SearchState {
 	return s
 }
 
-func unreadableReason(r search.Reason) pb.UnreadableReason {
+func unreadableReason(r core.ViewReason) pb.UnreadableReason {
 	switch r {
-	case search.NoDaemon, search.Connecting:
+	case core.NoDaemon, core.Connecting:
 		return pb.UnreadableReason_UNREADABLE_REASON_NO_DAEMON
-	case search.StartFailed:
+	case core.StartFailed:
 		return pb.UnreadableReason_UNREADABLE_REASON_START_FAILED
-	case search.CLINotInstalled:
+	case core.CLINotInstalled:
 		return pb.UnreadableReason_UNREADABLE_REASON_CLI_NOT_INSTALLED
-	case search.ClientTooOld:
+	case core.ClientTooOld:
 		return pb.UnreadableReason_UNREADABLE_REASON_CLIENT_TOO_OLD
-	case search.DaemonTooOld:
+	case core.DaemonTooOld:
 		return pb.UnreadableReason_UNREADABLE_REASON_DAEMON_TOO_OLD
-	case search.StoreOwnedElsewhere:
+	case core.StoreOwnedElsewhere:
 		return pb.UnreadableReason_UNREADABLE_REASON_STORE_OWNED_ELSEWHERE
-	case search.StoreAway:
+	case core.StoreAway:
 		return pb.UnreadableReason_UNREADABLE_REASON_STORE_AWAY
-	case search.StreamLost, search.MessageTooLarge:
+	case core.StreamLost:
 		return pb.UnreadableReason_UNREADABLE_REASON_STREAM_LOST
+	case core.MessageTooLarge:
+		return pb.UnreadableReason_UNREADABLE_REASON_MESSAGE_TOO_LARGE
 	default:
 		panic("daemon: unhandled search reason")
 	}

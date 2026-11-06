@@ -17,17 +17,11 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/protocol"
 )
 
 // MaxReceiveMessageBytes is the explicit receive limit for the orchestrator link.
 const MaxReceiveMessageBytes = 4 << 20
-
-// The versions this build speaks, sent in the handshake. They equal the daemon package's, which the
-// client does not import; a test holds the two together.
-const (
-	ProtocolVersion    uint32 = 1
-	MinProtocolVersion uint32 = 1
-)
 
 // Dialer opens one connection to the daemon. It is called again after a connection breaks.
 type Dialer func(ctx context.Context) (net.Conn, error)
@@ -100,7 +94,7 @@ func Dial(ctx context.Context, dial Dialer, opts Options) (*Client, error) {
 	}
 	c := &Client{conn: conn, svc: pb.NewOrchestratorServiceClient(conn)}
 	resp, err := c.svc.Hello(ctx, &pb.HelloRequest{Client: &pb.BuildVersions{
-		BinaryVersion: opts.BinaryVersion, ProtocolVersion: ProtocolVersion, MinProtocolVersion: MinProtocolVersion,
+		BinaryVersion: opts.BinaryVersion, ProtocolVersion: protocol.Version, MinProtocolVersion: protocol.MinVersion,
 	}})
 	if err != nil {
 		_ = conn.Close()
@@ -145,24 +139,6 @@ func (c *Client) ListItems(ctx context.Context, agent string, before, pageSize u
 		return nil, err
 	}
 	return resp.GetPage(), nil
-}
-
-// ListPlans reads a run's plans.
-func (c *Client) ListPlans(ctx context.Context, run string) ([]*pb.Plan, error) {
-	resp, err := c.svc.ListPlans(ctx, &pb.ListPlansRequest{RunId: run})
-	if err != nil {
-		return nil, err
-	}
-	return resp.GetPlans(), nil
-}
-
-// ViewPlan reads one plan.
-func (c *Client) ViewPlan(ctx context.Context, run string, number uint32) (*pb.Plan, error) {
-	resp, err := c.svc.ViewPlan(ctx, &pb.ViewPlanRequest{RunId: run, Number: number})
-	if err != nil {
-		return nil, err
-	}
-	return resp.GetPlan(), nil
 }
 
 // Snapshot reads the runs and agents as they stand: the first message of WatchRuns.

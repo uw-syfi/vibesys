@@ -36,6 +36,8 @@ const (
 	UnreadableReason_UNREADABLE_REASON_STORE_OWNED_ELSEWHERE UnreadableReason = 6
 	UnreadableReason_UNREADABLE_REASON_STORE_AWAY            UnreadableReason = 7
 	UnreadableReason_UNREADABLE_REASON_STREAM_LOST           UnreadableReason = 8
+	// The job service sent a message past the size bound; retrying the same read cannot fix it.
+	UnreadableReason_UNREADABLE_REASON_MESSAGE_TOO_LARGE UnreadableReason = 9
 )
 
 // Enum value maps for UnreadableReason.
@@ -50,6 +52,7 @@ var (
 		6: "UNREADABLE_REASON_STORE_OWNED_ELSEWHERE",
 		7: "UNREADABLE_REASON_STORE_AWAY",
 		8: "UNREADABLE_REASON_STREAM_LOST",
+		9: "UNREADABLE_REASON_MESSAGE_TOO_LARGE",
 	}
 	UnreadableReason_value = map[string]int32{
 		"UNREADABLE_REASON_UNSPECIFIED":           0,
@@ -61,6 +64,7 @@ var (
 		"UNREADABLE_REASON_STORE_OWNED_ELSEWHERE": 6,
 		"UNREADABLE_REASON_STORE_AWAY":            7,
 		"UNREADABLE_REASON_STREAM_LOST":           8,
+		"UNREADABLE_REASON_MESSAGE_TOO_LARGE":     9,
 	}
 )
 
@@ -402,7 +406,7 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	"\x06reason\x18\x01 \x01(\x0e2).vibesys.orchestrator.v1.UnreadableReasonB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x128\n" +
 	"\x05since\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x05since\x12 \n" +
-	"\x06detail\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x06detail*\xe1\x02\n" +
+	"\x06detail\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x06detail*\x8a\x03\n" +
 	"\x10UnreadableReason\x12!\n" +
 	"\x1dUNREADABLE_REASON_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1bUNREADABLE_REASON_NO_DAEMON\x10\x01\x12\"\n" +
@@ -412,7 +416,8 @@ const file_vibesys_orchestrator_v1_search_proto_rawDesc = "" +
 	" UNREADABLE_REASON_DAEMON_TOO_OLD\x10\x05\x12+\n" +
 	"'UNREADABLE_REASON_STORE_OWNED_ELSEWHERE\x10\x06\x12 \n" +
 	"\x1cUNREADABLE_REASON_STORE_AWAY\x10\a\x12!\n" +
-	"\x1dUNREADABLE_REASON_STREAM_LOST\x10\bBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x1dUNREADABLE_REASON_STREAM_LOST\x10\b\x12'\n" +
+	"#UNREADABLE_REASON_MESSAGE_TOO_LARGE\x10\tBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_search_proto_rawDescOnce sync.Once

@@ -238,7 +238,7 @@ func (s *sim) settle() {
 func (s *sim) clearFaults() {
 	h := s.rig.Sidecars
 	h.Stall, h.AfterSend = 0, nil
-	s.rig.Plans.Stall, s.rig.JobStall = 0, 0
+	s.rig.JobStall = 0
 	s.rig.Faults.FailComplete, s.rig.Faults.FailRelease, s.rig.Faults.CrashAt = 0, 0, ""
 }
 

@@ -51,68 +51,6 @@ func (n *Nonces) Next() core.Nonce {
 	return core.Nonce(fmt.Sprintf("n%06d", n.n))
 }
 
-// Plans is a PlanReader over plans a test sets.
-type Plans struct {
-	mu    sync.Mutex
-	plans map[core.RunID][]*pb.Plan
-	// Stall makes that many calls hang until their context ends, calling Elapse first.
-	Stall  int
-	Elapse func()
-}
-
-func (p *Plans) hang(ctx context.Context) (bool, error) {
-	p.mu.Lock()
-	stall := p.Stall > 0
-	if stall {
-		p.Stall--
-	}
-	elapse := p.Elapse
-	p.mu.Unlock()
-	if !stall {
-		return false, nil
-	}
-	if ctx.Done() == nil {
-		return true, errors.New("fake plans: a call that hangs was made with no bound")
-	}
-	if elapse != nil {
-		elapse()
-	}
-	<-ctx.Done()
-	return true, ctx.Err()
-}
-
-// NewPlans returns a reader with no plans.
-func NewPlans() *Plans { return &Plans{plans: map[core.RunID][]*pb.Plan{}} }
-
-// Set replaces a run's plans.
-func (p *Plans) Set(run core.RunID, plans ...*pb.Plan) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.plans[run] = plans
-}
-
-// ListPlans implements daemon.PlanReader.
-func (p *Plans) ListPlans(ctx context.Context, run core.Run) ([]*pb.Plan, error) {
-	if hung, err := p.hang(ctx); hung {
-		return nil, err
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.plans[run.ID], nil
-}
-
-// ViewPlan implements daemon.PlanReader.
-func (p *Plans) ViewPlan(_ context.Context, run core.Run, number uint32) (*pb.Plan, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, plan := range p.plans[run.ID] {
-		if plan.GetNumber() == number {
-			return plan, nil
-		}
-	}
-	return nil, daemon.ErrPlanNotFound
-}
-
 // Reaction is what a session does when it is sent a command. The default one is DefaultReaction.
 type Reaction func(s *Session, cmd *pb.SidecarCommand)
 

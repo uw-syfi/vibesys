@@ -22,6 +22,7 @@ const unreadableWords = {
   [UnreadableReason.STORE_OWNED_ELSEWHERE]: 'Another search service owns this task’s store.',
   [UnreadableReason.STORE_AWAY]: 'The search store is unavailable.',
   [UnreadableReason.STREAM_LOST]: 'The connection to the search service was lost.',
+  [UnreadableReason.MESSAGE_TOO_LARGE]: 'The search service sent more than the app can read.',
 } satisfies Record<UnreadableReason, string>;
 
 /** Search facts stay visible when the daemon cannot read them. Free text is displayed only. */

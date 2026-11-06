@@ -17,9 +17,9 @@ import (
 // test-isolation: exercise the private follower adapter's failure mapping and late
 // callback guard; synctest owns scheduling, with no wall-clock synchronization.
 func TestFollowerEveryFailureReplacesReadableReason(t *testing.T) {
-	for _, reason := range []clidaemon.Reason{clidaemon.NoDaemon, clidaemon.StartFailed, clidaemon.CLINotInstalled, clidaemon.ClientTooOld, clidaemon.DaemonTooOld, clidaemon.StreamLost, clidaemon.MessageTooLarge, 255} {
+	for _, reason := range []core.ViewReason{core.NoDaemon, core.StartFailed, core.CLINotInstalled, core.ClientTooOld, core.DaemonTooOld, core.StreamLost, core.MessageTooLarge, 255} {
 		ctx, cancel := context.WithCancel(context.Background())
-		v := search.View{Reason: search.Readable}
+		v := search.View{Reason: core.Readable}
 		f := clidaemon.Follower{
 			Connect: func(context.Context) (clidaemon.Connection, error) {
 				return nil, &clidaemon.Unreadable{Reason: reason, Detail: "failure"}
@@ -32,7 +32,7 @@ func TestFollowerEveryFailureReplacesReadableReason(t *testing.T) {
 		}
 		followSearch(ctx, f, Subscription{Repository: "/repo", Task: "task"}, &v, func(search.View) {})
 		cancel()
-		if v.Reason == search.Readable || v.Detail != "failure" {
+		if v.Reason == core.Readable || v.Detail != "failure" {
 			t.Fatalf("reason %v left %+v", reason, v)
 		}
 	}
@@ -67,7 +67,7 @@ func TestReconcilerGeneratedLifetimes(t *testing.T) {
 			v := search.View{}
 			followSearch(ctx, f, k, &v, publish)
 			// A callback racing a stop must not restore a deleted run.
-			publish(search.View{Reason: search.StreamLost, Detail: "late"})
+			publish(search.View{Reason: core.StreamLost, Detail: "late"})
 		}
 		for range 100 {
 			var runs []core.Run
@@ -103,7 +103,7 @@ func TestReconcilerGeneratedLifetimes(t *testing.T) {
 		r.Sync(context.Background(), nil)
 		synctest.Wait()
 		for _, publish := range callbacks {
-			publish(search.View{Reason: search.Readable})
+			publish(search.View{Reason: core.Readable})
 		}
 		for _, id := range []core.RunID{"a", "b", "c", "d", "e"} {
 			if _, rev := store.Get(id); rev != 0 {
@@ -123,7 +123,7 @@ func TestTerminalFollowerRestartsOnlyWithChangedSubscription(t *testing.T) {
 		calls := 0
 		r := &Reconciler{Store: new(search.Store), Follow: func(_ context.Context, _ Subscription, publish func(search.View)) {
 			calls++
-			publish(search.View{Reason: search.CLINotInstalled})
+			publish(search.View{Reason: core.CLINotInstalled})
 		}}
 		run := core.Run{ID: "r", Status: core.RunRunning, Location: core.CliLocation{CLI: "/old/cli"}}
 		defer r.Close()
@@ -134,7 +134,7 @@ func TestTerminalFollowerRestartsOnlyWithChangedSubscription(t *testing.T) {
 			synctest.Wait()
 		}
 		v, _ := r.Store.Get("r")
-		if calls != 1 || v.Reason != search.CLINotInstalled {
+		if calls != 1 || v.Reason != core.CLINotInstalled {
 			t.Fatal(calls, v)
 		}
 		run.Location.CLI = "/new/cli"
@@ -153,7 +153,7 @@ func TestNewFollowerStartsConnecting(t *testing.T) {
 		defer r.Close()
 		r.Sync(context.Background(), []core.Run{{ID: "r", Status: core.RunRunning}})
 		v, rev := r.Store.Get("r")
-		if rev == 0 || v.Reason != search.Connecting {
+		if rev == 0 || v.Reason != core.Connecting {
 			t.Fatal(v, rev)
 		}
 		r.Close()

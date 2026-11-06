@@ -1,15 +1,29 @@
+import {getOption} from '@bufbuild/protobuf';
+import {
+  file_vibesys_orchestrator_v1_service,
+  min_protocol_version,
+  protocol_version,
+} from '@vibesys/orchestrator-proto';
+
 /**
  * What this client says to a daemon in `Hello` and how it words a refusal. `PROTOCOL_VERSION` is
- * the revision of `OrchestratorService` this client was written against; it moves with the
- * daemon's `ProtocolVersion` (orchestrator/internal/daemon/ports.go) when a change breaks a peer.
+ * the revision of `OrchestratorService` this client was written against. It is read from the
+ * service's file options in `service.proto`, the one place the daemon and the Go client read it
+ * too, so a change that breaks a peer moves all of them together.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = getOption(file_vibesys_orchestrator_v1_service, protocol_version);
+
+/** The oldest revision the app still speaks, from the same options. */
+export const MIN_PROTOCOL_VERSION = getOption(
+  file_vibesys_orchestrator_v1_service,
+  min_protocol_version,
+);
 
 /** The client's `BuildVersions`, as the initializer of that message. */
 export const CLIENT_BUILD = {
   binaryVersion: 'desktop',
   protocolVersion: PROTOCOL_VERSION,
-  minProtocolVersion: PROTOCOL_VERSION,
+  minProtocolVersion: MIN_PROTOCOL_VERSION,
 } as const;
 
 /** The daemon reports this app is too old for it. */

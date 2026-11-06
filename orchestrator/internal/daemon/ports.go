@@ -10,12 +10,6 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
 
-// The versions this build speaks. ProtocolVersion rises only when a change breaks a peer.
-const (
-	ProtocolVersion    uint32 = 1
-	MinProtocolVersion uint32 = 1
-)
-
 // MergeWindow is how often the daemon ends the hub's merge window. Run ticks at this rate.
 const MergeWindow = 50 * time.Millisecond
 
@@ -28,7 +22,7 @@ type Nonces interface{ Next() core.Nonce }
 // Bounds gives each call the daemon makes outside itself a limit, so that one call that never
 // returns cannot stall the loop that serves every agent. Production returns a context with a
 // timeout; a test returns one it ends itself. The daemon asks for a bound for every call to a
-// Sidecars, Sidecar, JobSource or PlanReader, and treats the end of the bound as a failure to retry:
+// Sidecars, Sidecar or JobSource, and treats the end of the bound as a failure to retry:
 // the call may or may not have had its effect, which every call it makes can bear.
 type Bounds interface {
 	Bound(ctx context.Context) (context.Context, context.CancelFunc)
@@ -116,16 +110,6 @@ type EventStream interface {
 	Next() (*pb.SidecarEvent, error)
 	Close()
 }
-
-// PlanReader reads plans through vibesys-cli. The orchestrator shows them and decides nothing on
-// them. ErrPlanNotFound says the number names no plan.
-type PlanReader interface {
-	ListPlans(ctx context.Context, run core.Run) ([]*pb.Plan, error)
-	ViewPlan(ctx context.Context, run core.Run, number uint32) (*pb.Plan, error)
-}
-
-// ErrPlanNotFound is the answer to a plan number that names no plan.
-var ErrPlanNotFound = errors.New("daemon: no such plan")
 
 // StartChecks refuses a StartRun that cannot work, before it is decided: no run, event or receipt
 // is made for a refused start. It is the daemon's only look at the repository and at whether

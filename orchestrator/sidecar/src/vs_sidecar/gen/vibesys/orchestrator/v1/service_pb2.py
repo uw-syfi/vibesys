@@ -23,20 +23,20 @@ _sym_db = _symbol_database.Default()
 
 
 from vs_sidecar.gen.buf.validate import validate_pb2 as buf_dot_validate_dot_validate__pb2
-from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
+from google.protobuf import descriptor_pb2 as google_dot_protobuf_dot_descriptor__pb2
 from vs_sidecar.gen.vibesys.orchestrator.v1 import events_pb2 as vibesys_dot_orchestrator_dot_v1_dot_events__pb2
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as vibesys_dot_orchestrator_dot_v1_dot_orchestrator__pb2
 from vs_sidecar.gen.vibesys.orchestrator.v1 import search_pb2 as vibesys_dot_orchestrator_dot_v1_dot_search__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%vibesys/orchestrator/v1/service.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a$vibesys/orchestrator/v1/search.proto\"\x93\x01\n\rBuildVersions\x12%\n\x0e\x62inary_version\x18\x01 \x01(\tR\rbinaryVersion\x12)\n\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x12\x30\n\x14min_protocol_version\x18\x03 \x01(\rR\x12minProtocolVersion\"U\n\x0f\x44ispatchRequest\x12\x42\n\x07\x63ommand\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.CommandB\x06\xbaH\x03\xc8\x01\x01R\x07\x63ommand\"V\n\x10\x44ispatchResponse\x12\x42\n\x07receipt\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.ReceiptB\x06\xbaH\x03\xc8\x01\x01R\x07receipt\"V\n\x0cHelloRequest\x12\x46\n\x06\x63lient\x18\x01 \x01(\x0b\x32&.vibesys.orchestrator.v1.BuildVersionsB\x06\xbaH\x03\xc8\x01\x01R\x06\x63lient\"\xb1\x01\n\rHelloResponse\x12\x46\n\x06\x64\x61\x65mon\x18\x01 \x01(\x0b\x32&.vibesys.orchestrator.v1.BuildVersionsB\x06\xbaH\x03\xc8\x01\x01R\x06\x64\x61\x65mon\x12X\n\rcompatibility\x18\x02 \x01(\x0e\x32&.vibesys.orchestrator.v1.CompatibilityB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\rcompatibility\"9\n\x10WatchRunsRequest\x12%\n\x0e\x61\x66ter_sequence\x18\x01 \x01(\x04R\rafterSequence\"\xe7\x02\n\x0cRunsSnapshot\x12\x30\n\x04runs\x18\x01 \x03(\x0b\x32\x1c.vibesys.orchestrator.v1.RunR\x04runs\x12\x36\n\x06\x61gents\x18\x02 \x03(\x0b\x32\x1e.vibesys.orchestrator.v1.AgentR\x06\x61gents\x12\x1a\n\x08sequence\x18\x03 \x01(\x04R\x08sequence\x12\x33\n\x05turns\x18\x04 \x03(\x0b\x32\x1d.vibesys.orchestrator.v1.TurnR\x05turns\x12<\n\x08messages\x18\x05 \x03(\x0b\x32 .vibesys.orchestrator.v1.MessageR\x08messages\x12@\n\x08searches\x18\x06 \x03(\x0b\x32$.vibesys.orchestrator.v1.SearchStateR\x08searches\x12\x1c\n\ttruncated\x18\x07 \x01(\x08R\ttruncated\"\xdf\x01\n\x11WatchRunsResponse\x12\x43\n\x08snapshot\x18\x01 \x01(\x0b\x32%.vibesys.orchestrator.v1.RunsSnapshotH\x00R\x08snapshot\x12\x36\n\x05\x65vent\x18\x02 \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.EventH\x00R\x05\x65vent\x12>\n\x06search\x18\x03 \x01(\x0b\x32$.vibesys.orchestrator.v1.SearchStateH\x00R\x06searchB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\x87\x01\n\x11WatchAgentRequest\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12\'\n\tpage_size\x18\x02 \x01(\rB\n\xbaH\x07*\x05\x18\xe8\x07 \x00R\x08pageSize\x12%\n\x0e\x61\x66ter_sequence\x18\x03 \x01(\x04R\rafterSequence\"\x8c\x01\n\tItemsPage\x12\x33\n\x05items\x18\x01 \x03(\x0b\x32\x1d.vibesys.orchestrator.v1.ItemR\x05items\x12\x1a\n\x08sequence\x18\x02 \x01(\x04R\x08sequence\x12.\n\x13next_before_ordinal\x18\x03 \x01(\rR\x11nextBeforeOrdinal\"\x9b\x02\n\x12WatchAgentResponse\x12\x38\n\x04page\x18\x01 \x01(\x0b\x32\".vibesys.orchestrator.v1.ItemsPageH\x00R\x04page\x12\x33\n\x04item\x18\x02 \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.ItemH\x00R\x04item\x12\x36\n\x05\x64\x65lta\x18\x03 \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.DeltaH\x00R\x05\x64\x65lta\x12\x33\n\x04turn\x18\x04 \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.TurnH\x00R\x04turn\x12\x1a\n\x08sequence\x18\x05 \x01(\x04R\x08sequenceB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\x8f\x01\n\x10ListItemsRequest\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12.\n\x0e\x62\x65\x66ore_ordinal\x18\x02 \x01(\rB\x07\xbaH\x04*\x02 \x00R\rbeforeOrdinal\x12\'\n\tpage_size\x18\x03 \x01(\rB\n\xbaH\x07*\x05\x18\xe8\x07 \x00R\x08pageSize\"S\n\x11ListItemsResponse\x12>\n\x04page\x18\x01 \x01(\x0b\x32\".vibesys.orchestrator.v1.ItemsPageB\x06\xbaH\x03\xc8\x01\x01R\x04page\"c\n\x0bPlanComment\x12\x12\n\x04text\x18\x01 \x01(\tR\x04text\x12*\n\x02\x61t\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\x02\x61t\x12\x14\n\x05\x61gent\x18\x03 \x01(\tR\x05\x61gent\"\xd0\x02\n\x04Plan\x12\x1f\n\x06number\x18\x01 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x06number\x12\x14\n\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n\x04\x62ody\x18\x03 \x01(\tR\x04\x62ody\x12\x45\n\x06status\x18\x04 \x01(\x0e\x32#.vibesys.orchestrator.v1.PlanStatusB\x08\xbaH\x05\x82\x01\x02\x10\x01R\x06status\x12@\n\x08\x63omments\x18\x05 \x03(\x0b\x32$.vibesys.orchestrator.v1.PlanCommentR\x08\x63omments\x12\x39\n\ncreated_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x39\n\nupdated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\tupdatedAt\"2\n\x10ListPlansRequest\x12\x1e\n\x06run_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\"H\n\x11ListPlansResponse\x12\x33\n\x05plans\x18\x01 \x03(\x0b\x32\x1d.vibesys.orchestrator.v1.PlanR\x05plans\"R\n\x0fViewPlanRequest\x12\x1e\n\x06run_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\x12\x1f\n\x06number\x18\x02 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x06number\"M\n\x10ViewPlanResponse\x12\x39\n\x04plan\x18\x01 \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.PlanB\x06\xbaH\x03\xc8\x01\x01R\x04plan*\x90\x01\n\rCompatibility\x12\x1d\n\x19\x43OMPATIBILITY_UNSPECIFIED\x10\x00\x12\x1c\n\x18\x43OMPATIBILITY_COMPATIBLE\x10\x01\x12 \n\x1c\x43OMPATIBILITY_CLIENT_TOO_OLD\x10\x02\x12 \n\x1c\x43OMPATIBILITY_DAEMON_TOO_OLD\x10\x03*\x9e\x01\n\nPlanStatus\x12\x1b\n\x17PLAN_STATUS_UNSPECIFIED\x10\x00\x12\x14\n\x10PLAN_STATUS_OPEN\x10\x01\x12\x16\n\x12PLAN_STATUS_CHOSEN\x10\x02\x12\x13\n\x0fPLAN_STATUS_WON\x10\x03\x12\x16\n\x12PLAN_STATUS_PARKED\x10\x04\x12\x18\n\x14PLAN_STATUS_REJECTED\x10\x05\x32\xc6\x05\n\x13OrchestratorService\x12V\n\x05Hello\x12%.vibesys.orchestrator.v1.HelloRequest\x1a&.vibesys.orchestrator.v1.HelloResponse\x12_\n\x08\x44ispatch\x12(.vibesys.orchestrator.v1.DispatchRequest\x1a).vibesys.orchestrator.v1.DispatchResponse\x12\x64\n\tWatchRuns\x12).vibesys.orchestrator.v1.WatchRunsRequest\x1a*.vibesys.orchestrator.v1.WatchRunsResponse0\x01\x12g\n\nWatchAgent\x12*.vibesys.orchestrator.v1.WatchAgentRequest\x1a+.vibesys.orchestrator.v1.WatchAgentResponse0\x01\x12\x62\n\tListItems\x12).vibesys.orchestrator.v1.ListItemsRequest\x1a*.vibesys.orchestrator.v1.ListItemsResponse\x12\x62\n\tListPlans\x12).vibesys.orchestrator.v1.ListPlansRequest\x1a*.vibesys.orchestrator.v1.ListPlansResponse\x12_\n\x08ViewPlan\x12(.vibesys.orchestrator.v1.ViewPlanRequest\x1a).vibesys.orchestrator.v1.ViewPlanResponseBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%vibesys/orchestrator/v1/service.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a$vibesys/orchestrator/v1/events.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a$vibesys/orchestrator/v1/search.proto\"\x93\x01\n\rBuildVersions\x12%\n\x0e\x62inary_version\x18\x01 \x01(\tR\rbinaryVersion\x12)\n\x10protocol_version\x18\x02 \x01(\rR\x0fprotocolVersion\x12\x30\n\x14min_protocol_version\x18\x03 \x01(\rR\x12minProtocolVersion\"U\n\x0f\x44ispatchRequest\x12\x42\n\x07\x63ommand\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.CommandB\x06\xbaH\x03\xc8\x01\x01R\x07\x63ommand\"V\n\x10\x44ispatchResponse\x12\x42\n\x07receipt\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.ReceiptB\x06\xbaH\x03\xc8\x01\x01R\x07receipt\"V\n\x0cHelloRequest\x12\x46\n\x06\x63lient\x18\x01 \x01(\x0b\x32&.vibesys.orchestrator.v1.BuildVersionsB\x06\xbaH\x03\xc8\x01\x01R\x06\x63lient\"\xb1\x01\n\rHelloResponse\x12\x46\n\x06\x64\x61\x65mon\x18\x01 \x01(\x0b\x32&.vibesys.orchestrator.v1.BuildVersionsB\x06\xbaH\x03\xc8\x01\x01R\x06\x64\x61\x65mon\x12X\n\rcompatibility\x18\x02 \x01(\x0e\x32&.vibesys.orchestrator.v1.CompatibilityB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\rcompatibility\"9\n\x10WatchRunsRequest\x12%\n\x0e\x61\x66ter_sequence\x18\x01 \x01(\x04R\rafterSequence\"\xe7\x02\n\x0cRunsSnapshot\x12\x30\n\x04runs\x18\x01 \x03(\x0b\x32\x1c.vibesys.orchestrator.v1.RunR\x04runs\x12\x36\n\x06\x61gents\x18\x02 \x03(\x0b\x32\x1e.vibesys.orchestrator.v1.AgentR\x06\x61gents\x12\x1a\n\x08sequence\x18\x03 \x01(\x04R\x08sequence\x12\x33\n\x05turns\x18\x04 \x03(\x0b\x32\x1d.vibesys.orchestrator.v1.TurnR\x05turns\x12<\n\x08messages\x18\x05 \x03(\x0b\x32 .vibesys.orchestrator.v1.MessageR\x08messages\x12@\n\x08searches\x18\x06 \x03(\x0b\x32$.vibesys.orchestrator.v1.SearchStateR\x08searches\x12\x1c\n\ttruncated\x18\x07 \x01(\x08R\ttruncated\"\xdf\x01\n\x11WatchRunsResponse\x12\x43\n\x08snapshot\x18\x01 \x01(\x0b\x32%.vibesys.orchestrator.v1.RunsSnapshotH\x00R\x08snapshot\x12\x36\n\x05\x65vent\x18\x02 \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.EventH\x00R\x05\x65vent\x12>\n\x06search\x18\x03 \x01(\x0b\x32$.vibesys.orchestrator.v1.SearchStateH\x00R\x06searchB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\x87\x01\n\x11WatchAgentRequest\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12\'\n\tpage_size\x18\x02 \x01(\rB\n\xbaH\x07*\x05\x18\xe8\x07 \x00R\x08pageSize\x12%\n\x0e\x61\x66ter_sequence\x18\x03 \x01(\x04R\rafterSequence\"\x8c\x01\n\tItemsPage\x12\x33\n\x05items\x18\x01 \x03(\x0b\x32\x1d.vibesys.orchestrator.v1.ItemR\x05items\x12\x1a\n\x08sequence\x18\x02 \x01(\x04R\x08sequence\x12.\n\x13next_before_ordinal\x18\x03 \x01(\rR\x11nextBeforeOrdinal\"\x9b\x02\n\x12WatchAgentResponse\x12\x38\n\x04page\x18\x01 \x01(\x0b\x32\".vibesys.orchestrator.v1.ItemsPageH\x00R\x04page\x12\x33\n\x04item\x18\x02 \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.ItemH\x00R\x04item\x12\x36\n\x05\x64\x65lta\x18\x03 \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.DeltaH\x00R\x05\x64\x65lta\x12\x33\n\x04turn\x18\x04 \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.TurnH\x00R\x04turn\x12\x1a\n\x08sequence\x18\x05 \x01(\x04R\x08sequenceB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\x8f\x01\n\x10ListItemsRequest\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12.\n\x0e\x62\x65\x66ore_ordinal\x18\x02 \x01(\rB\x07\xbaH\x04*\x02 \x00R\rbeforeOrdinal\x12\'\n\tpage_size\x18\x03 \x01(\rB\n\xbaH\x07*\x05\x18\xe8\x07 \x00R\x08pageSize\"S\n\x11ListItemsResponse\x12>\n\x04page\x18\x01 \x01(\x0b\x32\".vibesys.orchestrator.v1.ItemsPageB\x06\xbaH\x03\xc8\x01\x01R\x04page*\x90\x01\n\rCompatibility\x12\x1d\n\x19\x43OMPATIBILITY_UNSPECIFIED\x10\x00\x12\x1c\n\x18\x43OMPATIBILITY_COMPATIBLE\x10\x01\x12 \n\x1c\x43OMPATIBILITY_CLIENT_TOO_OLD\x10\x02\x12 \n\x1c\x43OMPATIBILITY_DAEMON_TOO_OLD\x10\x03\x32\x81\x04\n\x13OrchestratorService\x12V\n\x05Hello\x12%.vibesys.orchestrator.v1.HelloRequest\x1a&.vibesys.orchestrator.v1.HelloResponse\x12_\n\x08\x44ispatch\x12(.vibesys.orchestrator.v1.DispatchRequest\x1a).vibesys.orchestrator.v1.DispatchResponse\x12\x64\n\tWatchRuns\x12).vibesys.orchestrator.v1.WatchRunsRequest\x1a*.vibesys.orchestrator.v1.WatchRunsResponse0\x01\x12g\n\nWatchAgent\x12*.vibesys.orchestrator.v1.WatchAgentRequest\x1a+.vibesys.orchestrator.v1.WatchAgentResponse0\x01\x12\x62\n\tListItems\x12).vibesys.orchestrator.v1.ListItemsRequest\x1a*.vibesys.orchestrator.v1.ListItemsResponse:I\n\x10protocol_version\x12\x1c.google.protobuf.FileOptions\x18\xbe\x87\x03 \x01(\rR\x0fprotocolVersion:P\n\x14min_protocol_version\x12\x1c.google.protobuf.FileOptions\x18\xbf\x87\x03 \x01(\rR\x12minProtocolVersionB\\ZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1\xf0\xbb\x18\x01\xf8\xbb\x18\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'vibesys.orchestrator.v1.service_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'ZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1'
+  _globals['DESCRIPTOR']._serialized_options = b'ZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1\360\273\030\001\370\273\030\001'
   _globals['_DISPATCHREQUEST'].fields_by_name['command']._loaded_options = None
   _globals['_DISPATCHREQUEST'].fields_by_name['command']._serialized_options = b'\272H\003\310\001\001'
   _globals['_DISPATCHRESPONSE'].fields_by_name['receipt']._loaded_options = None
@@ -63,60 +63,34 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_LISTITEMSREQUEST'].fields_by_name['page_size']._serialized_options = b'\272H\007*\005\030\350\007 \000'
   _globals['_LISTITEMSRESPONSE'].fields_by_name['page']._loaded_options = None
   _globals['_LISTITEMSRESPONSE'].fields_by_name['page']._serialized_options = b'\272H\003\310\001\001'
-  _globals['_PLAN'].fields_by_name['number']._loaded_options = None
-  _globals['_PLAN'].fields_by_name['number']._serialized_options = b'\272H\004*\002 \000'
-  _globals['_PLAN'].fields_by_name['status']._loaded_options = None
-  _globals['_PLAN'].fields_by_name['status']._serialized_options = b'\272H\005\202\001\002\020\001'
-  _globals['_LISTPLANSREQUEST'].fields_by_name['run_id']._loaded_options = None
-  _globals['_LISTPLANSREQUEST'].fields_by_name['run_id']._serialized_options = b'\272H\004r\002\020\001'
-  _globals['_VIEWPLANREQUEST'].fields_by_name['run_id']._loaded_options = None
-  _globals['_VIEWPLANREQUEST'].fields_by_name['run_id']._serialized_options = b'\272H\004r\002\020\001'
-  _globals['_VIEWPLANREQUEST'].fields_by_name['number']._loaded_options = None
-  _globals['_VIEWPLANREQUEST'].fields_by_name['number']._serialized_options = b'\272H\004*\002 \000'
-  _globals['_VIEWPLANRESPONSE'].fields_by_name['plan']._loaded_options = None
-  _globals['_VIEWPLANRESPONSE'].fields_by_name['plan']._serialized_options = b'\272H\003\310\001\001'
-  _globals['_COMPATIBILITY']._serialized_start=3016
-  _globals['_COMPATIBILITY']._serialized_end=3160
-  _globals['_PLANSTATUS']._serialized_start=3163
-  _globals['_PLANSTATUS']._serialized_end=3321
-  _globals['_BUILDVERSIONS']._serialized_start=249
-  _globals['_BUILDVERSIONS']._serialized_end=396
-  _globals['_DISPATCHREQUEST']._serialized_start=398
-  _globals['_DISPATCHREQUEST']._serialized_end=483
-  _globals['_DISPATCHRESPONSE']._serialized_start=485
-  _globals['_DISPATCHRESPONSE']._serialized_end=571
-  _globals['_HELLOREQUEST']._serialized_start=573
-  _globals['_HELLOREQUEST']._serialized_end=659
-  _globals['_HELLORESPONSE']._serialized_start=662
-  _globals['_HELLORESPONSE']._serialized_end=839
-  _globals['_WATCHRUNSREQUEST']._serialized_start=841
-  _globals['_WATCHRUNSREQUEST']._serialized_end=898
-  _globals['_RUNSSNAPSHOT']._serialized_start=901
-  _globals['_RUNSSNAPSHOT']._serialized_end=1260
-  _globals['_WATCHRUNSRESPONSE']._serialized_start=1263
-  _globals['_WATCHRUNSRESPONSE']._serialized_end=1486
-  _globals['_WATCHAGENTREQUEST']._serialized_start=1489
-  _globals['_WATCHAGENTREQUEST']._serialized_end=1624
-  _globals['_ITEMSPAGE']._serialized_start=1627
-  _globals['_ITEMSPAGE']._serialized_end=1767
-  _globals['_WATCHAGENTRESPONSE']._serialized_start=1770
-  _globals['_WATCHAGENTRESPONSE']._serialized_end=2053
-  _globals['_LISTITEMSREQUEST']._serialized_start=2056
-  _globals['_LISTITEMSREQUEST']._serialized_end=2199
-  _globals['_LISTITEMSRESPONSE']._serialized_start=2201
-  _globals['_LISTITEMSRESPONSE']._serialized_end=2284
-  _globals['_PLANCOMMENT']._serialized_start=2286
-  _globals['_PLANCOMMENT']._serialized_end=2385
-  _globals['_PLAN']._serialized_start=2388
-  _globals['_PLAN']._serialized_end=2724
-  _globals['_LISTPLANSREQUEST']._serialized_start=2726
-  _globals['_LISTPLANSREQUEST']._serialized_end=2776
-  _globals['_LISTPLANSRESPONSE']._serialized_start=2778
-  _globals['_LISTPLANSRESPONSE']._serialized_end=2850
-  _globals['_VIEWPLANREQUEST']._serialized_start=2852
-  _globals['_VIEWPLANREQUEST']._serialized_end=2934
-  _globals['_VIEWPLANRESPONSE']._serialized_start=2936
-  _globals['_VIEWPLANRESPONSE']._serialized_end=3013
-  _globals['_ORCHESTRATORSERVICE']._serialized_start=3324
-  _globals['_ORCHESTRATORSERVICE']._serialized_end=4034
+  _globals['_COMPATIBILITY']._serialized_start=2288
+  _globals['_COMPATIBILITY']._serialized_end=2432
+  _globals['_BUILDVERSIONS']._serialized_start=250
+  _globals['_BUILDVERSIONS']._serialized_end=397
+  _globals['_DISPATCHREQUEST']._serialized_start=399
+  _globals['_DISPATCHREQUEST']._serialized_end=484
+  _globals['_DISPATCHRESPONSE']._serialized_start=486
+  _globals['_DISPATCHRESPONSE']._serialized_end=572
+  _globals['_HELLOREQUEST']._serialized_start=574
+  _globals['_HELLOREQUEST']._serialized_end=660
+  _globals['_HELLORESPONSE']._serialized_start=663
+  _globals['_HELLORESPONSE']._serialized_end=840
+  _globals['_WATCHRUNSREQUEST']._serialized_start=842
+  _globals['_WATCHRUNSREQUEST']._serialized_end=899
+  _globals['_RUNSSNAPSHOT']._serialized_start=902
+  _globals['_RUNSSNAPSHOT']._serialized_end=1261
+  _globals['_WATCHRUNSRESPONSE']._serialized_start=1264
+  _globals['_WATCHRUNSRESPONSE']._serialized_end=1487
+  _globals['_WATCHAGENTREQUEST']._serialized_start=1490
+  _globals['_WATCHAGENTREQUEST']._serialized_end=1625
+  _globals['_ITEMSPAGE']._serialized_start=1628
+  _globals['_ITEMSPAGE']._serialized_end=1768
+  _globals['_WATCHAGENTRESPONSE']._serialized_start=1771
+  _globals['_WATCHAGENTRESPONSE']._serialized_end=2054
+  _globals['_LISTITEMSREQUEST']._serialized_start=2057
+  _globals['_LISTITEMSREQUEST']._serialized_end=2200
+  _globals['_LISTITEMSRESPONSE']._serialized_start=2202
+  _globals['_LISTITEMSRESPONSE']._serialized_end=2285
+  _globals['_ORCHESTRATORSERVICE']._serialized_start=2435
+  _globals['_ORCHESTRATORSERVICE']._serialized_end=2948
 # @@protoc_insertion_point(module_scope)

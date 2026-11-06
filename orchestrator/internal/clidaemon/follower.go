@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	pb "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -16,7 +17,7 @@ type Connection interface {
 }
 
 // Connector locates and dials using the run's recorded location. It returns a
-// typed NoDaemon when discovery or dialing fails, without starting anything.
+// typed core.NoDaemon when discovery or dialing fails, without starting anything.
 type Connector func(context.Context) (Connection, error)
 
 // Bound derives a unary deadline from the caller, using an injected clock.
@@ -48,14 +49,14 @@ func (f Follower) Follow(ctx context.Context, request *pb.WatchTaskRequest) erro
 		}
 		var unreadable *Unreadable
 		if !errors.As(err, &unreadable) {
-			reason := StreamLost
+			reason := core.StreamLost
 			if status.Code(err) == codes.ResourceExhausted {
-				reason = MessageTooLarge
+				reason = core.MessageTooLarge
 			}
 			unreadable = &Unreadable{reason, err.Error()}
 		}
 		f.Failed(unreadable)
-		if unreadable.Reason == DaemonTooOld || unreadable.Reason == ClientTooOld || unreadable.Reason == CLINotInstalled || unreadable.Reason == MessageTooLarge {
+		if unreadable.Reason == core.DaemonTooOld || unreadable.Reason == core.ClientTooOld || unreadable.Reason == core.CLINotInstalled || unreadable.Reason == core.MessageTooLarge {
 			return unreadable
 		}
 		if progressed {
@@ -114,7 +115,7 @@ func (f Follower) connect(ctx context.Context) (Connection, error) {
 		return conn, nil
 	}
 	var unreadable *Unreadable
-	if !errors.As(err, &unreadable) || (unreadable.Reason != NoDaemon && unreadable.Reason != DaemonTooOld) {
+	if !errors.As(err, &unreadable) || (unreadable.Reason != core.NoDaemon && unreadable.Reason != core.DaemonTooOld) {
 		return nil, err
 	}
 	bound, cancel := f.Bound(ctx)

@@ -4,6 +4,7 @@ import (
 	"buf.build/go/protovalidate"
 	"fmt"
 	pb "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"google.golang.org/protobuf/proto"
 	"sort"
 )
@@ -84,12 +85,12 @@ func FactKey(f *pb.TaskFact) (string, error) {
 // atomic too. Only CaughtUp advances the resume token, even after live diffs.
 func (s *Session) Apply(m *pb.WatchTaskResponse) (bool, error) {
 	if m == nil {
-		return false, &Unreadable{StreamLost, "missing WatchTask response"}
+		return false, &Unreadable{core.StreamLost, "missing WatchTask response"}
 	}
 	if err := protovalidate.Validate(m); err != nil {
-		return false, &Unreadable{StreamLost, err.Error()}
+		return false, &Unreadable{core.StreamLost, err.Error()}
 	}
-	bad := func() (bool, error) { return false, &Unreadable{StreamLost, "invalid WatchTask ordering or fact"} }
+	bad := func() (bool, error) { return false, &Unreadable{core.StreamLost, "invalid WatchTask ordering or fact"} }
 	if m.GetEpoch() == "" || m.GetSequence() == 0 {
 		return bad()
 	}

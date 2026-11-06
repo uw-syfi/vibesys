@@ -92,6 +92,10 @@ type ProcessSidecars struct {
 	conns map[core.Session]*sidecarProcess
 }
 
+// ToolServerName is the name every agent's tool server is registered under, so the tools show up
+// as mcp__vibesys__spawn_agent and so on. The harness skills name it; a test holds the two together.
+const ToolServerName = "vibesys"
+
 // MCPServer is one stdio tool server in the sidecar's --mcp-config file.
 type MCPServer struct {
 	Name    string            `json:"name"`
@@ -141,7 +145,7 @@ func (s *ProcessSidecars) Launch(ctx context.Context, l core.LaunchSession, env 
 	if err := os.WriteFile(filepath.Join(dir, "launch.json"), data, 0o600); err != nil {
 		return nil, err
 	}
-	tools, err := json.Marshal([]MCPServer{{Name: "vibesys", Command: s.Executable, Args: []string{"mcp"}, Env: env}})
+	tools, err := json.Marshal([]MCPServer{{Name: ToolServerName, Command: s.Executable, Args: []string{"mcp"}, Env: env}})
 	if err != nil {
 		return nil, err
 	}

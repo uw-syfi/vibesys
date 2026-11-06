@@ -46,7 +46,7 @@ func TestRandomJobHistoriesTellEveryLiveSubmitterExactlyOnce(t *testing.T) {
 					r.Follow = func(ctx context.Context, k Subscription, publish func(search.View)) {
 						f := clidaemon.Follower{Connect: func(context.Context) (clidaemon.Connection, error) {
 							if offline {
-								return nil, &clidaemon.Unreadable{Reason: clidaemon.StreamLost, Detail: "offline"}
+								return nil, &clidaemon.Unreadable{Reason: core.StreamLost, Detail: "offline"}
 							}
 							return fakes[map[string]int{"/repo-0": 0, "/repo-1": 1}[k.Repository]], nil
 						}, Bound: func(c context.Context) (context.Context, context.CancelFunc) {

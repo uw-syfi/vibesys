@@ -12,27 +12,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Reason describes whether the retained view can currently be refreshed.
-type Reason uint8
-
-const (
-	Readable Reason = iota
-	NoDaemon
-	StartFailed
-	CLINotInstalled
-	ClientTooOld
-	DaemonTooOld
-	StreamLost
-	StoreOwnedElsewhere
-	StoreAway
-	Connecting
-	MessageTooLarge
-)
-
 // View owns its facts. Unreadable retains facts and records a typed link failure.
 type View struct {
 	Facts            []*pb.TaskFact
-	Reason           Reason
+	Reason           core.ViewReason
 	Detail           string
 	Truncated        bool
 	UnattributedJobs uint32
@@ -44,9 +27,9 @@ func Fold(facts []*pb.TaskFact) View {
 	for _, f := range facts {
 		v.Facts = append(v.Facts, proto.Clone(f).(*pb.TaskFact))
 		if away := f.GetHealth().GetAway(); away != nil {
-			v.Reason = StoreAway
+			v.Reason = core.StoreAway
 			if away.Reason == pb.AwayReason_AWAY_REASON_OWNED_ELSEWHERE {
-				v.Reason = StoreOwnedElsewhere
+				v.Reason = core.StoreOwnedElsewhere
 			}
 			v.Detail = away.GetFailure().GetMessage()
 		}

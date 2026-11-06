@@ -175,15 +175,6 @@ func TestACallThatHangsIsBoundedAndRetried(t *testing.T) {
 			t.Fatalf("a hanging job poll gave %v, want ErrExpired", err)
 		}
 	})
-	t.Run("plans", func(t *testing.T) {
-		r := daemontest.NewRig(t)
-		run, _ := beginRun(t, r)
-		r.Plans.Stall = 1
-		_, err := r.Service.ListPlans(context.Background(), &pb.ListPlansRequest{RunId: string(run.ID)})
-		if status.Code(err) != codes.Unavailable {
-			t.Fatalf("a hanging plan reader gave %v, want Unavailable", err)
-		}
-	})
 	t.Run("a daemon without bounds is refused", func(t *testing.T) {
 		if _, err := daemon.Open(daemon.Config{}); err == nil {
 			t.Fatal("Open accepted a config with no Bounds")

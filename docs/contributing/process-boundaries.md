@@ -266,7 +266,7 @@ validated message; the other rows are what the parts above replace.
 | terminal client and desktop to host | gRPC `OrchestratorService` over a Unix socket | `orchestrator/v1/service.proto` | typed; run messages still mix stored and public fields |
 | desktop renderer and Electron main | `DesktopGatewayRequest` and `Reply` bytes | `desktop/v1/gateway.proto` | typed |
 | `connect` pipe | opaque bytes over stdio | carries the service above | typed |
-| handshake | `Hello`, `BuildVersions`, `Compatibility` | `service.proto` | typed; protocol constants written in more than one place |
+| handshake | `Hello`, `BuildVersions`, `Compatibility` | `service.proto` | typed; the protocol revision is a file option read by every peer |
 | client starts a host | argv, inherited environment and working directory | none | untyped: host control |
 | which root, which socket | path rules, `--root`, environment | `gatewayroot` and a copy in TypeScript | untyped: host control |
 | host absent or held | gRPC `UNAVAILABLE` with free text | none | untyped: host control |
