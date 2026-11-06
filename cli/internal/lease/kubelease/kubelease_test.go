@@ -28,6 +28,17 @@ func world(leasetest.TB) leasetest.World {
 			t := clock.NewManualTimers()
 			return tracking{kubelease.Cluster{API: server, Duration: duration, Clock: now, Timers: t}, t, timers}
 		},
+		Plant: func(l lease.Lease, record []byte) {
+			name := "vibesys-" + string(l.Key())
+			o, err := server.Get(context.Background(), name)
+			if err != nil || o == nil {
+				panic("planting a record: no lease object")
+			}
+			o.Metadata.Annotations[kubelease.HolderAnnotation] = string(record)
+			if err := server.Replace(context.Background(), o); err != nil {
+				panic("planting a record: " + err.Error())
+			}
+		},
 		Crash: func(l lease.Lease) {
 			l.(*kubelease.Lease).Abandon()
 			server.Expire("vibesys-" + string(l.Key()))

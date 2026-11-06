@@ -2,7 +2,6 @@ package apptainer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"path"
@@ -13,13 +12,15 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/backend"
 	"github.com/uw-syfi/vibesys/cli/internal/backend/cpu"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // Reading is what a node said of itself inside an allocation, and when: what each script printed,
-// by its name.
+// by its name. It is kept on the cluster as a cliv1.NodeReading, which processes of different
+// builds share: see wire.EncodeNodeReading.
 type Reading struct {
-	At      time.Time         `json:"at"`
-	Outputs map[string]string `json:"outputs"`
+	At      time.Time
+	Outputs map[string]string
 }
 
 // machineScripts are what a node runs to say what its machine is and how loaded it is.
@@ -65,7 +66,7 @@ func (e *Engine) read(ctx context.Context, node Node) error {
 	e.reading = r
 	e.mu.Unlock()
 	if e.cfg.Scope != "" {
-		if data, err := json.Marshal(r); err == nil {
+		if data, err := wire.EncodeNodeReading(r.At, r.Outputs); err == nil {
 			// The kept reading only says what the scope's nodes are like; a run does not depend on
 			// it, so one that could not be kept fails nothing.
 			_ = e.cfg.Cluster.Publish(ctx, e.readingPath(), strings.NewReader(string(data)))
@@ -87,11 +88,12 @@ func (e *Engine) last(ctx context.Context, kept bool) *Reading {
 	if err != nil || !ok {
 		return nil
 	}
-	var got Reading
-	if json.Unmarshal(data, &got) != nil || got.Outputs == nil {
+	// A record that is not a reading names nothing of the scope's nodes, as none kept.
+	at, outputs, err := wire.DecodeNodeReading(data)
+	if err != nil {
 		return nil
 	}
-	return &got
+	return &Reading{At: at, Outputs: outputs}
 }
 
 // Backend is the backend.Backend of the nodes: what the last node this process ran on said of

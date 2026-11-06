@@ -1,0 +1,39 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// The records that daemons of different builds, users and machines share through a file, a lock
+// file or an annotation. They are written as protojson with the proto field names, and read with
+// unknown fields discarded, so that:
+//
+//   - a record written before these messages existed, a JSON object with the same keys, reads;
+//   - a record with a field a later build adds reads in an older build, which ignores the field;
+//   - a field is only ever added, and an added field is optional: a reader that lacks it must still
+//     name the holder or the node, so no rule here may make a later build's record unreadable.
+//
+// Integers are int32 so that protojson writes them as numbers, which is what the older readers
+// decode them as (a 64-bit integer is a string in protojson).
+
+// LeaseRecord is the holder of a lease as it is kept beside the lease, so whoever finds the lease
+// held can say by whom. The lease itself is the lock, never this record: a record that is missing
+// or unreadable names nobody and leaves the lease held.
+message LeaseRecord {
+  string user = 1;
+  string host = 2;
+  int32 pid = 3 [(buf.validate.field).int32.gte = 0];
+  string job = 4;
+  // When the lease was taken.
+  google.protobuf.Timestamp since = 5;
+}
+
+// NodeReading is what a node of a cluster said of itself inside an allocation, and when: what each
+// of the node's scripts printed, by script name. It is kept on the cluster for every process of the
+// scope. It is advisory: a run never depends on it.
+message NodeReading {
+  google.protobuf.Timestamp at = 1 [(buf.validate.field).required = true];
+  map<string, string> outputs = 2 [(buf.validate.field).map.min_pairs = 1];
+}

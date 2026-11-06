@@ -13,7 +13,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -97,7 +96,7 @@ func (h Host) Acquire(ctx context.Context, key lease.Key, holder core.LeaseHolde
 	if _, err := lease.ParseKey(string(key)); err != nil {
 		return nil, err
 	}
-	rec, err := json.Marshal(lease.RecordOf(holder))
+	rec, err := lease.EncodeRecord(holder)
 	if err != nil {
 		return nil, err
 	}
@@ -138,11 +137,11 @@ func (h Host) Acquire(ctx context.Context, key lease.Key, holder core.LeaseHolde
 	case first == "held":
 		rest, _ := io.ReadAll(io.LimitReader(out, 4096))
 		_ = cmd.Wait()
-		var r lease.Record
-		if err := json.Unmarshal(bytes.TrimSpace(rest), &r); err != nil {
-			r = lease.Record{}
+		who, err := lease.DecodeRecord(rest)
+		if err != nil {
+			who = lease.Anonymous()
 		}
-		return nil, &lease.HeldError{Key: key, Where: h.Where(), Holder: r.Holder()}
+		return nil, &lease.HeldError{Key: key, Where: h.Where(), Holder: who}
 	}
 	waitErr := cmd.Wait()
 	why := strings.TrimPrefix(first, "error: ")

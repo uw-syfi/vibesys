@@ -28,6 +28,12 @@ func world(t leasetest.TB) leasetest.World {
 		Daemon: func() lease.Leases { return h },
 		Crash:  kill,
 		Lose:   kill,
+		Plant: func(l lease.Lease, record []byte) {
+			// The shell holds the lock on its own descriptor; this writes the same file.
+			if err := os.WriteFile(filepath.Join(h.Dir, string(l.Key())+".lock"), record, 0o666); err != nil {
+				t.Fatalf("planting a record: %v", err)
+			}
+		},
 	}
 }
 

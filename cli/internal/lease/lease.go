@@ -14,12 +14,13 @@
 package lease
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"regexp"
-	"time"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
+	"github.com/uw-syfi/vibesys/cli/internal/wire"
 )
 
 // Leases is a place where leases are kept, such as a directory of this machine, a host reached over
@@ -102,22 +103,19 @@ type NoBook struct{}
 // Place implements Book.
 func (NoBook) Place(string) (Place, bool) { return Place{}, false }
 
-// Record is the holder of a lease as it is kept beside the lease, so whoever finds the lease held
-// can say by whom. Since is when the lease was taken.
-type Record struct {
-	User  string    `json:"user"`
-	Host  string    `json:"host"`
-	PID   int       `json:"pid"`
-	Job   string    `json:"job"`
-	Since time.Time `json:"since"`
+// EncodeRecord writes the holder of a lease as the record kept beside it, so whoever finds the lease
+// held can say by whom. It is one line of JSON, the protojson of cliv1.LeaseRecord, which keeps the
+// keys the first builds wrote: daemons of different builds share these records, and a record of an
+// older build reads here while a record of a newer one, with fields added, reads in an older build.
+func EncodeRecord(h core.LeaseHolder) ([]byte, error) { return wire.EncodeLeaseRecord(h) }
+
+// DecodeRecord reads the holder out of a kept record. A record that is empty or is not one is an
+// error of kind invalid input, never a holder: the lock is the lease and the record only names its
+// holder, so a caller that finds a held lease with an unreadable record reports it held by nobody
+// it can name (see Anonymous), and never as free.
+func DecodeRecord(data []byte) (core.LeaseHolder, error) {
+	return wire.DecodeLeaseRecord(bytes.TrimSpace(data))
 }
 
-// RecordOf is the Record of a holder.
-func RecordOf(h core.LeaseHolder) Record {
-	return Record{User: h.User, Host: h.Host, PID: h.PID, Job: string(h.Job), Since: h.Since.UTC()}
-}
-
-// Holder is the holder a Record names.
-func (r Record) Holder() core.LeaseHolder {
-	return core.LeaseHolder{User: r.User, Host: r.Host, PID: r.PID, Job: core.JobID(r.Job), Since: r.Since}
-}
+// Anonymous is the holder named by a record that could not be read: nobody in particular.
+func Anonymous() core.LeaseHolder { return core.LeaseHolder{} }

@@ -95,6 +95,7 @@ var rules = map[string][]string{
 	"internal/environment/apptainer": {
 		"internal/backend", "internal/backend/cpu", "internal/clock", "internal/core", "internal/environment",
 		"internal/environment/docker",
+		"internal/wire",
 	},
 	"internal/environment/apptainer/clustercli": {
 		"internal/clock", "internal/core", "internal/environment", "internal/environment/apptainer",
@@ -196,7 +197,7 @@ var rules = map[string][]string{
 
 	// Leases: how the daemons that share a resource take turns at it. Each place a lease is kept
 	// is a package of its own, which only production names, and passes the contract in leasetest.
-	"internal/lease":                    {"internal/core"},
+	"internal/lease":                    {"internal/core", "internal/wire"},
 	"internal/lease/leasetest":          {"internal/core", "internal/lease"},
 	"internal/lease/fakelease":          {"internal/core", "internal/lease"},
 	"internal/lease/locallease":         {"internal/core", "internal/lease"},
