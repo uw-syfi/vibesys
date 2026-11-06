@@ -8,8 +8,10 @@
 package clientcli
 
 import (
+	"context"
 	"io"
 	"io/fs"
+	"net"
 	"time"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
@@ -21,6 +23,9 @@ type Clock interface {
 	// After sends once, d from now.
 	After(d time.Duration) <-chan time.Time
 }
+
+// Dial opens one connection to the service. It is called again after a connection breaks.
+type Dial = func(ctx context.Context) (net.Conn, error)
 
 // Env is what a verb needs from the process it runs in.
 type Env struct {
@@ -43,5 +48,5 @@ type Env struct {
 	IDs client.IDs
 	// Connect finds the service for a --root flag value ("" for the default) and returns how to
 	// reach it, starting the host when none serves.
-	Connect func(root string) (client.Dialer, error)
+	Connect func(root string) (Dial, error)
 }

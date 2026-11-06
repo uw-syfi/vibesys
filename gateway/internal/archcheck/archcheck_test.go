@@ -3,6 +3,7 @@ package archcheck_test
 import (
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,7 +24,10 @@ func goFile(imports ...string) string {
 }
 
 func tree() map[string]string {
-	return map[string]string{archcheck.CommandDirectory + "/main.go": goFile("os", module+"gateway/internal/hostmain")}
+	return map[string]string{
+		archcheck.CommandDirectory + "/main.go": goFile("os", module+"gateway/internal/hostmain"),
+		archcheck.ClientDirectory + "/main.go":  goFile("os", module+"gateway/internal/clientmain"),
+	}
 }
 
 func TestRules(t *testing.T) {
@@ -49,6 +53,11 @@ func TestRules(t *testing.T) {
 		bad                bool
 	}{
 		{"allowed composition", "gateway/internal/hostmain/a.go", goFile("context", "os/signal", module+"gateway/internal/connect", module+"gateway/internal/lifecycle", module+"gateway/internal/pipe", module+"gateway/internal/server", module+"gateway/schemahash", module+"orchestrator/hosted"), false},
+		{"client composition", "gateway/internal/clientmain/a.go", goFile("context", "github.com/mattn/go-isatty", module+"gateway/internal/connect", module+"gateway/internal/lifecycle", module+"gateway/schemahash", module+"orchestrator/clientcli", module+"orchestrator/gatewayroot"), false},
+		{"client may not import the host's orchestrator", "gateway/internal/clientmain/a.go", goFile(module + "orchestrator/hosted"), true},
+		{"host may not import the client's verbs", "gateway/internal/hostmain/a.go", goFile(module + "orchestrator/clientcli"), true},
+		{"second client command file", archcheck.ClientDirectory + "/extra.go", goFile("os", module+"gateway/internal/clientmain"), true},
+		{"client command with the wrong composition", archcheck.ClientDirectory + "/main.go", goFile("os", module+"gateway/internal/hostmain"), true},
 		{"command tests allowed", archcheck.CommandDirectory + "/main_test.go", goFile(module + "gateway/gen/vibesys/api/v1"), false},
 		{"hostmain tests allowed", "gateway/internal/hostmain/a_test.go", goFile(module + "cli/internal/core"), false},
 		{"second command file", archcheck.CommandDirectory + "/extra.go", goFile("os", module+"gateway/internal/hostmain"), true},
@@ -67,6 +76,25 @@ func TestRules(t *testing.T) {
 	}
 	if got := archcheck.Violations(nil); len(got) == 0 {
 		t.Fatal("missing command accepted")
+	}
+}
+
+// The client must stay a thin program: linking the daemon or the store into it would make every
+// client a second host.
+func TestTheClientBinaryLinksNeitherTheDaemonNorTheStore(t *testing.T) {
+	out, err := exec.Command("go", "list", "-deps", "-f", "{{.ImportPath}}", "../../cmd/vibesys-client").Output()
+	if err != nil {
+		t.Fatalf("go list: %v", err)
+	}
+	for _, dep := range strings.Fields(string(out)) {
+		for _, banned := range []string{"orchestrator/internal/daemon", "orchestrator/internal/store", "orchestrator/internal/production", "orchestrator/hosted", "modernc.org/sqlite"} {
+			if strings.Contains(dep, banned) {
+				t.Errorf("vibesys-client links %s", dep)
+			}
+		}
+	}
+	if !strings.Contains(string(out), "orchestrator/clientcli") {
+		t.Errorf("go list did not see the client's verbs:\n%s", out)
 	}
 }
 

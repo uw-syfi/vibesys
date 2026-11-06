@@ -12,7 +12,6 @@ import (
 
 	"github.com/uw-syfi/vibesys/orchestrator/clientcli"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 )
 
 // Every exit code has a case that ends in it, and no verb ends in a code outside the table.
@@ -73,7 +72,7 @@ func TestAHostThatCannotBeFoundIsUnavailable(t *testing.T) {
 	var out, errb bytes.Buffer
 	code := clientcli.Main(context.Background(), []string{"run", "list"}, clientcli.Env{
 		Stdout: &out, Stderr: &errb, Dir: w.dir, FS: w.files, Clock: w.clock, IDs: w.ids,
-		Connect: func(string) (client.Dialer, error) {
+		Connect: func(string) (clientcli.Dial, error) {
 			return nil, errors.New("no vibesys-host next to this program or on PATH")
 		},
 	})

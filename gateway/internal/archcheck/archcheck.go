@@ -12,26 +12,58 @@ import (
 	"strings"
 )
 
-// CommandDirectory is the single command path changed when the host is renamed.
+// CommandDirectory is the host's command path, changed when the host is renamed.
 const CommandDirectory = "gateway/cmd/vibesys-host"
+
+// ClientDirectory is the client's command path.
+const ClientDirectory = "gateway/cmd/vibesys-client"
 
 const module = "github.com/uw-syfi/vibesys/"
 
-// Violations returns sorted diagnostics for the command shape and hostmain imports.
+// command is one binary of the module: a directory with a single main file that imports only os
+// and its composition package, which in turn may import only what allowed lists.
+type command struct {
+	directory, composition string
+	allowed                []string
+}
+
+var commands = []command{
+	{CommandDirectory, "gateway/internal/hostmain", []string{
+		module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
+		module + "gateway/internal/pipe", module + "gateway/internal/server",
+		module + "gateway/schemahash", module + "orchestrator/gatewayroot", module + "orchestrator/hosted",
+	}},
+	{ClientDirectory, "gateway/internal/clientmain", []string{
+		module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
+		module + "gateway/schemahash", module + "orchestrator/clientcli", module + "orchestrator/gatewayroot",
+		"github.com/mattn/go-isatty",
+	}},
+}
+
+// Violations returns sorted diagnostics for the command shapes and composition imports.
 // Files use repository-relative, slash-separated paths; tests are unrestricted.
 func Violations(files map[string]string) []string {
 	var found []string
-	var commands []string
+	for _, c := range commands {
+		found = append(found, c.violations(files)...)
+	}
+	sort.Strings(found)
+	return found
+}
+
+func (c command) violations(files map[string]string) []string {
+	var found []string
+	var mains []string
 	for name, source := range files {
 		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		command := path.Dir(name) == CommandDirectory
-		if !command && !strings.HasPrefix(name, "gateway/internal/hostmain/") {
+		isMain := path.Dir(name) == c.directory
+		if !isMain && !strings.HasPrefix(name, c.composition+"/") {
 			continue
 		}
-		if command {
-			commands = append(commands, name)
+		if isMain {
+			mains = append(mains, name)
 		}
 		file, err := parser.ParseFile(token.NewFileSet(), name, source, parser.ImportsOnly)
 		if err != nil {
@@ -46,32 +78,27 @@ func Violations(files map[string]string) []string {
 				continue
 			}
 			targets = append(targets, target)
-			if !command && !allowed(target) {
-				found = append(found, fmt.Sprintf("%s: forbidden import %s; hostmain only composes typed services", name, target))
+			if !isMain && !c.permits(target) {
+				found = append(found, fmt.Sprintf("%s: forbidden import %s; %s only composes typed services", name, target, path.Base(c.composition)))
 			}
 		}
-		if command {
+		if isMain {
 			slices.Sort(targets)
-			if !slices.Equal(targets, []string{module + "gateway/internal/hostmain", "os"}) {
-				found = append(found, fmt.Sprintf("%s: command must import exactly os and hostmain", name))
+			if !slices.Equal(targets, []string{module + c.composition, "os"}) {
+				found = append(found, fmt.Sprintf("%s: command must import exactly os and %s", name, path.Base(c.composition)))
 			}
 		}
 	}
-	if len(commands) != 1 {
-		found = append(found, fmt.Sprintf("%s: need exactly one non-test Go file, found %d; move composition into hostmain", CommandDirectory, len(commands)))
+	if len(mains) != 1 {
+		found = append(found, fmt.Sprintf("%s: need exactly one non-test Go file, found %d; move composition into %s", c.directory, len(mains), path.Base(c.composition)))
 	}
-	sort.Strings(found)
 	return found
 }
 
-func allowed(target string) bool {
+func (c command) permits(target string) bool {
 	// Standard library import paths have no domain in their first component.
 	if !strings.Contains(strings.Split(target, "/")[0], ".") && target != "C" {
 		return true
 	}
-	return slices.Contains([]string{
-		module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
-		module + "gateway/internal/pipe", module + "gateway/internal/server",
-		module + "gateway/schemahash", module + "orchestrator/gatewayroot", module + "orchestrator/hosted",
-	}, target)
+	return slices.Contains(c.allowed, target)
 }

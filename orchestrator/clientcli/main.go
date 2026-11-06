@@ -98,7 +98,7 @@ func (c *call) open(ctx context.Context) (*client.Client, error) {
 	if err != nil {
 		return nil, unavailable("%v", err)
 	}
-	conn, err := client.Dial(ctx, dial, client.Options{BinaryVersion: c.Version})
+	conn, err := client.Dial(ctx, client.Dialer(dial), client.Options{BinaryVersion: c.Version})
 	if err != nil {
 		if exitCodeOf(classify(err)) == ExitFailed && !errors.As(err, new(*client.IncompatibleError)) {
 			return nil, unavailable("%v", err)

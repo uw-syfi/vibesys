@@ -142,7 +142,7 @@ func (w *world) runUnbounded(ctx context.Context, args ...string) result {
 	env := clientcli.Env{
 		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: &errb, Terminal: w.terminal,
 		Dir: w.dir, FS: w.files, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
-		Connect: func(string) (client.Dialer, error) { return w.dial, nil },
+		Connect: func(string) (clientcli.Dial, error) { return w.dial, nil },
 	}
 	code := clientcli.Main(ctx, args, env)
 	return result{code: code, stdout: stdout.String(), stderr: errb.String()}
