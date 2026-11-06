@@ -161,16 +161,39 @@ shows its earliest in the snapshot.
 
 ## Running it
 
-Set `VIBESYS_ORCHESTRATOR_STATE_DIR` to a local-disk directory and `VIBESYS_ORCHESTRATOR_SIDECAR`
-to an `orchestrator/sidecar` checkout (or the command that runs it), and `VIBESYS_ORCHESTRATOR_MARKETPLACE`
-to the checkout of the plugin marketplace (the repository root, which holds `.claude-plugin/marketplace.json`);
-there is no default for any of them. Every session, lead and subagent, on either harness, loads the
-`vibesys` plugin from that checkout and none of the operator's own plugins, skills or configuration.
-The plugin is installed once per agent into `STATE/sessions/AGENT/plugin-home`, which a resume reuses.
-A missing or wrong marketplace refuses every launch, naming the setting. Build with
-`go build -o ~/.local/bin/vibesys-host ./gateway/cmd/vibesys-host`, run `uv sync --frozen --project
-orchestrator/sidecar` once, then `vibesys-host run start ...` starts a gateway if none serves. Each
-session's files, logs and socket are under `STATE/sessions/`.
+The host finds its parts from the release folder it is installed in, so an installed host needs no
+setting:
+
+```
+RELEASE/bin/vibesys-client  vibesys-host  vibesys-cli
+RELEASE/sidecar/            pyproject.toml, uv.lock, src/, .venv/   (.venv made at install by uv sync --frozen)
+RELEASE/marketplace/        .claude-plugin/marketplace.json, skills/...
+```
+
+The sidecar runs as `RELEASE/sidecar/.venv/bin/python -m vs_sidecar`, so `uv` is not needed at run
+time. Every session, lead and subagent, on either harness, loads the `vibesys` plugin from
+`RELEASE/marketplace` and none of the operator's own plugins, skills or configuration. The plugin is
+installed once per agent into `STATE/sessions/AGENT/plugin-home`, which a resume reuses.
+
+Each part is chosen, in order, from the developer override, then the release, then an error:
+
+| Part | Override (used as given, errors included) | Release |
+| --- | --- | --- |
+| sidecar | `VIBESYS_ORCHESTRATOR_SIDECAR`: an `orchestrator/sidecar` checkout, or the command that runs it | `RELEASE/sidecar/.venv/bin/python`, with `RELEASE/sidecar/pyproject.toml` |
+| marketplace | `VIBESYS_ORCHESTRATOR_MARKETPLACE`: an absolute path to a checkout holding `.claude-plugin/marketplace.json` | `RELEASE/marketplace` |
+| `vibesys-cli` | `VIBESYS_ORCHESTRATOR_CLI` (see below) | beside the host, `RELEASE/bin/vibesys-cli` |
+
+RELEASE is the parent of the folder holding the running `vibesys-host`, and only if that folder is
+named `bin`. A set override that is wrong is an error and is never replaced by the release. A checkout
+is not taken for a release: a host built into `~/.local/bin` has no `sidecar` or `marketplace` beside
+its `bin`, so with no override it refuses every launch with an error naming the setting and the path it
+looked at. `VIBESYS_ORCHESTRATOR_STATE_DIR` is the state directory, which should be on local disk.
+
+For a developer checkout: build with `go build -o ~/.local/bin/vibesys-host ./gateway/cmd/vibesys-host`,
+run `uv sync --frozen --project orchestrator/sidecar` once, set `VIBESYS_ORCHESTRATOR_SIDECAR` to
+`orchestrator/sidecar` and `VIBESYS_ORCHESTRATOR_MARKETPLACE` to the repository root, then
+`vibesys-host run start ...` starts a gateway if none serves. Each session's files, logs and socket are
+under `STATE/sessions/`.
 
 The lead's first message is rendered by the sidecar from the run's task, its `--fanout` and the
 optional `--brief`, the operator's steering text: it tells the lead to run `vibesys:optimize` for the

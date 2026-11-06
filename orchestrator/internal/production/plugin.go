@@ -11,7 +11,8 @@ import (
 
 // EnvMarketplace names the local checkout of the published plugin marketplace: the directory that
 // holds .claude-plugin/marketplace.json. Every agent session loads the vibesys plugin from it, and
-// none of the operator's own plugins. It has no default: a daemon never guesses where its skills are.
+// none of the operator's own plugins. It is a developer override; without it the marketplace of the
+// release the host is installed in is used (see ReleaseMarketplace).
 const EnvMarketplace = "VIBESYS_ORCHESTRATOR_MARKETPLACE"
 
 // PluginName is the plugin every session loads, as the marketplace names it.
@@ -25,13 +26,17 @@ type Plugin struct {
 	Name string
 }
 
-// PluginFor reads the plugin from the environment and checks the checkout holds it, so a wrong path
-// is refused when the daemon starts and named, instead of when an agent is launched.
-func PluginFor(getenv func(string) string) (Plugin, error) {
+// PluginFor chooses the plugin marketplace, EnvMarketplace when it is set and otherwise the
+// release's, and checks the checkout holds the plugin, so a wrong path is refused when the daemon
+// starts and named, instead of when an agent is launched.
+func PluginFor(getenv func(string) string, executable string, files Files) (Plugin, error) {
 	path := strings.TrimSpace(getenv(EnvMarketplace))
 	switch {
 	case path == "":
-		return Plugin{}, fmt.Errorf("%s is not set, so no agent session can start: set it to the checkout of the vibesys plugin marketplace (the directory holding .claude-plugin/marketplace.json)", EnvMarketplace)
+		var err error
+		if path, err = ReleaseMarketplace(executable, files); err != nil {
+			return Plugin{}, fmt.Errorf("%s is not set and %w, so no agent session can start: set it to the checkout of the vibesys plugin marketplace (the directory holding .claude-plugin/marketplace.json)", EnvMarketplace, err)
+		}
 	case !filepath.IsAbs(path):
 		return Plugin{}, fmt.Errorf("%s=%s is not an absolute path", EnvMarketplace, path)
 	}

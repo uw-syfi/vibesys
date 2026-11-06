@@ -14,6 +14,7 @@ import (
 type fakeFiles map[string]bool
 
 func (f fakeFiles) Executable(path string) bool { return f[path] }
+func (f fakeFiles) Regular(path string) bool    { return f[path] }
 
 func cliTestEnv(kv ...string) func(string) string {
 	m := map[string]string{}
