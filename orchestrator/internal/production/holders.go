@@ -98,6 +98,15 @@ type ProcessHolders struct {
 	Log *slog.Logger
 	// Signals ends processes. Nil ends them through the operating system.
 	Signals ProcessSignals
+	// Git runs git in a repository and returns its combined output. Nil runs the git program.
+	Git func(ctx context.Context, repository string, args ...string) ([]byte, error)
+}
+
+func (h *ProcessHolders) git(ctx context.Context, repository string, args ...string) ([]byte, error) {
+	if h.Git != nil {
+		return h.Git(ctx, repository, args...)
+	}
+	return exec.CommandContext(ctx, "git", append([]string{"-C", repository}, args...)...).CombinedOutput()
 }
 
 func (h *ProcessHolders) signals() ProcessSignals {
@@ -254,11 +263,25 @@ func (h *ProcessHolders) Worktree(ctx context.Context, repository, path string) 
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	}
-	out, err := exec.CommandContext(ctx, "git", "-C", repository, "worktree", "add", "--detach", path).CombinedOutput()
+	out, err := h.git(ctx, repository, "worktree", "add", "--detach", path)
+	if err != nil && lostItsRecord(out) {
+		// A `git worktree prune` (this host's own, at the end of another run, or the user's) between
+		// git making the record of the new worktree and locking it removes the record, and git then
+		// fails to open a file in it. The other process is done by the time this one returns, so
+		// one more try meets no record and makes it whole. Once: a second failure is a real one.
+		out, err = h.git(ctx, repository, "worktree", "add", "--detach", path)
+	}
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// lostItsRecord says git's output is a worktree add that lost its record in .git/worktrees to
+// another git process.
+func lostItsRecord(out []byte) bool {
+	text := string(out)
+	return strings.Contains(text, "could not open") && strings.Contains(text, "/worktrees/")
 }
 
 // grpcLink is HolderLink over gRPC.
