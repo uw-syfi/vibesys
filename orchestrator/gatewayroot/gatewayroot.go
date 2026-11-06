@@ -4,9 +4,13 @@
 package gatewayroot
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
@@ -76,6 +80,38 @@ func StateDirectory(root, home string, getenv func(string) string) string {
 		return localfs.DefaultPath(getenv, home)
 	}
 	return filepath.Join(root, "state")
+}
+
+// CheckState says whether a host of root could keep its state where chosen says, or where its root
+// says when chosen is empty, as the host itself would find when it started: a local disk, a place a
+// directory can be made by this user, and a path short enough for the agent socket. It changes nothing.
+func CheckState(chosen, root, home string, getenv func(string) string) error {
+	state, err := localfs.StateDir(chosen, StateDirectory(root, home, getenv), localfs.SystemDetector{})
+	if err != nil {
+		return err
+	}
+	if _, err := state.AgentSocket(); err != nil {
+		return err
+	}
+	existing := state.Path()
+	for {
+		info, err := os.Stat(existing)
+		if err == nil {
+			if !info.IsDir() {
+				return fmt.Errorf("the state directory %s cannot be made: %s is not a directory; %s", state.Path(), existing, localfs.Remedy)
+			}
+			break
+		}
+		parent := filepath.Dir(existing)
+		if !errors.Is(err, os.ErrNotExist) || parent == existing {
+			return fmt.Errorf("the state directory %s: %w; %s", state.Path(), err, localfs.Remedy)
+		}
+		existing = parent
+	}
+	if err := unix.Access(existing, unix.W_OK|unix.X_OK); err != nil {
+		return fmt.Errorf("the state directory %s cannot be written: %s: %w; %s", state.Path(), existing, err, localfs.Remedy)
+	}
+	return nil
 }
 
 // resolveExisting resolves the symlinks of the longest existing prefix of path and keeps the rest.

@@ -21,14 +21,21 @@ func (c exitCode) Error() string { return fmt.Sprintf("exit status %d", int(c)) 
 
 // startOrchestrator opens the orchestrator for this host. stop ends the host, and is what
 // HostControlService calls when a client asks it to stop.
-func startOrchestrator(ctx context.Context, stop func(), root string, config *hostconfig.Config, getenv func(string) string, home string) (*hosted.Orchestrator, error) {
+func startOrchestrator(ctx context.Context, stop func(), root string, config *hostconfig.Config, getenv func(string) string, home string, connected func() uint32) (*hosted.Orchestrator, error) {
 	binary, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
+	// Read now, as the host starts: a rebuild replaces the file under a host that keeps running.
+	build := ""
+	if !buildinfo.Released() {
+		if build, err = buildinfo.ID(binary); err != nil {
+			return nil, err
+		}
+	}
 	return hosted.Start(ctx, hosted.Options{
 		Version: buildinfo.Version, Executable: binary, Log: slog.New(slog.NewTextHandler(os.Stderr, nil)),
-		Root: root, Config: config, Getenv: getenv, Home: home, APISchemaHash: schema.APISchemaHash, Stop: stop,
+		Root: root, Config: config, Getenv: getenv, Home: home, APISchemaHash: schema.APISchemaHash, Stop: stop, BuildID: build, Connected: connected,
 	}), nil
 }
 

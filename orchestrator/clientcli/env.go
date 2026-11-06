@@ -51,8 +51,17 @@ type Env struct {
 	// IDs mints the id of each command.
 	IDs client.IDs
 	// Connect finds the service for a --root flag value ("" for the default) and returns how to
-	// reach it, starting the host when none serves.
+	// reach it, starting the host when none serves. The Dial is its proof that a host can start here:
+	// the program is found, and the configuration and state directory are ones a host would accept.
+	// Otherwise it is an error, with *CannotStart for what an operator must put right, and nothing has
+	// been started.
 	Connect func(root string) (Dial, error)
+	// Prove is Connect for a verb about to give up a working host: it also verifies the parts of the
+	// release, which a start with no host to lose reports instead when a run needs them.
+	Prove func(root string) (Dial, error)
+	// HostBuild is the identity of the host this client would start, or empty when it cannot tell. It
+	// is compared with what a host of no release says, and only then is it worked out.
+	HostBuild func(root string) string
 	// Locate is Connect without the start: the Dial it returns fails with ErrNoHost when no host
 	// serves, and never starts one.
 	Locate func(root string) (Dial, error)

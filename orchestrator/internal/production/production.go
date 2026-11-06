@@ -90,9 +90,9 @@ func LayoutFor(chosen, fallback string) (Layout, error) {
 	if err != nil {
 		return Layout{}, err
 	}
-	agentSocket := filepath.Join(state.Path(), "agent.sock")
-	if len(agentSocket) > maxSocketPath {
-		return Layout{}, fmt.Errorf("the agent socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", agentSocket, maxSocketPath, localfs.Remedy)
+	agentSocket, err := state.AgentSocket()
+	if err != nil {
+		return Layout{}, err
 	}
 	return Layout{State: state, AgentSocket: agentSocket}, nil
 }

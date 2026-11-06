@@ -62,10 +62,10 @@ type IncompatibleError struct {
 func (e *IncompatibleError) Error() string {
 	switch e.Compatibility {
 	case pb.Compatibility_COMPATIBILITY_CLIENT_TOO_OLD:
-		return fmt.Sprintf("this client (protocol older than %d) is too old for the daemon (%s): update this client to the daemon's version",
+		return fmt.Sprintf("this client (protocol older than %d) is too old for the host (%s): update this client to the host's version, or replace the host with this client's with `vibesys-client host restart`",
 			e.Daemon.GetMinProtocolVersion(), e.Daemon.GetBinaryVersion())
 	default:
-		return fmt.Sprintf("the daemon (%s, protocol %d) is older than this client needs: stop the daemon process on that host so the next connection starts the current one",
+		return fmt.Sprintf("the host (%s, protocol %d) is older than this client needs: replace it with `vibesys-client host restart`",
 			e.Daemon.GetBinaryVersion(), e.Daemon.GetProtocolVersion())
 	}
 }

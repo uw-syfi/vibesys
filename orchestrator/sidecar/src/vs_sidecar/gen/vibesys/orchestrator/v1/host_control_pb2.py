@@ -26,7 +26,7 @@ from vs_sidecar.gen.buf.validate import validate_pb2 as buf_dot_validate_dot_val
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n*vibesys/orchestrator/v1/host_control.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"B\n\x0fIdentifyRequest\x12/\n\x0e\x63lient_release\x18\x01 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\rclientRelease\"\xa9\x04\n\x10IdentifyResponse\x12$\n\x07release\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x01R\x07release\x12P\n\x08relation\x18\x02 \x01(\x0e\x32(.vibesys.orchestrator.v1.ReleaseRelationB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x08relation\x12\x41\n\nstarted_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\x12\x1b\n\tlive_runs\x18\x04 \x01(\rR\x08liveRuns\x12\x46\n\x05parts\x18\x05 \x03(\x0b\x32&.vibesys.orchestrator.v1.PartReadinessB\x08\xbaH\x05\x92\x01\x02\x10\x10R\x05parts\x12<\n\x07serving\x18\x06 \x01(\x0b\x32 .vibesys.orchestrator.v1.ServingH\x00R\x07serving\x12?\n\x08unserved\x18\x07 \x01(\x0b\x32!.vibesys.orchestrator.v1.UnservedH\x00R\x08unserved\x12-\n\rconfig_digest\x18\x08 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\x0c\x63onfigDigest\x12\x30\n\x0f\x61pi_schema_hash\x18\t \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\rapiSchemaHashB\x15\n\x0corchestrator\x12\x05\xbaH\x02\x08\x01\"\xe0\x01\n\rPartReadiness\x12\x41\n\x04part\x18\x01 \x01(\x0e\x32!.vibesys.orchestrator.v1.HostPartB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x04part\x12:\n\x05ready\x18\x02 \x01(\x0b\x32\".vibesys.orchestrator.v1.PartReadyH\x00R\x05ready\x12@\n\x07problem\x18\x03 \x01(\x0b\x32$.vibesys.orchestrator.v1.PartProblemH\x00R\x07problemB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01\"T\n\tPartReady\x12G\n\x06origin\x18\x01 \x01(\x0e\x32#.vibesys.orchestrator.v1.PartOriginB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06origin\"\x7f\n\x0bPartProblem\x12N\n\x06reason\x18\x01 \x01(\x0e\x32*.vibesys.orchestrator.v1.PartProblemReasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n\x06\x64\x65tail\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x06\x64\x65tail\"\t\n\x07Serving\"\xab\x01\n\x08Unserved\x12K\n\x06reason\x18\x01 \x01(\x0e\x32\'.vibesys.orchestrator.v1.UnservedReasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12\x30\n\x0fheld_by_release\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\rheldByRelease\x12 \n\x06\x64\x65tail\x18\x03 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x06\x64\x65tail\"/\n\x0bStopRequest\x12 \n\x0conly_if_idle\x18\x01 \x01(\x08R\nonlyIfIdle\"\x9c\x01\n\x0cStopResponse\x12?\n\x08stopping\x18\x01 \x01(\x0b\x32!.vibesys.orchestrator.v1.StoppingH\x00R\x08stopping\x12\x39\n\x07refused\x18\x02 \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.BusyH\x00R\x07refusedB\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01\"\n\n\x08Stopping\",\n\x04\x42usy\x12$\n\tlive_runs\x18\x01 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x08liveRuns\"i\n\x08HostLock\x12\x19\n\x03pid\x18\x01 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x03pid\x12$\n\x07release\x18\x02 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x01R\x07release\x12\x1c\n\x04root\x18\x03 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x04root\"\xf1\x01\n\x0fHostStartReport\x12<\n\x07serving\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.ServingH\x00R\x07serving\x12O\n\x0e\x61lready_served\x18\x02 \x01(\x0b\x32&.vibesys.orchestrator.v1.AlreadyServedH\x00R\ralreadyServed\x12=\n\x07refused\x18\x03 \x01(\x0b\x32!.vibesys.orchestrator.v1.UnservedH\x00R\x07refusedB\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01\"\x0f\n\rAlreadyServed*\xae\x01\n\x0fReleaseRelation\x12 \n\x1cRELEASE_RELATION_UNSPECIFIED\x10\x00\x12\x19\n\x15RELEASE_RELATION_SAME\x10\x01\x12\x1f\n\x1bRELEASE_RELATION_HOST_OLDER\x10\x02\x12\x1f\n\x1bRELEASE_RELATION_HOST_NEWER\x10\x03\x12\x1c\n\x18RELEASE_RELATION_UNKNOWN\x10\x04*q\n\x08HostPart\x12\x19\n\x15HOST_PART_UNSPECIFIED\x10\x00\x12\x1c\n\x18HOST_PART_SESSION_HOLDER\x10\x01\x12\x14\n\x10HOST_PART_SKILLS\x10\x02\x12\x16\n\x12HOST_PART_JOB_TOOL\x10\x03*\\\n\nPartOrigin\x12\x1b\n\x17PART_ORIGIN_UNSPECIFIED\x10\x00\x12\x17\n\x13PART_ORIGIN_RELEASE\x10\x01\x12\x18\n\x14PART_ORIGIN_OPERATOR\x10\x02*\xb9\x01\n\x11PartProblemReason\x12#\n\x1fPART_PROBLEM_REASON_UNSPECIFIED\x10\x00\x12\"\n\x1ePART_PROBLEM_REASON_NO_RELEASE\x10\x01\x12*\n&PART_PROBLEM_REASON_RELEASE_INCOMPLETE\x10\x02\x12/\n+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03*\x9c\x01\n\x0eUnservedReason\x12\x1f\n\x1bUNSERVED_REASON_UNSPECIFIED\x10\x00\x12\"\n\x1eUNSERVED_REASON_HELD_ELSEWHERE\x10\x01\x12!\n\x1dUNSERVED_REASON_STATE_REFUSED\x10\x02\x12\"\n\x1eUNSERVED_REASON_CONFIG_REFUSED\x10\x03\x32\xca\x01\n\x12HostControlService\x12_\n\x08Identify\x12(.vibesys.orchestrator.v1.IdentifyRequest\x1a).vibesys.orchestrator.v1.IdentifyResponse\x12S\n\x04Stop\x12$.vibesys.orchestrator.v1.StopRequest\x1a%.vibesys.orchestrator.v1.StopResponseBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n*vibesys/orchestrator/v1/host_control.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"B\n\x0fIdentifyRequest\x12/\n\x0e\x63lient_release\x18\x01 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\rclientRelease\"\xfb\x04\n\x10IdentifyResponse\x12$\n\x07release\x18\x01 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x01R\x07release\x12P\n\x08relation\x18\x02 \x01(\x0e\x32(.vibesys.orchestrator.v1.ReleaseRelationB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x08relation\x12\x41\n\nstarted_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\tstartedAt\x12\x1b\n\tlive_runs\x18\x04 \x01(\rR\x08liveRuns\x12\x46\n\x05parts\x18\x05 \x03(\x0b\x32&.vibesys.orchestrator.v1.PartReadinessB\x08\xbaH\x05\x92\x01\x02\x10\x10R\x05parts\x12<\n\x07serving\x18\x06 \x01(\x0b\x32 .vibesys.orchestrator.v1.ServingH\x00R\x07serving\x12?\n\x08unserved\x18\x07 \x01(\x0b\x32!.vibesys.orchestrator.v1.UnservedH\x00R\x08unserved\x12-\n\rconfig_digest\x18\x08 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\x0c\x63onfigDigest\x12\x30\n\x0f\x61pi_schema_hash\x18\t \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\rapiSchemaHash\x12+\n\x11\x63onnected_clients\x18\n \x01(\rR\x10\x63onnectedClients\x12#\n\x08\x62uild_id\x18\x0b \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\x07\x62uildIdB\x15\n\x0corchestrator\x12\x05\xbaH\x02\x08\x01\"\xe0\x01\n\rPartReadiness\x12\x41\n\x04part\x18\x01 \x01(\x0e\x32!.vibesys.orchestrator.v1.HostPartB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x04part\x12:\n\x05ready\x18\x02 \x01(\x0b\x32\".vibesys.orchestrator.v1.PartReadyH\x00R\x05ready\x12@\n\x07problem\x18\x03 \x01(\x0b\x32$.vibesys.orchestrator.v1.PartProblemH\x00R\x07problemB\x0e\n\x05state\x12\x05\xbaH\x02\x08\x01\"T\n\tPartReady\x12G\n\x06origin\x18\x01 \x01(\x0e\x32#.vibesys.orchestrator.v1.PartOriginB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06origin\"\x7f\n\x0bPartProblem\x12N\n\x06reason\x18\x01 \x01(\x0e\x32*.vibesys.orchestrator.v1.PartProblemReasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12 \n\x06\x64\x65tail\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x06\x64\x65tail\"\t\n\x07Serving\"\xab\x01\n\x08Unserved\x12K\n\x06reason\x18\x01 \x01(\x0e\x32\'.vibesys.orchestrator.v1.UnservedReasonB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x06reason\x12\x30\n\x0fheld_by_release\x18\x02 \x01(\tB\x08\xbaH\x05r\x03(\x80\x01R\rheldByRelease\x12 \n\x06\x64\x65tail\x18\x03 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x06\x64\x65tail\"/\n\x0bStopRequest\x12 \n\x0conly_if_idle\x18\x01 \x01(\x08R\nonlyIfIdle\"\x9c\x01\n\x0cStopResponse\x12?\n\x08stopping\x18\x01 \x01(\x0b\x32!.vibesys.orchestrator.v1.StoppingH\x00R\x08stopping\x12\x39\n\x07refused\x18\x02 \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.BusyH\x00R\x07refusedB\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01\"\n\n\x08Stopping\",\n\x04\x42usy\x12$\n\tlive_runs\x18\x01 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x08liveRuns\"\x8d\x01\n\x08HostLock\x12\x19\n\x03pid\x18\x01 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x03pid\x12$\n\x07release\x18\x02 \x01(\tB\n\xbaH\x07r\x05\x10\x01(\x80\x01R\x07release\x12\x1c\n\x04root\x18\x03 \x01(\tB\x08\xbaH\x05r\x03(\x80 R\x04root\x12\"\n\x07machine\x18\x04 \x01(\tB\x08\xbaH\x05r\x03(\x80\x02R\x07machine\"\xf1\x01\n\x0fHostStartReport\x12<\n\x07serving\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.ServingH\x00R\x07serving\x12O\n\x0e\x61lready_served\x18\x02 \x01(\x0b\x32&.vibesys.orchestrator.v1.AlreadyServedH\x00R\ralreadyServed\x12=\n\x07refused\x18\x03 \x01(\x0b\x32!.vibesys.orchestrator.v1.UnservedH\x00R\x07refusedB\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01\"\x0f\n\rAlreadyServed*\xae\x01\n\x0fReleaseRelation\x12 \n\x1cRELEASE_RELATION_UNSPECIFIED\x10\x00\x12\x19\n\x15RELEASE_RELATION_SAME\x10\x01\x12\x1f\n\x1bRELEASE_RELATION_HOST_OLDER\x10\x02\x12\x1f\n\x1bRELEASE_RELATION_HOST_NEWER\x10\x03\x12\x1c\n\x18RELEASE_RELATION_UNKNOWN\x10\x04*q\n\x08HostPart\x12\x19\n\x15HOST_PART_UNSPECIFIED\x10\x00\x12\x1c\n\x18HOST_PART_SESSION_HOLDER\x10\x01\x12\x14\n\x10HOST_PART_SKILLS\x10\x02\x12\x16\n\x12HOST_PART_JOB_TOOL\x10\x03*\\\n\nPartOrigin\x12\x1b\n\x17PART_ORIGIN_UNSPECIFIED\x10\x00\x12\x17\n\x13PART_ORIGIN_RELEASE\x10\x01\x12\x18\n\x14PART_ORIGIN_OPERATOR\x10\x02*\xb9\x01\n\x11PartProblemReason\x12#\n\x1fPART_PROBLEM_REASON_UNSPECIFIED\x10\x00\x12\"\n\x1ePART_PROBLEM_REASON_NO_RELEASE\x10\x01\x12*\n&PART_PROBLEM_REASON_RELEASE_INCOMPLETE\x10\x02\x12/\n+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03*\xbd\x01\n\x0eUnservedReason\x12\x1f\n\x1bUNSERVED_REASON_UNSPECIFIED\x10\x00\x12\"\n\x1eUNSERVED_REASON_HELD_ELSEWHERE\x10\x01\x12!\n\x1dUNSERVED_REASON_STATE_REFUSED\x10\x02\x12\"\n\x1eUNSERVED_REASON_CONFIG_REFUSED\x10\x03\x12\x1f\n\x1bUNSERVED_REASON_HOLDER_GONE\x10\x04\x32\xca\x01\n\x12HostControlService\x12_\n\x08Identify\x12(.vibesys.orchestrator.v1.IdentifyRequest\x1a).vibesys.orchestrator.v1.IdentifyResponse\x12S\n\x04Stop\x12$.vibesys.orchestrator.v1.StopRequest\x1a%.vibesys.orchestrator.v1.StopResponseBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -50,6 +50,8 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_IDENTIFYRESPONSE'].fields_by_name['config_digest']._serialized_options = b'\272H\005r\003(\200\001'
   _globals['_IDENTIFYRESPONSE'].fields_by_name['api_schema_hash']._loaded_options = None
   _globals['_IDENTIFYRESPONSE'].fields_by_name['api_schema_hash']._serialized_options = b'\272H\005r\003(\200\001'
+  _globals['_IDENTIFYRESPONSE'].fields_by_name['build_id']._loaded_options = None
+  _globals['_IDENTIFYRESPONSE'].fields_by_name['build_id']._serialized_options = b'\272H\005r\003(\200\001'
   _globals['_PARTREADINESS'].oneofs_by_name['state']._loaded_options = None
   _globals['_PARTREADINESS'].oneofs_by_name['state']._serialized_options = b'\272H\002\010\001'
   _globals['_PARTREADINESS'].fields_by_name['part']._loaded_options = None
@@ -76,46 +78,48 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_HOSTLOCK'].fields_by_name['release']._serialized_options = b'\272H\007r\005\020\001(\200\001'
   _globals['_HOSTLOCK'].fields_by_name['root']._loaded_options = None
   _globals['_HOSTLOCK'].fields_by_name['root']._serialized_options = b'\272H\005r\003(\200 '
+  _globals['_HOSTLOCK'].fields_by_name['machine']._loaded_options = None
+  _globals['_HOSTLOCK'].fields_by_name['machine']._serialized_options = b'\272H\005r\003(\200\002'
   _globals['_HOSTSTARTREPORT'].oneofs_by_name['outcome']._loaded_options = None
   _globals['_HOSTSTARTREPORT'].oneofs_by_name['outcome']._serialized_options = b'\272H\002\010\001'
-  _globals['_RELEASERELATION']._serialized_start=2019
-  _globals['_RELEASERELATION']._serialized_end=2193
-  _globals['_HOSTPART']._serialized_start=2195
-  _globals['_HOSTPART']._serialized_end=2308
-  _globals['_PARTORIGIN']._serialized_start=2310
-  _globals['_PARTORIGIN']._serialized_end=2402
-  _globals['_PARTPROBLEMREASON']._serialized_start=2405
-  _globals['_PARTPROBLEMREASON']._serialized_end=2590
-  _globals['_UNSERVEDREASON']._serialized_start=2593
-  _globals['_UNSERVEDREASON']._serialized_end=2749
+  _globals['_RELEASERELATION']._serialized_start=2138
+  _globals['_RELEASERELATION']._serialized_end=2312
+  _globals['_HOSTPART']._serialized_start=2314
+  _globals['_HOSTPART']._serialized_end=2427
+  _globals['_PARTORIGIN']._serialized_start=2429
+  _globals['_PARTORIGIN']._serialized_end=2521
+  _globals['_PARTPROBLEMREASON']._serialized_start=2524
+  _globals['_PARTPROBLEMREASON']._serialized_end=2709
+  _globals['_UNSERVEDREASON']._serialized_start=2712
+  _globals['_UNSERVEDREASON']._serialized_end=2901
   _globals['_IDENTIFYREQUEST']._serialized_start=133
   _globals['_IDENTIFYREQUEST']._serialized_end=199
   _globals['_IDENTIFYRESPONSE']._serialized_start=202
-  _globals['_IDENTIFYRESPONSE']._serialized_end=755
-  _globals['_PARTREADINESS']._serialized_start=758
-  _globals['_PARTREADINESS']._serialized_end=982
-  _globals['_PARTREADY']._serialized_start=984
-  _globals['_PARTREADY']._serialized_end=1068
-  _globals['_PARTPROBLEM']._serialized_start=1070
-  _globals['_PARTPROBLEM']._serialized_end=1197
-  _globals['_SERVING']._serialized_start=1199
-  _globals['_SERVING']._serialized_end=1208
-  _globals['_UNSERVED']._serialized_start=1211
-  _globals['_UNSERVED']._serialized_end=1382
-  _globals['_STOPREQUEST']._serialized_start=1384
-  _globals['_STOPREQUEST']._serialized_end=1431
-  _globals['_STOPRESPONSE']._serialized_start=1434
-  _globals['_STOPRESPONSE']._serialized_end=1590
-  _globals['_STOPPING']._serialized_start=1592
-  _globals['_STOPPING']._serialized_end=1602
-  _globals['_BUSY']._serialized_start=1604
-  _globals['_BUSY']._serialized_end=1648
-  _globals['_HOSTLOCK']._serialized_start=1650
-  _globals['_HOSTLOCK']._serialized_end=1755
-  _globals['_HOSTSTARTREPORT']._serialized_start=1758
-  _globals['_HOSTSTARTREPORT']._serialized_end=1999
-  _globals['_ALREADYSERVED']._serialized_start=2001
-  _globals['_ALREADYSERVED']._serialized_end=2016
-  _globals['_HOSTCONTROLSERVICE']._serialized_start=2752
-  _globals['_HOSTCONTROLSERVICE']._serialized_end=2954
+  _globals['_IDENTIFYRESPONSE']._serialized_end=837
+  _globals['_PARTREADINESS']._serialized_start=840
+  _globals['_PARTREADINESS']._serialized_end=1064
+  _globals['_PARTREADY']._serialized_start=1066
+  _globals['_PARTREADY']._serialized_end=1150
+  _globals['_PARTPROBLEM']._serialized_start=1152
+  _globals['_PARTPROBLEM']._serialized_end=1279
+  _globals['_SERVING']._serialized_start=1281
+  _globals['_SERVING']._serialized_end=1290
+  _globals['_UNSERVED']._serialized_start=1293
+  _globals['_UNSERVED']._serialized_end=1464
+  _globals['_STOPREQUEST']._serialized_start=1466
+  _globals['_STOPREQUEST']._serialized_end=1513
+  _globals['_STOPRESPONSE']._serialized_start=1516
+  _globals['_STOPRESPONSE']._serialized_end=1672
+  _globals['_STOPPING']._serialized_start=1674
+  _globals['_STOPPING']._serialized_end=1684
+  _globals['_BUSY']._serialized_start=1686
+  _globals['_BUSY']._serialized_end=1730
+  _globals['_HOSTLOCK']._serialized_start=1733
+  _globals['_HOSTLOCK']._serialized_end=1874
+  _globals['_HOSTSTARTREPORT']._serialized_start=1877
+  _globals['_HOSTSTARTREPORT']._serialized_end=2118
+  _globals['_ALREADYSERVED']._serialized_start=2120
+  _globals['_ALREADYSERVED']._serialized_end=2135
+  _globals['_HOSTCONTROLSERVICE']._serialized_start=2904
+  _globals['_HOSTCONTROLSERVICE']._serialized_end=3106
 # @@protoc_insertion_point(module_scope)

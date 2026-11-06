@@ -27,7 +27,7 @@ func steer(ctx context.Context, c *call, args []string) error {
 	default:
 		return usageError("run steer takes [RUN] TEXT, got %d arguments", len(positional))
 	}
-	s, ctx, err := c.join(ctx, arg)
+	s, ctx, err := c.join(ctx, arg, onlyLive)
 	if err != nil {
 		return err
 	}
@@ -53,7 +53,9 @@ func steer(ctx context.Context, c *call, args []string) error {
 
 // dispatch sends a command and turns a refusal into an error.
 func (c *call) dispatch(ctx context.Context, s *session, cmd *pb.Command) (*pb.Receipt, error) {
-	receipt, err := s.client.Dispatch(ctx, cmd)
+	receipt, err := within(ctx, c.Clock, serviceBound, "answer", func(ctx context.Context) (*pb.Receipt, error) {
+		return s.client.Dispatch(ctx, cmd)
+	})
 	if err != nil {
 		return nil, classify(err)
 	}
@@ -90,7 +92,8 @@ func (c *call) delivery(ctx context.Context, s *session, receipt *pb.Receipt, ta
 	return fmt.Sprintf("accepted for %s", who), nil
 }
 
-// stop ends a run and every agent in it. A person at a terminal is asked first.
+// stop ends a run and every agent in it. A person at a terminal is asked first. A run that has already
+// ended is what the caller asked for, so that is said, with no error.
 func stop(ctx context.Context, c *call, args []string) error {
 	fs := flags("stop")
 	yes := fs.Bool("yes", false, "do not ask for confirmation")
@@ -105,12 +108,16 @@ func stop(ctx context.Context, c *call, args []string) error {
 	if len(positional) == 1 {
 		arg = positional[0]
 	}
-	s, ctx, err := c.join(ctx, arg)
+	s, ctx, err := c.join(ctx, arg, mostRecent)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 	run := s.view.Run
+	if !live(run) {
+		_, err = fmt.Fprintf(c.Stdout, "run %s has already %s; there is nothing to stop\n", run.GetId(), statusWord(run.GetStatus().String(), "RUN_STATUS_"))
+		return err
+	}
 	if c.Terminal && !*yes && !c.confirm(run) {
 		return failed("run %s was not stopped", run.GetId())
 	}

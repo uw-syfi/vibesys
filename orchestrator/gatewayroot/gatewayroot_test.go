@@ -151,3 +151,39 @@ func TestAProgramIsInstalledInTheDirectoryThatHoldsItsReleases(t *testing.T) {
 		t.Errorf("a build in no release: %q, want nothing", got)
 	}
 }
+
+// CheckState refuses what the host itself would, and leaves nothing behind.
+func TestCheckStateSaysWhatAHostWouldFind(t *testing.T) {
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "a-file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	getenv := func(string) string { return "" }
+	root := filepath.Join(dir, "root")
+	for _, c := range []struct {
+		name, chosen, want string
+	}{
+		{"the root's own place", "", ""},
+		{"a place to be made", filepath.Join(dir, "to", "be", "made"), ""},
+		{"an existing directory", dir, ""},
+		{"under a file", filepath.Join(file, "state"), "a-file"},
+		{"a file", file, "a-file"},
+		{"relative", "relative/state", "absolute"},
+		{"too long for the agent socket", filepath.Join(dir, strings.Repeat("s", 120)), "--state-directory"},
+	} {
+		err := gatewayroot.CheckState(c.chosen, root, filepath.Join(dir, "home"), getenv)
+		if (c.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%s: %v, want %q", c.name, err, c.want)
+		}
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Errorf("a check made the root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "to")); !os.IsNotExist(err) {
+		t.Errorf("a check made the state directory: %v", err)
+	}
+}

@@ -57,7 +57,8 @@ func getID(t *testing.T, runs []*pb.Run, args ...string) (id string, got result)
 
 // RUN is a full id, a unique prefix, or omitted, over any set of runs: a full id always finds its
 // run; a prefix finds the one run it starts, and otherwise fails naming every run it starts; and
-// no argument finds the one live run of this repository, and otherwise fails naming the choices.
+// no argument finds the one live run of this repository, or with none its most recent run, and
+// otherwise fails naming the choices.
 func TestRunResolutionOverRandomRunSets(t *testing.T) {
 	r := rand.New(rand.NewPCG(7, 11))
 	for i := range 120 {
@@ -95,8 +96,11 @@ func TestRunResolutionOverRandomRunSets(t *testing.T) {
 			}
 
 			var here, elsewhere []string
+			var endedHere []*pb.Run
 			for _, run := range runs {
 				switch {
+				case !isLive(run) && run.GetRepository() == "/work/repo":
+					endedHere = append(endedHere, run)
 				case !isLive(run):
 				case run.GetRepository() == "/work/repo":
 					here = append(here, run.GetId())
@@ -111,6 +115,24 @@ func TestRunResolutionOverRandomRunSets(t *testing.T) {
 					t.Errorf("omitted RUN resolved to %q (exit %d, %q), want %q", id, got.code, got.stderr, here[0])
 				}
 			case 0:
+				if len(endedHere) > 0 {
+					newest := endedHere[0].GetCreatedAt().AsTime()
+					for _, run := range endedHere {
+						if run.GetCreatedAt().AsTime().After(newest) {
+							newest = run.GetCreatedAt().AsTime()
+						}
+					}
+					var chosen *pb.Run
+					for _, run := range endedHere {
+						if run.GetId() == id {
+							chosen = run
+						}
+					}
+					if got.code != 0 || chosen == nil || !chosen.GetCreatedAt().AsTime().Equal(newest) {
+						t.Errorf("no live run here, %d ended: resolved to %q (exit %d, %q), want one from %v", len(endedHere), id, got.code, got.stderr, newest)
+					}
+					break
+				}
 				if got.code != 1 {
 					t.Errorf("no live run here: exit %d", got.code)
 				}
@@ -211,4 +233,67 @@ func TestStartOutsideAGitRepositoryIsAUsageErrorNamingTheDirectory(t *testing.T)
 	if len(f.sent()) != 0 {
 		t.Errorf("sent %v", f.sent())
 	}
+}
+
+// endedHere is a world whose repository's runs have all ended, the older one and the newer one, with
+// a live run elsewhere that an omitted RUN must never mean.
+func endedHere(t *testing.T) (*fakeService, *world) {
+	t.Helper()
+	runs := []*pb.Run{
+		runOf("run-older", "/work/repo", pb.RunStatus_RUN_STATUS_FAILED, 1),
+		runOf("run-newer", "/work/repo", pb.RunStatus_RUN_STATUS_ENDED, 5),
+		runOf("run-there", "/work/other", pb.RunStatus_RUN_STATUS_RUNNING, 9),
+	}
+	f := &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(1, false, runs, nil)}}
+	return f, newWorld(t, serveFake(t, f))
+}
+
+// Finding: after a run ended the installer's next steps failed, with no candidates. run get shows the
+// repository's most recent run.
+func TestRunGetWithNoRunShowsTheMostRecentRunHere(t *testing.T) {
+	_, w := endedHere(t)
+	got := w.run(context.Background(), "run", "get", "--json")
+	if got.code != 0 || !strings.Contains(got.stdout, "run-newer") || strings.Contains(got.stdout, "run-there") {
+		t.Fatalf("exit %d: %s%s", got.code, got.stdout, got.stderr)
+	}
+}
+
+// run stop of a run that has ended says so, sends nothing and exits 0, however the run was named.
+func TestRunStopOfARunThatHasEndedIsAlreadyDone(t *testing.T) {
+	for _, args := range [][]string{{"run", "stop", "--yes"}, {"run", "stop"}, {"run", "stop", "run-newer", "--yes"}, {"run", "stop", "run-older"}} {
+		f, w := endedHere(t)
+		w.terminal = true
+		got := w.run(context.Background(), args...)
+		if got.code != 0 || !strings.Contains(got.stdout, "already") || len(f.sent()) != 0 {
+			t.Errorf("%v: exit %d, sent %v: %s%s", args, got.code, f.sent(), got.stdout, got.stderr)
+		}
+	}
+}
+
+// run attach replays the most recent run and returns. It says the run has ended, and promises no detach.
+func TestRunAttachWithNoRunReplaysTheMostRecentRunHere(t *testing.T) {
+	_, w := endedHere(t)
+	got := w.run(context.Background(), "run", "attach")
+	if got.code != 0 || !strings.Contains(got.stderr, "run-newer") || strings.Contains(got.stderr, "Ctrl-C") {
+		t.Fatalf("exit %d: %s%s", got.code, got.stdout, got.stderr)
+	}
+}
+
+// A verb that can do nothing with a run that ended still wants a live one, and now names the ended ones.
+func TestAVerbThatNeedsALiveRunNamesTheEndedOnesItFound(t *testing.T) {
+	for _, args := range [][]string{{"run", "steer", "hello"}, {"run", "wait", "--until", "ended", "--timeout", "1m"}} {
+		_, w := endedHere(t)
+		got := w.run(context.Background(), args...)
+		if got.code != 1 {
+			t.Errorf("%v: exit %d", args, got.code)
+		}
+		contains(t, "stderr", got.stderr, "no live run", "run-newer", "run-older")
+	}
+}
+
+// --help says all of this.
+func TestHelpStatesWhatAnOmittedRunMeans(t *testing.T) {
+	_, w := endedHere(t)
+	got := w.run(context.Background(), "--help")
+	contains(t, "stdout", got.stdout, "most recent run", "already ended", "replays")
 }

@@ -14,8 +14,6 @@ import (
 // a *HeldError.
 var ErrHeld = errors.New("another process holds the orchestrator")
 
-const holderFile = "holder"
-
 // HeldError is the refusal of a state directory another process holds.
 type HeldError struct {
 	Dir string
@@ -29,7 +27,14 @@ func (e *HeldError) Error() string {
 	if e.Holder == nil {
 		return fmt.Sprintf("%v: the holder of %s is unknown: %v", ErrHeld, e.Dir, e.Unreadable)
 	}
-	return fmt.Sprintf("%v: held by pid %d, release %s, in %s", ErrHeld, e.Holder.GetPid(), e.Holder.GetRelease(), e.Dir)
+	who := fmt.Sprintf("pid %d, release %s", e.Holder.GetPid(), e.Holder.GetRelease())
+	if e.Holder.GetRoot() != "" {
+		who += ", the host of " + e.Holder.GetRoot()
+	}
+	if e.Holder.GetMachine() != "" {
+		who += " on " + e.Holder.GetMachine()
+	}
+	return fmt.Sprintf("%v: held by %s, in %s", ErrHeld, who, e.Dir)
 }
 
 // Is makes a *HeldError an ErrHeld.
@@ -39,21 +44,21 @@ func (e *HeldError) Is(target error) bool { return target == ErrHeld }
 // written only while the store's lock is held, so the file names the holder whenever the lock is
 // taken.
 func writeHolder(dir, release, root string) error {
-	data, err := hostlock.Marshal(os.Getpid(), release, root)
+	data, err := hostlock.Marshal(os.Getpid(), release, root, hostlock.ThisMachine())
 	if err != nil {
 		return err
 	}
-	tmp := filepath.Join(dir, holderFile+".tmp")
+	tmp := filepath.Join(dir, hostlock.StateRecordFile+".tmp")
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write the holder file: %w", err)
 	}
-	return os.Rename(tmp, filepath.Join(dir, holderFile))
+	return os.Rename(tmp, filepath.Join(dir, hostlock.StateRecordFile))
 }
 
 // ReadHolder says who holds a state directory, from the record its holder wrote.
 func ReadHolder(dir string) *HeldError {
 	held := &HeldError{Dir: dir}
-	data, err := os.ReadFile(filepath.Join(dir, holderFile))
+	data, err := os.ReadFile(filepath.Join(dir, hostlock.StateRecordFile))
 	if err != nil {
 		held.Unreadable = err
 		return held
