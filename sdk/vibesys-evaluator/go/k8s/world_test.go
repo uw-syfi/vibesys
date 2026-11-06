@@ -160,10 +160,10 @@ func newWorld(t *testing.T) *world {
 	}
 	env := map[string]string{
 		"KUBECONFIG": "/vibesys/kubeconfig", "VIBESYS_K8S_REGISTRY": "registry:5000",
-		"VIBESYS_K8S_BUILDER": "tcp://builder:1234", "VIBESYS_ARTIFACTS_DIR": w.artifacts,
+		"VIBESYS_K8S_BUILDER": "tcp://builder:1234",
 	}
 	var err error
-	w.env, err = k8s.ParseEnvironment(func(k string) string { return env[k] }, filepath.Join(root, "work"), "")
+	w.env, err = k8s.ParseEnvironment(func(k string) string { return env[k] }, filepath.Join(root, "work"), w.artifacts)
 	if err != nil {
 		t.Fatal(err)
 	}

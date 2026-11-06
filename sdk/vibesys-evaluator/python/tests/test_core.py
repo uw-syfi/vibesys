@@ -142,6 +142,7 @@ def test_a_task_script_without_the_binary_exits_with_the_message(
             signal.signal(sig, handler)
     assert "VIBESYS_EVALUATOR_BIN" in capsys.readouterr().err
 
+
 def test_a_cut_short_wait_gives_the_core_its_grace_to_clean_up(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

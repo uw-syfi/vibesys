@@ -197,7 +197,7 @@ def test_an_oomkilled_phase_pod_names_the_limit_and_what_to_lower(
     message = str(raised.value)
     assert "ran out of memory (OOMKilled at its 4Gi limit)" in message
     assert "15 s warmup and 60 s window" in message
-    assert "sample fewer large responses" in message
+    assert "shrink the model or the dataset" in message
     assert "plan" not in message
 
 

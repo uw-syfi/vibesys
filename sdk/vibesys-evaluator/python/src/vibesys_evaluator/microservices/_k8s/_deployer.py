@@ -57,10 +57,9 @@ def _out_of_memory(job: PhaseJob, error: PodOutOfMemoryError) -> str:
         span = "a phase"
     return (
         f"{job.name}: the phase pod ran out of memory (OOMKilled at its {error.limit} limit) "
-        f"in {span}. loadgen holds only its buffer of the request stream; what must fit is the "
-        "generator's dataset and model (with the history it replays) and the results of the "
-        "sampled operations and writes the check keeps: shrink the model, sample fewer large "
-        f"responses (Operation.sample), or shorten the window. {error}"
+        f"in {span}. What must fit is loadgen's buffer of the request stream and the "
+        "generator's dataset and model: shrink the model or the dataset, lower the load "
+        f"(clients or rate), or shorten the window. {error}"
     )
 
 

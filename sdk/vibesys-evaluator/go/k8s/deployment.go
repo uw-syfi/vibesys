@@ -47,24 +47,21 @@ type Environment struct {
 	Job          string
 }
 
-// ParseEnvironment reads the job's variables through getenv; artifacts overrides
-// $VIBESYS_ARTIFACTS_DIR when not empty.
+// ParseEnvironment reads the cluster the job gives (KUBECONFIG, VIBESYS_K8S_REGISTRY and
+// VIBESYS_K8S_BUILDER, from vibesys-cli's kubernetes resource) through getenv. artifacts is the
+// job's artifacts directory (.../<job>/<step>), which also names the job in the namespace labels.
 func ParseEnvironment(getenv func(string) string, workDir, artifacts string) (Environment, error) {
 	for _, name := range []string{"KUBECONFIG", "VIBESYS_K8S_REGISTRY", "VIBESYS_K8S_BUILDER"} {
 		if getenv(name) == "" {
 			return Environment{}, deployErr("%s is not set: the task needs `[environment] needs = [\"kubernetes\"]` and a placement whose kubernetes resource names the registry and the builder", name)
 		}
 	}
-	jobDir := getenv("VIBESYS_ARTIFACTS_DIR")
-	if artifacts == "" {
-		artifacts = jobDir
-	}
 	return Environment{
 		Registry:     strings.TrimRight(getenv("VIBESYS_K8S_REGISTRY"), "/"),
 		Builder:      getenv("VIBESYS_K8S_BUILDER"),
 		ArtifactsDir: artifacts,
 		WorkDir:      workDir,
-		Job:          JobLabelOf(jobDir, randomToken()),
+		Job:          JobLabelOf(artifacts, randomToken()),
 	}, nil
 }
 

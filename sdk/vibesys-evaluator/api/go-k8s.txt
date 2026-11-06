@@ -132,7 +132,7 @@ func ImageName(registry, appSlug, component, digest string) string
     ImageName is registry/vse/<app>/<component>:<digest>.
 
 func JobLabelOf(artifactsDir, fallback string) string
-    JobLabelOf is the vibesys-cli job id: the parent of $VIBESYS_ARTIFACTS_DIR
+    JobLabelOf is the vibesys-cli job id: the parent of the artifacts directory
     (.../<job>/<step>), else fallback.
 
 func JoinUsage(pods []Pod, workloads []Workload, stats map[string]PodStats) map[string]Usage
@@ -419,8 +419,10 @@ type Environment struct {
     deploy layer.
 
 func ParseEnvironment(getenv func(string) string, workDir, artifacts string) (Environment, error)
-    ParseEnvironment reads the job's variables through getenv; artifacts
-    overrides $VIBESYS_ARTIFACTS_DIR when not empty.
+    ParseEnvironment reads the cluster the job gives (KUBECONFIG,
+    VIBESYS_K8S_REGISTRY and VIBESYS_K8S_BUILDER, from vibesys-cli's kubernetes
+    resource) through getenv. artifacts is the job's artifacts directory
+    (.../<job>/<step>), which also names the job in the namespace labels.
 
 type Error struct {
 	Kind    string

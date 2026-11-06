@@ -52,7 +52,7 @@ var (
 	jobPattern   = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9._-]{0,61}[A-Za-z0-9])?$`)
 )
 
-// JobLabelOf is the vibesys-cli job id: the parent of $VIBESYS_ARTIFACTS_DIR (.../<job>/<step>),
+// JobLabelOf is the vibesys-cli job id: the parent of the artifacts directory (.../<job>/<step>),
 // else fallback.
 func JobLabelOf(artifactsDir, fallback string) string {
 	var parts []string
