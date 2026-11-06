@@ -135,6 +135,31 @@ with torch.cuda.graph(graph):
     static_logits = _forward(batch_size, decode_wrapper, static_input_ids, ...)
 ```
 
+### Capture pitfalls that fault or corrupt only at replay
+
+These hold for CUDA and for HIP graphs on ROCm, and each one passes every eager test:
+
+- **Warm up on the capture stream.** `torch.cuda.graph` captures on its own side stream unless
+  you pass one. Warming on the default stream leaves library workspaces (GEMM handles, scratch)
+  to be created inside the first capture, which then depends on them; it can fault later, only
+  for the first-captured graph and only at some sizes. Run the warmup iterations on the stream
+  you capture on, synchronize, then capture on that stream.
+- **One memory pool per graph, unless replays follow capture order.** Graphs that share a pool
+  (`pool=` / `graph_pool_handle()`) are safe only if they replay in the order they were
+  captured. Bucketed decode, verify, commit and draft graphs replay in any order, so give each
+  its own pool (the default) and budget the extra memory.
+- **Stage host inputs through pinned, event-guarded buffers.** A `non_blocking` copy from a
+  temporary pageable tensor into a static input can be read after the host tensor is freed.
+  Keep one pinned staging buffer, record an event after the copy, and reuse the buffer only
+  after the event.
+- **Rebuild address tables on any change.** A table of device pointers (per-lane KV caches,
+  per-layer buffers) read inside the graph must be rebuilt whenever any entry changes, not when
+  a sampled entry does: a new lane can reuse some of a freed lane's addresses.
+- **Test what eager tests miss.** Compare graph vs eager bit for bit, and replay at the largest
+  context and every batch bucket, in the capture order the server uses. A fault that vanishes
+  under `AMD_SERIALIZE_KERNEL=3` / `CUDA_LAUNCH_BLOCKING=1` but not with private pools points at
+  pool or warmup state, not at a kernel.
+
 ## Replay Lifecycle
 
 1. **Copy** real data into static buffers for first `actual_bs` slots
