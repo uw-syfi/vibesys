@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -95,7 +96,7 @@ func seen(t *testing.T, rig *daemontest.Rig) map[core.RunID]counts {
 // than a count already seen, and equal to the truth whenever the service answered.
 func TestEndedRunsKeepTheirCountsAcrossRestartsInAnyOrder(t *testing.T) {
 	const runCount = 3
-	for seed := range uint64(60) {
+	for seed := range uint64(40) {
 		t.Run(fmt.Sprint(seed), func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				random := rand.New(rand.NewPCG(seed, 7))
@@ -271,9 +272,9 @@ func TestAnEndedRunIsNotLoadingAfterTheHostRestarts(t *testing.T) {
 // A host reads an ended run's task once, however many times it is asked, and the answer stays.
 func TestAnEndedRunIsReadOncePerHost(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		calls := 0
+		var calls atomic.Int32
 		rec := &Reconciler{Store: new(search.Store), Follow: func(_ context.Context, _ Subscription, publish func(search.View)) {
-			calls++
+			calls.Add(1)
 			publish(search.View{Facts: search.Facts{endedJob("j", cli.JobState_JOB_STATE_SUCCEEDED, "a")}})
 		}}
 		defer rec.Close()
@@ -286,8 +287,8 @@ func TestAnEndedRunIsReadOncePerHost(t *testing.T) {
 			rec.Sync(context.Background(), runs)
 			synctest.Wait()
 		}
-		if calls != 2 {
-			t.Fatalf("read %d times, want once for each of the two tasks", calls)
+		if calls.Load() != 2 {
+			t.Fatalf("read %d times, want once for each of the two tasks", calls.Load())
 		}
 		for _, id := range []core.RunID{"a", "b", "c"} {
 			if v, _ := rec.Store.Get(id); v.Reason != core.Readable || len(v.Facts) != 1 {

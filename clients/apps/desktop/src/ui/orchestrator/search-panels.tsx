@@ -23,7 +23,8 @@ const unreadableWords = {
   [UnreadableReason.STORE_AWAY]: 'The search store is unavailable.',
   [UnreadableReason.STREAM_LOST]: 'The connection to the search service was lost.',
   [UnreadableReason.MESSAGE_TOO_LARGE]: 'The search service sent more than the app can read.',
-  [UnreadableReason.NOT_ANSWERING]: 'The search service did not answer when the host asked for the job log.',
+  [UnreadableReason.NOT_ANSWERING]:
+    'The search service did not answer when the host asked for the job log.',
 } satisfies Record<UnreadableReason, string>;
 
 /** Search facts stay visible when the daemon cannot read them. Free text is displayed only. */
