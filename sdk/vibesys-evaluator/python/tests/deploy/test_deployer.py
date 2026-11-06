@@ -84,6 +84,7 @@ def test_deploy_asks_the_core_and_phases_run_in_pods_with_their_files(
         "has_seed": True,
         "restartable": ["frontend", "backend"],
         "caches": {"cache": "K8S_CACHE_KIND_MEMCACHED"},
+        "wait_secs": 300.0,
     }
     assert deploy["task_dir"] == str(tmp_path / "task")
     assert deploy["project_root"] == str(tmp_path / "project")
@@ -123,6 +124,13 @@ def test_deploy_asks_the_core_and_phases_run_in_pods_with_their_files(
         [PHASE_LOG_FILE, "output.binpb", "results.binpb.gz"]
     )
     assert (out / PHASE_LOG_FILE).read_text() == "ran\n"
+
+
+def test_the_apps_wait_goes_to_the_core(fake_core: FakeCore, tmp_path: Path) -> None:
+    fake_core.save()
+    with KubeDeployer(make_app(wait_secs=1800)).deploy(context(tmp_path)):
+        pass
+    assert fake_core.request("deploy")["app"]["wait_secs"] == 1800.0
 
 
 def test_the_probe_plan_goes_to_the_core_as_a_file(fake_core: FakeCore, tmp_path: Path) -> None:

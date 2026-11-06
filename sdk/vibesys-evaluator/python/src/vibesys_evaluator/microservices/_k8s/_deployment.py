@@ -100,6 +100,7 @@ def app_message(app: App[Any]) -> dict[str, Any]:
         "has_seed": app.seed is not None,
         "restartable": list(app.restartable),
         "caches": {name: f"K8S_CACHE_KIND_{kind.upper()}" for name, kind in app.caches.items()},
+        "wait_secs": float(app.wait_secs),
     }
 
 

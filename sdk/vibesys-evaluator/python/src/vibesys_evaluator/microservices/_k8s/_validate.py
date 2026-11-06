@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
@@ -91,6 +93,9 @@ def check_app(app: App[Any]) -> None:
             "but seed is None: remove data_tier or give seed"
         )
     _check_hooks(app.restartable, app.caches)
+    wait = app.wait_secs
+    if isinstance(wait, bool) or not isinstance(wait, (int, float)) or not 0 < wait < math.inf:
+        raise ValueError(f"k8s.App(wait_secs={wait!r}): want a finite number of seconds > 0")
 
 
 def _check_images(images: Mapping[str, str]) -> None:

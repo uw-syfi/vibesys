@@ -129,6 +129,7 @@ func appOf(m *pb.K8SApp) k8s.App {
 	app := k8s.App{
 		Name: m.GetName(), Manifest: m.GetManifest(), Images: m.GetImages(), Gateway: m.GetGateway(),
 		DataTier: m.GetDataTier(), HasSeed: m.GetHasSeed(), Restartable: m.GetRestartable(),
+		WaitSecs: m.GetWaitSecs(),
 	}
 	if len(m.GetCaches()) > 0 {
 		app.Caches = map[string]k8s.CacheKind{}

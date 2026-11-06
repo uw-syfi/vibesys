@@ -38,7 +38,7 @@ type WaitOptions struct {
 	Deployments []string
 	// Replaced are the UIDs of pods that must be gone (a restart's, see ReplacedPod.UID).
 	Replaced []string
-	// Timeout is WaitSecs when zero.
+	// Timeout is the App's Wait() when zero.
 	Timeout time.Duration
 	// NoProbe skips the probes through the gateway that follow readiness.
 	NoProbe bool
@@ -149,7 +149,7 @@ func (d *Deployment) WaitReady(ctx context.Context, opts WaitOptions) error {
 	}
 	timeout := opts.Timeout
 	if timeout == 0 {
-		timeout = WaitSecs
+		timeout = d.App.Wait()
 	}
 	if err := d.waitServing(ctx, names, replaced, timeout); err != nil {
 		return err
@@ -262,7 +262,7 @@ func (d *Deployment) Stop(ctx context.Context) error {
 	for _, n := range d.App.Restartable {
 		names[n] = true
 	}
-	if err := d.waitServing(ctx, names, nil, WaitSecs); err != nil {
+	if err := d.waitServing(ctx, names, nil, d.App.Wait()); err != nil {
 		return err
 	}
 	d.log("stopped %s", strings.Join(d.App.Restartable, ", "))
@@ -294,7 +294,7 @@ func (d *Deployment) Start(ctx context.Context) error {
 			return err
 		}
 	}
-	if err := d.waitServing(ctx, nil, nil, WaitSecs); err != nil {
+	if err := d.waitServing(ctx, nil, nil, d.App.Wait()); err != nil {
 		return err
 	}
 	return d.Probe(ctx)

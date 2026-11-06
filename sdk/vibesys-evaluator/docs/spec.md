@@ -761,8 +761,10 @@ run.py: the cluster comes from the vibesys-cli `kubernetes` resource
 - `ready`: steps sent through `gateway` by `loadgen probe` from a pod once
   every Deployment has all its replicas available; each must succeed twice
   per ready endpoint of the gateway Service, on fresh connections.
-- `restartable`, `caches`: the Deployments the fault actions may act on, through
-  `python bench.py ctl restart DEPLOYMENT [--every-pod] | flush CACHE | stop | start`
+- `restartable`, `caches`: the Deployments an accuracy check's faults may act on
+  (`Fault.restart`, `Fault.restart_all` and `Fault.exec` on either, `Fault.flush`
+  on a cache; see "Accuracy run"). Outside an accuracy check, the same actions go
+  through `python bench.py ctl restart DEPLOYMENT [--every-pod] | flush CACHE | stop | start`
   or, from Python, `k8s.attach(app)` (the sample's namespace, by default
   `$VIBESYS_EVALUATOR_NAMESPACE`): `restart(*deployments, every_pod=False,
   wait=True)` deletes one pod (the first by name) or every pod and, with `wait`,
@@ -772,6 +774,10 @@ run.py: the cluster comes from the vibesys-cli `kubernetes` resource
   again; `flush(cache)` runs `FLUSHALL` or `flush_all` in place; `stop()` and
   `start()` scale every restartable Deployment to 0 and back. Only Deployments
   listed in `restartable` or `caches` can be restarted or exec'd in.
+- `wait_secs` (Go `App.WaitSecs`; default 300): how long each wait of the
+  deploy may take: for the data tier, for every replica, for a pod to start, and
+  for a restarted Deployment to serve again (a fault's wait too). An application
+  whose pods load a large snapshot before they start needs more.
 - Phase pods: one pod per phase in the namespace, the inputs copied in and
   the outputs copied out with `kubectl exec ... tar`, so no ConfigMap size limit
   applies; pods of the package carry its labels and die with the namespace.

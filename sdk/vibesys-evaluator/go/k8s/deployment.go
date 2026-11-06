@@ -21,7 +21,7 @@ import (
 
 // Waits and deadlines of the deploy layer.
 const (
-	WaitSecs       = 300 * time.Second // data tier, all replicas, a pod's start, a restart
+	WaitSecs       = 300 * time.Second // data tier, all replicas, a pod's start, a restart (App.WaitSecs)
 	SeedSecs       = 1200 * time.Second
 	ProbeSecs      = 300 * time.Second
 	BuildSecs      = 2400 * time.Second
@@ -562,7 +562,7 @@ func (d *Deployment) bringUp(ctx context.Context, seed *PodCommand) error {
 	for n := range workloadNames(d.rendered.First, "StatefulSet") {
 		first[n] = true
 	}
-	if err := d.waitServing(ctx, first, nil, WaitSecs); err != nil {
+	if err := d.waitServing(ctx, first, nil, d.App.Wait()); err != nil {
 		return err
 	}
 	if tier {
@@ -573,12 +573,12 @@ func (d *Deployment) bringUp(ctx context.Context, seed *PodCommand) error {
 		if err := d.kube().Apply(ctx, d.Namespace, d.rendered.Rest); err != nil {
 			return err
 		}
-		if err := d.waitServing(ctx, nil, nil, WaitSecs); err != nil {
+		if err := d.waitServing(ctx, nil, nil, d.App.Wait()); err != nil {
 			return err
 		}
 		return d.Probe(ctx)
 	}
-	if err := d.waitServing(ctx, nil, nil, WaitSecs); err != nil {
+	if err := d.waitServing(ctx, nil, nil, d.App.Wait()); err != nil {
 		return err
 	}
 	if err := d.Probe(ctx); err != nil {
@@ -633,7 +633,7 @@ func (d *Deployment) waitServing(ctx context.Context, names, replaced map[string
 		}
 		fatal := Fatal(appPods)
 		if len(fatal) > 0 || !clock.Now().Before(deadline) {
-			why := fmt.Sprintf("not serving after %.0fs", timeout.Seconds())
+			why := fmt.Sprintf("not serving after %.0fs (k8s.App(wait_secs) waits longer)", timeout.Seconds())
 			if len(fatal) > 0 {
 				why = "cannot start"
 				reasons = fatal
@@ -680,7 +680,7 @@ func (d *Deployment) Probe(ctx context.Context) error {
 		"loadgen", "probe", "--target", d.Gateway.URL, "--requests", WorkDir + "/" + ProbeFile,
 		"--rounds", fmt.Sprint(rounds), "--deadline", fmt.Sprint(int(ProbeSecs.Seconds())),
 	}
-	run, err := d.RunPod(ctx, RoleProbe, PodCommand{Argv: argv, Inputs: map[string][]byte{ProbeFile: d.probePlan}}, ProbeSecs+WaitSecs, RunOptions{})
+	run, err := d.RunPod(ctx, RoleProbe, PodCommand{Argv: argv, Inputs: map[string][]byte{ProbeFile: d.probePlan}}, ProbeSecs+d.App.Wait(), RunOptions{})
 	if err != nil {
 		return err
 	}
@@ -726,7 +726,7 @@ func (d *Deployment) RunPod(ctx context.Context, role Role, command PodCommand, 
 		d.mu.Unlock()
 	}
 	started := clock.Now()
-	deadline := int(timeout.Seconds() + 2*WaitSecs.Seconds())
+	deadline := int(timeout.Seconds() + 2*d.App.Wait().Seconds())
 	if err := d.kube().Apply(ctx, d.Namespace, []Object{job(name, role, d.TaskImage, command.Argv, deadline)}); err != nil {
 		return PodRun{}, err
 	}
@@ -815,7 +815,7 @@ func (d *Deployment) podFailure(ctx context.Context, name string, pod Pod) error
 
 func (d *Deployment) waitPodRunning(ctx context.Context, name string) (string, error) {
 	clock := d.cluster.Clock
-	deadline := clock.Now().Add(WaitSecs)
+	deadline := clock.Now().Add(d.App.Wait())
 	for {
 		pod, err := d.jobPod(ctx, name)
 		if err != nil {
@@ -834,7 +834,7 @@ func (d *Deployment) waitPodRunning(ctx context.Context, name string) (string, e
 					state = pod.Phase
 				}
 			}
-			return "", deployErr("pod %s did not start in %.0fs (%s)", name, WaitSecs.Seconds(), state)
+			return "", deployErr("pod %s did not start in %.0fs (%s; k8s.App(wait_secs) gives a slow pod longer)", name, d.App.Wait().Seconds(), state)
 		}
 		if err := clock.Sleep(ctx, pollInterval); err != nil {
 			return "", err

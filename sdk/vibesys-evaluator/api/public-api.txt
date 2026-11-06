@@ -61,7 +61,7 @@ vibesys_evaluator.microservices.main(*, dataset: Callable[[], D], system: App[D]
 vibesys_evaluator.microservices.post(path: str | Template, *, query: Mapping[str, str | Template] | None = None, form: Mapping[str, str | Template] | None = None, json: Any = None, body: bytes | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
 vibesys_evaluator.microservices.put(path: str | Template, *, query: Mapping[str, str | Template] | None = None, form: Mapping[str, str | Template] | None = None, json: Any = None, body: bytes | None = None, headers: Mapping[str, str | Template] | None = None, capture: Mapping[str, str] | None = None, expect: int | Sequence[int] = 200) -> Step
 vibesys_evaluator.microservices.ref(name: str) -> Template
-class vibesys_evaluator.microservices.k8s.App(Generic[D])  (*, name: str, manifest: str, images: Mapping[str, str], gateway: str, ready: Sequence[Step], data_tier: str = '', seed: Callable[[D], None] | None = None, restartable: Sequence[str] = (), caches: Mapping[str, Literal['memcached', 'redis']] = dict()) -> None
+class vibesys_evaluator.microservices.k8s.App(Generic[D])  (*, name: str, manifest: str, images: Mapping[str, str], gateway: str, ready: Sequence[Step], data_tier: str = '', seed: Callable[[D], None] | None = None, restartable: Sequence[str] = (), caches: Mapping[str, Literal['memcached', 'redis']] = dict(), wait_secs: float = 300.0) -> None
 vibesys_evaluator.microservices.k8s.App.caches: Mapping[str, Literal['memcached', 'redis']]
 vibesys_evaluator.microservices.k8s.App.data_tier: str
 vibesys_evaluator.microservices.k8s.App.gateway: str
@@ -71,6 +71,7 @@ vibesys_evaluator.microservices.k8s.App.name: str
 vibesys_evaluator.microservices.k8s.App.ready: Sequence[Step]
 vibesys_evaluator.microservices.k8s.App.restartable: Sequence[str]
 vibesys_evaluator.microservices.k8s.App.seed: Callable[[D], None] | None
+vibesys_evaluator.microservices.k8s.App.wait_secs: float
 class vibesys_evaluator.microservices.k8s.Deployment  (app: App[Any], target: Mapping[str, Any], *, scratch: object | None = None) -> None
 vibesys_evaluator.microservices.k8s.Deployment.exec(argv: Sequence[str], *, deployment: str | None = None, pod: str | None = None, all_pods: bool = False, timeout_secs: float = 60.0, check: bool = False) -> list[ExecResult]
 vibesys_evaluator.microservices.k8s.Deployment.flush(cache: str) -> None

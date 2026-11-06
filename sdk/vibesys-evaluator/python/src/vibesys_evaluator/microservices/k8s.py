@@ -59,10 +59,19 @@ class App(Generic[D]):
       whole manifest is applied and serves before `seed` runs.
     - `seed`: called with the dataset in a Job of the task image, before the
       measured phases (and, with `data_tier`, before the application starts).
-    - `restartable`: Deployments the accuracy hooks may restart, stop and
-      start (`ctl restart DEPLOYMENT | stop | start`).
-    - `caches`: cache Deployments the hooks may empty in place
-      (`ctl flush CACHE`), with their protocol.
+    - `restartable`: Deployments the accuracy check's faults may act on:
+      `microservices.Fault.restart` (one pod), `Fault.restart_all` (every
+      pod at once) and `Fault.exec` (a command in the first pod), each
+      recorded in the history as a fault of its kind.
+    - `caches`: cache Deployments, with their protocol, that
+      `microservices.Fault.flush` empties in place (memcached's `flush_all`,
+      redis's `FLUSHALL`, in every pod); the other faults may act on them too.
+      Outside an accuracy check, `attach(app)` gives the same actions on a
+      running sample.
+    - `wait_secs`: how long each wait of the deploy may take: for the data
+      tier, for every replica, for a pod to start, and for a restarted
+      Deployment to serve again. An application whose pods load a large
+      snapshot before they start needs more than the default.
     """
 
     name: str
@@ -74,6 +83,7 @@ class App(Generic[D]):
     seed: Callable[[D], None] | None = None
     restartable: Sequence[str] = ()
     caches: Mapping[str, Literal["memcached", "redis"]] = field(default_factory=dict)
+    wait_secs: float = 300.0
 
     def __post_init__(self) -> None:
         """Check every field and freeze the collections; a bad field raises ValueError naming it."""

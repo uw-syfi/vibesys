@@ -410,6 +410,25 @@ func TestAPodThatNeverBecomesReadyAfterARestartFails(t *testing.T) {
 	contains(t, err, "not serving after 300s", "CrashLoopBackOff")
 }
 
+func TestTheAppsWaitBoundsTheDeployAndARestart(t *testing.T) {
+	w := newWorld(t)
+	w.kube.Broken["backend"] = "ContainerCreating"
+	began := w.clock.Now()
+	_, err := w.up(context.Background(), func(a *k8s.App) { a.WaitSecs = 900 })
+	contains(t, err, "not serving after 900s")
+	if waited := w.clock.Now().Sub(began); waited < 900*time.Second {
+		t.Fatalf("gave up after %v", waited)
+	}
+	w = newWorld(t)
+	d := w.mustUp(func(a *k8s.App) { a.WaitSecs = 45 })
+	w.kube.Broken["frontend"] = "CrashLoopBackOff"
+	_, err = d.Restart(context.Background(), []string{"frontend"}, k8s.RestartOptions{})
+	contains(t, err, "not serving after 45s")
+	if err := (k8s.App{Name: "a", Manifest: "m.yaml", Gateway: "http://a:1", WaitSecs: -1}).Validate(); err == nil || !strings.Contains(err.Error(), "wait_secs") {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestExecRunsInOnePodOrEveryPodOfAnAllowedDeployment(t *testing.T) {
 	w := newWorld(t)
 	w.kube.Execs["echo"] = func(pod string, argv []string) k8s.ExecResult {
