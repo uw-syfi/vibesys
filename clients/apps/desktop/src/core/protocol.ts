@@ -14,10 +14,7 @@ import {
 export const PROTOCOL_VERSION = getOption(file_vibesys_orchestrator_v1_service, protocol_version);
 
 /** The oldest revision the app still speaks, from the same options. */
-const MIN_PROTOCOL_VERSION = getOption(
-  file_vibesys_orchestrator_v1_service,
-  min_protocol_version,
-);
+const MIN_PROTOCOL_VERSION = getOption(file_vibesys_orchestrator_v1_service, min_protocol_version);
 
 /** The client's `BuildVersions`, as the initializer of that message. */
 export const CLIENT_BUILD = {
