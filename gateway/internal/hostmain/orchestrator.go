@@ -17,7 +17,9 @@ type exitCode int
 
 func (c exitCode) Error() string { return fmt.Sprintf("exit status %d", int(c)) }
 
-func startOrchestrator(ctx context.Context) (*hosted.Orchestrator, error) {
+// startOrchestrator opens the orchestrator for this host. stop ends the host, and is what
+// HostControlService calls when a client asks it to stop.
+func startOrchestrator(ctx context.Context, stop func()) (*hosted.Orchestrator, error) {
 	binary, err := os.Executable()
 	if err != nil {
 		return nil, err
@@ -25,7 +27,7 @@ func startOrchestrator(ctx context.Context) (*hosted.Orchestrator, error) {
 	getenv, home := hosted.Environ()
 	return hosted.Start(ctx, hosted.Options{
 		Version: buildinfo.Version, Executable: binary, Log: slog.New(slog.NewTextHandler(os.Stderr, nil)),
-		Getenv: getenv, Home: home,
+		Getenv: getenv, Home: home, Stop: stop,
 	}), nil
 }
 

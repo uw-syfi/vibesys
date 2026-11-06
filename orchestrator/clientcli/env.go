@@ -53,4 +53,9 @@ type Env struct {
 	// Connect finds the service for a --root flag value ("" for the default) and returns how to
 	// reach it, starting the host when none serves.
 	Connect func(root string) (Dial, error)
+	// Locate is Connect without the start: the Dial it returns fails with ErrNoHost when no host
+	// serves, and never starts one.
+	Locate func(root string) (Dial, error)
+	// Hosts finds and ends the process of a host that does not answer.
+	Hosts HostProcesses
 }

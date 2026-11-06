@@ -22,7 +22,30 @@ import (
 //
 // The gateway's socket and the host's run files live under the root; the orchestrator's own state
 // stays in the state directory, and a root derived from it is a separate subdirectory.
+//
+// The result has its symlinks resolved as far as the path exists, so a home reached through a link
+// and the same home reached directly are one root, and so one socket and one lock.
 func For(flag string, getenv func(string) string, home string) (string, error) {
+	root, err := place(flag, getenv, home)
+	if err != nil {
+		return "", err
+	}
+	return resolveExisting(root), nil
+}
+
+// resolveExisting resolves the symlinks of the longest existing prefix of path and keeps the rest.
+func resolveExisting(path string) string {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	parent := filepath.Dir(path)
+	if parent == path {
+		return path
+	}
+	return filepath.Join(resolveExisting(parent), filepath.Base(path))
+}
+
+func place(flag string, getenv func(string) string, home string) (string, error) {
 	switch state := getenv(localfs.EnvStateDir); {
 	case flag != "":
 		return filepath.Abs(flag)

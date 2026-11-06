@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -83,6 +84,41 @@ func Listen(root, schemaHash string) (*Endpoint, error) {
 	}
 	release = false
 	return &Endpoint{Listener: listener, lock: lock}, nil
+}
+
+// Record writes what a reader of the lock file finds while the lock is held: who holds it. It
+// replaces whatever an earlier holder left.
+func (e *Endpoint) Record(data []byte) error {
+	if err := e.lock.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := e.lock.WriteAt(data, 0); err != nil {
+		return err
+	}
+	return e.lock.Sync()
+}
+
+// Holder reads the record of the process holding the lock file of the host that serves root with
+// schemaHash. held is false when no process holds the lock, whatever the file says: a record left
+// by a process that has since exited names nobody, and the number it holds may belong to another
+// program now. The probe takes and releases the lock when it is free.
+func Holder(root, schemaHash string) (record []byte, held bool, err error) {
+	file, err := os.Open(filepath.Join(filepath.Dir(SocketPath(root, schemaHash)), lockFileName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	defer file.Close()
+	switch err := syscall.Flock(int(file.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); {
+	case err == nil:
+		return nil, false, nil
+	case !errors.Is(err, syscall.EWOULDBLOCK):
+		return nil, false, err
+	}
+	record, err = io.ReadAll(file)
+	return record, true, err
 }
 
 func (e *Endpoint) Close() error {

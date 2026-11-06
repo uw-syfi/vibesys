@@ -153,7 +153,9 @@ imports this binary.
 
 `serve` also hosts the orchestrator (`orchestrator/hosted`, through a `replace` of the sibling
 module): its operator service shares this socket, and `mcp`, `run` and `send` are subcommands. See
-[the orchestrator README](../orchestrator/README.md). `e2e/` runs it end to end with real processes
+[the orchestrator README](../orchestrator/README.md). `serve` writes a `HostLock` record into the lock it
+holds and serves `HostControlService` beside the others, so `vibesys-client host status|stop|restart`
+need no process list. `e2e/` runs it end to end with real processes
 and a scripted provider: `go test -tags e2e ./e2e -v` (needs `uv`). `TestTheDesktopPathRunsAnOptimizationEndToEnd`
 runs a lead, two workers and a judge on a toy task with the real `vibesys-cli`; CI runs it as the
 `desktop-path` job.

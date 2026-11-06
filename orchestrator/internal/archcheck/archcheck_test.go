@@ -57,6 +57,9 @@ func TestRules(t *testing.T) {
 		{"a daemon test may wait with a guard", map[string]string{"orchestrator/internal/daemon/a_test.go": goFile("time") + "var c = time.After(0)\n"}, false},
 		{"another package cannot spell the manifest's name", map[string]string{"orchestrator/internal/production/a.go": "package p\n\nvar manifest = \"release.json\"\n"}, true},
 		{"another package cannot spell the environment folder", map[string]string{"orchestrator/hosted/a.go": "package p\n\nvar python = \"sidecar/.venv/bin/python\"\n"}, true},
+		{"no process-table scraping", map[string]string{"orchestrator/hosted/a.go": "package p\n\nvar tool = \"pgrep\"\n"}, true},
+		{"no ps", map[string]string{"orchestrator/hosted/a.go": "package p\n\nvar tool = \"ps\"\n"}, true},
+		{"no command line files", map[string]string{"orchestrator/hosted/a.go": "package p\n\nvar f = \"/proc/1/cmdline\"\n"}, true},
 		{"package release owns the layout", map[string]string{"orchestrator/release/a.go": "package p\n\nvar python = \"sidecar/.venv/bin/python\"\nvar manifest = \"release.json\"\n"}, false},
 		{"a comment may name the manifest", map[string]string{"orchestrator/internal/production/a.go": "package p\n\n// RELEASE/release.json\nvar x = 1\n"}, false},
 		{"a test may spell the manifest's name", map[string]string{"orchestrator/internal/production/a_test.go": "package p\n\nvar manifest = \"release.json\"\n"}, false},
@@ -102,6 +105,22 @@ func TestRepositoryObeysTheRules(t *testing.T) {
 	}
 	for _, v := range archcheck.Violations(files) {
 		t.Error(v)
+	}
+}
+
+// The installer asks the host through the client and reads no process list.
+func TestInstallerDoesNotScrapeTheProcessTable(t *testing.T) {
+	source, err := os.ReadFile("../../../install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for number, line := range strings.Split(string(source), "\n") {
+		code, _, _ := strings.Cut(line, "#")
+		for _, word := range strings.Fields(code) {
+			if word == "ps" || word == "pgrep" || word == "pkill" || strings.Contains(word, "/proc/") {
+				t.Errorf("install.sh:%d reads the process table (%q); ask the host through `vibesys-client host stop`", number+1, word)
+			}
+		}
 	}
 }
 

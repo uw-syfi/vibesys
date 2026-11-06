@@ -51,7 +51,7 @@ func Main(args []string) int {
 		Version: buildinfo.Version, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		Terminal: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
 		Dir:      dir, FS: os.DirFS("/"), Canonical: canonical, Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
-		Connect: connector,
+		Connect: connector, Locate: locator, Hosts: hostProcesses{},
 	})
 }
 

@@ -12,7 +12,7 @@
 #
 # Options and settings, all optional:
 #
-#   --force                  switch versions even while a vibesys-host of the current version runs
+#   --force                  switch versions without asking a running vibesys-host to stop, even with live runs
 #   VIBESYS_VERSION          install this version (for example 0.2.0) instead of the newest
 #   VIBESYS_INSTALL_DIR      put the vibesys-client link here instead of $HOME/.local/bin
 #   VIBESYS_HOME             keep releases here instead of $HOME/.vibesys
@@ -24,8 +24,9 @@
 #
 # A failure at any step names the step and leaves the previous install working: the new release is
 # unpacked beside the old ones, and `current` moves only after every step has passed. Running the
-# same version again changes nothing. A switch to another version is refused while a vibesys-host
-# started from a release under $VIBESYS_HOME is running, unless --force is given; see running_host.
+# same version again changes nothing. A switch to another version asks a running vibesys-host to
+# stop, and is refused while it has live runs or does not answer, unless --force is given; see
+# stop_host_for_switch.
 #
 # The whole script is a function called on the last line, so a download cut short does nothing.
 
@@ -149,29 +150,21 @@ current_version() {
   fi
 }
 
-# running_host: print the path of a vibesys-host process started from a release under $home, if
-# any. The test is the process list: ps shows each process's command line, and a host started from
-# `current/bin` or `releases/<version>/bin` has a command line that starts with that path. Hosts
-# started from elsewhere (a development build) are not ours and are not considered. The list holds
-# the old version's processes because the old version is the only one that has run so far.
-running_host() {
-  ps -axo args= 2>/dev/null | while IFS= read -r line; do
-    case "$line" in
-      "$home"/*/bin/vibesys-host | "$home"/*/bin/vibesys-host\ *)
-        printf '%s\n' "${line%% *}"
-        break
-        ;;
-    esac
-  done
-}
-
-# refuse_if_serving: stop before moving `current` to another version while a host runs.
-refuse_if_serving() {
+# stop_host_for_switch: before moving `current` to another version, ask the host that is running to
+# end, through the new release's own client, which is the one that is certain to speak the question.
+# `host stop --if-no-live-runs` answers in its exit code: 0 when no host is left (none was running,
+# or an idle one stopped), 1 when the host has live runs and stays, 4 when a host did not answer
+# (one that predates host control). Nothing here reads the process list.
+stop_host_for_switch() {
   [ "$force" = 0 ] || return 0
   [ -n "$(current_version)" ] && [ "$(current_version)" != "$1" ] || return 0
-  running="$(running_host)"
-  [ -z "$running" ] ||
-    fail "a vibesys-host is running ($running). Stop it, or run again with --force to switch anyway; agents already running keep using the old release, which is left in place"
+  status=0
+  "$2/bin/vibesys-client" --root "$home" host stop --if-no-live-runs || status=$?
+  case "$status" in
+    0) ;;
+    1) fail "the running vibesys-host has live runs. Stop them, or run again with --force to switch anyway; agents already running keep using the old release, which is left in place" ;;
+    *) fail "the running vibesys-host did not answer (exit $status). Stop it, or run again with --force to switch anyway" ;;
+  esac
 }
 
 # find_uv: print the path of a usable uv, installing one into $home/uv if there is none.
@@ -258,9 +251,6 @@ main() {
   tag="vibesys-v$version"
   release="$home/releases/$version"
 
-  step="checking for a running host"
-  refuse_if_serving "$version"
-
   if release_ready "$release"; then
     printf 'VibeSys %s is already unpacked at %s.\n' "$version" "$release"
   else
@@ -298,8 +288,9 @@ main() {
     created=""
   fi
 
+  step="stopping the running host"
+  stop_host_for_switch "$version" "$release"
   step="switching to the new release"
-  refuse_if_serving "$version"
   if [ "$(current_version)" != "$version" ]; then
     link_to "releases/$version" "$home/current"
   fi

@@ -6,10 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"buf.build/go/protovalidate"
-	"google.golang.org/protobuf/encoding/protojson"
-
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/hostlock"
 )
 
 // ErrHeld says another process holds the orchestrator's state directory. The error wrapping it is
@@ -41,7 +39,7 @@ func (e *HeldError) Is(target error) bool { return target == ErrHeld }
 // written only while the store's lock is held, so the file names the holder whenever the lock is
 // taken.
 func writeHolder(dir, release string) error {
-	data, err := protojson.Marshal(&pb.HostLock{Pid: uint32(os.Getpid()), Release: release})
+	data, err := hostlock.Marshal(os.Getpid(), release)
 	if err != nil {
 		return err
 	}
@@ -60,15 +58,8 @@ func ReadHolder(dir string) *HeldError {
 		held.Unreadable = err
 		return held
 	}
-	var lock pb.HostLock
-	if err := protojson.Unmarshal(data, &lock); err != nil {
+	if held.Holder, err = hostlock.Parse(data); err != nil {
 		held.Unreadable = err
-		return held
 	}
-	if err := protovalidate.Validate(&lock); err != nil {
-		held.Unreadable = err
-		return held
-	}
-	held.Holder = &lock
 	return held
 }
