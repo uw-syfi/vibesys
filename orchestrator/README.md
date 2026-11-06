@@ -223,16 +223,27 @@ shows its earliest in the snapshot.
 ## Running it
 
 The host finds its parts from the release folder it is installed in, so an installed host needs no
-setting:
+setting. A release says what it holds in `RELEASE/release.json`, a `ReleaseManifest`
+(`proto/vibesys/orchestrator/v1/release.proto`) that the builder writes through
+`orchestrator/cmd/release-manifest` and that the host, the client and the installer read through
+package `orchestrator/release`. That package is the one place the layout is written down; the
+archchecks refuse another spelling of `release.json` or `.venv` in product code. Today a release
+holds:
 
 ```
-RELEASE/bin/vibesys-client  vibesys-host  vibesys-cli
+RELEASE/release.json        the manifest
+RELEASE/bin/                vibesys-client  vibesys-host  vibesys-cli
 RELEASE/sidecar/            pyproject.toml, uv.lock, src/, .venv/   (.venv made at install by uv sync --frozen)
 RELEASE/marketplace/        .claude-plugin/marketplace.json, skills/...
 ```
 
-The sidecar runs as `RELEASE/sidecar/.venv/bin/python -m vs_sidecar`, so `uv` is not needed at run
-time. Every session, lead and subagent, on either harness, loads the `vibesys` plugin from
+`vibesys-client release verify [--installed] DIR` checks DIR against its own manifest, names every
+file that is missing or cannot run, prints the version on success, and needs no host. The installer
+asks it, instead of keeping a path list. `--installed` also requires what install makes, the session
+holder's environment.
+
+The manifest's session holder command is `sidecar/.venv/bin/python -m vs_sidecar`, so `uv` is not
+needed at run time. Every session, lead and subagent, on either harness, loads the `vibesys` plugin from
 `RELEASE/marketplace` and none of the operator's own plugins, skills or configuration. The plugin is
 installed once per agent into `STATE/sessions/AGENT/plugin-home`, which a resume reuses.
 
@@ -240,15 +251,16 @@ Each part is chosen, in order, from the developer override, then the release, th
 
 | Part | Override (used as given, errors included) | Release |
 | --- | --- | --- |
-| sidecar | `VIBESYS_ORCHESTRATOR_SIDECAR`: an `orchestrator/sidecar` checkout, or the command that runs it | `RELEASE/sidecar/.venv/bin/python`, with `RELEASE/sidecar/pyproject.toml` |
-| marketplace | `VIBESYS_ORCHESTRATOR_MARKETPLACE`: an absolute path to a checkout holding `.claude-plugin/marketplace.json` | `RELEASE/marketplace` |
-| `vibesys-cli` | `VIBESYS_ORCHESTRATOR_CLI` (see below) | beside the host, `RELEASE/bin/vibesys-cli` |
+| sidecar | `VIBESYS_ORCHESTRATOR_SIDECAR`: an `orchestrator/sidecar` checkout, or the command that runs it | the manifest's session holder command |
+| marketplace | `VIBESYS_ORCHESTRATOR_MARKETPLACE`: an absolute path to a checkout holding `.claude-plugin/marketplace.json` | the manifest's skills folder |
+| `vibesys-cli` | `VIBESYS_ORCHESTRATOR_CLI` (see below) | the manifest's job tool |
 
-RELEASE is the parent of the folder holding the running `vibesys-host`, and only if that folder is
-named `bin`. A set override that is wrong is an error and is never replaced by the release. A checkout
-is not taken for a release: a host built into `~/.local/bin` has no `sidecar` or `marketplace` beside
-its `bin`, so with no override it refuses every launch with an error naming the setting and the path it
-looked at. `VIBESYS_ORCHESTRATOR_STATE_DIR` is the state directory, which should be on local disk.
+RELEASE is the folder that holds the running `vibesys-host`'s own folder, when it holds a
+`release.json`. A set override that is wrong is an error and is never replaced by the release. A
+developer's build is in no release: a host built into `~/.local/bin` has no `release.json` above it,
+so with no override it refuses every launch with an error naming the setting and the manifest it
+looked for. A release with a part missing is an error naming that file. `vibesys-client` finds its
+host the same way, then on `PATH` for a build that is in no release. `VIBESYS_ORCHESTRATOR_STATE_DIR` is the state directory, which should be on local disk.
 
 For a developer checkout: build with `(cd gateway && go build -o ~/.local/bin/vibesys-host ./cmd/vibesys-host && go build -o ~/.local/bin/vibesys-client ./cmd/vibesys-client)`,
 run `uv sync --frozen --project orchestrator/sidecar` once, set `VIBESYS_ORCHESTRATOR_SIDECAR` to
@@ -301,8 +313,9 @@ An agent's shell may be a login shell (Codex runs `bash -lc`), which reads the u
 and can put another `vibesys-cli` first on `PATH`. So the daemon picks one build when it starts. It
 picks, in order: `VIBESYS_ORCHESTRATOR_CLI` (an absolute path to an executable file; a relative path
 or a file that is not executable stops the orchestrator from starting, naming the setting, and no
-other build is substituted), a `vibesys-cli` beside the `vibesys-host` binary, then the first
-`vibesys-cli` on the daemon's own `PATH`. With none of them the orchestrator does not start, because
+other build is substituted), the release's job tool (an error naming the file when the release lacks
+it, never another build), then, for a host in no release, the first `vibesys-cli` on the daemon's own
+`PATH`. With none of them the orchestrator does not start, because
 the skills have no `PATH` fallback: they run `"$VIBESYS_CLI"` and stop with a clear message when it
 is unset.
 

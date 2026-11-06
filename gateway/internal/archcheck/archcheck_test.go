@@ -63,6 +63,10 @@ func TestRules(t *testing.T) {
 		{"second command file", archcheck.CommandDirectory + "/extra.go", goFile("os", module+"gateway/internal/hostmain"), true},
 		{"extra command import", archcheck.CommandDirectory + "/main.go", goFile("os", module+"gateway/internal/hostmain", "fmt"), true},
 		{"missing command import", archcheck.CommandDirectory + "/main.go", goFile("os"), true},
+		{"the client cannot spell the manifest's name", "gateway/internal/clientmain/a.go", "package p\n\nvar manifest = \"release.json\"\n", true},
+		{"the host cannot spell the environment folder", "gateway/internal/hostmain/a.go", "package p\n\nvar python = \"sidecar/.venv/bin/python\"\n", true},
+		{"a comment may name the manifest", "gateway/internal/hostmain/a.go", "package p\n\n// RELEASE/release.json\nvar x = 1\n", false},
+		{"a test may spell the manifest's name", "gateway/internal/clientmain/a_test.go", "package p\n\nvar manifest = \"release.json\"\n", false},
 		{"malformed source", "gateway/internal/hostmain/a.go", "package (", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -53,7 +53,7 @@ func TestAWrongMarketplaceIsRefusedNamingTheSetting(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := PluginFor(env(c.path), "/x/bin/vibesys-host", fakeFiles{})
+			_, err := PluginFor(env(c.path), developerBuild)
 			if err == nil || !strings.Contains(err.Error(), EnvMarketplace) || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("PluginFor(%q) = %v, want an error naming %s and %q", c.path, err, EnvMarketplace, c.want)
 			}
@@ -63,7 +63,7 @@ func TestAWrongMarketplaceIsRefusedNamingTheSetting(t *testing.T) {
 
 func TestTheMarketplaceNamesTheVibesysPlugin(t *testing.T) {
 	root := marketplace(t, good)
-	got, err := PluginFor(env(root+"/"), "/x/bin/vibesys-host", fakeFiles{})
+	got, err := PluginFor(env(root+"/"), developerBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestWithoutAMarketplaceEveryLaunchIsRefused(t *testing.T) {
 			return "true"
 		}
 		return ""
-	}, t.TempDir(), "/x/bin/vibesys-host", fakeFiles{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}, t.TempDir(), "/x/bin/vibesys-host", developerBuild, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestWithoutAMarketplaceEveryLaunchIsRefused(t *testing.T) {
 
 func launcher(t *testing.T) *ProcessSidecars {
 	t.Helper()
-	plugin, err := PluginFor(env(marketplace(t, good)), "/x/bin/vibesys-host", fakeFiles{})
+	plugin, err := PluginFor(env(marketplace(t, good)), developerBuild)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/production"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
+	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
 // Options are what the host process tells the orchestrator about itself.
@@ -52,11 +53,12 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	if err != nil {
 		return x.unavailable(o.Log, "the orchestrator's state directory is refused: "+err.Error())
 	}
-	sidecars, err := production.SidecarsFor(o.Getenv, filepath.Join(layout.State.Path(), "sessions"), o.Executable, production.OSFiles{}, o.Log)
+	find := release.FinderFor(o.Executable)
+	sidecars, err := production.SidecarsFor(o.Getenv, filepath.Join(layout.State.Path(), "sessions"), o.Executable, find, o.Log)
 	if err != nil {
 		return x.unavailable(o.Log, err.Error())
 	}
-	cli, err := production.ResolveCLI(o.Getenv, o.Executable, production.OSFiles{})
+	cli, err := production.ResolveCLI(o.Getenv, find, production.OSFiles{})
 	if err != nil {
 		return x.unavailable(o.Log, err.Error())
 	}

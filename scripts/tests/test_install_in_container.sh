@@ -44,12 +44,26 @@ until_true() {
 hosts() { pgrep -f "^$home/releases/[^ ]*/bin/vibesys-host " || true; }
 no_hosts() { [ -z "$(hosts)" ]; }
 
+# gone PID...: succeed when none of the processes still holds its file descriptors, which is when a
+# process has exited (a zombie has closed them). The process list is not enough: a process that
+# is exiting loses its command line, and so stops matching, before it closes its files, and the
+# state directory's lock is one of them.
+gone() {
+  local pid state
+  for pid in "$@"; do
+    state="$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null || true)"
+    [ -z "$state" ] || [ "$state" = Z ] || return 1
+  done
+}
+
 # stop_hosts: end every vibesys-host of an installed release and wait for them to be gone.
 stop_hosts() {
   local pids
   pids="$(hosts)"
   # shellcheck disable=SC2086 # a list of pids
   [ -z "$pids" ] || kill -TERM $pids 2>/dev/null || true
+  # shellcheck disable=SC2086 # a list of pids
+  until_true 30 gone $pids || die "a vibesys-host did not stop: $(hosts)"
   until_true 30 no_hosts || die "a vibesys-host did not stop: $(hosts)"
 }
 
@@ -69,7 +83,7 @@ phase_install() {
   check "layout"
   for f in bin/vibesys-client bin/vibesys-host bin/vibesys-cli sidecar/pyproject.toml sidecar/uv.lock \
     sidecar/README.md sidecar/src/vs_sidecar/__init__.py sidecar/.venv/bin/python \
-    marketplace/.claude-plugin/marketplace.json marketplace/skills/README.md VERSION; do
+    marketplace/.claude-plugin/marketplace.json marketplace/skills/README.md release.json; do
     [ -e "$home/releases/1.0.0/$f" ] || die "missing $home/releases/1.0.0/$f"
   done
   [ "$(readlink "$home/current")" = "releases/1.0.0" ] || die "current does not point at releases/1.0.0"
@@ -88,8 +102,14 @@ phase_install() {
 
   check "the sidecar imports"
   "$home/current/sidecar/.venv/bin/python" -c 'import vs_sidecar'
-  check "the host's relative paths exist from its own binary"
-  (cd "$home/current/bin" && [ -x ../sidecar/.venv/bin/python ] && [ -x ./vibesys-cli ] && [ -d ../marketplace/skills ])
+  check "the release verifies itself, and says its version"
+  [ "$(vibesys-client release verify --installed "$home/current")" = "1.0.0" ] || die "release verify did not print the version"
+  # A part gone from an installed release is named, and put back it verifies again.
+  mv "$home/current/bin/vibesys-cli" "$home/vibesys-cli.moved"
+  if vibesys-client release verify --installed "$home/current" >/tmp/verify.out 2>/tmp/verify.err; then die "a release without its job tool verified"; fi
+  grep -q "bin/vibesys-cli" /tmp/verify.err || die "the missing file is not named: $(cat /tmp/verify.err)"
+  mv "$home/vibesys-cli.moved" "$home/current/bin/vibesys-cli"
+  vibesys-client release verify --installed "$home/current" >/dev/null || die "a repaired release does not verify"
 
   check "the install warned about PATH and confinement and gave the next steps"
   grep -q "unconfined" /tmp/install1.log || die "no warning about unconfined agents"

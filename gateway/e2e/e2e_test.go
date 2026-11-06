@@ -85,6 +85,8 @@ func newRig(t *testing.T) *rig {
 	// The runtime directory holds vibesys-cli's socket; the agent socket is in the state directory.
 	// Both live under dir, so the test touches nothing of the user running it.
 	r.env = append(r.env,
+		// These binaries are a developer's build, in no release, so the client finds its host on PATH.
+		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"XDG_RUNTIME_DIR="+filepath.Join(dir, "rt"),
 		"XDG_STATE_HOME="+filepath.Join(dir, "xdg-state"),
 		// The scripted sidecar imports its sibling modules as the package e2e of the sidecar project.

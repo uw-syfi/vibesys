@@ -1,0 +1,76 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// ReleaseManifest says what one installed release holds and how to start its parts. The release
+// builder writes it as RELEASE/release.json (protobuf JSON); the host, the client and the installer
+// read it through generated code, and `vibesys-client release verify` checks the release against it.
+// It is the one definition of the layout: no other program carries a path list for a release.
+//
+// Every path is relative to the release folder and stays inside it.
+message ReleaseManifest {
+  // The release's version: MAJOR.MINOR.PATCH with an optional -suffix, and no leading "v".
+  string version = 1 [(buf.validate.field).string.pattern = "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$"];
+  // The platform the release was built for, as Go names them.
+  string os = 2 [(buf.validate.field).string = {in: ["linux", "darwin"]}];
+  string arch = 3 [(buf.validate.field).string = {in: ["amd64", "arm64"]}];
+  // The program that serves the host API.
+  string host_program = 4 [
+    (buf.validate.field).string = {min_len: 1, max_bytes: 512},
+    (buf.validate.field).cel = {
+      id: "release.host_program_inside"
+      message: "must be a path inside the release"
+      expression: "!this.startsWith('/') && !this.split('/').exists(p, p == '..')"
+    }
+  ];
+  // The program that holds an agent session. The first word is a path inside the release; the
+  // words after it are given to it before the host's own arguments.
+  repeated string session_holder_command = 5 [
+    (buf.validate.field).repeated = {min_items: 1, max_items: 16},
+    (buf.validate.field).repeated.items.string = {min_len: 1, max_bytes: 512},
+    (buf.validate.field).cel = {
+      id: "release.session_holder_inside"
+      message: "the first word must be a path inside the release"
+      expression: "!this[0].startsWith('/') && !this[0].split('/').exists(p, p == '..')"
+    }
+  ];
+  // What an agent's session loads.
+  SkillBundle skills = 6 [(buf.validate.field).required = true];
+  // The tool the skills run, which every agent of the host is given.
+  string job_tool = 7 [
+    (buf.validate.field).string = {min_len: 1, max_bytes: 512},
+    (buf.validate.field).cel = {
+      id: "release.job_tool_inside"
+      message: "must be a path inside the release"
+      expression: "!this.startsWith('/') && !this.split('/').exists(p, p == '..')"
+    }
+  ];
+  // The files an archive of the release holds, which `release verify` checks. The parts above are
+  // checked as well, so a file that exists only after install (the session holder's interpreter)
+  // is not listed here.
+  repeated string required_files = 8 [
+    (buf.validate.field).repeated = {min_items: 1, max_items: 256, unique: true},
+    (buf.validate.field).repeated.items.string = {min_len: 1, max_bytes: 512},
+    (buf.validate.field).cel = {
+      id: "release.files_inside"
+      message: "every file must be a path inside the release"
+      expression: "this.all(f, !f.startsWith('/') && !f.split('/').exists(p, p == '..'))"
+    }
+  ];
+}
+
+// SkillBundle is the skills a session loads, kept in one folder of the release.
+message SkillBundle {
+  // The folder, relative to the release.
+  string root = 1 [
+    (buf.validate.field).string = {min_len: 1, max_bytes: 512},
+    (buf.validate.field).cel = {
+      id: "release.skills_inside"
+      message: "must be a path inside the release"
+      expression: "!this.startsWith('/') && !this.split('/').exists(p, p == '..')"
+    }
+  ];
+}

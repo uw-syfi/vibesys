@@ -15,7 +15,7 @@ import (
 const Program = "vibesys-client"
 
 // Usage is the text printed for a usage error and for --help.
-const Usage = `usage: vibesys-client [--root PATH] run VERB ...
+const Usage = `usage: vibesys-client [--root PATH] run VERB ... | release verify ...
   run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--fanout N]
             [--model M] [--effort E] [--deadline RFC3339] [--detach] [--json]
   run list [--json]
@@ -24,9 +24,11 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ...
   run wait [RUN] --until started|report|ended --timeout DURATION [--json]
   run steer [RUN] TEXT [--agent AGENT] [--json]
   run stop [RUN] [--yes]
+  release verify [--installed] DIR
   --version
 
 RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository.
+release verify checks the release in DIR against its manifest, prints its version, and needs no host.
 Exit codes: 0 ok, 1 failed or refused, 2 usage, 3 timeout, 4 service unavailable.
 `
 
@@ -70,8 +72,11 @@ func execute(ctx context.Context, args []string, env Env) error {
 	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		return flag.ErrHelp
 	}
+	if args[0] == "release" && len(args) >= 2 && args[1] == "verify" {
+		return releaseVerify(&call{Env: env, root: root}, args[2:])
+	}
 	if args[0] != "run" || len(args) < 2 {
-		return usageError("expected `run VERB`, got %q", strings.Join(args, " "))
+		return usageError("expected `run VERB` or `release verify`, got %q", strings.Join(args, " "))
 	}
 	verb, ok := verbs[args[1]]
 	if !ok {
@@ -126,6 +131,9 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 		if err := fs.Parse(args); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
 				return nil, err
+			}
+			if strings.HasPrefix(fs.Name(), "release ") {
+				return nil, usageError("%s: %v", fs.Name(), err)
 			}
 			return nil, usageError("run %s: %v", fs.Name(), err)
 		}

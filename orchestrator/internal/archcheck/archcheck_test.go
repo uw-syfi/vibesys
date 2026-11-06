@@ -55,6 +55,11 @@ func TestRules(t *testing.T) {
 		{"the client cannot draw random numbers", map[string]string{"orchestrator/internal/client/a.go": goFile("crypto/rand")}, true},
 		{"production may read the clock", map[string]string{"orchestrator/internal/production/a.go": goFile("time") + "var t = time.Now()\n"}, false},
 		{"a daemon test may wait with a guard", map[string]string{"orchestrator/internal/daemon/a_test.go": goFile("time") + "var c = time.After(0)\n"}, false},
+		{"another package cannot spell the manifest's name", map[string]string{"orchestrator/internal/production/a.go": "package p\n\nvar manifest = \"release.json\"\n"}, true},
+		{"another package cannot spell the environment folder", map[string]string{"orchestrator/hosted/a.go": "package p\n\nvar python = \"sidecar/.venv/bin/python\"\n"}, true},
+		{"package release owns the layout", map[string]string{"orchestrator/release/a.go": "package p\n\nvar python = \"sidecar/.venv/bin/python\"\nvar manifest = \"release.json\"\n"}, false},
+		{"a comment may name the manifest", map[string]string{"orchestrator/internal/production/a.go": "package p\n\n// RELEASE/release.json\nvar x = 1\n"}, false},
+		{"a test may spell the manifest's name", map[string]string{"orchestrator/internal/production/a_test.go": "package p\n\nvar manifest = \"release.json\"\n"}, false},
 		{"an unparsable file fails", map[string]string{"orchestrator/internal/core/a.go": "package ("}, true},
 	}
 	for _, c := range cases {

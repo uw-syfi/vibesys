@@ -10,7 +10,12 @@
 #   bin/{vibesys-client,vibesys-host,vibesys-cli}   static Go binaries (CGO off)
 #   sidecar/                                        pyproject.toml uv.lock README.md src/
 #   marketplace/                                    .claude-plugin/marketplace.json and skills/
-#   VERSION
+#   release.json                                    the ReleaseManifest, written last
+#
+# release.json is the one definition of the layout (orchestrator/release): it is written by
+# orchestrator/cmd/release-manifest, which refuses to write it when a file it requires is not in
+# the stage, so this script and the manifest cannot drift apart unnoticed. The host, the client and
+# install.sh (through `vibesys-client release verify`) read it.
 #
 # The sidecar's virtual environment is not in the archive: install.sh creates it with
 # `uv sync --frozen`, because it must match the machine's Python.
@@ -67,7 +72,9 @@ cp "$root/.claude-plugin/marketplace.json" "$stage/marketplace/.claude-plugin/"
 cp -R "$root/skills" "$stage/marketplace/skills"
 find "$stage/marketplace" -name __pycache__ -prune -exec rm -rf {} +
 
-printf '%s\n' "$version" > "$stage/VERSION"
+# The manifest is written by the build machine's own Go, whatever platform the binaries are for.
+(cd "$root/orchestrator" && env -u GOOS -u GOARCH -u CGO_ENABLED \
+  go run ./cmd/release-manifest "$version" "$os" "$arch" "$stage")
 tar -C "$stage" -czf "$out/$name.tar.gz" .
 cd "$out"
 if command -v sha256sum > /dev/null 2>&1; then

@@ -29,23 +29,23 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
+	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
 // EnvSidecar names how to start a sidecar: the path of an orchestrator/sidecar checkout, run with
 // `uv run --frozen --project PATH python -m vs_sidecar`, or a command whose words are run as given.
 // It is a developer override. Without it the sidecar of the release the host was installed in
-// is used (see ReleaseSidecar).
+// is used (see release.Release.SessionHolderCommand).
 const EnvSidecar = "VIBESYS_ORCHESTRATOR_SIDECAR"
 
-// SidecarsFor gives the sidecar launcher the environment and the release layout name, or the
-// launcher that refuses every launch with the reason when a setting is missing or wrong. Sessions
-// keep their files under root. executable is the host binary, where the release layout is looked
-// for.
-func SidecarsFor(getenv func(string) string, root, executable string, files Files, log *slog.Logger) (daemon.Sidecars, error) {
-	argv, err := sidecarCommand(getenv, executable, files)
+// SidecarsFor gives the sidecar launcher the environment and the host's release, or the launcher
+// that refuses every launch with the reason when a setting is missing or wrong. Sessions keep their
+// files under root. executable is the host binary, which each agent's tool server runs.
+func SidecarsFor(getenv func(string) string, root, executable string, find release.Finder, log *slog.Logger) (daemon.Sidecars, error) {
+	argv, err := sidecarCommand(getenv, find)
 	if err == nil {
 		var plugin Plugin
-		if plugin, err = PluginFor(getenv, executable, files); err == nil {
+		if plugin, err = PluginFor(getenv, find); err == nil {
 			if err = os.MkdirAll(root, 0o700); err != nil {
 				return nil, err
 			}
@@ -58,15 +58,18 @@ func SidecarsFor(getenv func(string) string, root, executable string, files File
 
 // sidecarCommand is EnvSidecar when it is set, whatever it holds, and otherwise the release's
 // own sidecar. A set but wrong value is never replaced by the release.
-func sidecarCommand(getenv func(string) string, executable string, files Files) ([]string, error) {
+func sidecarCommand(getenv func(string) string, find release.Finder) ([]string, error) {
 	if setting := strings.TrimSpace(getenv(EnvSidecar)); setting != "" {
 		return sidecarSetting(setting)
 	}
-	python, err := ReleaseSidecar(executable, files)
-	if err != nil {
-		return nil, fmt.Errorf("%s is not set and %w, so no agent session can start: set %s to an orchestrator/sidecar checkout or to the command that runs the sidecar", EnvSidecar, err, EnvSidecar)
+	rel, err := find()
+	if err == nil {
+		var command []string
+		if command, err = rel.SessionHolderCommand(); err == nil {
+			return command, nil
+		}
 	}
-	return []string{python, "-m", "vs_sidecar"}, nil
+	return nil, fmt.Errorf("%s is not set and %w, so no agent session can start: set %s to an orchestrator/sidecar checkout or to the command that runs the sidecar", EnvSidecar, err, EnvSidecar)
 }
 
 func sidecarSetting(setting string) ([]string, error) {
