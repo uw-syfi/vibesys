@@ -51,7 +51,7 @@ func TestABenchmarkReportsItsMetricsAndKeepsItsPhaseFiles(t *testing.T) {
 		}
 		return run.Report(map[string]float64{"tokens_per_s": 12.5})
 	})
-	want := `{"kind":"hello","protocol":2,"metrics":{"tokens_per_s":{"direction":"max","unit":"tok/s"}}}` + "\n" +
+	want := `{"kind":"hello","protocol":2,"metrics":{"tokens_per_s":{"unit":"tok/s","direction":"max"}}}` + "\n" +
 		`{"kind":"result","label":"","values":{"tokens_per_s":12.5}}` + "\n"
 	if code != 0 || text != want {
 		t.Fatalf("exit %d, records:\n%s", code, text)
@@ -77,7 +77,7 @@ func TestABenchmarkThatIsNotAMeasurementEndsInAnErrorRecord(t *testing.T) {
 		"panic":       {func(context.Context, *Run) error { var m map[string]int; m["x"] = 1; return nil }, "panic"},
 		"sample-error": {func(context.Context, *Run) error {
 			return &SampleError{Msg: "the server never answered", Partial: &Partial{Name: "ops", Value: 3, Direction: Max}}
-		}, `"message":"the server never answered","partial":{"name":"ops","value":3.0,"direction":"max"}`},
+		}, `"message":"the server never answered","partial":{"name":"ops","value":3,"direction":"max"}`},
 	} {
 		code, text, _ := benchmark(t, c.fn)
 		if code != 1 || !strings.Contains(text, `"kind":"error"`) || !strings.Contains(text, c.named) {

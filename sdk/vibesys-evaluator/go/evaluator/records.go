@@ -11,6 +11,10 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"google.golang.org/protobuf/encoding/protojson"
+
+	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 )
 
 // Protocol is the result protocol version the records are written in.
@@ -140,11 +144,10 @@ func (s *Stream) Hello(metrics []NamedMetric) error {
 	if len(metrics) == 0 {
 		return recordErrorf("declare at least one metric")
 	}
-	var b strings.Builder
-	b.WriteString(`{"kind":"hello","protocol":2,"metrics":{`)
 	seen := map[string]bool{}
 	names := make([]string, 0, len(metrics))
-	for i, m := range metrics {
+	specs := make(map[string]*pb.MetricSpec, len(metrics))
+	for _, m := range metrics {
 		if !ValidMetricName(m.Name) {
 			return recordErrorf("metric name %s must be non-empty and contain no whitespace", pyRepr(m.Name))
 		}
@@ -156,17 +159,13 @@ func (s *Stream) Hello(metrics []NamedMetric) error {
 		}
 		seen[m.Name] = true
 		names = append(names, m.Name)
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(jsonString(m.Name) + `:{"direction":` + jsonString(string(m.Direction)))
+		spec := &pb.MetricSpec{Direction: ptr(string(m.Direction))}
 		if m.Unit != "" {
-			b.WriteString(`,"unit":` + jsonString(m.Unit))
+			spec.Unit = ptr(m.Unit)
 		}
-		b.WriteByte('}')
+		specs[m.Name] = spec
 	}
-	b.WriteString("}}")
-	if err := s.write(b.String()); err != nil {
+	if err := s.write(&pb.ResultRecord{Kind: ptr("hello"), Protocol: ptr(uint32(Protocol)), Metrics: specs}); err != nil {
 		return err
 	}
 	s.hello = true
@@ -209,16 +208,7 @@ func (s *Stream) Result(values map[string]float64) error {
 			return recordErrorf("metric %s is %s; report a finite number", name, pyFloat(v))
 		}
 	}
-	var b strings.Builder
-	b.WriteString(`{"kind":"result","label":"","values":{`)
-	for i, name := range s.metrics {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		b.WriteString(jsonString(name) + ":" + pyFloat(values[name]))
-	}
-	b.WriteString("}}")
-	if err := s.write(b.String()); err != nil {
+	if err := s.write(&pb.ResultRecord{Kind: ptr("result"), Label: ptr(""), Values: values}); err != nil {
 		return err
 	}
 	s.outcome = OutcomeResult
@@ -239,23 +229,42 @@ func (s *Stream) Error(message string, partial *Partial) error {
 	if utf8.RuneCountInString(text) > maxMessage {
 		text = string([]rune(text)[:maxMessage-3]) + "..."
 	}
-	rec := `{"kind":"error","message":` + jsonString(text)
+	rec := &pb.ResultRecord{Kind: ptr("error"), Message: &text}
 	if partial != nil && ValidMetricName(partial.Name) && Finite(partial.Value) {
-		rec += `,"partial":{"name":` + jsonString(partial.Name) + `,"value":` + pyFloat(partial.Value) +
-			`,"direction":` + jsonString(string(partial.Direction))
+		rec.Partial = &pb.PartialResult{Name: &partial.Name, Value: &partial.Value, Direction: ptr(string(partial.Direction))}
 		if partial.Unit != "" {
-			rec += `,"unit":` + jsonString(partial.Unit)
+			rec.Partial.Unit = &partial.Unit
 		}
-		rec += "}"
 	}
-	if err := s.write(rec + "}"); err != nil {
+	if err := s.write(rec); err != nil {
 		return err
 	}
 	s.outcome = OutcomeError
 	return nil
 }
 
-func (s *Stream) write(line string) error {
+func ptr[T any](v T) *T { return &v }
+
+// encode is the record as one line of JSON with the proto field names: the generated message is the
+// definition of what a record holds, so what is written is what the definition says.
+func encode(rec *pb.ResultRecord) (string, error) {
+	raw, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(rec)
+	if err != nil {
+		return "", recordErrorf("the %s record cannot be written: %v", rec.GetKind(), err)
+	}
+	// protojson varies its spacing on purpose.
+	var line bytes.Buffer
+	if err := json.Compact(&line, raw); err != nil {
+		return "", err
+	}
+	return line.String(), nil
+}
+
+func (s *Stream) write(rec *pb.ResultRecord) error {
+	line, err := encode(rec)
+	if err != nil {
+		return err
+	}
 	if s.file == nil {
 		flags := os.O_WRONLY | os.O_CREATE | os.O_APPEND
 		if !s.hello && s.outcome == NoOutcome {

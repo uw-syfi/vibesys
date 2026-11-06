@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	evaluatorv1 "github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval/internal/gen/vibesys/evaluator/v1"
 )
 
 // Run is a declared evaluator report. Its hello record is already written;
@@ -81,7 +83,7 @@ func (r *Run) Emit() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("required metrics were never set: %s", strings.Join(missing, ", "))
 	}
-	if err := r.report.write(resultRecord{Kind: kindResult, Label: "", Values: values}); err != nil {
+	if err := r.report.write(&evaluatorv1.ResultRecord{Kind: ptr(kindResult), Label: ptr(""), Values: values}); err != nil {
 		return err
 	}
 	r.report.outcome = true

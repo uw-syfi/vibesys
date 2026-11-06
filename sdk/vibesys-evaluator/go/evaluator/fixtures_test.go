@@ -6,12 +6,36 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 )
 
+// sameRecords reports whether two record streams hold the same records, line for line.
+func sameRecords(a, b []byte) bool {
+	decode := func(data []byte) ([]any, bool) {
+		var out []any
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			if line == "" {
+				continue
+			}
+			var v any
+			if json.Unmarshal([]byte(line), &v) != nil {
+				return nil, false
+			}
+			out = append(out, v)
+		}
+		return out, true
+	}
+	x, okx := decode(a)
+	y, oky := decode(b)
+	return okx && oky && reflect.DeepEqual(x, y)
+}
+
 // The cases of fixtures/core.json were written from the Python implementation this package
-// replaced; every one must come out the same here, byte for byte where a file is written.
+// replaced; every one must come out the same here, as records (the records of a file are compared
+// semantically, as the protocol says, since the definition owns how they are spelled).
 
 type fixture struct {
 	Percentiles []float64 `json:"percentiles"`
@@ -211,7 +235,9 @@ func TestRecordsEqualPythons(t *testing.T) {
 		}
 		s.Close()
 		got, _ := os.ReadFile(path)
-		if string(got) != c.Expect.File {
+		// The protocol compares records semantically: key order, float spelling and escapes are
+		// the writer's choice (PROTOCOL.md, "Serialization").
+		if !sameRecords(got, []byte(c.Expect.File)) {
 			t.Errorf("%s: file\n%s\nwant\n%s", c.Name, got, c.Expect.File)
 		}
 	}

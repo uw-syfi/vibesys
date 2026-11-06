@@ -46,9 +46,9 @@ func TestTheRecordsOfASampleAreWrittenOneCallAtATime(t *testing.T) {
 		}
 	}
 	got, _ := os.ReadFile(path)
-	want := `{"kind":"hello","protocol":2,"metrics":{"ops":{"direction":"max","unit":"ops/s"}}}
-{"kind":"result","label":"","values":{"ops":5300.0}}
-{"kind":"error","message":"teardown","partial":{"name":"ops","value":3.0,"direction":"max"}}
+	want := `{"kind":"hello","protocol":2,"metrics":{"ops":{"unit":"ops/s","direction":"max"}}}
+{"kind":"result","label":"","values":{"ops":5300}}
+{"kind":"error","message":"teardown","partial":{"name":"ops","value":3,"direction":"max"}}
 `
 	if string(got) != want {
 		t.Errorf("file:\n%s", got)

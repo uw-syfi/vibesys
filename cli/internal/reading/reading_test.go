@@ -1,6 +1,7 @@
 package reading_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -161,8 +162,6 @@ func TestWhatTheProtocolForbidsIsRejectedAndNamed(t *testing.T) {
 		"a metric that is not an object":           {`{"kind":"hello","protocol":2,"metrics":{"m":1}}`, "m", reading.InvalidRecord, "m"},
 		"an unknown key in a spec":                 {`{"kind":"hello","protocol":2,"metrics":{"m":{"color":"red"}}}`, "m", reading.UnknownKey, "metrics.m.color"},
 		"a bad direction":                          {`{"kind":"hello","protocol":2,"metrics":{"m":{"direction":"up"}}}`, "m", reading.InvalidRecord, "direction"},
-		"a null required":                          {`{"kind":"hello","protocol":2,"metrics":{"m":{"required":null}}}`, "m", reading.InvalidRecord, "required"},
-		"a null label":                             {hello + `{"kind":"result","label":null,"values":{"m":1}}`, "m", reading.InvalidRecord, "label"},
 		"values that are a list":                   {hello + `{"kind":"result","values":[1]}`, "m", reading.InvalidRecord, "values"},
 		"a null value":                             {hello + `{"kind":"result","values":{"m":null}}`, "m", reading.NonNumericValue, "values.m"},
 		"a string value":                           {hello + `{"kind":"result","values":{"m":"1"}}`, "m", reading.NonNumericValue, "values.m"},
@@ -190,6 +189,29 @@ func TestWhatTheProtocolForbidsIsRejectedAndNamed(t *testing.T) {
 		r := rejection(t, err)
 		if r.Code != c.code || !strings.Contains(r.Message, c.names) {
 			t.Errorf("%s: %s %q, want %s naming %q", name, r.Code, r.Message, c.code, c.names)
+		}
+	}
+}
+
+// A JSON null reads as an absent key, as in proto3 JSON, wherever the key may be absent. Benchmarks
+// written against the earlier reader, which skipped a null unit or direction, keep working.
+func TestANullKeyReadsAsAbsent(t *testing.T) {
+	for name, stream := range map[string]string{
+		"a null unit and direction": `{"kind":"hello","protocol":2,"metrics":{"m":{"unit":null,"direction":null}}}` + "\n" + `{"kind":"result","values":{"m":1}}`,
+		"a null required":           `{"kind":"hello","protocol":2,"metrics":{"m":{"required":null}}}` + "\n" + `{"kind":"result","values":{"m":1}}`,
+		"a null label":              `{"kind":"hello","protocol":2,"metrics":{"m":{}}}` + "\n" + `{"kind":"result","label":null,"values":{"m":1}}`,
+		"a null partial":            `{"kind":"error","message":"x","partial":null,"requirement":null,"error_kind":null}`,
+	} {
+		got, err := reading.Protocol2([]byte(stream), "m")
+		if err == nil {
+			if got.Value != 1 {
+				t.Errorf("%s: read %v, want 1", name, got.Value)
+			}
+			continue
+		}
+		var reported *reading.Reported
+		if !errors.As(err, &reported) {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
 }
@@ -554,6 +576,13 @@ func checkOutcome(t *testing.T, got reading.Reading, err error, scored string) {
 			if rej.Code == "" || rej.Message == "" {
 				t.Fatalf("a rejection without a code or message: %+v", rej)
 			}
+			// A rejection of one key or value names it, in quotes.
+			switch rej.Code {
+			case reading.UnknownKey, reading.NonNumericValue, reading.NonFiniteValue:
+				if strings.Count(rej.Message, `"`) < 2 {
+					t.Fatalf("a %s rejection that does not name the key: %q", rej.Code, rej.Message)
+				}
+			}
 		case errors.As(err, &rep):
 			if rep.Message == "" {
 				t.Fatalf("a reported error without a message: %+v", rep)
@@ -591,7 +620,29 @@ func FuzzProtocol2(f *testing.F) {
 	f.Fuzz(func(t *testing.T, stream []byte, scored string) {
 		got, err := reading.Protocol2(stream, scored)
 		checkOutcome(t, got, err, scored)
+		if err == nil && !writtenAsValue(stream, scored, got.Value) {
+			t.Fatalf("read %v for %q, which no line of the stream holds", got.Value, scored)
+		}
 	})
+}
+
+// writtenAsValue reports whether some line of the stream is a JSON object whose values hold the
+// number, found without the reader: a reader may refuse a stream, but it may not invent a number.
+func writtenAsValue(stream []byte, metric string, want float64) bool {
+	for _, line := range bytes.Split(stream, []byte{'\n'}) {
+		var rec struct {
+			Values map[string]json.Number `json:"values"`
+		}
+		if json.Unmarshal(line, &rec) != nil {
+			continue
+		}
+		if n, ok := rec.Values[metric]; ok {
+			if f, err := strconv.ParseFloat(n.String(), 64); err == nil && f == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func FuzzJSONField(f *testing.F) {

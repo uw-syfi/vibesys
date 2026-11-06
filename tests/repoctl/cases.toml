@@ -13,7 +13,7 @@ pnpm_packages = { dependents_of = "pnpm:@vibesys/orchestrator-proto" }
 [[cases]]
 name = "evaluator SDK changes reach consumers"
 paths = ["sdk/vs-evaluator/vseval/go.mod"]
-jobs = ["evaluators", "examples", "python"]
+jobs = ["evaluators", "examples", "proto", "python"]
 [cases.collections]
 native_languages = ["go"]
 dockerfile_contexts = []

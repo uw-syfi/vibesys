@@ -10,6 +10,7 @@ require (
 	buf.build/go/protovalidate v1.0.0
 	github.com/BurntSushi/toml v1.5.0
 	github.com/moby/patternmatcher v0.6.0
+	github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go v0.0.0
 	golang.org/x/sys v0.47.0
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800
 	google.golang.org/grpc v1.84.0
@@ -32,3 +33,7 @@ tool (
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc
 	google.golang.org/protobuf/cmd/protoc-gen-go
 )
+
+// The result record is defined and generated once, in the evaluator SDK; the reader of a
+// benchmark output uses that package rather than a second copy.
+replace github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go => ../sdk/vibesys-evaluator/go

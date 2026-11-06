@@ -2,12 +2,15 @@ package reading
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"unicode"
+
+	"buf.build/go/protovalidate"
+
+	evaluatorv1 "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 )
 
 // Protocol2 reads the record stream a benchmark wrote under evaluator protocol 2 and returns the
@@ -18,8 +21,8 @@ import (
 // record instead of a result is valid and is returned as a *Reported; every other stream the
 // protocol forbids is a *Rejection with the protocol's reason code.
 //
-// Records are applied in order, and an error record ends the stream: what follows it is not
-// read, as PROTOCOL.md says.
+// Each line is a evaluatorv1.ResultRecord, the protocol's one definition. Records are applied in
+// order, and an error record ends the stream: what follows it is not read, as PROTOCOL.md says.
 func Protocol2(stream []byte, scored string) (Reading, error) {
 	var (
 		declared map[string]spec
@@ -96,13 +99,13 @@ func Protocol2(stream []byte, scored string) (Reading, error) {
 type spec struct{ required bool }
 
 type helloRecord struct {
-	protocol int64
+	protocol uint32
 	metrics  map[string]spec
 }
 
 type resultRecord struct {
 	label  string
-	values map[string]json.RawMessage
+	values map[string]float64
 }
 
 type errorRecord struct {
@@ -147,323 +150,119 @@ func checkResult(declared map[string]spec, r resultRecord, position int) (map[st
 	if len(missing) > 0 {
 		return nil, reject(MissingMetric, "record %d has key 'values' missing required metrics %s", position, quoted(missing))
 	}
-	row := make(map[string]float64, len(names))
-	for _, name := range names {
-		raw := r.values[name]
-		if !isNumberToken(raw) {
-			return nil, reject(NonNumericValue, "record %d has key 'values.%s' = %s, which is not a number", position, name, shorten(raw))
-		}
-		f, ok := number(string(raw))
-		if !ok {
-			return nil, reject(NonFiniteValue, "record %d has key 'values.%s' = %s, which is not finite", position, name, shorten(raw))
-		}
-		row[name] = f
-	}
-	return row, nil
+	return r.values, nil
 }
 
 // parseLine reads one line as the record its kind names, rejecting a line that is not a record of
-// a known kind, has a key the record does not define, or has a field of the wrong type.
+// a known kind, has a key the record does not define, or has a field of the wrong type. The
+// definition is evaluatorv1.ResultRecord: decodeObject fits the line to it and its validation
+// rules say what each kind may hold, so this function only chooses which failure to report.
 func parseLine(line []byte, lineNo int) (any, error) {
 	if len(line) > MaxLineBytes {
 		return nil, reject(MalformedLine, "line %d is larger than %d bytes", lineNo, MaxLineBytes)
 	}
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(line, &top); err != nil {
-		var wrongType *json.UnmarshalTypeError
-		if errors.As(err, &wrongType) {
+	rec := &evaluatorv1.ResultRecord{}
+	problems, err := decodeObject(line, rec.ProtoReflect())
+	if err != nil {
+		if errors.Is(err, errNotObject) {
 			return nil, reject(MalformedLine, "line %d is not a JSON object", lineNo)
 		}
 		return nil, reject(MalformedLine, "line %d is not valid JSON", lineNo)
 	}
-	if top == nil {
-		return nil, reject(MalformedLine, "line %d is not a JSON object", lineNo)
+	violations, err := violationsOf(rec)
+	if err != nil {
+		return nil, err
 	}
-	var kind string
-	if raw, ok := top["kind"]; !ok || json.Unmarshal(raw, &kind) != nil {
-		return nil, reject(UnknownKind, "line %d has no record kind", lineNo)
+	// A line of no known kind cannot be said to have a wrong key, so that is reported first.
+	for _, v := range violations {
+		if v.path == "kind" {
+			if rec.Kind == nil {
+				return nil, reject(UnknownKind, "line %d has no record kind", lineNo)
+			}
+			return nil, reject(UnknownKind, "line %d has unknown record kind %q", lineNo, rec.GetKind())
+		}
 	}
-	w := where{line: lineNo, kind: kind}
+	kind := rec.GetKind()
+	if err := firstProblem(problems, violations, lineNo, kind); err != nil {
+		return nil, err
+	}
 	switch kind {
 	case "hello":
-		return parseHello(top, w)
+		h := helloRecord{protocol: rec.GetProtocol(), metrics: make(map[string]spec, len(rec.GetMetrics()))}
+		for name, s := range rec.GetMetrics() {
+			h.metrics[name] = spec{required: s.Required == nil || s.GetRequired()}
+		}
+		return h, nil
 	case "result":
-		return parseResult(top, w)
-	case "error":
-		return parseError(top, w)
+		return resultRecord{label: rec.GetLabel(), values: rec.GetValues()}, nil
+	default:
+		return errorRecord{message: rec.GetMessage(), requirement: rec.GetRequirement()}, nil
 	}
-	return nil, reject(UnknownKind, "line %d has unknown record kind %q", lineNo, kind)
 }
 
-// where names the record a problem is in.
-type where struct {
-	line int
-	kind string
+// violation is one rule of the definition that the record broke.
+type violation struct {
 	path string
+	rule string
+	why  string
 }
 
-func (w where) in(key string) where {
-	if key == "" {
-		return w
+// violationsOf checks the rules the definition states, ordered so the choice among several is
+// the same every time.
+func violationsOf(rec *evaluatorv1.ResultRecord) ([]violation, error) {
+	err := protovalidate.Validate(rec)
+	if err == nil {
+		return nil, nil
 	}
-	if w.path != "" {
-		key = w.path + "." + key
+	var invalid *protovalidate.ValidationError
+	if !errors.As(err, &invalid) {
+		return nil, fmt.Errorf("checking the result record against its definition: %w", err)
 	}
-	w.path = key
-	return w
+	out := make([]violation, 0, len(invalid.Violations))
+	for _, v := range invalid.Violations {
+		out = append(out, violation{path: protovalidate.FieldPathString(v.Proto.GetField()), rule: v.Proto.GetRuleId(), why: v.Proto.GetMessage()})
+	}
+	slices.SortFunc(out, func(a, b violation) int {
+		return strings.Compare(a.path+"\x00"+a.rule, b.path+"\x00"+b.rule)
+	})
+	return out, nil
 }
 
-func (w where) unknown(key string) error {
-	return reject(UnknownKey, "line %d: %s record has unknown key %q", w.line, w.kind, w.in(key).path)
-}
-
-func (w where) invalid(key, why string) error {
-	return reject(InvalidRecord, "line %d: %s record has invalid key %q: %s", w.line, w.kind, w.in(key).path, why)
-}
-
-// onlyKeys rejects the first key, in order, that the object does not define.
-func onlyKeys(m map[string]json.RawMessage, w where, allowed ...string) error {
-	for _, k := range keys(m) {
-		if !slices.Contains(allowed, k) {
-			return w.unknown(k)
+// firstProblem reports the failure to put first: a key the record does not define, then a value
+// of the wrong type, then a rule of the definition.
+func firstProblem(problems []problem, violations []violation, line int, kind string) error {
+	slices.SortStableFunc(problems, func(a, b problem) int { return strings.Compare(a.path, b.path) })
+	for _, p := range problems {
+		if p.kind == unknownKey {
+			return reject(UnknownKey, "line %d: %s record has unknown key %q", line, kind, p.path)
 		}
+	}
+	for _, v := range violations {
+		if key, ok := strings.CutPrefix(v.rule, "unknown_key."); ok {
+			return reject(UnknownKey, "line %d: %s record has unknown key %q", line, kind, key)
+		}
+	}
+	for _, p := range problems {
+		if !strings.HasPrefix(p.path, "values.") {
+			return reject(InvalidRecord, "line %d: %s record has invalid key %q: not %s", line, kind, p.path, p.want)
+		}
+		code := NonNumericValue
+		if p.kind == notFinite {
+			code = NonFiniteValue
+		}
+		return reject(code, "line %d: %s record has key %q, which is not %s", line, kind, p.path, p.want)
+	}
+	for _, v := range violations {
+		key := v.path
+		if k, ok := strings.CutPrefix(v.rule, "required."); ok {
+			key = k
+		} else if strings.HasPrefix(v.rule, "requirement.") {
+			key = "requirement"
+		}
+		return reject(InvalidRecord, "line %d: %s record has invalid key %q: %s", line, kind, key, v.why)
 	}
 	return nil
 }
-
-func parseHello(top map[string]json.RawMessage, w where) (any, error) {
-	if err := onlyKeys(top, w, "kind", "protocol", "metrics"); err != nil {
-		return nil, err
-	}
-	var h helloRecord
-	raw, ok := top["protocol"]
-	if !ok {
-		return nil, w.invalid("protocol", "required")
-	}
-	if h.protocol, ok = asInt(raw); !ok {
-		return nil, w.invalid("protocol", "not an integer")
-	}
-	raw, ok = top["metrics"]
-	if !ok {
-		return nil, w.invalid("metrics", "required")
-	}
-	metrics, ok := asObject(raw)
-	if !ok {
-		return nil, w.invalid("metrics", "not an object")
-	}
-	h.metrics = make(map[string]spec, len(metrics))
-	for _, name := range keys(metrics) {
-		mw := w.in("metrics").in(name)
-		so, ok := asObject(metrics[name])
-		if !ok {
-			return nil, w.in("metrics").invalid(name, "not an object")
-		}
-		if err := onlyKeys(so, mw, "unit", "direction", "required"); err != nil {
-			return nil, err
-		}
-		s := spec{required: true}
-		if raw, ok := so["unit"]; ok && !isNull(raw) {
-			if _, ok := asString(raw); !ok {
-				return nil, mw.invalid("unit", "not a string")
-			}
-		}
-		if raw, ok := so["direction"]; ok && !isNull(raw) {
-			if d, ok := asString(raw); !ok || (d != "max" && d != "min") {
-				return nil, mw.invalid("direction", `not "max" or "min"`)
-			}
-		}
-		if raw, ok := so["required"]; ok {
-			if s.required, ok = asBool(raw); !ok {
-				return nil, mw.invalid("required", "not a boolean")
-			}
-		}
-		h.metrics[name] = s
-	}
-	return h, nil
-}
-
-func parseResult(top map[string]json.RawMessage, w where) (any, error) {
-	if err := onlyKeys(top, w, "kind", "label", "values"); err != nil {
-		return nil, err
-	}
-	var r resultRecord
-	if raw, ok := top["label"]; ok {
-		if r.label, ok = asString(raw); !ok {
-			return nil, w.invalid("label", "not a string")
-		}
-	}
-	raw, ok := top["values"]
-	if !ok {
-		return nil, w.invalid("values", "required")
-	}
-	if r.values, ok = asObject(raw); !ok {
-		return nil, w.invalid("values", "not an object")
-	}
-	return r, nil
-}
-
-func parseError(top map[string]json.RawMessage, w where) (any, error) {
-	if err := onlyKeys(top, w, "kind", "message", "partial", "error_kind", "requirement"); err != nil {
-		return nil, err
-	}
-	var e errorRecord
-	raw, ok := top["message"]
-	if !ok {
-		return nil, w.invalid("message", "required")
-	}
-	if e.message, ok = asString(raw); !ok || e.message == "" {
-		return nil, w.invalid("message", "not a non-empty string")
-	}
-	if raw, ok := top["partial"]; ok && !isNull(raw) {
-		if err := checkPartial(raw, w.in("partial")); err != nil {
-			return nil, err
-		}
-	}
-	notMet := false
-	if raw, ok := top["error_kind"]; ok {
-		k, ok := asString(raw)
-		if !ok || (k != "transient" && k != "requirement_not_met") {
-			return nil, w.invalid("error_kind", `not "transient" or "requirement_not_met"`)
-		}
-		notMet = k == "requirement_not_met"
-	}
-	if raw, ok := top["requirement"]; ok && !isNull(raw) {
-		if e.requirement, ok = asName(raw); !ok {
-			return nil, w.invalid("requirement", "not a non-empty string without whitespace")
-		}
-	}
-	if notMet != (e.requirement != "") {
-		return nil, w.invalid("requirement", `required by, and only allowed with, key 'error_kind' = "requirement_not_met"`)
-	}
-	return e, nil
-}
-
-// checkPartial validates what a failed run measured before it stopped. The reader keeps none of
-// it: it never counts as a result.
-func checkPartial(raw json.RawMessage, w where) error {
-	m, ok := asObject(raw)
-	if !ok {
-		return w.invalid("", "not an object")
-	}
-	if err := onlyKeys(m, w, "name", "value", "direction", "unit", "target", "progress"); err != nil {
-		return err
-	}
-	if r, ok := m["name"]; !ok {
-		return w.invalid("name", "required")
-	} else if _, ok := asName(r); !ok {
-		return w.invalid("name", "not a non-empty string without whitespace")
-	}
-	if r, ok := m["value"]; !ok {
-		return w.invalid("value", "required")
-	} else if _, ok := asFinite(r); !ok {
-		return w.invalid("value", "not a finite number")
-	}
-	if r, ok := m["direction"]; !ok {
-		return w.invalid("direction", "required")
-	} else if d, ok := asString(r); !ok || (d != "max" && d != "min") {
-		return w.invalid("direction", `not "max" or "min"`)
-	}
-	if r, ok := m["unit"]; ok && !isNull(r) {
-		if u, ok := asString(r); !ok || u == "" {
-			return w.invalid("unit", "not a non-empty string")
-		}
-	}
-	if r, ok := m["target"]; ok && !isNull(r) {
-		if _, ok := asFinite(r); !ok {
-			return w.invalid("target", "not a finite number")
-		}
-	}
-	if r, ok := m["progress"]; ok && !isNull(r) {
-		return checkProgress(r, w.in("progress"))
-	}
-	return nil
-}
-
-func checkProgress(raw json.RawMessage, w where) error {
-	m, ok := asObject(raw)
-	if !ok {
-		return w.invalid("", "not an object")
-	}
-	if err := onlyKeys(m, w, "completed", "required", "unit"); err != nil {
-		return err
-	}
-	if r, ok := m["completed"]; !ok {
-		return w.invalid("completed", "required")
-	} else if n, ok := asInt(r); !ok || n < 0 {
-		return w.invalid("completed", "not an integer of at least 0")
-	}
-	if r, ok := m["required"]; !ok {
-		return w.invalid("required", "required")
-	} else if n, ok := asInt(r); !ok || n < 1 {
-		return w.invalid("required", "not an integer of at least 1")
-	}
-	if r, ok := m["unit"]; !ok {
-		return w.invalid("unit", "required")
-	} else if _, ok := asName(r); !ok {
-		return w.invalid("unit", "not a non-empty string without whitespace")
-	}
-	return nil
-}
-
-func asObject(raw json.RawMessage) (map[string]json.RawMessage, bool) {
-	if len(raw) == 0 || raw[0] != '{' {
-		return nil, false
-	}
-	var m map[string]json.RawMessage
-	if json.Unmarshal(raw, &m) != nil || m == nil {
-		return nil, false
-	}
-	return m, true
-}
-
-func asString(raw json.RawMessage) (string, bool) {
-	var s string
-	if len(raw) == 0 || raw[0] != '"' || json.Unmarshal(raw, &s) != nil {
-		return "", false
-	}
-	return s, true
-}
-
-// asName reads a non-empty string without whitespace.
-func asName(raw json.RawMessage) (string, bool) {
-	s, ok := asString(raw)
-	if !ok || s == "" || strings.IndexFunc(s, isSpace) >= 0 {
-		return "", false
-	}
-	return s, true
-}
-
-func asBool(raw json.RawMessage) (bool, bool) {
-	switch string(raw) {
-	case "true":
-		return true, true
-	case "false":
-		return false, true
-	}
-	return false, false
-}
-
-// asInt reads an integer token. A number written with a fraction or an exponent is not one, as in
-// the protocol's strict records.
-func asInt(raw json.RawMessage) (int64, bool) {
-	var n int64
-	if !isNumberToken(raw) || json.Unmarshal(raw, &n) != nil {
-		return 0, false
-	}
-	return n, true
-}
-
-func asFinite(raw json.RawMessage) (float64, bool) {
-	if !isNumberToken(raw) {
-		return 0, false
-	}
-	return number(string(raw))
-}
-
-func isNull(raw json.RawMessage) bool { return string(raw) == "null" }
-
-// isSpace is Unicode white space, with the C0 separators the protocol's other readers count.
-func isSpace(r rune) bool { return unicode.IsSpace(r) || (r >= 0x1c && r <= 0x1f) }
 
 func keys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
@@ -482,11 +281,5 @@ func quoted(names []string) string {
 	return strings.Join(q, ", ")
 }
 
-// shorten bounds a value quoted in an error, since the value is the benchmark's own.
-func shorten(raw []byte) string {
-	const limit = 40
-	if len(raw) > limit {
-		return string(raw[:limit]) + "..."
-	}
-	return string(raw)
-}
+// isSpace is Unicode white space, with the C0 separators the protocol's other readers count.
+func isSpace(r rune) bool { return unicode.IsSpace(r) || (r >= 0x1c && r <= 0x1f) }

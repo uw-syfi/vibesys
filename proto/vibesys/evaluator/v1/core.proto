@@ -28,8 +28,8 @@ enum Direction {
   DIRECTION_MIN = 2;
 }
 
-// MetricSpec declares one metric of a benchmark (a `hello` record's entry).
-message MetricSpec {
+// DeclaredMetric declares one metric of a benchmark (a `hello` record's entry).
+message DeclaredMetric {
   string name = 1;
   // Its unit, for people ("ops/s", "ms"); may be empty.
   string unit = 2;
@@ -119,7 +119,7 @@ message WriteRecordRequest {
   string path = 1;
   oneof record {
     HelloRecord hello = 2;
-    ResultRecord result = 3;
+    ResultRow result = 3;
     ErrorRecord error = 4;
   }
   // The first record of a new stream: the file is replaced, not read. Without it the file must
@@ -129,11 +129,11 @@ message WriteRecordRequest {
 
 // HelloRecord declares the metrics, in order; it creates (truncates) the file.
 message HelloRecord {
-  repeated MetricSpec metrics = 1;
+  repeated DeclaredMetric metrics = 1;
 }
 
-// ResultRecord is the measured row: every declared metric, finite.
-message ResultRecord {
+// ResultRow is the measured row: every declared metric, finite.
+message ResultRow {
   repeated MetricValue values = 1;
 }
 

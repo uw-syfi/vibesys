@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vibesys_evaluator import Metric
 
@@ -163,3 +165,63 @@ def test_a_long_error_message_is_cut(tmp_path: Path) -> None:
     failure = read_measurement(parse_records((tmp_path / "out.jsonl").read_text())).failure
     assert failure is not None
     assert len(failure) <= 4000
+
+
+_NAMES = st.text(
+    st.characters(blacklist_categories=("Z", "C"), blacklist_characters="\x1c\x1d\x1e\x1f\x85"),
+    min_size=1,
+    max_size=12,
+)
+_FINITE = st.floats(allow_nan=False, allow_infinity=False)
+_METRICS = st.dictionaries(
+    _NAMES,
+    st.builds(
+        Metric,
+        unit=st.sampled_from(["", "ops/s", "ms"]),
+        direction=st.sampled_from(["max", "min"]),
+    ),
+    min_size=1,
+    max_size=5,
+)
+
+
+@given(data=st.data(), metrics=_METRICS)
+def test_anything_the_writer_writes_the_reader_reads_back_as_the_same_numbers(
+    tmp_path_factory: pytest.TempPathFactory, data: st.DataObject, metrics: dict[str, Metric]
+) -> None:
+    values = {name: data.draw(_FINITE) for name in metrics}
+    path = tmp_path_factory.mktemp("records") / "out.jsonl"
+    stream = RecordStream(path)
+    stream.hello(metrics)
+    stream.result(values)
+    stream.close()
+    measurement = read_measurement(parse_records(path.read_text()))
+    assert dict(measurement.values or {}) == values
+    # The bytes are the protocol's own: one object per line, the proto field names as keys.
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    assert [line["kind"] for line in lines] == ["hello", "result"]
+    assert lines[0]["protocol"] == 2
+    assert lines[1]["label"] == ""
+
+
+@given(
+    message=st.text(min_size=1, max_size=500).filter(lambda s: s.strip()),
+    partial=st.builds(
+        Partial,
+        name=_NAMES,
+        value=_FINITE,
+        direction=st.sampled_from(["max", "min"]),
+        unit=st.sampled_from(["", "tok/s"]),
+    ),
+)
+def test_anything_the_writer_writes_for_an_error_is_read_back_as_that_error(
+    tmp_path_factory: pytest.TempPathFactory, message: str, partial: Partial
+) -> None:
+    path = tmp_path_factory.mktemp("records") / "out.jsonl"
+    stream = RecordStream(path)
+    stream.error(message, partial=partial)
+    stream.close()
+    measurement = read_measurement(parse_records(path.read_text()))
+    assert measurement.failure == message.strip()
+    assert measurement.partial is not None
+    assert measurement.partial.value == partial.value
