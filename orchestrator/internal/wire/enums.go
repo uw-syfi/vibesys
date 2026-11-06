@@ -130,6 +130,7 @@ var (
 		core.RefuseDeadlinePassed:  pb.Refusal_REFUSAL_DEADLINE_PASSED,
 		core.RefuseRepositoryInUse: pb.Refusal_REFUSAL_REPOSITORY_IN_USE,
 		core.RefuseAgentNotAllowed: pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED,
+		core.RefuseHandoffNotYours: pb.Refusal_REFUSAL_HANDOFF_NOT_YOURS,
 	})
 	startFailures = newEnum(map[core.StartFailure]pb.StartFailureReason{
 		"":                              pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED,

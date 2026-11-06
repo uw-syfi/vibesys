@@ -339,6 +339,10 @@ func (t *tx) sendMessage(c Command, b SendMessage, r *Receipt) RunID {
 
 func (t *tx) postHandoff(c Command, b PostHandoff, r *Receipt) RunID {
 	caller := t.s.agents[callerAgent(c)]
+	if b.Handoff.Role() != caller.Role {
+		r.Refusal = RefuseHandoffNotYours
+		return ""
+	}
 	caller.HandedOff = true
 	t.emit(caller.Run, caller.Agent)
 	run := t.s.runs[caller.Run]

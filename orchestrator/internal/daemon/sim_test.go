@@ -518,7 +518,7 @@ func (s *sim) agentAct(a core.Agent) {
 		live := s.liveAgents()
 		cmd = &pb.Command{Id: id, Body: &pb.Command_StopAgent{StopAgent: &pb.StopAgent{AgentId: string(live[s.pick(len(live))].ID)}}}
 	default:
-		cmd = &pb.Command{Id: id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: &pb.Handoff{Claim: "done", Body: &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}}}}}
+		cmd = &pb.Command{Id: id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: handoffBy(a.Role)}}}
 	}
 	switch s.pick(8) {
 	case 0: // a wrong token must change nothing.
@@ -866,4 +866,22 @@ func TestDaemonSimulation(t *testing.T) {
 			}
 		}
 	}
+}
+
+// handoffBy is a handoff with the body of the role that posts it.
+func handoffBy(role core.AgentRole) *pb.Handoff {
+	h := &pb.Handoff{Claim: "done"}
+	switch role {
+	case core.RolePlanner:
+		h.Body = &pb.Handoff_Planner{Planner: &pb.PlannerHandoff{Plan: "p"}}
+	case core.RoleJudge:
+		h.Body = &pb.Handoff_Judge{Judge: &pb.JudgeHandoff{Commit: "c", Verdict: pb.JudgeVerdict_JUDGE_VERDICT_PASS, Reasons: "r"}}
+	case core.RoleCombiner:
+		h.Body = &pb.Handoff_Combiner{Combiner: &pb.CombinerHandoff{Commit: "c", Branch: "b", Applied: "a"}}
+	case core.RoleProfiler:
+		h.Body = &pb.Handoff_Profiler{Profiler: &pb.ProfilerHandoff{Question: "q", Revision: "r", Answer: "a"}}
+	default:
+		h.Body = &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}
+	}
+	return h
 }

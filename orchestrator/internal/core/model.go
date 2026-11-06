@@ -233,8 +233,8 @@ type MessageBody interface{ messageBody() }
 
 // HandoffBody is the part of a handoff that belongs to the role that posts it: a worker's candidate or
 // the reason it has none, a planner's plan, a judge's verdict, a combiner's commit, a profiler's
-// answer. The set is closed.
-type HandoffBody interface{ handoffBody() }
+// answer. The set is closed, and each body names the one role it belongs to.
+type HandoffBody interface{ handoffRole() AgentRole }
 
 // The message bodies.
 type (
@@ -326,16 +326,25 @@ type (
 	}
 )
 
-func (Text) messageBody()              {}
-func (Brief) messageBody()             {}
-func (LeadBrief) messageBody()         {}
-func (Handoff) messageBody()           {}
-func (WorkerCandidate) handoffBody()   {}
-func (WorkerNoCandidate) handoffBody() {}
-func (PlannerPlan) handoffBody()       {}
-func (JudgeFinding) handoffBody()      {}
-func (CombinerResult) handoffBody()    {}
-func (ProfilerFindings) handoffBody()  {}
+func (Text) messageBody()      {}
+func (Brief) messageBody()     {}
+func (LeadBrief) messageBody() {}
+
+// Role is the role the handoff's body belongs to, empty for a handoff with no body.
+func (h Handoff) Role() AgentRole {
+	if h.Body == nil {
+		return ""
+	}
+	return h.Body.handoffRole()
+}
+
+func (Handoff) messageBody()                     {}
+func (WorkerCandidate) handoffRole() AgentRole   { return RoleWorker }
+func (WorkerNoCandidate) handoffRole() AgentRole { return RoleWorker }
+func (PlannerPlan) handoffRole() AgentRole       { return RolePlanner }
+func (JudgeFinding) handoffRole() AgentRole      { return RoleJudge }
+func (CombinerResult) handoffRole() AgentRole    { return RoleCombiner }
+func (ProfilerFindings) handoffRole() AgentRole  { return RoleProfiler }
 
 func (Report) messageBody()           {}
 func (JobFinished) messageBody()      {}

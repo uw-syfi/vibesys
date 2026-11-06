@@ -46,6 +46,8 @@ const (
 	// The harness and model asked for are outside what the run may use. The receipt's allowed_agents
 	// lists what is allowed.
 	Refusal_REFUSAL_AGENT_NOT_ALLOWED Refusal = 10
+	// A handoff has no body, or the body of another role than the one posting it.
+	Refusal_REFUSAL_HANDOFF_NOT_YOURS Refusal = 11
 )
 
 // Enum value maps for Refusal.
@@ -62,6 +64,7 @@ var (
 		8:  "REFUSAL_DEADLINE_PASSED",
 		9:  "REFUSAL_REPOSITORY_IN_USE",
 		10: "REFUSAL_AGENT_NOT_ALLOWED",
+		11: "REFUSAL_HANDOFF_NOT_YOURS",
 	}
 	Refusal_value = map[string]int32{
 		"REFUSAL_UNSPECIFIED":       0,
@@ -75,6 +78,7 @@ var (
 		"REFUSAL_DEADLINE_PASSED":   8,
 		"REFUSAL_REPOSITORY_IN_USE": 9,
 		"REFUSAL_AGENT_NOT_ALLOWED": 10,
+		"REFUSAL_HANDOFF_NOT_YOURS": 11,
 	}
 )
 
@@ -1311,7 +1315,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"message_id\x18\x06 \x01(\tR\tmessageId\x12G\n" +
 	"\bdelivery\x18\a \x01(\x0e2!.vibesys.orchestrator.v1.DeliveryB\b\xbaH\x05\x82\x01\x02\x10\x01R\bdelivery\x12\x1a\n" +
 	"\bsequence\x18\b \x01(\x04R\bsequence\x12L\n" +
-	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgents*\xbe\x02\n" +
+	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgents*\xdd\x02\n" +
 	"\aRefusal\x12\x17\n" +
 	"\x13REFUSAL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15REFUSAL_RUN_NOT_FOUND\x10\x01\x12\x1b\n" +
@@ -1324,7 +1328,8 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x17REFUSAL_DEADLINE_PASSED\x10\b\x12\x1d\n" +
 	"\x19REFUSAL_REPOSITORY_IN_USE\x10\t\x12\x1d\n" +
 	"\x19REFUSAL_AGENT_NOT_ALLOWED\x10\n" +
-	"BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x12\x1d\n" +
+	"\x19REFUSAL_HANDOFF_NOT_YOURS\x10\vBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_events_proto_rawDescOnce sync.Once

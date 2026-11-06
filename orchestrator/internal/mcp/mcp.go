@@ -236,23 +236,9 @@ func (s *Server) send(ctx context.Context, cmd *pb.Command, done func(*pb.Receip
 		return "", transportAdvice(err)
 	}
 	if r := receipt.GetRefusal(); r != pb.Refusal_REFUSAL_UNSPECIFIED {
-		return "", errors.New(refusalAdvice(receipt))
+		return "", errors.New(s.refusalAdvice(receipt))
 	}
 	return done(receipt), nil
-}
-
-// allowedList names the agents a run may use, as spawn_agent takes them.
-func allowedList(allowed []*pb.AllowedAgent) string {
-	var parts []string
-	for _, c := range allowed {
-		name := names.Spell(c.GetHarness())
-		if c.GetModel() == "" {
-			parts = append(parts, fmt.Sprintf("harness %s with its default model (leave model out)", name))
-		} else {
-			parts = append(parts, fmt.Sprintf("harness %s with model %s", name, c.GetModel()))
-		}
-	}
-	return strings.Join(parts, "; ")
 }
 
 func transportAdvice(err error) error {
@@ -266,30 +252,16 @@ func transportAdvice(err error) error {
 	return errors.New(say("transport_unanswered", data))
 }
 
-func refusalAdvice(receipt *pb.Receipt) string {
-	r := receipt.GetRefusal()
-	switch r {
-	case pb.Refusal_REFUSAL_RUN_NOT_FOUND:
-		return "your run does not exist on this orchestrator: stop work and tell the operator"
-	case pb.Refusal_REFUSAL_AGENT_NOT_FOUND:
-		return "no agent has that id: call list_agents for the ids that exist"
-	case pb.Refusal_REFUSAL_NOT_PERMITTED:
-		return "your role may not do this: post_handoff to the lead instead if you are a subagent"
-	case pb.Refusal_REFUSAL_RUN_NOT_RUNNING:
-		return "the run is stopping or over: finish what you hold, then post your handoff or report"
-	case pb.Refusal_REFUSAL_FANOUT_LIMIT:
-		return "the run already has the most subagents it may have live: wait for a handoff, or stop a subagent with stop_agent, then spawn again"
-	case pb.Refusal_REFUSAL_AGENT_IS_LEAD:
-		return "the lead stops only with its run: ask the operator to stop the run"
-	case pb.Refusal_REFUSAL_AGENT_NOT_LIVE:
-		return "that agent's session is already over or closing: call list_agents to see which agents are live"
-	case pb.Refusal_REFUSAL_DEADLINE_PASSED:
-		return "the run's deadline has passed: post your report or handoff now"
-	case pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED:
-		return "the operator did not allow that harness and model for this run. It allows only: " +
-			allowedList(receipt.GetAllowedAgents()) + ". Spawn again with one of these, or leave the model out to take the first one on the harness; if none fits, tell the operator"
-	case pb.Refusal_REFUSAL_REPOSITORY_IN_USE:
-		return "another run is working in this repository: only an operator starts runs, so tell the operator"
+// refusalAdvice words a refusal for the agent, saying what to do next. The refusal arrives spelled
+// as its enum is, and the template that words it chooses by that spelling.
+func (s *Server) refusalAdvice(receipt *pb.Receipt) string {
+	type agent struct{ Harness, Model string }
+	var allowed []agent
+	for _, c := range receipt.GetAllowedAgents() {
+		allowed = append(allowed, agent{Harness: names.Spell(c.GetHarness()), Model: c.GetModel()})
 	}
-	return "the orchestrator refused the command: " + r.String()
+	return say("refusal", struct {
+		Refusal, Role string
+		Allowed       []agent
+	}{names.Spell(receipt.GetRefusal()), string(s.id.Role), allowed})
 }

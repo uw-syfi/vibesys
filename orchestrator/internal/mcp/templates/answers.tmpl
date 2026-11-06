@@ -103,3 +103,31 @@ there is no tool `{{.Name}}`: the tools you have are {{.Tools}}
 {{- define "tool_not_for_role" -}}
 {{.Name}} is not available to a {{.Role}}: the tools you have are {{.Tools}}
 {{- end -}}
+
+{{- define "refusal" -}}
+{{- if eq .Refusal "run_not_found" -}}
+your run does not exist on this orchestrator: stop work and tell the operator
+{{- else if eq .Refusal "agent_not_found" -}}
+no agent has that id: call list_agents for the ids that exist
+{{- else if eq .Refusal "not_permitted" -}}
+your role may not do this: post_handoff to the lead instead if you are a subagent
+{{- else if eq .Refusal "run_not_running" -}}
+the run is stopping or over: finish what you hold, then post your handoff or report
+{{- else if eq .Refusal "fanout_limit" -}}
+the run already has the most subagents it may have live: wait for a handoff, or stop a subagent with stop_agent, then spawn again
+{{- else if eq .Refusal "agent_is_lead" -}}
+the lead stops only with its run: ask the operator to stop the run
+{{- else if eq .Refusal "agent_not_live" -}}
+that agent's session is already over or closing: call list_agents to see which agents are live
+{{- else if eq .Refusal "deadline_passed" -}}
+the run's deadline has passed: post your report or handoff now
+{{- else if eq .Refusal "agent_not_allowed" -}}
+the operator did not allow that harness and model for this run. It allows only: {{range $i, $a := .Allowed}}{{if $i}}; {{end}}harness {{$a.Harness}} {{if $a.Model}}with model {{$a.Model}}{{else}}with its default model (leave model out){{end}}{{end}}. Spawn again with one of these, or leave the model out to take the first one on the harness; if none fits, tell the operator
+{{- else if eq .Refusal "repository_in_use" -}}
+another run is working in this repository: only an operator starts runs, so tell the operator
+{{- else if eq .Refusal "handoff_not_yours" -}}
+your handoff has no body for your role, or has another role's: give it again with the `{{.Role}}` field and no other body
+{{- else -}}
+the orchestrator refused the command: {{.Refusal}}
+{{- end -}}
+{{- end -}}

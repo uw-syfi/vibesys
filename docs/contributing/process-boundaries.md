@@ -282,7 +282,10 @@ per role (`worker`, `planner`, `judge`, `combiner`, `profiler`); a worker's body
 is itself a `oneof` of a candidate or why it has none. The body's field is named
 for the role as the enum spells it (`names.Spell`), so the server finds the
 caller's own body without a table, and a handoff with none or with another
-role's is refused in the tool's answer, naming the field to fill. Enum
+role's is refused in the tool's answer, naming the field to fill, before
+anything is sent. The core holds the same line for a call that reaches the host
+another way: it refuses a handoff whose body is not its poster's role with
+`REFUSAL_HANDOFF_NOT_YOURS` and posts nothing. Enum
 spellings for people and agents (`worker`, `claude_code`) come from the enum
 alone (`internal/names`); the desktop app derives its harness choices from the
 generated enum. What the server says back (a started agent, a delivery, the list
