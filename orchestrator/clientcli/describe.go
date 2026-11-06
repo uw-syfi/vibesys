@@ -55,7 +55,7 @@ func (v *View) text(c Change) string {
 		return fmt.Sprintf("%s started (%s%s)", agentLabel(a, ""), strings.ToLower(strings.TrimPrefix(a.GetHarness().String(), "HARNESS_")), withPrefix(", model ", a.GetModel()))
 	case AgentEnded:
 		a := c.Agent
-		return fmt.Sprintf("%s %s%s", agentLabel(a, ""), statusWord(a.GetStatus().String(), "AGENT_STATUS_"), withPrefix(": ", oneLine(a.GetEndDetail(), 300)))
+		return fmt.Sprintf("%s %s%s", agentLabel(a, ""), statusWord(a.GetStatus().String(), "AGENT_STATUS_"), withPrefix(": ", endDetail(a, 300)))
 	case TurnEnded:
 		return fmt.Sprintf("%s turn %d %s%s", agentLabel(c.Agent, c.Turn.GetAgentId()), c.Turn.GetOrdinal(), statusWord(c.Turn.GetStatus().String(), "TURN_STATUS_"), cost(c.Turn.GetUsage()))
 	case HandoffPosted:
@@ -99,10 +99,31 @@ func stopReason(r *pb.Run) string {
 
 // failureDetail is why a run failed: what its lead ended with, else the stop reason.
 func (v *View) failureDetail(r *pb.Run) string {
-	if detail := v.Agents[r.GetLeadAgentId()].GetEndDetail(); detail != "" {
-		return oneLine(detail, 500)
+	if detail := endDetail(v.Agents[r.GetLeadAgentId()], 500); detail != "" {
+		return detail
 	}
 	return stopReason(r)
+}
+
+// endDetail is why an agent's session ended, with the reason it never opened when it did not.
+func endDetail(a *pb.Agent, limit int) string {
+	detail := oneLine(a.GetEndDetail(), limit)
+	reason := startFailureWords(a.GetStartFailureReason())
+	switch {
+	case reason == "":
+		return detail
+	case detail == "":
+		return reason
+	}
+	return detail + " (" + reason + ")"
+}
+
+// startFailureWords names why a session never opened, or is empty when it did not fail to.
+func startFailureWords(r pb.StartFailureReason) string {
+	if r == pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED {
+		return ""
+	}
+	return statusWord(r.String(), "START_FAILURE_REASON_")
 }
 
 func withPrefix(prefix, text string) string {
