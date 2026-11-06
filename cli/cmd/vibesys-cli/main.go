@@ -89,6 +89,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"result":     resultCommand,
 	"frontier":   frontierCommand,
 	"plan":       planCommand,
+	"lab":        labCommand,
 	"daemon":     daemonCommand,
 	"supervisor": supervisorCommand,
 	// Run in a container by the docker environment, never by a person: see probeCommand.
@@ -106,6 +107,13 @@ commands:
                                                  queue a command and print the job
   submit profile <commit> [--wrap prefix]        queue the task's [profile] load against the
                                                  candidate's server started under the prefix
+  lab start <commit> [--for 30m] [--wait]        hold a placement's containers for profiling and
+                                                 exploring: nothing a lab runs is scored
+  lab exec <lab> [--in candidate|task] [--detach] [--env K=V] -- <argv...>
+                                                 run a command in the lab; exits with its code
+  lab ps|end <lab>, lab kill <lab> <pN>, lab checkout <lab> <commit>, lab list
+  lab cp <lab>:<path> <local> | <local> <lab>:<path>
+                                                 copy out of or into the lab's artifacts directory
   wait <job>... [--any] [--timeout 30m]          block until the jobs are final
   cancel <job> [--reason text]                   stop a job
   note <job> <text>                              add a note to a job

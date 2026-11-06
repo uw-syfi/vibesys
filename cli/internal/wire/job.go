@@ -111,6 +111,9 @@ func JobSpec(s core.JobSpec) *cliv1.JobSpec {
 			Argv: append([]string(nil), settings.Argv...), Service: serviceSpec(settings.Service),
 			Profile: profileRequest(settings.Profile), Candidate: commandCandidate(settings.Candidate),
 		}
+		if settings.Lab != nil {
+			command.Lab = &cliv1.LabSpec{}
+		}
 		if settings.Timeout != 0 {
 			command.Timeout = durationpb.New(settings.Timeout)
 		}
@@ -168,8 +171,13 @@ func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSett
 	if err != nil {
 		return core.CommandSettings{}, err
 	}
-	// A profile is submitted without a command, which the daemon takes from the task.
-	if (len(c.GetArgv()) == 0 && profile == nil) || (len(c.GetArgv()) > 0 && c.GetArgv()[0] == "") {
+	var lab *core.LabSpec
+	if c.GetLab() != nil {
+		lab = &core.LabSpec{}
+	}
+	// A profile is submitted without a command, which the daemon takes from the task, and a lab
+	// runs none: it runs what its calls ask (app.labOf refuses one that names a command).
+	if (len(c.GetArgv()) == 0 && profile == nil && lab == nil) || (len(c.GetArgv()) > 0 && c.GetArgv()[0] == "") {
 		return core.CommandSettings{}, invalid("%s.argv: a command needs a program to run", field)
 	}
 	if svc := c.GetService(); svc != nil && (len(svc.GetArgv()) == 0 || svc.GetArgv()[0] == "") {
@@ -190,7 +198,7 @@ func toCommandSettings(field string, c *cliv1.CommandSettings) (core.CommandSett
 	}
 	return core.CommandSettings{
 		Argv: append([]string(nil), c.GetArgv()...), Service: toServiceSpec(c.GetService()), Timeout: timeout,
-		Profile: profile, Candidate: candidate,
+		Profile: profile, Candidate: candidate, Lab: lab,
 	}, nil
 }
 

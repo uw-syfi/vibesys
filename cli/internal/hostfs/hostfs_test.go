@@ -3,9 +3,11 @@ package hostfs_test
 import (
 	"context"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -66,6 +68,54 @@ func contract(t *testing.T, newFS func(t *testing.T) hostfs.FS, write func(t *te
 		got, err := fsys.ReadFile(dir+"/missing", 10)
 		if !errors.Is(err, fs.ErrNotExist) || got != nil {
 			t.Errorf("%q, %v", got, err)
+		}
+	})
+	t.Run("a file written in pieces reads back whole, and a write at 0 starts it afresh", func(t *testing.T) {
+		fsys := newFS(t)
+		dir, remove, _ := fsys.MakeScratch(ctx)
+		defer remove()
+		at := dir + "/deep/er/f"
+		for _, w := range []struct {
+			data   string
+			offset int64
+		}{{"hello", 0}, {" world", 5}, {"HELLO", 0}, {"!", 5}} {
+			if err := fsys.WriteAt(ctx, at, []byte(w.data), w.offset, w.offset == 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got, err := fsys.ReadFile(at, 100); err != nil || string(got) != "HELLO!" {
+			t.Errorf("read back %q, %v", got, err)
+		}
+		if err := fsys.WriteAt(ctx, at, []byte("x"), 99, false); err == nil {
+			t.Error("a write past the end of the file was taken")
+		}
+		buf := make([]byte, 4)
+		if n, err := fsys.ReadAt(at, buf, 2); n != 4 || err != nil || string(buf) != "LLO!" {
+			t.Errorf("ReadAt at 2: %d %q, %v", n, buf[:n], err)
+		}
+		if n, err := fsys.ReadAt(at, buf, 4); n != 2 || !errors.Is(err, io.EOF) {
+			t.Errorf("ReadAt to the end: %d, %v", n, err)
+		}
+	})
+	t.Run("files lists the regular files under a directory, and a file as itself", func(t *testing.T) {
+		fsys := newFS(t)
+		dir, remove, _ := fsys.MakeScratch(ctx)
+		defer remove()
+		for _, p := range []string{"b/c", "a", "b/d/e"} {
+			if err := fsys.WriteAt(ctx, dir+"/out/"+p, []byte(p), 0, p == "a"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := fsys.Files(dir + "/out")
+		want := []hostfs.File{{Path: "a", Size: 1, Executable: true}, {Path: "b/c", Size: 3}, {Path: "b/d/e", Size: 5}}
+		if err != nil || !slices.Equal(got, want) {
+			t.Errorf("Files = %v, %v; want %v", got, err, want)
+		}
+		if got, err := fsys.Files(dir + "/out/b/c"); err != nil || !slices.Equal(got, []hostfs.File{{Size: 3}}) {
+			t.Errorf("Files of a file = %v, %v", got, err)
+		}
+		if _, err := fsys.Files(dir + "/none"); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("Files of nothing: %v", err)
 		}
 	})
 	t.Run("a cancelled context makes no directory", func(t *testing.T) {

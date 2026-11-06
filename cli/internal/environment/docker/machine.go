@@ -23,6 +23,15 @@ type Machine interface {
 	// whose ending cannot be vouched for.
 	Collect(ctx context.Context, local, staged Dirs) error
 
+	// Replace makes the staged checkout a mirror of the caller's while the run's containers are
+	// up, so what is not in the caller's is gone from it: a lab replaces its checkout in place.
+	Replace(ctx context.Context, local, staged Dirs) error
+
+	// Add copies the file at rel of the caller's artifacts directory to the staged one, replacing
+	// what is there, while the run's containers are up: a lab takes files in this way. Nothing else
+	// of the staged directory changes.
+	Add(ctx context.Context, local, staged Dirs, rel string) error
+
 	// Cache returns the directory on the machine that is kept for the key across runs, made if it
 	// is missing.
 	Cache(ctx context.Context, key string) (string, error)
@@ -49,6 +58,12 @@ func (Shared) Stage(_ context.Context, d Dirs) (Dirs, error) { return d, nil }
 
 // Collect implements Machine.
 func (Shared) Collect(context.Context, Dirs, Dirs) error { return nil }
+
+// Replace implements Machine: the commands see the caller's own directories.
+func (Shared) Replace(context.Context, Dirs, Dirs) error { return nil }
+
+// Add implements Machine: the commands see the caller's own directories.
+func (Shared) Add(context.Context, Dirs, Dirs, string) error { return nil }
 
 // Cache implements Machine. A shared machine has no cache.
 func (Shared) Cache(context.Context, string) (string, error) { return "", nil }

@@ -26,7 +26,7 @@ const clockAt = "cli/internal/clock/"
 // goStatementScopes are the package trees whose non-test files may not contain a go statement.
 // Their goroutines start through owned.Group, which joins them. Test files are not held to it: a
 // test starts its own client goroutines and the testing skill's concurrency kit bounds them.
-var goStatementScopes = []string{"cli/internal/app/", "cli/internal/daemon/", "cli/internal/supervisor/"}
+var goStatementScopes = []string{"cli/internal/app/", "cli/internal/daemon/", "cli/internal/lab/", "cli/internal/supervisor/"}
 
 // ownedAt is the package that implements the owned goroutine group; it is the one place that is
 // allowed to be written in terms of goroutine primitives.

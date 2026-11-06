@@ -359,6 +359,15 @@ func (a *App) prepare(ctx context.Context, ref lifecycle.Ref, placement string, 
 	if placement != "" {
 		spec.Placement = placement
 	}
+	// A lab lasts no longer than its placement runs a command (core.PlacementOffer.LabTime).
+	if c, ok := spec.Settings.(core.CommandSettings); ok && c.Lab != nil {
+		for _, o := range a.cfg.Placements {
+			if o.Name == spec.Placement {
+				c.Timeout = o.LabTime(c.Timeout)
+			}
+		}
+		spec.Settings = c
+	}
 	env, err := a.cfg.Environments.Environment(spec.Environment, environment.Target{
 		Repository: string(scope.Repository()), Commit: spec.Commit, Task: string(scope.Task()), Placement: spec.Placement,
 	})

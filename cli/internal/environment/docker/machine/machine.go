@@ -37,6 +37,12 @@ func (Local) Stage(_ context.Context, d docker.Dirs) (docker.Dirs, error) { retu
 // Collect implements docker.Machine: the commands wrote where the caller reads.
 func (Local) Collect(context.Context, docker.Dirs, docker.Dirs) error { return nil }
 
+// Replace implements docker.Machine: the commands see the caller's own directories.
+func (Local) Replace(context.Context, docker.Dirs, docker.Dirs) error { return nil }
+
+// Add implements docker.Machine: the commands see the caller's own directories.
+func (Local) Add(context.Context, docker.Dirs, docker.Dirs, string) error { return nil }
+
 // Cache implements docker.Machine.
 func (l Local) Cache(ctx context.Context, key string) (string, error) {
 	if err := ctx.Err(); err != nil {
@@ -141,6 +147,30 @@ func (r *Remote) Collect(ctx context.Context, local, staged docker.Dirs) error {
 		if err := r.Rsync.Pull(ctx, staged.Artifacts, local.Artifacts, false); err != nil {
 			return fmt.Errorf("copying the artifacts back from %s: %w", r.Shell.Where(), err)
 		}
+	}
+	return nil
+}
+
+// Replace implements docker.Machine: the checkout is mirrored, so a checkout replaced in place
+// leaves nothing of the one before it, a build included.
+func (r *Remote) Replace(ctx context.Context, local, staged docker.Dirs) error {
+	if err := r.Rsync.Push(ctx, local.Checkout, staged.Checkout, true); err != nil {
+		return fmt.Errorf("copying the checkout to %s: %w", r.Shell.Where(), err)
+	}
+	return nil
+}
+
+// Add implements docker.Machine: the one file is copied, into a directory made for it.
+func (r *Remote) Add(ctx context.Context, local, staged docker.Dirs, rel string) error {
+	if local.Artifacts == "" || staged.Artifacts == "" {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: "the run has no artifacts directory to add a file to"}
+	}
+	dest := path.Join(staged.Artifacts, rel)
+	if _, err := r.run(ctx, `mkdir -p "$1"`, path.Dir(dest)); err != nil {
+		return fmt.Errorf("making a directory for %s on %s: %w", rel, r.Shell.Where(), err)
+	}
+	if err := r.Rsync.PushFile(ctx, path.Join(local.Artifacts, rel), dest); err != nil {
+		return fmt.Errorf("copying %s to %s: %w", rel, r.Shell.Where(), err)
 	}
 	return nil
 }

@@ -41,6 +41,8 @@ var unfuzzedDecoders = map[string]string{
 	"ToCommand":            "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
 	"ToCommandOutcome":     "an enum translator, held total over every contract value by TestEveryRecordEnumValueIsTranslatedOrRefused",
 	"ToCompatibility":      "an enum translator, held total over every contract value by TestEveryContractEnumValueIsTranslatedOrRefused",
+	"ToLabRoom":            "decoded inside ToLabCall and ToLabReply, which FuzzDecodeLabCall and FuzzDecodeLabReply fuzz",
+	"ToLabStatus":          "decoded inside ToLabReply, which FuzzDecodeLabReply fuzzes",
 }
 
 // UnfuzzedDecoders returns the decoders excused from having a fuzz target, with the reason.

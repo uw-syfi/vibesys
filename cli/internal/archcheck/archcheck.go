@@ -139,10 +139,14 @@ var rules = map[string][]string{
 	// The translation between the domain and the contract.
 	"internal/wire": {"internal/core", "internal/flow", "internal/lifecycle", "internal/task", "gen/"},
 
+	// A running lab, as its supervisor holds it: the containers, the processes it started in them,
+	// and the calls on it.
+	"internal/lab": {"internal/clock", "internal/core", "internal/environment", "internal/hostfs", "internal/owned"},
+
 	// Supervisors: the domain, its channel to the daemon, and the process that serves it.
 	"internal/supervisor": {
 		"internal/changed", "internal/clock", "internal/core", "internal/environment", "internal/flow",
-		"internal/flowrun", "internal/hostfs", "internal/lifecycle", "internal/owned",
+		"internal/flowrun", "internal/hostfs", "internal/lab", "internal/lifecycle", "internal/owned",
 	},
 	"internal/supervisor/suptest": {"internal/core", "internal/lifecycle", "internal/owned", "internal/supervisor"},
 	"internal/supervisor/rpc":     {"gen/", "internal/core", "internal/lifecycle", "internal/supervisor", "internal/wire"},

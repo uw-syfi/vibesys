@@ -56,7 +56,11 @@ import (
 // Version 7 adds a job's own priority and a plan's priority, which a version 6 program would refuse
 // as unknown. It only adds, and is migrated the same way, writing the format file at version 7
 // last.
-const formatVersion = 7
+//
+// Version 8 adds that a command job is a lab (CommandSettings.lab), which a version 7 program would
+// refuse as unknown. It only adds, and a store of 2 to 7 is migrated the same way, writing the
+// format file at version 8 last.
+const formatVersion = 8
 
 // rekeyedBefore is the first version whose results carry keys of the current rule: a result of a
 // record older than it is rekeyed when it is read.
@@ -253,6 +257,9 @@ func settingsFromMessage(s *cliv1.JobSpec) (core.Settings, error) {
 		}
 		if out.Candidate, err = wire.ToCommandCandidate("command.candidate", settings.Command.GetCandidate()); err != nil {
 			return nil, err
+		}
+		if settings.Command.GetLab() != nil {
+			out.Lab = &core.LabSpec{}
 		}
 		return out, nil
 	case *cliv1.JobSpec_Measure:

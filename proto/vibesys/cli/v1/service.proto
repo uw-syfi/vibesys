@@ -7,6 +7,7 @@ import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/frontier.proto";
 import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/lab.proto";
 import "vibesys/cli/v1/machine.proto";
 import "vibesys/cli/v1/plan.proto";
 import "vibesys/cli/v1/promote.proto";
@@ -67,6 +68,10 @@ service DaemonService {
   // Queue lists a task's queued and running jobs grouped by plan, with why each queued job waits,
   // the priority it counts as now, its age and an estimate of its duration. Protocol 7.
   rpc Queue(QueueRequest) returns (QueueResponse);
+  // Lab makes one call on a lab job (lab.proto): it waits while the lab is queued or starting, and
+  // streams the lab's answer. A call on a job that is not a lab is INVALID_INPUT, and one on a lab
+  // that ended is CONFLICT. Protocol 8.
+  rpc Lab(LabRequest) returns (stream LabResponse);
   // ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
   // dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
   rpc ForgetRepository(ForgetRepositoryRequest) returns (ForgetRepositoryResponse);
@@ -365,6 +370,16 @@ message ListJobsRequest {
   }];
   JobKind kind = 4 [(buf.validate.field).enum.defined_only = true];
   string note_contains = 5;
+}
+
+message LabRequest {
+  CallContext context = 1;
+  string job_id = 2 [(buf.validate.field).string.min_len = 1];
+  LabCall call = 3 [(buf.validate.field).required = true];
+}
+
+message LabResponse {
+  LabReply reply = 1 [(buf.validate.field).required = true];
 }
 
 message ListJobsResponse {

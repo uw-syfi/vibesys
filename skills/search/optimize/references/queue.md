@@ -11,7 +11,8 @@ never hold, release or cancel a job they did not submit.
 status, priority), each with its kind, commit, where it runs or why it waits, whether it is held,
 its submitter, its note, its age and an estimate from this task's history of jobs of its kind.
 Read it before you fund more work, and before you reprioritize. A queued job with a wait reason is
-waiting its turn, not stuck.
+waiting its turn, not stuck. A lab (`lab for <time>`) is listed, prioritized, held and drained as
+any job; a running lab holds its slot, and its GPUs, until it is ended or its time runs out.
 
 ## Set a priority when you fund a plan
 
@@ -21,8 +22,8 @@ job) with your agent name and the time.
 - `vibesys-cli plan edit <n> --priority high --reason "<why>"` for work that gates others (an
   integration line, a combine, a re-measure a promotion waits on) or that has the best expected
   value per GPU-minute.
-- `--priority low` for exploratory work: microbenchmarks, feasibility probes, profiles that inform
-  no pending decision.
+- `--priority low` for exploratory work: microbenchmarks, feasibility probes, labs and profiles
+  that inform no pending decision.
 - Leave the rest `normal` (a new plan's priority). Set the plan's priority, not each job's: every
   job linked to the plan with `--plan` takes it.
 - `vibesys-cli job priority <job> high|normal|low|inherit --reason "<why>"` overrides one queued
@@ -51,10 +52,14 @@ you):
    go on.
 2. Wait for the running jobs (`vibesys-cli queue` lists them) with `vibesys-cli wait <job>...` as
    a tracked background task, never a polling loop; then `vibesys-cli daemon status` says
-   `running 0`. A running job survives a restart too, so you may restart sooner when you must.
+   `running 0`. A running lab ends only when its owner ends it or its time runs out, so ask its
+   worker to `lab end` it. A running job or lab survives a restart too, so you may restart sooner
+   when you must. A lab queued during the drain stays queued, and its `lab start --wait` exits 1
+   saying the daemon drains.
 3. Install the new build, then `vibesys-cli daemon restart`. The new daemon reads the drain and
    starts nothing.
 4. `vibesys-cli daemon status` must still say `draining`, and `vibesys-cli queue` must list the
    same queued jobs. Then `vibesys-cli daemon resume`.
 
-Tell the workers nothing needs resubmitting: their jobs kept their places.
+Tell the workers nothing needs resubmitting: their jobs and labs kept their places, and a worker
+whose lab was queued runs `vibesys-cli lab ps <lab> --wait` again.

@@ -91,6 +91,11 @@ func (e *Environment) Candidate(context.Context, core.CandidateBuild, io.Writer)
 	return core.CandidateImage{}, environment.NoImages(core.EnvironmentHost)
 }
 
+// Lab implements environment.Environment: the host holds no containers, so no lab.
+func (e *Environment) Lab(context.Context, core.Execution, io.Writer, environment.HoldLab) core.Attempt {
+	return environment.NoLab(core.EnvironmentHost)
+}
+
 // Run implements environment.Environment.
 func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) core.Attempt {
 	if err := environment.Validate(x); err != nil {

@@ -22,4 +22,26 @@ type FS interface {
 	// MakeDir creates the directory at the absolute path, with its parents, and leaves it as it
 	// is when it exists. It is how a job's artifacts directory is made, which outlives the job.
 	MakeDir(ctx context.Context, path string) error
+
+	// Files returns the regular files at or under the absolute path, sorted by their path from it:
+	// the one file, with the empty path, when the path is a file. It fails with an error that
+	// satisfies errors.Is(err, fs.ErrNotExist) for a path that is not there. Links and other
+	// files that are not regular are left out.
+	Files(path string) ([]File, error)
+
+	// ReadAt reads from the file at the offset as io.ReaderAt does: io.EOF at its end.
+	ReadAt(path string, p []byte, offset int64) (int, error)
+
+	// WriteAt writes data into the file at the offset, making the file and its directories when
+	// they are missing. A write at offset 0 starts the file afresh, and a write past its end fails.
+	// executable makes the file one its owner may run.
+	WriteAt(ctx context.Context, path string, data []byte, offset int64, executable bool) error
+}
+
+// File is a regular file Files found.
+type File struct {
+	// Path is the file's path from the path Files was given, with / between its parts.
+	Path       string
+	Size       int64
+	Executable bool
 }

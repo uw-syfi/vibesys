@@ -128,6 +128,7 @@ func (g *gen) settings() core.Settings {
 				Build: core.CandidateBuild{Dockerfile: g.text(), Context: g.text(), AllowedBases: g.strs()},
 				Serve: &core.CandidateServe{Argv: g.strs(), Ready: "/" + g.text(), StartupTimeout: time.Duration(1 + g.r.Int64N(1<<40))},
 			},
+			Lab: &core.LabSpec{},
 		}
 	}
 	return core.MeasureSettings{Samples: 1 + g.r.Uint32(), Recheck: true}

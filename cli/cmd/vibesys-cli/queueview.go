@@ -77,6 +77,8 @@ func describeQueued(e *cliv1.QueuedJob, task string) string {
 	}
 	kind := "command"
 	switch {
+	case j.GetSpec().GetCommand().GetLab() != nil:
+		kind = fmt.Sprintf("lab for %v", j.GetSpec().GetCommand().GetTimeout().AsDuration())
 	case j.GetSpec().GetCheck() != nil:
 		kind = "check"
 	case j.GetSpec().GetMeasure() != nil:

@@ -77,6 +77,7 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 		providers[name] = provider
 		offer := provider.Offer()
 		offer.Jobs = operator.JobKinds(op.GetPlacements()[name])
+		offer.LongestRun = longestRun(op.GetPlacements()[name])
 		out.offers = append(out.offers, offer)
 		out.claims[name] = provider.Claims()
 	}
@@ -93,6 +94,21 @@ func (p Process) machineEnvironments(op *cliv1.OperatorConfig, clk clock.System,
 		},
 	}
 	return out, nil
+}
+
+// longestRun is how long a command may run on a placement before Slurm ends what it runs in: the
+// allocation's cap ([slurm] max_time_seconds, in whole minutes) less the margin the kind asks for
+// the stop, and at least a minute. A placement with no cap has none.
+func longestRun(pl *cliv1.Placement) time.Duration {
+	ceiling := seconds(pl.GetSlurm().GetMaxTimeSeconds(), 0).Truncate(time.Minute)
+	if ceiling <= 0 {
+		return 0
+	}
+	margin := slurm.Margin
+	if pl.GetKind() == cliv1.PlacementKind_PLACEMENT_KIND_APPTAINER {
+		margin = apptainer.StopMargin
+	}
+	return max(ceiling-margin, time.Minute)
 }
 
 // probe is the program a local placement's containers probe a candidate's server with: this

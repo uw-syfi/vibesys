@@ -32,7 +32,8 @@ Commit first: a job runs a commit, never a working copy, so what is not committe
 | --- | --- |
 | The correctness check on a commit | `vibesys-cli submit check <sha>` |
 | The official number: check, then benchmark samples | `vibesys-cli submit measure <sha> --samples 5` |
-| Any other work that drives load (a sanity or tuning run, a profile) | `vibesys-cli submit command <sha> -- <argv...>` |
+| Profiling or exploring, never scored: a server under a profiler, a load of your own | a lab: `vibesys-cli lab start <sha> --wait` (below) |
+| A one-shot command that drives load (a sanity or tuning run) | `vibesys-cli submit command <sha> -- <argv...>` |
 
 Each prints a job id and returns at once. Always pass `--plan <n>`, which links the job to your
 plan and gives it the plan's priority (the CLI warns on stderr when a run's job has none). Other
@@ -49,10 +50,37 @@ print or an import) on the commit: the job builds the image from the commit and 
 before a measure pays for the build.
 
 Everything that puts load on the machine goes through a job, so the daemon decides what runs
-together and the numbers stay clean: a measure job holds its placement alone, while checks and
-command jobs may share it up to the placement's `max_jobs`. Do not start a benchmark, a profiler
-or a server in your own shell. Unit tests and in-process microbenchmarks that finish in seconds
-are checks, not load: run them in your worktree.
+together and the numbers stay clean: a measure job holds its placement alone, while checks,
+command jobs and labs may share it up to the placement's `max_jobs`. Do not start a benchmark, a
+profiler or a server in your own shell. Unit tests and in-process microbenchmarks that finish
+in seconds are checks, not load: run them in your worktree.
+
+## Labs
+
+A lab holds the containers a run of the task has, on a GPU placement, for a while, and runs in
+them whatever you ask: the default way to profile and explore. Nothing a lab runs is scored, so
+its numbers are never official: decide with `submit measure`.
+
+```bash
+vibesys-cli lab start <sha> --for 30m --wait --plan <n> --note "why"   # prints the lab (j7), its port, its containers
+vibesys-cli lab exec j7 --detach -- <server argv, with ${PORT} replaced by the port>
+vibesys-cli lab exec j7 --in task -- <the task's load generator> <any args>   # exits with its code
+vibesys-cli lab ps j7                       # processes p1, p2, ... and how each ended
+vibesys-cli lab cp j7:/vibesys/artifacts/out ./out    # results come back through the artifacts dir
+vibesys-cli lab checkout j7 <sha2>          # the next commit, same images, nothing running
+vibesys-cli lab end j7                      # always end it: it holds the GPUs until --for runs out
+```
+
+`--in candidate` (the default) is the candidate's image over the checkout, with the GPUs; `--in
+task` is the task's image beside it, which reaches the server at `$VIBESYS_SERVICE_URL`. A task of
+one image has only the candidate's. A detached process's output is in `vibesys-cli logs j7`. Copy
+anything you need out of the containers into `/vibesys/artifacts` first. `lab checkout` refuses a
+commit whose task or candidate image differs: start a new lab for it.
+
+A lab is a queued job like any other: it waits its turn, takes its plan's priority, and is held
+and drained as a job is. If it is held or the daemon drains, `lab start --wait` exits 1 at once
+saying so, and the lab keeps its place: do not start another, run `vibesys-cli lab ps j7 --wait`
+once it may start.
 
 `vibesys-cli queue` shows the task's queued and running jobs by plan, why each waits and an
 estimate of how long its kind takes. `vibesys-cli hold <job> --reason "<why>"` keeps one of your

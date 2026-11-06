@@ -17,9 +17,10 @@ type Checkouts struct {
 	// Fail fails every Checkout with this error when it is set.
 	Fail error
 
-	mu   sync.Mutex
-	open int
-	made int
+	mu       sync.Mutex
+	open     int
+	made     int
+	switched []core.Commit
 }
 
 // Checkout returns a checkout of the commit and the function that closes it.
@@ -47,6 +48,28 @@ func (c *Checkouts) Checkout(ctx context.Context, repository string, commit core
 		})
 	}
 	return core.Checkout{Commit: commit, Dir: path.Join(root, string(commit))}, closeIt, nil
+}
+
+// Switch records that the checkout now has the commit's files. Its directory stays, as a real
+// switch's does.
+func (c *Checkouts) Switch(ctx context.Context, _ string, _ core.Checkout, commit core.Commit) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if c.Fail != nil {
+		return c.Fail
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.switched = append(c.switched, commit)
+	return nil
+}
+
+// Switched returns every commit a checkout was switched to, in order.
+func (c *Checkouts) Switched() []core.Commit {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]core.Commit(nil), c.switched...)
 }
 
 // Open returns how many checkouts were made and not yet closed.

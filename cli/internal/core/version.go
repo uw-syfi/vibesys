@@ -27,7 +27,11 @@ const (
 	// 6: plans and jobs have priorities. A daemon of 5 would drop the priority of a plan edit.
 	//
 	// 7: Queue lists a task's queue by plan. A daemon of 6 has no such call.
-	ProtocolVersion uint32 = 7
+	//
+	// 8: labs. A command job may be a lab (CommandSettings.lab), and Lab calls reach it through the
+	// daemon and its supervisor. A daemon of 7 would drop the field and refuse the job as a command
+	// with nothing to run, and has no Lab call.
+	ProtocolVersion uint32 = 8
 
 	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
 	// serves command lines and supervisors of 1: an older command line waits through Watch and
@@ -37,10 +41,10 @@ const (
 	// MinDaemonProtocolVersion is the oldest daemon the command line of this build works with. It
 	// is above MinProtocolVersion because the command line needs what 2 added, while a daemon of
 	// this build still serves older peers. It is at least WatchTaskSince, so a command line of this
-	// build, `daemon ensure` included, replaces a daemon that cannot serve WatchTask, and it is 5,
-	// so that it replaces one that would drop the placement of a submission or a plan's priority, or
-	// cannot hold a job, drain or list its queue.
-	MinDaemonProtocolVersion uint32 = 7
+	// build, `daemon ensure` included, replaces a daemon that cannot serve WatchTask, and it is 8,
+	// so that it replaces one that would drop the placement of a submission, a plan's priority or a
+	// lab, or cannot hold a job, drain, list its queue or reach a lab.
+	MinDaemonProtocolVersion uint32 = 8
 )
 
 // WatchTaskSince is the protocol version that added WatchTask. It is the one definition of the

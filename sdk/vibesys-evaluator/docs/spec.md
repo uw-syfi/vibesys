@@ -736,6 +736,16 @@ it.
   measured request, any error (the error summary must be present and empty),
   an unexpected unit, or a non-finite or negative value is an
   `error` record with the partial values, never a score.
+- `agentx.explore(..., duration_secs=, warmup_requests_per_lane=1,
+  dataset_entries=None, seed=42)` runs the same harness, corpus and server
+  with the load it is given, for a profiler's capture or an experiment in a
+  vibesys-cli lab: it passes `--unsafe-override`, is held to no
+  submission-validity rule, and its metrics are no measurement of the task.
+  `python -m vibesys_evaluator.llm_serving.agentx explore --help` is its
+  command line, which prints the metrics as one JSON object, for a shell in
+  the task's container; the task's `bench.py` names the model, tokenizer,
+  revision and context length to pass it. Example:
+  [`examples/agentx-llm/explore.py`](../examples/agentx-llm/explore.py).
 - `golden.logprobs(path, url=None, model=None, thresholds=None, report=None)`
   is the accuracy gate, ported from the Qwen task's HTTP checker: free-run
   divergences only at near-ties of the reference, no decisive teacher-forced

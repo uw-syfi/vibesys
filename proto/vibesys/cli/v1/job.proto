@@ -66,7 +66,16 @@ message CommandSettings {
   // Set by the daemon for a job of a task of two images, never by a caller: how the candidate's
   // image is built, and for a profile the server the command runs against.
   CandidateSetup candidate = 5;
+  // Set for a lab: the job holds its containers, with nothing running in them, for the timeout,
+  // and runs in them what a lab call asks (lab.proto). A lab is submitted with no argv, service or
+  // profile. For a task of two images the daemon sets the candidate's build, and the lab holds the
+  // candidate's container and the task's beside it.
+  LabSpec lab = 6;
 }
+
+// LabSpec says a command job is a lab. It has no settings of its own yet: the job's timeout is how
+// long the lab lasts once its containers are up.
+message LabSpec {}
 
 // ProfileRequest is what a profile submission asks for.
 message ProfileRequest {

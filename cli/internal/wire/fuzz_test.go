@@ -471,3 +471,85 @@ func FuzzDecodeNodeReadingJSON(f *testing.F) {
 		}
 	})
 }
+
+// labCallSeeds are a call of each kind, the shapes a command line sends.
+func labCallSeeds() []proto.Message {
+	calls := []core.LabCall{
+		core.LabExec{Room: core.LabTask, Argv: []string{"sh", "-c", "echo hi"}, Env: map[string]string{"A": "1"}, Detach: true},
+		core.LabStatusCall{Wait: true}, core.LabKillCall{Handle: "p3", Signal: core.LabKill},
+		core.LabCheckoutCall{Commit: "0123456789abcdef0123456789abcdef01234567"},
+		core.LabPull{Path: "out/trace"}, core.LabPush{Path: "in/x", Offset: 3, Data: []byte("abc"), Executable: true, Last: true},
+		core.LabEndCall{},
+	}
+	out := make([]proto.Message, len(calls))
+	for i, c := range calls {
+		out[i] = wire.LabCall(c)
+	}
+	return out
+}
+
+// A call on a lab decodes to one the lab can take, or is refused as invalid input: a path never
+// climbs out of the artifacts directory, and a command always has a program.
+func FuzzDecodeLabCall(f *testing.F) {
+	seedMessages(f, labCallSeeds()...)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.LabCall{}
+		decode(t, data, message)
+		first, err := wire.ToLabCall("call", message)
+		if err != nil {
+			if !wire.IsInvalidInput(err) {
+				t.Fatalf("a refused call gave %v, want an invalid-input failure", err)
+			}
+			return
+		}
+		var p core.LabPath
+		switch c := first.(type) {
+		case core.LabExec:
+			if len(c.Argv) == 0 || c.Argv[0] == "" {
+				t.Fatalf("a decoded exec %+v has no program", c)
+			}
+		case core.LabPull:
+			p = c.Path
+		case core.LabPush:
+			p = c.Path
+		}
+		if got, err := core.ParseLabPath(string(p), "/a"); err != nil || got != p || strings.HasPrefix(string(p), "/") {
+			t.Fatalf("a decoded path %q is not clean and inside: %q, %v", p, got, err)
+		}
+		again, err := wire.ToLabCall("call", wire.LabCall(first))
+		if err != nil || !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded call changed when encoded and decoded again: %+v, %v; want %+v", again, err, first)
+		}
+	})
+}
+
+// A reply of a lab decodes to a reply or is refused as invalid input, and survives encoding.
+func FuzzDecodeLabReply(f *testing.F) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	proc := core.LabProcess{Handle: "p1", Room: core.LabCandidate, Argv: []string{"x"}, StartedAt: at, End: &core.LabExit{Code: 2}}
+	var seeds []proto.Message
+	for _, r := range []core.LabReply{
+		core.LabOutput{Data: []byte("out")}, core.LabFile{Path: "a/b", Offset: 4, Data: []byte("x"), Executable: true},
+		core.LabExit{Code: 3}, core.LabExit{Lost: "gone"}, proc, core.LabPulled{Files: 2, Bytes: 9}, core.LabPushed{Size: 5},
+		core.LabStatus{Phase: core.LabReady, Commit: "0123456789abcdef0123456789abcdef01234567", Port: 20001, Until: at,
+			Rooms: []core.LabRoom{core.LabCandidate, core.LabTask}, Processes: []core.LabProcess{proc}, Artifacts: "/vibesys/artifacts"},
+	} {
+		seeds = append(seeds, wire.LabReply(r))
+	}
+	seedMessages(f, seeds...)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.LabReply{}
+		decode(t, data, message)
+		first, err := wire.ToLabReply("reply", message)
+		if err != nil {
+			if !wire.IsInvalidInput(err) {
+				t.Fatalf("a refused reply gave %v, want an invalid-input failure", err)
+			}
+			return
+		}
+		again, err := wire.ToLabReply("reply", wire.LabReply(first))
+		if err != nil || !reflect.DeepEqual(again, first) {
+			t.Fatalf("a decoded reply changed when encoded and decoded again: %+v, %v; want %+v", again, err, first)
+		}
+	})
+}

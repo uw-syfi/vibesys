@@ -58,6 +58,9 @@ type Config struct {
 	// Tasks reads a task as a commit has it. It is required to run check and measure jobs, which
 	// are refused as unavailable without it; command jobs do not read a task.
 	Tasks task.Source
+	// Files reads a commit's files. A lab's checkout of a task of two images compares the
+	// candidate's image of two commits with it, and is refused as unavailable without it.
+	Files task.Files
 
 	// Scheduler is how the machine is shared between jobs. The zero value runs one job at a time,
 	// the oldest first.

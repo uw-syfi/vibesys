@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 // ResourceKind is something a placement can give a job's container, and a task can need. It is
@@ -76,6 +77,19 @@ type PlacementOffer struct {
 	// Jobs are the kinds of job the placement runs, such as check and command on a partition whose
 	// time limit is shorter than a measure takes. Empty means every kind.
 	Jobs []JobKind
+	// LongestRun is the longest a command may run there before what it runs in is ended under it,
+	// such as a cluster's allocation capped at its partition's time limit, less the time its stop
+	// takes. Zero is no cap. A lab there lasts no longer.
+	LongestRun time.Duration
+}
+
+// LabTime is how long a lab that asks for asked lasts on the placement: no longer than its
+// LongestRun.
+func (p PlacementOffer) LabTime(asked time.Duration) time.Duration {
+	if p.LongestRun > 0 && asked > p.LongestRun {
+		return p.LongestRun
+	}
+	return asked
 }
 
 // Runs reports whether the placement runs a job of the kind.

@@ -1,0 +1,205 @@
+syntax = "proto3";
+package vibesys.cli.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1";
+
+// A lab is a command job that holds a placement's containers for a while and runs, in them, what
+// its caller asks: the candidate's image over a clean checkout of a commit and, for a task of two
+// images, the task's image beside it, as one run of the task does. Nothing a lab runs is a result:
+// a lab saves no result, so nothing of it is compared, promoted or added to the frontier. The calls
+// below reach a running lab through the daemon (DaemonService.Lab) and the lab's supervisor
+// (SupervisorService.Lab), and carry the same messages both ways.
+
+// LabRoom is a container of a lab.
+enum LabRoom {
+  LAB_ROOM_UNSPECIFIED = 0;
+  // The candidate's image, over the checkout, with the placement's GPUs. A task of one image has
+  // only this one, of the task's image.
+  LAB_ROOM_CANDIDATE = 1;
+  // The task's image, beside the candidate's and in its network, for a task of two images.
+  LAB_ROOM_TASK = 2;
+}
+
+// LabSignal is what a process of a lab is sent to stop it.
+enum LabSignal {
+  LAB_SIGNAL_UNSPECIFIED = 0;
+  // SIGTERM to the process's whole group: it may clean up.
+  LAB_SIGNAL_TERM = 1;
+  // SIGKILL to the process's whole group.
+  LAB_SIGNAL_KILL = 2;
+}
+
+// LabPhase is where a lab is.
+enum LabPhase {
+  LAB_PHASE_UNSPECIFIED = 0;
+  // The job waits for its turn on a placement.
+  LAB_PHASE_QUEUED = 1;
+  // The job runs, and its containers are not up yet: the image is built, or an allocation waits in
+  // a cluster's queue.
+  LAB_PHASE_STARTING = 2;
+  // The containers are up, and take commands.
+  LAB_PHASE_READY = 3;
+  // The lab ended: its time was up, it was ended or cancelled, or its containers failed.
+  LAB_PHASE_ENDED = 4;
+}
+
+// LabExec runs a command in a container of the lab, as the invoking user, in the checkout.
+message LabExec {
+  LabRoom room = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The command and its arguments. A shell is a command like any other: ["sh", "-c", "..."].
+  repeated string argv = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    max_items: 4096
+  }];
+  // Variables set for the command, over the container's.
+  map<string, string> env = 3 [(buf.validate.field).map.keys.string.pattern = "^[A-Za-z_][A-Za-z0-9_]*$"];
+  // Start it and answer with its handle at once, instead of streaming its output and answering
+  // with its exit. Its output goes to the lab's log.
+  bool detach = 4;
+}
+
+// LabStatusRequest asks where the lab is and what runs in it.
+message LabStatusRequest {
+  // Answer once the lab is ready or has ended, and not while it is queued or starting.
+  bool wait = 1;
+}
+
+// LabKill signals a process of the lab the lab started.
+message LabKill {
+  string handle = 1 [(buf.validate.field).string.pattern = "^p[1-9][0-9]{0,8}$"];
+  LabSignal signal = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// LabCheckout replaces the lab's checkout with a clean checkout of another commit, whose images
+// are the lab's own.
+message LabCheckout {
+  string commit = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+}
+
+// LabPull copies what is at a path of the lab's artifacts directory back to the caller.
+message LabPull {
+  // A path relative to the artifacts directory; empty is the whole directory.
+  string path = 1 [(buf.validate.field).string.max_len = 4096];
+}
+
+// LabPush writes one piece of a file into the lab's artifacts directory.
+message LabPush {
+  // A path relative to the artifacts directory.
+  string path = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  // Where the piece goes in the file. A piece at 0 starts the file afresh.
+  uint64 offset = 2;
+  bytes data = 3 [(buf.validate.field).bytes.max_len = 1048576];
+  // Whether the file may be run.
+  bool executable = 4;
+  // This is the file's last piece: the lab makes it visible to its containers.
+  bool last = 5;
+}
+
+// LabEnd ends the lab now: its containers are removed and its artifacts kept, as at the end of its
+// time.
+message LabEnd {}
+
+// LabCall is one call on a lab.
+message LabCall {
+  oneof op {
+    option (buf.validate.oneof).required = true;
+    LabExec exec = 1;
+    LabStatusRequest status = 2;
+    LabKill kill = 3;
+    LabCheckout checkout = 4;
+    LabPull pull = 5;
+    LabPush push = 6;
+    LabEnd end = 7;
+  }
+}
+
+// LabProcess is a process the lab started for a detached exec.
+message LabProcess {
+  // The lab's name for it, p1, p2, ... in the order they started.
+  string handle = 1;
+  LabRoom room = 2;
+  repeated string argv = 3;
+  google.protobuf.Timestamp started_at = 4;
+  oneof state {
+    // It runs.
+    bool running = 5;
+    // It exited with this code.
+    int32 exit_code = 6;
+    // It started and the lab cannot say how it ended, and this says why.
+    string lost = 7;
+  }
+}
+
+// LabStatus is where a lab is and what runs in it.
+message LabStatus {
+  LabPhase phase = 1;
+  // The commit the checkout is at now.
+  string commit = 2;
+  // A TCP port of the candidate's container on which nothing listened when the lab started, for a
+  // server the caller starts there. The task's container reaches it at 127.0.0.1.
+  uint32 port = 3;
+  // When the lab ends on its own.
+  google.protobuf.Timestamp until = 4;
+  repeated LabRoom rooms = 5;
+  repeated LabProcess processes = 6;
+  // Where the containers see the artifacts directory, which both share.
+  string artifacts = 7;
+}
+
+// LabFile is one piece of a file a pull copies back.
+message LabFile {
+  // The file's path relative to the path pulled; empty when that path is the file.
+  string path = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+  bool executable = 4;
+}
+
+// LabExit is how a command an exec ran in the foreground ended.
+message LabExit {
+  oneof end {
+    option (buf.validate.oneof).required = true;
+    int32 code = 1;
+    // It started and the lab cannot say how it ended, and this says why.
+    string lost = 2;
+  }
+}
+
+// LabPulled ends a pull: how many files and bytes it sent.
+message LabPulled {
+  uint32 files = 1;
+  uint64 bytes = 2;
+}
+
+// LabPushed answers a push: the file's size so far.
+message LabPushed {
+  uint64 size = 1;
+}
+
+// LabReply is one message of a lab call's answer. A call streams output or file pieces, and its
+// last message is its answer: an exec's exit or process, a pull's pulled, a push's pushed, and a
+// status for the others.
+message LabReply {
+  oneof item {
+    // Output of a foreground exec, standard output and standard error as one stream.
+    bytes output = 1;
+    LabFile file = 2;
+    LabExit exit = 3;
+    LabProcess process = 4;
+    LabStatus status = 5;
+    LabPulled pulled = 6;
+    LabPushed pushed = 7;
+  }
+}

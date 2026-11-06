@@ -54,6 +54,8 @@ type remoteMachine struct {
 	mu        sync.Mutex
 	staged    []docker.Dirs
 	collected []docker.Dirs
+	replaced  []docker.Dirs
+	added     []string
 	caches    []string
 	failWith  error // fails Collect
 }
@@ -77,6 +79,20 @@ func (m *remoteMachine) Collect(_ context.Context, local, staged docker.Dirs) er
 	defer m.mu.Unlock()
 	m.collected = append(m.collected, local)
 	return m.failWith
+}
+
+func (m *remoteMachine) Replace(_ context.Context, local, _ docker.Dirs) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.replaced = append(m.replaced, local)
+	return nil
+}
+
+func (m *remoteMachine) Add(_ context.Context, _, staged docker.Dirs, rel string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.added = append(m.added, staged.Artifacts+"/"+rel)
+	return nil
 }
 
 func (m *remoteMachine) Cache(_ context.Context, key string) (string, error) {

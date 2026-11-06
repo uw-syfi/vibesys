@@ -2,9 +2,12 @@ package gitwork
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -60,6 +63,65 @@ func (c Checkouts) Checkout(ctx context.Context, repository string, commit core.
 		return core.Checkout{}, nil, c.failed(ctx, err)
 	}
 	return core.Checkout{Commit: commit, Dir: dir}, remove, nil
+}
+
+// Switch replaces the checkout, in place, with a clean checkout of the commit: the commit's files
+// and nothing else, what was built or left there before removed. The checkout's directory stays,
+// so what has it mounted sees the new files. The repository is read and never changed; the
+// checkout borrows its objects (objects/info/alternates), so a commit made after the checkout, on
+// any branch or none, is found. It fails as Checkout does.
+func (c Checkouts) Switch(ctx context.Context, repository string, checkout core.Checkout, commit core.Commit) error {
+	ok, err := hasCommit(ctx, repository, commit)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return noCommit(repository, commit)
+	}
+	common, err := git(ctx, repository, "rev-parse", "--path-format=absolute", "--git-common-dir")
+	if err != nil {
+		return c.failed(ctx, err)
+	}
+	objects := filepath.Join(strings.TrimSpace(string(common)), "objects")
+	own, err := git(ctx, checkout.Dir, "rev-parse", "--path-format=absolute", "--git-path", "objects/info/alternates")
+	if err != nil {
+		return c.failed(ctx, err)
+	}
+	if err := borrow(strings.TrimSpace(string(own)), objects); err != nil {
+		return &core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("letting the checkout read the repository's objects: %v", err)}
+	}
+	for _, args := range [][]string{
+		{"checkout", "--quiet", "--force", "--detach", string(commit)},
+		{"clean", "-ffdxq"},
+	} {
+		if _, err := git(ctx, checkout.Dir, args...); err != nil {
+			return c.failed(ctx, err)
+		}
+	}
+	return nil
+}
+
+// borrow adds the objects directory to the alternates file, once.
+func borrow(alternates, objects string) error {
+	have, err := os.ReadFile(alternates)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if slices.Contains(strings.Split(string(have), "\n"), objects) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(alternates), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(alternates, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(f, objects); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func (Checkouts) failed(ctx context.Context, err error) error {

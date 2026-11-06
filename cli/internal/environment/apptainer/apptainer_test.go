@@ -1369,3 +1369,39 @@ func TestAKeptAllocationNoContainerTakesIsCancelled(t *testing.T) {
 		nothingLeft(t, cluster)
 	})
 }
+
+// A lab of a task of two images on a cluster holds one allocation, on one node, for both of its
+// containers, for its time and the stop's margin; a command the lab starts in either is a step of
+// that allocation, and everything is gone when it ends.
+func TestALabOfTwoImagesHoldsOneAllocationForBothContainers(t *testing.T) {
+	w := fakeworld.New()
+	cluster := clusterfake.New(w.MemoryGates)
+	timers := envtest.NewTimers()
+	r, x := candidateRig(t, w, cluster, timers, []string{"unused"}, nil)
+	x.Argv, x.Artifacts = nil, "/art/01-lab"
+	x.Candidate.Serve = nil
+	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
+	defer cancel()
+	a := r.env.Lab(ctx, x, nil, func(b environment.Bench) core.ExecOutcome {
+		for _, room := range []core.LabRoom{core.LabCandidate, core.LabTask} {
+			var out bytes.Buffer
+			p, err := b.Rooms[room].Start([]string{"print", "in " + string(room)}, &out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st := <-p.Exited(); st.Err != nil || st.Code != 0 || strings.TrimSpace(out.String()) != "in "+string(room) {
+				t.Fatalf("%s: %+v, %q", room, st, out.String())
+			}
+		}
+		if len(cluster.Running()) != 2 {
+			t.Errorf("processes %v, want the two containers' holders", cluster.Running())
+		}
+		return core.ExecOutcome{Kind: core.ExecExited}
+	})
+	exited(t, a, 0)
+	sub := cluster.Submitted()
+	if len(sub) != 1 || sub[0].Limit != limit+apptainer.StopMargin {
+		t.Fatalf("allocations %+v, want one for the lab's time and the margin", sub)
+	}
+	nothingLeft(t, cluster)
+}

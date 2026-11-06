@@ -244,6 +244,11 @@ func (h *handle) Follow(ctx context.Context, offset uint64, emit func([]byte) er
 	return out, h.proved(err)
 }
 
+// Lab implements supervisor.Handle.
+func (h *handle) Lab(ctx context.Context, call core.LabCall, emit func(core.LabReply) error) error {
+	return h.proved(h.Client.Lab(ctx, call, emit))
+}
+
 // Release implements supervisor.Handle.
 func (h *handle) Release(ctx context.Context) error {
 	err := h.proved(h.Client.Release(ctx))

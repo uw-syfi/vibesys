@@ -6,6 +6,7 @@ capture, and how to keep the profiler, the HIP runtime and the driver consistent
 ## Contents
 
 - [Recipes](#recipes)
+- [Capturing in a lab](#capturing-in-a-lab)
 - [Two kinds of capture job](#two-kinds-of-capture-job)
 - [Capture windows](#capture-windows)
 - [Complete and bounded captures](#complete-and-bounded-captures)
@@ -33,6 +34,36 @@ timeline's kernel names. `counters` takes counter names, not set names: print th
 `analyze.py counters plan --arch <gfx> --sets <sets>`, and keep each pass at the size `plan`
 prints, since packing too many counters into one pass has hung GPUs. The thread-trace decoder is
 found through `$ROCPROF_ATT_LIBRARY_PATH` or `$ROCM_PATH/lib`; install it in the candidate image.
+
+## Capturing in a lab
+
+A lab is the default way to capture: it holds the candidate's container, with the GPUs, and the
+task's beside it for as long as you ask, and runs whatever you start there. Nothing a lab runs is
+scored. `vibesys:measure` lists the commands; a timeline of a server under the task's own load:
+
+```bash
+vibesys-cli lab start <sha> --for 45m --wait          # note the lab (j7) and its port
+vibesys-cli lab cp <this skill>/scripts/capture.py j7:capture.py   # into /vibesys/artifacts
+vibesys-cli lab exec j7 --detach -- python3 /vibesys/artifacts/capture.py timeline --hip-api \
+  --collection-period 120:30 --name cap -- <server argv, ${PORT} replaced>
+vibesys-cli lab exec j7 --in task -- <the task's load generator> <any duration, lanes, warmup>
+vibesys-cli lab kill j7 p1                            # SIGTERM: the profiler writes its trace
+vibesys-cli lab ps j7                                 # wait until p1 has exited
+vibesys-cli lab cp j7:cap ./cap && vibesys-cli lab end j7
+```
+
+The capture lands in `/vibesys/artifacts/cap` (`$VIBESYS_ARTIFACTS_DIR` in the container). The
+server's command is the task's `[candidate] serve`, with `${PORT}` replaced by the port `lab ps`
+names. For an LLM-serving task built on vibesys-evaluator, the load generator is the AgentX
+replay with any load: `python -m vibesys_evaluator.llm_serving.agentx explore --model <m>
+--tokenizer <t> --tokenizer-revision <r> --max-context-length <n> --concurrency <lanes>
+--duration-secs <s> --warmup-requests-per-lane <w> --artifacts /vibesys/artifacts/load`, with the
+model, tokenizer, revision and context length the task's `bench.py` names; it prints the metrics
+as JSON. An image whose vibesys-evaluator predates `explore` (its `--help` lacks it) still runs the
+task's short replay: `python <task dir>/bench.py profile`. Restart the server under the next recipe in the same lab; `lab checkout` moves it to
+another commit of the same images. Let `capture.py` end on SIGTERM (`lab kill`, not `--signal
+kill`), and give it the time to write before `lab end`; the lab's end also sends SIGTERM and waits
+the stop grace.
 
 ## Two kinds of capture job
 

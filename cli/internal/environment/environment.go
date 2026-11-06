@@ -61,6 +61,17 @@ type Environment interface {
 	// with core.FailureInvalidInput for an environment that runs no images, such as the host: a
 	// task of two images runs only where images do.
 	Candidate(ctx context.Context, build core.CandidateBuild, log io.Writer) (core.CandidateImage, error)
+
+	// Lab holds a lab (core.LabSpec): it starts the containers a run of the execution would have,
+	// with nothing in them but what keeps them up, and calls hold with them (Bench) once they are
+	// up and what their resources ask them to check passed. For an execution with a candidate's
+	// image the rooms are the candidate's, with the placement's GPUs, and the task's beside it in
+	// its network, as for a profile; otherwise the one room is the task's image. The lab's time is
+	// the execution's Timeout, armed when hold is called. Once hold returns, Lab removes the
+	// containers and brings the artifacts back, on every path, and says what the attempt did as
+	// Run does: core.Ended with hold's ending. The execution passes ValidateLab. An environment
+	// that holds no labs, such as the host, answers NoLab.
+	Lab(ctx context.Context, execution core.Execution, out io.Writer, hold HoldLab) core.Attempt
 }
 
 // NoImages is what an environment that runs no images answers Candidate with.

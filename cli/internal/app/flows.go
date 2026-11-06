@@ -84,7 +84,7 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 	var t task.Task
 	read := spec.Environment == core.EnvironmentAuto ||
 		spec.Environment == core.EnvironmentDocker && len(a.cfg.Placements) > 0 ||
-		command.Profile != nil
+		command.Profile != nil || command.Lab != nil
 	if read {
 		var err error
 		t, err = a.taskAt(ctx, string(c.Scope.Repository()), spec.Commit, string(c.Scope.Task()))
@@ -99,6 +99,11 @@ func (a *App) placeFlow(ctx context.Context, sub core.Submission) (core.Submissi
 	command, err := commandOfTwoImages(command, t)
 	if err != nil {
 		return sub, err
+	}
+	if command.Lab != nil {
+		if command, err = labOf(command, spec.Environment, t); err != nil {
+			return sub, err
+		}
 	}
 	if _, ok := spec.Settings.(core.CommandSettings); ok {
 		spec.Settings = command
@@ -144,6 +149,27 @@ func commandOfTwoImages(c core.CommandSettings, t task.Task) (core.CommandSettin
 	}
 	c.Timeout = limit + cand.StartupTimeout
 	c.Candidate = &core.CommandCandidate{Build: cand.Build, Serve: &serve}
+	return c, nil
+}
+
+// labOf is a lab's settings as the daemon queues it: in docker, where its containers are, for the
+// time it asked for (core.DefaultLabTime when it asked for none), at most core.MaxLabTime. A
+// placement whose allocations are capped shortens it when it starts (core.PlacementOffer.LabTime).
+func labOf(c core.CommandSettings, env core.EnvironmentKind, t task.Task) (core.CommandSettings, error) {
+	if len(c.Argv) > 0 || c.Service != nil || c.Profile != nil {
+		return c, &core.Failure{Kind: core.FailureInvalidInput, Message: "a lab runs what lab exec asks, and takes no command, service or profile of its own"}
+	}
+	if env != core.EnvironmentDocker {
+		return c, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"task %q runs in the %s environment, and a lab holds the containers of a placement: it needs a task with a Dockerfile, run in docker", t.Name, env)}
+	}
+	if c.Timeout == 0 {
+		c.Timeout = core.DefaultLabTime
+	}
+	if c.Timeout > core.MaxLabTime {
+		return c, &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf(
+			"a lab lasts at most %v, and %v was asked for", core.MaxLabTime, c.Timeout)}
+	}
 	return c, nil
 }
 

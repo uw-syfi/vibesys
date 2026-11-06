@@ -14,6 +14,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/flow"
 	"github.com/uw-syfi/vibesys/cli/internal/flowrun"
 	"github.com/uw-syfi/vibesys/cli/internal/hostfs"
+	"github.com/uw-syfi/vibesys/cli/internal/lab"
 	"github.com/uw-syfi/vibesys/cli/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/cli/internal/owned"
 )
@@ -57,20 +58,60 @@ type Supervisor struct {
 	released chan struct{}
 	done     chan struct{}
 
+	// lab is the lab the job is, and nil for a job that is not one.
+	lab *lab.Lab
+
 	mu           sync.Mutex
 	phase        lifecycle.RunPhase
 	cancelAsked  bool
 	cancelReason string
 	outcome      lifecycle.Outcome
+	// checkout is the lab's checkout once it is made, which a lab's Switch replaces in place.
+	checkout core.Checkout
 }
 
 // New returns a parked supervisor for the launch.
 func New(cfg Config) *Supervisor {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Supervisor{
+	s := &Supervisor{
 		cfg: cfg, ctx: ctx, cancel: cancel,
 		phase: lifecycle.RunParked, released: make(chan struct{}), done: make(chan struct{}),
 	}
+	if command, ok := cfg.Launch.Spec.Settings.(core.CommandSettings); ok && command.Lab != nil {
+		l := cfg.Launch
+		s.lab = lab.New(lab.Config{
+			Clock: cfg.Host.Clock, Log: writer{s}, Files: cfg.Host.Files, Artifacts: s.labArtifacts(),
+			Commit: l.Spec.Commit, Time: command.Timeout,
+			Switch: func(ctx context.Context, commit core.Commit) error {
+				s.mu.Lock()
+				co := s.checkout
+				s.mu.Unlock()
+				return cfg.Checkouts.Switch(ctx, l.Repository, co, commit)
+			},
+		})
+	}
+	return s
+}
+
+// labArtifacts is the artifacts directory of the lab's one run, and empty for a supervisor whose
+// host keeps no artifacts.
+func (s *Supervisor) labArtifacts() string {
+	h, l := s.cfg.Host, s.cfg.Launch
+	if h.Artifacts == nil {
+		return ""
+	}
+	return flowrun.ArtifactsOf(h.Artifacts(l.Repository, l.Task, l.Job), 1, "lab")
+}
+
+// Lab makes one call on the job's lab (Handle.Lab).
+func (s *Supervisor) Lab(ctx context.Context, call core.LabCall, emit func(core.LabReply) error) error {
+	if s.lab == nil {
+		return &core.Failure{Kind: core.FailureInvalidInput, Message: fmt.Sprintf("job %s is not a lab", s.cfg.Launch.Job)}
+	}
+	if s.Phase() == lifecycle.RunReleased {
+		return ErrReleased
+	}
+	return s.lab.Call(ctx, call, emit)
 }
 
 // Phase returns where the supervisor is.
@@ -221,7 +262,15 @@ func (s *Supervisor) execute() lifecycle.Outcome {
 	}
 	if asked {
 		// Cancelled while parked: the command never starts.
+		if s.lab != nil {
+			s.lab.Close()
+		}
 		return commandEnded(cancelled)
+	}
+	if s.lab != nil {
+		attempt := s.executeLab(spec)
+		s.lab.Close()
+		return commandEnded(attempt)
 	}
 	return commandEnded(s.executeCommand(spec))
 }
@@ -266,6 +315,42 @@ func (s *Supervisor) executeCommand(spec core.JobSpec) core.Attempt {
 		_, _ = fmt.Fprintf(writer{s}, "[command] artifacts: %s\n", x.Artifacts)
 	}
 	return env.Run(s.ctx, x, writer{s})
+}
+
+// executeLab holds the job's lab: its checkout, its candidate's image when its task has two, and
+// its containers for its time, with the lab answering the calls on it meanwhile.
+func (s *Supervisor) executeLab(spec core.JobSpec) core.Attempt {
+	command, _ := spec.Settings.(core.CommandSettings)
+	h := s.cfg.Host
+	artifacts := s.labArtifacts()
+	if h.Files == nil || h.Clock == nil || artifacts == "" {
+		return core.NotStarted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: "this supervisor was started without the artifacts directory and the clock a lab needs"}}
+	}
+	env, err := s.cfg.Environments.Environment(spec.Environment, s.target())
+	if err != nil {
+		return core.NotStarted{Failure: core.AsFailure(err)}
+	}
+	checkout, remove, err := s.cfg.Checkouts.Checkout(s.ctx, s.cfg.Launch.Repository, spec.Commit)
+	if err != nil {
+		return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
+	}
+	defer remove()
+	s.mu.Lock()
+	s.checkout = checkout
+	s.mu.Unlock()
+	x := core.Execution{Checkout: checkout, Artifacts: artifacts, Timeout: command.Timeout}
+	if c := command.Candidate; c != nil {
+		img, err := env.Candidate(s.ctx, c.Build, writer{s})
+		if err != nil {
+			return environment.Finish(s.ctx, core.NotStarted{Failure: core.AsFailure(err)}, nil)
+		}
+		x.Candidate = &core.CandidateRun{Image: img.ID}
+	}
+	if err := h.Files.MakeDir(s.ctx, artifacts); err != nil {
+		return core.NotStarted{Failure: core.Failure{Kind: core.FailureUnavailable, Message: fmt.Sprintf("making the artifacts directory: %v", err)}}
+	}
+	_, _ = fmt.Fprintf(writer{s}, "[lab] artifacts: %s\n", artifacts)
+	return env.Lab(s.ctx, x, writer{s}, s.lab.Hold)
 }
 
 // executePlan drives a check or a measure job through its plan and says how it ended. The plan is

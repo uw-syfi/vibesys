@@ -25,13 +25,16 @@ names; they usually say which profiler fits. Details are in
 1. Decide what evidence would answer the question, and the cheapest way to capture it.
 2. Build in the checkout if the task needs it. Edit no tracked file, except as step 4 allows. Scratch output, traces and
    reports go in the scratch directory your brief names, not in the checkout.
-3. Capture on the workload the benchmark uses, or one close enough to say so. A capture that
-   drives load is a `vibesys-cli submit command <rev> -- <argv...>` job (`vibesys:measure`), and
-   its output is read with `vibesys-cli logs <job>`. A capture script of your own can travel as
-   the job's argv (`-- python3 -c "<script>"`), so it needs no commit.
+3. Capture on the workload the benchmark uses, or one close enough to say so, in a lab
+   (`vibesys:measure`, Labs): `lab start <rev> --wait`, start the server under any profiler with
+   `lab exec --detach`, drive it with the task's own load generator with `lab exec --in task --
+   <generator> <any args>`, copy the results back with `lab cp`, and `lab end`. Iterate in the
+   same lab: kill and restart the server, change the load, `lab checkout` another commit. A lab's
+   numbers are never official; give them as evidence, not as a measurement. For a capture to
+   compare across commits, use the task's standard profile load (`submit profile`).
 4. If the program cannot show what the question needs (it serves no profiler, its binaries carry
    no symbols, it has no hook to time), say so and stop, unless your brief names an
-   instrumentation branch. A job runs only a commit, so a scratch copy outside the checkout is
+   instrumentation branch. A lab and a job run only a commit, so a scratch copy outside the checkout is
    never what runs. On that branch, make one `wip:` commit that adds the instrumentation and
    nothing else: no change to what the program computes or returns. Profile that commit. Never
    measure, check or hand it back as a candidate, and say in the findings what the

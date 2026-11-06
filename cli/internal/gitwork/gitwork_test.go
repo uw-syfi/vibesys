@@ -267,3 +267,53 @@ func TestACheckoutFailsAsTheInterfaceSays(t *testing.T) {
 		t.Errorf("left %v", entries)
 	}
 }
+
+// A switch replaces a checkout in place with a clean checkout of another commit, one made after
+// the checkout and on no branch included: the directory stays, the new commit's files are there,
+// and nothing the commands left in it before is.
+func TestASwitchReplacesACheckoutInPlace(t *testing.T) {
+	repo, first := newRepo(t, task.Tree{"a.txt": {Data: []byte("one")}})
+	co, remove, err := (gitwork.Checkouts{Base: t.TempDir()}).Checkout(context.Background(), repo, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer remove()
+	// A commit made after the checkout, on no branch: what an agent's detached HEAD leaves.
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, repo, "add", "-A")
+	tree := gitIn(t, repo, "write-tree")
+	second := core.Commit(gitIn(t, repo, "commit-tree", tree, "-p", string(first), "-m", "second"))
+	for _, left := range []string{"build/out.o", "untracked.txt"} {
+		p := filepath.Join(co.Dir, left)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("left"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkouts := gitwork.Checkouts{}
+	for range 2 { // a second switch to the same commit changes nothing
+		if err := checkouts.Switch(context.Background(), repo, co, second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if data, err := os.ReadFile(filepath.Join(co.Dir, "a.txt")); err != nil || string(data) != "two" {
+		t.Fatalf("a.txt is %q, %v after the switch", data, err)
+	}
+	for _, left := range []string{"build", "untracked.txt"} {
+		if _, err := os.Stat(filepath.Join(co.Dir, left)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s survived the switch: %v", left, err)
+		}
+	}
+	if got := gitIn(t, co.Dir, "rev-parse", "HEAD"); got != string(second) {
+		t.Fatalf("the checkout is at %s, want %s", got, second)
+	}
+	missing := core.Commit(strings.Repeat("f", 40))
+	var f *core.Failure
+	if err := checkouts.Switch(context.Background(), repo, co, missing); !errors.As(err, &f) || f.Kind != core.FailureNotFound {
+		t.Fatalf("a switch to a commit the repository lacks: %v", err)
+	}
+}

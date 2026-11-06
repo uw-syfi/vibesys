@@ -48,6 +48,16 @@ func describe(j *cliv1.Job) string {
 	}
 	fmt.Fprintf(&b, "\t%s", commit)
 	switch spec := j.GetSpec(); {
+	case spec.GetCommand().GetLab() != nil:
+		fmt.Fprintf(&b, "\tlab for %v", spec.GetCommand().GetTimeout().AsDuration())
+		for _, p := range j.GetPlans() {
+			fmt.Fprintf(&b, ", plan #%d", p)
+		}
+		for _, s := range j.GetSubmitters() {
+			if s.GetAgent() != "" {
+				fmt.Fprintf(&b, ", by %s", s.GetAgent())
+			}
+		}
 	case spec.GetCommand() != nil:
 		fmt.Fprintf(&b, "\t%s", commandSummary(spec.GetCommand().GetArgv()))
 	case spec.GetCheck() != nil:

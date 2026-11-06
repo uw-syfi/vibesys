@@ -78,6 +78,9 @@ type CommandSettings struct {
 	// Candidate is set by the daemon for a job of a task of two images: how the job's candidate image
 	// is built, and the server the command runs against for a profile. It is never the caller's.
 	Candidate *CommandCandidate
+	// Lab, when set, makes the job a lab (lab.go): it has no Argv, Service or Profile, and holds its
+	// containers for Timeout once they are up.
+	Lab *LabSpec
 }
 
 // ProfileRequest is what a profile submission asks for.

@@ -35,6 +35,7 @@ const (
 	DaemonService_SetJobPriority_FullMethodName   = "/vibesys.cli.v1.DaemonService/SetJobPriority"
 	DaemonService_ListJobs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ListJobs"
 	DaemonService_Queue_FullMethodName            = "/vibesys.cli.v1.DaemonService/Queue"
+	DaemonService_Lab_FullMethodName              = "/vibesys.cli.v1.DaemonService/Lab"
 	DaemonService_ForgetRepository_FullMethodName = "/vibesys.cli.v1.DaemonService/ForgetRepository"
 	DaemonService_ReadLogs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ReadLogs"
 	DaemonService_Show_FullMethodName             = "/vibesys.cli.v1.DaemonService/Show"
@@ -105,6 +106,10 @@ type DaemonServiceClient interface {
 	// Queue lists a task's queued and running jobs grouped by plan, with why each queued job waits,
 	// the priority it counts as now, its age and an estimate of its duration. Protocol 7.
 	Queue(ctx context.Context, in *QueueRequest, opts ...grpc.CallOption) (*QueueResponse, error)
+	// Lab makes one call on a lab job (lab.proto): it waits while the lab is queued or starting, and
+	// streams the lab's answer. A call on a job that is not a lab is INVALID_INPUT, and one on a lab
+	// that ended is CONFLICT. Protocol 8.
+	Lab(ctx context.Context, in *LabRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LabResponse], error)
 	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
 	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
 	ForgetRepository(ctx context.Context, in *ForgetRepositoryRequest, opts ...grpc.CallOption) (*ForgetRepositoryResponse, error)
@@ -325,6 +330,25 @@ func (c *daemonServiceClient) Queue(ctx context.Context, in *QueueRequest, opts 
 	return out, nil
 }
 
+func (c *daemonServiceClient) Lab(ctx context.Context, in *LabRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LabResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[3], DaemonService_Lab_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[LabRequest, LabResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonService_LabClient = grpc.ServerStreamingClient[LabResponse]
+
 func (c *daemonServiceClient) ForgetRepository(ctx context.Context, in *ForgetRepositoryRequest, opts ...grpc.CallOption) (*ForgetRepositoryResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ForgetRepositoryResponse)
@@ -337,7 +361,7 @@ func (c *daemonServiceClient) ForgetRepository(ctx context.Context, in *ForgetRe
 
 func (c *daemonServiceClient) ReadLogs(ctx context.Context, in *ReadLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ReadLogsResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[3], DaemonService_ReadLogs_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &DaemonService_ServiceDesc.Streams[4], DaemonService_ReadLogs_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -528,6 +552,10 @@ type DaemonServiceServer interface {
 	// Queue lists a task's queued and running jobs grouped by plan, with why each queued job waits,
 	// the priority it counts as now, its age and an estimate of its duration. Protocol 7.
 	Queue(context.Context, *QueueRequest) (*QueueResponse, error)
+	// Lab makes one call on a lab job (lab.proto): it waits while the lab is queued or starting, and
+	// streams the lab's answer. A call on a job that is not a lab is INVALID_INPUT, and one on a lab
+	// that ended is CONFLICT. Protocol 8.
+	Lab(*LabRequest, grpc.ServerStreamingServer[LabResponse]) error
 	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
 	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
 	ForgetRepository(context.Context, *ForgetRepositoryRequest) (*ForgetRepositoryResponse, error)
@@ -608,6 +636,9 @@ func (UnimplementedDaemonServiceServer) ListJobs(context.Context, *ListJobsReque
 }
 func (UnimplementedDaemonServiceServer) Queue(context.Context, *QueueRequest) (*QueueResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Queue not implemented")
+}
+func (UnimplementedDaemonServiceServer) Lab(*LabRequest, grpc.ServerStreamingServer[LabResponse]) error {
+	return status.Error(codes.Unimplemented, "method Lab not implemented")
 }
 func (UnimplementedDaemonServiceServer) ForgetRepository(context.Context, *ForgetRepositoryRequest) (*ForgetRepositoryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForgetRepository not implemented")
@@ -938,6 +969,17 @@ func _DaemonService_Queue_Handler(srv interface{}, ctx context.Context, dec func
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _DaemonService_Lab_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(LabRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(DaemonServiceServer).Lab(m, &grpc.GenericServerStream[LabRequest, LabResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type DaemonService_LabServer = grpc.ServerStreamingServer[LabResponse]
 
 func _DaemonService_ForgetRepository_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ForgetRepositoryRequest)
@@ -1310,6 +1352,11 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "WatchTask",
 			Handler:       _DaemonService_WatchTask_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "Lab",
+			Handler:       _DaemonService_Lab_Handler,
 			ServerStreams: true,
 		},
 		{

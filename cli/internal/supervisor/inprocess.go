@@ -327,6 +327,29 @@ func (h *inProcessHandle) Follow(ctx context.Context, offset uint64, emit func([
 	return out, err
 }
 
+func (h *inProcessHandle) Lab(ctx context.Context, call core.LabCall, emit func(core.LabReply) error) error {
+	if err := h.check(ctx); err != nil {
+		return err
+	}
+	// A kill ends a call in flight: the connection to a killed process drops.
+	ctx, cancel := context.WithCancel(ctx)
+	var watcher owned.Group
+	defer watcher.Wait()
+	defer cancel()
+	watcher.Go(func() {
+		select {
+		case <-h.proc.killed:
+			cancel()
+		case <-ctx.Done():
+		}
+	})
+	err := h.proc.sup.Lab(ctx, call, emit)
+	if gone := h.proc.gone(); gone != nil && (h.proc.dead() || errors.Is(err, ErrReleased)) {
+		return gone
+	}
+	return err
+}
+
 func (h *inProcessHandle) Release(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err

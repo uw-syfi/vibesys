@@ -321,6 +321,56 @@ func (e *Environment) Run(ctx context.Context, x core.Execution, out io.Writer) 
 	return environment.WithServiceLog(environment.Finish(ctx, attempt, nil), tail)
 }
 
+// Lab implements environment.Environment: its rooms are launchers of scripts on one fake machine,
+// which share its files, so the artifacts directory is where the caller has it and nothing is
+// copied. The candidate's room listens on CandidatePort.
+func (e *Environment) Lab(ctx context.Context, x core.Execution, out io.Writer, hold environment.HoldLab) core.Attempt {
+	e.mu.Lock()
+	e.runs = append(e.runs, x)
+	e.active++
+	e.running = append(e.running, &x)
+	e.mu.Unlock()
+	defer func() {
+		e.mu.Lock()
+		e.active--
+		e.running = slices.DeleteFunc(e.running, func(r *core.Execution) bool { return r == &x })
+		e.mu.Unlock()
+	}()
+	if err := environment.ValidateLab(x); err != nil {
+		return core.NotStarted{Failure: core.AsFailure(err)}
+	}
+	if e.kind != core.EnvironmentDocker {
+		return environment.NoLab(e.kind)
+	}
+	if ctx.Err() != nil {
+		return core.Ended{Exec: core.ExecOutcome{Kind: core.ExecCancelled}}
+	}
+	limit, stop := e.timers.Timeout(ctx, x.Timeout)
+	defer stop()
+	// Each room waits for its own processes, so that ending one never waits on another's.
+	in := &interpreter{gates: e.gates, dir: x.Checkout.Dir, files: e.files, ready: &atomic.Bool{}}
+	rooms := map[core.LabRoom]*launcher{core.LabCandidate: {in: in, wg: &sync.WaitGroup{}}}
+	if x.Candidate != nil {
+		rooms[core.LabTask] = &launcher{in: in, wg: &sync.WaitGroup{}}
+	}
+	bench := environment.Bench{
+		Rooms: map[core.LabRoom]environment.Launcher{}, Port: CandidatePort, Artifacts: x.Artifacts,
+		Limit: limit, Cancelled: ctx.Done(),
+		Grace:    func() (<-chan struct{}, func()) { return e.timers.Timeout(ctx, environment.DefaultGrace) },
+		Collect:  func(ctx context.Context) error { return ctx.Err() },
+		Replaced: func(ctx context.Context) error { return ctx.Err() },
+		Added:    func(ctx context.Context, _ core.LabPath) error { return ctx.Err() },
+	}
+	for room, l := range rooms {
+		bench.Rooms[room] = l
+	}
+	ended := hold(bench)
+	for _, l := range rooms {
+		l.end()
+	}
+	return environment.Finish(ctx, core.Ended{Exec: ended}, nil)
+}
+
 // syncWriter serializes the writes of the several processes of one run.
 type syncWriter struct {
 	mu sync.Mutex

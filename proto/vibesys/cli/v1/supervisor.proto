@@ -6,6 +6,7 @@ import "google/protobuf/duration.proto";
 import "vibesys/cli/v1/environment.proto";
 import "vibesys/cli/v1/failure.proto";
 import "vibesys/cli/v1/job.proto";
+import "vibesys/cli/v1/lab.proto";
 import "vibesys/cli/v1/result.proto";
 import "vibesys/cli/v1/version.proto";
 
@@ -43,6 +44,10 @@ service SupervisorService {
   // since a running job is cancelled first and released after its outcome is recorded. A parked
   // supervisor is released to abort a job that never started.
   rpc Release(ReleaseRequest) returns (ReleaseResponse);
+
+  // LabCall makes one call on the lab the supervisor runs (lab.proto). A supervisor of a job that
+  // is not a lab refuses it with INVALID_INPUT.
+  rpc LabCall(LabCallRequest) returns (stream LabCallResponse);
 }
 
 // Launch is what one supervisor runs: a job as the daemon resolved it. The daemon writes it into
@@ -266,3 +271,11 @@ message CancelJobResponse {}
 message ReleaseRequest {}
 
 message ReleaseResponse {}
+
+message LabCallRequest {
+  LabCall call = 1;
+}
+
+message LabCallResponse {
+  LabReply reply = 1;
+}
