@@ -1,19 +1,18 @@
 """Result protocol 2 records (``sdk/vs-evaluator/PROTOCOL.md``) written to ``--vs-output``.
 
-A ``RecordStream`` writes ``hello`` first and at most one outcome after it,
-flushing each line, and refuses any record a reader would reject, so a
-mistake in a task surfaces here with its name rather than as an invalid
-stream later.
+A ``RecordStream`` appends ``hello`` first and at most one outcome after it, each through the
+core (``vibesys-evaluator records write``), which owns the protocol: it flushes every line and
+refuses any record a reader would reject, so a mistake in a task surfaces here with its name
+rather than as an invalid stream later.
 """
 
 from __future__ import annotations
 
-import json
-import os
+import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, TextIO
+from typing import TYPE_CHECKING, Any, Literal
 
-from vibesys_evaluator._private.results import finite, valid_metric_name
+from vibesys_evaluator._private import core
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
     from vibesys_evaluator._private.results import Metric
 
 PROTOCOL = 2
-_MAX_MESSAGE = 4000
+_DIRECTIONS = {"max": "DIRECTION_MAX", "min": "DIRECTION_MIN"}
 
 
 class RecordError(ValueError):
@@ -39,23 +38,41 @@ class Partial:
     unit: str = ""
 
 
+def _number(value: object) -> float | str:
+    """A JSON number for the core; a non-finite one travels as text, a non-number as NaN."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return "NaN"
+    number = float(value)
+    if math.isnan(number):
+        return "NaN"
+    if math.isinf(number):
+        return "Infinity" if number > 0 else "-Infinity"
+    return number
+
+
 class RecordStream:
     """The record stream of one sample, written as records are made."""
 
     def __init__(self, path: Path) -> None:
-        """Open (truncate) the stream at ``path``."""
+        """Name the stream's file; it is created (truncated) with the first record."""
         self._path = path
-        self._file: TextIO | None = None
-        self._metrics: dict[str, Metric] | None = None
+        self._fresh = True
         self._outcome: Literal["result", "error"] | None = None
 
-    def _write(self, record: dict[str, object]) -> None:
-        if self._file is None:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._file = self._path.open("w", encoding="utf-8")
-        self._file.write(json.dumps(record, allow_nan=False, separators=(",", ":")) + "\n")
-        self._file.flush()
-        os.fsync(self._file.fileno())
+    def _write(self, record: dict[str, Any]) -> None:
+        request = {"path": str(self._path), "fresh": self._fresh, **record}
+        try:
+            response = core.call("records", "write", request)
+        except core.CoreDomainError as error:
+            if error.kind == "record":
+                raise RecordError(error.message) from error
+            raise
+        self._fresh = False
+        outcome = response.get("outcome", "")
+        if outcome == "result":
+            self._outcome = "result"
+        elif outcome == "error":
+            self._outcome = "error"
 
     @property
     def outcome(self) -> Literal["result", "error"] | None:
@@ -68,24 +85,15 @@ class RecordStream:
         Raises:
             RecordError: A second hello, no metrics, or a metric name with whitespace.
         """
-        if self._metrics is not None or self._outcome is not None:
-            msg = "hello is written once, first"
-            raise RecordError(msg)
-        if not metrics:
-            msg = "declare at least one metric"
-            raise RecordError(msg)
         for name in metrics:
-            if not valid_metric_name(name):
+            if not isinstance(name, str):
                 msg = f"metric name {name!r} must be non-empty and contain no whitespace"
                 raise RecordError(msg)
-        self._metrics = dict(metrics)
-        specs: dict[str, dict[str, str]] = {}
-        for name, metric in metrics.items():
-            spec = {"direction": metric.direction}
-            if metric.unit:
-                spec["unit"] = metric.unit
-            specs[name] = spec
-        self._write({"kind": "hello", "protocol": PROTOCOL, "metrics": specs})
+        specs = [
+            {"name": name, "unit": metric.unit, "direction": _DIRECTIONS[metric.direction]}
+            for name, metric in metrics.items()
+        ]
+        self._write({"hello": {"metrics": specs}})
 
     def result(self, values: Mapping[str, float]) -> None:
         """Write the measured row.
@@ -94,27 +102,12 @@ class RecordStream:
             RecordError: No hello yet, a second outcome, an undeclared or
                 missing metric, or a value that is not a finite number.
         """
-        if self._metrics is None:
-            msg = "write hello before the result"
-            raise RecordError(msg)
-        if self._outcome is not None:
-            msg = f"the stream already has its outcome ({self._outcome}); report once"
-            raise RecordError(msg)
-        unknown = sorted(set(values) - set(self._metrics))
-        if unknown:
-            msg = f"reported {unknown} but declared only {sorted(self._metrics)}"
-            raise RecordError(msg)
-        missing = sorted(set(self._metrics) - set(values))
-        if missing:
-            msg = f"declared {missing} but did not report them"
-            raise RecordError(msg)
         for name, value in values.items():
-            if not finite(value):
+            if isinstance(value, bool) or not isinstance(value, int | float):
                 msg = f"metric {name} is {value!r}; report a finite number"
                 raise RecordError(msg)
-        self._outcome = "result"
         self._write(
-            {"kind": "result", "label": "", "values": {k: float(v) for k, v in values.items()}}
+            {"result": {"values": [{"name": k, "value": _number(v)} for k, v in values.items()]}}
         )
 
     def error(self, message: str, *, partial: Partial | None = None) -> None:
@@ -123,27 +116,15 @@ class RecordStream:
         Raises:
             RecordError: The stream already ended with an error.
         """
-        if self._outcome == "error":
-            msg = "the stream already ended with an error"
-            raise RecordError(msg)
-        text = message.strip() or "the benchmark failed without a message"
-        if len(text) > _MAX_MESSAGE:
-            text = text[: _MAX_MESSAGE - 3] + "..."
-        record: dict[str, object] = {"kind": "error", "message": text}
-        if partial is not None and valid_metric_name(partial.name) and finite(partial.value):
-            part: dict[str, object] = {
+        record: dict[str, Any] = {"message": message}
+        if partial is not None:
+            record["partial"] = {
                 "name": partial.name,
-                "value": float(partial.value),
-                "direction": partial.direction,
+                "value": _number(partial.value),
+                "direction": _DIRECTIONS[partial.direction],
+                "unit": partial.unit,
             }
-            if partial.unit:
-                part["unit"] = partial.unit
-            record["partial"] = part
-        self._outcome = "error"
-        self._write(record)
+        self._write({"error": record})
 
     def close(self) -> None:
-        """Close the file (idempotent)."""
-        if self._file is not None:
-            self._file.close()
-            self._file = None
+        """Nothing stays open between records; kept so a stream is used like a file."""

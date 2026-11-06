@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from typing import Literal
-
-_METRIC_NAME = re.compile(r"^\S+$")
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -65,11 +62,6 @@ class Validity:
                 f"Validity min_ops_per_operation is an int >= 0, got {self.min_ops_per_operation!r}"
             )
             raise ValueError(msg)
-
-
-def valid_metric_name(name: str) -> bool:
-    """A result-protocol metric name: non-empty, no whitespace."""
-    return isinstance(name, str) and bool(_METRIC_NAME.match(name))
 
 
 def finite(value: float) -> bool:

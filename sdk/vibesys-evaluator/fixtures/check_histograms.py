@@ -122,7 +122,7 @@ def core_decoder() -> Decoder:
             count=histogram.total,
             p50=histogram.percentile(50),
             p99=histogram.percentile(99),
-            max=None,
+            max=histogram.max,
         )
 
     return decode

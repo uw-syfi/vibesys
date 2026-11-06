@@ -58,6 +58,7 @@ selected_roots = [
   "resources/evaluators/stack/native_runner",
   "resources/evaluators/unordered-map",
   "resources/evaluators/unordered-map/native_runner",
+  "sdk/vibesys-evaluator/examples/go-bench",
   "sdk/vibesys-evaluator/examples/kv-store/generator",
   "sdk/vibesys-evaluator/go",
   "sdk/vs-evaluator/vseval",

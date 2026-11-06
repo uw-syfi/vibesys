@@ -9,6 +9,7 @@ and rejects each file a reader must reject, for the manifest's reason.
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 import sys
@@ -137,12 +138,13 @@ def test_every_fixture_histogram_decodes_to_the_manifests_count_and_percentiles(
 
 
 @pytest.mark.parametrize("cookie_bits", [0x00, 0x10], ids=["base", "standard"])
-def test_both_cookie_forms_decode_and_the_encoder_writes_the_standard_one(
-    cookie_bits: int,
-) -> None:
-    histogram = hdr.Histogram(lowest=1, highest=60_000_000, significant_figures=3)
-    histogram.record(1234)
-    encoded = bytearray(hdr.encode(histogram))
+def test_both_cookie_forms_decode(cookie_bits: int) -> None:
+    core = json.loads((FIXTURES / "core.json").read_text())
+    case = next(c for c in core["histograms"] if c["name"].endswith("/latency-like"))
+    encoded = bytearray(base64.b64decode(case["encoded"]))
     assert encoded[:4] == (0x1C849314).to_bytes(4, "big")  # what loadgen and the libraries write
     encoded[3] = (encoded[3] & 0x0F) | cookie_bits  # a reader masks the word-size bits off
-    assert hdr.decode(bytes(encoded)).percentile(50) == histogram.percentile(50)
+    assert (
+        hdr.decode(bytes(encoded)).percentile(50)
+        == case["percentiles"][core["percentiles"].index(50)]
+    )

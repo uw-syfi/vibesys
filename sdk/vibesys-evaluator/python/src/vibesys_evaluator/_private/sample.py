@@ -17,18 +17,16 @@ are ignored, so whatever the body opened is closed on the way out.
 
 from __future__ import annotations
 
-import json
-import re
-import secrets
 import signal
 import sys
 import tempfile
 import traceback
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from vibesys_evaluator._private import core
 from vibesys_evaluator._private.records import RecordError, RecordStream
 
 if TYPE_CHECKING:
@@ -43,8 +41,6 @@ SAMPLE_SEED_ENV = "VIBESYS_SAMPLE_SEED"
 #: The directory vibesys keeps with the job.
 ARTIFACTS_ENV = "VIBESYS_ARTIFACTS_DIR"
 SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
-_MAX_SEED = (1 << 64) - 1
-_PHASE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
 
 
 class Mode(StrEnum):
@@ -116,27 +112,19 @@ class Sample:
     artifacts: Path
     records: RecordStream | None = None
     partial: Partial | None = None
-    _phases: set[str] = field(default_factory=set)
 
     def phase_dir(self, name: str) -> Path:
         """A new, empty directory for one phase's files: ``<artifacts>/<name>``.
 
         Raises:
             ValueError: ``name`` is not a lowercase file name or was used before.
+            TypeError: ``name`` is not a string.
         """
-        if not isinstance(name, str) or not _PHASE_NAME.match(name):
-            msg = (
-                f"phase name {name!r} must be 1 to 63 of a-z, 0-9, '.', '_' and '-', "
-                "starting with a letter or digit"
-            )
-            raise ValueError(msg)
-        if name in self._phases:
-            msg = f"phase name {name!r} is used twice in this sample; give each phase its own"
-            raise ValueError(msg)
-        self._phases.add(name)
-        path = self.artifacts / name
-        path.mkdir(parents=True, exist_ok=False)
-        return path
+        if not isinstance(name, str):
+            msg = f"phase name {name!r} must be a string of a-z, 0-9, '.', '_' and '-'"
+            raise TypeError(msg)
+        reply = _core("sample", "phase", {"artifacts_dir": str(self.artifacts), "name": name})
+        return Path(reply["path"])
 
     def report(self, values: Mapping[str, float]) -> None:
         """Write the result record (benchmark mode, once).
@@ -154,43 +142,28 @@ class Sample:
             raise ValueError(msg) from error
 
 
-def sample_seed(flag: int | None, env: Mapping[str, str]) -> tuple[int, str]:
-    """The sample seed and where it came from: ``--seed``, the environment, or drawn."""
-    if flag is not None:
-        if not 0 <= flag <= _MAX_SEED:
-            msg = f"--seed must be in [0, 2**64), got {flag}"
-            raise ValueError(msg)
-        return flag, "--seed"
-    value = env.get(SAMPLE_SEED_ENV, "").strip()
-    if value:
-        try:
-            seed = int(value, 0)
-        except ValueError:
-            seed = -1
-        if not 0 <= seed <= _MAX_SEED:
-            msg = f"${SAMPLE_SEED_ENV}={value!r} is not an integer in [0, 2**64)"
-            raise ValueError(msg)
-        return seed, SAMPLE_SEED_ENV
-    return secrets.randbits(63), "drawn"
-
-
-def _artifacts(env: Mapping[str, str], scratch: Path) -> Path:
-    value = env.get(ARTIFACTS_ENV, "")
-    path = Path(value) if value else scratch / "artifacts"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def _core(group: str, verb: str, request: Mapping[str, Any]) -> dict[str, Any]:
+    """Call the core; what it refuses on the sample's own terms is a ``ValueError``."""
+    try:
+        return core.call(group, verb, request)
+    except core.CoreDomainError as error:
+        raise ValueError(error.message) from error
 
 
 def _new_sample(
     mode: Mode, *, seed_flag: int | None, env: Mapping[str, str], scratch: Path
 ) -> Sample:
-    seed, source = sample_seed(seed_flag, env)
-    artifacts = _artifacts(env, scratch)
-    (artifacts / "seeds.json").write_text(
-        json.dumps({"sample_seed": seed, "source": source}) + "\n"
-    )
-    log(f"{mode} sample, seed {seed} ({source})")
-    return Sample(mode=mode, seed=seed, artifacts=artifacts)
+    """Start a sample in the core: seed, artifacts directory and ``seeds.json``."""
+    request: dict[str, Any] = {
+        "mode": str(mode),
+        "env_seed": env.get(SAMPLE_SEED_ENV, ""),
+        "env_artifacts_dir": env.get(ARTIFACTS_ENV, ""),
+        "scratch_dir": str(scratch),
+    }
+    if seed_flag is not None:
+        request["seed_flag"] = str(seed_flag)
+    started = _core("sample", "start", request)
+    return Sample(mode=mode, seed=int(started["seed"]), artifacts=Path(started["artifacts_dir"]))
 
 
 def benchmark_sample(

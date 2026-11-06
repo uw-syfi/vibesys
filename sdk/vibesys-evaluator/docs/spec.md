@@ -332,8 +332,41 @@ for every subcommand:
 Python calls them through one helper, `_private/core.py`: it finds the binary
 (the wheel's `_bin/`, then `$VIBESYS_EVALUATOR_BIN`, then `PATH`), runs it,
 decodes the reply and raises `CoreDomainError` (exit 1), `CoreCrashError` (any
-other exit, or a reply that is not JSON) or `CoreNotFoundError`. `core version`
-is the one verb so far.
+other exit, or a reply that is not JSON) or `CoreNotFoundError`.
+
+The verbs (messages in `proto/vibesys/evaluator/v1/core.proto`):
+
+| Verb | What it does |
+|---|---|
+| `core version` | what this build implements |
+| `sample start` | resolve the sample seed (`--seed`, `$VIBESYS_SAMPLE_SEED`, else drawn) and the artifacts directory; write `seeds.json` |
+| `sample phase` | create one phase's directory, `<artifacts>/<name>`, refusing a bad or repeated name |
+| `sample combine` | combine each metric's trials into the sample's value (median, mean, min, max, sum) |
+| `records write` | append one result-protocol-2 record (`hello`, `result` or `error`) to the `--vs-output` file, enforcing the protocol against what the file holds |
+| `hist summary` | merge HDR histograms and read percentiles from the sum |
+
+Error kinds a wrapper sees: `record` (a record the protocol refuses),
+`histogram`, `phase`, `invalid_argument`, `bad_request`, `io`.
+
+The logic is the Go package `evaluator` (`go/evaluator`), which task authors
+can use directly: `evaluator.Main(evaluator.Task{Metrics, Benchmark, Check,
+Profile})` is the Go `main` (the same command line, exit codes and records as
+the Python one; the functions receive a `context.Context` that the first
+SIGTERM, SIGINT or SIGHUP cancels, and a `*Run` with `Phase`, `Report`, `Seed`
+and `SetPartial`), `Metric` and `Validity` are the same plain data,
+`Stream` writes the records, `MergeHistograms` and `Histogram.Percentile` read
+HDR histograms, `Combine` aggregates trials, and `PhaseDir`, `SampleSeed` and
+`WriteSeeds` are the sample's files. `examples/go-bench` is a whole benchmark
+in Go.
+
+The Python wrappers (`main`, `Run`, `Metric`, `Validity`) keep their API. What
+stays Python is what has to: the control flow around the task's own Python
+functions (calling them, catching their exceptions and signals) and the plain
+data classes, whose rules the cross-language fixtures `fixtures/core.json`
+pin to Go's (record streams byte for byte, histogram summaries and merges,
+validity and seed rules); `Rand` is native in both languages and pinned by
+`fixtures/rand.json`. The wheel alone is no longer enough: `main` runs the
+`vibesys-evaluator` binary, which the images carry on the PATH.
 
 ## Generator command line
 
