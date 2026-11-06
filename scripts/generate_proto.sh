@@ -47,3 +47,5 @@ for path in Path("clients/libs/proto/src/generated").rglob("*.ts"):
     path.write_text(path.read_text(encoding="utf-8").rstrip() + "\n", encoding="utf-8")
 PYTHON
 node clients/libs/proto/generate-schema-files.mjs
+# The sidecar's Python bindings of the orchestrator contract live in its own tree and lock.
+./orchestrator/sidecar/generate.sh
