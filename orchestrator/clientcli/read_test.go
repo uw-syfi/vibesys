@@ -192,6 +192,9 @@ func TestGetAndReplayShowTheUsageOfFinishedTurns(t *testing.T) {
 	})
 	run, lead := l.startRun(t, "/work/repo", "alpha")
 	w := newWorld(t, l.Listener.Dial)
+	// The turn ends on the session's own time, after the run is running: read once the run says
+	// the turn's usage reached it.
+	l.awaitRun(t, run, func(r *pb.Run) bool { return r.GetUsage().GetOutputTokens() == 7 })
 
 	got := w.run(context.Background(), "run", "get", run)
 	contains(t, "summary", got.stdout, "cost $0.0301", lead, "7 out")
