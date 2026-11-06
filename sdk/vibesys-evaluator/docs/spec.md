@@ -313,6 +313,28 @@ service API's:
   (bit-identical to Python's; `Uint64` is Python's `below(2**64)`).
 - `Main(workload)` is the generator command.
 
+## Core command line (`vibesys-evaluator`)
+
+The Go module's `cmd/vibesys-evaluator` is the core the language SDKs wrap, one
+subcommand per coarse operation: `vibesys-evaluator <group> <verb>`. One rule
+for every subcommand:
+
+- the request is one protobuf-JSON message on stdin (defined in `proto/`), the
+  response one protobuf-JSON message on stdout;
+- progress and logs go to stderr, which the wrapper passes through;
+- exit 0 is OK; exit 1 is a domain error, and the response carries
+  `error_kind` and `message`; any other code means the core itself broke;
+- a long-running verb streams newline-delimited JSON events on stdout and ends
+  with the response;
+- each group registers its verbs in its own file under
+  `go/cmd/vibesys-evaluator/` (`register(group, verb, handler)` from `init`).
+
+Python calls them through one helper, `_private/core.py`: it finds the binary
+(the wheel's `_bin/`, then `$VIBESYS_EVALUATOR_BIN`, then `PATH`), runs it,
+decodes the reply and raises `CoreDomainError` (exit 1), `CoreCrashError` (any
+other exit, or a reply that is not JSON) or `CoreNotFoundError`. `core version`
+is the one verb so far.
+
 ## Generator command line
 
 The phase pod runs every generator, Python or Go, alike:
