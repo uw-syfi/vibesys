@@ -75,12 +75,13 @@ func TestTheMarketplaceNamesTheVibesysPlugin(t *testing.T) {
 // Without a marketplace the launcher refuses every launch and says why: no session starts without
 // the plugin.
 func TestWithoutAMarketplaceEveryLaunchIsRefused(t *testing.T) {
-	sidecars, err := SidecarsFor(func(k string) string {
+	getenv := func(k string) string {
 		if k == EnvSidecar {
 			return "true"
 		}
 		return ""
-	}, t.TempDir(), "/x/bin/vibesys-host", developerBuild, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}
+	sidecars, err := SidecarsFor(Parts{Getenv: getenv, Find: developerBuild}, t.TempDir(), "/x/bin/vibesys-host", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,13 +91,13 @@ func TestWithoutAMarketplaceEveryLaunchIsRefused(t *testing.T) {
 	}
 }
 
-func launcher(t *testing.T) *ProcessSidecars {
+func launcher(t *testing.T) (*ProcessSidecars, Plugin) {
 	t.Helper()
 	plugin, err := PluginFor(env(marketplace(t, good)), developerBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &ProcessSidecars{Root: t.TempDir(), Plugin: plugin}
+	return &ProcessSidecars{Root: t.TempDir()}, plugin
 }
 
 func lead(agent core.AgentID, session uint32) core.LaunchSession {
@@ -109,8 +110,8 @@ func lead(agent core.AgentID, session uint32) core.LaunchSession {
 // The launch file carries the plugin and survives the JSON the sidecar reads, and the sidecar's own
 // validation accepts it.
 func TestTheLaunchFileCarriesThePluginAndIsValid(t *testing.T) {
-	s := launcher(t)
-	spec, err := s.launchSpec(context.Background(), lead("a1", 1))
+	s, plugin := launcher(t)
+	spec, err := s.launchSpec(context.Background(), lead("a1", 1), plugin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +123,7 @@ func TestTheLaunchFileCarriesThePluginAndIsValid(t *testing.T) {
 	if err := protojson.Unmarshal(data, &back); err != nil {
 		t.Fatal(err)
 	}
-	if got := back.GetPlugin(); got.GetMarketplace() != s.Plugin.Marketplace || got.GetName() != "vibesys" || got.GetHome() == "" {
+	if got := back.GetPlugin(); got.GetMarketplace() != plugin.Marketplace || got.GetName() != "vibesys" || got.GetHome() == "" {
 		t.Fatalf("plugin = %v", got)
 	}
 	if err := protovalidate.Validate(&back); err != nil {
@@ -133,9 +134,9 @@ func TestTheLaunchFileCarriesThePluginAndIsValid(t *testing.T) {
 // A resume (a later session of the agent) finds the home the first session installed into, and
 // another agent never shares it.
 func TestAnAgentKeepsOnePluginHomeAcrossSessions(t *testing.T) {
-	s := launcher(t)
+	s, plugin := launcher(t)
 	home := func(agent core.AgentID, session uint32) string {
-		spec, err := s.launchSpec(context.Background(), lead(agent, session))
+		spec, err := s.launchSpec(context.Background(), lead(agent, session), plugin)
 		if err != nil {
 			t.Fatal(err)
 		}

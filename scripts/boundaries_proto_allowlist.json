@@ -77,6 +77,9 @@
   "proto/vibesys/orchestrator/v1/events.proto": [
     "SidecarSource"
   ],
+  "proto/vibesys/orchestrator/v1/host_control.proto": [
+    "HostLock.pid"
+  ],
   "proto/vibesys/orchestrator/v1/orchestrator.proto": [
     "Agent.provider_conversation_id",
     "Agent.worktree",

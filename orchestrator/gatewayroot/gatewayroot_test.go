@@ -1,6 +1,7 @@
 package gatewayroot_test
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,5 +68,40 @@ func TestTheRootRefusesWhatItCannotPlaceWithoutGuessing(t *testing.T) {
 	}
 	if got, err := gatewayroot.For("/f", getenv(nil), ""); err != nil || got != "/f" {
 		t.Errorf("a flag needs no home: got %q, %v", got, err)
+	}
+}
+
+// A home reached through a symlink and the same home reached directly are one root, whether or not
+// the root directory exists yet, because a host and a client may be started from either path.
+func TestTheRootIsTheSameThroughASymlinkedHome(t *testing.T) {
+	real := t.TempDir()
+	if resolved, err := filepath.EvalSymlinks(real); err == nil {
+		real = resolved
+	}
+	link := filepath.Join(t.TempDir(), "home-link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, exists := range []bool{false, true} {
+		if exists {
+			if err := os.Mkdir(filepath.Join(real, ".vibesys"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+		direct, err := gatewayroot.For("", getenv(nil), real)
+		if err != nil {
+			t.Fatal(err)
+		}
+		through, err := gatewayroot.For("", getenv(nil), link)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if direct != through || direct != filepath.Join(real, ".vibesys") {
+			t.Errorf("root exists %v: direct %q, through the link %q", exists, direct, through)
+		}
+		flagged, err := gatewayroot.For(filepath.Join(link, ".vibesys"), getenv(nil), "/unused")
+		if err != nil || flagged != direct {
+			t.Errorf("root exists %v: --root through the link is %q (%v), want %q", exists, flagged, err, direct)
+		}
 	}
 }

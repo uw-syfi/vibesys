@@ -1,0 +1,160 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// HostControlService is the one contract every host of every release answers, so any client can ask
+// any host what it is and ask it to stop. It is served always, even when the host cannot serve the
+// orchestrator, and it is small and frozen on purpose: a change that breaks it makes a host that
+// no client of another release can stop. Nothing is removed or renumbered; buf breaking holds it.
+service HostControlService {
+  // Identify says what the host is, whether it can serve, and whether stopping it is safe.
+  rpc Identify(IdentifyRequest) returns (IdentifyResponse);
+  // Stop ends the host. Sessions of live runs keep running, and the next host finds them.
+  rpc Stop(StopRequest) returns (StopResponse);
+}
+
+message IdentifyRequest {
+  // The caller's release version, or empty when it is a build of no release. The host decides how
+  // the two relate, once, for every client.
+  string client_release = 1 [(buf.validate.field).string.max_bytes = 128];
+}
+
+message IdentifyResponse {
+  // The running host's release version, or "dev" for a build of no release.
+  string release = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 128}];
+  ReleaseRelation relation = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  google.protobuf.Timestamp started_at = 3 [(buf.validate.field).required = true];
+  // Runs that have not reached their end. Stopping the host while it is not zero leaves them
+  // without a host until the next one starts.
+  uint32 live_runs = 4;
+  // Every part the host starts a run with, as it is at this moment.
+  repeated PartReadiness parts = 5 [(buf.validate.field).repeated.max_items = 16];
+  oneof orchestrator {
+    option (buf.validate.oneof).required = true;
+    // This host serves the orchestrator.
+    Serving serving = 6;
+    // This host is up and answers here, and does not serve the orchestrator.
+    Unserved unserved = 7;
+  }
+}
+
+// ReleaseRelation is how the host's release compares with the asking client's.
+enum ReleaseRelation {
+  RELEASE_RELATION_UNSPECIFIED = 0;
+  RELEASE_RELATION_SAME = 1;
+  RELEASE_RELATION_HOST_OLDER = 2;
+  RELEASE_RELATION_HOST_NEWER = 3;
+  // Either side is a build of no release, so the two cannot be ordered.
+  RELEASE_RELATION_UNKNOWN = 4;
+}
+
+// HostPart is something the host starts a run with. The names do not say how it is implemented:
+// a different program in the same role changes nothing here.
+enum HostPart {
+  HOST_PART_UNSPECIFIED = 0;
+  HOST_PART_SESSION_HOLDER = 1;
+  HOST_PART_SKILLS = 2;
+  HOST_PART_JOB_TOOL = 3;
+}
+
+message PartReadiness {
+  HostPart part = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  oneof state {
+    option (buf.validate.oneof).required = true;
+    PartReady ready = 2;
+    PartProblem problem = 3;
+  }
+}
+
+message PartReady {
+  PartOrigin origin = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+enum PartOrigin {
+  PART_ORIGIN_UNSPECIFIED = 0;
+  // The release the host is installed in provides it.
+  PART_ORIGIN_RELEASE = 1;
+  // The operator chose it for this host, overriding the release.
+  PART_ORIGIN_OPERATOR = 2;
+}
+
+message PartProblem {
+  PartProblemReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Display only: what is missing or wrong, and where.
+  string detail = 2 [(buf.validate.field).string.max_bytes = 4096];
+}
+
+enum PartProblemReason {
+  PART_PROBLEM_REASON_UNSPECIFIED = 0;
+  // The host is in no release and the operator chose nothing.
+  PART_PROBLEM_REASON_NO_RELEASE = 1;
+  // The release lacks a file the part needs.
+  PART_PROBLEM_REASON_RELEASE_INCOMPLETE = 2;
+  // The operator's choice cannot be used.
+  PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED = 3;
+}
+
+message Serving {}
+
+message Unserved {
+  UnservedReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The release of the process that holds the orchestrator, when it is another host and says.
+  string held_by_release = 2 [(buf.validate.field).string.max_bytes = 128];
+  // Display only.
+  string detail = 3 [(buf.validate.field).string.max_bytes = 4096];
+}
+
+enum UnservedReason {
+  UNSERVED_REASON_UNSPECIFIED = 0;
+  // Another host process holds the orchestrator's state.
+  UNSERVED_REASON_HELD_ELSEWHERE = 1;
+  // The state cannot be opened here.
+  UNSERVED_REASON_STATE_REFUSED = 2;
+}
+
+message StopRequest {
+  // Stop only when no run is live. A host with live runs answers refused instead.
+  bool only_if_idle = 1;
+}
+
+message StopResponse {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    Stopping stopping = 1;
+    Busy refused = 2;
+  }
+}
+
+// Stopping says the host is ending. It may close the connection before the caller reads this.
+message Stopping {}
+
+message Busy {
+  uint32 live_runs = 1 [(buf.validate.field).uint32.gt = 0];
+}
+
+// HostLock is what a host process records in the lock file it holds for its whole life. A reader
+// finds the process the lock belongs to only while the lock is held: a free lock means no host,
+// whatever the record says.
+message HostLock {
+  uint32 pid = 1 [(buf.validate.field).uint32.gt = 0];
+  string release = 2 [(buf.validate.field).string = {min_len: 1, max_bytes: 128}];
+}

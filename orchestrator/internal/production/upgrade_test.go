@@ -88,7 +88,7 @@ func TestIdentityUpgradeDeliversBothRunsAndAttachesExistingSessions(t *testing.T
 				t.Fatal(err)
 			}
 			defer disk.Close()
-			d, err := daemon.Open(daemon.Config{Engine: daemon.EngineDeps{Store: disk, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Location: core.CliLocation{CLI: "/opt/vibesys-cli"}}, Sidecars: r.Sidecars, Bounds: r.Bounds, Authority: r.Auth})
+			d, err := daemon.Open(daemon.Config{Engine: daemon.EngineDeps{Store: disk, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Locate: func() core.CliLocation { return core.CliLocation{CLI: "/opt/vibesys-cli"} }}, Sidecars: r.Sidecars, Bounds: r.Bounds, Authority: r.Auth})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -163,9 +163,12 @@ type Wiring struct {
 	Tree Tree
 	// Version is the binary's version, reported by Hello.
 	Version string
-	// Location is where the agents of every run this daemon starts find the vibesys-cli and its
-	// daemon and store: the CLI from ResolveCLI, the rest from the daemon's own environment.
-	Location core.CliLocation
+	// Locate is where the agents of a run that starts now find the vibesys-cli and its daemon and
+	// store: the CLI from ResolveCLI, the rest from the daemon's own environment. It is asked when a
+	// run starts, so a repaired install is used by the next run with no restart.
+	Locate func() core.CliLocation
+	// Parts says whether a run can be started now.
+	Parts PartsCheck
 }
 
 // Daemon is an opened daemon: it holds the state directory's lock and its database, and serves the
@@ -188,10 +191,13 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 	if wiring.Tree == nil {
 		return nil, errors.New("production: Wiring.Tree is required: starts are checked against it")
 	}
+	if wiring.Parts == nil {
+		return nil, errors.New("production: Wiring.Parts is required: starts are checked against it")
+	}
 	db, err := store.OpenSQLite(layout.State, store.SQLiteOptions{})
 	if err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			return nil, fmt.Errorf("%w: %s", ErrHeld, ReadHolder(layout.State.Path()))
+			return nil, ReadHolder(layout.State.Path())
 		}
 		return nil, fmt.Errorf("open the database: %w", err)
 	}
@@ -216,7 +222,7 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 	h := hub.New(hub.DefaultLimits)
 	x.d, err = daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
-			Search: searchStore(wiring.Search), Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log, Location: wiring.Location,
+			Search: searchStore(wiring.Search), Store: db, Clock: SystemClock{}, Nonces: RandomNonces{}, Hub: h, Log: log, Locate: wiring.Locate,
 			OnCommit: func() {
 				for _, c := range []chan struct{}{x.wake, x.commits} {
 					select {
@@ -240,19 +246,23 @@ func Open(layout Layout, wiring Wiring, log *slog.Logger) (*Daemon, error) {
 func (x *Daemon) Service(audience daemon.Audience) (*daemon.Service, error) {
 	return daemon.NewService(x.d.Engine, daemon.ServiceDeps{
 		Plans: x.wiring.Plans, Authority: x.authority, Audience: audience, Bounds: Timeouts{}, Binary: x.wiring.Version,
-		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Tree: x.wiring.Tree},
+		Starts: StartChecks{Sidecars: x.wiring.Sidecars, Parts: x.wiring.Parts, Tree: x.wiring.Tree},
 	})
 }
 
-// Live reports whether any run has not reached its end.
-func (x *Daemon) Live() bool {
+// LiveRuns counts the runs that have not reached their end.
+func (x *Daemon) LiveRuns() uint32 {
+	var n uint32
 	for _, r := range x.d.State().Runs() {
 		if !r.Status.Final() {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
+
+// Live reports whether any run has not reached its end.
+func (x *Daemon) Live() bool { return x.LiveRuns() > 0 }
 
 // Commits wakes after commits, coalesced, so a watcher of Live can look again.
 func (x *Daemon) Commits() <-chan struct{} { return x.commits }

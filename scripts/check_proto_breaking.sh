@@ -16,7 +16,10 @@ if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
   # proto/vibesys/orchestrator/v1 is left out until the first vibesys-v* tag: no release has shipped
   # its contract, and docs/contributing/process-boundaries.md redesigns it in place. The managed
   # release workflow refuses a tag while this path is missing below; restore it before tagging.
+  # host_control.proto is the exception: it is the contract every release's client asks a host
+  # through, so it is held from its first merge.
   uv run --project "$root" --locked --group proto buf breaking --path proto/vibesys/store/v1 --path proto/vibesys/search/v1 --path proto/vibesys/core/v1 --path proto/vibesys/cli/v1 \
+    --path proto/vibesys/orchestrator/v1/host_control.proto \
     --against "$baseline/base.tar"
 elif git cat-file -e "$base:proto/vibesys/store/v1" 2>/dev/null; then
   echo "Store exists at $base but buf.yaml is missing; restore its breaking-check configuration." >&2

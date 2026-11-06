@@ -25,9 +25,10 @@ type EngineDeps struct {
 	Nonces Nonces
 	Hub    *hub.Hub
 	Log    *slog.Logger
-	// Location is where this daemon's agents find the vibesys-cli and its daemon and store. Each
-	// run that starts records it, so a session launched later for that run meets the same ones.
-	Location core.CliLocation
+	// Locate is where this daemon's agents find the vibesys-cli and its daemon and store. It is
+	// asked when a run starts, and the run records the answer, so a session launched later for that
+	// run meets the same ones. Nil means no location.
+	Locate func() core.CliLocation
 	// OnCommit is called after every commit, with the engine's lock held, so it must not wait. The
 	// daemon's loop uses it to wake up.
 	OnCommit func()
@@ -82,7 +83,7 @@ func (e *Engine) Apply(body core.InputBody) (Applied, error) {
 }
 
 func (e *Engine) apply(body core.InputBody) (Applied, error) {
-	in := core.Input{At: e.Clock.Now(), Nonce: e.Nonces.Next(), Location: e.Location, Body: body}
+	in := core.Input{At: e.Clock.Now(), Nonce: e.Nonces.Next(), Location: e.location(body), Body: body}
 	next, events, effects := core.Decide(e.state, in)
 	if len(events) == 0 && len(effects) == 0 {
 		// Decide records no reason for an input that changes nothing. Most are repeats a feed or a
@@ -188,4 +189,16 @@ func (e *Engine) Delta(d *pb.Delta) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.Hub.PublishDelta(d)
+}
+
+// location is the CLI location an input is stamped with: only a start records one.
+func (e *Engine) location(body core.InputBody) core.CliLocation {
+	command, ok := body.(core.Command)
+	if !ok || e.Locate == nil {
+		return core.CliLocation{}
+	}
+	if _, starts := command.Body.(core.StartRun); !starts {
+		return core.CliLocation{}
+	}
+	return e.Locate()
 }

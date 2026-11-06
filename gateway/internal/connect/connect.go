@@ -35,7 +35,7 @@ func Dial(ctx context.Context, socket, binary string, args []string, report io.W
 	if err == nil {
 		return connection, nil
 	}
-	if !absent(err) {
+	if !Absent(err) {
 		return nil, err
 	}
 	if err := os.MkdirAll(filepath.Dir(socket), 0700); err != nil {
@@ -55,7 +55,7 @@ func Dial(ctx context.Context, socket, binary string, args []string, report io.W
 	if err == nil {
 		return connection, nil
 	}
-	if !absent(err) {
+	if !Absent(err) {
 		return nil, err
 	}
 	serveLog := ServeLogPath(socket)
@@ -72,7 +72,7 @@ func Dial(ctx context.Context, socket, binary string, args []string, report io.W
 		if err == nil {
 			return connection, nil
 		}
-		if !absent(err) {
+		if !Absent(err) {
 			return nil, err
 		}
 		select {
@@ -97,7 +97,9 @@ func Dial(ctx context.Context, socket, binary string, args []string, report io.W
 	}
 }
 
-func absent(err error) bool {
+// Absent says err is what a dial of a socket that nobody serves returns: the socket is not there,
+// or it is a file a host left behind.
+func Absent(err error) bool {
 	return errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED)
 }
 

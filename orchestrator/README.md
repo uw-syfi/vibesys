@@ -153,6 +153,23 @@ vibesys-client run steer [RUN] "text" [--agent AGENT]
 vibesys-client run stop [RUN] [--yes]
 ```
 
+`vibesys-host` always serves `HostControlService` (`Identify`, `Stop`), whether or not it can serve the
+orchestrator, and `vibesys-client host` is its client. It never starts a host to ask a question:
+
+```sh
+vibesys-client host status [--json]                      # release, relation to this client, live runs, each part and why not, who holds the state
+vibesys-client host stop [--if-no-live-runs] [--force]   # exit 0 stopped or none running, 1 refused (live runs), 4 no answer
+vibesys-client host restart                              # stop an idle host and start one from this client's release
+```
+
+`--if-no-live-runs` makes the host refuse, and name how many, when a run is live. `--force` ends the
+process named by the host lock when the host does not answer (one that predates host control). The
+lock, not a process list, says who holds the host: the host writes a typed `HostLock` record (its pid and
+release) into the lock file it holds, and a client reads it only while the lock is held. A `restart`
+with live runs is refused for now. The release layout is resolved on every launch and start check, so
+repairing an install under a running host needs no restart. The home is resolved through symlinks, so a
+home reached by either path is one host.
+
 `RUN` is a run id, a unique prefix, or omitted for the one live run in the current repository. The
 repository of a new run is the root of the repository around the working directory unless `--repository`
 says otherwise. Exit codes: 0 ok, 1 failed or refused, 2 usage, 3 timeout, 4 service unavailable. With no
@@ -437,8 +454,10 @@ Every binary in the bundle reports the bundle's version: `vibesys-client --versi
 
 - A failed step names itself and leaves the previous install working: `current` moves last.
 - Installing the same version again changes nothing.
-- Switching versions is refused while a `vibesys-host` started from a release under `~/.vibesys`
-  is running (found in the `ps` command lines); `--force` overrides. Old releases are kept.
+- Switching versions asks a running host to stop, through the new release's own client
+  (`vibesys-client host stop --if-no-live-runs`, read by exit code): an idle host stops, a host with
+  live runs or one that does not answer refuses the switch. `--force` skips the question. Old
+  releases are kept.
 - With no version named, the installer reads the newest stable version from `vibesys-latest`. While
   only pre-releases are published that tag does not exist, and the installer says to pass
   `VIBESYS_VERSION=<version>`.

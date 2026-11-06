@@ -134,17 +134,18 @@ func TestAHostWithNoSettingsLaunchesFromItsReleaseOrRefusesWithTheReason(t *test
 	root, find := diskRelease(t, good)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	sidecars, err := SidecarsFor(cliTestEnv(), t.TempDir(), filepath.Join(root, "bin", "vibesys-host"), find, log)
+	sidecars, err := SidecarsFor(Parts{Getenv: cliTestEnv(), Find: find}, t.TempDir(), filepath.Join(root, "bin", "vibesys-host"), log)
 	if err != nil {
 		t.Fatal(err)
 	}
-	process, ok := sidecars.(*ProcessSidecars)
 	python := filepath.Join(root, "sidecar", ".venv", "bin", "python")
-	if !ok || strings.Join(process.Command, " ") != python+" -m vs_sidecar" || process.Plugin.Marketplace != filepath.Join(root, "marketplace") {
-		t.Fatalf("got %#v, want a launcher of the release's sidecar and marketplace", sidecars)
+	command, _, err := sidecars.Parts.SessionHolder()
+	plugin, _, perr := sidecars.Parts.Skills()
+	if err != nil || perr != nil || strings.Join(command, " ") != python+" -m vs_sidecar" || plugin.Marketplace != filepath.Join(root, "marketplace") {
+		t.Fatalf("got %q, %v and %+v, %v; want the release's sidecar and marketplace", command, err, plugin, perr)
 	}
 
-	outside, err := SidecarsFor(cliTestEnv(), t.TempDir(), "/home/u/.local/bin/vibesys-host", developerBuild, log)
+	outside, err := SidecarsFor(Parts{Getenv: cliTestEnv(), Find: developerBuild}, t.TempDir(), "/home/u/.local/bin/vibesys-host", log)
 	if err != nil {
 		t.Fatal(err)
 	}

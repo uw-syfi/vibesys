@@ -274,11 +274,16 @@ EOF
   [ -n "$watched" ] || die "a run with a report has no recorded sidecar"
   ! none_live || die "the run's recorded processes are not running"
 
-  check "the installer's running-host check refuses a switch against the real host"
+  check "host status answers through a symlinked home, and the installer's stop is refused with a live run"
   [ -n "$(hosts)" ] || die "no host is running"
-  if install "$v2" >/tmp/install5.log 2>&1; then die "switch was allowed while a host runs"; fi
-  grep -q "vibesys-host is running" /tmp/install5.log || die "refusal did not name the running host: $(cat /tmp/install5.log)"
+  # The same home reached through a link is the same host: one socket and one lock.
+  ln -sfn "$HOME" "$HOME/home-link"
+  vibesys-client --root "$HOME/home-link/.vibesys" host status | tee /tmp/status.out
+  grep -q "live runs: 1" /tmp/status.out || die "host status through the link does not show the live run"
+  if install "$v2" >/tmp/install5.log 2>&1; then die "switch was allowed while a run is live"; fi
+  grep -q "live runs" /tmp/install5.log || die "refusal did not say why: $(cat /tmp/install5.log)"
   [ "$(readlink "$home/current")" = "releases/1.0.0" ] || die "current moved despite the refusal"
+  [ -n "$(hosts)" ] || die "the refused install stopped the host"
 
   check "stop the run and nothing of it is left"
   vibesys-client run stop "$run" --yes
@@ -286,14 +291,15 @@ EOF
   until_true 30 none_live || die "processes of the run are still running"
   until_true 30 no_leftovers || die "a sidecar or tool server is left: $(pgrep -af 'scripted_sidecar|vibesys-host mcp')"
 
-  check "--force switches while the host runs, and the next host is the new release's"
-  install "$v2" --force >/tmp/install6.log 2>&1 || {
+  check "with no live run the installer stops the idle host and switches, and the next host is the new release's"
+  [ -n "$(hosts)" ] || die "the idle host is not running"
+  install "$v2" >/tmp/install6.log 2>&1 || {
     cat /tmp/install6.log
-    die "--force install failed"
+    die "install of the new release failed with an idle host"
   }
-  [ "$(readlink "$home/current")" = "releases/1.0.1" ] || die "--force did not switch"
+  [ "$(readlink "$home/current")" = "releases/1.0.1" ] || die "the install did not switch"
   [ -d "$home/releases/1.0.0" ] || die "the old release was removed"
-  stop_hosts
+  no_hosts || die "the installer left the old host running: $(hosts)"
   [ "$(vibesys-client --version)" = "vibesys-client 1.0.1" ] || die "the client is not the new release"
   vibesys-client run list >/dev/null
   hosts | grep -q . || die "no host started from the new release"

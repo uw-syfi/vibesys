@@ -19,6 +19,7 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
 	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
 	"github.com/uw-syfi/vibesys/orchestrator/hosted"
+	"github.com/uw-syfi/vibesys/orchestrator/hostlock"
 )
 
 // Main runs the host command and returns its process exit status.
@@ -94,11 +95,18 @@ func serve(ctx context.Context, root string, idle time.Duration) error {
 		return err
 	}
 	defer endpoint.Close()
+	record, err := hostlock.Marshal(os.Getpid(), buildinfo.Version)
+	if err != nil {
+		return err
+	}
+	if err := endpoint.Record(record); err != nil {
+		return err
+	}
 	monitor := lifecycle.NewMonitor(idle, lifecycle.SystemClock{}, func() { endpoint.Listener.Close() })
 	defer monitor.Stop()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	orchestrator, err := startOrchestrator(ctx)
+	orchestrator, err := startOrchestrator(ctx, cancel)
 	if err != nil {
 		return err
 	}

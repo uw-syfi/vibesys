@@ -33,7 +33,7 @@ var rules = map[string][]string{
 	"internal/clidaemon":               {"gen/vibesys/cli/"},
 	"internal/clidaemon/clidaemontest": {"internal/clidaemon", "gen/vibesys/cli/"},
 	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "release", "gen/vibesys/orchestrator/"},
-	"internal/production":              {"release", "internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/production":              {"release", "hostlock", "internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/core":                    {},
 	"internal/search":                  {"internal/core", "internal/jobs", "gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
 	"internal/jobs":                    {"internal/core"},
@@ -45,6 +45,7 @@ var rules = map[string][]string{
 	"internal/localfs":                 {},
 	"gatewayroot":                      {"internal/localfs"},
 	"release":                          {"gen/vibesys/orchestrator/"},
+	"hostlock":                         {"gen/vibesys/orchestrator/"},
 	"release/releasetest":              {"release"},
 	"cmd/release-manifest":             {"release"},
 	"clientcli":                        {"internal/client", "release", "gen/vibesys/orchestrator/"},
@@ -73,6 +74,7 @@ var testRules = map[string][]string{
 	// localfs's own tests run its checks against the fake.
 	"internal/localfs": {"internal/localfs/localfstest"},
 	"internal/client":  {"internal/core", "internal/daemon", "internal/daemon/daemontest", "internal/mcp"},
+	"hosted":           {"release/releasetest", "gen/vibesys/orchestrator/"},
 	// The verbs are tested against a whole daemon in memory, as the client library is.
 	"clientcli":       {"release/releasetest", "internal/core", "internal/daemon", "internal/daemon/daemontest", "gen/vibesys/orchestrator/"},
 	"internal/core":   {"internal/jobs/jobstest", "internal/wire", "gen/vibesys/orchestrator/"},
@@ -131,6 +133,7 @@ func Violations(files map[string]string) []string {
 			found = append(found, confinement(name, source)...)
 			found = append(found, capabilities(name, source)...)
 			found = append(found, layoutLiterals(name, source)...)
+			found = append(found, processScraping(name, source)...)
 		}
 	}
 	sort.Strings(found)
