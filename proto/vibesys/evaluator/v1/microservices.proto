@@ -22,17 +22,19 @@ message PhasePodRequest {
   // The phase's work directory. It holds input.binpb (a PhaseInput); the phase leaves
   // output.binpb (a PhaseOutput: its presence means the phase ran), summary.binpb and loadgen's
   // results there: results.binpb.gz, or under capture results.binpb whole and the generator's
-  // kept.binpb.
+  // kept.binpb. A path because the phase's results are files (loadgen's and the generator's,
+  // which an accuracy check reads as they are) that the pod's runner copies out of the pod.
   string work_dir = 1;
   // The base URL of every request: the system's gateway as the pod reaches it.
   string target = 2;
   // The generator command; `generate --phase-input F --dataset F --state DIR` follows it.
   repeated string generator = 3;
-  // The dataset file the generator reads (--dataset); written by the caller.
+  // The dataset file the generator reads (--dataset); written by the caller. A path because the
+  // generator, a program of the task, takes its dataset as a file.
   string dataset_file = 4;
   // Open loop: the share of the target rate that counts as sustained (loadgen --min-sustained).
   double min_sustained_ratio = 5;
-  // The loadgen binary; empty: $VIBESYS_EVALUATOR_LOADGEN, else loadgen on PATH.
+  // The loadgen binary; empty: the loadgen next to the core's executable, else loadgen on PATH.
   string loadgen = 6;
 }
 
@@ -74,7 +76,8 @@ message PhaseValidity {
 
 // PhaseJudgeRequest asks whether a phase is a measurement (`phase judge`).
 message PhaseJudgeRequest {
-  // The directory the phase pod's files were copied into (it holds output.binpb).
+  // The directory the phase pod's files were copied into: the judge reads the PhaseOutput the
+  // pod left there (output.binpb), which holds loadgen's summary.
   string phase_dir = 1;
   // The phase as the orchestrator asked for it, for the messages.
   PhaseInput input = 2;

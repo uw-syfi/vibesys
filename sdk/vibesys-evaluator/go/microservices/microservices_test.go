@@ -49,7 +49,7 @@ func TestMain(m *testing.M) {
 	if err := build.Run(); err != nil {
 		panic(fmt.Sprintf("building loadgen: %v", err))
 	}
-	os.Setenv(phase.LoadgenEnv, loadgen)
+	os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)
@@ -123,7 +123,7 @@ func testTask() Task[kvData, *kvModel] {
 		Workload: &w,
 		Capture:  capture,
 		Benchmark: func(ctx context.Context, run *Run) error {
-			closed, err := run.ClosedLoop(ctx, Closed{Clients: 4, Secs: time.Second, Warmup: 200 * time.Millisecond})
+			closed, err := run.ClosedLoop(ctx, Closed{Clients: 16, Secs: time.Second, Warmup: 200 * time.Millisecond})
 			if err != nil {
 				return err
 			}
@@ -135,7 +135,7 @@ func testTask() Task[kvData, *kvModel] {
 					return err
 				}
 			}
-			rate := 2000.0
+			rate := 500.0
 			if text := os.Getenv(openEnv); text != "" {
 				fmt.Sscan(text, &rate)
 			}
@@ -148,12 +148,17 @@ func testTask() Task[kvData, *kvModel] {
 	}
 }
 
+// serverDelay is how long the test application takes per request: with latencies this long, the
+// open loop's send lag on a busy machine stays far below the guard's 10% of the latency.
+const serverDelay = 50 * time.Millisecond
+
 // kvServer is the application: GET and PUT of /kv/<key>; every response fails with status
 // when failing is set.
 func kvServer(t *testing.T, failing int) *httptest.Server {
 	var mu sync.Mutex
 	values := map[string]string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(serverDelay)
 		if failing != 0 {
 			w.WriteHeader(failing)
 			return
@@ -247,7 +252,7 @@ func TestBenchmarkRunsPhasesAndReports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := output.GetSummary(); s.GetModel() != pb.LoadModel_LOAD_MODEL_OPEN || s.GetTargetRate() != 2000 {
+	if s := output.GetSummary(); s.GetModel() != pb.LoadModel_LOAD_MODEL_OPEN || s.GetTargetRate() != 500 {
 		t.Errorf("phase 1's summary: %v", s)
 	}
 }
@@ -324,7 +329,7 @@ func TestAPhaseThatIsNotAMeasurementEndsTheSample(t *testing.T) {
 	}
 	last := records[len(records)-1]
 	message, _ := last["message"].(string)
-	if last["kind"] != "error" || !strings.Contains(message, "phase 0 (closed loop, 4 clients, 1 s after 0.2 s warmup): error rate") {
+	if last["kind"] != "error" || !strings.Contains(message, "phase 0 (closed loop, 16 clients, 1 s after 0.2 s warmup): error rate") {
 		t.Fatalf("the last record is %v", last)
 	}
 }

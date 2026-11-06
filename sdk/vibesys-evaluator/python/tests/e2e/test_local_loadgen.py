@@ -258,13 +258,16 @@ def test_the_go_example_is_a_whole_benchmark(
     # service itself, runs its phases through the same phase runner, and under capture records
     # a history the oracle passes.
     output, artifacts = tmp_path / "records.jsonl", tmp_path / "artifacts"
+    tools = tmp_path / "bin"  # a Go task finds loadgen on PATH, as in its task image
+    tools.mkdir()
+    (tools / "loadgen").symlink_to(built_loadgen)
     with _serving(kv.KvService()) as target:
         env = {
             **os.environ,
+            "PATH": f"{tools}{os.pathsep}{os.environ.get('PATH', '')}",
             "KV_TARGET": target,
             "KV_CAPTURE": "1",
             "KV_STORE_SCALE": "test",
-            "VIBESYS_EVALUATOR_LOADGEN": str(built_loadgen),
             "VIBESYS_ARTIFACTS_DIR": str(artifacts),
         }
         done = _run(

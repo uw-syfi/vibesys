@@ -39,17 +39,19 @@ type PhasePodRequest struct {
 	// The phase's work directory. It holds input.binpb (a PhaseInput); the phase leaves
 	// output.binpb (a PhaseOutput: its presence means the phase ran), summary.binpb and loadgen's
 	// results there: results.binpb.gz, or under capture results.binpb whole and the generator's
-	// kept.binpb.
+	// kept.binpb. A path because the phase's results are files (loadgen's and the generator's,
+	// which an accuracy check reads as they are) that the pod's runner copies out of the pod.
 	WorkDir string `protobuf:"bytes,1,opt,name=work_dir,json=workDir,proto3" json:"work_dir,omitempty"`
 	// The base URL of every request: the system's gateway as the pod reaches it.
 	Target string `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
 	// The generator command; `generate --phase-input F --dataset F --state DIR` follows it.
 	Generator []string `protobuf:"bytes,3,rep,name=generator,proto3" json:"generator,omitempty"`
-	// The dataset file the generator reads (--dataset); written by the caller.
+	// The dataset file the generator reads (--dataset); written by the caller. A path because the
+	// generator, a program of the task, takes its dataset as a file.
 	DatasetFile string `protobuf:"bytes,4,opt,name=dataset_file,json=datasetFile,proto3" json:"dataset_file,omitempty"`
 	// Open loop: the share of the target rate that counts as sustained (loadgen --min-sustained).
 	MinSustainedRatio float64 `protobuf:"fixed64,5,opt,name=min_sustained_ratio,json=minSustainedRatio,proto3" json:"min_sustained_ratio,omitempty"`
-	// The loadgen binary; empty: $VIBESYS_EVALUATOR_LOADGEN, else loadgen on PATH.
+	// The loadgen binary; empty: the loadgen next to the core's executable, else loadgen on PATH.
 	Loadgen       string `protobuf:"bytes,6,opt,name=loadgen,proto3" json:"loadgen,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -342,7 +344,8 @@ func (x *PhaseValidity) GetMinOpsPerOperation() uint32 {
 // PhaseJudgeRequest asks whether a phase is a measurement (`phase judge`).
 type PhaseJudgeRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The directory the phase pod's files were copied into (it holds output.binpb).
+	// The directory the phase pod's files were copied into: the judge reads the PhaseOutput the
+	// pod left there (output.binpb), which holds loadgen's summary.
 	PhaseDir string `protobuf:"bytes,1,opt,name=phase_dir,json=phaseDir,proto3" json:"phase_dir,omitempty"`
 	// The phase as the orchestrator asked for it, for the messages.
 	Input         *PhaseInput    `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`

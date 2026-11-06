@@ -187,9 +187,10 @@ SDK is microservices code in Go; it imports only loadgen's generated schema.
 The orchestrator writes the `PhaseInput` (sample seed, phase index, load,
 capture) into the phase pod; the pod runs the core's `phase pod`
 (`vibesys-evaluator phase pod`, or the Go `microservices.Main`'s `phase`),
-which runs loadgen with the generator; the orchestrator copies the pod's
-files back and judges them (`phase judge`, or the Go phase runner in
-process). The phase runner is Go (`go/microservices`, `go/internal/phase`);
+which runs loadgen with the generator (the loadgen the Python SDK names in
+the request, else the one next to the running binary, else `loadgen` on
+`PATH`); the orchestrator copies the pod's files back and judges them
+(`phase judge`, or the Go phase runner in process). The phase runner is Go (`go/microservices`, `go/internal/phase`);
 the Python `Run` drives it through those two verbs.
 
 1. **Model.** The generator builds `workload.model(data, rand)` with the

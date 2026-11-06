@@ -21,9 +21,6 @@ import (
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/files"
 )
 
-// LoadgenEnv names the loadgen binary; loadgen on PATH when unset.
-const LoadgenEnv = "VIBESYS_EVALUATOR_LOADGEN"
-
 // heartbeat is how often a running pod says that loadgen still runs.
 const heartbeat = time.Minute
 
@@ -42,7 +39,8 @@ type Pod struct {
 	DatasetFile string
 	// MinSustainedRatio is the open loop's --min-sustained.
 	MinSustainedRatio float64
-	// Loadgen is the loadgen binary; empty: $VIBESYS_EVALUATOR_LOADGEN, else loadgen on PATH.
+	// Loadgen is the loadgen binary; empty: the loadgen next to this process's executable (as a
+	// wheel bundles them), else loadgen on PATH.
 	Loadgen string
 	// Stderr receives loadgen's and the generator's standard error; nil discards it.
 	Stderr io.Writer
@@ -129,14 +127,22 @@ func (p Pod) Run(ctx context.Context) (*pb.PhaseOutput, error) {
 	return output, nil
 }
 
+// defaultLoadgen is the loadgen next to this process's executable, else loadgen on PATH.
+func defaultLoadgen() string {
+	if exe, err := os.Executable(); err == nil {
+		beside := filepath.Join(filepath.Dir(exe), "loadgen")
+		if info, err := os.Stat(beside); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
+			return beside
+		}
+	}
+	return "loadgen"
+}
+
 // loadgen runs loadgen with args, its standard error to p.Stderr and to a tail for the message.
 func (p Pod) loadgen(ctx context.Context, args []string, budget time.Duration, began time.Time, event func(string, string)) error {
 	binary := p.Loadgen
 	if binary == "" {
-		binary = os.Getenv(LoadgenEnv)
-	}
-	if binary == "" {
-		binary = "loadgen"
+		binary = defaultLoadgen()
 	}
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()

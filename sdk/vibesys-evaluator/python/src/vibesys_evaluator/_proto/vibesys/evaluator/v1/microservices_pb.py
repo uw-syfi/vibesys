@@ -35,7 +35,8 @@ class PhasePodRequest(Message[_PhasePodRequestFields]):
             The phase's work directory. It holds input.binpb (a PhaseInput); the phase leaves
             output.binpb (a PhaseOutput: its presence means the phase ran), summary.binpb and loadgen's
             results there: results.binpb.gz, or under capture results.binpb whole and the generator's
-            kept.binpb.
+            kept.binpb. A path because the phase's results are files (loadgen's and the generator's,
+            which an accuracy check reads as they are) that the pod's runner copies out of the pod.
 
             ```proto
             string work_dir = 1;
@@ -53,7 +54,8 @@ class PhasePodRequest(Message[_PhasePodRequestFields]):
             repeated string generator = 3;
             ```
         dataset_file:
-            The dataset file the generator reads (--dataset); written by the caller.
+            The dataset file the generator reads (--dataset); written by the caller. A path because the
+            generator, a program of the task, takes its dataset as a file.
 
             ```proto
             string dataset_file = 4;
@@ -65,7 +67,7 @@ class PhasePodRequest(Message[_PhasePodRequestFields]):
             double min_sustained_ratio = 5;
             ```
         loadgen:
-            The loadgen binary; empty: $VIBESYS_EVALUATOR_LOADGEN, else loadgen on PATH.
+            The loadgen binary; empty: the loadgen next to the core's executable, else loadgen on PATH.
 
             ```proto
             string loadgen = 6;
@@ -267,7 +269,8 @@ class PhaseJudgeRequest(Message[_PhaseJudgeRequestFields]):
 
     Attributes:
         phase_dir:
-            The directory the phase pod's files were copied into (it holds output.binpb).
+            The directory the phase pod's files were copied into: the judge reads the PhaseOutput the
+            pod left there (output.binpb), which holds loadgen's summary.
 
             ```proto
             string phase_dir = 1;
