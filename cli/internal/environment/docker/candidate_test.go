@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/uw-syfi/vibesys/cli/envcodec"
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"strings"
 	"sync"
 	"testing"
@@ -222,9 +224,12 @@ func TestTheServerHasTheGPUsAndTheCommandSharesItsNetwork(t *testing.T) {
 	if command.Spec.Network != "container:"+server.Name {
 		t.Errorf("the command's network is %q, want the server's", command.Spec.Network)
 	}
-	url := command.Spec.Env[core.EnvServiceURL]
-	if !strings.HasPrefix(url, "http://127.0.0.1:") {
-		t.Errorf("%s = %q", core.EnvServiceURL, url)
+	var job cliv1.JobEnvironment
+	if err := envcodec.Decode(func(n string) string { return command.Spec.Env[n] }, &job); err != nil {
+		t.Fatal(err)
+	}
+	if url := job.GetServiceUrl(); !strings.HasPrefix(url, "http://127.0.0.1:") {
+		t.Errorf("the service address is %q", url)
 	}
 	probe := false
 	for _, m := range command.Spec.Mounts {
@@ -239,7 +244,7 @@ func TestTheServerHasTheGPUsAndTheCommandSharesItsNetwork(t *testing.T) {
 	if e, ok := a.(core.Ended); !ok || e.Exec.Kind != core.ExecExited || e.Exec.ExitCode != 0 {
 		t.Fatalf("attempt %+v", a)
 	}
-	port := strings.TrimPrefix(url, "http://127.0.0.1:")
+	port := strings.TrimPrefix(job.GetServiceUrl(), "http://127.0.0.1:")
 	if !strings.Contains(out, "load done") || !strings.Contains(out, "serving on "+port) {
 		t.Fatalf("output %q lacks the command's or the server's lines on port %s", out, port)
 	}

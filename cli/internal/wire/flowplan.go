@@ -46,7 +46,7 @@ func flowPlan(p *flow.Plan) *cliv1.FlowPlan {
 	}
 	if p.Kind == core.JobMeasure {
 		out.Benchmark = planCommand(&p.Benchmark)
-		out.ResultFormat = &cliv1.ResultFormat{Protocol2: p.Result.Protocol2, JsonArgument: p.Result.JSONArgument, Field: p.Result.Field}
+		out.ResultFormat = resultFormat(p.Result)
 		out.Metric = &cliv1.Metric{Name: p.Metric.Name, Direction: direction(p.Metric.Direction)}
 		out.Objectives = Objectives(p.Objectives)
 	}
@@ -88,7 +88,9 @@ func toFlowPlan(field string, p *cliv1.FlowPlan) (*flow.Plan, error) {
 		}
 	}
 	if f := p.GetResultFormat(); f != nil {
-		out.Result = task.Result{Protocol2: f.GetProtocol2(), JSONArgument: f.GetJsonArgument(), Field: f.GetField()}
+		if out.Result, err = toResultFormat(field+".result_format", f); err != nil {
+			return nil, err
+		}
 	}
 	if m := p.GetMetric(); m != nil {
 		if out.Metric.Direction, err = toDirection(field+".metric.direction", m.GetDirection()); err != nil {
@@ -106,4 +108,33 @@ func toFlowPlan(field string, p *cliv1.FlowPlan) (*flow.Plan, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// resultFormat is how a task's benchmark reports a result, as the message states it: nil when the
+// task says nothing (a plan of a job that scores nothing).
+func resultFormat(r task.Result) *cliv1.ResultFormat {
+	switch {
+	case r.Protocol2:
+		return &cliv1.ResultFormat{Format: &cliv1.ResultFormat_EvaluatorStream{EvaluatorStream: &cliv1.EvaluatorStream{}}}
+	case r.JSONArgument != "":
+		return &cliv1.ResultFormat{Format: &cliv1.ResultFormat_ScoredField{ScoredField: &cliv1.ScoredField{Flag: r.JSONArgument, Field: r.Field}}}
+	}
+	return nil
+}
+
+func toResultFormat(field string, f *cliv1.ResultFormat) (task.Result, error) {
+	switch format := f.GetFormat().(type) {
+	case *cliv1.ResultFormat_EvaluatorStream:
+		return task.Result{Protocol2: true}, nil
+	case *cliv1.ResultFormat_ScoredField:
+		return task.Result{JSONArgument: format.ScoredField.GetFlag(), Field: format.ScoredField.GetField()}, nil
+	}
+	// A plan written before the oneof names its format in the earlier fields.
+	switch {
+	case f.GetProtocol2():
+		return task.Result{Protocol2: true}, nil
+	case f.GetJsonArgument() != "":
+		return task.Result{JSONArgument: f.GetJsonArgument(), Field: f.GetField()}, nil
+	}
+	return task.Result{}, invalid("%s names no format", field)
 }

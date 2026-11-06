@@ -762,7 +762,13 @@ Every request of a sample is a function of the dataset and the sample seed.
 
 Generic over the application, from hotel-k8s' and social-network-k8s'
 run.py: the cluster comes from the vibesys-cli `kubernetes` resource
-(`KUBECONFIG`, `VIBESYS_K8S_REGISTRY`, `VIBESYS_K8S_BUILDER`).
+(`KUBECONFIG`, `VIBESYS_K8S_REGISTRY`, `VIBESYS_K8S_BUILDER`: the fields of
+`KubernetesEnvironment`), and the job's time limit from `VIBESYS_JOB_TIMEOUT_SECONDS`
+(`JobEnvironment.timeout_seconds`), which the Go core reads with the SDK's own reader of those
+messages (`proto/vibesys/cli/v1/env.proto`, `docs/contributing/cli-task-environment.md`); a missing
+or malformed variable is refused naming it. The core reads no task manifest. The sweep deletes
+the namespaces an earlier job left behind once they are older than the running job's limit plus
+ten minutes; jobs of one cluster run one at a time (the `kubernetes` resource's exclusive claim).
 
 - `images`: manifest variable to candidate directory, built with buildctl
   from `PROJECT_ROOT/<dir>` and tagged by a digest of the directory.

@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/cli/v1/env.proto.
  */
 export const file_vibesys_cli_v1_env: GenFile = /*@__PURE__*/
-  fileDesc("Chh2aWJlc3lzL2NsaS92MS9lbnYucHJvdG8SDnZpYmVzeXMuY2xpLnYxIvIBCgxBZ2VudENvbnRleHQSLAoKcmVwb3NpdG9yeRgBIAEoCUIYukgFcgMogCCiuxgMVklCRVNZU19SRVBPEiYKBHRhc2sYAiABKAlCGLpIBXIDKIACorsYDFZJQkVTWVNfVEFTSxInCgZydW5faWQYAyABKAlCF7pIBXIDKIACorsYC1ZJQkVTWVNfUlVOEjkKB2hhcm5lc3MYBCABKAlCKLpIEnIQKEAyDF5bYS16MC05LV0qJKK7GA9WSUJFU1lTX0hBUk5FU1MSKAoFYWdlbnQYBSABKAlCGbpIBXIDKIACorsYDVZJQkVTWVNfQUdFTlQiQwoPT3BlcmF0b3JDb250ZXh0EjAKCXBsYWNlbWVudBgBIAEoCUIdukgFcgMogAKiuxgRVklCRVNZU19QTEFDRU1FTlQiRQoQU2tpbGxFbnZpcm9ubWVudBIxCgNjbGkYASABKAlCJLpIEnIQMg5eKC9bXlx4MDBdKik/JKK7GAtWSUJFU1lTX0NMSTo6CghlbnZfbmFtZRIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYtIcDIAEoCVIHZW52TmFtZTpGCg1lbnZfbmFtZXNwYWNlEh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGLSHAyABKAlSDGVudk5hbWVzcGFjZUI5WjdnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9jbGkvZ2VuL3ZpYmVzeXMvY2xpL3YxO2NsaXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_descriptor]);
+  fileDesc("Chh2aWJlc3lzL2NsaS92MS9lbnYucHJvdG8SDnZpYmVzeXMuY2xpLnYxIvIBCgxBZ2VudENvbnRleHQSLAoKcmVwb3NpdG9yeRgBIAEoCUIYukgFcgMogCCiuxgMVklCRVNZU19SRVBPEiYKBHRhc2sYAiABKAlCGLpIBXIDKIACorsYDFZJQkVTWVNfVEFTSxInCgZydW5faWQYAyABKAlCF7pIBXIDKIACorsYC1ZJQkVTWVNfUlVOEjkKB2hhcm5lc3MYBCABKAlCKLpIEnIQKEAyDF5bYS16MC05LV0qJKK7GA9WSUJFU1lTX0hBUk5FU1MSKAoFYWdlbnQYBSABKAlCGbpIBXIDKIACorsYDVZJQkVTWVNfQUdFTlQiQwoPT3BlcmF0b3JDb250ZXh0EjAKCXBsYWNlbWVudBgBIAEoCUIdukgFcgMogAKiuxgRVklCRVNZU19QTEFDRU1FTlQiRQoQU2tpbGxFbnZpcm9ubWVudBIxCgNjbGkYASABKAlCJLpIEnIQMg5eKC9bXlx4MDBdKik/JKK7GAtWSUJFU1lTX0NMSSLyAgoOSm9iRW52aXJvbm1lbnQSRAoJYXJ0aWZhY3RzGAEgASgJQjG6SBVyEyiAIDIOXigvW15ceDAwXSopPySiuxgVVklCRVNZU19BUlRJRkFDVFNfRElSEjwKBWNhY2hlGAIgASgJQi26SBVyEyiAIDIOXigvW15ceDAwXSopPySiuxgRVklCRVNZU19DQUNIRV9ESVISSgoLc2VydmljZV91cmwYAyABKAlCNbpIG3IZKIAQMhReKGh0dHBzPzovL1teXHNdKyk/JKK7GBNWSUJFU1lTX1NFUlZJQ0VfVVJMEkIKD3RpbWVvdXRfc2Vjb25kcxgEIAEoDUIpukgHKgUYgOeED6K7GBtWSUJFU1lTX0pPQl9USU1FT1VUX1NFQ09ORFMSTAoGbW91bnRzGAUgAygJQjy6SCeSASQQQBgBIh5yHDIaXlthLXowLTldW2EtejAtOV8tXXswLDYyfSSiuxgOVklCRVNZU19NT1VOVFMi5wEKFUt1YmVybmV0ZXNFbnZpcm9ubWVudBI6CgprdWJlY29uZmlnGAEgASgJQia6SBVyEyiAIDIOXigvW15ceDAwXSopPySiuxgKS1VCRUNPTkZJRxJJCghyZWdpc3RyeRgCIAEoCUI3ukgcchoogAQyFV5bQS1aYS16MC05Ll86L0ArLV0qJKK7GBRWSUJFU1lTX0s4U19SRUdJU1RSWRJHCgdidWlsZGVyGAMgASgJQja6SBxyGiiABDIVXltBLVphLXowLTkuXzovQCstXSokorsYE1ZJQkVTWVNfSzhTX0JVSUxERVI6OgoIZW52X25hbWUSHS5nb29nbGUucHJvdG9idWYuRmllbGRPcHRpb25zGLSHAyABKAlSB2Vudk5hbWU6RgoNZW52X25hbWVzcGFjZRIfLmdvb2dsZS5wcm90b2J1Zi5NZXNzYWdlT3B0aW9ucxi0hwMgASgJUgxlbnZOYW1lc3BhY2VCOVo3Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvY2xpL2dlbi92aWJlc3lzL2NsaS92MTtjbGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_descriptor]);
 
 /**
  * AgentContext is what vibesys-cli reads as the defaults of its context flags, and what the
@@ -111,6 +111,100 @@ export type SkillEnvironment = Message<"vibesys.cli.v1.SkillEnvironment"> & {
  */
 export const SkillEnvironmentSchema: GenMessage<SkillEnvironment> = /*@__PURE__*/
   messageDesc(file_vibesys_cli_v1_env, 2);
+
+/**
+ * JobEnvironment is what a job's commands may read about the job they run in. A command that reads
+ * none of it works as it does without VibeSys. A field that does not apply to a job is not set, and
+ * the rules require none: the program that needs one says which is missing.
+ *
+ * @generated from message vibesys.cli.v1.JobEnvironment
+ */
+export type JobEnvironment = Message<"vibesys.cli.v1.JobEnvironment"> & {
+  /**
+   * Where the job keeps files that stay with the job after it ends: an absolute location, empty
+   * when the job keeps none.
+   *
+   * @generated from field: string artifacts = 1;
+   */
+  artifacts: string;
+
+  /**
+   * Where the job keeps files between runs of the same task image: an absolute location, empty when
+   * the job has none.
+   *
+   * @generated from field: string cache = 2;
+   */
+  cache: string;
+
+  /**
+   * The address of the candidate's server, for a command that sends it requests: an http or https URL.
+   *
+   * @generated from field: string service_url = 3;
+   */
+  serviceUrl: string;
+
+  /**
+   * The longest the job may run, in seconds. The job is stopped when it passes it; a command that
+   * keeps something outside the job, such as a deployment, uses it to know when that is left over.
+   * Zero when the job has no limit.
+   *
+   * @generated from field: uint32 timeout_seconds = 4;
+   */
+  timeoutSeconds: number;
+
+  /**
+   * The names of the read-only data sets the job may read, each a name in the operator's
+   * configuration.
+   *
+   * @generated from field: repeated string mounts = 5;
+   */
+  mounts: string[];
+};
+
+/**
+ * Describes the message vibesys.cli.v1.JobEnvironment.
+ * Use `create(JobEnvironmentSchema)` to create a new message.
+ */
+export const JobEnvironmentSchema: GenMessage<JobEnvironment> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_env, 3);
+
+/**
+ * KubernetesEnvironment is what a job that needs a Kubernetes cluster is given: the cluster's
+ * credentials, the registry it pulls images from, and the service that builds images for it. A job
+ * without the need gets none of it.
+ *
+ * @generated from message vibesys.cli.v1.KubernetesEnvironment
+ */
+export type KubernetesEnvironment = Message<"vibesys.cli.v1.KubernetesEnvironment"> & {
+  /**
+   * The cluster's credentials, in the form kubectl and the client libraries read: an absolute
+   * location.
+   *
+   * @generated from field: string kubeconfig = 1;
+   */
+  kubeconfig: string;
+
+  /**
+   * The registry the cluster pulls images from.
+   *
+   * @generated from field: string registry = 2;
+   */
+  registry: string;
+
+  /**
+   * The address of the service that builds images the registry holds.
+   *
+   * @generated from field: string builder = 3;
+   */
+  builder: string;
+};
+
+/**
+ * Describes the message vibesys.cli.v1.KubernetesEnvironment.
+ * Use `create(KubernetesEnvironmentSchema)` to create a new message.
+ */
+export const KubernetesEnvironmentSchema: GenMessage<KubernetesEnvironment> = /*@__PURE__*/
+  messageDesc(file_vibesys_cli_v1_env, 4);
 
 /**
  * The environment variable this field is carried in.

@@ -73,14 +73,45 @@ message PlanCommand {
 }
 
 // ResultFormat is how a benchmark reports a result: the evaluator record stream, or a JSON file
-// with one numeric field. Exactly one of protocol2 and json_argument is set.
+// with one numeric field. Exactly one `format` is set.
+//
+// The first three fields are what builds before `format` wrote: protocol2 for the record stream,
+// json_argument and field for the JSON file. They are read, so a plan that an earlier build left
+// in a run directory still runs, and never written. `buf breaking` keeps a field once a release
+// has it, so they stay declared; a release that no older build can hand a plan to may drop them
+// with a reviewed waiver.
 message ResultFormat {
-  // The benchmark writes evaluator result protocol 2 records to the path after `--vs-output`.
+  option (buf.validate.message).cel = {
+    id: "result_format.one"
+    message: "a result format names exactly one format, either as format or as the earlier fields"
+    expression: "((has(this.evaluator_stream) || has(this.scored_field)) ? 1 : 0) + (this.protocol2 ? 1 : 0) + ((this.json_argument != '') ? 1 : 0) == 1"
+  };
+  option (buf.validate.message).cel = {
+    id: "result_format.earlier_field"
+    message: "field is the earlier form of a JSON file, and goes with json_argument"
+    expression: "this.field == '' || this.json_argument != ''"
+  };
   bool protocol2 = 1;
-  // The flag the benchmark takes the path of its JSON result after.
   string json_argument = 2;
-  // The numeric field of the JSON object that holds the scored value.
   string field = 3;
+  oneof format {
+    // The benchmark writes evaluator result records to the file named after its output flag.
+    EvaluatorStream evaluator_stream = 4;
+    // The benchmark writes one JSON document to the file named after the flag of the message.
+    ScoredField scored_field = 5;
+  }
+}
+
+// EvaluatorStream is the evaluator result records format. It has no setting: the flag is the one
+// every evaluator takes.
+message EvaluatorStream {}
+
+// ScoredField is a result of one JSON document, with the scored value in one of its fields.
+message ScoredField {
+  // The flag the benchmark takes the name of its JSON result after: one option-style argument.
+  string flag = 1 [(buf.validate.field).string.pattern = "^-[^\\s=]+$"];
+  // The numeric top-level field of the document that holds the scored value.
+  string field = 2 [(buf.validate.field).string.min_len = 1];
 }
 
 // FlowPlan is everything a check or a measure job needs to run. Nothing in it is decided by the
@@ -165,8 +196,8 @@ message SupervisorOutcome {
   // a measure job in flow. The members before command are not sent, and a receiver reads them as
   // an ending it does not know, which is never a success.
   oneof result {
-    ExecutionOutcome executed = 1 [deprecated = true];
-    Failure not_attempted = 2 [deprecated = true];
+    ExecutionOutcome executed = 1;
+    Failure not_attempted = 2;
     Result passed = 4 [deprecated = true];
     string rejected = 5 [deprecated = true];
     // How a command job's one attempt went.

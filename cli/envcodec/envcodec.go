@@ -2,8 +2,9 @@
 // field travels in is its env_name option (proto/vibesys/cli/v1/env.proto), so the definition of a
 // variable is one field of one message, and a reader holds a message and not a name.
 //
-// Encode is total over the messages this package supports: a field is a string, an unsigned
-// integer or an enum, and has an env_name. A field at its zero value is not set, so Encode says
+// Encode is total over the messages this package supports: a field is a string, a list of strings
+// (written as its elements separated by commas), an unsigned integer or an enum, and has an
+// env_name. A field at its zero value is not set, so Encode says
 // which names to unset as well. Decode reads the names a message declares, holds the result to the
 // message's protovalidate rules, and refuses what breaks them with an error that names the
 // variable. A value is never part of an error, because some variables hold secrets.
@@ -103,7 +104,7 @@ func Decode(lookup Lookup, m proto.Message) error {
 			r.Clear(f.field)
 			continue
 		}
-		value, err := parse(f.field, text)
+		value, err := parse(r, f.field, text)
 		if err != nil {
 			problems = append(problems, &Error{Variable: f.name, Reason: err.Error()})
 			continue
@@ -185,8 +186,8 @@ func declared(d protoreflect.MessageDescriptor) ([]variable, error) {
 			return nil, fmt.Errorf("envcodec: field %s has no env_name; every field of an environment message carries one", f.FullName())
 		}
 		switch {
-		case f.IsList() || f.IsMap():
-			return nil, fmt.Errorf("envcodec: field %s is repeated; a variable holds one value", f.FullName())
+		case f.IsMap() || (f.IsList() && f.Kind() != protoreflect.StringKind):
+			return nil, fmt.Errorf("envcodec: field %s is a %s; a variable holds one value or a list of strings", f.FullName(), "map or repeated "+f.Kind().String())
 		case f.Kind() == protoreflect.StringKind, f.Kind() == protoreflect.Uint32Kind, f.Kind() == protoreflect.Uint64Kind, f.Kind() == protoreflect.EnumKind:
 		default:
 			return nil, fmt.Errorf("envcodec: field %s is a %s; a variable holds a string, an unsigned integer or an enum", f.FullName(), f.Kind())
@@ -197,6 +198,17 @@ func declared(d protoreflect.MessageDescriptor) ([]variable, error) {
 }
 
 func format(f protoreflect.FieldDescriptor, v protoreflect.Value) (string, error) {
+	if f.IsList() {
+		list := v.List()
+		elements := make([]string, list.Len())
+		for i := range elements {
+			elements[i] = list.Get(i).String()
+			if strings.Contains(elements[i], ",") {
+				return "", errors.New("an element holds a comma")
+			}
+		}
+		return strings.Join(elements, ","), nil
+	}
 	switch f.Kind() {
 	case protoreflect.StringKind:
 		return v.String(), nil
@@ -211,7 +223,14 @@ func format(f protoreflect.FieldDescriptor, v protoreflect.Value) (string, error
 	}
 }
 
-func parse(f protoreflect.FieldDescriptor, text string) (protoreflect.Value, error) {
+func parse(m protoreflect.Message, f protoreflect.FieldDescriptor, text string) (protoreflect.Value, error) {
+	if f.IsList() {
+		list := m.NewField(f)
+		for _, element := range strings.Split(text, ",") {
+			list.List().Append(protoreflect.ValueOfString(element))
+		}
+		return list, nil
+	}
 	switch f.Kind() {
 	case protoreflect.StringKind:
 		return protoreflect.ValueOfString(text), nil

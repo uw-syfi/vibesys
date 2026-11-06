@@ -74,19 +74,19 @@ var rules = map[string][]string{
 	"internal/resource/fakeresource": {"internal/core", "internal/resource"},
 	"internal/resource/gpu":          {"internal/core", "internal/resource"},
 	"internal/resource/rocm":         {"internal/core", "internal/resource"},
-	"internal/resource/mounts":       {"internal/core", "internal/resource"},
-	"internal/resource/kubernetes":   {"internal/clock", "internal/core", "internal/remote", "internal/resource"},
-	"internal/environment":           {"internal/core"},
+	"internal/resource/mounts":       {"envcodec", "gen/", "internal/core", "internal/resource"},
+	"internal/resource/kubernetes":   {"envcodec", "gen/", "internal/clock", "internal/core", "internal/remote", "internal/resource"},
+	"internal/environment":           {"envcodec", "gen/", "internal/core"},
 	"internal/environment/fakeenv":   {"internal/clock", "internal/core", "internal/environment"},
 	// The fake machine's world for the contract suite. Only tests reach it.
 	"internal/environment/fakeenv/fakeworld": {"internal/environment/envtest", "internal/environment/fakeenv"},
 	"internal/environment/envtest":           {"internal/clock", "internal/core", "internal/environment"},
-	"internal/environment/host":              {"internal/backend", "internal/clock", "internal/core", "internal/environment"},
+	"internal/environment/host":              {"gen/", "internal/backend", "internal/clock", "internal/core", "internal/environment"},
 
 	// The docker environment decides what to run and how it ends; an engine is the only thing that
 	// talks to Docker. The real engine drives the docker program, the fake keeps a daemon in
 	// memory, and one contract suite holds both to the same behavior.
-	"internal/environment/docker":           {"internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/resource", "internal/task"},
+	"internal/environment/docker":           {"envcodec", "gen/", "internal/backend", "internal/clock", "internal/core", "internal/environment", "internal/resource", "internal/task"},
 	"internal/environment/docker/dockercli": {"internal/clock", "internal/core", "internal/environment", "internal/environment/docker", "internal/remote"},
 	// Where a docker engine's containers find a run's directories: this machine, or copies on one
 	// reached over ssh.
