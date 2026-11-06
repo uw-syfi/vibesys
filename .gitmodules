@@ -50,3 +50,8 @@
 	url = https://github.com/rpcstack/hotel.git
 	branch = main
 	shallow = true
+[submodule "examples/microservices/repositories/socialnet"]
+	path = examples/microservices/repositories/socialnet
+	url = https://github.com/rpcstack/socialnet.git
+	branch = main
+	shallow = true
