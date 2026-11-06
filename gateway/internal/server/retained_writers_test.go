@@ -47,6 +47,7 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 				name = source.Name() + "/keyframe"
 			}
 			t.Run(name, func(t *testing.T) {
+				t.Parallel()
 				f := start(t)
 				project, err := filepath.EvalSymlinks(t.TempDir())
 				if err != nil {

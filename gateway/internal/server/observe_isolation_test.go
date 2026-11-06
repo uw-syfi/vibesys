@@ -1,12 +1,14 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
@@ -109,34 +111,56 @@ func listing(t *testing.T, f fixture, c apiv1.HostServiceClient) map[string]*api
 }
 
 // A read error in one run's data stays inside that run: the other runs list with the same
-// facts, and the damaged run is still listed by name.
+// facts, and the damaged run is still listed by name. Each retained case is its own host, so
+// the cases run side by side. A damage rewrites only the file it changes, giving a changed
+// log a modification time of its own: the observer tells logs apart by that time and size,
+// so rewriting identical bytes under a new time made every head damage rescan a log that
+// had not changed.
 func TestRunsListsHealthyRunsBesideADamagedOne(t *testing.T) {
 	for _, name := range corpusCases(t) {
-		log, head := readCorpus(t, name, "run.log"), readCorpus(t, name, "run.head")
-		f := start(t)
-		second := t.TempDir()
-		if err := os.Symlink(second, filepath.Join(f.root, "runs", "run-2")); err != nil {
-			t.Fatal(err)
-		}
-		write(t, filepath.Join(second, "run.log"), false, log)
-		write(t, filepath.Join(second, "run.head"), false, head)
-		c := client(t, f, false)
-		write(t, filepath.Join(f.run, "run.log"), false, log)
-		write(t, filepath.Join(f.run, "run.head"), false, head)
-		baseline := listing(t, f, c)
-		if baseline["run-2"].GetHead().GetObjective() == nil {
-			t.Fatalf("%s: the healthy run lists without its head: %v", name, baseline["run-2"])
-		}
-		for _, damage := range damages(log, head) {
-			write(t, filepath.Join(f.run, "run.log"), false, damage.log)
-			write(t, filepath.Join(f.run, "run.head"), false, damage.head)
-			runs := listing(t, f, c)
-			if !proto.Equal(runs["run-2"], baseline["run-2"]) {
-				t.Fatalf("%s, %s: the healthy run changed: %v, want %v", name, damage.name, runs["run-2"], baseline["run-2"])
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			log, head := readCorpus(t, name, "run.log"), readCorpus(t, name, "run.head")
+			f := start(t)
+			second := t.TempDir()
+			if err := os.Symlink(second, filepath.Join(f.root, "runs", "run-2")); err != nil {
+				t.Fatal(err)
 			}
-			if runs["run-1"] == nil {
-				t.Fatalf("%s, %s: the damaged run is not listed by name", name, damage.name)
+			write(t, filepath.Join(second, "run.log"), false, log)
+			write(t, filepath.Join(second, "run.head"), false, head)
+			c := client(t, f, false)
+			var onDisk struct{ log, head []byte }
+			var generation int64
+			set := func(log, head []byte) {
+				if !bytes.Equal(log, onDisk.log) {
+					generation++
+					path := filepath.Join(f.run, "run.log")
+					write(t, path, false, log)
+					stamp := time.Unix(generation, 0)
+					if err := os.Chtimes(path, stamp, stamp); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if !bytes.Equal(head, onDisk.head) {
+					write(t, filepath.Join(f.run, "run.head"), false, head)
+				}
+				onDisk.log, onDisk.head = log, head
 			}
-		}
+			set(log, head)
+			baseline := listing(t, f, c)
+			if baseline["run-2"].GetHead().GetObjective() == nil {
+				t.Fatalf("the healthy run lists without its head: %v", baseline["run-2"])
+			}
+			for _, damage := range damages(log, head) {
+				set(damage.log, damage.head)
+				runs := listing(t, f, c)
+				if !proto.Equal(runs["run-2"], baseline["run-2"]) {
+					t.Fatalf("%s: the healthy run changed: %v, want %v", damage.name, runs["run-2"], baseline["run-2"])
+				}
+				if runs["run-1"] == nil {
+					t.Fatalf("%s: the damaged run is not listed by name", damage.name)
+				}
+			}
+		})
 	}
 }

@@ -20,6 +20,7 @@ import (
 func TestRunsCarriesPublishedProject(t *testing.T) {
 	for variant := 0; variant < 8; variant++ {
 		t.Run(fmt.Sprint(variant), func(t *testing.T) {
+			t.Parallel()
 			ticker := &fakeTicker{ticks: make(chan time.Time, 1), stopped: make(chan struct{})}
 			f := startWithClock(t, &fakeClock{ticker: ticker})
 			project := externalFixture(t, &f, variant)

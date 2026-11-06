@@ -60,13 +60,33 @@ func TestHostValidationCorpus(t *testing.T) {
 	if err := json.Unmarshal(data, &cases); err != nil {
 		t.Fatal(err)
 	}
+	// Fail-fast stops at a message's first violation. Every corpus case holds one, so this
+	// keeps what each case asserts; the over-bound cases would otherwise evaluate every item
+	// of a million-item list after the list's own bound already failed.
+	validator, err := protovalidate.New(protovalidate.WithFailFast())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, item := range cases {
 		t.Run(item.Name, func(t *testing.T) {
+			t.Parallel()
 			kind, err := protoregistry.GlobalTypes.FindMessageByName(protoreflect.FullName("vibesys.api.v1." + item.Message))
 			if err != nil {
 				t.Fatal(err)
 			}
 			message := kind.New().Interface()
+			// A top-level list of a million copies is decoded as one copy and grown here:
+			// the same message, without spelling a million JSON items for protojson to parse.
+			repeats := map[string]int{}
+			if fields, ok := item.Value.(map[string]any); ok {
+				for key, field := range fields {
+					if spec, ok := field.(map[string]any); ok {
+						if count, ok := spec["$repeat"].(float64); ok && count > 4096 {
+							repeats[key], spec["$repeat"] = int(count), float64(1)
+						}
+					}
+				}
+			}
 			encoded, err := json.Marshal(expandCorpus(item.Value))
 			if err != nil {
 				t.Fatal(err)
@@ -74,7 +94,14 @@ func TestHostValidationCorpus(t *testing.T) {
 			if err := protojson.Unmarshal(encoded, message); err != nil {
 				t.Fatal(err)
 			}
-			err = protovalidate.Validate(message)
+			reflected := message.ProtoReflect()
+			for key, count := range repeats {
+				list := reflected.Mutable(reflected.Descriptor().Fields().ByJSONName(key)).List()
+				for first := list.Get(0); list.Len() < count; {
+					list.Append(first)
+				}
+			}
+			err = validator.Validate(message)
 			if item.Field == "" {
 				if err != nil {
 					t.Fatal(err)
