@@ -137,8 +137,16 @@ func (m *monitor) commit(body core.InputBody, events []core.Event) error {
 		}
 	}
 	if launchTimer != nil {
-		if post := m.agents[launchTimer.Agent]; post.Status != core.AgentFailed || post.StartFailure != core.StartTimedOut {
-			return fmt.Errorf("the launch timer of %v left %+v, want failed as timed out", *launchTimer, post)
+		// A lead that can resume goes straight into a new launch, so the failure is read from the
+		// events the timer produced, not from where the agent stands afterwards.
+		timedOut := false
+		for _, e := range events {
+			if a, ok := e.Body.(core.Agent); ok && a.ID == launchTimer.Agent && a.Session == launchTimer.N {
+				timedOut = timedOut || (a.Status == core.AgentFailed && a.StartFailure == core.StartTimedOut)
+			}
+		}
+		if !timedOut {
+			return fmt.Errorf("the launch timer of %v ended no event failing it as timed out; agent now %+v", *launchTimer, m.agents[launchTimer.Agent])
 		}
 		m.covered.startsTimedOut++
 	}
