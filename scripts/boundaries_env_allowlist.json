@@ -83,9 +83,6 @@
   "orchestrator/internal/production/plugin.go": {
     "VIBESYS_ORCHESTRATOR_MARKETPLACE": 1
   },
-  "orchestrator/internal/production/production.go": {
-    "XDG_RUNTIME_DIR": 1
-  },
   "orchestrator/internal/production/sidecars.go": {
     "VIBESYS_ORCHESTRATOR_SIDECAR": 1
   },

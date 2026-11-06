@@ -38,7 +38,7 @@ var boundaries = map[string]allowance{
 	"internal/production/plugin.go":              {reason: "external:the harness's marketplace manifest; process-boundaries.md, release manifest", reads: 1, json: 1},
 	"internal/production/production.go":          {reason: "the orchestrator's own boot identity and state directory", reads: 1, writes: 7},
 	"internal/production/sidecars.go":            {reason: "sidecar launch files, pid and pgid files and git worktree creation; process-boundaries.md, session contract and session processes", reads: 9, writes: 7, json: 1, exec: 2},
-	"internal/production/startchecks.go":         {reason: "checks a start's repository and task directory exist before the run is decided", reads: 1},
+	"internal/production/startchecks.go":         {reason: "checks a start's repository and task directory exist, and reads the repository with git", reads: 1, exec: 1},
 	"internal/store/lock_unix.go":                {reason: "the store's own advisory lock", reads: 1, writes: 1},
 	"internal/store/sqlite.go":                   {reason: "the store's own database file", writes: 1},
 	"internal/store/storetest/contract.go":       {reason: "the contract suite reads its depth from the environment", env: 2},
