@@ -38,6 +38,7 @@ var rules = map[string][]string{
 	"internal/core":                    {},
 	"internal/search":                  {"internal/core", "internal/jobs", "gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
 	"internal/jobs":                    {"internal/core"},
+	"internal/prompts":                 {"internal/core"},
 	"internal/jobs/jobstest":           {"internal/core", "internal/jobs"},
 	"internal/wire":                    {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/archcheck":               {},
@@ -55,7 +56,7 @@ var rules = map[string][]string{
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/client":                  {"internal/protocol", "gen/vibesys/orchestrator/"},
 	"internal/mcp":                     {"internal/core", "gen/vibesys/orchestrator/"},
-	"internal/daemon":                  {"internal/protocol", "internal/search", "internal/core", "internal/hub", "internal/jobs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"internal/daemon":                  {"internal/protocol", "internal/search", "internal/core", "internal/hub", "internal/jobs", "internal/prompts", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
 	"internal/localfs/localfstest": {"internal/localfs"},
@@ -84,6 +85,8 @@ var testRules = map[string][]string{
 	"internal/core":   {"internal/jobs/jobstest", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/wire":   {"internal/core", "internal/client"},
 	"internal/daemon": {"internal/client", "internal/daemon/daemontest", "internal/store", "internal/jobs/jobstest"},
+	// The goldens are messages as the contract states them, read through the wire.
+	"internal/prompts": {"internal/wire", "gen/vibesys/orchestrator/"},
 }
 
 // pureImports is the standard library the core may use. Nothing here reaches a clock, a file, the

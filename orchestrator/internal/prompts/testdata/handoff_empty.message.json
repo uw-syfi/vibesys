@@ -1,0 +1,8 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "handoff": {},
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

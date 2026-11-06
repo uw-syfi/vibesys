@@ -7,7 +7,6 @@ dependencies = [
     "agentshim==0.27.3",
     "grpcio==1.76.0",
     "protobuf==6.33.5",
-    "jinja2>=3.1",
     "protovalidate>=0.7",
 ]
 

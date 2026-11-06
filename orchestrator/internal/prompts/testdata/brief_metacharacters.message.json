@@ -1,0 +1,9 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "brief": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-lead",
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

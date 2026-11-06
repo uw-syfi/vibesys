@@ -12,6 +12,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/prompts"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/store"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
@@ -366,7 +367,7 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 		d.forget(session)
 		return nil
 	}
-	cmd, ok, err := wire.SessionCommandFor(e)
+	cmd, ok, err := wire.SessionCommandFor(e, prompts.Render)
 	if err != nil || !ok {
 		return err
 	}

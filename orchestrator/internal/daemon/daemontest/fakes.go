@@ -365,7 +365,7 @@ func DefaultReaction(s *Session, cmd *pb.SessionCommand) {
 		AnswerTurn(s, b.StartTurn.GetTurnId(), "ok")
 	case *pb.SessionCommand_Steer:
 		s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_Steer{Steer: &pb.SteerOutcome{
-			MessageId: b.Steer.GetMessage().GetId(), Accepted: true,
+			MessageId: b.Steer.GetMessageId(), Accepted: true,
 		}}})
 	case *pb.SessionCommand_Interrupt:
 		s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{

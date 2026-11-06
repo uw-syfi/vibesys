@@ -177,8 +177,12 @@ token never rests on disk) and an `AgentEnvironment` that the holder lays over
 the login environment without interpreting it. There is no `launch.json`, no
 `mcp.json` and no argv beyond the program name.
 
-The host renders prompts from templates and sends text. The holder needs words,
-not delivery bookkeeping. Names describe roles (`AgentSessionService`,
+The host renders prompts from templates (`orchestrator/internal/prompts`, Go
+`text/template`) and sends text: `SessionStartTurn` and `SessionSteer` carry a
+`prompt` and no message. The holder needs words, not delivery bookkeeping, and
+never learns a skill's name or what the words say. The stored effect keeps the
+typed `Message` and the host renders when it sends, so a delivery that is
+retried sends the same bytes. Names describe roles (`AgentSessionService`,
 `SessionEvent`), not the current implementation.
 
 ### Process identity
@@ -280,7 +284,6 @@ part they wait for.
 | --- | --- | --- |
 | Release manifest | `ReleaseManifest`, `release verify`, the host and installer reading it | hand path lists in the builder, installer and host; the `bin` folder rule |
 | Host control | `HostControlService`, `HostConfig`, host lock, `host status/stop/restart`, stable socket, minimal-environment start, client policy | the `holder` text file, the `ps` scan, the hash in the socket path, `VIBESYS_ORCHESTRATOR_{STATE_DIR,SIDECAR,MARKETPLACE,CLI}` on the host |
-| Host-side prompts | prompt rendering in the host; text-only `StartTurn` | the sidecar's prompt templates |
 | Environment codec | the `env_name` option, `AgentContext`, `ToolServerCredentials`, `SkillEnvironment` | the Python env table and its golden |
 | Job tool endpoint | `JobToolEndpoint`, `daemon ensure --json`, `DaemonPlaces` | `CliLocation`, the `XDG_*` and `HOME` rewrite, the host's copy of the socket rule |
 | Client records | `AgentRecord`, `RunRecord`, `ReceiptRecord`, `RunChange` | private fields served to clients |
@@ -324,7 +327,7 @@ validated message; the other rows are what the parts above replace.
 | commands and events | gRPC `AgentSessionService` | `agent_session.proto` | typed |
 | version check | `Hello`, ending in `INCOMPATIBLE_VERSIONS` | `agent_session.proto` | typed |
 | why a session failed | `StartFailureReason` | `orchestrator.proto` | typed |
-| prompts | rendered text from templates in the holder | `vs_sidecar/prompts/` | typed input, wrong layer: host-side prompts |
+| prompts | `prompt` text in `SessionStartTurn` and `SessionSteer`, rendered by the host | `agent_session.proto`, `orchestrator/internal/prompts` | typed |
 | agent harness | in-process library | agentshim | not a process boundary |
 | harness and provider streams | stream-json and the provider's protocol | agentshim | external |
 

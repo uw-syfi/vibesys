@@ -96,10 +96,11 @@ def test_the_same_effect_twice_runs_once() -> None:
     assert h.kinds(store.events_after(0)).count("turn_ended") == 1
 
 
-def test_a_command_for_another_session_is_refused() -> None:
+@pytest.mark.parametrize("kind", ["interrupt", "close"])
+def test_a_command_for_another_session_is_refused(kind: str) -> None:
     engine, _ = _engine(CodexScript())
-    other = h.start_turn("e1", "t1")
-    other.start_turn.session.session = 2
+    other = h.interrupt("e1", "t1") if kind == "interrupt" else h.close("e1")
+    getattr(other, kind).session.session = 2
     with pytest.raises(InvalidCommandError):
         engine.send(other)
 

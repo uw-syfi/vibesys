@@ -18,19 +18,8 @@
       "send": {
         "effectId": "e1",
         "startTurn": {
-          "session": {
-            "agentId": "agent-1",
-            "session": 1
-          },
           "turnId": "t1",
-          "message": {
-            "id": "msg-t1",
-            "runId": "run-1",
-            "toAgentId": "agent-1",
-            "delivery": "DELIVERY_QUEUED",
-            "at": "1970-01-01T00:00:01Z",
-            "text": "go"
-          }
+          "prompt": "go"
         }
       }
     },

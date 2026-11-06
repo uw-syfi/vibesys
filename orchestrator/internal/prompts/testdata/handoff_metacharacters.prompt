@@ -1,0 +1,8 @@
+Agent {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` `` handed off plan 1.
+Candidate: commit {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` `` on branch {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` `` (parent {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``).
+Claim: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``
+Checks: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``
+Measurement: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``
+Learned: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``
+Next: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``
+Open items: {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``

@@ -1,0 +1,16 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+  "id": "m1",
+  "report": {
+    "changed": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+    "decisions": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+    "headline": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+    "inFlight": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+    "kind": "REPORT_KIND_FINAL",
+    "openForUser": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``"
+  },
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

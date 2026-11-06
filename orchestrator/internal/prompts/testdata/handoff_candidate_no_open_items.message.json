@@ -1,0 +1,20 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-w1",
+  "handoff": {
+    "branch": "plan-1",
+    "checks": "passed",
+    "claim": "score 14",
+    "commit": "cccccccccccccccccccccccccccccccccccccccc",
+    "hasCandidate": true,
+    "learned": "L",
+    "measurement": "m",
+    "next": "N",
+    "parentCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "planNumber": 1
+  },
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

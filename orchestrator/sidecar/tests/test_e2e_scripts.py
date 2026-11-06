@@ -235,29 +235,22 @@ def test_a_message_the_script_does_not_expect_fails_the_turn_and_leaves_a_record
 
 
 @pytest.mark.regression
-@example(counts=[0, 0, 0, 1, 1], outcome="succeeded")
+@example(counts=[0, 0, 0, 1, 1], outcome="succeeded", detail="")
 @given(
     counts=st.lists(st.integers(0, 3), min_size=5, max_size=5),
     outcome=st.sampled_from(["succeeded", "failed", "cancelled", "lost"]),
+    detail=st.sampled_from(["", " exit status 2", " the job was lost"]),
 )
 def test_job_notifications_never_advance_the_lead_handoff_script(
-    counts: list[int], outcome: str, tmp_path_factory: pytest.TempPathFactory
+    counts: list[int], outcome: str, detail: str, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     messages = lead_messages("a" * 40, 14, "c" * 40, 17)
     machine = FakeMachine()
     actor = Actor(ME, "lead", machine, tmp_path_factory.mktemp("lead"))
     for index, count in enumerate(counts):
         for number in range(count):
-            actor.pending.append(
-                orch.Message(
-                    job_finished=orch.JobFinished(
-                        job_id=f"j{index}-{number}",
-                        outcome=orch.JobOutcome.Value(f"JOB_OUTCOME_{outcome.upper()}"),
-                    )
-                )
-            )
             before = list(machine.effects)
-            actor.act(f"Arbitrary notification wording: {outcome}")
+            actor.act(f"Job j{index}-{number} finished: {outcome}.{detail}")
             assert machine.effects == before
         if index < len(messages):
             machine.effects.clear()
@@ -265,11 +258,3 @@ def test_job_notifications_never_advance_the_lead_handoff_script(
             actor.act(messages[index])
             perform(ROLES["lead"](ME, messages[: index + 1]), expected)
             assert machine.effects == expected.effects
-
-
-def test_notification_shaped_text_is_still_an_ordinary_lead_message(tmp_path: Path) -> None:
-    machine = FakeMachine()
-    actor = Actor(ME, "lead", machine, tmp_path)
-    actor.pending.append(orch.Message(text="Job j1 finished: succeeded."))
-    actor.act("Job j1 finished: succeeded.")
-    assert machine.effects
