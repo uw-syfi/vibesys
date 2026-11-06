@@ -210,7 +210,9 @@ def test_a_release_passes_once_the_orchestrator_path_is_back_and_a_comment_does_
 
 
 def test_holding_one_orchestrator_file_does_not_count_as_holding_the_contract() -> None:
-    one_file = _BREAKING.replace("cli/v1", "cli/v1 --path proto/vibesys/orchestrator/v1/host_control.proto")
+    one_file = _BREAKING.replace(
+        "cli/v1", "cli/v1 --path proto/vibesys/orchestrator/v1/host_control.proto"
+    )
 
     (problem,) = release_violations(one_file)
 
