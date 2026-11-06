@@ -330,13 +330,28 @@ system and architecture, checks its SHA-256, and lays it out like this:
 
 Only `vibesys-client` goes on your PATH. The host finds the sidecar, the marketplace and
 `vibesys-cli` relative to its own binary. If `uv` is missing the installer installs it into
-`~/.vibesys/uv`; uv fetches Python 3.12 itself. Git must be installed, because the sidecar depends
-on agentshim by Git URL.
+`~/.vibesys/uv`; uv fetches Python 3.12 itself. The installer needs no git; starting a run does,
+because a task lives in a git repository.
+
+After the install a run needs no setting. Start one, leave it, check it and stop it:
+
+```bash
+vibesys-client run start --task <task> --detach   # in the task's repository
+vibesys-client run wait --until report --timeout 30m
+vibesys-client run get          # or: run list
+vibesys-client run stop --yes
+```
+
+Every binary in the bundle reports the bundle's version: `vibesys-client --version`,
+`vibesys-host --version` and `vibesys-cli --version`.
 
 - A failed step names itself and leaves the previous install working: `current` moves last.
 - Installing the same version again changes nothing.
 - Switching versions is refused while a `vibesys-host` started from a release under `~/.vibesys`
   is running (found in the `ps` command lines); `--force` overrides. Old releases are kept.
+- With no version named, the installer reads the newest stable version from `vibesys-latest`. While
+  only pre-releases are published that tag does not exist, and the installer says to pass
+  `VIBESYS_VERSION=<version>`.
 - `VIBESYS_VERSION`, `VIBESYS_INSTALL_DIR`, `VIBESYS_HOME`, `VIBESYS_RELEASES_URL` and
   `VIBESYS_INSTALL_BUNDLE=/path/to/bundle.tar.gz` (offline install) are read; see the header of
   `install.sh`.
@@ -346,8 +361,12 @@ Agents run as your user, unconfined, with permissions bypassed.
 
 Bundles are built by `scripts/build_release_bundle.sh VERSION OS ARCH OUTDIR` and published by
 `.github/workflows/managed-release.yml` on `vibesys-v<version>` tags, with attestations; the tag
-`vibesys-latest` names the newest stable version. `scripts/tests/test_install.sh` installs a bundle
-in a clean container.
+`vibesys-latest` names the newest stable version. `scripts/tests/test_install.sh` builds two real
+bundles and, in a clean container as an ordinary user, installs them and runs the installed product:
+a start with no harness installed fails naming the missing harness (the release found its own
+sidecar), and a run with scripted agents (`sidecar/e2e`, selected by the developer override
+`VIBESYS_ORCHESTRATOR_SIDECAR`, no model called) is started, waited on, listed, stopped and shown to
+leave no process behind.
 
 ## Testing
 

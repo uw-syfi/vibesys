@@ -38,10 +38,15 @@ fail() {
 
 # fetch URL DEST: download one file or fail.
 fetch() {
+  try_fetch "$1" "$2" || fail "cannot download $1"
+}
+
+# try_fetch URL DEST: download one file, returning its status.
+try_fetch() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -o "$2" "$1" || fail "cannot download $1"
+    curl -fsSL -o "$2" "$1"
   elif command -v wget >/dev/null 2>&1; then
-    wget -q -O "$2" "$1" || fail "cannot download $1"
+    wget -q -O "$2" "$1"
   else
     fail "needs curl or wget"
   fi
@@ -218,7 +223,9 @@ main() {
   elif [ -z "$version" ]; then
     # The newest release is the rolling vibesys-latest, whose VERSION file names it.
     step="finding the newest version"
-    fetch "$releases_url/vibesys-latest/VERSION" "$work/VERSION"
+    # vibesys-latest names stable versions only, so it does not exist while only pre-releases do.
+    try_fetch "$releases_url/vibesys-latest/VERSION" "$work/VERSION" ||
+      fail "cannot find the newest version at $releases_url/vibesys-latest/VERSION. No stable release may be published yet; name the version to install, for example VIBESYS_VERSION=0.2.0-rc.1"
     version="$(tr -d ' \n\r' <"$work/VERSION")"
     case "$version" in
       "" | *[!0-9A-Za-z.-]*) fail "the published VERSION file is not a version" ;;
@@ -298,10 +305,14 @@ main() {
   esac
   cat <<EOF
 
-Next steps:
-  vibesys-client run start --task <task>
+Next steps, in the git repository that holds the task:
+  vibesys-client run start --task <task> --detach
+  vibesys-client run wait --until report --timeout 30m
+  vibesys-client run get
+  vibesys-client run stop --yes
 
 What it needs:
+  - git, because a task lives in a git repository.
   - Claude Code or Codex installed and logged in on this machine.
   - Docker, only for tasks that run in containers.
 
