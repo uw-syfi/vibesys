@@ -258,9 +258,19 @@ func TestARunSurvivesADaemonRestart(t *testing.T) {
 	if out, err := exec.Command("git", "init", "-q", repository).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
-	// A start is refused unless the repository holds the task.
+	// A start is refused unless the repository holds the task, committed: the subagents' copies
+	// of the repository are made from the latest commit.
 	if err := os.MkdirAll(filepath.Join(repository, ".vibesys", "tasks", "demo"), 0o755); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repository, ".vibesys", "tasks", "demo", "OBJECTIVE.md"), []byte("say hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", ".vibesys"}, {"commit", "-q", "-m", "demo task"}} {
+		cmd := exec.Command("git", append([]string{"-C", repository, "-c", "user.name=demo", "-c", "user.email=demo@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
 	}
 
 	first := r.serve()

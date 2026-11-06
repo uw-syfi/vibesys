@@ -17,8 +17,11 @@ type fakeTree map[string]bool
 func (t fakeTree) Exists(path string) bool { _, ok := t[path]; return ok }
 func (t fakeTree) IsDir(path string) bool  { return t[path] }
 
-// A fakeTree has no links.
-func (t fakeTree) RealPath(path string) (string, error) { return path, nil }
+// A fakeTree has no links and every repository in it is committed, task included, so that only the
+// rules about paths can refuse; osTree_test.go runs the history rules against real repositories.
+func (t fakeTree) RealPath(path string) (string, error)      { return path, nil }
+func (t fakeTree) HasCommit(string) (bool, error)            { return true, nil }
+func (t fakeTree) CommittedDir(string, string) (bool, error) { return true, nil }
 
 // readyLauncher is a launcher that is wired in; what it launches does not matter here.
 type readyLauncher struct{ NoSidecars }
@@ -30,7 +33,9 @@ type everythingIsADir struct{}
 func (everythingIsADir) Exists(string) bool { return true }
 func (everythingIsADir) IsDir(string) bool  { return true }
 
-func (everythingIsADir) RealPath(path string) (string, error) { return path, nil }
+func (everythingIsADir) RealPath(path string) (string, error)      { return path, nil }
+func (everythingIsADir) HasCommit(string) (bool, error)            { return true, nil }
+func (everythingIsADir) CommittedDir(string, string) (bool, error) { return true, nil }
 
 func refusal(t *testing.T, err error) *daemon.StartRefusal {
 	t.Helper()

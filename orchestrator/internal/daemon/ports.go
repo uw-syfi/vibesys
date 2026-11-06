@@ -123,7 +123,9 @@ var ErrPlanNotFound = errors.New("daemon: no such plan")
 type StartChecks interface {
 	// CheckStart returns the canonical form of repository (symbolic links resolved, so that one
 	// directory is one repository whichever way it was named) when a run of task in it can start,
-	// and a *StartRefusal when it cannot. It may be called for every start and must be cheap.
+	// and a *StartRefusal when it cannot. A repository that cannot feed the subagents' copies of it
+	// is refused: one with no commit, or one whose task is not committed. It may be called for every
+	// start and must be cheap.
 	CheckStart(repository, task string) (canonical string, err error)
 }
 

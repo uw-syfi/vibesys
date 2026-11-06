@@ -9,28 +9,14 @@ import (
 	"testing"
 )
 
-// realChecks is StartChecks over the real file system.
+// realChecks is StartChecks over the real file system and real git.
 var realChecks = StartChecks{Sidecars: readyLauncher{}, Tree: OSTree{}}
-
-// newRepository is a git work tree, as far as a start checks it, holding a task folder.
-func newRepository(t *testing.T) string {
-	t.Helper()
-	dir, err := filepath.EvalSymlinks(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, sub := range []string{".git", filepath.Join(".vibesys", "tasks", "demo")} {
-		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
-}
 
 // Any name for a repository, through any chain of links and with parts of the path that are links,
 // resolves to the one real directory: that is what keeps one repository to one run.
 func TestEveryNameOfARepositoryResolvesToTheRealDirectory(t *testing.T) {
 	real := newRepository(t)
+	commitAll(t, real)
 	for seed := uint64(1); seed <= 40; seed++ {
 		rng := rand.New(rand.NewPCG(seed, 11))
 		base, err := filepath.EvalSymlinks(t.TempDir())
