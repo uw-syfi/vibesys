@@ -124,6 +124,7 @@ const REFUSAL: Readonly<Record<Refusal, string>> = {
   [Refusal.DEADLINE_PASSED]: 'The run passed its deadline.',
   [Refusal.REPOSITORY_IN_USE]: 'Another run is already working in this repository.',
   [Refusal.AGENT_NOT_ALLOWED]: 'The run was not allowed to use that agent.',
+  [Refusal.HANDOFF_NOT_YOURS]: 'That handoff does not belong to the agent\u2019s role.',
 };
 
 export const refusalWord = (refusal: Refusal): string => REFUSAL[refusal];
