@@ -16,6 +16,8 @@ package workload
 import (
 	"fmt"
 	"math"
+
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/wire"
 )
 
 // Workload is the dataset, the model the operations share, and the operations: the Python
@@ -52,8 +54,8 @@ type Operation[M any] struct {
 }
 
 func (o Operation[M]) validate() error {
-	if !validName(o.Name) {
-		return fmt.Errorf("operation name %q must match %s", o.Name, namePattern)
+	if err := wire.CheckOperationNames([]string{o.Name}); err != nil {
+		return err
 	}
 	if !(o.Weight > 0) || math.IsInf(o.Weight, 0) {
 		return fmt.Errorf("operation %s: weight must be a finite number > 0, got %v", o.Name, o.Weight)
@@ -77,7 +79,7 @@ func (w Workload[D, M]) validate() error {
 			return err
 		}
 		if seen[o.Name] {
-			return fmt.Errorf("Workload has two operations named %q", o.Name)
+			return fmt.Errorf("two operations are named %q: operation names are unique", o.Name)
 		}
 		seen[o.Name] = true
 	}

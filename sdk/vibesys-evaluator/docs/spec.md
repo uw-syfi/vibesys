@@ -248,7 +248,7 @@ Listing: [`api/public-api.txt`](../api/public-api.txt).
 | Module | Names |
 | --- | --- |
 | `vibesys_evaluator` | `main`, `Run`, `Metric`, `Validity`, `Rand` |
-| `vibesys_evaluator.microservices` | `main`, `Run`, `PhaseResult`, `Workload`, `Generator`, `Operation`, `Request`, `Step`, `Template`, `http`, `get`, `post`, `put`, `ref` |
+| `vibesys_evaluator.microservices` | `main`, `Run`, `PhaseResult`, `Workload`, `Generator`, `Operation`, `Request`, `Step`, `Template`, `http`, `get`, `post`, `put`, `ref`, `Accuracy`, `Fault` |
 | `vibesys_evaluator.microservices.k8s` | `App`, `attach`, `Deployment`, `ExecResult`, `ReplacedPod` |
 | `vibesys_evaluator.llm_serving` | `endpoint` |
 | `vibesys_evaluator.llm_serving.agentx` | `replay`, `METRICS`, `HARNESS_VERSION` |
@@ -259,7 +259,10 @@ The microservices names:
 - `Workload(model, operations, begin_phase)`. `begin_phase(model, index)`,
   when given, is called once per phase before the first `build`.
 - `Operation(name, weight, build)`. `build(model, rand)` may change the
-  model; later operations of the stream see the change.
+  model; later operations of the stream see the change. A name is what
+  loadgen takes (`^[a-z][a-z0-9_]{0,62}$`: no dots or dashes), unique in the
+  workload; a bad one is refused when the operation is made, and loadgen
+  refuses a generator's at the stream's header, before any load.
 - `Request(*steps, info)`. Steps are sent in order on one client
   and form one operation with one latency. `info` (JSON) holds what the
   request was built from; it is not sent, and under capture it is kept for
@@ -290,8 +293,17 @@ The microservices names:
   generator built on `go/workload`, in the task image), run as
   `command + ["generate", ...]` ("Generator command line");
   `microservices.main(workload=Generator([...]))`.
-- `main(dataset, system, workload, benchmark, metrics, validity, capture)`.
-  `capture=True` records the accuracy history; benchmarks leave it off.
+- `main(dataset, system, workload, benchmark, metrics, validity, capture,
+  accuracy)`. `capture=True` records the accuracy history; benchmarks leave
+  it off. `accuracy` is the task's accuracy check, `bench.py accuracy`
+  ("Accuracy run").
+- `Accuracy(phases, rate, secs, oracle, warmup, arrivals, faults)`: the
+  check's open-loop phases, the oracle's command (a program on
+  `check.Main`; a relative path is the task script's directory's), and the
+  faults between phases: `Fault.restart(deployment, after=i)` (one pod),
+  `Fault.restart_all(deployment, after=i)` (every pod at once) and
+  `Fault.exec(deployment, argv, after=i)` (a command in the first pod), each
+  on a Deployment of the `k8s.App` after phase `i`.
 
 ## The Go SDK
 
@@ -309,7 +321,9 @@ service API's:
   index)` tells it the phase; D and M are any Go types (a task's existing
   reference state).
 - `Operation[M]{Name, Weight, Build}`: `Build(m, rand) Request`, which may
-  change the model.
+  change the model. Names follow the Python rule; `microservices.Main`
+  refuses a bad one before it deploys, and the generator before it writes
+  its stream.
 - `Request{Steps, Info}`; `HTTP(method, path, options...)` for GET, POST,
   PUT, DELETE and PATCH, and its shorthands `Get`/`Post`/`Put(path,
   options...)`, with `Query`, `Header`, `Form`, `JSON`, `Body`, `Capture`,
@@ -329,7 +343,12 @@ Capture})` has the Python main's command line (`benchmark`, `phase`,
 Warmup})`, `OpenLoop(ctx, Open{Rate, Secs, Warmup, Arrivals})` and
 `Fault(ctx, kind, target, action)` to the core's `evaluator.Run`;
 `Local(target)` is a `System` already running here (seed and phases as
-child processes).
+child processes), `K8s(app, ready...)` an application on Kubernetes (package
+`k8s`). `Task.Accuracy` is the task's accuracy check, the `accuracy` command
+("Accuracy run"): `Accuracy{Phases, Load, Faults, Oracle, Options}` with the
+faults `Restart(after, deployment)`, `RestartAll(after, deployment)`,
+`Exec(after, deployment, argv...)` (on `K8s`) and `FaultFunc(after, kind,
+target, action)` (the task's own), and the oracle's specs run in-process.
 
 ## Accuracy checks (`go/check`)
 
@@ -427,6 +446,43 @@ DIR/phase-<i>/kept.binpb     a KeptOperation for every operation (its info)
 - A directory without `history.binpb` (today's phase directories) is read
   with the phases it has, no faults, and `dataset.json` if present.
 
+### Accuracy run
+
+A task's accuracy check is one command of its script, the same flow in Go
+and Python:
+
+```text
+bench.py accuracy [--project-root DIR] [--out DIR] [--seed N]
+TASK_BINARY accuracy [--project-root DIR] [--out DIR] [--seed N] [--history DIR]
+```
+
+1. The dataset file goes into `OUT/history/` and the application is
+   deployed and seeded as for a benchmark sample (a namespace of its own on
+   Kubernetes, deleted on every path).
+2. `phases` open-loop phases of the check's load run through the phase
+   runner with capture on: every response body, the loadgen client of each
+   operation and the generator's `info`. A phase that is not a measurement
+   (the saturation guard, the validity rules) is logged and checked all the
+   same.
+3. After phase `i`, the faults with `after == i` run in order, each recorded
+   as a `FaultEvent` with its start and end on the loadgen clock. `restart`
+   deletes one pod of the Deployment (the first by name), `restart_all` every
+   pod at once, and both wait until it serves again (replicas available, the
+   ready steps through the gateway); `exec` runs a command in the first pod,
+   and a nonzero exit ends the run. A fault that cannot be applied (a
+   Kubernetes fault on a local application) ends it too.
+4. The application is torn down, then the oracle judges `OUT/history`: in
+   Go, the `Accuracy.Oracle` specs in-process (`check.Check`); in Python, the
+   oracle program with `--history OUT/history --out OUT`.
+
+The exit status is the verdict's: 0 PASS, 1 FAIL, 2 UNKNOWN, which is also
+the status of a run that could not complete (a deploy, a phase or a fault
+that failed, a signal), with `UNKNOWN: the accuracy run did not complete:
+...` on standard error. `OUT` (default `/vibesys/artifacts/accuracy`, or
+`accuracy/` in `$VIBESYS_ARTIFACTS_DIR`) holds `report.txt`, the failures'
+timelines and the history. The Go `--history DIR` judges a history again
+without running. The Python wrapper drives the core's `accuracy run`.
+
 ## Core command line (`vibesys-evaluator`)
 
 The Go module's `cmd/vibesys-evaluator` is the core the language SDKs wrap, one
@@ -463,10 +519,12 @@ The verbs (messages in `proto/vibesys/evaluator/v1/core.proto`, and
 | `hist summary` | merge HDR histograms and read percentiles from the sum |
 | `phase pod` | run one phase where the phase pod runs: loadgen and the generator, the pod's files (long: `{"event": PhaseEvent}` lines, then the response) |
 | `phase judge` | whether a phase's files are a measurement: the saturation guard and the validity rules |
+| `accuracy run` | an accuracy check: deploy and seed the application (Kubernetes, or a local one), run the phases with capture and the faults between them into the history directory, tear it down, run the oracle program (long: `{"event": PhaseEvent}` lines, then the verdict) |
 
 Error kinds a wrapper sees: `record` (a record the protocol refuses),
 `histogram`, `phase`, `invalid_argument`, `bad_request`, `io`, `cancelled`
-(a signal stopped a long verb).
+(a signal stopped a long verb), `deploy` and `run` (an accuracy run's
+deploy, or a phase or fault of it, failed).
 
 The logic is the Go package `evaluator` (`go/evaluator`), which task authors
 can use directly: `evaluator.Main(evaluator.Task{Metrics, Benchmark, Check,
@@ -624,7 +682,8 @@ All in `proto/vibesys/evaluator/v1/`; see the comments there for every field.
   `--state`), and the accuracy history's `HistoryManifest` and `FaultEvent`
   (see "Accuracy history"). `HistoryEntry`, `Violation` and the fields of
   the checks are no longer written.
-- `microservices.proto`: the core's `phase pod` and `phase judge`.
+- `microservices.proto`: the core's `phase pod`, `phase judge` and
+  `accuracy run`.
 
 Length-delimited binary is the default; `--format json` writes proto3 JSON,
 one message per line. Histograms are microseconds in the standard compressed

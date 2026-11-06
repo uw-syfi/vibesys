@@ -1,6 +1,7 @@
 """kv-store with its workload in Go: bench.py's task, the requests from generator/.
 
-The same task as bench.py (dataset, system, benchmark, metrics, validity);
+The same task as bench.py (dataset, system, benchmark, metrics, validity,
+accuracy check);
 only the workload is another program: the Go generator in `generator/`
 (built on the Go SDK, `go/workload`), which writes the same request
 stream as bench.py's WORKLOAD. The task image builds it next to this script:
@@ -31,4 +32,5 @@ if __name__ == "__main__":
             "operations_per_second": vse.Metric(unit="ops/s", direction="max"),
         },
         validity=vse.Validity(max_error_rate=0.001, min_sustained_ratio=0.99),
+        accuracy=bench.ACCURACY,
     )

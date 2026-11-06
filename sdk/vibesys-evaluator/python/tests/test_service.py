@@ -116,6 +116,11 @@ def test_a_request_takes_only_steps() -> None:
     ("operation", "match"),
     [
         pytest.param({"name": "Read", "weight": 1, "build": _build}, "name", id="name"),
+        pytest.param(
+            {"name": "config.create", "weight": 1, "build": _build},
+            "'config.create' is not one loadgen takes",
+            id="dotted-name",
+        ),
         pytest.param({"name": "read", "weight": 0, "build": _build}, "weight", id="zero-weight"),
         pytest.param(
             {"name": "read", "weight": float("inf"), "build": _build}, "weight", id="inf-weight"
@@ -138,5 +143,5 @@ def test_a_workload_needs_distinct_operations() -> None:
     read = Operation(name="read", weight=1, build=_build)
     with pytest.raises(ValueError, match="at least one"):
         Workload(model=lambda d, _r: d, operations=[])
-    with pytest.raises(ValueError, match="two operations named 'read'"):
+    with pytest.raises(ValueError, match="two operations are named 'read'"):
         Workload(model=lambda d, _r: d, operations=[read, read])

@@ -80,6 +80,8 @@
     "RefEncoding.REF_ENCODING_JSON_VALUE"
   ],
   "proto/vibesys/evaluator/v1/microservices.proto": [
+    "AccuracyRunRequest.history_dir",
+    "AccuracyRunRequest.out_dir",
     "PhaseJudgeRequest.phase_dir",
     "PhasePodRequest.dataset_file",
     "PhasePodRequest.work_dir"

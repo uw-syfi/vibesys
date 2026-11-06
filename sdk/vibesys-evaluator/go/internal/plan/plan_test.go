@@ -53,7 +53,9 @@ func TestReadRejectsPlansItCannotRun(t *testing.T) {
 		"steps":                               messages.RequestsFile(files.Binpb, names, messages.Op(0)),
 		"unsupported schema version":          messages.RequestsFileVersion(files.Binpb, 2, names, messages.Op(0, messages.Get("/"))),
 		"literal \"/\"":                       messages.RequestsFile(files.Binpb, names, messages.Op(0, messages.Get("x"))),
-		"operation_names":                     messages.RequestsFile(files.Binpb, []string{"Bad-Name"}, messages.Op(0, messages.Get("/"))),
+		`operation name "Bad-Name" is not one loadgen takes`:      messages.RequestsFile(files.Binpb, []string{"Bad-Name"}, messages.Op(0, messages.Get("/"))),
+		`operation name "config.create" is not one loadgen takes`: messages.RequestsFile(files.Binpb, []string{"config.create"}, messages.Op(0, messages.Get("/"))),
+		`two operations are named "a"`:                            messages.RequestsFile(files.Binpb, []string{"a", "a"}, messages.Op(0, messages.Get("/"))),
 	}
 	// A capture of the same step does not count: refs resolve against earlier steps only.
 	self := messages.CaptureJSON(messages.Get("/", messages.Raw("t")), "t", "/t")

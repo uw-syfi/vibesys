@@ -5,27 +5,17 @@ import (
 	"strings"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/wire"
 )
 
 // The schema's patterns, checked by hand: a regular expression per step showed in profiles.
 const (
-	namePattern    = `^[a-z][a-z0-9_]{0,62}$`
+	namePattern    = wire.NamePattern
 	pointerPattern = `^(/[^/]*)+$`
 )
 
 // validName reports whether name matches namePattern.
-func validName(name string) bool {
-	if len(name) < 1 || len(name) > 63 || name[0] < 'a' || name[0] > 'z' {
-		return false
-	}
-	for i := 1; i < len(name); i++ {
-		c := name[i]
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
-			return false
-		}
-	}
-	return true
-}
+func validName(name string) bool { return wire.ValidName(name) }
 
 // validPointer reports whether pointer matches pointerPattern: it starts with "/".
 func validPointer(pointer string) bool { return strings.HasPrefix(pointer, "/") }
@@ -151,6 +141,10 @@ type Step struct {
 	message  *pb.Step
 	refs     map[string]bool
 	captures []string
+}
+
+func init() {
+	wire.StepMessage = func(step any) *pb.Step { return step.(Step).message }
 }
 
 // String shows the method and path.

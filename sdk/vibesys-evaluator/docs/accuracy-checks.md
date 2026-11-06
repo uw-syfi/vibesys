@@ -37,11 +37,44 @@ func main() {
 }
 ```
 
-`check.Main` is the task's `[accuracy] command`: it reads the captured
-history directory, runs the check, writes `report.txt` and HTML timelines to
+`check.Main` is the oracle's command line: it reads the captured history
+directory, runs the check, writes `report.txt` and HTML timelines to
 `/vibesys/artifacts/accuracy/`, and exits 0 (PASS), 1 (FAIL) or 2 (UNKNOWN).
 Run the same binary on a copied history directory to debug a verdict
 offline.
+
+### Running the check
+
+The task's accuracy check runs its phases and its faults and then the oracle
+(`spec.md`, "Accuracy run"): `bench.py accuracy` for a Python task,
+
+```python
+ms.main(
+    ...,
+    accuracy=ms.Accuracy(
+        phases=3, rate=200, secs=30, warmup=5,
+        faults=[ms.Fault.restart_all("kv", after=0), ms.Fault.exec("kv", ["sync"], after=1)],
+        oracle=["./kv-oracle"],  # the oracle program, built next to bench.py
+    ),
+)
+```
+
+and the `accuracy` command of a Go task, whose oracle runs in-process:
+
+```go
+Accuracy: &microservices.Accuracy{
+    Phases: 3,
+    Load:   microservices.Open{Rate: 200, Secs: 30 * time.Second, Warmup: 5 * time.Second},
+    Faults: []microservices.Fault{microservices.RestartAll(0, "kv"), microservices.Exec(1, "kv", "sync")},
+    Oracle: oracle, // func(*check.History) ([]check.AnySpec, error), as for check.Main
+},
+```
+
+Each fault is a `FaultEvent` of its kind (`restart`, `restart_all`, `exec`,
+or a `FaultFunc`'s) on the Deployment; `Spec.Fault` says what it does to the
+state, and without one a fault changes nothing, so a store that loses
+acknowledged writes in a restart fails. The kv-store example
+(`examples/kv-store`) has both forms.
 
 ### Projection
 
