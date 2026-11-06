@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from google.protobuf.message import DecodeError
 
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -51,11 +51,11 @@ class RawRecord:
 class Store(Protocol):
     """What a session remembers across a restart of its sidecar."""
 
-    def append(self, event: sc.SidecarEvent) -> sc.SidecarEvent:
+    def append(self, event: sc.SessionEvent) -> sc.SessionEvent:
         """Number *event* with the next offset and keep it. Returns the numbered event."""
         ...
 
-    def events_after(self, offset: int) -> list[sc.SidecarEvent]:
+    def events_after(self, offset: int) -> list[sc.SessionEvent]:
         """The kept events with an offset above *offset*, in order."""
         ...
 
@@ -146,7 +146,7 @@ class DiskFiles:
         return DiskLog(self._directory / name)
 
 
-def encode_events(events: Iterable[sc.SidecarEvent]) -> bytes:
+def encode_events(events: Iterable[sc.SessionEvent]) -> bytes:
     """The event log format: each event as a 4-byte big-endian length, then its bytes."""
     out = bytearray()
     for event in events:
@@ -155,21 +155,21 @@ def encode_events(events: Iterable[sc.SidecarEvent]) -> bytes:
     return bytes(out)
 
 
-def decode_events(data: bytes) -> tuple[list[sc.SidecarEvent], int]:
+def decode_events(data: bytes) -> tuple[list[sc.SessionEvent], int]:
     """The whole events in *data* and the number of bytes they take.
 
     Stops at the first torn record (a short length or body, an oversized length, or bytes that
     are not an event) without raising, so a crash mid-write loses only the record it tore. Total
     over any input: the fuzz target.
     """
-    events: list[sc.SidecarEvent] = []
+    events: list[sc.SessionEvent] = []
     at = 0
     while at + _LENGTH.size <= len(data):
         (size,) = _LENGTH.unpack_from(data, at)
         end = at + _LENGTH.size + size
         if size > MAX_RECORD or end > len(data):
             break
-        event = sc.SidecarEvent()
+        event = sc.SessionEvent()
         try:
             event.ParseFromString(data[at + _LENGTH.size : end])
         except DecodeError:
@@ -220,7 +220,7 @@ class MemoryStore:
 
     def __init__(
         self,
-        events: Iterable[sc.SidecarEvent] = (),
+        events: Iterable[sc.SessionEvent] = (),
         raw: Iterable[RawRecord] = (),
         effects: Iterable[str] = (),
     ) -> None:
@@ -233,15 +233,15 @@ class MemoryStore:
     def _last(self) -> int:
         return self._events[-1].offset if self._events else 0
 
-    def numbered(self, event: sc.SidecarEvent) -> sc.SidecarEvent:
+    def numbered(self, event: sc.SessionEvent) -> sc.SessionEvent:
         """A copy of *event* with the offset it would take next. Keeps nothing."""
         with self._lock:
-            numbered = sc.SidecarEvent()
+            numbered = sc.SessionEvent()
             numbered.CopyFrom(event)
             numbered.offset = self._last() + 1
             return numbered
 
-    def keep(self, numbered: sc.SidecarEvent) -> None:
+    def keep(self, numbered: sc.SessionEvent) -> None:
         """Keep an event ``numbered`` gave out; it must still be the next offset."""
         with self._lock:
             if numbered.offset != self._last() + 1:
@@ -249,16 +249,16 @@ class MemoryStore:
                 raise ValueError(msg)
             self._events.append(numbered)
 
-    def append(self, event: sc.SidecarEvent) -> sc.SidecarEvent:
+    def append(self, event: sc.SessionEvent) -> sc.SessionEvent:
         """See ``Store.append``."""
         with self._lock:
-            numbered = sc.SidecarEvent()
+            numbered = sc.SessionEvent()
             numbered.CopyFrom(event)
             numbered.offset = self._last() + 1
             self._events.append(numbered)
             return numbered
 
-    def events_after(self, offset: int) -> list[sc.SidecarEvent]:
+    def events_after(self, offset: int) -> list[sc.SessionEvent]:
         """See ``Store.events_after``."""
         with self._lock:
             return [event for event in self._events if event.offset > offset]
@@ -329,7 +329,7 @@ class FileStore:
         """The store in *directory* on disk."""
         return cls(DiskFiles(directory))
 
-    def append(self, event: sc.SidecarEvent) -> sc.SidecarEvent:
+    def append(self, event: sc.SessionEvent) -> sc.SessionEvent:
         """See ``Store.append``. Raises the write's error, with the file as it was."""
         with self._events.lock:
             numbered = self._memory.numbered(event)
@@ -337,7 +337,7 @@ class FileStore:
             self._memory.keep(numbered)
             return numbered
 
-    def events_after(self, offset: int) -> list[sc.SidecarEvent]:
+    def events_after(self, offset: int) -> list[sc.SessionEvent]:
         """See ``Store.events_after``."""
         return self._memory.events_after(offset)
 

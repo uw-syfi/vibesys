@@ -59,9 +59,6 @@ func OpenEngine(d EngineDeps) (*Engine, error) {
 		d.Log = slog.New(slog.DiscardHandler)
 	}
 	e := &Engine{EngineDeps: d, state: state, last: snap.Sequence, searches: map[core.RunID]*pb.SearchState{}}
-	if err := e.upgradeLocations(); err != nil {
-		return nil, err
-	}
 	return e, nil
 }
 

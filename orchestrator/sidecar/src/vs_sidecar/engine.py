@@ -1,6 +1,6 @@
 """The sidecar's session logic, with no socket and no thread of its own.
 
-``Engine`` carries out ``SidecarCommand``s, folds what the provider does into numbered events and
+``Engine`` carries out ``SessionCommand``s, folds what the provider does into numbered events and
 keeps them in a ``Store``. The shell (``server.py``, ``main.py``) calls ``send`` from its RPC threads
 and ``run_next`` and ``poll_idle`` from one worker thread; tests call all three in a fixed order.
 
@@ -32,9 +32,9 @@ import protovalidate
 from agentshim import AgentShimError
 
 from vs_sidecar.driver import StartError, SteerRefusedError
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 from vs_sidecar.normalize import SteerBook, TurnNormalizer
 from vs_sidecar.prompts import render
 from vs_sidecar.store import FrameDirection
@@ -64,17 +64,17 @@ class Engine:
 
     def __init__(
         self,
-        launch: fx.LaunchSession,
+        session: fx.SessionRef,
         store: Store,
         driver_factory: Callable[[Callable[[RawFrame], None]], Driver],
         notify: Callable[[], None] = lambda: None,
     ) -> None:
-        """Hold the session *launch* describes.
+        """Hold the session *session*.
 
         *driver_factory* receives the sink for raw provider frames and returns the driver; *notify*
         is called after each event is kept, to wake whoever follows the log.
         """
-        self._launch = launch
+        self._session = session
         self._store = store
         self._driver_factory = driver_factory
         self._notify = notify
@@ -116,7 +116,7 @@ class Engine:
                 )
             return
         with self._lock:
-            if not opened.conversation_id:
+            if opened.capabilities.resumes and not opened.conversation_id:
                 self._fail(
                     "could not start the agent: the provider did not name the conversation",
                     orch.START_FAILURE_REASON_OTHER,
@@ -124,22 +124,19 @@ class Engine:
                 driver.close()
                 return
             self._driver = driver
+            token = opened.conversation_id.encode() if opened.capabilities.resumes else b""
             self._append(
-                sc.SidecarEvent(
-                    opened=sc.ConversationOpened(
-                        provider_conversation_id=opened.conversation_id,
-                        capabilities=opened.capabilities,
-                        worktree=self._launch.worktree,
-                    )
+                sc.SessionEvent(
+                    opened=sc.SessionOpened(resume_token=token, capabilities=opened.capabilities)
                 )
             )
 
-    def _resume_history(self, history: list[sc.SidecarEvent]) -> None:
+    def _resume_history(self, history: list[sc.SessionEvent]) -> None:
         kinds = [event.WhichOneof("body") for event in history]
         if "closed" in kinds:
             self._closed = True
             return
-        last_item: dict[str, sc.SidecarItem] = {}
+        last_item: dict[str, sc.SessionItem] = {}
         for event in history:
             if event.HasField("item"):
                 last_item[event.item.id] = event.item
@@ -153,14 +150,14 @@ class Engine:
                 if item.status == orch.ITEM_STATUS_RUNNING and (
                     turn_id is None or item.turn_id == turn_id
                 ):
-                    lost = sc.SidecarItem()
+                    lost = sc.SessionItem()
                     lost.CopyFrom(item)
                     lost.status = orch.ITEM_STATUS_FAILED
                     last_item[item.id] = lost
-                    self._append(sc.SidecarEvent(item=lost))
+                    self._append(sc.SessionEvent(item=lost))
             if turn_id is not None:
                 self._append(
-                    sc.SidecarEvent(
+                    sc.SessionEvent(
                         turn_ended=sc.TurnEnded(turn_id=turn_id, status=orch.TURN_STATUS_FAILED)
                     )
                 )
@@ -175,14 +172,14 @@ class Engine:
         self._failed = True
         self._end_idle(orch.TURN_STATUS_FAILED)
         self._append(
-            sc.SidecarEvent(
+            sc.SessionEvent(
                 failed=sc.SessionFailed(detail=detail, start_failure_reason=start_failure)
             )
         )
 
     # -- reading
 
-    def events_after(self, offset: int) -> list[sc.SidecarEvent]:
+    def events_after(self, offset: int) -> list[sc.SessionEvent]:
         """The kept events after *offset*."""
         with self._lock:
             return self._store.events_after(offset)
@@ -205,7 +202,7 @@ class Engine:
 
     # -- commands
 
-    def send(self, command: sc.SidecarCommand) -> None:
+    def send(self, command: sc.SessionCommand) -> None:
         """Carry out *command*. A repeated effect id changes nothing.
 
         Raises ``InvalidCommandError`` for a command that breaks its contract or addresses another
@@ -217,11 +214,8 @@ class Engine:
             raise InvalidCommandError(str(error)) from error
         body = command.WhichOneof("body")
         ref = getattr(command, body).session
-        if (ref.agent_id, ref.session) != (
-            self._launch.session.agent_id,
-            self._launch.session.session,
-        ):
-            msg = f"command is for session {ref.agent_id}/{ref.session}, this is {self._launch.session.agent_id}/{self._launch.session.session}"
+        if (ref.agent_id, ref.session) != (self._session.agent_id, self._session.session):
+            msg = f"command is for session {ref.agent_id}/{ref.session}, this is {self._session.agent_id}/{self._session.session}"
             raise InvalidCommandError(msg)
         try:
             with self._lock:
@@ -267,7 +261,7 @@ class Engine:
                 self._steers.add(steer.message.id, text)
             elif not self._closed:
                 self._append(
-                    sc.SidecarEvent(
+                    sc.SessionEvent(
                         steer=sc.SteerOutcome(message_id=steer.message.id, accepted=False)
                     )
                 )
@@ -279,7 +273,7 @@ class Engine:
             with self._lock:
                 if self._steers.take(text) is not None:
                     self._append(
-                        sc.SidecarEvent(
+                        sc.SessionEvent(
                             steer=sc.SteerOutcome(message_id=steer.message.id, accepted=False)
                         )
                     )
@@ -293,7 +287,7 @@ class Engine:
         for turn_id, prompt, message in self._pending:
             if matches(turn_id):
                 self._append(
-                    sc.SidecarEvent(
+                    sc.SessionEvent(
                         turn_ended=sc.TurnEnded(
                             turn_id=turn_id, status=orch.TURN_STATUS_INTERRUPTED
                         )
@@ -344,7 +338,7 @@ class Engine:
             driver.close()
         with self._lock:
             self._end_idle(orch.TURN_STATUS_FAILED)
-            self._append(sc.SidecarEvent(closed=sc.SessionClosed()))
+            self._append(sc.SessionEvent(closed=sc.SessionClosed()))
             # Only once the close is on disk: a failed write leaves the session open, so the
             # daemon's retried close is not dropped as already done.
             self._closed = True
@@ -417,9 +411,9 @@ class Engine:
 
     # -- log
 
-    def _append(self, event: sc.SidecarEvent) -> None:
+    def _append(self, event: sc.SessionEvent) -> None:
         # The offset is the store's to give, so a copy with a placeholder is what is checked.
-        probe = sc.SidecarEvent()
+        probe = sc.SessionEvent()
         probe.CopyFrom(event)
         probe.offset = 1
         try:

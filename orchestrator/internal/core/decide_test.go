@@ -65,12 +65,12 @@ func (w *script) fact(a core.AgentID, body core.FactBody) {
 	}
 	session := core.Session{Agent: a, N: agent.Session}
 	w.offsets[session]++
-	w.step(core.SidecarFact{Session: session, Offset: w.offsets[session], Body: body})
+	w.step(core.SessionFact{Session: session, Offset: w.offsets[session], Body: body})
 }
 
 func (w *script) open(a core.AgentID, caps core.Capabilities) {
 	w.t.Helper()
-	w.fact(a, core.ConversationOpened{ConversationID: "conv-" + string(a), Capabilities: caps, Worktree: "/w/" + string(a)})
+	w.fact(a, core.SessionOpened{ResumeToken: "conv-" + string(a), Capabilities: caps})
 }
 
 func (w *script) turn(a core.AgentID) core.Turn {
@@ -363,7 +363,7 @@ func TestDeliveryByAgentStateAndCapability(t *testing.T) {
 			w, run, leadID := started(t, 1, steers)
 			a := w.spawn(run, leadID, steers)
 			got, _ := w.s.Agent(a)
-			w.step(core.SidecarLost{Session: core.Session{Agent: a, N: got.Session}})
+			w.step(core.SessionLost{Session: core.Session{Agent: a, N: got.Session}})
 			return w, a
 		}, core.DeliveryQueued, []string{"LaunchSession", "ArmTimer"}},
 		{"ended and not capable is rejected", func(t *testing.T) (*script, core.AgentID) {
@@ -412,10 +412,10 @@ func TestAResumedSessionKeepsItsConversationAndFencesTheOldOne(t *testing.T) {
 	w.fact(a, core.SessionClosed{})
 	w.command(operator, core.SendMessage{Agent: a, Text: "again"})
 	launch := w.effects[0].(core.LaunchSession)
-	if launch.ConversationID != "conv-"+string(a) || launch.Session.N != 2 || launch.Worktree == "" {
+	if launch.ResumeToken != "conv-"+string(a) || launch.Session.N != 2 {
 		t.Fatalf("resume = %+v", launch)
 	}
-	w.step(core.SidecarFact{Session: old, Offset: 99, Body: core.SessionFailed{Detail: "late"}})
+	w.step(core.SessionFact{Session: old, Offset: 99, Body: core.SessionFailed{Detail: "late"}})
 	if len(w.events) != 0 {
 		t.Fatalf("a fact from a replaced session recorded %v", w.events)
 	}
@@ -497,7 +497,7 @@ func TestASubagentThatStopsWithoutAHandoffWakesTheLead(t *testing.T) {
 		},
 		"failed": func(w *script, a core.AgentID) { w.fact(a, core.SessionFailed{Detail: "boom"}) },
 		"closed": func(w *script, a core.AgentID) { w.fact(a, core.SessionClosed{}) },
-		"lost":   func(w *script, a core.AgentID) { w.step(core.SidecarLost{Session: core.Session{Agent: a, N: 1}}) },
+		"lost":   func(w *script, a core.AgentID) { w.step(core.SessionLost{Session: core.Session{Agent: a, N: 1}}) },
 	}
 	for name, end := range ends {
 		t.Run(name, func(t *testing.T) {
@@ -640,7 +640,7 @@ func TestALostSidecarFailsItsTurnAndHoldsItsMessageForTheResume(t *testing.T) {
 	r := w.command(operator, core.SendMessage{Agent: leadID, Text: "wake"})
 	turn := w.turn(leadID)
 	w.fact(leadID, core.ItemObserved{ID: "i1", Turn: turn.ID, Status: core.ItemRunning, Body: core.Assistant{Text: "hm"}})
-	w.step(core.SidecarLost{Session: core.Session{Agent: leadID, N: 1}})
+	w.step(core.SessionLost{Session: core.Session{Agent: leadID, N: 1}})
 	w.wantEffects("LaunchSession", "ArmTimer")
 	var item core.Item
 	var ended core.Turn
@@ -666,12 +666,12 @@ func TestALeadThatKeepsDyingFailsTheRun(t *testing.T) {
 	worker := w.spawn(run, leadID, steers)
 	for range core.MaxLeadResumes {
 		a, _ := w.s.Agent(leadID)
-		w.step(core.SidecarLost{Session: core.Session{Agent: leadID, N: a.Session}})
+		w.step(core.SessionLost{Session: core.Session{Agent: leadID, N: a.Session}})
 		w.wantEffects("LaunchSession", "ArmTimer")
 		w.open(leadID, steers)
 	}
 	a, _ := w.s.Agent(leadID)
-	w.step(core.SidecarLost{Session: core.Session{Agent: leadID, N: a.Session}})
+	w.step(core.SessionLost{Session: core.Session{Agent: leadID, N: a.Session}})
 	got, _ := w.s.Run(run)
 	if got.Status != core.RunStopping || got.StopReason != core.StopLeadGone {
 		t.Fatalf("run is %+v, want stopping because the lead is gone", got)
@@ -686,7 +686,7 @@ func TestALeadThatKeepsDyingFailsTheRun(t *testing.T) {
 func TestALeadThatCannotResumeFailsARunStillStarting(t *testing.T) {
 	w := newScript(t)
 	r := w.command(operator, core.StartRun{Repository: "r", Task: "t", Lead: lead, Brief: "b"})
-	w.step(core.SidecarLost{Session: core.Session{Agent: r.Agent, N: 1}})
+	w.step(core.SessionLost{Session: core.Session{Agent: r.Agent, N: 1}})
 	if got, _ := w.s.Run(r.Run); got.Status != core.RunFailed {
 		t.Fatalf("run is %s, want failed", got.Status)
 	}
@@ -879,7 +879,7 @@ func TestAFactAtACommittedOffsetIsDropped(t *testing.T) {
 	w, _, leadID := started(t, 0, steers)
 	session := core.Session{Agent: leadID, N: 1}
 	committed := w.s.CommittedOffset(session)
-	w.step(core.SidecarFact{Session: session, Offset: committed, Body: core.SessionFailed{Detail: "again"}})
+	w.step(core.SessionFact{Session: session, Offset: committed, Body: core.SessionFailed{Detail: "again"}})
 	if len(w.events) != 0 {
 		t.Fatalf("a repeated fact recorded %v", w.events)
 	}

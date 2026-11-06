@@ -1,8 +1,8 @@
 """The real ``Machine``: scripted effects run as processes on this host.
 
 This is the e2e tier's one use of real processes. ``Shell`` runs in the agent's worktree with the
-agent's environment, and ``Mcp`` starts the orchestrator's MCP server exactly as the sidecar's
-``mcp.json`` names it, with the session identity, and speaks its stdio protocol for one call.
+agent's environment, and ``Mcp`` starts the orchestrator's MCP server exactly as ``Open`` names it,
+with the session identity, and speaks its stdio protocol for one call.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ class HostMachine:
                 "params": {"name": effect.tool, "arguments": dict(effect.arguments)},
             },
         ]
-        # lint-waiver: LW-997302 [S603]; The MCP server command is the one the daemon wrote into mcp.json, run without a shell.
+        # lint-waiver: LW-997302 [S603]; The MCP server command is the one the host named in Open, run without a shell.
         # > A wrapper would only move this one call: argv is already a list and shell=False.
         done = subprocess.run(  # noqa: S603
             [self._server.command, *self._server.args],

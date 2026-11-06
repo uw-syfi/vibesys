@@ -21,17 +21,17 @@ from vs_sidecar.store import MemoryStore
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
+    from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 
 
 def _engine(driver: ScriptedDriver) -> tuple[Engine, MemoryStore]:
     store = MemoryStore()
-    engine = Engine(h.launch(), store, lambda _sink: driver)
+    engine = Engine(h.REF, store, lambda _sink: driver)
     engine.start()
     return engine, store
 
 
-def _ends(events: list[sc.SidecarEvent]) -> dict[str, int]:
+def _ends(events: list[sc.SessionEvent]) -> dict[str, int]:
     return {e.turn_ended.turn_id: e.turn_ended.status for e in events if e.HasField("turn_ended")}
 
 

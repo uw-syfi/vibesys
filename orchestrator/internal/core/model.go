@@ -50,7 +50,7 @@ type AgentSpec struct {
 	Effort  EffortName
 }
 
-// Capabilities are what a session can do, as its sidecar reports them. All are false until the
+// Capabilities are what a session can do, as the session reports them. All are false until the
 // session opens, which is the safe answer: nothing is steered into or resumed from a session that
 // has not said it can.
 type Capabilities struct {
@@ -61,18 +61,19 @@ type Capabilities struct {
 
 // Agent is one session we launched, in a tree under the lead.
 type Agent struct {
-	ID             AgentID
-	Run            RunID
-	Parent         AgentID
-	Role           AgentRole
-	Spec           AgentSpec
-	PlanNumber     uint32
-	Worktree       string
-	Status         AgentStatus
-	ConversationID string
-	Capabilities   Capabilities
-	StartedAt      time.Time
-	EndedAt        time.Time
+	ID         AgentID
+	Run        RunID
+	Parent     AgentID
+	Role       AgentRole
+	Spec       AgentSpec
+	PlanNumber uint32
+	Status     AgentStatus
+	// ResumeToken is what the session's holder said a later session continues from. Opaque here,
+	// and empty until a session that can resume opened.
+	ResumeToken  string
+	Capabilities Capabilities
+	StartedAt    time.Time
+	EndedAt      time.Time
 	// Session counts the agent's sessions and fences them: a fact from an earlier one is dropped.
 	Session uint32
 	Stop    StopStage

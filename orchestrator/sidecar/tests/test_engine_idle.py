@@ -13,7 +13,7 @@ from vs_sidecar.store import MemoryStore
 
 def _engine(driver: ScriptedDriver) -> tuple[Engine, MemoryStore]:
     store = MemoryStore()
-    engine = Engine(h.launch(), store, lambda _sink: driver)
+    engine = Engine(h.REF, store, lambda _sink: driver)
     engine.start()
     return engine, store
 

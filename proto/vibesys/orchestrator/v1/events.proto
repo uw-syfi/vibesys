@@ -7,9 +7,9 @@ import "vibesys/orchestrator/v1/orchestrator.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
-// SidecarSource names the sidecar event a stored event came from, so that a replay knows how far
+// SessionSource names the session event a stored event came from, so that a replay knows how far
 // each session's stream was committed. It is what a restarted daemon resumes that stream from.
-message SidecarSource {
+message SessionSource {
   string agent_id = 1 [(buf.validate.field).string.min_len = 1];
   uint32 session = 2 [(buf.validate.field).uint32.gt = 0];
   uint64 offset = 3 [(buf.validate.field).uint64.gt = 0];
@@ -25,8 +25,8 @@ message Event {
   // Empty unless a command caused the event.
   string command_id = 3;
   google.protobuf.Timestamp at = 4 [(buf.validate.field).required = true];
-  // Absent unless a sidecar event caused the event.
-  SidecarSource source = 5;
+  // Absent unless a session event caused the event.
+  SessionSource source = 5;
   oneof body {
     option (buf.validate.oneof).required = true;
     Run run_updated = 10;
@@ -89,7 +89,10 @@ message SpawnAgent {
   // Any role but the lead's.
   AgentRole role = 2 [(buf.validate.field).enum = {
     defined_only: true
-    not_in: [0, 1]
+    not_in: [
+      0,
+      1
+    ]
   }];
   AgentSpec spec = 3;
   uint32 plan_number = 4;

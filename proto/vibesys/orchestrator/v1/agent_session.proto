@@ -1,0 +1,289 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/orchestrator/v1/effects.proto";
+import "vibesys/orchestrator/v1/orchestrator.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// AgentSessionService is what the program holding one agent's session serves over a local socket.
+// There is one per session, and it outlives the host, so a host restart reattaches and loses only
+// deltas. Nothing here says what that program is.
+service AgentSessionService {
+  // Hello says who answers on this socket and whether it can work with the caller. A host calls it
+  // before anything else, also on a process it did not start, because a session outlives a host
+  // and so can be older or newer than it.
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc Hello(SessionHelloRequest) returns (SessionHelloResponse);
+  // Open starts the agent, and answers once it has taken the request: the first event of Follow says
+  // whether the session opened or why it did not. A repeat for the session already held answers the
+  // same and starts nothing. A request that breaks this contract is refused with INVALID_ARGUMENT
+  // naming the field, and one for another session with FAILED_PRECONDITION.
+  // buf:lint:ignore RPC_REQUEST_STANDARD_NAME
+  // buf:lint:ignore RPC_RESPONSE_STANDARD_NAME
+  rpc Open(OpenSessionRequest) returns (OpenSessionResponse);
+  // Send carries out a command. A repeated effect_id answers as the first delivery did. Before Open
+  // it is refused with FAILED_PRECONDITION.
+  rpc Send(SendRequest) returns (SendResponse);
+  // Follow streams the session's events after an offset. Before Open it is refused with
+  // FAILED_PRECONDITION.
+  rpc Follow(FollowRequest) returns (stream FollowResponse);
+}
+
+// SessionProtocolVersion holds the one number both sides of this service carry in BuildVersions, so
+// that both get it from this file. CURRENT rises when a change here breaks a peer.
+enum SessionProtocolVersion {
+  SESSION_PROTOCOL_VERSION_UNSPECIFIED = 0;
+  SESSION_PROTOCOL_VERSION_CURRENT = 1;
+}
+
+// SessionBootstrap is the one message a session's process reads, as binary, from its standard input
+// until it ends. It has no arguments, so there is nothing else to agree on.
+message SessionBootstrap {
+  // Where to serve AgentSessionService.
+  string listen_socket = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).cel = {
+      id: "session_bootstrap.listen_socket.absolute"
+      message: "must be an absolute path"
+      expression: "this.startsWith('/')"
+    }
+  ];
+  // The directory private to this process, which only it reads.
+  string state_directory = 2 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).cel = {
+      id: "session_bootstrap.state_directory.absolute"
+      message: "must be an absolute path"
+      expression: "this.startsWith('/')"
+    }
+  ];
+}
+
+message SessionHelloRequest {
+  BuildVersions client = 1 [(buf.validate.field).required = true];
+}
+
+message SessionHelloResponse {
+  BuildVersions versions = 1 [(buf.validate.field).required = true];
+  Compatibility compatibility = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // The session this process holds. Absent until it was opened, so a host that died between
+  // starting the process and Open knows to open it.
+  SessionRef session = 3;
+}
+
+message OpenSessionRequest {
+  SessionRef session = 1 [(buf.validate.field).required = true];
+  Harness harness = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string model = 3;
+  string reasoning_effort = 4;
+  // The directory the agent works in.
+  string working_directory = 5 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).cel = {
+      id: "open_session.working_directory.absolute"
+      message: "must be an absolute path"
+      expression: "this.startsWith('/')"
+    }
+  ];
+  // A directory private to the agent and kept across its sessions. What is in it is the agent's.
+  string agent_data_directory = 6 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).cel = {
+      id: "open_session.agent_data_directory.absolute"
+      message: "must be an absolute path"
+      expression: "this.startsWith('/')"
+    }
+  ];
+  // Set to continue where an earlier session of this agent stopped: the token its SessionOpened
+  // gave. Opaque to the host.
+  bytes resume_token = 7 [(buf.validate.field).bytes.max_len = 4096];
+  // The skills every session loads, and none of the operator's own plugins, skills or config.
+  SessionSkills skills = 8 [(buf.validate.field).required = true];
+  // The tools the agent is given. Their names are unique.
+  repeated ToolServer tools = 9 [(buf.validate.field).cel = {
+    id: "open_session.tools.unique"
+    message: "tool server names must be unique"
+    expression: "this.map(t, t.name).unique()"
+  }];
+  // What the agent's environment holds besides the login environment.
+  AgentEnvironment environment = 10 [(buf.validate.field).required = true];
+}
+
+// OpenSessionResponse says the request was taken. It names the session, so a repeat answers the same.
+message OpenSessionResponse {
+  SessionRef session = 1 [(buf.validate.field).required = true];
+}
+
+// SessionSkills is a published skill bundle, named by value so the session never guesses where one is.
+// Loading it is the session's to try: a bundle that cannot be loaded fails the start with
+// START_FAILURE_REASON_PLUGIN_UNAVAILABLE.
+message SessionSkills {
+  // The directory holding the bundle's index.
+  string directory = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (buf.validate.field).cel = {
+      id: "skill_bundle.directory.absolute"
+      message: "must be an absolute path"
+      expression: "this.startsWith('/')"
+    }
+  ];
+  // The bundle's name in that index.
+  string name = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// ToolServer is a program that serves the agent tools over its standard input and output. Its
+// credentials are in env, so they reach the session in this message and rest nowhere.
+message ToolServer {
+  string name = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9_-]+$"];
+  // The program and its arguments. The program is an absolute path.
+  repeated string argv = 2 [
+    (buf.validate.field).repeated.min_items = 1,
+    (buf.validate.field).cel = {
+      id: "tool_server.argv.absolute"
+      message: "the program must be an absolute path"
+      expression: "this.size() == 0 || this[0].startsWith('/')"
+    }
+  ];
+  map<string, string> env = 3 [(buf.validate.field).map.keys.string.pattern = "^[A-Za-z_][A-Za-z0-9_]*$"];
+}
+
+// AgentEnvironment is laid over the login environment of the session's agent. The holder does not
+// interpret it: the names belong to whoever builds it and whoever reads them.
+message AgentEnvironment {
+  option (buf.validate.message).cel = {
+    id: "agent_environment.set_or_unset"
+    message: "a name cannot be both set and unset"
+    expression: "this.unset.all(name, !(name in this.set))"
+  };
+
+  map<string, string> set = 1 [(buf.validate.field).map.keys.string.pattern = "^[A-Za-z_][A-Za-z0-9_]*$"];
+  repeated string unset = 2 [(buf.validate.field).repeated.items.string.pattern = "^[A-Za-z_][A-Za-z0-9_]*$"];
+}
+
+// SessionCommand is an effect addressed to a live session. Opening one is not: that is Open.
+message SessionCommand {
+  // The id of the effect this carries out.
+  string effect_id = 1 [(buf.validate.field).string.min_len = 1];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    StartTurn start_turn = 2;
+    Steer steer = 3;
+    Interrupt interrupt = 4;
+    CloseSession close = 5;
+  }
+}
+
+message SendRequest {
+  SessionCommand command = 1 [(buf.validate.field).required = true];
+}
+
+message SendResponse {}
+
+message FollowRequest {
+  // The last offset the host committed. Zero reads from the start.
+  uint64 after_offset = 1;
+}
+
+message FollowResponse {
+  SessionEvent event = 1 [(buf.validate.field).required = true];
+}
+
+// SessionOpened says a session is ready.
+message SessionOpened {
+  option (buf.validate.message).cel = {
+    id: "session_opened.resume_token"
+    message: "a session that can resume gives a token to resume with, and only it"
+    expression: "(size(this.resume_token) > 0) == this.capabilities.resumes"
+  };
+
+  // What a later session of this agent opens with to continue from here. Opaque to the host.
+  bytes resume_token = 1 [(buf.validate.field).bytes.max_len = 4096];
+  Capabilities capabilities = 2 [(buf.validate.field).required = true];
+}
+
+// SessionItem is an item as the agent reports it. The orchestrator assigns its ordinal and agent.
+message SessionItem {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  string turn_id = 2 [(buf.validate.field).string.min_len = 1];
+  ItemStatus status = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    Text assistant = 10;
+    Text reasoning = 11;
+    Text prompt = 12;
+    ToolCall tool = 13;
+  }
+}
+
+message SessionDelta {
+  string item_id = 1 [(buf.validate.field).string.min_len = 1];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    string text = 2;
+    string command_output = 3;
+  }
+}
+
+message TurnEnded {
+  string turn_id = 1 [(buf.validate.field).string.min_len = 1];
+  // A final status: COMPLETED, INTERRUPTED or FAILED.
+  TurnStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    in: [
+      2,
+      3,
+      4
+    ]
+  }];
+  Usage usage = 3;
+}
+
+// SteerOutcome answers one Steer. It follows the TurnEnded of a turn the steer came too late for.
+message SteerOutcome {
+  string message_id = 1 [(buf.validate.field).string.min_len = 1];
+  // False when the turn it was meant for had ended.
+  bool accepted = 2;
+}
+
+message UsageReported {
+  string turn_id = 1 [(buf.validate.field).string.min_len = 1];
+  Usage usage = 2 [(buf.validate.field).required = true];
+}
+
+message SessionFailed {
+  string detail = 1 [(buf.validate.field).string.min_len = 1];
+  // Why the session never opened, when it failed before it did. Unspecified for a failure of a
+  // session that had opened.
+  StartFailureReason start_failure_reason = 2 [(buf.validate.field).enum.defined_only = true];
+}
+
+// SessionClosed confirms a session is over. It is the last event of a session.
+message SessionClosed {}
+
+message SessionEvent {
+  // Increases within a session; deltas take offsets too, so offsets can skip.
+  uint64 offset = 1 [(buf.validate.field).uint64.gt = 0];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    SessionOpened opened = 10;
+    SessionItem item = 11;
+    SessionDelta delta = 12;
+    TurnEnded turn_ended = 13;
+    SteerOutcome steer = 14;
+    UsageReported usage = 15;
+    SessionFailed failed = 16;
+    SessionClosed closed = 17;
+  }
+}

@@ -239,7 +239,7 @@ func (*Effect_CloseSession) isEffect_Body() {}
 
 func (*Effect_ArmTimer) isEffect_Body() {}
 
-// SessionRef names one session of one agent. A sidecar refuses a stale one.
+// SessionRef names one session of one agent. The program holding a session refuses a stale one.
 type SessionRef struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
@@ -292,26 +292,18 @@ func (x *SessionRef) GetSession() uint32 {
 	return 0
 }
 
+// LaunchSession asks for a session of an agent. What else the session needs comes from the run and
+// the host's configuration when the effect is carried out.
 type LaunchSession struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Session         *SessionRef            `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
 	RunId           string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	Repository      string                 `protobuf:"bytes,3,opt,name=repository,proto3" json:"repository,omitempty"`
-	Role            AgentRole              `protobuf:"varint,4,opt,name=role,proto3,enum=vibesys.orchestrator.v1.AgentRole" json:"role,omitempty"`
-	Harness         Harness                `protobuf:"varint,5,opt,name=harness,proto3,enum=vibesys.orchestrator.v1.Harness" json:"harness,omitempty"`
-	Model           string                 `protobuf:"bytes,6,opt,name=model,proto3" json:"model,omitempty"`
-	ReasoningEffort string                 `protobuf:"bytes,7,opt,name=reasoning_effort,json=reasoningEffort,proto3" json:"reasoning_effort,omitempty"`
-	// Set to continue the provider's conversation instead of starting one.
-	ResumeConversationId string `protobuf:"bytes,8,opt,name=resume_conversation_id,json=resumeConversationId,proto3" json:"resume_conversation_id,omitempty"`
-	// Set on a resume: the worktree the agent had.
-	Worktree string `protobuf:"bytes,9,opt,name=worktree,proto3" json:"worktree,omitempty"`
-	// The plugin every session loads, and none of the operator's own plugins, skills or config.
-	// Absent from the stored effect: the daemon's sidecar launcher fills it from its configuration
-	// when it writes the launch file, and the sidecar refuses a launch file without it.
-	Plugin *SessionPlugin `protobuf:"bytes,10,opt,name=plugin,proto3" json:"plugin,omitempty"`
-	// The run task and CLI location for the agent.
-	Task          string       `protobuf:"bytes,11,opt,name=task,proto3" json:"task,omitempty"`
-	CliLocation   *CliLocation `protobuf:"bytes,12,opt,name=cli_location,json=cliLocation,proto3" json:"cli_location,omitempty"`
+	Role            AgentRole              `protobuf:"varint,3,opt,name=role,proto3,enum=vibesys.orchestrator.v1.AgentRole" json:"role,omitempty"`
+	Harness         Harness                `protobuf:"varint,4,opt,name=harness,proto3,enum=vibesys.orchestrator.v1.Harness" json:"harness,omitempty"`
+	Model           string                 `protobuf:"bytes,5,opt,name=model,proto3" json:"model,omitempty"`
+	ReasoningEffort string                 `protobuf:"bytes,6,opt,name=reasoning_effort,json=reasoningEffort,proto3" json:"reasoning_effort,omitempty"`
+	// Set to continue the agent's last session instead of starting afresh. See SessionOpened.
+	ResumeToken   []byte `protobuf:"bytes,7,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -360,13 +352,6 @@ func (x *LaunchSession) GetRunId() string {
 	return ""
 }
 
-func (x *LaunchSession) GetRepository() string {
-	if x != nil {
-		return x.Repository
-	}
-	return ""
-}
-
 func (x *LaunchSession) GetRole() AgentRole {
 	if x != nil {
 		return x.Role
@@ -395,106 +380,11 @@ func (x *LaunchSession) GetReasoningEffort() string {
 	return ""
 }
 
-func (x *LaunchSession) GetResumeConversationId() string {
+func (x *LaunchSession) GetResumeToken() []byte {
 	if x != nil {
-		return x.ResumeConversationId
-	}
-	return ""
-}
-
-func (x *LaunchSession) GetWorktree() string {
-	if x != nil {
-		return x.Worktree
-	}
-	return ""
-}
-
-func (x *LaunchSession) GetPlugin() *SessionPlugin {
-	if x != nil {
-		return x.Plugin
+		return x.ResumeToken
 	}
 	return nil
-}
-
-func (x *LaunchSession) GetTask() string {
-	if x != nil {
-		return x.Task
-	}
-	return ""
-}
-
-func (x *LaunchSession) GetCliLocation() *CliLocation {
-	if x != nil {
-		return x.CliLocation
-	}
-	return nil
-}
-
-// SessionPlugin is the published plugin a session loads, named by value so the sidecar never
-// guesses where its own checkout is.
-type SessionPlugin struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The root of a local marketplace checkout: the directory holding .claude-plugin/marketplace.json.
-	Marketplace string `protobuf:"bytes,1,opt,name=marketplace,proto3" json:"marketplace,omitempty"`
-	// The plugin's name in that marketplace.
-	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	// The session's plugin home: a fresh directory the first session of an agent installs the plugin
-	// into, and every later session of that agent reuses, because the provider keeps the
-	// conversation to resume there too. One per agent; never shared between agents.
-	Home          string `protobuf:"bytes,3,opt,name=home,proto3" json:"home,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SessionPlugin) Reset() {
-	*x = SessionPlugin{}
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SessionPlugin) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SessionPlugin) ProtoMessage() {}
-
-func (x *SessionPlugin) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SessionPlugin.ProtoReflect.Descriptor instead.
-func (*SessionPlugin) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *SessionPlugin) GetMarketplace() string {
-	if x != nil {
-		return x.Marketplace
-	}
-	return ""
-}
-
-func (x *SessionPlugin) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *SessionPlugin) GetHome() string {
-	if x != nil {
-		return x.Home
-	}
-	return ""
 }
 
 type StartTurn struct {
@@ -509,7 +399,7 @@ type StartTurn struct {
 
 func (x *StartTurn) Reset() {
 	*x = StartTurn{}
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -521,7 +411,7 @@ func (x *StartTurn) String() string {
 func (*StartTurn) ProtoMessage() {}
 
 func (x *StartTurn) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[4]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -534,7 +424,7 @@ func (x *StartTurn) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StartTurn.ProtoReflect.Descriptor instead.
 func (*StartTurn) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *StartTurn) GetSession() *SessionRef {
@@ -569,7 +459,7 @@ type Steer struct {
 
 func (x *Steer) Reset() {
 	*x = Steer{}
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -581,7 +471,7 @@ func (x *Steer) String() string {
 func (*Steer) ProtoMessage() {}
 
 func (x *Steer) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[5]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -594,7 +484,7 @@ func (x *Steer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Steer.ProtoReflect.Descriptor instead.
 func (*Steer) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *Steer) GetSession() *SessionRef {
@@ -628,7 +518,7 @@ type Interrupt struct {
 
 func (x *Interrupt) Reset() {
 	*x = Interrupt{}
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -640,7 +530,7 @@ func (x *Interrupt) String() string {
 func (*Interrupt) ProtoMessage() {}
 
 func (x *Interrupt) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[6]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -653,7 +543,7 @@ func (x *Interrupt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Interrupt.ProtoReflect.Descriptor instead.
 func (*Interrupt) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Interrupt) GetSession() *SessionRef {
@@ -681,7 +571,7 @@ type CloseSession struct {
 
 func (x *CloseSession) Reset() {
 	*x = CloseSession{}
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -693,7 +583,7 @@ func (x *CloseSession) String() string {
 func (*CloseSession) ProtoMessage() {}
 
 func (x *CloseSession) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[7]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -706,7 +596,7 @@ func (x *CloseSession) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloseSession.ProtoReflect.Descriptor instead.
 func (*CloseSession) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *CloseSession) GetSession() *SessionRef {
@@ -737,7 +627,7 @@ type ArmTimer struct {
 
 func (x *ArmTimer) Reset() {
 	*x = ArmTimer{}
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -749,7 +639,7 @@ func (x *ArmTimer) String() string {
 func (*ArmTimer) ProtoMessage() {}
 
 func (x *ArmTimer) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[8]
+	mi := &file_vibesys_orchestrator_v1_effects_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -762,7 +652,7 @@ func (x *ArmTimer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArmTimer.ProtoReflect.Descriptor instead.
 func (*ArmTimer) Descriptor() ([]byte, []int) {
-	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ArmTimer) GetKind() TimerKind {
@@ -812,31 +702,17 @@ const file_vibesys_orchestrator_v1_effects_proto_rawDesc = "" +
 	"\n" +
 	"SessionRef\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12!\n" +
-	"\asession\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\asession\"\xe4\x04\n" +
+	"\asession\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\asession\"\xf0\x02\n" +
 	"\rLaunchSession\x12E\n" +
 	"\asession\x18\x01 \x01(\v2#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\asession\x12\x1e\n" +
-	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12'\n" +
-	"\n" +
-	"repository\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
-	"repository\x12B\n" +
-	"\x04role\x18\x04 \x01(\x0e2\".vibesys.orchestrator.v1.AgentRoleB\n" +
+	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12B\n" +
+	"\x04role\x18\x03 \x01(\x0e2\".vibesys.orchestrator.v1.AgentRoleB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04role\x12F\n" +
-	"\aharness\x18\x05 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\n" +
+	"\aharness\x18\x04 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aharness\x12\x14\n" +
-	"\x05model\x18\x06 \x01(\tR\x05model\x12)\n" +
-	"\x10reasoning_effort\x18\a \x01(\tR\x0freasoningEffort\x124\n" +
-	"\x16resume_conversation_id\x18\b \x01(\tR\x14resumeConversationId\x12\x1a\n" +
-	"\bworktree\x18\t \x01(\tR\bworktree\x12>\n" +
-	"\x06plugin\x18\n" +
-	" \x01(\v2&.vibesys.orchestrator.v1.SessionPluginR\x06plugin\x12\x1b\n" +
-	"\x04task\x18\v \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12G\n" +
-	"\fcli_location\x18\f \x01(\v2$.vibesys.orchestrator.v1.CliLocationR\vcliLocation\"\x8d\x02\n" +
-	"\rSessionPlugin\x12y\n" +
-	"\vmarketplace\x18\x01 \x01(\tBW\xbaHT\xba\x01M\n" +
-	"\x1bplugin.marketplace.absolute\x12\x18must be an absolute path\x1a\x14this.startsWith('/')r\x02\x10\x01R\vmarketplace\x12\x1b\n" +
-	"\x04name\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12d\n" +
-	"\x04home\x18\x03 \x01(\tBP\xbaHM\xba\x01F\n" +
-	"\x14plugin.home.absolute\x12\x18must be an absolute path\x1a\x14this.startsWith('/')r\x02\x10\x01R\x04home\"\xb8\x01\n" +
+	"\x05model\x18\x05 \x01(\tR\x05model\x12)\n" +
+	"\x10reasoning_effort\x18\x06 \x01(\tR\x0freasoningEffort\x12+\n" +
+	"\fresume_token\x18\a \x01(\fB\b\xbaH\x05z\x03\x18\x80 R\vresumeToken\"\xb8\x01\n" +
 	"\tStartTurn\x12E\n" +
 	"\asession\x18\x01 \x01(\v2#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\asession\x12 \n" +
 	"\aturn_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06turnId\x12B\n" +
@@ -878,50 +754,46 @@ func file_vibesys_orchestrator_v1_effects_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_effects_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_orchestrator_v1_effects_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_vibesys_orchestrator_v1_effects_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_vibesys_orchestrator_v1_effects_proto_goTypes = []any{
 	(TimerKind)(0),                // 0: vibesys.orchestrator.v1.TimerKind
 	(*Effect)(nil),                // 1: vibesys.orchestrator.v1.Effect
 	(*SessionRef)(nil),            // 2: vibesys.orchestrator.v1.SessionRef
 	(*LaunchSession)(nil),         // 3: vibesys.orchestrator.v1.LaunchSession
-	(*SessionPlugin)(nil),         // 4: vibesys.orchestrator.v1.SessionPlugin
-	(*StartTurn)(nil),             // 5: vibesys.orchestrator.v1.StartTurn
-	(*Steer)(nil),                 // 6: vibesys.orchestrator.v1.Steer
-	(*Interrupt)(nil),             // 7: vibesys.orchestrator.v1.Interrupt
-	(*CloseSession)(nil),          // 8: vibesys.orchestrator.v1.CloseSession
-	(*ArmTimer)(nil),              // 9: vibesys.orchestrator.v1.ArmTimer
-	(AgentRole)(0),                // 10: vibesys.orchestrator.v1.AgentRole
-	(Harness)(0),                  // 11: vibesys.orchestrator.v1.Harness
-	(*CliLocation)(nil),           // 12: vibesys.orchestrator.v1.CliLocation
-	(*Message)(nil),               // 13: vibesys.orchestrator.v1.Message
-	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
+	(*StartTurn)(nil),             // 4: vibesys.orchestrator.v1.StartTurn
+	(*Steer)(nil),                 // 5: vibesys.orchestrator.v1.Steer
+	(*Interrupt)(nil),             // 6: vibesys.orchestrator.v1.Interrupt
+	(*CloseSession)(nil),          // 7: vibesys.orchestrator.v1.CloseSession
+	(*ArmTimer)(nil),              // 8: vibesys.orchestrator.v1.ArmTimer
+	(AgentRole)(0),                // 9: vibesys.orchestrator.v1.AgentRole
+	(Harness)(0),                  // 10: vibesys.orchestrator.v1.Harness
+	(*Message)(nil),               // 11: vibesys.orchestrator.v1.Message
+	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_effects_proto_depIdxs = []int32{
 	3,  // 0: vibesys.orchestrator.v1.Effect.launch_session:type_name -> vibesys.orchestrator.v1.LaunchSession
-	5,  // 1: vibesys.orchestrator.v1.Effect.start_turn:type_name -> vibesys.orchestrator.v1.StartTurn
-	6,  // 2: vibesys.orchestrator.v1.Effect.steer:type_name -> vibesys.orchestrator.v1.Steer
-	7,  // 3: vibesys.orchestrator.v1.Effect.interrupt:type_name -> vibesys.orchestrator.v1.Interrupt
-	8,  // 4: vibesys.orchestrator.v1.Effect.close_session:type_name -> vibesys.orchestrator.v1.CloseSession
-	9,  // 5: vibesys.orchestrator.v1.Effect.arm_timer:type_name -> vibesys.orchestrator.v1.ArmTimer
+	4,  // 1: vibesys.orchestrator.v1.Effect.start_turn:type_name -> vibesys.orchestrator.v1.StartTurn
+	5,  // 2: vibesys.orchestrator.v1.Effect.steer:type_name -> vibesys.orchestrator.v1.Steer
+	6,  // 3: vibesys.orchestrator.v1.Effect.interrupt:type_name -> vibesys.orchestrator.v1.Interrupt
+	7,  // 4: vibesys.orchestrator.v1.Effect.close_session:type_name -> vibesys.orchestrator.v1.CloseSession
+	8,  // 5: vibesys.orchestrator.v1.Effect.arm_timer:type_name -> vibesys.orchestrator.v1.ArmTimer
 	2,  // 6: vibesys.orchestrator.v1.LaunchSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	10, // 7: vibesys.orchestrator.v1.LaunchSession.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	11, // 8: vibesys.orchestrator.v1.LaunchSession.harness:type_name -> vibesys.orchestrator.v1.Harness
-	4,  // 9: vibesys.orchestrator.v1.LaunchSession.plugin:type_name -> vibesys.orchestrator.v1.SessionPlugin
-	12, // 10: vibesys.orchestrator.v1.LaunchSession.cli_location:type_name -> vibesys.orchestrator.v1.CliLocation
-	2,  // 11: vibesys.orchestrator.v1.StartTurn.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	13, // 12: vibesys.orchestrator.v1.StartTurn.message:type_name -> vibesys.orchestrator.v1.Message
-	2,  // 13: vibesys.orchestrator.v1.Steer.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	13, // 14: vibesys.orchestrator.v1.Steer.message:type_name -> vibesys.orchestrator.v1.Message
-	2,  // 15: vibesys.orchestrator.v1.Interrupt.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	2,  // 16: vibesys.orchestrator.v1.CloseSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	0,  // 17: vibesys.orchestrator.v1.ArmTimer.kind:type_name -> vibesys.orchestrator.v1.TimerKind
-	2,  // 18: vibesys.orchestrator.v1.ArmTimer.session:type_name -> vibesys.orchestrator.v1.SessionRef
-	14, // 19: vibesys.orchestrator.v1.ArmTimer.fire_at:type_name -> google.protobuf.Timestamp
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	9,  // 7: vibesys.orchestrator.v1.LaunchSession.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	10, // 8: vibesys.orchestrator.v1.LaunchSession.harness:type_name -> vibesys.orchestrator.v1.Harness
+	2,  // 9: vibesys.orchestrator.v1.StartTurn.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	11, // 10: vibesys.orchestrator.v1.StartTurn.message:type_name -> vibesys.orchestrator.v1.Message
+	2,  // 11: vibesys.orchestrator.v1.Steer.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	11, // 12: vibesys.orchestrator.v1.Steer.message:type_name -> vibesys.orchestrator.v1.Message
+	2,  // 13: vibesys.orchestrator.v1.Interrupt.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	2,  // 14: vibesys.orchestrator.v1.CloseSession.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	0,  // 15: vibesys.orchestrator.v1.ArmTimer.kind:type_name -> vibesys.orchestrator.v1.TimerKind
+	2,  // 16: vibesys.orchestrator.v1.ArmTimer.session:type_name -> vibesys.orchestrator.v1.SessionRef
+	12, // 17: vibesys.orchestrator.v1.ArmTimer.fire_at:type_name -> google.protobuf.Timestamp
+	18, // [18:18] is the sub-list for method output_type
+	18, // [18:18] is the sub-list for method input_type
+	18, // [18:18] is the sub-list for extension type_name
+	18, // [18:18] is the sub-list for extension extendee
+	0,  // [0:18] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_effects_proto_init() }
@@ -944,7 +816,7 @@ func file_vibesys_orchestrator_v1_effects_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_effects_proto_rawDesc), len(file_vibesys_orchestrator_v1_effects_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   9,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -234,7 +234,6 @@ function leadAgent(builder: Builder, status: AgentStatus): Agent {
     model: 'model-a',
     reasoningEffort: 'high',
     status,
-    worktree: 'worktrees/lead',
     startedAt: timestampFromMs(START_MS),
     capabilities: create(CapabilitiesSchema, {streamsText: true, steers: true, resumes: true}),
   });
@@ -292,7 +291,6 @@ function subagentOf(builder: Builder, index: number, startMs: number): Agent {
     model: codex ? 'model-c' : 'model-b',
     reasoningEffort: codex ? 'medium' : 'high',
     planNumber: role === AgentRole.WORKER ? builder.plans.length + 1 : 0,
-    worktree: `worktrees/${ROLE_NAME[role]}-${index + 1}`,
     status: AgentStatus.ACTIVE,
     startedAt: timestampFromMs(startMs),
     capabilities: create(CapabilitiesSchema, {streamsText: true, steers: !codex, resumes: true}),
@@ -358,7 +356,7 @@ function investigation(builder: Builder, agent: Agent, depth: number): Step[] {
 function addSubagent(builder: Builder, index: number, after: number, tail: boolean): Sub {
   const startMs = after + builder.rng.between(5, 90) * 1000;
   const agent = subagentOf(builder, index, startMs);
-  builder.putAgent(startMs, {...agent, status: AgentStatus.LAUNCHING, worktree: ''});
+  builder.putAgent(startMs, {...agent, status: AgentStatus.LAUNCHING});
   builder.putAgent(startMs + 1500, agent);
   const spawn = builder.message(startMs, {
     fromAgentId: builder.leadId,

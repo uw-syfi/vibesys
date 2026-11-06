@@ -20,8 +20,8 @@ plan reader is a placeholder in production and the job source is left unwired un
 - **Run:** one optimization of one task. It keeps its id across restarts.
 - **Agent:** one agent in a tree under the run's lead. It keeps its id across resumes.
 - **Session:** one process of an agent. Each resume is a new session with a higher number.
-- **Sidecar:** the process that holds a session. It outlives the daemon, so a daemon restart does
-  not stop an agent.
+- **Sidecar:** the process that holds a session (`AgentSessionService`). It outlives the daemon, so a
+  daemon restart does not stop an agent. Nothing in the contract names it.
 - **Turn:** one unit of work by an agent, started by one message.
 - **Item:** one ordered entry in a turn, changed in place from running to finished.
 - **Message:** typed mail between agents and the operator: handoffs, reports, steering.
@@ -250,7 +250,7 @@ The rest of the system does not care how the session is held.
 start session  ->  opened | failed(StartFailureReason, detail)
 ```
 
-A session is not live when its process answers. The core treats it as live (`ConversationOpened`)
+A session is not live when its process answers. The core treats it as live (`SessionOpened`)
 only when its sidecar says it is, and the sidecar says so only once the agent is up, in its working
 directory, with the plugin installed and the tool servers it was given connected. The tools check is
 the provider's own answer, asked of agentshim before the first turn (`Session.report_tools`): a tool
@@ -258,6 +258,16 @@ server it reports failed ends the start as `TOOLS_UNAVAILABLE`. What a provider 
 words nobody knows, is unknown, and unknown opens the session: a run never fails on missing evidence.
 Claude Code is asked with `mcp_status` and Codex's own start-up reports are read, so both can answer
 before the first prompt.
+
+Starting one crosses to the sidecar in three calls, which only `internal/production` knows: find or
+start the process, `Hello`, and `Open`, which carries everything in one validated message and is safe
+to repeat. The daemon sees a session that started and then opened or failed with a reason, and the
+core sees none of it. A host that crashes between any two of these finds the process again and asks
+again; one process holds a session, and it starts one agent.
+
+A store of another schema version is refused, with what to do: this contract changed the stored
+state, and there is no upgrade. A session of another protocol found after an upgrade is ended, and
+its agent resumes under this host's.
 
 The reason is the closed enum `StartFailureReason` on `Agent.start_failure_reason` and on the sidecar's
 `SessionFailed`, beside the free-text `end_detail`, which keeps the provider's own words and always
@@ -271,7 +281,8 @@ begins "could not start the agent:".
 | `TOOLS_UNAVAILABLE` | a tool server of the session failed to connect | sidecar, from the provider's report |
 | `WORKING_DIRECTORY_UNAVAILABLE` | the agent's directory could not be made or entered | the daemon (a worktree that cannot be created), or the sidecar |
 | `TIMED_OUT` | the session did not open within `core.LaunchTimeout` | the core |
-| `OTHER` | none of these, including a sidecar that could not be started or reached | the daemon or the sidecar |
+| `INCOMPATIBLE_VERSIONS` | the process holding the session and this host share no protocol (`Hello`); it is ended, and nothing was opened on it | the host |
+| `OTHER` | none of these, including a process that could not be started or reached, and a start refused by a field's name | the daemon or the sidecar |
 
 The time limit is a timer the core arms through `Decide` with every `LaunchSession` (`TimerLaunchDeadline`,
 an `ArmTimer` effect like the run's deadline), so it is injected and fired like any other and survives a
@@ -391,11 +402,11 @@ The choice is recorded, with the places that build reads its daemon and store fr
 (`XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `HOME` of the daemon's own environment, each only if it is an
 absolute path), as the run's `CliLocation` when the run starts. Every session of the run, a resumed
 one after a daemon restart included, is launched with the run's recorded location and its task, so
-the agents of a run meet one daemon and one store. The sidecar puts them in the agent's environment
-with the run's identity (`VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_AGENT`,
-`VIBESYS_HARNESS`), as its README describes. The sidecar process's own
-environment carries none of it: agentshim builds a provider's environment from a login-shell probe,
-so only the environment the sidecar gives the `Agent` arrives.
+the agents of a run meet one daemon and one store. The host builds them into the session's
+`AgentEnvironment` with the run's identity (`VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`,
+`VIBESYS_AGENT`, `VIBESYS_HARNESS`), and `Open` carries it. The sidecar process's
+own environment carries none of it: agentshim builds a provider's environment from a login-shell
+probe, so only the environment the sidecar gives the `Agent` arrives.
 
 Live smoke run with Claude Code and Haiku 4.5 (it uses a real account, so an operator runs it; the
 repository needs the task bundle named by `--task`):

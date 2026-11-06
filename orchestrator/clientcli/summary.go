@@ -22,6 +22,11 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 	}
 	fmt.Fprintf(&b, "run %s\n", v.RunID)
 	row("status", "%s", statusWord(v.Run.GetStatus().String(), "RUN_STATUS_")+withPrefix(" by ", stopReason(v.Run))+stallWords(v, now))
+	if v.Run.GetStatus() == pb.RunStatus_RUN_STATUS_FAILED {
+		if detail := endDetail(v.Agents[v.Run.GetLeadAgentId()], 500); detail != "" {
+			row("why", "%s", detail)
+		}
+	}
 	row("task", "%s", v.Run.GetTask())
 	row("repository", "%s", v.Run.GetRepository())
 	row("started", "%s ago", age(now, v.Run.GetCreatedAt().AsTime()))

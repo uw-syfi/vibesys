@@ -138,8 +138,8 @@ func TestAWholeRunFromAClient(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*guard)
 	defer cancel()
 	rig := daemontest.NewRig(t)
-	rig.Sidecars.React = func(s *daemontest.Session, cmd *pb.SidecarCommand) {
-		if _, turn := cmd.GetBody().(*pb.SidecarCommand_StartTurn); turn && s.Launch.Role == core.RoleWorker {
+	rig.Sidecars.React = func(s *daemontest.Session, cmd *pb.SessionCommand) {
+		if _, turn := cmd.GetBody().(*pb.SessionCommand_StartTurn); turn && s.Launch.Role == core.RoleWorker {
 			return // a worker keeps working until the test says it is done.
 		}
 		daemontest.DefaultReaction(s, cmd)
@@ -189,7 +189,7 @@ func TestAWholeRunFromAClient(t *testing.T) {
 			turnID = st.GetTurnId()
 		}
 	}
-	workerSession.EmitEvents(&pb.SidecarEvent{Body: &pb.SidecarEvent_TurnEnded{TurnEnded: &pb.TurnEnded{TurnId: turnID, Status: pb.TurnStatus_TURN_STATUS_COMPLETED}}})
+	workerSession.EmitEvents(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{TurnId: turnID, Status: pb.TurnStatus_TURN_STATUS_COMPLETED}}})
 	feed.until("the worker's session to end", func(ev *pb.Event) bool {
 		a := ev.GetAgentUpdated()
 		return a != nil && a.GetId() == worker && a.GetStatus() == pb.AgentStatus_AGENT_STATUS_ENDED

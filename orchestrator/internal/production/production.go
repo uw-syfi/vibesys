@@ -350,7 +350,7 @@ func listenPrivate(path string) (net.Listener, error) {
 type NoSidecars struct{}
 
 // Launch implements daemon.Sidecars.
-func (NoSidecars) Launch(context.Context, core.LaunchSession, daemon.LaunchEnv) (daemon.Sidecar, error) {
+func (NoSidecars) Launch(context.Context, daemon.SessionStart) (daemon.Sidecar, error) {
 	return nil, errors.New("this build has no way to start agent sessions, so none can start")
 }
 

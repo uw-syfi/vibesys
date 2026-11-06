@@ -26,8 +26,8 @@ from agentshim import (
     TurnInterrupted,
 )
 
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -80,9 +80,9 @@ class _Item:
     exit_code: int | None = None
     is_error: bool = False
 
-    def proto(self, item_id: str, turn_id: str) -> sc.SidecarItem:
+    def proto(self, item_id: str, turn_id: str) -> sc.SessionItem:
         """The item as it is now."""
-        item = sc.SidecarItem(id=item_id, turn_id=turn_id, status=self.status)  # type: ignore[arg-type]
+        item = sc.SessionItem(id=item_id, turn_id=turn_id, status=self.status)  # type: ignore[arg-type]
         if self.kind == "tool":
             tool = orch.ToolCall(
                 tool=self.tool or "unknown",
@@ -161,7 +161,7 @@ class TurnNormalizer:
         """Whether the provider said the turn was interrupted."""
         return self._interrupted
 
-    def feed(self, event: AgentEvent) -> list[sc.SidecarEvent]:
+    def feed(self, event: AgentEvent) -> list[sc.SessionEvent]:
         """What *event* adds to the log, in order."""
         if isinstance(event, (AssistantText, Reasoning)):
             return self._text(event)
@@ -170,7 +170,7 @@ class TurnNormalizer:
             return []
         return handler(event)
 
-    def _handlers(self) -> dict[type, Callable[[Any], list[sc.SidecarEvent]]]:
+    def _handlers(self) -> dict[type, Callable[[Any], list[sc.SessionEvent]]]:
         return {
             ToolCall: self._call,
             ToolResult: self._result,
@@ -180,11 +180,11 @@ class TurnNormalizer:
             TurnInterrupted: self._interrupted_by,
         }
 
-    def _interrupted_by(self, _event: TurnInterrupted) -> list[sc.SidecarEvent]:
+    def _interrupted_by(self, _event: TurnInterrupted) -> list[sc.SessionEvent]:
         self._interrupted = True
         return []
 
-    def settle(self, status: int) -> list[sc.SidecarEvent]:
+    def settle(self, status: int) -> list[sc.SessionEvent]:
         """Settle every item still running: finished if *status* completed, failed otherwise.
 
         Codex does not always send ``item/completed``, and an item nobody will report on again
@@ -195,14 +195,14 @@ class TurnNormalizer:
             if status == orch.TURN_STATUS_COMPLETED
             else orch.ITEM_STATUS_FAILED
         )
-        out: list[sc.SidecarEvent] = []
+        out: list[sc.SessionEvent] = []
         for item_id, item in self._items.items():
             if item.status == orch.ITEM_STATUS_RUNNING:
                 item.status = settled
                 out.append(self._event(item=item.proto(item_id, self._turn_id)))
         return out
 
-    def finish(self, status: int, usage: ProviderUsage | None = None) -> list[sc.SidecarEvent]:
+    def finish(self, status: int, usage: ProviderUsage | None = None) -> list[sc.SessionEvent]:
         """Close the turn: settle unfinished items, report *usage*, end it, answer open steers.
 
         *usage* is the turn result's. A steer that was never consumed is answered as not
@@ -227,7 +227,7 @@ class TurnNormalizer:
         self._minted += 1
         return f"{self._mint_prefix}:n{self._minted}"
 
-    def _text(self, event: AssistantText | Reasoning) -> list[sc.SidecarEvent]:
+    def _text(self, event: AssistantText | Reasoning) -> list[sc.SessionEvent]:
         item_id = event.item_id or self._mint()
         kind = "assistant" if isinstance(event, AssistantText) else "reasoning"
         known = self._items.get(item_id)
@@ -241,7 +241,7 @@ class TurnNormalizer:
         self._items[item_id] = item
         return [self._event(item=item.proto(item_id, self._turn_id))]
 
-    def _call(self, event: ToolCall) -> list[sc.SidecarEvent]:
+    def _call(self, event: ToolCall) -> list[sc.SessionEvent]:
         item_id = event.tool_id or self._mint()
         if item_id in self._items:
             return []
@@ -255,7 +255,7 @@ class TurnNormalizer:
         self._items[item_id] = item
         return [self._event(item=item.proto(item_id, self._turn_id))]
 
-    def _result(self, event: ToolResult) -> list[sc.SidecarEvent]:
+    def _result(self, event: ToolResult) -> list[sc.SessionEvent]:
         item_id = event.tool_id or self._mint()
         item = self._items.get(item_id)
         if item is None:
@@ -283,10 +283,10 @@ class TurnNormalizer:
         self._items[item_id] = finished
         return [self._event(item=finished.proto(item_id, self._turn_id))]
 
-    def _delta(self, event: TextDelta) -> list[sc.SidecarEvent]:
+    def _delta(self, event: TextDelta) -> list[sc.SessionEvent]:
         if not event.item_id or not event.text:
             return []
-        delta = sc.SidecarDelta(item_id=event.item_id)
+        delta = sc.SessionDelta(item_id=event.item_id)
         if event.kind is TextKind.TOOL_OUTPUT:
             delta.command_output = event.text
         else:
@@ -295,19 +295,19 @@ class TurnNormalizer:
 
     # -- steers
 
-    def _steer(self, text: str, *, accepted: bool) -> list[sc.SidecarEvent]:
+    def _steer(self, text: str, *, accepted: bool) -> list[sc.SessionEvent]:
         message_id = self._steers.take(text)
         return [] if message_id is None else [self._outcome(message_id, accepted=accepted)]
 
     @staticmethod
-    def _outcome(message_id: str, *, accepted: bool) -> sc.SidecarEvent:
+    def _outcome(message_id: str, *, accepted: bool) -> sc.SessionEvent:
         return TurnNormalizer._event(
             steer=sc.SteerOutcome(message_id=message_id, accepted=accepted)
         )
 
     @staticmethod
-    def _event(**body: object) -> sc.SidecarEvent:
-        return sc.SidecarEvent(**body)  # type: ignore[arg-type]
+    def _event(**body: object) -> sc.SessionEvent:
+        return sc.SessionEvent(**body)  # type: ignore[arg-type]
 
 
 def _args_json(args: object) -> str:
@@ -323,10 +323,10 @@ def normalize(
     events: Iterable[AgentEvent],
     status: int,
     usage: ProviderUsage | None = None,
-) -> list[sc.SidecarEvent]:
+) -> list[sc.SessionEvent]:
     """The sidecar events one whole turn gives, for tests and replay."""
     normalizer = TurnNormalizer(turn_id)
-    out: list[sc.SidecarEvent] = []
+    out: list[sc.SessionEvent] = []
     for event in events:
         out.extend(normalizer.feed(event))
     out.extend(normalizer.finish(status, usage))

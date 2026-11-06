@@ -19,8 +19,8 @@ from agentshim import (
 from hypothesis import given
 from hypothesis import strategies as st
 
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 from vs_sidecar.normalize import SteerBook, TurnNormalizer, normalize, usage_proto
 
 DONE = orch.TURN_STATUS_COMPLETED
@@ -224,7 +224,7 @@ def test_the_fold_is_deterministic_and_well_formed(events: list, status: int) ->
 def test_every_event_it_makes_satisfies_the_contract(events: list, status: int) -> None:
     validator = protovalidate.Validator()
     for event in normalize("t1", events, status, _usage(3, 1)):
-        numbered = sc.SidecarEvent()
+        numbered = sc.SessionEvent()
         numbered.CopyFrom(event)
         numbered.offset = 1  # the store numbers events; the contract wants a positive offset
         validator.validate(numbered)

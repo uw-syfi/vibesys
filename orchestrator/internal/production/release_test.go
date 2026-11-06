@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 	"github.com/uw-syfi/vibesys/orchestrator/release/releasetest"
 )
@@ -84,7 +84,7 @@ func TestTheSidecarCommandIsTheSettingThenTheReleaseThenAnError(t *testing.T) {
 }
 
 // The marketplace follows the same order: the setting (checked as before), then the release's
-// skills, then an error naming both. The release's marketplace file is validated like any other.
+// skills, then an error naming both. What is in the marketplace file is for the harness to read.
 func TestTheMarketplaceIsTheSettingThenTheReleaseThenAnError(t *testing.T) {
 	override := marketplace(t, good)
 	root, find := diskRelease(t, good)
@@ -119,13 +119,6 @@ func TestTheMarketplaceIsTheSettingThenTheReleaseThenAnError(t *testing.T) {
 			t.Fatalf("got %v", err)
 		}
 	})
-	t.Run("a release whose marketplace lacks the plugin is refused", func(t *testing.T) {
-		_, bad := diskRelease(t, `{"plugins": []}`)
-		_, err := PluginFor("", bad)
-		if err == nil || !strings.Contains(err.Error(), "lists no plugin named vibesys") {
-			t.Fatalf("got %v", err)
-		}
-	})
 }
 
 // A host installed in a release starts with no setting at all; one outside a release refuses
@@ -149,7 +142,7 @@ func TestAHostWithNoSettingsLaunchesFromItsReleaseOrRefusesWithTheReason(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = outside.Launch(context.Background(), core.LaunchSession{}, nil)
+	_, err = outside.Launch(context.Background(), daemon.SessionStart{})
 	if err == nil || !strings.Contains(err.Error(), SettingSessionHolder) || !strings.Contains(err.Error(), "/home/u/.local/release.json") {
 		t.Fatalf("Launch = %v, want a refusal naming %s and the manifest looked for", err, SettingSessionHolder)
 	}

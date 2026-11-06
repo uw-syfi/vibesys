@@ -181,9 +181,9 @@ func TestGetShowsTheUsageOfTheRunAndOfEachAgent(t *testing.T) {
 // agents' usage.
 func TestGetAndReplayShowTheUsageOfFinishedTurns(t *testing.T) {
 	cost := 0.0301
-	l := newLive(t, func(s *daemontest.Session, cmd *pb.SidecarCommand) {
+	l := newLive(t, func(s *daemontest.Session, cmd *pb.SessionCommand) {
 		if st := cmd.GetStartTurn(); st != nil {
-			s.Emit(&pb.SidecarEvent{Body: &pb.SidecarEvent_TurnEnded{TurnEnded: &pb.TurnEnded{
+			s.Emit(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{
 				TurnId: st.GetTurnId(), Status: pb.TurnStatus_TURN_STATUS_COMPLETED, Usage: &pb.Usage{CostUsd: &cost, OutputTokens: ptr(uint64(7))},
 			}}})
 			return

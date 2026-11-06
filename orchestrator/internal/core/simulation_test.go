@@ -515,22 +515,22 @@ func (w *sim) carryOut(e core.Effect) {
 		}
 		return
 	case core.LaunchSession:
-		if run, ok := w.state.Run(b.Run); !ok || b.Task != run.Task || b.Location != run.Location || b.Location == (core.CliLocation{}) {
-			w.fail("launch %+v does not carry the task and recorded location of run %+v", b, run)
+		if _, ok := w.state.Run(b.Run); !ok {
+			w.fail("launch %+v names no run", b)
 		}
 		if _, ok := w.sessions[b.Session]; ok {
 			return
 		}
 		s := &session{id: b.Session, caps: w.capabilities(b.Session.Agent), seen: map[core.EffectID]bool{}}
 		w.sessions[b.Session] = s
-		if b.ConversationID != "" && !strings.HasPrefix(b.ConversationID, "conv-") {
-			w.fail("a resume got conversation %q", b.ConversationID)
+		if b.ResumeToken != "" && !strings.HasPrefix(b.ResumeToken, "conv-") {
+			w.fail("a resume got conversation %q", b.ResumeToken)
 		}
 		if w.slowStarts && w.r.IntN(3) == 0 {
 			s.opening = true
 			return
 		}
-		w.open(s, b.ConversationID)
+		w.open(s, b.ResumeToken)
 		return
 	case core.StartTurn:
 		id = b.Session
@@ -550,7 +550,7 @@ func (w *sim) open(s *session, conversation string) {
 		conversation = "conv-" + string(s.id.Agent)
 	}
 	s.opening = false
-	s.say(core.ConversationOpened{ConversationID: conversation, Capabilities: s.caps, Worktree: "/w/" + string(s.id.Agent)})
+	s.say(core.SessionOpened{ResumeToken: conversation, Capabilities: s.caps})
 }
 
 // cooperate carries out a command a session is sent, as a cooperative sidecar does.
@@ -672,7 +672,7 @@ func (w *sim) readSidecar() bool {
 	} else {
 		w.read[s.id]++
 	}
-	w.decide(core.SidecarFact{Session: s.id, Offset: uint64(offset + 1), Body: s.stream[offset]})
+	w.decide(core.SessionFact{Session: s.id, Offset: uint64(offset + 1), Body: s.stream[offset]})
 	return true
 }
 
@@ -701,7 +701,7 @@ func (w *sim) reapSidecars() {
 		s := w.sessions[id]
 		a, ok := w.state.Agent(id.Agent)
 		if s.dead && ok && a.Session == id.N && !a.Status.Over() && w.read[id] >= len(s.stream) {
-			w.decide(core.SidecarLost{Session: id})
+			w.decide(core.SessionLost{Session: id})
 		}
 	}
 }

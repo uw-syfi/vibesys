@@ -36,10 +36,10 @@ func TestEverySessionOfARunIsLaunchedWithTheLocationItRecorded(t *testing.T) {
 		t.Fatalf("%d sessions, want the lead's two", len(sessions))
 	}
 	for _, s := range sessions {
-		got := s.Launch.Location
-		if got != locationA() || s.Launch.Task != first.Task {
+		got := s.Start.Location
+		if got != locationA() || s.Start.Task != first.Task {
 			t.Errorf("session %s/%d was launched with %+v for task %q, want %+v for %q",
-				s.Launch.Session.Agent, s.Launch.Session.N, got, s.Launch.Task, locationA(), first.Task)
+				s.Launch.Session.Agent, s.Launch.Session.N, got, s.Start.Task, locationA(), first.Task)
 		}
 	}
 }
@@ -52,33 +52,7 @@ func TestARunStartedWithoutALocationRecordsNone(t *testing.T) {
 	if run.Location != (core.CliLocation{}) {
 		t.Fatalf("the run recorded %+v with none given", run.Location)
 	}
-	if got := r.Sidecars.Session(core.Session{Agent: lead.ID, N: 1}).Launch.Location; got != (core.CliLocation{}) {
+	if got := r.Sidecars.Session(core.Session{Agent: lead.ID, N: 1}).Start.Location; got != (core.CliLocation{}) {
 		t.Fatalf("the session was launched with %+v with none recorded", got)
-	}
-}
-
-func TestLegacyRunRecordsCurrentLocationOnceBeforeResuming(t *testing.T) {
-	r := daemontest.NewRig(t)
-	run, lead := beginRun(t, r)
-	r.Settle(t)
-	r.Sidecars.Session(core.Session{Agent: lead.ID, N: 1}).Die()
-	r.Location = locationA()
-	r.Restart(t)
-	r.Settle(t)
-	got, _ := r.Daemon.State().Run(run.ID)
-	if got.Location != locationA() {
-		t.Fatalf("migration recorded %+v", got.Location)
-	}
-	r.Location = locationB()
-	r.Restart(t)
-	r.Settle(t)
-	got, _ = r.Daemon.State().Run(run.ID)
-	if got.Location != locationA() {
-		t.Fatalf("migration repeated: %+v", got.Location)
-	}
-	for _, session := range r.Sidecars.Sessions() {
-		if session.Launch.Session.N > 1 && session.Launch.Location != locationA() {
-			t.Fatalf("resume location: %+v", session.Launch)
-		}
 	}
 }

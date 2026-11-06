@@ -1,42 +1,48 @@
-"""The sidecar process: ``python -m vs_sidecar --launch FILE --state-dir DIR --socket PATH``.
+"""The process that holds one session: ``python -m vs_sidecar``, with no arguments.
 
-The daemon writes the ``LaunchSession`` it wants (protobuf JSON) to a file, starts this process in
-its own session so it outlives the daemon, and talks to it over the socket. Everything the session
-did is in ``--state-dir``, so a restarted sidecar can tell the daemon what happened.
+Its one input is a binary ``SessionBootstrap`` on standard input, which says where to listen and
+where its private state is. Everything else arrives over ``AgentSessionService``: the host starts
+this process in its own session so it outlives the host, says ``Hello``, and sends ``Open``. Everything
+the session did is in the state directory, so a restarted process can tell the host what happened.
 
-The agent is a child of this process and leads a process group of its own. A sidecar that is killed
-without warning cannot stop it, so the state directory names both for the daemon, which reaps them
+The agent is a child of this process and leads a process group of its own. A process that is killed
+without warning cannot stop it, so the state directory names both for the host, which reaps them
 (see the README, "Process lifetime"): ``sidecar.pid`` and ``agent.pgids``.
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import os
 import signal
+import socket as sockets
 import sys
 import threading
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO, NoReturn
 
 import protovalidate
-from agentshim import StdioMcpServer
-from google.protobuf import json_format
+from google.protobuf.message import DecodeError
 
 from vs_sidecar.driver import AgentshimDriver, build_session
 from vs_sidecar.engine import Engine
-from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
+from vs_sidecar.holder import SessionHolder
 from vs_sidecar.server import Wakeup, serve
 from vs_sidecar.store import FileStore
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
+    import grpc
     from agentshim import RawFrame
 
     from vs_sidecar.driver import Driver
+
+    DriverFactory = Callable[[Callable[[RawFrame], None]], Driver]
+    #: Makes the drivers of a session, from its request and the process's state directory.
+    SessionDrivers = Callable[[sc.OpenSessionRequest, Path], DriverFactory]
 
 #: How long the worker sleeps between looks at the provider when nothing else wakes it.
 IDLE_TICK_SECONDS = 0.25
@@ -47,72 +53,32 @@ IDLE_TICK_SECONDS = 0.25
 LINGER_SECONDS = 60.0
 #: How long a stopped sidecar waits for its worker to wind down before it gives up on it.
 STOP_SECONDS = 30.0
-#: The state directory's names for the process ids the daemon reaps.
+#: How long a process nobody has opened waits before it ends. A host that started it and died comes
+#: back well within this and opens it; one that does not has left nothing that needs it. It is as long
+#: as the host gives a session to open (``core.LaunchTimeout``).
+OPEN_WAIT_SECONDS = 300.0
+#: The state directory's names for the process ids the host reaps.
 PIDFILE = "sidecar.pid"
 GROUPS_FILE = "agent.pgids"
 
 
-def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    """The command line."""
-    parser = argparse.ArgumentParser(prog="vs_sidecar", description=__doc__)
-    parser.add_argument("--launch", type=Path, required=True, help="LaunchSession as protobuf JSON")
-    parser.add_argument("--state-dir", type=Path, required=True)
-    parser.add_argument("--socket", type=Path, required=True)
-    parser.add_argument("--mcp-config", type=Path, help="JSON list of stdio MCP servers")
-    parser.add_argument("--detach", action="store_true", help="fork into the background first")
-    return parser.parse_args(argv)
+class BootstrapError(ValueError):
+    """The bootstrap cannot start a process; the message names what is wrong."""
 
 
-class LaunchError(ValueError):
-    """The launch cannot start a session; the message names what is wrong."""
-
-
-def load_launch(path: Path) -> fx.LaunchSession:
-    """The launch spec in *path*.
-
-    Raises ``LaunchError`` for a launch that breaks its contract or has no worktree: the agent
-    needs a directory to work in.
-    """
-    launch = json_format.Parse(path.read_text(), fx.LaunchSession())
-    if not launch.worktree:
-        msg = "launch.worktree is empty: give the agent's directory in the launch"
-        raise LaunchError(msg)
+def read_bootstrap(stream: BinaryIO) -> sc.SessionBootstrap:
+    """The bootstrap in *stream*, read to its end. Raises ``BootstrapError`` for a bad one."""
+    bootstrap = sc.SessionBootstrap()
     try:
-        protovalidate.Validator().validate(launch, fail_fast=True)
+        bootstrap.ParseFromString(stream.read())
+        protovalidate.Validator().validate(bootstrap)
+    except DecodeError as error:
+        msg = f"standard input is not a SessionBootstrap: {error}"
+        raise BootstrapError(msg) from error
     except protovalidate.ValidationError as error:
-        msg = f"launch is invalid: {error}"
-        raise LaunchError(msg) from error
-    check_plugin(launch)
-    return launch
-
-
-def check_plugin(launch: fx.LaunchSession) -> None:
-    """Refuse a launch whose plugin is missing or is not in its marketplace, naming the field.
-
-    A session always loads the plugin and there is no default, so an absent one is an error here,
-    before an agent starts, and not a session that quietly runs without the skills.
-    """
-    if not launch.HasField("plugin"):
-        msg = "launch.plugin is missing: every session loads the vibesys plugin, and the daemon sets it"
-        raise LaunchError(msg)
-    manifest = Path(launch.plugin.marketplace) / ".claude-plugin" / "marketplace.json"
-    try:
-        data = json.loads(manifest.read_text())
-    except OSError as error:
-        msg = f"launch.plugin.marketplace {launch.plugin.marketplace} has no readable {manifest.name}: {error}"
-        raise LaunchError(msg) from error
-    except ValueError as error:
-        msg = f"launch.plugin.marketplace: {manifest} is not JSON: {error}"
-        raise LaunchError(msg) from error
-    entries = data.get("plugins") if isinstance(data, dict) else None
-    names = (
-        [entry.get("name") for entry in entries if isinstance(entry, dict)]
-        if isinstance(entries, list)
-        else []
-    )
-    if launch.plugin.name not in names:
-        msg = f"launch.plugin.name {launch.plugin.name!r} is not a plugin of {manifest}"
-        raise LaunchError(msg)
+        msg = f"the bootstrap is invalid: {error}"
+        raise BootstrapError(msg) from error
+    return bootstrap
 
 
 def child_pids(proc: Path = Path("/proc")) -> list[int]:
@@ -145,58 +111,25 @@ def write_atomically(path: Path, text: str) -> None:
     temporary.replace(path)
 
 
-def load_mcp(path: Path | None) -> list[StdioMcpServer]:
-    """The stdio MCP servers in *path*: ``[{"name", "command", "args", "env"}]``."""
-    if path is None:
-        return []
-    return [
-        StdioMcpServer(
-            name=entry["name"],
-            command=entry["command"],
-            args=tuple(entry.get("args", ())),
-            env=dict(entry.get("env", {})),
-        )
-        for entry in json.loads(path.read_text())
-    ]
-
-
-def detach(log: Path) -> None:
-    """Leave the caller's process group and session, as a daemon does, and log to *log*."""
-    if os.fork():
-        os._exit(0)
-    os.setsid()
-    if os.fork():
-        os._exit(0)
-    log.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    null = os.open(os.devnull, os.O_RDONLY)
-    os.dup2(null, 0)
-    os.dup2(fd, 1)
-    os.dup2(fd, 2)
-    signal.signal(signal.SIGHUP, signal.SIG_IGN)
-
-
-def driver_factory(
-    launch: fx.LaunchSession, servers: Sequence[StdioMcpServer]
-) -> Callable[[Callable[[RawFrame], None]], Driver]:
-    """Drivers over the real provider for *launch*."""
-    preferred = None if launch.resume_conversation_id else _conversation_id(launch)
+def real_drivers(request: sc.OpenSessionRequest, _state: Path) -> DriverFactory:
+    """Drivers over the real provider for *request*."""
+    preferred = None if request.resume_token else _conversation_id(request)
 
     def make(raw_sink: Callable[[RawFrame], None]) -> Driver:
         return AgentshimDriver(
             lambda conversation_id: build_session(
-                launch, mcp_servers=servers, raw_sink=raw_sink, new_conversation_id=conversation_id
+                request, raw_sink=raw_sink, new_conversation_id=conversation_id
             ),
             preferred_id=preferred,
-            workdir=launch.worktree,
+            workdir=request.working_directory,
         )
 
     return make
 
 
-def _conversation_id(launch: fx.LaunchSession) -> str:
+def _conversation_id(request: sc.OpenSessionRequest) -> str:
     """A conversation id derived from the session, so a relaunch of the same session gets the same one."""
-    name = f"{launch.run_id}/{launch.session.agent_id}/{launch.session.session}"
+    name = f"{request.session.agent_id}/{request.session.session}"
     return str(uuid.uuid5(uuid.NAMESPACE_URL, name))
 
 
@@ -254,18 +187,85 @@ def keep_recording(groups: AgentGroups, done: threading.Event) -> None:
         groups.record()
 
 
-def serve_session(engine: Engine, wakeup: Wakeup, args: argparse.Namespace) -> None:
-    """Serve *engine* and run its worker until the session ends or a signal stops it.
+def listening(socket: Path) -> bool:
+    """Whether a process already listens on *socket*."""
+    with sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM) as probe:
+        try:
+            probe.connect(str(socket))
+        except OSError:
+            return False
+    return True
+
+
+def leave_unopened() -> NoReturn:
+    """End a process nobody opened, at once.
+
+    It holds no agent, so nothing needs winding down.
+    """
+    os._exit(0)
+
+
+def serve_holder(
+    bootstrap: sc.SessionBootstrap,
+    drivers: SessionDrivers,
+    *,
+    open_wait: float = OPEN_WAIT_SECONDS,
+    leave: Callable[[], NoReturn] = leave_unopened,
+) -> None:
+    """Serve until the session ends or a signal stops it.
 
     On the way out, whatever the reason (a signal, a failed write, a bug), the agent is closed, so
-    it does not outlive the sidecar's own knowledge of it. A failure in the worker is raised here
+    it does not outlive this process's own knowledge of it. A failure in the worker is raised here
     after that cleanup.
     """
-    groups = AgentGroups(args.state_dir / GROUPS_FILE)
-    stop = threading.Event()
-    wake = threading.Event()
+    state = Path(bootstrap.state_directory)
+    socket = Path(bootstrap.listen_socket)
+    state.mkdir(parents=True, exist_ok=True)
+    if listening(socket):
+        sys.stderr.write(f"vs_sidecar: another process already listens on {socket}\n")
+        leave()
+    wakeup = Wakeup()
+    holder = SessionHolder(
+        lambda request: Engine(
+            request.session, FileStore.at(state), drivers(request, state), wakeup.notify
+        )
+    )
+    groups = AgentGroups(state / GROUPS_FILE)
+    ending = _Ending()
+
+    def stopped(*_: object) -> None:
+        ending.stop.set()
+        ending.wake.set()
+        holder.abandon_waiting()
+
     for number in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(number, lambda *_: (stop.set(), wake.set()))
+        signal.signal(number, stopped)
+    # Before the socket answers, so whoever reaches this process finds the pid that goes with it.
+    write_atomically(state / PIDFILE, f"{os.getpid()}\n")
+    server = serve(holder, wakeup, socket)
+    engine = holder.wait_opened(open_wait)
+    if engine is None:
+        leave()
+    run_session(engine, wakeup, server, groups, ending)
+
+
+@dataclass(frozen=True)
+class _Ending:
+    """What ends a session: *stop* asks for it, and *wake* rouses whoever waits for the end."""
+
+    stop: threading.Event = field(default_factory=threading.Event)
+    wake: threading.Event = field(default_factory=threading.Event)
+
+
+def run_session(
+    engine: Engine,
+    wakeup: Wakeup,
+    server: grpc.Server,
+    groups: AgentGroups,
+    ending: _Ending,
+) -> None:
+    """Run *engine*'s worker until the session ends or it is stopped, then wind down."""
+    stop, wake = ending.stop, ending.wake
     failure: list[BaseException] = []
     recorded = threading.Event()
     recorder = threading.Thread(
@@ -285,9 +285,7 @@ def serve_session(engine: Engine, wakeup: Wakeup, args: argparse.Namespace) -> N
         finally:
             wake.set()
 
-    server = None
     try:
-        server = serve(engine, wakeup, args.socket)
         # A daemon thread: a worker still stuck after STOP_SECONDS must not hold the process open.
         worker = threading.Thread(target=run, name="vs-sidecar-worker", daemon=True)
         worker.start()
@@ -302,32 +300,22 @@ def serve_session(engine: Engine, wakeup: Wakeup, args: argparse.Namespace) -> N
         recorded.set()
         recorder.join()
         groups.clear()
-        if server is not None:
-            server.stop(grace=1).wait()
+        server.stop(grace=1).wait()
     if failure:
         raise failure[0]
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run one session. Returns the process exit code."""
-    args = parse_args(sys.argv[1:] if argv is None else argv)
-    if args.detach:
-        detach(args.state_dir / "sidecar.log")
+def main(drivers: SessionDrivers = real_drivers) -> int:
+    """Run one process. Returns its exit code."""
+    if sys.argv[1:]:
+        sys.stderr.write(f"vs_sidecar takes no arguments: {sys.argv[1:]}\n")
+        return 2
     try:
-        launch = load_launch(args.launch)
-    except LaunchError as error:
+        bootstrap = read_bootstrap(sys.stdin.buffer)
+    except BootstrapError as error:
         sys.stderr.write(f"vs_sidecar: {error}\n")
         return 2
-    args.state_dir.mkdir(parents=True, exist_ok=True)
-    write_atomically(args.state_dir / PIDFILE, f"{os.getpid()}\n")
-    wakeup = Wakeup()
-    engine = Engine(
-        launch,
-        FileStore.at(args.state_dir),
-        driver_factory(launch, load_mcp(args.mcp_config)),
-        wakeup.notify,
-    )
-    serve_session(engine, wakeup, args)
+    serve_holder(bootstrap, drivers)
     return 0
 
 

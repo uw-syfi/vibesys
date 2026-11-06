@@ -4,11 +4,11 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "agentshim"
-version = "0.27.1"
+version = "0.27.3"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/00/2b/7c9af8fbdd11b78877977b3067736d2121467e769ad5c8f0212bede12633/agentshim-0.27.1.tar.gz", hash = "sha256:86be3d3a0c9b0a88d0b68ef6b8742880ada74554aead6c97a0c373dcfdbaaf15", size = 361173, upload-time = "2026-11-06T07:29:14.075Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/64/98/d0f3beec436f244162c64607a47407b3be50ecc2e4f6cfac4c73d806984e/agentshim-0.27.3.tar.gz", hash = "sha256:4451d1d0b3103d5379c0d03a6c465957451272302fcb086254abf97cac290807", size = 362655, upload-time = "2026-11-06T08:39:55.94Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7d/a5/d847ec604620275faf9b68191979927de94f0507bab6321829907950cd8e/agentshim-0.27.1-py3-none-any.whl", hash = "sha256:97f089738d28fe1d816224cedd2056276a2ad49d459726a921b2d6a084b7da97", size = 409946, upload-time = "2026-11-06T07:29:12.262Z" },
+    { url = "https://files.pythonhosted.org/packages/46/f8/ecae68f6db4f2935635a4db8b4e29808c944b1a41c516605a814eef5dbd7/agentshim-0.27.3-py3-none-any.whl", hash = "sha256:5a8d061c0dbf7293b3f7d186ff85b685d1cefced1184ff0a1658e710cbb63058", size = 411097, upload-time = "2026-11-06T08:39:54.242Z" },
 ]
 
 [[package]]
@@ -591,7 +591,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = "==0.27.1" },
+    { name = "agentshim", specifier = "==0.27.3" },
     { name = "grpcio", specifier = "==1.76.0" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "protobuf", specifier = "==6.33.5" },

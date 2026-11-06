@@ -11,7 +11,7 @@ from vs_sidecar.store import MemoryStore
 
 def test_a_turn_keeps_its_typed_job_notification_at_the_driver_boundary() -> None:
     driver = ScriptedDriver([TurnScript([])])
-    engine = Engine(h.launch(), MemoryStore(), lambda _sink: driver)
+    engine = Engine(h.REF, MemoryStore(), lambda _sink: driver)
     engine.start()
     command = h.start_turn("e1", "t1")
     source = h.message("notification-1")
@@ -29,7 +29,7 @@ def test_a_steer_keeps_its_typed_job_notification_at_the_driver_boundary() -> No
         orch.JobFinished(job_id="j1", outcome=orch.JOB_OUTCOME_SUCCEEDED)
     )
     driver = ScriptedDriver()
-    engine = Engine(h.launch(), MemoryStore(), lambda _sink: driver)
+    engine = Engine(h.REF, MemoryStore(), lambda _sink: driver)
     driver.turns.append(
         TurnScript([lambda: engine.send(command)], on_steer=[AssistantText("noted")])
     )

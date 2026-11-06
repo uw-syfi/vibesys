@@ -7,7 +7,7 @@ import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
-import type { AgentRole, CliLocation, Harness, Message as Message$1 } from "./orchestrator_pb.js";
+import type { AgentRole, Harness, Message as Message$1 } from "./orchestrator_pb.js";
 import { file_vibesys_orchestrator_v1_orchestrator } from "./orchestrator_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/effects.proto.
  */
 export const file_vibesys_orchestrator_v1_effects: GenFile = /*@__PURE__*/
-  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9lZmZlY3RzLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSKKAwoGRWZmZWN0EhMKAmlkGAEgASgJQge6SARyAhABEkAKDmxhdW5jaF9zZXNzaW9uGAogASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTGF1bmNoU2Vzc2lvbkgAEjgKCnN0YXJ0X3R1cm4YCyABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdGFydFR1cm5IABIvCgVzdGVlchgMIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0ZWVySAASNwoJaW50ZXJydXB0GA0gASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSW50ZXJydXB0SAASPgoNY2xvc2Vfc2Vzc2lvbhgOIAEoCzIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNsb3NlU2Vzc2lvbkgAEjYKCWFybV90aW1lchgPIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFybVRpbWVySABCDQoEYm9keRIFukgCCAEiQQoKU2Vzc2lvblJlZhIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIYCgdzZXNzaW9uGAIgASgNQge6SAQqAiAAIuYDCg1MYXVuY2hTZXNzaW9uEjwKB3Nlc3Npb24YASABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmQga6SAPIAQESFwoGcnVuX2lkGAIgASgJQge6SARyAhABEhsKCnJlcG9zaXRvcnkYAyABKAlCB7pIBHICEAESPAoEcm9sZRgEIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50Um9sZUIKukgHggEEEAEgABI9CgdoYXJuZXNzGAUgASgOMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSGFybmVzc0IKukgHggEEEAEgABINCgVtb2RlbBgGIAEoCRIYChByZWFzb25pbmdfZWZmb3J0GAcgASgJEh4KFnJlc3VtZV9jb252ZXJzYXRpb25faWQYCCABKAkSEAoId29ya3RyZWUYCSABKAkSNgoGcGx1Z2luGAogASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblBsdWdpbhIVCgR0YXNrGAsgASgJQge6SARyAhABEjoKDGNsaV9sb2NhdGlvbhgMIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNsaUxvY2F0aW9uIvQBCg1TZXNzaW9uUGx1Z2luEmwKC21hcmtldHBsYWNlGAEgASgJQle6SFS6AU0KG3BsdWdpbi5tYXJrZXRwbGFjZS5hYnNvbHV0ZRIYbXVzdCBiZSBhbiBhYnNvbHV0ZSBwYXRoGhR0aGlzLnN0YXJ0c1dpdGgoJy8nKXICEAESFQoEbmFtZRgCIAEoCUIHukgEcgIQARJeCgRob21lGAMgASgJQlC6SE26AUYKFHBsdWdpbi5ob21lLmFic29sdXRlEhhtdXN0IGJlIGFuIGFic29sdXRlIHBhdGgaFHRoaXMuc3RhcnRzV2l0aCgnLycpcgIQASKeAQoJU3RhcnRUdXJuEjwKB3Nlc3Npb24YASABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmQga6SAPIAQESGAoHdHVybl9pZBgCIAEoCUIHukgEcgIQARI5CgdtZXNzYWdlGAMgASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTWVzc2FnZUIGukgDyAEBIpoBCgVTdGVlchI8CgdzZXNzaW9uGAEgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblJlZkIGukgDyAEBEhgKB3R1cm5faWQYAiABKAlCB7pIBHICEAESOQoHbWVzc2FnZRgDIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2VCBrpIA8gBASJjCglJbnRlcnJ1cHQSPAoHc2Vzc2lvbhgBIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWZCBrpIA8gBARIYCgd0dXJuX2lkGAIgASgJQge6SARyAhABIlsKDENsb3NlU2Vzc2lvbhI8CgdzZXNzaW9uGAEgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblJlZkIGukgDyAEBEg0KBWZvcmNlGAIgASgIIoIDCghBcm1UaW1lchI8CgRraW5kGAEgASgOMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVGltZXJLaW5kQgq6SAeCAQQQASAAEhcKBnJ1bl9pZBgCIAEoCUIHukgEcgIQARI0CgdzZXNzaW9uGAMgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblJlZhIzCgdmaXJlX2F0GAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBOrMBukivARqsAQoRYXJtX3RpbWVyLnNlc3Npb24SXmEgc3RvcCBncmFjZSBhbmQgYSBsYXVuY2ggZGVhZGxpbmUgbmFtZSBhIHNlc3Npb247IGEgcnVuIGRlYWRsaW5lIGFuZCBhIGxlYWQgaWRsZSB0aW1lciBkbyBub3QaN2hhcyh0aGlzLnNlc3Npb24pID09ICh0aGlzLmtpbmQgPT0gMiB8fCB0aGlzLmtpbmQgPT0gMykqmQEKCVRpbWVyS2luZBIaChZUSU1FUl9LSU5EX1VOU1BFQ0lGSUVEEAASGwoXVElNRVJfS0lORF9SVU5fREVBRExJTkUQARIZChVUSU1FUl9LSU5EX1NUT1BfR1JBQ0UQAhIeChpUSU1FUl9LSU5EX0xBVU5DSF9ERUFETElORRADEhgKFFRJTUVSX0tJTkRfTEVBRF9JRExFEARCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator]);
+  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9lZmZlY3RzLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSKKAwoGRWZmZWN0EhMKAmlkGAEgASgJQge6SARyAhABEkAKDmxhdW5jaF9zZXNzaW9uGAogASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTGF1bmNoU2Vzc2lvbkgAEjgKCnN0YXJ0X3R1cm4YCyABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdGFydFR1cm5IABIvCgVzdGVlchgMIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0ZWVySAASNwoJaW50ZXJydXB0GA0gASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSW50ZXJydXB0SAASPgoNY2xvc2Vfc2Vzc2lvbhgOIAEoCzIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNsb3NlU2Vzc2lvbkgAEjYKCWFybV90aW1lchgPIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFybVRpbWVySABCDQoEYm9keRIFukgCCAEiQQoKU2Vzc2lvblJlZhIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIYCgdzZXNzaW9uGAIgASgNQge6SAQqAiAAIqwCCg1MYXVuY2hTZXNzaW9uEjwKB3Nlc3Npb24YASABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmQga6SAPIAQESFwoGcnVuX2lkGAIgASgJQge6SARyAhABEjwKBHJvbGUYAyABKA4yIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudFJvbGVCCrpIB4IBBBABIAASPQoHaGFybmVzcxgEIAEoDjIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhhcm5lc3NCCrpIB4IBBBABIAASDQoFbW9kZWwYBSABKAkSGAoQcmVhc29uaW5nX2VmZm9ydBgGIAEoCRIeCgxyZXN1bWVfdG9rZW4YByABKAxCCLpIBXoDGIAgIp4BCglTdGFydFR1cm4SPAoHc2Vzc2lvbhgBIAEoCzIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlc3Npb25SZWZCBrpIA8gBARIYCgd0dXJuX2lkGAIgASgJQge6SARyAhABEjkKB21lc3NhZ2UYAyABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5NZXNzYWdlQga6SAPIAQEimgEKBVN0ZWVyEjwKB3Nlc3Npb24YASABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmQga6SAPIAQESGAoHdHVybl9pZBgCIAEoCUIHukgEcgIQARI5CgdtZXNzYWdlGAMgASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTWVzc2FnZUIGukgDyAEBImMKCUludGVycnVwdBI8CgdzZXNzaW9uGAEgASgLMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2Vzc2lvblJlZkIGukgDyAEBEhgKB3R1cm5faWQYAiABKAlCB7pIBHICEAEiWwoMQ2xvc2VTZXNzaW9uEjwKB3Nlc3Npb24YASABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmQga6SAPIAQESDQoFZm9yY2UYAiABKAgiggMKCEFybVRpbWVyEjwKBGtpbmQYASABKA4yIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UaW1lcktpbmRCCrpIB4IBBBABIAASFwoGcnVuX2lkGAIgASgJQge6SARyAhABEjQKB3Nlc3Npb24YAyABKAsyIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXNzaW9uUmVmEjMKB2ZpcmVfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQE6swG6SK8BGqwBChFhcm1fdGltZXIuc2Vzc2lvbhJeYSBzdG9wIGdyYWNlIGFuZCBhIGxhdW5jaCBkZWFkbGluZSBuYW1lIGEgc2Vzc2lvbjsgYSBydW4gZGVhZGxpbmUgYW5kIGEgbGVhZCBpZGxlIHRpbWVyIGRvIG5vdBo3aGFzKHRoaXMuc2Vzc2lvbikgPT0gKHRoaXMua2luZCA9PSAyIHx8IHRoaXMua2luZCA9PSAzKSqZAQoJVGltZXJLaW5kEhoKFlRJTUVSX0tJTkRfVU5TUEVDSUZJRUQQABIbChdUSU1FUl9LSU5EX1JVTl9ERUFETElORRABEhkKFVRJTUVSX0tJTkRfU1RPUF9HUkFDRRACEh4KGlRJTUVSX0tJTkRfTEFVTkNIX0RFQURMSU5FEAMSGAoUVElNRVJfS0lORF9MRUFEX0lETEUQBEJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_orchestrator]);
 
 /**
  * Effect is one request for I/O. It commits in the same transaction as the events that decided
@@ -81,7 +81,7 @@ export const EffectSchema: GenMessage<Effect> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_effects, 0);
 
 /**
- * SessionRef names one session of one agent. A sidecar refuses a stale one.
+ * SessionRef names one session of one agent. The program holding a session refuses a stale one.
  *
  * @generated from message vibesys.orchestrator.v1.SessionRef
  */
@@ -105,6 +105,9 @@ export const SessionRefSchema: GenMessage<SessionRef> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_effects, 1);
 
 /**
+ * LaunchSession asks for a session of an agent. What else the session needs comes from the run and
+ * the host's configuration when the effect is carried out.
+ *
  * @generated from message vibesys.orchestrator.v1.LaunchSession
  */
 export type LaunchSession = Message<"vibesys.orchestrator.v1.LaunchSession"> & {
@@ -119,64 +122,31 @@ export type LaunchSession = Message<"vibesys.orchestrator.v1.LaunchSession"> & {
   runId: string;
 
   /**
-   * @generated from field: string repository = 3;
-   */
-  repository: string;
-
-  /**
-   * @generated from field: vibesys.orchestrator.v1.AgentRole role = 4;
+   * @generated from field: vibesys.orchestrator.v1.AgentRole role = 3;
    */
   role: AgentRole;
 
   /**
-   * @generated from field: vibesys.orchestrator.v1.Harness harness = 5;
+   * @generated from field: vibesys.orchestrator.v1.Harness harness = 4;
    */
   harness: Harness;
 
   /**
-   * @generated from field: string model = 6;
+   * @generated from field: string model = 5;
    */
   model: string;
 
   /**
-   * @generated from field: string reasoning_effort = 7;
+   * @generated from field: string reasoning_effort = 6;
    */
   reasoningEffort: string;
 
   /**
-   * Set to continue the provider's conversation instead of starting one.
+   * Set to continue the agent's last session instead of starting afresh. See SessionOpened.
    *
-   * @generated from field: string resume_conversation_id = 8;
+   * @generated from field: bytes resume_token = 7;
    */
-  resumeConversationId: string;
-
-  /**
-   * Set on a resume: the worktree the agent had.
-   *
-   * @generated from field: string worktree = 9;
-   */
-  worktree: string;
-
-  /**
-   * The plugin every session loads, and none of the operator's own plugins, skills or config.
-   * Absent from the stored effect: the daemon's sidecar launcher fills it from its configuration
-   * when it writes the launch file, and the sidecar refuses a launch file without it.
-   *
-   * @generated from field: vibesys.orchestrator.v1.SessionPlugin plugin = 10;
-   */
-  plugin?: SessionPlugin | undefined;
-
-  /**
-   * The run task and CLI location for the agent.
-   *
-   * @generated from field: string task = 11;
-   */
-  task: string;
-
-  /**
-   * @generated from field: vibesys.orchestrator.v1.CliLocation cli_location = 12;
-   */
-  cliLocation?: CliLocation | undefined;
+  resumeToken: Uint8Array;
 };
 
 /**
@@ -185,44 +155,6 @@ export type LaunchSession = Message<"vibesys.orchestrator.v1.LaunchSession"> & {
  */
 export const LaunchSessionSchema: GenMessage<LaunchSession> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_effects, 2);
-
-/**
- * SessionPlugin is the published plugin a session loads, named by value so the sidecar never
- * guesses where its own checkout is.
- *
- * @generated from message vibesys.orchestrator.v1.SessionPlugin
- */
-export type SessionPlugin = Message<"vibesys.orchestrator.v1.SessionPlugin"> & {
-  /**
-   * The root of a local marketplace checkout: the directory holding .claude-plugin/marketplace.json.
-   *
-   * @generated from field: string marketplace = 1;
-   */
-  marketplace: string;
-
-  /**
-   * The plugin's name in that marketplace.
-   *
-   * @generated from field: string name = 2;
-   */
-  name: string;
-
-  /**
-   * The session's plugin home: a fresh directory the first session of an agent installs the plugin
-   * into, and every later session of that agent reuses, because the provider keeps the
-   * conversation to resume there too. One per agent; never shared between agents.
-   *
-   * @generated from field: string home = 3;
-   */
-  home: string;
-};
-
-/**
- * Describes the message vibesys.orchestrator.v1.SessionPlugin.
- * Use `create(SessionPluginSchema)` to create a new message.
- */
-export const SessionPluginSchema: GenMessage<SessionPlugin> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 3);
 
 /**
  * @generated from message vibesys.orchestrator.v1.StartTurn
@@ -251,7 +183,7 @@ export type StartTurn = Message<"vibesys.orchestrator.v1.StartTurn"> & {
  * Use `create(StartTurnSchema)` to create a new message.
  */
 export const StartTurnSchema: GenMessage<StartTurn> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 4);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 3);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Steer
@@ -278,7 +210,7 @@ export type Steer = Message<"vibesys.orchestrator.v1.Steer"> & {
  * Use `create(SteerSchema)` to create a new message.
  */
 export const SteerSchema: GenMessage<Steer> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 5);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 4);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Interrupt
@@ -300,7 +232,7 @@ export type Interrupt = Message<"vibesys.orchestrator.v1.Interrupt"> & {
  * Use `create(InterruptSchema)` to create a new message.
  */
 export const InterruptSchema: GenMessage<Interrupt> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 6);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 5);
 
 /**
  * @generated from message vibesys.orchestrator.v1.CloseSession
@@ -324,7 +256,7 @@ export type CloseSession = Message<"vibesys.orchestrator.v1.CloseSession"> & {
  * Use `create(CloseSessionSchema)` to create a new message.
  */
 export const CloseSessionSchema: GenMessage<CloseSession> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 7);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 6);
 
 /**
  * ArmTimer asks for a TimerFired at a time. A timer that outlives its reason fires harmlessly.
@@ -360,7 +292,7 @@ export type ArmTimer = Message<"vibesys.orchestrator.v1.ArmTimer"> & {
  * Use `create(ArmTimerSchema)` to create a new message.
  */
 export const ArmTimerSchema: GenMessage<ArmTimer> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_effects, 8);
+  messageDesc(file_vibesys_orchestrator_v1_effects, 7);
 
 /**
  * TimerKind says what a timer is for.

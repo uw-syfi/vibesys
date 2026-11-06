@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,3 +102,31 @@ func TestDamagedBytesNeverPanic(t *testing.T) {
 }
 
 var farFutureForTests = time.Date(2200, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// A store of any other schema version is refused with what to do about it, and left as it was: there
+// is no upgrade, and a store that is read wrongly is worse than one that is not read.
+func TestAStoreOfAnotherSchemaVersionIsRefusedWithWhatToDo(t *testing.T) {
+	for _, version := range []int{1, 2, 3, 4, 6, 100} {
+		t.Run(fmt.Sprint(version), func(t *testing.T) {
+			dir := localDir(t)
+			s := openSQLite(t, dir, store.SQLiteOptions{})
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := sql.Open("sqlite", filepath.Join(dir.Path(), store.DatabaseFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := raw.Exec(`UPDATE meta SET value = ? WHERE key = 'schema_version'`, version); err != nil {
+				t.Fatal(err)
+			}
+			if err := raw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			_, err = store.OpenSQLite(dir, store.SQLiteOptions{})
+			if err == nil || !strings.Contains(err.Error(), "move the state directory") || !strings.Contains(err.Error(), fmt.Sprint(version)) {
+				t.Fatalf("got %v, want a refusal naming the version and what to do", err)
+			}
+		})
+	}
+}

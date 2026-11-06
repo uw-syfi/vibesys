@@ -1,0 +1,118 @@
+{
+  "name": "a_bad_open_is_refused_by_name",
+  "doc": "An Open that breaks the contract is refused naming the field, starts nothing, and leaves the process able to be opened.",
+  "provider": [
+    [
+      {
+        "say": "done",
+        "item": "a1"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "refused": {
+        "open": {
+          "workingDirectory": "relative"
+        },
+        "code": "INVALID_ARGUMENT",
+        "names": "working_directory"
+      }
+    },
+    {
+      "refused": {
+        "open": {
+          "agentDataDirectory": ""
+        },
+        "code": "INVALID_ARGUMENT",
+        "names": "agent_data_directory"
+      }
+    },
+    {
+      "refused": {
+        "open": {
+          "harness": "HARNESS_UNSPECIFIED"
+        },
+        "code": "INVALID_ARGUMENT",
+        "names": "harness"
+      }
+    },
+    {
+      "refused": {
+        "open": {
+          "skills": {
+            "directory": "relative",
+            "name": "vibesys"
+          }
+        },
+        "code": "INVALID_ARGUMENT",
+        "names": "skills.directory"
+      }
+    },
+    {
+      "refused": {
+        "open": {
+          "tools": [
+            {
+              "name": "vibesys",
+              "argv": []
+            }
+          ]
+        },
+        "code": "INVALID_ARGUMENT",
+        "names": "tools[0].argv"
+      }
+    },
+    {
+      "refused": {
+        "open": {
+          "environment": {
+            "set": {
+              "A=B": "x"
+            }
+          }
+        },
+        "code": "INVALID_ARGUMENT",
+        "names": "environment.set"
+      }
+    },
+    {
+      "hello": {
+        "compatibility": "COMPATIBILITY_COMPATIBLE",
+        "session": null
+      }
+    },
+    {
+      "open": {}
+    },
+    {
+      "send": {
+        "effectId": "e-t1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "do the thing"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t1"
+      }
+    }
+  ],
+  "checks": [
+    "opened_first",
+    "one_agent_started"
+  ]
+}

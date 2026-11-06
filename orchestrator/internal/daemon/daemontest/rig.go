@@ -49,6 +49,9 @@ type Rig struct {
 	JobStall int
 	// JobSource overrides the default Fake for integrated deterministic tests.
 	JobSource jobs.JobSource
+	// NewHost makes the launcher each new daemon is given, for a test of the real start protocol.
+	// Without it every daemon is given Sidecars, the Fake.
+	NewHost func() daemon.Sidecars
 	// ReattachErr is what the last restart's Reattach reported.
 	ReattachErr error
 	// Wake is signalled by every commit, for a daemon run with Daemon.Run.
@@ -95,6 +98,10 @@ func (r *Rig) Restart(tb testing.TB) {
 	r.Sidecars.mu.Lock()
 	r.Sidecars.AfterSend = nil
 	r.Sidecars.mu.Unlock()
+	var host daemon.Sidecars = r.Sidecars
+	if r.NewHost != nil {
+		host = r.NewHost()
+	}
 	d, err := daemon.Open(daemon.Config{
 		Engine: daemon.EngineDeps{
 			Store: r.Faults, Clock: r.Clock, Nonces: r.Nonces, Hub: r.Hub, Log: r.Log, Locate: func() core.CliLocation { return r.Location },
@@ -105,7 +112,7 @@ func (r *Rig) Restart(tb testing.TB) {
 				}
 			},
 		},
-		Sidecars: r.Sidecars, Jobs: gatedJobs{r}, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
+		Sidecars: host, Jobs: gatedJobs{r}, Authority: r.Auth, Bounds: r.Bounds, AgentSocket: AgentSocket,
 		JobPollEvery: PollEvery,
 	})
 	if err != nil {

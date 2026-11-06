@@ -100,9 +100,9 @@ func (Refusal) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{0}
 }
 
-// SidecarSource names the sidecar event a stored event came from, so that a replay knows how far
+// SessionSource names the session event a stored event came from, so that a replay knows how far
 // each session's stream was committed. It is what a restarted daemon resumes that stream from.
-type SidecarSource struct {
+type SessionSource struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
 	Session       uint32                 `protobuf:"varint,2,opt,name=session,proto3" json:"session,omitempty"`
@@ -111,20 +111,20 @@ type SidecarSource struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SidecarSource) Reset() {
-	*x = SidecarSource{}
+func (x *SessionSource) Reset() {
+	*x = SessionSource{}
 	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SidecarSource) String() string {
+func (x *SessionSource) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SidecarSource) ProtoMessage() {}
+func (*SessionSource) ProtoMessage() {}
 
-func (x *SidecarSource) ProtoReflect() protoreflect.Message {
+func (x *SessionSource) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_orchestrator_v1_events_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -136,26 +136,26 @@ func (x *SidecarSource) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SidecarSource.ProtoReflect.Descriptor instead.
-func (*SidecarSource) Descriptor() ([]byte, []int) {
+// Deprecated: Use SessionSource.ProtoReflect.Descriptor instead.
+func (*SessionSource) Descriptor() ([]byte, []int) {
 	return file_vibesys_orchestrator_v1_events_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *SidecarSource) GetAgentId() string {
+func (x *SessionSource) GetAgentId() string {
 	if x != nil {
 		return x.AgentId
 	}
 	return ""
 }
 
-func (x *SidecarSource) GetSession() uint32 {
+func (x *SessionSource) GetSession() uint32 {
 	if x != nil {
 		return x.Session
 	}
 	return 0
 }
 
-func (x *SidecarSource) GetOffset() uint64 {
+func (x *SessionSource) GetOffset() uint64 {
 	if x != nil {
 		return x.Offset
 	}
@@ -173,8 +173,8 @@ type Event struct {
 	// Empty unless a command caused the event.
 	CommandId string                 `protobuf:"bytes,3,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
 	At        *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=at,proto3" json:"at,omitempty"`
-	// Absent unless a sidecar event caused the event.
-	Source *SidecarSource `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`
+	// Absent unless a session event caused the event.
+	Source *SessionSource `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`
 	// Types that are valid to be assigned to Body:
 	//
 	//	*Event_RunUpdated
@@ -246,7 +246,7 @@ func (x *Event) GetAt() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *Event) GetSource() *SidecarSource {
+func (x *Event) GetSource() *SessionSource {
 	if x != nil {
 		return x.Source
 	}
@@ -1195,7 +1195,7 @@ var File_vibesys_orchestrator_v1_events_proto protoreflect.FileDescriptor
 const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"w\n" +
-	"\rSidecarSource\x12\"\n" +
+	"\rSessionSource\x12\"\n" +
 	"\bagent_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\aagentId\x12!\n" +
 	"\asession\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\asession\x12\x1f\n" +
 	"\x06offset\x18\x03 \x01(\x04B\a\xbaH\x042\x02 \x00R\x06offset\"\x91\x05\n" +
@@ -1205,7 +1205,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"command_id\x18\x03 \x01(\tR\tcommandId\x122\n" +
 	"\x02at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02at\x12>\n" +
-	"\x06source\x18\x05 \x01(\v2&.vibesys.orchestrator.v1.SidecarSourceR\x06source\x12?\n" +
+	"\x06source\x18\x05 \x01(\v2&.vibesys.orchestrator.v1.SessionSourceR\x06source\x12?\n" +
 	"\vrun_updated\x18\n" +
 	" \x01(\v2\x1c.vibesys.orchestrator.v1.RunH\x00R\n" +
 	"runUpdated\x12E\n" +
@@ -1308,7 +1308,7 @@ var file_vibesys_orchestrator_v1_events_proto_enumTypes = make([]protoimpl.EnumI
 var file_vibesys_orchestrator_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_vibesys_orchestrator_v1_events_proto_goTypes = []any{
 	(Refusal)(0),                  // 0: vibesys.orchestrator.v1.Refusal
-	(*SidecarSource)(nil),         // 1: vibesys.orchestrator.v1.SidecarSource
+	(*SessionSource)(nil),         // 1: vibesys.orchestrator.v1.SessionSource
 	(*Event)(nil),                 // 2: vibesys.orchestrator.v1.Event
 	(*Delta)(nil),                 // 3: vibesys.orchestrator.v1.Delta
 	(*AgentSpec)(nil),             // 4: vibesys.orchestrator.v1.AgentSpec
@@ -1335,7 +1335,7 @@ var file_vibesys_orchestrator_v1_events_proto_goTypes = []any{
 }
 var file_vibesys_orchestrator_v1_events_proto_depIdxs = []int32{
 	14, // 0: vibesys.orchestrator.v1.Event.at:type_name -> google.protobuf.Timestamp
-	1,  // 1: vibesys.orchestrator.v1.Event.source:type_name -> vibesys.orchestrator.v1.SidecarSource
+	1,  // 1: vibesys.orchestrator.v1.Event.source:type_name -> vibesys.orchestrator.v1.SessionSource
 	15, // 2: vibesys.orchestrator.v1.Event.run_updated:type_name -> vibesys.orchestrator.v1.Run
 	16, // 3: vibesys.orchestrator.v1.Event.agent_updated:type_name -> vibesys.orchestrator.v1.Agent
 	17, // 4: vibesys.orchestrator.v1.Event.turn_updated:type_name -> vibesys.orchestrator.v1.Turn

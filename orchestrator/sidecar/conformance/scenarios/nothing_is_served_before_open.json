@@ -1,0 +1,81 @@
+{
+  "name": "nothing_is_served_before_open",
+  "doc": "A command and a read before Open are refused, and a process refused them can still be opened.",
+  "provider": [
+    [
+      {
+        "say": "done",
+        "item": "a1"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "refused": {
+        "send": {
+          "effectId": "e-t1",
+          "startTurn": {
+            "session": {
+              "agentId": "agent-1",
+              "session": 1
+            },
+            "turnId": "t1",
+            "message": {
+              "id": "msg-t1",
+              "runId": "run-1",
+              "toAgentId": "agent-1",
+              "delivery": "DELIVERY_QUEUED",
+              "at": "1970-01-01T00:00:01Z",
+              "text": "do the thing"
+            }
+          }
+        },
+        "code": "FAILED_PRECONDITION"
+      }
+    },
+    {
+      "refused": {
+        "follow": true,
+        "code": "FAILED_PRECONDITION"
+      }
+    },
+    {
+      "hello": {
+        "compatibility": "COMPATIBILITY_COMPATIBLE",
+        "session": null
+      }
+    },
+    {
+      "open": {}
+    },
+    {
+      "send": {
+        "effectId": "e-t1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "do the thing"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t1"
+      }
+    }
+  ],
+  "checks": [
+    "opened_first",
+    "one_agent_started"
+  ]
+}

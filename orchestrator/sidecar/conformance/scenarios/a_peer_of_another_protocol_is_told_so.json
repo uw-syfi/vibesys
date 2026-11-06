@@ -1,0 +1,36 @@
+{
+  "name": "a_peer_of_another_protocol_is_told_so",
+  "doc": "Hello answers with what the two share. A peer whose protocol is too old, or one that needs a newer one than this process speaks, is told which, and nothing was opened.",
+  "provider": [],
+  "steps": [
+    {
+      "hello": {
+        "client": {
+          "protocolVersion": 0,
+          "minProtocolVersion": 0
+        },
+        "compatibility": "COMPATIBILITY_CLIENT_TOO_OLD",
+        "session": null
+      }
+    },
+    {
+      "hello": {
+        "client": {
+          "protocolVersion": 4294967295,
+          "minProtocolVersion": 4294967295
+        },
+        "compatibility": "COMPATIBILITY_DAEMON_TOO_OLD",
+        "session": null
+      }
+    },
+    {
+      "hello": {
+        "compatibility": "COMPATIBILITY_COMPATIBLE",
+        "session": null
+      }
+    }
+  ],
+  "checks": [
+    "no_agent_started"
+  ]
+}

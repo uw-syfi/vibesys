@@ -76,7 +76,7 @@ func TestASessionThatFailsToStartKeepsItsReasonAndAnOpenOneDoesNot(t *testing.T)
 func TestALostSessionThatNeverOpenedGetsTheOtherReasonUnlessTold(t *testing.T) {
 	w := newScript(t)
 	r := w.startOnly()
-	w.step(core.SidecarLost{Session: core.Session{Agent: r.Agent, N: 1}, Detail: "gone"})
+	w.step(core.SessionLost{Session: core.Session{Agent: r.Agent, N: 1}, Detail: "gone"})
 	if agent, _ := w.s.Agent(r.Agent); agent.Status != core.AgentLost || agent.StartFailure != core.StartOther {
 		t.Fatalf("lead %+v, want lost with the other reason", agent)
 	}

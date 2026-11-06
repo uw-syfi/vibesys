@@ -124,13 +124,14 @@ func (r *rig) actingAgents() { r.holderEnv = append(r.holderEnv, "VIBESYS_E2E_SC
 
 // session is one launched session's directory under the orchestrator's state.
 type session struct {
-	dir    string
-	launch struct {
-		Plugin struct {
-			Marketplace string `json:"marketplace"`
-			Name        string `json:"name"`
-			Home        string `json:"home"`
-		} `json:"plugin"`
+	dir string
+	// open is what the session was opened with, as the scripted holder recorded it.
+	open struct {
+		Skills struct {
+			Directory string `json:"directory"`
+			Name      string `json:"name"`
+		} `json:"skills"`
+		AgentDataDirectory string `json:"agentDataDirectory"`
 	}
 }
 
@@ -143,12 +144,12 @@ func (r *rig) sessions() []session {
 	var out []session
 	for _, dir := range dirs {
 		s := session{dir: dir}
-		data, err := os.ReadFile(filepath.Join(dir, "launch.json"))
+		data, err := os.ReadFile(filepath.Join(dir, "open.json"))
 		if err != nil {
-			r.t.Fatalf("session %s has no launch spec: %v", dir, err)
+			r.t.Fatalf("session %s was not opened: %v", dir, err)
 		}
-		if err := json.Unmarshal(data, &s.launch); err != nil {
-			r.t.Fatalf("launch spec of %s: %v", dir, err)
+		if err := json.Unmarshal(data, &s.open); err != nil {
+			r.t.Fatalf("what opened %s: %v", dir, err)
 		}
 		out = append(out, s)
 	}
@@ -285,15 +286,15 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 	// Every session loaded the vibesys plugin from the marketplace, in a home of its agent's own.
 	homes := map[string]string{} // plugin home to the agent directory that owns it
 	for _, sess := range r.sessions() {
-		p := sess.launch.Plugin
-		if p.Name != "vibesys" || p.Marketplace != r.marketplace || p.Home == "" {
-			t.Errorf("session %s launched with plugin %+v, want vibesys from %s with a home", sess.dir, p, r.marketplace)
+		home := sess.open.AgentDataDirectory
+		if sess.open.Skills.Name != "vibesys" || sess.open.Skills.Directory != r.marketplace || home == "" {
+			t.Errorf("session %s opened with skills %+v in %q, want vibesys from %s with a home", sess.dir, sess.open.Skills, home, r.marketplace)
 		}
 		agentDir := filepath.Dir(sess.dir)
-		if owner, ok := homes[p.Home]; ok && owner != agentDir {
-			t.Errorf("agents %s and %s share the plugin home %s", owner, agentDir, p.Home)
+		if owner, ok := homes[home]; ok && owner != agentDir {
+			t.Errorf("agents %s and %s share the plugin home %s", owner, agentDir, home)
 		}
-		homes[p.Home] = agentDir
+		homes[home] = agentDir
 		r.checkProviderLoadsOnlyThePlugin(sess)
 		if data, err := os.ReadFile(filepath.Join(sess.dir, "peer-failure.txt")); err == nil {
 			t.Errorf("a scripted agent broke off: %s", data)
@@ -438,7 +439,7 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 // sessionDirOf is the directory name the orchestrator keeps an agent's sessions under.
 func sessionDirOf(r *rig, agent string) string {
 	for _, sess := range r.sessions() {
-		data, err := os.ReadFile(filepath.Join(sess.dir, "launch.json"))
+		data, err := os.ReadFile(filepath.Join(sess.dir, "open.json"))
 		if err == nil && strings.Contains(string(data), `"`+agent+`"`) {
 			return filepath.Base(filepath.Dir(sess.dir))
 		}
@@ -470,8 +471,8 @@ func (r *rig) checkProviderLoadsOnlyThePlugin(sess session) {
 		r.t.Fatalf("session %s started the provider %d times", sess.dir, len(spawned.Spawns))
 	}
 	spawn := spawned.Spawns[0]
-	if spawn.Home != sess.launch.Plugin.Home {
-		r.t.Errorf("session %s: the provider's config home is %q, want the plugin home %q", sess.dir, spawn.Home, sess.launch.Plugin.Home)
+	if spawn.Home != sess.open.AgentDataDirectory {
+		r.t.Errorf("session %s: the provider's config home is %q, want the plugin home %q", sess.dir, spawn.Home, sess.open.AgentDataDirectory)
 	}
 	flag := func(name string) []string {
 		var values []string

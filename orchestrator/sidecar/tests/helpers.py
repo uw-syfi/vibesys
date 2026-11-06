@@ -1,11 +1,11 @@
-"""Builders shared by the sidecar's tests: commands, launches and scripted agentshim sessions."""
+"""Builders shared by the sidecar's tests: commands, open requests and scripted agentshim sessions."""
 
 from __future__ import annotations
 
 import json
 from typing import TYPE_CHECKING, Any
 
-from agentshim import Agent, ApprovalPolicy, NativePermissions, StdioMcpServer, TransportKind
+from agentshim import Agent, ApprovalPolicy, NativePermissions, TransportKind
 from agentshim.testing import (
     ClaudeFramePeer,
     ClaudeStreamPeers,
@@ -16,10 +16,10 @@ from agentshim.testing import (
     SequentialIds,
 )
 
-from vs_sidecar.driver import AgentFactory, AgentshimDriver, Driver, Identity, build_session
+from vs_sidecar.driver import AgentFactory, AgentshimDriver, Driver, build_session, over
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -58,16 +58,12 @@ def write_marketplace(root: Path, name: str = "vibesys") -> Path:
     return root
 
 
-def session_plugin(root: Path, *, name: str = "vibesys") -> fx.SessionPlugin:
-    """The plugin a launch names: a marketplace under *root* and a plugin home that does not exist."""
-    return fx.SessionPlugin(
-        marketplace=str(write_marketplace(root / "marketplace", name)),
-        name=name,
-        home=str(root / "plugin-home"),
-    )
+def skill_bundle(root: Path, *, name: str = "vibesys") -> sc.SessionSkills:
+    """The bundle a request names: a marketplace written under *root*."""
+    return sc.SessionSkills(directory=str(write_marketplace(root / "marketplace", name)), name=name)
 
 
-#: The environment a scripted session's identity is laid over, standing for the login shell's.
+#: The environment a scripted session's own is laid over, standing for the login shell's.
 BASE_ENV = {"PATH": "/usr/bin:/bin", "HOME": "/home/tester"}
 
 
@@ -79,17 +75,17 @@ def scripted_agents(
 ) -> AgentFactory:
     """An ``AgentFactory`` whose agents run *provider* over *executor*, on a fixed clock.
 
-    Each agent's environment is the session's identity laid over *base_env*, as it is over the
-    login shell's in production.
+    Each agent's environment is the session's laid over *base_env*, as it is over the login shell's
+    in production.
     """
 
-    def make(_provider: str, identity: Identity) -> Agent:
+    def make(_provider: str, environment: sc.AgentEnvironment) -> Agent:
         return Agent(
             provider,
             transport=TransportKind.STREAM,
             model="fake-model",
             executor=executor,
-            env=identity.over(base_env),
+            env=over(environment, base_env),
             permissions=NativePermissions.bypass(),
             approvals=ApprovalPolicy.DENY,
             clock=FakeClock(),
@@ -100,21 +96,21 @@ def scripted_agents(
     return make
 
 
-def launch(harness: int = orch.HARNESS_CODEX, **fields: Any) -> fx.LaunchSession:
-    """A valid ``LaunchSession``."""
+def open_request(harness: int = orch.HARNESS_CODEX, **fields: Any) -> sc.OpenSessionRequest:
+    """A valid ``OpenSessionRequest``."""
     base: dict[str, Any] = {
         "session": REF,
-        "run_id": "run-1",
-        "repository": "repo",
-        "task": "task",
-        "role": orch.AGENT_ROLE_WORKER,
         "harness": harness,
-        "worktree": "/work",
+        "working_directory": "/work",
+        "agent_data_directory": "/data",
+        "skills": sc.SessionSkills(directory="/skills", name="vibesys"),
+        "environment": sc.AgentEnvironment(set={"VIBESYS_RUN": "run-1"}),
     }
     if _root is not None:
-        base["plugin"] = session_plugin(_root)
+        base["skills"] = skill_bundle(_root)
+        base["agent_data_directory"] = str(_root / "plugin-home")
     base.update(fields)
-    return fx.LaunchSession(**base)
+    return sc.OpenSessionRequest(**base)
 
 
 def message(message_id: str = "m1", text: str = "do the thing") -> orch.Message:
@@ -131,9 +127,9 @@ def message(message_id: str = "m1", text: str = "do the thing") -> orch.Message:
     )
 
 
-def start_turn(effect_id: str, turn_id: str, text: str = "do the thing") -> sc.SidecarCommand:
+def start_turn(effect_id: str, turn_id: str, text: str = "do the thing") -> sc.SessionCommand:
     """A ``StartTurn`` command."""
-    return sc.SidecarCommand(
+    return sc.SessionCommand(
         effect_id=effect_id,
         start_turn=fx.StartTurn(
             session=REF, turn_id=turn_id, message=message(f"msg-{turn_id}", text)
@@ -143,27 +139,27 @@ def start_turn(effect_id: str, turn_id: str, text: str = "do the thing") -> sc.S
 
 def steer(
     effect_id: str, turn_id: str, message_id: str, text: str = "also this"
-) -> sc.SidecarCommand:
+) -> sc.SessionCommand:
     """A ``Steer`` command."""
-    return sc.SidecarCommand(
+    return sc.SessionCommand(
         effect_id=effect_id,
         steer=fx.Steer(session=REF, turn_id=turn_id, message=message(message_id, text)),
     )
 
 
-def interrupt(effect_id: str, turn_id: str) -> sc.SidecarCommand:
+def interrupt(effect_id: str, turn_id: str) -> sc.SessionCommand:
     """An ``Interrupt`` command."""
-    return sc.SidecarCommand(
+    return sc.SessionCommand(
         effect_id=effect_id, interrupt=fx.Interrupt(session=REF, turn_id=turn_id)
     )
 
 
-def close(effect_id: str, *, force: bool = False) -> sc.SidecarCommand:
+def close(effect_id: str, *, force: bool = False) -> sc.SessionCommand:
     """A ``CloseSession`` command."""
-    return sc.SidecarCommand(effect_id=effect_id, close=fx.CloseSession(session=REF, force=force))
+    return sc.SessionCommand(effect_id=effect_id, close=fx.CloseSession(session=REF, force=force))
 
 
-def kinds(events: Sequence[sc.SidecarEvent]) -> list[str]:
+def kinds(events: Sequence[sc.SessionEvent]) -> list[str]:
     """The body kind of each event, for readable assertions."""
     return [event.WhichOneof("body") or "" for event in events]
 
@@ -194,34 +190,34 @@ def driver_factory_over(
     provider: str,
     executor: FakeExecutor,
     *,
-    mcp_servers: Sequence[StdioMcpServer] = (),
-    launch_fields: Mapping[str, Any] | None = None,
+    tools: Sequence[sc.ToolServer] = (),
+    request_fields: Mapping[str, Any] | None = None,
 ) -> Callable[[Callable[[RawFrame], None]], Driver]:
-    """A driver factory over *executor*, for a session given *mcp_servers*."""
-    return _factory(provider, executor, {}, mcp_servers, launch_fields or {})
+    """A driver factory over *executor*, for a session given *tools*."""
+    return _factory(provider, executor, {}, tools, request_fields or {})
 
 
 def _factory(
     provider: str,
     executor: FakeExecutor,
     options: dict[str, Any],
-    mcp_servers: Sequence[StdioMcpServer] = (),
-    launch_fields: Mapping[str, Any] | None = None,
+    tools: Sequence[sc.ToolServer] = (),
+    request_fields: Mapping[str, Any] | None = None,
 ) -> Callable[[Callable[[RawFrame], None]], Driver]:
     agent = scripted_agents(provider, executor, **options)
-    fields = dict(launch_fields or {})
+    fields = dict(request_fields or {})
 
     def make(raw_sink: Callable[[RawFrame], None]) -> Driver:
+        request = open_request(tools=tools, **fields)
         return AgentshimDriver(
             lambda conversation_id: build_session(
-                launch(**fields),
+                request,
                 agent=agent,
-                mcp_servers=mcp_servers,
                 raw_sink=raw_sink,
                 new_conversation_id=conversation_id,
             ),
             preferred_id="11111111-1111-4111-8111-111111111111",
-            workdir=launch(**fields).worktree,
+            workdir=request.working_directory,
         )
 
     return make

@@ -1,11 +1,8 @@
 package production
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/uw-syfi/vibesys/orchestrator/release"
@@ -29,9 +26,9 @@ type Plugin struct {
 	Name string
 }
 
-// PluginFor chooses the plugin marketplace, the setting when there is one and otherwise the
-// release's, and checks the checkout holds the plugin, so a wrong path is refused when the daemon
-// starts and named, instead of when an agent is launched.
+// PluginFor chooses the plugin marketplace, the setting when there is one and otherwise the release's.
+// It does not read the marketplace: the agent's own harness defines that format and is its one reader,
+// so one that cannot be loaded comes back as the session's start failure, naming it.
 func PluginFor(setting string, find release.Finder) (Plugin, error) {
 	path := strings.TrimSpace(setting)
 	switch {
@@ -45,26 +42,6 @@ func PluginFor(setting string, find release.Finder) (Plugin, error) {
 		}
 	case !filepath.IsAbs(path):
 		return Plugin{}, fmt.Errorf("%s=%s is not an absolute path", SettingSkills, path)
-	}
-	manifest := filepath.Join(path, ".claude-plugin", "marketplace.json")
-	data, err := os.ReadFile(manifest)
-	if err != nil {
-		return Plugin{}, fmt.Errorf("%s=%s is not a marketplace checkout: %w", SettingSkills, path, err)
-	}
-	var parsed struct {
-		Plugins []struct {
-			Name string `json:"name"`
-		} `json:"plugins"`
-	}
-	if err := json.Unmarshal(data, &parsed); err != nil {
-		return Plugin{}, fmt.Errorf("%s=%s: %s is not a marketplace manifest: %w", SettingSkills, path, manifest, err)
-	}
-	names := make([]string, 0, len(parsed.Plugins))
-	for _, p := range parsed.Plugins {
-		names = append(names, p.Name)
-	}
-	if !slices.Contains(names, PluginName) {
-		return Plugin{}, fmt.Errorf("%s=%s: %s lists no plugin named %s", SettingSkills, path, manifest, PluginName)
 	}
 	return Plugin{Marketplace: filepath.Clean(path), Name: PluginName}, nil
 }

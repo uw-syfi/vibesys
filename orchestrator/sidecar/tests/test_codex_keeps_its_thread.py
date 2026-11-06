@@ -15,9 +15,8 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from tests import helpers as h
-from vs_sidecar.driver import AgentshimDriver
+from vs_sidecar.driver import AgentshimDriver, build_session
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.main import build_session
 
 if TYPE_CHECKING:
     from agentshim import AgentEvent
@@ -34,7 +33,7 @@ def _driver(script: CodexScript) -> tuple[Driver, FakeExecutor]:
     agent = h.scripted_agents("codex", executor)
     driver = AgentshimDriver(
         lambda conversation_id: build_session(
-            h.launch(),
+            h.open_request(),
             agent=agent,
             raw_sink=lambda _frame: None,
             new_conversation_id=conversation_id,

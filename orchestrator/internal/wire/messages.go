@@ -58,9 +58,9 @@ func ParseCommandMessage(m *pb.Command, caller core.Caller) (core.Command, error
 // build does not know.
 func Validate(m proto.Message) error { return check(m) }
 
-// SidecarCommandFor returns what the sidecar is sent for an effect. It reports false for the
+// SessionCommandFor returns what a session is sent for an effect. It reports false for the
 // effects that are not commands to a live session: launching a session and arming a timer.
-func SidecarCommandFor(e core.Effect) (*pb.SidecarCommand, bool, error) {
+func SessionCommandFor(e core.Effect) (*pb.SessionCommand, bool, error) {
 	data, err := EncodeEffect(e)
 	if err != nil {
 		return nil, false, err
@@ -69,16 +69,16 @@ func SidecarCommandFor(e core.Effect) (*pb.SidecarCommand, bool, error) {
 	if err := proto.Unmarshal(data, &m); err != nil {
 		return nil, false, fmt.Errorf("effect %s: %w", e.ID(), err)
 	}
-	out := &pb.SidecarCommand{EffectId: m.GetId()}
+	out := &pb.SessionCommand{EffectId: m.GetId()}
 	switch b := m.GetBody().(type) {
 	case *pb.Effect_StartTurn:
-		out.Body = &pb.SidecarCommand_StartTurn{StartTurn: b.StartTurn}
+		out.Body = &pb.SessionCommand_StartTurn{StartTurn: b.StartTurn}
 	case *pb.Effect_Steer:
-		out.Body = &pb.SidecarCommand_Steer{Steer: b.Steer}
+		out.Body = &pb.SessionCommand_Steer{Steer: b.Steer}
 	case *pb.Effect_Interrupt:
-		out.Body = &pb.SidecarCommand_Interrupt{Interrupt: b.Interrupt}
+		out.Body = &pb.SessionCommand_Interrupt{Interrupt: b.Interrupt}
 	case *pb.Effect_CloseSession:
-		out.Body = &pb.SidecarCommand_Close{Close: b.CloseSession}
+		out.Body = &pb.SessionCommand_Close{Close: b.CloseSession}
 	default:
 		return nil, false, nil
 	}

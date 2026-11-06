@@ -131,7 +131,7 @@ func newMonitor() *monitor {
 func (m *monitor) commit(body core.InputBody, events []core.Event) error {
 	m.refusedSteer = ""
 	m.idled, m.over, m.noticed, m.resumed = map[core.AgentID]bool{}, map[core.AgentID]bool{}, map[core.AgentID]int{}, map[core.AgentID]bool{}
-	if fact, ok := body.(core.SidecarFact); ok {
+	if fact, ok := body.(core.SessionFact); ok {
 		if outcome, ok := fact.Body.(core.SteerOutcome); ok && !outcome.Accepted {
 			m.refusedSteer = outcome.Message
 		}
@@ -170,7 +170,7 @@ func (m *monitor) commit(body core.InputBody, events []core.Event) error {
 }
 
 // fact holds a sidecar to its session: only the current one has a say, and each offset counts once.
-func (m *monitor) fact(f core.SidecarFact, events []core.Event) error {
+func (m *monitor) fact(f core.SessionFact, events []core.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -297,7 +297,7 @@ func (m *monitor) run(r core.Run) error {
 		m.covered.runsFailed++
 	case r.Status == core.RunStopping && r.StopReason == core.StopLeadGone:
 		lead := m.agents[r.Lead]
-		if lead.Capabilities.Resumes && lead.ConversationID != "" && m.failures[lead.ID] <= core.MaxLeadResumes {
+		if lead.Capabilities.Resumes && lead.ResumeToken != "" && m.failures[lead.ID] <= core.MaxLeadResumes {
 			return fmt.Errorf("run %s gave up on a lead with %d failures that could resume", r.ID, m.failures[lead.ID])
 		}
 		if lead.Capabilities.Resumes {

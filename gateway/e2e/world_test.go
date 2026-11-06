@@ -21,13 +21,12 @@ type world struct {
 }
 
 type agentView struct {
-	ID       string `json:"id"`
-	Parent   string `json:"parentAgentId"`
-	Role     string `json:"role"`
-	Harness  string `json:"harness"`
-	Status   string `json:"status"`
-	Plan     int    `json:"planNumber"`
-	Worktree string `json:"worktree"`
+	ID      string `json:"id"`
+	Parent  string `json:"parentAgentId"`
+	Role    string `json:"role"`
+	Harness string `json:"harness"`
+	Status  string `json:"status"`
+	Plan    int    `json:"planNumber"`
 }
 
 type messageView struct {

@@ -67,8 +67,8 @@ func TestStartOnARunThatFailsExitsOneWithTheAgentsReason(t *testing.T) {
 
 func TestStartOnAnAgentWithoutItsToolsExitsOneNamingTheReason(t *testing.T) {
 	l := newLive(t, nil)
-	l.Sidecars.Opening = func(core.LaunchSession) []*pb.SidecarEvent {
-		return []*pb.SidecarEvent{{Body: &pb.SidecarEvent_Failed{Failed: &pb.SessionFailed{
+	l.Sidecars.Opening = func(core.LaunchSession) []*pb.SessionEvent {
+		return []*pb.SessionEvent{{Body: &pb.SessionEvent_Failed{Failed: &pb.SessionFailed{
 			Detail:             "could not start the agent: the tool server vibesys did not connect",
 			StartFailureReason: pb.StartFailureReason_START_FAILURE_REASON_TOOLS_UNAVAILABLE,
 		}}}}
@@ -161,5 +161,43 @@ func TestStartWithDetachOrNoTerminalDoesNotAttach(t *testing.T) {
 		if got.code != 0 || strings.Contains(got.stderr, "Ctrl-C") {
 			t.Errorf("terminal %v: exit %d, stderr %q", terminal, got.code, got.stderr)
 		}
+	}
+}
+
+// Every reason a session can fail to start reaches a person, in the words of its name, on both the
+// start that failed and a later look at the run, and reaches a program, by its name.
+func TestEveryStartFailureReasonReachesStartAndGet(t *testing.T) {
+	for number, name := range pb.StartFailureReason_name {
+		reason := pb.StartFailureReason(number)
+		if reason == pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			l := newLive(t, nil)
+			l.Sidecars.Opening = func(core.LaunchSession) []*pb.SessionEvent {
+				return []*pb.SessionEvent{{Body: &pb.SessionEvent_Failed{Failed: &pb.SessionFailed{
+					Detail: "could not start the agent: the detail", StartFailureReason: reason,
+				}}}}
+			}
+			w := newWorld(t, l.Listener.Dial)
+			words := strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(name, "START_FAILURE_REASON_")), "_", " ")
+
+			started := w.run(context.Background(), "run", "start", "--task", "toy", "--json")
+			if started.code != 1 {
+				t.Fatalf("start exited %d, want 1; stdout %q stderr %q", started.code, started.stdout, started.stderr)
+			}
+			contains(t, "start stderr", started.stderr, "the detail", words)
+
+			var receipt struct {
+				RunID string `json:"runId"`
+			}
+			if err := json.Unmarshal([]byte(started.stdout), &receipt); err != nil || receipt.RunID == "" {
+				t.Fatalf("start printed %q: %v", started.stdout, err)
+			}
+			got := w.run(context.Background(), "run", "get", receipt.RunID)
+			contains(t, "get", got.stdout, "the detail", words)
+			got = w.run(context.Background(), "run", "get", receipt.RunID, "--json")
+			contains(t, "get --json", got.stdout, name)
+		})
 	}
 }

@@ -91,9 +91,9 @@ func digest(id string) core.Digest {
 	return core.Digest(hex.EncodeToString(sum[:]))
 }
 
-func (w *Workload) fact(s core.Session, body core.FactBody) core.SidecarFact {
+func (w *Workload) fact(s core.Session, body core.FactBody) core.SessionFact {
 	w.offsets[s]++
-	return core.SidecarFact{Session: s, Offset: w.offsets[s], Body: body}
+	return core.SessionFact{Session: s, Offset: w.offsets[s], Body: body}
 }
 
 // choose picks the next input, or nothing when it only moved its own bookkeeping.
@@ -120,9 +120,8 @@ func (w *Workload) choose() core.InputBody {
 func (w *Workload) answer(e core.Effect) core.InputBody {
 	switch e := e.(type) {
 	case core.LaunchSession:
-		return w.fact(e.Session, core.ConversationOpened{
-			ConversationID: "conv-" + string(e.Session.Agent), Capabilities: core.Capabilities{StreamsText: true, Steers: true, Resumes: true},
-			Worktree: "/work/" + string(e.Session.Agent),
+		return w.fact(e.Session, core.SessionOpened{
+			ResumeToken: "conv-" + string(e.Session.Agent), Capabilities: core.Capabilities{StreamsText: true, Steers: true, Resumes: true},
 		})
 	case core.StartTurn:
 		w.turns = append(w.turns, turnPlan{session: e.Session, turn: e.Turn, left: 1 + w.r.IntN(6)})

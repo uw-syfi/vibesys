@@ -12,7 +12,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from agentshim import CliNotFoundError, FailureKind, StdioMcpServer, TurnFailedError
+from agentshim import CliNotFoundError, FailureKind, TurnFailedError
 from agentshim.testing import (
     ClaudeRecordedPeer,
     ClaudeStreamPeers,
@@ -24,8 +24,8 @@ from agentshim.testing import (
 from tests import helpers as h
 from vs_sidecar.driver import StartError, classify_start_error
 from vs_sidecar.engine import Engine
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.gen.vibesys.orchestrator.v1 import sidecar_pb2 as sc
 from vs_sidecar.store import MemoryStore
 
 if TYPE_CHECKING:
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
     from agentshim.execution.process import SpawnRequest
 
-TOOLS = (StdioMcpServer("vibesys", "/bin/vibesys", ("mcp",)),)
+TOOLS = (sc.ToolServer(name="vibesys", argv=["/bin/vibesys", "mcp"]),)
 
 
 class _NoDirectory(FakeExecutor):
@@ -44,10 +44,10 @@ class _NoDirectory(FakeExecutor):
 
 
 def _start(
-    provider: str, executor: FakeExecutor, mcp_servers: Sequence[StdioMcpServer] = TOOLS
-) -> list[sc.SidecarEvent]:
-    factory = h.driver_factory_over(provider, executor, mcp_servers=mcp_servers)
-    engine = Engine(h.launch(harness=_harness(provider)), MemoryStore(), factory)
+    provider: str, executor: FakeExecutor, tools: Sequence[sc.ToolServer] = TOOLS
+) -> list[sc.SessionEvent]:
+    factory = h.driver_factory_over(provider, executor, tools=tools)
+    engine = Engine(h.REF, MemoryStore(), factory)
     engine.start()
     return engine.events_after(0)
 
@@ -60,7 +60,7 @@ def _claude(peers: ClaudeStreamPeers, **executor: Any) -> FakeExecutor:
     return FakeExecutor([], peers=peers.build, **executor)
 
 
-def _fails_with(events: Sequence[sc.SidecarEvent], reason: int, detail: str) -> None:
+def _fails_with(events: Sequence[sc.SessionEvent], reason: int, detail: str) -> None:
     assert h.kinds(events) == ["failed"], "the session must never be reported open"
     failed = events[0].failed
     assert failed.start_failure_reason == reason
@@ -156,7 +156,7 @@ def test_codex_servers_that_started_open_the_session() -> None:
 
 
 def test_a_session_given_no_tool_servers_opens() -> None:
-    events = _start("claude", _claude(ClaudeStreamPeers()), mcp_servers=())
+    events = _start("claude", _claude(ClaudeStreamPeers()), tools=())
     assert h.kinds(events) == ["opened"]
 
 
@@ -188,9 +188,7 @@ def test_an_error_is_classified_by_its_type_and_never_by_its_text(
 
 
 def test_a_start_failure_names_its_reason_in_the_driver_error() -> None:
-    factory = h.driver_factory_over(
-        "claude", FakeExecutor([], binaries={"x": "/x"}), mcp_servers=TOOLS
-    )
+    factory = h.driver_factory_over("claude", FakeExecutor([], binaries={"x": "/x"}), tools=TOOLS)
     driver = factory(lambda _frame: None)
     with pytest.raises(StartError) as raised:
         driver.open()

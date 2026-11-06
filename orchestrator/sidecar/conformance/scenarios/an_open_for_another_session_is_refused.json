@@ -1,0 +1,67 @@
+{
+  "name": "an_open_for_another_session_is_refused",
+  "doc": "A process holds one session. An Open for another is refused and changes nothing.",
+  "provider": [
+    [
+      {
+        "say": "done",
+        "item": "a1"
+      }
+    ]
+  ],
+  "steps": [
+    {
+      "open": {}
+    },
+    {
+      "refused": {
+        "open": {
+          "session": {
+            "agentId": "agent-2",
+            "session": 1
+          }
+        },
+        "code": "FAILED_PRECONDITION",
+        "names": "agent-2"
+      }
+    },
+    {
+      "hello": {
+        "compatibility": "COMPATIBILITY_COMPATIBLE",
+        "session": {
+          "agentId": "agent-1",
+          "session": 1
+        }
+      }
+    },
+    {
+      "send": {
+        "effectId": "e-t1",
+        "startTurn": {
+          "session": {
+            "agentId": "agent-1",
+            "session": 1
+          },
+          "turnId": "t1",
+          "message": {
+            "id": "msg-t1",
+            "runId": "run-1",
+            "toAgentId": "agent-1",
+            "delivery": "DELIVERY_QUEUED",
+            "at": "1970-01-01T00:00:01Z",
+            "text": "do the thing"
+          }
+        }
+      }
+    },
+    {
+      "await": {
+        "turn_ended": "t1"
+      }
+    }
+  ],
+  "checks": [
+    "opened_first",
+    "one_agent_started"
+  ]
+}

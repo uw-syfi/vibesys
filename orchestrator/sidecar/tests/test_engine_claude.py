@@ -57,7 +57,7 @@ FRAMES = [
 
 def _engine() -> tuple[Engine, MemoryStore]:
     store = MemoryStore()
-    engine = Engine(h.launch(orch.HARNESS_CLAUDE_CODE), store, h.claude_factory([FRAMES]))
+    engine = Engine(h.REF, store, h.claude_factory([FRAMES]))
     engine.start()
     return engine, store
 
@@ -65,7 +65,7 @@ def _engine() -> tuple[Engine, MemoryStore]:
 def test_claude_names_its_conversation_before_the_first_turn() -> None:
     _, store = _engine()
     (opened,) = store.events_after(0)
-    assert opened.opened.provider_conversation_id == SESSION
+    assert opened.opened.resume_token == SESSION.encode()
 
 
 def test_streamed_text_names_the_item_the_completed_text_arrives_as() -> None:

@@ -53,7 +53,13 @@ func set(r *rand.Rand, m protoreflect.Message, fd protoreflect.FieldDescriptor) 
 			}
 		}
 	case fd.Message() != nil:
-		fill(r, m.Mutable(fd).Message())
+		child := m.Mutable(fd).Message()
+		fill(r, child)
+		// Outside a oneof, a message with nothing in it says what its absence says: the core keeps
+		// one form of it, so the generator must not choose the other.
+		if empty := proto.Size(child.Interface()) == 0; empty && fd.ContainingOneof() == nil {
+			m.Clear(fd)
+		}
 	default:
 		m.Set(fd, scalar(r, fd))
 	}
@@ -78,6 +84,8 @@ func scalar(r *rand.Rand, fd protoreflect.FieldDescriptor) protoreflect.Value {
 			return protoreflect.ValueOfString(fmt.Sprintf("%064x", r.Uint64()))
 		}
 		return protoreflect.ValueOfString(fmt.Sprintf("v%d", r.IntN(1000)))
+	case protoreflect.BytesKind:
+		return protoreflect.ValueOfBytes(fmt.Appendf(nil, "v%d", r.IntN(1000)))
 	case protoreflect.Uint32Kind:
 		return protoreflect.ValueOfUint32(1 + r.Uint32N(1000))
 	case protoreflect.Uint64Kind:

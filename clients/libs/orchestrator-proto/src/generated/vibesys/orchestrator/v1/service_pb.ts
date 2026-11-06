@@ -2,14 +2,14 @@
 // @generated from file vibesys/orchestrator/v1/service.proto (package vibesys.orchestrator.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenEnum, GenExtension, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { enumDesc, extDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenExtension, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { extDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { FileOptions } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_descriptor } from "@bufbuild/protobuf/wkt";
 import type { Command, Delta, Event, Receipt } from "./events_pb.js";
 import { file_vibesys_orchestrator_v1_events } from "./events_pb.js";
-import type { Agent, Item, Message as Message$1, Run, Turn } from "./orchestrator_pb.js";
+import type { Agent, BuildVersions, Compatibility, Item, Message as Message$1, Run, Turn } from "./orchestrator_pb.js";
 import { file_vibesys_orchestrator_v1_orchestrator } from "./orchestrator_pb.js";
 import type { SearchState } from "./search_pb.js";
 import { file_vibesys_orchestrator_v1_search } from "./search_pb.js";
@@ -19,42 +19,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/service.proto.
  */
 export const file_vibesys_orchestrator_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXJ2aWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSJfCg1CdWlsZFZlcnNpb25zEhYKDmJpbmFyeV92ZXJzaW9uGAEgASgJEhgKEHByb3RvY29sX3ZlcnNpb24YAiABKA0SHAoUbWluX3Byb3RvY29sX3ZlcnNpb24YAyABKA0iTAoPRGlzcGF0Y2hSZXF1ZXN0EjkKB2NvbW1hbmQYASABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Db21tYW5kQga6SAPIAQEiTQoQRGlzcGF0Y2hSZXNwb25zZRI5CgdyZWNlaXB0GAEgASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVjZWlwdEIGukgDyAEBIk4KDEhlbGxvUmVxdWVzdBI+CgZjbGllbnQYASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQEimgEKDUhlbGxvUmVzcG9uc2USPgoGZGFlbW9uGAEgASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQnVpbGRWZXJzaW9uc0IGukgDyAEBEkkKDWNvbXBhdGliaWxpdHkYAiABKA4yJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Db21wYXRpYmlsaXR5Qgq6SAeCAQQQASAAIioKEFdhdGNoUnVuc1JlcXVlc3QSFgoOYWZ0ZXJfc2VxdWVuY2UYASABKAQiqQIKDFJ1bnNTbmFwc2hvdBIqCgRydW5zGAEgAygLMhwudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuEi4KBmFnZW50cxgCIAMoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50EhAKCHNlcXVlbmNlGAMgASgEEiwKBXR1cm5zGAQgAygLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybhIyCghtZXNzYWdlcxgFIAMoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLk1lc3NhZ2USNgoIc2VhcmNoZXMYBiADKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZWFyY2hTdGF0ZRIRCgl0cnVuY2F0ZWQYByABKAgixgEKEVdhdGNoUnVuc1Jlc3BvbnNlEjkKCHNuYXBzaG90GAEgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUnVuc1NuYXBzaG90SAASLwoFZXZlbnQYAiABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5FdmVudEgAEjYKBnNlYXJjaBgDIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlYXJjaFN0YXRlSABCDQoEYm9keRIFukgCCAEiZQoRV2F0Y2hBZ2VudFJlcXVlc3QSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESHQoJcGFnZV9zaXplGAIgASgNQgq6SAcqBRjoByAAEhYKDmFmdGVyX3NlcXVlbmNlGAMgASgEImgKCUl0ZW1zUGFnZRIsCgVpdGVtcxgBIAMoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkl0ZW0SEAoIc2VxdWVuY2UYAiABKAQSGwoTbmV4dF9iZWZvcmVfb3JkaW5hbBgDIAEoDSL4AQoSV2F0Y2hBZ2VudFJlc3BvbnNlEjIKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VIABItCgRpdGVtGAIgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbUgAEi8KBWRlbHRhGAMgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuRGVsdGFIABItCgR0dXJuGAQgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVybkgAEhAKCHNlcXVlbmNlGAUgASgEQg0KBGJvZHkSBbpIAggBIm0KEExpc3RJdGVtc1JlcXVlc3QSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESHwoOYmVmb3JlX29yZGluYWwYAiABKA1CB7pIBCoCIAASHQoJcGFnZV9zaXplGAMgASgNQgq6SAcqBRjoByAAIk0KEUxpc3RJdGVtc1Jlc3BvbnNlEjgKBHBhZ2UYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtc1BhZ2VCBrpIA8gBASqQAQoNQ29tcGF0aWJpbGl0eRIdChlDT01QQVRJQklMSVRZX1VOU1BFQ0lGSUVEEAASHAoYQ09NUEFUSUJJTElUWV9DT01QQVRJQkxFEAESIAocQ09NUEFUSUJJTElUWV9DTElFTlRfVE9PX09MRBACEiAKHENPTVBBVElCSUxJVFlfREFFTU9OX1RPT19PTEQQAzKBBAoTT3JjaGVzdHJhdG9yU2VydmljZRJWCgVIZWxsbxIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVxdWVzdBomLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhlbGxvUmVzcG9uc2USXwoIRGlzcGF0Y2gSKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EaXNwYXRjaFJlc3BvbnNlEmQKCVdhdGNoUnVucxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoUnVuc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaFJ1bnNSZXNwb25zZTABEmcKCldhdGNoQWdlbnQSKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5XYXRjaEFnZW50UmVxdWVzdBorLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoQWdlbnRSZXNwb25zZTABEmIKCUxpc3RJdGVtcxIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkxpc3RJdGVtc1JlcXVlc3QaKi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5MaXN0SXRlbXNSZXNwb25zZTpJChBwcm90b2NvbF92ZXJzaW9uEhwuZ29vZ2xlLnByb3RvYnVmLkZpbGVPcHRpb25zGL6HAyABKA1SD3Byb3RvY29sVmVyc2lvbjpQChRtaW5fcHJvdG9jb2xfdmVyc2lvbhIcLmdvb2dsZS5wcm90b2J1Zi5GaWxlT3B0aW9ucxi/hwMgASgNUhJtaW5Qcm90b2NvbFZlcnNpb25CXFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MfC7GAH4uxgBYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_descriptor, file_vibesys_orchestrator_v1_events, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_search]);
-
-/**
- * BuildVersions is what one build carries.
- *
- * @generated from message vibesys.orchestrator.v1.BuildVersions
- */
-export type BuildVersions = Message<"vibesys.orchestrator.v1.BuildVersions"> & {
-  /**
-   * The release version, or "dev". Display only: callers never compare it.
-   *
-   * @generated from field: string binary_version = 1;
-   */
-  binaryVersion: string;
-
-  /**
-   * The revision of this contract's behavior. It increases only when a change breaks a peer.
-   *
-   * @generated from field: uint32 protocol_version = 2;
-   */
-  protocolVersion: number;
-
-  /**
-   * The oldest protocol_version this build still serves.
-   *
-   * @generated from field: uint32 min_protocol_version = 3;
-   */
-  minProtocolVersion: number;
-};
-
-/**
- * Describes the message vibesys.orchestrator.v1.BuildVersions.
- * Use `create(BuildVersionsSchema)` to create a new message.
- */
-export const BuildVersionsSchema: GenMessage<BuildVersions> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 0);
+  fileDesc("CiV2aWJlc3lzL29yY2hlc3RyYXRvci92MS9zZXJ2aWNlLnByb3RvEhd2aWJlc3lzLm9yY2hlc3RyYXRvci52MSJMCg9EaXNwYXRjaFJlcXVlc3QSOQoHY29tbWFuZBgBIAEoCzIgLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbW1hbmRCBrpIA8gBASJNChBEaXNwYXRjaFJlc3BvbnNlEjkKB3JlY2VpcHQYASABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SZWNlaXB0Qga6SAPIAQEiTgoMSGVsbG9SZXF1ZXN0Ej4KBmNsaWVudBgBIAEoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkJ1aWxkVmVyc2lvbnNCBrpIA8gBASKaAQoNSGVsbG9SZXNwb25zZRI+CgZkYWVtb24YASABKAsyJi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdWlsZFZlcnNpb25zQga6SAPIAQESSQoNY29tcGF0aWJpbGl0eRgCIAEoDjImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbXBhdGliaWxpdHlCCrpIB4IBBBABIAAiKgoQV2F0Y2hSdW5zUmVxdWVzdBIWCg5hZnRlcl9zZXF1ZW5jZRgBIAEoBCKpAgoMUnVuc1NuYXBzaG90EioKBHJ1bnMYASADKAsyHC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW4SLgoGYWdlbnRzGAIgAygLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnQSEAoIc2VxdWVuY2UYAyABKAQSLAoFdHVybnMYBCADKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuEjIKCG1lc3NhZ2VzGAUgAygLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTWVzc2FnZRI2CghzZWFyY2hlcxgGIAMoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlNlYXJjaFN0YXRlEhEKCXRydW5jYXRlZBgHIAEoCCLGAQoRV2F0Y2hSdW5zUmVzcG9uc2USOQoIc25hcHNob3QYASABKAsyJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SdW5zU25hcHNob3RIABIvCgVldmVudBgCIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkV2ZW50SAASNgoGc2VhcmNoGAMgASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VhcmNoU3RhdGVIAEINCgRib2R5EgW6SAIIASJlChFXYXRjaEFnZW50UmVxdWVzdBIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIdCglwYWdlX3NpemUYAiABKA1CCrpIByoFGOgHIAASFgoOYWZ0ZXJfc2VxdWVuY2UYAyABKAQiaAoJSXRlbXNQYWdlEiwKBWl0ZW1zGAEgAygLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbRIQCghzZXF1ZW5jZRgCIAEoBBIbChNuZXh0X2JlZm9yZV9vcmRpbmFsGAMgASgNIvgBChJXYXRjaEFnZW50UmVzcG9uc2USMgoEcGFnZRgBIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkl0ZW1zUGFnZUgAEi0KBGl0ZW0YAiABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JdGVtSAASLwoFZGVsdGEYAyABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EZWx0YUgAEi0KBHR1cm4YBCABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuSAASEAoIc2VxdWVuY2UYBSABKARCDQoEYm9keRIFukgCCAEibQoQTGlzdEl0ZW1zUmVxdWVzdBIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIfCg5iZWZvcmVfb3JkaW5hbBgCIAEoDUIHukgEKgIgABIdCglwYWdlX3NpemUYAyABKA1CCrpIByoFGOgHIAAiTQoRTGlzdEl0ZW1zUmVzcG9uc2USOAoEcGFnZRgBIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkl0ZW1zUGFnZUIGukgDyAEBMoEEChNPcmNoZXN0cmF0b3JTZXJ2aWNlElYKBUhlbGxvEiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSGVsbG9SZXF1ZXN0GiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSGVsbG9SZXNwb25zZRJfCghEaXNwYXRjaBIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkRpc3BhdGNoUmVxdWVzdBopLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkRpc3BhdGNoUmVzcG9uc2USZAoJV2F0Y2hSdW5zEikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV2F0Y2hSdW5zUmVxdWVzdBoqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoUnVuc1Jlc3BvbnNlMAESZwoKV2F0Y2hBZ2VudBIqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLldhdGNoQWdlbnRSZXF1ZXN0GisudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV2F0Y2hBZ2VudFJlc3BvbnNlMAESYgoJTGlzdEl0ZW1zEikudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTGlzdEl0ZW1zUmVxdWVzdBoqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkxpc3RJdGVtc1Jlc3BvbnNlOkkKEHByb3RvY29sX3ZlcnNpb24SHC5nb29nbGUucHJvdG9idWYuRmlsZU9wdGlvbnMYvocDIAEoDVIPcHJvdG9jb2xWZXJzaW9uOlAKFG1pbl9wcm90b2NvbF92ZXJzaW9uEhwuZ29vZ2xlLnByb3RvYnVmLkZpbGVPcHRpb25zGL+HAyABKA1SEm1pblByb3RvY29sVmVyc2lvbkJcWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYx8LsYAfi7GAFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_descriptor, file_vibesys_orchestrator_v1_events, file_vibesys_orchestrator_v1_orchestrator, file_vibesys_orchestrator_v1_search]);
 
 /**
  * @generated from message vibesys.orchestrator.v1.DispatchRequest
@@ -71,7 +36,7 @@ export type DispatchRequest = Message<"vibesys.orchestrator.v1.DispatchRequest">
  * Use `create(DispatchRequestSchema)` to create a new message.
  */
 export const DispatchRequestSchema: GenMessage<DispatchRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 1);
+  messageDesc(file_vibesys_orchestrator_v1_service, 0);
 
 /**
  * @generated from message vibesys.orchestrator.v1.DispatchResponse
@@ -88,7 +53,7 @@ export type DispatchResponse = Message<"vibesys.orchestrator.v1.DispatchResponse
  * Use `create(DispatchResponseSchema)` to create a new message.
  */
 export const DispatchResponseSchema: GenMessage<DispatchResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 2);
+  messageDesc(file_vibesys_orchestrator_v1_service, 1);
 
 /**
  * @generated from message vibesys.orchestrator.v1.HelloRequest
@@ -105,7 +70,7 @@ export type HelloRequest = Message<"vibesys.orchestrator.v1.HelloRequest"> & {
  * Use `create(HelloRequestSchema)` to create a new message.
  */
 export const HelloRequestSchema: GenMessage<HelloRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 3);
+  messageDesc(file_vibesys_orchestrator_v1_service, 2);
 
 /**
  * @generated from message vibesys.orchestrator.v1.HelloResponse
@@ -127,7 +92,7 @@ export type HelloResponse = Message<"vibesys.orchestrator.v1.HelloResponse"> & {
  * Use `create(HelloResponseSchema)` to create a new message.
  */
 export const HelloResponseSchema: GenMessage<HelloResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 4);
+  messageDesc(file_vibesys_orchestrator_v1_service, 3);
 
 /**
  * @generated from message vibesys.orchestrator.v1.WatchRunsRequest
@@ -146,7 +111,7 @@ export type WatchRunsRequest = Message<"vibesys.orchestrator.v1.WatchRunsRequest
  * Use `create(WatchRunsRequestSchema)` to create a new message.
  */
 export const WatchRunsRequestSchema: GenMessage<WatchRunsRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 5);
+  messageDesc(file_vibesys_orchestrator_v1_service, 4);
 
 /**
  * @generated from message vibesys.orchestrator.v1.RunsSnapshot
@@ -202,7 +167,7 @@ export type RunsSnapshot = Message<"vibesys.orchestrator.v1.RunsSnapshot"> & {
  * Use `create(RunsSnapshotSchema)` to create a new message.
  */
 export const RunsSnapshotSchema: GenMessage<RunsSnapshot> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 6);
+  messageDesc(file_vibesys_orchestrator_v1_service, 5);
 
 /**
  * @generated from message vibesys.orchestrator.v1.WatchRunsResponse
@@ -237,7 +202,7 @@ export type WatchRunsResponse = Message<"vibesys.orchestrator.v1.WatchRunsRespon
  * Use `create(WatchRunsResponseSchema)` to create a new message.
  */
 export const WatchRunsResponseSchema: GenMessage<WatchRunsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 7);
+  messageDesc(file_vibesys_orchestrator_v1_service, 6);
 
 /**
  * @generated from message vibesys.orchestrator.v1.WatchAgentRequest
@@ -268,7 +233,7 @@ export type WatchAgentRequest = Message<"vibesys.orchestrator.v1.WatchAgentReque
  * Use `create(WatchAgentRequestSchema)` to create a new message.
  */
 export const WatchAgentRequestSchema: GenMessage<WatchAgentRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 8);
+  messageDesc(file_vibesys_orchestrator_v1_service, 7);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ItemsPage
@@ -299,7 +264,7 @@ export type ItemsPage = Message<"vibesys.orchestrator.v1.ItemsPage"> & {
  * Use `create(ItemsPageSchema)` to create a new message.
  */
 export const ItemsPageSchema: GenMessage<ItemsPage> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 9);
+  messageDesc(file_vibesys_orchestrator_v1_service, 8);
 
 /**
  * @generated from message vibesys.orchestrator.v1.WatchAgentResponse
@@ -350,7 +315,7 @@ export type WatchAgentResponse = Message<"vibesys.orchestrator.v1.WatchAgentResp
  * Use `create(WatchAgentResponseSchema)` to create a new message.
  */
 export const WatchAgentResponseSchema: GenMessage<WatchAgentResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 10);
+  messageDesc(file_vibesys_orchestrator_v1_service, 9);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ListItemsRequest
@@ -379,7 +344,7 @@ export type ListItemsRequest = Message<"vibesys.orchestrator.v1.ListItemsRequest
  * Use `create(ListItemsRequestSchema)` to create a new message.
  */
 export const ListItemsRequestSchema: GenMessage<ListItemsRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 11);
+  messageDesc(file_vibesys_orchestrator_v1_service, 10);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ListItemsResponse
@@ -396,40 +361,7 @@ export type ListItemsResponse = Message<"vibesys.orchestrator.v1.ListItemsRespon
  * Use `create(ListItemsResponseSchema)` to create a new message.
  */
 export const ListItemsResponseSchema: GenMessage<ListItemsResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_service, 12);
-
-/**
- * Compatibility is the answer to a handshake, from the daemon's side.
- *
- * @generated from enum vibesys.orchestrator.v1.Compatibility
- */
-export enum Compatibility {
-  /**
-   * @generated from enum value: COMPATIBILITY_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: COMPATIBILITY_COMPATIBLE = 1;
-   */
-  COMPATIBLE = 1,
-
-  /**
-   * @generated from enum value: COMPATIBILITY_CLIENT_TOO_OLD = 2;
-   */
-  CLIENT_TOO_OLD = 2,
-
-  /**
-   * @generated from enum value: COMPATIBILITY_DAEMON_TOO_OLD = 3;
-   */
-  DAEMON_TOO_OLD = 3,
-}
-
-/**
- * Describes the enum vibesys.orchestrator.v1.Compatibility.
- */
-export const CompatibilitySchema: GenEnum<Compatibility> = /*@__PURE__*/
-  enumDesc(file_vibesys_orchestrator_v1_service, 0);
+  messageDesc(file_vibesys_orchestrator_v1_service, 11);
 
 /**
  * OrchestratorService is what the daemon serves to its clients, the desktop app and the headless

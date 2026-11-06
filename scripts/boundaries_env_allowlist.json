@@ -86,7 +86,7 @@
     "XDG_RUNTIME_DIR": 2,
     "XDG_STATE_HOME": 2
   },
-  "orchestrator/sidecar/src/vs_sidecar/driver.py": {
+  "orchestrator/internal/production/sidecars.go": {
     "VIBESYS_AGENT": 1,
     "VIBESYS_CLI": 1,
     "VIBESYS_HARNESS": 1,

@@ -122,8 +122,12 @@ func (s *SQLite) open() (err error) {
 		('schema_version', ?), ('last_sequence', 0), ('checkpoint_sequence', 0), ('checkpoint_gen', 0), ('pruned_max', 0)`, schemaVersion); err != nil {
 		return fmt.Errorf("store: %w", err)
 	}
-	if v, err := s.meta(s.w, "schema_version"); err != nil || v != schemaVersion {
-		return fmt.Errorf("store: %s has schema version %d, this build reads %d (%v)", s.path, v, schemaVersion, err)
+	v, err := s.meta(s.w, "schema_version")
+	if err != nil {
+		return err
+	}
+	if v != schemaVersion {
+		return fmt.Errorf("store: %s has schema version %d and this build reads only %d: move the state directory holding it away, which discards its run history, and start again", s.path, v, schemaVersion)
 	}
 	if s.r, err = sql.Open("sqlite", s.dsn(true)); err != nil {
 		return fmt.Errorf("store: %w", err)

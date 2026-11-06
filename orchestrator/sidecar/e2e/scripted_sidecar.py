@@ -1,16 +1,19 @@
 """A sidecar process over agentshim's scripted providers, for vibesys-host's end-to-end tests.
 
-It takes the real sidecar's command line and runs the real engine, store and server, with the one
-difference that the provider process is scripted, on the harness the launch names. Two modes:
+It starts as the real one does, from a bootstrap on standard input, and runs the real holder,
+engine, store and server, with the one difference that the provider process is scripted, on the
+harness the request names. Two modes:
 
 - ``reply`` (the default): each turn answers ``reply N`` with no model behind it.
 - ``act`` (``VIBESYS_E2E_SCRIPT=act``): the agent acts. Each message runs its role's script (see
   ``e2e.scripts``): real commands and real calls of the orchestrator's tools, mirrored in the
   frames the provider peer plays back.
 
-In ``act`` mode the sidecar also writes, in its state directory, ``prompts/N.md`` (the N-th message
-the agent was sent), ``spawns.json`` (the argv and config home the real driver gave the provider
-process, and the plugin commands it ran) and ``peer-failure.txt`` if a turn broke.
+It also writes ``open.json`` in its state directory: what ``Open`` carried, for the tests to read,
+with the tool servers' environment left out because it holds the session's token. In ``act`` mode it
+writes ``prompts/N.md`` (the N-th message the agent was sent), ``spawns.json`` (the argv and config
+home the real driver gave the provider process, and the plugin commands it ran) and
+``peer-failure.txt`` if a turn broke.
 """
 
 from __future__ import annotations
@@ -19,41 +22,36 @@ import json
 import os
 import sys
 from collections import deque
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from agentshim import Agent, ApprovalPolicy, NativePermissions, TransportKind
 from agentshim.testing import ClaudeFramePeer, FakeExecutor, SequentialIds
+from google.protobuf import json_format
 
 from e2e.actor import Actor
 from e2e.host import HostMachine
 from e2e.peers import ActingClaudePeers, ActingCodex
 from e2e.scripts import Me
-from vs_sidecar.driver import PROVIDERS, AgentshimDriver, Identity, SteerRefusedError, build_session
-from vs_sidecar.engine import Engine
-from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
-from vs_sidecar.main import (
-    PIDFILE,
-    LaunchError,
-    detach,
-    load_launch,
-    load_mcp,
-    parse_args,
-    serve_session,
-    write_atomically,
+from vs_sidecar.driver import (
+    PROVIDERS,
+    AgentshimDriver,
+    SteerRefusedError,
+    build_session,
+    over,
+    tool_servers,
 )
-from vs_sidecar.server import Wakeup
-from vs_sidecar.store import FileStore
+from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
+from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
+from vs_sidecar.main import main as holder_main
+from vs_sidecar.main import write_atomically
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
-    from agentshim import RawFrame, Session, StdioMcpServer
+    from agentshim import RawFrame, Session
     from agentshim.execution.process import SpawnRequest
     from agentshim.testing import FakePeer
-
-    from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
 
 CONVERSATION = "11111111-1111-4111-8111-111111111111"
 TURNS = 8
@@ -90,17 +88,10 @@ def _turn(number: int) -> list[dict[str, Any]]:
     ]
 
 
-def _without_token(argv: Sequence[str]) -> list[str]:
-    """*argv* with the value of ``--mcp-config`` left out: it holds the session's token."""
-    return [
-        "<mcp config>" if i and argv[i - 1] == "--mcp-config" else arg for i, arg in enumerate(argv)
-    ]
-
-
 def dump_spawns(executor: FakeExecutor, provider: str, path: Path) -> None:
     """Write what the real driver asked the executor to run: the provider's argv and config home, and plugin commands."""
     spawns = [
-        {"argv": _without_token(spawn.argv), "home": spawn.env.get(HOMES[provider], "")}
+        {"argv": list(spawn.argv), "home": spawn.env.get(HOMES[provider], "")}
         for spawn in executor.spawns
     ]
     commands = [list(request.argv) for request in executor.requests]
@@ -116,26 +107,28 @@ def replying_executor() -> tuple[FakeExecutor, str]:
 
 
 def acting_executor(
-    launch: fx.LaunchSession,
-    servers: list[StdioMcpServer],
+    request: sc.OpenSessionRequest,
     state_dir: Path,
     pending: deque[orch.Message],
 ) -> tuple[FakeExecutor, str]:
-    """The peer for the launch's harness whose turns run its role's script."""
-    provider = PROVIDERS[launch.harness]
-    identity = Identity.of(launch)
-    server = servers[0]
+    """The peer for the request's harness whose turns run its role's script.
+
+    The holder is told nothing of the run or the role, which is the point of the contract, so this
+    fixture reads them where the agent's tools do: the tool server's environment.
+    """
+    provider = PROVIDERS[request.harness]
+    server = tool_servers(request)[0]
     machine = HostMachine(
-        cwd=Path(launch.worktree),
-        env=identity.over(os.environ),
-        server=replace(server, env=identity.over(server.env)),
+        cwd=Path(request.working_directory),
+        env=over(request.environment, os.environ),
+        server=server,
     )
     me = Me(
-        run_id=launch.run_id,
-        agent_id=launch.session.agent_id,
-        harness=orch.Harness.Name(launch.harness).removeprefix("HARNESS_").lower(),
+        run_id=server.env["VIBESYS_ORCHESTRATOR_RUN"],
+        agent_id=request.session.agent_id,
+        harness=orch.Harness.Name(request.harness).removeprefix("HARNESS_").lower(),
     )
-    role = orch.AgentRole.Name(launch.role).removeprefix("AGENT_ROLE_").lower()
+    role = server.env["VIBESYS_ORCHESTRATOR_ROLE"]
     actor = Actor(me, role, machine, state_dir, pending=pending)
     holder: list[FakeExecutor] = []
 
@@ -181,30 +174,31 @@ class ScriptedDriver(AgentshimDriver):
             raise
 
 
-def main() -> int:
-    """Run one scripted session with the sidecar's command line."""
-    args = parse_args(sys.argv[1:])
-    if args.detach:
-        detach(args.state_dir / "sidecar.log")
-    try:
-        launch = load_launch(args.launch)
-    except LaunchError as error:
-        sys.stderr.write(f"scripted_sidecar: {error}\n")
-        return 2
-    args.state_dir.mkdir(parents=True, exist_ok=True)
-    write_atomically(args.state_dir / PIDFILE, f"{os.getpid()}\n")
-    servers = load_mcp(args.mcp_config)
+def _record_open(request: sc.OpenSessionRequest, state_dir: Path) -> None:
+    """Write what ``Open`` carried for the tests to read, without what holds the token."""
+    record = sc.OpenSessionRequest()
+    record.CopyFrom(request)
+    for tool in record.tools:
+        tool.env.clear()
+    write_atomically(state_dir / "open.json", json_format.MessageToJson(record))
+
+
+def scripted_drivers(
+    request: sc.OpenSessionRequest, state_dir: Path
+) -> Callable[[Callable[[RawFrame], None]], AgentshimDriver]:
+    """Drivers over a scripted provider, in the mode the environment names."""
+    _record_open(request, state_dir)
     pending: deque[orch.Message] = deque()
     if os.environ.get(MODE_VARIABLE) == "act":
-        executor, _provider = acting_executor(launch, servers, args.state_dir, pending)
+        executor, _provider = acting_executor(request, state_dir, pending)
     else:
         executor, _provider = replying_executor()
 
-    def agent(provider: str, identity: Identity) -> Agent:
+    def agent(provider: str, environment: sc.AgentEnvironment) -> Agent:
         return Agent(
             provider,
             transport=TransportKind.STREAM,
-            env=identity.over(os.environ),
+            env=over(environment, os.environ),
             model="scripted",
             executor=executor,
             permissions=NativePermissions.bypass(),
@@ -219,20 +213,16 @@ def main() -> int:
     def make(raw_sink: Callable[[RawFrame], None]) -> AgentshimDriver:
         return ScriptedDriver(
             lambda conversation_id: build_session(
-                launch,
+                request,
                 agent=agent,
-                mcp_servers=servers,
                 raw_sink=raw_sink,
                 new_conversation_id=conversation_id,
             ),
             pending,
         )
 
-    wakeup = Wakeup()
-    engine = Engine(launch, FileStore.at(args.state_dir), make, wakeup.notify)
-    serve_session(engine, wakeup, args)
-    return 0
+    return make
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(holder_main(scripted_drivers))

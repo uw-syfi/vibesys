@@ -172,9 +172,12 @@ func (d *Daemon) sidecar(ctx context.Context, session core.Session) (Sidecar, er
 	sc, err := bound(d.cfg.Bounds, ctx, func(c context.Context) (Sidecar, error) {
 		return d.cfg.Sidecars.Attach(c, session)
 	})
+	var unusable *LaunchError
 	switch {
 	case errors.Is(err, ErrSidecarGone):
 		return nil, d.lose(session, "the agent session was not found when the daemon looked for it", "")
+	case errors.As(err, &unusable):
+		return nil, d.lose(session, unusable.Error(), unusable.Reason)
 	case err != nil:
 		return nil, fmt.Errorf("attach %s/%d: %w", session.Agent, session.N, err)
 	}
@@ -192,7 +195,7 @@ func (d *Daemon) lose(session core.Session, detail string, start core.StartFailu
 	if r := []rune(detail); len(r) > maxDetail {
 		detail = string(r[:maxDetail]) + "..."
 	}
-	_, err := d.Apply(core.SidecarLost{Session: session, Detail: detail, StartFailure: start})
+	_, err := d.Apply(core.SessionLost{Session: session, Detail: detail, StartFailure: start})
 	return err
 }
 
@@ -225,9 +228,10 @@ func (d *Daemon) releaseUnattached(ctx context.Context, session core.Session) er
 	sc, err := bound(d.cfg.Bounds, ctx, func(c context.Context) (Sidecar, error) {
 		return d.cfg.Sidecars.Attach(c, session)
 	})
+	var unusable *LaunchError
 	switch {
-	case errors.Is(err, ErrSidecarGone):
-		return nil
+	case errors.Is(err, ErrSidecarGone), errors.As(err, &unusable):
+		return nil // nothing to release: a holder that cannot be used is ended when it is found.
 	case err != nil:
 		return fmt.Errorf("find the sidecar of %s/%d to release it: %w", session.Agent, session.N, err)
 	}
@@ -362,7 +366,7 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 		d.forget(session)
 		return nil
 	}
-	cmd, ok, err := wire.SidecarCommandFor(e)
+	cmd, ok, err := wire.SessionCommandFor(e)
 	if err != nil || !ok {
 		return err
 	}
@@ -394,9 +398,9 @@ func effectSession(e core.Effect) core.Session {
 }
 
 func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
-	// Recovery may have migrated a pre-location run after its queued launch was written.
-	if run, ok := d.State().Run(l.Run); ok {
-		l.Location = run.Location
+	run, ok := d.State().Run(l.Run)
+	if !ok {
+		return fmt.Errorf("launch %s/%d: no run %s", l.Session.Agent, l.Session.N, l.Run)
 	}
 	if l.Session.N > 1 {
 		// A resume replaces a session whose sidecar may still run: it ends before the new one starts.
@@ -405,12 +409,15 @@ func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
 			return err
 		}
 	}
-	env := LaunchEnv{
-		EnvSocket: d.cfg.AgentSocket, EnvAgent: string(l.Session.Agent), EnvSession: fmt.Sprint(l.Session.N),
-		EnvToken: d.cfg.Authority.Token(l.Session), EnvRun: string(l.Run), EnvRole: string(l.Role),
+	start := SessionStart{
+		Launch: l, Repository: run.Repository, Task: run.Task, Location: run.Location,
+		Tools: LaunchEnv{
+			EnvSocket: d.cfg.AgentSocket, EnvAgent: string(l.Session.Agent), EnvSession: fmt.Sprint(l.Session.N),
+			EnvToken: d.cfg.Authority.Token(l.Session), EnvRun: string(l.Run), EnvRole: string(l.Role),
+		},
 	}
 	sc, err := bound(d.cfg.Bounds, ctx, func(c context.Context) (Sidecar, error) {
-		return d.cfg.Sidecars.Launch(c, l, env)
+		return d.cfg.Sidecars.Launch(c, start)
 	})
 	switch {
 	case errors.Is(err, ErrExpired):
@@ -504,7 +511,7 @@ func (d *Daemon) pump(ctx context.Context, session core.Session) (bool, error) {
 			}
 			data = &eventStash{data: raw, offset: ev.GetOffset()}
 		}
-		fact, delta, err := wire.ParseSidecarEvent(session, data.data)
+		fact, delta, err := wire.ParseSessionEvent(session, data.data)
 		switch {
 		case err != nil:
 			// An event the contract refuses can be neither recorded nor retried: say so and go on.

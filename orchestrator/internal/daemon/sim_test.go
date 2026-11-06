@@ -281,7 +281,7 @@ func (s *sim) checkDelivered() {
 	s.settle()
 	state := s.rig.Daemon.State()
 	for _, e := range s.rig.Faults.Committed {
-		cmd, ok, err := wire.SidecarCommandFor(e)
+		cmd, ok, err := wire.SessionCommandFor(e)
 		if err != nil || !ok {
 			continue
 		}
@@ -550,7 +550,7 @@ func (s *sim) finishTurn() {
 	for turn, se := range s.stuck { // map order is random; the first entry only matters for which turn ends.
 		_ = turn
 		status := []pb.TurnStatus{pb.TurnStatus_TURN_STATUS_COMPLETED, pb.TurnStatus_TURN_STATUS_FAILED}[s.pick(2)]
-		se.EmitEvents(&pb.SidecarEvent{Body: &pb.SidecarEvent_TurnEnded{TurnEnded: &pb.TurnEnded{TurnId: turn, Status: status}}})
+		se.EmitEvents(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{TurnId: turn, Status: status}}})
 		delete(s.stuck, turn)
 		s.note("held turn %s ends %s", turn, status)
 		return
@@ -666,7 +666,7 @@ func (s *sim) pollSome() {
 
 // init sets up a hold on some turns, and the log that counts inputs that changed nothing.
 func (s *sim) init() {
-	s.rig.Sidecars.React = func(se *daemontest.Session, cmd *pb.SidecarCommand) {
+	s.rig.Sidecars.React = func(se *daemontest.Session, cmd *pb.SessionCommand) {
 		if st := cmd.GetStartTurn(); st != nil && s.pick(4) == 0 {
 			s.stuck[st.GetTurnId()] = se
 			return
@@ -694,7 +694,7 @@ func (s *sim) finish() {
 	for range 20 {
 		s.settle()
 		for turn, se := range s.stuck {
-			se.EmitEvents(&pb.SidecarEvent{Body: &pb.SidecarEvent_TurnEnded{TurnEnded: &pb.TurnEnded{TurnId: turn, Status: pb.TurnStatus_TURN_STATUS_COMPLETED}}})
+			se.EmitEvents(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{TurnId: turn, Status: pb.TurnStatus_TURN_STATUS_COMPLETED}}})
 			delete(s.stuck, turn)
 		}
 		s.settle()
