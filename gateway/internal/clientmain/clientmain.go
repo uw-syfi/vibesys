@@ -39,11 +39,16 @@ const (
 	startup = 10 * time.Second
 )
 
+// stopSignals are the signals that end a command the way Ctrl-C does: the command's context is
+// cancelled, so that a view in key mode puts the terminal back before the process exits. A signal
+// outside this list (SIGKILL cannot be, and Ctrl-Z is turned off in key mode) would end it without.
+var stopSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
+
 // Main runs the client command and returns its process exit status.
 func Main(args []string) int {
 	// A closed pipe (`| head`) is a normal end of output, seen as a write error.
 	signal.Ignore(syscall.SIGPIPE)
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := signal.NotifyContext(context.Background(), stopSignals...)
 	defer cancel()
 	dir, err := os.Getwd()
 	if err != nil {

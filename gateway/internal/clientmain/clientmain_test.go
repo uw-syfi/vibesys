@@ -1,11 +1,15 @@
 package clientmain
 
 import (
+	"context"
 	"errors"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/uw-syfi/vibesys/orchestrator/release/releasetest"
 )
@@ -90,5 +94,24 @@ func TestCommandIDsAreDistinct(t *testing.T) {
 			t.Fatalf("id %s was minted twice", id)
 		}
 		seen[id] = true
+	}
+}
+
+// Every signal that ends the command cancels its context, which is what makes a view in key mode put
+// the terminal back: Ctrl-C, a plain kill, and the hangup of a closed window alike.
+func TestEverySignalThatEndsTheCommandCancelsItsContext(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP} {
+		ctx, stop := signal.NotifyContext(context.Background(), stopSignals...)
+		if err := syscall.Kill(os.Getpid(), sig); err != nil {
+			stop()
+			t.Fatal(err)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(30 * time.Second): // only a guard against a hang.
+			stop()
+			t.Fatalf("%v did not cancel the context", sig)
+		}
+		stop()
 	}
 }

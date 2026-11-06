@@ -138,6 +138,19 @@ def test_a_wrapped_codex_tool_is_named_by_the_tool_it_wraps() -> None:
     assert (call.other.name, call.other.text) == ("post_handoff", "claim: x")
 
 
+def test_a_tool_of_our_server_is_named_plainly_whatever_the_harness_prefix() -> None:
+    claude = describe_call("mcp__vibesys__spawn_agent", {"role": "planner"})
+    codex = describe_call(
+        "mcp_tool_call",
+        {"server": "vibesys", "tool": "spawn_agent", "arguments": {"role": "planner"}},
+    )
+    assert (claude.other.name, claude.other.text) == ("spawn_agent", "role: planner")
+    assert (codex.other.name, codex.other.text) == (claude.other.name, claude.other.text)
+    # Another server's tool keeps its harness name, and a bare prefix is not an empty name.
+    assert describe_call("mcp__other__spawn_agent", {}).other.name == "mcp__other__spawn_agent"
+    assert describe_call("mcp__vibesys__", {}).other.name == "mcp__vibesys__"
+
+
 CORPUS = json.loads((Path(__file__).parent / "corpus" / "tool_shapes.json").read_text())
 
 
@@ -153,5 +166,7 @@ def test_every_shape_of_a_real_frame_maps_to_its_case(shape: dict) -> None:
 def test_the_corpus_covers_both_harnesses_and_names_what_is_shown_generically() -> None:
     assert {s["harness"] for s in CORPUS} == {"claude", "codex"}
     generic = sorted({s["tool"] for s in CORPUS if s["case"] == "other"})
-    assert "mcp__vibesys__post_handoff" in generic
+    shown = {describe_call(s["tool"], s["args"]).other.name for s in CORPUS if s["case"] == "other"}
+    assert "post_handoff" in shown
+    assert not any(name.startswith("mcp__vibesys__") for name in shown)
     assert not {"Bash", "Read", "Edit", "Write", "Grep", "Glob", "execute"} & set(generic)

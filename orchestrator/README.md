@@ -398,6 +398,8 @@ What a view shows:
   adds up every model call in the turn and reads as the size of the context, which it is not.
 - The other agents and the run's milestones as short lines, as before. An item is printed once, when it is
   complete, and an update of it is not printed again.
+- A history cut falls inside a turn at most once, and the view does not guess about it: that turn says no
+  count of tool calls, since it would count only the items that were read.
 - Agents are named by role and number in the order they started (`lead`, `planner-2`, `worker-1`), not by
   id. `run steer --agent` takes these names or an id. The view of an agent says its id, and `run get --json`
   lists them all.
@@ -407,8 +409,9 @@ agents, the cost and the keys. `a` lists the agents with numbers, role and statu
 agent's view, which clears the screen, replays its conversation the same way and follows it live, showing
 only that agent's items. `Esc` or `b` goes up to the agent that started the viewed one, and on to the
 lead, replaying it. Ctrl-C detaches from any view, with the same message and exit code, and the run goes
-on. The terminal is put back on every way out: the run ending, a failed stream, a detach, and a panic in a
-reader. With stdin or stdout not a terminal there are no keys and no footer, and the lines are written one
+on. The terminal is put back on every way out: the run ending, a failed stream, a detach (Ctrl-C, or the
+process told to end with SIGTERM or SIGHUP), and a panic in a reader. Ctrl-Z does nothing while the keys are
+on, because a view stopped in key mode would leave the shell in it. With stdin or stdout not a terminal there are no keys and no footer, and the lines are written one
 at a time. `--agent NAME-OR-ID` starts in that agent's view, or for a pipe follows only that agent, and
 ends with the run or when that agent has ended. A run that has ended is replayed and attach exits.
 

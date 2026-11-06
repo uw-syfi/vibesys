@@ -26,7 +26,8 @@ func New(in, out *os.File) *Terminal {
 }
 
 // Raw delivers each key press at once and without echo, and keeps what the terminal does with Ctrl-C
-// (it still raises an interrupt) and with output (a line break still returns the cursor). The function
+// (it still raises an interrupt) and with output (a line break still returns the cursor). It turns off
+// Ctrl-Z, so the program cannot be left stopped while the terminal is in this mode. The function
 // it returns puts every setting back as it was found, and may be called more than once.
 func (t *Terminal) Raw() (func(), error) {
 	fd := int(t.in.Fd())
@@ -38,6 +39,7 @@ func (t *Terminal) Raw() (func(), error) {
 	keys.Lflag &^= unix.ICANON | unix.ECHO
 	keys.Cc[unix.VMIN] = 1
 	keys.Cc[unix.VTIME] = 0
+	disableSuspend(&keys)
 	if err := unix.IoctlSetTermios(fd, setTermios, &keys); err != nil {
 		return nil, err
 	}

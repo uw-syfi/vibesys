@@ -62,6 +62,12 @@ type Model struct {
 	tools    map[string]int
 	closed   map[string]bool
 	openTurn string
+	// cut holds the turns some of whose items the view never had (the history limit, or more items
+	// than a catch-up read holds). What the view counts of such a turn is not the turn's, so it says
+	// no count and no start it cannot know.
+	cut map[string]bool
+	// top is the newest item ordinal the view was told of.
+	top uint32
 	// lastTurn is the number of the newest turn shown.
 	lastTurn uint32
 
@@ -362,7 +368,9 @@ func (m *Model) history(in AgentHistory) []Output {
 	var floor uint32
 	if skipped > 0 {
 		floor = m.turn(items[0].GetTurnId()).GetOrdinal()
+		m.cut[items[0].GetTurnId()] = true
 	}
+	m.noteTop(items)
 	lines = append(lines, m.catchUp(items, floor)...)
 	var changes []entry
 	var from time.Time
@@ -408,6 +416,7 @@ func (m *Model) live(in AgentFrame) []Output {
 	var ents []entry
 	switch {
 	case in.Item != nil:
+		m.top = max(m.top, in.Item.GetOrdinal())
 		ents = m.itemEntries(in.Item)
 	case in.Turn != nil:
 		ents = m.turnFrame(in.Turn)
@@ -444,6 +453,32 @@ func (m *Model) itemEntries(it *pb.Item) []entry {
 	return ents
 }
 
+// noteTop records the newest ordinal among items.
+func (m *Model) noteTop(items []*pb.Item) {
+	for _, it := range items {
+		m.top = max(m.top, it.GetOrdinal())
+	}
+}
+
+// markGap marks as cut the turns that a catch-up read, whose items are in order, skipped part of: when
+// the oldest item is not the one after the newest the view was told of, the items between were not
+// read, so the turn it belongs to, the open turn, and every turn between them are incomplete.
+func (m *Model) markGap(items []*pb.Item) {
+	if len(items) == 0 || items[0].GetOrdinal() <= m.top+1 {
+		return
+	}
+	first := m.turn(items[0].GetTurnId())
+	m.cut[items[0].GetTurnId()] = true
+	if m.openTurn != "" {
+		m.cut[m.openTurn] = true
+	}
+	for _, t := range m.View.Turns {
+		if t.GetAgentId() == m.agent && t.GetOrdinal() >= m.lastTurn && (first == nil || t.GetOrdinal() <= first.GetOrdinal()) {
+			m.cut[t.GetId()] = true
+		}
+	}
+}
+
 // turn is the newest record of a turn: the agent's own stream is ahead of the run's, except that a
 // record that has ended is final.
 func (m *Model) turn(id string) *pb.Turn {
@@ -469,6 +504,9 @@ func (m *Model) enter(id string, at time.Time) []entry {
 		m.lastTurn = max(m.lastTurn, t.GetOrdinal())
 		return append(ents, entry{t.GetStartedAt().AsTime(), Line{Kind: LineTurn, Text: Clock(t.GetStartedAt().AsTime(), m.opt.Zone) + "  " + fmt.Sprintf("%s turn %d started: %s", name, t.GetOrdinal(), m.View.triggerWords(t))}})
 	}
+	if m.cut[id] {
+		return ents // when it started is not known: the first item the view has is not its first.
+	}
 	return append(ents, entry{at, Line{Kind: LineTurn, Text: Clock(at, m.opt.Zone) + "  " + name + " turn started"}})
 }
 
@@ -487,7 +525,11 @@ func (m *Model) closeTurn(id string) []entry {
 		return nil
 	}
 	at := pick(t.GetEndedAt(), t.GetStartedAt().AsTime())
-	return []entry{{at, Line{Kind: LineTurn, Text: Clock(at, m.opt.Zone) + "  " + turnEndWords(m.View.AgentName(m.agent), t, m.tools[id])}}}
+	tools := m.tools[id]
+	if m.cut[id] {
+		tools = -1 // the view did not see all of the turn's items, so it cannot count its calls.
+	}
+	return []entry{{at, Line{Kind: LineTurn, Text: Clock(at, m.opt.Zone) + "  " + turnEndWords(m.View.AgentName(m.agent), t, tools)}}}
 }
 
 // catchUp shows what the viewed agent did that has not been shown: its turns from number floor on, as
@@ -578,6 +620,8 @@ func (m *Model) sweep(in AgentSweep) []Output {
 	}
 	items := slices.Clone(in.Items)
 	slices.SortStableFunc(items, func(a, b *pb.Item) int { return int(a.GetOrdinal()) - int(b.GetOrdinal()) })
+	m.markGap(items)
+	m.noteTop(items)
 	ents := m.catchUp(items, m.lastTurn)
 	outs := m.print(texts(ents))
 	if in.Final {
@@ -593,6 +637,7 @@ func (m *Model) subscribe() Output {
 	m.hist, m.swept = false, false
 	m.subscribedOver = m.finished()
 	m.seen, m.turns, m.tools, m.closed, m.openTurn = map[string]bool{}, map[string]*pb.Turn{}, map[string]int{}, map[string]bool{}, ""
+	m.cut, m.top = map[string]bool{}, 0
 	m.lastTurn = 0
 	return Subscribe{Agent: m.agent, Gen: m.gen, Limit: m.opt.History}
 }

@@ -62,6 +62,9 @@ func TestRawModeIsRestoredExactly(t *testing.T) {
 	if during.Lflag&unix.ISIG == 0 || during.Oflag&unix.OPOST == 0 {
 		t.Errorf("Ctrl-C or output processing was turned off: lflag %#x oflag %#x", during.Lflag, during.Oflag)
 	}
+	if during.Cc[unix.VSUSP] != 0 {
+		t.Errorf("Ctrl-Z still stops the program in key mode: VSUSP = %#x", during.Cc[unix.VSUSP])
+	}
 	restore()
 	restore()
 	if after := settings(t, slave); after != before {
