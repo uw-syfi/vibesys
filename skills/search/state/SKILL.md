@@ -37,7 +37,10 @@ All worktrees of the repository share one store per task, so any agent sees the 
 - Candidate branches: `vibesys-work/<task>/plan-N`, where N is the plan number.
 - Worktrees: the lead picks one directory outside the repository's working tree and puts every
   worktree there (`git worktree add`), one per plan, one per judge or profile question. Each brief
-  names its worktree. `git worktree list` is the truth about which exist.
+  names its worktree. `git worktree list` is the truth about which exist. A new worktree has its
+  submodules empty: when the repository has any (`.gitmodules`), run
+  `git -C <path> submodule update --init --recursive` after `git worktree add`, so the agent can
+  read the submodule source (a framework's examples and docs) that the repository vendors.
 - Scratch: disposable machine output (profiles, raw logs). Any directory the lead names in the
   briefs; nothing depends on it.
 
