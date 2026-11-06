@@ -231,6 +231,11 @@ type Item struct {
 // MessageBody is what a message holds. The set is closed.
 type MessageBody interface{ messageBody() }
 
+// HandoffBody is the part of a handoff that belongs to the role that posts it: a worker's candidate or
+// the reason it has none, a planner's plan, a judge's verdict, a combiner's commit, a profiler's
+// answer. The set is closed, and each body names the one role it belongs to.
+type HandoffBody interface{ handoffRole() AgentRole }
+
 // The message bodies.
 type (
 	// Text is free text from the operator or another agent.
@@ -244,19 +249,44 @@ type (
 		FanoutLimit uint32
 		Steering    string
 	}
-	// Handoff is what a finished agent tells the lead.
+	// Handoff is what a finished agent tells the lead: what it did, and the body of its role.
 	Handoff struct {
-		PlanNumber   uint32
-		HasCandidate bool
-		Claim        string
-		Commit       Commit
-		ParentCommit Commit
-		Branch       string
-		Checks       string
-		Measurement  string
-		Learned      string
-		Next         string
-		OpenItems    string
+		PlanNumber uint32
+		Claim      string
+		Learned    string
+		Next       string
+		OpenItems  string
+		Body       HandoffBody
+	}
+	// WorkerCandidate is a worker's commit, offered for judging.
+	WorkerCandidate struct {
+		Commit, ParentCommit Commit
+		Branch, Checks       string
+		Measurement          string
+	}
+	// WorkerNoCandidate says a worker's turn ended without a commit worth measuring.
+	WorkerNoCandidate struct{ Blocker string }
+	// PlannerPlan is a planner's proposal.
+	PlannerPlan struct {
+		Plan, Confidence, Unestablished, DecidingMeasurement string
+	}
+	// JudgeFinding is a judge's verdict on one candidate.
+	JudgeFinding struct {
+		Commit  Commit
+		Verdict Verdict
+		Reasons string
+	}
+	// CombinerResult is the commit a combiner made from several candidates.
+	CombinerResult struct {
+		Commit                     Commit
+		Branch, Applied, Unapplied string
+		Checks, Measurement        string
+	}
+	// ProfilerFindings is a profiler's answer to its question.
+	ProfilerFindings struct {
+		Question                               string
+		Revision                               Commit
+		Answer, Evidence, Unsupported, Informs string
 	}
 	// Report is what the lead tells the operator. Kind says whether it is a note along the way or
 	// the lead's last word. Sequence is zero in a command and the report's place in its run, from 1,
@@ -296,10 +326,26 @@ type (
 	}
 )
 
-func (Text) messageBody()             {}
-func (Brief) messageBody()            {}
-func (LeadBrief) messageBody()        {}
-func (Handoff) messageBody()          {}
+func (Text) messageBody()      {}
+func (Brief) messageBody()     {}
+func (LeadBrief) messageBody() {}
+
+// Role is the role the handoff's body belongs to, empty for a handoff with no body.
+func (h Handoff) Role() AgentRole {
+	if h.Body == nil {
+		return ""
+	}
+	return h.Body.handoffRole()
+}
+
+func (Handoff) messageBody()                     {}
+func (WorkerCandidate) handoffRole() AgentRole   { return RoleWorker }
+func (WorkerNoCandidate) handoffRole() AgentRole { return RoleWorker }
+func (PlannerPlan) handoffRole() AgentRole       { return RolePlanner }
+func (JudgeFinding) handoffRole() AgentRole      { return RoleJudge }
+func (CombinerResult) handoffRole() AgentRole    { return RoleCombiner }
+func (ProfilerFindings) handoffRole() AgentRole  { return RoleProfiler }
+
 func (Report) messageBody()           {}
 func (JobFinished) messageBody()      {}
 func (SubagentSettled) messageBody()  {}

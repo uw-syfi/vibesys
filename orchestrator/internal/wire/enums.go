@@ -130,6 +130,7 @@ var (
 		core.RefuseDeadlinePassed:  pb.Refusal_REFUSAL_DEADLINE_PASSED,
 		core.RefuseRepositoryInUse: pb.Refusal_REFUSAL_REPOSITORY_IN_USE,
 		core.RefuseAgentNotAllowed: pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED,
+		core.RefuseHandoffNotYours: pb.Refusal_REFUSAL_HANDOFF_NOT_YOURS,
 	})
 	startFailures = newEnum(map[core.StartFailure]pb.StartFailureReason{
 		"":                              pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED,
@@ -146,6 +147,11 @@ var (
 	reportKinds = newEnum(map[core.ReportKind]pb.ReportKind{
 		core.ReportProgress: pb.ReportKind_REPORT_KIND_PROGRESS,
 		core.ReportFinal:    pb.ReportKind_REPORT_KIND_FINAL,
+	})
+	verdicts = newEnum(map[core.Verdict]pb.JudgeVerdict{
+		core.VerdictPass:       pb.JudgeVerdict_JUDGE_VERDICT_PASS,
+		core.VerdictFail:       pb.JudgeVerdict_JUDGE_VERDICT_FAIL,
+		core.VerdictUnmeasured: pb.JudgeVerdict_JUDGE_VERDICT_UNMEASURED,
 	})
 	timerKinds = newEnum(map[core.TimerKind]pb.TimerKind{
 		core.TimerRunDeadline:    pb.TimerKind_TIMER_KIND_RUN_DEADLINE,

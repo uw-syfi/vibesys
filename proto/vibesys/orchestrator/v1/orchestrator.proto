@@ -3,6 +3,7 @@ package vibesys.orchestrator.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/orchestrator/v1/tool_options.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
@@ -389,33 +390,181 @@ message ToolCall {
   bool is_error = 6;
 }
 
+// Handoff is what a finished subagent tells its lead, and the input of the post_handoff tool. The
+// common fields say what the agent did; the body of its role says what the lead needs to act on
+// it. The server checks that the body is the caller's own.
 message Handoff {
-  uint32 plan_number = 1;
-  bool has_candidate = 2;
-  string claim = 3;
-  string commit = 4;
-  string parent_commit = 5;
-  string branch = 6;
-  string checks = 7;
-  string measurement = 8;
-  string learned = 9;
-  string next = 10;
-  string open_items = 11;
+  option (mcp_tool) = {
+    name: "post_handoff"
+    description: "Tell your lead what you did and finish. Call it once, last: your session closes when your turn ends and no mail waits for you. Fill in the body that is named for your role (worker, planner, judge, combiner or profiler) and no other."
+  };
+
+  reserved 2, 4 to 8;
+  reserved "has_candidate", "commit", "parent_commit", "branch", "checks", "measurement";
+
+  uint32 plan_number = 1 [(tool_field_doc) = "The plan you worked on."];
+  string claim = 3 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "What you did, in one or two sentences."
+  ];
+  string learned = 9 [(tool_field_doc) = "What the lead should know."];
+  string next = 10 [(tool_field_doc) = "What you would do next."];
+  string open_items = 11 [(tool_field_doc) = "What is left undone."];
+  // The body is the caller's role, spelled as the role is: AGENT_ROLE_WORKER is the field worker.
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    option (tool_oneof_doc) = "your role's body";
+    WorkerHandoff worker = 20 [(tool_field_doc) = "Your result, if you are a worker."];
+    PlannerHandoff planner = 21 [(tool_field_doc) = "Your plan, if you are a planner."];
+    JudgeHandoff judge = 22 [(tool_field_doc) = "Your verdict, if you are a judge."];
+    CombinerHandoff combiner = 23 [(tool_field_doc) = "Your combined commit, if you are a combiner."];
+    ProfilerHandoff profiler = 24 [(tool_field_doc) = "Your findings, if you are a profiler."];
+  }
 }
 
+// WorkerHandoff is a worker's result: a candidate commit, or why there is none.
+message WorkerHandoff {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    option (tool_oneof_doc) = "the outcome";
+    Candidate candidate = 1 [(tool_field_doc) = "Give this if you produced a commit worth measuring."];
+    NoCandidate no_candidate = 2 [(tool_field_doc) = "Give this if you produced no such commit."];
+  }
+}
+
+// Candidate is a commit a worker offers for judging.
+message Candidate {
+  string commit = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The full SHA of the commit you produced."
+  ];
+  string parent_commit = 2 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The full SHA it builds on."
+  ];
+  string branch = 3 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The branch that holds it."
+  ];
+  string checks = 4 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "Which checks you ran and how they ended."
+  ];
+  string measurement = 5 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "What you measured: job ids and the comparison with the base, or why it is unmeasured."
+  ];
+}
+
+// NoCandidate says a worker's turn ended without a commit worth measuring.
+message NoCandidate {
+  string blocker = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "Why: the exact file, function, check or error that stopped you."
+  ];
+}
+
+// PlannerHandoff is a planner's proposal.
+message PlannerHandoff {
+  string plan = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The path of the plan file you wrote."
+  ];
+  string confidence = 2 [(tool_field_doc) = "How sure you are, stated plainly."];
+  string unestablished = 3 [(tool_field_doc) = "What you could not establish."];
+  string deciding_measurement = 4 [(tool_field_doc) = "The measurement that would most change your view."];
+}
+
+// JudgeVerdict is what a judge found of a candidate's claim.
+enum JudgeVerdict {
+  JUDGE_VERDICT_UNSPECIFIED = 0;
+  JUDGE_VERDICT_PASS = 1;
+  JUDGE_VERDICT_FAIL = 2;
+  JUDGE_VERDICT_UNMEASURED = 3;
+}
+
+// JudgeHandoff is a judge's verdict on one candidate.
+message JudgeHandoff {
+  string commit = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The full SHA of the candidate you judged."
+  ];
+  JudgeVerdict verdict = 2 [
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    },
+    (tool_field_doc) = "pass if the claim holds, fail if it does not, unmeasured if it cannot be checked."
+  ];
+  string reasons = 3 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The reasons, each tied to a file and line or a recorded number."
+  ];
+}
+
+// CombinerHandoff is the commit a combiner made from several candidates.
+message CombinerHandoff {
+  string commit = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The full SHA of the combined commit."
+  ];
+  string branch = 2 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The branch that holds it."
+  ];
+  string applied = 3 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "Each part you applied."
+  ];
+  string unapplied = 4 [(tool_field_doc) = "Each part, or piece of one, you could not apply, and why."];
+  string checks = 5 [(tool_field_doc) = "Which checks you ran and how they ended."];
+  string measurement = 6 [(tool_field_doc) = "Job ids and the comparison against the head and against the best part."];
+}
+
+// ProfilerHandoff is a profiler's answer to the question it was asked.
+message ProfilerHandoff {
+  string question = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The question, as it was asked."
+  ];
+  string revision = 2 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The full SHA of the revision you looked at."
+  ];
+  string answer = 3 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "The direct answer, with the numbers."
+  ];
+  string evidence = 4 [(tool_field_doc) = "The paths of the captures, and the command that made each."];
+  string unsupported = 5 [(tool_field_doc) = "The parts of the question the evidence does not answer, and what would."];
+  string informs = 6 [(tool_field_doc) = "The decision this informs, and which way the answer points."];
+}
+
+// Report is what the lead tells the operator, and the input of the post_report tool.
 message Report {
-  string headline = 1 [(buf.validate.field).string.min_len = 1];
-  string changed = 2;
-  string in_flight = 3;
-  string decisions = 4;
-  string open_for_user = 5;
-  ReportKind kind = 6 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
-  }];
+  option (mcp_tool) = {
+    name: "post_report"
+    description: "Send the operator a report. Use kind progress for a note along the way and kind final once, when you have finished what you were asked to do or cannot go on."
+  };
+
+  string headline = 1 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "One line."
+  ];
+  string changed = 2 [(tool_field_doc) = "What changed since the last report."];
+  string in_flight = 3 [(tool_field_doc) = "What is running now."];
+  string decisions = 4 [(tool_field_doc) = "What you decided on your own."];
+  string open_for_user = 5 [(tool_field_doc) = "What needs the operator."];
+  ReportKind kind = 6 [
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [0]
+    },
+    (tool_field_doc) = "progress for a note along the way; final for your last word."
+  ];
   // Zero in a command. The orchestrator numbers the reports of a run from 1 in the order it
   // records them, so a reader can ask for those after the last one it saw.
-  uint32 sequence = 7;
+  uint32 sequence = 7 [(tool_field_hidden) = true];
 }
 
 message JobFinished {

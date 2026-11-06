@@ -14,12 +14,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/names"
 )
 
 // confinementNotice is printed on every start, to stderr so that --json stays clean.
 const confinementNotice = "note: agents run as your user with their permissions bypassed and no confinement."
-
-var harnesses = map[string]pb.Harness{"claude_code": pb.Harness_HARNESS_CLAUDE_CODE, "codex": pb.Harness_HARNESS_CODEX}
 
 // startArgs are the flags of `run start`.
 type startArgs struct {
@@ -36,7 +35,7 @@ func parseStart(args []string) (startArgs, error) {
 	fs.StringVar(&a.repository, "repository", "", "the repository the run works in (default: the git root of the current directory)")
 	fs.StringVar(&a.task, "task", "", "the task to optimize")
 	fs.StringVar(&a.brief, "brief", "", "steering text for the lead")
-	fs.StringVar(&a.harness, "harness", "claude_code", "claude_code or codex")
+	fs.StringVar(&a.harness, "harness", names.Spell(pb.Harness_HARNESS_CLAUDE_CODE), names.List[pb.Harness]())
 	fs.StringVar(&a.model, "model", "", "the lead's model")
 	fs.StringVar(&a.effort, "effort", "", "the lead's reasoning effort")
 	fs.Func("allow-agent", "an agent the lead may also use, as harness or harness:model (repeatable)", func(v string) error {
@@ -61,9 +60,9 @@ func parseStart(args []string) (startArgs, error) {
 
 // command builds the StartRun command for repo.
 func (a startArgs) command(id, repo string) (*pb.Command, error) {
-	harness, ok := harnesses[a.harness]
+	harness, ok := names.Parse[pb.Harness](a.harness)
 	if !ok {
-		return nil, usageError("--harness %q is not claude_code or codex", a.harness)
+		return nil, usageError("--harness %q is not %s", a.harness, names.List[pb.Harness]())
 	}
 	start := &pb.StartRun{
 		Repository: repo, Task: a.task, FanoutLimit: uint32(a.fanout), Brief: a.brief,
@@ -90,9 +89,9 @@ func (a startArgs) command(id, repo string) (*pb.Command, error) {
 // A harness alone allows that harness on its default model only.
 func parseAllowed(spec string) (*pb.AllowedAgent, error) {
 	name, model, _ := strings.Cut(spec, ":")
-	harness, ok := harnesses[name]
+	harness, ok := names.Parse[pb.Harness](name)
 	if !ok {
-		return nil, usageError("--allow-agent %q does not start with claude_code or codex", spec)
+		return nil, usageError("--allow-agent %q does not start with %s", spec, names.List[pb.Harness]())
 	}
 	return &pb.AllowedAgent{Harness: harness, Model: model}, nil
 }

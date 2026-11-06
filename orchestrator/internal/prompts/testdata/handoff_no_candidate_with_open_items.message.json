@@ -6,7 +6,12 @@
     "learned": "nothing worked",
     "next": "stop",
     "openItems": "the cache",
-    "planNumber": 3
+    "planNumber": 3,
+    "worker": {
+      "noCandidate": {
+        "blocker": "the compiler rejected the change in kernel.cu"
+      }
+    }
   },
   "id": "m1",
   "runId": "r1",

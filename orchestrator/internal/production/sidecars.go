@@ -23,6 +23,7 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/mcp"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
@@ -369,8 +370,9 @@ func (s *ProcessSidecars) openRequest(start daemon.SessionStart, plugin Plugin) 
 }
 
 // ToolServerName is the name every agent's tool server is registered under, so the tools show up
-// as mcp__vibesys__spawn_agent and so on. The harness skills name it; a test holds the two together.
-const ToolServerName = "vibesys"
+// as mcp__vibesys__spawn_agent and so on. The tool server says the same name of itself, and the
+// harness skills name it; a test holds the doc to it.
+const ToolServerName = mcp.ServerName
 
 func launchMessage(l core.LaunchSession) (*pb.LaunchSession, error) {
 	data, err := wire.EncodeEffect(l)

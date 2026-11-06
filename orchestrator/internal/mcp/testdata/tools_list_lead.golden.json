@@ -1,0 +1,150 @@
+{
+  "tools": [
+    {
+      "description": "Start a subagent in your run, with a brief for its first turn. It reports back with post_handoff. An empty harness takes yours. An empty model takes the first model the operator allowed on that harness; a harness and model the operator did not allow are refused, with the list of what is allowed. An empty effort takes yours.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "brief": {
+            "description": "Its first prompt.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "effort": {
+            "description": "Optional reasoning effort.",
+            "type": "string"
+          },
+          "harness": {
+            "description": "Optional. The agent CLI to run on.",
+            "enum": [
+              "claude_code",
+              "codex"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "description": "Optional model name.",
+            "type": "string"
+          },
+          "plan_number": {
+            "description": "Optional. The plan this agent works on.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "role": {
+            "description": "What the subagent is for.",
+            "enum": [
+              "planner",
+              "worker",
+              "judge",
+              "combiner",
+              "profiler"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "role",
+          "brief"
+        ],
+        "type": "object"
+      },
+      "name": "spawn_agent"
+    },
+    {
+      "description": "Send text to one agent of your run. It reaches the agent as steering if it is working, or starts its next turn if it is idle.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "description": "The agent to tell.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "description": "What to say.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id",
+          "text"
+        ],
+        "type": "object"
+      },
+      "name": "send_message"
+    },
+    {
+      "description": "List the agents of your run with their role, status and plan, so you can see who is working and who is done.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "required": [],
+        "type": "object"
+      },
+      "name": "list_agents"
+    },
+    {
+      "description": "Stop one subagent of your run. It is asked to finish its turn, then its session closes.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_id": {
+            "description": "The subagent to stop.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "type": "object"
+      },
+      "name": "stop_agent"
+    },
+    {
+      "description": "Send the operator a report. Use kind progress for a note along the way and kind final once, when you have finished what you were asked to do or cannot go on.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "description": "What changed since the last report.",
+            "type": "string"
+          },
+          "decisions": {
+            "description": "What you decided on your own.",
+            "type": "string"
+          },
+          "headline": {
+            "description": "One line.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "in_flight": {
+            "description": "What is running now.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "progress for a note along the way; final for your last word.",
+            "enum": [
+              "progress",
+              "final"
+            ],
+            "type": "string"
+          },
+          "open_for_user": {
+            "description": "What needs the operator.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "headline",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "name": "post_report"
+    }
+  ]
+}

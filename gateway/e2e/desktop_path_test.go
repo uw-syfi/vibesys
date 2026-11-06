@@ -325,14 +325,14 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 	// lead promoted the better one, and the number it reported is the one the CLI has for the head.
 	commits := map[int]string{}
 	for _, m := range w.messages {
-		if m.Handoff == nil || m.Handoff.Commit == "" {
+		if m.Handoff == nil || m.Handoff.Commit() == "" {
 			continue
 		}
 		sender := w.agents[m.From]
 		if sender == nil || sender.Role != "AGENT_ROLE_WORKER" || sender.Plan != m.Handoff.PlanNumber || m.To != lead.ID {
 			t.Errorf("handoff %+v is not a worker's own to the lead (sender %+v)", m.Handoff, sender)
 		}
-		commits[m.Handoff.PlanNumber] = m.Handoff.Commit
+		commits[m.Handoff.PlanNumber] = m.Handoff.Commit()
 	}
 	scores := map[int]float64{1: 14, 2: 17}
 	for plan, score := range scores {

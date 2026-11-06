@@ -66,7 +66,7 @@ func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
 	case *pb.Command_SendMessage:
 		c.Body = core.SendMessage{Agent: core.AgentID(b.SendMessage.GetAgentId()), Text: b.SendMessage.GetText()}
 	case *pb.Command_PostHandoff:
-		c.Body = core.PostHandoff{Handoff: handoffIn(b.PostHandoff.GetHandoff())}
+		c.Body = core.PostHandoff{Handoff: handoffIn(b.PostHandoff.GetHandoff(), &errs)}
 	case *pb.Command_PostReport:
 		c.Body = core.PostReport{Report: reportIn(b.PostReport.GetReport(), &errs)}
 	default:

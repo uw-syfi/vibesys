@@ -1,0 +1,9 @@
+Agent agent-x1 handed off plan 4.
+Combined commit cccccccccccccccccccccccccccccccccccccccc on branch combined.
+Claim: Two parts applied.
+Applied: plans 2 and 3
+Not applied: plan 5, which conflicts in kernel.cu
+Checks: unit tests passed
+Measurement: job 41: better
+Learned: They do not overlap.
+Next: Judge it.

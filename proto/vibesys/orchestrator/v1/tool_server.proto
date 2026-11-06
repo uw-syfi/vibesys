@@ -4,6 +4,7 @@ package vibesys.orchestrator.v1;
 import "buf/validate/validate.proto";
 import "vibesys/cli/v1/env.proto";
 import "vibesys/orchestrator/v1/orchestrator.proto";
+import "vibesys/orchestrator/v1/tool_options.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
 
@@ -54,4 +55,43 @@ message ToolServerCredentials {
       not_in: [0]
     }
   ];
+}
+
+// SpawnAgentInput is the input of the spawn_agent tool. The run is the caller's own and the server
+// fills it in, so the agent is not offered it.
+message SpawnAgentInput {
+  option (mcp_tool) = {
+    name: "spawn_agent"
+    description: "Start a subagent in your run, with a brief for its first turn. It reports back with post_handoff. An empty harness takes yours. An empty model takes the first model the operator allowed on that harness; a harness and model the operator did not allow are refused, with the list of what is allowed. An empty effort takes yours."
+  };
+
+  AgentRole role = 1 [
+    (buf.validate.field).enum = {
+      defined_only: true
+      not_in: [
+        0,
+        1
+      ]
+    },
+    (tool_field_doc) = "What the subagent is for."
+  ];
+  string brief = 2 [
+    (buf.validate.field).string.min_len = 1,
+    (tool_field_doc) = "Its first prompt."
+  ];
+  Harness harness = 3 [
+    (buf.validate.field).enum.defined_only = true,
+    (tool_field_doc) = "Optional. The agent CLI to run on."
+  ];
+  string model = 4 [(tool_field_doc) = "Optional model name."];
+  string effort = 5 [(tool_field_doc) = "Optional reasoning effort."];
+  uint32 plan_number = 6 [(tool_field_doc) = "Optional. The plan this agent works on."];
+}
+
+// ListAgentsInput is the input of the list_agents tool, which takes no argument.
+message ListAgentsInput {
+  option (mcp_tool) = {
+    name: "list_agents"
+    description: "List the agents of your run with their role, status and plan, so you can see who is working and who is done."
+  };
 }

@@ -118,6 +118,16 @@ const (
 	TriggerReminder        TurnTrigger = "reminder"
 )
 
+// Verdict is what a judge found of a candidate's claim.
+type Verdict string
+
+// The verdicts.
+const (
+	VerdictPass       Verdict = "pass"
+	VerdictFail       Verdict = "fail"
+	VerdictUnmeasured Verdict = "unmeasured"
+)
+
 // ReportKind says what a report is for.
 type ReportKind string
 
@@ -210,6 +220,8 @@ const (
 	// RefuseAgentNotAllowed says the harness and model asked for are outside what the run may use.
 	// The receipt lists what is allowed.
 	RefuseAgentNotAllowed Refusal = "agent_not_allowed"
+	// RefuseHandoffNotYours says a handoff has no body, or the body of another role than its poster's.
+	RefuseHandoffNotYours Refusal = "handoff_not_yours"
 )
 
 // StartFailure says why a session never opened. The empty value means it did not fail to start.

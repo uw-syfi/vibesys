@@ -3,17 +3,20 @@
   "delivery": "DELIVERY_NEW_TURN",
   "fromAgentId": "agent-w5",
   "handoff": {
-    "branch": "x",
-    "checks": "1\n2\n",
     "claim": "a\nb",
-    "commit": "dddddddddddddddddddddddddddddddddddddddd",
-    "hasCandidate": true,
     "learned": "l1\nl2",
-    "measurement": "  m  ",
     "next": "n\n",
     "openItems": "o1\n\no2\n",
-    "parentCommit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-    "planNumber": 5
+    "planNumber": 5,
+    "worker": {
+      "candidate": {
+        "branch": "x",
+        "checks": "1\n2\n",
+        "commit": "dddddddddddddddddddddddddddddddddddddddd",
+        "measurement": "  m  ",
+        "parentCommit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    }
   },
   "id": "m1",
   "runId": "r1",

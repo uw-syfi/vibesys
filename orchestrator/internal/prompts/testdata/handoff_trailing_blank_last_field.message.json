@@ -5,7 +5,12 @@
   "handoff": {
     "learned": "l",
     "next": "n\n\n\n",
-    "planNumber": 1
+    "planNumber": 1,
+    "worker": {
+      "noCandidate": {
+        "blocker": "the compiler rejected the change in kernel.cu"
+      }
+    }
   },
   "id": "m1",
   "runId": "r1",

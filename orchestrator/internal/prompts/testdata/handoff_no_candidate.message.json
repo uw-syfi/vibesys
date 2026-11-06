@@ -4,7 +4,12 @@
   "fromAgentId": "agent-judge",
   "handoff": {
     "claim": "pass",
-    "learned": "better by 3%"
+    "learned": "better by 3%",
+    "worker": {
+      "noCandidate": {
+        "blocker": "the compiler rejected the change in kernel.cu"
+      }
+    }
   },
   "id": "m1",
   "runId": "r1",

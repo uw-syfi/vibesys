@@ -1,0 +1,22 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-x1",
+  "handoff": {
+    "claim": "Time goes to the copy.",
+    "learned": "The copy is 60 percent.",
+    "next": "Overlap it.",
+    "planNumber": 1,
+    "profiler": {
+      "answer": "The copy takes 60 percent.",
+      "evidence": "captures/run1.json from rocprof",
+      "informs": "Favors an overlap plan.",
+      "question": "Where does the time go?",
+      "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "unsupported": "Memory bandwidth."
+    }
+  },
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

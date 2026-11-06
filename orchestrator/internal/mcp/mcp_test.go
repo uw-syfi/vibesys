@@ -119,16 +119,16 @@ func TestAToolOfAnotherRoleIsRefusedWithWhatToUseInstead(t *testing.T) {
 	}
 }
 
+// Every refusal of the contract has advice of its own: none falls to the line that only names it.
 func TestEveryRefusalSaysWhatToDoNext(t *testing.T) {
-	for _, r := range []pb.Refusal{
-		pb.Refusal_REFUSAL_RUN_NOT_FOUND, pb.Refusal_REFUSAL_AGENT_NOT_FOUND, pb.Refusal_REFUSAL_NOT_PERMITTED,
-		pb.Refusal_REFUSAL_RUN_NOT_RUNNING, pb.Refusal_REFUSAL_FANOUT_LIMIT, pb.Refusal_REFUSAL_AGENT_IS_LEAD,
-		pb.Refusal_REFUSAL_AGENT_NOT_LIVE, pb.Refusal_REFUSAL_DEADLINE_PASSED, pb.Refusal_REFUSAL_REPOSITORY_IN_USE,
-		pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED,
-	} {
+	values := pb.Refusal(0).Descriptor().Values()
+	for i := 1; i < values.Len(); i++ {
+		r := pb.Refusal(values.Get(i).Number())
 		d := &fakeDaemon{receipt: &pb.Receipt{Refusal: r}}
-		text, isErr := call(t, newServer(core.RoleLead, d), 1, "stop_agent", map[string]any{"agent_id": "a-2"})
-		if !isErr || !strings.Contains(text, ":") || strings.Contains(text, "REFUSAL_") {
+		text, isErr := call(t, newServer(core.RoleWorker, d), 1, "post_handoff", map[string]any{
+			"claim": "c", "worker": map[string]any{"no_candidate": map[string]any{"blocker": "b"}},
+		})
+		if !isErr || !strings.Contains(text, ":") || strings.Contains(text, "REFUSAL_") || strings.Contains(text, "refused the command") || strings.Contains(text, "<no value>") {
 			t.Errorf("refusal %v read %q, want advice in words", r, text)
 		}
 	}

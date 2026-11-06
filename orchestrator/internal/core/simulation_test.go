@@ -372,7 +372,7 @@ func (w *sim) handoff() {
 		return
 	}
 	w.command(core.AgentCaller{Agent: a.ID}, &pb.Command{Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{
-		Handoff: &pb.Handoff{Claim: "done"},
+		Handoff: handoffBy(a.Role),
 	}}})
 }
 
@@ -936,4 +936,22 @@ func TestASeedRepeatsExactly(t *testing.T) {
 	if !reflect.DeepEqual(first.log, second.log) {
 		t.Fatal("one seed produced two logs")
 	}
+}
+
+// handoffBy is a handoff with the body of the role that posts it.
+func handoffBy(role core.AgentRole) *pb.Handoff {
+	h := &pb.Handoff{Claim: "done"}
+	switch role {
+	case core.RolePlanner:
+		h.Body = &pb.Handoff_Planner{Planner: &pb.PlannerHandoff{Plan: "p"}}
+	case core.RoleJudge:
+		h.Body = &pb.Handoff_Judge{Judge: &pb.JudgeHandoff{Commit: "c", Verdict: pb.JudgeVerdict_JUDGE_VERDICT_PASS, Reasons: "r"}}
+	case core.RoleCombiner:
+		h.Body = &pb.Handoff_Combiner{Combiner: &pb.CombinerHandoff{Commit: "c", Branch: "b", Applied: "a"}}
+	case core.RoleProfiler:
+		h.Body = &pb.Handoff_Profiler{Profiler: &pb.ProfilerHandoff{Question: "q", Revision: "r", Answer: "a"}}
+	default:
+		h.Body = &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}
+	}
+	return h
 }

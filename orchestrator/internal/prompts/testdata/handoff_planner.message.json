@@ -1,0 +1,20 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-x1",
+  "handoff": {
+    "claim": "Fuse the two passes.",
+    "learned": "Both passes read the same rows.",
+    "next": "Measure a fused kernel.",
+    "planNumber": 3,
+    "planner": {
+      "confidence": "medium",
+      "decidingMeasurement": "Register count of the fused kernel.",
+      "plan": "plans/plan-003-fuse.md",
+      "unestablished": "Whether registers spill."
+    }
+  },
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

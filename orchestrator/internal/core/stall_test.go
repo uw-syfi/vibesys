@@ -121,7 +121,7 @@ func TestARunWithAJobOrAWorkingAgentIsNotStalled(t *testing.T) {
 	if got := w.runOf(run); !got.StalledSince.IsZero() {
 		t.Fatalf("stalled with %s working", worker)
 	}
-	w.command(core.AgentCaller{Agent: worker}, core.PostHandoff{Handoff: core.Handoff{Claim: "done"}})
+	w.command(core.AgentCaller{Agent: worker}, core.PostHandoff{Handoff: done()})
 	w.endTurn(leadID, core.TurnCompleted)
 	w.endTurn(worker, core.TurnCompleted)
 	w.fact(worker, core.SessionClosed{})
@@ -239,7 +239,7 @@ func TestAResumedSubagentIsRemindedAgain(t *testing.T) {
 func TestASubagentThatHandedOffIsNeverReminded(t *testing.T) {
 	w, run, leadID := started(t, 1, steers)
 	a := w.spawn(run, leadID, steers)
-	w.command(core.AgentCaller{Agent: a}, core.PostHandoff{Handoff: core.Handoff{Claim: "done"}})
+	w.command(core.AgentCaller{Agent: a}, core.PostHandoff{Handoff: done()})
 	w.endTurn(a, core.TurnCompleted)
 	if w.sent(core.HandoffReminder{}) != 0 {
 		t.Fatal("an agent that handed off was reminded")
@@ -422,7 +422,7 @@ func TestTheReminderCountsTheSubagentsTheLeadStartedByRole(t *testing.T) {
 				t.Fatalf("spawn of a %s refused: %s", role, spawned.Refusal)
 			}
 			w.open(spawned.Agent, steers)
-			w.command(core.AgentCaller{Agent: spawned.Agent}, core.PostHandoff{Handoff: core.Handoff{Claim: "done"}})
+			w.command(core.AgentCaller{Agent: spawned.Agent}, core.PostHandoff{Handoff: done()})
 			w.endTurn(spawned.Agent, core.TurnCompleted)
 			w.fact(spawned.Agent, core.SessionClosed{})
 			w.endTurn(leadID, core.TurnCompleted)

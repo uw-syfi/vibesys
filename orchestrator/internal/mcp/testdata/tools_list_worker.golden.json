@@ -1,0 +1,238 @@
+{
+  "tools": [
+    {
+      "description": "Tell your lead what you did and finish. Call it once, last: your session closes when your turn ends and no mail waits for you. Fill in the body that is named for your role (worker, planner, judge, combiner or profiler) and no other.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "description": "Give exactly one of worker, planner, judge, combiner or profiler (your role's body).",
+        "properties": {
+          "claim": {
+            "description": "What you did, in one or two sentences.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "combiner": {
+            "additionalProperties": false,
+            "description": "Your combined commit, if you are a combiner.",
+            "properties": {
+              "applied": {
+                "description": "Each part you applied.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "branch": {
+                "description": "The branch that holds it.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "checks": {
+                "description": "Which checks you ran and how they ended.",
+                "type": "string"
+              },
+              "commit": {
+                "description": "The full SHA of the combined commit.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "measurement": {
+                "description": "Job ids and the comparison against the head and against the best part.",
+                "type": "string"
+              },
+              "unapplied": {
+                "description": "Each part, or piece of one, you could not apply, and why.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "commit",
+              "branch",
+              "applied"
+            ],
+            "type": "object"
+          },
+          "judge": {
+            "additionalProperties": false,
+            "description": "Your verdict, if you are a judge.",
+            "properties": {
+              "commit": {
+                "description": "The full SHA of the candidate you judged.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "reasons": {
+                "description": "The reasons, each tied to a file and line or a recorded number.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "verdict": {
+                "description": "pass if the claim holds, fail if it does not, unmeasured if it cannot be checked.",
+                "enum": [
+                  "pass",
+                  "fail",
+                  "unmeasured"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "commit",
+              "verdict",
+              "reasons"
+            ],
+            "type": "object"
+          },
+          "learned": {
+            "description": "What the lead should know.",
+            "type": "string"
+          },
+          "next": {
+            "description": "What you would do next.",
+            "type": "string"
+          },
+          "open_items": {
+            "description": "What is left undone.",
+            "type": "string"
+          },
+          "plan_number": {
+            "description": "The plan you worked on.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "planner": {
+            "additionalProperties": false,
+            "description": "Your plan, if you are a planner.",
+            "properties": {
+              "confidence": {
+                "description": "How sure you are, stated plainly.",
+                "type": "string"
+              },
+              "deciding_measurement": {
+                "description": "The measurement that would most change your view.",
+                "type": "string"
+              },
+              "plan": {
+                "description": "The path of the plan file you wrote.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "unestablished": {
+                "description": "What you could not establish.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "plan"
+            ],
+            "type": "object"
+          },
+          "profiler": {
+            "additionalProperties": false,
+            "description": "Your findings, if you are a profiler.",
+            "properties": {
+              "answer": {
+                "description": "The direct answer, with the numbers.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "evidence": {
+                "description": "The paths of the captures, and the command that made each.",
+                "type": "string"
+              },
+              "informs": {
+                "description": "The decision this informs, and which way the answer points.",
+                "type": "string"
+              },
+              "question": {
+                "description": "The question, as it was asked.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "revision": {
+                "description": "The full SHA of the revision you looked at.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "unsupported": {
+                "description": "The parts of the question the evidence does not answer, and what would.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "question",
+              "revision",
+              "answer"
+            ],
+            "type": "object"
+          },
+          "worker": {
+            "additionalProperties": false,
+            "description": "Your result, if you are a worker. Give exactly one of candidate or no_candidate (the outcome).",
+            "properties": {
+              "candidate": {
+                "additionalProperties": false,
+                "description": "Give this if you produced a commit worth measuring.",
+                "properties": {
+                  "branch": {
+                    "description": "The branch that holds it.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "checks": {
+                    "description": "Which checks you ran and how they ended.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "commit": {
+                    "description": "The full SHA of the commit you produced.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "measurement": {
+                    "description": "What you measured: job ids and the comparison with the base, or why it is unmeasured.",
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "parent_commit": {
+                    "description": "The full SHA it builds on.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "commit",
+                  "parent_commit",
+                  "branch",
+                  "checks",
+                  "measurement"
+                ],
+                "type": "object"
+              },
+              "no_candidate": {
+                "additionalProperties": false,
+                "description": "Give this if you produced no such commit.",
+                "properties": {
+                  "blocker": {
+                    "description": "Why: the exact file, function, check or error that stopped you.",
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "blocker"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [],
+            "type": "object"
+          }
+        },
+        "required": [
+          "claim"
+        ],
+        "type": "object"
+      },
+      "name": "post_handoff"
+    }
+  ]
+}

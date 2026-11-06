@@ -29,6 +29,25 @@ type agentView struct {
 	Plan    int    `json:"planNumber"`
 }
 
+// handoffView is a handoff as the stream states it: a worker's carries its candidate.
+type handoffView struct {
+	PlanNumber int    `json:"planNumber"`
+	Claim      string `json:"claim"`
+	Worker     *struct {
+		Candidate *struct {
+			Commit string `json:"commit"`
+		} `json:"candidate"`
+	} `json:"worker"`
+}
+
+// Commit is the commit the handoff offers, empty when it offers none.
+func (h *handoffView) Commit() string {
+	if h.Worker == nil || h.Worker.Candidate == nil {
+		return ""
+	}
+	return h.Worker.Candidate.Commit
+}
+
 type messageView struct {
 	ID        string `json:"id"`
 	From      string `json:"fromAgentId"`
@@ -39,12 +58,8 @@ type messageView struct {
 		FanoutLimit int    `json:"fanoutLimit"`
 		Steering    string `json:"steering"`
 	} `json:"leadBrief"`
-	Handoff *struct {
-		PlanNumber int    `json:"planNumber"`
-		Claim      string `json:"claim"`
-		Commit     string `json:"commit"`
-	} `json:"handoff"`
-	Report *struct {
+	Handoff *handoffView `json:"handoff"`
+	Report  *struct {
 		Headline string `json:"headline"`
 	} `json:"report"`
 }

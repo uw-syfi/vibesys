@@ -188,20 +188,70 @@ func itemIn(i *pb.Item, errs *errorList) core.Item {
 }
 
 func handoffOut(h core.Handoff) *pb.Handoff {
-	return &pb.Handoff{
-		PlanNumber: h.PlanNumber, HasCandidate: h.HasCandidate, Claim: h.Claim, Commit: string(h.Commit),
-		ParentCommit: string(h.ParentCommit), Branch: h.Branch, Checks: h.Checks, Measurement: h.Measurement,
-		Learned: h.Learned, Next: h.Next, OpenItems: h.OpenItems,
+	out := &pb.Handoff{PlanNumber: h.PlanNumber, Claim: h.Claim, Learned: h.Learned, Next: h.Next, OpenItems: h.OpenItems}
+	switch b := h.Body.(type) {
+	case core.WorkerCandidate:
+		out.Body = &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_Candidate{Candidate: &pb.Candidate{
+			Commit: string(b.Commit), ParentCommit: string(b.ParentCommit), Branch: b.Branch, Checks: b.Checks, Measurement: b.Measurement,
+		}}}}
+	case core.WorkerNoCandidate:
+		out.Body = &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: b.Blocker}}}}
+	case core.PlannerPlan:
+		out.Body = &pb.Handoff_Planner{Planner: &pb.PlannerHandoff{
+			Plan: b.Plan, Confidence: b.Confidence, Unestablished: b.Unestablished, DecidingMeasurement: b.DecidingMeasurement,
+		}}
+	case core.JudgeFinding:
+		out.Body = &pb.Handoff_Judge{Judge: &pb.JudgeHandoff{Commit: string(b.Commit), Verdict: verdicts.out(b.Verdict), Reasons: b.Reasons}}
+	case core.CombinerResult:
+		out.Body = &pb.Handoff_Combiner{Combiner: &pb.CombinerHandoff{
+			Commit: string(b.Commit), Branch: b.Branch, Applied: b.Applied, Unapplied: b.Unapplied, Checks: b.Checks, Measurement: b.Measurement,
+		}}
+	case core.ProfilerFindings:
+		out.Body = &pb.Handoff_Profiler{Profiler: &pb.ProfilerHandoff{
+			Question: b.Question, Revision: string(b.Revision), Answer: b.Answer, Evidence: b.Evidence, Unsupported: b.Unsupported, Informs: b.Informs,
+		}}
 	}
+	return out
 }
 
-func handoffIn(h *pb.Handoff) core.Handoff {
-	return core.Handoff{
-		PlanNumber: h.GetPlanNumber(), HasCandidate: h.GetHasCandidate(), Claim: h.GetClaim(),
-		Commit: core.Commit(h.GetCommit()), ParentCommit: core.Commit(h.GetParentCommit()), Branch: h.GetBranch(),
-		Checks: h.GetChecks(), Measurement: h.GetMeasurement(), Learned: h.GetLearned(), Next: h.GetNext(),
-		OpenItems: h.GetOpenItems(),
+func handoffIn(h *pb.Handoff, errs *errorList) core.Handoff {
+	out := core.Handoff{PlanNumber: h.GetPlanNumber(), Claim: h.GetClaim(), Learned: h.GetLearned(), Next: h.GetNext(), OpenItems: h.GetOpenItems()}
+	switch b := h.GetBody().(type) {
+	case *pb.Handoff_Worker:
+		switch o := b.Worker.GetOutcome().(type) {
+		case *pb.WorkerHandoff_Candidate:
+			c := o.Candidate
+			out.Body = core.WorkerCandidate{
+				Commit: core.Commit(c.GetCommit()), ParentCommit: core.Commit(c.GetParentCommit()), Branch: c.GetBranch(),
+				Checks: c.GetChecks(), Measurement: c.GetMeasurement(),
+			}
+		case *pb.WorkerHandoff_NoCandidate:
+			out.Body = core.WorkerNoCandidate{Blocker: o.NoCandidate.GetBlocker()}
+		default:
+			errs.addf("a worker handoff has no outcome")
+		}
+	case *pb.Handoff_Planner:
+		p := b.Planner
+		out.Body = core.PlannerPlan{Plan: p.GetPlan(), Confidence: p.GetConfidence(), Unestablished: p.GetUnestablished(), DecidingMeasurement: p.GetDecidingMeasurement()}
+	case *pb.Handoff_Judge:
+		j := b.Judge
+		out.Body = core.JudgeFinding{Commit: core.Commit(j.GetCommit()), Verdict: verdicts.in(j.GetVerdict(), errs), Reasons: j.GetReasons()}
+	case *pb.Handoff_Combiner:
+		c := b.Combiner
+		out.Body = core.CombinerResult{
+			Commit: core.Commit(c.GetCommit()), Branch: c.GetBranch(), Applied: c.GetApplied(), Unapplied: c.GetUnapplied(),
+			Checks: c.GetChecks(), Measurement: c.GetMeasurement(),
+		}
+	case *pb.Handoff_Profiler:
+		p := b.Profiler
+		out.Body = core.ProfilerFindings{
+			Question: p.GetQuestion(), Revision: core.Commit(p.GetRevision()), Answer: p.GetAnswer(), Evidence: p.GetEvidence(),
+			Unsupported: p.GetUnsupported(), Informs: p.GetInforms(),
+		}
+	default:
+		errs.addf("a handoff has no body of a role")
 	}
+	return out
 }
 
 func reportOut(r core.Report) *pb.Report {
@@ -268,7 +318,7 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 	case *pb.Message_LeadBrief:
 		out.Body = core.LeadBrief{Task: b.LeadBrief.GetTask(), FanoutLimit: b.LeadBrief.GetFanoutLimit(), Steering: b.LeadBrief.GetSteering()}
 	case *pb.Message_Handoff:
-		out.Body = handoffIn(b.Handoff)
+		out.Body = handoffIn(b.Handoff, errs)
 	case *pb.Message_Report:
 		out.Body = reportIn(b.Report, errs)
 	case *pb.Message_JobFinished:
