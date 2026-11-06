@@ -168,6 +168,17 @@ func (w *sim) decide(body core.InputBody) {
 	if v := w.state.Violations(); len(v) > 0 {
 		w.fail("after input %d: %v", w.inputs, v)
 	}
+	// Not in State.Violations: a log written before the rule may hold two, and must replay as written.
+	// This simulation starts empty, so every run in it was decided under the rule.
+	held := map[string]core.RunID{}
+	for _, run := range w.state.Runs() {
+		if other, twice := held[run.Repository]; twice && !run.Status.Final() {
+			w.fail("after input %d: runs %s and %s are both not over in %s", w.inputs, other, run.ID, run.Repository)
+		}
+		if !run.Status.Final() {
+			held[run.Repository] = run.ID
+		}
+	}
 	if !reflect.DeepEqual(core.Replay(before, events), w.state) {
 		w.fail("replaying input %d's events differs from what Decide returned", w.inputs)
 	}
@@ -289,7 +300,7 @@ func subagent(a core.Agent) bool { return a.Role != core.RoleLead }
 
 func (w *sim) startRun() {
 	start := &pb.StartRun{
-		Repository: "repo", Task: "task", FanoutLimit: uint32(w.r.IntN(4)), Brief: "go",
+		Repository: fmt.Sprintf("repo-%d", w.r.IntN(3)), Task: "task", FanoutLimit: uint32(w.r.IntN(4)), Brief: "go",
 		Lead: &pb.AgentSpec{Harness: pb.Harness(1 + w.r.IntN(2)), Model: "m"},
 	}
 	if w.r.IntN(2) == 0 {

@@ -278,6 +278,8 @@ func refusalAdvice(r pb.Refusal) string {
 		return "that agent's session is already over or closing: call list_agents to see which agents are live"
 	case pb.Refusal_REFUSAL_DEADLINE_PASSED:
 		return "the run's deadline has passed: post your report or handoff now"
+	case pb.Refusal_REFUSAL_REPOSITORY_IN_USE:
+		return "another run is working in this repository: only an operator starts runs, so tell the operator"
 	}
 	return "the orchestrator refused the command: " + r.String()
 }

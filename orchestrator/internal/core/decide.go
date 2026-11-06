@@ -147,6 +147,10 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 		r.Refusal = RefuseDeadlinePassed
 		return ""
 	}
+	if busy, ok := t.runInRepository(b.Repository); ok {
+		r.Run, r.Refusal = busy, RefuseRepositoryInUse
+		return ""
+	}
 	run := Run{
 		ID: RunID(t.mint("run")), Repository: b.Repository, Task: b.Task, Status: RunStarting,
 		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, Deadline: b.Deadline, CreatedAt: t.in.At,
@@ -160,6 +164,23 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 	t.launch(run, Agent{ID: run.Lead, Run: run.ID, Role: RoleLead, Spec: b.Lead})
 	r.Message = t.post(Message{Run: run.ID, To: run.Lead, Body: LeadBrief{Task: b.Task, FanoutLimit: b.FanoutLimit, Steering: b.Brief}}).ID
 	return run.ID
+}
+
+// runInRepository returns the oldest run that is not over and works in repository. Two runs in one
+// repository would share one checkout, so a start is refused while one is there, a run that is still
+// stopping included. Only a start is held to this: a log that already holds two such runs replays as
+// it was written.
+func (t *tx) runInRepository(repository string) (RunID, bool) {
+	var found Run
+	for _, run := range t.s.runs {
+		if run.Repository != repository || run.Status.Final() {
+			continue
+		}
+		if found.ID == "" || run.CreatedAt.Before(found.CreatedAt) || run.CreatedAt.Equal(found.CreatedAt) && run.ID < found.ID {
+			found = run
+		}
+	}
+	return found.ID, found.ID != ""
 }
 
 // launch records a new agent and asks for its first session.

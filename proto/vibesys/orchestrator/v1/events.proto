@@ -146,6 +146,8 @@ enum Refusal {
   REFUSAL_AGENT_NOT_LIVE = 7;
   // The deadline had passed when the command arrived.
   REFUSAL_DEADLINE_PASSED = 8;
+  // Another run that is not over already works in the repository. The receipt's run_id is that run.
+  REFUSAL_REPOSITORY_IN_USE = 9;
 }
 
 // Receipt is the answer to a command, and the same answer to each retry of it.

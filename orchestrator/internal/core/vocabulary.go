@@ -183,6 +183,9 @@ const (
 	RefuseAgentIsLead    Refusal = "agent_is_lead"
 	RefuseAgentNotLive   Refusal = "agent_not_live"
 	RefuseDeadlinePassed Refusal = "deadline_passed"
+	// RefuseRepositoryInUse says another run that is not over works in the repository. The
+	// receipt's run is that run.
+	RefuseRepositoryInUse Refusal = "repository_in_use"
 )
 
 // TimerKind says what a timer is for.
