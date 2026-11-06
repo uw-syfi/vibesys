@@ -31,7 +31,7 @@ func TestNativeBenchmarkTimesOutStuckCandidate(t *testing.T) {
 }
 
 func TestNativeReferenceBenchmark(t *testing.T) {
-	result, err := runNativeBenchmark(benchmarkConfig{
+	result := benchmarkUntilTransferred(t, benchmarkConfig{
 		candidateConfig: candidateConfig{
 			workspace:    t.TempDir(),
 			useReference: true,
@@ -43,9 +43,6 @@ func TestNativeReferenceBenchmark(t *testing.T) {
 		consumers: 1,
 		duration:  20 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if result.Enqueued == 0 || result.Dequeued == 0 || result.TotalOpsPerSec <= 0 {
 		t.Fatalf("benchmark did not perform useful work: %+v", result)
 	}
@@ -93,7 +90,7 @@ func TestBenchmarkRejectsNonPositiveOrEvenRepetitions(t *testing.T) {
 
 func TestNativeBenchmarkLoadsCandidateCABI(t *testing.T) {
 	workspace := compileCandidateFixture(t, false)
-	result, err := runNativeBenchmark(benchmarkConfig{
+	result := benchmarkUntilTransferred(t, benchmarkConfig{
 		candidateConfig: candidateConfig{
 			workspace: workspace,
 			candidate: "stack-candidate.so",
@@ -105,9 +102,6 @@ func TestNativeBenchmarkLoadsCandidateCABI(t *testing.T) {
 		consumers: 1,
 		duration:  20 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if result.Enqueued == 0 || result.Dequeued == 0 {
 		t.Fatalf("candidate ABI benchmark did not transfer copied values: %+v", result)
 	}

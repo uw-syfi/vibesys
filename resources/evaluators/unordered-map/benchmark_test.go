@@ -31,7 +31,7 @@ func TestNativeBenchmarkTimesOutStuckCandidate(t *testing.T) {
 }
 
 func TestNativeReferenceBenchmark(t *testing.T) {
-	result, err := runNativeBenchmark(benchmarkConfig{
+	result := benchmarkUntilWorked(t, benchmarkConfig{
 		candidateConfig: candidateConfig{
 			workspace:    t.TempDir(),
 			useReference: true,
@@ -43,9 +43,6 @@ func TestNativeReferenceBenchmark(t *testing.T) {
 		duration: 20 * time.Millisecond,
 		keySpace: 32,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if result.Puts+result.Gets+result.Removes == 0 || result.TotalOpsPerSec <= 0 {
 		t.Fatalf("benchmark did not perform useful work: %+v", result)
 	}
@@ -55,7 +52,7 @@ func TestNativeReferenceBenchmark(t *testing.T) {
 }
 
 func TestNativeReferenceMixedBenchmark(t *testing.T) {
-	result, err := runNativeBenchmark(benchmarkConfig{
+	result := benchmarkUntilWorked(t, benchmarkConfig{
 		candidateConfig: candidateConfig{
 			workspace:    t.TempDir(),
 			useReference: true,
@@ -66,10 +63,7 @@ func TestNativeReferenceMixedBenchmark(t *testing.T) {
 		},
 		duration: 20 * time.Millisecond,
 		keySpace: 64,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	}, func(r benchmarkResult) bool { return r.Puts > 0 && r.Gets > 0 && r.Removes > 0 })
 	if result.Puts == 0 || result.Gets == 0 || result.Removes == 0 {
 		t.Fatalf("mixed benchmark did not exercise put/get/remove: %+v", result)
 	}
@@ -137,7 +131,7 @@ func TestBenchmarkRejectsNonPositiveOrEvenRepetitions(t *testing.T) {
 
 func TestNativeBenchmarkLoadsCandidateCABI(t *testing.T) {
 	workspace := compileCandidateFixture(t, false)
-	result, err := runNativeBenchmark(benchmarkConfig{
+	result := benchmarkUntilWorked(t, benchmarkConfig{
 		candidateConfig: candidateConfig{
 			workspace:   workspace,
 			candidate:   "unordered-map-candidate.so",
@@ -149,9 +143,6 @@ func TestNativeBenchmarkLoadsCandidateCABI(t *testing.T) {
 		duration: 20 * time.Millisecond,
 		keySpace: 32,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if result.Puts+result.Gets == 0 {
 		t.Fatalf("candidate ABI benchmark did not copy keys and values: %+v", result)
 	}

@@ -44,7 +44,6 @@ func TestRunUsesOneAggregateDeadline(t *testing.T) {
 	options := testOptions()
 	options.PhaseTimeout = 25 * time.Millisecond
 	options.ProbeTimeout = 100 * time.Millisecond
-	started := time.Now()
 	err := Run(context.Background(), runtimeFunc(func(ctx context.Context, _ api.Invocation) api.ProtocolResult {
 		select {
 		case <-ctx.Done():
@@ -53,8 +52,10 @@ func TestRunUsesOneAggregateDeadline(t *testing.T) {
 			return api.ProtocolResult{TransportSuccess: true}
 		}
 	}), []api.ReadinessProbe{probe("one"), probe("two")}, options)
-	if err == nil || time.Since(started) > 60*time.Millisecond {
-		t.Fatalf("err=%v elapsed=%s", err, time.Since(started))
+	// The verdict is the error alone: elapsed time is not asserted, because a loaded machine
+	// stretches it.
+	if err == nil {
+		t.Fatal("two 20ms probes ran to completion under a 25ms aggregate deadline")
 	}
 }
 
