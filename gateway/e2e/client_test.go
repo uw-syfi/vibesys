@@ -21,7 +21,7 @@ func TestAClientCanStartLeaveCheckAndStopARun(t *testing.T) {
 	repository := newToy(t, r.dir)
 	r.serve()
 
-	started := r.receipt("run", "start", "--repository", repository.path, "--task", toyTask, "--detach", "--json")
+	started := r.receipt("run", "start", "--repository", repository.path, "--task", toyTask, "--detach", "--allow-agent", "codex", "--json")
 	if started.RunID == "" {
 		t.Fatalf("run start printed no run: %+v", started)
 	}

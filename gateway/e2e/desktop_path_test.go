@@ -252,7 +252,7 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 
 	r.serve()
 	const steering = "Prefer Codex workers for volume."
-	started := r.receipt("run", "start", "--repository", repository.path, "--task", toyTask, "--brief", steering, "--json")
+	started := r.receipt("run", "start", "--repository", repository.path, "--task", toyTask, "--brief", steering, "--allow-agent", "codex", "--json")
 	if started.RunID == "" || started.AgentID == "" {
 		t.Fatalf("run start printed no run and lead: %+v", started)
 	}

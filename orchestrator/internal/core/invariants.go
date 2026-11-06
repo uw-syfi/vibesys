@@ -1,6 +1,9 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Violations checks everything that must hold of a State, whatever led to it, and returns one line
 // per breach. It is the machine-checked form of the guarantees in this package: the simulation
@@ -21,6 +24,9 @@ func (s State) Violations() []string {
 		}
 		if a.Stop == StopNone && a.Status.Resting() && len(a.queue) > 0 {
 			bad("agent %s rests with mail waiting: %v", a.ID, a.queue)
+		}
+		if run, ok := s.runs[a.Run]; ok && !slices.Contains(run.Allowed, AgentChoice{Harness: a.Spec.Harness, Model: a.Spec.Model}) {
+			bad("agent %s runs on %s %q, outside what run %s allows: %v", a.ID, a.Spec.Harness, a.Spec.Model, run.ID, run.Allowed)
 		}
 	}
 	for _, run := range s.runs {

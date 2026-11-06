@@ -16,6 +16,7 @@ func runOut(r core.Run) *pb.Run {
 		CreatedAt: when(r.CreatedAt), StopReason: stopReasons.out(r.StopReason), EndedAt: when(r.EndedAt),
 		CliLocation: locationOut(r.Location), ReportsPosted: r.ReportsPosted, FinalReported: r.FinalReported, StalledSince: when(r.StalledSince),
 		ActiveJobs: r.ActiveJobs, LeadReminders: r.LeadReminders, Usage: usageOut(r.Usage),
+		AllowedAgents: choicesOut(r.Allowed),
 	}
 }
 
@@ -39,6 +40,7 @@ func runIn(r *pb.Run, errs *errorList) core.Run {
 		EndedAt: moment(r.GetEndedAt(), errs), Location: locationIn(r.GetCliLocation()),
 		ReportsPosted: r.GetReportsPosted(), FinalReported: r.GetFinalReported(), StalledSince: moment(r.GetStalledSince(), errs),
 		ActiveJobs: r.GetActiveJobs(), LeadReminders: r.GetLeadReminders(), Usage: usageIn(r.GetUsage()),
+		Allowed: choicesIn(r.GetAllowedAgents(), errs),
 	}
 }
 
@@ -279,7 +281,7 @@ func receiptOut(r core.Receipt, sequence uint64) *pb.Receipt {
 	return &pb.Receipt{
 		CommandId: string(r.Command), CommandDigest: string(r.Digest), Refusal: refusals.out(r.Refusal),
 		RunId: string(r.Run), AgentId: string(r.Agent), MessageId: string(r.Message),
-		Delivery: deliveries.out(r.Delivery), Sequence: sequence,
+		Delivery: deliveries.out(r.Delivery), Sequence: sequence, AllowedAgents: choicesOut(r.Allowed),
 	}
 }
 
@@ -288,6 +290,7 @@ func receiptIn(r *pb.Receipt, errs *errorList) core.Receipt {
 		Command: core.CommandID(r.GetCommandId()), Digest: core.Digest(r.GetCommandDigest()),
 		Refusal: refusals.in(r.GetRefusal(), errs), Run: core.RunID(r.GetRunId()), Agent: core.AgentID(r.GetAgentId()),
 		Message: core.MessageID(r.GetMessageId()), Delivery: deliveries.in(r.GetDelivery(), errs),
+		Allowed: choicesIn(r.GetAllowedAgents(), errs),
 	}
 }
 

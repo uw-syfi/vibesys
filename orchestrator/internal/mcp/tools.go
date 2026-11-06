@@ -19,6 +19,15 @@ var reportKindNames = map[string]pb.ReportKind{"progress": pb.ReportKind_REPORT_
 
 var harnessNames = map[string]pb.Harness{"claude_code": pb.Harness_HARNESS_CLAUDE_CODE, "codex": pb.Harness_HARNESS_CODEX}
 
+func harnessName(h pb.Harness) string {
+	for name, v := range harnessNames {
+		if v == h {
+			return name
+		}
+	}
+	return h.String()
+}
+
 func str(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 
 // object is a JSON Schema object. A tool with no required argument says so with an empty list:
@@ -33,7 +42,7 @@ func object(required []string, props map[string]any) map[string]any {
 var allTools = []tool{
 	{
 		name: "spawn_agent", action: core.ActionSpawnAgent,
-		description: "Start a subagent in your run, with a brief for its first turn. It reports back with post_handoff. An empty harness, model or effort takes yours.",
+		description: "Start a subagent in your run, with a brief for its first turn. It reports back with post_handoff. An empty harness takes yours. An empty model takes the first model the operator allowed on that harness; a harness and model the operator did not allow are refused, with the list of what is allowed. An empty effort takes yours.",
 		schema: object([]string{"role", "brief"}, map[string]any{
 			"role":        map[string]any{"type": "string", "enum": []string{"planner", "worker", "judge", "combiner", "profiler"}, "description": "What the subagent is for."},
 			"brief":       str("Its first prompt."),

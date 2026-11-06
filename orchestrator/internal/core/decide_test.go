@@ -246,12 +246,6 @@ func TestASpawnInheritsWhatItLeavesOut(t *testing.T) {
 	if got, _ := w.s.Agent(same); got.Spec != lead {
 		t.Fatalf("an unspecified spawn runs on %+v, want the lead's %+v", got.Spec, lead)
 	}
-	r := w.command(core.AgentCaller{Agent: leadID}, core.SpawnAgent{
-		Run: run, Role: core.RoleWorker, Spec: core.AgentSpec{Harness: core.Codex}, Brief: "work",
-	})
-	if got, _ := w.s.Agent(r.Agent); got.Spec != (core.AgentSpec{Harness: core.Codex}) {
-		t.Fatalf("a spawn on another harness runs on %+v: the lead's model means nothing there", got.Spec)
-	}
 }
 
 // The role table is one table, and every command goes through it. Each principal and action is
@@ -805,7 +799,7 @@ func TestARefusalIsRememberedAcrossARestart(t *testing.T) {
 	if r.Refusal != core.RefuseRunNotFound {
 		t.Fatalf("refusal = %q", r.Refusal)
 	}
-	if got, recall := core.Replay(core.State{}, w.log).Recall(r.Command, r.Digest); recall != core.RecallRepeat || got != r {
+	if got, recall := core.Replay(core.State{}, w.log).Recall(r.Command, r.Digest); recall != core.RecallRepeat || !reflect.DeepEqual(got, r) {
 		t.Fatalf("after a restart: %+v (%s)", got, recall)
 	}
 }

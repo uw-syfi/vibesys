@@ -280,7 +280,7 @@ func (w *sim) retry() {
 		w.fail("command %s was not remembered: %s", c.ID, recall)
 	}
 	w.decide(c)
-	if again, _ := w.state.Recall(c.ID, c.Digest); again != first {
+	if again, _ := w.state.Recall(c.ID, c.Digest); !reflect.DeepEqual(again, first) {
 		w.fail("a retry of %s changed the receipt from %+v to %+v", c.ID, first, again)
 	}
 }
@@ -308,6 +308,9 @@ func (w *sim) startRun() {
 		Repository: fmt.Sprintf("repo-%d", w.r.IntN(3)), Task: "task", FanoutLimit: uint32(w.r.IntN(4)), Brief: "go",
 		Lead: &pb.AgentSpec{Harness: pb.Harness(1 + w.r.IntN(2)), Model: "m"},
 	}
+	for range w.r.IntN(3) {
+		start.AllowAgents = append(start.AllowAgents, &pb.AllowedAgent{Harness: pb.Harness(1 + w.r.IntN(2)), Model: []string{"", "m", "x"}[w.r.IntN(3)]})
+	}
 	if w.r.IntN(2) == 0 {
 		start.Deadline = timestamp(w.now.Add(time.Duration(300+w.r.IntN(1800)) * time.Second))
 	}
@@ -329,6 +332,7 @@ func (w *sim) spawn() {
 	role := pb.AgentRole(2 + w.r.IntN(5))
 	w.command(w.callerIn(run), &pb.Command{Body: &pb.Command_SpawnAgent{SpawnAgent: &pb.SpawnAgent{
 		RunId: string(run.ID), Role: role, Brief: "work",
+		Spec: &pb.AgentSpec{Harness: pb.Harness(w.r.IntN(3)), Model: []string{"", "m", "x"}[w.r.IntN(3)]},
 	}}})
 }
 

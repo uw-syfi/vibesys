@@ -43,21 +43,25 @@ const (
 	Refusal_REFUSAL_DEADLINE_PASSED Refusal = 8
 	// Another run that is not over already works in the repository. The receipt's run_id is that run.
 	Refusal_REFUSAL_REPOSITORY_IN_USE Refusal = 9
+	// The harness and model asked for are outside what the run may use. The receipt's allowed_agents
+	// lists what is allowed.
+	Refusal_REFUSAL_AGENT_NOT_ALLOWED Refusal = 10
 )
 
 // Enum value maps for Refusal.
 var (
 	Refusal_name = map[int32]string{
-		0: "REFUSAL_UNSPECIFIED",
-		1: "REFUSAL_RUN_NOT_FOUND",
-		2: "REFUSAL_AGENT_NOT_FOUND",
-		3: "REFUSAL_NOT_PERMITTED",
-		4: "REFUSAL_RUN_NOT_RUNNING",
-		5: "REFUSAL_FANOUT_LIMIT",
-		6: "REFUSAL_AGENT_IS_LEAD",
-		7: "REFUSAL_AGENT_NOT_LIVE",
-		8: "REFUSAL_DEADLINE_PASSED",
-		9: "REFUSAL_REPOSITORY_IN_USE",
+		0:  "REFUSAL_UNSPECIFIED",
+		1:  "REFUSAL_RUN_NOT_FOUND",
+		2:  "REFUSAL_AGENT_NOT_FOUND",
+		3:  "REFUSAL_NOT_PERMITTED",
+		4:  "REFUSAL_RUN_NOT_RUNNING",
+		5:  "REFUSAL_FANOUT_LIMIT",
+		6:  "REFUSAL_AGENT_IS_LEAD",
+		7:  "REFUSAL_AGENT_NOT_LIVE",
+		8:  "REFUSAL_DEADLINE_PASSED",
+		9:  "REFUSAL_REPOSITORY_IN_USE",
+		10: "REFUSAL_AGENT_NOT_ALLOWED",
 	}
 	Refusal_value = map[string]int32{
 		"REFUSAL_UNSPECIFIED":       0,
@@ -70,6 +74,7 @@ var (
 		"REFUSAL_AGENT_NOT_LIVE":    7,
 		"REFUSAL_DEADLINE_PASSED":   8,
 		"REFUSAL_REPOSITORY_IN_USE": 9,
+		"REFUSAL_AGENT_NOT_ALLOWED": 10,
 	}
 )
 
@@ -456,8 +461,10 @@ func (*Delta_Text) isDelta_Body() {}
 
 func (*Delta_CommandOutput) isDelta_Body() {}
 
-// AgentSpec says what to run an agent on. An absent harness takes the lead's. An absent model or
-// effort takes the lead's on the lead's harness, and is the harness's default on another.
+// AgentSpec says what to run an agent on. An absent harness takes the lead's. An absent model takes
+// the first model the run allows on that harness. An absent effort takes the lead's on the lead's
+// harness, and is the harness's default on another. A harness and model outside the run's
+// allowance are refused.
 type AgentSpec struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Harness         Harness                `protobuf:"varint,1,opt,name=harness,proto3,enum=vibesys.orchestrator.v1.Harness" json:"harness,omitempty"`
@@ -529,7 +536,9 @@ type StartRun struct {
 	Lead *AgentSpec `protobuf:"bytes,5,opt,name=lead,proto3" json:"lead,omitempty"`
 	// The operator's steering text for the lead, such as a note about cost or which harnesses to
 	// prefer. Empty when there is none; a template words the lead's first prompt around it.
-	Brief         string `protobuf:"bytes,6,opt,name=brief,proto3" json:"brief,omitempty"`
+	Brief string `protobuf:"bytes,6,opt,name=brief,proto3" json:"brief,omitempty"`
+	// Agents the run may use besides the lead's own harness and model, which are always allowed.
+	AllowAgents   []*AllowedAgent `protobuf:"bytes,7,rep,name=allow_agents,json=allowAgents,proto3" json:"allow_agents,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -604,6 +613,13 @@ func (x *StartRun) GetBrief() string {
 		return x.Brief
 	}
 	return ""
+}
+
+func (x *StartRun) GetAllowAgents() []*AllowedAgent {
+	if x != nil {
+		return x.AllowAgents
+	}
+	return nil
 }
 
 type StopRun struct {
@@ -1099,7 +1115,9 @@ type Receipt struct {
 	// Where the message stood when the command finished.
 	Delivery Delivery `protobuf:"varint,7,opt,name=delivery,proto3,enum=vibesys.orchestrator.v1.Delivery" json:"delivery,omitempty"`
 	// The sequence of this receipt's event, the last one of the command.
-	Sequence      uint64 `protobuf:"varint,8,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	Sequence uint64 `protobuf:"varint,8,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// Set with REFUSAL_AGENT_NOT_ALLOWED: what the run may use, so the caller can ask again.
+	AllowedAgents []*AllowedAgent `protobuf:"bytes,9,rep,name=allowed_agents,json=allowedAgents,proto3" json:"allowed_agents,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1190,6 +1208,13 @@ func (x *Receipt) GetSequence() uint64 {
 	return 0
 }
 
+func (x *Receipt) GetAllowedAgents() []*AllowedAgent {
+	if x != nil {
+		return x.AllowedAgents
+	}
+	return nil
+}
+
 var File_vibesys_orchestrator_v1_events_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
@@ -1224,7 +1249,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\tAgentSpec\x12D\n" +
 	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\b\xbaH\x05\x82\x01\x02\x10\x01R\aharness\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12)\n" +
-	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\xca\x02\n" +
+	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\x94\x03\n" +
 	"\bStartRun\x12'\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
@@ -1234,7 +1259,8 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\bdeadline\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline\x12\x86\x01\n" +
 	"\x04lead\x18\x05 \x01(\v2\".vibesys.orchestrator.v1.AgentSpecBN\xbaHK\xba\x01E\n" +
 	"\x16start_run.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x14\n" +
-	"\x05brief\x18\x06 \x01(\tR\x05brief\")\n" +
+	"\x05brief\x18\x06 \x01(\tR\x05brief\x12H\n" +
+	"\fallow_agents\x18\a \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\vallowAgents\")\n" +
 	"\aStopRun\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\xea\x01\n" +
 	"\n" +
@@ -1268,7 +1294,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\fpost_handoff\x18\x0f \x01(\v2$.vibesys.orchestrator.v1.PostHandoffH\x00R\vpostHandoff\x12F\n" +
 	"\vpost_report\x18\x10 \x01(\v2#.vibesys.orchestrator.v1.PostReportH\x00R\n" +
 	"postReportB\r\n" +
-	"\x04body\x12\x05\xbaH\x02\b\x01\"\xeb\x02\n" +
+	"\x04body\x12\x05\xbaH\x02\b\x01\"\xb9\x03\n" +
 	"\aReceipt\x12&\n" +
 	"\n" +
 	"command_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tcommandId\x12<\n" +
@@ -1279,7 +1305,8 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\n" +
 	"message_id\x18\x06 \x01(\tR\tmessageId\x12G\n" +
 	"\bdelivery\x18\a \x01(\x0e2!.vibesys.orchestrator.v1.DeliveryB\b\xbaH\x05\x82\x01\x02\x10\x01R\bdelivery\x12\x1a\n" +
-	"\bsequence\x18\b \x01(\x04R\bsequence*\x9f\x02\n" +
+	"\bsequence\x18\b \x01(\x04R\bsequence\x12L\n" +
+	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgents*\xbe\x02\n" +
 	"\aRefusal\x12\x17\n" +
 	"\x13REFUSAL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15REFUSAL_RUN_NOT_FOUND\x10\x01\x12\x1b\n" +
@@ -1290,7 +1317,9 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x15REFUSAL_AGENT_IS_LEAD\x10\x06\x12\x1a\n" +
 	"\x16REFUSAL_AGENT_NOT_LIVE\x10\a\x12\x1b\n" +
 	"\x17REFUSAL_DEADLINE_PASSED\x10\b\x12\x1d\n" +
-	"\x19REFUSAL_REPOSITORY_IN_USE\x10\tBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x19REFUSAL_REPOSITORY_IN_USE\x10\t\x12\x1d\n" +
+	"\x19REFUSAL_AGENT_NOT_ALLOWED\x10\n" +
+	"BTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_events_proto_rawDescOnce sync.Once
@@ -1328,10 +1357,11 @@ var file_vibesys_orchestrator_v1_events_proto_goTypes = []any{
 	(*Item)(nil),                  // 18: vibesys.orchestrator.v1.Item
 	(*Message)(nil),               // 19: vibesys.orchestrator.v1.Message
 	(Harness)(0),                  // 20: vibesys.orchestrator.v1.Harness
-	(AgentRole)(0),                // 21: vibesys.orchestrator.v1.AgentRole
-	(*Handoff)(nil),               // 22: vibesys.orchestrator.v1.Handoff
-	(*Report)(nil),                // 23: vibesys.orchestrator.v1.Report
-	(Delivery)(0),                 // 24: vibesys.orchestrator.v1.Delivery
+	(*AllowedAgent)(nil),          // 21: vibesys.orchestrator.v1.AllowedAgent
+	(AgentRole)(0),                // 22: vibesys.orchestrator.v1.AgentRole
+	(*Handoff)(nil),               // 23: vibesys.orchestrator.v1.Handoff
+	(*Report)(nil),                // 24: vibesys.orchestrator.v1.Report
+	(Delivery)(0),                 // 25: vibesys.orchestrator.v1.Delivery
 }
 var file_vibesys_orchestrator_v1_events_proto_depIdxs = []int32{
 	14, // 0: vibesys.orchestrator.v1.Event.at:type_name -> google.protobuf.Timestamp
@@ -1345,24 +1375,26 @@ var file_vibesys_orchestrator_v1_events_proto_depIdxs = []int32{
 	20, // 8: vibesys.orchestrator.v1.AgentSpec.harness:type_name -> vibesys.orchestrator.v1.Harness
 	14, // 9: vibesys.orchestrator.v1.StartRun.deadline:type_name -> google.protobuf.Timestamp
 	4,  // 10: vibesys.orchestrator.v1.StartRun.lead:type_name -> vibesys.orchestrator.v1.AgentSpec
-	21, // 11: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
-	4,  // 12: vibesys.orchestrator.v1.SpawnAgent.spec:type_name -> vibesys.orchestrator.v1.AgentSpec
-	22, // 13: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
-	23, // 14: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
-	5,  // 15: vibesys.orchestrator.v1.Command.start_run:type_name -> vibesys.orchestrator.v1.StartRun
-	6,  // 16: vibesys.orchestrator.v1.Command.stop_run:type_name -> vibesys.orchestrator.v1.StopRun
-	7,  // 17: vibesys.orchestrator.v1.Command.spawn_agent:type_name -> vibesys.orchestrator.v1.SpawnAgent
-	8,  // 18: vibesys.orchestrator.v1.Command.stop_agent:type_name -> vibesys.orchestrator.v1.StopAgent
-	9,  // 19: vibesys.orchestrator.v1.Command.send_message:type_name -> vibesys.orchestrator.v1.SendMessage
-	10, // 20: vibesys.orchestrator.v1.Command.post_handoff:type_name -> vibesys.orchestrator.v1.PostHandoff
-	11, // 21: vibesys.orchestrator.v1.Command.post_report:type_name -> vibesys.orchestrator.v1.PostReport
-	0,  // 22: vibesys.orchestrator.v1.Receipt.refusal:type_name -> vibesys.orchestrator.v1.Refusal
-	24, // 23: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	21, // 11: vibesys.orchestrator.v1.StartRun.allow_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	22, // 12: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	4,  // 13: vibesys.orchestrator.v1.SpawnAgent.spec:type_name -> vibesys.orchestrator.v1.AgentSpec
+	23, // 14: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
+	24, // 15: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
+	5,  // 16: vibesys.orchestrator.v1.Command.start_run:type_name -> vibesys.orchestrator.v1.StartRun
+	6,  // 17: vibesys.orchestrator.v1.Command.stop_run:type_name -> vibesys.orchestrator.v1.StopRun
+	7,  // 18: vibesys.orchestrator.v1.Command.spawn_agent:type_name -> vibesys.orchestrator.v1.SpawnAgent
+	8,  // 19: vibesys.orchestrator.v1.Command.stop_agent:type_name -> vibesys.orchestrator.v1.StopAgent
+	9,  // 20: vibesys.orchestrator.v1.Command.send_message:type_name -> vibesys.orchestrator.v1.SendMessage
+	10, // 21: vibesys.orchestrator.v1.Command.post_handoff:type_name -> vibesys.orchestrator.v1.PostHandoff
+	11, // 22: vibesys.orchestrator.v1.Command.post_report:type_name -> vibesys.orchestrator.v1.PostReport
+	0,  // 23: vibesys.orchestrator.v1.Receipt.refusal:type_name -> vibesys.orchestrator.v1.Refusal
+	25, // 24: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
+	21, // 25: vibesys.orchestrator.v1.Receipt.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_events_proto_init() }

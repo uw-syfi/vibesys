@@ -156,7 +156,7 @@ func (t *tx) startRun(c Command, b StartRun, r *Receipt) RunID {
 	run := Run{
 		ID: RunID(t.mint("run")), Repository: b.Repository, Task: b.Task, Status: RunStarting,
 		Lead: AgentID(t.mint("agent")), FanoutLimit: b.FanoutLimit, Deadline: b.Deadline, CreatedAt: t.in.At,
-		Location: t.in.Location,
+		Location: t.in.Location, Allowed: allowance(b.Lead, b.Allow),
 	}
 	r.Run, r.Agent = run.ID, run.Lead
 	t.emit(run.ID, run)
@@ -226,24 +226,54 @@ func (t *tx) spawnAgent(c Command, b SpawnAgent, r *Receipt) RunID {
 	case run.Status != RunRunning:
 		r.Run, r.Refusal = run.ID, RefuseRunNotRunning
 		return ""
+	}
+	lead := t.s.agents[run.Lead].Agent
+	spec, ok := resolveSpec(run.Allowed, lead.Spec, b.Spec)
+	switch {
+	case !ok:
+		r.Run, r.Refusal, r.Allowed = run.ID, RefuseAgentNotAllowed, run.Allowed
+		return ""
 	case t.liveSubagents(run.ID) >= run.FanoutLimit:
 		r.Run, r.Refusal = run.ID, RefuseFanoutLimit
 		return ""
-	}
-	lead := t.s.agents[run.Lead].Agent
-	spec := b.Spec
-	if spec.Harness == "" {
-		spec.Harness = lead.Spec.Harness
-	}
-	if spec.Harness == lead.Spec.Harness {
-		spec.Model = orElse(spec.Model, lead.Spec.Model)
-		spec.Effort = orElse(spec.Effort, lead.Spec.Effort)
 	}
 	id := AgentID(t.mint("agent"))
 	t.launch(run, Agent{ID: id, Run: run.ID, Parent: run.Lead, Role: b.Role, Spec: spec, PlanNumber: b.PlanNumber})
 	r.Run, r.Agent = run.ID, id
 	r.Message = t.post(Message{Run: run.ID, From: callerAgent(c), To: id, Body: Brief{Text: b.Brief}}).ID
 	return run.ID
+}
+
+// allowance is what a run may use: its lead's harness and model, then the operator's additions, each
+// once and in the order given.
+func allowance(lead AgentSpec, extra []AgentChoice) []AgentChoice {
+	out := []AgentChoice{{Harness: lead.Harness, Model: lead.Model}}
+	for _, c := range extra {
+		if !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// resolveSpec fills what a spawn left empty and says whether the result is within the allowance. An
+// empty harness is the lead's. An empty model is the first model allowed on the harness, so a
+// harness the operator did not choose a model for never falls to its own default by accident. An
+// empty effort is the lead's on the lead's harness.
+func resolveSpec(allowed []AgentChoice, lead, ask AgentSpec) (AgentSpec, bool) {
+	spec := ask
+	spec.Harness = orElse(spec.Harness, lead.Harness)
+	if spec.Model == "" {
+		i := slices.IndexFunc(allowed, func(c AgentChoice) bool { return c.Harness == spec.Harness })
+		if i < 0 {
+			return spec, false
+		}
+		spec.Model = allowed[i].Model
+	}
+	if spec.Harness == lead.Harness {
+		spec.Effort = orElse(spec.Effort, lead.Effort)
+	}
+	return spec, slices.Contains(allowed, AgentChoice{Harness: spec.Harness, Model: spec.Model})
 }
 
 // orElse returns the value unless it is empty.

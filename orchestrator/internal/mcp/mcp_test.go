@@ -123,12 +123,30 @@ func TestEveryRefusalSaysWhatToDoNext(t *testing.T) {
 	for _, r := range []pb.Refusal{
 		pb.Refusal_REFUSAL_RUN_NOT_FOUND, pb.Refusal_REFUSAL_AGENT_NOT_FOUND, pb.Refusal_REFUSAL_NOT_PERMITTED,
 		pb.Refusal_REFUSAL_RUN_NOT_RUNNING, pb.Refusal_REFUSAL_FANOUT_LIMIT, pb.Refusal_REFUSAL_AGENT_IS_LEAD,
-		pb.Refusal_REFUSAL_AGENT_NOT_LIVE, pb.Refusal_REFUSAL_DEADLINE_PASSED,
+		pb.Refusal_REFUSAL_AGENT_NOT_LIVE, pb.Refusal_REFUSAL_DEADLINE_PASSED, pb.Refusal_REFUSAL_REPOSITORY_IN_USE,
+		pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED,
 	} {
 		d := &fakeDaemon{receipt: &pb.Receipt{Refusal: r}}
 		text, isErr := call(t, newServer(core.RoleLead, d), 1, "stop_agent", map[string]any{"agent_id": "a-2"})
 		if !isErr || !strings.Contains(text, ":") || strings.Contains(text, "REFUSAL_") {
 			t.Errorf("refusal %v read %q, want advice in words", r, text)
+		}
+	}
+}
+
+// A spawn outside the run's allowance is refused with the list the lead can choose from, in the names
+// spawn_agent takes.
+func TestARefusedSpawnListsWhatTheOperatorAllowed(t *testing.T) {
+	d := &fakeDaemon{receipt: &pb.Receipt{Refusal: pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED, AllowedAgents: []*pb.AllowedAgent{
+		{Harness: pb.Harness_HARNESS_CODEX, Model: "gpt-m"}, {Harness: pb.Harness_HARNESS_CLAUDE_CODE},
+	}}}
+	text, isErr := call(t, newServer(core.RoleLead, d), 1, "spawn_agent", map[string]any{"role": "judge", "brief": "b", "harness": "claude_code", "model": "opus"})
+	if !isErr {
+		t.Fatalf("got %q, want a refusal", text)
+	}
+	for _, want := range []string{"harness codex with model gpt-m", "harness claude_code with its default model"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the refusal %q does not list %q", text, want)
 		}
 	}
 }

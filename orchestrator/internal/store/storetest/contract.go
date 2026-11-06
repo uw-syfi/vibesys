@@ -106,7 +106,7 @@ func commitSequences(t *testing.T, h *Harness) {
 		for i, e := range r.Events {
 			if rc, ok := e.Body.(core.Receipt); ok {
 				recs, err := h.Store.EventsAfter("", c.First+uint64(i)-1, 1)
-				if err != nil || len(recs) != 1 || recs[0].Event.Body.(core.Receipt) != rc || recs[0].Sequence != c.First+uint64(i) {
+				if err != nil || len(recs) != 1 || !reflect.DeepEqual(recs[0].Event.Body, e.Body) || recs[0].Sequence != c.First+uint64(i) {
 					t.Fatalf("receipt of %s is not at its own sequence %d: %v %v", rc.Command, c.First+uint64(i), recs, err)
 				}
 			}

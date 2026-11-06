@@ -245,9 +245,23 @@ func (s *Server) send(ctx context.Context, cmd *pb.Command, done func(*pb.Receip
 		return "", transportAdvice(err)
 	}
 	if r := receipt.GetRefusal(); r != pb.Refusal_REFUSAL_UNSPECIFIED {
-		return "", errors.New(refusalAdvice(r))
+		return "", errors.New(refusalAdvice(receipt))
 	}
 	return done(receipt), nil
+}
+
+// allowedList names the agents a run may use, as spawn_agent takes them.
+func allowedList(allowed []*pb.AllowedAgent) string {
+	var parts []string
+	for _, c := range allowed {
+		name := harnessName(c.GetHarness())
+		if c.GetModel() == "" {
+			parts = append(parts, fmt.Sprintf("harness %s with its default model (leave model out)", name))
+		} else {
+			parts = append(parts, fmt.Sprintf("harness %s with model %s", name, c.GetModel()))
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 func transportAdvice(err error) error {
@@ -260,7 +274,8 @@ func transportAdvice(err error) error {
 	return fmt.Errorf("the orchestrator did not answer (%s): call list_agents to see whether your last call took effect, then repeat it only if it did not", status.Convert(err).Message())
 }
 
-func refusalAdvice(r pb.Refusal) string {
+func refusalAdvice(receipt *pb.Receipt) string {
+	r := receipt.GetRefusal()
 	switch r {
 	case pb.Refusal_REFUSAL_RUN_NOT_FOUND:
 		return "your run does not exist on this orchestrator: stop work and tell the operator"
@@ -278,6 +293,9 @@ func refusalAdvice(r pb.Refusal) string {
 		return "that agent's session is already over or closing: call list_agents to see which agents are live"
 	case pb.Refusal_REFUSAL_DEADLINE_PASSED:
 		return "the run's deadline has passed: post your report or handoff now"
+	case pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED:
+		return "the operator did not allow that harness and model for this run. It allows only: " +
+			allowedList(receipt.GetAllowedAgents()) + ". Spawn again with one of these, or leave the model out to take the first one on the harness; if none fits, tell the operator"
 	case pb.Refusal_REFUSAL_REPOSITORY_IN_USE:
 		return "another run is working in this repository: only an operator starts runs, so tell the operator"
 	}

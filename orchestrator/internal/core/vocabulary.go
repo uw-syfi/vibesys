@@ -207,6 +207,9 @@ const (
 	// RefuseRepositoryInUse says another run that is not over works in the repository. The
 	// receipt's run is that run.
 	RefuseRepositoryInUse Refusal = "repository_in_use"
+	// RefuseAgentNotAllowed says the harness and model asked for are outside what the run may use.
+	// The receipt lists what is allowed.
+	RefuseAgentNotAllowed Refusal = "agent_not_allowed"
 )
 
 // StartFailure says why a session never opened. The empty value means it did not fail to start.

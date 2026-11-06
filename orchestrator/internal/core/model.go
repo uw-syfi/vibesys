@@ -31,6 +31,16 @@ type Run struct {
 	LeadReminders uint32
 	// Usage is the cost of every finished turn of every agent of the run.
 	Usage Usage
+	// Allowed is what the run may spend on: set when it starts, never changed. A subagent runs
+	// only on one of these.
+	Allowed []AgentChoice
+}
+
+// AgentChoice is one harness and model a run may use. An empty Model is the harness's own default
+// model, and only that.
+type AgentChoice struct {
+	Harness Harness
+	Model   ModelName
 }
 
 // CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
@@ -334,4 +344,6 @@ type Receipt struct {
 	Agent    AgentID
 	Message  MessageID
 	Delivery Delivery
+	// Allowed is what the run may use, set with RefuseAgentNotAllowed.
+	Allowed []AgentChoice
 }

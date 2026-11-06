@@ -123,6 +123,7 @@ const REFUSAL: Readonly<Record<Refusal, string>> = {
   [Refusal.AGENT_NOT_LIVE]: 'That agent has finished and cannot take messages.',
   [Refusal.DEADLINE_PASSED]: 'The run passed its deadline.',
   [Refusal.REPOSITORY_IN_USE]: 'Another run is already working in this repository.',
+  [Refusal.AGENT_NOT_ALLOWED]: 'The run was not allowed to use that agent.',
 };
 
 export const refusalWord = (refusal: Refusal): string => REFUSAL[refusal];
