@@ -264,7 +264,7 @@ protocol branches to the scheduler.
 `api.Application` prepares fixtures, builds logical-operation plans, and
 validates their collected results. A plan may contain one or more invocations;
 the engine always issues and accounts for each invocation itself.
-The declarative adapter covers ordinary HTTP operations. The Social Network
+The declarative adapter covers ordinary HTTP operations. The Train Ticket
 adapter demonstrates the typed escape hatch for dynamic users and setup.
 
 Applications with mode-neutral startup requirements implement

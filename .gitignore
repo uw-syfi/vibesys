@@ -287,3 +287,6 @@ clients/libs/proto/src/generated/schema-files.ts
 
 # Descriptor-bearing fixtures are generated and validated at test time.
 proto/testdata/records/epoch_started.pb
+
+# Compiled Go test binaries (go test -c)
+*.test

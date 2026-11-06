@@ -1,19 +1,11 @@
 {
   "include": [
     "kv-store",
-    "hotel-k8s",
-    "social-network-k8s",
     "agentx-llm"
   ],
   "executionEnvironments": [
     {
       "root": "kv-store"
-    },
-    {
-      "root": "hotel-k8s"
-    },
-    {
-      "root": "social-network-k8s"
     },
     {
       "root": "agentx-llm"

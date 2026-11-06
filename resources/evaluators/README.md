@@ -84,10 +84,9 @@ support tree.
 Every trusted command from that package, including Python or shell wrappers
 that launch Go children, receives the prepared `GOMODCACHE` and runs with
 `GOPROXY=off`, `GOSUMDB=off`, `GOWORK=off`, `GOTOOLCHAIN=local`, and
-`-mod=readonly`. Candidate commands do not inherit this policy. This is why the
-hotel-correctness wrapper can compose the exact resolved microservice package
-through a temporary modfile without downloading dependencies when its gate
-starts.
+`-mod=readonly`. Candidate commands do not inherit this policy. This is why a
+wrapper can compose the exact resolved microservice package through a temporary
+modfile without downloading dependencies when its gate starts.
 
 ## Cargo tools from Git
 

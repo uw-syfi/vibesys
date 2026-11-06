@@ -4,11 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	accuracyhotel "vibesys/microservice-evaluator/accuracyapps/hotel"
 	accuracytrainticket "vibesys/microservice-evaluator/accuracyapps/trainticket"
 	"vibesys/microservice-evaluator/apps/declarative"
-	benchmarkhotel "vibesys/microservice-evaluator/apps/hotel"
-	"vibesys/microservice-evaluator/apps/socialnetwork"
 	benchmarktrainticket "vibesys/microservice-evaluator/apps/trainticket"
 	"vibesys/microservice-evaluator/composition"
 	"vibesys/microservice-evaluator/drivers/httpdriver"
@@ -23,10 +20,7 @@ func main() {
 		version,
 		composition.Driver(httpdriver.New()),
 		composition.Application("declarative", declarative.New),
-		composition.Application("hotel", benchmarkhotel.New),
-		composition.Application("social-network", socialnetwork.New),
 		composition.Application("train-ticket", benchmarktrainticket.New),
-		composition.AccuracyApplication("hotel", accuracyhotel.New),
 		composition.AccuracyApplication("train-ticket", accuracytrainticket.New),
 	)
 	if err != nil {
