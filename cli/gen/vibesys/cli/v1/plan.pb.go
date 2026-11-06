@@ -133,6 +133,58 @@ func (PlanGainReference) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{1}
 }
 
+// PlanGainAnswer is whether every plan that counts states a bound below the share.
+type PlanGainAnswer int32
+
+const (
+	PlanGainAnswer_PLAN_GAIN_ANSWER_UNSPECIFIED PlanGainAnswer = 0
+	// Every plan that counts does, and so does a check in which none counts.
+	PlanGainAnswer_PLAN_GAIN_ANSWER_ALL_UNDER PlanGainAnswer = 1
+	// Some plan that counts states none, or one that is not below the share.
+	PlanGainAnswer_PLAN_GAIN_ANSWER_NOT_ALL_UNDER PlanGainAnswer = 2
+)
+
+// Enum value maps for PlanGainAnswer.
+var (
+	PlanGainAnswer_name = map[int32]string{
+		0: "PLAN_GAIN_ANSWER_UNSPECIFIED",
+		1: "PLAN_GAIN_ANSWER_ALL_UNDER",
+		2: "PLAN_GAIN_ANSWER_NOT_ALL_UNDER",
+	}
+	PlanGainAnswer_value = map[string]int32{
+		"PLAN_GAIN_ANSWER_UNSPECIFIED":   0,
+		"PLAN_GAIN_ANSWER_ALL_UNDER":     1,
+		"PLAN_GAIN_ANSWER_NOT_ALL_UNDER": 2,
+	}
+)
+
+func (x PlanGainAnswer) Enum() *PlanGainAnswer {
+	p := new(PlanGainAnswer)
+	*p = x
+	return p
+}
+
+func (x PlanGainAnswer) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (PlanGainAnswer) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_plan_proto_enumTypes[2].Descriptor()
+}
+
+func (PlanGainAnswer) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_plan_proto_enumTypes[2]
+}
+
+func (x PlanGainAnswer) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use PlanGainAnswer.Descriptor instead.
+func (PlanGainAnswer) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_plan_proto_rawDescGZIP(), []int{2}
+}
+
 // PlanGainBound is the most a plan could gain, as its planner states it: a share of a reference,
 // 0.05 for five percent of the headline. A plan states it so that a decision to go on or to stop
 // does not have to read the plan's prose.
@@ -465,8 +517,8 @@ type PlanGainCheck struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The share asked about.
 	Share float64 `protobuf:"fixed64,1,opt,name=share,proto3" json:"share,omitempty"`
-	// True when every plan that counts states a bound below the share; also true when none counts.
-	AllUnder bool `protobuf:"varint,2,opt,name=all_under,json=allUnder,proto3" json:"all_under,omitempty"`
+	// It is an enum and not a bool so that a JSON reader sees it either way: a false bool is left out.
+	Answer PlanGainAnswer `protobuf:"varint,2,opt,name=answer,proto3,enum=vibesys.cli.v1.PlanGainAnswer" json:"answer,omitempty"`
 	// How many plans count.
 	Counted uint32 `protobuf:"varint,3,opt,name=counted,proto3" json:"counted,omitempty"`
 	// The plans that count and are not under the share, by number.
@@ -512,11 +564,11 @@ func (x *PlanGainCheck) GetShare() float64 {
 	return 0
 }
 
-func (x *PlanGainCheck) GetAllUnder() bool {
+func (x *PlanGainCheck) GetAnswer() PlanGainAnswer {
 	if x != nil {
-		return x.AllUnder
+		return x.Answer
 	}
-	return false
+	return PlanGainAnswer_PLAN_GAIN_ANSWER_UNSPECIFIED
 }
 
 func (x *PlanGainCheck) GetCounted() uint32 {
@@ -538,7 +590,8 @@ type PlanGainBlocker struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Number uint32                 `protobuf:"varint,1,opt,name=number,proto3" json:"number,omitempty"`
 	Title  string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	Status PlanStatus             `protobuf:"varint,3,opt,name=status,proto3,enum=vibesys.cli.v1.PlanStatus" json:"status,omitempty"`
+	// Open or parked.
+	Status PlanStatus `protobuf:"varint,3,opt,name=status,proto3,enum=vibesys.cli.v1.PlanStatus" json:"status,omitempty"`
 	// The bound it states, which is at or above the share. Absent when it states none.
 	GainBound     *PlanGainBound `protobuf:"bytes,4,opt,name=gain_bound,json=gainBound,proto3" json:"gain_bound,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -634,16 +687,20 @@ const file_vibesys_cli_v1_plan_proto_rawDesc = "" +
 	"\averdict\x18\x02 \x01(\v2\x17.vibesys.cli.v1.VerdictR\averdict\"c\n" +
 	"\bPlanView\x12(\n" +
 	"\x04plan\x18\x01 \x01(\v2\x14.vibesys.cli.v1.PlanR\x04plan\x12-\n" +
-	"\x04jobs\x18\x02 \x03(\v2\x19.vibesys.cli.v1.LinkedJobR\x04jobs\"\x99\x01\n" +
-	"\rPlanGainCheck\x12\x14\n" +
-	"\x05share\x18\x01 \x01(\x01R\x05share\x12\x1b\n" +
-	"\tall_under\x18\x02 \x01(\bR\ballUnder\x12\x18\n" +
+	"\x04jobs\x18\x02 \x03(\v2\x19.vibesys.cli.v1.LinkedJobR\x04jobs\"\x83\x05\n" +
+	"\rPlanGainCheck\x12&\n" +
+	"\x05share\x18\x01 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x05share\x12B\n" +
+	"\x06answer\x18\x02 \x01(\x0e2\x1e.vibesys.cli.v1.PlanGainAnswerB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06answer\x12\x18\n" +
 	"\acounted\x18\x03 \x01(\rR\acounted\x12;\n" +
-	"\bblockers\x18\x04 \x03(\v2\x1f.vibesys.cli.v1.PlanGainBlockerR\bblockers\"\xb1\x01\n" +
-	"\x0fPlanGainBlocker\x12\x16\n" +
-	"\x06number\x18\x01 \x01(\rR\x06number\x12\x14\n" +
-	"\x05title\x18\x02 \x01(\tR\x05title\x122\n" +
-	"\x06status\x18\x03 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusR\x06status\x12<\n" +
+	"\bblockers\x18\x04 \x03(\v2\x1f.vibesys.cli.v1.PlanGainBlockerR\bblockers:\xae\x03\xbaH\xaa\x03\x1a\xef\x01\n" +
+	"'plan_gain_check.answer_follows_blockers\x12cthe answer is all under exactly when there is no blocker, and a blocker is one of the counted plans\x1a_(this.answer == 1) == (this.blockers.size() == 0) && uint(this.blockers.size()) <= this.counted\x1a\xb5\x01\n" +
+	"&plan_gain_check.blockers_are_not_under\x12=a blocker states no bound, or one that is not below the share\x1aLthis.blockers.all(b, !has(b.gain_bound) || b.gain_bound.share >= this.share)\"\xc6\x01\n" +
+	"\x0fPlanGainBlocker\x12\x1f\n" +
+	"\x06number\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x06number\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12>\n" +
+	"\x06status\x18\x03 \x01(\x0e2\x1a.vibesys.cli.v1.PlanStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x18\x01\x18\x04R\x06status\x12<\n" +
 	"\n" +
 	"gain_bound\x18\x04 \x01(\v2\x1d.vibesys.cli.v1.PlanGainBoundR\tgainBound*\x9e\x01\n" +
 	"\n" +
@@ -656,7 +713,11 @@ const file_vibesys_cli_v1_plan_proto_rawDesc = "" +
 	"\x14PLAN_STATUS_REJECTED\x10\x05*Z\n" +
 	"\x11PlanGainReference\x12#\n" +
 	"\x1fPLAN_GAIN_REFERENCE_UNSPECIFIED\x10\x00\x12 \n" +
-	"\x1cPLAN_GAIN_REFERENCE_HEADLINE\x10\x01B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\x1cPLAN_GAIN_REFERENCE_HEADLINE\x10\x01*v\n" +
+	"\x0ePlanGainAnswer\x12 \n" +
+	"\x1cPLAN_GAIN_ANSWER_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aPLAN_GAIN_ANSWER_ALL_UNDER\x10\x01\x12\"\n" +
+	"\x1ePLAN_GAIN_ANSWER_NOT_ALL_UNDER\x10\x02B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_plan_proto_rawDescOnce sync.Once
@@ -670,42 +731,44 @@ func file_vibesys_cli_v1_plan_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_plan_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_plan_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_vibesys_cli_v1_plan_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
 var file_vibesys_cli_v1_plan_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_vibesys_cli_v1_plan_proto_goTypes = []any{
 	(PlanStatus)(0),               // 0: vibesys.cli.v1.PlanStatus
 	(PlanGainReference)(0),        // 1: vibesys.cli.v1.PlanGainReference
-	(*PlanGainBound)(nil),         // 2: vibesys.cli.v1.PlanGainBound
-	(*PlanComment)(nil),           // 3: vibesys.cli.v1.PlanComment
-	(*Plan)(nil),                  // 4: vibesys.cli.v1.Plan
-	(*LinkedJob)(nil),             // 5: vibesys.cli.v1.LinkedJob
-	(*PlanView)(nil),              // 6: vibesys.cli.v1.PlanView
-	(*PlanGainCheck)(nil),         // 7: vibesys.cli.v1.PlanGainCheck
-	(*PlanGainBlocker)(nil),       // 8: vibesys.cli.v1.PlanGainBlocker
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
-	(*Job)(nil),                   // 10: vibesys.cli.v1.Job
-	(*Verdict)(nil),               // 11: vibesys.cli.v1.Verdict
+	(PlanGainAnswer)(0),           // 2: vibesys.cli.v1.PlanGainAnswer
+	(*PlanGainBound)(nil),         // 3: vibesys.cli.v1.PlanGainBound
+	(*PlanComment)(nil),           // 4: vibesys.cli.v1.PlanComment
+	(*Plan)(nil),                  // 5: vibesys.cli.v1.Plan
+	(*LinkedJob)(nil),             // 6: vibesys.cli.v1.LinkedJob
+	(*PlanView)(nil),              // 7: vibesys.cli.v1.PlanView
+	(*PlanGainCheck)(nil),         // 8: vibesys.cli.v1.PlanGainCheck
+	(*PlanGainBlocker)(nil),       // 9: vibesys.cli.v1.PlanGainBlocker
+	(*timestamppb.Timestamp)(nil), // 10: google.protobuf.Timestamp
+	(*Job)(nil),                   // 11: vibesys.cli.v1.Job
+	(*Verdict)(nil),               // 12: vibesys.cli.v1.Verdict
 }
 var file_vibesys_cli_v1_plan_proto_depIdxs = []int32{
 	1,  // 0: vibesys.cli.v1.PlanGainBound.relative_to:type_name -> vibesys.cli.v1.PlanGainReference
-	9,  // 1: vibesys.cli.v1.PlanComment.at:type_name -> google.protobuf.Timestamp
+	10, // 1: vibesys.cli.v1.PlanComment.at:type_name -> google.protobuf.Timestamp
 	0,  // 2: vibesys.cli.v1.Plan.status:type_name -> vibesys.cli.v1.PlanStatus
-	3,  // 3: vibesys.cli.v1.Plan.comments:type_name -> vibesys.cli.v1.PlanComment
-	9,  // 4: vibesys.cli.v1.Plan.created_at:type_name -> google.protobuf.Timestamp
-	9,  // 5: vibesys.cli.v1.Plan.updated_at:type_name -> google.protobuf.Timestamp
-	2,  // 6: vibesys.cli.v1.Plan.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
-	10, // 7: vibesys.cli.v1.LinkedJob.job:type_name -> vibesys.cli.v1.Job
-	11, // 8: vibesys.cli.v1.LinkedJob.verdict:type_name -> vibesys.cli.v1.Verdict
-	4,  // 9: vibesys.cli.v1.PlanView.plan:type_name -> vibesys.cli.v1.Plan
-	5,  // 10: vibesys.cli.v1.PlanView.jobs:type_name -> vibesys.cli.v1.LinkedJob
-	8,  // 11: vibesys.cli.v1.PlanGainCheck.blockers:type_name -> vibesys.cli.v1.PlanGainBlocker
-	0,  // 12: vibesys.cli.v1.PlanGainBlocker.status:type_name -> vibesys.cli.v1.PlanStatus
-	2,  // 13: vibesys.cli.v1.PlanGainBlocker.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	4,  // 3: vibesys.cli.v1.Plan.comments:type_name -> vibesys.cli.v1.PlanComment
+	10, // 4: vibesys.cli.v1.Plan.created_at:type_name -> google.protobuf.Timestamp
+	10, // 5: vibesys.cli.v1.Plan.updated_at:type_name -> google.protobuf.Timestamp
+	3,  // 6: vibesys.cli.v1.Plan.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
+	11, // 7: vibesys.cli.v1.LinkedJob.job:type_name -> vibesys.cli.v1.Job
+	12, // 8: vibesys.cli.v1.LinkedJob.verdict:type_name -> vibesys.cli.v1.Verdict
+	5,  // 9: vibesys.cli.v1.PlanView.plan:type_name -> vibesys.cli.v1.Plan
+	6,  // 10: vibesys.cli.v1.PlanView.jobs:type_name -> vibesys.cli.v1.LinkedJob
+	2,  // 11: vibesys.cli.v1.PlanGainCheck.answer:type_name -> vibesys.cli.v1.PlanGainAnswer
+	9,  // 12: vibesys.cli.v1.PlanGainCheck.blockers:type_name -> vibesys.cli.v1.PlanGainBlocker
+	0,  // 13: vibesys.cli.v1.PlanGainBlocker.status:type_name -> vibesys.cli.v1.PlanStatus
+	3,  // 14: vibesys.cli.v1.PlanGainBlocker.gain_bound:type_name -> vibesys.cli.v1.PlanGainBound
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_plan_proto_init() }
@@ -720,7 +783,7 @@ func file_vibesys_cli_v1_plan_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_plan_proto_rawDesc), len(file_vibesys_cli_v1_plan_proto_rawDesc)),
-			NumEnums:      2,
+			NumEnums:      3,
 			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,

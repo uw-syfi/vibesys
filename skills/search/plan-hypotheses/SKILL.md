@@ -52,7 +52,8 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    end to end, including whatever drives the load. Say which resource sets that ceiling and where
    the current result sits under it. A part's headroom is real only below that ceiling.
 3. **Claim early.** As soon as you chose an idea, run `vibesys-cli plan create --title "<claim>"
-   --body-file -` with a stub body (one line of mechanism); note the number it prints. Before
+   --body-file -` with a stub body (one line of mechanism) and `--gain-bound <share>`, the most
+   the idea could gain as a share of the headline (see step 5); note the number it prints. Before
    investing in details, list the plans again: if a sibling already claimed the same mechanism,
    pick another idea and change yours with `plan edit <n> --title ... --body-file -`.
 4. Check premises cheaply: read the installed library or code to confirm the API, kernel or flag
@@ -61,9 +62,19 @@ you stop), so a miss costs one worker pass. Fill the Bold fields in
    that can succeed or fail alone, the arithmetic, the files touched, and the smallest first step
    that reaches a measurable commit in one worker pass. Leave the status `open`. Decisions and
    results are the lead's comments, not yours.
+6. **State the bound.** The lead decides whether to go on or to stop from the bounds of the plans
+   that are still open or parked, and a tool reads them, so state yours as a number and not only
+   in prose: the most the idea could gain, as a share of the headline, from the arithmetic of
+   step 2 (the headroom of the part divided by the headline, capped by the system's ceiling).
+   Round up, never down. Set it with `plan edit <n> --gain-bound 5%` (it replaces the old one;
+   `--gain-bound-of headline` is the default and the only reference). "Unattributed" is not a
+   number: bound the idea by the whole system's ceiling, or make its first step the measurement
+   and say so. The headline is `vibesys-cli result` (before a first promotion, the base's value
+   from `vibesys-cli show <base>`). When the headline has moved a lot since you wrote the bound,
+   state it again.
 
 ## Hand back
 
-The plan number, your confidence stated plainly, what you could not establish, and the
-measurement that would most change your view. Derive the idea from evidence and first principles;
+The plan number, the gain bound you stated, your confidence stated plainly, what you could not
+establish, and the measurement that would most change your view. Derive the idea from evidence and first principles;
 do not copy code from other systems.

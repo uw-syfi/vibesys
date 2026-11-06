@@ -75,14 +75,40 @@ message PlanView {
   repeated LinkedJob jobs = 2;
 }
 
+// PlanGainAnswer is whether every plan that counts states a bound below the share.
+enum PlanGainAnswer {
+  PLAN_GAIN_ANSWER_UNSPECIFIED = 0;
+  // Every plan that counts does, and so does a check in which none counts.
+  PLAN_GAIN_ANSWER_ALL_UNDER = 1;
+  // Some plan that counts states none, or one that is not below the share.
+  PLAN_GAIN_ANSWER_NOT_ALL_UNDER = 2;
+}
+
 // PlanGainCheck is the answer to "is every plan that is still open or parked under this share of
 // its reference?" (`vibesys-cli plan check-gain --under`). A plan counts when its status is open or
 // parked. A plan that states no bound is not under any share.
 message PlanGainCheck {
+  option (buf.validate.message).cel = {
+    id: "plan_gain_check.answer_follows_blockers"
+    message: "the answer is all under exactly when there is no blocker, and a blocker is one of the counted plans"
+    expression: "(this.answer == 1) == (this.blockers.size() == 0) && uint(this.blockers.size()) <= this.counted"
+  };
+  option (buf.validate.message).cel = {
+    id: "plan_gain_check.blockers_are_not_under"
+    message: "a blocker states no bound, or one that is not below the share"
+    expression: "this.blockers.all(b, !has(b.gain_bound) || b.gain_bound.share >= this.share)"
+  };
+
   // The share asked about.
-  double share = 1;
-  // True when every plan that counts states a bound below the share; also true when none counts.
-  bool all_under = 2;
+  double share = 1 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  // It is an enum and not a bool so that a JSON reader sees it either way: a false bool is left out.
+  PlanGainAnswer answer = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
   // How many plans count.
   uint32 counted = 3;
   // The plans that count and are not under the share, by number.
@@ -91,9 +117,15 @@ message PlanGainCheck {
 
 // PlanGainBlocker is a plan that keeps PlanGainCheck from being all under.
 message PlanGainBlocker {
-  uint32 number = 1;
+  uint32 number = 1 [(buf.validate.field).uint32.gt = 0];
   string title = 2;
-  PlanStatus status = 3;
+  // Open or parked.
+  PlanStatus status = 3 [(buf.validate.field).enum = {
+    in: [
+      1,
+      4
+    ]
+  }];
   // The bound it states, which is at or above the share. Absent when it states none.
   PlanGainBound gain_bound = 4;
 }

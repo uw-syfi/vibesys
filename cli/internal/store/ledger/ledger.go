@@ -380,6 +380,7 @@ func (l *Ledger) CreatePlan(np core.NewPlan) (Change, core.Plan, error) {
 		Status:    core.PlanOpen,
 		CreatedAt: np.At,
 		UpdatedAt: np.At,
+		GainBound: np.GainBound,
 	}
 	return PutPlan{Plan: plan}, Copy(plan), nil
 }
@@ -404,6 +405,9 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 	}
 	if edit.Status != nil {
 		plan.Status = *edit.Status
+	}
+	if edit.GainBound != nil {
+		plan.GainBound = edit.GainBound
 	}
 	if edit.Comment != nil {
 		plan.Comments = append(plan.Comments, *edit.Comment)

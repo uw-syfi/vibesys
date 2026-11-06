@@ -82,7 +82,7 @@ func TestAPlanViewGivesTheVerdictOfEachLinkedCommitAgainstTheHead(t *testing.T) 
 	r.measured(base, level)
 	r.measured(cm(1), win)
 	r.measured(cm(2), lose)
-	plan, err := r.app.CreatePlan(ctx, call, "tile", "")
+	plan, err := r.app.CreatePlan(ctx, call, "tile", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestAPlanViewJudgesAgainstTheHeadAfterItMoves(t *testing.T) {
 	r.measured(base, level)
 	r.measured(cm(1), win)
 	r.measured(cm(2), lose)
-	plan, _ := r.app.CreatePlan(ctx, call, "tile", "")
+	plan, _ := r.app.CreatePlan(ctx, call, "tile", "", nil)
 	out, err := r.app.Submit(ctx, app.SubmitRequest{Context: call, Spec: commandAt(cm(2)), Plan: plan.Number})
 	if err != nil {
 		t.Fatal(err)
@@ -159,7 +159,7 @@ func TestAPlanViewWithoutAReadableHeadStillShowsTheJobs(t *testing.T) {
 	w := newWorld(t)
 	a := w.newApp() // no repository to ask: no result branch
 	ctx := ctxFor(t)
-	plan, _ := a.CreatePlan(ctx, call, "tile", "")
+	plan, _ := a.CreatePlan(ctx, call, "tile", "", nil)
 	out, err := a.Submit(ctx, app.SubmitRequest{Context: call, Spec: command("exit", "0"), Plan: plan.Number})
 	if err != nil {
 		t.Fatal(err)

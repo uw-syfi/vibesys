@@ -17,7 +17,11 @@ func (s *Server) CreatePlan(ctx context.Context, req *cliv1.CreatePlanRequest) (
 	if err != nil {
 		return nil, wire.Error(err)
 	}
-	plan, err := s.app.CreatePlan(ctx, call, req.GetTitle(), req.GetBody())
+	bound, err := wire.ToGainBound("gain_bound", req.GetGainBound())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	plan, err := s.app.CreatePlan(ctx, call, req.GetTitle(), req.GetBody(), bound)
 	if err != nil {
 		return nil, wire.Error(err)
 	}
@@ -62,7 +66,11 @@ func (s *Server) ViewPlan(ctx context.Context, req *cliv1.ViewPlanRequest) (*cli
 func (s *Server) EditPlan(ctx context.Context, req *cliv1.EditPlanRequest) (*cliv1.EditPlanResponse, error) {
 	ctx, cancel := s.bound(ctx)
 	defer cancel()
-	change := app.PlanChange{Title: req.Title, Body: req.Body}
+	bound, err := wire.ToGainBound("gain_bound", req.GetGainBound())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	change := app.PlanChange{Title: req.Title, Body: req.Body, GainBound: bound}
 	if req.Status != nil {
 		status, err := wire.ToPlanStatus("status", req.GetStatus())
 		if err != nil {

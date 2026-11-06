@@ -114,6 +114,7 @@ commands:
   frontier add <commit>                          add a multi-objective commit to the frontier, or say why not
   frontier list                                  the frontier, with each member's numbers
   plan create|list|view|edit|comment|close       store and find plans
+  plan check-gain --under <share>                say whether every open or parked plan's gain bound is below it
   daemon status|stop|restart                     manage the daemon
   upgrade                                        replace this binary with the newest release
 
