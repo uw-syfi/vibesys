@@ -58,9 +58,41 @@ func ParseCommandMessage(m *pb.Command, caller core.Caller) (core.Command, error
 // build does not know.
 func Validate(m proto.Message) error { return check(m) }
 
+// MailboxFromMessage reads a message given as the contract states it: the inverse of MailboxMessage.
+func MailboxFromMessage(m *pb.Message) (core.Message, error) {
+	var errs errorList
+	out := messageIn(m, &errs)
+	return out, errs.err()
+}
+
+// Prompt gives the words an agent is sent for a message.
+type Prompt func(core.Message) (string, error)
+
 // SessionCommandFor returns what a session is sent for an effect. It reports false for the
 // effects that are not commands to a live session: launching a session and arming a timer.
-func SessionCommandFor(e core.Effect) (*pb.SessionCommand, bool, error) {
+//
+// A turn or a steer carries the words of its message and nothing of the message: prompt words it
+// each time, so a delivery that is retried sends the words the first one did.
+func SessionCommandFor(e core.Effect, prompt Prompt) (*pb.SessionCommand, bool, error) {
+	out := &pb.SessionCommand{EffectId: string(e.ID())}
+	switch b := e.(type) {
+	case core.StartTurn:
+		words, err := prompt(b.Message)
+		if err != nil {
+			return nil, false, fmt.Errorf("effect %s: %w", e.ID(), err)
+		}
+		out.Body = &pb.SessionCommand_StartTurn{StartTurn: &pb.SessionStartTurn{TurnId: string(b.Turn), Prompt: words}}
+		return out, true, nil
+	case core.Steer:
+		words, err := prompt(b.Message)
+		if err != nil {
+			return nil, false, fmt.Errorf("effect %s: %w", e.ID(), err)
+		}
+		out.Body = &pb.SessionCommand_Steer{Steer: &pb.SessionSteer{
+			TurnId: string(b.Turn), MessageId: string(b.Message.ID), Prompt: words,
+		}}
+		return out, true, nil
+	}
 	data, err := EncodeEffect(e)
 	if err != nil {
 		return nil, false, err
@@ -69,12 +101,7 @@ func SessionCommandFor(e core.Effect) (*pb.SessionCommand, bool, error) {
 	if err := proto.Unmarshal(data, &m); err != nil {
 		return nil, false, fmt.Errorf("effect %s: %w", e.ID(), err)
 	}
-	out := &pb.SessionCommand{EffectId: m.GetId()}
 	switch b := m.GetBody().(type) {
-	case *pb.Effect_StartTurn:
-		out.Body = &pb.SessionCommand_StartTurn{StartTurn: b.StartTurn}
-	case *pb.Effect_Steer:
-		out.Body = &pb.SessionCommand_Steer{Steer: b.Steer}
 	case *pb.Effect_Interrupt:
 		out.Body = &pb.SessionCommand_Interrupt{Interrupt: b.Interrupt}
 	case *pb.Effect_CloseSession:

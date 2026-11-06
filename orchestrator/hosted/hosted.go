@@ -23,6 +23,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
+	"github.com/uw-syfi/vibesys/orchestrator/hostlock"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/production"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
@@ -48,14 +49,20 @@ type Options struct {
 	APISchemaHash string
 	// Stop ends the host process. HostControlService calls it, after the reply, when asked to stop.
 	Stop func()
+	// BuildID is which program a host of no release is, and empty for one of a release.
+	BuildID string
+	// Connected counts the host's open connections, the asker's among them. Nil counts none.
+	Connected func() uint32
 }
 
 // Orchestrator is one opened orchestrator, or the reason there is none in this process.
 type Orchestrator struct {
 	d      *production.Daemon
 	reason string
-	// why says why d is nil, in the form HostControlService reports it.
+	// why says why d is nil, in the form HostControlService reports it, as it was when the host
+	// started. state is the directory it found held, for looking again at who holds it.
 	why     *pb.Unserved
+	state   string
 	control pb.HostControlServiceServer
 	live    chan bool
 	done    chan error
@@ -68,7 +75,7 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	// The parts are resolved when a run is started and when a session is launched, and when
 	// HostControlService is asked, never here: a part that is missing now is not missing for good.
 	parts := production.Parts{Config: o.Config, Getenv: o.Getenv, Find: release.FinderFor(o.Executable), Files: production.OSFiles{}, Home: o.Home}
-	x.control = NewHostControl(ControlConfig{Release: o.Version, Started: production.SystemClock{}.Now(), Parts: parts, Host: x, Stop: o.Stop, ConfigDigest: hostconfig.Digest(o.Config), APISchemaHash: o.APISchemaHash})
+	x.control = NewHostControl(ControlConfig{Release: o.Version, Started: production.SystemClock{}.Now(), Parts: parts, Host: x, Stop: o.Stop, ConfigDigest: hostconfig.Digest(o.Config), APISchemaHash: o.APISchemaHash, BuildID: o.BuildID, Connected: o.Connected})
 	layout, err := production.LayoutFor(o.Config.GetStateDirectory(), gatewayroot.StateDirectory(o.Root, o.Home, o.Getenv))
 	if err != nil {
 		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator's state directory is refused: "+err.Error())
@@ -83,6 +90,7 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	if err != nil {
 		var held *production.HeldError
 		if errors.As(err, &held) {
+			x.state = layout.State.Path()
 			return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_HELD_ELSEWHERE, held.Holder.GetRelease(), "the orchestrator is not served by this process: "+err.Error())
 		}
 		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator is not served by this process: "+err.Error())
@@ -116,8 +124,31 @@ func (x *Orchestrator) LiveRuns() uint32 {
 	return x.d.LiveRuns()
 }
 
-// Unserved implements Source.
-func (x *Orchestrator) Unserved() *pb.Unserved { return x.why }
+// Unserved implements Source. What was held when the host started may not be held now, so that one
+// answer is looked at again each time it is asked for: a holder that has gone is its own reason, and a
+// new holder is named in place of the old one. Nothing else about why a host does not serve changes
+// while it runs.
+func (x *Orchestrator) Unserved() *pb.Unserved {
+	if x.why.GetReason() != pb.UnservedReason_UNSERVED_REASON_HELD_ELSEWHERE {
+		return x.why
+	}
+	holder, held, err := hostlock.StateHolder(x.state)
+	switch {
+	case err != nil:
+		return x.why
+	case !held:
+		return &pb.Unserved{
+			Reason: pb.UnservedReason_UNSERVED_REASON_HOLDER_GONE, HeldByRelease: x.why.GetHeldByRelease(),
+			Detail: "the process that held the orchestrator's state in " + x.state + " has gone, and this host, started while it held it, does not take it over",
+		}
+	case holder != nil:
+		return &pb.Unserved{
+			Reason: pb.UnservedReason_UNSERVED_REASON_HELD_ELSEWHERE, HeldByRelease: holder.GetRelease(),
+			Detail: "the orchestrator is not served by this process: " + (&production.HeldError{Dir: x.state, Holder: holder}).Error(),
+		}
+	}
+	return x.why
+}
 
 // Reason is why this process does not serve the orchestrator, or empty when it does.
 func (x *Orchestrator) Reason() string { return x.reason }

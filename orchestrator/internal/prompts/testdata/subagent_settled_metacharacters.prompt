@@ -1,0 +1,1 @@
+Agent {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` `` stopped without a handoff (failed). {{ not_a_var }} {% if x %} {# c #} {{'q'}} \ $ % <b>&amp;</b> ` ``

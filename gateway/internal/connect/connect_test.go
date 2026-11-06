@@ -10,15 +10,19 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"testing/quick"
 	"time"
 
 	"golang.org/x/sys/unix"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/hostlock"
 )
 
 func shortRoot(t *testing.T) string {
@@ -329,4 +333,133 @@ func TestAServingHostStartsNothing(t *testing.T) {
 		t.Fatalf("%v, %d candidates", err, fake.launches)
 	}
 	connection.Close()
+}
+
+// A lock held from another machine is not a winner to wait for: Dial says so at once, with nothing
+// signalled and nothing left. A record from this machine, or one with no name, is a winner like any other.
+func TestALockHeldFromAnotherMachineEndsTheWaitAtOnce(t *testing.T) {
+	root := shortRoot(t)
+	held, err := lifecycle.Hold(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	record := func(machine string) {
+		t.Helper()
+		data, err := hostlock.Marshal(os.Getpid(), "1.0.0", root, machine)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := held.Record(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The probe shares a process with the lock only through another open file, as another machine would.
+	record("host-b")
+	_, err = HoldingOf(root)()
+	var elsewhere *HeldElsewhereError
+	if !errors.As(err, &elsewhere) || !strings.Contains(err.Error(), "host-b") {
+		t.Fatalf("held from another machine: %v", err)
+	}
+	for _, machine := range []string{"", hostlock.ThisMachine()} {
+		record(machine)
+		if yes, err := HoldingOf(root)(); err != nil || !yes {
+			t.Errorf("held by %q: %v, %v", machine, yes, err)
+		}
+	}
+}
+
+// Whatever an idle host's clients do before the bridge has asked again, a host with others connected
+// stays, and a client that has already gone does not keep it.
+func TestABridgeLeavesAHostWithOtherClientsOrANewerRelease(t *testing.T) {
+	for _, c := range []struct {
+		name                    string
+		answers                 []*pb.IdentifyResponse
+		wantStayed, wantStopped bool
+	}{
+		{"idle", []*pb.IdentifyResponse{identityOf(0, 0, pb.ReleaseRelation_RELEASE_RELATION_HOST_OLDER)}, false, true},
+		{"a client on its way out", []*pb.IdentifyResponse{identityOf(0, 1, pb.ReleaseRelation_RELEASE_RELATION_HOST_OLDER), identityOf(0, 0, pb.ReleaseRelation_RELEASE_RELATION_HOST_OLDER)}, false, true},
+		{"a client that stays", []*pb.IdentifyResponse{identityOf(0, 1, pb.ReleaseRelation_RELEASE_RELATION_HOST_OLDER)}, true, false},
+		{"a live run", []*pb.IdentifyResponse{identityOf(1, 0, pb.ReleaseRelation_RELEASE_RELATION_HOST_OLDER)}, true, false},
+		{"newer", []*pb.IdentifyResponse{identityOf(0, 0, pb.ReleaseRelation_RELEASE_RELATION_HOST_NEWER)}, true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := shortRoot(t)
+			socket := filepath.Join(root, "host.sock")
+			host := &scriptedHost{answers: c.answers}
+			host.serve(t, socket)
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			stayed := false
+			connection, err := DialForAPI(ctx, socket, scriptedLauncher{func() { host.serve(t, socket) }}, func() (bool, error) { return false, nil }, "1.0.0", "this-api", func(*pb.IdentifyResponse) { stayed = true })
+			if err != nil {
+				t.Fatal(err)
+			}
+			connection.Close()
+			if stayed != c.wantStayed || host.stopped() != c.wantStopped {
+				t.Fatalf("stayed %v, stopped %v", stayed, host.stopped())
+			}
+		})
+	}
+}
+
+func identityOf(live, clients uint32, relation pb.ReleaseRelation) *pb.IdentifyResponse {
+	return &pb.IdentifyResponse{Release: "x", Relation: relation, LiveRuns: live, ConnectedClients: clients, ApiSchemaHash: "another-api"}
+}
+
+// scriptedHost answers Identify with its answers in turn, keeping to the last, and a stop ends it.
+type scriptedHost struct {
+	pb.UnimplementedHostControlServiceServer
+	mu      sync.Mutex
+	answers []*pb.IdentifyResponse
+	server  *grpc.Server
+	stops   int
+}
+
+func (h *scriptedHost) serve(t *testing.T, socket string) {
+	t.Helper()
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer()
+	pb.RegisterHostControlServiceServer(server, h)
+	h.mu.Lock()
+	h.server = server
+	h.mu.Unlock()
+	go func() { _ = server.Serve(listener) }()
+	t.Cleanup(server.Stop)
+}
+
+func (h *scriptedHost) stopped() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.stops > 0
+}
+
+func (h *scriptedHost) Identify(context.Context, *pb.IdentifyRequest) (*pb.IdentifyResponse, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	answer := h.answers[0]
+	if len(h.answers) > 1 {
+		h.answers = h.answers[1:]
+	}
+	return answer, nil
+}
+
+func (h *scriptedHost) Stop(context.Context, *pb.StopRequest) (*pb.StopResponse, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.stops++
+	server := h.server
+	go server.Stop()
+	return &pb.StopResponse{Outcome: &pb.StopResponse_Stopping{Stopping: &pb.Stopping{}}}, nil
+}
+
+// scriptedLauncher starts the host again, in process.
+type scriptedLauncher struct{ start func() }
+
+func (l scriptedLauncher) Launch(context.Context) (*pb.HostStartReport, error) {
+	l.start()
+	return &pb.HostStartReport{Outcome: &pb.HostStartReport_Serving{Serving: &pb.Serving{}}}, nil
 }

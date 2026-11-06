@@ -88,14 +88,16 @@ func start(ctx context.Context, c *call, args []string) error {
 		return err
 	}
 	fmt.Fprintln(c.Stderr, confinementNotice)
-	conn, err := c.openFor(ctx, NeedLaunch)
+	conn, err := c.openFor(ctx, VerbStart)
 	if err != nil {
 		return err
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	s := &session{client: conn, cancel: cancel}
 	defer s.Close()
-	receipt, err := conn.Dispatch(ctx, cmd)
+	receipt, err := within(ctx, c.Clock, serviceBound, "answer", func(ctx context.Context) (*pb.Receipt, error) {
+		return conn.Dispatch(ctx, cmd)
+	})
 	if err != nil {
 		return classify(err)
 	}
@@ -124,7 +126,7 @@ func start(ctx context.Context, c *call, args []string) error {
 // followUntilLive reads the stream until the run's lead is live. A run that ends first is an
 // error that carries the lead's own account of why.
 func (c *call) followUntilLive(ctx context.Context, s *session, run string) ([]Change, error) {
-	f, snapshot, err := openFeed(ctx, s.client)
+	f, snapshot, err := openFeed(ctx, c.Clock, s.client)
 	if err != nil {
 		return nil, err
 	}

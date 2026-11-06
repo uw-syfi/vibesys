@@ -404,3 +404,55 @@ func TestLeadRemindersObeyTheirRulesOverRandomSequences(t *testing.T) {
 		}
 	}
 }
+
+// The reminder carries what the host counted of the lead's own subagents, so its words can name the
+// step the run waits on: no worker yet, no judge yet, or both done. Subagents that ended are
+// counted too, and the lead is not.
+func TestTheReminderCountsTheSubagentsTheLeadStartedByRole(t *testing.T) {
+	roles := []core.AgentRole{core.RolePlanner, core.RoleWorker, core.RoleJudge, core.RoleCombiner, core.RoleProfiler}
+	r := rand.New(rand.NewPCG(21, 22))
+	for range 40 {
+		w, run, leadID, _ := stalledRun(t)
+		var want core.LeadIdleReminder
+		want.Idle = core.LeadIdleAfter
+		for range r.IntN(7) {
+			role := roles[r.IntN(len(roles))]
+			spawned := w.command(core.AgentCaller{Agent: leadID}, core.SpawnAgent{Run: run, Role: role, Brief: "go"})
+			if spawned.Refusal != "" {
+				t.Fatalf("spawn of a %s refused: %s", role, spawned.Refusal)
+			}
+			w.open(spawned.Agent, steers)
+			w.command(core.AgentCaller{Agent: spawned.Agent}, core.PostHandoff{Handoff: core.Handoff{Claim: "done"}})
+			w.endTurn(spawned.Agent, core.TurnCompleted)
+			w.fact(spawned.Agent, core.SessionClosed{})
+			w.endTurn(leadID, core.TurnCompleted)
+			want.Subagents++
+			switch role {
+			case core.RoleWorker:
+				want.Workers++
+			case core.RoleJudge:
+				want.Judges++
+			}
+		}
+		timer, ok := w.leadTimer()
+		if !ok {
+			t.Fatalf("no reminder timer is armed with %+v started", want)
+		}
+		w.fire(timer)
+		// The wait since the stall began is the delay, whatever else happened before it.
+		got := w.bodies()
+		var sent *core.LeadIdleReminder
+		for _, b := range got {
+			if reminder, ok := b.(core.LeadIdleReminder); ok {
+				sent = &reminder
+			}
+		}
+		if sent == nil {
+			t.Fatalf("no reminder among %v", got)
+		}
+		want.Idle = sent.Idle
+		if *sent != want {
+			t.Fatalf("reminder %+v, want %+v", *sent, want)
+		}
+	}
+}

@@ -1,0 +1,7 @@
+Agent agent-w1 handed off plan 1.
+Candidate: commit cccccccccccccccccccccccccccccccccccccccc on branch plan-1 (parent aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa).
+Claim: score 14
+Checks: passed
+Measurement: m
+Learned: L
+Next: N

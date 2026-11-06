@@ -12,7 +12,8 @@ import (
 // HostConfigs is the host's configuration in the root of each --root value ("" for the default).
 type HostConfigs interface {
 	Load(root string) (*pb.HostConfig, error)
-	// Save records what the next host of that root starts with.
+	// Save records what the next host of that root starts with, having refused what it can tell a host
+	// could not use, naming the field. Nothing is written then.
 	Save(root string, config *pb.HostConfig) error
 }
 
@@ -34,17 +35,17 @@ func hostConfigure(_ context.Context, c *call, args []string) error {
 	if len(positional) != 0 {
 		return usageError("host configure takes no argument, got %q", positional[0])
 	}
-	config, err := c.Configs.Load(c.root)
-	if err != nil {
-		return placeOrFailed(err)
+	// --clear is how a file that does not read is put right, so it never reads the file.
+	config := &pb.HostConfig{}
+	if !*clear {
+		if config, err = c.Configs.Load(c.root); err != nil {
+			return loadFailure(err)
+		}
 	}
 	given := 0
 	fs.Visit(func(*flag.Flag) { given++ })
 	if given == 0 {
 		return printJSON(c.Stdout, config)
-	}
-	if *clear {
-		config = &pb.HostConfig{}
 	}
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
@@ -65,6 +66,15 @@ func hostConfigure(_ context.Context, c *call, args []string) error {
 	}
 	_, err = fmt.Fprintln(c.Stdout, "the next host starts with this; a host that is running keeps what it started with until it is replaced")
 	return err
+}
+
+// loadFailure is placeOrFailed for a configuration that does not read, with the way out.
+func loadFailure(err error) error {
+	failure := placeFailure(err)
+	if exitCodeOf(failure) == ExitUsage {
+		return failure
+	}
+	return failed("%s", configProblem(err))
 }
 
 // placeOrFailed is a failure with a usage exit for a root that cannot be chosen, and a refusal for

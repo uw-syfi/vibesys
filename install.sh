@@ -153,8 +153,8 @@ current_version() {
 # stop_host_for_switch: before moving `current` to another version, ask the host that is running to
 # end, through the new release's own client, which is the one that is certain to speak the question.
 # `host stop --if-no-live-runs` answers in its exit code: 0 when no host is left (none was running,
-# or an idle one stopped), 1 when the host has live runs and stays, 4 when a host did not answer
-# (one that predates host control). Nothing here reads the process list.
+# or an idle one stopped), 1 when the host has live runs and stays, 4 when a host did not answer or is
+# on another machine, having said what to do. Nothing here reads the process list.
 stop_host_for_switch() {
   [ "$force" = 0 ] || return 0
   [ -n "$(current_version)" ] && [ "$(current_version)" != "$1" ] || return 0
@@ -163,7 +163,7 @@ stop_host_for_switch() {
   case "$status" in
     0) ;;
     1) fail "the running vibesys-host has live runs. Stop them, or run again with --force to switch anyway; agents already running keep using the old release, which is left in place" ;;
-    *) fail "the running vibesys-host did not answer (exit $status). Stop it, or run again with --force to switch anyway" ;;
+    *) fail "the running vibesys-host could not be stopped (exit $status), for the reason above. Do what it says, or run again with --force to switch anyway" ;;
   esac
 }
 

@@ -249,7 +249,7 @@ Listing: [`api/public-api.txt`](../api/public-api.txt).
 | --- | --- |
 | `vibesys_evaluator` | `main`, `Run`, `Metric`, `Validity`, `Rand` |
 | `vibesys_evaluator.microservices` | `main`, `Run`, `PhaseResult`, `Workload`, `Generator`, `Operation`, `Request`, `Step`, `Template`, `http`, `get`, `post`, `put`, `ref` |
-| `vibesys_evaluator.microservices.k8s` | `App` |
+| `vibesys_evaluator.microservices.k8s` | `App`, `attach`, `Deployment`, `ExecResult`, `ReplacedPod` |
 | `vibesys_evaluator.llm_serving` | `endpoint` |
 | `vibesys_evaluator.llm_serving.agentx` | `replay`, `METRICS`, `HARNESS_VERSION` |
 | `vibesys_evaluator.llm_serving.golden` | `logprobs`, `Thresholds` |
@@ -702,13 +702,46 @@ run.py: the cluster comes from the vibesys-cli `kubernetes` resource
 - `ready`: steps sent through `gateway` by `loadgen probe` from a pod once
   every Deployment has all its replicas available; each must succeed twice
   per ready endpoint of the gateway Service, on fresh connections.
-- `restartable`, `caches`: the hooks accuracy checkers use, through
-  `python bench.py ctl restart DEPLOYMENT | flush CACHE | stop | start`:
-  delete one pod and wait for all replicas and the probes; `FLUSHALL` or
-  `flush_all` in place; scale every restartable Deployment to 0 and back.
+- `restartable`, `caches`: the Deployments the fault actions may act on, through
+  `python bench.py ctl restart DEPLOYMENT [--every-pod] | flush CACHE | stop | start`
+  or, from Python, `k8s.attach(app)` (the sample's namespace, by default
+  `$VIBESYS_EVALUATOR_NAMESPACE`): `restart(*deployments, every_pod=False,
+  wait=True)` deletes one pod (the first by name) or every pod and, with `wait`,
+  waits for all replicas and the probes; `exec(argv, deployment=... | pod=...,
+  all_pods=False)` runs a command in a pod (a nonzero exit is a result, not an
+  error); `wait_ready(deployments, replaced=...)` waits until the app serves
+  again; `flush(cache)` runs `FLUSHALL` or `flush_all` in place; `stop()` and
+  `start()` scale every restartable Deployment to 0 and back. Only Deployments
+  listed in `restartable` or `caches` can be restarted or exec'd in.
 - Phase pods: one pod per phase in the namespace, the inputs copied in and
-  the outputs copied out with `kubectl cp`, so no ConfigMap size limit
+  the outputs copied out with `kubectl exec ... tar`, so no ConfigMap size limit
   applies; pods of the package carry its labels and die with the namespace.
+
+### The Go core of the deploy layer
+
+The logic is the Go package `go/k8s` (`github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/k8s`),
+which runs `kubectl` and `buildctl` as subprocesses behind the `KubeAPI` and `Builder` interfaces
+(`k8s/k8stest` holds an in-memory cluster and builder, so the package is tested without a cluster).
+Python's `k8s.App` keeps its shape and its constructor-time checks; everything it does on a
+cluster is one call of `vibesys-evaluator k8s <verb>` (the wrapper calling convention; messages in
+`proto/vibesys/evaluator/v1/k8s.proto`):
+
+| Verb | Does |
+| --- | --- |
+| `deploy` | sweep this task's stale namespaces, build the images, deploy into a fresh namespace, seed, probe; returns the `target` |
+| `attach` | check a namespace is the app's; returns its `target` |
+| `teardown` | delete the namespace (`fast` after a signal; `failed` saves diagnostics) |
+| `run-pod` | run a command of the task image in a pod, with input files, and collect its outputs |
+| `restart` | delete one or every pod of Deployments; wait for the replacements unless `no_wait` |
+| `exec` | run a command in a pod, or in the pods of a Deployment |
+| `wait` | wait until the app serves again (optionally without the pods `replaced_uids`), then probe |
+| `flush`, `stop`, `start`, `usage` | empty a cache; scale the restartable Deployments; per-pod CPU |
+
+The core keeps no state between calls: `target` (the app, namespace, UID, task image and scratch
+directories) travels in every request. `deploy` and `run-pod` log progress on stderr and are
+cancelled by SIGINT or SIGTERM, after which `deploy` deletes its namespace without waiting.
+Failures are the convention's domain errors with the kinds `deploy`, `build`, `manifest`,
+`invalid`, `out_of_memory`, `kube` and `canceled`.
 
 ## LLM serving (`llm_serving`)
 

@@ -36,7 +36,6 @@ from vs_sidecar.gen.vibesys.orchestrator.v1 import agent_session_pb2 as sc
 from vs_sidecar.gen.vibesys.orchestrator.v1 import effects_pb2 as fx
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as orch
 from vs_sidecar.normalize import SteerBook, TurnNormalizer
-from vs_sidecar.prompts import render
 from vs_sidecar.store import FrameDirection
 
 if TYPE_CHECKING:
@@ -80,7 +79,7 @@ class Engine:
         self._notify = notify
         self._lock = threading.RLock()
         self._driver: Driver | None = None
-        self._pending: deque[tuple[str, str, orch.Message]] = deque()
+        self._pending: deque[tuple[str, str]] = deque()
         self._turn: TurnNormalizer | None = None
         self._idle: TurnNormalizer | None = None
         self._idle_runs = 0
@@ -213,10 +212,13 @@ class Engine:
         except protovalidate.ValidationError as error:
             raise InvalidCommandError(str(error)) from error
         body = command.WhichOneof("body")
-        ref = getattr(command, body).session
-        if (ref.agent_id, ref.session) != (self._session.agent_id, self._session.session):
-            msg = f"command is for session {ref.agent_id}/{ref.session}, this is {self._session.agent_id}/{self._session.session}"
-            raise InvalidCommandError(msg)
+        # A turn and a steer carry words and nothing that names a session: the socket they arrive
+        # on is this session's, and the host checked who answers on it (``Hello``).
+        if body in ("interrupt", "close"):
+            ref = getattr(command, body).session
+            if (ref.agent_id, ref.session) != (self._session.agent_id, self._session.session):
+                msg = f"command is for session {ref.agent_id}/{ref.session}, this is {self._session.agent_id}/{self._session.session}"
+                raise InvalidCommandError(msg)
         try:
             with self._lock:
                 if not self._store.remember_effect(command.effect_id):
@@ -244,37 +246,36 @@ class Engine:
         if failure is not None:
             raise failure
 
-    def _start_turn(self, start: fx.StartTurn) -> None:
-        prompt = render(start.message)
+    def _start_turn(self, start: sc.SessionStartTurn) -> None:
         with self._lock:
             if self._unusable:
                 return
-            self._pending.append((start.turn_id, prompt, start.message))
+            self._pending.append((start.turn_id, start.prompt))
         self._notify()
 
-    def _steer(self, steer: fx.Steer) -> None:
-        text = render(steer.message)
+    def _steer(self, steer: sc.SessionSteer) -> None:
+        text = steer.prompt
         with self._lock:
             driver = self._driver
             running = self._turn is not None and self._turn.turn_id == steer.turn_id
             if running:
-                self._steers.add(steer.message.id, text)
+                self._steers.add(steer.message_id, text)
             elif not self._closed:
                 self._append(
                     sc.SessionEvent(
-                        steer=sc.SteerOutcome(message_id=steer.message.id, accepted=False)
+                        steer=sc.SteerOutcome(message_id=steer.message_id, accepted=False)
                     )
                 )
         if not running or driver is None:
             return
         try:
-            driver.steer(steer.turn_id, text, message=steer.message)
+            driver.steer(steer.turn_id, text)
         except SteerRefusedError:
             with self._lock:
                 if self._steers.take(text) is not None:
                     self._append(
                         sc.SessionEvent(
-                            steer=sc.SteerOutcome(message_id=steer.message.id, accepted=False)
+                            steer=sc.SteerOutcome(message_id=steer.message_id, accepted=False)
                         )
                     )
 
@@ -283,8 +284,8 @@ class Engine:
 
         Call with the lock held.
         """
-        kept: deque[tuple[str, str, orch.Message]] = deque()
-        for turn_id, prompt, message in self._pending:
+        kept: deque[tuple[str, str]] = deque()
+        for turn_id, prompt in self._pending:
             if matches(turn_id):
                 self._append(
                     sc.SessionEvent(
@@ -294,7 +295,7 @@ class Engine:
                     )
                 )
             else:
-                kept.append((turn_id, prompt, message))
+                kept.append((turn_id, prompt))
         self._pending = kept
 
     def _interrupt(self, interrupt: fx.Interrupt) -> None:
@@ -351,14 +352,14 @@ class Engine:
             driver = self._driver
             if not self._pending or self._unusable or driver is None:
                 return False
-            turn_id, prompt, message = self._pending.popleft()
+            turn_id, prompt = self._pending.popleft()
             self._end_idle(orch.TURN_STATUS_FAILED)
             normalizer = TurnNormalizer(turn_id, self._steers)
             # The driver learns the turn before anyone can address it (``_turn`` is what
             # ``_interrupt`` and ``_steer`` check), so an interrupt is never sent to a driver that
             # has not heard of the turn, and the driver keeps one that comes before the provider
             # starts it.
-            driver.begin_turn(turn_id, prompt, message=message)
+            driver.begin_turn(turn_id, prompt)
             self._turn = normalizer
 
         def emit(event: AgentEvent) -> None:

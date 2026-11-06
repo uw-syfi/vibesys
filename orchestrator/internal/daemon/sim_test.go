@@ -24,6 +24,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/prompts"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
@@ -281,7 +282,7 @@ func (s *sim) checkDelivered() {
 	s.settle()
 	state := s.rig.Daemon.State()
 	for _, e := range s.rig.Faults.Committed {
-		cmd, ok, err := wire.SessionCommandFor(e)
+		cmd, ok, err := wire.SessionCommandFor(e, prompts.Render)
 		if err != nil || !ok {
 			continue
 		}

@@ -22,7 +22,6 @@ import json
 import os
 import subprocess
 import sys
-from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -37,7 +36,6 @@ from e2e.scripts import Me
 from vs_sidecar.driver import (
     PROVIDERS,
     AgentshimDriver,
-    SteerRefusedError,
     build_session,
     over,
     tool_servers,
@@ -50,7 +48,7 @@ from vs_sidecar.main import main as holder_main
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from agentshim import RawFrame, Session
+    from agentshim import RawFrame
     from agentshim.execution.process import SpawnRequest
     from agentshim.testing import FakePeer
 
@@ -109,11 +107,7 @@ def replying_executor() -> tuple[FakeExecutor, str]:
     return FakeExecutor([], peers=lambda _request: peer), "claude"
 
 
-def acting_executor(
-    request: sc.OpenSessionRequest,
-    state_dir: Path,
-    pending: deque[orch.Message],
-) -> tuple[FakeExecutor, str]:
+def acting_executor(request: sc.OpenSessionRequest, state_dir: Path) -> tuple[FakeExecutor, str]:
     """The peer for the request's harness whose turns run its role's script.
 
     The holder is told nothing of the run or the role, which is the point of the contract, so this
@@ -132,7 +126,7 @@ def acting_executor(
         harness=orch.Harness.Name(request.harness).removeprefix("HARNESS_").lower(),
     )
     role = server.env["VIBESYS_ORCHESTRATOR_ROLE"]
-    actor = Actor(me, role, machine, state_dir, pending=pending)
+    actor = Actor(me, role, machine, state_dir)
     holder: list[FakeExecutor] = []
 
     def on_turn() -> None:
@@ -146,35 +140,6 @@ def acting_executor(
     executor = FakeExecutor([], peers=peers)
     holder.append(executor)
     return executor, provider
-
-
-class ScriptedDriver(AgentshimDriver):
-    """Carry typed inputs to the acting peer, including steers during a turn."""
-
-    def __init__(
-        self, factory: Callable[[str | None], Session], pending: deque[orch.Message]
-    ) -> None:
-        """Build the scripted session and share its typed inbox with the actor."""
-        super().__init__(factory, preferred_id=CONVERSATION)
-        self.pending = pending
-
-    def begin_turn(self, turn_id: str, prompt: str, *, message: orch.Message | None = None) -> None:
-        """Announce a turn and discard any input from an interrupted earlier turn."""
-        self.pending.clear()
-        if message is not None:
-            self.pending.append(message)
-        super().begin_turn(turn_id, prompt, message=message)
-
-    def steer(self, turn_id: str, text: str, *, message: orch.Message | None = None) -> None:
-        """Queue the typed steer before the provider can answer it, undoing a refusal."""
-        if message is not None:
-            self.pending.append(message)
-        try:
-            super().steer(turn_id, text, message=message)
-        except SteerRefusedError:
-            if message is not None and message in self.pending:
-                self.pending.remove(message)
-            raise
 
 
 def _record_open(request: sc.OpenSessionRequest, state_dir: Path) -> None:
@@ -195,9 +160,8 @@ def scripted_drivers(
         # lint-waiver: LW-770102 [S607]; a fixed program in a test fixture, which is its purpose.
         # > The stand-in must be a real process in a group of its own, which nothing else here makes.
         subprocess.Popen(["sleep", "600"], start_new_session=True)  # noqa: S607
-    pending: deque[orch.Message] = deque()
     if os.environ.get(MODE_VARIABLE) == "act":
-        executor, _provider = acting_executor(request, state_dir, pending)
+        executor, _provider = acting_executor(request, state_dir)
     else:
         executor, _provider = replying_executor()
 
@@ -218,14 +182,14 @@ def scripted_drivers(
         )
 
     def make(raw_sink: Callable[[RawFrame], None]) -> AgentshimDriver:
-        return ScriptedDriver(
+        return AgentshimDriver(
             lambda conversation_id: build_session(
                 request,
                 agent=agent,
                 raw_sink=raw_sink,
                 new_conversation_id=conversation_id,
             ),
-            pending,
+            preferred_id=CONVERSATION,
         )
 
     return make

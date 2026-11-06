@@ -148,6 +148,23 @@ func StateDir(chosen, fallback string, d Detector) (Dir, error) {
 	return resolve(fallback, d, true)
 }
 
+// agentSocketFile is the agent-only socket's name in a state directory, and maxSocketPath the longest
+// path a Unix socket address holds on the systems that matter.
+const (
+	agentSocketFile = "agent.sock"
+	maxSocketPath   = 100
+)
+
+// AgentSocket is the agent-only socket of a state directory, which lives inside it. A state directory
+// so long that the path does not fit in a socket address is an error that says what to do.
+func (d Dir) AgentSocket() (string, error) {
+	socket := filepath.Join(d.path, agentSocketFile)
+	if len(socket) > maxSocketPath {
+		return "", fmt.Errorf("the agent socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", socket, maxSocketPath, Remedy)
+	}
+	return socket, nil
+}
+
 // DefaultPath is where the state goes when nothing says otherwise: $XDG_STATE_HOME/vibesys/orchestrator
 // when that is an absolute path, else ~/.local/state/vibesys/orchestrator. It is the same on every
 // platform, so a documented path is true everywhere.

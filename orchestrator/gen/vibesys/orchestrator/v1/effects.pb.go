@@ -391,7 +391,8 @@ type StartTurn struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	Session *SessionRef            `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
 	TurnId  string                 `protobuf:"bytes,2,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
-	// The data a template renders into the prompt.
+	// The typed message, kept as it is. The host renders it into words each time it sends the effect,
+	// so a delivery that is retried sends the same words.
 	Message       *Message `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -449,10 +450,11 @@ func (x *StartTurn) GetMessage() *Message {
 }
 
 type Steer struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Session       *SessionRef            `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
-	TurnId        string                 `protobuf:"bytes,2,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
-	Message       *Message               `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Session *SessionRef            `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	TurnId  string                 `protobuf:"bytes,2,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
+	// The typed message, rendered when sent like StartTurn's.
+	Message       *Message `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

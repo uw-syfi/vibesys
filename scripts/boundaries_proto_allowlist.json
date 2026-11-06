@@ -54,6 +54,17 @@
     "SampleStartResponse.artifacts_dir",
     "WriteRecordRequest.path"
   ],
+  "proto/vibesys/evaluator/v1/k8s.proto": [
+    "K8sDeployRequest.artifacts_dir",
+    "K8sDeployRequest.probe_plan_file",
+    "K8sDeployRequest.task_dir",
+    "K8sDeployRequest.work_dir",
+    "K8sRunPodRequest.outputs_dir",
+    "K8sTarget.artifacts_dir",
+    "K8sTarget.probe_plan_file",
+    "K8sTarget.task_dir",
+    "K8sTarget.work_dir"
+  ],
   "proto/vibesys/evaluator/v1/loadgen.proto": [
     "Capture.json_pointer",
     "FileHeader",

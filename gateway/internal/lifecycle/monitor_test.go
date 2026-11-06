@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"net"
 	"testing"
 	"time"
 )
@@ -42,3 +43,31 @@ func TestMonitorStopInvalidatesExpiry(t *testing.T) {
 	monitor.Stop()
 	clock.alarms[0]()
 }
+
+// What is counted is connections, once each however often they are closed.
+func TestConnectionsCountsWhatIsOpen(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	listener := &oneListener{connection: server}
+	var connections Connections
+	tracked := Track(listener, NewMonitor(time.Minute, &manualClock{}, func() {}), &connections)
+	accepted, err := tracked.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connections.Open() != 1 {
+		t.Fatalf("%d open, want 1", connections.Open())
+	}
+	accepted.Close()
+	accepted.Close()
+	if connections.Open() != 0 {
+		t.Fatalf("%d open, want 0", connections.Open())
+	}
+}
+
+type oneListener struct {
+	net.Listener
+	connection net.Conn
+}
+
+func (l *oneListener) Accept() (net.Conn, error) { return l.connection, nil }

@@ -1,0 +1,21 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-w2",
+  "handoff": {
+    "branch": "HEAD",
+    "checks": "passed",
+    "claim": "score 17",
+    "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "hasCandidate": true,
+    "learned": "Codex is faster here.",
+    "measurement": "{\"value\": 17}",
+    "next": "Try batching.",
+    "openItems": "Unclear if it holds at scale.",
+    "parentCommit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "planNumber": 2
+  },
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

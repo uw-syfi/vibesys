@@ -59,3 +59,10 @@ def test_claude_cannot_delegate_around_the_orchestrator_or_message_other_session
     argv = _claude_argv()
     denied = argv[argv.index("--disallowedTools") + 1].split(",")
     assert {"Agent", "Task", "SendMessage", "ListAgents"} <= set(denied)
+
+
+def test_claude_cannot_schedule_a_turn_of_its_own_because_only_the_host_starts_turns() -> None:
+    argv = _claude_argv()
+    assert argv.count("--disallowedTools") == 1
+    denied = argv[argv.index("--disallowedTools") + 1].split(",")
+    assert {"ScheduleWakeup", "CronCreate"} <= set(denied)

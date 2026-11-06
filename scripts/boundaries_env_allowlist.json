@@ -60,10 +60,13 @@
     "VIBESYS_HOME": 1
   },
   "orchestrator/hostconfig/hostconfig.go": {
+    "VIBESYS_CLI_CONFIG": 1,
     "VIBESYS_ORCHESTRATOR_CLI": 1,
     "VIBESYS_ORCHESTRATOR_MARKETPLACE": 1,
     "VIBESYS_ORCHESTRATOR_SIDECAR": 1,
     "VIBESYS_ORCHESTRATOR_STATE_DIR": 1,
+    "XDG_CACHE_HOME": 1,
+    "XDG_CONFIG_HOME": 1,
     "XDG_RUNTIME_DIR": 1,
     "XDG_STATE_HOME": 1
   },
@@ -100,6 +103,10 @@
     "VIBESYS_ARTIFACTS_DIR": 1,
     "VIBESYS_SAMPLE_SEED": 1
   },
+  "sdk/vibesys-evaluator/go/k8s/deployment.go": {
+    "VIBESYS_K8S_BUILDER": 2,
+    "VIBESYS_K8S_REGISTRY": 2
+  },
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_private/core.py": {
     "VIBESYS_EVALUATOR_BIN": 1,
     "VIBESYS_EVALUATOR_LOADGEN": 1,
@@ -121,13 +128,8 @@
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/llm_serving/_endpoint.py": {
     "VIBESYS_SERVICE_URL": 3
   },
-  "sdk/vibesys-evaluator/python/src/vibesys_evaluator/microservices/_k8s/_deployer.py": {
-    "VIBESYS_EVALUATOR_NAMESPACE": 1
-  },
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/microservices/_k8s/_deployment.py": {
-    "VIBESYS_ARTIFACTS_DIR": 1,
-    "VIBESYS_K8S_BUILDER": 2,
-    "VIBESYS_K8S_REGISTRY": 2
+    "VIBESYS_EVALUATOR_NAMESPACE": 1
   },
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/microservices/k8s.py": {
     "VIBESYS_K8S_BUILDER": 1,

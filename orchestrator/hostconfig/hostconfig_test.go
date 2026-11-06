@@ -108,3 +108,69 @@ func TestSaveLeavesOneFile(t *testing.T) {
 		t.Fatalf("%v, %v", entries, err)
 	}
 }
+
+// Finding: the host's cleared environment dropped what the job tool reads, so a daemon the host started
+// ignored the operator's Slurm and Docker settings. From an environment that sets everything to
+// something, only what is named survives; each of the job tool's settings is among it.
+func TestEnvironKeepsWhatTheJobToolReadsAndNothingElse(t *testing.T) {
+	jobTool := map[string]bool{"VIBESYS_CLI_CONFIG": true, "XDG_CONFIG_HOME": true, "XDG_CACHE_HOME": true, "XDG_RUNTIME_DIR": true, "XDG_STATE_HOME": true}
+	session := map[string]bool{"USER": true, "LOGNAME": true, "SHELL": true, "TMPDIR": true}
+	hostile := func(name string) string { return "/hostile/" + name }
+	env := hostconfig.Environ(&pb.HostConfig{ToolPath: []string{"/a"}}, "/home/u", hostile)
+	got := map[string]string{}
+	for _, entry := range env {
+		name, value, _ := strings.Cut(entry, "=")
+		got[name] = value
+	}
+	if got["HOME"] != "/home/u" || got["PATH"] != "/a" {
+		t.Errorf("the host's own: %v", got)
+	}
+	delete(got, "HOME")
+	delete(got, "PATH")
+	for name := range jobTool {
+		if got[name] != hostile(name) {
+			t.Errorf("%s = %q, want it kept", name, got[name])
+		}
+	}
+	for name := range got {
+		if !jobTool[name] && !session[name] {
+			t.Errorf("%s came through from whoever started the host", name)
+		}
+	}
+	// A setting that is not set stays not set.
+	for _, entry := range hostconfig.Environ(nil, "/home/u", func(string) string { return "" }) {
+		if name, _, _ := strings.Cut(entry, "="); name != "HOME" && name != "PATH" {
+			t.Errorf("%s was made up", name)
+		}
+	}
+}
+
+// Check names the field of what is not there, and an empty field is not looked at.
+func TestCheckNamesTheFieldOfWhatIsNotThere(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "plain")
+	tool := filepath.Join(dir, "tool")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tool, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		config *pb.HostConfig
+		want   string
+	}{
+		{&pb.HostConfig{}, ""},
+		{&pb.HostConfig{SkillsDirectory: dir, JobTool: tool}, ""},
+		{&pb.HostConfig{SkillsDirectory: filepath.Join(dir, "gone")}, "skills_directory"},
+		{&pb.HostConfig{SkillsDirectory: file}, "skills_directory"},
+		{&pb.HostConfig{JobTool: filepath.Join(dir, "gone")}, "job_tool"},
+		{&pb.HostConfig{JobTool: file}, "job_tool"},
+		{&pb.HostConfig{JobTool: dir}, "job_tool"},
+	} {
+		err := hostconfig.Check(c.config)
+		if (c.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.want)) {
+			t.Errorf("%v: %v, want %q", c.config, err, c.want)
+		}
+	}
+}

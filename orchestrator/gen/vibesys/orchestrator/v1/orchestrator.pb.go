@@ -2348,9 +2348,14 @@ func (*HandoffReminder) Descriptor() ([]byte, []int) {
 type LeadIdleReminder struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// How long the run has stood still.
-	IdleSeconds   uint32 `protobuf:"varint,1,opt,name=idle_seconds,json=idleSeconds,proto3" json:"idle_seconds,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	IdleSeconds uint32 `protobuf:"varint,1,opt,name=idle_seconds,json=idleSeconds,proto3" json:"idle_seconds,omitempty"`
+	// How many subagents the lead has started in the run, and how many of them were workers and
+	// judges. A template words the next step from them.
+	SubagentsStarted uint32 `protobuf:"varint,2,opt,name=subagents_started,json=subagentsStarted,proto3" json:"subagents_started,omitempty"`
+	WorkersStarted   uint32 `protobuf:"varint,3,opt,name=workers_started,json=workersStarted,proto3" json:"workers_started,omitempty"`
+	JudgesStarted    uint32 `protobuf:"varint,4,opt,name=judges_started,json=judgesStarted,proto3" json:"judges_started,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *LeadIdleReminder) Reset() {
@@ -2386,6 +2391,27 @@ func (*LeadIdleReminder) Descriptor() ([]byte, []int) {
 func (x *LeadIdleReminder) GetIdleSeconds() uint32 {
 	if x != nil {
 		return x.IdleSeconds
+	}
+	return 0
+}
+
+func (x *LeadIdleReminder) GetSubagentsStarted() uint32 {
+	if x != nil {
+		return x.SubagentsStarted
+	}
+	return 0
+}
+
+func (x *LeadIdleReminder) GetWorkersStarted() uint32 {
+	if x != nil {
+		return x.WorkersStarted
+	}
+	return 0
+}
+
+func (x *LeadIdleReminder) GetJudgesStarted() uint32 {
+	if x != nil {
+		return x.JudgesStarted
 	}
 	return 0
 }
@@ -2937,9 +2963,12 @@ const file_vibesys_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\x06status\x18\x02 \x01(\x0e2$.vibesys.orchestrator.v1.AgentStatusB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12\x16\n" +
 	"\x06detail\x18\x03 \x01(\tR\x06detail\"\x11\n" +
-	"\x0fHandoffReminder\"5\n" +
+	"\x0fHandoffReminder\"\xb2\x01\n" +
 	"\x10LeadIdleReminder\x12!\n" +
-	"\fidle_seconds\x18\x01 \x01(\rR\vidleSeconds\"\xbc\a\n" +
+	"\fidle_seconds\x18\x01 \x01(\rR\vidleSeconds\x12+\n" +
+	"\x11subagents_started\x18\x02 \x01(\rR\x10subagentsStarted\x12'\n" +
+	"\x0fworkers_started\x18\x03 \x01(\rR\x0eworkersStarted\x12%\n" +
+	"\x0ejudges_started\x18\x04 \x01(\rR\rjudgesStarted\"\xbc\a\n" +
 	"\aMessage\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12\x1e\n" +
 	"\x06run_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x12\"\n" +

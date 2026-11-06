@@ -106,7 +106,8 @@ func TestAttachTellsASteerCutShortFromOneRefused(t *testing.T) {
 	contains(t, "attach", got.stdout, "was cut short after its turn started: run stopping", "was rejected: run stopping")
 }
 
-func TestStopIsRefusedForARunThatIsOver(t *testing.T) {
+// What the operator asked for is already so: it is said, with exit 0, and the service is asked nothing.
+func TestStopOfARunThatIsOverSaysSo(t *testing.T) {
 	l := newLive(t, nil)
 	run, _ := l.startRun(t, "/work/repo", "alpha")
 	w := newWorld(t, l.Listener.Dial)
@@ -115,10 +116,10 @@ func TestStopIsRefusedForARunThatIsOver(t *testing.T) {
 	}
 	l.awaitRun(t, run, hasStatus(pb.RunStatus_RUN_STATUS_ENDED))
 	got := w.run(context.Background(), "run", "stop", run, "--yes")
-	if got.code != 1 {
-		t.Fatalf("exit %d, want 1; stdout %q", got.code, got.stdout)
+	if got.code != 0 {
+		t.Fatalf("exit %d, want 0; stderr %q", got.code, got.stderr)
 	}
-	contains(t, "stderr", got.stderr, "refused", "not running")
+	contains(t, "stdout", got.stdout, run, "already")
 }
 
 func TestStopEndsTheRunAndTellsHowToWaitForIt(t *testing.T) {

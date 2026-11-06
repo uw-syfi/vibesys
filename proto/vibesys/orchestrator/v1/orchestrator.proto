@@ -418,6 +418,11 @@ message HandoffReminder {}
 message LeadIdleReminder {
   // How long the run has stood still.
   uint32 idle_seconds = 1;
+  // How many subagents the lead has started in the run, and how many of them were workers and
+  // judges. A template words the next step from them.
+  uint32 subagents_started = 2;
+  uint32 workers_started = 3;
+  uint32 judges_started = 4;
 }
 
 message Message {

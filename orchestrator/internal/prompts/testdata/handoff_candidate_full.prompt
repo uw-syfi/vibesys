@@ -1,0 +1,8 @@
+Agent agent-w2 handed off plan 2.
+Candidate: commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb on branch HEAD (parent aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa).
+Claim: score 17
+Checks: passed
+Measurement: {"value": 17}
+Learned: Codex is faster here.
+Next: Try batching.
+Open items: Unclear if it holds at scale.

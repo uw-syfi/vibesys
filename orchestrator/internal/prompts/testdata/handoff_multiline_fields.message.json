@@ -1,0 +1,21 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-w5",
+  "handoff": {
+    "branch": "x",
+    "checks": "1\n2\n",
+    "claim": "a\nb",
+    "commit": "dddddddddddddddddddddddddddddddddddddddd",
+    "hasCandidate": true,
+    "learned": "l1\nl2",
+    "measurement": "  m  ",
+    "next": "n\n",
+    "openItems": "o1\n\no2\n",
+    "parentCommit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "planNumber": 5
+  },
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

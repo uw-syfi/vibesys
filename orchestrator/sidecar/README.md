@@ -19,7 +19,6 @@ The only provider names here are the `Harness` to provider table in `driver.py`.
 | `driver.py` | `Driver` protocol and `AgentshimDriver`; builds the agentshim session from an `OpenSessionRequest` (subagents off, text streaming, its tool servers, environment and skill bundle). |
 | `holder.py` | What a process that holds a session answers before it holds one: `Hello` and `Open`. |
 | `engine.py` | Carries out commands, drops repeated effect ids, numbers events, reports a lost session on restart. No threads, no sockets. |
-| `prompts.py`, `prompts/` | The words sent to the agent for a `Message`, rendered from templates. |
 | `server.py`, `main.py` | The thin shell: gRPC over a Unix socket, a worker thread, process start. |
 | `gen/` | Generated bindings. `./generate.sh` rewrites them. |
 | `e2e/` | The scripted sidecar the end to end tests launch, and the acting peers behind it (see below). Test support; the product never imports it. |

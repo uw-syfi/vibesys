@@ -225,15 +225,15 @@ def _check_tool_names(folder: Path, root: Path) -> list[Finding]:
 
 
 def check_identity_assets(root: Path) -> list[Finding]:
-    """Reject only the retired identity names in published skills and sidecar prompt assets."""
+    """Reject only the retired identity names in published skills and host prompt assets."""
     findings: list[Finding] = []
     for folder in (
         "skills",
-        "orchestrator/sidecar/src/vs_sidecar/prompts",
-        "orchestrator/sidecar/tests/goldens",
+        "orchestrator/internal/prompts/templates",
+        "orchestrator/internal/prompts/testdata",
     ):
         for path in sorted((root / folder).rglob("*")):
-            if not path.is_file() or path.suffix not in {".md", ".j2"}:
+            if not path.is_file() or path.suffix not in {".md", ".tmpl", ".prompt"}:
                 continue
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 for old, new in (

@@ -58,7 +58,20 @@ func (t *tx) leadIdle(b TimerFired) {
 	}
 	run.LeadReminders++
 	t.emit(run.ID, run)
-	t.post(Message{Run: run.ID, To: run.Lead, Body: LeadIdleReminder{Idle: t.in.At.Sub(run.StalledSince).Truncate(time.Second)}})
+	reminder := LeadIdleReminder{Idle: t.in.At.Sub(run.StalledSince).Truncate(time.Second)}
+	for _, a := range t.s.agents {
+		if a.Run != run.ID || a.ID == run.Lead {
+			continue
+		}
+		reminder.Subagents++
+		switch a.Role {
+		case RoleWorker:
+			reminder.Workers++
+		case RoleJudge:
+			reminder.Judges++
+		}
+	}
+	t.post(Message{Run: run.ID, To: run.Lead, Body: reminder})
 	t.sweep(run.ID)
 }
 

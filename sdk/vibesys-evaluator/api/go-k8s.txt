@@ -1,0 +1,763 @@
+package k8s // import "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/k8s"
+
+Package k8s deploys a task's application into a Kubernetes cluster and acts on
+it: it builds the images with BuildKit, applies the manifest into a namespace
+of its own, waits until the application serves, runs the package's pods (seed,
+probe, phase) in that namespace, applies fault actions (restart one or every pod
+of a Deployment, exec a command in a pod, wait for readiness again) and deletes
+the namespace on every exit path.
+
+It is the Go core behind the Python `microservices.k8s.App` and the
+`vibesys-evaluator k8s` subcommands. kubectl and buildctl run as subprocesses,
+behind the KubeAPI and Builder interfaces; package k8stest holds an in-memory
+cluster and builder for tests.
+
+The cluster is the one the environment gives: KUBECONFIG, VIBESYS_K8S_REGISTRY
+and VIBESYS_K8S_BUILDER (see ParseEnvironment).
+
+CONSTANTS
+
+const (
+	KindDeploy      = "deploy"
+	KindBuild       = "build"
+	KindManifest    = "manifest"
+	KindInvalid     = "invalid"
+	KindOutOfMemory = "out_of_memory"
+	KindKube        = "kube"
+	KindCanceled    = "canceled"
+)
+    Error kinds, as the `error_kind` of a subcommand's response.
+
+const (
+	WaitSecs       = 300 * time.Second // data tier, all replicas, a pod's start, a restart
+	SeedSecs       = 1200 * time.Second
+	ProbeSecs      = 300 * time.Second
+	BuildSecs      = 2400 * time.Second
+	DeleteWait     = 240 * time.Second
+	DeleteAttempts = 3
+
+	// OOMKilled is the termination reason of a container the kernel killed at its memory limit.
+	OOMKilled = "OOMKilled"
+	// ProbeFile is the pod file the probe's requests are written to.
+	ProbeFile = "probe.binpb"
+)
+    Waits and deadlines of the deploy layer.
+
+const (
+	Root       = "/vse"
+	WorkDir    = Root + "/work"
+	ControlDir = Root + "/control"
+
+	// PodLabel is the role, on every pod of the package.
+	PodLabel = "vibesys.dev/evaluator-pod"
+)
+    The package's own pods (seed, probe, phase): their Job objects and the file
+    exchange.
+
+    A pod of the package runs the task image under a small shell wrapper:
+
+     1. it waits until CONTROL/ready exists; the caller first writes the
+        input files into WorkDir and that marker last, in one tar stream
+        (KubeAPI.PutFiles);
+     2. it runs the command, which leaves its outputs in WorkDir and its output
+        in the pod log, and writes the exit status to CONTROL/exit;
+     3. it waits until CONTROL/collected exists, so the caller can copy WorkDir
+        out of the running container, then exits with the command's status.
+
+    The inputs and outputs travel through the API server's exec stream, so no
+    ConfigMap size limit applies, and the Job's activeDeadlineSeconds ends a pod
+    nobody collects.
+
+const (
+	NamespacePrefix = "hk8s-"
+	TaskLabel       = "vibesys.dev/evaluator-task"
+	CreatedLabel    = "vibesys.dev/evaluator-created" // unix seconds
+	JobLabel        = "vibesys.dev/evaluator-job"
+	SweepMargin     = 600 * time.Second
+)
+    The pure decisions of the deploy layer: names, labels, the sweep, readiness,
+    restart victims and usage.
+
+    Namespaces of this package's tasks are hk8s-<slug>-<token>: the clusters
+    it was built for keep per-task namespaces under this prefix. A namespace
+    carries the task label (the App's name), its creation time and the
+    vibesys-cli job that made it.
+
+
+VARIABLES
+
+var (
+	ErrNotFound = errors.New("not found")
+	ErrConflict = errors.New("conflict")
+)
+    ErrNotFound and ErrConflict classify a KubeError with errors.Is: the object
+    does not exist, or a precondition failed (it is not the object the caller
+    meant: another UID).
+
+var AllowedKinds = [][2]string{
+	{"", "ConfigMap"},
+	{"", "Secret"},
+	{"", "Service"},
+	{"", "ServiceAccount"},
+	{"", "PersistentVolumeClaim"},
+	{"apps", "Deployment"},
+	{"apps", "StatefulSet"},
+	{"policy", "PodDisruptionBudget"},
+}
+    AllowedKinds are the namespaced kinds an application may bring, as {API
+    group, kind}. Anything else, in particular every cluster-scoped kind
+    (Namespace, ClusterRole, PersistentVolume, CRDs), RBAC (Role, RoleBinding)
+    and node-wide workloads (DaemonSet), is refused: the cluster is shared,
+    and a namespace deletion must remove everything a sample made.
+
+var Sizes = map[Role]Size{
+	RoleSeed:  {"4", "2Gi"},
+	RoleProbe: {"500m", "256Mi"},
+	RolePhase: {"6", "4Gi"},
+}
+    Sizes of the package's pods. A phase pod's size is fixed so the saturation
+    guard has a known budget (spec: 6 CPUs, 4 GiB, what both yardsticks' load
+    generators used).
+
+
+FUNCTIONS
+
+func Conflict(format string, args ...any) error
+    Conflict returns a KubeError that matches ErrConflict.
+
+func Fatal(pods []Pod) []string
+    Fatal lists the pods whose waiting reason does not recover.
+
+func ImageName(registry, appSlug, component, digest string) string
+    ImageName is registry/vse/<app>/<component>:<digest>.
+
+func JobLabelOf(artifactsDir, fallback string) string
+    JobLabelOf is the vibesys-cli job id: the parent of the artifacts directory
+    (.../<job>/<step>), else fallback.
+
+func JoinUsage(pods []Pod, workloads []Workload, stats map[string]PodStats) map[string]Usage
+    JoinUsage joins kubelet counters to the pods and their workloads, by pod
+    name.
+
+func KindOf(err error) string
+    KindOf is the error kind of err, KindDeploy for an error of no known kind.
+
+func NamespaceLabels(appName string, now time.Time, job string) map[string]string
+    NamespaceLabels are the labels of a namespace this package makes.
+
+func NamespaceName(appName, token string) string
+    NamespaceName is the name of the namespace of an App with a token.
+
+func NamespacePrefixOf(appName string) string
+    NamespacePrefixOf is the prefix of the namespaces of an App.
+
+func NotFound(format string, args ...any) error
+    NotFound returns a KubeError that matches ErrNotFound.
+
+func ParseSelector(selector string) (map[string]string, error)
+    ParseSelector reads an equality label selector key=value[,key=value] (==
+    too); empty is nil.
+
+func Slug(appName string) string
+    Slug is the App's name cut to fit a namespace name, without a trailing dash.
+
+func Stage(source, into string) (string, error)
+    Stage copies a context without the generated files, so the build sees what
+    the digest covers.
+
+func Substitute(text string, values map[string]string, source string) (string, error)
+    Substitute replaces each ${NAME} by values[NAME]; any other ${...} is an
+    error naming its line.
+
+func Sweep(ctx context.Context, src AppSource, c Cluster) ([]string, error)
+    Sweep deletes this task's namespaces that killed samples left behind and
+    returns their names.
+
+    Only namespaces labelled with the App's name, named with its prefix and
+    older than the longest a job may run plus a margin are deleted, each only if
+    it still has the UID it was listed with, so a concurrent sample's namespace
+    or another task's is never touched.
+
+func TaskTimeout(taskDir string) (time.Duration, error)
+    TaskTimeout is the longest a job of the task may run: the larger of the two
+    timeout_seconds of the task's vibesys.input.toml.
+
+func TreeDigest(root string) (string, error)
+    TreeDigest is 16 hex digits over every file's relative path, mode
+    (executable or not) and content. It is the digest the Python implementation
+    computed, so an image built by either is found by the other.
+
+func Unready(workloads []Workload, pods []Pod, names map[string]bool, replaced map[string]bool) []string
+    Unready says why each workload (of names, when not nil) does not serve with
+    all its replicas; nil when all do. A workload serves when its controller
+    has seen its spec, exactly `replicas` of its pods exist that are neither
+    terminating nor among the replaced UIDs, all of them Ready, and its status
+    counts every replica ready, available and updated.
+
+func UsageDelta(before, after map[string]Usage) map[string]float64
+    UsageDelta is the CPU seconds each pod used between two snapshots (a pod new
+    since before counts from 0).
+
+
+TYPES
+
+type App struct {
+	// Name is the task's application name (lowercase letters, digits and dashes). It labels the
+	// namespaces of the task, so the sweep of stale namespaces only ever deletes this task's.
+	Name string
+	// Manifest is the manifest's path relative to the task directory. ${NAMESPACE} and every
+	// key of Images are substituted; any other ${...} is an error. Only namespaced application
+	// kinds are accepted (see AllowedKinds).
+	Manifest string
+	// Images maps a manifest variable to a candidate directory (relative to the project root),
+	// each built with its own Dockerfile and tagged by a digest of the directory.
+	Images map[string]string
+	// Gateway is the base URL of every request, http://<service>:<port>, a Service of the manifest.
+	Gateway string
+	// DataTier is a label selector (key=value[,key=value]). The objects it selects and every
+	// non-workload object are applied first and waited for; then the seed runs; then the
+	// remaining workloads are applied. Empty: the whole manifest serves before the seed runs.
+	DataTier string
+	// HasSeed says the deploy runs a seed pod (Deploy is given its command).
+	HasSeed bool
+	// Restartable are the Deployments the fault actions may restart, exec in, stop and start.
+	Restartable []string
+	// Caches are the cache Deployments the fault actions may empty in place, with their protocol.
+	// They may also be restarted and exec'd in.
+	Caches map[string]CacheKind
+}
+    App is an application on Kubernetes: what to build, what to apply, how to
+    tell it serves. It is the Go form of Python's `microservices.k8s.App`;
+    the fields mean the same.
+
+func (a App) Validate() error
+    Validate returns an error naming the first field of the App that is wrong,
+    and what to write.
+
+type AppSource struct {
+	App         App
+	TaskDir     string
+	ProjectRoot string
+	ProbePlan   []byte
+}
+    AppSource is an App with what it is built from: the task directory
+    (manifest, task image), the project root (candidate images) and the encoded
+    `ready` requests (a loadgen requests file).
+
+type Build struct {
+	Context string // a directory holding the Dockerfile
+	Image   string // registry/repository:tag, pushed when built
+}
+    Build is one image to build and push.
+
+type BuildError struct{ Message string }
+    BuildError means an image did not build; the message names it and ends with
+    the build log's tail.
+
+func (e *BuildError) Error() string
+
+type BuildctlBuilder struct {
+	Address string
+	Clock   Clock
+	// Buildctl is the binary; "buildctl" when empty.
+	Buildctl string
+}
+    BuildctlBuilder runs buildctl against the BuildKit daemon at Address,
+    pushing to an insecure registry.
+
+func (b BuildctlBuilder) Argv(build Build) []string
+    Argv is the buildctl command line of one build.
+
+func (b BuildctlBuilder) Build(ctx context.Context, builds []Build, timeout time.Duration, logDir string) (map[string]float64, error)
+    Build implements Builder: every build starts at once, and they are awaited
+    in order.
+
+type Builder interface {
+	// Build builds and pushes every image at once and returns each image's build seconds. It
+	// returns a *BuildError naming the first image that failed.
+	Build(ctx context.Context, builds []Build, timeout time.Duration, logDir string) (map[string]float64, error)
+}
+    Builder builds images.
+
+type CacheKind string
+    CacheKind is the protocol of a cache Deployment, which says how its contents
+    are flushed.
+
+const (
+	Memcached CacheKind = "memcached"
+	Redis     CacheKind = "redis"
+)
+    The caches a task may flush in place.
+
+type Clock interface {
+	// Now is the time; differences of two readings are deadlines.
+	Now() time.Time
+	// Sleep waits d, or returns the context's error when it ends first.
+	Sleep(ctx context.Context, d time.Duration) error
+}
+    Clock is the clock the deploy layer waits with: SystemClock, or a FakeClock
+    in tests.
+
+type CloseOptions struct {
+	// Fast (after a signal) asks for the deletion and returns, within the CLI's grace period.
+	// Otherwise Close waits (bounded) until the namespace is gone so the next sample finds the
+	// cluster free.
+	Fast bool
+	// Failed saves diagnostics first (unless Fast).
+	Failed bool
+}
+    CloseOptions say how Close ends the namespace.
+
+type Cluster struct {
+	Env     Environment
+	Kube    KubeAPI
+	Builder Builder
+	Clock   Clock
+	Log     func(string)
+	// Token makes the suffix of a namespace name; 8 random hex digits when nil.
+	Token func() string
+}
+    Cluster is where and with what the deploy layer works: the job's environment
+    and the interfaces.
+
+type Deployment struct {
+	App       App
+	Namespace string
+	TaskImage string
+	Gateway   Gateway
+	// Images are the candidate images by manifest variable, and BuildSeconds the seconds each
+	// image took; both only on a Deployment made by Deploy.
+	Images       map[string]string
+	BuildSeconds map[string]float64
+
+	// Has unexported fields.
+}
+    Deployment is an App in its namespace. Deploy makes one that owns the
+    namespace; Attach one that does not. Methods are safe for concurrent use
+    except Close.
+
+func Attach(ctx context.Context, src AppSource, namespace string, c Cluster) (*Deployment, error)
+    Attach makes a Deployment for a namespace another process deployed (the
+    fault actions); it never deletes it.
+
+func Deploy(ctx context.Context, src AppSource, seed *PodCommand, c Cluster) (*Deployment, error)
+    Deploy sweeps, builds, deploys into a fresh namespace, seeds and probes, and
+    returns the serving Deployment. The caller owns the result and must Close
+    it. On any failure here, including the context's cancellation (a signal),
+    the namespace is deleted before the error returns.
+
+func Owned(app App, namespace, uid string, c Cluster) *Deployment
+    Owned makes a Deployment that owns an existing namespace, for a process that
+    closes what another one deployed: Close deletes the namespace if it still
+    has the UID. It reads no manifest.
+
+func (d *Deployment) Close(ctx context.Context, opts CloseOptions) error
+    Close deletes the namespace, if this Deployment owns it; it is idempotent.
+    A cancelled ctx does not stop the deletion request: only its wait.
+
+func (d *Deployment) Exec(ctx context.Context, target ExecTarget, argv []string, timeout time.Duration) ([]PodExec, error)
+    Exec runs argv in a pod, or in the pods of a Deployment, and returns every
+    pod's answer; a nonzero exit is a result, not an error. The Deployment must
+    be one of the App's Restartable or Caches.
+
+func (d *Deployment) Flush(ctx context.Context, cache string) error
+    Flush empties a cache in place, on every pod of its Deployment, then probes.
+
+func (d *Deployment) Probe(ctx context.Context) error
+    Probe runs loadgen probe from a pod: every ready request succeeds twice per
+    ready gateway pod.
+
+func (d *Deployment) Restart(ctx context.Context, deployments []string, opts RestartOptions) ([]ReplacedPod, error)
+    Restart deletes one pod (the first by name) or every pod of each Deployment
+    at once. Unless opts.NoWait it returns when no deleted pod remains, every
+    workload serves with all replicas and the probes pass.
+
+func (d *Deployment) RunPod(ctx context.Context, role Role, command PodCommand, timeout time.Duration, opts RunOptions) (PodRun, error)
+    RunPod runs a command of the task image in a pod of the namespace and
+    collects WorkDir.
+
+    The pod gets command.Inputs in WorkDir before the command starts;
+    the files the command leaves there are copied into the outputs directory.
+    A nonzero exit is returned, not an error (the caller judges it); a pod that
+    cannot start, dies or runs past the timeout is an error with its log tail
+    (an *OutOfMemoryError when the kernel killed it at its memory limit).
+
+func (d *Deployment) Start(ctx context.Context) error
+    Start scales the restartable Deployments back to the manifest's replicas,
+    waits and probes.
+
+func (d *Deployment) Stop(ctx context.Context) error
+    Stop scales every restartable Deployment to 0 and waits until their pods are
+    gone.
+
+func (d *Deployment) UID() string
+    UID is the namespace's UID once it is created ("" before).
+
+func (d *Deployment) Usage(ctx context.Context, label string) (map[string]float64, error)
+    Usage returns each pod's CPU seconds since the previous snapshot, logs it
+    and writes pod-usage-<label>.json into the artifacts. It is diagnostics
+    only: a cluster that does not give kubelet stats logs why and returns nil.
+    The previous snapshot is kept in the Environment's WorkDir, so successive
+    processes of one deploy share it.
+
+func (d *Deployment) WaitReady(ctx context.Context, opts WaitOptions) error
+    WaitReady waits until every workload (of opts.Deployments) serves with all
+    its replicas, none of them a replaced pod, then probes through the gateway.
+
+func (d *Deployment) WaitServing(ctx context.Context, names, replaced map[string]bool, timeout time.Duration) error
+    WaitServing waits until every workload (of names, when not nil) has all its
+    replicas Ready and available, none of them among the replaced pod UIDs.
+
+type Environment struct {
+	Registry     string
+	Builder      string
+	ArtifactsDir string // "" when the job has none
+	WorkDir      string
+	Job          string
+}
+    Environment is what vibesys-cli's `kubernetes` resource and the job give the
+    deploy layer.
+
+func ParseEnvironment(getenv func(string) string, workDir, artifacts string) (Environment, error)
+    ParseEnvironment reads the cluster the job gives (KUBECONFIG,
+    VIBESYS_K8S_REGISTRY and VIBESYS_K8S_BUILDER, from vibesys-cli's kubernetes
+    resource) through getenv. artifacts is the job's artifacts directory
+    (.../<job>/<step>), which also names the job in the namespace labels.
+
+type Error struct {
+	Kind    string
+	Message string
+}
+    Error is a failure of the deploy layer: the system under test could not be
+    brought up, acted on or torn down. The message names the step and ends with
+    the relevant log tail. Kind groups failures for the language wrappers (see
+    the Kind constants).
+
+func (e *Error) Error() string
+
+type ExecResult struct {
+	ExitCode int
+	Output   string // standard output and standard error
+}
+    ExecResult is what a command run in a pod answered. A nonzero exit is a
+    result, not an error.
+
+type ExecTarget struct {
+	Deployment string
+	Pod        string
+	AllPods    bool
+}
+    ExecTarget names where Exec runs: a Pod, or a Deployment (its first pod by
+    name, or every live pod with AllPods).
+
+type FakeClock struct {
+	// Has unexported fields.
+}
+    FakeClock is virtual time: Sleep advances it at once.
+
+func NewFakeClock() *FakeClock
+    NewFakeClock starts a FakeClock at an arbitrary fixed time.
+
+func (c *FakeClock) Now() time.Time
+    Now implements Clock.
+
+func (c *FakeClock) Sleep(ctx context.Context, d time.Duration) error
+    Sleep implements Clock.
+
+type File struct {
+	Name string
+	Data []byte
+}
+    File is one file of a PutFiles call.
+
+type Gateway struct {
+	URL     string
+	Service string
+	Port    int
+}
+    Gateway is a gateway URL, split: the Service it names and its port.
+
+func ParseGateway(rawURL string) (Gateway, error)
+    ParseGateway splits http://<service>:<port> (port 80 when absent) with no
+    path, query or credentials.
+
+type KubeAPI interface {
+	// CreateNamespace creates a namespace with its labels in one request.
+	CreateNamespace(ctx context.Context, name string, labels map[string]string) (Namespace, error)
+	// Namespaces lists the namespaces whose labels include every pair of selector.
+	Namespaces(ctx context.Context, selector map[string]string) ([]Namespace, error)
+	// DeleteNamespace asks for deletion of the namespace if it still has this UID, without
+	// waiting for it. ErrConflict when it has another UID, ErrNotFound when gone.
+	DeleteNamespace(ctx context.Context, name, uid string) error
+	// Apply is a server-side apply of the objects into the namespace.
+	Apply(ctx context.Context, namespace string, objects []Object) error
+	// Workloads lists the Deployments and StatefulSets of the namespace.
+	Workloads(ctx context.Context, namespace string) ([]Workload, error)
+	// Pods lists the pods of the namespace (whose labels include selector, when given).
+	Pods(ctx context.Context, namespace string, selector map[string]string) ([]Pod, error)
+	// DeletePods deletes the pods; one already gone is not an error. It does not wait.
+	DeletePods(ctx context.Context, namespace string, names []string, graceSecs int) error
+	// Scale sets a Deployment's replica count.
+	Scale(ctx context.Context, namespace, deployment string, replicas int) error
+	// Exec runs argv in the pod's first container.
+	Exec(ctx context.Context, namespace, pod string, argv []string, timeout time.Duration) (ExecResult, error)
+	// PutFiles writes files into a directory of the running pod, in the order given.
+	PutFiles(ctx context.Context, namespace, pod, directory string, files []File) error
+	// GetFiles copies every file of the pod's directory into the local directory into and
+	// returns their relative names, sorted.
+	GetFiles(ctx context.Context, namespace, pod, directory, into string) ([]string, error)
+	// Logs is the pod's log (its previous container's with previous); "" when there is none.
+	Logs(ctx context.Context, namespace, pod string, tail int, previous bool) (string, error)
+	// PodStats is the kubelet counters of the namespace's pods on a node, by pod name.
+	PodStats(ctx context.Context, namespace, node string) (map[string]PodStats, error)
+}
+    KubeAPI is what the deploy layer does to a cluster. Every call has a
+    deadline of its implementation; every failure is a *KubeError (ErrNotFound
+    and ErrConflict classify some) or the context's error.
+
+type KubeError struct{ Message string }
+    KubeError is what the cluster refused or failed; the message says which and
+    why.
+
+func (e *KubeError) Error() string
+
+type Kubectl struct {
+	// Binary is kubectl; "kubectl" when empty.
+	Binary string
+	// Env is the environment of the processes; the current one when nil.
+	Env []string
+}
+    Kubectl is the KubeAPI over the kubectl binary and the kubeconfig in the
+    environment. Each call is one kubectl process with a deadline; failures are
+    *KubeError with kubectl's stderr.
+
+func (k Kubectl) Apply(ctx context.Context, namespace string, objects []Object) error
+    Apply implements KubeAPI.
+
+func (k Kubectl) CreateNamespace(ctx context.Context, name string, labels map[string]string) (Namespace, error)
+    CreateNamespace implements KubeAPI.
+
+func (k Kubectl) DeleteNamespace(ctx context.Context, name, uid string) error
+    DeleteNamespace implements KubeAPI.
+
+func (k Kubectl) DeletePods(ctx context.Context, namespace string, names []string, graceSecs int) error
+    DeletePods implements KubeAPI.
+
+func (k Kubectl) Exec(ctx context.Context, namespace, pod string, argv []string, timeout time.Duration) (ExecResult, error)
+    Exec implements KubeAPI.
+
+func (k Kubectl) GetFiles(ctx context.Context, namespace, pod, directory, into string) ([]string, error)
+    GetFiles implements KubeAPI.
+
+func (k Kubectl) Logs(ctx context.Context, namespace, pod string, tail int, previous bool) (string, error)
+    Logs implements KubeAPI.
+
+func (k Kubectl) Namespaces(ctx context.Context, selector map[string]string) ([]Namespace, error)
+    Namespaces implements KubeAPI.
+
+func (k Kubectl) PodStats(ctx context.Context, namespace, node string) (map[string]PodStats, error)
+    PodStats implements KubeAPI.
+
+func (k Kubectl) Pods(ctx context.Context, namespace string, selector map[string]string) ([]Pod, error)
+    Pods implements KubeAPI.
+
+func (k Kubectl) PutFiles(ctx context.Context, namespace, pod, directory string, files []File) error
+    PutFiles implements KubeAPI.
+
+func (k Kubectl) Scale(ctx context.Context, namespace, deployment string, replicas int) error
+    Scale implements KubeAPI.
+
+func (k Kubectl) Workloads(ctx context.Context, namespace string) ([]Workload, error)
+    Workloads implements KubeAPI.
+
+type ManifestError struct{ Message string }
+    ManifestError means the manifest cannot be applied as written; the message
+    names the file, object or line.
+
+func (e *ManifestError) Error() string
+
+type Namespace struct {
+	Name     string
+	UID      string
+	Labels   map[string]string
+	Created  time.Time // the API server's creationTimestamp
+	Deleting bool
+}
+    Namespace is a namespace of the cluster.
+
+func Stale(namespaces []Namespace, appName string, now time.Time, ttl time.Duration) []Namespace
+    Stale returns this task's namespaces that no live sample can own: labelled
+    with its name, named with its prefix and a token, and older than ttl (the
+    longest a job may run plus a margin).
+
+type Object = map[string]any
+    Object is one Kubernetes object, as the JSON a manifest document decodes to.
+
+type OutOfMemoryError struct {
+	Message string
+	Limit   string
+}
+    OutOfMemoryError is a pod of the package that was OOMKilled; Limit is its
+    memory limit ("4Gi").
+
+func (e *OutOfMemoryError) Error() string
+
+type Pod struct {
+	Name     string
+	UID      string
+	Labels   map[string]string
+	Phase    string // Pending, Running, Succeeded, Failed, Unknown
+	Ready    bool
+	Deleting bool
+	Node     string
+	Restarts int
+	// Waiting is a container's waiting reason, such as ImagePullBackOff.
+	Waiting string
+	// ExitCode is the first container's, once terminated; nil before.
+	ExitCode *int
+	// Reason is the first container's termination reason, such as OOMKilled.
+	Reason string
+}
+    Pod is a pod of a namespace.
+
+func ParsePod(data []byte) (Pod, error)
+    ParsePod reads a pod from the JSON of `kubectl get pod -o json`.
+
+func Victims(pods []Pod, every bool) []Pod
+    Victims are the pods a restart deletes: every live one, or the first by
+    name.
+
+type PodCommand struct {
+	Argv   []string
+	Inputs map[string][]byte
+}
+    PodCommand is a command of the task image, and the files written into its
+    pod's WorkDir first.
+
+type PodExec struct {
+	Pod string
+	ExecResult
+}
+    PodExec is the answer of one pod to Exec.
+
+type PodRun struct {
+	Name     string
+	ExitCode int
+	Outputs  string
+	Files    []string
+	Log      string
+	Seconds  float64
+}
+    PodRun is a finished pod: its command's exit status, its outputs and its
+    log. Files are the files the command left in WorkDir (inputs excepted),
+    copied into Outputs.
+
+type PodStats struct {
+	CPUSeconds float64
+	RxBytes    int64
+	TxBytes    int64
+}
+    PodStats is one pod's counters from its node's kubelet summary.
+
+type Rendered struct {
+	First []Object
+	Rest  []Object
+	Text  string
+}
+    Rendered is the manifest's objects for one namespace. First is applied and
+    waited for before the seed, Rest after it (empty without a data tier).
+
+func Render(text, namespace string, images, dataTier map[string]string, source string) (Rendered, error)
+    Render substitutes ${NAMESPACE} and the images, parses, checks, sets the
+    namespace and splits.
+
+    It returns a *ManifestError for an unknown variable, an image variable the
+    manifest does not use, a kind outside AllowedKinds, an object of another
+    namespace, a duplicate object, or a data tier that selects no workload.
+
+func (r Rendered) Objects() []Object
+    Objects are First followed by Rest.
+
+type ReplacedPod struct {
+	Deployment string
+	Pod        string
+	UID        string
+}
+    ReplacedPod is a pod a restart deleted.
+
+type RestartOptions struct {
+	// EveryPod deletes every pod of each Deployment at once; otherwise one (the first by name).
+	EveryPod bool
+	// NoWait returns once the pods are deleted: the caller waits with WaitReady, naming the
+	// replaced UIDs.
+	NoWait bool
+}
+    RestartOptions say which pods Restart deletes and whether it waits.
+
+type Role string
+    Role is what a pod of the package is for.
+
+const (
+	RoleSeed  Role = "seed"
+	RoleProbe Role = "probe"
+	RolePhase Role = "phase"
+)
+    The roles of the package's pods.
+
+type RunOptions struct {
+	// Outputs is the local directory the files the command leaves in WorkDir are copied into
+	// (WorkDir/<pod name> of the Environment by default).
+	Outputs string
+	// Name is the pod's Job name (vse-<role>-<n> by default, a random suffix instead of n from
+	// a process that did not deploy); it must be unique in the namespace.
+	Name string
+}
+    RunOptions are the optional parts of RunPod.
+
+type Size struct{ CPU, Memory string }
+    Size is a pod's CPU and memory (requests equal limits).
+
+type SystemClock struct{}
+    SystemClock is the real time.
+
+func (SystemClock) Now() time.Time
+    Now implements Clock.
+
+func (SystemClock) Sleep(ctx context.Context, d time.Duration) error
+    Sleep implements Clock.
+
+type Usage struct {
+	Workload   string  `json:"workload"`
+	CPUSeconds float64 `json:"cpu_seconds"`
+	RxBytes    int64   `json:"rx_bytes"`
+	TxBytes    int64   `json:"tx_bytes"`
+}
+    Usage is the CPU seconds and network bytes of one pod since it started,
+    and its workload.
+
+type WaitOptions struct {
+	// Deployments to wait for; every workload of the namespace when empty.
+	Deployments []string
+	// Replaced are the UIDs of pods that must be gone (a restart's, see ReplacedPod.UID).
+	Replaced []string
+	// Timeout is WaitSecs when zero.
+	Timeout time.Duration
+	// NoProbe skips the probes through the gateway that follow readiness.
+	NoProbe bool
+}
+    WaitOptions say what WaitReady waits for.
+
+type Workload struct {
+	Kind       string // Deployment or StatefulSet
+	Name       string
+	Labels     map[string]string
+	Selector   map[string]string // spec.selector.matchLabels
+	Replicas   int
+	Ready      int
+	Available  int
+	Updated    int
+	Generation int
+	Observed   int
+}
+    Workload is a Deployment or a StatefulSet.
+

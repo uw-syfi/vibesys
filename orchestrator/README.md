@@ -1,8 +1,5 @@
 # Orchestrator
 
-Desktop provisioning installs `vibesys-host` beside old executables and leaves them untouched,
-since existing agent sessions may still name the old executable in their MCP configuration.
-
 The orchestrator is a Go daemon that runs on the host doing the work, usually a remote one. It
 launches Claude Code and Codex agents, records everything they do, relays typed messages between
 them, and wakes a lead agent when a subagent or a job finishes. It sits beside the Python runs and
@@ -35,6 +32,7 @@ plan reader is a placeholder in production and the job source is left unwired un
 | `internal/jobs` | `JobSource`, the interface over `vibesys-cli` jobs | `core` |
 | `internal/jobs/jobstest` | The in-memory `JobSource` and the contract every one passes | `core`, `jobs` |
 | `internal/wire` | Bytes to core types and back, once, at the edge | `core`, `gen` |
+| `internal/prompts` | The words an agent is sent for a message: Go templates, goldens from the Python renderer they replaced | `core` |
 | `internal/localfs` | Proof that the state directory is on a local filesystem | Nothing of this module |
 | `internal/store` | The durable record: atomic commits, recovery, outbox, paged reads, retention | `core`, `wire`, `localfs` |
 | `internal/store/storetest` | The contract every store passes, a workload from the real core, and a model | `core`, `store`, `wire` |
@@ -124,20 +122,49 @@ every default. `vibesys-client host configure` writes it and, with no flag, prin
 | `--tool-path` | the directories the host looks for programs in, separated by colons | `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin` |
 
 A host takes nothing else from the environment it was started in. It clears it and keeps `HOME`, a
-`PATH` from the tool path, and `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `XDG_RUNTIME_DIR` and
-`XDG_STATE_HOME`, which say who and where the session is. `VIBESYS_ORCHESTRATOR_SIDECAR`,
+`PATH` from the tool path, `USER`, `LOGNAME`, `SHELL` and `TMPDIR`, which say who and where the session
+is, and `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and `VIBESYS_CLI_CONFIG`,
+which name the job tool's places and its operator configuration, so a daemon the host starts obeys
+the operator's Slurm and Docker settings. `VIBESYS_ORCHESTRATOR_SIDECAR`,
 `_MARKETPLACE`, `_STATE_DIR` and `_CLI` are no longer read, and a client that starts a host with one
 of them set names it on stderr with the flag that replaces it.
 
 A client first asks what serves the root and acts on the answer, one action per case
-(`clientcli.Decide`):
+(`clientcli.Decide`, pure, and held over every combination by a property test). A read is every run
+verb but `start`:
 
-| What is there | What the client does | Exit code when it stops there |
-| --- | --- | --- |
-| nothing | starts a host | 1 when the host refuses, 3 on a timeout |
-| a compatible host | uses it | |
-| an incompatible host, or one on another configuration | replaces it when idle; with live runs, reads through it and refuses a launch | 1 |
-| a host that does not answer | stops and says how to end it (`host stop --force`) | 4 |
+| What is there | read | `run start` | `host restart` | `host stop` |
+| --- | --- | --- | --- | --- |
+| nothing | start a host | start a host | start a host | nothing to do |
+| a host on another machine, through a shared disk | 4, naming it | 4, naming it | 4, naming it | 4, naming it, and never signals it |
+| a host that does not answer | 4, naming `--force` | 4, naming `--force` | 4, naming `--force` | 4, and `--force` ends it |
+| serving: this client's own, on this configuration | use | use | replace unless runs are live | stop |
+| serving: older, or another build | use, with a note | replace when idle, else 1 | replace unless runs are live | stop |
+| serving: this client's own, on another configuration | use, with a note | replace when idle, else 1 | replace unless runs are live | stop |
+| serving: newer | use, with a note | use; on another configuration 1, naming `host restart` | replace unless runs are live | stop |
+| not serving: state held by another process | 4, naming it | 4, naming it | 4, naming it | stop |
+| not serving: that process has gone, or the state was refused | 4, naming the way out | replace when idle, else 1 | replace unless runs are live | stop |
+
+Idle means no live run and no other client connected. A host of a release is ordered by the host's
+own `relation`; a build of no release is another build unless it is the very program this client would
+start, and cannot be ordered. A newer or older host whose protocol does not match fails the handshake,
+which names `host restart`.
+
+Replacing proves first that a new host can start: the program is found, the configuration reads, the
+state directory is usable and the release's parts verify. Nothing has been stopped when that fails.
+A `host-config.json` that does not read does not get in the way of a host that is running: verbs go on
+with a warning naming the file and the key, and `host status` says so. A verb that must start a host
+refuses, saying the same. `host configure --clear` never reads the file, and `host configure` refuses
+what it can tell no host could use.
+
+A root on a shared disk is seen from other machines, whose socket connections are refused and whose
+process numbers mean something else. The lock's record names the machine, so that is a finding of its
+own, whatever the verb. A shared disk whose locks are not shared between machines cannot be told apart
+from no host at all.
+
+Every call to a host has a bound: 5 s for `HostControlService`, 10 s for the handshake, and 30 s for a
+command, a snapshot and the start of a stream, which then lasts as long as the run. An expired call
+exits 3, or 4 for `HostControlService`, naming what to do.
 
 A host stops answering a little before it has exited. It lets go of the state directory first and its
 root's lock last, but a killed process drops both in an order nothing here controls, so a new host
@@ -169,9 +196,12 @@ time and read latency on generated data.
 
 `vibesys-host` hosts the daemon (`orchestrator/hosted`): `vibesys-host serve` registers `OrchestratorService`
 beside `HostService` on the gateway's socket and serves the agent-only socket itself. One `vibesys-host`
-holds the state directory through the store's lock; any other answers orchestrator calls
-`UNAVAILABLE` naming the holder's pid and version, and keeps serving `HostService`. It does not exit
-for being idle while a run is live. It is crash-only: starting is recovering. A serial loop feeds commands, sidecar events, job polls and timers to `Decide`, commits
+holds the state directory through the store's lock. Any other refuses to start, naming the holder's pid
+and version, unless it was started with `--orchestrator-optional`, as the desktop app's bridge
+(`vibesys-host connect`) does: that one stays up, answers orchestrator calls `UNAVAILABLE` and keeps
+serving `HostService`. Desktop provisioning installs `vibesys-host` beside old executables and leaves
+them untouched, since existing agent sessions may still name the old executable in their MCP
+configuration. A host does not exit for being idle while a run is live. It is crash-only: starting is recovering. A serial loop feeds commands, sidecar events, job polls and timers to `Decide`, commits
 the result through the store, and then a worker carries out the effects at least once. Time and
 nonces are injected, and an input that changes nothing is logged.
 
@@ -209,19 +239,21 @@ orchestrator, and `vibesys-client host` is its client. It never starts a host to
 
 ```sh
 vibesys-client host status [--json]                      # release, relation to this client, live runs, each part and why not, who holds the state
-vibesys-client host stop [--if-no-live-runs] [--force]   # exit 0 stopped or none running, 1 refused (live runs), 4 no answer
+vibesys-client host stop [--if-no-live-runs] [--force]   # exit 0 stopped or none running, 1 refused (live runs), 4 no answer or on another machine
 vibesys-client host restart                              # stop an idle host and start one from this client's release
 ```
 
 `--if-no-live-runs` makes the host refuse, and name how many, when a run is live. `--force` ends the
-process named by the host lock when the host does not answer (one that predates host control). The
-lock, not a process list, says who holds the host: the host writes a typed `HostLock` record (its pid and
-release) into the lock file it holds, and a client reads it only while the lock is held. A `restart`
+process named by the host lock when the host does not answer, and never one on another machine. The
+lock, not a process list, says who holds the host: the host writes a typed `HostLock` record (its pid,
+release, root and machine) into the lock file it holds, and a client reads it only while the lock is held. A `restart`
 with live runs is refused for now. The release layout is resolved on every launch and start check, so
 repairing an install under a running host needs no restart. The home is resolved through symlinks, so a
 home reached by either path is one host.
 
-`RUN` is a run id, a unique prefix, or omitted for the one live run in the current repository. The
+`RUN` is a run id, a unique prefix, or omitted for the one live run in the current repository. With no run
+live there, an omitted `RUN` means the repository's most recent run to `run get`, `run attach` (which
+replays it) and `run stop` (which says it has already ended and exits 0, as it does for any `RUN` that has). The
 repository of a new run is the root of the repository around the working directory unless `--repository`
 says otherwise. Exit codes: 0 ok, 1 failed or refused, 2 usage, 3 timeout, 4 service unavailable. With no
 terminal nothing prompts. `run start` follows the stream until the lead is live and exits 1, with the lead's
@@ -518,7 +550,8 @@ Every binary in the bundle reports the bundle's version: `vibesys-client --versi
 - Installing the same version again changes nothing.
 - Switching versions asks a running host to stop, through the new release's own client
   (`vibesys-client host stop --if-no-live-runs`, read by exit code): an idle host stops, a host with
-  live runs or one that does not answer refuses the switch. `--force` skips the question. Old
+  live runs, one that does not answer or one on another machine refuses the switch, having said what to
+  do. `--force` skips the question. Old
   releases are kept.
 - With no version named, the installer reads the newest stable version from `vibesys-latest`. While
   only pre-releases are published that tag does not exist, and the installer says to pass

@@ -13,8 +13,9 @@
    complete type.
 4. Each example under ``examples/`` imports and type-checks (pyright, basic)
    against the package.
-5. The Go SDK's snapshots ``api/go-workload.txt`` and ``api/go-check.txt``
-   (``go doc -all`` of ``go/workload`` and ``go/check``; each package's Go
+5. The Go SDK's snapshots ``api/go-workload.txt`` and ``api/go-check.txt``,
+   ``api/go-microservices.txt`` and ``api/go-k8s.txt``
+   (``go doc -all`` of ``go/workload``, ``go/check``, ``go/microservices`` and ``go/k8s``; each package's Go
    test ``TestAPISnapshotIsCurrent`` keeps its snapshot equal to the code)
    lose no line of the last release's: a removed or changed declaration is a
    break. Skipped, with a note, for a snapshot no release has yet.
@@ -50,6 +51,7 @@ GO_SNAPSHOTS = (
     SDK / "api" / "go-workload.txt",
     SDK / "api" / "go-check.txt",
     SDK / "api" / "go-microservices.txt",
+    SDK / "api" / "go-k8s.txt",
 )
 EXAMPLES = SDK / "examples"
 PACKAGE = "vibesys_evaluator"

@@ -4,7 +4,10 @@ A task describes its application with one `App`; the package builds its
 images, deploys it into a fresh namespace of the cluster that vibesys-cli's
 `kubernetes` resource gives (`KUBECONFIG`, `VIBESYS_K8S_REGISTRY`,
 `VIBESYS_K8S_BUILDER`), seeds it, waits until it serves, runs every phase in
-a pod of that namespace and deletes the namespace on every exit path.
+a pod of that namespace and deletes the namespace on every exit path. The work is the Go core's
+(``vibesys-evaluator k8s ...``); `attach` gives an accuracy check its fault actions on the sample's
+namespace: restart one or every pod of a Deployment, exec a command in a pod, flush a cache and
+wait for readiness again.
 """
 
 from __future__ import annotations
@@ -15,13 +18,19 @@ from typing import TYPE_CHECKING, Generic, Literal
 
 from vibesys_evaluator._private.typevars import D
 from vibesys_evaluator.microservices._k8s import _validate
+from vibesys_evaluator.microservices._k8s._deployment import (
+    Deployment,
+    ExecResult,
+    ReplacedPod,
+    attach,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from vibesys_evaluator.microservices import Step
 
-__all__ = ["App"]
+__all__ = ["App", "Deployment", "ExecResult", "ReplacedPod", "attach"]
 
 
 @dataclass(frozen=True, kw_only=True)

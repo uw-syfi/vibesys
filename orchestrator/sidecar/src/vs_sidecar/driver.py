@@ -128,8 +128,8 @@ class Driver(Protocol):
         """
         ...
 
-    def begin_turn(self, turn_id: str, prompt: str, *, message: orch.Message | None = None) -> None:
-        """Announce the next turn with its typed source message and route commands to it."""
+    def begin_turn(self, turn_id: str, prompt: str) -> None:
+        """Announce the next turn, with the words it sends, and route commands to it."""
         ...
 
     def run_turn(self, emit: Callable[[AgentEvent], None]) -> TurnResult:
@@ -140,7 +140,7 @@ class Driver(Protocol):
         """
         ...
 
-    def steer(self, turn_id: str, text: str, *, message: orch.Message | None = None) -> None:
+    def steer(self, turn_id: str, text: str) -> None:
         """Send *text* to turn *turn_id* if it is the one running, or raise ``SteerRefusedError``."""
         ...
 
@@ -271,10 +271,8 @@ class AgentshimDriver:
             raise SessionStateError(msg)
         return self._session
 
-    def begin_turn(self, turn_id: str, prompt: str, *, message: orch.Message | None = None) -> None:
+    def begin_turn(self, turn_id: str, prompt: str) -> None:
         """See ``Driver.begin_turn``."""
-        # Provider sessions consume the rendered prompt; scripted drivers use the typed source.
-        del message
         with self._lock:
             self._active = _Active(turn_id, prompt)
 
@@ -315,9 +313,8 @@ class AgentshimDriver:
                 return None
             return active.ticket
 
-    def steer(self, turn_id: str, text: str, *, message: orch.Message | None = None) -> None:
+    def steer(self, turn_id: str, text: str) -> None:
         """See ``Driver.steer``."""
-        del message
         ticket = self._ticket_of(turn_id)
         if ticket is None:
             msg = f"turn {turn_id} is not running"
@@ -422,6 +419,8 @@ def build_session(
         resume_id=request.resume_token.decode() or None,
         partial_text=True,
         disable_subagents=True,
+        # The host starts every turn: a wake-up an agent scheduled would never fire.
+        disable_self_scheduling=True,
         raw_sink=raw_sink,
         new_conversation_id=new_conversation_id,
     )

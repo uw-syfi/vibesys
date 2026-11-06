@@ -92,6 +92,28 @@ func Save(root string, config *pb.HostConfig) error {
 	return os.Rename(temporary.Name(), Path(root))
 }
 
+// Check says whether what the configuration names is there, as far as that can be known without
+// starting anything: the skills directory is a directory, and the job tool an executable file. A command
+// is only known when it runs. It names the field of the first that is not, and an empty field is not
+// looked at. The state directory is checked with its root, by gatewayroot.CheckState.
+func Check(config *pb.HostConfig) error {
+	if dir := config.GetSkillsDirectory(); dir != "" {
+		if info, err := os.Stat(dir); err != nil {
+			return fmt.Errorf("skills_directory: %w", err)
+		} else if !info.IsDir() {
+			return fmt.Errorf("skills_directory: %s is not a directory", dir)
+		}
+	}
+	if tool := config.GetJobTool(); tool != "" {
+		if info, err := os.Stat(tool); err != nil {
+			return fmt.Errorf("job_tool: %w", err)
+		} else if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+			return fmt.Errorf("job_tool: %s is not an executable file", tool)
+		}
+	}
+	return nil
+}
+
 // Digest names a configuration by what it says, however its file is laid out. The empty
 // configuration, which is what a missing file means, has the empty digest.
 func Digest(config *pb.HostConfig) string {
@@ -124,9 +146,11 @@ func ToolPath(config *pb.HostConfig, home string) []string {
 
 // sessionFacts are what a host keeps of the environment it was started in. None of them chooses
 // anything about the host: they say who the user is and how this login's programs reach each other.
-// XDG_RUNTIME_DIR and XDG_STATE_HOME stay only because they name the job tool's places, which runs
-// record and agents share with the operator's own shell, until that tool has a typed endpoint.
-var sessionFacts = []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "XDG_RUNTIME_DIR", "XDG_STATE_HOME"}
+// The others stay only because they name the job tool's places and its operator configuration, which
+// runs record and agents share with the operator's own shell, until that tool has a typed endpoint:
+// without them a daemon the host starts ignores the Slurm or Docker settings the operator's own
+// vibesys-cli obeys.
+var sessionFacts = []string{"USER", "LOGNAME", "SHELL", "TMPDIR", "XDG_RUNTIME_DIR", "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "VIBESYS_CLI_CONFIG"}
 
 // Environ is a host's whole environment: its home, PATH from its configuration, and the session
 // facts of getenv. Nothing else of getenv is looked at, so no setting of whoever started the host

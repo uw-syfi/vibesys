@@ -16,8 +16,12 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 )
 
-// identifyBound is how long a host has to say what it is.
-const identifyBound = 5 * time.Second
+const (
+	// identifyBound is how long a host has to say what it is.
+	identifyBound = 5 * time.Second
+	// clientLooks bounds how often a host reporting connected clients is asked again.
+	clientLooks = 25
+)
 
 // control speaks HostControlService over one connection already made.
 func control(connection net.Conn) (pb.HostControlServiceClient, func(), error) {
@@ -99,9 +103,35 @@ func StopIdle(ctx context.Context, socket string) error {
 	}
 }
 
+// occupied says the host has live runs or other clients connected. A connection that just closed, this
+// program's own for one, is counted until the host has seen it close, so a host that reports only
+// connections is asked again a few times before they are believed.
+func occupied(ctx context.Context, socket, release string, id *pb.IdentifyResponse) bool {
+	for range clientLooks {
+		if id.GetLiveRuns() > 0 {
+			return true
+		}
+		if id.GetConnectedClients() == 0 {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return true
+		case <-time.After(settleEvery):
+		}
+		again, err := Identify(ctx, socket, release)
+		if err != nil {
+			return true
+		}
+		id = again
+	}
+	return id.GetLiveRuns() > 0 || id.GetConnectedClients() > 0
+}
+
 // DialForAPI is Dial for a client of the host API, which shakes hands by the exact API hash and has
-// nothing to do with a host of another. Such a host is replaced when it holds no live run. One with
-// live runs stays, the client's handshake fails naming both hashes, and stayed is told why.
+// nothing to do with a host of another. Such a host is replaced when nothing depends on it: no live
+// run, no other client, and not a newer release than this one. One that stays fails the client's
+// handshake naming both hashes, and stayed is told why.
 func DialForAPI(ctx context.Context, socket string, launcher Launcher, holding Holding, release, apiHash string, stayed func(id *pb.IdentifyResponse)) (net.Conn, error) {
 	connection, err := Dial(ctx, socket, launcher, holding)
 	if err != nil {
@@ -114,7 +144,7 @@ func DialForAPI(ctx context.Context, socket string, launcher Launcher, holding H
 		// A host that cannot say what it is leaves it to the handshake.
 		return Dial(ctx, socket, launcher, holding)
 	}
-	if id.GetLiveRuns() > 0 {
+	if id.GetRelation() == pb.ReleaseRelation_RELEASE_RELATION_HOST_NEWER || occupied(ctx, socket, release, id) {
 		stayed(id)
 		return Dial(ctx, socket, launcher, holding)
 	}

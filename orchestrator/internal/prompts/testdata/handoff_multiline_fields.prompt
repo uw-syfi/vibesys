@@ -1,0 +1,15 @@
+Agent agent-w5 handed off plan 5.
+Candidate: commit dddddddddddddddddddddddddddddddddddddddd on branch x (parent eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee).
+Claim: a
+b
+Checks: 1
+2
+
+Measurement:   m  
+Learned: l1
+l2
+Next: n
+
+Open items: o1
+
+o2
