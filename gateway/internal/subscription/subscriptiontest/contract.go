@@ -534,7 +534,8 @@ func resubscribingKeepsTheCadence[V proto.Message](subject Subject[V], policy ho
 // the topic's own tests hold that.
 //
 // The goroutine count is the process's, which only this bubble changes while no
-// gateway test runs in parallel.
+// other test runs beside this one. Parallel subtests finish before their parent
+// test returns, so they never overlap the test that runs this contract.
 func stuckSamplerIsBounded[V proto.Message](subject Subject[V], policy hostoperations.TopicPolicy) error {
 	stuck, release := subject.Stuck()
 	released := false

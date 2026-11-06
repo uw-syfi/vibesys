@@ -39,6 +39,8 @@ func TestEveryLiveReadPathCarriesCanonicalPerformance(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
+			// Each case is its own host with its own run directory.
+			t.Parallel()
 			raw, err := base64.StdEncoding.DecodeString(c.Log)
 			if err != nil {
 				t.Fatal(err)

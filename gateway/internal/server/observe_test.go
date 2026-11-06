@@ -50,64 +50,72 @@ func publish(t *testing.T, dir string, head *storev1.RunHead) {
 // and every read states the facts its prefix measured.
 func TestOnlyPreviousWriterHeadsScanTheirLogOncePerPrefix(t *testing.T) {
 	for name, want := range corpusCases(t) {
-		dir := t.TempDir()
-		log, err := os.ReadFile(filepath.Join(corpus, name, "run.log"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "run.log"), log, 0600); err != nil {
-			t.Fatal(err)
-		}
-		stored, err := os.ReadFile(filepath.Join(corpus, name, "run.head"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		base := &storev1.RunHead{}
-		if err := proto.Unmarshal(stored, base); err != nil {
-			t.Fatal(err)
-		}
-		last := base.GetCommittedSeq()
-		type variant struct {
-			committed       uint64
-			stated, hasEpoc bool
-		}
-		for seed := int64(0); seed < 4; seed++ {
-			rng := rand.New(rand.NewSource(seed))
-			var observer headObserver
-			scanned := map[variant]bool{}
-			for range 100 {
-				v := variant{rng.Uint64()%(last+1) + 1, rng.Intn(2) == 0, rng.Intn(2) == 0}
-				if v.committed > last {
-					v.committed = last
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			log, err := os.ReadFile(filepath.Join(corpus, name, "run.log"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "run.log"), log, 0600); err != nil {
+				t.Fatal(err)
+			}
+			stored, err := os.ReadFile(filepath.Join(corpus, name, "run.head"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			base := &storev1.RunHead{}
+			if err := proto.Unmarshal(stored, base); err != nil {
+				t.Fatal(err)
+			}
+			last := base.GetCommittedSeq()
+			type variant struct {
+				committed       uint64
+				stated, hasEpoc bool
+			}
+			for seed := int64(0); seed < 4; seed++ {
+				rng := rand.New(rand.NewSource(seed))
+				var observer headObserver
+				scanned := map[variant]bool{}
+				// A scan costs the whole prefix, so the reads draw from a few prefixes: both
+				// sides of the measurement, the log's end and two drawn ones. Many reads then
+				// revisit a prefix, which is what the scan bound is about; on a long log, drawing
+				// from every sequence number almost never revisited one.
+				var prefixes []uint64
+				for _, seq := range []uint64{1, want.MeasurementSeq - 1, want.MeasurementSeq, want.MeasurementSeq + 1, last, rng.Uint64()%last + 1, rng.Uint64()%last + 1} {
+					prefixes = append(prefixes, min(max(seq, 1), last))
 				}
-				head := proto.Clone(base).(*storev1.RunHead)
-				head.CommittedSeq = proto.Uint64(v.committed)
-				head.Objective.InputValue = nil
-				head.Objective.InputStated = v.stated
-				head.PerformanceStated = true
-				if !v.hasEpoc {
-					head.Epoch = 0
+				for range 100 {
+					v := variant{prefixes[rng.Intn(len(prefixes))], rng.Intn(2) == 0, rng.Intn(2) == 0}
+					head := proto.Clone(base).(*storev1.RunHead)
+					head.CommittedSeq = proto.Uint64(v.committed)
+					head.Objective.InputValue = nil
+					head.Objective.InputStated = v.stated
+					head.PerformanceStated = true
+					if !v.hasEpoc {
+						head.Epoch = 0
+					}
+					publish(t, dir, head)
+					got, err := observer.read(dir)
+					if err != nil {
+						t.Fatalf("%s %+v: %v", name, v, err)
+					}
+					if !v.stated || !v.hasEpoc {
+						scanned[variant{committed: v.committed}] = true
+					}
+					measured := got.Objective.InputValue != nil
+					if measured != (!v.stated && v.committed >= want.MeasurementSeq) || (measured && *got.Objective.InputValue != want.Input) {
+						t.Fatalf("%s %+v: input %v, want %v from sequence %d", name, v, got.Objective.InputValue, want.Input, want.MeasurementSeq)
+					}
+					if got.Epoch != 1 {
+						t.Fatalf("%s %+v: epoch %d", name, v, got.Epoch)
+					}
 				}
-				publish(t, dir, head)
-				got, err := observer.read(dir)
-				if err != nil {
-					t.Fatalf("%s %+v: %v", name, v, err)
-				}
-				if !v.stated || !v.hasEpoc {
-					scanned[variant{committed: v.committed}] = true
-				}
-				measured := got.Objective.InputValue != nil
-				if measured != (!v.stated && v.committed >= want.MeasurementSeq) || (measured && *got.Objective.InputValue != want.Input) {
-					t.Fatalf("%s %+v: input %v, want %v from sequence %d", name, v, got.Objective.InputValue, want.Input, want.MeasurementSeq)
-				}
-				if got.Epoch != 1 {
-					t.Fatalf("%s %+v: epoch %d", name, v, got.Epoch)
+				if observer.scans > len(scanned) {
+					t.Fatalf("%s seed %d: %d scans for %d previous-writer prefixes", name, seed, observer.scans, len(scanned))
 				}
 			}
-			if observer.scans > len(scanned) {
-				t.Fatalf("%s seed %d: %d scans for %d previous-writer prefixes", name, seed, observer.scans, len(scanned))
-			}
-		}
+		})
 	}
 }
 
@@ -157,7 +165,7 @@ func objectiveHead(t *testing.T, stated bool, committed uint64) *storev1.RunHead
 // Reading a head costs no scan of a long log when its writer stated the facts. A log that no
 // scan could finish proves it: its damaged middle never matters to a current writer's head.
 func TestCurrentWriterHeadOfALongLogCostsNoScan(t *testing.T) {
-	const records = 100_000
+	const records = 10_000 // the assertions count scans, so the log needs length, not bulk
 	dir := t.TempDir()
 	syntheticLog(t, dir, records, len(runlog.Magic)+records*10)
 	var observer headObserver
@@ -182,7 +190,7 @@ func TestCurrentWriterHeadOfALongLogCostsNoScan(t *testing.T) {
 }
 
 func TestPreviousWriterHeadOfALongLogScansOnce(t *testing.T) {
-	const records = 100_000
+	const records = 10_000 // the assertions count scans, so the log needs length, not bulk
 	dir := t.TempDir()
 	syntheticLog(t, dir, records, 0)
 	publish(t, dir, objectiveHead(t, false, records))
