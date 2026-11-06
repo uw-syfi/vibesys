@@ -53,3 +53,38 @@ def test_the_lead_brief_carries_the_task_fanout_and_steering_verbatim(
 @given(task=_TASKS, fanout=st.integers(0, 64))
 def test_the_lead_brief_without_steering_mentions_no_steering(task: str, fanout: int) -> None:
     assert "steering" not in render(lead_message(task, fanout, ""))
+
+
+def reminder_message(kind: str, idle_seconds: int = 0) -> orch.Message:
+    """A reminder the orchestrator addresses to an agent."""
+    message = h.message()
+    message.ClearField("text")
+    if kind == "handoff_reminder":
+        message.handoff_reminder.SetInParent()
+    else:
+        message.lead_idle_reminder.CopyFrom(orch.LeadIdleReminder(idle_seconds=idle_seconds))
+    return message
+
+
+def test_the_handoff_reminder_is_pinned() -> None:
+    text = render(reminder_message("handoff_reminder"))
+    assert text == (GOLDENS / "handoff_reminder.md").read_text().rstrip("\n")
+
+
+def test_the_lead_idle_reminder_is_pinned() -> None:
+    text = render(reminder_message("lead_idle_reminder", 600))
+    assert text == (GOLDENS / "lead_idle_reminder.md").read_text().rstrip("\n")
+
+
+def test_the_handoff_reminder_asks_for_a_handoff_and_for_recorded_numbers() -> None:
+    text = render(reminder_message("handoff_reminder"))
+    assert "`post_handoff`" in text
+    assert "`vibesys-cli submit measure`" in text
+
+
+@given(minutes=st.integers(1, 24 * 60))
+def test_the_lead_idle_reminder_names_how_long_the_run_stood_still(minutes: int) -> None:
+    text = render(reminder_message("lead_idle_reminder", minutes * 60 + 59))
+    assert f"for {minutes} minutes" in text
+    assert "`post_report`" in text
+    assert "`final`" in text

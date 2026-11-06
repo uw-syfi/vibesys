@@ -21,7 +21,7 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... 
   run list [--json]
   run attach [RUN]
   run get [RUN] [--json]
-  run wait [RUN] --until started|report|ended --timeout DURATION [--json]
+  run wait [RUN] --until started|report|progress|stalled|ended --timeout DURATION [--after N] [--json]
   run steer [RUN] TEXT [--agent AGENT] [--json]
   run stop [RUN] [--yes]
   host status [--json]
@@ -37,6 +37,12 @@ host status and host stop never start a host; host restart does. A host with liv
 host stop --force ends the process that holds the host's lock, for a host that does not answer.
 host configure records what the next host starts with, and with no flag prints it.
 release verify checks the release in DIR against its manifest, prints its version, and needs no host.
+wait --until report returns for a final report and --until progress for any report. Both count the
+reports posted after the wait began (reports are numbered from 1; run get --json shows the numbers),
+and --after N counts those numbered above N instead; for a run that has already ended, with no
+--after, the report it already has counts. --until stalled returns when the run stands still: its
+lead is idle and no agent, job or message is outstanding. A wait for a report does not return for
+a stalled run: it runs to its timeout, which then says the run is stalled.
 Exit codes: 0 ok, 1 failed or refused, 2 usage, 3 timeout, 4 service unavailable.
 `
 

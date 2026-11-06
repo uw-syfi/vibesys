@@ -318,12 +318,26 @@ func (s *SQLite) Messages(run core.RunID, after uint64, limit int) ([]MessageRec
 	return out, err
 }
 
+// windowBound is a time as a window bound of the tables. A time outside what int64 nanoseconds can say is clamped to
+// the nearest bound, so that the zero time and a far-future time stay the ends of a window and do
+// not wrap around: time.Time.UnixNano is undefined for them, and for the year 9999 it came out
+// negative, which made the window of a run's whole history empty.
+func windowBound(t time.Time) int64 {
+	switch {
+	case t.Before(time.Unix(0, math.MinInt64)):
+		return math.MinInt64
+	case t.After(time.Unix(0, math.MaxInt64)):
+		return math.MaxInt64
+	}
+	return t.UnixNano()
+}
+
 // Turns implements Reader.
 func (s *SQLite) Turns(run core.RunID, from, to time.Time, limit int) (TurnWindow, error) {
 	var out TurnWindow
 	limit = pageLimit(limit, MaxWindowTurns)
 	err := s.reading(func(tx *sql.Tx) error {
-		rows, err := tx.Query(queryTurns, string(run), from.UnixNano(), to.UnixNano(), limit+1)
+		rows, err := tx.Query(queryTurns, string(run), windowBound(from), windowBound(to), limit+1)
 		if err != nil {
 			return fmt.Errorf("store: %w", err)
 		}

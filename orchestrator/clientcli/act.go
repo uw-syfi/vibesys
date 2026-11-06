@@ -60,11 +60,21 @@ func (c *call) dispatch(ctx context.Context, s *session, cmd *pb.Command) (*pb.R
 	return receipt, refusal(receipt)
 }
 
-// delivery says in words where a steering message stands. A rejected one is read back from the
-// stream, which carries every event up to the receipt, to give the reason.
+// delivery says in words where a steering message stands. The answer is read from the message as the
+// stream records it, after every event up to the receipt: the log and this answer are then one
+// decision, and the log's line for the same message later says what became of it.
 func (c *call) delivery(ctx context.Context, s *session, receipt *pb.Receipt, target string) (string, error) {
 	who := agentLabel(s.view.Agents[target], target)
-	switch receipt.GetDelivery() {
+	for s.view.Sequence < receipt.GetSequence() {
+		if _, err := s.feed.next(s.view); err != nil {
+			return "", err
+		}
+	}
+	delivery := receipt.GetDelivery()
+	if recorded, ok := s.view.Messages[receipt.GetMessageId()]; ok {
+		delivery = recorded.GetDelivery()
+	}
+	switch delivery {
 	case pb.Delivery_DELIVERY_QUEUED:
 		return fmt.Sprintf("queued: %s will see it when its current work ends", who), nil
 	case pb.Delivery_DELIVERY_STEERED:
@@ -74,11 +84,6 @@ func (c *call) delivery(ctx context.Context, s *session, receipt *pb.Receipt, ta
 	case pb.Delivery_DELIVERY_CONSUMED:
 		return fmt.Sprintf("%s has it", who), nil
 	case pb.Delivery_DELIVERY_REJECTED:
-		for s.view.Sequence < receipt.GetSequence() {
-			if _, err := s.feed.next(s.view); err != nil {
-				return "", err
-			}
-		}
 		reason := statusWord(s.view.Messages[receipt.GetMessageId()].GetRejection().String(), "REJECTION_")
 		return "", failed("%s did not take the message: %s", who, reason)
 	}

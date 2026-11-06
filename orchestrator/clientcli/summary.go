@@ -21,7 +21,7 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 		fmt.Fprintf(&b, "  %-11s %s\n", name, fmt.Sprintf(format, args...))
 	}
 	fmt.Fprintf(&b, "run %s\n", v.RunID)
-	row("status", "%s", statusWord(v.Run.GetStatus().String(), "RUN_STATUS_")+withPrefix(" by ", stopReason(v.Run)))
+	row("status", "%s", statusWord(v.Run.GetStatus().String(), "RUN_STATUS_")+withPrefix(" by ", stopReason(v.Run))+stallWords(v, now))
 	row("task", "%s", v.Run.GetTask())
 	row("repository", "%s", v.Run.GetRepository())
 	row("started", "%s ago", age(now, v.Run.GetCreatedAt().AsTime()))
@@ -32,11 +32,12 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 		row("note", "the snapshot was cut to fit, so agents, turns, checks and measures are not counted")
 	} else {
 		row("agents", "%s", agentCounts(v))
-		row("turns", "%s", turnTotals(v))
+		row("turns", "%d", len(v.Turns))
 		checks, measures := jobTotals(v.Search)
 		row("checks", "%s", checks)
 		row("measures", "%s", measures)
 	}
+	b.WriteString(usageRows(v))
 	row("best", "%s", best(v.Search))
 	row("last report", "%s", lastReport(v, zone))
 	return b.String()
@@ -66,12 +67,40 @@ func sortedKeys[K ~int32](m map[K]int) []K {
 	return keys
 }
 
-func turnTotals(v *View) string {
-	var total float64
-	for _, t := range v.Turns {
-		total += t.GetUsage().GetCostUsd()
+// stallWords says how long a stalled run has stood still, or that its lead has given its final
+// report, and is empty for a run that is neither.
+func stallWords(v *View, now time.Time) string {
+	if v.Run.GetFinalReported() {
+		return ", its lead has given its final report"
 	}
-	return fmt.Sprintf("%d, cost $%.4f", len(v.Turns), total)
+	if !v.Stalled() {
+		return ""
+	}
+	return ", stalled for " + age(now, v.Run.GetStalledSince().AsTime())
+}
+
+// usageRows is what the run has cost: the run's total, and each agent's, from the orchestrator's own
+// tallies, which count every finished turn and so stay right when a snapshot was cut. An agent that
+// has finished no turn that reported a cost has no row.
+func usageRows(v *View) string {
+	var b strings.Builder
+	total := usageWords(v.Run.GetUsage())
+	if total == "" {
+		total = "not reported yet"
+	}
+	fmt.Fprintf(&b, "  %-11s %s\n", "usage", total)
+	ids := make([]string, 0, len(v.Agents))
+	for id := range v.Agents {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		a := v.Agents[id]
+		if words := usageWords(a.GetUsage()); words != "" {
+			fmt.Fprintf(&b, "    %-9s %s  %s\n", statusWord(a.GetRole().String(), "AGENT_ROLE_"), id, words)
+		}
+	}
+	return b.String()
 }
 
 // jobTotals counts the finished and failed checks and measures of a search view.

@@ -1,8 +1,9 @@
 package store
 
-// schemaVersion is stored in meta. Version 2 upgrades queued identity payloads atomically;
-// other versions are refused.
-const schemaVersion = 3
+// schemaVersion is stored in meta. A store written under any other version is refused: nothing has
+// been released, so the stored format changes in place and old rows are not upgraded. Version 4
+// added report kinds and numbers, the stall and usage fields of a run, and the reminders.
+const schemaVersion = 4
 
 // The schema. It follows the draft in the design notes, with these deliberate differences:
 //

@@ -13,6 +13,10 @@ import (
 // MergeWindow is how often the daemon ends the hub's merge window. Run ticks at this rate.
 const MergeWindow = 50 * time.Millisecond
 
+// MaxBackoffTicks is the most ticks Run skips between tries of a step that keeps failing: 40 ticks
+// of MergeWindow are two seconds.
+const MaxBackoffTicks = 40
+
 // Clock tells the time. Production reads the system clock; a test sets one.
 type Clock interface{ Now() time.Time }
 

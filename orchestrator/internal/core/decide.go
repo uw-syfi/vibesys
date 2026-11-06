@@ -24,6 +24,8 @@ func Decide(s State, in Input) (State, []Event, []Effect) {
 		t.lost(b)
 	case JobUpdate:
 		t.job(b)
+	case JobsRunning:
+		t.jobsRunning(b)
 	case TimerFired:
 		t.timer(b)
 	default:
@@ -317,7 +319,13 @@ func (t *tx) postHandoff(c Command, b PostHandoff, r *Receipt) RunID {
 func (t *tx) postReport(c Command, b PostReport, r *Receipt) RunID {
 	caller := t.s.agents[callerAgent(c)]
 	r.Run, r.Agent = caller.Run, caller.ID
-	r.Message = t.post(Message{Run: caller.Run, From: caller.ID, Body: b.Report}).ID
+	run := t.s.runs[caller.Run]
+	run.ReportsPosted++
+	run.FinalReported = b.Report.Kind == ReportFinal
+	t.emit(run.ID, run)
+	report := b.Report
+	report.Sequence = run.ReportsPosted
+	r.Message = t.post(Message{Run: caller.Run, From: caller.ID, Body: report}).ID
 	return caller.Run
 }
 

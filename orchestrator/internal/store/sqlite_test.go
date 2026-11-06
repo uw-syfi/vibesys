@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -123,6 +124,19 @@ func TestEveryConnectionIsInWriteAheadLogModeWithItsBusyTimeout(t *testing.T) {
 	for i, r := range readers {
 		if r != want {
 			t.Errorf("reader connection %d settings %+v, want %+v", i, r, want)
+		}
+	}
+}
+
+// A store written under another schema version is refused, whichever way the version differs: the
+// stored format has not been released, so it changes in place and old rows are not read.
+func TestAStoreOfAnotherSchemaVersionIsRefused(t *testing.T) {
+	for _, version := range []int{2, 3, 5} {
+		dir, _ := populated(t, 1, 3)
+		damage(t, dir, fmt.Sprintf(`UPDATE meta SET value = %d WHERE key = 'schema_version'`, version))
+		_, err := store.OpenSQLite(dir, store.SQLiteOptions{})
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("schema version %d", version)) {
+			t.Fatalf("a store of version %d opened or failed for another reason: %v", version, err)
 		}
 	}
 }

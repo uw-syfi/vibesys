@@ -97,9 +97,8 @@ func (t *tx) turnEnded(a agentState, b TurnEnded) {
 		a.SessionFailures = 0
 	}
 	t.emit(a.Run, a.Agent)
-	done := a.Role != RoleLead && !a.HandedOff && a.Stop == StopNone && len(a.queue) == 0 && !t.steerPending(a.ID)
-	if done && t.s.runs[a.Run].Status == RunRunning {
-		t.notifyLead(a, AgentIdle, "")
+	if a.Role != RoleLead && !a.HandedOff && a.Stop == StopNone && len(a.queue) == 0 && !t.steerPending(a.ID) {
+		t.settled(a)
 	}
 }
 
@@ -158,6 +157,8 @@ func (t *tx) timer(b TimerFired) {
 			t.beginStop(run, StopDeadline)
 			t.sweep(run.ID)
 		}
+	case TimerLeadIdle:
+		t.leadIdle(b)
 	case TimerStopGrace:
 		if a, ok := t.live(b.Timer.Session); ok && a.Stop != StopNone {
 			t.effect(CloseSession{Session: b.Timer.Session, Force: true})

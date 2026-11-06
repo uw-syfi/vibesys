@@ -554,8 +554,19 @@ func (d *Daemon) pollJobs(ctx context.Context) (bool, error) {
 			errs = append(errs, fmt.Errorf("jobs of run %s: %w", run.ID, err))
 			continue
 		}
+		var going uint32
+		inputs := make([]core.InputBody, 0, len(updates)+1)
 		for _, u := range updates {
-			applied, err := d.Apply(u)
+			inputs = append(inputs, u)
+			if !u.State.Final() {
+				going++
+			}
+		}
+		// The count follows the updates, so a job that finished tells the lead before the run counts as
+		// having nothing going.
+		inputs = append(inputs, core.JobsRunning{Run: run.ID, Count: going})
+		for _, in := range inputs {
+			applied, err := d.Apply(in)
 			if err != nil {
 				errs = append(errs, err)
 				break
@@ -569,21 +580,36 @@ func (d *Daemon) pollJobs(ctx context.Context) (bool, error) {
 // Run steps on every wake and every tick until the context ends. ticks carries the merge window:
 // each one ends it for the hub, and also steps the daemon, so a quiet daemon still polls its jobs
 // and fires its timers. wake says a commit happened. The loop is the only caller of Step.
+//
+// A step that fails is tried again on a later tick, but not on the next ones: each failure in a
+// row doubles the number of ticks skipped, up to MaxBackoffTicks. What fails is usually a session
+// that is gone but not yet known to be, such as a sidecar whose socket vanished, and asking it again
+// every tick only fills the log; a commit (a wake) steps at once, and a step that succeeds ends the
+// backoff.
 func (d *Daemon) Run(ctx context.Context, ticks <-chan time.Time, wake <-chan struct{}, log *slog.Logger) {
+	failures, skip := 0, 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticks:
 			d.Hub.Flush()
+			if skip > 0 {
+				skip--
+				continue
+			}
 		case <-wake:
 		}
 		// Settle: what one step did may be what the next one needs, such as a turn that ends and a
 		// message that then starts another.
 		for {
 			moved, err := d.Step(ctx)
-			if err != nil && ctx.Err() == nil {
-				log.Warn("step failed; it will be retried", "err", err)
+			if err == nil {
+				failures, skip = 0, 0
+			} else if ctx.Err() == nil {
+				failures++
+				skip = min(1<<min(failures, 16)-1, MaxBackoffTicks)
+				log.Warn("step failed; it will be retried", "err", err, "failures", failures, "ticks_skipped", skip)
 			}
 			if !moved || err != nil || ctx.Err() != nil {
 				break

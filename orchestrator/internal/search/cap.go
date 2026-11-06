@@ -9,13 +9,18 @@ import (
 )
 
 // Cap projects an owned view to the bounded wire shape. It keeps the newest jobs
-// and only their results and troubles. Health and identity belong to the caller.
+// of the run named by s.RunId and only their results and troubles: the CLI's store holds the jobs of
+// every run of the task, and a run that showed an earlier run's jobs would count and replay work it
+// never did. A job no run claimed is left out and counted in UnattributedJobs. Health and identity
+// belong to the caller.
 func Cap(v View, s *pb.SearchState) *pb.SearchState {
 	s.UnattributedJobs, s.Truncated = v.UnattributedJobs, v.Truncated || len(v.Detail) > len(Detail(v.Detail))
 	for _, f := range v.Facts {
 		switch b := f.Fact.(type) {
 		case *cli.TaskFact_Job:
-			s.Jobs = append(s.Jobs, b.Job)
+			if submittedBy(b.Job, s.RunId) {
+				s.Jobs = append(s.Jobs, b.Job)
+			}
 		case *cli.TaskFact_Result:
 			s.Results = append(s.Results, b.Result)
 		case *cli.TaskFact_Judgment:
@@ -59,6 +64,11 @@ func Cap(v View, s *pb.SearchState) *pb.SearchState {
 	s.Plans = capList(s.Plans, 200, &s.Truncated)
 	boundBytes(s, v)
 	return s
+}
+
+// submittedBy says the run submitted the job.
+func submittedBy(j *cli.Job, run string) bool {
+	return slices.ContainsFunc(j.GetSubmitters(), func(s *cli.Submitter) bool { return s.GetRunId() == run })
 }
 
 func capList[T any](xs []T, n int, truncated *bool) []T {

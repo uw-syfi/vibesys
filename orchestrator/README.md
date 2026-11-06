@@ -191,10 +191,18 @@ vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness c
 vibesys-client run list                       # every run, newest first
 vibesys-client run attach [RUN]               # follow a run; Ctrl-C detaches and never stops it
 vibesys-client run get [RUN] [--json]         # status, agents, cost, checks, best, last report
-vibesys-client run wait [RUN] --until started|report|ended --timeout 30m
+vibesys-client run wait [RUN] --until started|report|progress|stalled|ended --timeout 30m [--after N]
 vibesys-client run steer [RUN] "text" [--agent AGENT]
 vibesys-client run stop [RUN] [--yes]
 ```
+
+A report is a `progress` note or a `final` report, numbered from 1 within its run. `wait --until report`
+returns for a final report and `--until progress` for any report, counting those posted after the wait began
+(or numbered above `--after N`; an ended run counts the one it has). A run is stalled when its lead is idle
+and no agent, job or message is outstanding: `--until stalled` returns then, `run get` says how long, and the
+orchestrator reminds the lead after 10 idle minutes (at most 3 times per run). A lead that has given a final report and
+has had no new input since is finished, not stalled: it is not reminded, and `run get` says so. A wait for a report on a
+stalled run goes on to its timeout, which names the stall.
 
 `vibesys-host` always serves `HostControlService` (`Identify`, `Stop`), whether or not it can serve the
 orchestrator, and `vibesys-client host` is its client. It never starts a host to ask a question:

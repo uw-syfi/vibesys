@@ -48,6 +48,10 @@ def render(message: orch.Message) -> str:
             .removeprefix("AGENT_STATUS_")
             .lower()
         )
+    elif kind == "handoff_reminder":
+        template = "handoff_reminder"
+    elif kind == "lead_idle_reminder":
+        template, context["reminder"] = "lead_idle_reminder", message.lead_idle_reminder
     else:
         msg = "a message with no body has no prompt"
         raise ValueError(msg)

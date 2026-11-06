@@ -109,6 +109,8 @@ func generatedEffect(r *rand.Rand) *pb.Effect {
 	var e core.Effect
 	switch b := in.GetBody().(type) {
 	case *pb.Effect_LaunchSession:
+		// The plugin is filled in by the shell when it launches the session, and is not a core fact.
+		b.LaunchSession.Plugin = nil
 		e = core.LaunchSession{Session: ref(b.LaunchSession.GetSession())}
 	case *pb.Effect_StartTurn:
 		e = core.StartTurn{Turn: core.TurnID(b.StartTurn.GetTurnId())}
@@ -127,9 +129,13 @@ func generatedEffect(r *rand.Rand) *pb.Effect {
 
 // armed is the timer's core value, with a deadline's session dropped because a deadline has none.
 func armed(t *pb.ArmTimer, session core.Session) core.ArmTimer {
-	if t.GetKind() == pb.TimerKind_TIMER_KIND_RUN_DEADLINE {
+	switch t.GetKind() {
+	case pb.TimerKind_TIMER_KIND_RUN_DEADLINE:
 		t.Session = nil
 		return core.ArmTimer{Kind: core.TimerRunDeadline, Run: core.RunID(t.GetRunId())}
+	case pb.TimerKind_TIMER_KIND_LEAD_IDLE:
+		t.Session = nil
+		return core.ArmTimer{Kind: core.TimerLeadIdle, Run: core.RunID(t.GetRunId()), FireAt: t.GetFireAt().AsTime()}
 	}
 	return core.ArmTimer{Kind: core.TimerStopGrace, Session: session}
 }

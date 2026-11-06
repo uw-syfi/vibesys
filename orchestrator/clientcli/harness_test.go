@@ -107,6 +107,8 @@ type world struct {
 	ids      *counterIDs
 	// onStdout, when set, sees stdout as it is written.
 	onStdout func(written string)
+	// onStderr, when set, sees stderr as it is written.
+	onStderr func(written string)
 }
 
 func newWorld(t testing.TB, dial client.Dialer) *world {
@@ -139,10 +141,10 @@ func (w *world) run(ctx context.Context, args ...string) result {
 }
 
 func (w *world) runUnbounded(ctx context.Context, args ...string) result {
-	var errb bytes.Buffer
+	errb := &watchedBuffer{on: w.onStderr}
 	stdout := &watchedBuffer{on: w.onStdout}
 	env := clientcli.Env{
-		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: &errb, Terminal: w.terminal,
+		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: errb, Terminal: w.terminal,
 		Dir: w.dir, FS: w.files, Canonical: w.canonical, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
 		// No host answers HostControlService here, so a verb starts one, which is Connect.
 		Connect: func(string) (clientcli.Dial, error) { return w.dial, nil },
@@ -152,6 +154,28 @@ func (w *world) runUnbounded(ctx context.Context, args ...string) result {
 	}
 	code := clientcli.Main(ctx, args, env)
 	return result{code: code, stdout: stdout.String(), stderr: errb.String()}
+}
+
+// runWaitingToTimeOut runs a command line that waits, fires its timer once it has begun to wait
+// (it has then read the snapshot), and returns its result.
+func (w *world) runWaitingToTimeOut(args ...string) result {
+	w.t.Helper()
+	began := make(chan struct{})
+	var once sync.Once
+	w.onStderr = func(written string) {
+		if strings.Contains(written, "waiting for") {
+			once.Do(func() { close(began) })
+		}
+	}
+	done := make(chan result, 1)
+	go func() { done <- w.run(context.Background(), args...) }()
+	select {
+	case <-began:
+	case <-time.After(guard):
+		w.t.Fatal("the wait never began")
+	}
+	w.clock.fire(w.t)
+	return <-done
 }
 
 // canonical follows w.links from the longest leading part of path that is one, as the file system does.
@@ -212,8 +236,14 @@ func (l *live) startRun(t testing.TB, repository, task string) (run, lead string
 	return receipt.GetRunId(), string(state.Lead)
 }
 
-// postReport posts a report as the run's lead, through the agent socket.
+// postReport posts a progress report as the run's lead, through the agent socket.
 func (l *live) postReport(t testing.TB, lead, headline string) {
+	t.Helper()
+	l.postReportOf(t, lead, headline, pb.ReportKind_REPORT_KIND_PROGRESS)
+}
+
+// postReportOf posts a report of a kind as the run's lead.
+func (l *live) postReportOf(t testing.TB, lead, headline string, kind pb.ReportKind) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), guard)
 	defer cancel()
@@ -228,7 +258,7 @@ func (l *live) postReport(t testing.TB, lead, headline string) {
 			t.Fatal(err)
 		}
 		defer agent.Close()
-		receipt, err := agent.Dispatch(ctx, &pb.Command{Id: "report-" + headline, Body: &pb.Command_PostReport{PostReport: &pb.PostReport{Report: &pb.Report{Headline: headline}}}})
+		receipt, err := agent.Dispatch(ctx, &pb.Command{Id: "report-" + headline, Body: &pb.Command_PostReport{PostReport: &pb.PostReport{Report: &pb.Report{Kind: kind, Headline: headline}}}})
 		if err != nil || receipt.GetRefusal() != pb.Refusal_REFUSAL_UNSPECIFIED {
 			t.Fatalf("report: %v %v", receipt, err)
 		}

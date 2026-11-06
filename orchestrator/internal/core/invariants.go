@@ -27,6 +27,15 @@ func (s State) Violations() []string {
 		if subagents[run.ID] > run.FanoutLimit {
 			bad("run %s has %d live subagents over its limit of %d", run.ID, subagents[run.ID], run.FanoutLimit)
 		}
+		if run.FinalReported && !run.StalledSince.IsZero() {
+			bad("run %s has given its final report and is stalled since %v", run.ID, run.StalledSince)
+		}
+		if stalled := s.stalled(run); stalled != !run.StalledSince.IsZero() {
+			bad("run %s is %s with stalled since %v, but its stall is %t", run.ID, run.Status, run.StalledSince, stalled)
+		}
+		if run.LeadReminders > MaxLeadReminders {
+			bad("run %s sent its lead %d reminders, over the limit of %d", run.ID, run.LeadReminders, MaxLeadReminders)
+		}
 		if run.Status.Final() && subagents[run.ID]+s.liveLead(run) > 0 {
 			bad("run %s is %s with live agents", run.ID, run.Status)
 		}

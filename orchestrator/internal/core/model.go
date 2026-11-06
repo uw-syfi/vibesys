@@ -18,6 +18,19 @@ type Run struct {
 	// Location is where the run's agents find the vibesys-cli and its daemon and store. It is
 	// recorded when the run starts and every session of the run is launched with it.
 	Location CliLocation
+	// ReportsPosted counts the reports the lead has posted; the next is numbered one more.
+	ReportsPosted uint32
+	// FinalReported says the lead's latest report is a final one and it has had no new input since: it
+	// has finished what it was asked, so the run is not stalled and the lead is not reminded.
+	FinalReported bool
+	// StalledSince is the zero time unless the run is stalled: see stalled.
+	StalledSince time.Time
+	// ActiveJobs counts the run's jobs the job tool reports as queued or running.
+	ActiveJobs uint32
+	// LeadReminders counts the reminders sent to the lead because the run stood still.
+	LeadReminders uint32
+	// Usage is the cost of every finished turn of every agent of the run.
+	Usage Usage
 }
 
 // CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
@@ -73,6 +86,10 @@ type Agent struct {
 	// StartFailure says why the session never opened, when it was lost or failed while launching.
 	// It is empty for a session that opened and while one is live.
 	StartFailure StartFailure
+	// HandoffReminded says the agent was reminded to post a handoff in this session.
+	HandoffReminded bool
+	// Usage is the cost of the agent's finished turns, across its sessions.
+	Usage Usage
 }
 
 // Usage is what a turn has cost. Fields a provider does not report are nil, never zero.
@@ -103,6 +120,38 @@ func (u Usage) merged(newer Usage) Usage {
 	}
 	if newer.CostUSD != nil {
 		out.CostUSD = newer.CostUSD
+	}
+	return out
+}
+
+// plus returns the sum of two usages. A field neither reports stays nil, and one only a side
+// reports is that side's, so a provider that reports tokens and no dollars adds up to tokens and no
+// dollars, never to a zero cost.
+func (u Usage) plus(o Usage) Usage {
+	sum := func(a, b *uint64) *uint64 {
+		switch {
+		case a == nil:
+			return b
+		case b == nil:
+			return a
+		}
+		total := *a + *b
+		return &total
+	}
+	out := Usage{
+		InputTokens:         sum(u.InputTokens, o.InputTokens),
+		CacheReadTokens:     sum(u.CacheReadTokens, o.CacheReadTokens),
+		CacheCreationTokens: sum(u.CacheCreationTokens, o.CacheCreationTokens),
+		OutputTokens:        sum(u.OutputTokens, o.OutputTokens),
+		ReasoningTokens:     sum(u.ReasoningTokens, o.ReasoningTokens),
+		CostUSD:             u.CostUSD,
+	}
+	switch {
+	case u.CostUSD == nil:
+		out.CostUSD = o.CostUSD
+	case o.CostUSD != nil:
+		total := *u.CostUSD + *o.CostUSD
+		out.CostUSD = &total
 	}
 	return out
 }
@@ -189,8 +238,12 @@ type (
 		Next         string
 		OpenItems    string
 	}
-	// Report is what the lead tells the operator.
+	// Report is what the lead tells the operator. Kind says whether it is a note along the way or
+	// the lead's last word. Sequence is zero in a command and the report's place in its run, from 1,
+	// once recorded.
 	Report struct {
+		Kind        ReportKind
+		Sequence    uint32
 		Headline    string
 		Changed     string
 		InFlight    string
@@ -204,6 +257,10 @@ type (
 		SubmittedBy AgentID
 		Detail      string
 	}
+	// HandoffReminder asks an agent that ended a turn without a handoff to post one.
+	HandoffReminder struct{}
+	// LeadIdleReminder tells the lead its run has stood still for Idle.
+	LeadIdleReminder struct{ Idle time.Duration }
 	// SubagentSettled tells the lead a subagent stopped working without a handoff.
 	SubagentSettled struct {
 		Agent  AgentID
@@ -212,13 +269,15 @@ type (
 	}
 )
 
-func (Text) messageBody()            {}
-func (Brief) messageBody()           {}
-func (LeadBrief) messageBody()       {}
-func (Handoff) messageBody()         {}
-func (Report) messageBody()          {}
-func (JobFinished) messageBody()     {}
-func (SubagentSettled) messageBody() {}
+func (Text) messageBody()             {}
+func (Brief) messageBody()            {}
+func (LeadBrief) messageBody()        {}
+func (Handoff) messageBody()          {}
+func (Report) messageBody()           {}
+func (JobFinished) messageBody()      {}
+func (SubagentSettled) messageBody()  {}
+func (HandoffReminder) messageBody()  {}
+func (LeadIdleReminder) messageBody() {}
 
 // Message is typed mail between agents and the operator.
 type Message struct {
@@ -248,6 +307,8 @@ func (m Message) trigger() TurnTrigger {
 		return TriggerJobFinished
 	case SubagentSettled:
 		return TriggerSubagentSettled
+	case HandoffReminder, LeadIdleReminder:
+		return TriggerReminder
 	}
 	if m.From == "" {
 		return TriggerOperator

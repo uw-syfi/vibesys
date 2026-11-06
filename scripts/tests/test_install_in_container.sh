@@ -291,7 +291,7 @@ phase_product() {
   [ -n "$run" ] || die "run start printed no run id"
 
   vibesys-client run wait --until report --timeout 80s | tee /tmp/wait.out
-  grep -q "report:" /tmp/wait.out || die "wait --until report did not show the report"
+  grep -q "final report 1:" /tmp/wait.out || die "wait --until report did not show the report"
 
   vibesys-client run get --json >/tmp/get.json
   "$py" - /tmp/get.json "$run" <<'EOF' || die "get --json does not show the run, its agents and its report"

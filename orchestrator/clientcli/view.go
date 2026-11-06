@@ -1,6 +1,7 @@
 package clientcli
 
 import (
+	"cmp"
 	"slices"
 	"time"
 
@@ -27,6 +28,12 @@ const (
 	MessageRejected
 	JobMoved
 	Measured
+	// RunStalled says the run now stands still: see Run.stalled_since. RunResumed says it stopped
+	// standing still.
+	RunStalled
+	RunResumed
+	// ReminderSent says the orchestrator reminded an agent of something it owes.
+	ReminderSent
 )
 
 // Change is one thing that happened to the run, with the typed message that shows it.
@@ -169,8 +176,9 @@ func pick(t *timestamppb.Timestamp, fallback time.Time) time.Time {
 func (v *View) setRun(r *pb.Run, now time.Time) []Change {
 	previous := v.Run
 	v.Run = r
+	out := stallChange(previous, r, now)
 	if previous.GetStatus() == r.GetStatus() {
-		return nil
+		return out
 	}
 	at := pick(r.GetCreatedAt(), now)
 	switch {
@@ -179,7 +187,20 @@ func (v *View) setRun(r *pb.Run, now time.Time) []Change {
 	case r.GetEndedAt() != nil:
 		at = pick(r.GetEndedAt(), now)
 	}
-	return []Change{{Kind: RunMoved, At: at, Run: r}}
+	return append([]Change{{Kind: RunMoved, At: at, Run: r}}, out...)
+}
+
+// stallChange is what the run's stall shows that the previous state of the run did not: a run first
+// seen already stalled is told with the time it began, and one that stops standing still is told
+// with the time it was seen to.
+func stallChange(previous, r *pb.Run, now time.Time) []Change {
+	switch {
+	case r.GetStalledSince() != nil && previous.GetStalledSince() == nil:
+		return []Change{{Kind: RunStalled, At: r.GetStalledSince().AsTime(), Run: r}}
+	case r.GetStalledSince() == nil && previous.GetStalledSince() != nil:
+		return []Change{{Kind: RunResumed, At: now, Run: r}}
+	}
+	return nil
 }
 
 func (v *View) setAgent(a *pb.Agent, now time.Time) []Change {
@@ -218,6 +239,8 @@ func (v *View) setMessage(m *pb.Message, now time.Time) []Change {
 			return []Change{{Kind: JobFinishedMessage, At: at, Message: m}}
 		case *pb.Message_SubagentSettled:
 			return []Change{{Kind: SubagentSettled, At: at, Message: m}}
+		case *pb.Message_HandoffReminder, *pb.Message_LeadIdleReminder:
+			return []Change{{Kind: ReminderSent, At: at, Message: m, Agent: v.Agents[m.GetToAgentId()]}}
 		}
 	}
 	if m.GetDelivery() == pb.Delivery_DELIVERY_REJECTED && previous.GetDelivery() != pb.Delivery_DELIVERY_REJECTED && m.GetFromAgentId() == "" {
@@ -246,7 +269,8 @@ func (v *View) Started() bool {
 // Over says the run has a final status.
 func (v *View) Over() bool { return v.Run != nil && !live(v.Run) }
 
-// Reports are the reports posted in the run, oldest first.
+// Reports are the reports posted in the run, oldest first: in the order the orchestrator numbered
+// them.
 func (v *View) Reports() []*pb.Message {
 	var out []*pb.Message
 	for _, m := range v.Messages {
@@ -254,9 +278,30 @@ func (v *View) Reports() []*pb.Message {
 			out = append(out, m)
 		}
 	}
-	slices.SortFunc(out, func(a, b *pb.Message) int { return a.GetAt().AsTime().Compare(b.GetAt().AsTime()) })
+	slices.SortFunc(out, func(a, b *pb.Message) int {
+		if c := cmp.Compare(a.GetReport().GetSequence(), b.GetReport().GetSequence()); c != 0 {
+			return c
+		}
+		return a.GetAt().AsTime().Compare(b.GetAt().AsTime())
+	})
 	return out
 }
+
+// ReportAfter is the newest report numbered above after, of the final kind only when finalOnly,
+// or nil when there is none.
+func (v *View) ReportAfter(after uint32, finalOnly bool) *pb.Message {
+	var found *pb.Message
+	for _, m := range v.Reports() {
+		r := m.GetReport()
+		if r.GetSequence() > after && (!finalOnly || r.GetKind() == pb.ReportKind_REPORT_KIND_FINAL) {
+			found = m
+		}
+	}
+	return found
+}
+
+// Stalled says the run stands still: see Run.stalled_since.
+func (v *View) Stalled() bool { return v.Run.GetStalledSince() != nil }
 
 // Snapshot is the view as a RunsSnapshot of this one run, in the shape the service sends.
 func (v *View) Snapshot() *pb.RunsSnapshot {

@@ -2,6 +2,7 @@ package clientcli_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -17,15 +18,22 @@ func TestWaitReturnsAtOnceWhenTheConditionAlreadyHolds(t *testing.T) {
 	run := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)
 	live := leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)
 	ended := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_ENDED, 0)
-	cases := map[string]*pb.WatchRunsResponse{
-		"started": snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{live}),
-		"report":  snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{live}, reportMessage("run-1", "m1", "done", 3)),
-		"ended":   snapshotFrame(5, false, []*pb.Run{ended}, []*pb.Agent{live}),
+	final := reportOf("run-1", "m1", "done", 3, 1, pb.ReportKind_REPORT_KIND_FINAL)
+	cases := map[string]struct {
+		frame *pb.WatchRunsResponse
+		extra []string
+	}{
+		"started": {frame: snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{live})},
+		// A report that came before the wait counts when the caller says which it has read.
+		"report":   {frame: snapshotFrame(5, false, []*pb.Run{reported("run-1", 1)}, []*pb.Agent{live}, final), extra: []string{"--after", "0"}},
+		"progress": {frame: snapshotFrame(5, false, []*pb.Run{reported("run-1", 1)}, []*pb.Agent{live}, reportMessage("run-1", "m1", "note", 3)), extra: []string{"--after", "0"}},
+		"stalled":  {frame: snapshotFrame(5, false, []*pb.Run{stalledRun("run-1", 1)}, []*pb.Agent{live})},
+		"ended":    {frame: snapshotFrame(5, false, []*pb.Run{ended}, []*pb.Agent{live})},
 	}
-	for until, frame := range cases {
+	for until, c := range cases {
 		t.Run(until, func(t *testing.T) {
-			w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
-			got := w.run(context.Background(), waitArgs(until)...)
+			w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{c.frame}}))
+			got := w.run(context.Background(), append(waitArgs(until), c.extra...)...)
 			if got.code != 0 {
 				t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
 			}
@@ -64,7 +72,7 @@ func TestWaitOnARunThatEndsFirstExitsOne(t *testing.T) {
 	if got.code != 1 {
 		t.Fatalf("exit %d, want 1; stderr %q", got.code, got.stderr)
 	}
-	contains(t, "stderr", got.stderr, "ended before a report was posted")
+	contains(t, "stderr", got.stderr, "ended before a final report was posted")
 }
 
 func TestWaitForTheEndOfARunThatFailedExitsOne(t *testing.T) {
@@ -85,21 +93,22 @@ func TestWaitTimesOutWithExitThree(t *testing.T) {
 	run := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)
 	f := &fakeService{frames: []*pb.WatchRunsResponse{snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)})}}
 	w := newWorld(t, serveFake(t, f))
-	done := make(chan result, 1)
-	go func() { done <- w.run(context.Background(), waitArgs("report")...) }()
-	w.clock.fire(t)
-	got := <-done
+	got := w.runWaitingToTimeOut(waitArgs("report")...)
 	if got.code != 3 {
 		t.Fatalf("exit %d, want 3; stderr %q", got.code, got.stderr)
 	}
-	contains(t, "stderr", got.stderr, "timed out after 1m30s", "a report was posted")
+	contains(t, "stderr", got.stderr, "timed out after 1m30s", "a final report was posted", "run-1 is running")
+	if strings.Contains(got.stderr, "stalled") {
+		t.Errorf("a run that is not stalled is called stalled: %q", got.stderr)
+	}
 }
 
 func TestWaitJSONIsTheSnapshotOfTheRun(t *testing.T) {
 	run := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)
-	frame := snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)}, reportMessage("run-1", "m1", "done", 3))
+	run.ReportsPosted = 1
+	frame := snapshotFrame(5, false, []*pb.Run{run}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)}, reportOf("run-1", "m1", "done", 3, 1, pb.ReportKind_REPORT_KIND_FINAL))
 	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
-	got := w.run(context.Background(), append(waitArgs("report"), "--json")...)
+	got := w.run(context.Background(), append(waitArgs("report"), "--after", "0", "--json")...)
 	var snapshot pb.RunsSnapshot
 	if err := protojson.Unmarshal([]byte(got.stdout), &snapshot); err != nil || len(snapshot.GetMessages()) != 1 {
 		t.Fatalf("stdout %q: %v", got.stdout, err)
@@ -118,4 +127,105 @@ func TestWaitNeedsAGoalAndABound(t *testing.T) {
 			t.Errorf("%v: exit %d, want 2", args, got.code)
 		}
 	}
+}
+
+// A progress note is not the result, and neither is a report that came before the wait: the wait
+// counts final reports posted after it began, and returns for the one that arrives.
+func TestWaitForAReportIgnoresProgressNotesAndReportsFromBeforeIt(t *testing.T) {
+	lead := leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)
+	earlier := []*pb.Message{
+		reportOf("run-1", "m1", "first note", 1, 1, pb.ReportKind_REPORT_KIND_PROGRESS),
+		reportOf("run-1", "m2", "an early final", 2, 2, pb.ReportKind_REPORT_KIND_FINAL),
+	}
+	frames := []*pb.WatchRunsResponse{
+		snapshotFrame(5, false, []*pb.Run{reported("run-1", 2)}, []*pb.Agent{lead}, earlier...),
+		runEvent(6, reported("run-1", 3), 4),
+		messageEvent(7, reportOf("run-1", "m3", "a new note", 4, 3, pb.ReportKind_REPORT_KIND_PROGRESS), 4),
+		runEvent(8, reported("run-1", 4), 5),
+		messageEvent(9, reportOf("run-1", "m4", "the result", 5, 4, pb.ReportKind_REPORT_KIND_FINAL), 5),
+	}
+	w := newWorld(t, serveFake(t, &fakeService{frames: frames}))
+	got := w.run(context.Background(), waitArgs("report")...)
+	if got.code != 0 {
+		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stdout", got.stdout, "final report 4", "the result")
+
+	// Any report is enough for progress, and the first one after the wait began is the one it reports.
+	got = w.run(context.Background(), waitArgs("progress")...)
+	if got.code != 0 {
+		t.Fatalf("progress: exit %d, stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stdout", got.stdout, "progress report 3", "a new note")
+}
+
+// --after names the last report the caller has read, whatever its kind.
+func TestWaitAfterCountsTheReportsNumberedAboveIt(t *testing.T) {
+	messages := []*pb.Message{
+		reportOf("run-1", "m1", "one", 1, 1, pb.ReportKind_REPORT_KIND_PROGRESS),
+		reportOf("run-1", "m2", "two", 2, 2, pb.ReportKind_REPORT_KIND_PROGRESS),
+	}
+	frame := snapshotFrame(5, false, []*pb.Run{reported("run-1", 2)}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)}, messages...)
+	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	got := w.run(context.Background(), append(waitArgs("progress"), "--after", "1")...)
+	if got.code != 0 {
+		t.Fatalf("--after 1: exit %d, stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stdout", got.stdout, "report 2", "two")
+
+	w = newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	if got := w.runWaitingToTimeOut(append(waitArgs("progress"), "--after", "2")...); got.code != 3 {
+		t.Fatalf("--after 2: exit %d, want 3; stderr %q", got.code, got.stderr)
+	}
+}
+
+// A run that has ended posts no more reports, so the wait returns the one it has.
+func TestWaitForAReportOnAnEndedRunReturnsTheFinalReportItHas(t *testing.T) {
+	ended := runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_ENDED, 0)
+	ended.ReportsPosted = 2
+	messages := []*pb.Message{
+		reportOf("run-1", "m1", "the result", 1, 1, pb.ReportKind_REPORT_KIND_FINAL),
+		reportOf("run-1", "m2", "after it", 2, 2, pb.ReportKind_REPORT_KIND_PROGRESS),
+	}
+	frame := snapshotFrame(5, false, []*pb.Run{ended}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ENDED)}, messages...)
+	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	got := w.run(context.Background(), waitArgs("report")...)
+	if got.code != 0 {
+		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stdout", got.stdout, "final report 1", "the result")
+}
+
+// A wait for a result from a run that stands still does not return, and its timeout says why.
+func TestWaitForAReportTimesOutAndSaysTheRunIsStalled(t *testing.T) {
+	frame := snapshotFrame(5, false, []*pb.Run{stalledRun("run-1", 0)}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_IDLE)})
+	w := newWorld(t, serveFake(t, &fakeService{frames: []*pb.WatchRunsResponse{frame}}))
+	got := w.runWaitingToTimeOut(waitArgs("report")...)
+	if got.code != 3 {
+		t.Fatalf("exit %d, want 3; stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stderr", got.stderr, "timed out after 1m30s", "run-1 is running, stalled for 4m")
+}
+
+// The wait for a stall subscribes: nothing is read until the run stands still.
+func TestWaitUntilStalledReturnsWhenTheRunStandsStill(t *testing.T) {
+	frames := []*pb.WatchRunsResponse{
+		snapshotFrame(5, false, []*pb.Run{runOf("run-1", "/work/repo", pb.RunStatus_RUN_STATUS_RUNNING, 0)}, []*pb.Agent{leadOf("run-1", pb.AgentStatus_AGENT_STATUS_ACTIVE)}),
+		runEvent(6, stalledRun("run-1", 3), 3),
+	}
+	w := newWorld(t, serveFake(t, &fakeService{frames: frames}))
+	got := w.run(context.Background(), waitArgs("stalled")...)
+	if got.code != 0 {
+		t.Fatalf("exit %d, stderr %q", got.code, got.stderr)
+	}
+	contains(t, "stdout", got.stdout, "run-1 is stalled", "idle since 03:03:00")
+}
+
+func TestWaitAfterGoesOnlyWithReports(t *testing.T) {
+	w := newWorld(t, serveFake(t, &fakeService{}))
+	got := w.run(context.Background(), append(waitArgs("ended"), "--after", "1")...)
+	if got.code != 2 {
+		t.Fatalf("exit %d, want 2", got.code)
+	}
+	contains(t, "stderr", got.stderr, "--after")
 }

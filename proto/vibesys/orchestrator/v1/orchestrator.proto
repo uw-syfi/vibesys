@@ -81,6 +81,9 @@ enum TurnTrigger {
   TURN_TRIGGER_MESSAGE = 6;
   // A subagent settled without a handoff.
   TURN_TRIGGER_SUBAGENT_SETTLED = 7;
+  // The orchestrator reminded the agent of something it owes: a handoff, or a lead that has
+  // gone quiet its report or next step.
+  TURN_TRIGGER_REMINDER = 8;
 }
 
 // TurnStatus is where a turn is. All but RUNNING are final.
@@ -161,6 +164,14 @@ enum StartFailureReason {
   START_FAILURE_REASON_OTHER = 7;
 }
 
+// ReportKind says what a report is for. A final report says the lead has finished what it was asked
+// to do; a progress report is a note along the way. A waiter that wants the result waits for FINAL.
+enum ReportKind {
+  REPORT_KIND_UNSPECIFIED = 0;
+  REPORT_KIND_PROGRESS = 1;
+  REPORT_KIND_FINAL = 2;
+}
+
 // JobOutcome is how a vibesys-cli job finished.
 enum JobOutcome {
   JOB_OUTCOME_UNSPECIFIED = 0;
@@ -191,6 +202,22 @@ message Run {
   // when the run starts and never changed, so a relaunch of any of its sessions meets the same
   // ones. Empty for a run that started before it was recorded.
   CliLocation cli_location = 11;
+  // How many reports the run's lead has posted. The next report is numbered one more.
+  uint32 reports_posted = 12;
+  // Set while the run has nothing left that could move it: its lead is idle, no other agent is
+  // working, no message waits and no job is running. It is the time that became true, and it is
+  // cleared as soon as any of that changes. A lead that ended a turn with a provider wake-up looks
+  // idle here too, which is why a run shows a time and not a status.
+  google.protobuf.Timestamp stalled_since = 13;
+  // How many jobs of this run, as the job tool reports them, are queued or running.
+  uint32 active_jobs = 14;
+  // How many reminders the orchestrator has sent the lead because the run stood still.
+  uint32 lead_reminders = 15;
+  // What every turn of every agent of the run has cost, so far.
+  Usage usage = 16;
+  // The lead's latest report is a final one and it has had no new input since: it has finished, so
+  // the run is not stalled and the lead is not reminded.
+  bool final_reported = 17;
 }
 
 // CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
@@ -250,6 +277,10 @@ message Agent {
   // Why the session never opened, when it was lost or failed while launching. Unspecified for a
   // session that opened, and while one is live. end_detail has the details.
   StartFailureReason start_failure_reason = 20 [(buf.validate.field).enum.defined_only = true];
+  // The agent was reminded to post its handoff in this session, and is not reminded again.
+  bool handoff_reminded = 21;
+  // What the agent's finished turns have cost, across its sessions.
+  Usage usage = 22;
 }
 
 // Capabilities are what a session can do. The sidecar reports them when the session opens, so
@@ -346,6 +377,13 @@ message Report {
   string in_flight = 3;
   string decisions = 4;
   string open_for_user = 5;
+  ReportKind kind = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // Zero in a command. The orchestrator numbers the reports of a run from 1 in the order it
+  // records them, so a reader can ask for those after the last one it saw.
+  uint32 sequence = 7;
 }
 
 message JobFinished {
@@ -368,6 +406,16 @@ message SubagentSettled {
     not_in: [0]
   }];
   string detail = 3;
+}
+
+// HandoffReminder asks an agent that ended a turn without a handoff to post one. It carries no
+// data: a template words it.
+message HandoffReminder {}
+
+// LeadIdleReminder tells a lead that its run has stood still, so that it acts or says why not.
+message LeadIdleReminder {
+  // How long the run has stood still.
+  uint32 idle_seconds = 1;
 }
 
 message Message {
@@ -398,6 +446,8 @@ message Message {
     // The first prompt of a run's lead: the task, how many subagents may be live, and the
     // operator's steering text. Templates word it; the lead is not told the run's internals.
     LeadBrief lead_brief = 16;
+    HandoffReminder handoff_reminder = 17;
+    LeadIdleReminder lead_idle_reminder = 18;
   }
 }
 

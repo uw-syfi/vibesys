@@ -196,7 +196,7 @@ func TestAWholeRunFromAClient(t *testing.T) {
 	})
 
 	// The lead reports; the operator sees it.
-	callTool(t, leadTools, 3, "post_report", map[string]any{"headline": "plan 1 won"})
+	callTool(t, leadTools, 3, "post_report", map[string]any{"kind": "final", "headline": "plan 1 won"})
 	feed.until("the report", func(ev *pb.Event) bool {
 		return ev.GetMessageUpdated().GetReport().GetHeadline() == "plan 1 won"
 	})
