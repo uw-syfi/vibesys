@@ -223,7 +223,8 @@ def release_violations(breaking_script: str) -> list[str]:
     tag cannot publish a contract that ``buf breaking`` does not hold.
     """
     active = [line for line in breaking_script.splitlines() if not line.lstrip().startswith("#")]
-    if any(ORCHESTRATOR_PATH in line for line in active):
+    # The directory itself; a path to one file inside it does not hold the rest of the contract.
+    if any(re.search(re.escape(ORCHESTRATOR_PATH) + r"(\s|$)", line) for line in active):
         return []
     return [
         f"{BREAKING_SCRIPT}: release: the breaking check leaves out proto/vibesys/orchestrator/v1, "
