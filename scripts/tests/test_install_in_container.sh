@@ -548,6 +548,16 @@ phase_macos() {
   echo "--- the macOS version"
   sw_vers
 
+  check "a binary a browser downloaded (marked quarantined) is run by its first user"
+  # curl and tar leave no mark, so the installer's own files are not quarantined. A bundle fetched in
+  # a browser has the mark on the archive, and a file the Archive Utility unpacks from it inherits it.
+  local marked="$scratch/quarantined-client" rc_marked=0
+  cp "$release/bin/vibesys-client" "$marked"
+  xattr -w com.apple.quarantine "0081;$(printf '%x' "$(date +%s)");Safari;" "$marked"
+  xattr -l "$marked"
+  "$marked" --version || rc_marked=$?
+  echo "a quarantined, ad-hoc signed binary run from a shell exited $rc_marked"
+
   check "a root whose socket paths do not fit in a Unix socket address is refused by name, and a short state directory fixes it"
   # A Unix socket address holds 104 bytes on macOS. The user temp directory under /var/folders is
   # already about 50 of them, so a root made there is as long as a person's can get.
