@@ -64,6 +64,9 @@ service DaemonService {
   // Protocol 6.
   rpc SetJobPriority(SetJobPriorityRequest) returns (SetJobPriorityResponse);
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  // Queue lists a task's queued and running jobs grouped by plan, with why each queued job waits,
+  // the priority it counts as now, its age and an estimate of its duration. Protocol 7.
+  rpc Queue(QueueRequest) returns (QueueResponse);
   // ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
   // dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
   rpc ForgetRepository(ForgetRepositoryRequest) returns (ForgetRepositoryResponse);
@@ -369,6 +372,42 @@ message ListJobsResponse {
   // Why each listed queued job that has not started waits. A queued job that is about to start has
   // none.
   repeated JobWait waits = 2;
+}
+
+message QueueRequest {
+  CallContext context = 1;
+}
+
+message QueueResponse {
+  // The plans that have a queued or running job, by number, then the group of the jobs linked to
+  // no plan, which has no plan. A job linked to several plans is in the group of the first.
+  repeated QueueGroup groups = 1;
+  // Set while the daemon is draining.
+  DaemonDrain drain = 2;
+}
+
+// QueueGroup is the queued and running jobs of one plan: the running ones first, then the queued
+// ones by the priority they count as now and then by submit time.
+message QueueGroup {
+  // Unset for the jobs linked to no plan.
+  Plan plan = 1;
+  repeated QueuedJob jobs = 2;
+}
+
+// QueuedJob is a queued or running job, with what a lead decides by.
+message QueuedJob {
+  Job job = 1;
+  // The priority the job counts as now: its own or its plans', aged by how long it has waited.
+  Priority priority = 2;
+  // Why a queued job has not started, as the scheduler last decided. Unset for a running job and
+  // for one about to start.
+  WaitReason wait = 3;
+  // How long since the job was submitted.
+  google.protobuf.Duration age = 4;
+  // The median time a job of its kind ran in this task, from start to end, over estimated_from
+  // succeeded jobs. Unset when none has: the estimate is unknown.
+  google.protobuf.Duration estimate = 5;
+  uint32 estimated_from = 6;
 }
 
 message ReadLogsRequest {

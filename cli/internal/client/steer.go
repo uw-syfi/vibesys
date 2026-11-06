@@ -24,6 +24,12 @@ func (c *Client) SetJobPriority(ctx context.Context, req *cliv1.SetJobPriorityRe
 	return resp, c.fail(err)
 }
 
+// Queue lists a task's queued and running jobs by plan.
+func (c *Client) Queue(ctx context.Context, req *cliv1.QueueRequest) (*cliv1.QueueResponse, error) {
+	resp, err := c.rpc.Queue(ctx, req)
+	return resp, c.fail(err)
+}
+
 // Drain makes the daemon start no queued job until Resume.
 func (c *Client) Drain(ctx context.Context, req *cliv1.DrainRequest) (*cliv1.DrainResponse, error) {
 	resp, err := c.rpc.Drain(ctx, req)

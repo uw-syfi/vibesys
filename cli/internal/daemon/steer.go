@@ -87,6 +87,21 @@ func (s *Server) SetJobPriority(ctx context.Context, req *cliv1.SetJobPriorityRe
 	return &cliv1.SetJobPriorityResponse{Job: wire.Job(job)}, nil
 }
 
+// Queue implements cliv1.DaemonServiceServer.
+func (s *Server) Queue(ctx context.Context, req *cliv1.QueueRequest) (*cliv1.QueueResponse, error) {
+	ctx, cancel := s.bound(ctx)
+	defer cancel()
+	call, err := s.call(ctx, req.GetContext())
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	q, err := s.app.Queue(ctx, call.Scope)
+	if err != nil {
+		return nil, wire.Error(err)
+	}
+	return wire.QueueResponse(q.View, q.Waits, q.Drain), nil
+}
+
 // Drain implements cliv1.DaemonServiceServer.
 func (s *Server) Drain(ctx context.Context, req *cliv1.DrainRequest) (*cliv1.DrainResponse, error) {
 	ctx, cancel := s.bound(ctx)

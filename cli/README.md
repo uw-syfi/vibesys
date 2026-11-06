@@ -270,6 +270,7 @@ read their own settings (`VIBESYS_CLI_VERSION`, `VIBESYS_CLI_INSTALL_DIR`, `VIBE
 | `release <job>` | Let a held job start in its turn, which is its place by submit time as if it had never been held. Releasing a job that is not held prints it unchanged. |
 | `job priority <job> high\|normal\|low\|inherit --reason text` | Set a queued job's own priority, which overrides its plans', or with `inherit` let it take theirs again. `--reason` is required, and the change is kept as a note on the job (`priority <from> -> <to>: <reason>`, with the agent and the time). A job that is not queued is `CONFLICT` (exit `1`). See "Steering the queue". |
 | `jobs [--commit rev] [--state s] [--note-contains text]` | List the task's jobs, oldest first, with why each queued job waits, and who held a held one and why. |
+| `queue` | The task's queued and running jobs grouped by plan: a line per plan (`plan <n>`, status, priority, title) and a last group `no plan`; in each, running jobs first, then queued ones in the order the scheduler considers them. Each job's line has its id, state, kind, commit, where it runs (running) or the priority it counts as now (queued), its first submitter's agent, its age, and `est <d> (of <n>)`, the median run time of the task's `n` succeeded jobs of its kind, or `est unknown`; under it why it waits (held, draining, or the resources) and its notes. A first line says the daemon is draining. A job linked to several plans is in the group of the first. With `--json`, the `QueueResponse`. |
 | `logs <job> [--follow]` | Print a job's output, and with `--follow` keep printing until it ends. |
 | `show <commit>` | Every result saved for a commit, oldest first: each check, and the commit's measurements pooled as `compare` pools them, one line per environment, task version and metric, naming every measure job it holds (a top-up adds its samples to the same measurement). A measurement's `value` is its headline number, the mean of its samples, computed by the daemon; each of its `observations` has the same `value` for its own samples. For a multi-objective task the line gives every objective's headline in the order the task declares them, the numbers `compare` weighs. With `--json`, `results` has each job's result and `measurements` the pooled ones. |
 | `compare <commit> [--against rev]` | `better`, `worse`, `within_noise` or `inconclusive`, against the result branch head unless `--against` names a commit. For a multi-objective task, also `tradeoff`, with a verdict on every objective (see "Multi-objective tasks" below). Refuses to mix environments. |
@@ -323,7 +324,7 @@ because no daemon said the jobs were not done.
 
 With `--json`, a command prints the contract's messages in protobuf's canonical JSON form with the
 original field names, one compact message per line. That is the response for `submit`, `cancel`,
-`note`, `hold`, `release`, `jobs`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan` and
+`note`, `hold`, `release`, `job priority`, `jobs`, `queue`, `logs`, `show`, `compare`, `promote`, `result`, `daemon status` and the `plan` and
 `frontier` subcommands, `daemon drain` and `daemon resume`. For `wait` and `submit --wait`, it is the daemon's `WaitOutcome`: its `kind`, the job
 that decided it in `decided_by`, and every job's last state. An error that a command reports is a
 `Failure` on stderr: a refusal from the daemon, a missing argument, a job that does not exist, or a
@@ -372,6 +373,9 @@ agent of a run, steers it without cancelling anything:
   already. `daemon resume` ends the drain. The drain is kept in `drain.json` of the runtime
   directory, so it outlives `daemon restart` and a daemon crash, but not a reboot that empties the
   runtime directory.
+
+`queue` shows all of it in one place: per plan, its priority, and each job's priority now, why it
+waits, how long it has waited and how long its kind usually takes.
 
 To roll out a new `vibesys-cli` while jobs are queued, without cancelling and resubmitting them
 (which would lose their place):

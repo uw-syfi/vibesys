@@ -1,6 +1,7 @@
 package wire
 
 import (
+	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
@@ -51,6 +52,32 @@ func LeaseHolder(h core.LeaseHolder) *cliv1.LeaseHolder {
 	}
 	if !h.Since.IsZero() {
 		out.Since = timestamppb.New(h.Since)
+	}
+	return out
+}
+
+// QueueResponse returns the contract's message for a task's queue.
+func QueueResponse(view core.QueueView, waits map[core.JobID]core.JobWait, drain *core.Drain) *cliv1.QueueResponse {
+	out := &cliv1.QueueResponse{}
+	if drain != nil {
+		out.Drain = DaemonDrain(*drain)
+	}
+	for _, g := range view.Groups {
+		group := &cliv1.QueueGroup{}
+		if g.Plan != nil {
+			group.Plan = Plan(*g.Plan)
+		}
+		for _, q := range g.Jobs {
+			e := &cliv1.QueuedJob{Job: Job(q.Job), Priority: Priority(q.Priority), Age: durationpb.New(q.Waited)}
+			if w, ok := waits[q.Job.ID]; ok && q.Job.State == core.JobQueued {
+				e.Wait = WaitReason(w)
+			}
+			if q.Finished > 0 {
+				e.Estimate, e.EstimatedFrom = durationpb.New(q.Estimate), uint32(q.Finished)
+			}
+			group.Jobs = append(group.Jobs, e)
+		}
+		out.Groups = append(out.Groups, group)
 	}
 	return out
 }

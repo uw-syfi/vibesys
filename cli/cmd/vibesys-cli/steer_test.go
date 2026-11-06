@@ -138,3 +138,58 @@ func TestAPriorityChangeNeedsAReasonAndIsKept(t *testing.T) {
 func jobPriority(args ...string) []string {
 	return append([]string{"job", "priority", "--task", "kv"}, args...)
 }
+
+// `queue` groups the queued jobs by plan, the plan's line naming its status and priority, then
+// the jobs of no plan; each job says its kind, priority, submitter, age and estimate, why it
+// waits, and its notes. With --json it is the QueueResponse.
+func TestTheQueueGroupsJobsByPlanAndSaysWhyEachWaits(t *testing.T) {
+	c := newCLI(t)
+	c.env["VIBESYS_AGENT"] = "worker-1"
+	c.taskWithAJob("kv")
+	c.planOK("create", "--title", "the integration line")
+	c.planOK("edit", "1", "--priority", "high", "--reason", "gates the rest")
+	if r := c.run("daemon", "drain", "--reason", "rollout"); r.code != exitOK {
+		t.Fatalf("daemon drain: %+v", r)
+	}
+	r := c.run(withTask("submit", "command", "HEAD", "--env", "host", "--plan", "1", "--note", "the gating check", "--", "exit", "0")...)
+	if r.code != exitOK {
+		t.Fatalf("submit: %+v", r)
+	}
+	gating := strings.Fields(r.stdout)[0]
+	loose := c.submit("exit", "0")
+	q := c.run(withTask("queue")...)
+	if q.code != exitOK {
+		t.Fatalf("queue: %+v", q)
+	}
+	out := q.stdout
+	for _, want := range []string{
+		"draining\tsince ",
+		"plan 1\topen\tpriority high\tthe integration line\n  " + gating + "\tqueued\tcommand\t",
+		"\tpriority high\tby worker-1\tage ",
+		"\test 0s (of 1)\n\t  waiting: the daemon is draining",
+		"note: the gating check",
+		"no plan\n  " + loose + "\tqueued\tcommand\t",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("queue, want %q in:\n%s", want, out)
+		}
+	}
+	var resp struct {
+		Groups []struct {
+			Plan *struct {
+				Number uint32 `json:"number"`
+			} `json:"plan"`
+			Jobs []struct {
+				Priority string `json:"priority"`
+				Wait     struct {
+					Kind string `json:"kind"`
+				} `json:"wait"`
+			} `json:"jobs"`
+		} `json:"groups"`
+	}
+	j := c.run(withTask("queue", "--json")...)
+	if j.code != exitOK || json.Unmarshal([]byte(j.stdout), &resp) != nil || len(resp.Groups) != 2 || resp.Groups[0].Plan == nil ||
+		resp.Groups[1].Plan != nil || resp.Groups[0].Jobs[0].Priority != "PRIORITY_HIGH" || resp.Groups[0].Jobs[0].Wait.Kind != "WAIT_KIND_HELD" {
+		t.Fatalf("queue --json: %+v\n%s", resp, j.stdout)
+	}
+}

@@ -25,7 +25,9 @@ const (
 	// has neither call.
 	//
 	// 6: plans and jobs have priorities. A daemon of 5 would drop the priority of a plan edit.
-	ProtocolVersion uint32 = 6
+	//
+	// 7: Queue lists a task's queue by plan. A daemon of 6 has no such call.
+	ProtocolVersion uint32 = 7
 
 	// MinProtocolVersion is the oldest ProtocolVersion this build still serves. A daemon still
 	// serves command lines and supervisors of 1: an older command line waits through Watch and
@@ -37,8 +39,8 @@ const (
 	// this build still serves older peers. It is at least WatchTaskSince, so a command line of this
 	// build, `daemon ensure` included, replaces a daemon that cannot serve WatchTask, and it is 5,
 	// so that it replaces one that would drop the placement of a submission or a plan's priority, or
-	// cannot hold a job or drain.
-	MinDaemonProtocolVersion uint32 = 6
+	// cannot hold a job, drain or list its queue.
+	MinDaemonProtocolVersion uint32 = 7
 )
 
 // WatchTaskSince is the protocol version that added WatchTask. It is the one definition of the

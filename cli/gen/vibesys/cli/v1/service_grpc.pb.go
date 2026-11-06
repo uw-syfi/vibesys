@@ -34,6 +34,7 @@ const (
 	DaemonService_ReleaseJob_FullMethodName       = "/vibesys.cli.v1.DaemonService/ReleaseJob"
 	DaemonService_SetJobPriority_FullMethodName   = "/vibesys.cli.v1.DaemonService/SetJobPriority"
 	DaemonService_ListJobs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ListJobs"
+	DaemonService_Queue_FullMethodName            = "/vibesys.cli.v1.DaemonService/Queue"
 	DaemonService_ForgetRepository_FullMethodName = "/vibesys.cli.v1.DaemonService/ForgetRepository"
 	DaemonService_ReadLogs_FullMethodName         = "/vibesys.cli.v1.DaemonService/ReadLogs"
 	DaemonService_Show_FullMethodName             = "/vibesys.cli.v1.DaemonService/Show"
@@ -101,6 +102,9 @@ type DaemonServiceClient interface {
 	// Protocol 6.
 	SetJobPriority(ctx context.Context, in *SetJobPriorityRequest, opts ...grpc.CallOption) (*SetJobPriorityResponse, error)
 	ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*ListJobsResponse, error)
+	// Queue lists a task's queued and running jobs grouped by plan, with why each queued job waits,
+	// the priority it counts as now, its age and an estimate of its duration. Protocol 7.
+	Queue(ctx context.Context, in *QueueRequest, opts ...grpc.CallOption) (*QueueResponse, error)
 	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
 	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
 	ForgetRepository(ctx context.Context, in *ForgetRepositoryRequest, opts ...grpc.CallOption) (*ForgetRepositoryResponse, error)
@@ -311,6 +315,16 @@ func (c *daemonServiceClient) ListJobs(ctx context.Context, in *ListJobsRequest,
 	return out, nil
 }
 
+func (c *daemonServiceClient) Queue(ctx context.Context, in *QueueRequest, opts ...grpc.CallOption) (*QueueResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(QueueResponse)
+	err := c.cc.Invoke(ctx, DaemonService_Queue_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *daemonServiceClient) ForgetRepository(ctx context.Context, in *ForgetRepositoryRequest, opts ...grpc.CallOption) (*ForgetRepositoryResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ForgetRepositoryResponse)
@@ -511,6 +525,9 @@ type DaemonServiceServer interface {
 	// Protocol 6.
 	SetJobPriority(context.Context, *SetJobPriorityRequest) (*SetJobPriorityResponse, error)
 	ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error)
+	// Queue lists a task's queued and running jobs grouped by plan, with why each queued job waits,
+	// the priority it counts as now, its age and an estimate of its duration. Protocol 7.
+	Queue(context.Context, *QueueRequest) (*QueueResponse, error)
 	// ForgetRepository gives up a repository that is gone for good: what the daemon keeps of it is
 	// dropped, and what is left of its runs is ended. It refuses a repository whose store answers.
 	ForgetRepository(context.Context, *ForgetRepositoryRequest) (*ForgetRepositoryResponse, error)
@@ -588,6 +605,9 @@ func (UnimplementedDaemonServiceServer) SetJobPriority(context.Context, *SetJobP
 }
 func (UnimplementedDaemonServiceServer) ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListJobs not implemented")
+}
+func (UnimplementedDaemonServiceServer) Queue(context.Context, *QueueRequest) (*QueueResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Queue not implemented")
 }
 func (UnimplementedDaemonServiceServer) ForgetRepository(context.Context, *ForgetRepositoryRequest) (*ForgetRepositoryResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ForgetRepository not implemented")
@@ -901,6 +921,24 @@ func _DaemonService_ListJobs_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DaemonService_Queue_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueueRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DaemonServiceServer).Queue(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DaemonService_Queue_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DaemonServiceServer).Queue(ctx, req.(*QueueRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DaemonService_ForgetRepository_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ForgetRepositoryRequest)
 	if err := dec(in); err != nil {
@@ -1200,6 +1238,10 @@ var DaemonService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListJobs",
 			Handler:    _DaemonService_ListJobs_Handler,
+		},
+		{
+			MethodName: "Queue",
+			Handler:    _DaemonService_Queue_Handler,
 		},
 		{
 			MethodName: "ForgetRepository",

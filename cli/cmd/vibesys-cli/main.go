@@ -81,6 +81,7 @@ var commands = map[string]func(context.Context, deps, []string) int{
 	"release":    releaseCommand,
 	"job":        jobCommand,
 	"jobs":       jobsCommand,
+	"queue":      queueCommand,
 	"logs":       logsCommand,
 	"show":       showCommand,
 	"compare":    compareCommand,
@@ -113,6 +114,8 @@ commands:
   job priority <job> high|normal|low|inherit --reason text
                                                  a queued job's own priority, over its plans'
   jobs [--commit rev] [--state s] [--note-contains text]
+  queue                                          queued and running jobs by plan, why each waits,
+                                                 its priority, age and estimated duration
   logs <job> [--follow]                          print a job's output
   show <commit>                                  results saved for a commit
   compare <commit> [--against rev]               better, worse, within_noise, tradeoff or inconclusive

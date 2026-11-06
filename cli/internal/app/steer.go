@@ -163,3 +163,31 @@ func recording(what string, err error) error {
 	f := failureOf(err)
 	return &core.Failure{Kind: f.Kind, Message: "recording " + what + ": " + f.Message}
 }
+
+// Queue is a task's queue as a lead reads it: its queued and running jobs by plan, why each queued
+// job waits, and whether the daemon drains.
+type Queue struct {
+	View  core.QueueView
+	Waits map[core.JobID]core.JobWait
+	Drain *core.Drain
+}
+
+// Queue returns the queue of a task: its jobs and plans as the store has them, the estimates from
+// its finished jobs, and the waits the scheduler last decided. A task with no store has none.
+func (a *App) Queue(ctx context.Context, scope core.Scope) (Queue, error) {
+	jobs, err := a.Jobs(ctx, scope, core.JobFilter{})
+	if err != nil {
+		return Queue{}, err
+	}
+	plans, err := a.Plans(ctx, scope, core.PlanFilter{})
+	if err != nil {
+		return Queue{}, err
+	}
+	var queued []core.JobID
+	for _, j := range jobs {
+		if j.State == core.JobQueued {
+			queued = append(queued, j.ID)
+		}
+	}
+	return Queue{View: core.QueueOf(jobs, plans, a.now()), Waits: a.Waits(scope, queued), Drain: a.view.Load().drain}, nil
+}
