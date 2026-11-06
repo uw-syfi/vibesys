@@ -75,9 +75,9 @@ type SessionHolders interface {
 	// alone. A record of processes that cannot be read is reported as a *ProcessRecordError, and
 	// nothing is ended for it.
 	Reap(place HolderPlace) error
-	// ReapAgent does Reap for every session of an agent that nothing holds, so no old agent process
-	// works in a worktree under a new session.
-	ReapAgent(agentDirectory string) error
+	// ReapAgent does Reap for every place of an agent's sessions that nothing holds, so no old agent
+	// process works in a worktree under a new session.
+	ReapAgent(places []HolderPlace) error
 	// Worktree makes a detached git worktree of a repository at path, unless one is there.
 	Worktree(ctx context.Context, repository, path string) error
 }
@@ -241,14 +241,10 @@ func (h *ProcessHolders) said(place HolderPlace, skipped []string) {
 }
 
 // ReapAgent implements SessionHolders.
-func (h *ProcessHolders) ReapAgent(agentDirectory string) error {
-	sessions, _ := os.ReadDir(agentDirectory)
+func (h *ProcessHolders) ReapAgent(places []HolderPlace) error {
 	var errs []error
-	for _, e := range sessions {
-		if _, err := strconv.ParseUint(e.Name(), 10, 32); err == nil && e.IsDir() {
-			dir := filepath.Join(agentDirectory, e.Name())
-			errs = append(errs, h.Reap(HolderPlace{Socket: filepath.Join(dir, "sock"), Directory: dir}))
-		}
+	for _, place := range places {
+		errs = append(errs, h.Reap(place))
 	}
 	return errors.Join(errs...)
 }

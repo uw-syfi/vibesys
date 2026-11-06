@@ -484,11 +484,14 @@ The daemon serves two sockets, and which one a caller reached decides who it is:
 - The **agent socket** is the only socket a launched session is told (`VIBESYS_ORCHESTRATOR_SOCKET`).
   It is `agent.sock` in the state directory, not in `XDG_RUNTIME_DIR`: on a systemd machine without
   lingering, the runtime directory (`/run/user/UID`) is removed when the user's last login ends, and a
-  run that was left running would lose its tools' socket. A state directory whose path makes the socket
-  address too long for a Unix socket (100 bytes here) is an error naming
-  `vibesys-client host configure --state-directory`. The sidecar sockets are under `STATE/sessions` and
-  the gateway socket is `ROOT/host.sock`, or for a long root one under `/tmp/vibesys-UID`, so none of
-  ours is in the runtime directory.
+  run that was left running would lose its tools' socket. The sidecar sockets are under
+  `STATE/sessions` and the gateway socket is `ROOT/host.sock`. A socket whose path would be over 100
+  bytes (a Unix socket address holds 104 on macOS) goes, by one rule (`privatesocket.Place`), to
+  `/tmp/vibesys-UID/<hash of its path>.sock`, a directory only that user can reach, with nothing stored:
+  every program computes the same place from the same path. That holds for the default state
+  directory, so a long home is not something a user meets. A state directory the operator chose with
+  `vibesys-client host configure --state-directory` stays as chosen: one whose sockets would be too long
+  is an error naming that setting. None of our sockets is in the runtime directory.
   Every call on it needs the credentials of the agent's current session (agent id, session number
   and an HMAC token the daemon derives from a secret), and the daemon never reads the caller from a
   request body. An agent may issue the commands its role allows and read the snapshot of its run.

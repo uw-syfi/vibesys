@@ -3,7 +3,6 @@ package production
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"buf.build/go/protovalidate"
@@ -245,12 +244,12 @@ func (w *holderWorld) Reap(place HolderPlace) error {
 }
 
 // ReapAgent implements SessionHolders.
-func (w *holderWorld) ReapAgent(agentDirectory string) error {
+func (w *holderWorld) ReapAgent(places []HolderPlace) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	for socket := range w.agents {
-		if !w.aliveAt(socket) && strings.HasPrefix(socket, agentDirectory+"/") {
-			delete(w.agents, socket)
+	for _, place := range places {
+		if _, ok := w.agents[place.Socket]; ok && !w.aliveAt(place.Socket) {
+			delete(w.agents, place.Socket)
 		}
 	}
 	return nil

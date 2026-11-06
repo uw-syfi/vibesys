@@ -76,9 +76,6 @@ type Layout struct {
 	AgentSocket string
 }
 
-// maxSocketPath is the longest path a Unix socket address holds on the systems that matter.
-const maxSocketPath = 100
-
 // LayoutFor resolves the layout: the state directory chosen in the host's configuration, or fallback
 // when none was. The agent socket is in the state directory,
 // which outlives a login session: the runtime directory ($XDG_RUNTIME_DIR, /run/user/UID) is removed
@@ -336,6 +333,9 @@ func awaitServers(ctx context.Context, failed <-chan error) error {
 // state directory's lock, so no other daemon owns the path, and a file left there by a crash is
 // stale.
 func listenPrivate(path string) (net.Listener, error) {
+	if err := privatesocket.EnsureDirectory(path); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}

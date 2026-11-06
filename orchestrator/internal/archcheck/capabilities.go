@@ -26,6 +26,7 @@ type allowance struct {
 // boundaries holds the baseline, keyed by the file's path under orchestrator/.
 var boundaries = map[string]allowance{
 	"cmd/release-manifest/main.go":               {reason: "the build-time tool takes its output path from the command line and writes the release manifest; process-boundaries.md, release manifest", args: 1, writes: 1},
+	"privatesocket/placement.go":                 {reason: "makes and checks the private directory that holds a socket too long for its own place; process-boundaries.md, host control", reads: 1, writes: 1},
 	"privatesocket/privatesocket.go":             {reason: "binds a private socket in a directory of its own and renames it into place; process-boundaries.md, host control", writes: 6},
 	"release/releasetest/releasetest.go":         {reason: "test support that writes release fixtures; process-boundaries.md, release manifest", writes: 2},
 	"clientcli/start.go":                         {reason: "run get --json prints the protojson of a run snapshot", json: 1},
@@ -41,9 +42,9 @@ var boundaries = map[string]allowance{
 	"internal/production/checkouts.go":           {reason: "removes the clean worktrees agents made when their run is over, keeps the others, and holds the commits they made under a ref of the run; process-boundaries.md, session lock", reads: 2, exec: 6},
 	"internal/production/cli_ensure.go":          {reason: "the callee owns shared daemon startup through daemon ensure; process-boundaries.md, job tool endpoint", env: 1, exec: 1},
 	"internal/production/holder.go":              {reason: "the orchestrator's own holder record; process-boundaries.md, host control", reads: 1, writes: 2},
-	"internal/production/holders.go":             {reason: "the holder's log, the agents' directory listing, a group leader's start time from ps and git worktree creation; process-boundaries.md, process identity", reads: 3, writes: 2, exec: 3},
+	"internal/production/holders.go":             {reason: "the holder's log, a group leader's start time from ps and git worktree creation; process-boundaries.md, process identity", reads: 2, writes: 2, exec: 3},
 	"internal/production/production.go":          {reason: "the orchestrator's own boot identity and state directory", reads: 1, writes: 6},
-	"internal/production/sidecars.go":            {reason: "where the holder is installed, and its directory; process-boundaries.md, host control", reads: 2, writes: 1},
+	"internal/production/sidecars.go":            {reason: "where the holder is installed, its directory, and the listing of an agent's session directories; process-boundaries.md, host control", reads: 3, writes: 1},
 	"internal/production/sessionprocesses.go":    {reason: "the lock a session's process holds and the SessionProcesses record it keeps beside it, which the host reads only to end what a gone process left; process-boundaries.md, process identity", reads: 2, writes: 2},
 	"internal/production/startchecks.go":         {reason: "checks a start's repository and task directory exist, and reads the repository with git", reads: 1, exec: 1},
 	"internal/store/lock_unix.go":                {reason: "the store's own advisory lock", reads: 1, writes: 1},

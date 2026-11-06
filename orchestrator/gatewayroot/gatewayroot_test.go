@@ -154,7 +154,13 @@ func TestAProgramIsInstalledInTheDirectoryThatHoldsItsReleases(t *testing.T) {
 
 // CheckState refuses what the host itself would, and leaves nothing behind.
 func TestCheckStateSaysWhatAHostWouldFind(t *testing.T) {
-	dir, err := filepath.EvalSymlinks(t.TempDir())
+	// Short, because a state directory the operator chose must leave room for its sockets.
+	made, err := os.MkdirTemp("", "g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(made) })
+	dir, err := filepath.EvalSymlinks(made)
 	if err != nil {
 		t.Fatal(err)
 	}

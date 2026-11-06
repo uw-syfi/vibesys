@@ -44,7 +44,7 @@ var rules = map[string][]string{
 	"internal/archcheck":               {"gen/vibesys/orchestrator/"},
 	"internal/store":                   {"internal/core", "internal/wire", "internal/localfs", "hostlock"},
 	"internal/store/storetest":         {"internal/core", "internal/store", "internal/wire"},
-	"internal/localfs":                 {},
+	"internal/localfs":                 {"privatesocket"},
 	"gatewayroot":                      {"internal/localfs", "release"},
 	"hostconfig":                       {"gen/vibesys/orchestrator/"},
 	"release":                          {"gen/vibesys/orchestrator/"},
