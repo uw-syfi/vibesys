@@ -191,3 +191,40 @@ func TestAProfileOfATaskOfOneImageIsRefused(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// A task of schema 0.2 without [candidate] is a task of one image: its commands run in the task
+// image, no candidate image is built, and no server is started.
+func TestATaskOfSchema02WithoutACandidateRunsItsCommandsInTheTaskImage(t *testing.T) {
+	r := newTwoImageRig(t)
+	tree := twoImageTask(passes, protocol2Scores)
+	path := task.TasksDir + "/task/" + task.ManifestName
+	manifest := string(tree[path].Data)
+	start, end := strings.Index(manifest, "[candidate]"), strings.Index(manifest, "[accuracy]")
+	tree[path] = task.File{Data: []byte(manifest[:start] + manifest[end:])}
+	r.w.tasks.Put(string(call.Scope.Repository()), commit, tree)
+
+	job, _ := r.submit(t, core.MeasureSettings{Samples: 1}, false)
+	if job.State != core.JobSucceeded {
+		t.Fatalf("measure = %s\n%s", describe(job), logOf(t, r.a, job.ID))
+	}
+	if n := r.builds.Load(); n != 0 {
+		t.Fatalf("%d candidate builds for a task without a candidate", n)
+	}
+	runs := r.docker.Runs()
+	if len(runs) == 0 {
+		t.Fatal("nothing ran")
+	}
+	for _, run := range runs {
+		if run.Candidate != nil {
+			t.Fatalf("a run has a candidate: %+v", run.Candidate)
+		}
+	}
+	if got := logOf(t, r.a, job.ID); strings.Contains(got, "serving on") {
+		t.Fatalf("a server started: %q", got)
+	}
+	for _, x := range r.w.results(r.a) {
+		if x.CandidateImage != "" {
+			t.Fatalf("the result records a candidate image: %+v", x)
+		}
+	}
+}

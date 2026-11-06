@@ -5,8 +5,8 @@ A task schema is a message in proto/vibesys/cli/v1 with the option
 every message its fields reach. ``buf breaking`` (FILE) already refuses deletions,
 renames, renumbering and type changes. This check adds what Buf cannot see:
 
-* A schema of major version 0 is frozen once it is on the base: any change to its
-  messages fails. A new format is a new message with the next minor version.
+* A schema of major version 0 may change freely: a pre-1.0 format has no compatibility
+  rules here, beyond keeping its message (it may not be removed or change major version).
 * From 1.0 every field carries ``(vibesys.cli.v1.task_schema_since_minor)``, at
   most the schema's minor version. A field the base lacks declares the head's
   minor version, and the head's minor version is above the base's.
@@ -110,15 +110,6 @@ def _every_field_declares_its_minor(s: Schema) -> list[str]:
     return out
 
 
-def _frozen(base: Schema, head: Schema) -> list[str]:
-    return [
-        f"{name}: task schema {base.major}.{base.minor} is frozen, and this changes it; "
-        f"write the new format as a new message with the next minor version"
-        for name in sorted(set(base.closure) | set(head.closure))
-        if base.closure.get(name) != head.closure.get(name)
-    ]
-
-
 def _changed(name: str, old: Message, new: Message, minor: int) -> tuple[list[str], bool]:
     """What a message breaks against its base version, and whether it gained fields."""
     out = []
@@ -176,13 +167,7 @@ def violations(base_files: list[dict[str, Any]], head_files: list[dict[str, Any]
             out.append(
                 f"{name}: its major version changed from {b.major} to {h.major}; a new major version is a new message"
             )
-        elif b.major == 0:
-            if (b.minor, b.closure) != (h.minor, h.closure):
-                out.extend(
-                    _frozen(b, h)
-                    or [f"{name}: task schema {b.major}.{b.minor} is frozen; its version changed"]
-                )
-        else:
+        elif b.major >= 1:
             out.extend(_additive(b, h))
     out.extend(
         f"{name}: the task schema {b.major}.{b.minor} was removed"

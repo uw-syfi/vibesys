@@ -83,6 +83,53 @@ func TestReadsATaskOfTwoImages(t *testing.T) {
 	}
 }
 
+// withoutCandidate is v02Manifest with no [candidate] section.
+func withoutCandidate() string {
+	start := strings.Index(v02Manifest, "[candidate]")
+	end := strings.Index(v02Manifest, "[accuracy]")
+	return v02Manifest[:start] + v02Manifest[end:]
+}
+
+// [candidate] is optional: without it a 0.2 task is a task of one image, whose commands run in the
+// task image, and it reads the same as with it in every other key.
+func TestSchema02ReadsWithoutACandidate(t *testing.T) {
+	manifest := withoutCandidate()
+	if strings.Contains(manifest, "[candidate]") {
+		t.Fatal("the manifest still has a candidate")
+	}
+	with, err := task.Read(repo(v02Files(v02Manifest)), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := task.Read(repo(v02Files(manifest)), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Schema != task.Schema02 || got.Candidate != nil || got.Setup().TwoImages {
+		t.Fatalf("schema %s, candidate %+v, setup %+v", got.Schema, got.Candidate, got.Setup())
+	}
+	if got.Profile == nil || got.Profile.Timeout != 15*time.Minute || got.Benchmark.Timeout != time.Hour {
+		t.Fatalf("profile %+v, benchmark %+v", got.Profile, got.Benchmark)
+	}
+	if !reflect.DeepEqual(got.Check, with.Check) || !reflect.DeepEqual(got.Benchmark, with.Benchmark) || got.Metric != with.Metric {
+		t.Fatalf("without a candidate the commands read differently:\n%+v\n%+v", got, with)
+	}
+}
+
+// A task of one image needs no Dockerfile of its own, as a 0.1 task needs none; a task with a
+// [candidate] does.
+func TestASchema02TaskWithoutACandidateNeedsNoDockerfile(t *testing.T) {
+	files := v02Files(withoutCandidate())
+	delete(files, ".vibesys/tasks/t/Dockerfile")
+	got, err := task.Read(repo(files), "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.HasDockerfile || got.Candidate != nil {
+		t.Fatalf("read %+v", got)
+	}
+}
+
 func TestATaskOfTwoImagesNeedsItsOwnDockerfile(t *testing.T) {
 	files := v02Files(v02Manifest)
 	delete(files, ".vibesys/tasks/t/Dockerfile")

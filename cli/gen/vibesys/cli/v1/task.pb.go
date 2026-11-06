@@ -84,8 +84,8 @@ func (x *TaskSchema) GetMinor() uint32 {
 // container reaches the candidate only over HTTP, at VIBESYS_SERVICE_URL.
 //
 // It has every key of the single-image format 0.1, with the same meaning, except [evaluator] and the
-// entrypoint and args of a command, which it refuses by name; and it adds [candidate] and gives
-// [profile] a command. The sections 0.1 accepts without reading them are accepted the same way here.
+// entrypoint and args of a command, which it refuses by name; and it adds an optional [candidate] and
+// gives [profile] a command. The sections 0.1 accepts without reading them are accepted the same way here.
 type TaskManifestV02 struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The schema version, "0.2".
@@ -95,7 +95,8 @@ type TaskManifestV02 struct {
 	// The scored metric of a protocol 2 benchmark. Empty scores the first objective of
 	// objectives.toml.
 	Metric string `protobuf:"bytes,3,opt,name=metric,proto3" json:"metric,omitempty"`
-	// The candidate's image and server.
+	// The candidate's image and server. Optional: a manifest without it is a task of one image, whose
+	// commands run in the task image and own the system under test, as in 0.1.
 	Candidate *TaskCandidateV02 `protobuf:"bytes,4,opt,name=candidate,proto3" json:"candidate,omitempty"`
 	// The check: run in the task container against the candidate's server; exit 0 passes. [check] is
 	// the same section by its other name; a manifest has one of them.
@@ -788,14 +789,13 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\n" +
 	"TaskSchema\x12\x14\n" +
 	"\x05major\x18\x01 \x01(\rR\x05major\x12\x14\n" +
-	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xd7\b\n" +
+	"\x05minor\x18\x02 \x01(\rR\x05minor\"\xd1\b\n" +
 	"\x0fTaskManifestV02\x12+\n" +
 	"\aversion\x18\x01 \x01(\tB\x11\xbaH\n" +
 	"r\b2\x06^0\\.2$\xd0\xf3\x18\x02R\aversion\x12(\n" +
 	"\bbackends\x18\x02 \x03(\tB\f\xbaH\x05\x92\x01\x02\x10\x01\xd0\xf3\x18\x02R\bbackends\x12$\n" +
-	"\x06metric\x18\x03 \x01(\tB\f\xbaH\x05r\x03\x18\x80\x02\xd0\xf3\x18\x02R\x06metric\x12J\n" +
-	"\tcandidate\x18\x04 \x01(\v2 .vibesys.cli.v1.TaskCandidateV02B\n" +
-	"\xbaH\x03\xc8\x01\x01\xd0\xf3\x18\x02R\tcandidate\x12@\n" +
+	"\x06metric\x18\x03 \x01(\tB\f\xbaH\x05r\x03\x18\x80\x02\xd0\xf3\x18\x02R\x06metric\x12D\n" +
+	"\tcandidate\x18\x04 \x01(\v2 .vibesys.cli.v1.TaskCandidateV02B\x04\xd0\xf3\x18\x02R\tcandidate\x12@\n" +
 	"\baccuracy\x18\x05 \x01(\v2\x1e.vibesys.cli.v1.TaskCommandV02B\x04\xd0\xf3\x18\x02R\baccuracy\x12D\n" +
 	"\tbenchmark\x18\x06 \x01(\v2 .vibesys.cli.v1.TaskBenchmarkV02B\x04\xd0\xf3\x18\x02R\tbenchmark\x12>\n" +
 	"\aprofile\x18\a \x01(\v2\x1e.vibesys.cli.v1.TaskCommandV02B\x04\xd0\xf3\x18\x02R\aprofile\x12J\n" +

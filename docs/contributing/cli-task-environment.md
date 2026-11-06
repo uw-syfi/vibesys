@@ -51,6 +51,13 @@ belong to the Python evaluator package and stay refused.
 
 ### A task of two images (schema 0.2)
 
+`[candidate]` is optional. A 0.2 manifest without it is a task of one image,
+read like a 0.1 command task: the task image runs the check, the benchmark and
+the profile command, which own the system under test (a microservice task, for
+example, deploys its app from its own trusted code). It has no candidate image,
+no server, and no standard profile (`submit command --wrap` profiles it). The
+rest of this section describes a manifest with `[candidate]`.
+
 Schema 0.2 splits the judge from the candidate. The task's `Dockerfile` still
 builds the task image, which runs the check, the benchmark and the profile
 load. The candidate's commit builds a second image, the candidate image, from
@@ -92,7 +99,7 @@ The schema is `TaskManifestV02` in `proto/vibesys/cli/v1/task.proto`, the only
 definition of its keys; the CLI decodes the TOML into it and refuses an
 unknown key by name. Its keys are every key of 0.1, with the same meaning,
 except `[evaluator]` and a command's `entrypoint` and `args`, which it refuses
-by name, plus `[candidate]`; and `[profile]` holds a command:
+by name, plus an optional `[candidate]`; and `[profile]` holds a command:
 
 - `version`, `backends`, `metric`;
 - `[agent]` `domain` and `interface`;
@@ -517,7 +524,7 @@ specs; a Slurm or Apptainer placement implements the same `Environment`
 (`Candidate`, and a run of two containers in one allocation that share a
 network namespace) without a change to the flow.
 
-### Task schema versions are MAJOR.MINOR, and 0.x is frozen
+### Task schema versions are MAJOR.MINOR, and 0.x may change freely
 
 A manifest declares its schema as a string, `version = "0.2"`. The integer
 `version = 1` of the earliest tasks is refused, saying to write `"0.1"`: a
@@ -531,8 +538,9 @@ may set only the keys of M.0 to M.K (each field carries
 `task_schema_since_minor`). A major version is a new message beside the old.
 
 `./scripts/check_task_schema.sh`, in the proto check group beside
-`buf breaking`, compares the schemas with the merge base: any change to a 0.x
-schema fails; from 1.0, every field declares its minor version, a field added
+`buf breaking`, compares the schemas with the merge base: a 0.x schema may change
+freely (pre-1.0 formats have no compatibility rules, and `buf breaking` is the
+one gate on them); from 1.0, every field declares its minor version, a field added
 since the base declares the current minor version, the minor version must rise
 when fields are added, and a changed protovalidate rule fails ("tightening
 needs a new major; loosening needs a reviewed waiver"). `buf breaking` already
@@ -540,7 +548,7 @@ refuses a renamed or removed field.
 
 Schema 0.1 has no message in `task.proto` yet: its reader is the earlier Go
 reader, unchanged. Moving it into a `TaskManifestV01` message is left for
-later; until then the check covers 0.2 and every later schema.
+later; until then the check covers 1.0 and every later schema.
 
 ## What is not done
 
