@@ -22,6 +22,19 @@ const (
 	skillsRoot    = "marketplace"
 )
 
+// releasesFolder holds the releases of an install: HOME/releases/VERSION.
+const releasesFolder = "releases"
+
+// InstallHome is the directory this release was installed under by the installer, or "" for a
+// release that is not in an installer's layout, such as an unpacked bundle.
+func (r *Release) InstallHome() string {
+	parent := filepath.Dir(r.Dir)
+	if filepath.Base(parent) != releasesFolder {
+		return ""
+	}
+	return filepath.Dir(parent)
+}
+
 // NewManifest is the manifest of a release built for goos/goarch at version.
 func NewManifest(version, goos, goarch string) (*pb.ReleaseManifest, error) {
 	m := &pb.ReleaseManifest{

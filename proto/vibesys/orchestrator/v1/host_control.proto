@@ -43,6 +43,12 @@ message IdentifyResponse {
     // This host is up and answers here, and does not serve the orchestrator.
     Unserved unserved = 7;
   }
+  // The digest of the HostConfig this host started with, or empty when it started with none. A client
+  // compares it with the digest of the configuration now in the host's root.
+  string config_digest = 8 [(buf.validate.field).string.max_bytes = 128];
+  // The full API schema hash this host answers HostService with, for a client of that service to
+  // tell, before its handshake fails, that it must replace the host.
+  string api_schema_hash = 9 [(buf.validate.field).string.max_bytes = 128];
 }
 
 // ReleaseRelation is how the host's release compares with the asking client's.
@@ -129,6 +135,8 @@ enum UnservedReason {
   UNSERVED_REASON_HELD_ELSEWHERE = 1;
   // The state cannot be opened here.
   UNSERVED_REASON_STATE_REFUSED = 2;
+  // The host's configuration cannot be read. Only a start report says this: such a host never serves.
+  UNSERVED_REASON_CONFIG_REFUSED = 3;
 }
 
 message StopRequest {
@@ -157,4 +165,25 @@ message Busy {
 message HostLock {
   uint32 pid = 1 [(buf.validate.field).uint32.gt = 0];
   string release = 2 [(buf.validate.field).string = {min_len: 1, max_bytes: 128}];
+  // The root the process is the host of. A host holding its root's lock that finds the state directory
+  // held by a host of the same root is watching a hand-over; one of another root is a refusal. Empty
+  // from a host older than this field.
+  string root = 3 [(buf.validate.field).string.max_bytes = 4096];
 }
+
+// HostStartReport is what a starting host says, once, to whoever started it, on a pipe that the
+// starter holds and the host's exit closes. A candidate that ends without saying anything failed
+// before it could speak.
+message HostStartReport {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    // This candidate holds the root and accepts connections on its socket.
+    Serving serving = 1;
+    // Another process holds the root, and may not be accepting connections yet. This one has ended.
+    AlreadyServed already_served = 2;
+    // This candidate cannot serve, and has ended. Nothing is left running.
+    Unserved refused = 3;
+  }
+}
+
+message AlreadyServed {}

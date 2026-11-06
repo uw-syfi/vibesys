@@ -56,7 +56,10 @@ func TestConnectCLI(t *testing.T) {
 	t.Run("second-serve", func(t *testing.T) { testSecondServe(t, binary) })
 	t.Run("Tail", func(t *testing.T) { testTailCLI(t, binary) })
 	t.Run("closed-output", func(t *testing.T) { testClosedOutput(t, binary) })
-	t.Run("state-directory-root", func(t *testing.T) { testStateDirectoryRoot(t, binary) })
+	t.Run("hostile-environment", func(t *testing.T) { testHostileEnvironment(t, binary) })
+	t.Run("refused-state-leaves-nothing", func(t *testing.T) { testRefusedStateLeavesNothing(t, binary) })
+	t.Run("bridge-keeps-a-host-with-refused-state", func(t *testing.T) { testBridgeKeepsAHostWithRefusedState(t, binary) })
+	t.Run("bridge-replaces-another-api", func(t *testing.T) { testBridgeReplacesAnotherAPI(t, binary) })
 	t.Run("no-arguments", func(t *testing.T) {
 		command := exec.CommandContext(ctx, binary)
 		var stdout, stderr bytes.Buffer
@@ -80,7 +83,7 @@ func testTailCLI(t *testing.T, binary string) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	endpoint, err := lifecycle.Listen(root, schemahash.APISchemaHash)
+	endpoint, err := lifecycle.Listen(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +219,7 @@ func testClosedOutput(t *testing.T, binary string) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	endpoint, err := lifecycle.Listen(root, schemahash.APISchemaHash)
+	endpoint, err := lifecycle.Listen(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,6 +249,16 @@ func testClosedOutput(t *testing.T, binary string) {
 	outputWriter.Close()
 	done := make(chan error, 1)
 	go func() { done <- command.Wait() }()
+	// The first connection finds the host and the second asks what it is. This host cannot say, which
+	// the bridge leaves to the handshake on the connection it pipes.
+	for range 2 {
+		asking, err := endpoint.Listener.Accept()
+		if err != nil {
+			command.Process.Kill()
+			t.Fatal(err)
+		}
+		asking.Close()
+	}
 	connection, err := endpoint.Listener.Accept()
 	if err != nil {
 		command.Process.Kill()
@@ -269,41 +282,6 @@ func testClosedOutput(t *testing.T, binary string) {
 	}
 }
 
-// Without --root, a client whose orchestrator state directory is set dials the gateway of that state
-// directory, not the one under the default ~/.vibesys; the default root's socket is never made.
-func testStateDirectoryRoot(t *testing.T, binary string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	home, err := os.MkdirTemp("/tmp", "h")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(home)
-	state := filepath.Join(home, "state")
-	derived := filepath.Join(state, "host")
-	endpoint, err := lifecycle.Listen(derived, schemahash.APISchemaHash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer endpoint.Close()
-	endpoint.Listener.SetDeadline(time.Now().Add(5 * time.Second))
-	command := exec.CommandContext(ctx, binary, "connect")
-	command.Env = append(os.Environ(), "HOME="+home, "VIBESYS_ORCHESTRATOR_STATE_DIR="+state)
-	command.Stdin = bytes.NewReader(nil)
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { command.Process.Kill(); command.Wait() }()
-	connection, err := endpoint.Listener.Accept()
-	if err != nil {
-		t.Fatalf("connect did not dial the gateway of the state directory: %v", err)
-	}
-	connection.Close()
-	if _, err := os.Stat(filepath.Join(home, ".vibesys")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the default root was touched: %v", err)
-	}
-}
-
 // Bare run start currently reaches the host before checking arguments. Pin exit 1
 // on a failed handshake rather than introducing usage validation during the move.
 func testSecondServe(t *testing.T, binary string) {
@@ -315,14 +293,14 @@ func testSecondServe(t *testing.T, binary string) {
 	}
 	defer os.RemoveAll(root)
 	first := exec.CommandContext(ctx, binary, "serve", "--root", root)
-	first.Env = append(os.Environ(), "VIBESYS_ORCHESTRATOR_STATE_DIR="+filepath.Join(root, "state"))
+	first.Env = os.Environ()
 	if err := first.Start(); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { first.Process.Signal(os.Interrupt); first.Wait() }()
 	connection, err := grpc.NewClient("passthrough:///host", grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", lifecycle.SocketPath(root, schemahash.APISchemaHash))
+			return (&net.Dialer{}).DialContext(ctx, "unix", lifecycle.SocketPath(root))
 		}))
 	if err != nil {
 		t.Fatal(err)

@@ -32,11 +32,11 @@ var commands = []command{
 	{CommandDirectory, "gateway/internal/hostmain", []string{
 		module + "gateway/internal/buildinfo", module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
 		module + "gateway/internal/pipe", module + "gateway/internal/server",
-		module + "gateway/schemahash", module + "orchestrator/gatewayroot", module + "orchestrator/hosted", module + "orchestrator/hostlock",
+		module + "gateway/schemahash", module + "orchestrator/gatewayroot", module + "orchestrator/hostconfig", module + "orchestrator/hosted", module + "orchestrator/hostlock",
 	}},
 	{ClientDirectory, "gateway/internal/clientmain", []string{
 		module + "gateway/internal/buildinfo", module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
-		module + "gateway/schemahash", module + "orchestrator/clientcli", module + "orchestrator/gatewayroot", module + "orchestrator/gen/vibesys/orchestrator/v1", module + "orchestrator/hostlock", module + "orchestrator/release",
+		module + "orchestrator/clientcli", module + "orchestrator/gatewayroot", module + "orchestrator/gen/vibesys/orchestrator/v1", module + "orchestrator/hostconfig", module + "orchestrator/hostlock", module + "orchestrator/release",
 		"github.com/mattn/go-isatty",
 	}},
 }

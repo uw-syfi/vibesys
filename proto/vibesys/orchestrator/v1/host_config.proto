@@ -1,0 +1,50 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// HostConfig is everything an operator chooses about a host, as a typed record in the host's root
+// (host-config.json, protobuf JSON, written by `vibesys-client host configure`). A host reads it when
+// it starts and never reads a setting from the environment of whoever started it. An empty field
+// means what the release or the root gives; no file means every field is empty.
+message HostConfig {
+  // Where the orchestrator keeps its state: an absolute path on a local disk.
+  string state_directory = 1 [(buf.validate.field) = {
+    ignore: IGNORE_IF_ZERO_VALUE
+    string: {
+      pattern: "^/"
+      max_bytes: 4096
+    }
+  }];
+  // The checkout of the session holder, or the command that runs it, in place of the release's.
+  string session_holder_command = 2 [(buf.validate.field).string.max_bytes = 4096];
+  // The checkout of the skills marketplace, in place of the release's: an absolute path.
+  string skills_directory = 3 [(buf.validate.field) = {
+    ignore: IGNORE_IF_ZERO_VALUE
+    string: {
+      pattern: "^/"
+      max_bytes: 4096
+    }
+  }];
+  // The job tool, in place of the release's: an absolute path to an executable file.
+  string job_tool = 4 [(buf.validate.field) = {
+    ignore: IGNORE_IF_ZERO_VALUE
+    string: {
+      pattern: "^/"
+      max_bytes: 4096
+    }
+  }];
+  // The directories the host and what it starts look for programs in (git, for one), in order. Empty
+  // means a fixed list of the system's own, never the PATH of whoever started the host.
+  repeated string tool_path = 5 [(buf.validate.field).repeated = {
+    max_items: 256
+    items: {
+      string: {
+        pattern: "^/"
+        max_bytes: 4096
+      }
+    }
+  }];
+}

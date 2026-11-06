@@ -8,7 +8,9 @@ import (
 
 	"github.com/uw-syfi/vibesys/gateway/internal/buildinfo"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
+	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
 	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
+	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 	"github.com/uw-syfi/vibesys/orchestrator/hosted"
 )
 
@@ -19,15 +21,14 @@ func (c exitCode) Error() string { return fmt.Sprintf("exit status %d", int(c)) 
 
 // startOrchestrator opens the orchestrator for this host. stop ends the host, and is what
 // HostControlService calls when a client asks it to stop.
-func startOrchestrator(ctx context.Context, stop func()) (*hosted.Orchestrator, error) {
+func startOrchestrator(ctx context.Context, stop func(), root string, config *hostconfig.Config, getenv func(string) string, home string) (*hosted.Orchestrator, error) {
 	binary, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	getenv, home := hosted.Environ()
 	return hosted.Start(ctx, hosted.Options{
 		Version: buildinfo.Version, Executable: binary, Log: slog.New(slog.NewTextHandler(os.Stderr, nil)),
-		Getenv: getenv, Home: home, Stop: stop,
+		Root: root, Config: config, Getenv: getenv, Home: home, APISchemaHash: schema.APISchemaHash, Stop: stop,
 	}), nil
 }
 
@@ -56,9 +57,12 @@ func holdWhileLive(ctx context.Context, live <-chan bool, monitor *lifecycle.Mon
 	}
 }
 
-// gatewayRoot is the root every verb of this process dials or serves: the --root flag, else the one
-// derived from the orchestrator state directory, else ~/.vibesys (gatewayroot.For).
+// gatewayRoot is the root every verb of this process dials or serves, by gatewayroot.Rule.
 func gatewayRoot(flag string) (string, error) {
-	getenv, home := hosted.Environ()
-	return gatewayroot.For(flag, getenv, home)
+	home, _ := os.UserHomeDir()
+	binary, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return gatewayroot.For(flag, os.Getenv, home, gatewayroot.Installed(binary))
 }

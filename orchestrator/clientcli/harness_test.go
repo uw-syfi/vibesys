@@ -144,7 +144,11 @@ func (w *world) runUnbounded(ctx context.Context, args ...string) result {
 	env := clientcli.Env{
 		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: &errb, Terminal: w.terminal,
 		Dir: w.dir, FS: w.files, Canonical: w.canonical, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
+		// No host answers HostControlService here, so a verb starts one, which is Connect.
 		Connect: func(string) (clientcli.Dial, error) { return w.dial, nil },
+		Locate: func(string) (clientcli.Dial, error) {
+			return func(context.Context) (net.Conn, error) { return nil, clientcli.ErrNoHost }, nil
+		},
 	}
 	code := clientcli.Main(ctx, args, env)
 	return result{code: code, stdout: stdout.String(), stderr: errb.String()}

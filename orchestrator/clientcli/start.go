@@ -88,7 +88,7 @@ func start(ctx context.Context, c *call, args []string) error {
 		return err
 	}
 	fmt.Fprintln(c.Stderr, confinementNotice)
-	conn, err := c.open(ctx)
+	conn, err := c.openFor(ctx, NeedLaunch)
 	if err != nil {
 		return err
 	}

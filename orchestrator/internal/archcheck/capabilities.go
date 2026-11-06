@@ -26,10 +26,11 @@ type allowance struct {
 // boundaries holds the baseline, keyed by the file's path under orchestrator/.
 var boundaries = map[string]allowance{
 	"cmd/release-manifest/main.go":               {reason: "the build-time tool takes its output path from the command line and writes the release manifest; process-boundaries.md, release manifest", args: 1, writes: 1},
+	"privatesocket/privatesocket.go":             {reason: "binds a private socket in a directory of its own and renames it into place; process-boundaries.md, host control", writes: 6},
 	"release/releasetest/releasetest.go":         {reason: "test support that writes release fixtures; process-boundaries.md, release manifest", writes: 2},
 	"clientcli/start.go":                         {reason: "run get --json prints the protojson of a run snapshot", json: 1},
+	"hostconfig/hostconfig.go":                   {reason: "the host's configuration file in its root, a HostConfig message; process-boundaries.md, host control", reads: 1, writes: 5},
 	"hosted/command.go":                          {reason: "the tool server reads its identity from the environment; process-boundaries.md, environment codec", env: 1},
-	"hosted/hosted.go":                           {reason: "the host reads its settings from the environment; process-boundaries.md, host control", env: 1},
 	"internal/clidaemon/clidaemontest/corpus.go": {reason: "the conformance corpus is JSON beside the CLI's own", json: 2},
 	"internal/mcp/mcp.go":                        {reason: "external:MCP framing is JSON-RPC; tool schemas move to descriptors, see process-boundaries.md, tool schemas", json: 17},
 	"internal/mcp/tools.go":                      {reason: "hand tool schemas beside the protos; process-boundaries.md, tool schemas", json: 7},
@@ -38,7 +39,7 @@ var boundaries = map[string]allowance{
 	"internal/production/cli_transport.go":       {reason: "the callee-owned discovery contract requires inspecting socket directory metadata", reads: 1},
 	"internal/production/holder.go":              {reason: "the orchestrator's own holder record; process-boundaries.md, host control", reads: 1, writes: 2},
 	"internal/production/plugin.go":              {reason: "external:the harness's marketplace manifest; process-boundaries.md, release manifest", reads: 1, json: 1},
-	"internal/production/production.go":          {reason: "the orchestrator's own boot identity and state directory", reads: 1, writes: 7},
+	"internal/production/production.go":          {reason: "the orchestrator's own boot identity and state directory", reads: 1, writes: 6},
 	"internal/production/sidecars.go":            {reason: "sidecar launch files, pid and pgid files and git worktree creation; process-boundaries.md, session contract and session processes", reads: 9, writes: 7, json: 1, exec: 2},
 	"internal/production/startchecks.go":         {reason: "checks a start's repository and task directory exist, and reads the repository with git", reads: 1, exec: 1},
 	"internal/store/lock_unix.go":                {reason: "the store's own advisory lock", reads: 1, writes: 1},

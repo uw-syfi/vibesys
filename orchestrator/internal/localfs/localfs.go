@@ -11,7 +11,7 @@
 // the one answer that cannot be taken back.
 //
 // There is no flag to override a refusal. The error says what to do: point
-// VIBESYS_ORCHESTRATOR_STATE_DIR at a local path.
+// the state directory of the host's configuration at a local path.
 //
 // Detection sits behind Detector, so every filesystem type is tested with a Fake, and one test
 // checks the real thing where the host has both kinds of disk.
@@ -28,8 +28,8 @@ import (
 	"path/filepath"
 )
 
-// EnvStateDir names the variable that sets the state directory.
-const EnvStateDir = "VIBESYS_ORCHESTRATOR_STATE_DIR"
+// Remedy says how an operator chooses a state directory.
+const Remedy = "choose one on a local disk with `vibesys-client host configure --state-directory PATH`"
 
 // Filesystem is what a path lives on.
 type Filesystem struct {
@@ -75,7 +75,7 @@ func (e *RefusedError) Error() string {
 	if e.Filesystem.Class != Network {
 		what = fmt.Sprintf("on a filesystem this build does not know to be local (%s), and SQLite corrupts quietly on one that is not", e.Filesystem.Type)
 	}
-	return fmt.Sprintf("the %s %s is %s; set %s to a path on a local disk", which, where, what, EnvStateDir)
+	return fmt.Sprintf("the %s %s is %s; %s", which, where, what, Remedy)
 }
 
 // Resolve proves a directory local. The directory need not exist: the nearest ancestor that does
@@ -99,8 +99,8 @@ func resolve(path string, d Detector, isDefault bool) (Dir, error) {
 	}
 	fs, err := d.Detect(existing)
 	if err != nil {
-		return Dir{}, fmt.Errorf("state directory %s: cannot tell what filesystem %s is on (%w); set %s to a path on a local disk",
-			path, existing, err, EnvStateDir)
+		return Dir{}, fmt.Errorf("state directory %s: cannot tell what filesystem %s is on (%w); %s",
+			path, existing, err, Remedy)
 	}
 	if fs.Class != Local {
 		return Dir{}, &RefusedError{Path: abs, Resolved: resolved, Filesystem: fs, Default: isDefault}
@@ -131,22 +131,21 @@ func evalExisting(path string) (resolved, existing string, err error) {
 	}
 }
 
-// StateDir picks the state directory and proves it local. The variable wins; without it the
-// directory is the default under the user's home, and an empty home is an error, since the default
-// would otherwise be relative to the working directory. A default on a network filesystem is refused,
-// never replaced by another place: a daemon whose state moved without its operator knowing would
-// start empty and look like it lost everything.
-func StateDir(getenv func(string) string, home string, d Detector) (Dir, error) {
-	if v := getenv(EnvStateDir); v != "" {
-		if !filepath.IsAbs(v) {
-			return Dir{}, fmt.Errorf("%s=%q must be an absolute path", EnvStateDir, v)
+// StateDir proves local the state directory: chosen when the host's configuration names one, and
+// otherwise fallback, the place that follows from the host's root. A fallback on a network filesystem
+// is refused, never replaced by another place: a daemon whose state moved without its operator knowing
+// would start empty and look like it lost everything.
+func StateDir(chosen, fallback string, d Detector) (Dir, error) {
+	if chosen != "" {
+		if !filepath.IsAbs(chosen) {
+			return Dir{}, fmt.Errorf("the state directory %q must be an absolute path; %s", chosen, Remedy)
 		}
-		return resolve(v, d, false)
+		return resolve(chosen, d, false)
 	}
-	if home == "" && !filepath.IsAbs(getenv("XDG_STATE_HOME")) {
-		return Dir{}, fmt.Errorf("no home directory to put the default state directory under; set %s to an absolute path on a local disk", EnvStateDir)
+	if !filepath.IsAbs(fallback) {
+		return Dir{}, fmt.Errorf("no home directory to put the default state directory under; %s", Remedy)
 	}
-	return resolve(DefaultPath(getenv, home), d, true)
+	return resolve(fallback, d, true)
 }
 
 // DefaultPath is where the state goes when nothing says otherwise: $XDG_STATE_HOME/vibesys/orchestrator

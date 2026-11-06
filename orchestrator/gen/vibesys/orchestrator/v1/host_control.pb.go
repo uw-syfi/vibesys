@@ -248,6 +248,8 @@ const (
 	UnservedReason_UNSERVED_REASON_HELD_ELSEWHERE UnservedReason = 1
 	// The state cannot be opened here.
 	UnservedReason_UNSERVED_REASON_STATE_REFUSED UnservedReason = 2
+	// The host's configuration cannot be read. Only a start report says this: such a host never serves.
+	UnservedReason_UNSERVED_REASON_CONFIG_REFUSED UnservedReason = 3
 )
 
 // Enum value maps for UnservedReason.
@@ -256,11 +258,13 @@ var (
 		0: "UNSERVED_REASON_UNSPECIFIED",
 		1: "UNSERVED_REASON_HELD_ELSEWHERE",
 		2: "UNSERVED_REASON_STATE_REFUSED",
+		3: "UNSERVED_REASON_CONFIG_REFUSED",
 	}
 	UnservedReason_value = map[string]int32{
 		"UNSERVED_REASON_UNSPECIFIED":    0,
 		"UNSERVED_REASON_HELD_ELSEWHERE": 1,
 		"UNSERVED_REASON_STATE_REFUSED":  2,
+		"UNSERVED_REASON_CONFIG_REFUSED": 3,
 	}
 )
 
@@ -352,7 +356,13 @@ type IdentifyResponse struct {
 	//
 	//	*IdentifyResponse_Serving
 	//	*IdentifyResponse_Unserved
-	Orchestrator  isIdentifyResponse_Orchestrator `protobuf_oneof:"orchestrator"`
+	Orchestrator isIdentifyResponse_Orchestrator `protobuf_oneof:"orchestrator"`
+	// The digest of the HostConfig this host started with, or empty when it started with none. A client
+	// compares it with the digest of the configuration now in the host's root.
+	ConfigDigest string `protobuf:"bytes,8,opt,name=config_digest,json=configDigest,proto3" json:"config_digest,omitempty"`
+	// The full API schema hash this host answers HostService with, for a client of that service to
+	// tell, before its handshake fails, that it must replace the host.
+	ApiSchemaHash string `protobuf:"bytes,9,opt,name=api_schema_hash,json=apiSchemaHash,proto3" json:"api_schema_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -445,6 +455,20 @@ func (x *IdentifyResponse) GetUnserved() *Unserved {
 		}
 	}
 	return nil
+}
+
+func (x *IdentifyResponse) GetConfigDigest() string {
+	if x != nil {
+		return x.ConfigDigest
+	}
+	return ""
+}
+
+func (x *IdentifyResponse) GetApiSchemaHash() string {
+	if x != nil {
+		return x.ApiSchemaHash
+	}
+	return ""
 }
 
 type isIdentifyResponse_Orchestrator interface {
@@ -962,9 +986,13 @@ func (x *Busy) GetLiveRuns() uint32 {
 // finds the process the lock belongs to only while the lock is held: a free lock means no host,
 // whatever the record says.
 type HostLock struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Pid           uint32                 `protobuf:"varint,1,opt,name=pid,proto3" json:"pid,omitempty"`
-	Release       string                 `protobuf:"bytes,2,opt,name=release,proto3" json:"release,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Pid     uint32                 `protobuf:"varint,1,opt,name=pid,proto3" json:"pid,omitempty"`
+	Release string                 `protobuf:"bytes,2,opt,name=release,proto3" json:"release,omitempty"`
+	// The root the process is the host of. A host holding its root's lock that finds the state directory
+	// held by a host of the same root is watching a hand-over; one of another root is a refusal. Empty
+	// from a host older than this field.
+	Root          string `protobuf:"bytes,3,opt,name=root,proto3" json:"root,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1013,13 +1041,160 @@ func (x *HostLock) GetRelease() string {
 	return ""
 }
 
+func (x *HostLock) GetRoot() string {
+	if x != nil {
+		return x.Root
+	}
+	return ""
+}
+
+// HostStartReport is what a starting host says, once, to whoever started it, on a pipe that the
+// starter holds and the host's exit closes. A candidate that ends without saying anything failed
+// before it could speak.
+type HostStartReport struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Outcome:
+	//
+	//	*HostStartReport_Serving
+	//	*HostStartReport_AlreadyServed
+	//	*HostStartReport_Refused
+	Outcome       isHostStartReport_Outcome `protobuf_oneof:"outcome"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostStartReport) Reset() {
+	*x = HostStartReport{}
+	mi := &file_vibesys_orchestrator_v1_host_control_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostStartReport) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostStartReport) ProtoMessage() {}
+
+func (x *HostStartReport) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_host_control_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostStartReport.ProtoReflect.Descriptor instead.
+func (*HostStartReport) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_host_control_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *HostStartReport) GetOutcome() isHostStartReport_Outcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return nil
+}
+
+func (x *HostStartReport) GetServing() *Serving {
+	if x != nil {
+		if x, ok := x.Outcome.(*HostStartReport_Serving); ok {
+			return x.Serving
+		}
+	}
+	return nil
+}
+
+func (x *HostStartReport) GetAlreadyServed() *AlreadyServed {
+	if x != nil {
+		if x, ok := x.Outcome.(*HostStartReport_AlreadyServed); ok {
+			return x.AlreadyServed
+		}
+	}
+	return nil
+}
+
+func (x *HostStartReport) GetRefused() *Unserved {
+	if x != nil {
+		if x, ok := x.Outcome.(*HostStartReport_Refused); ok {
+			return x.Refused
+		}
+	}
+	return nil
+}
+
+type isHostStartReport_Outcome interface {
+	isHostStartReport_Outcome()
+}
+
+type HostStartReport_Serving struct {
+	// This candidate holds the root and accepts connections on its socket.
+	Serving *Serving `protobuf:"bytes,1,opt,name=serving,proto3,oneof"`
+}
+
+type HostStartReport_AlreadyServed struct {
+	// Another process holds the root, and may not be accepting connections yet. This one has ended.
+	AlreadyServed *AlreadyServed `protobuf:"bytes,2,opt,name=already_served,json=alreadyServed,proto3,oneof"`
+}
+
+type HostStartReport_Refused struct {
+	// This candidate cannot serve, and has ended. Nothing is left running.
+	Refused *Unserved `protobuf:"bytes,3,opt,name=refused,proto3,oneof"`
+}
+
+func (*HostStartReport_Serving) isHostStartReport_Outcome() {}
+
+func (*HostStartReport_AlreadyServed) isHostStartReport_Outcome() {}
+
+func (*HostStartReport_Refused) isHostStartReport_Outcome() {}
+
+type AlreadyServed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AlreadyServed) Reset() {
+	*x = AlreadyServed{}
+	mi := &file_vibesys_orchestrator_v1_host_control_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AlreadyServed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AlreadyServed) ProtoMessage() {}
+
+func (x *AlreadyServed) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_orchestrator_v1_host_control_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AlreadyServed.ProtoReflect.Descriptor instead.
+func (*AlreadyServed) Descriptor() ([]byte, []int) {
+	return file_vibesys_orchestrator_v1_host_control_proto_rawDescGZIP(), []int{13}
+}
+
 var File_vibesys_orchestrator_v1_host_control_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\n" +
 	"*vibesys/orchestrator/v1/host_control.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"B\n" +
 	"\x0fIdentifyRequest\x12/\n" +
-	"\x0eclient_release\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\rclientRelease\"\xc8\x03\n" +
+	"\x0eclient_release\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\rclientRelease\"\xa9\x04\n" +
 	"\x10IdentifyResponse\x12$\n" +
 	"\arelease\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x01R\arelease\x12P\n" +
@@ -1030,7 +1205,9 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\tlive_runs\x18\x04 \x01(\rR\bliveRuns\x12F\n" +
 	"\x05parts\x18\x05 \x03(\v2&.vibesys.orchestrator.v1.PartReadinessB\b\xbaH\x05\x92\x01\x02\x10\x10R\x05parts\x12<\n" +
 	"\aserving\x18\x06 \x01(\v2 .vibesys.orchestrator.v1.ServingH\x00R\aserving\x12?\n" +
-	"\bunserved\x18\a \x01(\v2!.vibesys.orchestrator.v1.UnservedH\x00R\bunservedB\x15\n" +
+	"\bunserved\x18\a \x01(\v2!.vibesys.orchestrator.v1.UnservedH\x00R\bunserved\x12-\n" +
+	"\rconfig_digest\x18\b \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\fconfigDigest\x120\n" +
+	"\x0fapi_schema_hash\x18\t \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\rapiSchemaHashB\x15\n" +
 	"\forchestrator\x12\x05\xbaH\x02\b\x01\"\xe0\x01\n" +
 	"\rPartReadiness\x12A\n" +
 	"\x04part\x18\x01 \x01(\x0e2!.vibesys.orchestrator.v1.HostPartB\n" +
@@ -1061,11 +1238,18 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\n" +
 	"\bStopping\",\n" +
 	"\x04Busy\x12$\n" +
-	"\tlive_runs\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\bliveRuns\"K\n" +
+	"\tlive_runs\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\bliveRuns\"i\n" +
 	"\bHostLock\x12\x19\n" +
 	"\x03pid\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x03pid\x12$\n" +
 	"\arelease\x18\x02 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80\x01R\arelease*\xae\x01\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\arelease\x12\x1c\n" +
+	"\x04root\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x04root\"\xf1\x01\n" +
+	"\x0fHostStartReport\x12<\n" +
+	"\aserving\x18\x01 \x01(\v2 .vibesys.orchestrator.v1.ServingH\x00R\aserving\x12O\n" +
+	"\x0ealready_served\x18\x02 \x01(\v2&.vibesys.orchestrator.v1.AlreadyServedH\x00R\ralreadyServed\x12=\n" +
+	"\arefused\x18\x03 \x01(\v2!.vibesys.orchestrator.v1.UnservedH\x00R\arefusedB\x10\n" +
+	"\aoutcome\x12\x05\xbaH\x02\b\x01\"\x0f\n" +
+	"\rAlreadyServed*\xae\x01\n" +
 	"\x0fReleaseRelation\x12 \n" +
 	"\x1cRELEASE_RELATION_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15RELEASE_RELATION_SAME\x10\x01\x12\x1f\n" +
@@ -1086,11 +1270,12 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\x1fPART_PROBLEM_REASON_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1ePART_PROBLEM_REASON_NO_RELEASE\x10\x01\x12*\n" +
 	"&PART_PROBLEM_REASON_RELEASE_INCOMPLETE\x10\x02\x12/\n" +
-	"+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03*x\n" +
+	"+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03*\x9c\x01\n" +
 	"\x0eUnservedReason\x12\x1f\n" +
 	"\x1bUNSERVED_REASON_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eUNSERVED_REASON_HELD_ELSEWHERE\x10\x01\x12!\n" +
-	"\x1dUNSERVED_REASON_STATE_REFUSED\x10\x022\xca\x01\n" +
+	"\x1dUNSERVED_REASON_STATE_REFUSED\x10\x02\x12\"\n" +
+	"\x1eUNSERVED_REASON_CONFIG_REFUSED\x10\x032\xca\x01\n" +
 	"\x12HostControlService\x12_\n" +
 	"\bIdentify\x12(.vibesys.orchestrator.v1.IdentifyRequest\x1a).vibesys.orchestrator.v1.IdentifyResponse\x12S\n" +
 	"\x04Stop\x12$.vibesys.orchestrator.v1.StopRequest\x1a%.vibesys.orchestrator.v1.StopResponseBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
@@ -1108,7 +1293,7 @@ func file_vibesys_orchestrator_v1_host_control_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_orchestrator_v1_host_control_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_vibesys_orchestrator_v1_host_control_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_vibesys_orchestrator_v1_host_control_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_vibesys_orchestrator_v1_host_control_proto_goTypes = []any{
 	(ReleaseRelation)(0),          // 0: vibesys.orchestrator.v1.ReleaseRelation
 	(HostPart)(0),                 // 1: vibesys.orchestrator.v1.HostPart
@@ -1127,11 +1312,13 @@ var file_vibesys_orchestrator_v1_host_control_proto_goTypes = []any{
 	(*Stopping)(nil),              // 14: vibesys.orchestrator.v1.Stopping
 	(*Busy)(nil),                  // 15: vibesys.orchestrator.v1.Busy
 	(*HostLock)(nil),              // 16: vibesys.orchestrator.v1.HostLock
-	(*timestamppb.Timestamp)(nil), // 17: google.protobuf.Timestamp
+	(*HostStartReport)(nil),       // 17: vibesys.orchestrator.v1.HostStartReport
+	(*AlreadyServed)(nil),         // 18: vibesys.orchestrator.v1.AlreadyServed
+	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
 }
 var file_vibesys_orchestrator_v1_host_control_proto_depIdxs = []int32{
 	0,  // 0: vibesys.orchestrator.v1.IdentifyResponse.relation:type_name -> vibesys.orchestrator.v1.ReleaseRelation
-	17, // 1: vibesys.orchestrator.v1.IdentifyResponse.started_at:type_name -> google.protobuf.Timestamp
+	19, // 1: vibesys.orchestrator.v1.IdentifyResponse.started_at:type_name -> google.protobuf.Timestamp
 	7,  // 2: vibesys.orchestrator.v1.IdentifyResponse.parts:type_name -> vibesys.orchestrator.v1.PartReadiness
 	10, // 3: vibesys.orchestrator.v1.IdentifyResponse.serving:type_name -> vibesys.orchestrator.v1.Serving
 	11, // 4: vibesys.orchestrator.v1.IdentifyResponse.unserved:type_name -> vibesys.orchestrator.v1.Unserved
@@ -1143,15 +1330,18 @@ var file_vibesys_orchestrator_v1_host_control_proto_depIdxs = []int32{
 	4,  // 10: vibesys.orchestrator.v1.Unserved.reason:type_name -> vibesys.orchestrator.v1.UnservedReason
 	14, // 11: vibesys.orchestrator.v1.StopResponse.stopping:type_name -> vibesys.orchestrator.v1.Stopping
 	15, // 12: vibesys.orchestrator.v1.StopResponse.refused:type_name -> vibesys.orchestrator.v1.Busy
-	5,  // 13: vibesys.orchestrator.v1.HostControlService.Identify:input_type -> vibesys.orchestrator.v1.IdentifyRequest
-	12, // 14: vibesys.orchestrator.v1.HostControlService.Stop:input_type -> vibesys.orchestrator.v1.StopRequest
-	6,  // 15: vibesys.orchestrator.v1.HostControlService.Identify:output_type -> vibesys.orchestrator.v1.IdentifyResponse
-	13, // 16: vibesys.orchestrator.v1.HostControlService.Stop:output_type -> vibesys.orchestrator.v1.StopResponse
-	15, // [15:17] is the sub-list for method output_type
-	13, // [13:15] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	10, // 13: vibesys.orchestrator.v1.HostStartReport.serving:type_name -> vibesys.orchestrator.v1.Serving
+	18, // 14: vibesys.orchestrator.v1.HostStartReport.already_served:type_name -> vibesys.orchestrator.v1.AlreadyServed
+	11, // 15: vibesys.orchestrator.v1.HostStartReport.refused:type_name -> vibesys.orchestrator.v1.Unserved
+	5,  // 16: vibesys.orchestrator.v1.HostControlService.Identify:input_type -> vibesys.orchestrator.v1.IdentifyRequest
+	12, // 17: vibesys.orchestrator.v1.HostControlService.Stop:input_type -> vibesys.orchestrator.v1.StopRequest
+	6,  // 18: vibesys.orchestrator.v1.HostControlService.Identify:output_type -> vibesys.orchestrator.v1.IdentifyResponse
+	13, // 19: vibesys.orchestrator.v1.HostControlService.Stop:output_type -> vibesys.orchestrator.v1.StopResponse
+	18, // [18:20] is the sub-list for method output_type
+	16, // [16:18] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_orchestrator_v1_host_control_proto_init() }
@@ -1171,13 +1361,18 @@ func file_vibesys_orchestrator_v1_host_control_proto_init() {
 		(*StopResponse_Stopping)(nil),
 		(*StopResponse_Refused)(nil),
 	}
+	file_vibesys_orchestrator_v1_host_control_proto_msgTypes[12].OneofWrappers = []any{
+		(*HostStartReport_Serving)(nil),
+		(*HostStartReport_AlreadyServed)(nil),
+		(*HostStartReport_Refused)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_orchestrator_v1_host_control_proto_rawDesc), len(file_vibesys_orchestrator_v1_host_control_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

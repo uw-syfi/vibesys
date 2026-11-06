@@ -38,8 +38,8 @@ func (e *HeldError) Is(target error) bool { return target == ErrHeld }
 // writeHolder records this process as the holder of the state directory, as a HostLock. It is
 // written only while the store's lock is held, so the file names the holder whenever the lock is
 // taken.
-func writeHolder(dir, release string) error {
-	data, err := hostlock.Marshal(os.Getpid(), release)
+func writeHolder(dir, release, root string) error {
+	data, err := hostlock.Marshal(os.Getpid(), release, root)
 	if err != nil {
 		return err
 	}

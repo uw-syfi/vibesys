@@ -8,6 +8,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,9 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 )
 
 // bound guards each wait against a hang. Nothing waits for it to pass.
@@ -31,6 +35,23 @@ type rig struct {
 	env                  []string
 	// marketplace is the plugin marketplace the orchestrator was given, once the test sets it.
 	marketplace string
+	// holder is the session holder's command, without the settings it is run with.
+	holder string
+	// holderEnv is what the scripted session holder is told, on its command line: nothing of the
+	// rig's own environment reaches it through the host.
+	holderEnv []string
+	// config is what the rig's host starts with. saveConfig records it in the root.
+	config *pb.HostConfig
+}
+
+// saveConfig records the rig's configuration in its root, as `vibesys-client host configure` does.
+// A host running then is on another configuration, so a test sets it up before it starts one.
+func (r *rig) saveConfig() {
+	r.t.Helper()
+	r.config.SessionHolderCommand = strings.Join(append(append([]string{"env"}, r.holderEnv...), r.holder), " ")
+	if err := hostconfig.Save(r.root, r.config); err != nil {
+		r.t.Fatal(err)
+	}
 }
 
 func newRig(t *testing.T) *rig {
@@ -89,18 +110,18 @@ func newRig(t *testing.T) *rig {
 		"PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"),
 		"XDG_RUNTIME_DIR="+filepath.Join(dir, "rt"),
 		"XDG_STATE_HOME="+filepath.Join(dir, "xdg-state"),
-		// The scripted sidecar imports its sibling modules as the package e2e of the sidecar project.
-		"PYTHONPATH="+sidecar,
-		"VIBESYS_ORCHESTRATOR_STATE_DIR="+r.state,
-		"VIBESYS_ORCHESTRATOR_CLI="+cli,
-		"VIBESYS_ORCHESTRATOR_SIDECAR=uv run --frozen --quiet --project "+sidecar+" python "+script,
 	)
+	r.holder = "uv run --frozen --quiet --project " + sidecar + " python " + script
+	// The scripted sidecar imports its sibling modules as the package e2e of the sidecar project.
+	r.holderEnv = []string{"PYTHONPATH=" + sidecar}
+	r.config = &pb.HostConfig{StateDirectory: r.state, JobTool: cli, ToolPath: append([]string{dir}, filepath.SplitList(os.Getenv("PATH"))...)}
 	for _, d := range []string{"rt", "xdg-state"} {
 		if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	r.useMarketplace()
+	r.saveConfig()
 	t.Cleanup(r.killSidecars)
 	return r
 }
@@ -108,6 +129,7 @@ func newRig(t *testing.T) *rig {
 // serve starts a gateway this test owns, so it can kill it.
 func (r *rig) serve() *exec.Cmd {
 	r.t.Helper()
+	r.saveConfig()
 	cmd := exec.Command(r.binary, "serve", "--root", r.root, "--idle-timeout", "10m")
 	cmd.Env = r.env
 	log, err := os.OpenFile(filepath.Join(r.state+".serve.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -253,14 +275,14 @@ func (r *rig) killSidecars() {
 
 func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
 
-func TestARunSurvivesADaemonRestart(t *testing.T) {
-	r := newRig(t)
+// demoRepository is a git repository holding the task "demo". A start is refused unless the repository
+// holds the task, committed: the subagents' copies of the repository are made from the latest commit.
+func demoRepository(t *testing.T) string {
+	t.Helper()
 	repository := t.TempDir()
 	if out, err := exec.Command("git", "init", "-q", repository).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
-	// A start is refused unless the repository holds the task, committed: the subagents' copies
-	// of the repository are made from the latest commit.
 	if err := os.MkdirAll(filepath.Join(repository, ".vibesys", "tasks", "demo"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +295,33 @@ func TestARunSurvivesADaemonRestart(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
+	return repository
+}
+
+// A host started from an environment that sets every old override to nonsense takes nothing from it:
+// the run goes through what its configuration names, and nothing is made where the nonsense points.
+func TestAHostTakesNoConfigurationFromItsEnvironment(t *testing.T) {
+	r := newRig(t)
+	repository := demoRepository(t)
+	nonsense := filepath.Join(t.TempDir(), "nonsense")
+	for _, setting := range hostconfig.Retired {
+		r.env = append(r.env, setting.Name+"="+filepath.Join(nonsense, setting.Name))
+	}
+	r.serve()
+	started := r.receipt("run", "start", "--repository", repository, "--task", "demo", "--brief", "say hello", "--json")
+	r.watchUntil("the lead's first reply", started.Sequence, func(line string) bool { return strings.Contains(line, "reply 1") })
+	if _, err := os.Stat(nonsense); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a place the environment names was used: %v", err)
+	}
+	r.client("run", "stop", started.RunID, "--yes")
+	r.watchUntil("the run ended", 0, func(line string) bool {
+		return strings.Contains(line, started.RunID) && strings.Contains(line, "RUN_STATUS_ENDED")
+	})
+}
+
+func TestARunSurvivesADaemonRestart(t *testing.T) {
+	r := newRig(t)
+	repository := demoRepository(t)
 
 	first := r.serve()
 	started := r.receipt("run", "start", "--repository", repository, "--task", "demo", "--brief", "say hello", "--json")

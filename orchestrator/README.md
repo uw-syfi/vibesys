@@ -90,20 +90,63 @@ Two stores pass one contract suite: `Memory`, the Fake the daemon's tests use, a
 file in a state directory with a write-ahead log, `synchronous = NORMAL` and one writer. The driver
 is pure Go, so the daemon cross-compiles with no C toolchain.
 
-The state directory comes from `VIBESYS_ORCHESTRATOR_STATE_DIR`, or defaults to
-`$XDG_STATE_HOME/vibesys/orchestrator` and then `~/.local/state/vibesys/orchestrator`. SQLite cannot
+The state directory is the host's `state_directory` setting (see [the host's root](#the-hosts-root)).
+For the default root it otherwise defaults to `$XDG_STATE_HOME/vibesys/orchestrator` and then
+`~/.local/state/vibesys/orchestrator`, and for any other root to `ROOT/state`. SQLite cannot
 lock safely on NFS, SMB and their kin, so `localfs` follows symlinks and refuses such a directory
 before the database opens anything. The check fails closed: only filesystem types known to be local
 pass (a list for Linux and for macOS), a network type is refused and named, and so is a type nobody
-listed, with its statfs number. There is no override: the error says to point the variable at a local
-path, and a default on a network filesystem is refused and never replaced by another place. An empty
+listed, with its statfs number. There is no override: the error says to choose a local path with
+`vibesys-client host configure --state-directory PATH`, and a default on a network filesystem is refused and never replaced by another place. An empty
 home directory is an error, not a default relative to the working directory.
 
-The gateway that hosts the orchestrator is found through its root, and the root follows the state
-directory: without `--root`, `vibesys-host serve` and `connect` and every `vibesys-client` verb
-use `$VIBESYS_ORCHESTRATOR_STATE_DIR/host` when the variable is set, and `~/.vibesys` when it is not.
-So `vibesys-client run start` with the variable set reaches, or starts, the gateway of that state directory and
-never one that serves another; `--root` overrides both. The rule is `gatewayroot.For`.
+### The host's root
+
+A root is the directory a host serves from: one socket, one lock, one log, one configuration and one
+state directory. The installer, the host and every client use one rule, `gatewayroot.Rule`:
+
+> the root is `--root` when given, else `VIBESYS_HOME` when set, else the directory this program is
+> installed in (the one holding `releases/`), else `~/.vibesys`; `VIBESYS_HOME` must name the directory
+> this program is installed in.
+
+So an installed client always reaches the host of its own install. A `VIBESYS_HOME` that names another
+place is an error that prints the rule (exit 2), never a guess.
+
+The host's configuration is the file `ROOT/host-config.json`, a `HostConfig` message. No file means
+every default. `vibesys-client host configure` writes it and, with no flag, prints it:
+
+| Flag | Setting | Default |
+| --- | --- | --- |
+| `--state-directory` | where the orchestrator keeps its state | follows the root, as above |
+| `--session-holder` | an `orchestrator/sidecar` checkout, or the command that runs it | the release's |
+| `--skills-directory` | a checkout holding `.claude-plugin/marketplace.json` | the release's |
+| `--job-tool` | an absolute path to an executable `vibesys-cli` | the release's |
+| `--tool-path` | the directories the host looks for programs in, separated by colons | `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin` |
+
+A host takes nothing else from the environment it was started in. It clears it and keeps `HOME`, a
+`PATH` from the tool path, and `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, `XDG_RUNTIME_DIR` and
+`XDG_STATE_HOME`, which say who and where the session is. `VIBESYS_ORCHESTRATOR_SIDECAR`,
+`_MARKETPLACE`, `_STATE_DIR` and `_CLI` are no longer read, and a client that starts a host with one
+of them set names it on stderr with the flag that replaces it.
+
+A client first asks what serves the root and acts on the answer, one action per case
+(`clientcli.Decide`):
+
+| What is there | What the client does | Exit code when it stops there |
+| --- | --- | --- |
+| nothing | starts a host | 1 when the host refuses, 3 on a timeout |
+| a compatible host | uses it | |
+| an incompatible host, or one on another configuration | replaces it when idle; with live runs, reads through it and refuses a launch | 1 |
+| a host that does not answer | stops and says how to end it (`host stop --force`) | 4 |
+
+A host stops answering a little before it has exited. It lets go of the state directory first and its
+root's lock last, but a killed process drops both in an order nothing here controls, so a new host
+that holds the root's lock and finds the state held by a host of the same root waits on that lock, for
+up to 5 s, then serves or refuses. A holder that names another root is refused at once. The state
+directory has its own lock because `--state-directory` can point two roots at one store.
+
+A client never kills a live run. A start that a host refuses leaves no host behind, and the message is
+what the host reported for this attempt, not a line from an old log. Usage errors exit 2.
 
 Writes never block reads, and the long ones never block the writer for long. `Verify` and the
 read-heavy part of `Compact` run on a snapshot beside the writer. `Compact` writes in steps of at
@@ -264,24 +307,24 @@ needed at run time. Every session, lead and subagent, on either harness, loads t
 `RELEASE/marketplace` and none of the operator's own plugins, skills or configuration. The plugin is
 installed once per agent into `STATE/sessions/AGENT/plugin-home`, which a resume reuses.
 
-Each part is chosen, in order, from the developer override, then the release, then an error:
+Each part is chosen, in order, from the host's configuration, then the release, then an error:
 
-| Part | Override (used as given, errors included) | Release |
+| Part | Configuration (used as given, errors included) | Release |
 | --- | --- | --- |
-| sidecar | `VIBESYS_ORCHESTRATOR_SIDECAR`: an `orchestrator/sidecar` checkout, or the command that runs it | the manifest's session holder command |
-| marketplace | `VIBESYS_ORCHESTRATOR_MARKETPLACE`: an absolute path to a checkout holding `.claude-plugin/marketplace.json` | the manifest's skills folder |
-| `vibesys-cli` | `VIBESYS_ORCHESTRATOR_CLI` (see below) | the manifest's job tool |
+| sidecar | `--session-holder` | the manifest's session holder command |
+| marketplace | `--skills-directory` | the manifest's skills folder |
+| `vibesys-cli` | `--job-tool` (see below) | the manifest's job tool |
 
 RELEASE is the folder that holds the running `vibesys-host`'s own folder, when it holds a
-`release.json`. A set override that is wrong is an error and is never replaced by the release. A
+`release.json`. A configured part that is wrong is an error and is never replaced by the release. A
 developer's build is in no release: a host built into `~/.local/bin` has no `release.json` above it,
-so with no override it refuses every launch with an error naming the setting and the manifest it
+so with no configuration it refuses every launch with an error naming the flag and the manifest it
 looked for. A release with a part missing is an error naming that file. `vibesys-client` finds its
-host the same way, then on `PATH` for a build that is in no release. `VIBESYS_ORCHESTRATOR_STATE_DIR` is the state directory, which should be on local disk.
+host the same way, then on `PATH` for a build that is in no release.
 
 For a developer checkout: build with `(cd gateway && go build -o ~/.local/bin/vibesys-host ./cmd/vibesys-host && go build -o ~/.local/bin/vibesys-client ./cmd/vibesys-client)`,
-run `uv sync --frozen --project orchestrator/sidecar` once, set `VIBESYS_ORCHESTRATOR_SIDECAR` to
-`orchestrator/sidecar` and `VIBESYS_ORCHESTRATOR_MARKETPLACE` to the repository root, then
+run `uv sync --frozen --project orchestrator/sidecar` once, run
+`vibesys-client host configure --session-holder $PWD/orchestrator/sidecar --skills-directory $PWD`, then
 `vibesys-client run start ...` starts a gateway if none serves. Each session's files, logs and socket are
 under `STATE/sessions/`.
 
@@ -328,8 +371,8 @@ written and those runs can still be stopped.
 
 An agent's shell may be a login shell (Codex runs `bash -lc`), which reads the user's profile again
 and can put another `vibesys-cli` first on `PATH`. So the daemon picks one build when it starts. It
-picks, in order: `VIBESYS_ORCHESTRATOR_CLI` (an absolute path to an executable file; a relative path
-or a file that is not executable stops the orchestrator from starting, naming the setting, and no
+picks, in order: the configured `--job-tool` (an absolute path to an executable file; a relative path
+or a file that is not executable stops the orchestrator from starting, naming the flag, and no
 other build is substituted), the release's job tool (an error naming the file when the release lacks
 it, never another build), then, for a host in no release, the first `vibesys-cli` on the daemon's own
 `PATH`. With none of them the orchestrator does not start, because
@@ -350,8 +393,8 @@ Live smoke run with Claude Code and Haiku 4.5 (it uses a real account, so an ope
 repository needs the task bundle named by `--task`):
 
 ```sh
-export VIBESYS_ORCHESTRATOR_STATE_DIR=/local/disk/vo-smoke VIBESYS_ORCHESTRATOR_SIDECAR=$PWD/orchestrator/sidecar VIBESYS_ORCHESTRATOR_MARKETPLACE=$PWD
 (cd gateway && go build -o ~/.local/bin/vibesys-host ./cmd/vibesys-host && go build -o ~/.local/bin/vibesys-client ./cmd/vibesys-client) && uv sync --frozen --project orchestrator/sidecar
+vibesys-client host configure --state-directory /local/disk/vo-smoke --session-holder $PWD/orchestrator/sidecar --skills-directory $PWD
 git init -q /local/disk/smoke-repo && printf 'def add(a, b):\n    return a - b\n' > /local/disk/smoke-repo/calc.py
 git -C /local/disk/smoke-repo add -A && git -C /local/disk/smoke-repo commit -qm init
 vibesys-client run start --repository /local/disk/smoke-repo --task fix-add --harness claude_code \
@@ -372,9 +415,9 @@ The daemon serves two sockets, and which one a caller reached decides who it is:
   lingering, the runtime directory (`/run/user/UID`) is removed when the user's last login ends, and a
   run that was left running would lose its tools' socket. A state directory whose path makes the socket
   address too long for a Unix socket (100 bytes here) is an error naming
-  `VIBESYS_ORCHESTRATOR_STATE_DIR`. The sidecar sockets are under `STATE/sessions` and the gateway socket
-  under the host root (`~/.vibesys`, or `host/` in a state directory), so none of ours is in the runtime
-  directory.
+  `vibesys-client host configure --state-directory`. The sidecar sockets are under `STATE/sessions` and
+  the gateway socket is `ROOT/host.sock`, or for a long root one under `/tmp/vibesys-UID`, so none of
+  ours is in the runtime directory.
   Every call on it needs the credentials of the agent's current session (agent id, session number
   and an HMAC token the daemon derives from a secret), and the daemon never reads the caller from a
   request body. An agent may issue the commands its role allows and read the snapshot of its run.
@@ -473,8 +516,8 @@ Bundles are built by `scripts/build_release_bundle.sh VERSION OS ARCH OUTDIR` an
 `vibesys-latest` names the newest stable version. `scripts/tests/test_install.sh` builds two real
 bundles and, in a clean container as an ordinary user, installs them and runs the installed product:
 a start with no harness installed fails naming the missing harness (the release found its own
-sidecar), and a run with scripted agents (`sidecar/e2e`, selected by the developer override
-`VIBESYS_ORCHESTRATOR_SIDECAR`, no model called) is started, waited on, listed, stopped and shown to
+sidecar), and a run with scripted agents (`sidecar/e2e`, selected by
+`vibesys-client host configure --session-holder`, no model called) is started, waited on, listed, stopped and shown to
 leave no process behind.
 
 ## Testing

@@ -38,7 +38,7 @@ const (
 )
 
 // hostVerbs are the verbs of `host`.
-var hostVerbs = map[string]verb{"status": hostStatus, "stop": hostStop, "restart": hostRestart}
+var hostVerbs = map[string]verb{"status": hostStatus, "stop": hostStop, "restart": hostRestart, "configure": hostConfigure}
 
 // within is ctx with an end d from now on the environment's clock.
 func (c *call) within(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
@@ -59,7 +59,7 @@ func (c *call) within(ctx context.Context, d time.Duration) (context.Context, co
 func (c *call) control(ctx context.Context) (*client.Control, error) {
 	dial, err := c.Locate(c.root)
 	if err != nil {
-		return nil, unavailable("%v", err)
+		return nil, placeFailure(err)
 	}
 	conn, err := dial(ctx)
 	if errors.Is(err, ErrNoHost) {
@@ -177,7 +177,7 @@ func (c *call) awaitGone(ctx context.Context) error {
 	for range goneTries {
 		dial, err := c.Locate(c.root)
 		if err != nil {
-			return unavailable("%v", err)
+			return placeFailure(err)
 		}
 		conn, err := dial(ctx)
 		if errors.Is(err, ErrNoHost) && c.lockFree() {
@@ -245,15 +245,9 @@ func hostRestart(ctx context.Context, c *call, args []string) error {
 			return err
 		}
 	}
-	dial, err := c.Connect(c.root)
-	if err != nil {
-		return unavailable("%v", err)
+	if err := c.startHost(ctx); err != nil {
+		return err
 	}
-	conn, err := dial(ctx)
-	if err != nil {
-		return unavailable("start the host: %v", err)
-	}
-	_ = conn.Close()
 	now, err := c.identify(ctx)
 	if err != nil {
 		return err

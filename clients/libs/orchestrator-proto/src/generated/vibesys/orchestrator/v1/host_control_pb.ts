@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/orchestrator/v1/host_control.proto.
  */
 export const file_vibesys_orchestrator_v1_host_control: GenFile = /*@__PURE__*/
-  fileDesc("Cip2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ob3N0X2NvbnRyb2wucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIjMKD0lkZW50aWZ5UmVxdWVzdBIgCg5jbGllbnRfcmVsZWFzZRgBIAEoCUIIukgFcgMogAEihgMKEElkZW50aWZ5UmVzcG9uc2USGwoHcmVsZWFzZRgBIAEoCUIKukgHcgUQASiAARJGCghyZWxhdGlvbhgCIAEoDjIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlbGVhc2VSZWxhdGlvbkIKukgHggEEEAEgABI2CgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEhEKCWxpdmVfcnVucxgEIAEoDRI/CgVwYXJ0cxgFIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBhcnRSZWFkaW5lc3NCCLpIBZIBAhAQEjMKB3NlcnZpbmcYBiABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXJ2aW5nSAASNQoIdW5zZXJ2ZWQYByABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5VbnNlcnZlZEgAQhUKDG9yY2hlc3RyYXRvchIFukgCCAEiygEKDVBhcnRSZWFkaW5lc3MSOwoEcGFydBgBIAEoDjIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhvc3RQYXJ0Qgq6SAeCAQQQASAAEjMKBXJlYWR5GAIgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUGFydFJlYWR5SAASNwoHcHJvYmxlbRgDIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBhcnRQcm9ibGVtSABCDgoFc3RhdGUSBbpIAggBIkwKCVBhcnRSZWFkeRI/CgZvcmlnaW4YASABKA4yIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5QYXJ0T3JpZ2luQgq6SAeCAQQQASAAIm8KC1BhcnRQcm9ibGVtEkYKBnJlYXNvbhgBIAEoDjIqLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBhcnRQcm9ibGVtUmVhc29uQgq6SAeCAQQQASAAEhgKBmRldGFpbBgCIAEoCUIIukgFcgMogCAiCQoHU2VydmluZyKMAQoIVW5zZXJ2ZWQSQwoGcmVhc29uGAEgASgOMicudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVW5zZXJ2ZWRSZWFzb25CCrpIB4IBBBABIAASIQoPaGVsZF9ieV9yZWxlYXNlGAIgASgJQgi6SAVyAyiAARIYCgZkZXRhaWwYAyABKAlCCLpIBXIDKIAgIiMKC1N0b3BSZXF1ZXN0EhQKDG9ubHlfaWZfaWRsZRgBIAEoCCKJAQoMU3RvcFJlc3BvbnNlEjUKCHN0b3BwaW5nGAEgASgLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3RvcHBpbmdIABIwCgdyZWZ1c2VkGAIgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQnVzeUgAQhAKB291dGNvbWUSBbpIAggBIgoKCFN0b3BwaW5nIiIKBEJ1c3kSGgoJbGl2ZV9ydW5zGAEgASgNQge6SAQqAiAAIj0KCEhvc3RMb2NrEhQKA3BpZBgBIAEoDUIHukgEKgIgABIbCgdyZWxlYXNlGAIgASgJQgq6SAdyBRABKIABKq4BCg9SZWxlYXNlUmVsYXRpb24SIAocUkVMRUFTRV9SRUxBVElPTl9VTlNQRUNJRklFRBAAEhkKFVJFTEVBU0VfUkVMQVRJT05fU0FNRRABEh8KG1JFTEVBU0VfUkVMQVRJT05fSE9TVF9PTERFUhACEh8KG1JFTEVBU0VfUkVMQVRJT05fSE9TVF9ORVdFUhADEhwKGFJFTEVBU0VfUkVMQVRJT05fVU5LTk9XThAEKnEKCEhvc3RQYXJ0EhkKFUhPU1RfUEFSVF9VTlNQRUNJRklFRBAAEhwKGEhPU1RfUEFSVF9TRVNTSU9OX0hPTERFUhABEhQKEEhPU1RfUEFSVF9TS0lMTFMQAhIWChJIT1NUX1BBUlRfSk9CX1RPT0wQAypcCgpQYXJ0T3JpZ2luEhsKF1BBUlRfT1JJR0lOX1VOU1BFQ0lGSUVEEAASFwoTUEFSVF9PUklHSU5fUkVMRUFTRRABEhgKFFBBUlRfT1JJR0lOX09QRVJBVE9SEAIquQEKEVBhcnRQcm9ibGVtUmVhc29uEiMKH1BBUlRfUFJPQkxFTV9SRUFTT05fVU5TUEVDSUZJRUQQABIiCh5QQVJUX1BST0JMRU1fUkVBU09OX05PX1JFTEVBU0UQARIqCiZQQVJUX1BST0JMRU1fUkVBU09OX1JFTEVBU0VfSU5DT01QTEVURRACEi8KK1BBUlRfUFJPQkxFTV9SRUFTT05fT1BFUkFUT1JfQ0hPSUNFX1JFRlVTRUQQAyp4Cg5VbnNlcnZlZFJlYXNvbhIfChtVTlNFUlZFRF9SRUFTT05fVU5TUEVDSUZJRUQQABIiCh5VTlNFUlZFRF9SRUFTT05fSEVMRF9FTFNFV0hFUkUQARIhCh1VTlNFUlZFRF9SRUFTT05fU1RBVEVfUkVGVVNFRBACMsoBChJIb3N0Q29udHJvbFNlcnZpY2USXwoISWRlbnRpZnkSKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JZGVudGlmeVJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JZGVudGlmeVJlc3BvbnNlElMKBFN0b3ASJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wUmVxdWVzdBolLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0b3BSZXNwb25zZUJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("Cip2aWJlc3lzL29yY2hlc3RyYXRvci92MS9ob3N0X2NvbnRyb2wucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIjMKD0lkZW50aWZ5UmVxdWVzdBIgCg5jbGllbnRfcmVsZWFzZRgBIAEoCUIIukgFcgMogAEiygMKEElkZW50aWZ5UmVzcG9uc2USGwoHcmVsZWFzZRgBIAEoCUIKukgHcgUQASiAARJGCghyZWxhdGlvbhgCIAEoDjIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlbGVhc2VSZWxhdGlvbkIKukgHggEEEAEgABI2CgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEhEKCWxpdmVfcnVucxgEIAEoDRI/CgVwYXJ0cxgFIAMoCzImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBhcnRSZWFkaW5lc3NCCLpIBZIBAhAQEjMKB3NlcnZpbmcYBiABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TZXJ2aW5nSAASNQoIdW5zZXJ2ZWQYByABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5VbnNlcnZlZEgAEh8KDWNvbmZpZ19kaWdlc3QYCCABKAlCCLpIBXIDKIABEiEKD2FwaV9zY2hlbWFfaGFzaBgJIAEoCUIIukgFcgMogAFCFQoMb3JjaGVzdHJhdG9yEgW6SAIIASLKAQoNUGFydFJlYWRpbmVzcxI7CgRwYXJ0GAEgASgOMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSG9zdFBhcnRCCrpIB4IBBBABIAASMwoFcmVhZHkYAiABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5QYXJ0UmVhZHlIABI3Cgdwcm9ibGVtGAMgASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUGFydFByb2JsZW1IAEIOCgVzdGF0ZRIFukgCCAEiTAoJUGFydFJlYWR5Ej8KBm9yaWdpbhgBIAEoDjIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlBhcnRPcmlnaW5CCrpIB4IBBBABIAAibwoLUGFydFByb2JsZW0SRgoGcmVhc29uGAEgASgOMioudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUGFydFByb2JsZW1SZWFzb25CCrpIB4IBBBABIAASGAoGZGV0YWlsGAIgASgJQgi6SAVyAyiAICIJCgdTZXJ2aW5nIowBCghVbnNlcnZlZBJDCgZyZWFzb24YASABKA4yJy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5VbnNlcnZlZFJlYXNvbkIKukgHggEEEAEgABIhCg9oZWxkX2J5X3JlbGVhc2UYAiABKAlCCLpIBXIDKIABEhgKBmRldGFpbBgDIAEoCUIIukgFcgMogCAiIwoLU3RvcFJlcXVlc3QSFAoMb25seV9pZl9pZGxlGAEgASgIIokBCgxTdG9wUmVzcG9uc2USNQoIc3RvcHBpbmcYASABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wcGluZ0gAEjAKB3JlZnVzZWQYAiABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5CdXN5SABCEAoHb3V0Y29tZRIFukgCCAEiCgoIU3RvcHBpbmciIgoEQnVzeRIaCglsaXZlX3J1bnMYASABKA1CB7pIBCoCIAAiVQoISG9zdExvY2sSFAoDcGlkGAEgASgNQge6SAQqAiAAEhsKB3JlbGVhc2UYAiABKAlCCrpIB3IFEAEogAESFgoEcm9vdBgDIAEoCUIIukgFcgMogCAi0AEKD0hvc3RTdGFydFJlcG9ydBIzCgdzZXJ2aW5nGAEgASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU2VydmluZ0gAEkAKDmFscmVhZHlfc2VydmVkGAIgASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWxyZWFkeVNlcnZlZEgAEjQKB3JlZnVzZWQYAyABKAsyIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5VbnNlcnZlZEgAQhAKB291dGNvbWUSBbpIAggBIg8KDUFscmVhZHlTZXJ2ZWQqrgEKD1JlbGVhc2VSZWxhdGlvbhIgChxSRUxFQVNFX1JFTEFUSU9OX1VOU1BFQ0lGSUVEEAASGQoVUkVMRUFTRV9SRUxBVElPTl9TQU1FEAESHwobUkVMRUFTRV9SRUxBVElPTl9IT1NUX09MREVSEAISHwobUkVMRUFTRV9SRUxBVElPTl9IT1NUX05FV0VSEAMSHAoYUkVMRUFTRV9SRUxBVElPTl9VTktOT1dOEAQqcQoISG9zdFBhcnQSGQoVSE9TVF9QQVJUX1VOU1BFQ0lGSUVEEAASHAoYSE9TVF9QQVJUX1NFU1NJT05fSE9MREVSEAESFAoQSE9TVF9QQVJUX1NLSUxMUxACEhYKEkhPU1RfUEFSVF9KT0JfVE9PTBADKlwKClBhcnRPcmlnaW4SGwoXUEFSVF9PUklHSU5fVU5TUEVDSUZJRUQQABIXChNQQVJUX09SSUdJTl9SRUxFQVNFEAESGAoUUEFSVF9PUklHSU5fT1BFUkFUT1IQAiq5AQoRUGFydFByb2JsZW1SZWFzb24SIwofUEFSVF9QUk9CTEVNX1JFQVNPTl9VTlNQRUNJRklFRBAAEiIKHlBBUlRfUFJPQkxFTV9SRUFTT05fTk9fUkVMRUFTRRABEioKJlBBUlRfUFJPQkxFTV9SRUFTT05fUkVMRUFTRV9JTkNPTVBMRVRFEAISLworUEFSVF9QUk9CTEVNX1JFQVNPTl9PUEVSQVRPUl9DSE9JQ0VfUkVGVVNFRBADKpwBCg5VbnNlcnZlZFJlYXNvbhIfChtVTlNFUlZFRF9SRUFTT05fVU5TUEVDSUZJRUQQABIiCh5VTlNFUlZFRF9SRUFTT05fSEVMRF9FTFNFV0hFUkUQARIhCh1VTlNFUlZFRF9SRUFTT05fU1RBVEVfUkVGVVNFRBACEiIKHlVOU0VSVkVEX1JFQVNPTl9DT05GSUdfUkVGVVNFRBADMsoBChJIb3N0Q29udHJvbFNlcnZpY2USXwoISWRlbnRpZnkSKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JZGVudGlmeVJlcXVlc3QaKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5JZGVudGlmeVJlc3BvbnNlElMKBFN0b3ASJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5TdG9wUmVxdWVzdBolLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0b3BSZXNwb25zZUJUWlJnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9vcmNoZXN0cmF0b3IvZ2VuL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL3YxO29yY2hlc3RyYXRvcnYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message vibesys.orchestrator.v1.IdentifyRequest
@@ -91,6 +91,22 @@ export type IdentifyResponse = Message<"vibesys.orchestrator.v1.IdentifyResponse
     value: Unserved;
     case: "unserved";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * The digest of the HostConfig this host started with, or empty when it started with none. A client
+   * compares it with the digest of the configuration now in the host's root.
+   *
+   * @generated from field: string config_digest = 8;
+   */
+  configDigest: string;
+
+  /**
+   * The full API schema hash this host answers HostService with, for a client of that service to
+   * tell, before its handshake fails, that it must replace the host.
+   *
+   * @generated from field: string api_schema_hash = 9;
+   */
+  apiSchemaHash: string;
 };
 
 /**
@@ -316,6 +332,15 @@ export type HostLock = Message<"vibesys.orchestrator.v1.HostLock"> & {
    * @generated from field: string release = 2;
    */
   release: string;
+
+  /**
+   * The root the process is the host of. A host holding its root's lock that finds the state directory
+   * held by a host of the same root is watching a hand-over; one of another root is a refusal. Empty
+   * from a host older than this field.
+   *
+   * @generated from field: string root = 3;
+   */
+  root: string;
 };
 
 /**
@@ -324,6 +349,64 @@ export type HostLock = Message<"vibesys.orchestrator.v1.HostLock"> & {
  */
 export const HostLockSchema: GenMessage<HostLock> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_host_control, 11);
+
+/**
+ * HostStartReport is what a starting host says, once, to whoever started it, on a pipe that the
+ * starter holds and the host's exit closes. A candidate that ends without saying anything failed
+ * before it could speak.
+ *
+ * @generated from message vibesys.orchestrator.v1.HostStartReport
+ */
+export type HostStartReport = Message<"vibesys.orchestrator.v1.HostStartReport"> & {
+  /**
+   * @generated from oneof vibesys.orchestrator.v1.HostStartReport.outcome
+   */
+  outcome: {
+    /**
+     * This candidate holds the root and accepts connections on its socket.
+     *
+     * @generated from field: vibesys.orchestrator.v1.Serving serving = 1;
+     */
+    value: Serving;
+    case: "serving";
+  } | {
+    /**
+     * Another process holds the root, and may not be accepting connections yet. This one has ended.
+     *
+     * @generated from field: vibesys.orchestrator.v1.AlreadyServed already_served = 2;
+     */
+    value: AlreadyServed;
+    case: "alreadyServed";
+  } | {
+    /**
+     * This candidate cannot serve, and has ended. Nothing is left running.
+     *
+     * @generated from field: vibesys.orchestrator.v1.Unserved refused = 3;
+     */
+    value: Unserved;
+    case: "refused";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.HostStartReport.
+ * Use `create(HostStartReportSchema)` to create a new message.
+ */
+export const HostStartReportSchema: GenMessage<HostStartReport> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_host_control, 12);
+
+/**
+ * @generated from message vibesys.orchestrator.v1.AlreadyServed
+ */
+export type AlreadyServed = Message<"vibesys.orchestrator.v1.AlreadyServed"> & {
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.AlreadyServed.
+ * Use `create(AlreadyServedSchema)` to create a new message.
+ */
+export const AlreadyServedSchema: GenMessage<AlreadyServed> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_host_control, 13);
 
 /**
  * ReleaseRelation is how the host's release compares with the asking client's.
@@ -488,6 +571,13 @@ export enum UnservedReason {
    * @generated from enum value: UNSERVED_REASON_STATE_REFUSED = 2;
    */
   STATE_REFUSED = 2,
+
+  /**
+   * The host's configuration cannot be read. Only a start report says this: such a host never serves.
+   *
+   * @generated from enum value: UNSERVED_REASON_CONFIG_REFUSED = 3;
+   */
+  CONFIG_REFUSED = 3,
 }
 
 /**

@@ -31,20 +31,11 @@ func marketplace(t *testing.T, manifest string) string {
 
 const good = `{"name": "vibesys", "plugins": [{"name": "other"}, {"name": "vibesys", "source": "./skills"}]}`
 
-func env(path string) func(string) string {
-	return func(k string) string {
-		if k == EnvMarketplace {
-			return path
-		}
-		return ""
-	}
-}
-
 // A marketplace setting that is missing, relative, not a checkout or without the plugin is refused
 // with the setting named, when the daemon starts.
 func TestAWrongMarketplaceIsRefusedNamingTheSetting(t *testing.T) {
 	cases := map[string]struct{ path, want string }{
-		"unset":      {"", "is not set"},
+		"unset":      {"", "names no"},
 		"relative":   {"skills", "not an absolute path"},
 		"no such":    {filepath.Join(t.TempDir(), "nowhere"), "not a marketplace checkout"},
 		"not json":   {marketplace(t, "{"), "not a marketplace manifest"},
@@ -53,9 +44,9 @@ func TestAWrongMarketplaceIsRefusedNamingTheSetting(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := PluginFor(env(c.path), developerBuild)
-			if err == nil || !strings.Contains(err.Error(), EnvMarketplace) || !strings.Contains(err.Error(), c.want) {
-				t.Fatalf("PluginFor(%q) = %v, want an error naming %s and %q", c.path, err, EnvMarketplace, c.want)
+			_, err := PluginFor(c.path, developerBuild)
+			if err == nil || !strings.Contains(err.Error(), SettingSkills) || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("PluginFor(%q) = %v, want an error naming %s and %q", c.path, err, SettingSkills, c.want)
 			}
 		})
 	}
@@ -63,7 +54,7 @@ func TestAWrongMarketplaceIsRefusedNamingTheSetting(t *testing.T) {
 
 func TestTheMarketplaceNamesTheVibesysPlugin(t *testing.T) {
 	root := marketplace(t, good)
-	got, err := PluginFor(env(root+"/"), developerBuild)
+	got, err := PluginFor(root+"/", developerBuild)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,25 +66,19 @@ func TestTheMarketplaceNamesTheVibesysPlugin(t *testing.T) {
 // Without a marketplace the launcher refuses every launch and says why: no session starts without
 // the plugin.
 func TestWithoutAMarketplaceEveryLaunchIsRefused(t *testing.T) {
-	getenv := func(k string) string {
-		if k == EnvSidecar {
-			return "true"
-		}
-		return ""
-	}
-	sidecars, err := SidecarsFor(Parts{Getenv: getenv, Find: developerBuild}, t.TempDir(), "/x/bin/vibesys-host", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	sidecars, err := SidecarsFor(Parts{Config: &pb.HostConfig{SessionHolderCommand: "true"}, Find: developerBuild}, t.TempDir(), "/x/bin/vibesys-host", slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = sidecars.Launch(context.Background(), core.LaunchSession{}, nil)
-	if err == nil || !strings.Contains(err.Error(), EnvMarketplace) {
-		t.Fatalf("Launch = %v, want a refusal naming %s", err, EnvMarketplace)
+	if err == nil || !strings.Contains(err.Error(), SettingSkills) {
+		t.Fatalf("Launch = %v, want a refusal naming %s", err, SettingSkills)
 	}
 }
 
 func launcher(t *testing.T) (*ProcessSidecars, Plugin) {
 	t.Helper()
-	plugin, err := PluginFor(env(marketplace(t, good)), developerBuild)
+	plugin, err := PluginFor(marketplace(t, good), developerBuild)
 	if err != nil {
 		t.Fatal(err)
 	}

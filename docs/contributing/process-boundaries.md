@@ -267,9 +267,10 @@ validated message; the other rows are what the parts above replace.
 | desktop renderer and Electron main | `DesktopGatewayRequest` and `Reply` bytes | `desktop/v1/gateway.proto` | typed |
 | `connect` pipe | opaque bytes over stdio | carries the service above | typed |
 | handshake | `Hello`, `BuildVersions`, `Compatibility` | `service.proto` | typed; the protocol revision is a file option read by every peer |
-| client starts a host | argv, inherited environment and working directory | none | untyped: host control |
-| which root, which socket | path rules, `--root`, environment | `gatewayroot` and a copy in TypeScript | untyped: host control |
-| host absent or held | gRPC `UNAVAILABLE` with free text | none | untyped: host control |
+| client starts a host | argv and `HostStartReport` on a pipe; the host clears its environment | `host_control.proto` | typed |
+| which root, which socket | `gatewayroot.Rule`, `lifecycle.SocketPath`; the desktop dials through the bridge | `gatewayroot` and `lifecycle` | one rule, held by tests |
+| what a host is configured with | `ROOT/host-config.json`, a `HostConfig` | `host_config.proto`, a local file and not part of the frozen `host_control.proto` | typed |
+| host absent or held | `HostStartReport` and `IdentifyResponse`, with a typed `Unserved` | `host_control.proto` | typed |
 | installer to running host | process list match | none | untyped: host control |
 | desktop to remote host | `sh -c` over `ssh` | desktop provisioning | external; tested |
 | run list output for scripts | `run get --json`, protojson | `service.proto` | typed |

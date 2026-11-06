@@ -32,6 +32,10 @@ type ControlConfig struct {
 	Host    Source
 	// Stop ends the host process. It is called once, after the reply to the call that asked.
 	Stop func()
+	// ConfigDigest is the digest of the configuration the host started with.
+	ConfigDigest string
+	// APISchemaHash is what the host's HostService answers with.
+	APISchemaHash string
 }
 
 // NewHostControl is the host's HostControlService. It is registered whether or not the orchestrator
@@ -52,6 +56,9 @@ func (c *control) Identify(_ context.Context, req *pb.IdentifyRequest) (*pb.Iden
 		StartedAt: timestamppb.New(c.c.Started),
 		LiveRuns:  c.c.Host.LiveRuns(),
 		Parts:     c.c.Parts.Readiness(),
+
+		ConfigDigest:  c.c.ConfigDigest,
+		ApiSchemaHash: c.c.APISchemaHash,
 	}
 	if unserved := c.c.Host.Unserved(); unserved != nil {
 		id.Orchestrator = &pb.IdentifyResponse_Unserved{Unserved: unserved}

@@ -11,10 +11,10 @@ import (
 
 	"github.com/uw-syfi/vibesys/gateway/internal/connect"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
-	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
 	"github.com/uw-syfi/vibesys/orchestrator/clientcli"
 	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 	"github.com/uw-syfi/vibesys/orchestrator/hostlock"
 )
 
@@ -24,13 +24,12 @@ const terminateGrace = 10 * time.Second
 // locator says how to reach the host for a --root value without starting one. The Dial it returns
 // fails with clientcli.ErrNoHost when nobody serves.
 func locator(root string) (func(ctx context.Context) (net.Conn, error), error) {
-	home, _ := os.UserHomeDir()
-	directory, err := gatewayroot.For(root, os.Getenv, home)
+	directory, err := hostRoot(root)
 	if err != nil {
 		return nil, err
 	}
-	socket := lifecycle.SocketPath(directory, schema.APISchemaHash)
-	if err := lifecycle.ValidateSocketPath(socket); err != nil {
+	socket := lifecycle.SocketPath(directory)
+	if err := lifecycle.CheckSocketDirectory(socket); err != nil {
 		return nil, err
 	}
 	return func(ctx context.Context) (net.Conn, error) {
@@ -51,7 +50,7 @@ func (hostProcesses) Holder(root string) (*pb.HostLock, error) {
 	if err != nil {
 		return nil, err
 	}
-	record, held, err := lifecycle.Holder(directory, schema.APISchemaHash)
+	record, held, err := lifecycle.Holder(directory)
 	if err != nil || !held {
 		return nil, err
 	}
@@ -103,7 +102,33 @@ func (h hostProcesses) exited(ctx context.Context, root string, holder *pb.HostL
 	}
 }
 
+// hostRoot is the root of a --root value, by gatewayroot.Rule.
 func hostRoot(root string) (string, error) {
 	home, _ := os.UserHomeDir()
-	return gatewayroot.For(root, os.Getenv, home)
+	self, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return gatewayroot.For(root, os.Getenv, home, gatewayroot.Installed(self))
+}
+
+// hostConfigs is the configurations in each root, on the real file system.
+type hostConfigs struct{}
+
+// Load implements clientcli.HostConfigs.
+func (hostConfigs) Load(root string) (*pb.HostConfig, error) {
+	directory, err := hostRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	return hostconfig.Load(directory)
+}
+
+// Save implements clientcli.HostConfigs.
+func (hostConfigs) Save(root string, config *pb.HostConfig) error {
+	directory, err := hostRoot(root)
+	if err != nil {
+		return err
+	}
+	return hostconfig.Save(directory, config)
 }

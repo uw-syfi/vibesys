@@ -27,12 +27,15 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... 
   host status [--json]
   host stop [--if-no-live-runs] [--force]
   host restart
+  host configure [--state-directory DIR] [--session-holder CMD] [--skills-directory DIR]
+                 [--job-tool PATH] [--tool-path DIR:DIR...] [--clear]
   release verify [--installed] DIR
   --version
 
 RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository.
 host status and host stop never start a host; host restart does. A host with live runs is not restarted.
 host stop --force ends the process that holds the host's lock, for a host that does not answer.
+host configure records what the next host starts with, and with no flag prints it.
 release verify checks the release in DIR against its manifest, prints its version, and needs no host.
 Exit codes: 0 ok, 1 failed or refused, 2 usage, 3 timeout, 4 service unavailable.
 `
@@ -110,11 +113,17 @@ var verbs = map[string]verb{
 	"start": start, "list": list, "attach": attach, "get": get, "wait": wait, "steer": steer, "stop": stop,
 }
 
-// open reaches the service and does the version handshake.
+// open reaches the service, having decided what to do with what it finds there for a verb that only
+// reads or steers, and does the version handshake.
 func (c *call) open(ctx context.Context) (*client.Client, error) {
-	dial, err := c.Connect(c.root)
+	return c.openFor(ctx, NeedService)
+}
+
+// openFor is open for what the verb needs of the host.
+func (c *call) openFor(ctx context.Context, need Need) (*client.Client, error) {
+	dial, err := c.settle(ctx, need)
 	if err != nil {
-		return nil, unavailable("%v", err)
+		return nil, err
 	}
 	conn, err := client.Dial(ctx, client.Dialer(dial), client.Options{BinaryVersion: c.Version})
 	if err != nil {

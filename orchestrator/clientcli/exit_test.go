@@ -75,6 +75,9 @@ func TestAHostThatCannotBeFoundIsUnavailable(t *testing.T) {
 		Connect: func(string) (clientcli.Dial, error) {
 			return nil, errors.New("no vibesys-host next to this program or on PATH")
 		},
+		Locate: func(string) (clientcli.Dial, error) {
+			return func(context.Context) (net.Conn, error) { return nil, clientcli.ErrNoHost }, nil
+		},
 	})
 	if code != clientcli.ExitUnavailable {
 		t.Fatalf("exit %d, want 4", code)

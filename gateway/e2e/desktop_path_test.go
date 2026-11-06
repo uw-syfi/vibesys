@@ -32,13 +32,17 @@ func (r *rig) useCLI() {
 	if out, err := build.CombinedOutput(); err != nil {
 		r.t.Fatalf("build vibesys-cli: %v\n%s", err, out)
 	}
-	for i, env := range r.env {
-		if strings.HasPrefix(env, "VIBESYS_ORCHESTRATOR_CLI=") {
-			r.env[i] = "VIBESYS_ORCHESTRATOR_CLI=" + filepath.Join(bin, "vibesys-cli")
-		}
-	}
 	// The rig's daemon is a sandbox daemon: with the runtime directory of its own, it must not meet
-	// the one daemon per user that a developer's machine may already run.
+	// the one daemon per user that a developer's machine may already run. Whoever starts it, the host
+	// or a scripted agent, runs the job tool, so that tool says so itself.
+	sandboxed := filepath.Join(bin, "vibesys-cli-sandboxed")
+	script := "#!/bin/sh\nVIBESYS_CLI_SANDBOX=1 exec " + filepath.Join(bin, "vibesys-cli") + " \"$@\"\n"
+	if err := os.WriteFile(sandboxed, []byte(script), 0o755); err != nil {
+		r.t.Fatal(err)
+	}
+	r.config.JobTool = sandboxed
+	r.config.ToolPath = append([]string{bin}, r.config.ToolPath...)
+	r.holderEnv = append(r.holderEnv, "VIBESYS_CLI_SANDBOX=1")
 	r.env = append(r.env, "VIBESYS_CLI_SANDBOX=1", "PATH="+bin+string(os.PathListSeparator)+r.dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	r.t.Cleanup(func() { r.stopCLIDaemon(filepath.Join(bin, "vibesys-cli")) })
 }
@@ -111,12 +115,12 @@ func (r *rig) useMarketplace() {
 		r.t.Fatal(err)
 	}
 	r.marketplace = root
-	r.env = append(r.env, "VIBESYS_ORCHESTRATOR_MARKETPLACE="+root)
+	r.config.SkillsDirectory = root
 }
 
 // actingAgents makes the scripted sidecars act: each agent runs its role's script instead of
 // answering "reply N".
-func (r *rig) actingAgents() { r.env = append(r.env, "VIBESYS_E2E_SCRIPT=act") }
+func (r *rig) actingAgents() { r.holderEnv = append(r.holderEnv, "VIBESYS_E2E_SCRIPT=act") }
 
 // session is one launched session's directory under the orchestrator's state.
 type session struct {

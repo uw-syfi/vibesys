@@ -15,17 +15,9 @@ type fakeFiles map[string]bool
 
 func (f fakeFiles) Executable(path string) bool { return f[path] }
 
-func cliTestEnv(kv ...string) func(string) string {
-	m := map[string]string{}
-	for i := 0; i < len(kv); i += 2 {
-		m[kv[i]] = kv[i+1]
-	}
-	return func(k string) string { return m[k] }
-}
-
 func TestAnExplicitCLIWinsOverEveryOtherBuild(t *testing.T) {
 	files := fakeFiles{"/pick/vibesys-cli": true, "/install/vibesys-cli": true, "/usr/bin/vibesys-cli": true}
-	got, err := ResolveCLI(cliTestEnv(EnvCLI, "/pick/vibesys-cli", "PATH", "/usr/bin"), developerBuild, files)
+	got, err := ResolveCLI("/pick/vibesys-cli", []string{"/usr/bin"}, developerBuild, files)
 	if err != nil || got != "/pick/vibesys-cli" {
 		t.Fatalf("got %q, %v, want the chosen build", got, err)
 	}
@@ -36,9 +28,9 @@ func TestAnExplicitCLIWinsOverEveryOtherBuild(t *testing.T) {
 func TestAnExplicitCLIThatCannotBeUsedIsRefusedAndNeverReplaced(t *testing.T) {
 	files := fakeFiles{"/install/vibesys-cli": true, "/usr/bin/vibesys-cli": true}
 	for _, setting := range []string{"vibesys-cli", "./vibesys-cli", "/missing/vibesys-cli", "/usr/bin"} {
-		got, err := ResolveCLI(cliTestEnv(EnvCLI, setting, "PATH", "/usr/bin"), developerBuild, files)
-		if err == nil || got != "" || !strings.Contains(err.Error(), EnvCLI) {
-			t.Errorf("%q gave %q, %v, want an error naming %s", setting, got, err, EnvCLI)
+		got, err := ResolveCLI(setting, []string{"/usr/bin"}, developerBuild, files)
+		if err == nil || got != "" || !strings.Contains(err.Error(), SettingJobTool) {
+			t.Errorf("%q gave %q, %v, want an error naming %s", setting, got, err, SettingJobTool)
 		}
 	}
 }
@@ -65,14 +57,14 @@ func TestTheCLIBesideTheDaemonThenTheFirstOnPATHIsChosen(t *testing.T) {
 		}
 		order := slices.Clone(dirs)
 		rng.Shuffle(len(order), func(i, j int) { order[i], order[j] = order[j], order[i] })
-		path := strings.Join(slices.Concat([]string{"bin"}, order), ":")
-		got, err := ResolveCLI(cliTestEnv("PATH", path), find, files)
+		path := slices.Concat([]string{"bin"}, order)
+		got, err := ResolveCLI("", path, find, files)
 		want := ""
 		switch {
 		case beside:
 			want = "/inst/bin/vibesys-cli"
 		default:
-			for _, d := range filepath.SplitList(path) {
+			for _, d := range path {
 				if filepath.IsAbs(d) && files[filepath.Join(d, "vibesys-cli")] {
 					want = filepath.Join(d, "vibesys-cli")
 					break
@@ -80,7 +72,7 @@ func TestTheCLIBesideTheDaemonThenTheFirstOnPATHIsChosen(t *testing.T) {
 			}
 		}
 		if got != want || (want == "") != (err != nil) {
-			t.Fatalf("seed %d: PATH %s, beside %v, executables in %v: got %q, %v, want %q", seed, path, beside, have, got, err, want)
+			t.Fatalf("seed %d: tool path %v, beside %v, executables in %v: got %q, %v, want %q", seed, path, beside, have, got, err, want)
 		}
 		if got != "" && !filepath.IsAbs(got) {
 			t.Fatalf("seed %d: %q is not absolute", seed, got)
@@ -92,16 +84,16 @@ func TestTheCLIBesideTheDaemonThenTheFirstOnPATHIsChosen(t *testing.T) {
 // build on PATH is not taken instead.
 func TestAReleaseWithoutItsToolIsAnErrorAndNeverAnotherBuild(t *testing.T) {
 	files := fakeFiles{"/usr/bin/vibesys-cli": true}
-	got, err := ResolveCLI(cliTestEnv("PATH", "/usr/bin"), memoryRelease(t, "/inst", "bin/vibesys-cli"), files)
+	got, err := ResolveCLI("", []string{"/usr/bin"}, memoryRelease(t, "/inst", "bin/vibesys-cli"), files)
 	if err == nil || got != "" || !strings.Contains(err.Error(), "bin/vibesys-cli") {
 		t.Fatalf("got %q, %v, want an error naming the release's tool", got, err)
 	}
 }
 
 func TestNoCLIAnywhereIsAnErrorNamingTheSettingAndNotAGuess(t *testing.T) {
-	got, err := ResolveCLI(cliTestEnv("PATH", "/usr/bin:relative"), developerBuild, fakeFiles{"relative/vibesys-cli": true})
-	if err == nil || got != "" || !strings.Contains(err.Error(), EnvCLI) {
-		t.Fatalf("got %q, %v, want an error naming %s", got, err, EnvCLI)
+	got, err := ResolveCLI("", []string{"/usr/bin", "relative"}, developerBuild, fakeFiles{"relative/vibesys-cli": true})
+	if err == nil || got != "" || !strings.Contains(err.Error(), SettingJobTool) {
+		t.Fatalf("got %q, %v, want an error naming %s", got, err, SettingJobTool)
 	}
 }
 

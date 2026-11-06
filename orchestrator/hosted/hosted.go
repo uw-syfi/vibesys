@@ -2,24 +2,27 @@
 // API, registers its operator service on its own gRPC server and socket, and keeps itself up while
 // a run is live. It is the one package outside this module's internals that other modules import.
 //
-// Exactly one process holds the orchestrator's state directory, through the store's lock. A process
-// that cannot take it, or whose state directory is refused, still starts: every orchestrator call
-// it receives answers UNAVAILABLE with the reason, and HostControlService, which is served either
-// way, says so as a typed Unserved, naming the holder's release when there is one.
+// Exactly one process holds the orchestrator's state directory, through the store's lock. Start
+// never fails on one that cannot take it, or whose state directory is refused: it says so as a typed
+// Unserved, naming the holder's release when there is one. The host decides what to do about that.
+// One that stays up answers UNAVAILABLE with the reason to every orchestrator call, and
+// HostControlService, which is served either way, reports the Unserved.
 package hosted
 
 import (
 	"context"
 	"errors"
 	"log/slog"
-	"os"
 	"path/filepath"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/uw-syfi/vibesys/orchestrator/gatewayroot"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/production"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/search"
@@ -33,9 +36,16 @@ type Options struct {
 	// Executable is the host binary. Each agent's tool server runs it as `Executable mcp`.
 	Executable string
 	Log        *slog.Logger
-	// Getenv and Home resolve the state directory and the sidecar setting.
+	// Root is the host's root, which its default state directory follows from.
+	Root string
+	// Config is the host's configuration, as it read it when it started.
+	Config *pb.HostConfig
+	// Getenv reads the XDG places of the host's own environment, which is only ever what
+	// hostconfig.Environ made it. Nothing that configures the host comes from it.
 	Getenv func(string) string
 	Home   string
+	// APISchemaHash is what the host's HostService answers with, for HostControlService to report.
+	APISchemaHash string
 	// Stop ends the host process. HostControlService calls it, after the reply, when asked to stop.
 	Stop func()
 }
@@ -57,9 +67,9 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	x := &Orchestrator{live: make(chan bool, 1), done: make(chan error, 1)}
 	// The parts are resolved when a run is started and when a session is launched, and when
 	// HostControlService is asked, never here: a part that is missing now is not missing for good.
-	parts := production.Parts{Getenv: o.Getenv, Find: release.FinderFor(o.Executable), Files: production.OSFiles{}, Home: o.Home}
-	x.control = NewHostControl(ControlConfig{Release: o.Version, Started: production.SystemClock{}.Now(), Parts: parts, Host: x, Stop: o.Stop})
-	layout, err := production.LayoutFor(o.Getenv, o.Home)
+	parts := production.Parts{Config: o.Config, Getenv: o.Getenv, Find: release.FinderFor(o.Executable), Files: production.OSFiles{}, Home: o.Home}
+	x.control = NewHostControl(ControlConfig{Release: o.Version, Started: production.SystemClock{}.Now(), Parts: parts, Host: x, Stop: o.Stop, ConfigDigest: hostconfig.Digest(o.Config), APISchemaHash: o.APISchemaHash})
+	layout, err := production.LayoutFor(o.Config.GetStateDirectory(), gatewayroot.StateDirectory(o.Root, o.Home, o.Getenv))
 	if err != nil {
 		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator's state directory is refused: "+err.Error())
 	}
@@ -68,7 +78,8 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", err.Error())
 	}
 	searches := production.SearchFor()
-	d, err := production.Open(layout, production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Tree: production.OSTree{}, Version: o.Version, Locate: parts.Location, Parts: parts}, o.Log)
+	wiring := production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Tree: production.OSTree{}, Version: o.Version, Locate: parts.Location, Parts: parts, Root: o.Root}
+	d, err := production.AwaitHandOver(ctx, o.Root, time.After, func() (*production.Daemon, error) { return production.Open(layout, wiring, o.Log) })
 	if err != nil {
 		var held *production.HeldError
 		if errors.As(err, &held) {
@@ -78,8 +89,11 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	}
 	x.d = d
 	go func() {
-		defer d.Close()
-		x.done <- d.Run(ctx)
+		err := d.Run(ctx)
+		// Done means the state directory's lock is free: a host releases its root's lock after this,
+		// so whoever gets that lock next finds the state free too.
+		d.Close()
+		x.done <- err
 	}()
 	go x.watchLive(ctx)
 	return x
@@ -168,10 +182,4 @@ func registerUnavailable(server grpc.ServiceRegistrar, reason string) {
 		desc.Streams[i].Handler = func(any, grpc.ServerStream) error { return err }
 	}
 	server.RegisterService(&desc, pb.UnimplementedOrchestratorServiceServer{})
-}
-
-// Environ is the process environment, for Options.Getenv.
-func Environ() (func(string) string, string) {
-	home, _ := os.UserHomeDir()
-	return os.Getenv, home
 }
