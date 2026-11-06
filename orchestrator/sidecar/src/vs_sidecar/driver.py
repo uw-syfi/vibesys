@@ -286,7 +286,9 @@ class AgentshimDriver:
             msg = "no turn has begun"
             raise SessionStateError(msg)
         try:
-            ticket = self._live.prepare_turn(TurnRequest(prompt=active.prompt))
+            # Pinned: a managed agent's conversation holds its brief, so agentshim must never
+            # retire it (Codex's two-turn renewal) or replace a refused resume with an empty one.
+            ticket = self._live.prepare_turn(TurnRequest(prompt=active.prompt), pin=True)
             with self._lock:
                 active.ticket = ticket
                 early = active.interrupt_requested
