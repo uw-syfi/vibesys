@@ -210,7 +210,7 @@ func (s *session) Close() {
 }
 
 // join opens the service, reads the snapshot and picks the run named by arg, which may be empty, in
-// which case omitted says which it means.
+// which case it means the run resolve picks.
 // The returned context ends the stream and must be used for every later call.
 func (c *call) join(ctx context.Context, arg string) (*session, context.Context, error) {
 	repo := ""
