@@ -80,6 +80,7 @@ jobs:
       cli: ${{ steps.filter.outputs.cli }}
       orchestrator: ${{ steps.filter.outputs.orchestrator }}
       desktop_path: ${{ steps.filter.outputs.desktop_path }}
+      managed_install: ${{ steps.filter.outputs.managed_install }}
       example_pointers: ${{ steps.example-pointers.outputs.example_pointers }}
       # The per-file test seconds the shards balance on, read once here so that
       # every shard of a run sees the same record (a shard that read a newer
@@ -646,6 +647,30 @@ jobs:
         # Electron's native windows require a display; Ubuntu runners provide Xvfb. The wrapper owns
         # the display for this one check group.
         run: xvfb-run -a ./support/repoctl/repoctl run-checks --group desktop_path_e2e
+
+  # The installer for managed runs (install.sh) end to end: builds a bundle, installs it in a clean
+  # Debian container with no Go, Python or repository, and checks the layout, a re-install, a
+  # corrupted bundle and a version switch. Runs only when the installer or what a bundle carries
+  # changes.
+  managed-install:
+    needs: changes
+    if: needs.changes.outputs.managed_install == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: |
+            gateway/go.sum
+            cli/go.sum
+
+      - name: Install on a clean machine
+        run: ./support/repoctl/repoctl run-checks --group managed_install_tests
 
   impact-tool:
     needs: changes
@@ -1658,6 +1683,7 @@ jobs:
       - cli
       - orchestrator
       - desktop-path
+      - managed-install
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
@@ -1731,6 +1757,7 @@ jobs:
       - cli
       - orchestrator
       - desktop-path
+      - managed-install
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
