@@ -60,6 +60,11 @@ func Restart(d *k8s.Deployment, deployment string, every bool) func(context.Cont
 	}
 }
 
+// Flush empties the cache Deployment in place, in every pod.
+func Flush(d *k8s.Deployment, cache string) func(context.Context) error {
+	return func(ctx context.Context) error { return d.Flush(ctx, cache) }
+}
+
 // Exec runs argv in the Deployment's first pod; a nonzero exit is an error with its output.
 func Exec(d *k8s.Deployment, deployment string, argv []string) func(context.Context) error {
 	return func(ctx context.Context) error {

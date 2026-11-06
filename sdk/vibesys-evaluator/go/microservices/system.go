@@ -31,10 +31,11 @@ type deployRequest struct {
 // deployment is a deployed application: it runs pods next to it until closed.
 type deployment interface {
 	phase.Pods
-	// restart and exec are the fault actions on a Deployment of the application (Restart,
-	// RestartAll, Exec): on Kubernetes they act; elsewhere they fail.
+	// restart, exec and flush are the fault actions on a Deployment of the application (Restart,
+	// RestartAll, Exec, Flush): on Kubernetes they act; elsewhere they fail.
 	restart(deployment string, every bool) func(context.Context) error
 	exec(deployment string, argv []string) func(context.Context) error
+	flush(cache string) func(context.Context) error
 	// close tears the application down; it is called on every path once deploy returned.
 	close(ctx context.Context) error
 }
@@ -67,4 +68,8 @@ func (l local) restart(deployment string, _ bool) func(context.Context) error {
 
 func (l local) exec(deployment string, _ []string) func(context.Context) error {
 	return accuracy.Unsupported("microservices.Local", "exec in "+deployment)
+}
+
+func (l local) flush(cache string) func(context.Context) error {
+	return accuracy.Unsupported("microservices.Local", "flush "+cache)
 }

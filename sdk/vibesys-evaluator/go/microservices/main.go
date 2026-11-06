@@ -49,7 +49,7 @@ type Task[D, M any] struct {
 	// ends the sample with an error record. Nil: the task has only Accuracy.
 	Benchmark func(ctx context.Context, run *Run) error
 	// Accuracy is the task's accuracy check (the `accuracy` command); nil when it has none.
-	Accuracy *Accuracy
+	Accuracy *Accuracy[D, M]
 	// Capture records every phase's whole history for an accuracy check, which benchmarks leave
 	// off: every response body, the loadgen client of every operation and the generator's info
 	// of every operation are kept in the phase directories, and history.binpb lists the phases
@@ -61,8 +61,9 @@ const usageText = `usage:
   TASK benchmark [--project-root DIR] --vs-output FILE [--seed N]   one sample (vibesys)
   TASK accuracy [--project-root DIR] [--out DIR] [--seed N]          the accuracy check (vibesys)
   TASK accuracy --history DIR [--out DIR]                         judge a captured history
-  TASK phase --work DIR --target URL                              one phase (a phase pod)
+  TASK phase [--accuracy] --work DIR --target URL                 one phase (a phase pod)
   TASK generate --phase-input F --dataset F --state DIR          the generator (under loadgen)
+  TASK accuracy-workload generate ...                             Accuracy.Workload's generator
   TASK seed --dataset-digest HEX                                  the seed (a seed pod)
 `
 
@@ -70,7 +71,8 @@ const usageText = `usage:
 // see evaluator.Main), whose body deploys the application on the Task's System, runs Benchmark
 // on a Run and tears the application down on every path; `accuracy` is the accuracy check (see
 // Accuracy); `phase` is the phase pod's command; `generate` the generator's (with
-// Task.Workload); `seed` the seed pod's.
+// Task.Workload) and `accuracy-workload generate` the accuracy check's (with Accuracy.Workload);
+// `seed` the seed pod's.
 func Main[D, M any](task Task[D, M]) {
 	if err := task.validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "bench: error:", err)
@@ -102,16 +104,27 @@ func Main[D, M any](task Task[D, M]) {
 		if task.Workload == nil {
 			usage("the workload is the generator %q: run it instead", task.Generator)
 		}
-		w := *task.Workload
-		if w.Dataset == nil {
-			w.Dataset = func(string) (D, error) { return dataset(task) }
+		generatorMain(task, *task.Workload)
+	case "accuracy-workload":
+		if task.Accuracy == nil || task.Accuracy.Workload == nil {
+			usage("this task's Accuracy has no Workload of its own")
 		}
-		workload.Main(w)
+		os.Args = append([]string{os.Args[0]}, args[1:]...)
+		generatorMain(task, *task.Accuracy.Workload)
 	case "seed":
 		os.Exit(withSignals(func(ctx context.Context) int { return seedCommand(ctx, task, args[1:]) }))
 	default:
 		usage("unknown command %q", args[0])
 	}
+}
+
+// generatorMain runs w's generator command line (os.Args); without its own Dataset, w's dataset
+// is the Task's.
+func generatorMain[D, M any](task Task[D, M], w workload.Workload[D, M]) {
+	if w.Dataset == nil {
+		w.Dataset = func(string) (D, error) { return dataset(task) }
+	}
+	workload.Main(w)
 }
 
 func usage(format string, args ...any) {
@@ -135,12 +148,7 @@ func (t Task[D, M]) validate() error {
 		return errors.New("microservices.Task needs exactly one of Workload and Generator")
 	}
 	if t.Workload != nil {
-		// Refused here, before anything is deployed, rather than by the generator in a phase.
-		names := make([]string, len(t.Workload.Operations))
-		for i, o := range t.Workload.Operations {
-			names[i] = o.Name
-		}
-		if err := wire.CheckOperationNames(names); err != nil {
+		if err := checkOperationNames(t.Workload); err != nil {
 			return fmt.Errorf("microservices.Task Workload: %w", err)
 		}
 	}
@@ -150,6 +158,16 @@ func (t Task[D, M]) validate() error {
 		}
 	}
 	return nil
+}
+
+// checkOperationNames refuses an operation name loadgen would refuse: here, before anything is
+// deployed, rather than in the generator of a phase.
+func checkOperationNames[D, M any](w *workload.Workload[D, M]) error {
+	names := make([]string, len(w.Operations))
+	for i, o := range w.Operations {
+		names[i] = o.Name
+	}
+	return wire.CheckOperationNames(names)
 }
 
 func (t Task[D, M]) validity() evaluator.Validity {
@@ -256,7 +274,7 @@ func sample[D, M any](ctx context.Context, task Task[D, M], run *evaluator.Run, 
 	}()
 	r := &Run{Run: run, phases: &phases{runner: &phase.Runner{
 		Pods:     deployed,
-		Command:  phaseCommand(exe),
+		Command:  phaseCommand(exe, false),
 		Seed:     run.Seed(),
 		Dir:      run.Artifacts(),
 		Validity: task.validity(),
@@ -267,31 +285,46 @@ func sample[D, M any](ctx context.Context, task Task[D, M], run *evaluator.Run, 
 	return task.Benchmark(ctx, r)
 }
 
-// phaseCommand is the phase pod's command: this binary's `phase`.
-func phaseCommand(exe string) func(work, target string) []string {
-	return func(work, target string) []string { return []string{exe, "phase", "--work", work, "--target", target} }
+// phaseCommand is the phase pod's command: this binary's `phase`, with --accuracy in an accuracy
+// check's phases.
+func phaseCommand(exe string, accuracy bool) func(work, target string) []string {
+	return func(work, target string) []string {
+		argv := []string{exe, "phase"}
+		if accuracy {
+			argv = append(argv, "--accuracy")
+		}
+		return append(argv, "--work", work, "--target", target)
+	}
 }
 
-// generatorCommand is the generator as the phase pod runs it.
-func generatorCommand[D, M any](task Task[D, M], exe string) []string {
-	if task.Workload != nil {
+// generatorCommand is the generator as the phase pod runs it: an accuracy check's own when it has
+// one and accuracy is set, else the Task's.
+func generatorCommand[D, M any](task Task[D, M], exe string, accuracy bool) []string {
+	generator := task.Generator
+	switch a := task.Accuracy; {
+	case accuracy && a != nil && a.Workload != nil:
+		return []string{exe, "accuracy-workload"}
+	case accuracy && a != nil && len(a.Generator) > 0:
+		generator = a.Generator
+	case task.Workload != nil:
 		return []string{exe}
 	}
-	program := task.Generator[0]
+	program := generator[0]
 	if strings.Contains(program, "/") && !filepath.IsAbs(program) {
 		program = filepath.Join(filepath.Dir(exe), program)
 	}
-	return append([]string{program}, task.Generator[1:]...)
+	return append([]string{program}, generator[1:]...)
 }
 
 // podCommand is `phase --work DIR --target URL`: one phase, here.
 func podCommand[D, M any](ctx context.Context, task Task[D, M], args []string) int {
 	set := flag.NewFlagSet("phase", flag.ContinueOnError)
 	set.SetOutput(io.Discard)
+	accuracy := set.Bool("accuracy", false, "an accuracy check's phase: its workload's generator")
 	work := set.String("work", "", "the phase's work directory")
 	target := set.String("target", "", "the application's base URL")
 	if err := set.Parse(args); err != nil || *work == "" || *target == "" || set.NArg() > 0 {
-		usage("phase needs --work DIR --target URL")
+		usage("phase needs [--accuracy] --work DIR --target URL")
 	}
 	exe, err := executable()
 	if err != nil {
@@ -315,7 +348,7 @@ func podCommand[D, M any](ctx context.Context, task Task[D, M], args []string) i
 		return 1
 	}
 	pod := phase.Pod{
-		WorkDir: *work, Target: *target, Generator: generatorCommand(task, exe), DatasetFile: datasetFile,
+		WorkDir: *work, Target: *target, Generator: generatorCommand(task, exe, *accuracy), DatasetFile: datasetFile,
 		MinSustainedRatio: task.validity().MinSustainedRatio, Stderr: os.Stderr,
 		Event: func(_, message string) { evaluator.Log("%s", message) },
 	}

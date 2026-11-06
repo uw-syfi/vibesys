@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os/signal"
 	"path/filepath"
 	"slices"
@@ -15,7 +16,6 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/check"
-	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/evaluator"
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/accuracy"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/kube"
@@ -34,6 +34,7 @@ type target struct {
 	pods    phase.Pods
 	restart func(deployment string, every bool) func(context.Context) error
 	exec    func(deployment string, argv []string) func(context.Context) error
+	flush   func(cache string) func(context.Context) error
 	close   func(context.Context) error
 }
 
@@ -53,33 +54,27 @@ func accuracyRun(rw IO) error {
 	if len(req.GetPhaseCommand()) == 0 || req.GetHistoryDir() == "" || req.GetSystem() == nil {
 		return fail("bad_request", "phase_command, history_dir and a system (k8s or local) are required")
 	}
-	v := req.GetValidity()
-	validity := evaluator.Validity{
-		MaxErrorRate: v.GetMaxErrorRate(), MinSustainedRatio: v.GetMinSustainedRatio(),
-		MinOpsPerOperation: int(v.GetMinOpsPerOperation()),
-	}
-	if v == nil {
-		validity = evaluator.DefaultValidity()
-	}
-	if err := validity.Validate(); err != nil {
-		return fail("bad_request", "%v", err)
-	}
 	plan, err := planOf(req, nil)
 	if err != nil {
 		return fail("bad_request", "%v", err)
 	}
 	if app := req.GetK8S().GetApp(); app != nil {
 		// A fault acts on a Deployment the App lets it touch: refuse the others before deploying.
-		allowed := map[string]bool{}
-		for _, name := range app.GetRestartable() {
-			allowed[name] = true
-		}
+		caches := map[string]bool{}
 		for name := range app.GetCaches() {
-			allowed[name] = true
+			caches[name] = true
 		}
-		for _, f := range plan.Faults {
-			if !allowed[f.Target] {
-				return fail("bad_request", "fault %s on %s: not one of the App's restartable Deployments or caches", f.Kind, f.Target)
+		deployments := maps.Clone(caches)
+		for _, name := range app.GetRestartable() {
+			deployments[name] = true
+		}
+		for i, f := range req.GetFaults() {
+			kind, name := plan.Faults[i].Kind, f.GetDeployment()
+			switch {
+			case f.GetAction() == pb.AccuracyFaultAction_ACCURACY_FAULT_ACTION_FLUSH && !caches[name]:
+				return fail("bad_request", "fault %s on %s: not one of the App's caches", kind, name)
+			case !deployments[name]:
+				return fail("bad_request", "fault %s on %s: not one of the App's restartable Deployments or caches", kind, name)
 			}
 		}
 	}
@@ -109,8 +104,8 @@ func accuracyRun(rw IO) error {
 	}
 	plan, _ = planOf(req, &t)
 	runner := &phase.Runner{
-		Pods: t.pods, Seed: req.GetSampleSeed(), Dir: req.GetHistoryDir(), Validity: validity,
-		Capture: true, Log: log, Now: time.Now,
+		Pods: t.pods, Seed: req.GetSampleSeed(), Dir: req.GetHistoryDir(),
+		Capture: true, Unjudged: true, Log: log, Now: time.Now,
 		Command: func(work, target string) []string {
 			return append(slices.Clone(req.GetPhaseCommand()), "--work", work, "--target", target)
 		},
@@ -166,8 +161,18 @@ func planOf(req *pb.AccuracyRunRequest, t *target) (accuracy.Plan, error) {
 			if t != nil {
 				do = t.exec(f.GetDeployment(), f.GetArgv())
 			}
+		case pb.AccuracyFaultAction_ACCURACY_FAULT_ACTION_FLUSH:
+			if kind == "" {
+				kind = "flush"
+			}
+			if t != nil {
+				do = t.flush(f.GetDeployment())
+			}
 		default:
-			return plan, fmt.Errorf("fault on %s: action must be restart, restart_all or exec", f.GetDeployment())
+			return plan, fmt.Errorf("fault on %s: action must be restart, restart_all, exec or flush", f.GetDeployment())
+		}
+		if len(f.GetArgv()) > 0 && f.GetAction() != pb.AccuracyFaultAction_ACCURACY_FAULT_ACTION_EXEC {
+			return plan, fmt.Errorf("a %s fault on %s has an argv: only an exec fault runs a command", kind, f.GetDeployment())
 		}
 		if f.GetDeployment() == "" {
 			return plan, fmt.Errorf("a %s fault names no deployment", kind)
@@ -198,6 +203,9 @@ func deployTarget(ctx context.Context, req *pb.AccuracyRunRequest, log func(stri
 			exec: func(name string, _ []string) func(context.Context) error {
 				return accuracy.Unsupported("a local system", "exec in "+name)
 			},
+			flush: func(name string) func(context.Context) error {
+				return accuracy.Unsupported("a local system", "flush "+name)
+			},
 			close: func(context.Context) error { return nil },
 		}, nil
 	}
@@ -227,6 +235,7 @@ func deployTarget(ctx context.Context, req *pb.AccuracyRunRequest, log func(stri
 		pods:    kube.Pods{D: d},
 		restart: func(name string, every bool) func(context.Context) error { return kube.Restart(d, name, every) },
 		exec:    func(name string, argv []string) func(context.Context) error { return kube.Exec(d, name, argv) },
+		flush:   func(name string) func(context.Context) error { return kube.Flush(d, name) },
 		close:   func(ctx context.Context) error { return d.Close(ctx, k8s.CloseOptions{}) },
 	}, nil
 }

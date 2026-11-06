@@ -59,6 +59,8 @@ func accuracyRequest(t *testing.T, faults string) (string, string) {
 func TestAnAccuracyRunRecordsTheHistoryAndRunsTheOracle(t *testing.T) {
 	t.Setenv("ACC_TEST_VERDICT", "1")
 	dir, req := accuracyRequest(t, "")
+	// An older wrapper's validity (field 8, now reserved) is ignored.
+	req = strings.Replace(req, `"sample_seed"`, `"validity":{"max_error_rate":0.001},"sample_seed"`, 1)
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"accuracy", "run"}, strings.NewReader(req), &stdout, &stderr)
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -85,6 +87,10 @@ func TestAnAccuracyRunRecordsTheHistoryAndRunsTheOracle(t *testing.T) {
 	if stages[len(stages)-2] != "check" || stages[len(stages)-1] != "done" {
 		t.Fatalf("stages %v", stages)
 	}
+	// The phases are not judged as measurements: each logs what it sent.
+	if !strings.Contains(stdout.String(), "operations sent") || strings.Contains(stdout.String(), "not a measurement") {
+		t.Fatalf("events %s", stdout.String())
+	}
 	manifest := &pb.HistoryManifest{}
 	if err := proto.Unmarshal(must(os.ReadFile(filepath.Join(dir, "history", phase.HistoryFile))), manifest); err != nil {
 		t.Fatal(err)
@@ -110,18 +116,24 @@ func TestAnAccuracyRunRecordsTheHistoryAndRunsTheOracle(t *testing.T) {
 }
 
 func TestAnAccuracyRunEndsAtAFaultItCannotApply(t *testing.T) {
-	_, req := accuracyRequest(t, `{"after_phase":0,"action":"ACCURACY_FAULT_ACTION_RESTART","deployment":"kv"}`)
-	code, out := lastLine(t, req)
-	if code != 1 || out["error_kind"] != "run" || !strings.Contains(out["message"].(string), "a local system cannot restart kv") {
-		t.Fatalf("exit %d, %v", code, out)
+	for action, want := range map[string]string{
+		"RESTART": "a local system cannot restart kv",
+		"FLUSH":   "a local system cannot flush kv",
+	} {
+		_, req := accuracyRequest(t, `{"after_phase":0,"action":"ACCURACY_FAULT_ACTION_`+action+`","deployment":"kv"}`)
+		code, out := lastLine(t, req)
+		if code != 1 || out["error_kind"] != "run" || !strings.Contains(out["message"].(string), want) {
+			t.Fatalf("%s: exit %d, %v", action, code, out)
+		}
 	}
 }
 
 func TestAnAccuracyRunRefusesABadPlan(t *testing.T) {
 	for faults, want := range map[string]string{
-		`{"after_phase":1,"action":"ACCURACY_FAULT_ACTION_RESTART","deployment":"kv"}`: "between two of the 2 phases",
-		`{"after_phase":0,"action":"ACCURACY_FAULT_ACTION_EXEC","deployment":"kv"}`:    "has no argv",
-		`{"after_phase":0,"deployment":"kv"}`:                                          "action must be",
+		`{"after_phase":1,"action":"ACCURACY_FAULT_ACTION_RESTART","deployment":"kv"}`:            "between two of the 2 phases",
+		`{"after_phase":0,"action":"ACCURACY_FAULT_ACTION_EXEC","deployment":"kv"}`:               "has no argv",
+		`{"after_phase":0,"deployment":"kv"}`:                                                     "action must be",
+		`{"after_phase":0,"action":"ACCURACY_FAULT_ACTION_FLUSH","deployment":"kv","argv":["x"]}`: "only an exec fault runs a command",
 	} {
 		_, req := accuracyRequest(t, faults)
 		code, out := lastLine(t, req)
@@ -136,6 +148,13 @@ func TestAnAccuracyRunRefusesAFaultOnADeploymentTheAppDoesNotOffer(t *testing.T)
 	req = strings.Replace(req, `"local":{"target":"http://127.0.0.1:1",`, `"k8s":{"app":{"name":"kv","restartable":["kv"]}},"unused":{`, 1)
 	code, out := lastLine(t, req)
 	if code != 1 || out["error_kind"] != "bad_request" || !strings.Contains(out["message"].(string), "restart on db: not one of the App's restartable") {
+		t.Fatalf("exit %d, %v", code, out)
+	}
+	// A flush empties a cache: a restartable Deployment that is not one is refused.
+	_, req = accuracyRequest(t, `{"after_phase":0,"action":"ACCURACY_FAULT_ACTION_FLUSH","deployment":"kv"}`)
+	req = strings.Replace(req, `"local":{"target":"http://127.0.0.1:1",`, `"k8s":{"app":{"name":"kv","restartable":["kv"],"caches":{"cache":"K8S_CACHE_KIND_REDIS"}}},"unused":{`, 1)
+	code, out = lastLine(t, req)
+	if code != 1 || out["error_kind"] != "bad_request" || !strings.Contains(out["message"].(string), "flush on kv: not one of the App's caches") {
 		t.Fatalf("exit %d, %v", code, out)
 	}
 }

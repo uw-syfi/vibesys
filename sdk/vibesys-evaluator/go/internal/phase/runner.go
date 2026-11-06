@@ -58,8 +58,12 @@ type Runner struct {
 	Validity evaluator.Validity
 	// Capture records every phase's whole history for an accuracy check.
 	Capture bool
-	Log     func(string)
-	Now     func() time.Time
+	// Unjudged: the phases are not measurements and get no verdict (an accuracy run's, whose
+	// oracle judges every response); Validity is not applied, and each phase logs what it sent
+	// and how many of its operations failed.
+	Unjudged bool
+	Log      func(string)
+	Now      func() time.Time
 
 	next   int
 	faults []*pb.FaultEvent
@@ -69,7 +73,8 @@ type Runner struct {
 }
 
 // Ran is a phase that ran to its end: what it was asked, what it left, and the judge's verdict
-// (whose Failure says why it is not a measurement, if it is not).
+// (whose Failure says why it is not a measurement, if it is not; zero when the Runner is
+// Unjudged).
 type Ran struct {
 	Index   int
 	Input   *pb.PhaseInput
@@ -81,7 +86,7 @@ type Ran struct {
 func (r *Runner) Phases() int { return r.next }
 
 // Run runs the next phase with the load asked (a PhaseInput's model, clients or rate and
-// arrivals, secs and warmup) and judges it. An error means it left nothing to judge: its pod could
+// arrivals, secs and warmup) and judges it, unless the Runner is Unjudged. An error means it left nothing to judge: its pod could
 // not run, exited nonzero or wrote no usable output.
 func (r *Runner) Run(ctx context.Context, asked *pb.PhaseInput) (Ran, error) {
 	index := r.next
@@ -118,6 +123,12 @@ func (r *Runner) Run(ctx context.Context, asked *pb.PhaseInput) (Ran, error) {
 		if err := r.writeHistory(); err != nil {
 			return Ran{}, err
 		}
+	}
+	if r.Unjudged {
+		for _, line := range Counts(in, output) {
+			r.Log(line)
+		}
+		return Ran{Index: index, Input: in, Output: output}, nil
 	}
 	verdict, err := Judge(output, r.Validity)
 	if err != nil {

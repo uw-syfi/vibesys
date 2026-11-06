@@ -7,6 +7,8 @@ The end-to-end test (``e2e/test_local_loadgen.py``) runs the real one.
 
 from __future__ import annotations
 
+import dataclasses
+import io
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,19 +18,28 @@ import pytest
 import vibesys_evaluator as vse
 from vibesys_evaluator import microservices as ms
 from vibesys_evaluator._private import core
+from vibesys_evaluator._private.files import DelimitedReader
+from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
+from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
 from vibesys_evaluator.microservices._k8s import deployer
 
 # test-isolation: main() exits; the command is tested through its private entry, with the
 # local deploy kind and the core's stream replaced.
 from vibesys_evaluator.microservices._private import accuracy as accuracy_check
 from vibesys_evaluator.microservices._private.deploy import TaskCommand
-from vibesys_evaluator.microservices._private.entry import Task, accuracy
+from vibesys_evaluator.microservices._private.entry import (
+    Task,
+    accuracy,
+    generator,
+    generator_command,
+)
 from vibesys_evaluator.microservices._private.local import LocalDeployer
+from vibesys_evaluator.microservices._private.workload import Operation, Workload
 
 from .vse_support import kv
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping
+    from collections.abc import Buffer, Callable, Mapping
 
     from vibesys_evaluator.microservices._private.deploy import Deployer
 
@@ -39,7 +50,11 @@ CHECK = ms.Accuracy(
     secs=2,
     warmup=0.5,
     arrivals="uniform",
-    faults=[ms.Fault.restart_all("kv", after=0), ms.Fault.exec("kv", ["sync"], after=1)],
+    faults=[
+        ms.Fault.restart_all("kv", after=0),
+        ms.Fault.exec("kv", ["sync"], after=1),
+        ms.Fault.flush("cache", after=1),
+    ],
     oracle=["./kv-oracle", "--quiet"],
 )
 
@@ -112,7 +127,9 @@ def test_a_local_system_sends_its_target_and_seed(
         "target": "http://127.0.0.1:9",
         "seed": ["python3", "/task/bench.py", "seed", "--dataset-digest", digest],
     }
-    assert request["phase_command"] == ["python3", "/task/bench.py", "phase"]
+    # The phase pods run the check's workload (its own, or the task's), unjudged: no validity.
+    assert request["phase_command"] == ["python3", "/task/bench.py", "phase", "--accuracy"]
+    assert "validity" not in request
     assert request["sample_seed"] == "99"
     assert request["phases"] == 3
     assert request["load"] == {
@@ -130,6 +147,7 @@ def test_a_local_system_sends_its_target_and_seed(
             "deployment": "kv",
             "argv": ["sync"],
         },
+        {"after_phase": 1, "action": "ACCURACY_FAULT_ACTION_FLUSH", "deployment": "cache"},
     ]
     assert request["history_dir"] == str(history)
     assert request["out_dir"] == str(tmp_path / "accuracy")
@@ -196,6 +214,12 @@ def test_the_report_goes_into_the_artifacts() -> None:
         (lambda: ms.Fault.restart("Not_A_Name", after=0), "Deployment's name"),
         (lambda: ms.Fault("exec", "kv", 0), "argv"),
         (lambda: ms.Fault("restart", "kv", 0, ("x",)), "argv"),
+        (lambda: ms.Fault("flush", "cache", 0, ("x",)), "argv"),
+        (lambda: ms.Fault("drain", "kv", 0), "restart, restart_all, exec or flush"),
+        (
+            lambda: ms.Accuracy(phases=1, rate=1, secs=1, oracle=["o"], workload="gen"),
+            "Workload, a Generator or None",
+        ),
         (lambda: ms.Accuracy(phases=0, rate=1, secs=1, oracle=["o"]), "phases"),
         (lambda: ms.Accuracy(phases=1, rate=0, secs=1, oracle=["o"]), "rate"),
         (lambda: ms.Accuracy(phases=1, rate=1, secs=1, warmup=-1, oracle=["o"]), "warmup"),
@@ -211,3 +235,69 @@ def test_the_report_goes_into_the_artifacts() -> None:
 def test_a_bad_check_is_refused_when_it_is_made(make: Callable[[], object], message: str) -> None:
     with pytest.raises(ValueError, match=message):
         make()
+
+
+OWN = Workload(model=kv.Model, operations=[Operation(name="write", weight=1, build=kv.write)])
+
+
+@pytest.mark.parametrize(
+    ("own", "accuracy", "command"),
+    [
+        (None, False, ["python3", "/task/bench.py"]),
+        (None, True, ["python3", "/task/bench.py"]),
+        (OWN, False, ["python3", "/task/bench.py"]),
+        (OWN, True, ["python3", "/task/bench.py", "accuracy-workload"]),
+        (ms.Generator(["./gen", "-x"]), True, ["/task/gen", "-x"]),
+    ],
+)
+def test_a_checks_phase_runs_its_own_workload_and_a_benchmarks_the_tasks(
+    own: Workload[Any, Any] | ms.Generator | None, *, accuracy: bool, command: list[str]
+) -> None:
+    check = dataclasses.replace(CHECK, workload=own)
+    assert generator_command(_task(check), SCRIPT, accuracy=accuracy) == command
+
+
+def test_accuracy_workload_generate_writes_the_checks_own_stream(tmp_path: Path) -> None:
+    phase_input = tmp_path / "input.binpb"
+    phase_input.write_bytes(
+        phase_pb.PhaseInput(
+            sample_seed=1,
+            phase_index=0,
+            model=pb.LoadModel.OPEN,
+            rate=10,
+            arrivals=pb.Arrivals.UNIFORM,
+            secs=1,
+        ).to_binary()
+    )
+    args = [
+        "generate",
+        "--phase-input",
+        str(phase_input),
+        "--dataset",
+        "x",
+        "--state",
+        str(tmp_path),
+    ]
+    own, tasks = _Pipe(), _Pipe()
+    check = dataclasses.replace(CHECK, workload=OWN)
+    assert generator(_task(check), args, stdout=own, accuracy=True) == 0
+    assert generator(_task(), args, stdout=tasks) == 0
+    names = [_operation_names(stream.getvalue()) for stream in (own, tasks)]
+    assert names == [["write"], ["read", "write", "delete"]]
+    # Without a workload of its own, there is no accuracy-workload generator.
+    assert generator(_task(), args, stdout=_Pipe(), accuracy=True) == 2
+
+
+class _Pipe(io.BytesIO):
+    """loadgen's end of the stream: closed once it has read 64 KiB."""
+
+    def write(self, data: Buffer, /) -> int:
+        if self.tell() > 1 << 16:
+            raise BrokenPipeError
+        return super().write(data)
+
+
+def _operation_names(stream: bytes) -> list[str]:
+    """The operation names of a generator stream's RequestsHeader."""
+    reader = DelimitedReader.from_bytes(stream, "the stream", pb.FileKind.REQUESTS)
+    return list(reader.one(pb.RequestsHeader).operation_names)

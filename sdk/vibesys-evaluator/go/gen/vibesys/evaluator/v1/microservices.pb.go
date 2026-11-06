@@ -45,6 +45,8 @@ const (
 	AccuracyFaultAction_ACCURACY_FAULT_ACTION_RESTART_ALL AccuracyFaultAction = 2
 	// Run argv in the Deployment's first pod; a nonzero exit fails the run.
 	AccuracyFaultAction_ACCURACY_FAULT_ACTION_EXEC AccuracyFaultAction = 3
+	// Empty the cache Deployment in place, in every pod (memcached's flush_all, redis's FLUSHALL).
+	AccuracyFaultAction_ACCURACY_FAULT_ACTION_FLUSH AccuracyFaultAction = 4
 )
 
 // Enum value maps for AccuracyFaultAction.
@@ -54,12 +56,14 @@ var (
 		1: "ACCURACY_FAULT_ACTION_RESTART",
 		2: "ACCURACY_FAULT_ACTION_RESTART_ALL",
 		3: "ACCURACY_FAULT_ACTION_EXEC",
+		4: "ACCURACY_FAULT_ACTION_FLUSH",
 	}
 	AccuracyFaultAction_value = map[string]int32{
 		"ACCURACY_FAULT_ACTION_UNSPECIFIED": 0,
 		"ACCURACY_FAULT_ACTION_RESTART":     1,
 		"ACCURACY_FAULT_ACTION_RESTART_ALL": 2,
 		"ACCURACY_FAULT_ACTION_EXEC":        3,
+		"ACCURACY_FAULT_ACTION_FLUSH":       4,
 	}
 )
 
@@ -597,11 +601,12 @@ type AccuracyFault struct {
 	// The phase it follows, from 0; the last phase is followed by none.
 	AfterPhase uint32              `protobuf:"varint,1,opt,name=after_phase,json=afterPhase,proto3" json:"after_phase,omitempty"`
 	Action     AccuracyFaultAction `protobuf:"varint,2,opt,name=action,proto3,enum=vibesys.evaluator.v1.AccuracyFaultAction" json:"action,omitempty"`
-	// The Deployment it acts on: one of the App's restartable ones.
+	// The Deployment it acts on: one of the App's restartable ones or caches; FLUSH: one of its
+	// caches.
 	Deployment string `protobuf:"bytes,3,opt,name=deployment,proto3" json:"deployment,omitempty"`
 	// EXEC: the command.
 	Argv []string `protobuf:"bytes,4,rep,name=argv,proto3" json:"argv,omitempty"`
-	// The FaultEvent's kind; empty: restart, restart_all or exec.
+	// The FaultEvent's kind; empty: restart, restart_all, exec or flush.
 	Kind          string `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -730,7 +735,8 @@ func (x *AccuracyLocal) GetSeed() []string {
 // AccuracyRunRequest is a language SDK's accuracy check (`accuracy run`): the core deploys and
 // seeds the application, runs `phases` open-loop phases of `load` with capture on, the faults
 // between them, writes the accuracy history into history_dir, tears the application down and runs
-// the oracle on the history. Progress is written as {"event": PhaseEvent} lines.
+// the oracle on the history. No phase is judged as a measurement: the oracle judges every
+// response. Progress is written as {"event": PhaseEvent} lines.
 type AccuracyRunRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to System:
@@ -738,7 +744,7 @@ type AccuracyRunRequest struct {
 	//	*AccuracyRunRequest_K8S
 	//	*AccuracyRunRequest_Local
 	System isAccuracyRunRequest_System `protobuf_oneof:"system"`
-	// The phase pod's command, before `--work DIR --target URL` (python bench.py phase).
+	// The phase pod's command, before `--work DIR --target URL` (python bench.py phase --accuracy).
 	PhaseCommand []string `protobuf:"bytes,3,rep,name=phase_command,json=phaseCommand,proto3" json:"phase_command,omitempty"`
 	// The sample's seed: every phase's streams derive from it.
 	SampleSeed uint64 `protobuf:"varint,4,opt,name=sample_seed,json=sampleSeed,proto3" json:"sample_seed,omitempty"`
@@ -746,8 +752,6 @@ type AccuracyRunRequest struct {
 	// Each phase's load: an open loop's rate, arrivals, secs and warmup_secs.
 	Load   *PhaseInput      `protobuf:"bytes,6,opt,name=load,proto3" json:"load,omitempty"`
 	Faults []*AccuracyFault `protobuf:"bytes,7,rep,name=faults,proto3" json:"faults,omitempty"`
-	// How the phases are judged, for the log: a phase that is not a measurement is checked too.
-	Validity *PhaseValidity `protobuf:"bytes,8,opt,name=validity,proto3" json:"validity,omitempty"`
 	// Where the history goes: a new or empty directory holding the dataset file (dataset.json),
 	// written by the caller. A path because the history is files on the caller's machine: the
 	// phases write them, the oracle program is given the directory (--history), and the caller
@@ -850,13 +854,6 @@ func (x *AccuracyRunRequest) GetLoad() *PhaseInput {
 func (x *AccuracyRunRequest) GetFaults() []*AccuracyFault {
 	if x != nil {
 		return x.Faults
-	}
-	return nil
-}
-
-func (x *AccuracyRunRequest) GetValidity() *PhaseValidity {
-	if x != nil {
-		return x.Validity
 	}
 	return nil
 }
@@ -1022,7 +1019,7 @@ const file_vibesys_evaluator_v1_microservices_proto_rawDesc = "" +
 	"\x04kind\x18\x05 \x01(\tR\x04kind\";\n" +
 	"\rAccuracyLocal\x12\x16\n" +
 	"\x06target\x18\x01 \x01(\tR\x06target\x12\x12\n" +
-	"\x04seed\x18\x02 \x03(\tR\x04seed\"\xfb\x03\n" +
+	"\x04seed\x18\x02 \x03(\tR\x04seed\"\xca\x03\n" +
 	"\x12AccuracyRunRequest\x12:\n" +
 	"\x03k8s\x18\x01 \x01(\v2&.vibesys.evaluator.v1.K8sDeployRequestH\x00R\x03k8s\x12;\n" +
 	"\x05local\x18\x02 \x01(\v2#.vibesys.evaluator.v1.AccuracyLocalH\x00R\x05local\x12#\n" +
@@ -1031,24 +1028,24 @@ const file_vibesys_evaluator_v1_microservices_proto_rawDesc = "" +
 	"sampleSeed\x12\x16\n" +
 	"\x06phases\x18\x05 \x01(\rR\x06phases\x124\n" +
 	"\x04load\x18\x06 \x01(\v2 .vibesys.evaluator.v1.PhaseInputR\x04load\x12;\n" +
-	"\x06faults\x18\a \x03(\v2#.vibesys.evaluator.v1.AccuracyFaultR\x06faults\x12?\n" +
-	"\bvalidity\x18\b \x01(\v2#.vibesys.evaluator.v1.PhaseValidityR\bvalidity\x12\x1f\n" +
+	"\x06faults\x18\a \x03(\v2#.vibesys.evaluator.v1.AccuracyFaultR\x06faults\x12\x1f\n" +
 	"\vhistory_dir\x18\t \x01(\tR\n" +
 	"historyDir\x12\x16\n" +
 	"\x06oracle\x18\n" +
 	" \x03(\tR\x06oracle\x12\x17\n" +
 	"\aout_dir\x18\v \x01(\tR\x06outDirB\b\n" +
-	"\x06system\"|\n" +
+	"\x06systemJ\x04\b\b\x10\tR\bvalidity\"|\n" +
 	"\x13AccuracyRunResponse\x12\x18\n" +
 	"\averdict\x18\x01 \x01(\tR\averdict\x12\x1b\n" +
 	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x16\n" +
 	"\x06phases\x18\x03 \x01(\rR\x06phases\x12\x16\n" +
-	"\x06faults\x18\x04 \x01(\rR\x06faults*\xa6\x01\n" +
+	"\x06faults\x18\x04 \x01(\rR\x06faults*\xc7\x01\n" +
 	"\x13AccuracyFaultAction\x12%\n" +
 	"!ACCURACY_FAULT_ACTION_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dACCURACY_FAULT_ACTION_RESTART\x10\x01\x12%\n" +
 	"!ACCURACY_FAULT_ACTION_RESTART_ALL\x10\x02\x12\x1e\n" +
-	"\x1aACCURACY_FAULT_ACTION_EXEC\x10\x03BZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3"
+	"\x1aACCURACY_FAULT_ACTION_EXEC\x10\x03\x12\x1f\n" +
+	"\x1bACCURACY_FAULT_ACTION_FLUSH\x10\x04BZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3"
 
 var (
 	file_vibesys_evaluator_v1_microservices_proto_rawDescOnce sync.Once
@@ -1089,12 +1086,11 @@ var file_vibesys_evaluator_v1_microservices_proto_depIdxs = []int32{
 	9,  // 5: vibesys.evaluator.v1.AccuracyRunRequest.local:type_name -> vibesys.evaluator.v1.AccuracyLocal
 	12, // 6: vibesys.evaluator.v1.AccuracyRunRequest.load:type_name -> vibesys.evaluator.v1.PhaseInput
 	8,  // 7: vibesys.evaluator.v1.AccuracyRunRequest.faults:type_name -> vibesys.evaluator.v1.AccuracyFault
-	4,  // 8: vibesys.evaluator.v1.AccuracyRunRequest.validity:type_name -> vibesys.evaluator.v1.PhaseValidity
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	8,  // [8:8] is the sub-list for method output_type
+	8,  // [8:8] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_evaluator_v1_microservices_proto_init() }

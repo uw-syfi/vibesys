@@ -45,13 +45,14 @@ func Main[D, M any](task Task[D, M])
     core's benchmark, see evaluator.Main), whose body deploys the application on
     the Task's System, runs Benchmark on a Run and tears the application down
     on every path; `accuracy` is the accuracy check (see Accuracy); `phase` is
-    the phase pod's command; `generate` the generator's (with Task.Workload);
+    the phase pod's command; `generate` the generator's (with Task.Workload) and
+    `accuracy-workload generate` the accuracy check's (with Accuracy.Workload);
     `seed` the seed pod's.
 
 
 TYPES
 
-type Accuracy struct {
+type Accuracy[D, M any] struct {
 	// Phases is how many phases run, each an open loop of Load.
 	Phases int
 	Load   Open
@@ -61,6 +62,11 @@ type Accuracy struct {
 	Oracle func(h *check.History) ([]check.AnySpec, error)
 	// Options bound the check; a zero field takes check.DefaultOptions'.
 	Options check.Options
+	// Workload is the check's own request generator, in this binary (`accuracy-workload
+	// generate`); or Generator is its command, as the Task's. Neither: the check's phases run the
+	// Task's workload. One task binary so serves a benchmark's mix and a check's.
+	Workload  *workload.Workload[D, M]
+	Generator []string
 }
     Accuracy is a task's accuracy check, the `accuracy` command of Main:
     it deploys and seeds the application as a benchmark sample does, runs
@@ -72,7 +78,8 @@ type Accuracy struct {
     and writes the report, the failures' timelines and the history into --out
     (/vibesys/artifacts/accuracy, or accuracy/ in $VIBESYS_ARTIFACTS_DIR).
     A check runs at a fixed, modest load, so that the responses are judged,
-    not the capacity.
+    not the capacity; no phase is a measurement, so the Task's Validity does not
+    apply.
 
 type Arrivals string
     Arrivals is the arrival process of an open loop.
@@ -98,11 +105,11 @@ type Fault struct {
 	// Has unexported fields.
 }
     Fault is a fault an accuracy run applies between two phases: Restart,
-    RestartAll and Exec act on a Deployment of a Kubernetes application (K8s);
-    FaultFunc is the task's own action. Each is recorded in the history as a
-    fault of its kind on its target, with its start and end on the clock loadgen
-    stamps its results with, and no operation in flight; the oracle's Spec.Fault
-    says what it does to the state.
+    RestartAll, Exec and Flush act on a Deployment of a Kubernetes application
+    (K8s); FaultFunc is the task's own action. Each is recorded in the history
+    as a fault of its kind on its target, with its start and end on the clock
+    loadgen stamps its results with, and no operation in flight; the oracle's
+    Spec.Fault says what it does to the state.
 
 func Exec(after int, name string, argv ...string) Fault
     Exec runs argv in the first pod of the Deployment name after phase after:
@@ -112,6 +119,11 @@ func FaultFunc(after int, kind, target string, action func(context.Context) erro
     FaultFunc is a fault the task applies itself after phase after: action,
     recorded as a fault of kind (^[a-z][a-z0-9_]{0,62}$) on target. An error of
     action ends the run.
+
+func Flush(after int, cache string) Fault
+    Flush empties the cache Deployment cache (one of the k8s.App's Caches) in
+    place, in every pod, after phase after: memcached's flush_all or redis's
+    FLUSHALL. A fault of kind "flush" on the cache.
 
 func Restart(after int, name string) Fault
     Restart deletes one pod of the Deployment name (the first by name) after
@@ -227,7 +239,7 @@ type Task[D, M any] struct {
 	// ends the sample with an error record. Nil: the task has only Accuracy.
 	Benchmark func(ctx context.Context, run *Run) error
 	// Accuracy is the task's accuracy check (the `accuracy` command); nil when it has none.
-	Accuracy *Accuracy
+	Accuracy *Accuracy[D, M]
 	// Capture records every phase's whole history for an accuracy check, which benchmarks leave
 	// off: every response body, the loadgen client of every operation and the generator's info
 	// of every operation are kept in the phase directories, and history.binpb lists the phases
