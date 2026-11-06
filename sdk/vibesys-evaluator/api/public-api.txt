@@ -16,7 +16,7 @@ vibesys_evaluator.Validity.max_error_rate: float
 vibesys_evaluator.Validity.min_ops_per_operation: int
 vibesys_evaluator.Validity.min_sustained_ratio: float
 vibesys_evaluator.main(*, metrics: Mapping[str, Metric], benchmark: Callable[[Run], None], check: Callable[[Run], str | None] | None = None, profile: Callable[[Run], None] | None = None) -> NoReturn
-class vibesys_evaluator.microservices.Accuracy  (*, phases: int, rate: float, secs: float, oracle: Sequence[str], warmup: float = 0.0, arrivals: Literal['poisson', 'uniform'] = 'poisson', faults: Sequence[Fault] = tuple()) -> None
+class vibesys_evaluator.microservices.Accuracy  (*, phases: int, rate: float, secs: float, oracle: Sequence[str], warmup: float = 0.0, arrivals: Literal['poisson', 'uniform'] = 'poisson', faults: Sequence[Fault] = tuple(), workload: Workload[Any, Any] | Generator | None = None) -> None
 vibesys_evaluator.microservices.Accuracy.arrivals: Literal['poisson', 'uniform']
 vibesys_evaluator.microservices.Accuracy.faults: Sequence[Fault]
 vibesys_evaluator.microservices.Accuracy.oracle: Sequence[str]
@@ -24,12 +24,14 @@ vibesys_evaluator.microservices.Accuracy.phases: int
 vibesys_evaluator.microservices.Accuracy.rate: float
 vibesys_evaluator.microservices.Accuracy.secs: float
 vibesys_evaluator.microservices.Accuracy.warmup: float
-class vibesys_evaluator.microservices.Fault  (action: Literal['restart', 'restart_all', 'exec'], deployment: str, after: int, argv: tuple[str, ...] = ()) -> None
-vibesys_evaluator.microservices.Fault.action: Literal['restart', 'restart_all', 'exec']
+vibesys_evaluator.microservices.Accuracy.workload: Workload[Any, Any] | Generator | None
+class vibesys_evaluator.microservices.Fault  (action: Literal['restart', 'restart_all', 'exec', 'flush'], deployment: str, after: int, argv: tuple[str, ...] = ()) -> None
+vibesys_evaluator.microservices.Fault.action: Literal['restart', 'restart_all', 'exec', 'flush']
 vibesys_evaluator.microservices.Fault.after: int
 vibesys_evaluator.microservices.Fault.argv: tuple[str, ...]
 vibesys_evaluator.microservices.Fault.deployment: str
 vibesys_evaluator.microservices.Fault.exec(deployment: str, argv: Sequence[str], *, after: int) -> Fault
+vibesys_evaluator.microservices.Fault.flush(cache: str, *, after: int) -> Fault
 vibesys_evaluator.microservices.Fault.restart(deployment: str, *, after: int) -> Fault
 vibesys_evaluator.microservices.Fault.restart_all(deployment: str, *, after: int) -> Fault
 class vibesys_evaluator.microservices.Generator  (command: Sequence[str]) -> None
