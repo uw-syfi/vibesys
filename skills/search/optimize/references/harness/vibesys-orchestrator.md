@@ -10,19 +10,23 @@ harness's subagent tools would start agents the run cannot see, stop, or count.
 Call `spawn_agent` with `role`, `brief` and optionally `plan_number`, `harness`, `model` and
 `effort`. The roles are `planner`, `worker`, `judge`, `combiner` and `profiler`; use the one that
 matches the skill you want the agent to follow. The brief is its whole first prompt, so write it
-self-contained (briefs.md). The agent starts fresh, never with your history. A spawn past
+self-contained (briefs.md). The agent starts fresh, never with your history. This is the only
+way to start a planner, a worker or a judge: never load a role's skill yourself in place of
+spawning it, and never implement a plan in a worktree of your own. A spawn past
 `--fanout` live subagents is refused; wait for a handoff, or `stop_agent` one you no longer need.
 
-Choose the harness per role. This is guidance, not a rule:
+Leave `harness`, `model` and `effort` empty. The run has an allowance of harnesses and models,
+and an empty model takes the first model the allowance lists for the harness. Name a `harness`
+or a `model` only when the allowance offers more than one choice and a role has a reason for
+one of them; you never name a model the allowance does not list. A spawn outside the allowance is
+refused with the list of what is allowed: choose from that list, or leave the fields empty.
 
-- Leave `harness`, `model` and `effort` empty to run as you do. Set `model` and `effort` only
-  with a reason, and only together with a `harness`: they apply to that harness alone.
-- Workers do the volume of the work and wait on measurements: prefer the cheaper or faster
-  harness available, and raise `effort` only for a bold plan.
-- Judges should not be the model that wrote the change. Pick a different `harness` from the
-  worker's so the judge reads the diff without its blind spots; with one harness available, a
-  different `model`.
-- Planners and combiners take your own harness unless a plan needs another's strength.
+- `model` and `effort` apply to the `harness` they are given with.
+- With a choice, workers do the volume of the work and wait on measurements: prefer the cheaper
+  or faster one, and raise `effort` only for a bold plan.
+- With a choice, a judge should not be the model that wrote the change: a different `harness`
+  from the worker's, or with one harness, a different `model`. With no choice, an empty spawn is
+  right.
 - The brief you were given may carry a steering note from the operator about harnesses, models
   or cost. It outranks this guidance.
 
@@ -48,17 +52,20 @@ the last, and after each promotion. The operator reads it in the run; it is not 
 needs no reply.
 
 Every report has a `kind`. Use `progress` for the hourly report and the note after a promotion:
-the run goes on. Use `final` once, as your last report, when you have finished what you were
-asked to do, or when you cannot go on and say why in its headline. An operator or a script that
-waits for the result waits for the `final` report; a `progress` report never satisfies it, so do
-not mark a note along the way `final`, and do not end the work without one.
+the run goes on. Use `final` once, as your last report, when the SKILL's Finish rule holds, or
+when you cannot go on and say why in its headline. An operator or a script that waits for the
+result waits for the `final` report; a `progress` report never satisfies it, so do not mark a
+note along the way `final`, and do not end the work without one. A progress report after every
+job or handoff is noise: send it after a promotion or when an hour has passed.
 
 Do not end a turn with a provider wake-up or timer of your own (such as `ScheduleWakeup`) as a way
-to wait: the run wakes you on every handoff, finished job and operator message. A run whose lead
-rests with no agent working, no job running and no message waiting is a stalled run. It shows as
-stalled to the operator, and after ten minutes you are sent a reminder, at most three times in
-all. Act on a reminder: start the next step, or send a `final` report saying why there is none. After
-a `final` report you rest without reminders until you are given something new.
+to wait: the run starts none for you, and the run wakes you on every handoff, finished job and
+operator message. A run whose lead rests with no agent working, no job running and no message
+waiting is a stalled run, and a lead that ends a turn with open plans and nothing outstanding
+makes one. It shows as stalled to the operator, and after ten minutes you are sent a reminder
+that names the next step, at most three times in all. Act on a reminder: start that step, or
+send a `final` report saying why there is none. After a `final` report you rest without
+reminders until you are given something new.
 
 ## Wait for work without polling
 

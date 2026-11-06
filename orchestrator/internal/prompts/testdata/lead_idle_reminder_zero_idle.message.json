@@ -3,7 +3,7 @@
   "delivery": "DELIVERY_NEW_TURN",
   "id": "m1",
   "leadIdleReminder": {
-    "idleSeconds": 3600
+    "idleSeconds": 0
   },
   "runId": "r1",
   "toAgentId": "agent-a"

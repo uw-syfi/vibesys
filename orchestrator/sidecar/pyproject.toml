@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "One process per agent session: drives a provider through agentshim and serves the orchestrator's AgentSessionService over a Unix socket."
 requires-python = ">=3.12"
 dependencies = [
-    "agentshim==0.27.3",
+    "agentshim==0.28.0",
     "grpcio==1.76.0",
     "protobuf==6.33.5",
     "protovalidate>=0.7",

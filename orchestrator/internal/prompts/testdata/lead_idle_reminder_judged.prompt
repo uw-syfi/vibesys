@@ -1,0 +1,5 @@
+Nothing has happened in this run for 25 minutes: no agent is working, no job is running and no message is waiting for you. Started so far: subagents 5, workers 2, judges 1.
+
+Workers and judges have reported. Promote a candidate whose judge passed, or start the next round of planners and workers while the finishing rule of the skill says there is a gain worth chasing.
+
+If the finishing rule of the skill is met, or you cannot go on, send a report of kind `final` with `post_report` that says which. Do not end your turn with open plans and nothing outstanding, and do not end it to wait on a timer: nothing will wake you.

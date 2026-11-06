@@ -9,6 +9,19 @@ You are the lead of one optimization for one task. You steer; you never write co
 that, each in its own git worktree. Everything you need is stored by `vibesys-cli` or
 git, so a context limit or a stop costs nothing: resume by reading the state.
 
+Three things hold for the whole run:
+
+- **Plans go to workers.** A plan is a hypothesis for a worker to try. You never try one yourself,
+  not a first draft, a small one or the one that looks easy, and you never create a worktree to
+  implement in. Planners write the plans; you write none. You start a subagent with the
+  harness's subagent tool. Loading a role's skill (`plan-hypotheses`, `implement-hypothesis`,
+  `judge-candidate`, `combine-candidates`, `profile-revision`) in your own context makes you do
+  that role's work, so those skills are for the subagents you start.
+- **A turn ends only with something outstanding.** Before you end a turn, a subagent is running
+  or a job is queued. If a plan is open or chosen and nothing is outstanding, start its worker
+  now. Nothing wakes a lead whose subagents and jobs are all done.
+- **The run ends with a final report.** When is set out in [Finish](#finish).
+
 **Which CLI.** Where this skill writes `vibesys-cli`, run `"$VIBESYS_CLI"`, never the one on
 `PATH`: your shell's `PATH` may hold another build than the one this run means to use. A run
 started by the orchestrator sets it. Before invoking the CLI, follow [CLI setup](#cli-setup)
@@ -62,7 +75,7 @@ It selects a working CLI or installs one only after explicit user approval.
 
 ## Loop
 
-1. Dispatch planners (fresh context each) with the task name and optionally one nudge, per
+1. Dispatch planners (fresh context each; you write no plan) with the task name and optionally one nudge, per
    [plan-hypotheses](../plan-hypotheses/SKILL.md). Vary nudges across a round; give at least one
    planner none, and every few rounds one the nudge "bold" (a high-risk, high-reward idea). Fund a
    bold plan by expected value, upside times chance, and start it with its feasibility step; a low
@@ -137,15 +150,36 @@ It selects a working CLI or installs one only after explicit user approval.
   polling"). Never poll the list of agents, or their state, on a timer: every poll spends your
   context and tells you nothing a message would not. Look at the list when a message arrives, on a
   resume, or when an expected handoff is so overdue that you say why you looked.
-- Stop when work plateaus (N consecutive plans within noise, or planners find nothing with
-  meaningful expected gain) or when the user stops it. To pause, bring every plan up to date
-  (status and a last comment); to resume, read the state.
+- To pause, bring every plan up to date (status and a last comment); to resume, read the state.
+
+## Finish
+
+Finish when the work has run its course, or when the user stops it. Check the course each time a
+candidate is promoted, refused or rejected, and before you dispatch another round of planners.
+It has run its course when either holds:
+
+1. **Bounded gains.** Every plan still open or parked states a bound on its possible gain (the
+   planners must, per [plan-hypotheses](../plan-hypotheses/SKILL.md)), and each bound is below
+   10% of the current headline. A new idea whose bound is that low is a parked plan, not a
+   reason to go on. A bold plan whose bound is higher keeps the run going.
+2. **No progress.** The last two candidates built on the current head were each refused as
+   `within_noise` or `worse`, or failed their judge, and no open plan has a bound above 10%.
+
+Then bring the plans up to date and give the final report, whatever else is still open: a
+result you hold is worth more reported than improved forever. A run that stays open after a
+final report costs nothing, and one that never gives it cannot be waited on. The operator's
+steering note may state another share.
+
+The bounds are text in each plan, so you read them; nothing computes this rule for you.
 
 ## Reporting
 
-Report to the user every hour, unless the user names another schedule. At the start, and again on
-every resume, schedule it with the harness's periodic-work mechanism (the harness file, "Schedule
-periodic work"); with no scheduler, report whenever a task finishes. How to write a report:
+There are two kinds. A progress report goes to the user after a promotion, and at least every
+hour unless the user names another schedule; not after each job or each agent. It does not say
+the work is done. The final report ends the work, once, as [Finish](#finish) says or when you
+cannot go on, and its headline says which. Where the harness has a scheduler, set the hourly
+report with it at the start and on every resume (the harness file, "Schedule periodic work");
+with none, report when a task finishes. How to write a report:
 [report-progress](../report-progress/SKILL.md). To attach charts of progress to a report, use
 [visualize-progress](../visualize-progress/SKILL.md).
 

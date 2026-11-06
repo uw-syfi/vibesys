@@ -1,3 +1,13 @@
-Nothing has happened in this run for {{.IdleMinutes}} minutes: no agent is working, no job is running and no message is waiting for you.
+Nothing has happened in this run for {{.IdleMinutes}} minutes: no agent is working, no job is running and no message is waiting for you. Started so far: subagents {{.Subagents}}, workers {{.Workers}}, judges {{.Judges}}.
 
-Read the state (`list_agents`, the plans and the jobs) and take the next step, such as starting a subagent or a measurement. If the work is finished, or you cannot go on, send a report of kind `final` with `post_report` that says which. Do not end your turn to wait: nothing will wake you.
+{{if eq .Subagents 0 -}}
+You have started no subagent, so no plan has been tried. A plan you wrote goes to a worker; you do not implement it yourself. Call `spawn_agent` with role `worker` for each plan you chose, or with role `planner` if you have none, then end your turn and wait for the handoff.
+{{- else if eq .Workers 0 -}}
+No worker has been started, so no plan has been tried. A plan goes to a worker; you do not implement it yourself. Call `spawn_agent` with role `worker` for the plan you chose, then end your turn and wait for the handoff.
+{{- else if eq .Judges 0 -}}
+No judge has been started. Measure each candidate a worker handed off, call `spawn_agent` with role `judge` for each one that beats the base, and promote a candidate the judge passes.
+{{- else -}}
+Workers and judges have reported. Promote a candidate whose judge passed, or start the next round of planners and workers while the finishing rule of the skill says there is a gain worth chasing.
+{{- end}}
+
+If the finishing rule of the skill is met, or you cannot go on, send a report of kind `final` with `post_report` that says which. Do not end your turn with open plans and nothing outstanding, and do not end it to wait on a timer: nothing will wake you.

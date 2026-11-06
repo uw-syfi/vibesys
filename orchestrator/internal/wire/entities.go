@@ -225,7 +225,9 @@ func messageOut(m core.Message) *pb.Message {
 	case core.HandoffReminder:
 		out.Body = &pb.Message_HandoffReminder{HandoffReminder: &pb.HandoffReminder{}}
 	case core.LeadIdleReminder:
-		out.Body = &pb.Message_LeadIdleReminder{LeadIdleReminder: &pb.LeadIdleReminder{IdleSeconds: uint32(b.Idle / time.Second)}}
+		out.Body = &pb.Message_LeadIdleReminder{LeadIdleReminder: &pb.LeadIdleReminder{
+			IdleSeconds: uint32(b.Idle / time.Second), SubagentsStarted: b.Subagents, WorkersStarted: b.Workers, JudgesStarted: b.Judges,
+		}}
 	case core.SubagentSettled:
 		out.Body = &pb.Message_SubagentSettled{SubagentSettled: &pb.SubagentSettled{
 			AgentId: string(b.Agent), Status: agentStatuses.out(b.Status), Detail: b.Detail,
@@ -259,7 +261,11 @@ func messageIn(m *pb.Message, errs *errorList) core.Message {
 	case *pb.Message_HandoffReminder:
 		out.Body = core.HandoffReminder{}
 	case *pb.Message_LeadIdleReminder:
-		out.Body = core.LeadIdleReminder{Idle: time.Duration(b.LeadIdleReminder.GetIdleSeconds()) * time.Second}
+		out.Body = core.LeadIdleReminder{
+			Idle:      time.Duration(b.LeadIdleReminder.GetIdleSeconds()) * time.Second,
+			Subagents: b.LeadIdleReminder.GetSubagentsStarted(), Workers: b.LeadIdleReminder.GetWorkersStarted(),
+			Judges: b.LeadIdleReminder.GetJudgesStarted(),
+		}
 	case *pb.Message_SubagentSettled:
 		out.Body = core.SubagentSettled{
 			Agent: core.AgentID(b.SubagentSettled.GetAgentId()), Status: agentStatuses.in(b.SubagentSettled.GetStatus(), errs),
