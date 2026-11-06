@@ -264,7 +264,8 @@ instead of copying names.
 ### Records shared between our own programs
 
 Anything one of our programs writes and another reads is a message: lease
-holder files, node readings, task objectives. The few text sentinels our own
+holder files, node readings, task objectives (`TaskObjectives`, read from
+`objectives.toml` through `tomlproto`). The few text sentinels our own
 scripts print over `ssh` are confined to one package and tested.
 
 The lease holder (`LeaseRecord`) and the node reading (`NodeReading`) are messages
@@ -297,7 +298,7 @@ part they wait for.
 | Tool schemas | descriptors to JSON Schema, `Handoff` `oneof`, templates | hand schemas and decode structs in the tool server |
 | Result records | `ResultRecord` generated for Go and the SDK | the hand parser and writer |
 | Job environment | `JobEnvironment`, `ResultFormat` as a `oneof` | the SDK's manifest reader and name copies |
-| Task objectives | a message for `objectives.toml`; decide whether manifest 0.1 is still written | hand TOML structs |
+| Manifest 0.1 | `TaskManifestV01`: 48 example tasks and the Python input synthesis still write `version = "0.1"`, so it stays until they move | the hand TOML structs of the single-image reader |
 | `cli.v1` validation | rules on the remaining data messages (jobs, results, outcomes, plan) and the responses; the allowlist lists them | the gap against the data rule |
 
 ## Boundaries and owners
@@ -357,7 +358,8 @@ validated message; the other rows are what the parts above replace.
 | daemon to supervisor | `launch.pb`, gRPC `SupervisorService`, `flock` on `alive` | `supervisor.proto` | typed; the model for process identity |
 | daemon store files | protojson of `store.proto`, one owner | `store.proto` | typed |
 | operator config and task manifest | TOML through `tomlproto` | `operator.proto`, `task.proto` | typed |
-| manifest 0.1 and objectives | hand TOML structs | `task` | untyped: task objectives |
+| objectives | TOML through `tomlproto` | `task.proto` (`TaskObjectives`) | typed |
+| manifest 0.1 | hand TOML structs | `task` | untyped: manifest 0.1 |
 | lease holder and node reading | JSON files shared across users and machines | `lease`, `apptainer` | untyped: lease and node records |
 | agent to job tool | argv flags, `--json`, exit codes, `Failure` on stderr | `cmd/vibesys-cli` | typed output |
 
