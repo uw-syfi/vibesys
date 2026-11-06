@@ -160,17 +160,19 @@ It has run its course when either holds:
 
 1. **Bounded gains.** Every plan still open or parked states a bound on its possible gain (the
    planners must, per [plan-hypotheses](../plan-hypotheses/SKILL.md)), and each bound is below
-   10% of the current headline. A new idea whose bound is that low is a parked plan, not a
-   reason to go on. A bold plan whose bound is higher keeps the run going.
+   10% of the current headline. `vibesys-cli plan check-gain --under 10%` answers it: `yes`
+   when so, and otherwise `no` with the plans that state no bound or a higher one. A plan that
+   states none is not under: ask its planner for one, or close it. A new idea whose bound is
+   that low is a parked plan, not a reason to go on. A bold plan whose bound is higher keeps the
+   run going.
 2. **No progress.** The last two candidates built on the current head were each refused as
-   `within_noise` or `worse`, or failed their judge, and no open plan has a bound above 10%.
+   `within_noise` or `worse`, or failed their judge, and `plan check-gain --under 10%` lists no
+   plan with a stated bound at or above 10%.
 
 Then bring the plans up to date and give the final report, whatever else is still open: a
 result you hold is worth more reported than improved forever. A run that stays open after a
 final report costs nothing, and one that never gives it cannot be waited on. The operator's
-steering note may state another share.
-
-The bounds are text in each plan, so you read them; nothing computes this rule for you.
+steering note may state another share, which you give to `--under`.
 
 ## Reporting
 

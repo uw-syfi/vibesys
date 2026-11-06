@@ -520,9 +520,13 @@ func planFromMessage(m *cliv1.Plan) (core.Plan, error) {
 	if err != nil {
 		return core.Plan{}, err
 	}
+	bound, err := wire.ToGainBound("plan.gain_bound", m.GetGainBound())
+	if err != nil {
+		return core.Plan{}, err
+	}
 	p := core.Plan{
 		Number: core.PlanNumber(m.GetNumber()), Title: m.GetTitle(), Body: m.GetBody(), Status: status,
-		CreatedAt: instant(m.GetCreatedAt()), UpdatedAt: instant(m.GetUpdatedAt()),
+		CreatedAt: instant(m.GetCreatedAt()), UpdatedAt: instant(m.GetUpdatedAt()), GainBound: bound,
 	}
 	for _, c := range m.GetComments() {
 		p.Comments = append(p.Comments, core.PlanComment{Text: c.GetText(), At: instant(c.GetAt()), Agent: c.GetAgent()})

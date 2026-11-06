@@ -18,18 +18,24 @@ import (
 
 // PlanChange is the fields an edit sets. A nil field is left as it is.
 type PlanChange struct {
-	Title  *string
-	Body   *string
-	Status *core.PlanStatus
+	Title     *string
+	Body      *string
+	Status    *core.PlanStatus
+	GainBound *core.GainBound
 }
 
 // CreatePlan stores a new open plan with the next number.
-func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body string) (core.Plan, error) {
+func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body string, bound *core.GainBound) (core.Plan, error) {
 	if err := core.CheckPlanTitle("title", title); err != nil {
 		return core.Plan{}, err
 	}
 	if err := core.CheckPlanBody("body", body); err != nil {
 		return core.Plan{}, err
+	}
+	if bound != nil {
+		if err := core.CheckGainBound("gain_bound", *bound); err != nil {
+			return core.Plan{}, err
+		}
 	}
 	scope := c.Scope
 	if err := resolved(scope); err != nil {
@@ -39,7 +45,7 @@ func (a *App) CreatePlan(ctx context.Context, c core.CallContext, title, body st
 	if err != nil {
 		return core.Plan{}, err
 	}
-	return st.CreatePlan(ctx, core.NewPlan{Title: title, Body: body, At: a.now()})
+	return st.CreatePlan(ctx, core.NewPlan{Title: title, Body: body, GainBound: bound, At: a.now()})
 }
 
 // Plans returns the plans of a task that match the filter, by number.
@@ -80,8 +86,13 @@ func (a *App) ViewPlan(ctx context.Context, scope core.Scope, number core.PlanNu
 // EditPlan changes a plan's title, body or status as one change. An edit that sets nothing is
 // refused, since it would only move the update time.
 func (a *App) EditPlan(ctx context.Context, c core.CallContext, number core.PlanNumber, change PlanChange) (core.Plan, error) {
-	if change.Title == nil && change.Body == nil && change.Status == nil {
-		return core.Plan{}, invalid("edit: set at least one of title, body or status")
+	if change.Title == nil && change.Body == nil && change.Status == nil && change.GainBound == nil {
+		return core.Plan{}, invalid("edit: set at least one of title, body, status or gain_bound")
+	}
+	if change.GainBound != nil {
+		if err := core.CheckGainBound("gain_bound", *change.GainBound); err != nil {
+			return core.Plan{}, err
+		}
 	}
 	if change.Title != nil {
 		if err := core.CheckPlanTitle("title", *change.Title); err != nil {
@@ -96,7 +107,7 @@ func (a *App) EditPlan(ctx context.Context, c core.CallContext, number core.Plan
 	if change.Status != nil && !change.Status.Valid() {
 		return core.Plan{}, invalid("status: %q is not a plan status", *change.Status)
 	}
-	return a.editPlan(ctx, c, number, core.PlanEdit{Title: change.Title, Body: change.Body, Status: change.Status})
+	return a.editPlan(ctx, c, number, core.PlanEdit{Title: change.Title, Body: change.Body, Status: change.Status, GainBound: change.GainBound})
 }
 
 // CommentPlan adds a comment, which carries a decision or a result.

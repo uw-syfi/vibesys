@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.cli.v1;
 
+import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/cli/v1/job.proto";
 import "vibesys/cli/v1/verdict.proto";
@@ -16,6 +17,30 @@ enum PlanStatus {
   PLAN_STATUS_WON = 3;
   PLAN_STATUS_PARKED = 4;
   PLAN_STATUS_REJECTED = 5;
+}
+
+// PlanGainReference is what a plan's gain bound is a share of.
+enum PlanGainReference {
+  PLAN_GAIN_REFERENCE_UNSPECIFIED = 0;
+  // The headline: the metric value of the task's current result, or the base's value before a first
+  // promotion. It moves as the work improves it, so a bound stated against an earlier headline is
+  // the planner's claim at that time, and whoever decides on it asks again when the headline moved.
+  PLAN_GAIN_REFERENCE_HEADLINE = 1;
+}
+
+// PlanGainBound is the most a plan could gain, as its planner states it: a share of a reference,
+// 0.05 for five percent of the headline. A plan states it so that a decision to go on or to stop
+// does not have to read the plan's prose.
+message PlanGainBound {
+  // At least 0, and finite. It may exceed 1: an idea can claim to more than double a metric.
+  double share = 1 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  PlanGainReference relative_to = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }
 
 message PlanComment {
@@ -34,6 +59,8 @@ message Plan {
   repeated PlanComment comments = 5;
   google.protobuf.Timestamp created_at = 6;
   google.protobuf.Timestamp updated_at = 7;
+  // The bound on the plan's possible gain. Absent when the plan states none.
+  PlanGainBound gain_bound = 8;
 }
 
 // LinkedJob is a job a plan was linked to, with its commit's verdict against the current result
@@ -46,4 +73,59 @@ message LinkedJob {
 message PlanView {
   Plan plan = 1;
   repeated LinkedJob jobs = 2;
+}
+
+// PlanGainAnswer is whether every plan that counts states a bound below the share.
+enum PlanGainAnswer {
+  PLAN_GAIN_ANSWER_UNSPECIFIED = 0;
+  // Every plan that counts does, and so does a check in which none counts.
+  PLAN_GAIN_ANSWER_ALL_UNDER = 1;
+  // Some plan that counts states none, or one that is not below the share.
+  PLAN_GAIN_ANSWER_NOT_ALL_UNDER = 2;
+}
+
+// PlanGainCheck is the answer to "is every plan that is still open or parked under this share of
+// its reference?" (`vibesys-cli plan check-gain --under`). A plan counts when its status is open or
+// parked. A plan that states no bound is not under any share.
+message PlanGainCheck {
+  option (buf.validate.message).cel = {
+    id: "plan_gain_check.answer_follows_blockers"
+    message: "the answer is all under exactly when there is no blocker, and a blocker is one of the counted plans"
+    expression: "(this.answer == 1) == (this.blockers.size() == 0) && uint(this.blockers.size()) <= this.counted"
+  };
+  option (buf.validate.message).cel = {
+    id: "plan_gain_check.blockers_are_not_under"
+    message: "a blocker states no bound, or one that is not below the share"
+    expression: "this.blockers.all(b, !has(b.gain_bound) || b.gain_bound.share >= this.share)"
+  };
+
+  // The share asked about.
+  double share = 1 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  // It is an enum and not a bool so that a JSON reader sees it either way: a false bool is left out.
+  PlanGainAnswer answer = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  // How many plans count.
+  uint32 counted = 3;
+  // The plans that count and are not under the share, by number.
+  repeated PlanGainBlocker blockers = 4;
+}
+
+// PlanGainBlocker is a plan that keeps PlanGainCheck from being all under.
+message PlanGainBlocker {
+  uint32 number = 1 [(buf.validate.field).uint32.gt = 0];
+  string title = 2;
+  // Open or parked.
+  PlanStatus status = 3 [(buf.validate.field).enum = {
+    in: [
+      1,
+      4
+    ]
+  }];
+  // The bound it states, which is at or above the share. Absent when it states none.
+  PlanGainBound gain_bound = 4;
 }

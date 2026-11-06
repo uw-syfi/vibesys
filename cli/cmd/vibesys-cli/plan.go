@@ -17,7 +17,7 @@ import (
 	"github.com/uw-syfi/vibesys/cli/internal/client"
 )
 
-const planUsage = "plan: name a subcommand: create, list, view, edit, comment or close"
+const planUsage = "plan: name a subcommand: create, list, view, edit, comment, close or check-gain"
 
 // planCommand is `plan create|list|view|edit|comment|close`, in the style of `gh issue`. Plans
 // belong to a task. The CLI stores what an agent writes in them and says nothing about it.
@@ -27,18 +27,19 @@ func planCommand(ctx context.Context, d deps, args []string) int {
 	}
 	sub, ok := planSubcommands[args[0]]
 	if !ok {
-		return fail(d, d.jsonErrors, usagef("plan: %q is not a subcommand (create, list, view, edit, comment or close)", args[0]))
+		return fail(d, d.jsonErrors, usagef("plan: %q is not a subcommand (create, list, view, edit, comment, close or check-gain)", args[0]))
 	}
 	return sub(ctx, d, args[1:])
 }
 
 var planSubcommands = map[string]func(context.Context, deps, []string) int{
-	"create":  planCreate,
-	"list":    planList,
-	"view":    planView,
-	"edit":    planEdit,
-	"comment": planComment,
-	"close":   planClose,
+	"create":     planCreate,
+	"list":       planList,
+	"view":       planView,
+	"edit":       planEdit,
+	"comment":    planComment,
+	"close":      planClose,
+	"check-gain": planCheckGain,
 }
 
 // planStatusNames maps what a user writes to plan statuses. It is read from the contract's enum,
@@ -213,9 +214,13 @@ func printPlan(d deps, asJSON bool, resp planResponse) {
 }
 
 // describePlan is the one line a plan takes: its number first, as a job's id is, so a caller can
-// read it back.
+// read it back, then its status and its title, and its gain bound when it states one.
 func describePlan(p *cliv1.Plan) string {
-	return fmt.Sprintf("%d\t%s\t%s", p.GetNumber(), planStatusName(p.GetStatus()), p.GetTitle())
+	line := fmt.Sprintf("%d\t%s\t%s", p.GetNumber(), planStatusName(p.GetStatus()), p.GetTitle())
+	if p.GetGainBound() != nil {
+		line += "\t" + describeGainBound(p.GetGainBound())
+	}
+	return line
 }
 
 // planCreate is `plan create --title t [--body text | --body-file path]`.
@@ -223,6 +228,7 @@ func planCreate(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("plan create", d)
 	title := fs.String("title", "", "the plan's title, one line")
 	body := addTextFlag(fs, "body", "the plan's body, in markdown")
+	gain := addGainBoundFlags(fs, "the most the plan could gain")
 	positional, code, ok := planArgs(fs, args)
 	if !ok {
 		return code
@@ -237,12 +243,16 @@ func planCreate(ctx context.Context, d deps, args []string) int {
 	if err != nil {
 		return fail(d, c.json, err)
 	}
+	bound, err := gain.read()
+	if err != nil {
+		return fail(d, c.json, err)
+	}
 	callCtx, cl, err := planClient(ctx, d, c)
 	if err != nil {
 		return fail(d, c.json, err)
 	}
 	defer cl.Close()
-	resp, err := cl.CreatePlan(ctx, &cliv1.CreatePlanRequest{Context: callCtx, Title: *title, Body: text})
+	resp, err := cl.CreatePlan(ctx, &cliv1.CreatePlanRequest{Context: callCtx, Title: *title, Body: text, GainBound: bound})
 	if err != nil {
 		return fail(d, c.json, err)
 	}
@@ -351,6 +361,7 @@ func planEdit(ctx context.Context, d deps, args []string) int {
 	fs.Var(&title, "title", "a new title, one line")
 	fs.Var(&status, "status", "a new status ("+planStatusChoices()+")")
 	body := addTextFlag(fs, "body", "a new body, in markdown")
+	gain := addGainBoundFlags(fs, "a new bound on the most the plan could gain, replacing the old one")
 	positional, code, ok := planArgs(fs, args)
 	if !ok {
 		return code
@@ -375,8 +386,13 @@ func planEdit(ctx context.Context, d deps, args []string) int {
 	} else if given {
 		req.Body = &text
 	}
-	if req.Title == nil && req.Body == nil && req.Status == nil {
-		return fail(d, c.json, usagef("plan edit: give at least one of --title, --body, --body-file or --status"))
+	bound, err := gain.read()
+	if err != nil {
+		return fail(d, c.json, err)
+	}
+	req.GainBound = bound
+	if req.Title == nil && req.Body == nil && req.Status == nil && req.GainBound == nil {
+		return fail(d, c.json, usagef("plan edit: give at least one of --title, --body, --body-file, --status or --gain-bound"))
 	}
 	callCtx, cl, err := planClient(ctx, d, c)
 	if err != nil {

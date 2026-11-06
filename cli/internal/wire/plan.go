@@ -39,6 +39,61 @@ func ToPlanStatus(field string, s cliv1.PlanStatus) (core.PlanStatus, error) {
 	return "", invalid("%s: %s is not a plan status", field, s)
 }
 
+// gainReferences pairs each domain reference with its contract value.
+var gainReferences = []struct {
+	domain core.GainReference
+	wire   cliv1.PlanGainReference
+}{
+	{core.GainHeadline, cliv1.PlanGainReference_PLAN_GAIN_REFERENCE_HEADLINE},
+}
+
+// GainBound returns the contract's message for a bound, nil for none.
+func GainBound(b *core.GainBound) *cliv1.PlanGainBound {
+	if b == nil {
+		return nil
+	}
+	out := &cliv1.PlanGainBound{Share: b.Share}
+	for _, r := range gainReferences {
+		if r.domain == b.RelativeTo {
+			out.RelativeTo = r.wire
+		}
+	}
+	return out
+}
+
+// ToGainBound returns the domain bound for the contract's message, nil for none, or invalid_input
+// naming field.
+func ToGainBound(field string, b *cliv1.PlanGainBound) (*core.GainBound, error) {
+	if b == nil {
+		return nil, nil
+	}
+	for _, r := range gainReferences {
+		if r.wire == b.GetRelativeTo() {
+			out := core.GainBound{Share: b.GetShare(), RelativeTo: r.domain}
+			if err := core.CheckGainBound(field, out); err != nil {
+				return nil, err
+			}
+			return &out, nil
+		}
+	}
+	return nil, invalid("%s.relative_to: %s is not something a bound is a share of", field, b.GetRelativeTo())
+}
+
+// GainCheck returns the contract's message for the answer to a gain check.
+func GainCheck(c core.GainCheck) *cliv1.PlanGainCheck {
+	answer := cliv1.PlanGainAnswer_PLAN_GAIN_ANSWER_NOT_ALL_UNDER
+	if c.AllUnder() {
+		answer = cliv1.PlanGainAnswer_PLAN_GAIN_ANSWER_ALL_UNDER
+	}
+	out := &cliv1.PlanGainCheck{Share: c.Share, Answer: answer, Counted: uint32(c.Counted)}
+	for _, p := range c.Blockers {
+		out.Blockers = append(out.Blockers, &cliv1.PlanGainBlocker{
+			Number: uint32(p.Number), Title: p.Title, Status: PlanStatus(p.Status), GainBound: GainBound(p.GainBound),
+		})
+	}
+	return out
+}
+
 // PlanComment returns the contract's message for a comment.
 func PlanComment(c core.PlanComment) *cliv1.PlanComment {
 	return &cliv1.PlanComment{Text: c.Text, At: timestamp(c.At), Agent: c.Agent}
@@ -58,6 +113,7 @@ func Plan(p core.Plan) *cliv1.Plan {
 		Status:    PlanStatus(p.Status),
 		CreatedAt: timestamp(p.CreatedAt),
 		UpdatedAt: timestamp(p.UpdatedAt),
+		GainBound: GainBound(p.GainBound),
 	}
 	for _, c := range p.Comments {
 		out.Comments = append(out.Comments, PlanComment(c))
@@ -80,9 +136,13 @@ func ToPlan(p *cliv1.Plan) (core.Plan, error) {
 	if err != nil {
 		return core.Plan{}, err
 	}
+	bound, err := ToGainBound("plan.gain_bound", p.GetGainBound())
+	if err != nil {
+		return core.Plan{}, err
+	}
 	out := core.Plan{
 		Number: core.PlanNumber(p.GetNumber()), Title: p.GetTitle(), Body: p.GetBody(), Status: status,
-		CreatedAt: toTime(p.GetCreatedAt()), UpdatedAt: toTime(p.GetUpdatedAt()),
+		CreatedAt: toTime(p.GetCreatedAt()), UpdatedAt: toTime(p.GetUpdatedAt()), GainBound: bound,
 	}
 	for _, c := range p.GetComments() {
 		out.Comments = append(out.Comments, ToPlanComment(c))
@@ -115,4 +175,18 @@ func ToPlanFilter(r *cliv1.ListPlansRequest) (core.PlanFilter, error) {
 		filter.Statuses = append(filter.Statuses, status)
 	}
 	return filter, nil
+}
+
+// CheckGain answers a gain check over plans as the contract has them: which of the open or parked
+// ones state a bound below share. A plan the contract does not allow is invalid input.
+func CheckGain(plans []*cliv1.Plan, share float64) (*cliv1.PlanGainCheck, error) {
+	domain := make([]core.Plan, 0, len(plans))
+	for _, p := range plans {
+		d, err := ToPlan(p)
+		if err != nil {
+			return nil, err
+		}
+		domain = append(domain, d)
+	}
+	return GainCheck(core.CheckGain(domain, share)), nil
 }

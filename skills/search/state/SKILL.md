@@ -58,14 +58,15 @@ Statuses: `open` (proposed, undecided), `chosen` (a worker is on it), `won` (pro
 
 | Writer | Writes |
 | --- | --- |
-| Planner | `plan create`, and `plan edit` of its own body |
+| Planner | `plan create`, and `plan edit` of its own body and its gain bound (`--gain-bound`, the most the plan could gain as a share of the headline) |
 | Lead | status (`plan edit <n> --status`, `plan close <n> --status s --comment ...`) and comments: the decision (chosen, rejected, deferred and why; duplicates; disjoint files), the worker brief text, the result (branch, commit, job ids, judge verdict, lessons), and on close the gain with its `compare` verdict or the reason |
 
 Workers and judges never write plans; they link jobs with `--plan <n>` and hand back evidence.
 Write each comment when the thing happens, not at the end.
 
 Cheap index of all plans, without reading bodies: `vibesys-cli plan list --json`. What is live:
-`plan list --status open,chosen`. A plan's linked jobs: `plan view <n>`.
+`plan list --status open,chosen`. A plan's linked jobs: `plan view <n>`. Whether every open or
+parked plan's gain bound is under a share: `plan check-gain --under 10%`.
 
 ## Resume
 
