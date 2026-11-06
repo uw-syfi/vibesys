@@ -16,7 +16,7 @@ speaks the same typed link.
 ```text
   operator
      |
- [desktop app] --typed link--> [vibesys-host]            one per state directory
+ [desktop app] --typed link--> [vibesys-host]            one per root
    (any machine)                   |  hosts
                               [orchestrator] ---typed link---> [vibesysd]   one per user per machine
                                    |                                ^
@@ -150,7 +150,7 @@ the log as the truth and a cache beside it, is in [run-recovery.md](run-recovery
 
 ## Where the limits are
 
-- **One orchestrator per state directory.** A store lock enforces this; distinct state directories can coexist. One `vibesysd` runs per user per machine. The desktop app holds one connection per host.
+- **One host per root, one orchestrator per state directory.** The root's lock and a store lock enforce these; distinct roots with distinct state directories can coexist. One `vibesysd` runs per user per machine. The desktop app holds one connection per host.
 - **Run summaries and detailed history have different bounds.** Run snapshots fit a byte budget and
   can omit older bundles or history. Agent items are paged separately. The core tracks multiple runs;
   their jobs still compete for the machine's resources.

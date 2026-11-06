@@ -115,3 +115,32 @@ func TestIdentifySaysWhatTheHostIsWhetherOrNotItServes(t *testing.T) {
 		})
 	}
 }
+
+// connected_clients leaves out the one asking, whose own connection is always among those counted, and
+// build_id is what the host was told.
+func TestIdentifyCountsTheOtherClientsAndSaysWhichBuild(t *testing.T) {
+	for _, c := range []struct {
+		open, want uint32
+	}{{0, 0}, {1, 0}, {2, 1}, {7, 6}} {
+		listener := bufconn.Listen(1 << 20)
+		server := grpc.NewServer()
+		pb.RegisterHostControlServiceServer(server, hosted.NewHostControl(hosted.ControlConfig{
+			Release: "dev", Started: time.Unix(1_700_000_000, 0), Parts: noParts{}, Host: fakeHost{}, Stop: func() {},
+			BuildID: "a-build", Connected: func() uint32 { return c.open },
+		}))
+		go func() { _ = server.Serve(listener) }()
+		conn, err := grpc.NewClient("passthrough:///host", grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) }))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), guard)
+		id, err := pb.NewHostControlServiceClient(conn).Identify(ctx, &pb.IdentifyRequest{ClientRelease: "dev"})
+		cancel()
+		_ = conn.Close()
+		server.Stop()
+		if err != nil || id.GetConnectedClients() != c.want || id.GetBuildId() != "a-build" {
+			t.Errorf("%d open: %v, %v", c.open, id, err)
+		}
+	}
+}

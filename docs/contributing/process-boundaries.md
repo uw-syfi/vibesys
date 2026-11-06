@@ -138,27 +138,35 @@ cannot be served:
 - `Identify` returns the release, how it relates to the asking client's release,
   when the host started, how many runs are live, whether each part it needs (the
   session holder, the skills, the job tool) is ready or why not, and whether the
-  orchestrator is serving or why not (`HELD_ELSEWHERE`, `STATE_REFUSED`).
+  orchestrator is serving or why not (`HELD_ELSEWHERE`, `HOLDER_GONE`,
+  `STATE_REFUSED`). It also says how many other clients are connected and, for a
+  build of no release, which program it is.
 - `Stop` stops the host, optionally only when no runs are live. Sessions outlive
   the host, so stopping is safe for them.
 
-The socket lives at a fixed place under the root. A host's settings come from a
-`HostConfig` message in the root, not from the environment of whichever client
-started it. The client starts a host with a minimal environment and the root as
-its working directory. Parts are resolved on every launch, so repairing an
-install does not need a restart. The client decides from `Identify`: same
-release, use it; different release and no live runs, stop and start its own;
-different and live runs, reads and steering work and a new run is refused with
-a typed reason.
+The socket's place is a function of the root alone: `ROOT/host.sock`, or, for a
+root too long for a socket address, a name derived from the root in a private
+directory of the user under `/tmp`. A host's settings come from a `HostConfig`
+message in the root, not from the environment of whichever client started it.
+The client starts a host with a minimal environment and the root as its working
+directory. Parts are resolved on every launch, so repairing an install does not
+need a restart.
 
-The host holds a lock file with its pid and release, read only by a forced stop
-when the socket does not answer.
+The client decides from `Identify` by one pure function, `clientcli.Decide`, whose
+table is in `orchestrator/README.md`. Only `run start` and `host restart` replace
+a host, and only after showing that a new one can start. No other verb stops a
+host that serves. A newer host, or one with other clients, is not replaced unasked.
+
+The host holds a lock file with its pid, release, root and machine. A client reads
+it only while the lock is held, for a forced stop when the socket does not answer,
+and to tell a host on another machine (a root on a shared disk) from no host at all:
+that host is named and left alone, and its pid is never signalled.
 
 ### The release
 
 A release folder holds a `ReleaseManifest` message: version, platform, the
-session protocol it speaks, the command that starts a session holder, the skills
-directory, the job tool, and the files that must exist. The builder writes it,
+command that starts a session holder, the skills directory, the job tool, and
+the files that must exist. The builder writes it,
 the host reads it through generated code, and `vibesys-client release verify`
 checks it. The installer asks that verb instead of keeping its own list of paths.
 A host that cannot find a manifest reports a typed part problem rather than a
@@ -282,10 +290,8 @@ part they wait for.
 
 | Part | Not built | Removes |
 | --- | --- | --- |
-| Release manifest | `ReleaseManifest`, `release verify`, the host and installer reading it | hand path lists in the builder, installer and host; the `bin` folder rule |
-| Host control | `HostControlService`, `HostConfig`, host lock, `host status/stop/restart`, stable socket, minimal-environment start, client policy | the `holder` text file, the `ps` scan, the hash in the socket path, `VIBESYS_ORCHESTRATOR_{STATE_DIR,SIDECAR,MARKETPLACE,CLI}` on the host |
 | Environment codec | the `env_name` option, `AgentContext`, `ToolServerCredentials`, `SkillEnvironment` | the Python env table and its golden |
-| Job tool endpoint | `JobToolEndpoint`, `daemon ensure --json`, `DaemonPlaces` | `CliLocation`, the `XDG_*` and `HOME` rewrite, the host's copy of the socket rule |
+| Job tool endpoint | `JobToolEndpoint`, `daemon ensure --json`, `DaemonPlaces` | `CliLocation`, the `XDG_*` and `HOME` rewrite, the host's copy of the socket rule, and the `XDG_*` and `VIBESYS_CLI_CONFIG` a host keeps from its starter for the job tool |
 | Client records | `AgentRecord`, `RunRecord`, `ReceiptRecord`, `RunChange` | private fields served to clients |
 | Tool calls | the `ToolCall` `oneof` | `args_json`, `provider_call_id`, the screen's `cmd`/`command` guess |
 | Tool schemas | descriptors to JSON Schema, `Handoff` `oneof`, templates | hand schemas and decode structs in the tool server |
@@ -311,7 +317,7 @@ validated message; the other rows are what the parts above replace.
 | which root, which socket | `gatewayroot.Rule`, `lifecycle.SocketPath`; the desktop dials through the bridge | `gatewayroot` and `lifecycle` | one rule, held by tests |
 | what a host is configured with | `ROOT/host-config.json`, a `HostConfig` | `host_config.proto`, a local file and not part of the frozen `host_control.proto` | typed |
 | host absent or held | `HostStartReport` and `IdentifyResponse`, with a typed `Unserved` | `host_control.proto` | typed |
-| installer to running host | process list match | none | untyped: host control |
+| installer to running host | `vibesys-client host stop --if-no-live-runs`, read by exit code | `clientcli` | typed |
 | desktop to remote host | `sh -c` over `ssh` | desktop provisioning | external; tested |
 | run list output for scripts | `run get --json`, protojson | `service.proto` | typed |
 | client exit codes | 0 to 4 | `clientcli` | held by a test |
@@ -368,7 +374,7 @@ validated message; the other rows are what the parts above replace.
 
 | Boundary | Carrier | Owner | State |
 | --- | --- | --- | --- |
-| bundle layout | path lists in the builder, installer and host | shell and `release.go` | untyped: release manifest |
+| bundle layout | `release.json`, a `ReleaseManifest` | `release.proto` | typed |
 | release index, checksums, asset names, installer settings | one token each, read by `sh` | `install.sh` | exempt, bootstrap |
 | harness plugin manifest | `marketplace.json` | the agent harness | external; three readers today |
 

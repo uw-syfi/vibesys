@@ -32,10 +32,17 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... 
   release verify [--installed] DIR
   --version
 
-RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository.
-host status and host stop never start a host; host restart does. A host with live runs is not restarted.
+RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository. When
+no run is live there, an omitted RUN means its most recent run to run get, run stop and run attach: get
+shows it, attach replays it, and stop says it has already ended and exits 0, as for any RUN that has.
+run start and host restart are the only verbs that replace a host, and only once a new one is shown to
+be able to start: run start replaces one that is older, another build or on another configuration, when
+it has no live run and no other client; host restart replaces any host with no live run. No other verb
+stops a host that serves, or starts one unless none is there. host status and host stop never start one.
 host stop --force ends the process that holds the host's lock, for a host that does not answer.
-host configure records what the next host starts with, and with no flag prints it.
+A host on another machine, seen through a shared disk, is named, and nothing here touches it.
+host configure records what the next host starts with, refusing what it can tell no host could use, and
+with no flag prints it. --clear never reads the file, so it also puts right one that does not read.
 release verify checks the release in DIR against its manifest, prints its version, and needs no host.
 wait --until report returns for a final report and --until progress for any report. Both count the
 reports posted after the wait began (reports are numbered from 1; run get --json shows the numbers),
@@ -122,16 +129,18 @@ var verbs = map[string]verb{
 // open reaches the service, having decided what to do with what it finds there for a verb that only
 // reads or steers, and does the version handshake.
 func (c *call) open(ctx context.Context) (*client.Client, error) {
-	return c.openFor(ctx, NeedService)
+	return c.openFor(ctx, VerbRead)
 }
 
-// openFor is open for what the verb needs of the host.
-func (c *call) openFor(ctx context.Context, need Need) (*client.Client, error) {
-	dial, err := c.settle(ctx, need)
+// openFor is open for what the verb may do to the host.
+func (c *call) openFor(ctx context.Context, verb Verb) (*client.Client, error) {
+	dial, err := c.settle(ctx, verb)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := client.Dial(ctx, client.Dialer(dial), client.Options{BinaryVersion: c.Version})
+	conn, err := within(ctx, c.Clock, handshakeBound, "shake hands", func(ctx context.Context) (*client.Client, error) {
+		return client.Dial(ctx, client.Dialer(dial), client.Options{BinaryVersion: c.Version})
+	})
 	if err != nil {
 		// A handshake that fails without a reason of the service's own means no service answered.
 		classified := classify(err)
@@ -188,9 +197,10 @@ func (s *session) Close() {
 	_ = s.client.Close()
 }
 
-// join opens the service, reads the snapshot and picks the run named by arg, which may be empty.
+// join opens the service, reads the snapshot and picks the run named by arg, which may be empty, in
+// which case omitted says which it means.
 // The returned context ends the stream and must be used for every later call.
-func (c *call) join(ctx context.Context, arg string) (*session, context.Context, error) {
+func (c *call) join(ctx context.Context, arg string, omitted omission) (*session, context.Context, error) {
 	repo := ""
 	if arg == "" {
 		var err error
@@ -204,12 +214,12 @@ func (c *call) join(ctx context.Context, arg string) (*session, context.Context,
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	s := &session{client: conn, cancel: cancel}
-	f, snapshot, err := openFeed(ctx, conn)
+	f, snapshot, err := openFeed(ctx, c.Clock, conn)
 	if err != nil {
 		s.Close()
 		return nil, nil, err
 	}
-	run, err := resolve(arg, repo, snapshot.GetRuns(), c.Canonical)
+	run, err := resolve(arg, repo, snapshot.GetRuns(), c.Canonical, omitted)
 	if err != nil {
 		s.Close()
 		return nil, nil, err

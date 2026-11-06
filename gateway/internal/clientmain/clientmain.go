@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -52,7 +53,7 @@ func Main(args []string) int {
 		Version: buildinfo.Version, Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr,
 		Terminal: isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd()),
 		Dir:      dir, FS: os.DirFS("/"), Canonical: canonical, Zone: time.Local, Clock: systemClock{}, IDs: randomIDs{},
-		Connect: connector, Locate: locator, Hosts: hostProcesses{}, Configs: hostConfigs{},
+		Connect: connector, Prove: prover, HostBuild: hostBuild, Locate: locator, Hosts: hostProcesses{}, Configs: hostConfigs{},
 	})
 }
 
@@ -80,7 +81,8 @@ func (randomIDs) NewCommandID() string {
 	return "client-" + hex.EncodeToString(b[:])
 }
 
-// connector says how to reach the host for a --root value, starting it when none serves.
+// connector says how to reach the host for a --root value, starting it when none serves, once it has
+// shown that a host could start there.
 func connector(root string) (clientcli.Dial, error) {
 	directory, err := hostRoot(root)
 	if err != nil {
@@ -95,22 +97,66 @@ func connector(root string) (clientcli.Dial, error) {
 		return nil, err
 	}
 	home, _ := os.UserHomeDir()
+	if err := checkStart(directory, home, os.Getenv); err != nil {
+		return nil, err
+	}
 	launcher := connect.Process{
 		Binary: host, Args: []string{"serve", "--root", directory, "--start-report-fd", strconv.Itoa(connect.ReportFD)},
 		// The host's whole environment is its own to decide; this is what it needs to find its home.
 		Env: hostconfig.Environ(nil, home, os.Getenv), Dir: directory, Log: lifecycle.LogPath(directory),
 	}
-	holding := func() (bool, error) {
-		_, held, err := lifecycle.Holder(directory)
-		return held, err
-	}
 	socket := lifecycle.SocketPath(directory)
 	return func(ctx context.Context) (net.Conn, error) {
 		ctx, cancel := context.WithTimeout(ctx, startup)
 		defer cancel()
-		connection, err := connect.Dial(ctx, socket, retiredNotice{launcher}, holding)
+		connection, err := connect.Dial(ctx, socket, retiredNotice{launcher}, connect.HoldingOf(directory))
 		return connection, startFailure(err)
 	}, nil
+}
+
+// prover is connector for a verb about to give up a working host: the parts of the release this
+// program is installed in must be whole too. A program in no release has no parts to verify.
+func prover(root string) (clientcli.Dial, error) {
+	dial, err := connector(root)
+	if err != nil {
+		return nil, err
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	rel, err := release.FinderFor(self)()
+	if err != nil {
+		var notInstalled *release.NotInstalledError
+		if errors.As(err, &notInstalled) {
+			return dial, nil
+		}
+		return nil, &clientcli.CannotStart{Problem: err.Error()}
+	}
+	if err := rel.Verify(release.Installed); err != nil {
+		return nil, &clientcli.CannotStart{Problem: err.Error()}
+	}
+	if err := rel.CheckPlatform(runtime.GOOS, runtime.GOARCH); err != nil {
+		return nil, &clientcli.CannotStart{Problem: err.Error()}
+	}
+	return dial, nil
+}
+
+// hostBuild is the identity of the host this program would start, or empty when it cannot tell.
+func hostBuild(string) string {
+	self, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	host, err := hostBinary(self, exec.LookPath)
+	if err != nil {
+		return ""
+	}
+	id, err := buildinfo.ID(host)
+	if err != nil {
+		return ""
+	}
+	return id
 }
 
 // retiredNotice names the settings this environment still has that no host reads any more, each

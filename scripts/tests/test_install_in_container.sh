@@ -251,7 +251,12 @@ phase_product() {
   check "a start the host refuses leaves no host, and shows only what caused this failure"
   printf 'an old line from another day\n' >>"$home/host.log"
   : >"$HOME/not-a-directory"
-  vibesys-client host configure --state-directory "$HOME/not-a-directory/state" >/dev/null
+  # configure refuses what it can tell no host could use, so the file is written as a hand would.
+  if vibesys-client host configure --state-directory "$HOME/not-a-directory/state" >/dev/null 2>/tmp/refused-configure.err; then
+    die "host configure accepted a state directory under a file"
+  fi
+  grep -q 'not-a-directory' /tmp/refused-configure.err || die "the refused configure does not name the state directory"
+  printf '{"stateDirectory": "%s/not-a-directory/state"}\n' "$HOME" >"$home/host-config.json"
   rc=0
   vibesys-client run list >/tmp/refused.out 2>/tmp/refused.err || rc=$?
   cat /tmp/refused.out /tmp/refused.err
@@ -336,6 +341,37 @@ EOF
   vibesys-client run wait "$run" --until ended --timeout 80s
   until_true 30 none_live || die "processes of the run are still running"
   until_true 30 no_leftovers || die "a sidecar or tool server is left: $(pgrep -af 'scripted_sidecar|vibesys-host mcp')"
+
+  check "after the run has ended, the installer's next steps still answer, about that run"
+  vibesys-client run get | tee /tmp/ended-get.out
+  grep -q "$run" /tmp/ended-get.out || die "run get with no RUN does not show the run that ended"
+  vibesys-client run stop --yes | tee /tmp/ended-stop.out
+  grep -q "already" /tmp/ended-stop.out || die "run stop does not say the run has already ended"
+  vibesys-client run stop "$run" --yes >/dev/null || die "run stop of a named run that has ended failed"
+  vibesys-client run attach >/tmp/ended-attach.out 2>/tmp/ended-attach.err || die "run attach does not replay the run that ended: $(cat /tmp/ended-attach.err)"
+  grep -q "$run" /tmp/ended-attach.err || die "run attach does not say which run it replays"
+  [ -s /tmp/ended-attach.out ] || die "run attach replayed nothing"
+
+  check "a configuration that does not read leaves the host usable, and is named, and --clear repairs it"
+  host_answers || die "the idle host is not running"
+  cp "$home/host-config.json" /tmp/host-config.good
+  printf '{"stateDirectry": "/s"}\n' >"$home/host-config.json"
+  vibesys-client run list >/dev/null 2>/tmp/bad-list.err || die "a read failed over a configuration only a new host needs: $(cat /tmp/bad-list.err)"
+  grep -q 'host-config.json' /tmp/bad-list.err || die "the warning does not name the file: $(cat /tmp/bad-list.err)"
+  grep -q 'stateDirectry' /tmp/bad-list.err || die "the warning does not name the key: $(cat /tmp/bad-list.err)"
+  vibesys-client host status >/dev/null 2>/tmp/bad-status.err || die "host status failed"
+  grep -q 'stateDirectry' /tmp/bad-status.err || die "host status does not report the configuration"
+  stop_host
+  rc=0
+  vibesys-client run list >/dev/null 2>/tmp/bad-start.err || rc=$?
+  [ "$rc" = 1 ] || die "a start on a configuration that does not read exited $rc, want 1"
+  grep -q 'stateDirectry' /tmp/bad-start.err || die "the refusal does not name the key"
+  grep -q -- '--clear' /tmp/bad-start.err || die "the refusal does not say how to fix it"
+  no_host || die "a refused start left a host"
+  vibesys-client host configure --clear >/dev/null || die "--clear could not repair a file that does not read"
+  [ ! -e "$home/host-config.json" ] || die "--clear left the file"
+  cp /tmp/host-config.good "$home/host-config.json"
+  vibesys-client run list >/dev/null || die "a repaired configuration did not start a host"
 
   check "with no live run the installer stops the idle host and switches, and the next host is the new release's"
   host_answers || die "the idle host is not running"

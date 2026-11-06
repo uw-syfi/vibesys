@@ -25,7 +25,7 @@ func list(ctx context.Context, c *call, args []string) error {
 		return err
 	}
 	defer conn.Close()
-	snapshot, err := conn.Snapshot(ctx)
+	snapshot, err := within(ctx, c.Clock, serviceBound, "send the runs", conn.Snapshot)
 	if err != nil {
 		return classify(err)
 	}
@@ -46,7 +46,7 @@ func list(ctx context.Context, c *call, args []string) error {
 	return table.Flush()
 }
 
-// get shows one run as it stands now.
+// get shows one run as it stands now: with no RUN, the live one here, or else the most recent one here.
 func get(ctx context.Context, c *call, args []string) error {
 	fs := flags("get")
 	asJSON := fs.Bool("json", false, "print the run as a JSON RunsSnapshot of this run")
@@ -61,7 +61,7 @@ func get(ctx context.Context, c *call, args []string) error {
 	if len(positional) == 1 {
 		arg = positional[0]
 	}
-	s, _, err := c.join(ctx, arg)
+	s, _, err := c.join(ctx, arg, mostRecent)
 	if err != nil {
 		return err
 	}

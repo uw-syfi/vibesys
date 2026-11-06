@@ -45,7 +45,10 @@ func (c *fakeClock) After(d time.Duration) <-chan time.Time {
 	c.mu.Lock()
 	c.timers = append(c.timers, ch)
 	c.mu.Unlock()
-	c.armed <- d
+	select {
+	case c.armed <- d:
+	default: // Nobody is waiting on this many: the signal that one exists has been given.
+	}
 	return ch
 }
 
@@ -57,6 +60,11 @@ func (c *fakeClock) fire(t testing.TB) {
 	case <-time.After(guard):
 		t.Fatal("no verb started a timer")
 	}
+	c.fireAll()
+}
+
+// fireAll ends every timer started so far.
+func (c *fakeClock) fireAll() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, ch := range c.timers {

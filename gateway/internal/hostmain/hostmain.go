@@ -127,7 +127,7 @@ func serve(ctx context.Context, root string, options serveOptions) error {
 			held.Close()
 		}
 	}()
-	record, err := hostlock.Marshal(os.Getpid(), buildinfo.Version, root)
+	record, err := hostlock.Marshal(os.Getpid(), buildinfo.Version, root, hostlock.ThisMachine())
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,8 @@ func serve(ctx context.Context, root string, options serveOptions) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	orchestrator, err := startOrchestrator(ctx, cancel, root, config, getenv, home)
+	var connections lifecycle.Connections
+	orchestrator, err := startOrchestrator(ctx, cancel, root, config, getenv, home, connections.Open)
 	if err != nil {
 		return err
 	}
@@ -162,7 +163,7 @@ func serve(ctx context.Context, root string, options serveOptions) error {
 	go holdWhileLive(ctx, orchestrator.Live(), monitor)
 	served := make(chan error, 1)
 	go func() {
-		served <- server.Serve(ctx, lifecycle.Track(endpoint.Listener, monitor), server.Config{Root: root, Version: buildinfo.Version, Register: orchestrator.Register})
+		served <- server.Serve(ctx, lifecycle.Track(endpoint.Listener, monitor, &connections), server.Config{Root: root, Version: buildinfo.Version, Register: orchestrator.Register})
 	}()
 	report.Serving()
 	select {
@@ -211,13 +212,9 @@ func bridge(ctx context.Context, root string, startup time.Duration) error {
 		Binary: binary, Args: []string{"serve", "--root", root, "--" + optionalOrchestratorFlag, "--" + reportFDFlag, strconv.Itoa(connect.ReportFD)},
 		Env: hostconfig.Environ(nil, home, os.Getenv), Dir: root, Log: lifecycle.LogPath(root),
 	}
-	holding := func() (bool, error) {
-		_, held, err := lifecycle.Holder(root)
-		return held, err
-	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	startupCtx, cancel := context.WithTimeout(ctx, startup)
-	connection, err := connect.DialForAPI(startupCtx, lifecycle.SocketPath(root), launcher, holding, buildinfo.Version, schema.APISchemaHash, func(id *hostconfig.IdentifyResponse) {
+	connection, err := connect.DialForAPI(startupCtx, lifecycle.SocketPath(root), launcher, connect.HoldingOf(root), buildinfo.Version, schema.APISchemaHash, func(id *hostconfig.IdentifyResponse) {
 		log.Warn("the running host speaks another API and has live runs, so it stays", "live_runs", id.GetLiveRuns(), "release", id.GetRelease())
 	})
 	cancel()

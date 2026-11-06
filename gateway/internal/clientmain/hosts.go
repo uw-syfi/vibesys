@@ -61,9 +61,13 @@ func (hostProcesses) Holder(root string) (*pb.HostLock, error) {
 	return lock, nil
 }
 
+// Machine implements clientcli.HostProcesses.
+func (hostProcesses) Machine() string { return hostlock.ThisMachine() }
+
 // Terminate implements clientcli.HostProcesses. It asks the process to exit, and kills it when it
 // has not in terminateGrace. It looks at the lock again first, and signals nothing when the lock is
-// free: the number in a record that nothing holds may belong to another program by now.
+// free: the number in a record that nothing holds may belong to another program by now. Nor does it
+// signal a process of another machine, whose number here is some other program's.
 func (h hostProcesses) Terminate(ctx context.Context, root string, holder *pb.HostLock) error {
 	current, err := h.Holder(root)
 	if err != nil {
@@ -71,6 +75,9 @@ func (h hostProcesses) Terminate(ctx context.Context, root string, holder *pb.Ho
 	}
 	if current == nil || current.GetPid() != holder.GetPid() {
 		return nil
+	}
+	if hostlock.Elsewhere(current, hostlock.ThisMachine()) {
+		return fmt.Errorf("process %d is on %s, not on this machine", current.GetPid(), current.GetMachine())
 	}
 	pid := int(holder.GetPid())
 	for _, signal := range []syscall.Signal{syscall.SIGTERM, syscall.SIGKILL} {
@@ -130,5 +137,35 @@ func (hostConfigs) Save(root string, config *pb.HostConfig) error {
 	if err != nil {
 		return err
 	}
+	if err := hostconfig.Check(config); err != nil {
+		return err
+	}
+	// A state directory of the default place is not the operator's choice, and is not refused here.
+	if chosen := config.GetStateDirectory(); chosen != "" {
+		home, _ := os.UserHomeDir()
+		if err := gatewayroot.CheckState(chosen, directory, home, os.Getenv); err != nil {
+			return err
+		}
+	}
 	return hostconfig.Save(directory, config)
+}
+
+// checkStart says what would make a host of root refuse to start, as the host itself would find it.
+func checkStart(root, home string, getenv func(string) string) error {
+	config, err := hostconfig.Load(root)
+	if err != nil {
+		return &clientcli.CannotStart{Problem: fmt.Sprintf("%v. Correct the file, or forget it with `%s host configure --clear`", err, clientcli.Program)}
+	}
+	if err := gatewayroot.CheckState(config.GetStateDirectory(), root, home, getenv); err != nil {
+		return &clientcli.CannotStart{Problem: err.Error()}
+	}
+	state := config.GetStateDirectory()
+	if state == "" {
+		state = gatewayroot.StateDirectory(root, home, getenv)
+	}
+	// The root's own host holding its state is the one being replaced, and lets go as it stops.
+	if holder, held, err := hostlock.StateHolder(state); err == nil && held && holder != nil && holder.GetRoot() != root {
+		return &clientcli.CannotStart{Problem: fmt.Sprintf("its state directory %s is held by process %d, release %s, the host of %s. Stop that host with `%s --root %s host stop`, or choose another with `%s host configure --state-directory PATH`", state, holder.GetPid(), holder.GetRelease(), holder.GetRoot(), clientcli.Program, holder.GetRoot(), clientcli.Program)}
+	}
+	return nil
 }

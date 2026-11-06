@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/uw-syfi/vibesys/orchestrator/clientcli"
@@ -31,6 +32,14 @@ type fakeHost struct {
 	oldHost bool
 	stops   []bool
 	starts  int
+	// control, when set, answers HostControlService in place of this host.
+	control pb.HostControlServiceServer
+	// clientsLeaveAfter is how many more answers count identity's connected clients: they are on their
+	// way out. Zero leaves the count as it is.
+	clientsLeaveAfter int
+	// closeOnStop makes a stop end the connection before its reply is read.
+	closeOnStop bool
+	conns       []net.Conn
 }
 
 func (h *fakeHost) isRunning() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.running }
@@ -38,6 +47,16 @@ func (h *fakeHost) isRunning() bool { h.mu.Lock(); defer h.mu.Unlock(); return h
 func (h *fakeHost) Identify(context.Context, *pb.IdentifyRequest) (*pb.IdentifyResponse, error) {
 	if h.oldHost {
 		return nil, status.Error(codes.Unimplemented, "unknown service")
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.clientsLeaveAfter > 0 {
+		h.clientsLeaveAfter--
+		if h.clientsLeaveAfter == 0 {
+			gone := proto.Clone(h.identity).(*pb.IdentifyResponse)
+			gone.ConnectedClients = 0
+			h.identity = gone
+		}
 	}
 	return h.identity, nil
 }
@@ -53,6 +72,12 @@ func (h *fakeHost) Stop(_ context.Context, req *pb.StopRequest) (*pb.StopRespons
 		return &pb.StopResponse{Outcome: &pb.StopResponse_Refused{Refused: &pb.Busy{LiveRuns: h.identity.GetLiveRuns()}}}, nil
 	}
 	h.running = false
+	if h.closeOnStop {
+		for _, conn := range h.conns {
+			_ = conn.Close()
+		}
+		return nil, status.Error(codes.Unavailable, "the connection closed")
+	}
 	return &pb.StopResponse{Outcome: &pb.StopResponse_Stopping{Stopping: &pb.Stopping{}}}, nil
 }
 
@@ -66,12 +91,19 @@ func (h *fakeHost) dial(ctx context.Context) (net.Conn, error) {
 	}
 	listener := bufconn.Listen(1 << 16)
 	server := grpc.NewServer()
-	pb.RegisterHostControlServiceServer(server, h)
+	var control pb.HostControlServiceServer = h
+	if h.control != nil {
+		control = h.control
+	}
+	pb.RegisterHostControlServiceServer(server, control)
 	go func() { _ = server.Serve(listener) }()
 	conn, err := listener.DialContext(ctx)
 	if err != nil {
 		return nil, err
 	}
+	h.mu.Lock()
+	h.conns = append(h.conns, conn)
+	h.mu.Unlock()
 	return &stoppingConn{Conn: conn, stop: server.Stop}, nil
 }
 
@@ -103,9 +135,15 @@ type fakeProcesses struct {
 	host       *fakeHost
 	lingering  int
 	terminated []*pb.HostLock
+	// polls counts the looks at the lock after a host is told to stop.
+	polls int
 }
 
+// Machine implements clientcli.HostProcesses: every test but those naming another is on host-a.
+func (f *fakeProcesses) Machine() string { return "host-a" }
+
 func (f *fakeProcesses) Holder(string) (*pb.HostLock, error) {
+	f.polls++
 	if f.host != nil && !f.host.isRunning() {
 		if f.lingering == 0 {
 			return nil, nil
@@ -125,24 +163,29 @@ func (f *fakeProcesses) Terminate(_ context.Context, _ string, h *pb.HostLock) e
 	return nil
 }
 
-func hostWorld(h *fakeHost, procs clientcli.HostProcesses) clientcli.Env {
-	return clientcli.Env{
-		Version: "1.0.0", Dir: "/", Zone: time.UTC, Clock: pacedClock{}, FS: nil,
-		Connect: func(string) (clientcli.Dial, error) {
-			return func(ctx context.Context) (net.Conn, error) {
-				h.mu.Lock()
-				if !h.running {
-					h.running = true
-					h.starts++
-				}
-				h.mu.Unlock()
-				return h.dial(ctx)
-			}, nil
-		},
-		Locate:  func(string) (clientcli.Dial, error) { return h.dial, nil },
-		Hosts:   procs,
-		Configs: &fakeConfigs{},
+func hostWorld(h *fakeHost, procs *fakeProcesses) clientcli.Env {
+	connect := func(string) (clientcli.Dial, error) {
+		return func(ctx context.Context) (net.Conn, error) {
+			h.mu.Lock()
+			if !h.running {
+				h.running = true
+				h.starts++
+			}
+			h.mu.Unlock()
+			return h.dial(ctx)
+		}, nil
 	}
+	env := clientcli.Env{
+		Version: "1.0.0", Dir: "/", Zone: time.UTC, Clock: pacedClock{}, FS: nil,
+		Connect: connect, Prove: connect,
+		HostBuild: func(string) string { return "this-build" },
+		Locate:    func(string) (clientcli.Dial, error) { return h.dial, nil },
+		Configs:   &fakeConfigs{},
+	}
+	if procs != nil {
+		env.Hosts = procs
+	}
+	return env
 }
 
 func runHost(env clientcli.Env, args ...string) (code int, stdout, stderr string) {

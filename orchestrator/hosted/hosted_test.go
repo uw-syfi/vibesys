@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -187,6 +188,40 @@ func TestAHostThatCannotServeTheOrchestratorStillIdentifiesItself(t *testing.T) 
 	}
 	if id.GetRelease() != "1.0.1" || id.GetRelation() != pb.ReleaseRelation_RELEASE_RELATION_HOST_NEWER || id.GetServing() != nil {
 		t.Fatalf("identity %v", id)
+	}
+}
+
+// Finding: a host that started while another held the state went on naming that holder after it had
+// gone. It looks again each time it is asked: the holder that has gone is its own reason.
+func TestAHostSaysSoWhenTheHolderOfItsStateHasGone(t *testing.T) {
+	state, err := os.MkdirTemp("", "h")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(state) })
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	first := hosted.Start(ctx, hosted.Options{
+		Version: "1.0.0", Executable: "/x/bin/vibesys-host", Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Root: state, Config: &pb.HostConfig{StateDirectory: state}, Getenv: func(string) string { return "" }, Home: state, Stop: func() {},
+	})
+	if first.Reason() != "" {
+		t.Skipf("the first host does not serve here: %s", first.Reason())
+	}
+	second := startIn(t, state+"-another-root", state, "/y/bin/vibesys-host", "1.0.1", &pb.HostConfig{})
+	before := identify(t, second, "1.0.1").GetUnserved()
+	if before.GetReason() != pb.UnservedReason_UNSERVED_REASON_HELD_ELSEWHERE || !strings.Contains(before.GetDetail(), "release 1.0.0") {
+		t.Fatalf("while it holds: %v", before)
+	}
+	stop()
+	select {
+	case <-first.Done():
+	case <-time.After(guard):
+		t.Fatal("the first host did not let go")
+	}
+	after := identify(t, second, "1.0.1").GetUnserved()
+	if after.GetReason() != pb.UnservedReason_UNSERVED_REASON_HOLDER_GONE || strings.Contains(after.GetDetail(), "pid") {
+		t.Fatalf("after it has gone: %v", after)
 	}
 }
 

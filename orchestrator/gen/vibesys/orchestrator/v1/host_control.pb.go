@@ -250,6 +250,9 @@ const (
 	UnservedReason_UNSERVED_REASON_STATE_REFUSED UnservedReason = 2
 	// The host's configuration cannot be read. Only a start report says this: such a host never serves.
 	UnservedReason_UNSERVED_REASON_CONFIG_REFUSED UnservedReason = 3
+	// Another process held the orchestrator's state when this host started, and has since let go. This
+	// host does not take it over; a host started now can.
+	UnservedReason_UNSERVED_REASON_HOLDER_GONE UnservedReason = 4
 )
 
 // Enum value maps for UnservedReason.
@@ -259,12 +262,14 @@ var (
 		1: "UNSERVED_REASON_HELD_ELSEWHERE",
 		2: "UNSERVED_REASON_STATE_REFUSED",
 		3: "UNSERVED_REASON_CONFIG_REFUSED",
+		4: "UNSERVED_REASON_HOLDER_GONE",
 	}
 	UnservedReason_value = map[string]int32{
 		"UNSERVED_REASON_UNSPECIFIED":    0,
 		"UNSERVED_REASON_HELD_ELSEWHERE": 1,
 		"UNSERVED_REASON_STATE_REFUSED":  2,
 		"UNSERVED_REASON_CONFIG_REFUSED": 3,
+		"UNSERVED_REASON_HOLDER_GONE":    4,
 	}
 )
 
@@ -363,6 +368,14 @@ type IdentifyResponse struct {
 	// The full API schema hash this host answers HostService with, for a client of that service to
 	// tell, before its handshake fails, that it must replace the host.
 	ApiSchemaHash string `protobuf:"bytes,9,opt,name=api_schema_hash,json=apiSchemaHash,proto3" json:"api_schema_hash,omitempty"`
+	// Connections open to the host other than the one asking: a desktop app, a client following a run.
+	// A host with connected clients is not idle, so no client replaces it unasked. Zero from a host
+	// older than this field.
+	ConnectedClients uint32 `protobuf:"varint,10,opt,name=connected_clients,json=connectedClients,proto3" json:"connected_clients,omitempty"`
+	// Which program a host of no release is, for telling two such builds apart: an opaque value, equal
+	// only for the same program. Empty for a host of a release, whose release says that, and from a host
+	// older than this field. A client compares it with the same value of the host it would start.
+	BuildId       string `protobuf:"bytes,11,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -467,6 +480,20 @@ func (x *IdentifyResponse) GetConfigDigest() string {
 func (x *IdentifyResponse) GetApiSchemaHash() string {
 	if x != nil {
 		return x.ApiSchemaHash
+	}
+	return ""
+}
+
+func (x *IdentifyResponse) GetConnectedClients() uint32 {
+	if x != nil {
+		return x.ConnectedClients
+	}
+	return 0
+}
+
+func (x *IdentifyResponse) GetBuildId() string {
+	if x != nil {
+		return x.BuildId
 	}
 	return ""
 }
@@ -992,7 +1019,11 @@ type HostLock struct {
 	// The root the process is the host of. A host holding its root's lock that finds the state directory
 	// held by a host of the same root is watching a hand-over; one of another root is a refusal. Empty
 	// from a host older than this field.
-	Root          string `protobuf:"bytes,3,opt,name=root,proto3" json:"root,omitempty"`
+	Root string `protobuf:"bytes,3,opt,name=root,proto3" json:"root,omitempty"`
+	// The machine the process runs on. A root on a shared disk is seen from other machines, where the
+	// lock reads as held, the socket cannot be connected to and the process cannot be signalled. Empty
+	// from a host older than this field.
+	Machine       string `protobuf:"bytes,4,opt,name=machine,proto3" json:"machine,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1044,6 +1075,13 @@ func (x *HostLock) GetRelease() string {
 func (x *HostLock) GetRoot() string {
 	if x != nil {
 		return x.Root
+	}
+	return ""
+}
+
+func (x *HostLock) GetMachine() string {
+	if x != nil {
+		return x.Machine
 	}
 	return ""
 }
@@ -1194,7 +1232,7 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\n" +
 	"*vibesys/orchestrator/v1/host_control.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"B\n" +
 	"\x0fIdentifyRequest\x12/\n" +
-	"\x0eclient_release\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\rclientRelease\"\xa9\x04\n" +
+	"\x0eclient_release\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\rclientRelease\"\xfb\x04\n" +
 	"\x10IdentifyResponse\x12$\n" +
 	"\arelease\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x01R\arelease\x12P\n" +
@@ -1207,7 +1245,10 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\aserving\x18\x06 \x01(\v2 .vibesys.orchestrator.v1.ServingH\x00R\aserving\x12?\n" +
 	"\bunserved\x18\a \x01(\v2!.vibesys.orchestrator.v1.UnservedH\x00R\bunserved\x12-\n" +
 	"\rconfig_digest\x18\b \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\fconfigDigest\x120\n" +
-	"\x0fapi_schema_hash\x18\t \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\rapiSchemaHashB\x15\n" +
+	"\x0fapi_schema_hash\x18\t \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\rapiSchemaHash\x12+\n" +
+	"\x11connected_clients\x18\n" +
+	" \x01(\rR\x10connectedClients\x12#\n" +
+	"\bbuild_id\x18\v \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\abuildIdB\x15\n" +
 	"\forchestrator\x12\x05\xbaH\x02\b\x01\"\xe0\x01\n" +
 	"\rPartReadiness\x12A\n" +
 	"\x04part\x18\x01 \x01(\x0e2!.vibesys.orchestrator.v1.HostPartB\n" +
@@ -1238,12 +1279,13 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\n" +
 	"\bStopping\",\n" +
 	"\x04Busy\x12$\n" +
-	"\tlive_runs\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\bliveRuns\"i\n" +
+	"\tlive_runs\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\bliveRuns\"\x8d\x01\n" +
 	"\bHostLock\x12\x19\n" +
 	"\x03pid\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x03pid\x12$\n" +
 	"\arelease\x18\x02 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x01R\arelease\x12\x1c\n" +
-	"\x04root\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x04root\"\xf1\x01\n" +
+	"\x04root\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x04root\x12\"\n" +
+	"\amachine\x18\x04 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\amachine\"\xf1\x01\n" +
 	"\x0fHostStartReport\x12<\n" +
 	"\aserving\x18\x01 \x01(\v2 .vibesys.orchestrator.v1.ServingH\x00R\aserving\x12O\n" +
 	"\x0ealready_served\x18\x02 \x01(\v2&.vibesys.orchestrator.v1.AlreadyServedH\x00R\ralreadyServed\x12=\n" +
@@ -1270,12 +1312,13 @@ const file_vibesys_orchestrator_v1_host_control_proto_rawDesc = "" +
 	"\x1fPART_PROBLEM_REASON_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1ePART_PROBLEM_REASON_NO_RELEASE\x10\x01\x12*\n" +
 	"&PART_PROBLEM_REASON_RELEASE_INCOMPLETE\x10\x02\x12/\n" +
-	"+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03*\x9c\x01\n" +
+	"+PART_PROBLEM_REASON_OPERATOR_CHOICE_REFUSED\x10\x03*\xbd\x01\n" +
 	"\x0eUnservedReason\x12\x1f\n" +
 	"\x1bUNSERVED_REASON_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eUNSERVED_REASON_HELD_ELSEWHERE\x10\x01\x12!\n" +
 	"\x1dUNSERVED_REASON_STATE_REFUSED\x10\x02\x12\"\n" +
-	"\x1eUNSERVED_REASON_CONFIG_REFUSED\x10\x032\xca\x01\n" +
+	"\x1eUNSERVED_REASON_CONFIG_REFUSED\x10\x03\x12\x1f\n" +
+	"\x1bUNSERVED_REASON_HOLDER_GONE\x10\x042\xca\x01\n" +
 	"\x12HostControlService\x12_\n" +
 	"\bIdentify\x12(.vibesys.orchestrator.v1.IdentifyRequest\x1a).vibesys.orchestrator.v1.IdentifyResponse\x12S\n" +
 	"\x04Stop\x12$.vibesys.orchestrator.v1.StopRequest\x1a%.vibesys.orchestrator.v1.StopResponseBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"

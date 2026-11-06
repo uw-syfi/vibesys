@@ -8,13 +8,13 @@ import (
 )
 
 // attach follows one run, showing what it did and what it does, until the run ends or the
-// caller detaches.
+// caller detaches. A run that has already ended is only replayed.
 func attach(ctx context.Context, c *call, args []string) error {
 	arg, err := optionalRun(args, "attach")
 	if err != nil {
 		return err
 	}
-	s, ctx, err := c.join(ctx, arg)
+	s, ctx, err := c.join(ctx, arg, mostRecent)
 	if err != nil {
 		return err
 	}
@@ -40,7 +40,11 @@ func optionalRun(args []string, verb string) (string, error) {
 // only detaches: nothing here can stop a run. It returns nil when the run ended normally.
 func (c *call) watchRun(ctx context.Context, s *session) error {
 	run := s.view.RunID
-	fmt.Fprintf(c.Stderr, "attached to run %s (task %s in %s). Ctrl-C detaches and leaves the run going.\n", run, s.view.Run.GetTask(), s.view.Run.GetRepository())
+	if s.view.Over() {
+		fmt.Fprintf(c.Stderr, "run %s (task %s in %s) has %s; this is what it did.\n", run, s.view.Run.GetTask(), s.view.Run.GetRepository(), statusWord(s.view.Run.GetStatus().String(), "RUN_STATUS_"))
+	} else {
+		fmt.Fprintf(c.Stderr, "attached to run %s (task %s in %s). Ctrl-C detaches and leaves the run going.\n", run, s.view.Run.GetTask(), s.view.Run.GetRepository())
+	}
 	c.show(s.view, s.history)
 	for !s.view.Over() {
 		changes, err := s.feed.next(s.view)

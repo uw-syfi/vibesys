@@ -49,6 +49,14 @@ message IdentifyResponse {
   // The full API schema hash this host answers HostService with, for a client of that service to
   // tell, before its handshake fails, that it must replace the host.
   string api_schema_hash = 9 [(buf.validate.field).string.max_bytes = 128];
+  // Connections open to the host other than the one asking: a desktop app, a client following a run.
+  // A host with connected clients is not idle, so no client replaces it unasked. Zero from a host
+  // older than this field.
+  uint32 connected_clients = 10;
+  // Which program a host of no release is, for telling two such builds apart: an opaque value, equal
+  // only for the same program. Empty for a host of a release, whose release says that, and from a host
+  // older than this field. A client compares it with the same value of the host it would start.
+  string build_id = 11 [(buf.validate.field).string.max_bytes = 128];
 }
 
 // ReleaseRelation is how the host's release compares with the asking client's.
@@ -137,6 +145,9 @@ enum UnservedReason {
   UNSERVED_REASON_STATE_REFUSED = 2;
   // The host's configuration cannot be read. Only a start report says this: such a host never serves.
   UNSERVED_REASON_CONFIG_REFUSED = 3;
+  // Another process held the orchestrator's state when this host started, and has since let go. This
+  // host does not take it over; a host started now can.
+  UNSERVED_REASON_HOLDER_GONE = 4;
 }
 
 message StopRequest {
@@ -169,6 +180,10 @@ message HostLock {
   // held by a host of the same root is watching a hand-over; one of another root is a refusal. Empty
   // from a host older than this field.
   string root = 3 [(buf.validate.field).string.max_bytes = 4096];
+  // The machine the process runs on. A root on a shared disk is seen from other machines, where the
+  // lock reads as held, the socket cannot be connected to and the process cannot be signalled. Empty
+  // from a host older than this field.
+  string machine = 4 [(buf.validate.field).string.max_bytes = 256];
 }
 
 // HostStartReport is what a starting host says, once, to whoever started it, on a pipe that the
