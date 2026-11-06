@@ -250,6 +250,14 @@ func TestUsageAndWorkloadErrors(t *testing.T) {
 		!strings.Contains(stderr.String(), "weight must be a finite number > 0") {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
+	dotted := counterWorkload()
+	dotted.Operations[0].Name = "config.create"
+	var stream bytes.Buffer
+	stderr.Reset()
+	if code := run(dotted, []string{"generate", "--phase-input", "x", "--dataset", "d", "--state", "y"}, &stream, &stderr); code != exitFailure ||
+		!strings.Contains(stderr.String(), `operation name "config.create" is not one loadgen takes`) || stream.Len() != 0 {
+		t.Fatalf("exit %d, %d bytes written: %s", code, stream.Len(), stderr.String())
+	}
 	panics := counterWorkload()
 	panics.Operations[0].Build = func(*counters, *Rand) Request { panic("no keys") }
 	dir := t.TempDir()

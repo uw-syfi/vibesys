@@ -8,9 +8,11 @@ step can send a value an earlier one captured (``ref``, a ``Template``). A
 ``go/workload``). The task's ``benchmark(run)`` composes load phases
 (``Run.closed_loop``, ``Run.open_loop``), each returning a ``PhaseResult``;
 the phases run in the Go core (``vibesys-evaluator phase``). A benchmark only
-measures: whether the responses are right is for an accuracy check to judge,
-from the history ``main(capture=True)`` records. The system under test is a
-``microservices.k8s.App``. See the package's ``docs/spec.md``.
+measures: whether the responses are right is for the task's accuracy check
+(``main(accuracy=Accuracy(...))``, ``bench.py accuracy``) to judge: phases at
+a fixed rate with the whole history captured and ``Fault``s between them,
+judged by the task's oracle (the Go SDK's ``check``). The system under test is
+a ``microservices.k8s.App``. See the package's ``docs/spec.md``.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from vibesys_evaluator._private.http import Request, Step, Template, get, http, 
 from vibesys_evaluator._private.results import Validity
 from vibesys_evaluator.microservices import _k8s
 from vibesys_evaluator.microservices._private import entry
+from vibesys_evaluator.microservices._private.accuracy import Accuracy, Fault
 from vibesys_evaluator.microservices._private.results import PhaseResult
 from vibesys_evaluator.microservices._private.run import Run
 from vibesys_evaluator.microservices._private.workload import Generator, Operation, Workload
@@ -34,6 +37,8 @@ if TYPE_CHECKING:
     from vibesys_evaluator.microservices.k8s import App
 
 __all__ = [
+    "Accuracy",
+    "Fault",
     "Generator",
     "Operation",
     "PhaseResult",
@@ -60,8 +65,9 @@ def main(
     metrics: Mapping[str, Metric],
     validity: Validity | None = None,
     capture: bool = False,
+    accuracy: Accuracy | None = None,
 ) -> NoReturn:
-    """Run the task script's command (``benchmark``, ``phase``, ``generate``, ``seed`` or ``ctl``) and exit.
+    """Run the task script's command (``benchmark``, ``accuracy``, ``phase``, ``generate``, ``seed`` or ``ctl``) and exit.
 
     Args:
         dataset: Builds the initial data; a pure function of the task's constants.
@@ -76,6 +82,10 @@ def main(
             client of each operation, each request's ``info``, and the faults
             of ``Run.fault`` (``history.binpb`` in the artifacts; see
             ``docs/spec.md``, "Accuracy history").
+        accuracy: The task's accuracy check, which ``bench.py accuracy``
+            runs: phases with the history captured and faults between them,
+            then the task's oracle; it exits 0 on PASS, 1 on FAIL and 2 on
+            UNKNOWN (see ``docs/spec.md``, "Accuracy run").
     """
     task = entry.Task(
         dataset=dataset,
@@ -85,6 +95,7 @@ def main(
         metrics=metrics,
         validity=validity if validity is not None else Validity(),
         capture=capture,
+        accuracy=accuracy,
     )
     entry.main(
         task,

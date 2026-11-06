@@ -18,6 +18,7 @@ import (
 
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/evaluator"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/phase"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/wire"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/workload"
 )
 
@@ -34,7 +35,7 @@ type Task[D, M any] struct {
 	// differs from the orchestrator's. It is written as JSON (encoding/json) into dataset.json in
 	// the artifacts and for the generator (--dataset). Nil: D's zero value.
 	Dataset func() (D, error)
-	// System is where the application runs: Local, or a Kubernetes namespace (package k8s).
+	// System is where the application runs: Local, or K8s (a Kubernetes namespace per sample).
 	System System
 	// Seed writes the dataset into the deployed application before the phases, from a process
 	// next to it (a seed pod); nil when there is nothing to write.
@@ -45,8 +46,10 @@ type Task[D, M any] struct {
 	Workload  *workload.Workload[D, M]
 	Generator []string
 	// Benchmark is the scoring definition: it runs phases on run and calls run.Report. An error
-	// ends the sample with an error record.
+	// ends the sample with an error record. Nil: the task has only Accuracy.
 	Benchmark func(ctx context.Context, run *Run) error
+	// Accuracy is the task's accuracy check (the `accuracy` command); nil when it has none.
+	Accuracy *Accuracy
 	// Capture records every phase's whole history for an accuracy check, which benchmarks leave
 	// off: every response body, the loadgen client of every operation and the generator's info
 	// of every operation are kept in the phase directories, and history.binpb lists the phases
@@ -56,6 +59,8 @@ type Task[D, M any] struct {
 
 const usageText = `usage:
   TASK benchmark [--project-root DIR] --vs-output FILE [--seed N]   one sample (vibesys)
+  TASK accuracy [--project-root DIR] [--out DIR] [--seed N]          the accuracy check (vibesys)
+  TASK accuracy --history DIR [--out DIR]                         judge a captured history
   TASK phase --work DIR --target URL                              one phase (a phase pod)
   TASK generate --phase-input F --dataset F --state DIR          the generator (under loadgen)
   TASK seed --dataset-digest HEX                                  the seed (a seed pod)
@@ -63,8 +68,9 @@ const usageText = `usage:
 
 // Main runs the command in os.Args and exits: `benchmark` is one sample (the core's benchmark,
 // see evaluator.Main), whose body deploys the application on the Task's System, runs Benchmark
-// on a Run and tears the application down on every path; `phase` is the phase pod's command;
-// `generate` the generator's (with Task.Workload); `seed` the seed pod's.
+// on a Run and tears the application down on every path; `accuracy` is the accuracy check (see
+// Accuracy); `phase` is the phase pod's command; `generate` the generator's (with
+// Task.Workload); `seed` the seed pod's.
 func Main[D, M any](task Task[D, M]) {
 	if err := task.validate(); err != nil {
 		fmt.Fprintln(os.Stderr, "bench: error:", err)
@@ -76,6 +82,9 @@ func Main[D, M any](task Task[D, M]) {
 	}
 	switch args[0] {
 	case "benchmark":
+		if task.Benchmark == nil {
+			usage("this task has no Benchmark")
+		}
 		root, rest, err := cutProjectRoot(args[1:])
 		if err != nil {
 			usage("%v", err)
@@ -85,6 +94,8 @@ func Main[D, M any](task Task[D, M]) {
 			Metrics:   task.Metrics,
 			Benchmark: func(ctx context.Context, run *evaluator.Run) error { return sample(ctx, task, run, root) },
 		})
+	case "accuracy":
+		os.Exit(withSignals(func(ctx context.Context) int { return accuracyCommand(ctx, task, args[1:]) }))
 	case "phase":
 		os.Exit(withSignals(func(ctx context.Context) int { return podCommand(ctx, task, args[1:]) }))
 	case "generate":
@@ -109,14 +120,29 @@ func usage(format string, args ...any) {
 }
 
 func (t Task[D, M]) validate() error {
-	if t.Benchmark == nil {
-		return errors.New("microservices.Task needs a Benchmark")
+	if t.Benchmark == nil && t.Accuracy == nil {
+		return errors.New("microservices.Task needs a Benchmark, an Accuracy or both")
+	}
+	if t.Accuracy != nil {
+		if err := t.Accuracy.validate(t.System); err != nil {
+			return err
+		}
 	}
 	if t.System == nil {
-		return errors.New("microservices.Task needs a System (microservices.Local, or k8s)")
+		return errors.New("microservices.Task needs a System (microservices.Local or microservices.K8s)")
 	}
 	if (t.Workload == nil) == (len(t.Generator) == 0) {
 		return errors.New("microservices.Task needs exactly one of Workload and Generator")
+	}
+	if t.Workload != nil {
+		// Refused here, before anything is deployed, rather than by the generator in a phase.
+		names := make([]string, len(t.Workload.Operations))
+		for i, o := range t.Workload.Operations {
+			names[i] = o.Name
+		}
+		if err := wire.CheckOperationNames(names); err != nil {
+			return fmt.Errorf("microservices.Task Workload: %w", err)
+		}
 	}
 	if t.Validity != nil {
 		if err := t.Validity.Validate(); err != nil {
@@ -228,17 +254,22 @@ func sample[D, M any](ctx context.Context, task Task[D, M], run *evaluator.Run, 
 			evaluator.Log("teardown: %v", err)
 		}
 	}()
-	r := &Run{Run: run, phases: &phases{
-		pods:      deployed,
-		command:   func(work, target string) []string { return []string{exe, "phase", "--work", work, "--target", target} },
-		seed:      run.Seed(),
-		artifacts: run.Artifacts(),
-		validity:  task.validity(),
-		capture:   task.Capture,
-		log:       logf,
-		now:       time.Now,
-	}}
+	r := &Run{Run: run, phases: &phases{runner: &phase.Runner{
+		Pods:     deployed,
+		Command:  phaseCommand(exe),
+		Seed:     run.Seed(),
+		Dir:      run.Artifacts(),
+		Validity: task.validity(),
+		Capture:  task.Capture,
+		Log:      logf,
+		Now:      time.Now,
+	}}}
 	return task.Benchmark(ctx, r)
+}
+
+// phaseCommand is the phase pod's command: this binary's `phase`.
+func phaseCommand(exe string) func(work, target string) []string {
+	return func(work, target string) []string { return []string{exe, "phase", "--work", work, "--target", target} }
 }
 
 // generatorCommand is the generator as the phase pod runs it.

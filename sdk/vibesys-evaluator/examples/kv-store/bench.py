@@ -8,8 +8,9 @@ template the loadgen fills from the first response); the score is latency at
 a fixed Poisson-arrival rate, with no closed loop. bench_go.py is the same
 task with this workload written in Go (generator/): both write the same
 request stream. The benchmark only measures: that reads see every
-acknowledged write at once is the accuracy oracle's to judge (oracle/), from
-the history a run with capture=True records.
+acknowledged write at once, across restarts too, is the accuracy check's to
+judge (`bench.py accuracy`: phases with the whole history captured and faults
+between them, then the oracle in oracle/ on that history).
 
 The service (candidate directory `server/`, its own Dockerfile) offers
     POST /register {"user", "password"}
@@ -143,6 +144,21 @@ def benchmark(run: ms.Run) -> None:
                 "operations_per_second": phase.ops_per_sec})
 
 
+# ---------------------------------------------------- the accuracy check
+
+ACCURACY = ms.Accuracy(
+    phases=3,
+    rate=200,  # modest: the responses are judged, not the capacity
+    secs=30,
+    warmup=5,
+    faults=[
+        ms.Fault.restart_all("kv", after=0),  # every pod at once; the writes must survive it
+        ms.Fault.exec("kv", ["sh", "-c", "kill -0 1"], after=1),  # a command in the first pod
+    ],
+    oracle=["./kv-oracle"],  # oracle/, built next to this script: exit 0 PASS, 1 FAIL, 2 UNKNOWN
+)
+
+
 # ------------------------------------------------------------- (5) validity
 
 if __name__ == "__main__":
@@ -157,4 +173,5 @@ if __name__ == "__main__":
             "operations_per_second": vse.Metric(unit="ops/s", direction="max"),
         },
         validity=vse.Validity(max_error_rate=0.001, min_sustained_ratio=0.99),
+        accuracy=ACCURACY,
     )
