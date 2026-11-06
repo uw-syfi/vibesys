@@ -410,7 +410,9 @@ for every subcommand:
 Python calls them through one helper, `_private/core.py`: it finds the binary
 (the wheel's `_bin/`, then `$VIBESYS_EVALUATOR_BIN`, then `PATH`), runs it,
 decodes the reply and raises `CoreDomainError` (exit 1), `CoreCrashError` (any
-other exit, or a reply that is not JSON) or `CoreNotFoundError`.
+other exit, or a reply that is not JSON) or `CoreNotFoundError`. `loadgen` and
+`otelcapture` are found the same way (`$VIBESYS_EVALUATOR_LOADGEN`,
+`$VIBESYS_EVALUATOR_OTELCAPTURE`). See "Distribution".
 
 The verbs (messages in `proto/vibesys/evaluator/v1/core.proto`):
 
@@ -443,8 +445,30 @@ functions (calling them, catching their exceptions and signals) and the plain
 data classes, whose rules the cross-language fixtures `fixtures/core.json`
 pin to Go's (record streams byte for byte, histogram summaries and merges,
 validity and seed rules); `Rand` is native in both languages and pinned by
-`fixtures/rand.json`. The wheel alone is no longer enough: `main` runs the
-`vibesys-evaluator` binary, which the images carry on the PATH.
+`fixtures/rand.json`. `main` runs the `vibesys-evaluator` binary, which the
+platform wheels bundle (see "Distribution").
+
+## Distribution
+
+`pip install vibesys-evaluator` is the whole install: the PyPI release holds
+one wheel per platform (linux x86_64 and aarch64, macOS x86_64 and arm64), each
+with the Go binaries `vibesys-evaluator`, `loadgen` and `otelcapture` in
+`vibesys_evaluator/_bin/`, the way `ruff` bundles its binary. The binaries are
+built with `CGO_ENABLED=0`, so the Linux wheels are static and carry the
+manylinux and the musllinux tags at once; macOS wheels are cross-compiled.
+`packaging/evaluator_wheels.py` builds and verifies them.
+
+The release also holds a source distribution, which has no binary, and no
+`py3-none-any` wheel. An installation without a bundled binary (the sdist, or a
+platform without a wheel, such as Windows) finds the binary in
+`$VIBESYS_EVALUATOR_BIN` (`..._LOADGEN`, `..._OTELCAPTURE` for the others), then
+on `PATH`; failing that, a task script exits 1 with a message that names those
+variables and the `go install` command. The Go module stays installable by
+`go install github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/cmd/<binary>@<tag>`
+for authors who write in Go.
+
+The task images install the linux x86_64 wheel and link its binaries onto the
+`PATH`; they run no Go toolchain.
 
 ## Generator command line
 
@@ -691,7 +715,7 @@ repository, and [`examples/agentx-llm/bench.py`](../examples/agentx-llm/bench.py
 
 One version `X.Y.Z` for the Python package, the Go module
 (`sdk/vibesys-evaluator/go/vX.Y.Z`) and the images, one per domain:
-`vibesys-evaluator-microservices:X.Y.Z` (the package and loadgen) and
+`vibesys-evaluator-microservices:X.Y.Z` (the package, and loadgen from its wheel) and
 `vibesys-evaluator-llm-serving:X.Y.Z` (the package and `agentx-harness`,
 installed from a hash-pinned lock in `image/llm-serving/`; task writers never
 install the harness). Python and loadgen ship together, and the Python

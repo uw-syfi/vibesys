@@ -9,7 +9,8 @@ generators in Go, for the microservices domain), the Go core `go/evaluator`
 its command line `vibesys-evaluator <group> <verb>` that the Python package
 wraps, the Go accuracy checker `go/check` (a task's oracle is written against
 it), loadgen (the Go binary in `go/cmd/loadgen` that sends the microservices
-requests), the schema in
+requests; the platform wheels bundle it with the core and `otelcapture`, see
+`docs/spec.md` "Distribution"), the schema in
 `proto/vibesys/evaluator/v1/`, and one image per domain,
 `vibesys-evaluator-microservices` and `vibesys-evaluator-llm-serving`. The
 design is [`docs/spec.md`](docs/spec.md).

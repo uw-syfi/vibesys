@@ -290,3 +290,6 @@ proto/testdata/records/epoch_started.pb
 
 # Compiled Go test binaries (go test -c)
 *.test
+
+# Binaries a platform wheel bundles (packaging/evaluator_wheels.py); a development tree has none.
+sdk/vibesys-evaluator/python/src/vibesys_evaluator/_bin/

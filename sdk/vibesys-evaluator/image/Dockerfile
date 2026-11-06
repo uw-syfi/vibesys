@@ -7,25 +7,30 @@
 #   COPY . /task
 #
 # Both hold Python with the vibesys_evaluator package (every domain of it; a task uses its
-# own). microservices adds loadgen and otelcapture (the Go module in ../go), kubectl and
+# own). microservices adds loadgen and otelcapture (from the wheel), kubectl and
 # buildctl: the orchestrator (python /task/bench.py) runs in the container vibesys-cli
 # starts, and its phase, seed and probe pods run the task image in the cluster, so
 # everything a phase needs is in that image. llm-serving adds the AgentX harness (AIPerf)
 # at the one version vibesys_evaluator.llm_serving.agentx replays with, from the hashed
 # lock in llm-serving/ (task writers never install it); the candidate server runs in its
-# own image and is reached over HTTP. Both put the core, `vibesys-evaluator`, on the PATH: the
-# Python package runs it for the sample's files, records and histograms.
+# own image and is reached over HTTP. The Go binaries (the core `vibesys-evaluator`, which the
+# Python package runs for the sample's files, records and histograms, and `loadgen` and
+# `otelcapture`) come from the wheel, which bundles them in vibesys_evaluator/_bin; the images
+# link them onto the PATH for Go-written tasks and for debugging. No Go toolchain runs for a
+# release image.
 #
 # Build with sdk/vibesys-evaluator as the context:
 #   docker build --target microservices -f sdk/vibesys-evaluator/image/Dockerfile sdk/vibesys-evaluator
 #   docker build --target llm-serving -f sdk/vibesys-evaluator/image/Dockerfile sdk/vibesys-evaluator
 #
-# By default the package's wheel is built from ../python. A release installs the wheel
-# it already built and verified instead, by replacing the stage `wheels` with a directory
-# that holds exactly that one wheel, and stamps loadgen with the release version:
-#   docker buildx build --build-context wheels=dist/evaluator \
-#     --build-arg VIBESYS_EVALUATOR_VERSION=<version> --target <domain> -f ... sdk/vibesys-evaluator
-# Without VIBESYS_EVALUATOR_VERSION, loadgen keeps its development version.
+# By default the package's wheel is built from ../python with binaries compiled here (stages
+# `go` and `wheel`, for development; stamped with VIBESYS_EVALUATOR_VERSION when it is set,
+# else with the development version). A release installs the platform wheel it already built
+# and verified (packaging/evaluator_wheels.py, the manylinux x86_64 one: the images are
+# linux/amd64) instead, by replacing the stage `wheels` with a directory that holds exactly
+# that one wheel:
+#   docker buildx build --build-context wheels=<dir with the one wheel> \
+#     --target <domain> -f ... sdk/vibesys-evaluator
 #
 # Every base is pinned by digest and every download by checksum or hash. Update them
 # together, with a version bump of the package (one version for the package, the Go module
@@ -35,9 +40,17 @@ ARG KUBECTL_VERSION=v1.34.0
 ARG KUBECTL_SHA256=cfda68cba5848bc3b6c6135ae2f20ba2c78de20059f68789c090166d6abc3e2c
 ARG VIBESYS_EVALUATOR_VERSION=
 
-FROM golang:1.25.9-bookworm@sha256:298734aec230b5f3e8cee450ce6d7eccc39f1797ba548ee90d57e9803030c6c3 AS go
+# kubectl, checked against its published sha256 (the version of the clusters' nodes).
+FROM golang:1.25.9-bookworm@sha256:298734aec230b5f3e8cee450ce6d7eccc39f1797ba548ee90d57e9803030c6c3 AS kubectl
 ARG KUBECTL_VERSION
 ARG KUBECTL_SHA256
+RUN mkdir -p /out \
+ && curl -fsSL -o /out/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+ && echo "${KUBECTL_SHA256}  /out/kubectl" | sha256sum -c - \
+ && chmod 0755 /out/kubectl
+
+# The Go binaries of a development build (a release's are in its wheel).
+FROM golang:1.25.9-bookworm@sha256:298734aec230b5f3e8cee450ce6d7eccc39f1797ba548ee90d57e9803030c6c3 AS go
 ARG VIBESYS_EVALUATOR_VERSION
 ENV CGO_ENABLED=0 GOFLAGS=-trimpath
 WORKDIR /src/go
@@ -49,18 +62,16 @@ RUN stamp="" \
       stamp="-X github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/version.Version=${VIBESYS_EVALUATOR_VERSION}"; \
     fi \
  && go build -ldflags "${stamp}" -o /out/ ./cmd/loadgen ./cmd/otelcapture ./cmd/vibesys-evaluator
-# kubectl, checked against its published sha256 (the version of the clusters' nodes).
-RUN curl -fsSL -o /out/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
- && echo "${KUBECTL_SHA256}  /out/kubectl" | sha256sum -c - \
- && chmod 0755 /out/kubectl
 
 FROM moby/buildkit:v0.22.0@sha256:832fa7aa1eb3deb56fa62ae933bfa42dad9a83ff4824dbbaf173b49c722b59d0 AS buildkit
 
 FROM python:3.12.12-slim-bookworm@sha256:593bd06efe90efa80dc4eee3948be7c0fde4134606dd40d8dd8dbcade98e669c AS wheel
 COPY python/ /src/python/
+COPY --from=go /out/ /src/python/src/vibesys_evaluator/_bin/
 RUN pip wheel --no-cache-dir --no-deps --wheel-dir /wheels /src/python
 
-# The wheel to install: the one built above, or a release's via --build-context wheels=DIR.
+# The wheel to install: the one built above, or a release's platform wheel via
+# --build-context wheels=DIR.
 FROM scratch AS wheels
 COPY --from=wheel /wheels/ /
 
@@ -69,11 +80,13 @@ COPY --from=wheels / /tmp/wheels/
 RUN set -- /tmp/wheels/*.whl \
  && if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then echo "expected exactly one wheel, found: $*" >&2; exit 1; fi \
  && pip install --no-cache-dir "$1" && rm -rf /tmp/wheels
-COPY --from=go /out/loadgen /out/otelcapture /out/vibesys-evaluator /out/kubectl /usr/local/bin/
+COPY --from=kubectl /out/kubectl /usr/local/bin/
 COPY --from=buildkit /usr/bin/buildctl /usr/local/bin/buildctl
 # A job runs as the invoking user, whose HOME may not exist: kubectl and buildctl keep
 # their caches under /tmp. Pods of the package write only below /vse (an emptyDir).
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp KUBECACHEDIR=/tmp/.kube/cache
+RUN bin="$(python -c 'import pathlib, vibesys_evaluator; print(pathlib.Path(vibesys_evaluator.__file__).parent / "_bin")')" \
+ && ln -s "$bin/loadgen" "$bin/otelcapture" "$bin/vibesys-evaluator" /usr/local/bin/
 RUN loadgen --capabilities >/dev/null && vibesys-evaluator core version >/dev/null && kubectl version --client >/dev/null && buildctl --version >/dev/null \
  && python -c "import vibesys_evaluator.microservices.k8s"
 
@@ -89,8 +102,10 @@ COPY --from=wheels / /tmp/wheels/
 RUN set -- /tmp/wheels/*.whl \
  && if [ "$#" -ne 1 ] || [ ! -f "$1" ]; then echo "expected exactly one wheel, found: $*" >&2; exit 1; fi \
  && pip install --no-cache-dir --no-deps "$1" && rm -rf /tmp/wheels && pip check
-# The core the package calls (records, sample files, histograms); no loadgen here.
-COPY --from=go /out/vibesys-evaluator /usr/local/bin/
+# The core the package calls (records, sample files, histograms) is in the wheel; link it onto
+# the PATH. loadgen and otelcapture are in the wheel too, and unused here.
+RUN bin="$(python -c 'import pathlib, vibesys_evaluator; print(pathlib.Path(vibesys_evaluator.__file__).parent / "_bin")')" \
+ && ln -s "$bin/vibesys-evaluator" /usr/local/bin/
 # A job runs as the invoking user, whose HOME may not exist: Hugging Face and AIPerf keep
 # their caches under /tmp unless the operator mounts a cache (VIBESYS_CACHE_DIR).
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HOME=/tmp

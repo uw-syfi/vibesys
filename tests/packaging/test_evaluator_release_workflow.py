@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import evaluator_wheels
 import yaml
 
 REPO_ROOT = Path(__file__).parents[2]
@@ -144,10 +145,65 @@ def test_the_release_runs_the_api_check_that_pull_requests_run() -> None:
     assert "uv run --frozen python scripts/check_vibesys_evaluator_api.py" in runs
 
 
-def test_the_image_installs_the_verified_wheel() -> None:
+def test_the_image_installs_the_verified_linux_wheel_and_runs_no_go() -> None:
     build = next(s["run"] for s in _jobs()["verify"]["steps"] if s.get("id") == "image")
-    assert "--build-context wheels=dist/evaluator" in build
-    assert '--build-arg VIBESYS_EVALUATOR_VERSION="$GO_VERSION"' in build
+    assert '--build-context wheels="$RUNNER_TEMP/image-wheel"' in build
+    assert 'cp "$LINUX_WHEEL" "$RUNNER_TEMP/image-wheel/"' in build
+    # The binaries in the image are the wheel's, stamped by the wheel build.
+    assert "VIBESYS_EVALUATOR_VERSION" not in build
+    linux = next(s for s in _jobs()["verify"]["steps"] if s.get("id") == "linux_wheel")
+    assert "manylinux_2_17_x86_64" in linux["run"]
+    assert 'test "$#" -eq 1' in linux["run"]
+
+
+def test_the_release_builds_every_platform_wheel_and_verifies_it_before_anything_is_published() -> (
+    None
+):
+    steps = _jobs()["verify"]["steps"]
+    names = [step.get("name", "") for step in steps]
+    build = steps[names.index("Build the wheels")]["run"]
+    assert "packaging/evaluator_wheels.py build" in build
+    assert '--go-version "$GO_VERSION"' in build
+    assert "--wheel-dir dist/evaluator --evaluator-wheels" in build
+    assert 'packaging/evaluator_wheels.py verify dist/evaluator --version "$VERSION"' in build
+    # Go is set up before the wheels are built (they cross-compile the binaries).
+    assert names.index("Set up Go") < names.index("Build the wheels")
+    # The wheel is installed with no Go toolchain, and a main() sample runs through its core.
+    install = steps[names.index("Install the wheel in a clean environment")]["run"]
+    assert 'clean_path="/usr/bin:/bin"' in install
+    assert "command -v go" in install
+    assert "evaluator_wheel_smoke.py" in install
+    assert "benchmark --vs-output" in install
+    # musl: the static Linux binaries run on Alpine.
+    musl = "\n".join(s.get("run", "") for s in steps if "musl" in s.get("name", ""))
+    assert "alpine@sha256:" in musl
+
+
+def test_pypi_gets_the_platform_wheels_and_the_sdist_and_never_overwrites() -> None:
+    steps = _jobs()["pypi"]["steps"]
+    script = "\n".join(step.get("run", "") for step in steps)
+    assert "-eq 5" in script
+    assert "vibesys_evaluator-$VERSION.tar.gz" in script
+    assert "*-any.whl" in script  # no universal wheel
+    for platform in (
+        "manylinux_2_17_x86_64",
+        "manylinux_2_17_aarch64",
+        "macosx_12_0_x86_64",
+        "macosx_12_0_arm64",
+    ):
+        assert platform in script
+    # A file PyPI already holds with other contents stops the release; the same one is skipped.
+    assert "not the verified" in script
+    publish = next(s for s in steps if s.get("uses", "").startswith("pypa/"))
+    assert publish["if"] == "steps.pending.outputs.pending != '0'"
+    assert "integrity/vibesys-evaluator" in script  # every file's attestation is checked
+
+
+def test_the_wheel_matrix_the_workflow_checks_is_the_one_the_builder_makes() -> None:
+    script = "\n".join(step.get("run", "") for step in _jobs()["pypi"]["steps"])
+    for platform in evaluator_wheels.PLATFORMS:
+        first = platform.tag.split(".")[0]
+        assert first in script, platform
 
 
 def test_python_checks_leave_no_bytecode_among_the_fixtures() -> None:
