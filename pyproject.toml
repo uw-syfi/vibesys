@@ -285,6 +285,7 @@ extend-exclude = [
     "third_party/serving-repos",
     "examples/model-serving/show-o2-1.5B-HQ/.vibesys/tasks/default/reference/Show-o",
     "examples/microservices/repositories/deathstarbench",
+    "examples/microservices/repositories/hotel",
     "examples/microservices/repositories/train-ticket",
     "examples/model-serving/repositories/sglang",
     "examples/model-serving/repositories/vllm",

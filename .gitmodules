@@ -45,3 +45,8 @@
 	url = https://github.com/vibesys-playground/sglang.git
 	branch = vibesys
 	shallow = true
+[submodule "examples/microservices/repositories/hotel"]
+	path = examples/microservices/repositories/hotel
+	url = https://github.com/rpcstack/hotel.git
+	branch = main
+	shallow = true

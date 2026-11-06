@@ -110,9 +110,14 @@ def test_repository_examples_track_their_vibesys_branches() -> None:
     assert repository_sections
     for section in repository_sections:
         assert not config.has_option(section, "update")
-        assert config.get(section, "branch") == "vibesys"
         assert config.getboolean(section, "shallow")
-        assert config.get(section, "url").startswith("https://github.com/vibesys-playground/")
+        url = config.get(section, "url")
+        if url.startswith("https://github.com/rpcstack/"):
+            # The rpcstack applications carry their task on their own default branch.
+            assert config.get(section, "branch") == "main"
+        else:
+            assert config.get(section, "branch") == "vibesys"
+            assert url.startswith("https://github.com/vibesys-playground/")
 
 
 def test_tracked_submodule_initialization_commands_override_the_opt_out() -> None:
