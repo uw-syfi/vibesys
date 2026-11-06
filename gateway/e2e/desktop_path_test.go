@@ -32,19 +32,25 @@ func (r *rig) useCLI() {
 	if out, err := build.CombinedOutput(); err != nil {
 		r.t.Fatalf("build vibesys-cli: %v\n%s", err, out)
 	}
-	// The rig's daemon is a sandbox daemon: with the runtime directory of its own, it must not meet
-	// the one daemon per user that a developer's machine may already run. Whoever starts it, the host
-	// or a scripted agent, runs the job tool, so that tool says so itself.
-	sandboxed := filepath.Join(bin, "vibesys-cli-sandboxed")
-	script := "#!/bin/sh\nVIBESYS_CLI_SANDBOX=1 exec " + filepath.Join(bin, "vibesys-cli") + " \"$@\"\n"
-	if err := os.WriteFile(sandboxed, []byte(script), 0o755); err != nil {
-		r.t.Fatal(err)
-	}
-	r.config.JobTool = sandboxed
+	r.config.JobTool = r.sandboxed(filepath.Join(bin, "vibesys-cli"))
 	r.config.ToolPath = append([]string{bin}, r.config.ToolPath...)
 	r.holderEnv = append(r.holderEnv, "VIBESYS_CLI_SANDBOX=1")
 	r.env = append(r.env, "VIBESYS_CLI_SANDBOX=1", "PATH="+bin+string(os.PathListSeparator)+r.dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	r.t.Cleanup(func() { r.stopCLIDaemon(filepath.Join(bin, "vibesys-cli")) })
+}
+
+// sandboxed is the job tool the rig's host runs: binary, whose daemon is a sandbox daemon. With a
+// runtime directory of its own, it must not meet the one daemon per user that a developer's machine
+// may already run. Whoever starts it, the host or a scripted agent, runs the job tool, so that tool
+// says so itself. The test stops the daemon when it ends.
+func (r *rig) sandboxed(binary string) string {
+	r.t.Helper()
+	wrapper := binary + "-sandboxed"
+	script := "#!/bin/sh\nVIBESYS_CLI_SANDBOX=1 exec " + binary + " \"$@\"\n"
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
+		r.t.Fatal(err)
+	}
+	r.t.Cleanup(func() { r.stopCLIDaemon(binary) })
+	return wrapper
 }
 
 // stopCLIDaemon stops the vibesys-cli daemon this rig started and fails the test if any process
@@ -252,7 +258,7 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 
 	r.serve()
 	const steering = "Prefer Codex workers for volume."
-	started := r.receipt("run", "start", "--repository", repository.path, "--task", toyTask, "--brief", steering, "--json")
+	started := r.receipt("run", "start", "--repository", repository.path, "--task", toyTask, "--brief", steering, "--allow-agent", "codex", "--json")
 	if started.RunID == "" || started.AgentID == "" {
 		t.Fatalf("run start printed no run and lead: %+v", started)
 	}
@@ -325,14 +331,14 @@ func TestTheDesktopPathRunsAnOptimizationEndToEnd(t *testing.T) {
 	// lead promoted the better one, and the number it reported is the one the CLI has for the head.
 	commits := map[int]string{}
 	for _, m := range w.messages {
-		if m.Handoff == nil || m.Handoff.Commit == "" {
+		if m.Handoff == nil || m.Handoff.Commit() == "" {
 			continue
 		}
 		sender := w.agents[m.From]
 		if sender == nil || sender.Role != "AGENT_ROLE_WORKER" || sender.Plan != m.Handoff.PlanNumber || m.To != lead.ID {
 			t.Errorf("handoff %+v is not a worker's own to the lead (sender %+v)", m.Handoff, sender)
 		}
-		commits[m.Handoff.PlanNumber] = m.Handoff.Commit
+		commits[m.Handoff.PlanNumber] = m.Handoff.Commit()
 	}
 	scores := map[int]float64{1: 14, 2: 17}
 	for plan, score := range scores {

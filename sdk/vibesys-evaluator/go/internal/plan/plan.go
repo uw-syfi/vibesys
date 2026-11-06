@@ -18,6 +18,7 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/files"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/wire"
 )
 
 // ErrInvalid means a request stream holds an operation this loadgen cannot run (exit status 2).
@@ -143,6 +144,11 @@ func newReader(in io.Reader, format files.Format) (header, error) {
 			return header{}, fmt.Errorf("%w: no RequestsHeader after the FileHeader", ErrInvalid)
 		}
 		return header{}, invalid(fmt.Errorf("RequestsHeader: %w", err))
+	}
+	// The names first, in words the workload's author can act on: the generator's first message
+	// is where a bad one shows, before any load.
+	if err := wire.CheckOperationNames(h.GetOperationNames()); err != nil {
+		return header{}, fmt.Errorf("%w: RequestsHeader.operation_names: %v", ErrInvalid, err)
 	}
 	if err := validator.Validate(h); err != nil {
 		return header{}, fmt.Errorf("%w: RequestsHeader: %v", ErrInvalid, err)

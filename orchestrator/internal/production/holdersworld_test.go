@@ -3,7 +3,6 @@ package production
 import (
 	"context"
 	"log/slog"
-	"strings"
 	"sync"
 
 	"buf.build/go/protovalidate"
@@ -15,6 +14,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
 // The steps of a start where a host can crash or a holder can die.
@@ -67,7 +67,7 @@ func newHolderWorld() *holderWorld {
 		crashes: map[string]bool{}, deaths: map[string]bool{}, probes: map[string]bool{}, protocol: current,
 		outcome: func(*pb.OpenSessionRequest) []*pb.SessionEvent {
 			return []*pb.SessionEvent{{Body: &pb.SessionEvent_Opened{Opened: &pb.SessionOpened{
-				ResumeToken: []byte("token"), Capabilities: &pb.Capabilities{StreamsText: true, Steers: true, Resumes: true},
+				ResumeToken: []byte("token"), Capabilities: &pb.Capabilities{Steers: true, Resumes: true},
 			}}}}
 		},
 	}
@@ -244,12 +244,12 @@ func (w *holderWorld) Reap(place HolderPlace) error {
 }
 
 // ReapAgent implements SessionHolders.
-func (w *holderWorld) ReapAgent(agentDirectory string) error {
+func (w *holderWorld) ReapAgent(places []HolderPlace) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	for socket := range w.agents {
-		if !w.aliveAt(socket) && strings.HasPrefix(socket, agentDirectory+"/") {
-			delete(w.agents, socket)
+	for _, place := range places {
+		if _, ok := w.agents[place.Socket]; ok && !w.aliveAt(place.Socket) {
+			delete(w.agents, place.Socket)
 		}
 	}
 	return nil
@@ -449,6 +449,8 @@ func sessionStart(agent string, role core.AgentRole, repository string) daemon.S
 			Spec: core.AgentSpec{Harness: core.ClaudeCode},
 		},
 		Repository: repository, Task: "task",
-		Tools: daemon.LaunchEnv{"VIBESYS_ORCHESTRATOR_TOKEN": "a-token"},
+		Tools: &pb.ToolServerCredentials{
+			Endpoint: "/run/orchestrator-agent.sock", Agent: agent, Session: 1, Token: "a-token", Run: "run-1", Role: wire.RoleOut(role),
+		},
 	}
 }

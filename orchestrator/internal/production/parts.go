@@ -1,14 +1,21 @@
 package production
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/hostconfig"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
+
+// jobToolBound limits a start's wait for the job tool's daemon: a daemon it has to bring up first
+// recovers its store, and the tool's own limit on all of it is longer than a client should wait.
+const jobToolBound = 30 * time.Second
 
 // Parts resolves what a run is started with: the program that holds an agent session, the skills a
 // session loads, and the tool the skills run. Each is resolved when it is asked for, on every
@@ -17,13 +24,13 @@ import (
 type Parts struct {
 	// Config is the host's configuration, which chooses any part in place of the release's.
 	Config *pb.HostConfig
-	// Getenv reads the job tool's places (see LocationFor), which are all it is for.
-	Getenv func(string) string
 	// Find looks for the release the host is installed in.
 	Find  release.Finder
 	Files Files
-	// Home is the home directory the job tool's places are resolved from.
+	// Home is the home directory of the host's default tool path.
 	Home string
+	// Runner runs the job tool.
+	Runner Runner
 }
 
 // SessionHolder is the command that holds a session, and who chose it.
@@ -44,14 +51,21 @@ func (p Parts) JobTool() (string, pb.PartOrigin, error) {
 	return tool, origin(p.Config.GetJobTool()), err
 }
 
-// Location is where the agents of a run that starts now find the job tool and its places. It is the
-// zero value when the job tool cannot be resolved, which Check refuses before a run starts.
-func (p Parts) Location() core.CliLocation {
+// JobToolEndpoint is what the agents of a run that starts now use: the job tool as it is resolved now,
+// and the daemon it answers with, which it has made sure of. So a start reaches a daemon the tool could
+// use, or is refused saying why, and the host holds no rule for where that daemon is.
+func (p Parts) JobToolEndpoint(ctx context.Context) (core.JobToolEndpoint, error) {
 	tool, _, err := p.JobTool()
 	if err != nil {
-		return core.CliLocation{}
+		return core.JobToolEndpoint{}, err
 	}
-	return LocationFor(p.Getenv, p.Home, tool)
+	ctx, cancel := context.WithTimeout(ctx, jobToolBound)
+	defer cancel()
+	answer, err := ExecEnsurerFor(core.JobToolEndpoint{Executable: tool}, p.Runner).Answer(ctx)
+	if err != nil {
+		return core.JobToolEndpoint{}, fmt.Errorf("the job tool %s has no daemon for this run: %w", tool, err)
+	}
+	return core.JobToolEndpoint{Executable: tool, RuntimeDirectory: answer.GetRuntimeDirectory()}, nil
 }
 
 func origin(setting string) pb.PartOrigin {

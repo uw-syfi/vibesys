@@ -7,13 +7,14 @@ import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import { file_vibesys_orchestrator_v1_tool_options } from "./tool_options_pb.js";
 import type { Message as Message$1 } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/orchestrator/v1/orchestrator.proto.
  */
 export const file_vibesys_orchestrator_v1_orchestrator: GenFile = /*@__PURE__*/
-  fileDesc("Cip2aWJlc3lzL29yY2hlc3RyYXRvci92MS9vcmNoZXN0cmF0b3IucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIpoFCgNSdW4SEwoCaWQYASABKAlCB7pIBHICEAESGwoKcmVwb3NpdG9yeRgCIAEoCUIHukgEcgIQARIVCgR0YXNrGAMgASgJQge6SARyAhABEj4KBnN0YXR1cxgEIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1blN0YXR1c0IKukgHggEEEAEgABIeCg1sZWFkX2FnZW50X2lkGAUgASgJQge6SARyAhABEhQKDGZhbm91dF9saW1pdBgGIAEoDRIsCghkZWFkbGluZRgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARJFCgtzdG9wX3JlYXNvbhgJIAEoDjImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1blN0b3BSZWFzb25CCLpIBYIBAhABEiwKCGVuZGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI6CgxjbGlfbG9jYXRpb24YCyABKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5DbGlMb2NhdGlvbhIWCg5yZXBvcnRzX3Bvc3RlZBgMIAEoDRIxCg1zdGFsbGVkX3NpbmNlGA0gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgthY3RpdmVfam9icxgOIAEoDRIWCg5sZWFkX3JlbWluZGVycxgPIAEoDRItCgV1c2FnZRgQIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlEhYKDmZpbmFsX3JlcG9ydGVkGBEgASgIIrUBCgtDbGlMb2NhdGlvbhIiCgNjbGkYASABKAlCFbpIEnIQMg5eKC9bXlx4MDBdKik/JBIuCg94ZGdfcnVudGltZV9kaXIYAiABKAlCFbpIEnIQMg5eKC9bXlx4MDBdKik/JBItCg54ZGdfc3RhdGVfaG9tZRgDIAEoCUIVukgSchAyDl4oL1teXHgwMF0qKT8kEiMKBGhvbWUYBCABKAlCFbpIEnIQMg5eKC9bXlx4MDBdKik/JCLbBgoFQWdlbnQSEwoCaWQYASABKAlCB7pIBHICEAESFwoGcnVuX2lkGAIgASgJQge6SARyAhABEhcKD3BhcmVudF9hZ2VudF9pZBgDIAEoCRI8CgRyb2xlGAQgASgOMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRSb2xlQgq6SAeCAQQQASAAEj0KB2hhcm5lc3MYBSABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgq6SAeCAQQQASAAEg0KBW1vZGVsGAYgASgJEhgKEHJlYXNvbmluZ19lZmZvcnQYByABKAkSEwoLcGxhbl9udW1iZXIYCCABKA0SQAoGc3RhdHVzGAogASgOMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRTdGF0dXNCCrpIB4IBBBABIAASHgoMcmVzdW1lX3Rva2VuGAsgASgMQgi6SAV6AxiAIBI7CgxjYXBhYmlsaXRpZXMYDCABKAsyJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5DYXBhYmlsaXRpZXMSNgoKc3RhcnRlZF9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIsCghlbmRlZF9hdBgOIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASGAoHc2Vzc2lvbhgPIAEoDUIHukgEKgIgABJHCgpzdG9wX3N0YWdlGBAgASgOMicudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRTdG9wU3RhZ2VCCrpIB4IBBBABIAASEgoKaGFuZGVkX29mZhgRIAEoCBIYChBzZXNzaW9uX2ZhaWx1cmVzGBIgASgNEhwKCmVuZF9kZXRhaWwYEyABKAlCCLpIBXIDGOgHElMKFHN0YXJ0X2ZhaWx1cmVfcmVhc29uGBQgASgOMisudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3RhcnRGYWlsdXJlUmVhc29uQgi6SAWCAQIQARIYChBoYW5kb2ZmX3JlbWluZGVkGBUgASgIEi0KBXVzYWdlGBYgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVXNhZ2UiRQoMQ2FwYWJpbGl0aWVzEhQKDHN0cmVhbXNfdGV4dBgBIAEoCBIOCgZzdGVlcnMYAiABKAgSDwoHcmVzdW1lcxgDIAEoCCK/AgoFVXNhZ2USGQoMaW5wdXRfdG9rZW5zGAEgASgESACIAQESHgoRY2FjaGVfcmVhZF90b2tlbnMYAiABKARIAYgBARIiChVjYWNoZV9jcmVhdGlvbl90b2tlbnMYAyABKARIAogBARIaCg1vdXRwdXRfdG9rZW5zGAQgASgESAOIAQESHQoQcmVhc29uaW5nX3Rva2VucxgFIAEoBEgEiAEBEicKCGNvc3RfdXNkGAYgASgBQhC6SA0SC0ABKQAAAAAAAAAASAWIAQFCDwoNX2lucHV0X3Rva2Vuc0IUChJfY2FjaGVfcmVhZF90b2tlbnNCGAoWX2NhY2hlX2NyZWF0aW9uX3Rva2Vuc0IQCg5fb3V0cHV0X3Rva2Vuc0ITChFfcmVhc29uaW5nX3Rva2Vuc0ILCglfY29zdF91c2QijgMKBFR1cm4SEwoCaWQYASABKAlCB7pIBHICEAESGQoIYWdlbnRfaWQYAiABKAlCB7pIBHICEAESGAoHb3JkaW5hbBgDIAEoDUIHukgEKgIgABJBCgd0cmlnZ2VyGAQgASgOMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVHVyblRyaWdnZXJCCrpIB4IBBBABIAASIwoSdHJpZ2dlcl9tZXNzYWdlX2lkGAUgASgJQge6SARyAhABEj8KBnN0YXR1cxgGIAEoDjIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlR1cm5TdGF0dXNCCrpIB4IBBBABIAASLQoFdXNhZ2UYByABKAsyHi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Vc2FnZRI2CgpzdGFydGVkX2F0GAggASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEiwKCGVuZGVkX2F0GAkgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCK2AwoESXRlbRITCgJpZBgBIAEoCUIHukgEcgIQARIYCgd0dXJuX2lkGAIgASgJQge6SARyAhABEhkKCGFnZW50X2lkGAMgASgJQge6SARyAhABEhgKB29yZGluYWwYBCABKA1CB7pIBCoCIAASPwoGc3RhdHVzGAUgASgOMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSXRlbVN0YXR1c0IKukgHggEEEAEgABIuCgJhdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIyCglhc3Npc3RhbnQYCiABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UZXh0SAASMgoJcmVhc29uaW5nGAsgASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVGV4dEgAEi8KBnByb21wdBgMIAEoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRleHRIABIxCgR0b29sGA0gASgLMiEudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVG9vbENhbGxIAEINCgRib2R5EgW6SAIIASIUCgRUZXh0EgwKBHRleHQYASABKAkilgEKCFRvb2xDYWxsEhUKBHRvb2wYASABKAlCB7pIBHICEAESGAoQcHJvdmlkZXJfY2FsbF9pZBgCIAEoCRIRCglhcmdzX2pzb24YAyABKAkSDgoGb3V0cHV0GAQgASgJEhYKCWV4aXRfY29kZRgFIAEoBUgAiAEBEhAKCGlzX2Vycm9yGAYgASgIQgwKCl9leGl0X2NvZGUi0wEKB0hhbmRvZmYSEwoLcGxhbl9udW1iZXIYASABKA0SFQoNaGFzX2NhbmRpZGF0ZRgCIAEoCBINCgVjbGFpbRgDIAEoCRIOCgZjb21taXQYBCABKAkSFQoNcGFyZW50X2NvbW1pdBgFIAEoCRIOCgZicmFuY2gYBiABKAkSDgoGY2hlY2tzGAcgASgJEhMKC21lYXN1cmVtZW50GAggASgJEg8KB2xlYXJuZWQYCSABKAkSDAoEbmV4dBgKIAEoCRISCgpvcGVuX2l0ZW1zGAsgASgJIsIBCgZSZXBvcnQSGQoIaGVhZGxpbmUYASABKAlCB7pIBHICEAESDwoHY2hhbmdlZBgCIAEoCRIRCglpbl9mbGlnaHQYAyABKAkSEQoJZGVjaXNpb25zGAQgASgJEhUKDW9wZW5fZm9yX3VzZXIYBSABKAkSPQoEa2luZBgGIAEoDjIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlcG9ydEtpbmRCCrpIB4IBBBABIAASEAoIc2VxdWVuY2UYByABKA0ilwEKC0pvYkZpbmlzaGVkEhcKBmpvYl9pZBgBIAEoCUIHukgEcgIQARJACgdvdXRjb21lGAIgASgOMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSm9iT3V0Y29tZUIKukgHggEEEAEgABIdChVzdWJtaXR0ZWRfYnlfYWdlbnRfaWQYAyABKAkSDgoGZGV0YWlsGAQgASgJIn4KD1N1YmFnZW50U2V0dGxlZBIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARJACgZzdGF0dXMYAiABKA4yJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5BZ2VudFN0YXR1c0IKukgHggEEEAEgABIOCgZkZXRhaWwYAyABKAkiEQoPSGFuZG9mZlJlbWluZGVyInQKEExlYWRJZGxlUmVtaW5kZXISFAoMaWRsZV9zZWNvbmRzGAEgASgNEhkKEXN1YmFnZW50c19zdGFydGVkGAIgASgNEhcKD3dvcmtlcnNfc3RhcnRlZBgDIAEoDRIWCg5qdWRnZXNfc3RhcnRlZBgEIAEoDSKMBgoHTWVzc2FnZRITCgJpZBgBIAEoCUIHukgEcgIQARIXCgZydW5faWQYAiABKAlCB7pIBHICEAESFQoNZnJvbV9hZ2VudF9pZBgDIAEoCRITCgt0b19hZ2VudF9pZBgEIAEoCRI/CghkZWxpdmVyeRgFIAEoDjIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkRlbGl2ZXJ5Qgq6SAeCAQQQASAAEi4KAmF0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBEj8KCXJlamVjdGlvbhgHIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlamVjdGlvbkIIukgFggECEAESEAoIYXR0ZW1wdHMYCCABKA0SDgoEdGV4dBgKIAEoCUgAEjMKB2hhbmRvZmYYCyABKAsyIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYW5kb2ZmSAASMQoGcmVwb3J0GAwgASgLMh8udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVwb3J0SAASPAoMam9iX2ZpbmlzaGVkGA0gASgLMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSm9iRmluaXNoZWRIABJEChBzdWJhZ2VudF9zZXR0bGVkGA4gASgLMigudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuU3ViYWdlbnRTZXR0bGVkSAASDwoFYnJpZWYYDyABKAlIABI4CgpsZWFkX2JyaWVmGBAgASgLMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuTGVhZEJyaWVmSAASRAoQaGFuZG9mZl9yZW1pbmRlchgRIAEoCzIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkhhbmRvZmZSZW1pbmRlckgAEkcKEmxlYWRfaWRsZV9yZW1pbmRlchgSIAEoCzIpLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkxlYWRJZGxlUmVtaW5kZXJIAEINCgRib2R5EgW6SAIIASJKCglMZWFkQnJpZWYSFQoEdGFzaxgBIAEoCUIHukgEcgIQARIUCgxmYW5vdXRfbGltaXQYAiABKA0SEAoIc3RlZXJpbmcYAyABKAkiXwoNQnVpbGRWZXJzaW9ucxIWCg5iaW5hcnlfdmVyc2lvbhgBIAEoCRIYChBwcm90b2NvbF92ZXJzaW9uGAIgASgNEhwKFG1pbl9wcm90b2NvbF92ZXJzaW9uGAMgASgNKp4BCglSdW5TdGF0dXMSGgoWUlVOX1NUQVRVU19VTlNQRUNJRklFRBAAEhcKE1JVTl9TVEFUVVNfU1RBUlRJTkcQARIWChJSVU5fU1RBVFVTX1JVTk5JTkcQAhIXChNSVU5fU1RBVFVTX1NUT1BQSU5HEAMSFAoQUlVOX1NUQVRVU19FTkRFRBAEEhUKEVJVTl9TVEFUVVNfRkFJTEVEEAUqiwEKDVJ1blN0b3BSZWFzb24SHwobUlVOX1NUT1BfUkVBU09OX1VOU1BFQ0lGSUVEEAASHAoYUlVOX1NUT1BfUkVBU09OX09QRVJBVE9SEAESHAoYUlVOX1NUT1BfUkVBU09OX0RFQURMSU5FEAISHQoZUlVOX1NUT1BfUkVBU09OX0xFQURfR09ORRADKrMBCglBZ2VudFJvbGUSGgoWQUdFTlRfUk9MRV9VTlNQRUNJRklFRBAAEhMKD0FHRU5UX1JPTEVfTEVBRBABEhYKEkFHRU5UX1JPTEVfUExBTk5FUhACEhUKEUFHRU5UX1JPTEVfV09SS0VSEAMSFAoQQUdFTlRfUk9MRV9KVURHRRAEEhcKE0FHRU5UX1JPTEVfQ09NQklORVIQBRIXChNBR0VOVF9ST0xFX1BST0ZJTEVSEAYq2QEKC0FnZW50U3RhdHVzEhwKGEFHRU5UX1NUQVRVU19VTlNQRUNJRklFRBAAEhoKFkFHRU5UX1NUQVRVU19MQVVOQ0hJTkcQARIXChNBR0VOVF9TVEFUVVNfQUNUSVZFEAISGAoUQUdFTlRfU1RBVFVTX1dBSVRJTkcQAxIVChFBR0VOVF9TVEFUVVNfSURMRRAEEhYKEkFHRU5UX1NUQVRVU19FTkRFRBAFEhcKE0FHRU5UX1NUQVRVU19GQUlMRUQQBhIVChFBR0VOVF9TVEFUVVNfTE9TVBAHKo4BCg5BZ2VudFN0b3BTdGFnZRIgChxBR0VOVF9TVE9QX1NUQUdFX1VOU1BFQ0lGSUVEEAASGQoVQUdFTlRfU1RPUF9TVEFHRV9OT05FEAESIQodQUdFTlRfU1RPUF9TVEFHRV9JTlRFUlJVUFRJTkcQAhIcChhBR0VOVF9TVE9QX1NUQUdFX0NMT1NJTkcQAyqKAgoLVHVyblRyaWdnZXISHAoYVFVSTl9UUklHR0VSX1VOU1BFQ0lGSUVEEAASFgoSVFVSTl9UUklHR0VSX0JSSUVGEAESGQoVVFVSTl9UUklHR0VSX09QRVJBVE9SEAISGAoUVFVSTl9UUklHR0VSX0hBTkRPRkYQAxIdChlUVVJOX1RSSUdHRVJfSk9CX0ZJTklTSEVEEAQSGQoVVFVSTl9UUklHR0VSX1NDSEVEVUxFEAUSGAoUVFVSTl9UUklHR0VSX01FU1NBR0UQBhIhCh1UVVJOX1RSSUdHRVJfU1VCQUdFTlRfU0VUVExFRBAHEhkKFVRVUk5fVFJJR0dFUl9SRU1JTkRFUhAIKpIBCgpUdXJuU3RhdHVzEhsKF1RVUk5fU1RBVFVTX1VOU1BFQ0lGSUVEEAASFwoTVFVSTl9TVEFUVVNfUlVOTklORxABEhkKFVRVUk5fU1RBVFVTX0NPTVBMRVRFRBACEhsKF1RVUk5fU1RBVFVTX0lOVEVSUlVQVEVEEAMSFgoSVFVSTl9TVEFUVVNfRkFJTEVEEAQqdAoKSXRlbVN0YXR1cxIbChdJVEVNX1NUQVRVU19VTlNQRUNJRklFRBAAEhcKE0lURU1fU1RBVFVTX1JVTk5JTkcQARIYChRJVEVNX1NUQVRVU19GSU5JU0hFRBACEhYKEklURU1fU1RBVFVTX0ZBSUxFRBADKk4KB0hhcm5lc3MSFwoTSEFSTkVTU19VTlNQRUNJRklFRBAAEhcKE0hBUk5FU1NfQ0xBVURFX0NPREUQARIRCg1IQVJORVNTX0NPREVYEAIqlAEKCERlbGl2ZXJ5EhgKFERFTElWRVJZX1VOU1BFQ0lGSUVEEAASEwoPREVMSVZFUllfUVVFVUVEEAESFAoQREVMSVZFUllfU1RFRVJFRBACEhUKEURFTElWRVJZX05FV19UVVJOEAMSFQoRREVMSVZFUllfQ09OU1VNRUQQBBIVChFERUxJVkVSWV9SRUpFQ1RFRBAFKrgBCglSZWplY3Rpb24SGQoVUkVKRUNUSU9OX1VOU1BFQ0lGSUVEEAASGAoUUkVKRUNUSU9OX0FHRU5UX0dPTkUQARIaChZSRUpFQ1RJT05fRkFOT1VUX0xJTUlUEAISHAoYUkVKRUNUSU9OX0FHRU5UX1NUT1BQSU5HEAMSGgoWUkVKRUNUSU9OX1JVTl9TVE9QUElORxAEEiAKHFJFSkVDVElPTl9BVFRFTVBUU19FWEhBVVNURUQQBSqVAwoSU3RhcnRGYWlsdXJlUmVhc29uEiQKIFNUQVJUX0ZBSUxVUkVfUkVBU09OX1VOU1BFQ0lGSUVEEAASLAooU1RBUlRfRkFJTFVSRV9SRUFTT05fQUdFTlRfTk9UX0lOU1RBTExFRBABEiYKIlNUQVJUX0ZBSUxVUkVfUkVBU09OX05PVF9TSUdORURfSU4QAhIrCidTVEFSVF9GQUlMVVJFX1JFQVNPTl9QTFVHSU5fVU5BVkFJTEFCTEUQAxIqCiZTVEFSVF9GQUlMVVJFX1JFQVNPTl9UT09MU19VTkFWQUlMQUJMRRAEEjYKMlNUQVJUX0ZBSUxVUkVfUkVBU09OX1dPUktJTkdfRElSRUNUT1JZX1VOQVZBSUxBQkxFEAUSIgoeU1RBUlRfRkFJTFVSRV9SRUFTT05fVElNRURfT1VUEAYSHgoaU1RBUlRfRkFJTFVSRV9SRUFTT05fT1RIRVIQBxIuCipTVEFSVF9GQUlMVVJFX1JFQVNPTl9JTkNPTVBBVElCTEVfVkVSU0lPTlMQCCpaCgpSZXBvcnRLaW5kEhsKF1JFUE9SVF9LSU5EX1VOU1BFQ0lGSUVEEAASGAoUUkVQT1JUX0tJTkRfUFJPR1JFU1MQARIVChFSRVBPUlRfS0lORF9GSU5BTBACKo0BCgpKb2JPdXRjb21lEhsKF0pPQl9PVVRDT01FX1VOU1BFQ0lGSUVEEAASGQoVSk9CX09VVENPTUVfU1VDQ0VFREVEEAESFgoSSk9CX09VVENPTUVfRkFJTEVEEAISGQoVSk9CX09VVENPTUVfQ0FOQ0VMTEVEEAMSFAoQSk9CX09VVENPTUVfTE9TVBAEKpABCg1Db21wYXRpYmlsaXR5Eh0KGUNPTVBBVElCSUxJVFlfVU5TUEVDSUZJRUQQABIcChhDT01QQVRJQklMSVRZX0NPTVBBVElCTEUQARIgChxDT01QQVRJQklMSVRZX0NMSUVOVF9UT09fT0xEEAISIAocQ09NUEFUSUJJTElUWV9EQUVNT05fVE9PX09MRBADQlRaUmdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL29yY2hlc3RyYXRvci9nZW4vdmliZXN5cy9vcmNoZXN0cmF0b3IvdjE7b3JjaGVzdHJhdG9ydjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("Cip2aWJlc3lzL29yY2hlc3RyYXRvci92MS9vcmNoZXN0cmF0b3IucHJvdG8SF3ZpYmVzeXMub3JjaGVzdHJhdG9yLnYxIoAGCgNSdW4SEwoCaWQYASABKAlCB7pIBHICEAESGwoKcmVwb3NpdG9yeRgCIAEoCUIHukgEcgIQARIVCgR0YXNrGAMgASgJQge6SARyAhABEj4KBnN0YXR1cxgEIAEoDjIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1blN0YXR1c0IKukgHggEEEAEgABIeCg1sZWFkX2FnZW50X2lkGAUgASgJQge6SARyAhABEhQKDGZhbm91dF9saW1pdBgGIAEoDRIsCghkZWFkbGluZRgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASNgoKY3JlYXRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARJFCgtzdG9wX3JlYXNvbhgJIAEoDjImLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJ1blN0b3BSZWFzb25CCLpIBYIBAhABEiwKCGVuZGVkX2F0GAogASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIWCg5yZXBvcnRzX3Bvc3RlZBgMIAEoDRIxCg1zdGFsbGVkX3NpbmNlGA0gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBITCgthY3RpdmVfam9icxgOIAEoDRIWCg5sZWFkX3JlbWluZGVycxgPIAEoDRItCgV1c2FnZRgQIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlEhYKDmZpbmFsX3JlcG9ydGVkGBEgASgIEj0KDmFsbG93ZWRfYWdlbnRzGBIgAygLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWxsb3dlZEFnZW50Ej0KDmtlcHRfY2hlY2tvdXRzGBMgAygLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuS2VwdENoZWNrb3V0SgQICxAMSgQIFBAVUgxjbGlfbG9jYXRpb25SCGpvYl90b29sIk8KDEtlcHRDaGVja291dBIZCghhZ2VudF9pZBgBIAEoCUIHukgEcgIQARIkCghsb2NhdGlvbhgCIAEoCUISukgPcg0yC14vW15ceDAwXSskIlwKDEFsbG93ZWRBZ2VudBI9CgdoYXJuZXNzGAEgASgOMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSGFybmVzc0IKukgHggEEEAEgABINCgVtb2RlbBgCIAEoCSLPBgoFQWdlbnQSEwoCaWQYASABKAlCB7pIBHICEAESFwoGcnVuX2lkGAIgASgJQge6SARyAhABEhcKD3BhcmVudF9hZ2VudF9pZBgDIAEoCRI8CgRyb2xlGAQgASgOMiIudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRSb2xlQgq6SAeCAQQQASAAEj0KB2hhcm5lc3MYBSABKA4yIC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYXJuZXNzQgq6SAeCAQQQASAAEg0KBW1vZGVsGAYgASgJEhgKEHJlYXNvbmluZ19lZmZvcnQYByABKAkSEwoLcGxhbl9udW1iZXIYCCABKA0SQAoGc3RhdHVzGAogASgOMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRTdGF0dXNCCrpIB4IBBBABIAASOwoMY2FwYWJpbGl0aWVzGAwgASgLMiUudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQ2FwYWJpbGl0aWVzEjYKCnN0YXJ0ZWRfYXQYDSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESLAoIZW5kZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhgKB3Nlc3Npb24YDyABKA1CB7pIBCoCIAASRwoKc3RvcF9zdGFnZRgQIAEoDjInLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkFnZW50U3RvcFN0YWdlQgq6SAeCAQQQASAAEhIKCmhhbmRlZF9vZmYYESABKAgSGAoQc2Vzc2lvbl9mYWlsdXJlcxgSIAEoDRIcCgplbmRfZGV0YWlsGBMgASgJQgi6SAVyAxjoBxJTChRzdGFydF9mYWlsdXJlX3JlYXNvbhgUIAEoDjIrLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN0YXJ0RmFpbHVyZVJlYXNvbkIIukgFggECEAESGAoQaGFuZG9mZl9yZW1pbmRlZBgVIAEoCBItCgV1c2FnZRgWIAEoCzIeLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlVzYWdlSgQICxAMUgxyZXN1bWVfdG9rZW4iQwoMQ2FwYWJpbGl0aWVzEg4KBnN0ZWVycxgCIAEoCBIPCgdyZXN1bWVzGAMgASgISgQIARACUgxzdHJlYW1zX3RleHQivwIKBVVzYWdlEhkKDGlucHV0X3Rva2VucxgBIAEoBEgAiAEBEh4KEWNhY2hlX3JlYWRfdG9rZW5zGAIgASgESAGIAQESIgoVY2FjaGVfY3JlYXRpb25fdG9rZW5zGAMgASgESAKIAQESGgoNb3V0cHV0X3Rva2VucxgEIAEoBEgDiAEBEh0KEHJlYXNvbmluZ190b2tlbnMYBSABKARIBIgBARInCghjb3N0X3VzZBgGIAEoAUIQukgNEgtAASkAAAAAAAAAAEgFiAEBQg8KDV9pbnB1dF90b2tlbnNCFAoSX2NhY2hlX3JlYWRfdG9rZW5zQhgKFl9jYWNoZV9jcmVhdGlvbl90b2tlbnNCEAoOX291dHB1dF90b2tlbnNCEwoRX3JlYXNvbmluZ190b2tlbnNCCwoJX2Nvc3RfdXNkIo4DCgRUdXJuEhMKAmlkGAEgASgJQge6SARyAhABEhkKCGFnZW50X2lkGAIgASgJQge6SARyAhABEhgKB29yZGluYWwYAyABKA1CB7pIBCoCIAASQQoHdHJpZ2dlchgEIAEoDjIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlR1cm5UcmlnZ2VyQgq6SAeCAQQQASAAEiMKEnRyaWdnZXJfbWVzc2FnZV9pZBgFIAEoCUIHukgEcgIQARI/CgZzdGF0dXMYBiABKA4yIy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UdXJuU3RhdHVzQgq6SAeCAQQQASAAEi0KBXVzYWdlGAcgASgLMh4udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVXNhZ2USNgoKc3RhcnRlZF9hdBgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARIsCghlbmRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAitgMKBEl0ZW0SEwoCaWQYASABKAlCB7pIBHICEAESGAoHdHVybl9pZBgCIAEoCUIHukgEcgIQARIZCghhZ2VudF9pZBgDIAEoCUIHukgEcgIQARIYCgdvcmRpbmFsGAQgASgNQge6SAQqAiAAEj8KBnN0YXR1cxgFIAEoDjIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkl0ZW1TdGF0dXNCCrpIB4IBBBABIAASLgoCYXQYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQESMgoJYXNzaXN0YW50GAogASgLMh0udmliZXN5cy5vcmNoZXN0cmF0b3IudjEuVGV4dEgAEjIKCXJlYXNvbmluZxgLIAEoCzIdLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRleHRIABIvCgZwcm9tcHQYDCABKAsyHS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5UZXh0SAASMQoEdG9vbBgNIAEoCzIhLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlRvb2xDYWxsSABCDQoEYm9keRIFukgCCAEiFAoEVGV4dBIMCgR0ZXh0GAEgASgJIpYBCghUb29sQ2FsbBIVCgR0b29sGAEgASgJQge6SARyAhABEhgKEHByb3ZpZGVyX2NhbGxfaWQYAiABKAkSEQoJYXJnc19qc29uGAMgASgJEg4KBm91dHB1dBgEIAEoCRIWCglleGl0X2NvZGUYBSABKAVIAIgBARIQCghpc19lcnJvchgGIAEoCEIMCgpfZXhpdF9jb2RlIvUICgdIYW5kb2ZmEjAKC3BsYW5fbnVtYmVyGAEgASgNQhuquxgXVGhlIHBsYW4geW91IHdvcmtlZCBvbi4SQAoFY2xhaW0YAyABKAlCMbpIBHICEAGquxgmV2hhdCB5b3UgZGlkLCBpbiBvbmUgb3IgdHdvIHNlbnRlbmNlcy4SLwoHbGVhcm5lZBgJIAEoCUIeqrsYGldoYXQgdGhlIGxlYWQgc2hvdWxkIGtub3cuEikKBG5leHQYCiABKAlCG6q7GBdXaGF0IHlvdSB3b3VsZCBkbyBuZXh0LhIsCgpvcGVuX2l0ZW1zGAsgASgJQhiquxgUV2hhdCBpcyBsZWZ0IHVuZG9uZS4SXwoGd29ya2VyGBQgASgLMiYudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuV29ya2VySGFuZG9mZkIlqrsYIVlvdXIgcmVzdWx0LCBpZiB5b3UgYXJlIGEgd29ya2VyLkgAEmAKB3BsYW5uZXIYFSABKAsyJy52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5QbGFubmVySGFuZG9mZkIkqrsYIFlvdXIgcGxhbiwgaWYgeW91IGFyZSBhIHBsYW5uZXIuSAASXQoFanVkZ2UYFiABKAsyJS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5KdWRnZUhhbmRvZmZCJaq7GCFZb3VyIHZlcmRpY3QsIGlmIHlvdSBhcmUgYSBqdWRnZS5IABJuCghjb21iaW5lchgXIAEoCzIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkNvbWJpbmVySGFuZG9mZkIwqrsYLFlvdXIgY29tYmluZWQgY29tbWl0LCBpZiB5b3UgYXJlIGEgY29tYmluZXIuSAASZwoIcHJvZmlsZXIYGCABKAsyKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Qcm9maWxlckhhbmRvZmZCKaq7GCVZb3VyIGZpbmRpbmdzLCBpZiB5b3UgYXJlIGEgcHJvZmlsZXIuSAA6/gGquxj5AQoMcG9zdF9oYW5kb2ZmEugBVGVsbCB5b3VyIGxlYWQgd2hhdCB5b3UgZGlkIGFuZCBmaW5pc2guIENhbGwgaXQgb25jZSwgbGFzdDogeW91ciBzZXNzaW9uIGNsb3NlcyB3aGVuIHlvdXIgdHVybiBlbmRzIGFuZCBubyBtYWlsIHdhaXRzIGZvciB5b3UuIEZpbGwgaW4gdGhlIGJvZHkgdGhhdCBpcyBuYW1lZCBmb3IgeW91ciByb2xlICh3b3JrZXIsIHBsYW5uZXIsIGp1ZGdlLCBjb21iaW5lciBvciBwcm9maWxlcikgYW5kIG5vIG90aGVyLkIhCgRib2R5Ehm6SAIIAaq7GBB5b3VyIHJvbGUncyBib2R5SgQIAhADSgQIBBAJUg1oYXNfY2FuZGlkYXRlUgZjb21taXRSDXBhcmVudF9jb21taXRSBmJyYW5jaFIGY2hlY2tzUgttZWFzdXJlbWVudCKPAgoNV29ya2VySGFuZG9mZhJwCgljYW5kaWRhdGUYASABKAsyIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5DYW5kaWRhdGVCN6q7GDNHaXZlIHRoaXMgaWYgeW91IHByb2R1Y2VkIGEgY29tbWl0IHdvcnRoIG1lYXN1cmluZy5IABJrCgxub19jYW5kaWRhdGUYAiABKAsyJC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5Ob0NhbmRpZGF0ZUItqrsYKUdpdmUgdGhpcyBpZiB5b3UgcHJvZHVjZWQgbm8gc3VjaCBjb21taXQuSABCHwoHb3V0Y29tZRIUukgCCAGquxgLdGhlIG91dGNvbWUigAMKCUNhbmRpZGF0ZRJDCgZjb21taXQYASABKAlCM7pIBHICEAGquxgoVGhlIGZ1bGwgU0hBIG9mIHRoZSBjb21taXQgeW91IHByb2R1Y2VkLhI8Cg1wYXJlbnRfY29tbWl0GAIgASgJQiW6SARyAhABqrsYGlRoZSBmdWxsIFNIQSBpdCBidWlsZHMgb24uEjQKBmJyYW5jaBgDIAEoCUIkukgEcgIQAaq7GBlUaGUgYnJhbmNoIHRoYXQgaG9sZHMgaXQuEkMKBmNoZWNrcxgEIAEoCUIzukgEcgIQAaq7GChXaGljaCBjaGVja3MgeW91IHJhbiBhbmQgaG93IHRoZXkgZW5kZWQuEnUKC21lYXN1cmVtZW50GAUgASgJQmC6SARyAhABqrsYVVdoYXQgeW91IG1lYXN1cmVkOiBqb2IgaWRzIGFuZCB0aGUgY29tcGFyaXNvbiB3aXRoIHRoZSBiYXNlLCBvciB3aHkgaXQgaXMgdW5tZWFzdXJlZC4iagoLTm9DYW5kaWRhdGUSWwoHYmxvY2tlchgBIAEoCUJKukgEcgIQAaq7GD9XaHk6IHRoZSBleGFjdCBmaWxlLCBmdW5jdGlvbiwgY2hlY2sgb3IgZXJyb3IgdGhhdCBzdG9wcGVkIHlvdS4imQIKDlBsYW5uZXJIYW5kb2ZmEj0KBHBsYW4YASABKAlCL7pIBHICEAGquxgkVGhlIHBhdGggb2YgdGhlIHBsYW4gZmlsZSB5b3Ugd3JvdGUuEjkKCmNvbmZpZGVuY2UYAiABKAlCJaq7GCFIb3cgc3VyZSB5b3UgYXJlLCBzdGF0ZWQgcGxhaW5seS4SOAoNdW5lc3RhYmxpc2hlZBgDIAEoCUIhqrsYHVdoYXQgeW91IGNvdWxkIG5vdCBlc3RhYmxpc2guElMKFGRlY2lkaW5nX21lYXN1cmVtZW50GAQgASgJQjWquxgxVGhlIG1lYXN1cmVtZW50IHRoYXQgd291bGQgbW9zdCBjaGFuZ2UgeW91ciB2aWV3LiLLAgoMSnVkZ2VIYW5kb2ZmEkQKBmNvbW1pdBgBIAEoCUI0ukgEcgIQAaq7GClUaGUgZnVsbCBTSEEgb2YgdGhlIGNhbmRpZGF0ZSB5b3UganVkZ2VkLhKXAQoHdmVyZGljdBgCIAEoDjIlLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkp1ZGdlVmVyZGljdEJfukgHggEEEAEgAKq7GFFwYXNzIGlmIHRoZSBjbGFpbSBob2xkcywgZmFpbCBpZiBpdCBkb2VzIG5vdCwgdW5tZWFzdXJlZCBpZiBpdCBjYW5ub3QgYmUgY2hlY2tlZC4SWwoHcmVhc29ucxgDIAEoCUJKukgEcgIQAaq7GD9UaGUgcmVhc29ucywgZWFjaCB0aWVkIHRvIGEgZmlsZSBhbmQgbGluZSBvciBhIHJlY29yZGVkIG51bWJlci4irQMKD0NvbWJpbmVySGFuZG9mZhI/CgZjb21taXQYASABKAlCL7pIBHICEAGquxgkVGhlIGZ1bGwgU0hBIG9mIHRoZSBjb21iaW5lZCBjb21taXQuEjQKBmJyYW5jaBgCIAEoCUIkukgEcgIQAaq7GBlUaGUgYnJhbmNoIHRoYXQgaG9sZHMgaXQuEjIKB2FwcGxpZWQYAyABKAlCIbpIBHICEAGquxgWRWFjaCBwYXJ0IHlvdSBhcHBsaWVkLhJQCgl1bmFwcGxpZWQYBCABKAlCPaq7GDlFYWNoIHBhcnQsIG9yIHBpZWNlIG9mIG9uZSwgeW91IGNvdWxkIG5vdCBhcHBseSwgYW5kIHdoeS4SPAoGY2hlY2tzGAUgASgJQiyquxgoV2hpY2ggY2hlY2tzIHlvdSByYW4gYW5kIGhvdyB0aGV5IGVuZGVkLhJfCgttZWFzdXJlbWVudBgGIAEoCUJKqrsYRkpvYiBpZHMgYW5kIHRoZSBjb21wYXJpc29uIGFnYWluc3QgdGhlIGhlYWQgYW5kIGFnYWluc3QgdGhlIGJlc3QgcGFydC4i3wMKD1Byb2ZpbGVySGFuZG9mZhI7CghxdWVzdGlvbhgBIAEoCUIpukgEcgIQAaq7GB5UaGUgcXVlc3Rpb24sIGFzIGl0IHdhcyBhc2tlZC4SSAoIcmV2aXNpb24YAiABKAlCNrpIBHICEAGquxgrVGhlIGZ1bGwgU0hBIG9mIHRoZSByZXZpc2lvbiB5b3UgbG9va2VkIGF0LhI/CgZhbnN3ZXIYAyABKAlCL7pIBHICEAGquxgkVGhlIGRpcmVjdCBhbnN3ZXIsIHdpdGggdGhlIG51bWJlcnMuElAKCGV2aWRlbmNlGAQgASgJQj6quxg6VGhlIHBhdGhzIG9mIHRoZSBjYXB0dXJlcywgYW5kIHRoZSBjb21tYW5kIHRoYXQgbWFkZSBlYWNoLhJgCgt1bnN1cHBvcnRlZBgFIAEoCUJLqrsYR1RoZSBwYXJ0cyBvZiB0aGUgcXVlc3Rpb24gdGhlIGV2aWRlbmNlIGRvZXMgbm90IGFuc3dlciwgYW5kIHdoYXQgd291bGQuElAKB2luZm9ybXMYBiABKAlCP6q7GDtUaGUgZGVjaXNpb24gdGhpcyBpbmZvcm1zLCBhbmQgd2hpY2ggd2F5IHRoZSBhbnN3ZXIgcG9pbnRzLiLOBAoGUmVwb3J0EiYKCGhlYWRsaW5lGAEgASgJQhS6SARyAhABqrsYCU9uZSBsaW5lLhI4CgdjaGFuZ2VkGAIgASgJQiequxgjV2hhdCBjaGFuZ2VkIHNpbmNlIHRoZSBsYXN0IHJlcG9ydC4SKwoJaW5fZmxpZ2h0GAMgASgJQhiquxgUV2hhdCBpcyBydW5uaW5nIG5vdy4SNAoJZGVjaXNpb25zGAQgASgJQiGquxgdV2hhdCB5b3UgZGVjaWRlZCBvbiB5b3VyIG93bi4SMwoNb3Blbl9mb3JfdXNlchgFIAEoCUIcqrsYGFdoYXQgbmVlZHMgdGhlIG9wZXJhdG9yLhJ9CgRraW5kGAYgASgOMiMudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuUmVwb3J0S2luZEJKukgHggEEEAEgAKq7GDxwcm9ncmVzcyBmb3IgYSBub3RlIGFsb25nIHRoZSB3YXk7IGZpbmFsIGZvciB5b3VyIGxhc3Qgd29yZC4SFgoIc2VxdWVuY2UYByABKA1CBLC7GAE6sgGquxitAQoLcG9zdF9yZXBvcnQSnQFTZW5kIHRoZSBvcGVyYXRvciBhIHJlcG9ydC4gVXNlIGtpbmQgcHJvZ3Jlc3MgZm9yIGEgbm90ZSBhbG9uZyB0aGUgd2F5IGFuZCBraW5kIGZpbmFsIG9uY2UsIHdoZW4geW91IGhhdmUgZmluaXNoZWQgd2hhdCB5b3Ugd2VyZSBhc2tlZCB0byBkbyBvciBjYW5ub3QgZ28gb24uIpcBCgtKb2JGaW5pc2hlZBIXCgZqb2JfaWQYASABKAlCB7pIBHICEAESQAoHb3V0Y29tZRgCIAEoDjIjLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkpvYk91dGNvbWVCCrpIB4IBBBABIAASHQoVc3VibWl0dGVkX2J5X2FnZW50X2lkGAMgASgJEg4KBmRldGFpbBgEIAEoCSJ+Cg9TdWJhZ2VudFNldHRsZWQSGQoIYWdlbnRfaWQYASABKAlCB7pIBHICEAESQAoGc3RhdHVzGAIgASgOMiQudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuQWdlbnRTdGF0dXNCCrpIB4IBBBABIAASDgoGZGV0YWlsGAMgASgJIhEKD0hhbmRvZmZSZW1pbmRlciJ0ChBMZWFkSWRsZVJlbWluZGVyEhQKDGlkbGVfc2Vjb25kcxgBIAEoDRIZChFzdWJhZ2VudHNfc3RhcnRlZBgCIAEoDRIXCg93b3JrZXJzX3N0YXJ0ZWQYAyABKA0SFgoOanVkZ2VzX3N0YXJ0ZWQYBCABKA0ijAYKB01lc3NhZ2USEwoCaWQYASABKAlCB7pIBHICEAESFwoGcnVuX2lkGAIgASgJQge6SARyAhABEhUKDWZyb21fYWdlbnRfaWQYAyABKAkSEwoLdG9fYWdlbnRfaWQYBCABKAkSPwoIZGVsaXZlcnkYBSABKA4yIS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5EZWxpdmVyeUIKukgHggEEEAEgABIuCgJhdBgGIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXBCBrpIA8gBARI/CglyZWplY3Rpb24YByABKA4yIi52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5SZWplY3Rpb25CCLpIBYIBAhABEhAKCGF0dGVtcHRzGAggASgNEg4KBHRleHQYCiABKAlIABIzCgdoYW5kb2ZmGAsgASgLMiAudmliZXN5cy5vcmNoZXN0cmF0b3IudjEuSGFuZG9mZkgAEjEKBnJlcG9ydBgMIAEoCzIfLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlJlcG9ydEgAEjwKDGpvYl9maW5pc2hlZBgNIAEoCzIkLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkpvYkZpbmlzaGVkSAASRAoQc3ViYWdlbnRfc2V0dGxlZBgOIAEoCzIoLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLlN1YmFnZW50U2V0dGxlZEgAEg8KBWJyaWVmGA8gASgJSAASOAoKbGVhZF9icmllZhgQIAEoCzIiLnZpYmVzeXMub3JjaGVzdHJhdG9yLnYxLkxlYWRCcmllZkgAEkQKEGhhbmRvZmZfcmVtaW5kZXIYESABKAsyKC52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5IYW5kb2ZmUmVtaW5kZXJIABJHChJsZWFkX2lkbGVfcmVtaW5kZXIYEiABKAsyKS52aWJlc3lzLm9yY2hlc3RyYXRvci52MS5MZWFkSWRsZVJlbWluZGVySABCDQoEYm9keRIFukgCCAEiSgoJTGVhZEJyaWVmEhUKBHRhc2sYASABKAlCB7pIBHICEAESFAoMZmFub3V0X2xpbWl0GAIgASgNEhAKCHN0ZWVyaW5nGAMgASgJIl8KDUJ1aWxkVmVyc2lvbnMSFgoOYmluYXJ5X3ZlcnNpb24YASABKAkSGAoQcHJvdG9jb2xfdmVyc2lvbhgCIAEoDRIcChRtaW5fcHJvdG9jb2xfdmVyc2lvbhgDIAEoDSqeAQoJUnVuU3RhdHVzEhoKFlJVTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIXChNSVU5fU1RBVFVTX1NUQVJUSU5HEAESFgoSUlVOX1NUQVRVU19SVU5OSU5HEAISFwoTUlVOX1NUQVRVU19TVE9QUElORxADEhQKEFJVTl9TVEFUVVNfRU5ERUQQBBIVChFSVU5fU1RBVFVTX0ZBSUxFRBAFKosBCg1SdW5TdG9wUmVhc29uEh8KG1JVTl9TVE9QX1JFQVNPTl9VTlNQRUNJRklFRBAAEhwKGFJVTl9TVE9QX1JFQVNPTl9PUEVSQVRPUhABEhwKGFJVTl9TVE9QX1JFQVNPTl9ERUFETElORRACEh0KGVJVTl9TVE9QX1JFQVNPTl9MRUFEX0dPTkUQAyqzAQoJQWdlbnRSb2xlEhoKFkFHRU5UX1JPTEVfVU5TUEVDSUZJRUQQABITCg9BR0VOVF9ST0xFX0xFQUQQARIWChJBR0VOVF9ST0xFX1BMQU5ORVIQAhIVChFBR0VOVF9ST0xFX1dPUktFUhADEhQKEEFHRU5UX1JPTEVfSlVER0UQBBIXChNBR0VOVF9ST0xFX0NPTUJJTkVSEAUSFwoTQUdFTlRfUk9MRV9QUk9GSUxFUhAGKtkBCgtBZ2VudFN0YXR1cxIcChhBR0VOVF9TVEFUVVNfVU5TUEVDSUZJRUQQABIaChZBR0VOVF9TVEFUVVNfTEFVTkNISU5HEAESFwoTQUdFTlRfU1RBVFVTX0FDVElWRRACEhgKFEFHRU5UX1NUQVRVU19XQUlUSU5HEAMSFQoRQUdFTlRfU1RBVFVTX0lETEUQBBIWChJBR0VOVF9TVEFUVVNfRU5ERUQQBRIXChNBR0VOVF9TVEFUVVNfRkFJTEVEEAYSFQoRQUdFTlRfU1RBVFVTX0xPU1QQByqOAQoOQWdlbnRTdG9wU3RhZ2USIAocQUdFTlRfU1RPUF9TVEFHRV9VTlNQRUNJRklFRBAAEhkKFUFHRU5UX1NUT1BfU1RBR0VfTk9ORRABEiEKHUFHRU5UX1NUT1BfU1RBR0VfSU5URVJSVVBUSU5HEAISHAoYQUdFTlRfU1RPUF9TVEFHRV9DTE9TSU5HEAMqigIKC1R1cm5UcmlnZ2VyEhwKGFRVUk5fVFJJR0dFUl9VTlNQRUNJRklFRBAAEhYKElRVUk5fVFJJR0dFUl9CUklFRhABEhkKFVRVUk5fVFJJR0dFUl9PUEVSQVRPUhACEhgKFFRVUk5fVFJJR0dFUl9IQU5ET0ZGEAMSHQoZVFVSTl9UUklHR0VSX0pPQl9GSU5JU0hFRBAEEhkKFVRVUk5fVFJJR0dFUl9TQ0hFRFVMRRAFEhgKFFRVUk5fVFJJR0dFUl9NRVNTQUdFEAYSIQodVFVSTl9UUklHR0VSX1NVQkFHRU5UX1NFVFRMRUQQBxIZChVUVVJOX1RSSUdHRVJfUkVNSU5ERVIQCCqSAQoKVHVyblN0YXR1cxIbChdUVVJOX1NUQVRVU19VTlNQRUNJRklFRBAAEhcKE1RVUk5fU1RBVFVTX1JVTk5JTkcQARIZChVUVVJOX1NUQVRVU19DT01QTEVURUQQAhIbChdUVVJOX1NUQVRVU19JTlRFUlJVUFRFRBADEhYKElRVUk5fU1RBVFVTX0ZBSUxFRBAEKnQKCkl0ZW1TdGF0dXMSGwoXSVRFTV9TVEFUVVNfVU5TUEVDSUZJRUQQABIXChNJVEVNX1NUQVRVU19SVU5OSU5HEAESGAoUSVRFTV9TVEFUVVNfRklOSVNIRUQQAhIWChJJVEVNX1NUQVRVU19GQUlMRUQQAypOCgdIYXJuZXNzEhcKE0hBUk5FU1NfVU5TUEVDSUZJRUQQABIXChNIQVJORVNTX0NMQVVERV9DT0RFEAESEQoNSEFSTkVTU19DT0RFWBACKpQBCghEZWxpdmVyeRIYChRERUxJVkVSWV9VTlNQRUNJRklFRBAAEhMKD0RFTElWRVJZX1FVRVVFRBABEhQKEERFTElWRVJZX1NURUVSRUQQAhIVChFERUxJVkVSWV9ORVdfVFVSThADEhUKEURFTElWRVJZX0NPTlNVTUVEEAQSFQoRREVMSVZFUllfUkVKRUNURUQQBSq4AQoJUmVqZWN0aW9uEhkKFVJFSkVDVElPTl9VTlNQRUNJRklFRBAAEhgKFFJFSkVDVElPTl9BR0VOVF9HT05FEAESGgoWUkVKRUNUSU9OX0ZBTk9VVF9MSU1JVBACEhwKGFJFSkVDVElPTl9BR0VOVF9TVE9QUElORxADEhoKFlJFSkVDVElPTl9SVU5fU1RPUFBJTkcQBBIgChxSRUpFQ1RJT05fQVRURU1QVFNfRVhIQVVTVEVEEAUqxwMKElN0YXJ0RmFpbHVyZVJlYXNvbhIkCiBTVEFSVF9GQUlMVVJFX1JFQVNPTl9VTlNQRUNJRklFRBAAEiwKKFNUQVJUX0ZBSUxVUkVfUkVBU09OX0FHRU5UX05PVF9JTlNUQUxMRUQQARImCiJTVEFSVF9GQUlMVVJFX1JFQVNPTl9OT1RfU0lHTkVEX0lOEAISKwonU1RBUlRfRkFJTFVSRV9SRUFTT05fUExVR0lOX1VOQVZBSUxBQkxFEAMSKgomU1RBUlRfRkFJTFVSRV9SRUFTT05fVE9PTFNfVU5BVkFJTEFCTEUQBBI2CjJTVEFSVF9GQUlMVVJFX1JFQVNPTl9XT1JLSU5HX0RJUkVDVE9SWV9VTkFWQUlMQUJMRRAFEiIKHlNUQVJUX0ZBSUxVUkVfUkVBU09OX1RJTUVEX09VVBAGEh4KGlNUQVJUX0ZBSUxVUkVfUkVBU09OX09USEVSEAcSLgoqU1RBUlRfRkFJTFVSRV9SRUFTT05fSU5DT01QQVRJQkxFX1ZFUlNJT05TEAgSMAosU1RBUlRfRkFJTFVSRV9SRUFTT05fU1RBVEVfTE9DQVRJT05fVE9PX0xPTkcQCSpaCgpSZXBvcnRLaW5kEhsKF1JFUE9SVF9LSU5EX1VOU1BFQ0lGSUVEEAASGAoUUkVQT1JUX0tJTkRfUFJPR1JFU1MQARIVChFSRVBPUlRfS0lORF9GSU5BTBACKo0BCgpKb2JPdXRjb21lEhsKF0pPQl9PVVRDT01FX1VOU1BFQ0lGSUVEEAASGQoVSk9CX09VVENPTUVfU1VDQ0VFREVEEAESFgoSSk9CX09VVENPTUVfRkFJTEVEEAISGQoVSk9CX09VVENPTUVfQ0FOQ0VMTEVEEAMSFAoQSk9CX09VVENPTUVfTE9TVBAEKnsKDEp1ZGdlVmVyZGljdBIdChlKVURHRV9WRVJESUNUX1VOU1BFQ0lGSUVEEAASFgoSSlVER0VfVkVSRElDVF9QQVNTEAESFgoSSlVER0VfVkVSRElDVF9GQUlMEAISHAoYSlVER0VfVkVSRElDVF9VTk1FQVNVUkVEEAMqkAEKDUNvbXBhdGliaWxpdHkSHQoZQ09NUEFUSUJJTElUWV9VTlNQRUNJRklFRBAAEhwKGENPTVBBVElCSUxJVFlfQ09NUEFUSUJMRRABEiAKHENPTVBBVElCSUxJVFlfQ0xJRU5UX1RPT19PTEQQAhIgChxDT01QQVRJQklMSVRZX0RBRU1PTl9UT09fT0xEEANCVFpSZ2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvb3JjaGVzdHJhdG9yL2dlbi92aWJlc3lzL29yY2hlc3RyYXRvci92MTtvcmNoZXN0cmF0b3J2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_orchestrator_v1_tool_options]);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Run
@@ -76,15 +77,6 @@ export type Run = Message$1<"vibesys.orchestrator.v1.Run"> & {
   endedAt?: Timestamp | undefined;
 
   /**
-   * Where this run's agents find the vibesys-cli and the daemon and store it talks to. Recorded
-   * when the run starts and never changed, so a relaunch of any of its sessions meets the same
-   * ones. Empty for a run that started before it was recorded.
-   *
-   * @generated from field: vibesys.orchestrator.v1.CliLocation cli_location = 11;
-   */
-  cliLocation?: CliLocation | undefined;
-
-  /**
    * How many reports the run's lead has posted. The next report is numbered one more.
    *
    * @generated from field: uint32 reports_posted = 12;
@@ -129,6 +121,23 @@ export type Run = Message$1<"vibesys.orchestrator.v1.Run"> & {
    * @generated from field: bool final_reported = 17;
    */
   finalReported: boolean;
+
+  /**
+   * The agents this run may spend on, set when it starts and never changed. A subagent is launched
+   * only on one of these.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.AllowedAgent allowed_agents = 18;
+   */
+  allowedAgents: AllowedAgent[];
+
+  /**
+   * Working copies of the repository that agents made and that were not removed when the run ended
+   * because they hold changes git does not have. Empty while the run is live, and for a run that left
+   * none. The run's operator decides what becomes of them.
+   *
+   * @generated from field: repeated vibesys.orchestrator.v1.KeptCheckout kept_checkouts = 19;
+   */
+  keptCheckouts: KeptCheckout[];
 };
 
 /**
@@ -139,43 +148,57 @@ export const RunSchema: GenMessage<Run> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_orchestrator, 0);
 
 /**
- * CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
- * store from. Each value is an absolute path, or empty for "not set": an empty value is unset in
- * the agent's environment, not set to the empty string. The environment names each one becomes are
- * in vibesys/cli/v1/conformance/identity_env.golden.json.
+ * KeptCheckout is one agent's working copy of the run's repository, left in place because removing
+ * it would lose work.
  *
- * @generated from message vibesys.orchestrator.v1.CliLocation
+ * @generated from message vibesys.orchestrator.v1.KeptCheckout
  */
-export type CliLocation = Message$1<"vibesys.orchestrator.v1.CliLocation"> & {
+export type KeptCheckout = Message$1<"vibesys.orchestrator.v1.KeptCheckout"> & {
   /**
-   * The vibesys-cli the orchestrator chose for its agents.
+   * @generated from field: string agent_id = 1;
+   */
+  agentId: string;
+
+  /**
+   * Where the working copy is: the client shows it so the operator can look at it, and remove it
+   * when done.
    *
-   * @generated from field: string cli = 1;
+   * @generated from field: string location = 2;
    */
-  cli: string;
-
-  /**
-   * @generated from field: string xdg_runtime_dir = 2;
-   */
-  xdgRuntimeDir: string;
-
-  /**
-   * @generated from field: string xdg_state_home = 3;
-   */
-  xdgStateHome: string;
-
-  /**
-   * @generated from field: string home = 4;
-   */
-  home: string;
+  location: string;
 };
 
 /**
- * Describes the message vibesys.orchestrator.v1.CliLocation.
- * Use `create(CliLocationSchema)` to create a new message.
+ * Describes the message vibesys.orchestrator.v1.KeptCheckout.
+ * Use `create(KeptCheckoutSchema)` to create a new message.
  */
-export const CliLocationSchema: GenMessage<CliLocation> = /*@__PURE__*/
+export const KeptCheckoutSchema: GenMessage<KeptCheckout> = /*@__PURE__*/
   messageDesc(file_vibesys_orchestrator_v1_orchestrator, 1);
+
+/**
+ * AllowedAgent is one harness and model a run may use. An empty model means the harness's own
+ * default model, and only that: naming another model on that harness is outside the allowance.
+ *
+ * @generated from message vibesys.orchestrator.v1.AllowedAgent
+ */
+export type AllowedAgent = Message$1<"vibesys.orchestrator.v1.AllowedAgent"> & {
+  /**
+   * @generated from field: vibesys.orchestrator.v1.Harness harness = 1;
+   */
+  harness: Harness;
+
+  /**
+   * @generated from field: string model = 2;
+   */
+  model: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.AllowedAgent.
+ * Use `create(AllowedAgentSchema)` to create a new message.
+ */
+export const AllowedAgentSchema: GenMessage<AllowedAgent> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 2);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Agent
@@ -231,15 +254,7 @@ export type Agent = Message$1<"vibesys.orchestrator.v1.Agent"> & {
   status: AgentStatus;
 
   /**
-   * What the next session of this agent resumes with. Opaque; empty until a session that can resume
-   * opened.
-   *
-   * @generated from field: bytes resume_token = 11;
-   */
-  resumeToken: Uint8Array;
-
-  /**
-   * Absent until the session opened.
+   * Absent until the session opened, and for a session that can neither steer nor resume.
    *
    * @generated from field: vibesys.orchestrator.v1.Capabilities capabilities = 12;
    */
@@ -317,7 +332,7 @@ export type Agent = Message$1<"vibesys.orchestrator.v1.Agent"> & {
  * Use `create(AgentSchema)` to create a new message.
  */
 export const AgentSchema: GenMessage<Agent> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 2);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 3);
 
 /**
  * Capabilities are what a session can do. It reports them when it opens, so
@@ -326,11 +341,6 @@ export const AgentSchema: GenMessage<Agent> = /*@__PURE__*/
  * @generated from message vibesys.orchestrator.v1.Capabilities
  */
 export type Capabilities = Message$1<"vibesys.orchestrator.v1.Capabilities"> & {
-  /**
-   * @generated from field: bool streams_text = 1;
-   */
-  streamsText: boolean;
-
   /**
    * @generated from field: bool steers = 2;
    */
@@ -347,7 +357,7 @@ export type Capabilities = Message$1<"vibesys.orchestrator.v1.Capabilities"> & {
  * Use `create(CapabilitiesSchema)` to create a new message.
  */
 export const CapabilitiesSchema: GenMessage<Capabilities> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 3);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 4);
 
 /**
  * Usage is what a turn has cost. Fields a provider does not report are absent, never zero.
@@ -391,7 +401,7 @@ export type Usage = Message$1<"vibesys.orchestrator.v1.Usage"> & {
  * Use `create(UsageSchema)` to create a new message.
  */
 export const UsageSchema: GenMessage<Usage> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 4);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 5);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Turn
@@ -450,7 +460,7 @@ export type Turn = Message$1<"vibesys.orchestrator.v1.Turn"> & {
  * Use `create(TurnSchema)` to create a new message.
  */
 export const TurnSchema: GenMessage<Turn> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 5);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 6);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Item
@@ -525,7 +535,7 @@ export type Item = Message$1<"vibesys.orchestrator.v1.Item"> & {
  * Use `create(ItemSchema)` to create a new message.
  */
 export const ItemSchema: GenMessage<Item> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 6);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 7);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Text
@@ -542,7 +552,7 @@ export type Text = Message$1<"vibesys.orchestrator.v1.Text"> & {
  * Use `create(TextSchema)` to create a new message.
  */
 export const TextSchema: GenMessage<Text> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 7);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 8);
 
 /**
  * @generated from message vibesys.orchestrator.v1.ToolCall
@@ -584,9 +594,13 @@ export type ToolCall = Message$1<"vibesys.orchestrator.v1.ToolCall"> & {
  * Use `create(ToolCallSchema)` to create a new message.
  */
 export const ToolCallSchema: GenMessage<ToolCall> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 8);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 9);
 
 /**
+ * Handoff is what a finished subagent tells its lead, and the input of the post_handoff tool. The
+ * common fields say what the agent did; the body of its role says what the lead needs to act on
+ * it. The server checks that the body is the caller's own.
+ *
  * @generated from message vibesys.orchestrator.v1.Handoff
  */
 export type Handoff = Message$1<"vibesys.orchestrator.v1.Handoff"> & {
@@ -596,39 +610,9 @@ export type Handoff = Message$1<"vibesys.orchestrator.v1.Handoff"> & {
   planNumber: number;
 
   /**
-   * @generated from field: bool has_candidate = 2;
-   */
-  hasCandidate: boolean;
-
-  /**
    * @generated from field: string claim = 3;
    */
   claim: string;
-
-  /**
-   * @generated from field: string commit = 4;
-   */
-  commit: string;
-
-  /**
-   * @generated from field: string parent_commit = 5;
-   */
-  parentCommit: string;
-
-  /**
-   * @generated from field: string branch = 6;
-   */
-  branch: string;
-
-  /**
-   * @generated from field: string checks = 7;
-   */
-  checks: string;
-
-  /**
-   * @generated from field: string measurement = 8;
-   */
-  measurement: string;
 
   /**
    * @generated from field: string learned = 9;
@@ -644,6 +628,43 @@ export type Handoff = Message$1<"vibesys.orchestrator.v1.Handoff"> & {
    * @generated from field: string open_items = 11;
    */
   openItems: string;
+
+  /**
+   * The body is the caller's role, spelled as the role is: AGENT_ROLE_WORKER is the field worker.
+   *
+   * @generated from oneof vibesys.orchestrator.v1.Handoff.body
+   */
+  body: {
+    /**
+     * @generated from field: vibesys.orchestrator.v1.WorkerHandoff worker = 20;
+     */
+    value: WorkerHandoff;
+    case: "worker";
+  } | {
+    /**
+     * @generated from field: vibesys.orchestrator.v1.PlannerHandoff planner = 21;
+     */
+    value: PlannerHandoff;
+    case: "planner";
+  } | {
+    /**
+     * @generated from field: vibesys.orchestrator.v1.JudgeHandoff judge = 22;
+     */
+    value: JudgeHandoff;
+    case: "judge";
+  } | {
+    /**
+     * @generated from field: vibesys.orchestrator.v1.CombinerHandoff combiner = 23;
+     */
+    value: CombinerHandoff;
+    case: "combiner";
+  } | {
+    /**
+     * @generated from field: vibesys.orchestrator.v1.ProfilerHandoff profiler = 24;
+     */
+    value: ProfilerHandoff;
+    case: "profiler";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -651,9 +672,251 @@ export type Handoff = Message$1<"vibesys.orchestrator.v1.Handoff"> & {
  * Use `create(HandoffSchema)` to create a new message.
  */
 export const HandoffSchema: GenMessage<Handoff> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 9);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 10);
 
 /**
+ * WorkerHandoff is a worker's result: a candidate commit, or why there is none.
+ *
+ * @generated from message vibesys.orchestrator.v1.WorkerHandoff
+ */
+export type WorkerHandoff = Message$1<"vibesys.orchestrator.v1.WorkerHandoff"> & {
+  /**
+   * @generated from oneof vibesys.orchestrator.v1.WorkerHandoff.outcome
+   */
+  outcome: {
+    /**
+     * @generated from field: vibesys.orchestrator.v1.Candidate candidate = 1;
+     */
+    value: Candidate;
+    case: "candidate";
+  } | {
+    /**
+     * @generated from field: vibesys.orchestrator.v1.NoCandidate no_candidate = 2;
+     */
+    value: NoCandidate;
+    case: "noCandidate";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.WorkerHandoff.
+ * Use `create(WorkerHandoffSchema)` to create a new message.
+ */
+export const WorkerHandoffSchema: GenMessage<WorkerHandoff> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 11);
+
+/**
+ * Candidate is a commit a worker offers for judging.
+ *
+ * @generated from message vibesys.orchestrator.v1.Candidate
+ */
+export type Candidate = Message$1<"vibesys.orchestrator.v1.Candidate"> & {
+  /**
+   * @generated from field: string commit = 1;
+   */
+  commit: string;
+
+  /**
+   * @generated from field: string parent_commit = 2;
+   */
+  parentCommit: string;
+
+  /**
+   * @generated from field: string branch = 3;
+   */
+  branch: string;
+
+  /**
+   * @generated from field: string checks = 4;
+   */
+  checks: string;
+
+  /**
+   * @generated from field: string measurement = 5;
+   */
+  measurement: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.Candidate.
+ * Use `create(CandidateSchema)` to create a new message.
+ */
+export const CandidateSchema: GenMessage<Candidate> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 12);
+
+/**
+ * NoCandidate says a worker's turn ended without a commit worth measuring.
+ *
+ * @generated from message vibesys.orchestrator.v1.NoCandidate
+ */
+export type NoCandidate = Message$1<"vibesys.orchestrator.v1.NoCandidate"> & {
+  /**
+   * @generated from field: string blocker = 1;
+   */
+  blocker: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.NoCandidate.
+ * Use `create(NoCandidateSchema)` to create a new message.
+ */
+export const NoCandidateSchema: GenMessage<NoCandidate> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 13);
+
+/**
+ * PlannerHandoff is a planner's proposal.
+ *
+ * @generated from message vibesys.orchestrator.v1.PlannerHandoff
+ */
+export type PlannerHandoff = Message$1<"vibesys.orchestrator.v1.PlannerHandoff"> & {
+  /**
+   * @generated from field: string plan = 1;
+   */
+  plan: string;
+
+  /**
+   * @generated from field: string confidence = 2;
+   */
+  confidence: string;
+
+  /**
+   * @generated from field: string unestablished = 3;
+   */
+  unestablished: string;
+
+  /**
+   * @generated from field: string deciding_measurement = 4;
+   */
+  decidingMeasurement: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.PlannerHandoff.
+ * Use `create(PlannerHandoffSchema)` to create a new message.
+ */
+export const PlannerHandoffSchema: GenMessage<PlannerHandoff> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 14);
+
+/**
+ * JudgeHandoff is a judge's verdict on one candidate.
+ *
+ * @generated from message vibesys.orchestrator.v1.JudgeHandoff
+ */
+export type JudgeHandoff = Message$1<"vibesys.orchestrator.v1.JudgeHandoff"> & {
+  /**
+   * @generated from field: string commit = 1;
+   */
+  commit: string;
+
+  /**
+   * @generated from field: vibesys.orchestrator.v1.JudgeVerdict verdict = 2;
+   */
+  verdict: JudgeVerdict;
+
+  /**
+   * @generated from field: string reasons = 3;
+   */
+  reasons: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.JudgeHandoff.
+ * Use `create(JudgeHandoffSchema)` to create a new message.
+ */
+export const JudgeHandoffSchema: GenMessage<JudgeHandoff> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 15);
+
+/**
+ * CombinerHandoff is the commit a combiner made from several candidates.
+ *
+ * @generated from message vibesys.orchestrator.v1.CombinerHandoff
+ */
+export type CombinerHandoff = Message$1<"vibesys.orchestrator.v1.CombinerHandoff"> & {
+  /**
+   * @generated from field: string commit = 1;
+   */
+  commit: string;
+
+  /**
+   * @generated from field: string branch = 2;
+   */
+  branch: string;
+
+  /**
+   * @generated from field: string applied = 3;
+   */
+  applied: string;
+
+  /**
+   * @generated from field: string unapplied = 4;
+   */
+  unapplied: string;
+
+  /**
+   * @generated from field: string checks = 5;
+   */
+  checks: string;
+
+  /**
+   * @generated from field: string measurement = 6;
+   */
+  measurement: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.CombinerHandoff.
+ * Use `create(CombinerHandoffSchema)` to create a new message.
+ */
+export const CombinerHandoffSchema: GenMessage<CombinerHandoff> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 16);
+
+/**
+ * ProfilerHandoff is a profiler's answer to the question it was asked.
+ *
+ * @generated from message vibesys.orchestrator.v1.ProfilerHandoff
+ */
+export type ProfilerHandoff = Message$1<"vibesys.orchestrator.v1.ProfilerHandoff"> & {
+  /**
+   * @generated from field: string question = 1;
+   */
+  question: string;
+
+  /**
+   * @generated from field: string revision = 2;
+   */
+  revision: string;
+
+  /**
+   * @generated from field: string answer = 3;
+   */
+  answer: string;
+
+  /**
+   * @generated from field: string evidence = 4;
+   */
+  evidence: string;
+
+  /**
+   * @generated from field: string unsupported = 5;
+   */
+  unsupported: string;
+
+  /**
+   * @generated from field: string informs = 6;
+   */
+  informs: string;
+};
+
+/**
+ * Describes the message vibesys.orchestrator.v1.ProfilerHandoff.
+ * Use `create(ProfilerHandoffSchema)` to create a new message.
+ */
+export const ProfilerHandoffSchema: GenMessage<ProfilerHandoff> = /*@__PURE__*/
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 17);
+
+/**
+ * Report is what the lead tells the operator, and the input of the post_report tool.
+ *
  * @generated from message vibesys.orchestrator.v1.Report
  */
 export type Report = Message$1<"vibesys.orchestrator.v1.Report"> & {
@@ -701,7 +964,7 @@ export type Report = Message$1<"vibesys.orchestrator.v1.Report"> & {
  * Use `create(ReportSchema)` to create a new message.
  */
 export const ReportSchema: GenMessage<Report> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 10);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 18);
 
 /**
  * @generated from message vibesys.orchestrator.v1.JobFinished
@@ -735,7 +998,7 @@ export type JobFinished = Message$1<"vibesys.orchestrator.v1.JobFinished"> & {
  * Use `create(JobFinishedSchema)` to create a new message.
  */
 export const JobFinishedSchema: GenMessage<JobFinished> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 11);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 19);
 
 /**
  * SubagentSettled tells the lead that a subagent stopped working without a handoff: it went idle,
@@ -765,7 +1028,7 @@ export type SubagentSettled = Message$1<"vibesys.orchestrator.v1.SubagentSettled
  * Use `create(SubagentSettledSchema)` to create a new message.
  */
 export const SubagentSettledSchema: GenMessage<SubagentSettled> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 12);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 20);
 
 /**
  * HandoffReminder asks an agent that ended a turn without a handoff to post one. It carries no
@@ -781,7 +1044,7 @@ export type HandoffReminder = Message$1<"vibesys.orchestrator.v1.HandoffReminder
  * Use `create(HandoffReminderSchema)` to create a new message.
  */
 export const HandoffReminderSchema: GenMessage<HandoffReminder> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 13);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 21);
 
 /**
  * LeadIdleReminder tells a lead that its run has stood still, so that it acts or says why not.
@@ -820,7 +1083,7 @@ export type LeadIdleReminder = Message$1<"vibesys.orchestrator.v1.LeadIdleRemind
  * Use `create(LeadIdleReminderSchema)` to create a new message.
  */
 export const LeadIdleReminderSchema: GenMessage<LeadIdleReminder> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 14);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 22);
 
 /**
  * @generated from message vibesys.orchestrator.v1.Message
@@ -944,7 +1207,7 @@ export type Message = Message$1<"vibesys.orchestrator.v1.Message"> & {
  * Use `create(MessageSchema)` to create a new message.
  */
 export const MessageSchema: GenMessage<Message> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 15);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 23);
 
 /**
  * @generated from message vibesys.orchestrator.v1.LeadBrief
@@ -973,7 +1236,7 @@ export type LeadBrief = Message$1<"vibesys.orchestrator.v1.LeadBrief"> & {
  * Use `create(LeadBriefSchema)` to create a new message.
  */
 export const LeadBriefSchema: GenMessage<LeadBrief> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 16);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 24);
 
 /**
  * BuildVersions is what one build carries.
@@ -1008,7 +1271,7 @@ export type BuildVersions = Message$1<"vibesys.orchestrator.v1.BuildVersions"> &
  * Use `create(BuildVersionsSchema)` to create a new message.
  */
 export const BuildVersionsSchema: GenMessage<BuildVersions> = /*@__PURE__*/
-  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 17);
+  messageDesc(file_vibesys_orchestrator_v1_orchestrator, 25);
 
 /**
  * RunStatus is where a run is. ENDED and FAILED are final.
@@ -1589,6 +1852,14 @@ export enum StartFailureReason {
    * @generated from enum value: START_FAILURE_REASON_INCOMPATIBLE_VERSIONS = 8;
    */
   INCOMPATIBLE_VERSIONS = 8,
+
+  /**
+   * The place where the host keeps its sessions is too long for a session to be reached there, so
+   * none can start. A shorter root or state location fixes it.
+   *
+   * @generated from enum value: START_FAILURE_REASON_STATE_LOCATION_TOO_LONG = 9;
+   */
+  STATE_LOCATION_TOO_LONG = 9,
 }
 
 /**
@@ -1665,6 +1936,39 @@ export const JobOutcomeSchema: GenEnum<JobOutcome> = /*@__PURE__*/
   enumDesc(file_vibesys_orchestrator_v1_orchestrator, 13);
 
 /**
+ * JudgeVerdict is what a judge found of a candidate's claim.
+ *
+ * @generated from enum vibesys.orchestrator.v1.JudgeVerdict
+ */
+export enum JudgeVerdict {
+  /**
+   * @generated from enum value: JUDGE_VERDICT_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: JUDGE_VERDICT_PASS = 1;
+   */
+  PASS = 1,
+
+  /**
+   * @generated from enum value: JUDGE_VERDICT_FAIL = 2;
+   */
+  FAIL = 2,
+
+  /**
+   * @generated from enum value: JUDGE_VERDICT_UNMEASURED = 3;
+   */
+  UNMEASURED = 3,
+}
+
+/**
+ * Describes the enum vibesys.orchestrator.v1.JudgeVerdict.
+ */
+export const JudgeVerdictSchema: GenEnum<JudgeVerdict> = /*@__PURE__*/
+  enumDesc(file_vibesys_orchestrator_v1_orchestrator, 14);
+
+/**
  * Compatibility is the answer to a handshake, from the daemon's side.
  *
  * @generated from enum vibesys.orchestrator.v1.Compatibility
@@ -1695,5 +1999,5 @@ export enum Compatibility {
  * Describes the enum vibesys.orchestrator.v1.Compatibility.
  */
 export const CompatibilitySchema: GenEnum<Compatibility> = /*@__PURE__*/
-  enumDesc(file_vibesys_orchestrator_v1_orchestrator, 14);
+  enumDesc(file_vibesys_orchestrator_v1_orchestrator, 15);
 

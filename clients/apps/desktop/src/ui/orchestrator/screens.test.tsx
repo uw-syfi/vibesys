@@ -6,6 +6,7 @@ import {
   Delivery,
   Harness,
   JobOutcome,
+  JudgeVerdict,
   MessageSchema,
   ReceiptSchema,
   Refusal,
@@ -16,7 +17,7 @@ import fc from 'fast-check';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {describe, expect, it} from 'vitest';
 import {
-  applyEvent,
+  applyChange,
   type CommandProgress,
   emptyState,
   type OrchestratorState,
@@ -38,7 +39,7 @@ const PROTOCOL = /UNSPECIFIED|AGENT_ROLE|TURN_|ITEM_STATUS|undefined|\[object/;
 
 function stateOf(seed: number, subagents: number, live: boolean) {
   const scenario = generateScenario({seed, subagents, live, depth: 2});
-  const state = scenario.events.reduce(applyEvent, emptyState);
+  const state = scenario.changes.reduce(applyChange, emptyState);
   return {scenario, state, runId: scenario.runId};
 }
 
@@ -216,6 +217,47 @@ describe('the screens', () => {
     });
     const withJob = {...state, messages: {...state.messages, 'job-1': finished}};
     expect(verdictOf(withJob, 'worker-1')?.label).toBe('Its benchmark job: Succeeded');
+  });
+
+  it('a handoff card shows what the body of each role says, and a worker without a change says so', () => {
+    const bodies = {
+      planner: {case: 'planner', value: {plan: 'plans/plan-3.md', confidence: 'medium'}},
+      judge: {case: 'judge', value: {commit: 'abc', verdict: JudgeVerdict.FAIL, reasons: 'noise'}},
+      combiner: {
+        case: 'combiner',
+        value: {commit: 'def', branch: 'merged', applied: 'plans 1 and 2'},
+      },
+      profiler: {case: 'profiler', value: {question: 'where?', answer: 'the copy'}},
+      kept: {
+        case: 'worker',
+        value: {
+          outcome: {case: 'candidate', value: {commit: 'c0ffee', branch: 'idea-1', checks: 'ok'}},
+        },
+      },
+      none: {
+        case: 'worker',
+        value: {outcome: {case: 'noCandidate', value: {blocker: 'did not compile'}}},
+      },
+    } as const;
+    const wanted: Record<keyof typeof bodies, readonly string[]> = {
+      planner: ['plans/plan-3.md', 'medium'],
+      judge: ['The claim does not hold', 'noise'],
+      combiner: ['plans 1 and 2', 'def on merged'],
+      profiler: ['where?', 'the copy'],
+      kept: ['c0ffee on idea-1'],
+      none: ['No change was kept from this attempt.', 'did not compile'],
+    };
+    for (const [kind, body] of Object.entries(bodies)) {
+      const message = create(MessageSchema, {
+        id: `handoff-${kind}`,
+        runId: 'r',
+        body: {case: 'handoff', value: {claim: 'it says so', body}},
+      });
+      const html = renderToStaticMarkup(
+        <HandoffCards state={{...emptyState, messages: {[message.id]: message}}} runId="r" />,
+      );
+      for (const text of wanted[kind as keyof typeof bodies]) expect(html).toContain(text);
+    }
   });
 
   it('every agent row carries its harness chip and its id, so a reader needs no detail view', () => {

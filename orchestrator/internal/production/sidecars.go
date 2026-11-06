@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,11 +19,13 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/localfs"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/mcp"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
+	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
@@ -78,6 +79,9 @@ func sidecarSetting(setting string) ([]string, error) {
 // none of it, only a session that started and then opened or failed with a reason.
 type ProcessSidecars struct {
 	Root string
+	// Place says where the socket whose natural path is given goes; nil keeps it there. A path that
+	// still does not fit a socket address refuses the launch (core.StartStateLocationTooLong).
+	Place func(natural string) string
 	// Parts gives the command that holds a session and the plugin every session loads. A launch
 	// with a part that cannot be resolved is refused.
 	Parts Parts
@@ -98,7 +102,30 @@ func (s *ProcessSidecars) agentDir(agent core.AgentID) string {
 
 func (s *ProcessSidecars) place(session core.Session) HolderPlace {
 	dir := filepath.Join(s.agentDir(session.Agent), strconv.FormatUint(uint64(session.N), 10))
-	return HolderPlace{Socket: filepath.Join(dir, "sock"), Directory: dir}
+	return s.holderPlace(dir)
+}
+
+// holderPlace is the place of the holder whose files are in dir: its socket is dir/sock, or where
+// Place puts that.
+func (s *ProcessSidecars) holderPlace(dir string) HolderPlace {
+	socket := filepath.Join(dir, "sock")
+	if s.Place != nil {
+		socket = s.Place(socket)
+	}
+	return HolderPlace{Socket: socket, Directory: dir}
+}
+
+// agentPlaces are the places of every session an agent has had, live or not.
+func (s *ProcessSidecars) agentPlaces(agent core.AgentID) []HolderPlace {
+	root := s.agentDir(agent)
+	entries, _ := os.ReadDir(root)
+	var places []HolderPlace
+	for _, e := range entries {
+		if _, err := strconv.ParseUint(e.Name(), 10, 32); err == nil && e.IsDir() {
+			places = append(places, s.holderPlace(filepath.Join(root, e.Name())))
+		}
+	}
+	return places
 }
 
 // Launch implements daemon.Sidecars. Its parts and what it asks for are checked first, so a missing
@@ -115,8 +142,13 @@ func (s *ProcessSidecars) Launch(ctx context.Context, start daemon.SessionStart)
 	}
 	session := start.Launch.Session
 	place := s.place(session)
-	if len(place.Socket) > maxSocketPath {
-		return nil, fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold; %s", place.Socket, maxSocketPath, localfs.Remedy)
+	if !privatesocket.Fits(place.Socket) {
+		return nil, &daemon.LaunchError{Reason: core.StartStateLocationTooLong, Err: fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold", place.Socket, privatesocket.MaxPath)}
+	}
+	// A socket that was moved to the short private place needs its directory, made by this user and
+	// closed to everyone else, before the holder binds there.
+	if err := privatesocket.EnsureDirectory(place.Socket); err != nil {
+		return nil, err
 	}
 	request, err := s.openRequest(start, plugin)
 	if err != nil {
@@ -161,7 +193,7 @@ func (s *ProcessSidecars) holderFor(ctx context.Context, session core.Session, p
 		// place's lock and may not listen yet: it is waited for, and no second one is started.
 		exited := s.startingProcess(session)
 		if exited == nil && !s.Holders.Alive(place) {
-			if err := s.Holders.ReapAgent(s.agentDir(session.Agent)); err != nil {
+			if err := s.Holders.ReapAgent(s.agentPlaces(session.Agent)); err != nil {
 				return nil, fmt.Errorf("end the agent processes an earlier session left: %w", err)
 			}
 			s.forgetConn(session)
@@ -327,6 +359,16 @@ func (s *ProcessSidecars) forgetConn(session core.Session) {
 	}
 }
 
+// secretEnv names the entries of a session's tool environment that are credentials. The token is the
+// only one: the rest says where the daemon is and who is asking. The name is the one the credentials
+// message encodes its token under, so there is one definition of it.
+func secretEnv(tools *pb.ToolServerCredentials) []string {
+	if tools.GetToken() == "" {
+		return nil
+	}
+	return []string{envcodec.NameOf(tools, "token")}
+}
+
 // openRequest is what a session is opened with. The plugin's home is kept with the agent, not the
 // session, so a resume finds the one the first session installed into, which also holds what the
 // agent needs to continue. It does no I/O.
@@ -340,52 +382,29 @@ func (s *ProcessSidecars) openRequest(start daemon.SessionStart, plugin Plugin) 
 	if l.Role != core.RoleLead {
 		workdir = filepath.Join(s.agentDir(l.Session.Agent), "worktree")
 	}
-	environment := agentEnvironment(start)
-	toolEnv := maps.Clone(start.Tools)
-	if toolEnv == nil {
-		toolEnv = map[string]string{}
+	environment, err := agentEnvironment(start)
+	if err != nil {
+		return nil, err
 	}
-	maps.Copy(toolEnv, environment.GetSet())
+	toolEnv, err := toolServerEnvironment(start.Tools, environment)
+	if err != nil {
+		return nil, err
+	}
 	return &pb.OpenSessionRequest{
 		Session: launch.GetSession(), Harness: launch.GetHarness(), Model: launch.GetModel(), ReasoningEffort: launch.GetReasoningEffort(),
 		WorkingDirectory: workdir, AgentDataDirectory: filepath.Join(s.agentDir(l.Session.Agent), "plugin-home"), ResumeToken: launch.GetResumeToken(),
-		Skills:      &pb.SessionSkills{Directory: plugin.Marketplace, Name: plugin.Name},
-		Tools:       []*pb.ToolServer{{Name: ToolServerName, Argv: []string{s.Executable, "mcp"}, Env: toolEnv}},
+		Skills: &pb.SessionSkills{Directory: plugin.Marketplace, Name: plugin.Name},
+		Tools: []*pb.ToolServer{{
+			Name: ToolServerName, Argv: []string{s.Executable, "mcp"}, Env: toolEnv, SecretEnv: secretEnv(start.Tools),
+		}},
 		Environment: environment,
 	}, nil
 }
 
 // ToolServerName is the name every agent's tool server is registered under, so the tools show up
-// as mcp__vibesys__spawn_agent and so on. The harness skills name it; a test holds the two together.
-const ToolServerName = "vibesys"
-
-// agentEnvironment is what the session's processes get over their login environment. The names are
-// listed, with what fills each, in proto/vibesys/cli/v1/conformance/identity_env.golden.json, which
-// a test holds this to. An empty value unsets its name, so the program resolves it as this process
-// would, except HOME, which the agent's own program needs.
-func agentEnvironment(start daemon.SessionStart) *pb.AgentEnvironment {
-	l, where := start.Launch, start.Location
-	out := &pb.AgentEnvironment{Set: map[string]string{}}
-	for _, name := range []struct{ name, value string }{
-		{"VIBESYS_REPO", start.Repository},
-		{"VIBESYS_TASK", start.Task},
-		{"VIBESYS_RUN", string(l.Run)},
-		{"VIBESYS_AGENT", string(l.Session.Agent)},
-		{"VIBESYS_HARNESS", strings.ReplaceAll(string(l.Spec.Harness), "_", "-")},
-		{"VIBESYS_CLI", where.CLI},
-		{"XDG_RUNTIME_DIR", where.RuntimeDir},
-		{"XDG_STATE_HOME", where.StateHome},
-		{"HOME", where.Home},
-	} {
-		switch {
-		case name.value != "":
-			out.Set[name.name] = name.value
-		case name.name != "HOME":
-			out.Unset = append(out.Unset, name.name)
-		}
-	}
-	return out
-}
+// as mcp__vibesys__spawn_agent and so on. The tool server says the same name of itself, and the
+// harness skills name it; a test holds the doc to it.
+const ToolServerName = mcp.ServerName
 
 func launchMessage(l core.LaunchSession) (*pb.LaunchSession, error) {
 	data, err := wire.EncodeEffect(l)

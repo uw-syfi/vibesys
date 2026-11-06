@@ -1,0 +1,14 @@
+# The environment messages of vibesys-cli's contract (proto/vibesys/cli/v1/env.proto), once more for
+# the vibesys-evaluator SDK's Python package: a job's process reads what vibesys-cli writes with the
+# same message. Its Go copy is buf.gen.evaluator-env-go.yaml. It is a template of its own because
+# buf.gen.evaluator.yaml cleans the directory it writes, and it runs after it.
+version: v2
+clean: false
+inputs:
+  - directory: proto
+    paths: [proto/vibesys/cli/v1/env.proto]
+plugins:
+  - local: protoc-gen-py
+    strategy: all
+    out: sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto
+    include_imports: true

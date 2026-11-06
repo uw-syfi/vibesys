@@ -69,12 +69,16 @@ reminders until you are given something new.
 
 ## Wait for work without polling
 
-A subagent finishes with `post_handoff`: its claim, commit, checks, measurement, what it
-learned and what is left arrive as a message that wakes you. When no handoff is due, end your
+A subagent finishes with `post_handoff`: its claim, what it learned, what is left and the
+body of its role (a worker's commit, checks and measurement or why it has none; a judge's
+verdict and reasons; a planner's plan file; a combiner's commit; a profiler's answer) arrive as
+a message that wakes you. When no handoff is due, end your
 turn; the run starts your next turn on the next handoff or operator message. Do not loop on
 `list_agents`, `sleep` or `vibesys-cli jobs`. While you wait, a subagent cannot reach you except
 by its handoff, so a worker that must end early has to hand off with what it has. If you are
-a subagent, call `post_handoff` once, last, and end your turn. A subagent that ends a turn without
+a subagent, call `post_handoff` once, last, and end your turn. Fill in the field named for your
+role (`worker`, `planner`, `judge`, `combiner` or `profiler`) and no other; a call with another
+role's field, or with a required argument missing, is refused and says what to fix. A subagent that ends a turn without
 a handoff is reminded once to send one, and its lead is told if it does not.
 
 ## Packaging

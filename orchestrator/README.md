@@ -124,8 +124,8 @@ every default. `vibesys-client host configure` writes it and, with no flag, prin
 A host takes nothing else from the environment it was started in. It clears it and keeps `HOME`, a
 `PATH` from the tool path, `USER`, `LOGNAME`, `SHELL` and `TMPDIR`, which say who and where the session
 is, and `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME` and `VIBESYS_CLI_CONFIG`,
-which name the job tool's places and its operator configuration, so a daemon the host starts obeys
-the operator's Slurm and Docker settings. `VIBESYS_ORCHESTRATOR_SIDECAR`,
+which the job tool resolves its daemon, store and operator configuration from, so the host meets the
+operator's own daemon and a daemon the host starts obeys the operator's Slurm and Docker settings. `VIBESYS_ORCHESTRATOR_SIDECAR`,
 `_MARKETPLACE`, `_STATE_DIR` and `_CLI` are no longer read, and a client that starts a host with one
 of them set names it on stderr with the flag that replaces it.
 
@@ -217,7 +217,7 @@ followed, so `~/.local/bin/vibesys-client` finds the release directory's host), 
 `vibesys-host serve --root ROOT` when none serves.
 
 ```sh
-vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--detach] [--json]
+vibesys-client run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--model M] [--allow-agent HARNESS[:MODEL]]... [--detach] [--json]
 vibesys-client run list                       # every run, newest first
 vibesys-client run attach [RUN]               # follow a run; Ctrl-C detaches and never stops it
 vibesys-client run get [RUN] [--json]         # status, agents, cost, checks, best, last report
@@ -226,9 +226,24 @@ vibesys-client run steer [RUN] "text" [--agent AGENT]
 vibesys-client run stop [RUN] [--yes]
 ```
 
+A run spends only on agents its operator chose. It may start subagents on its lead's harness and model, and
+on each `--allow-agent` (a harness alone allows that harness's default model). A spawn that names neither
+takes the lead's harness and the first allowed model on it; a spawn outside the allowance gets
+`REFUSAL_AGENT_NOT_ALLOWED` with the list, and starts nothing. `Run.allowed_agents` holds the allowance and
+`run get` prints it as "may use". `run get` also counts the agents that ended without a measured cost, since
+their spend is missing from the usage total.
+
+When a run is over (and never before), the orchestrator removes the working copy of each subagent that holds
+nothing git lacks. A commit made there that no branch holds is first kept under
+`refs/vibesys/runs/<run>/<agent>` in the repository (`git log refs/vibesys/runs/<run>/<agent>`), so
+`git gc` does not prune it; if that ref cannot be written the copy stays. A copy with modified or untracked files is
+kept, and `Run.kept_checkouts` names it, which `run get` prints as "kept". The lead works in the repository
+itself and has no copy to remove.
+
 A report is a `progress` note or a `final` report, numbered from 1 within its run. `wait --until report`
-returns for a final report and `--until progress` for any report, counting those posted after the wait began
-(or numbered above `--after N`; an ended run counts the one it has). A run is stalled when its lead is idle
+returns for a final report, at once with the one the run already has however late the wait begins, and
+`--until progress` for any report, counting those posted after the wait began (an ended run counts the one it
+has). `--after N` counts only reports numbered above N, for either. A run is stalled when its lead is idle
 and no agent, job or message is outstanding: `--until stalled` returns then, `run get` says how long, and the
 orchestrator reminds the lead after 10 idle minutes (at most 3 times per run). A lead that has given a final report and
 has had no new input since is finished, not stalled: it is not reminded, and `run get` says so. A wait for a report on a
@@ -314,6 +329,7 @@ begins "could not start the agent:".
 | `WORKING_DIRECTORY_UNAVAILABLE` | the agent's directory could not be made or entered | the daemon (a worktree that cannot be created), or the sidecar |
 | `TIMED_OUT` | the session did not open within `core.LaunchTimeout` | the core |
 | `INCOMPATIBLE_VERSIONS` | the process holding the session and this host share no protocol (`Hello`); it is ended, and nothing was opened on it | the host |
+| `STATE_LOCATION_TOO_LONG` | the place the host keeps sessions in is too long for a session's socket (`maxSocketPath` bytes); no session can start there | the host |
 | `OTHER` | none of these, including a process that could not be started or reached, and a start refused by a field's name | the daemon or the sidecar |
 
 The time limit is a timer the core arms through `Decide` with every `LaunchSession` (`TimerLaunchDeadline`,
@@ -430,13 +446,17 @@ it, never another build), then, for a host in no release, the first `vibesys-cli
 the skills have no `PATH` fallback: they run `"$VIBESYS_CLI"` and stop with a clear message when it
 is unset.
 
-The choice is recorded, with the places that build reads its daemon and store from
-(`XDG_RUNTIME_DIR`, `XDG_STATE_HOME`, `HOME` of the daemon's own environment, each only if it is an
-absolute path), as the run's `CliLocation` when the run starts. Every session of the run, a resumed
-one after a daemon restart included, is launched with the run's recorded location and its task, so
-the agents of a run meet one daemon and one store. The host builds them into the session's
-`AgentEnvironment` with the run's identity (`VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`,
-`VIBESYS_AGENT`, `VIBESYS_HARNESS`), and `Open` carries it. The sidecar process's
+When a run starts the host asks that tool, in the host's own environment: `daemon ensure --json`
+makes sure of a daemon and answers with its socket and its runtime directory, so the host holds no
+rule for where it is. A start the tool cannot answer is refused, in the tool's words: for one, a
+daemon of another build that has jobs. The program and the directory are recorded as the run's
+`JobToolEndpoint`. Every session of the run, a resumed one after a daemon restart included, is
+launched with the run's recorded endpoint and its task, so the agents of a run meet one daemon and
+one store. The host builds them into the session's `AgentEnvironment` with the run's identity
+(`VIBESYS_REPO`, `VIBESYS_TASK`, `VIBESYS_RUN`, `VIBESYS_AGENT`, `VIBESYS_HARNESS`), the program
+(`VIBESYS_CLI`) and the directory (`VIBESYS_CLI_RUNTIME_DIR`), and `Open` carries it. Nothing else of
+the operator's environment changes: an agent's `HOME` and `XDG_*` are the operator's, so its
+credentials and git configuration resolve as for a person. The sidecar process's
 own environment carries none of it: agentshim builds a provider's environment from a login-shell
 probe, so only the environment the sidecar gives the `Agent` arrives.
 
@@ -464,11 +484,14 @@ The daemon serves two sockets, and which one a caller reached decides who it is:
 - The **agent socket** is the only socket a launched session is told (`VIBESYS_ORCHESTRATOR_SOCKET`).
   It is `agent.sock` in the state directory, not in `XDG_RUNTIME_DIR`: on a systemd machine without
   lingering, the runtime directory (`/run/user/UID`) is removed when the user's last login ends, and a
-  run that was left running would lose its tools' socket. A state directory whose path makes the socket
-  address too long for a Unix socket (100 bytes here) is an error naming
-  `vibesys-client host configure --state-directory`. The sidecar sockets are under `STATE/sessions` and
-  the gateway socket is `ROOT/host.sock`, or for a long root one under `/tmp/vibesys-UID`, so none of
-  ours is in the runtime directory.
+  run that was left running would lose its tools' socket. The sidecar sockets are under
+  `STATE/sessions` and the gateway socket is `ROOT/host.sock`. A socket whose path would be over 100
+  bytes (a Unix socket address holds 104 on macOS) goes, by one rule (`privatesocket.Place`), to
+  `/tmp/vibesys-UID/<hash of its path>.sock`, a directory only that user can reach, with nothing stored:
+  every program computes the same place from the same path. That holds for the default state
+  directory, so a long home is not something a user meets. A state directory the operator chose with
+  `vibesys-client host configure --state-directory` stays as chosen: one whose sockets would be too long
+  is an error naming that setting. None of our sockets is in the runtime directory.
   Every call on it needs the credentials of the agent's current session (agent id, session number
   and an HMAC token the daemon derives from a secret), and the daemon never reads the caller from a
   request body. An agent may issue the commands its role allows and read the snapshot of its run.

@@ -1,6 +1,9 @@
 package core
 
-import "fmt"
+import (
+	"fmt"
+	"slices"
+)
 
 // Violations checks everything that must hold of a State, whatever led to it, and returns one line
 // per breach. It is the machine-checked form of the guarantees in this package: the simulation
@@ -22,6 +25,9 @@ func (s State) Violations() []string {
 		if a.Stop == StopNone && a.Status.Resting() && len(a.queue) > 0 {
 			bad("agent %s rests with mail waiting: %v", a.ID, a.queue)
 		}
+		if run, ok := s.runs[a.Run]; ok && !slices.Contains(run.Allowed, AgentChoice{Harness: a.Spec.Harness, Model: a.Spec.Model}) {
+			bad("agent %s runs on %s %q, outside what run %s allows: %v", a.ID, a.Spec.Harness, a.Spec.Model, run.ID, run.Allowed)
+		}
 	}
 	for _, run := range s.runs {
 		if subagents[run.ID] > run.FanoutLimit {
@@ -32,6 +38,14 @@ func (s State) Violations() []string {
 		}
 		if stalled := s.stalled(run); stalled != !run.StalledSince.IsZero() {
 			bad("run %s is %s with stalled since %v, but its stall is %t", run.ID, run.Status, run.StalledSince, stalled)
+		}
+		if len(run.Kept) > 0 && !run.Status.Final() {
+			bad("run %s is %s and already keeps checkouts %v", run.ID, run.Status, run.Kept)
+		}
+		for _, c := range run.Kept {
+			if a, ok := s.agents[c.Agent]; !ok || a.Run != run.ID || a.Role == RoleLead {
+				bad("run %s keeps a checkout of %s, which is not one of its subagents", run.ID, c.Agent)
+			}
 		}
 		if run.LeadReminders > MaxLeadReminders {
 			bad("run %s sent its lead %d reminders, over the limit of %d", run.ID, run.LeadReminders, MaxLeadReminders)

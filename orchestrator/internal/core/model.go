@@ -15,9 +15,9 @@ type Run struct {
 	CreatedAt  time.Time
 	StopReason RunStopReason
 	EndedAt    time.Time
-	// Location is where the run's agents find the vibesys-cli and its daemon and store. It is
-	// recorded when the run starts and every session of the run is launched with it.
-	Location CliLocation
+	// JobTool is the tool the run's agents use and the daemon it serves. It is recorded when the run
+	// starts and every session of the run is launched with it.
+	JobTool JobToolEndpoint
 	// ReportsPosted counts the reports the lead has posted; the next is numbered one more.
 	ReportsPosted uint32
 	// FinalReported says the lead's latest report is a final one and it has had no new input since: it
@@ -31,16 +31,33 @@ type Run struct {
 	LeadReminders uint32
 	// Usage is the cost of every finished turn of every agent of the run.
 	Usage Usage
+	// Allowed is what the run may spend on: set when it starts, never changed. A subagent runs
+	// only on one of these.
+	Allowed []AgentChoice
+	// Kept are the working copies agents made that were not removed when the run ended, because they
+	// hold changes git does not have. Empty until the run is over and its checkouts are released.
+	Kept []Checkout
 }
 
-// CliLocation names the vibesys-cli an agent runs and the places that build reads its daemon and
-// store from. Each is an absolute path, or empty for "not set", which the agent's environment
-// leaves unset.
-type CliLocation struct {
-	CLI        string
-	RuntimeDir string
-	StateHome  string
-	Home       string
+// Checkout is a working copy of a run's repository that one agent made.
+type Checkout struct {
+	Agent    AgentID
+	Location string
+}
+
+// AgentChoice is one harness and model a run may use. An empty Model is the harness's own default
+// model, and only that.
+type AgentChoice struct {
+	Harness Harness
+	Model   ModelName
+}
+
+// JobToolEndpoint names the vibesys-cli an agent runs and the runtime directory of the daemon it
+// serves, as that tool named it when the run started. Both are absolute paths; the zero value is a run
+// with no job tool, which the agent's environment leaves unset.
+type JobToolEndpoint struct {
+	Executable       string
+	RuntimeDirectory string
 }
 
 // AgentSpec says what an agent runs on.
@@ -54,9 +71,8 @@ type AgentSpec struct {
 // session opens, which is the safe answer: nothing is steered into or resumed from a session that
 // has not said it can.
 type Capabilities struct {
-	StreamsText bool
-	Steers      bool
-	Resumes     bool
+	Steers  bool
+	Resumes bool
 }
 
 // Agent is one session we launched, in a tree under the lead.
@@ -212,6 +228,11 @@ type Item struct {
 // MessageBody is what a message holds. The set is closed.
 type MessageBody interface{ messageBody() }
 
+// HandoffBody is the part of a handoff that belongs to the role that posts it: a worker's candidate or
+// the reason it has none, a planner's plan, a judge's verdict, a combiner's commit, a profiler's
+// answer. The set is closed, and each body names the one role it belongs to.
+type HandoffBody interface{ handoffRole() AgentRole }
+
 // The message bodies.
 type (
 	// Text is free text from the operator or another agent.
@@ -225,19 +246,44 @@ type (
 		FanoutLimit uint32
 		Steering    string
 	}
-	// Handoff is what a finished agent tells the lead.
+	// Handoff is what a finished agent tells the lead: what it did, and the body of its role.
 	Handoff struct {
-		PlanNumber   uint32
-		HasCandidate bool
-		Claim        string
-		Commit       Commit
-		ParentCommit Commit
-		Branch       string
-		Checks       string
-		Measurement  string
-		Learned      string
-		Next         string
-		OpenItems    string
+		PlanNumber uint32
+		Claim      string
+		Learned    string
+		Next       string
+		OpenItems  string
+		Body       HandoffBody
+	}
+	// WorkerCandidate is a worker's commit, offered for judging.
+	WorkerCandidate struct {
+		Commit, ParentCommit Commit
+		Branch, Checks       string
+		Measurement          string
+	}
+	// WorkerNoCandidate says a worker's turn ended without a commit worth measuring.
+	WorkerNoCandidate struct{ Blocker string }
+	// PlannerPlan is a planner's proposal.
+	PlannerPlan struct {
+		Plan, Confidence, Unestablished, DecidingMeasurement string
+	}
+	// JudgeFinding is a judge's verdict on one candidate.
+	JudgeFinding struct {
+		Commit  Commit
+		Verdict Verdict
+		Reasons string
+	}
+	// CombinerResult is the commit a combiner made from several candidates.
+	CombinerResult struct {
+		Commit                     Commit
+		Branch, Applied, Unapplied string
+		Checks, Measurement        string
+	}
+	// ProfilerFindings is a profiler's answer to its question.
+	ProfilerFindings struct {
+		Question                               string
+		Revision                               Commit
+		Answer, Evidence, Unsupported, Informs string
 	}
 	// Report is what the lead tells the operator. Kind says whether it is a note along the way or
 	// the lead's last word. Sequence is zero in a command and the report's place in its run, from 1,
@@ -277,10 +323,26 @@ type (
 	}
 )
 
-func (Text) messageBody()             {}
-func (Brief) messageBody()            {}
-func (LeadBrief) messageBody()        {}
-func (Handoff) messageBody()          {}
+func (Text) messageBody()      {}
+func (Brief) messageBody()     {}
+func (LeadBrief) messageBody() {}
+
+// Role is the role the handoff's body belongs to, empty for a handoff with no body.
+func (h Handoff) Role() AgentRole {
+	if h.Body == nil {
+		return ""
+	}
+	return h.Body.handoffRole()
+}
+
+func (Handoff) messageBody()                     {}
+func (WorkerCandidate) handoffRole() AgentRole   { return RoleWorker }
+func (WorkerNoCandidate) handoffRole() AgentRole { return RoleWorker }
+func (PlannerPlan) handoffRole() AgentRole       { return RolePlanner }
+func (JudgeFinding) handoffRole() AgentRole      { return RoleJudge }
+func (CombinerResult) handoffRole() AgentRole    { return RoleCombiner }
+func (ProfilerFindings) handoffRole() AgentRole  { return RoleProfiler }
+
 func (Report) messageBody()           {}
 func (JobFinished) messageBody()      {}
 func (SubagentSettled) messageBody()  {}
@@ -334,4 +396,6 @@ type Receipt struct {
 	Agent    AgentID
 	Message  MessageID
 	Delivery Delivery
+	// Allowed is what the run may use, set with RefuseAgentNotAllowed.
+	Allowed []AgentChoice
 }

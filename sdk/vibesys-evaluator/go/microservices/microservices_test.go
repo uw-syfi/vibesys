@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -24,15 +26,20 @@ import (
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/evaluator"
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/phase"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/k8s"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/workload"
 )
 
 // The test binary is also the task script: run with a command of Main (benchmark, phase,
 // generate, seed), it is Main of testTask, configured by these variables.
 const (
-	targetEnv  = "MS_TEST_TARGET"
-	captureEnv = "MS_TEST_CAPTURE"
-	openEnv    = "MS_TEST_OPEN_RATE"
+	targetEnv   = "MS_TEST_TARGET"
+	captureEnv  = "MS_TEST_CAPTURE"
+	openEnv     = "MS_TEST_OPEN_RATE"
+	accuracyEnv = "MS_TEST_ACCURACY" // the fault between the accuracy check's phases
+	// The accuracy check's own workload, instead of the task's: "puts" (writes only) or
+	// "refused" (writes, and a request the application refuses).
+	ownWorkloadEnv = "MS_TEST_ACCURACY_WORKLOAD"
 )
 
 func TestMain(m *testing.M) {
@@ -122,6 +129,7 @@ func testTask() Task[kvData, *kvModel] {
 		},
 		Workload: &w,
 		Capture:  capture,
+		Accuracy: testAccuracy(os.Getenv(accuracyEnv)),
 		Benchmark: func(ctx context.Context, run *Run) error {
 			closed, err := run.ClosedLoop(ctx, Closed{Clients: 16, Secs: time.Second, Warmup: 200 * time.Millisecond})
 			if err != nil {
@@ -148,6 +156,116 @@ func testTask() Task[kvData, *kvModel] {
 	}
 }
 
+// testAccuracy is the accuracy check of the test task: two phases with fault between them, and
+// kvOracle; nil without a fault.
+func testAccuracy(fault string) *Accuracy[kvData, *kvModel] {
+	var f Fault
+	switch fault {
+	case "":
+		return nil
+	case "pause":
+		f = FaultFunc(0, "pause", "kv", func(context.Context) error { time.Sleep(20 * time.Millisecond); return nil })
+	case "wipe": // the application loses what it stored, as a store without durability would
+		f = FaultFunc(0, "wipe", "kv", func(ctx context.Context) error {
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, os.Getenv(targetEnv)+"/admin/wipe", nil)
+			if err != nil {
+				return err
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return err
+			}
+			return resp.Body.Close()
+		})
+	case "restart":
+		f = Restart(0, "kv")
+	case "flush":
+		f = Flush(0, "cache")
+	}
+	a := &Accuracy[kvData, *kvModel]{
+		Phases: 2,
+		Load:   Open{Rate: 100, Secs: time.Second, Warmup: 200 * time.Millisecond, Arrivals: Uniform},
+		Faults: []Fault{f},
+		Oracle: func(*check.History) ([]check.AnySpec, error) { return []check.AnySpec{kvSpec()}, nil },
+	}
+	if own := os.Getenv(ownWorkloadEnv); own != "" {
+		w := kvWorkload()
+		w.Operations = w.Operations[1:] // put
+		if own == "refused" {
+			w.Operations = append(w.Operations, workload.Operation[*kvModel]{Name: "refused", Weight: 1,
+				Build: func(*kvModel, *workload.Rand) workload.Request {
+					return workload.Request{Steps: []workload.Step{workload.HTTP("POST", "/kv/0")}, Info: kvInfo{}}
+				}})
+		}
+		a.Workload = &w
+	}
+	return a
+}
+
+// kvSpec is the test application's oracle: a key reads the last value written to it (the seed's
+// "0" before any), at once.
+func kvSpec() *check.Spec[check.Register[string], kvOp, string] {
+	return &check.Spec[check.Register[string], kvOp, string]{
+		Name: "kv",
+		Project: func(phases iter.Seq[[]check.Call], out *check.Projection[kvOp, string]) error {
+			for calls := range phases {
+				for i := range calls {
+					c := &calls[i]
+					var info kvInfo
+					if err := json.Unmarshal(c.Info, &info); err != nil {
+						return err
+					}
+					if c.Op == "refused" { // the application must refuse it: no state is read or written
+						if c.Steps[0].Status != http.StatusMethodNotAllowed {
+							out.Violation(c, "a POST was answered %d", c.Steps[0].Status)
+						}
+						continue
+					}
+					piece := check.Piece[kvOp, string]{Keys: []string{fmt.Sprint(info.Key)}, Origin: c, Unknown: c.Lost()}
+					switch c.Op {
+					case "put":
+						piece.Write, piece.In = true, kvOp{write: true, value: fmt.Sprint(info.Value)}
+					case "get":
+						if !piece.Unknown {
+							var body struct{ Value string }
+							if err := json.Unmarshal(c.Steps[0].Body, &body); err != nil {
+								out.Violation(c, "GET answered %q", c.Steps[0].Body)
+								continue
+							}
+							piece.Out = body.Value
+						}
+					}
+					out.Add(piece)
+				}
+			}
+			return nil
+		},
+		EffectWindow: 10 * time.Second,
+		Init:         func([]string) check.Register[string] { return check.NewRegister("0") },
+		Step: func(r check.Register[string], o check.Op[kvOp, string]) ([]check.Register[string], string) {
+			r = r.Prune(o.Floor, 0)
+			if o.In.write {
+				written := r.Write(o.In.value, o.Return)
+				if o.Unknown {
+					return []check.Register[string]{r, written}, ""
+				}
+				return []check.Register[string]{written}, ""
+			}
+			if o.Unknown || r.MayShow(o.Out, o.Call, 0) {
+				return []check.Register[string]{r}, ""
+			}
+			return nil, fmt.Sprintf("read %q", o.Out)
+		},
+		Equal: func(a, b check.Register[string]) bool { return a.Equal(b) },
+		Hash:  func(r check.Register[string]) uint64 { return r.Hash() },
+	}
+}
+
+type kvOp struct {
+	write bool
+	value string
+}
+
 // serverDelay is how long the test application takes per request: with latencies this long, the
 // open loop's send lag on a busy machine stays far below the guard's 10% of the latency.
 const serverDelay = 50 * time.Millisecond
@@ -163,9 +281,13 @@ func kvServer(t *testing.T, failing int) *httptest.Server {
 			w.WriteHeader(failing)
 			return
 		}
-		key := strings.TrimPrefix(r.URL.Path, "/kv/")
 		mu.Lock()
 		defer mu.Unlock()
+		if r.URL.Path == "/admin/wipe" {
+			clear(values)
+			return
+		}
+		key := strings.TrimPrefix(r.URL.Path, "/kv/")
 		switch r.Method {
 		case http.MethodPut:
 			body, _ := io.ReadAll(r.Body)
@@ -263,7 +385,7 @@ func TestCaptureRecordsAHistoryTheCheckerReads(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit %d, records %v", code, records)
 	}
-	raw, err := os.ReadFile(filepath.Join(artifacts, historyFile))
+	raw, err := os.ReadFile(filepath.Join(artifacts, phase.HistoryFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,22 +491,161 @@ func TestLoadsAreValidated(t *testing.T) {
 	}
 }
 
-func TestAFaultGoesBetweenPhases(t *testing.T) {
-	p := &phases{log: func(string) {}, now: time.Now, artifacts: t.TempDir()}
-	ran := false
-	action := func(context.Context) error { ran = true; return nil }
-	if err := p.fault(context.Background(), "restart", "kv", action); err == nil || ran {
-		t.Fatalf("a fault before the first phase ran: %v", err)
+// accuracyRun runs the test binary's accuracy command with fault and returns the report
+// directory, the exit code and the standard error.
+func accuracyRun(t *testing.T, target, fault string, env ...string) (string, int, string) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
 	}
-	p.next = 1
-	if err := p.fault(context.Background(), "Restart!", "kv", action); err == nil || ran {
-		t.Fatalf("a fault of a bad kind ran: %v", err)
+	out := filepath.Join(t.TempDir(), "accuracy")
+	cmd := exec.Command(exe, "accuracy", "--out", out, "--seed", "7")
+	cmd.Env = append(append(os.Environ(), targetEnv+"="+target, accuracyEnv+"="+fault), env...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	var exit *exec.ExitError
+	code := 0
+	if errors.As(err, &exit) {
+		code = exit.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
 	}
-	failing := func(context.Context) error { return errors.New("no such pod") }
-	if err := p.fault(context.Background(), "restart", "kv", failing); err == nil || !strings.Contains(err.Error(), "no such pod") {
-		t.Fatalf("a failed action: %v", err)
+	t.Logf("accuracy stderr:\n%s", stderr.String())
+	return out, code, stderr.String()
+}
+
+func TestAccuracyPassesAnApplicationThatKeepsItsWrites(t *testing.T) {
+	server := kvServer(t, 0)
+	out, code, _ := accuracyRun(t, server.URL, "pause")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
 	}
-	if len(p.faults) != 1 || p.faults[0].GetAfterPhase() != 0 {
-		t.Fatalf("the failed action was not recorded: %v", p.faults)
+	history, err := check.OpenHistory(filepath.Join(out, "history"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if history.Phases != 2 || len(history.Faults) != 1 || history.Faults[0].Kind != "pause" || history.Dataset == "" {
+		t.Fatalf("history: %d phases, faults %+v, dataset %q", history.Phases, history.Faults, history.Dataset)
+	}
+	if _, err := os.Stat(filepath.Join(out, "report.txt")); err != nil {
+		t.Fatal(err)
+	}
+	// The history is judged again without a run.
+	again := exec.Command(os.Args[0], "accuracy", "--history", filepath.Join(out, "history"), "--out", t.TempDir())
+	again.Env = append(os.Environ(), accuracyEnv+"=pause")
+	if err := again.Run(); err != nil {
+		t.Fatalf("judging the history again: %v", err)
+	}
+}
+
+func TestAccuracyFailsAnApplicationThatLosesItsWrites(t *testing.T) {
+	server := kvServer(t, 0)
+	_, code, stderr := accuracyRun(t, server.URL, "wipe")
+	if code != 1 || !strings.Contains(stderr, "FAIL") {
+		t.Fatalf("exit %d", code)
+	}
+}
+
+func TestAKubernetesFaultOnALocalSystemEndsTheRunUnknown(t *testing.T) {
+	server := kvServer(t, 0)
+	_, code, stderr := accuracyRun(t, server.URL, "restart")
+	if code != 2 || !strings.Contains(stderr, "microservices.Local cannot restart kv") {
+		t.Fatalf("exit %d", code)
+	}
+}
+
+func TestAKubernetesFaultMustActOnADeploymentTheAppOffers(t *testing.T) {
+	system := K8s(k8s.App{Name: "kv", Restartable: []string{"kv"}, Caches: map[string]k8s.CacheKind{"cache": k8s.Redis}}, workload.Get("/"))
+	check := func(faults ...Fault) error {
+		a := testAccuracy("pause")
+		a.Faults = faults
+		return a.validate(system)
+	}
+	if err := check(Restart(0, "kv"), RestartAll(0, "kv"), Exec(0, "cache", "true"), Flush(0, "cache"),
+		FaultFunc(0, "flush", "elsewhere", func(context.Context) error { return nil })); err != nil {
+		t.Fatal(err)
+	}
+	if err := check(RestartAll(0, "db")); err == nil || !strings.Contains(err.Error(), "restart_all on db: not one of the k8s.App's Restartable") {
+		t.Fatalf("got %v", err)
+	}
+	if err := check(Flush(0, "kv")); err == nil || !strings.Contains(err.Error(), "flush on kv: not one of the k8s.App's Caches") {
+		t.Fatalf("a flush of a Deployment that is not a cache: %v", err)
+	}
+}
+
+func TestAFlushOnALocalSystemEndsTheRunUnknown(t *testing.T) {
+	server := kvServer(t, 0)
+	_, code, stderr := accuracyRun(t, server.URL, "flush")
+	if code != 2 || !strings.Contains(stderr, "microservices.Local cannot flush cache") {
+		t.Fatalf("exit %d", code)
+	}
+}
+
+func TestAnAccuracyCheckRunsItsOwnWorkload(t *testing.T) {
+	server := kvServer(t, 0)
+	out, code, stderr := accuracyRun(t, server.URL, "pause", ownWorkloadEnv+"=refused")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	history, err := check.OpenHistory(filepath.Join(out, "history"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := map[string]int{}
+	for i := range history.Phases {
+		calls, err := history.Phase(i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range calls {
+			ops[c.Op]++
+		}
+	}
+	if ops["get"] != 0 || ops["put"] == 0 || ops["refused"] == 0 {
+		t.Fatalf("the check ran the task's workload, not its own: %v", ops)
+	}
+	// The refused requests are errors to loadgen, far above the Validity's error rate: no phase
+	// of a check is a measurement, so none is judged as one.
+	if strings.Contains(stderr, "not a measurement") || !strings.Contains(stderr, "operations sent") {
+		t.Fatalf("the phases were judged:\n%s", stderr)
+	}
+}
+
+func TestThePhasePodRunsTheChecksOwnGeneratorOnlyInACheck(t *testing.T) {
+	task := testTask()
+	if got := generatorCommand(task, "/t/bench", true); !slices.Equal(got, []string{"/t/bench"}) {
+		t.Fatalf("no Accuracy.Workload: %q", got)
+	}
+	w := kvWorkload()
+	task.Accuracy = &Accuracy[kvData, *kvModel]{Workload: &w}
+	if got := generatorCommand(task, "/t/bench", true); !slices.Equal(got, []string{"/t/bench", "accuracy-workload"}) {
+		t.Fatalf("Accuracy.Workload: %q", got)
+	}
+	if got := generatorCommand(task, "/t/bench", false); !slices.Equal(got, []string{"/t/bench"}) {
+		t.Fatalf("a benchmark's phase: %q", got)
+	}
+	task.Accuracy = &Accuracy[kvData, *kvModel]{Generator: []string{"./gen", "-x"}}
+	if got := generatorCommand(task, "/t/bench", true); !slices.Equal(got, []string{"/t/gen", "-x"}) {
+		t.Fatalf("Accuracy.Generator: %q", got)
+	}
+	if got := phaseCommand("/t/bench", true)("/w", "http://a"); !slices.Equal(got, []string{"/t/bench", "phase", "--accuracy", "--work", "/w", "--target", "http://a"}) {
+		t.Fatalf("an accuracy phase's command: %q", got)
+	}
+	both := &Accuracy[kvData, *kvModel]{Workload: &w, Generator: []string{"gen"}, Phases: 1, Oracle: testAccuracy("pause").Oracle}
+	if err := both.validate(task.System); err == nil || !strings.Contains(err.Error(), "at most one of Workload and Generator") {
+		t.Fatalf("both: %v", err)
+	}
+}
+
+func TestATaskWithAnOperationNameLoadgenRefusesIsRefusedBeforeItDeploys(t *testing.T) {
+	task := testTask()
+	w := *task.Workload
+	w.Operations = append([]workload.Operation[*kvModel](nil), w.Operations...)
+	w.Operations[0].Name = "config.create"
+	task.Workload = &w
+	if err := task.validate(); err == nil || !strings.Contains(err.Error(), `operation name "config.create" is not one loadgen takes`) {
+		t.Fatalf("got %v", err)
 	}
 }

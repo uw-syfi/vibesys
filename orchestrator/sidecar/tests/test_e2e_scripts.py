@@ -158,7 +158,7 @@ def test_a_worker_commits_checks_measures_then_hands_off_its_own_commit(
     last = machine.effects[-1]
     assert isinstance(last, Mcp)
     assert last.tool == "post_handoff"
-    assert last.arguments["commit"] == "c" * 40
+    assert last.arguments["worker"]["candidate"]["commit"] == "c" * 40
     assert last.arguments["claim"] == f"score {score}"
     assert last.arguments["plan_number"] == plan
 

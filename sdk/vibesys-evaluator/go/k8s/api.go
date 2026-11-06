@@ -8,8 +8,7 @@
 // subcommands. kubectl and buildctl run as subprocesses, behind the KubeAPI and Builder
 // interfaces; package k8stest holds an in-memory cluster and builder for tests.
 //
-// The cluster is the one the environment gives: KUBECONFIG, VIBESYS_K8S_REGISTRY and
-// VIBESYS_K8S_BUILDER (see ParseEnvironment).
+// The cluster is the one the job gives: the fields of KubernetesEnvironment (see ParseEnvironment).
 package k8s
 
 import (

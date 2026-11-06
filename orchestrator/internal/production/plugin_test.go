@@ -83,13 +83,10 @@ func launcher(t *testing.T) (*ProcessSidecars, Plugin) {
 }
 
 func lead(agent core.AgentID, session uint32) daemon.SessionStart {
-	return daemon.SessionStart{
-		Launch: core.LaunchSession{
-			Session: core.Session{Agent: agent, N: session}, Run: "run", Role: core.RoleLead,
-			Spec: core.AgentSpec{Harness: core.ClaudeCode},
-		},
-		Repository: "/repo", Task: "task",
-	}
+	start := sessionStart(string(agent), core.RoleLead, "/repo")
+	start.Launch.Session.N = session
+	start.Tools.Session = session
+	return start
 }
 
 // The request carries the skills, and the holder's own validation accepts it.

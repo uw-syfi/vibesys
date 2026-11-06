@@ -7,7 +7,10 @@ runs the generator. The generator is this script's ``generate`` (the Python
 workload), or, with ``KV_GO_GENERATOR`` set, that binary: the kv-store
 example's Go generator (``KV_STORE_SCALE=test`` selects this task's scale).
 With ``KV_CAPTURE`` set the sample records the accuracy history, with a fault
-between its phases.
+between its phases. ``accuracy`` is the task's accuracy check, with the
+oracle at ``KV_ORACLE``; ``KV_ACCURACY=restart`` gives it a restart between its
+phases, which a local system cannot apply, and ``KV_ACCURACY_WORKLOAD=writes`` a
+workload of its own (writes and reads, no deletes) instead of the benchmark's.
 """
 
 from __future__ import annotations
@@ -30,6 +33,25 @@ from vse_support import kv  # the tests directory is on PYTHONPATH
 
 GO_GENERATOR = os.environ.get("KV_GO_GENERATOR", "")
 CAPTURE = bool(os.environ.get("KV_CAPTURE"))
+FAULTS = [ms.Fault.restart("kv", after=0)] if os.environ.get("KV_ACCURACY") == "restart" else []
+OWN_WORKLOAD = ms.Workload(
+    model=kv.Model,
+    operations=[
+        ms.Operation(name="write", weight=3, build=kv.write),
+        ms.Operation(name="read", weight=1, build=kv.read),
+    ],
+    begin_phase=kv.begin_phase,
+)
+ACCURACY = ms.Accuracy(
+    phases=2,
+    rate=40,
+    secs=1,
+    warmup=0.5,
+    arrivals="uniform",
+    faults=FAULTS,
+    oracle=[os.environ.get("KV_ORACLE", "kv-oracle")],
+    workload=OWN_WORKLOAD if os.environ.get("KV_ACCURACY_WORKLOAD") == "writes" else None,
+)
 
 
 def _benchmark(run: ms.Run) -> None:
@@ -48,6 +70,7 @@ TASK = Task(
     metrics=kv.METRICS,
     validity=vse.Validity(),
     capture=CAPTURE,
+    accuracy=ACCURACY,
 )
 
 

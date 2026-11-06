@@ -246,12 +246,6 @@ func TestASpawnInheritsWhatItLeavesOut(t *testing.T) {
 	if got, _ := w.s.Agent(same); got.Spec != lead {
 		t.Fatalf("an unspecified spawn runs on %+v, want the lead's %+v", got.Spec, lead)
 	}
-	r := w.command(core.AgentCaller{Agent: leadID}, core.SpawnAgent{
-		Run: run, Role: core.RoleWorker, Spec: core.AgentSpec{Harness: core.Codex}, Brief: "work",
-	})
-	if got, _ := w.s.Agent(r.Agent); got.Spec != (core.AgentSpec{Harness: core.Codex}) {
-		t.Fatalf("a spawn on another harness runs on %+v: the lead's model means nothing there", got.Spec)
-	}
 }
 
 // The role table is one table, and every command goes through it. Each principal and action is
@@ -441,7 +435,7 @@ func TestALateSteerStartsTheNextTurn(t *testing.T) {
 func TestAHandedOffAgentWaitsForASteerStillInFlight(t *testing.T) {
 	w, run, leadID := started(t, 1, steers)
 	a := w.spawn(run, leadID, steers)
-	w.command(core.AgentCaller{Agent: a}, core.PostHandoff{Handoff: core.Handoff{Claim: "done"}})
+	w.command(core.AgentCaller{Agent: a}, core.PostHandoff{Handoff: done()})
 	sent := w.command(operator, core.SendMessage{Agent: a, Text: "one more thing"})
 	w.endTurn(a, core.TurnCompleted)
 	w.wantEffects()
@@ -467,7 +461,7 @@ func TestAHandoffWakesTheLeadOnce(t *testing.T) {
 		t.Run(fmt.Sprintf("steers=%v", caps.Steers), func(t *testing.T) {
 			w, run, leadID := started(t, 1, caps)
 			a := w.spawn(run, leadID, caps)
-			w.command(core.AgentCaller{Agent: a}, core.PostHandoff{Handoff: core.Handoff{Claim: "done"}})
+			w.command(core.AgentCaller{Agent: a}, core.PostHandoff{Handoff: done()})
 			turn := w.turn(leadID)
 			if turn.Trigger != core.TriggerHandoff {
 				t.Fatalf("the lead woke for %s", turn.Trigger)
@@ -805,7 +799,7 @@ func TestARefusalIsRememberedAcrossARestart(t *testing.T) {
 	if r.Refusal != core.RefuseRunNotFound {
 		t.Fatalf("refusal = %q", r.Refusal)
 	}
-	if got, recall := core.Replay(core.State{}, w.log).Recall(r.Command, r.Digest); recall != core.RecallRepeat || got != r {
+	if got, recall := core.Replay(core.State{}, w.log).Recall(r.Command, r.Digest); recall != core.RecallRepeat || !reflect.DeepEqual(got, r) {
 		t.Fatalf("after a restart: %+v (%s)", got, recall)
 	}
 }

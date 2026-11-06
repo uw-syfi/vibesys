@@ -118,6 +118,16 @@ const (
 	TriggerReminder        TurnTrigger = "reminder"
 )
 
+// Verdict is what a judge found of a candidate's claim.
+type Verdict string
+
+// The verdicts.
+const (
+	VerdictPass       Verdict = "pass"
+	VerdictFail       Verdict = "fail"
+	VerdictUnmeasured Verdict = "unmeasured"
+)
+
 // ReportKind says what a report is for.
 type ReportKind string
 
@@ -207,6 +217,11 @@ const (
 	// RefuseRepositoryInUse says another run that is not over works in the repository. The
 	// receipt's run is that run.
 	RefuseRepositoryInUse Refusal = "repository_in_use"
+	// RefuseAgentNotAllowed says the harness and model asked for are outside what the run may use.
+	// The receipt lists what is allowed.
+	RefuseAgentNotAllowed Refusal = "agent_not_allowed"
+	// RefuseHandoffNotYours says a handoff has no body, or the body of another role than its poster's.
+	RefuseHandoffNotYours Refusal = "handoff_not_yours"
 )
 
 // StartFailure says why a session never opened. The empty value means it did not fail to start.
@@ -223,6 +238,8 @@ const (
 	StartOther                 StartFailure = "other"
 	// StartIncompatibleVersions says what holds the session and this host share no protocol.
 	StartIncompatibleVersions StartFailure = "incompatible_versions"
+	// StartStateLocationTooLong says the place the host keeps sessions in is too long to reach one.
+	StartStateLocationTooLong StartFailure = "state_location_too_long"
 )
 
 // TimerKind says what a timer is for.

@@ -18,7 +18,6 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 )
 
@@ -117,6 +116,8 @@ type world struct {
 	onStdout func(written string)
 	// onStderr, when set, sees stderr as it is written.
 	onStderr func(written string)
+	// configs, when set, is the host's configuration in every root.
+	configs clientcli.HostConfigs
 }
 
 func newWorld(t testing.TB, dial client.Dialer) *world {
@@ -153,7 +154,7 @@ func (w *world) runUnbounded(ctx context.Context, args ...string) result {
 	stdout := &watchedBuffer{on: w.onStdout}
 	env := clientcli.Env{
 		Version: "test", Stdin: w.stdin, Stdout: stdout, Stderr: errb, Terminal: w.terminal,
-		Dir: w.dir, FS: w.files, Canonical: w.canonical, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
+		Dir: w.dir, Home: "/home/u", Configs: w.configs, FS: w.files, Canonical: w.canonical, Zone: time.UTC, Clock: w.clock, IDs: w.ids,
 		// No host answers HostControlService here, so a verb starts one, which is Connect.
 		Connect: func(string) (clientcli.Dial, error) { return w.dial, nil },
 		Locate: func(string) (clientcli.Dial, error) {
@@ -259,9 +260,7 @@ func (l *live) postReportOf(t testing.TB, lead, headline string, kind pb.ReportK
 		if string(s.Launch.Session.Agent) != lead {
 			continue
 		}
-		var n uint32
-		fmt.Sscan(s.Env[daemon.EnvSession], &n)
-		agent, err := client.Dial(ctx, l.AgentListener.Dial, client.Options{Session: &client.Session{Agent: s.Env[daemon.EnvAgent], Session: n, Token: s.Env[daemon.EnvToken]}})
+		agent, err := client.Dial(ctx, l.AgentListener.Dial, client.Options{Session: &client.Session{Agent: s.Credentials.GetAgent(), Session: s.Credentials.GetSession(), Token: s.Credentials.GetToken()}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -295,7 +294,7 @@ func (l *live) awaitRun(t testing.TB, run string, want func(*pb.Run) bool) {
 				return
 			}
 		}
-		if r := event.GetRunUpdated(); r.GetId() == run && want(r) {
+		if r := event.GetRun(); r.GetId() == run && want(r) {
 			return
 		}
 	}

@@ -1,6 +1,6 @@
 import {create} from '@bufbuild/protobuf';
 import {describe, expect, it} from '@effect/vitest';
-import {EventSchema, RunsSnapshotSchema, SearchStateSchema} from '@vibesys/orchestrator-proto';
+import {RunChangeSchema, RunsSnapshotSchema, SearchStateSchema} from '@vibesys/orchestrator-proto';
 import fc from 'fast-check';
 import {applyHostFrame, beginRunsStream, emptyHostModel} from '../host-model.js';
 import {applySearch, applySnapshot} from './fold.js';
@@ -149,7 +149,10 @@ it('search frames preserve the cursor and gap in arbitrary snapshot and event in
                     case: 'snapshot' as const,
                     value: create(RunsSnapshotSchema, {sequence: step.sequence}),
                   }
-                : {case: 'event' as const, value: create(EventSchema, {sequence: step.sequence})};
+                : {
+                    case: 'change' as const,
+                    value: create(RunChangeSchema, {sequence: step.sequence}),
+                  };
             model = applyHostFrame(model, {from: 'runs', body});
             withoutSearch = applyHostFrame(withoutSearch, {from: 'runs', body});
           }

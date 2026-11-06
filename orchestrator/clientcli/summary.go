@@ -28,6 +28,7 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 		}
 	}
 	row("task", "%s", v.Run.GetTask())
+	row("may use", "%s", allowedWords(v.Run.GetAllowedAgents()))
 	row("repository", "%s", v.Run.GetRepository())
 	row("started", "%s ago", age(now, v.Run.GetCreatedAt().AsTime()))
 	if v.Run.GetEndedAt() != nil {
@@ -43,9 +44,36 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 		row("measures", "%s", measures)
 	}
 	b.WriteString(usageRows(v))
+	if kept := v.Run.GetKeptCheckouts(); len(kept) > 0 {
+		row("kept", "%d working copies hold uncommitted changes to tracked files; commit or discard them, then `git worktree remove` each:", len(kept))
+		for _, k := range kept {
+			fmt.Fprintf(&b, "    %s  %s\n", k.GetAgentId(), k.GetLocation())
+		}
+	}
 	row("best", "%s", best(v.Search))
 	row("last report", "%s", lastReport(v, zone))
 	return b.String()
+}
+
+// allowedWords lists the agents a run may use: each harness with its model, or "default model" for a
+// harness the operator gave none.
+func allowedWords(allowed []*pb.AllowedAgent) string {
+	if len(allowed) == 0 {
+		return "not recorded"
+	}
+	parts := make([]string, 0, len(allowed))
+	for _, c := range allowed {
+		model := orDefault(c.GetModel())
+		parts = append(parts, statusWord(c.GetHarness().String(), "HARNESS_")+" "+model)
+	}
+	return strings.Join(parts, "; ")
+}
+
+func orDefault(model string) string {
+	if model == "" {
+		return "(default model)"
+	}
+	return model
 }
 
 func agentCounts(v *View) string {
@@ -84,14 +112,55 @@ func stallWords(v *View, now time.Time) string {
 	return ", stalled for " + age(now, v.Run.GetStalledSince().AsTime())
 }
 
+// unmeasured returns, in id order, the agents that are over and ran a turn yet recorded no usage: a
+// session killed or lost before its provider reported, so what it cost is missing from every total.
+// It is empty for a cut snapshot, which has not the turns to say.
+func unmeasured(v *View) []string {
+	if v.Truncated {
+		return nil
+	}
+	ran := map[string]bool{}
+	for _, t := range v.Turns {
+		ran[t.GetAgentId()] = true
+	}
+	var ids []string
+	for id, a := range v.Agents {
+		if over(a.GetStatus()) && ran[id] && !hasUsage(a.GetUsage()) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// over says an agent's session is finished for good.
+func over(s pb.AgentStatus) bool {
+	return s == pb.AgentStatus_AGENT_STATUS_ENDED || s == pb.AgentStatus_AGENT_STATUS_FAILED || s == pb.AgentStatus_AGENT_STATUS_LOST
+}
+
+// hasUsage says a usage reports anything at all.
+func hasUsage(u *pb.Usage) bool {
+	return u != nil && (u.InputTokens != nil || u.CacheReadTokens != nil || u.CacheCreationTokens != nil ||
+		u.OutputTokens != nil || u.ReasoningTokens != nil || u.CostUsd != nil)
+}
+
 // usageRows is what the run has cost: the run's total, and each agent's, from the orchestrator's own
 // tallies, which count every finished turn and so stay right when a snapshot was cut. An agent that
-// has finished no turn that reported a cost has no row.
+// has finished no turn that reported a cost has no row, except one that is over and reported none:
+// its cost is unknown, so the total says it leaves those out.
 func usageRows(v *View) string {
 	var b strings.Builder
 	total := usageWords(v.Run.GetUsage())
 	if total == "" {
 		total = "not reported yet"
+	}
+	missing := unmeasured(v)
+	switch len(missing) {
+	case 0:
+	case 1:
+		total += "; 1 agent ended without a measured cost, so this is not the whole cost"
+	default:
+		total += fmt.Sprintf("; %d agents ended without a measured cost, so this is not the whole cost", len(missing))
 	}
 	fmt.Fprintf(&b, "  %-11s %s\n", "usage", total)
 	ids := make([]string, 0, len(v.Agents))
@@ -101,7 +170,11 @@ func usageRows(v *View) string {
 	slices.Sort(ids)
 	for _, id := range ids {
 		a := v.Agents[id]
-		if words := usageWords(a.GetUsage()); words != "" {
+		words := usageWords(a.GetUsage())
+		if words == "" && slices.Contains(missing, id) {
+			words = "ended without a measured cost"
+		}
+		if words != "" {
 			fmt.Fprintf(&b, "    %-9s %s  %s\n", statusWord(a.GetRole().String(), "AGENT_ROLE_"), id, words)
 		}
 	}

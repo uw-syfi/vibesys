@@ -33,3 +33,11 @@ message DaemonDrain {
   string reason = 2;
   google.protobuf.Timestamp since = 3 [(buf.validate.field).required = true];
 }
+
+// DaemonPlaces is daemon-places.json in a runtime directory, written once, as protojson, before the
+// first daemon starts there. Any later start in the directory reuses it, so no caller has to carry a
+// state home in its environment, and every daemon of a directory keeps one store.
+message DaemonPlaces {
+  // The directory the daemon's state lives under.
+  string state_home = 1 [(buf.validate.field).string.pattern = "^/"];
+}

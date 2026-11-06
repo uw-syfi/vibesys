@@ -12,8 +12,10 @@
 // ({"event": PhaseEvent}), and ends with its response. See sdk/vibesys-evaluator/docs/spec.md
 // ("A phase" and "Core command line").
 //
-//   phase pod    run one phase where the phase pod runs: loadgen and the generator (long; events)
-//   phase judge  whether a phase's output is a measurement: the saturation guard and validity
+//   phase pod     run one phase where the phase pod runs: loadgen and the generator (long; events)
+//   phase judge   whether a phase's output is a measurement: the saturation guard and validity
+//   accuracy run  a language SDK's accuracy check: deploy, phases under capture with faults
+//                 between them, the oracle on the history (long; events)
 
 package evaluatorv1
 
@@ -31,6 +33,66 @@ const (
 	// Verify that runtime/protoimpl is sufficiently up-to-date.
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
+
+// AccuracyFaultAction is what a fault of an accuracy run does to the deployed application.
+type AccuracyFaultAction int32
+
+const (
+	AccuracyFaultAction_ACCURACY_FAULT_ACTION_UNSPECIFIED AccuracyFaultAction = 0
+	// Delete one pod of the Deployment (the first by name) and wait until it serves again.
+	AccuracyFaultAction_ACCURACY_FAULT_ACTION_RESTART AccuracyFaultAction = 1
+	// Delete every pod of the Deployment at once and wait until it serves again.
+	AccuracyFaultAction_ACCURACY_FAULT_ACTION_RESTART_ALL AccuracyFaultAction = 2
+	// Run argv in the Deployment's first pod; a nonzero exit fails the run.
+	AccuracyFaultAction_ACCURACY_FAULT_ACTION_EXEC AccuracyFaultAction = 3
+	// Empty the cache Deployment in place, in every pod (memcached's flush_all, redis's FLUSHALL).
+	AccuracyFaultAction_ACCURACY_FAULT_ACTION_FLUSH AccuracyFaultAction = 4
+)
+
+// Enum value maps for AccuracyFaultAction.
+var (
+	AccuracyFaultAction_name = map[int32]string{
+		0: "ACCURACY_FAULT_ACTION_UNSPECIFIED",
+		1: "ACCURACY_FAULT_ACTION_RESTART",
+		2: "ACCURACY_FAULT_ACTION_RESTART_ALL",
+		3: "ACCURACY_FAULT_ACTION_EXEC",
+		4: "ACCURACY_FAULT_ACTION_FLUSH",
+	}
+	AccuracyFaultAction_value = map[string]int32{
+		"ACCURACY_FAULT_ACTION_UNSPECIFIED": 0,
+		"ACCURACY_FAULT_ACTION_RESTART":     1,
+		"ACCURACY_FAULT_ACTION_RESTART_ALL": 2,
+		"ACCURACY_FAULT_ACTION_EXEC":        3,
+		"ACCURACY_FAULT_ACTION_FLUSH":       4,
+	}
+)
+
+func (x AccuracyFaultAction) Enum() *AccuracyFaultAction {
+	p := new(AccuracyFaultAction)
+	*p = x
+	return p
+}
+
+func (x AccuracyFaultAction) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AccuracyFaultAction) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_evaluator_v1_microservices_proto_enumTypes[0].Descriptor()
+}
+
+func (AccuracyFaultAction) Type() protoreflect.EnumType {
+	return &file_vibesys_evaluator_v1_microservices_proto_enumTypes[0]
+}
+
+func (x AccuracyFaultAction) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AccuracyFaultAction.Descriptor instead.
+func (AccuracyFaultAction) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_evaluator_v1_microservices_proto_rawDescGZIP(), []int{0}
+}
 
 // PhasePodRequest runs one phase in this process's machine or pod (`phase pod`): loadgen sends
 // the generator's request stream to the target and the pod's files are left in work_dir.
@@ -532,11 +594,385 @@ func (x *PhaseJudgeResponse) GetLog() []string {
 	return nil
 }
 
+// AccuracyFault is a fault an accuracy run applies between two phases, recorded in the history
+// as a FaultEvent.
+type AccuracyFault struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The phase it follows, from 0; the last phase is followed by none.
+	AfterPhase uint32              `protobuf:"varint,1,opt,name=after_phase,json=afterPhase,proto3" json:"after_phase,omitempty"`
+	Action     AccuracyFaultAction `protobuf:"varint,2,opt,name=action,proto3,enum=vibesys.evaluator.v1.AccuracyFaultAction" json:"action,omitempty"`
+	// The Deployment it acts on: one of the App's restartable ones or caches; FLUSH: one of its
+	// caches.
+	Deployment string `protobuf:"bytes,3,opt,name=deployment,proto3" json:"deployment,omitempty"`
+	// EXEC: the command.
+	Argv []string `protobuf:"bytes,4,rep,name=argv,proto3" json:"argv,omitempty"`
+	// The FaultEvent's kind; empty: restart, restart_all, exec or flush.
+	Kind          string `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccuracyFault) Reset() {
+	*x = AccuracyFault{}
+	mi := &file_vibesys_evaluator_v1_microservices_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccuracyFault) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccuracyFault) ProtoMessage() {}
+
+func (x *AccuracyFault) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_evaluator_v1_microservices_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccuracyFault.ProtoReflect.Descriptor instead.
+func (*AccuracyFault) Descriptor() ([]byte, []int) {
+	return file_vibesys_evaluator_v1_microservices_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *AccuracyFault) GetAfterPhase() uint32 {
+	if x != nil {
+		return x.AfterPhase
+	}
+	return 0
+}
+
+func (x *AccuracyFault) GetAction() AccuracyFaultAction {
+	if x != nil {
+		return x.Action
+	}
+	return AccuracyFaultAction_ACCURACY_FAULT_ACTION_UNSPECIFIED
+}
+
+func (x *AccuracyFault) GetDeployment() string {
+	if x != nil {
+		return x.Deployment
+	}
+	return ""
+}
+
+func (x *AccuracyFault) GetArgv() []string {
+	if x != nil {
+		return x.Argv
+	}
+	return nil
+}
+
+func (x *AccuracyFault) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+// AccuracyLocal is an application already running at target (no Kubernetes): the seed and the
+// phases run as child processes of the core.
+type AccuracyLocal struct {
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Target string                 `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
+	// The seed command; empty when the task has none.
+	Seed          []string `protobuf:"bytes,2,rep,name=seed,proto3" json:"seed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccuracyLocal) Reset() {
+	*x = AccuracyLocal{}
+	mi := &file_vibesys_evaluator_v1_microservices_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccuracyLocal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccuracyLocal) ProtoMessage() {}
+
+func (x *AccuracyLocal) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_evaluator_v1_microservices_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccuracyLocal.ProtoReflect.Descriptor instead.
+func (*AccuracyLocal) Descriptor() ([]byte, []int) {
+	return file_vibesys_evaluator_v1_microservices_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AccuracyLocal) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *AccuracyLocal) GetSeed() []string {
+	if x != nil {
+		return x.Seed
+	}
+	return nil
+}
+
+// AccuracyRunRequest is a language SDK's accuracy check (`accuracy run`): the core deploys and
+// seeds the application, runs `phases` open-loop phases of `load` with capture on, the faults
+// between them, writes the accuracy history into history_dir, tears the application down and runs
+// the oracle on the history. No phase is judged as a measurement: the oracle judges every
+// response. Progress is written as {"event": PhaseEvent} lines.
+type AccuracyRunRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to System:
+	//
+	//	*AccuracyRunRequest_K8S
+	//	*AccuracyRunRequest_Local
+	System isAccuracyRunRequest_System `protobuf_oneof:"system"`
+	// The phase pod's command, before `--work DIR --target URL` (python bench.py phase --accuracy).
+	PhaseCommand []string `protobuf:"bytes,3,rep,name=phase_command,json=phaseCommand,proto3" json:"phase_command,omitempty"`
+	// The sample's seed: every phase's streams derive from it.
+	SampleSeed uint64 `protobuf:"varint,4,opt,name=sample_seed,json=sampleSeed,proto3" json:"sample_seed,omitempty"`
+	Phases     uint32 `protobuf:"varint,5,opt,name=phases,proto3" json:"phases,omitempty"`
+	// Each phase's load: an open loop's rate, arrivals, secs and warmup_secs.
+	Load   *PhaseInput      `protobuf:"bytes,6,opt,name=load,proto3" json:"load,omitempty"`
+	Faults []*AccuracyFault `protobuf:"bytes,7,rep,name=faults,proto3" json:"faults,omitempty"`
+	// Where the history goes: a new or empty directory holding the dataset file (dataset.json),
+	// written by the caller. A path because the history is files on the caller's machine: the
+	// phases write them, the oracle program is given the directory (--history), and the caller
+	// keeps it as the run's artifact.
+	HistoryDir string `protobuf:"bytes,9,opt,name=history_dir,json=historyDir,proto3" json:"history_dir,omitempty"`
+	// The oracle (a program on go/check's Main), before `--history DIR --out DIR`; empty: the
+	// history is only recorded.
+	Oracle []string `protobuf:"bytes,10,rep,name=oracle,proto3" json:"oracle,omitempty"`
+	// Where the oracle writes its report (/vibesys/artifacts/accuracy when empty). A path because
+	// the report and the failures' timelines are files the oracle program writes (--out) for the
+	// job's artifacts.
+	OutDir        string `protobuf:"bytes,11,opt,name=out_dir,json=outDir,proto3" json:"out_dir,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccuracyRunRequest) Reset() {
+	*x = AccuracyRunRequest{}
+	mi := &file_vibesys_evaluator_v1_microservices_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccuracyRunRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccuracyRunRequest) ProtoMessage() {}
+
+func (x *AccuracyRunRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_evaluator_v1_microservices_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccuracyRunRequest.ProtoReflect.Descriptor instead.
+func (*AccuracyRunRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_evaluator_v1_microservices_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AccuracyRunRequest) GetSystem() isAccuracyRunRequest_System {
+	if x != nil {
+		return x.System
+	}
+	return nil
+}
+
+func (x *AccuracyRunRequest) GetK8S() *K8SDeployRequest {
+	if x != nil {
+		if x, ok := x.System.(*AccuracyRunRequest_K8S); ok {
+			return x.K8S
+		}
+	}
+	return nil
+}
+
+func (x *AccuracyRunRequest) GetLocal() *AccuracyLocal {
+	if x != nil {
+		if x, ok := x.System.(*AccuracyRunRequest_Local); ok {
+			return x.Local
+		}
+	}
+	return nil
+}
+
+func (x *AccuracyRunRequest) GetPhaseCommand() []string {
+	if x != nil {
+		return x.PhaseCommand
+	}
+	return nil
+}
+
+func (x *AccuracyRunRequest) GetSampleSeed() uint64 {
+	if x != nil {
+		return x.SampleSeed
+	}
+	return 0
+}
+
+func (x *AccuracyRunRequest) GetPhases() uint32 {
+	if x != nil {
+		return x.Phases
+	}
+	return 0
+}
+
+func (x *AccuracyRunRequest) GetLoad() *PhaseInput {
+	if x != nil {
+		return x.Load
+	}
+	return nil
+}
+
+func (x *AccuracyRunRequest) GetFaults() []*AccuracyFault {
+	if x != nil {
+		return x.Faults
+	}
+	return nil
+}
+
+func (x *AccuracyRunRequest) GetHistoryDir() string {
+	if x != nil {
+		return x.HistoryDir
+	}
+	return ""
+}
+
+func (x *AccuracyRunRequest) GetOracle() []string {
+	if x != nil {
+		return x.Oracle
+	}
+	return nil
+}
+
+func (x *AccuracyRunRequest) GetOutDir() string {
+	if x != nil {
+		return x.OutDir
+	}
+	return ""
+}
+
+type isAccuracyRunRequest_System interface {
+	isAccuracyRunRequest_System()
+}
+
+type AccuracyRunRequest_K8S struct {
+	// On Kubernetes: the request of `k8s deploy` (app, task_dir, project_root, work_dir,
+	// artifacts_dir, probe_plan_file, seed).
+	K8S *K8SDeployRequest `protobuf:"bytes,1,opt,name=k8s,proto3,oneof"`
+}
+
+type AccuracyRunRequest_Local struct {
+	Local *AccuracyLocal `protobuf:"bytes,2,opt,name=local,proto3,oneof"`
+}
+
+func (*AccuracyRunRequest_K8S) isAccuracyRunRequest_System() {}
+
+func (*AccuracyRunRequest_Local) isAccuracyRunRequest_System() {}
+
+// AccuracyRunResponse is the verdict, when an oracle ran.
+type AccuracyRunResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// PASS, FAIL or UNKNOWN; empty when no oracle ran.
+	Verdict string `protobuf:"bytes,1,opt,name=verdict,proto3" json:"verdict,omitempty"`
+	// The accuracy command's exit status: 0 PASS, 1 FAIL, 2 UNKNOWN.
+	ExitCode      int32  `protobuf:"varint,2,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	Phases        uint32 `protobuf:"varint,3,opt,name=phases,proto3" json:"phases,omitempty"`
+	Faults        uint32 `protobuf:"varint,4,opt,name=faults,proto3" json:"faults,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccuracyRunResponse) Reset() {
+	*x = AccuracyRunResponse{}
+	mi := &file_vibesys_evaluator_v1_microservices_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccuracyRunResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccuracyRunResponse) ProtoMessage() {}
+
+func (x *AccuracyRunResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_evaluator_v1_microservices_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccuracyRunResponse.ProtoReflect.Descriptor instead.
+func (*AccuracyRunResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_evaluator_v1_microservices_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *AccuracyRunResponse) GetVerdict() string {
+	if x != nil {
+		return x.Verdict
+	}
+	return ""
+}
+
+func (x *AccuracyRunResponse) GetExitCode() int32 {
+	if x != nil {
+		return x.ExitCode
+	}
+	return 0
+}
+
+func (x *AccuracyRunResponse) GetPhases() uint32 {
+	if x != nil {
+		return x.Phases
+	}
+	return 0
+}
+
+func (x *AccuracyRunResponse) GetFaults() uint32 {
+	if x != nil {
+		return x.Faults
+	}
+	return 0
+}
+
 var File_vibesys_evaluator_v1_microservices_proto protoreflect.FileDescriptor
 
 const file_vibesys_evaluator_v1_microservices_proto_rawDesc = "" +
 	"\n" +
-	"(vibesys/evaluator/v1/microservices.proto\x12\x14vibesys.evaluator.v1\x1a vibesys/evaluator/v1/phase.proto\"\xcf\x01\n" +
+	"(vibesys/evaluator/v1/microservices.proto\x12\x14vibesys.evaluator.v1\x1a\x1evibesys/evaluator/v1/k8s.proto\x1a vibesys/evaluator/v1/phase.proto\"\xcf\x01\n" +
 	"\x0fPhasePodRequest\x12\x19\n" +
 	"\bwork_dir\x18\x01 \x01(\tR\aworkDir\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\x12\x1c\n" +
@@ -571,7 +1007,45 @@ const file_vibesys_evaluator_v1_microservices_proto_rawDesc = "" +
 	"\x12PhaseJudgeResponse\x12H\n" +
 	"\vmeasurement\x18\x01 \x01(\v2&.vibesys.evaluator.v1.PhaseMeasurementR\vmeasurement\x12\x18\n" +
 	"\afailure\x18\x02 \x01(\tR\afailure\x12\x10\n" +
-	"\x03log\x18\x03 \x03(\tR\x03logBZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3"
+	"\x03log\x18\x03 \x03(\tR\x03log\"\xbb\x01\n" +
+	"\rAccuracyFault\x12\x1f\n" +
+	"\vafter_phase\x18\x01 \x01(\rR\n" +
+	"afterPhase\x12A\n" +
+	"\x06action\x18\x02 \x01(\x0e2).vibesys.evaluator.v1.AccuracyFaultActionR\x06action\x12\x1e\n" +
+	"\n" +
+	"deployment\x18\x03 \x01(\tR\n" +
+	"deployment\x12\x12\n" +
+	"\x04argv\x18\x04 \x03(\tR\x04argv\x12\x12\n" +
+	"\x04kind\x18\x05 \x01(\tR\x04kind\";\n" +
+	"\rAccuracyLocal\x12\x16\n" +
+	"\x06target\x18\x01 \x01(\tR\x06target\x12\x12\n" +
+	"\x04seed\x18\x02 \x03(\tR\x04seed\"\xca\x03\n" +
+	"\x12AccuracyRunRequest\x12:\n" +
+	"\x03k8s\x18\x01 \x01(\v2&.vibesys.evaluator.v1.K8sDeployRequestH\x00R\x03k8s\x12;\n" +
+	"\x05local\x18\x02 \x01(\v2#.vibesys.evaluator.v1.AccuracyLocalH\x00R\x05local\x12#\n" +
+	"\rphase_command\x18\x03 \x03(\tR\fphaseCommand\x12\x1f\n" +
+	"\vsample_seed\x18\x04 \x01(\x04R\n" +
+	"sampleSeed\x12\x16\n" +
+	"\x06phases\x18\x05 \x01(\rR\x06phases\x124\n" +
+	"\x04load\x18\x06 \x01(\v2 .vibesys.evaluator.v1.PhaseInputR\x04load\x12;\n" +
+	"\x06faults\x18\a \x03(\v2#.vibesys.evaluator.v1.AccuracyFaultR\x06faults\x12\x1f\n" +
+	"\vhistory_dir\x18\t \x01(\tR\n" +
+	"historyDir\x12\x16\n" +
+	"\x06oracle\x18\n" +
+	" \x03(\tR\x06oracle\x12\x17\n" +
+	"\aout_dir\x18\v \x01(\tR\x06outDirB\b\n" +
+	"\x06systemJ\x04\b\b\x10\tR\bvalidity\"|\n" +
+	"\x13AccuracyRunResponse\x12\x18\n" +
+	"\averdict\x18\x01 \x01(\tR\averdict\x12\x1b\n" +
+	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x16\n" +
+	"\x06phases\x18\x03 \x01(\rR\x06phases\x12\x16\n" +
+	"\x06faults\x18\x04 \x01(\rR\x06faults*\xc7\x01\n" +
+	"\x13AccuracyFaultAction\x12%\n" +
+	"!ACCURACY_FAULT_ACTION_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x1dACCURACY_FAULT_ACTION_RESTART\x10\x01\x12%\n" +
+	"!ACCURACY_FAULT_ACTION_RESTART_ALL\x10\x02\x12\x1e\n" +
+	"\x1aACCURACY_FAULT_ACTION_EXEC\x10\x03\x12\x1f\n" +
+	"\x1bACCURACY_FAULT_ACTION_FLUSH\x10\x04BZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3"
 
 var (
 	file_vibesys_evaluator_v1_microservices_proto_rawDescOnce sync.Once
@@ -585,26 +1059,38 @@ func file_vibesys_evaluator_v1_microservices_proto_rawDescGZIP() []byte {
 	return file_vibesys_evaluator_v1_microservices_proto_rawDescData
 }
 
-var file_vibesys_evaluator_v1_microservices_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_vibesys_evaluator_v1_microservices_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_vibesys_evaluator_v1_microservices_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_vibesys_evaluator_v1_microservices_proto_goTypes = []any{
-	(*PhasePodRequest)(nil),    // 0: vibesys.evaluator.v1.PhasePodRequest
-	(*PhasePodResponse)(nil),   // 1: vibesys.evaluator.v1.PhasePodResponse
-	(*PhaseEvent)(nil),         // 2: vibesys.evaluator.v1.PhaseEvent
-	(*PhaseValidity)(nil),      // 3: vibesys.evaluator.v1.PhaseValidity
-	(*PhaseJudgeRequest)(nil),  // 4: vibesys.evaluator.v1.PhaseJudgeRequest
-	(*PhaseMeasurement)(nil),   // 5: vibesys.evaluator.v1.PhaseMeasurement
-	(*PhaseJudgeResponse)(nil), // 6: vibesys.evaluator.v1.PhaseJudgeResponse
-	(*PhaseInput)(nil),         // 7: vibesys.evaluator.v1.PhaseInput
+	(AccuracyFaultAction)(0),    // 0: vibesys.evaluator.v1.AccuracyFaultAction
+	(*PhasePodRequest)(nil),     // 1: vibesys.evaluator.v1.PhasePodRequest
+	(*PhasePodResponse)(nil),    // 2: vibesys.evaluator.v1.PhasePodResponse
+	(*PhaseEvent)(nil),          // 3: vibesys.evaluator.v1.PhaseEvent
+	(*PhaseValidity)(nil),       // 4: vibesys.evaluator.v1.PhaseValidity
+	(*PhaseJudgeRequest)(nil),   // 5: vibesys.evaluator.v1.PhaseJudgeRequest
+	(*PhaseMeasurement)(nil),    // 6: vibesys.evaluator.v1.PhaseMeasurement
+	(*PhaseJudgeResponse)(nil),  // 7: vibesys.evaluator.v1.PhaseJudgeResponse
+	(*AccuracyFault)(nil),       // 8: vibesys.evaluator.v1.AccuracyFault
+	(*AccuracyLocal)(nil),       // 9: vibesys.evaluator.v1.AccuracyLocal
+	(*AccuracyRunRequest)(nil),  // 10: vibesys.evaluator.v1.AccuracyRunRequest
+	(*AccuracyRunResponse)(nil), // 11: vibesys.evaluator.v1.AccuracyRunResponse
+	(*PhaseInput)(nil),          // 12: vibesys.evaluator.v1.PhaseInput
+	(*K8SDeployRequest)(nil),    // 13: vibesys.evaluator.v1.K8sDeployRequest
 }
 var file_vibesys_evaluator_v1_microservices_proto_depIdxs = []int32{
-	7, // 0: vibesys.evaluator.v1.PhaseJudgeRequest.input:type_name -> vibesys.evaluator.v1.PhaseInput
-	3, // 1: vibesys.evaluator.v1.PhaseJudgeRequest.validity:type_name -> vibesys.evaluator.v1.PhaseValidity
-	5, // 2: vibesys.evaluator.v1.PhaseJudgeResponse.measurement:type_name -> vibesys.evaluator.v1.PhaseMeasurement
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	12, // 0: vibesys.evaluator.v1.PhaseJudgeRequest.input:type_name -> vibesys.evaluator.v1.PhaseInput
+	4,  // 1: vibesys.evaluator.v1.PhaseJudgeRequest.validity:type_name -> vibesys.evaluator.v1.PhaseValidity
+	6,  // 2: vibesys.evaluator.v1.PhaseJudgeResponse.measurement:type_name -> vibesys.evaluator.v1.PhaseMeasurement
+	0,  // 3: vibesys.evaluator.v1.AccuracyFault.action:type_name -> vibesys.evaluator.v1.AccuracyFaultAction
+	13, // 4: vibesys.evaluator.v1.AccuracyRunRequest.k8s:type_name -> vibesys.evaluator.v1.K8sDeployRequest
+	9,  // 5: vibesys.evaluator.v1.AccuracyRunRequest.local:type_name -> vibesys.evaluator.v1.AccuracyLocal
+	12, // 6: vibesys.evaluator.v1.AccuracyRunRequest.load:type_name -> vibesys.evaluator.v1.PhaseInput
+	8,  // 7: vibesys.evaluator.v1.AccuracyRunRequest.faults:type_name -> vibesys.evaluator.v1.AccuracyFault
+	8,  // [8:8] is the sub-list for method output_type
+	8,  // [8:8] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_evaluator_v1_microservices_proto_init() }
@@ -612,19 +1098,25 @@ func file_vibesys_evaluator_v1_microservices_proto_init() {
 	if File_vibesys_evaluator_v1_microservices_proto != nil {
 		return
 	}
+	file_vibesys_evaluator_v1_k8s_proto_init()
 	file_vibesys_evaluator_v1_phase_proto_init()
+	file_vibesys_evaluator_v1_microservices_proto_msgTypes[9].OneofWrappers = []any{
+		(*AccuracyRunRequest_K8S)(nil),
+		(*AccuracyRunRequest_Local)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_evaluator_v1_microservices_proto_rawDesc), len(file_vibesys_evaluator_v1_microservices_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   7,
+			NumEnums:      1,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_vibesys_evaluator_v1_microservices_proto_goTypes,
 		DependencyIndexes: file_vibesys_evaluator_v1_microservices_proto_depIdxs,
+		EnumInfos:         file_vibesys_evaluator_v1_microservices_proto_enumTypes,
 		MessageInfos:      file_vibesys_evaluator_v1_microservices_proto_msgTypes,
 	}.Build()
 	File_vibesys_evaluator_v1_microservices_proto = out.File

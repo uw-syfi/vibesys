@@ -136,7 +136,10 @@ func printLeases(d deps, st *cliv1.StatusResponse) {
 // runs or replaces one older than this build, and waits until it answers. A caller that is not a
 // command line, such as the orchestrator, runs this and reads the exit code only: 0 means a
 // compatible daemon answers, and 4 means none does, whatever the reason; the message names it.
-// Only a command that is itself malformed ends otherwise, with 2.
+// Only a command that is itself malformed ends otherwise, with 2. With --json the answer says how to
+// reach the daemon, so such a caller rebuilds no path of ours. It is also the one command that records
+// where a directory's daemon keeps state from a process that was told which directory to use: the host
+// runs it, an agent's commands only find what it set up.
 func daemonEnsure(ctx context.Context, d deps, args []string) int {
 	fs, c := newFlags("daemon ensure", d)
 	if _, err := parse(fs, args); err != nil {
@@ -150,7 +153,8 @@ func daemonEnsure(ctx context.Context, d deps, args []string) int {
 	st, err := client.Ensure(ctx, opts)
 	if err == nil {
 		if c.json {
-			printJSON(d, st)
+			place := opts.Rendezvous.Place()
+			printJSON(d, &cliv1.DaemonEnsureResponse{Socket: place.Socket, Versions: st.GetVersions(), RuntimeDirectory: place.RuntimeDirectory})
 		} else {
 			fmt.Fprintf(d.stdout, "ready\tpid %d\tversion %s\n", st.GetPid(), st.GetVersions().GetBinaryVersion())
 		}

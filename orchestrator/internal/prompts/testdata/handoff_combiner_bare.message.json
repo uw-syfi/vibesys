@@ -1,0 +1,17 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-x1",
+  "handoff": {
+    "claim": "One part applied.",
+    "combiner": {
+      "applied": "plan 2",
+      "branch": "combined",
+      "commit": "cccccccccccccccccccccccccccccccccccccccc"
+    },
+    "planNumber": 4
+  },
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}

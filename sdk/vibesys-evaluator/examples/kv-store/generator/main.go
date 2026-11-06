@@ -10,8 +10,13 @@
 //	kv-generator benchmark --vs-output records.jsonl [--seed N]
 //
 // against the application at $KV_TARGET (microservices.Local: started by whoever runs it).
-// Whether the responses are right is the accuracy check's to judge (../oracle), from the history
-// a run with KV_CAPTURE=1 records.
+// Whether the responses are right is the accuracy check's to judge:
+//
+//	kv-generator accuracy [--out DIR] [--seed N]
+//
+// runs two phases at a modest rate with the history captured and a pause between them, then
+// judges the history with the oracle's specs (../oracle/kvcheck) in-process. The oracle program
+// (../oracle) judges the history a benchmark with KV_CAPTURE=1 records the same way.
 package main
 
 import (
@@ -23,6 +28,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"example.com/kv-store/oracle/kvcheck"
 
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/evaluator"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/microservices"
@@ -191,9 +198,9 @@ func seed(ctx context.Context, target string, data *Data) error {
 }
 
 func main() {
-	scale := Example
+	scale, values := Example, kvcheck.Example
 	if os.Getenv("KV_STORE_SCALE") == "test" {
-		scale = Test
+		scale, values = Test, kvcheck.Test
 	}
 	target := os.Getenv("KV_TARGET")
 	capture := os.Getenv("KV_CAPTURE") != ""
@@ -210,6 +217,14 @@ func main() {
 		Seed:     func(ctx context.Context, data *Data) error { return seed(ctx, target, data) },
 		Workload: &kv,
 		Capture:  capture,
+		// The accuracy check: on Kubernetes (microservices.K8s) its faults would be Restart,
+		// RestartAll or Exec on the kv Deployment; a local application is the task's to pause.
+		Accuracy: &microservices.Accuracy[*Data, *Model]{
+			Phases: 2,
+			Load:   microservices.Open{Rate: 40, Secs: time.Second, Warmup: 500 * time.Millisecond, Arrivals: microservices.Uniform},
+			Faults: []microservices.Fault{microservices.FaultFunc(0, "pause", "kv", func(context.Context) error { return nil })},
+			Oracle: kvcheck.Oracle(values),
+		},
 		Benchmark: func(ctx context.Context, run *microservices.Run) error {
 			rate, secs, warmup := 2000.0, 60*time.Second, 15*time.Second // bench.py's
 			if scale == Test {

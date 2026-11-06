@@ -27,7 +27,7 @@ from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as vibesys_dot_orchestrator_dot_v1_dot_orchestrator__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%vibesys/orchestrator/v1/effects.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\xd2\x03\n\x06\x45\x66\x66\x65\x63t\x12\x17\n\x02id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x02id\x12O\n\x0elaunch_session\x18\n \x01(\x0b\x32&.vibesys.orchestrator.v1.LaunchSessionH\x00R\rlaunchSession\x12\x43\n\nstart_turn\x18\x0b \x01(\x0b\x32\".vibesys.orchestrator.v1.StartTurnH\x00R\tstartTurn\x12\x36\n\x05steer\x18\x0c \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.SteerH\x00R\x05steer\x12\x42\n\tinterrupt\x18\r \x01(\x0b\x32\".vibesys.orchestrator.v1.InterruptH\x00R\tinterrupt\x12L\n\rclose_session\x18\x0e \x01(\x0b\x32%.vibesys.orchestrator.v1.CloseSessionH\x00R\x0c\x63loseSession\x12@\n\tarm_timer\x18\x0f \x01(\x0b\x32!.vibesys.orchestrator.v1.ArmTimerH\x00R\x08\x61rmTimerB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"S\n\nSessionRef\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12!\n\x07session\x18\x02 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x07session\"\xf0\x02\n\rLaunchSession\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12\x1e\n\x06run_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\x12\x42\n\x04role\x18\x03 \x01(\x0e\x32\".vibesys.orchestrator.v1.AgentRoleB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x04role\x12\x46\n\x07harness\x18\x04 \x01(\x0e\x32 .vibesys.orchestrator.v1.HarnessB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x07harness\x12\x14\n\x05model\x18\x05 \x01(\tR\x05model\x12)\n\x10reasoning_effort\x18\x06 \x01(\tR\x0freasoningEffort\x12+\n\x0cresume_token\x18\x07 \x01(\x0c\x42\x08\xbaH\x05z\x03\x18\x80 R\x0bresumeToken\"\xb8\x01\n\tStartTurn\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12 \n\x07turn_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x06turnId\x12\x42\n\x07message\x18\x03 \x01(\x0b\x32 .vibesys.orchestrator.v1.MessageB\x06\xbaH\x03\xc8\x01\x01R\x07message\"\xb4\x01\n\x05Steer\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12 \n\x07turn_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x06turnId\x12\x42\n\x07message\x18\x03 \x01(\x0b\x32 .vibesys.orchestrator.v1.MessageB\x06\xbaH\x03\xc8\x01\x01R\x07message\"t\n\tInterrupt\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12 \n\x07turn_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x06turnId\"k\n\x0c\x43loseSession\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12\x14\n\x05\x66orce\x18\x02 \x01(\x08R\x05\x66orce\"\xa0\x03\n\x08\x41rmTimer\x12\x42\n\x04kind\x18\x01 \x01(\x0e\x32\".vibesys.orchestrator.v1.TimerKindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1e\n\x06run_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\x12=\n\x07session\x18\x03 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefR\x07session\x12;\n\x07\x66ire_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06\x66ireAt:\xb3\x01\xbaH\xaf\x01\x1a\xac\x01\n\x11\x61rm_timer.session\x12^a stop grace and a launch deadline name a session; a run deadline and a lead idle timer do not\x1a\x37has(this.session) == (this.kind == 2 || this.kind == 3)*\x99\x01\n\tTimerKind\x12\x1a\n\x16TIMER_KIND_UNSPECIFIED\x10\x00\x12\x1b\n\x17TIMER_KIND_RUN_DEADLINE\x10\x01\x12\x19\n\x15TIMER_KIND_STOP_GRACE\x10\x02\x12\x1e\n\x1aTIMER_KIND_LAUNCH_DEADLINE\x10\x03\x12\x18\n\x14TIMER_KIND_LEAD_IDLE\x10\x04\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n%vibesys/orchestrator/v1/effects.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"\xac\x04\n\x06\x45\x66\x66\x65\x63t\x12\x17\n\x02id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x02id\x12O\n\x0elaunch_session\x18\n \x01(\x0b\x32&.vibesys.orchestrator.v1.LaunchSessionH\x00R\rlaunchSession\x12\x43\n\nstart_turn\x18\x0b \x01(\x0b\x32\".vibesys.orchestrator.v1.StartTurnH\x00R\tstartTurn\x12\x36\n\x05steer\x18\x0c \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.SteerH\x00R\x05steer\x12\x42\n\tinterrupt\x18\r \x01(\x0b\x32\".vibesys.orchestrator.v1.InterruptH\x00R\tinterrupt\x12L\n\rclose_session\x18\x0e \x01(\x0b\x32%.vibesys.orchestrator.v1.CloseSessionH\x00R\x0c\x63loseSession\x12@\n\tarm_timer\x18\x0f \x01(\x0b\x32!.vibesys.orchestrator.v1.ArmTimerH\x00R\x08\x61rmTimer\x12X\n\x11release_checkouts\x18\x10 \x01(\x0b\x32).vibesys.orchestrator.v1.ReleaseCheckoutsH\x00R\x10releaseCheckoutsB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"S\n\nSessionRef\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12!\n\x07session\x18\x02 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x07session\"\xf0\x02\n\rLaunchSession\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12\x1e\n\x06run_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\x12\x42\n\x04role\x18\x03 \x01(\x0e\x32\".vibesys.orchestrator.v1.AgentRoleB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x04role\x12\x46\n\x07harness\x18\x04 \x01(\x0e\x32 .vibesys.orchestrator.v1.HarnessB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x07harness\x12\x14\n\x05model\x18\x05 \x01(\tR\x05model\x12)\n\x10reasoning_effort\x18\x06 \x01(\tR\x0freasoningEffort\x12+\n\x0cresume_token\x18\x07 \x01(\x0c\x42\x08\xbaH\x05z\x03\x18\x80 R\x0bresumeToken\"\xb8\x01\n\tStartTurn\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12 \n\x07turn_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x06turnId\x12\x42\n\x07message\x18\x03 \x01(\x0b\x32 .vibesys.orchestrator.v1.MessageB\x06\xbaH\x03\xc8\x01\x01R\x07message\"\xb4\x01\n\x05Steer\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12 \n\x07turn_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x06turnId\x12\x42\n\x07message\x18\x03 \x01(\x0b\x32 .vibesys.orchestrator.v1.MessageB\x06\xbaH\x03\xc8\x01\x01R\x07message\"t\n\tInterrupt\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12 \n\x07turn_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x06turnId\"k\n\x0c\x43loseSession\x12\x45\n\x07session\x18\x01 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefB\x06\xbaH\x03\xc8\x01\x01R\x07session\x12\x14\n\x05\x66orce\x18\x02 \x01(\x08R\x05\x66orce\"2\n\x10ReleaseCheckouts\x12\x1e\n\x06run_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\"\xa0\x03\n\x08\x41rmTimer\x12\x42\n\x04kind\x18\x01 \x01(\x0e\x32\".vibesys.orchestrator.v1.TimerKindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1e\n\x06run_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\x12=\n\x07session\x18\x03 \x01(\x0b\x32#.vibesys.orchestrator.v1.SessionRefR\x07session\x12;\n\x07\x66ire_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x06\x66ireAt:\xb3\x01\xbaH\xaf\x01\x1a\xac\x01\n\x11\x61rm_timer.session\x12^a stop grace and a launch deadline name a session; a run deadline and a lead idle timer do not\x1a\x37has(this.session) == (this.kind == 2 || this.kind == 3)*\x99\x01\n\tTimerKind\x12\x1a\n\x16TIMER_KIND_UNSPECIFIED\x10\x00\x12\x1b\n\x17TIMER_KIND_RUN_DEADLINE\x10\x01\x12\x19\n\x15TIMER_KIND_STOP_GRACE\x10\x02\x12\x1e\n\x1aTIMER_KIND_LAUNCH_DEADLINE\x10\x03\x12\x18\n\x14TIMER_KIND_LEAD_IDLE\x10\x04\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -71,6 +71,8 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_INTERRUPT'].fields_by_name['turn_id']._serialized_options = b'\272H\004r\002\020\001'
   _globals['_CLOSESESSION'].fields_by_name['session']._loaded_options = None
   _globals['_CLOSESESSION'].fields_by_name['session']._serialized_options = b'\272H\003\310\001\001'
+  _globals['_RELEASECHECKOUTS'].fields_by_name['run_id']._loaded_options = None
+  _globals['_RELEASECHECKOUTS'].fields_by_name['run_id']._serialized_options = b'\272H\004r\002\020\001'
   _globals['_ARMTIMER'].fields_by_name['kind']._loaded_options = None
   _globals['_ARMTIMER'].fields_by_name['kind']._serialized_options = b'\272H\007\202\001\004\020\001 \000'
   _globals['_ARMTIMER'].fields_by_name['run_id']._loaded_options = None
@@ -79,22 +81,24 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_ARMTIMER'].fields_by_name['fire_at']._serialized_options = b'\272H\003\310\001\001'
   _globals['_ARMTIMER']._loaded_options = None
   _globals['_ARMTIMER']._serialized_options = b'\272H\257\001\032\254\001\n\021arm_timer.session\022^a stop grace and a launch deadline name a session; a run deadline and a lead idle timer do not\0327has(this.session) == (this.kind == 2 || this.kind == 3)'
-  _globals['_TIMERKIND']._serialized_start=2114
-  _globals['_TIMERKIND']._serialized_end=2267
+  _globals['_TIMERKIND']._serialized_start=2256
+  _globals['_TIMERKIND']._serialized_end=2409
   _globals['_EFFECT']._serialized_start=173
-  _globals['_EFFECT']._serialized_end=639
-  _globals['_SESSIONREF']._serialized_start=641
-  _globals['_SESSIONREF']._serialized_end=724
-  _globals['_LAUNCHSESSION']._serialized_start=727
-  _globals['_LAUNCHSESSION']._serialized_end=1095
-  _globals['_STARTTURN']._serialized_start=1098
-  _globals['_STARTTURN']._serialized_end=1282
-  _globals['_STEER']._serialized_start=1285
-  _globals['_STEER']._serialized_end=1465
-  _globals['_INTERRUPT']._serialized_start=1467
-  _globals['_INTERRUPT']._serialized_end=1583
-  _globals['_CLOSESESSION']._serialized_start=1585
-  _globals['_CLOSESESSION']._serialized_end=1692
-  _globals['_ARMTIMER']._serialized_start=1695
-  _globals['_ARMTIMER']._serialized_end=2111
+  _globals['_EFFECT']._serialized_end=729
+  _globals['_SESSIONREF']._serialized_start=731
+  _globals['_SESSIONREF']._serialized_end=814
+  _globals['_LAUNCHSESSION']._serialized_start=817
+  _globals['_LAUNCHSESSION']._serialized_end=1185
+  _globals['_STARTTURN']._serialized_start=1188
+  _globals['_STARTTURN']._serialized_end=1372
+  _globals['_STEER']._serialized_start=1375
+  _globals['_STEER']._serialized_end=1555
+  _globals['_INTERRUPT']._serialized_start=1557
+  _globals['_INTERRUPT']._serialized_end=1673
+  _globals['_CLOSESESSION']._serialized_start=1675
+  _globals['_CLOSESESSION']._serialized_end=1782
+  _globals['_RELEASECHECKOUTS']._serialized_start=1784
+  _globals['_RELEASECHECKOUTS']._serialized_end=1834
+  _globals['_ARMTIMER']._serialized_start=1837
+  _globals['_ARMTIMER']._serialized_end=2253
 # @@protoc_insertion_point(module_scope)

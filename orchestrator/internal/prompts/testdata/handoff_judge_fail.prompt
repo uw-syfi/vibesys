@@ -1,0 +1,6 @@
+Agent agent-x1 handed off plan 2.
+Verdict: fail on commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.
+Claim: The claim does not hold.
+Reasons: compare says better, kernel.cu:40 is on the measured path
+Learned: The gain is real.
+Next: Promote it.

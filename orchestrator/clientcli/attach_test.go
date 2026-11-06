@@ -21,7 +21,7 @@ func goldenScript() []*pb.WatchRunsResponse {
 	worker := agentOf("run-1", "worker-1", pb.AgentRole_AGENT_ROLE_WORKER, pb.AgentStatus_AGENT_STATUS_ENDED, 1)
 	worker.EndedAt = at(4)
 	handoff := &pb.Message{Id: "m1", RunId: "run-1", FromAgentId: "worker-1", ToAgentId: "lead-run-1", Delivery: pb.Delivery_DELIVERY_CONSUMED, At: at(4),
-		Body: &pb.Message_Handoff{Handoff: &pb.Handoff{PlanNumber: 2, Claim: "plan 2 is 3%\nfaster", Commit: "abc"}}}
+		Body: &pb.Message_Handoff{Handoff: &pb.Handoff{PlanNumber: 2, Claim: "plan 2 is 3%\nfaster", Body: &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}}}}
 	snapshot := &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Snapshot{Snapshot: &pb.RunsSnapshot{
 		Runs: []*pb.Run{run}, Agents: []*pb.Agent{lead, worker}, Messages: []*pb.Message{handoff}, Sequence: 10,
 		Turns: []*pb.Turn{
@@ -48,8 +48,8 @@ func goldenScript() []*pb.WatchRunsResponse {
 		snapshot,
 		agentEvent(11, failing, 5),
 		messageEvent(12, settled, 7),
-		eventFrame(13, "run-1", 8, func(ev *pb.Event) {
-			ev.Body = &pb.Event_TurnUpdated{TurnUpdated: &pb.Turn{Id: "t3", AgentId: "lead-run-1", Ordinal: 2, Status: pb.TurnStatus_TURN_STATUS_FAILED, StartedAt: at(7), EndedAt: at(8)}}
+		eventFrame(13, "run-1", 8, func(ev *pb.RunChange) {
+			ev.Body = &pb.RunChange_Turn{Turn: &pb.Turn{Id: "t3", AgentId: "lead-run-1", Ordinal: 2, Status: pb.TurnStatus_TURN_STATUS_FAILED, StartedAt: at(7), EndedAt: at(8)}}
 		}),
 		messageEvent(14, jobDone, 8),
 		searchFrame("run-1", 1, jobOf("job-1", cliv1.JobState_JOB_STATE_RUNNING, true)),

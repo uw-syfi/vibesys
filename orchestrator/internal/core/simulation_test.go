@@ -131,10 +131,16 @@ func (w *sim) decide(body core.InputBody) {
 	w.inputs++
 	w.nonce++
 	w.now = w.now.Add(time.Duration(1+w.r.IntN(5)) * time.Second)
-	// The shell's own location changes between inputs, as it does between daemon starts; a run keeps
-	// the one in force when it started.
-	where := core.CliLocation{CLI: fmt.Sprintf("/cli/%d", w.inputs%3), Home: fmt.Sprintf("/home/%d", w.inputs%2)}
-	in := core.Input{At: w.now, Nonce: core.Nonce(fmt.Sprintf("%d-%d", w.seed, w.nonce)), Location: where, Body: body}
+	// The job tool the shell answers with changes between starts, as it does between daemon starts; a
+	// run keeps the one in force when it started.
+	if command, ok := body.(core.Command); ok {
+		if start, ok := command.Body.(core.StartRun); ok {
+			start.JobTool = core.JobToolEndpoint{Executable: fmt.Sprintf("/cli/%d", w.inputs%3), RuntimeDirectory: fmt.Sprintf("/run/%d", w.inputs%2)}
+			command.Body = start
+			body = command
+		}
+	}
+	in := core.Input{At: w.now, Nonce: core.Nonce(fmt.Sprintf("%d-%d", w.seed, w.nonce)), Body: body}
 	w.note("%d input %T %+v", w.inputs, body, body)
 	before := w.state
 	var events []core.Event
@@ -280,7 +286,7 @@ func (w *sim) retry() {
 		w.fail("command %s was not remembered: %s", c.ID, recall)
 	}
 	w.decide(c)
-	if again, _ := w.state.Recall(c.ID, c.Digest); again != first {
+	if again, _ := w.state.Recall(c.ID, c.Digest); !reflect.DeepEqual(again, first) {
 		w.fail("a retry of %s changed the receipt from %+v to %+v", c.ID, first, again)
 	}
 }
@@ -308,6 +314,9 @@ func (w *sim) startRun() {
 		Repository: fmt.Sprintf("repo-%d", w.r.IntN(3)), Task: "task", FanoutLimit: uint32(w.r.IntN(4)), Brief: "go",
 		Lead: &pb.AgentSpec{Harness: pb.Harness(1 + w.r.IntN(2)), Model: "m"},
 	}
+	for range w.r.IntN(3) {
+		start.AllowAgents = append(start.AllowAgents, &pb.AllowedAgent{Harness: pb.Harness(1 + w.r.IntN(2)), Model: []string{"", "m", "x"}[w.r.IntN(3)]})
+	}
 	if w.r.IntN(2) == 0 {
 		start.Deadline = timestamp(w.now.Add(time.Duration(300+w.r.IntN(1800)) * time.Second))
 	}
@@ -329,6 +338,7 @@ func (w *sim) spawn() {
 	role := pb.AgentRole(2 + w.r.IntN(5))
 	w.command(w.callerIn(run), &pb.Command{Body: &pb.Command_SpawnAgent{SpawnAgent: &pb.SpawnAgent{
 		RunId: string(run.ID), Role: role, Brief: "work",
+		Spec: &pb.AgentSpec{Harness: pb.Harness(w.r.IntN(3)), Model: []string{"", "m", "x"}[w.r.IntN(3)]},
 	}}})
 }
 
@@ -368,7 +378,7 @@ func (w *sim) handoff() {
 		return
 	}
 	w.command(core.AgentCaller{Agent: a.ID}, &pb.Command{Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{
-		Handoff: &pb.Handoff{Claim: "done"},
+		Handoff: handoffBy(a.Role),
 	}}})
 }
 
@@ -499,7 +509,7 @@ func (w *sim) work() {
 func (w *sim) capabilities(agent core.AgentID) core.Capabilities {
 	c, ok := w.caps[agent]
 	if !ok {
-		c = core.Capabilities{StreamsText: w.r.IntN(2) == 0, Steers: w.r.IntN(2) == 0, Resumes: w.r.IntN(4) != 0}
+		c = core.Capabilities{Steers: w.r.IntN(2) == 0, Resumes: w.r.IntN(4) != 0}
 		w.caps[agent] = c
 	}
 	return c
@@ -513,6 +523,20 @@ func (w *sim) carryOut(e core.Effect) {
 		if !slices.Contains(w.timers, b) {
 			w.timers = append(w.timers, b)
 		}
+		return
+	case core.ReleaseCheckouts:
+		// Working copies are removed only once nothing can continue in them, and the answer names some
+		// of them as kept.
+		if run, ok := w.state.Run(b.Run); !ok || !run.Status.Final() {
+			w.fail("asked to release the checkouts of %s while it is %q", b.Run, run.Status)
+		}
+		var kept []core.Checkout
+		for _, a := range w.state.Agents(b.Run) {
+			if a.Role != core.RoleLead && w.r.IntN(2) == 0 {
+				kept = append(kept, core.Checkout{Agent: a.ID, Location: "/state/" + string(a.ID) + "/worktree"})
+			}
+		}
+		w.decide(core.CheckoutsReleased{Run: b.Run, Kept: kept})
 		return
 	case core.LaunchSession:
 		if _, ok := w.state.Run(b.Run); !ok {
@@ -918,4 +942,22 @@ func TestASeedRepeatsExactly(t *testing.T) {
 	if !reflect.DeepEqual(first.log, second.log) {
 		t.Fatal("one seed produced two logs")
 	}
+}
+
+// handoffBy is a handoff with the body of the role that posts it.
+func handoffBy(role core.AgentRole) *pb.Handoff {
+	h := &pb.Handoff{Claim: "done"}
+	switch role {
+	case core.RolePlanner:
+		h.Body = &pb.Handoff_Planner{Planner: &pb.PlannerHandoff{Plan: "p"}}
+	case core.RoleJudge:
+		h.Body = &pb.Handoff_Judge{Judge: &pb.JudgeHandoff{Commit: "c", Verdict: pb.JudgeVerdict_JUDGE_VERDICT_PASS, Reasons: "r"}}
+	case core.RoleCombiner:
+		h.Body = &pb.Handoff_Combiner{Combiner: &pb.CombinerHandoff{Commit: "c", Branch: "b", Applied: "a"}}
+	case core.RoleProfiler:
+		h.Body = &pb.Handoff_Profiler{Profiler: &pb.ProfilerHandoff{Question: "q", Revision: "r", Answer: "a"}}
+	default:
+		h.Body = &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}
+	}
+	return h
 }

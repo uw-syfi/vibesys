@@ -24,6 +24,11 @@ const (
 )
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 {
+		if role, ok := accuracyRoles[os.Args[1]]; ok {
+			os.Exit(role(os.Args[2:]))
+		}
+	}
 	if os.Getenv(fakeLoadgenEnv) != "" {
 		os.Exit(fakeLoadgen(os.Args[1:]))
 	}

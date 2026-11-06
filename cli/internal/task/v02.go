@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"buf.build/go/protovalidate"
-
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/tomlproto"
@@ -37,7 +35,7 @@ func (c Candidate) ServeAt(root string, wrap []string) core.CandidateServe {
 // parseV02 reads a manifest of task schema 0.2 (TaskManifestV02 in task.proto). Without [candidate]
 // the task has no Candidate, as a task of 0.1: its commands run in the task image and own the system
 // under test.
-func parseV02(name string, table map[string]any, o objectivesFile) (Task, error) {
+func parseV02(name string, table map[string]any, o *cliv1.TaskObjectives) (Task, error) {
 	if err := refusedV02(table); err != nil {
 		return Task{}, err
 	}
@@ -46,8 +44,8 @@ func parseV02(name string, table map[string]any, o objectivesFile) (Task, error)
 	if err := tomlproto.DecodeTable(table, &m, tomlproto.Options{Declared: &declared}); err != nil {
 		return Task{}, invalid("%s: %s", ManifestName, core.AsFailure(err).Message)
 	}
-	if err := protovalidate.Validate(&m); err != nil {
-		return Task{}, invalid("%s: %s", ManifestName, strings.TrimPrefix(strings.ReplaceAll(err.Error(), "\n", " "), "validation error: "))
+	if err := validate(ManifestName, &m); err != nil {
+		return Task{}, err
 	}
 	t := Task{Name: name, Samples: DefaultSamples, Schema: Schema02}
 	var err error

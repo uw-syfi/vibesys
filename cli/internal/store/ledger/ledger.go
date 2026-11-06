@@ -410,6 +410,7 @@ func (l *Ledger) CreatePlan(np core.NewPlan) (Change, core.Plan, error) {
 		Status:    core.PlanOpen,
 		CreatedAt: np.At,
 		UpdatedAt: np.At,
+		GainBound: np.GainBound,
 	}
 	return PutPlan{Plan: plan}, Copy(plan), nil
 }
@@ -440,6 +441,9 @@ func (l *Ledger) EditPlan(number core.PlanNumber, edit core.PlanEdit) (Change, c
 			return nil, none, invalid("edit.Priority", fmt.Sprintf("%q is not a priority", *edit.Priority))
 		}
 		plan.Priority = *edit.Priority
+	}
+	if edit.GainBound != nil {
+		plan.GainBound = edit.GainBound
 	}
 	if edit.Comment != nil {
 		plan.Comments = append(plan.Comments, *edit.Comment)

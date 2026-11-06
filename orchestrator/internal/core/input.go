@@ -9,10 +9,7 @@ type Input struct {
 	// Nonce is unique to this input. Decide builds every new id from it, and a replay reads those
 	// ids from the events, so it is never needed twice.
 	Nonce Nonce
-	// Location is where this daemon's own vibesys-cli and its daemon and store are. A run started by
-	// this input records it.
-	Location CliLocation
-	Body     InputBody
+	Body  InputBody
 }
 
 // InputBody is what happened. The set is closed.
@@ -58,11 +55,18 @@ type (
 		Deadline    time.Time
 		Lead        AgentSpec
 		Brief       string
+		// Allow adds to what the run may use. The lead's own harness and model are always allowed.
+		Allow []AgentChoice
+		// JobTool is what the run's agents use. The shell sets it, as the tool answered it before the
+		// command was decided: it is no part of what the client sent, or of the command's digest.
+		JobTool JobToolEndpoint
 	}
 	// StopRun stops a run and every agent in it.
 	StopRun struct{ Run RunID }
-	// SpawnAgent launches a subagent. An empty harness takes the lead's. An empty model or effort
-	// takes the lead's on the lead's harness, and is left to the harness's default on another.
+	// SpawnAgent launches a subagent. An empty harness takes the lead's. An empty model takes the
+	// first model the run allows on that harness. An empty effort takes the lead's on the lead's
+	// harness, and is left to the harness's default on another. A harness and model the run does
+	// not allow are refused.
 	SpawnAgent struct {
 		Run        RunID
 		Role       AgentRole
@@ -196,6 +200,15 @@ type JobsRunning struct {
 }
 
 func (JobsRunning) inputBody() {}
+
+// CheckoutsReleased says a ReleaseCheckouts was carried out, and which working copies it kept. The
+// answer to a run that is not over, or one already recorded, changes nothing.
+type CheckoutsReleased struct {
+	Run  RunID
+	Kept []Checkout
+}
+
+func (CheckoutsReleased) inputBody() {}
 
 // TimerFired says a timer an ArmTimer asked for is due. A timer can outlive what it was armed for,
 // and then it does nothing.

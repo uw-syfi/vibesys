@@ -76,17 +76,13 @@ func buildKey(input []byte, bases []base) string {
 // imageTag names the task's image by its build key.
 func imageTag(key string) string { return imageRepository + ":" + key[:32] }
 
-// Where a container finds what the environment gives it besides the checkout, and the variables
-// that name them.
+// Where a container finds what the environment gives it besides the checkout.
 const (
 	// CacheDir is the cache directory of the task's image, kept across runs and commits.
 	CacheDir = "/vibesys/cache"
 	// ArtifactsDir is the run's artifacts directory, empty when the run starts and kept with the
 	// job after it.
 	ArtifactsDir = "/vibesys/artifacts"
-
-	EnvCacheDir     = "VIBESYS_CACHE_DIR"
-	EnvArtifactsDir = "VIBESYS_ARTIFACTS_DIR"
 )
 
 // cacheKey names the cache directory of a task's image: the task and the image, so the cache is

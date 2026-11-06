@@ -207,9 +207,15 @@ func (d decoder) single(v any, fd protoreflect.FieldDescriptor, at string) (any,
 	case protoreflect.DoubleKind, protoreflect.FloatKind:
 		switch n := v.(type) {
 		case float64:
-			// TOML writes nan and inf, which JSON, and so protojson, cannot carry.
-			if math.IsNaN(n) || math.IsInf(n, 0) {
-				return nil, wrong("a finite number")
+			// JSON has no NaN or infinity; protojson reads them by these names, and the message's
+			// rules decide whether the field may hold one, naming it.
+			switch {
+			case math.IsNaN(n):
+				return "NaN", nil
+			case math.IsInf(n, 1):
+				return "Infinity", nil
+			case math.IsInf(n, -1):
+				return "-Infinity", nil
 			}
 		case int64:
 			return float64(n), nil

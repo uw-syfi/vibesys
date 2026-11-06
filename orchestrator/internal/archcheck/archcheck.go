@@ -33,18 +33,18 @@ var rules = map[string][]string{
 	"internal/clidaemon":               {"internal/core", "gen/vibesys/cli/"},
 	"internal/protocol":                {"gen/vibesys/orchestrator/"},
 	"internal/clidaemon/clidaemontest": {"internal/clidaemon", "internal/core", "gen/vibesys/cli/"},
-	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
-	"internal/production":              {"release", "privatesocket", "hostlock", "hostconfig", "internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
+	"hosted":                           {"internal/client", "internal/core", "internal/daemon", "internal/mcp", "internal/production", "internal/search", "internal/wire", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
+	"internal/production":              {"release", "privatesocket", "hostlock", "hostconfig", "internal/client", "internal/core", "internal/daemon", "internal/hub", "internal/jobs", "internal/search", "internal/clidaemon", "internal/localfs", "internal/mcp", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/core":                    {},
 	"internal/search":                  {"internal/core", "internal/jobs", "gen/vibesys/cli/", "gen/vibesys/orchestrator/"},
 	"internal/jobs":                    {"internal/core"},
 	"internal/prompts":                 {"internal/core"},
 	"internal/jobs/jobstest":           {"internal/core", "internal/jobs"},
 	"internal/wire":                    {"internal/core", "gen/vibesys/orchestrator/"},
-	"internal/archcheck":               {},
+	"internal/archcheck":               {"gen/vibesys/orchestrator/"},
 	"internal/store":                   {"internal/core", "internal/wire", "internal/localfs", "hostlock"},
 	"internal/store/storetest":         {"internal/core", "internal/store", "internal/wire"},
-	"internal/localfs":                 {},
+	"internal/localfs":                 {"privatesocket"},
 	"gatewayroot":                      {"internal/localfs", "release"},
 	"hostconfig":                       {"gen/vibesys/orchestrator/"},
 	"release":                          {"gen/vibesys/orchestrator/"},
@@ -52,10 +52,11 @@ var rules = map[string][]string{
 	"privatesocket":                    {},
 	"release/releasetest":              {"release"},
 	"cmd/release-manifest":             {"release"},
-	"clientcli":                        {"internal/client", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
+	"clientcli":                        {"internal/client", "internal/names", "release", "gatewayroot", "hostconfig", "hostlock", "gen/vibesys/orchestrator/"},
 	"internal/hub":                     {"internal/core", "gen/vibesys/orchestrator/"},
 	"internal/client":                  {"internal/protocol", "gen/vibesys/orchestrator/"},
-	"internal/mcp":                     {"internal/core", "gen/vibesys/orchestrator/"},
+	"internal/mcp":                     {"internal/core", "internal/names", "gen/vibesys/orchestrator/"},
+	"internal/names":                   {"gen/vibesys/orchestrator/"},
 	"internal/daemon":                  {"internal/protocol", "internal/search", "internal/core", "internal/hub", "internal/jobs", "internal/prompts", "internal/store", "internal/wire", "gen/vibesys/orchestrator/"},
 	"internal/daemon/daemontest":       {"internal/core", "internal/daemon", "internal/hub", "internal/jobs/jobstest", "internal/jobs", "internal/store", "gen/vibesys/orchestrator/"},
 	// The fake detector mints a Dir for any path, so it is a test fixture only (see testRules).
@@ -186,7 +187,7 @@ func layering(name, source string) []string {
 	for _, target := range targets {
 		rest, inModule := strings.CutPrefix(target, modulePath)
 		switch {
-		case !inModule && strings.HasPrefix(target, repositoryPath) && target != "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !(strings.HasSuffix(name, "/internal/clidaemon/client_integration_test.go") && target == "github.com/uw-syfi/vibesys/cli/daemontest"):
+		case !inModule && strings.HasPrefix(target, repositoryPath) && target != "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && target != "github.com/uw-syfi/vibesys/cli/envcodec" && !(strings.HasSuffix(name, "/internal/clidaemon/client_integration_test.go") && target == "github.com/uw-syfi/vibesys/cli/daemontest"):
 			found = append(found, fmt.Sprintf("%s: imports %s; this module stands apart from the rest of the repository", name, target))
 		case inModule && !slices.ContainsFunc(allowed, func(rule string) bool { return permits(rule, rest) }):
 			found = append(found, fmt.Sprintf("%s: imports %s, which its layer does not allow", name, rest))

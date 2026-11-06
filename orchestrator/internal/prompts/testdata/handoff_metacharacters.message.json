@@ -3,17 +3,20 @@
   "delivery": "DELIVERY_NEW_TURN",
   "fromAgentId": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
   "handoff": {
-    "branch": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
-    "checks": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
     "claim": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
-    "commit": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
-    "hasCandidate": true,
     "learned": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
-    "measurement": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
     "next": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
     "openItems": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
-    "parentCommit": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
-    "planNumber": 1
+    "planNumber": 1,
+    "worker": {
+      "candidate": {
+        "branch": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+        "checks": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+        "commit": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+        "measurement": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``",
+        "parentCommit": "{{ not_a_var }} {% if x %} {# c #} {{'q'}} \\ $ % <b>&amp;</b> ` ``"
+      }
+    }
   },
   "id": "m1",
   "runId": "r1",

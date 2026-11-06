@@ -1,5 +1,5 @@
 /**
- * A realistic orchestrated run as a gap-free event stream: a lead that plans, workers that try
+ * A realistic orchestrated run as a gap-free stream of changes: a lead that plans, workers that try
  * ideas and submit jobs, a judge, and a combiner, on a mix of the two harnesses, with operator
  * messages and their receipts, handoffs, a report, and an unfinished tail so the run is live.
  * A function of its options alone (seeded), so the same options give the same bytes.
@@ -12,31 +12,37 @@ import {
   AgentSchema,
   AgentStatus,
   AgentStopStage,
+  CandidateSchema,
   CapabilitiesSchema,
   Delivery,
   type Delta,
   DeltaSchema,
-  type Event,
   HandoffSchema,
   Harness,
   type Item,
   ItemStatus,
   JobFinishedSchema,
   JobOutcome,
+  JudgeHandoffSchema,
+  JudgeVerdict,
   type Message,
   MessageSchema,
+  NoCandidateSchema,
   type Plan,
+  PlannerHandoffSchema,
   ReceiptSchema,
   ReportKind,
   ReportSchema,
+  type RunChange,
   RunStatus,
   type Turn,
   TurnStatus,
   TurnTrigger,
   type Usage,
+  WorkerHandoffSchema,
 } from '@vibesys/orchestrator-proto';
 import {itemOf, planOf, runOf, turnOf, usageOf} from './builders.js';
-import {EventLog, Rng} from './log.js';
+import {ChangeLog, Rng} from './log.js';
 
 export interface ScenarioOptions {
   readonly seed: number;
@@ -53,11 +59,11 @@ export interface Scenario {
   readonly searchStale?: boolean;
   readonly searchTruncated?: boolean;
   readonly runId: string;
-  readonly events: readonly Event[];
+  readonly changes: readonly RunChange[];
   readonly plans: readonly Plan[];
   /** Progress on running items, which the daemon sends but never stores. */
   readonly deltas: readonly Delta[];
-  /** The time of the last event. */
+  /** The time of the last change. */
   readonly endMs: number;
 }
 
@@ -102,7 +108,7 @@ type Step = (atMs: number, turnId: string) => Item;
 class Builder {
   readonly rng: Rng;
   readonly runId: string;
-  readonly log: EventLog;
+  readonly log: ChangeLog;
   readonly deltas: Delta[] = [];
   readonly plans: Plan[] = [];
   readonly leadId: string;
@@ -113,7 +119,7 @@ class Builder {
   constructor(readonly options: ScenarioOptions) {
     this.rng = new Rng(options.seed);
     this.runId = `run-${options.seed}`;
-    this.log = new EventLog(this.runId);
+    this.log = new ChangeLog(this.runId);
     this.leadId = `agent-${options.seed}-lead`;
   }
 
@@ -123,7 +129,7 @@ class Builder {
   }
 
   putAgent(atMs: number, agent: Agent): void {
-    this.log.push(atMs, {case: 'agentUpdated', value: agent});
+    this.log.push(atMs, {case: 'agent', value: agent});
   }
 
   message(
@@ -137,7 +143,7 @@ class Builder {
       at: timestampFromMs(atMs),
       ...fields,
     });
-    this.log.push(atMs, {case: 'messageUpdated', value});
+    this.log.push(atMs, {case: 'message', value});
     return value;
   }
 
@@ -183,12 +189,12 @@ class Builder {
       startMs,
       status: TurnStatus.RUNNING,
     });
-    this.log.push(startMs, {case: 'turnUpdated', value: open});
+    this.log.push(startMs, {case: 'turn', value: open});
     let at = startMs;
     for (const step of steps) {
       at += this.rng.between(4, 40) * 1000;
       const item = step(at, open.id);
-      this.log.push(at, {case: 'itemUpdated', value: item});
+      this.log.push(at, {case: 'item', value: item});
       if (item.status === ItemStatus.RUNNING) this.progress(agent.id, item.id);
     }
     if (running) return at;
@@ -199,7 +205,7 @@ class Builder {
       endedAt: timestampFromMs(at),
       usage: this.usage(agent),
     };
-    this.log.push(at, {case: 'turnUpdated', value: closed});
+    this.log.push(at, {case: 'turn', value: closed});
     return at;
   }
 
@@ -235,7 +241,7 @@ function leadAgent(builder: Builder, status: AgentStatus): Agent {
     reasoningEffort: 'high',
     status,
     startedAt: timestampFromMs(START_MS),
-    capabilities: create(CapabilitiesSchema, {streamsText: true, steers: true, resumes: true}),
+    capabilities: create(CapabilitiesSchema, {steers: true, resumes: true}),
   });
 }
 
@@ -244,9 +250,9 @@ function startRun(builder: Builder): number {
   const {runId, leadId, log} = builder;
   const run = (status: RunStatus) =>
     runOf({id: runId, leadAgentId: leadId, status, startMs: START_MS, fanout: 5});
-  log.push(START_MS, {case: 'runUpdated', value: run(RunStatus.STARTING)});
+  log.push(START_MS, {case: 'run', value: run(RunStatus.STARTING)});
   builder.putAgent(START_MS, leadAgent(builder, AgentStatus.LAUNCHING));
-  log.push(START_MS + 2000, {case: 'runUpdated', value: run(RunStatus.RUNNING)});
+  log.push(START_MS + 2000, {case: 'run', value: run(RunStatus.RUNNING)});
   builder.putAgent(START_MS + 2000, leadAgent(builder, AgentStatus.ACTIVE));
   const text = 'Make the decode loop faster without changing its output.';
   const brief = builder.message(START_MS + 2000, {
@@ -293,7 +299,7 @@ function subagentOf(builder: Builder, index: number, startMs: number): Agent {
     planNumber: role === AgentRole.WORKER ? builder.plans.length + 1 : 0,
     status: AgentStatus.ACTIVE,
     startedAt: timestampFromMs(startMs),
-    capabilities: create(CapabilitiesSchema, {streamsText: true, steers: !codex, resumes: true}),
+    capabilities: create(CapabilitiesSchema, {steers: !codex, resumes: true}),
   });
 }
 
@@ -413,14 +419,13 @@ function operatorMessage(builder: Builder, target: Agent, atMs: number): void {
   });
   const receipt = create(ReceiptSchema, {
     commandId: 'cmd-operator-1',
-    commandDigest: 'a'.repeat(64),
     runId: builder.runId,
     agentId: target.id,
     messageId: sent.id,
     delivery: Delivery.QUEUED,
-    sequence: BigInt(builder.log.events.length + 1),
+    sequence: BigInt(builder.log.changes.length + 1),
   });
-  builder.log.push(atMs, {case: 'receiptRecorded', value: receipt}, 'cmd-operator-1');
+  builder.log.push(atMs, {case: 'receipt', value: receipt});
 }
 
 function finishRun(builder: Builder, atMs: number): void {
@@ -443,7 +448,7 @@ function finishRun(builder: Builder, atMs: number): void {
     }),
     endedAt: timestampFromMs(atMs + 1000),
   };
-  builder.log.push(atMs + 1000, {case: 'runUpdated', value: ended});
+  builder.log.push(atMs + 1000, {case: 'run', value: ended});
 }
 
 export function generateScenario(options: ScenarioOptions): Scenario {
@@ -460,11 +465,11 @@ export function generateScenario(options: ScenarioOptions): Scenario {
   const target = subs.find(sub => sub.agent.role === AgentRole.WORKER)?.agent;
   if (target !== undefined) operatorMessage(builder, target, lastEnd + 5000);
   if (!options.live) finishRun(builder, lastEnd + 30_000);
-  const last = builder.log.events[builder.log.events.length - 1];
+  const last = builder.log.changes[builder.log.changes.length - 1];
   const endMs = last?.at === undefined ? START_MS : Number(last.at.seconds) * 1000;
   return {
     runId: builder.runId,
-    events: builder.log.events,
+    changes: builder.log.changes,
     plans: builder.plans,
     deltas: builder.deltas,
     endMs,
@@ -472,23 +477,63 @@ export function generateScenario(options: ScenarioOptions): Scenario {
 }
 
 function handoffFor(role: AgentRole, planNumber: number, idea: string, index: number) {
-  const worker = role === AgentRole.WORKER;
-  return create(HandoffSchema, {
+  const common = {
     planNumber,
-    hasCandidate: worker && index % 4 !== 3,
-    claim: worker
-      ? `${idea} makes decoding ${6 + index} percent faster.`
-      : role === AgentRole.JUDGE
-        ? 'The batching change holds up under review.'
-        : 'Ideas are written down.',
-    commit: worker ? `c${index}f3a9e1` : '',
-    parentCommit: worker ? 'b81d02a' : '',
-    branch: worker ? `idea-${planNumber}` : '',
-    checks: worker ? 'All unit tests pass.' : '',
-    measurement: worker
-      ? `1182 to ${1182 + 40 * (index + 1)} tokens per second over five runs.`
-      : '',
+    claim:
+      role === AgentRole.WORKER
+        ? `${idea} makes decoding ${6 + index} percent faster.`
+        : role === AgentRole.JUDGE
+          ? 'The batching change holds up under review.'
+          : 'Ideas are written down.',
     learned: 'The step is memory bound.',
     next: 'Try a larger batch.',
+  };
+  if (role === AgentRole.WORKER) {
+    return create(HandoffSchema, {
+      ...common,
+      body: {
+        case: 'worker',
+        value: create(WorkerHandoffSchema, {
+          outcome:
+            index % 4 !== 3
+              ? {
+                  case: 'candidate',
+                  value: create(CandidateSchema, {
+                    commit: `c${index}f3a9e1`,
+                    parentCommit: 'b81d02a',
+                    branch: `idea-${planNumber}`,
+                    checks: 'All unit tests pass.',
+                    measurement: `1182 to ${1182 + 40 * (index + 1)} tokens per second over five runs.`,
+                  }),
+                }
+              : {
+                  case: 'noCandidate',
+                  value: create(NoCandidateSchema, {
+                    blocker: 'The batched kernel did not compile.',
+                  }),
+                },
+        }),
+      },
+    });
+  }
+  if (role === AgentRole.JUDGE) {
+    return create(HandoffSchema, {
+      ...common,
+      body: {
+        case: 'judge',
+        value: create(JudgeHandoffSchema, {
+          commit: 'c0f3a9e1',
+          verdict: JudgeVerdict.PASS,
+          reasons: 'The comparison says better and the change is on the measured path.',
+        }),
+      },
+    });
+  }
+  return create(HandoffSchema, {
+    ...common,
+    body: {
+      case: 'planner',
+      value: create(PlannerHandoffSchema, {plan: `plans/plan-${planNumber}.md`}),
+    },
   });
 }

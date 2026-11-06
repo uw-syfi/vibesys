@@ -316,14 +316,15 @@ func TestProbeWaitsForReadinessAndFailsAtTheDeadline(t *testing.T) {
 
 func TestSelftestWritesAValidResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "selftest")
-	code, _, stderr := invoke(t, "selftest", "--summary", path, "--step-secs", "0.3", "--max-rate", "1000", "--format", "json")
+	code, _, stderr := invoke(t, "selftest", "--summary", path, "--step-secs", "0.3", "--max-rate", "1000", "--accept-any-rate", "--format", "json")
 	if code != exitOK {
 		t.Fatalf("exit %d: %s", code, stderr)
 	}
 	data, _ := os.ReadFile(path)
 	got := readFile(t, data, files.JSON, pb.FileKind_FILE_KIND_SELFTEST, func() *pb.SelftestResult { return &pb.SelftestResult{} })
-	// What rate this host sustains is not the test's business; the search and the file are.
-	if len(got) != 1 || got[0].GetMaxRate() > 1000 || got[0].GetAddedLatencyRate() != got[0].GetMaxRate()/2 {
+	// What rate this host sustains is not the test's business, so every trial passes and the search
+	// ends at its cap on any host; the file is.
+	if len(got) != 1 || got[0].GetMaxRate() != 1000 || got[0].GetAddedLatencyRate() != 500 {
 		t.Fatalf("selftest %v", got)
 	}
 }

@@ -16,12 +16,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/BurntSushi/toml"
+	cliv1 "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/cli/v1"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/jobenv"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
 // Waits and deadlines of the deploy layer.
 const (
-	WaitSecs       = 300 * time.Second // data tier, all replicas, a pod's start, a restart
+	WaitSecs       = 300 * time.Second // data tier, all replicas, a pod's start, a restart (App.WaitSecs)
 	SeedSecs       = 1200 * time.Second
 	ProbeSecs      = 300 * time.Second
 	BuildSecs      = 2400 * time.Second
@@ -38,30 +40,45 @@ const (
 	usageStateFile = "usage-state.json"
 )
 
-// Environment is what vibesys-cli's `kubernetes` resource and the job give the deploy layer.
+// Environment is what the job gives the deploy layer: the cluster's registry and image builder, the
+// job's time limit, and where the job keeps its files.
 type Environment struct {
 	Registry     string
 	Builder      string
 	ArtifactsDir string // "" when the job has none
 	WorkDir      string
 	Job          string
+	// JobTimeout is the longest the job may run; zero when the job does not say. Sweep needs it.
+	JobTimeout time.Duration
 }
 
-// ParseEnvironment reads the cluster the job gives (KUBECONFIG, VIBESYS_K8S_REGISTRY and
-// VIBESYS_K8S_BUILDER, from vibesys-cli's kubernetes resource) through getenv. artifacts is the
-// job's artifacts directory (.../<job>/<step>), which also names the job in the namespace labels.
+// ParseEnvironment reads the cluster the job gives (the fields of KubernetesEnvironment, from
+// vibesys-cli's kubernetes resource) and its time limit (JobEnvironment.timeout_seconds) through
+// getenv. artifacts is the job's artifacts directory (.../<job>/<step>), which also names the job in
+// the namespace labels. A variable that is missing or malformed is refused naming it.
 func ParseEnvironment(getenv func(string) string, workDir, artifacts string) (Environment, error) {
-	for _, name := range []string{"KUBECONFIG", "VIBESYS_K8S_REGISTRY", "VIBESYS_K8S_BUILDER"} {
-		if getenv(name) == "" {
-			return Environment{}, deployErr("%s is not set: the task needs `[environment] needs = [\"kubernetes\"]` and a placement whose kubernetes resource names the registry and the builder", name)
+	cluster, err := jobenv.Kubernetes(getenv)
+	if err != nil {
+		return Environment{}, deployErr("%v", err)
+	}
+	for _, given := range []struct{ field, value string }{
+		{"kubeconfig", cluster.GetKubeconfig()}, {"registry", cluster.GetRegistry()}, {"builder", cluster.GetBuilder()},
+	} {
+		if given.value == "" {
+			return Environment{}, deployErr("%s is not set: the task needs `[environment] needs = [\"kubernetes\"]` and a placement whose kubernetes resource names the registry and the builder", jobenv.NameOf(cluster, protoreflect.Name(given.field)))
 		}
 	}
+	job, err := jobenv.Job(getenv)
+	if err != nil {
+		return Environment{}, deployErr("%v", err)
+	}
 	return Environment{
-		Registry:     strings.TrimRight(getenv("VIBESYS_K8S_REGISTRY"), "/"),
-		Builder:      getenv("VIBESYS_K8S_BUILDER"),
+		Registry:     strings.TrimRight(cluster.GetRegistry(), "/"),
+		Builder:      cluster.GetBuilder(),
 		ArtifactsDir: artifacts,
 		WorkDir:      workDir,
 		Job:          JobLabelOf(artifacts, randomToken()),
+		JobTimeout:   time.Duration(job.GetTimeoutSeconds()) * time.Second,
 	}, nil
 }
 
@@ -153,46 +170,16 @@ func Owned(app App, namespace, uid string, c Cluster) *Deployment {
 
 func (d *Deployment) kube() KubeAPI { return d.cluster.Kube }
 
-// TaskTimeout is the longest a job of the task may run: the larger of the two timeout_seconds of
-// the task's vibesys.input.toml.
-func TaskTimeout(taskDir string) (time.Duration, error) {
-	path := filepath.Join(taskDir, "vibesys.input.toml")
-	bad := func(err any) (time.Duration, error) {
-		return 0, deployErr("%s: cannot read [accuracy]/[benchmark] timeout_seconds (%v)", path, err)
-	}
-	var manifest map[string]map[string]any
-	if _, err := toml.DecodeFile(path, &manifest); err != nil {
-		return bad(err)
-	}
-	var longest int64 = -1
-	for _, section := range []string{"accuracy", "benchmark"} {
-		table, ok := manifest[section]
-		if !ok {
-			continue
-		}
-		secs, ok := table["timeout_seconds"].(int64)
-		if !ok {
-			return bad("KeyError: 'timeout_seconds'")
-		}
-		longest = max(longest, secs)
-	}
-	if longest < 0 {
-		return bad("no section")
-	}
-	return time.Duration(longest) * time.Second, nil
-}
-
 // Sweep deletes this task's namespaces that killed samples left behind and returns their names.
 //
-// Only namespaces labelled with the App's name, named with its prefix and older than the longest a
-// job may run plus a margin are deleted, each only if it still has the UID it was listed with, so
+// Only namespaces labelled with the App's name, named with its prefix and older than the job's own
+// limit (Environment.JobTimeout) plus a margin are deleted, each only if it still has the UID it was listed with, so
 // a concurrent sample's namespace or another task's is never touched.
 func Sweep(ctx context.Context, src AppSource, c Cluster) ([]string, error) {
-	ttl, err := TaskTimeout(src.TaskDir)
-	if err != nil {
-		return nil, err
+	if c.Env.JobTimeout <= 0 {
+		return nil, deployErr("%s is not set: the job's time limit decides which namespaces an earlier job left behind, and without it a live one could be deleted; vibesys-cli states it, and a job run by hand sets it to the seconds it may run", jobenv.NameOf(&cliv1.JobEnvironment{}, "timeout_seconds"))
 	}
-	ttl += SweepMargin
+	ttl := c.Env.JobTimeout + SweepMargin
 	listed, err := c.Kube.Namespaces(ctx, map[string]string{TaskLabel: src.App.Name})
 	if err != nil {
 		return nil, err
@@ -562,7 +549,7 @@ func (d *Deployment) bringUp(ctx context.Context, seed *PodCommand) error {
 	for n := range workloadNames(d.rendered.First, "StatefulSet") {
 		first[n] = true
 	}
-	if err := d.waitServing(ctx, first, nil, WaitSecs); err != nil {
+	if err := d.waitServing(ctx, first, nil, d.App.Wait()); err != nil {
 		return err
 	}
 	if tier {
@@ -573,12 +560,12 @@ func (d *Deployment) bringUp(ctx context.Context, seed *PodCommand) error {
 		if err := d.kube().Apply(ctx, d.Namespace, d.rendered.Rest); err != nil {
 			return err
 		}
-		if err := d.waitServing(ctx, nil, nil, WaitSecs); err != nil {
+		if err := d.waitServing(ctx, nil, nil, d.App.Wait()); err != nil {
 			return err
 		}
 		return d.Probe(ctx)
 	}
-	if err := d.waitServing(ctx, nil, nil, WaitSecs); err != nil {
+	if err := d.waitServing(ctx, nil, nil, d.App.Wait()); err != nil {
 		return err
 	}
 	if err := d.Probe(ctx); err != nil {
@@ -633,7 +620,7 @@ func (d *Deployment) waitServing(ctx context.Context, names, replaced map[string
 		}
 		fatal := Fatal(appPods)
 		if len(fatal) > 0 || !clock.Now().Before(deadline) {
-			why := fmt.Sprintf("not serving after %.0fs", timeout.Seconds())
+			why := fmt.Sprintf("not serving after %.0fs (k8s.App(wait_secs) waits longer)", timeout.Seconds())
 			if len(fatal) > 0 {
 				why = "cannot start"
 				reasons = fatal
@@ -680,7 +667,7 @@ func (d *Deployment) Probe(ctx context.Context) error {
 		"loadgen", "probe", "--target", d.Gateway.URL, "--requests", WorkDir + "/" + ProbeFile,
 		"--rounds", fmt.Sprint(rounds), "--deadline", fmt.Sprint(int(ProbeSecs.Seconds())),
 	}
-	run, err := d.RunPod(ctx, RoleProbe, PodCommand{Argv: argv, Inputs: map[string][]byte{ProbeFile: d.probePlan}}, ProbeSecs+WaitSecs, RunOptions{})
+	run, err := d.RunPod(ctx, RoleProbe, PodCommand{Argv: argv, Inputs: map[string][]byte{ProbeFile: d.probePlan}}, ProbeSecs+d.App.Wait(), RunOptions{})
 	if err != nil {
 		return err
 	}
@@ -726,7 +713,7 @@ func (d *Deployment) RunPod(ctx context.Context, role Role, command PodCommand, 
 		d.mu.Unlock()
 	}
 	started := clock.Now()
-	deadline := int(timeout.Seconds() + 2*WaitSecs.Seconds())
+	deadline := int(timeout.Seconds() + 2*d.App.Wait().Seconds())
 	if err := d.kube().Apply(ctx, d.Namespace, []Object{job(name, role, d.TaskImage, command.Argv, deadline)}); err != nil {
 		return PodRun{}, err
 	}
@@ -815,7 +802,7 @@ func (d *Deployment) podFailure(ctx context.Context, name string, pod Pod) error
 
 func (d *Deployment) waitPodRunning(ctx context.Context, name string) (string, error) {
 	clock := d.cluster.Clock
-	deadline := clock.Now().Add(WaitSecs)
+	deadline := clock.Now().Add(d.App.Wait())
 	for {
 		pod, err := d.jobPod(ctx, name)
 		if err != nil {
@@ -834,7 +821,7 @@ func (d *Deployment) waitPodRunning(ctx context.Context, name string) (string, e
 					state = pod.Phase
 				}
 			}
-			return "", deployErr("pod %s did not start in %.0fs (%s)", name, WaitSecs.Seconds(), state)
+			return "", deployErr("pod %s did not start in %.0fs (%s; k8s.App(wait_secs) gives a slow pod longer)", name, d.App.Wait().Seconds(), state)
 		}
 		if err := clock.Sleep(ctx, pollInterval); err != nil {
 			return "", err

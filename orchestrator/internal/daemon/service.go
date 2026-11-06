@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/hub"
@@ -55,6 +56,11 @@ type ServiceDeps struct {
 	Binary string
 	// Starts refuses a StartRun that cannot work before it is decided.
 	Starts StartChecks
+	// JobTool is what the agents of a run that starts now use, as the tool itself answers. It may start
+	// or replace the tool's daemon, so it is asked before the command reaches the engine, whose lock it
+	// must not hold, and its failure refuses the start. It is bounded by the caller's context. Nil means
+	// a host with no job tool, and its runs record none.
+	JobTool func(context.Context) (core.JobToolEndpoint, error)
 }
 
 // Service is OrchestratorService over an Engine and the hub, for one Audience.
@@ -107,7 +113,7 @@ func (s *Service) caller(ctx context.Context) (core.Caller, error) {
 	agent := md.Get(MetaAgent)
 	if s.Audience == AudienceOperator {
 		if len(agent)+len(md.Get(MetaSession))+len(md.Get(MetaToken)) > 0 {
-			return nil, status.Error(codes.PermissionDenied, "this is the operator's socket and it takes no agent credentials: an agent's tools use the socket named by "+EnvSocket)
+			return nil, status.Error(codes.PermissionDenied, "this is the operator's socket and it takes no agent credentials: an agent's tools use the endpoint named by "+envcodec.NameOf(&pb.ToolServerCredentials{}, "endpoint"))
 		}
 		return core.Operator{}, nil
 	}
@@ -153,7 +159,7 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
-	cmd, err = s.checkStart(cmd)
+	cmd, err = s.checkStart(ctx, cmd)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +178,7 @@ func (s *Service) Dispatch(ctx context.Context, req *pb.DispatchRequest) (*pb.Di
 // Decide holds however the repository was spelled. The command's digest stays that of what the
 // client sent, so a retry of it is the same command. A retry of a command that already has a
 // receipt skips the check, so it still gets that receipt.
-func (s *Service) checkStart(cmd core.Command) (core.Command, error) {
+func (s *Service) checkStart(ctx context.Context, cmd core.Command) (core.Command, error) {
 	start, ok := cmd.Body.(core.StartRun)
 	if _, operator := cmd.Caller.(core.Operator); !ok || !operator {
 		// Only the operator may start a run; Decide refuses an agent that tries, with a receipt.
@@ -186,6 +192,12 @@ func (s *Service) checkStart(cmd core.Command) (core.Command, error) {
 	switch {
 	case err == nil:
 		start.Repository = canonical
+		if s.JobTool != nil {
+			start.JobTool, err = s.JobTool(ctx)
+			if err != nil {
+				return cmd, status.Error(codes.FailedPrecondition, err.Error())
+			}
+		}
 		cmd.Body = start
 		return cmd, nil
 	case errors.As(err, &refusal) && refusal.NotReady:
@@ -223,11 +235,11 @@ func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, [
 		snapshot: func(state core.State, last uint64) (*pb.WatchRunsResponse, error) {
 			return s.runsSnapshot(state, last, run, scoped, seen)
 		},
-		event: func(ev *pb.Event) (*pb.WatchRunsResponse, bool) {
-			if scoped && core.RunID(ev.GetRunId()) != run {
+		change: func(c *pb.RunChange) (*pb.WatchRunsResponse, bool) {
+			if scoped && core.RunID(c.GetRunId()) != run {
 				return nil, false
 			}
-			return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Event{Event: ev}}, true
+			return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Change{Change: c}}, true
 		},
 		delta:  func(*pb.Delta) (*pb.WatchRunsResponse, bool) { return nil, false },
 		latest: latest,
@@ -272,7 +284,7 @@ func (s *Service) addHistory(snap *pb.RunsSnapshot, run core.RunID) error {
 	}
 }
 
-// WatchRuns streams a snapshot of runs and agents, then every event after it.
+// WatchRuns streams a snapshot of runs and agents, then the public part of every event after it.
 func (s *Service) WatchRuns(req *pb.WatchRunsRequest, stream grpc.ServerStreamingServer[pb.WatchRunsResponse]) error {
 	caller, err := s.caller(stream.Context())
 	if err != nil {
@@ -302,15 +314,15 @@ func (s *Service) WatchAgentFrom(agent core.AgentID, pageSize uint32, after uint
 			page.Sequence = last
 			return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Page{Page: page}}, nil
 		},
-		event: func(ev *pb.Event) (*pb.WatchAgentResponse, bool) {
-			switch b := ev.GetBody().(type) {
-			case *pb.Event_ItemUpdated:
-				if b.ItemUpdated.GetAgentId() == string(agent) {
-					return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Item{Item: b.ItemUpdated}}, true
+		change: func(c *pb.RunChange) (*pb.WatchAgentResponse, bool) {
+			switch b := c.GetBody().(type) {
+			case *pb.RunChange_Item:
+				if b.Item.GetAgentId() == string(agent) {
+					return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Item{Item: b.Item}}, true
 				}
-			case *pb.Event_TurnUpdated:
-				if b.TurnUpdated.GetAgentId() == string(agent) {
-					return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Turn{Turn: b.TurnUpdated}}, true
+			case *pb.RunChange_Turn:
+				if b.Turn.GetAgentId() == string(agent) {
+					return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Turn{Turn: b.Turn}}, true
 				}
 			}
 			return nil, false

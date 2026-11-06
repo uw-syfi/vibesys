@@ -236,7 +236,8 @@ func (g *gen) plan() core.Plan {
 		Number: core.PlanNumber(1 + g.r.Uint32()), Title: g.text(), Body: g.text(),
 		Status:   []core.PlanStatus{core.PlanOpen, core.PlanChosen, core.PlanWon, core.PlanParked, core.PlanRejected}[g.pick(5)],
 		Comments: []core.PlanComment{g.comment(), g.comment()}, CreatedAt: g.instant(), UpdatedAt: g.instant(),
-		Priority: core.Priorities()[g.pick(3)],
+		Priority:  core.Priorities()[g.pick(3)],
+		GainBound: &core.GainBound{Share: []float64{0.05, 0.1, 3}[g.pick(3)], RelativeTo: core.GainHeadline},
 	}
 }
 

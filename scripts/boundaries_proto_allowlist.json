@@ -1,4 +1,7 @@
 {
+  "proto/vibesys/cli/v1/env.proto": [
+    "JobToolPlace.runtime_directory"
+  ],
   "proto/vibesys/cli/v1/environment.proto": [
     "EnvironmentKind.ENVIRONMENT_KIND_DOCKER"
   ],
@@ -15,6 +18,7 @@
     "LabReply.process"
   ],
   "proto/vibesys/cli/v1/machine.proto": [
+    "DaemonPlaces.state_home",
     "MachineDaemon.pid",
     "MachineDaemon.runtime_dir"
   ],
@@ -24,6 +28,8 @@
     "OperatorConfig.docker"
   ],
   "proto/vibesys/cli/v1/service.proto": [
+    "DaemonEnsureResponse.runtime_directory",
+    "DaemonEnsureResponse.socket",
     "DaemonProcess",
     "DaemonProcess.pid",
     "StatusResponse.checkout_directory",
@@ -89,6 +95,8 @@
     "RefEncoding.REF_ENCODING_JSON_VALUE"
   ],
   "proto/vibesys/evaluator/v1/microservices.proto": [
+    "AccuracyRunRequest.history_dir",
+    "AccuracyRunRequest.out_dir",
     "PhaseJudgeRequest.phase_dir",
     "PhasePodRequest.dataset_file",
     "PhasePodRequest.work_dir"
@@ -118,13 +126,13 @@
     "HostLock.pid"
   ],
   "proto/vibesys/orchestrator/v1/orchestrator.proto": [
-    "CliLocation.home",
-    "CliLocation.xdg_runtime_dir",
-    "CliLocation.xdg_state_home",
     "Harness.HARNESS_CLAUDE_CODE",
     "Harness.HARNESS_CODEX",
     "StartFailureReason.START_FAILURE_REASON_WORKING_DIRECTORY_UNAVAILABLE",
     "ToolCall.args_json",
     "ToolCall.provider_call_id"
+  ],
+  "proto/vibesys/orchestrator/v1/stored.proto": [
+    "JobToolEndpoint.runtime_directory"
   ]
 }

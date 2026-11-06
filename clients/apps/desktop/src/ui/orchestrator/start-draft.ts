@@ -1,9 +1,16 @@
 /** The Start run form's fields as the person typed them, and the StartRun command they become. */
 import {Harness} from '@vibesys/orchestrator-proto';
 
-/** The lead tools a run can start on; the key is what the form's choice holds. */
-export const LEADS = {claude_code: Harness.CLAUDE_CODE, codex: Harness.CODEX} as const;
-export type LeadChoice = keyof typeof LEADS;
+/**
+ * The lead tools a run can start on, from the Harness enum itself: the key is the value's name in
+ * lower case, as the command line and the agents' tools spell it, and what the form's choice holds.
+ */
+export type LeadChoice = Exclude<Lowercase<keyof typeof Harness>, 'unspecified'>;
+export const LEADS = Object.fromEntries(
+  (Object.keys(Harness) as (keyof typeof Harness)[])
+    .filter(name => Number.isNaN(Number(name)) && name !== 'UNSPECIFIED')
+    .map(name => [name.toLowerCase(), Harness[name]]),
+) as Record<LeadChoice, Harness>;
 export const LEAD_CHOICES = Object.keys(LEADS) as readonly LeadChoice[];
 
 /** How many agents a run may have at once, at most: the daemon's own ceiling. */

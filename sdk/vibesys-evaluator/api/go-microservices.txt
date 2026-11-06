@@ -26,23 +26,60 @@ A Go task script is a whole benchmark:
     	})
     }
 
+The application runs on a System: Local (already running), or K8s (built and
+deployed into a Kubernetes namespace of its own per sample).
+
 A benchmark only measures: whether the responses are right is for an accuracy
 check (package check) to judge, from the history a run with Task.Capture records
 (every response body, the loadgen client of each operation, the generator's
-info, the faults of Run.Fault). See sdk/vibesys-evaluator/docs/spec.md,
-"A phase" and "Accuracy history".
+info, the faults of Run.Fault). Task.Accuracy is that check as a command of
+the same binary (`accuracy`): phases of a fixed open-loop load with capture on,
+fault actions between them (Restart, RestartAll, Exec, FaultFunc), and the
+oracle's specs judging the history. See sdk/vibesys-evaluator/docs/spec.md,
+"A phase", "Accuracy history" and "Accuracy run".
 
 FUNCTIONS
 
 func Main[D, M any](task Task[D, M])
     Main runs the command in os.Args and exits: `benchmark` is one sample (the
     core's benchmark, see evaluator.Main), whose body deploys the application on
-    the Task's System, runs Benchmark on a Run and tears the application down on
-    every path; `phase` is the phase pod's command; `generate` the generator's
-    (with Task.Workload); `seed` the seed pod's.
+    the Task's System, runs Benchmark on a Run and tears the application down
+    on every path; `accuracy` is the accuracy check (see Accuracy); `phase` is
+    the phase pod's command; `generate` the generator's (with Task.Workload) and
+    `accuracy-workload generate` the accuracy check's (with Accuracy.Workload);
+    `seed` the seed pod's.
 
 
 TYPES
+
+type Accuracy[D, M any] struct {
+	// Phases is how many phases run, each an open loop of Load.
+	Phases int
+	Load   Open
+	// Faults go between phases, each after its phase, in order.
+	Faults []Fault
+	// Oracle builds the specs that judge the history, as an oracle's check.Main does.
+	Oracle func(h *check.History) ([]check.AnySpec, error)
+	// Options bound the check; a zero field takes check.DefaultOptions'.
+	Options check.Options
+	// Workload is the check's own request generator, in this binary (`accuracy-workload
+	// generate`); or Generator is its command, as the Task's. Neither: the check's phases run the
+	// Task's workload. One task binary so serves a benchmark's mix and a check's.
+	Workload  *workload.Workload[D, M]
+	Generator []string
+}
+    Accuracy is a task's accuracy check, the `accuracy` command of Main:
+    it deploys and seeds the application as a benchmark sample does, runs
+    Phases open-loop phases of Load against it with the whole history captured
+    (every response body, the loadgen client and the generator's info of every
+    operation), applies the Faults between them, tears the application down, and
+    judges the history with the specs Oracle builds (package check). It exits 0
+    on PASS, 1 on FAIL and 2 on UNKNOWN (also when the run could not complete),
+    and writes the report, the failures' timelines and the history into --out
+    (/vibesys/artifacts/accuracy, or accuracy/ in $VIBESYS_ARTIFACTS_DIR).
+    A check runs at a fixed, modest load, so that the responses are judged,
+    not the capacity; no phase is a measurement, so the Task's Validity does not
+    apply.
 
 type Arrivals string
     Arrivals is the arrival process of an open loop.
@@ -63,6 +100,40 @@ type Closed struct {
 }
     Closed is capacity: Clients clients, each sending its next operation when
     its last one completed, for Secs after a Warmup. Latency is end minus start.
+
+type Fault struct {
+	// Has unexported fields.
+}
+    Fault is a fault an accuracy run applies between two phases: Restart,
+    RestartAll, Exec and Flush act on a Deployment of a Kubernetes application
+    (K8s); FaultFunc is the task's own action. Each is recorded in the history
+    as a fault of its kind on its target, with its start and end on the clock
+    loadgen stamps its results with, and no operation in flight; the oracle's
+    Spec.Fault says what it does to the state.
+
+func Exec(after int, name string, argv ...string) Fault
+    Exec runs argv in the first pod of the Deployment name after phase after:
+    a fault of kind "exec" on the Deployment. A nonzero exit ends the run.
+
+func FaultFunc(after int, kind, target string, action func(context.Context) error) Fault
+    FaultFunc is a fault the task applies itself after phase after: action,
+    recorded as a fault of kind (^[a-z][a-z0-9_]{0,62}$) on target. An error of
+    action ends the run.
+
+func Flush(after int, cache string) Fault
+    Flush empties the cache Deployment cache (one of the k8s.App's Caches) in
+    place, in every pod, after phase after: memcached's flush_all or redis's
+    FLUSHALL. A fault of kind "flush" on the cache.
+
+func Restart(after int, name string) Fault
+    Restart deletes one pod of the Deployment name (the first by name) after
+    phase after and waits until it serves again: a fault of kind "restart" on
+    the Deployment.
+
+func RestartAll(after int, name string) Fault
+    RestartAll deletes every pod of the Deployment name at once after phase
+    after and waits until it serves again: a fault of kind "restart_all" on the
+    Deployment.
 
 type Load interface {
 	// Has unexported methods.
@@ -123,8 +194,20 @@ type System interface {
 	// Has unexported methods.
 }
     System is where a sample's application runs and its phase pods with it:
-    Local (an application already running), or a Kubernetes namespace of its own
-    (package k8s).
+    Local (an application already running), or K8s (a Kubernetes namespace of
+    its own).
+
+func K8s(app k8s.App, ready ...workload.Step) System
+    K8s is an application on Kubernetes (package k8s; the Go form of Python's
+    microservices.k8s.App): each sample builds its images, deploys it into a
+    namespace of its own in the cluster the environment gives (KUBECONFIG,
+    VIBESYS_K8S_REGISTRY, VIBESYS_K8S_BUILDER), waits until it serves and
+    every ready step succeeds through the gateway, and deletes the namespace
+    on every path. The seed and the phases run in pods of the task image there,
+    as this binary's `seed` and `phase` commands at the path it has here:
+    the task directory (app.Manifest and the task image's Dockerfile) is this
+    binary's directory, as a Python task's is its script's. Restart, RestartAll
+    and Exec act on app.Restartable Deployments.
 
 func Local(target string) System
     Local is an application already running at target (a base URL,
@@ -142,7 +225,7 @@ type Task[D, M any] struct {
 	// differs from the orchestrator's. It is written as JSON (encoding/json) into dataset.json in
 	// the artifacts and for the generator (--dataset). Nil: D's zero value.
 	Dataset func() (D, error)
-	// System is where the application runs: Local, or a Kubernetes namespace (package k8s).
+	// System is where the application runs: Local, or K8s (a Kubernetes namespace per sample).
 	System System
 	// Seed writes the dataset into the deployed application before the phases, from a process
 	// next to it (a seed pod); nil when there is nothing to write.
@@ -153,8 +236,10 @@ type Task[D, M any] struct {
 	Workload  *workload.Workload[D, M]
 	Generator []string
 	// Benchmark is the scoring definition: it runs phases on run and calls run.Report. An error
-	// ends the sample with an error record.
+	// ends the sample with an error record. Nil: the task has only Accuracy.
 	Benchmark func(ctx context.Context, run *Run) error
+	// Accuracy is the task's accuracy check (the `accuracy` command); nil when it has none.
+	Accuracy *Accuracy[D, M]
 	// Capture records every phase's whole history for an accuracy check, which benchmarks leave
 	// off: every response body, the loadgen client of every operation and the generator's info
 	// of every operation are kept in the phase directories, and history.binpb lists the phases

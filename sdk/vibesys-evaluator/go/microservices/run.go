@@ -3,16 +3,8 @@ package microservices
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"regexp"
-	"strings"
-	"time"
-
-	"google.golang.org/protobuf/proto"
 
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/evaluator"
-	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/phase"
 )
 
@@ -56,30 +48,12 @@ func (r *Run) Fault(ctx context.Context, kind, target string, action func(contex
 	return r.phases.fault(ctx, kind, target, action)
 }
 
-// The accuracy history's manifest, beside the phase directories and the dataset file in the
-// sample's artifacts (docs/spec.md, "Accuracy history").
-const historyFile = "history.binpb"
-
-var faultKind = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
-
 // phases runs a sample's load phases in order on a deployment and judges each: the Go phase
-// runner behind Run.
+// runner (phase.Runner) as a benchmark sees it, where a phase that is not a measurement ends the
+// sample.
 type phases struct {
-	pods      pods
-	command   func(workDir, target string) []string
-	seed      uint64
-	artifacts string
-	validity  evaluator.Validity
-	capture   bool
-	log       func(string)
-	now       func() time.Time
-
-	next   int
-	faults []*pb.FaultEvent
-	// windowEnd is the end of the last phase's window on the loadgen clock: a fault that starts
-	// before it shows clocks that disagree.
-	windowEnd int64
-	last      *PhaseResult
+	runner *phase.Runner
+	last   *PhaseResult
 }
 
 func (p *phases) partial() *evaluator.Partial {
@@ -98,107 +72,19 @@ func (p *phases) run(ctx context.Context, load Load) (PhaseResult, error) {
 	if err != nil {
 		return PhaseResult{}, err
 	}
-	index := p.next
-	p.next++
-	in := phase.Input(p.seed, index, asked, p.capture)
-	name := fmt.Sprintf("phase-%d", index)
-	dir, err := evaluator.PhaseDir(p.artifacts, name)
+	ran, err := p.runner.Run(ctx, asked)
 	if err != nil {
-		return PhaseResult{}, err
+		return PhaseResult{}, p.fail("%v", err)
 	}
-	p.log(fmt.Sprintf("phase %d: %s", index, phase.Describe(in)))
-	encoded, err := proto.Marshal(in)
-	if err != nil {
-		return PhaseResult{}, err
+	if ran.Verdict.Failure != "" {
+		return PhaseResult{}, p.fail("%s", phase.Failure(ran.Input, ran.Verdict.Failure))
 	}
-	ran, err := p.pods.runPod(ctx, podSpec{
-		name: name, command: p.command, outputs: dir, timeout: phase.Timeout(in),
-		inputs: map[string][]byte{phase.InputFile: encoded},
-	})
-	if err != nil {
-		_ = os.WriteFile(filepath.Join(dir, phase.LogFile), []byte(err.Error()), 0o644)
-		return PhaseResult{}, p.fail("phase %d (%s): %v", index, phase.Describe(in), err)
-	}
-	_ = os.WriteFile(filepath.Join(dir, phase.LogFile), []byte(ran.log), 0o644)
-	if ran.exitCode != 0 {
-		return PhaseResult{}, p.fail("%s exited %d after %.0f s; log tail:\n%s", name, ran.exitCode, ran.seconds, tail(ran.log, 1500))
-	}
-	output, err := phase.ReadOutput(dir)
-	if err != nil {
-		return PhaseResult{}, p.fail("phase %d (%s) left no usable output: %v", index, phase.Describe(in), err)
-	}
-	p.windowEnd = output.GetSummary().GetWindowEndUnixNanos()
-	if p.capture {
-		if err := p.writeHistory(); err != nil {
-			return PhaseResult{}, err
-		}
-	}
-	verdict, err := phase.Judge(output, p.validity)
-	if err != nil {
-		return PhaseResult{}, p.fail("phase %d: %v", index, err)
-	}
-	for _, line := range phase.Log(in, output, verdict) {
-		p.log(line)
-	}
-	if verdict.Failure != "" {
-		return PhaseResult{}, p.fail("%s", phase.Failure(in, verdict.Failure))
-	}
-	m := verdict.Measurement
+	m := ran.Verdict.Measurement
 	result := PhaseResult{OpsPerSec: m.OpsPerSec, P50Ms: m.P50Ms, P99Ms: m.P99Ms}
 	p.last = &result
 	return result, nil
 }
 
 func (p *phases) fault(ctx context.Context, kind, target string, action func(context.Context) error) error {
-	if !faultKind.MatchString(kind) {
-		return fmt.Errorf("fault kind %q must match %s", kind, faultKind)
-	}
-	if p.next == 0 {
-		return fmt.Errorf("fault %s: a fault goes between phases; run a phase first", kind)
-	}
-	after := p.next - 1
-	start := p.now()
-	if start.UnixNano() < p.windowEnd {
-		p.log(fmt.Sprintf("fault %s starts at %s, before phase %d's window ended on loadgen's clock (%s): "+
-			"this machine's clock and the phase pod's disagree, and the fault's times are off by as much",
-			kind, start.UTC().Format(time.RFC3339Nano), after, time.Unix(0, p.windowEnd).UTC().Format(time.RFC3339Nano)))
-	}
-	err := action(ctx)
-	end := p.now()
-	p.faults = append(p.faults, &pb.FaultEvent{
-		Kind: kind, Target: target, StartUnixNanos: start.UnixNano(), EndUnixNanos: end.UnixNano(), AfterPhase: uint32(after),
-	})
-	if p.capture {
-		if werr := p.writeHistory(); werr != nil && err == nil {
-			err = werr
-		}
-	}
-	if err != nil {
-		return fmt.Errorf("fault %s on %s after phase %d: %w", kind, target, after, err)
-	}
-	p.log(fmt.Sprintf("fault %s on %s after phase %d: %.1f s", kind, target, after, end.Sub(start).Seconds()))
-	return nil
-}
-
-// writeHistory writes the accuracy history's manifest: the phases run so far, the faults, the
-// dataset file.
-func (p *phases) writeHistory() error {
-	manifest := &pb.HistoryManifest{Phases: uint32(p.next), Faults: p.faults, Dataset: phase.DatasetFile}
-	encoded, err := proto.Marshal(manifest)
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(p.artifacts, historyFile)
-	if err := os.WriteFile(path+".tmp", encoded, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(path+".tmp", path)
-}
-
-func tail(text string, n int) string {
-	text = strings.TrimSpace(text)
-	if len(text) <= n {
-		return text
-	}
-	return text[len(text)-n:]
+	return p.runner.Fault(ctx, kind, target, action)
 }

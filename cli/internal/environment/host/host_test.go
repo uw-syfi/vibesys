@@ -59,8 +59,10 @@ func TestHostPassesTheEnvironmentContract(t *testing.T) {
 	})
 }
 
-// A command on the host finds its artifacts directory in the variable a container's command does.
-func TestACommandOnTheHostIsToldItsArtifactsDirectory(t *testing.T) {
+// A command on the host is told about its job as one in a container is: where its artifacts go and
+// how long it may run, and nothing the daemon's own environment says about another job.
+func TestACommandOnTheHostIsToldItsJobEnvironment(t *testing.T) {
+	t.Setenv("VIBESYS_MOUNTS", "left-over")
 	co := checkout(t, nil)
 	artifacts, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -70,10 +72,14 @@ func TestACommandOnTheHostIsToldItsArtifactsDirectory(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), envtest.Backstop)
 	defer cancel()
 	a := newHost(clock.System{}).Run(ctx, core.Execution{
-		Checkout: co, Artifacts: artifacts, Argv: []string{"/bin/sh", "-c", `printf %s "$VIBESYS_ARTIFACTS_DIR"`}, Timeout: time.Hour,
+		Checkout: co, Artifacts: artifacts, Timeout: time.Hour,
+		Argv: []string{"/bin/sh", "-c", `printf '%s\n%s\n%s' "$VIBESYS_ARTIFACTS_DIR" "$VIBESYS_JOB_TIMEOUT_SECONDS" "$VIBESYS_MOUNTS"`},
 	}, &out)
-	if e, ok := a.(core.Ended); !ok || e.Exec.ExitCode != 0 || out.String() != artifacts {
-		t.Errorf("attempt %+v printed %q, want %q", a, out.String(), artifacts)
+	if e, ok := a.(core.Ended); !ok || e.Exec.ExitCode != 0 {
+		t.Fatalf("attempt %+v", a)
+	}
+	if want := artifacts + "\n3600\n"; out.String() != want {
+		t.Errorf("the command printed %q, want %q", out.String(), want)
 	}
 }
 

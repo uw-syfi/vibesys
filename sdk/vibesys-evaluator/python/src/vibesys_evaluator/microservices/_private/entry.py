@@ -1,16 +1,22 @@
 """The microservices task script's command line, composed on the core sample lifecycle.
 
     bench.py benchmark --project-root DIR --vs-output FILE [--seed N]   one sample (vibesys)
-    bench.py phase --work DIR --target URL                              one phase (a phase pod)
+    bench.py phase [--accuracy] --work DIR --target URL                 one phase (a phase pod)
     bench.py generate --phase-input F --dataset F --state DIR           the generator (under loadgen)
+    bench.py accuracy-workload generate ...                             Accuracy(workload=)'s generator
     bench.py seed --dataset-digest HEX                                  the seed (a seed Job)
+    bench.py accuracy [--project-root DIR] [--out DIR] [--seed N]      the accuracy check
     bench.py ctl ARGS...                                                deploy hooks (accuracy)
 
 ``benchmark`` is the core's benchmark sample (records, seed, signals) whose
 body deploys the system, runs ``benchmark(run)`` on a microservices ``Run``
 and tears the system down on every path. ``phase`` writes the dataset file
 and hands the phase to the core (``vibesys-evaluator phase pod``), which runs
-loadgen and the generator.
+loadgen and the generator. ``accuracy`` hands the task's ``Accuracy`` to the
+core (``vibesys-evaluator accuracy run``): phases with the history captured
+and faults between them, then the oracle's verdict as the exit status. Its
+phase pods run ``phase --accuracy``, whose generator is the check's own
+workload when it has one (``accuracy-workload generate`` for a Python one).
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from vibesys_evaluator._private import core
 from vibesys_evaluator._private.files import SchemaFileError, read_message
 from vibesys_evaluator._private.sample import benchmark_sample, log, with_signals
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
+from vibesys_evaluator.microservices._private import accuracy as accuracy_check
 from vibesys_evaluator.microservices._private import dataset as dataset_file
 from vibesys_evaluator.microservices._private.deploy import DeployContext, TaskCommand
 from vibesys_evaluator.microservices._private.phase import PhaseError, generate
@@ -56,6 +63,7 @@ class Task:
     metrics: Mapping[str, Metric]
     validity: Validity
     capture: bool = False
+    accuracy: accuracy_check.Accuracy | None = None
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -66,12 +74,25 @@ def _parser() -> argparse.ArgumentParser:
     bench.add_argument("--vs-output", type=Path, required=True)
     bench.add_argument("--seed", type=int, default=None, help="replay the sample with this seed")
     phase = commands.add_parser("phase", help="run one phase (in a phase pod)")
+    phase.add_argument(
+        "--accuracy", action="store_true", help="an accuracy check's phase: its workload"
+    )
     phase.add_argument("--work", type=Path, required=True)
     phase.add_argument("--target", required=True)
     generate_command = commands.add_parser("generate", help="the request generator (in a phase)")
     generate_command.add_argument("--phase-input", type=Path, required=True)
     generate_command.add_argument("--dataset", type=Path, required=True)
     generate_command.add_argument("--state", type=Path, required=True)
+    accuracy_workload = commands.add_parser(
+        "accuracy-workload", help="the accuracy check's own generator: accuracy-workload generate"
+    )
+    accuracy_workload.add_argument("args", nargs=argparse.REMAINDER)
+    check = commands.add_parser(
+        "accuracy", help="run the accuracy check (exit 0 PASS, 1 FAIL, 2 UNKNOWN)"
+    )
+    check.add_argument("--project-root", type=Path, default=Path())
+    check.add_argument("--out", type=Path, default=None, help="the report and the history")
+    check.add_argument("--seed", type=int, default=None, help="replay the check with this seed")
     seed = commands.add_parser("seed", help="write the dataset into the system (in a seed Job)")
     seed.add_argument("--dataset-digest", required=True)
     ctl = commands.add_parser("ctl", help="the deploy layer's hooks for accuracy checkers")
@@ -126,6 +147,33 @@ def benchmark(
     )
 
 
+def accuracy(
+    task: Task,
+    *,
+    project_root: Path,
+    out: Path | None,
+    seed_flag: int | None,
+    deployer: Deployer,
+    env: Mapping[str, str],
+    script: TaskCommand,
+) -> int:
+    """Run the task's accuracy check; the exit status is the verdict's (2, UNKNOWN, without one)."""
+    if task.accuracy is None:
+        log("this task has no accuracy check: pass accuracy=Accuracy(...) to microservices.main")
+        return accuracy_check.UNKNOWN_EXIT
+    return accuracy_check.run_accuracy(
+        task.accuracy,
+        dataset=task.dataset(),
+        app=task.system,
+        project_root=project_root,
+        out=out if out is not None else accuracy_check.report_dir(env),
+        seed=seed_flag,
+        env=env,
+        deployer=deployer,
+        script=script,
+    )
+
+
 def seed(task: Task, *, expected_digest: str) -> int:
     """Regenerate the dataset, check it is the orchestrator's, and seed the system."""
     encoded = dataset_file.encode(task.dataset())
@@ -144,17 +192,29 @@ def seed(task: Task, *, expected_digest: str) -> int:
     return 0
 
 
-def generator_command(task: Task, script: TaskCommand) -> list[str]:
-    """The generator command of the task's workload, as the phase pod runs it."""
-    if not isinstance(task.workload, Generator):
+def _workload(task: Task, *, accuracy: bool) -> Workload[Any, Any] | Generator:
+    """The workload of a phase: the accuracy check's own in its phases, if it has one."""
+    if accuracy and task.accuracy is not None and task.accuracy.workload is not None:
+        return task.accuracy.workload
+    return task.workload
+
+
+def generator_command(task: Task, script: TaskCommand, *, accuracy: bool = False) -> list[str]:
+    """The generator command of the phase's workload, as the phase pod runs it."""
+    workload = _workload(task, accuracy=accuracy)
+    if not isinstance(workload, Generator):
+        if workload is not task.workload:
+            return [script.python, script.script, "accuracy-workload"]
         return [script.python, script.script]
-    program, *rest = task.workload.command
+    program, *rest = workload.command
     if "/" in program and not Path(program).is_absolute():
         program = str(Path(script.script).parent / program)
     return [program, *rest]
 
 
-def phase(task: Task, *, work: Path, target: str, script: TaskCommand) -> int:
+def phase(
+    task: Task, *, work: Path, target: str, script: TaskCommand, accuracy: bool = False
+) -> int:
     """Run one phase here (the phase pod's command): the core's ``phase pod``."""
     with tempfile.TemporaryDirectory(prefix="vibesys-phase-") as scratch:
         try:
@@ -172,7 +232,7 @@ def phase(task: Task, *, work: Path, target: str, script: TaskCommand) -> int:
         request = {
             "work_dir": str(work),
             "target": target,
-            "generator": generator_command(task, script),
+            "generator": generator_command(task, script, accuracy=accuracy),
             "dataset_file": str(dataset_path),
             "min_sustained_ratio": task.validity.min_sustained_ratio,
             "loadgen": loadgen,
@@ -187,23 +247,28 @@ def phase(task: Task, *, work: Path, target: str, script: TaskCommand) -> int:
     return 0
 
 
-def generator(task: Task, argv: Sequence[str], *, stdout: IO[bytes]) -> int:
+def generator(task: Task, argv: Sequence[str], *, stdout: IO[bytes], accuracy: bool = False) -> int:
     """The Python workload's ``generate`` (``docs/spec.md``, "Generator command line").
 
-    ``argv`` starts with the command name. The dataset is ``task.dataset()``,
-    built here (``--dataset`` is its file, for generators in other languages).
-    Returns the exit status.
+    ``argv`` starts with the command name. The workload is the task's, or
+    with ``accuracy`` the accuracy check's own (``accuracy-workload
+    generate``). The dataset is ``task.dataset()``, built here (``--dataset``
+    is its file, for generators in other languages). Returns the exit status.
     """
     args = _parser().parse_args(list(argv))
     if args.command != "generate":
         log(f"not a generator command: {args.command}")
         return 2
-    if isinstance(task.workload, Generator):
-        log(f"the workload is the generator {list(task.workload.command)!r}: run it instead")
+    if accuracy and (task.accuracy is None or task.accuracy.workload is None):
+        log("this task's Accuracy has no workload of its own: pass Accuracy(workload=...)")
+        return 2
+    workload = _workload(task, accuracy=accuracy)
+    if isinstance(workload, Generator):
+        log(f"the workload is the generator {list(workload.command)!r}: run it instead")
         return 2
     try:
         phase_input = read_message(args.phase_input, phase_pb.PhaseInput)
-        written = generate(task.workload, task.dataset(), phase_input, out=stdout, state=args.state)
+        written = generate(workload, task.dataset(), phase_input, out=stdout, state=args.state)
     except (PhaseError, SchemaFileError) as error:
         log(f"generate failed: {error}")
         return 1
@@ -211,11 +276,11 @@ def generator(task: Task, argv: Sequence[str], *, stdout: IO[bytes]) -> int:
     return 0
 
 
-def _generator_on_stdout(task: Task, argv: Sequence[str]) -> int:
+def _generator_on_stdout(task: Task, argv: Sequence[str], *, accuracy: bool = False) -> int:
     """``generator`` on this process's standard output, which loadgen closes to end the stream."""
     stdout = sys.stdout.buffer
     try:
-        code = generator(task, argv, stdout=stdout)
+        code = generator(task, argv, stdout=stdout, accuracy=accuracy)
         stdout.flush()
     except BrokenPipeError:
         code = 0
@@ -240,26 +305,34 @@ def run(
     """Run one command of the task script; returns the exit status."""
     args = _parser().parse_args(list(argv))
 
-    def command() -> int:
-        if args.command == "benchmark":
-            return benchmark(
-                task,
-                project_root=args.project_root,
-                output=args.vs_output,
-                seed_flag=args.seed,
-                deployer=deployer(),
-                env=env,
-                script=script,
-            )
-        if args.command == "phase":
-            return phase(task, work=args.work, target=args.target, script=script)
-        if args.command == "generate":
-            return _generator_on_stdout(task, argv)
-        if args.command == "seed":
-            return seed(task, expected_digest=args.dataset_digest)
-        return control(args.args)
-
-    return with_signals(command)
+    commands: dict[str, Callable[[], int]] = {
+        "benchmark": lambda: benchmark(
+            task,
+            project_root=args.project_root,
+            output=args.vs_output,
+            seed_flag=args.seed,
+            deployer=deployer(),
+            env=env,
+            script=script,
+        ),
+        "accuracy": lambda: accuracy(
+            task,
+            project_root=args.project_root,
+            out=args.out,
+            seed_flag=args.seed,
+            deployer=deployer(),
+            env=env,
+            script=script,
+        ),
+        "phase": lambda: phase(
+            task, work=args.work, target=args.target, script=script, accuracy=args.accuracy
+        ),
+        "generate": lambda: _generator_on_stdout(task, argv),
+        "accuracy-workload": lambda: _generator_on_stdout(task, args.args, accuracy=True),
+        "seed": lambda: seed(task, expected_digest=args.dataset_digest),
+        "ctl": lambda: control(args.args),
+    }
+    return with_signals(commands[args.command])
 
 
 def main(

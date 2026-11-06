@@ -36,7 +36,7 @@ func (r *rig) awaitLeadDeliveries(lead string) {
 				messages[m.Id] = m
 			}
 		}
-		if m := event.GetMessageUpdated(); m != nil {
+		if m := event.GetMessage(); m != nil {
 			messages[m.Id] = m
 		}
 		if leadDeliveriesComplete(r.t, messages, lead) {

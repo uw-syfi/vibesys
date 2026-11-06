@@ -6,8 +6,9 @@ The service is ``KvService`` over HTTP on localhost; loadgen is built from
 (``vibesys-evaluator phase pod``). The sample must end with a valid result
 record, with the Python generator and with the kv-store example's Go
 generator alike; under capture it records a history that the kv-store
-example's oracle passes, and fails when the service loses writes. The two
-generators must write the same request stream.
+example's oracle passes, and fails when the service loses writes; the
+accuracy check (``bench.py accuracy``, the core's ``accuracy run``) comes to the
+same verdicts. The two generators must write the same request stream.
 """
 
 from __future__ import annotations
@@ -251,6 +252,82 @@ def test_a_captured_history_is_judged_by_the_oracle(
     assert judged.returncode == verdict, judged.stdout + judged.stderr
 
 
+#: The service, the check's faults, and its verdict: PASS (0), FAIL (1), UNKNOWN (2).
+_CHECKED = {
+    "right": (kv.KvService, "", 0),
+    "losing-writes": (lambda: kv.KvService(lose_writes=True), "", 1),
+    "a-restart-on-a-local-system": (kv.KvService, "restart", 2),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_CHECKED))
+def test_the_accuracy_check_runs_its_phases_and_the_oracle(
+    built_loadgen: Path, oracle: Path, tmp_path: Path, case: str
+) -> None:
+    make, faults, verdict = _CHECKED[case]
+    service = make()
+    kv.seed_service(service, kv.Data())
+    out = tmp_path / "accuracy"
+    with _serving(service) as target:
+        env = {
+            **os.environ,
+            "KV_TARGET": target,
+            "KV_ACCURACY": faults,
+            "KV_ORACLE": str(oracle),
+            "KV_STORE_SCALE": "test",
+            "VIBESYS_EVALUATOR_LOADGEN": str(built_loadgen),
+            "PYTHONPATH": os.pathsep.join([str(TESTS), os.environ.get("PYTHONPATH", "")]),
+        }
+        done = _run(
+            [sys.executable, str(SCRIPT), "accuracy", "--out", str(out), "--seed", "7"],
+            env=env,
+            timeout=SAMPLE_TIMEOUT_SECS,
+        )
+    assert done.returncode == verdict, done.stdout + done.stderr
+    if faults:
+        assert "a local system cannot restart kv" in done.stderr
+        return
+    manifest = phase_pb.HistoryManifest.from_binary(
+        (out / "history" / "history.binpb").read_bytes()
+    )
+    assert manifest.phases == 2
+    assert (out / "history" / "dataset.json").is_file()
+    assert (out / "report.txt").is_file(), sorted(p.name for p in out.iterdir())
+    results = read_results(out / "history" / "phase-1" / "results.binpb")
+    assert results
+    assert all(r.client is not None for r in results)
+
+
+def test_the_accuracy_check_runs_its_own_workload(
+    built_loadgen: Path, oracle: Path, tmp_path: Path
+) -> None:
+    service = kv.KvService()
+    kv.seed_service(service, kv.Data())
+    out = tmp_path / "accuracy"
+    with _serving(service) as target:
+        env = {
+            **os.environ,
+            "KV_TARGET": target,
+            "KV_ACCURACY_WORKLOAD": "writes",
+            "KV_ORACLE": str(oracle),
+            "KV_STORE_SCALE": "test",
+            "VIBESYS_EVALUATOR_LOADGEN": str(built_loadgen),
+            "PYTHONPATH": os.pathsep.join([str(TESTS), os.environ.get("PYTHONPATH", "")]),
+        }
+        done = _run(
+            [sys.executable, str(SCRIPT), "accuracy", "--out", str(out), "--seed", "7"],
+            env=env,
+            timeout=SAMPLE_TIMEOUT_SECS,
+        )
+    assert done.returncode == 0, done.stdout + done.stderr
+    # The phases ran the check's workload (bench.py accuracy-workload generate), unjudged.
+    for index in range(2):
+        summary = read_summary(out / "history" / f"phase-{index}" / "summary.binpb")
+        assert list(summary.operation_names) == ["write", "read"]
+    assert "operations sent" in done.stderr
+    assert "not a measurement" not in done.stderr
+
+
 def test_the_go_example_is_a_whole_benchmark(
     built_loadgen: Path, go_generator: Path, oracle: Path, tmp_path: Path
 ) -> None:
@@ -285,6 +362,37 @@ def test_the_go_example_is_a_whole_benchmark(
         timeout=SAMPLE_TIMEOUT_SECS,
     )
     assert judged.returncode == 0, judged.stdout + judged.stderr
+
+
+@pytest.mark.parametrize("case", ["right", "losing-writes"])
+def test_the_go_examples_accuracy_check_judges_its_history_in_process(
+    built_loadgen: Path, go_generator: Path, tmp_path: Path, case: str
+) -> None:
+    # microservices.Main's accuracy command: the phases through the same runner, the pause
+    # between them, then the oracle's specs (kvcheck) on the history, in the same process.
+    out = tmp_path / "accuracy"
+    tools = tmp_path / "bin"  # a Go task finds loadgen on PATH, as in its task image
+    tools.mkdir()
+    (tools / "loadgen").symlink_to(built_loadgen)
+    with _serving(kv.KvService(lose_writes=case == "losing-writes")) as target:
+        env = {
+            **os.environ,
+            "PATH": f"{tools}{os.pathsep}{os.environ.get('PATH', '')}",
+            "KV_TARGET": target,
+            "KV_STORE_SCALE": "test",
+        }
+        done = _run(
+            [str(go_generator), "accuracy", "--out", str(out), "--seed", "7"],
+            env=env,
+            timeout=SAMPLE_TIMEOUT_SECS,
+        )
+    assert done.returncode == (1 if case == "losing-writes" else 0), done.stdout + done.stderr
+    manifest = phase_pb.HistoryManifest.from_binary(
+        (out / "history" / "history.binpb").read_bytes()
+    )
+    assert manifest.phases == 2
+    assert [(f.kind, f.after_phase) for f in manifest.faults] == [("pause", 0)]
+    assert (out / "report.txt").is_file()
 
 
 def _phase_input(path: Path, *, capture: bool) -> Path:

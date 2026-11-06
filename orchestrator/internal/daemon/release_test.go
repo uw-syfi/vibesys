@@ -11,7 +11,6 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 )
 
@@ -83,7 +82,7 @@ func newWorld(t *testing.T, deadline time.Duration, leadBusy bool) *world {
 // spawn adds a worker that behaves as kind says.
 func (w *world) spawn(kind worker) {
 	w.t.Helper()
-	token := w.r.Sidecars.Session(core.Session{Agent: w.lead.ID, N: 1}).Env[daemon.EnvToken]
+	token := w.r.Sidecars.Session(core.Session{Agent: w.lead.ID, N: 1}).Credentials.GetToken()
 	id := fmt.Sprintf("spawn-%d", len(w.spawned))
 	resp, err := w.r.AgentService.Dispatch(agentContext(w.lead.ID, 1, token), &pb.DispatchRequest{Command: &pb.Command{Id: id, Body: &pb.Command_SpawnAgent{SpawnAgent: &pb.SpawnAgent{
 		RunId: string(w.run.ID), Role: pb.AgentRole_AGENT_ROLE_WORKER, Brief: "work",
@@ -97,7 +96,7 @@ func (w *world) spawn(kind worker) {
 	w.r.Settle(w.t)
 	if kind == workerHandedOff {
 		session := w.r.Sidecars.Session(core.Session{Agent: agent, N: 1})
-		_, err := w.r.AgentService.Dispatch(agentContext(agent, 1, session.Env[daemon.EnvToken]), &pb.DispatchRequest{Command: &pb.Command{Id: "handoff-" + id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: &pb.Handoff{Claim: "done"}}}}})
+		_, err := w.r.AgentService.Dispatch(agentContext(agent, 1, session.Credentials.GetToken()), &pb.DispatchRequest{Command: &pb.Command{Id: "handoff-" + id, Body: &pb.Command_PostHandoff{PostHandoff: &pb.PostHandoff{Handoff: &pb.Handoff{Claim: "done", Body: &pb.Handoff_Worker{Worker: &pb.WorkerHandoff{Outcome: &pb.WorkerHandoff_NoCandidate{NoCandidate: &pb.NoCandidate{Blocker: "none"}}}}}}}}})
 		if err != nil {
 			w.t.Fatalf("handoff: %v", err)
 		}
@@ -153,7 +152,7 @@ func TestStoppingARunEndsTheSidecarsOfItsLeadAndItsWorkers(t *testing.T) {
 func TestAStoppedWorkersSidecarEndsAsTheRunsDo(t *testing.T) {
 	w := newWorld(t, 0, false)
 	w.spawn(workerIdle)
-	token := w.r.Sidecars.Session(core.Session{Agent: w.lead.ID, N: 1}).Env[daemon.EnvToken]
+	token := w.r.Sidecars.Session(core.Session{Agent: w.lead.ID, N: 1}).Credentials.GetToken()
 	dispatchAs := func(id string, body *pb.Command) {
 		_, err := w.r.AgentService.Dispatch(agentContext(w.lead.ID, 1, token), &pb.DispatchRequest{Command: body})
 		if err != nil {
@@ -220,7 +219,7 @@ func alive(r *daemontest.Rig) int {
 func TestAKillThatFailsIsRetriedUntilTheSidecarEnds(t *testing.T) {
 	w := newWorld(t, 0, false)
 	w.spawn(workerIdle)
-	w.r.Sidecars.KillFailures = 3
+	w.r.Sidecars.KillFailures = 10
 	dispatch(t, w.r, &pb.Command{Id: "stop", Body: &pb.Command_StopRun{StopRun: &pb.StopRun{RunId: string(w.run.ID)}}})
 	stepAll(t, w.r)
 	run, _ := w.r.Daemon.State().Run(w.run.ID)
@@ -248,4 +247,36 @@ func TestASidecarLeftByADaemonThatStoppedIsEndedByTheNext(t *testing.T) {
 	w.r.Restart(t)
 	w.r.Settle(t)
 	w.requireNoSidecarLeft("after a restart")
+}
+
+// A run's working copies are released once it is over and never before: the Fake is asked for the
+// run's subagents only, the copies it keeps are recorded on the run, and a daemon that restarts right
+// after deciding the end still releases them.
+func TestAnEndedRunReleasesItsWorkersCheckoutsAndRecordsTheOnesKept(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		w := newWorld(t, 0, false)
+		w.spawn(workerIdle)
+		w.spawn(workerIdle)
+		w.r.Checkouts.Dirty = map[core.AgentID]bool{w.spawned[1]: true}
+		if got := w.r.Checkouts.Releases(); len(got) != 0 {
+			t.Fatalf("a running run released checkouts: %v", got)
+		}
+		w.end(endOperator, restart)
+		w.requireNoSidecarLeft("operator stop")
+		calls := w.r.Checkouts.Releases()
+		if len(calls) == 0 {
+			t.Fatalf("restart=%v: nothing was released", restart)
+		}
+		for _, call := range calls {
+			for _, a := range call {
+				if a == w.lead.ID {
+					t.Fatalf("the lead was offered for release: %v", call)
+				}
+			}
+		}
+		run, _ := w.r.Daemon.State().Run(w.run.ID)
+		if len(run.Kept) != 1 || run.Kept[0].Agent != w.spawned[1] {
+			t.Fatalf("restart=%v: kept %+v, want only %s", restart, run.Kept, w.spawned[1])
+		}
+	}
 }

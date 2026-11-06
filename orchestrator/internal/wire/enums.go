@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"fmt"
+
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
@@ -127,6 +129,8 @@ var (
 		core.RefuseAgentNotLive:    pb.Refusal_REFUSAL_AGENT_NOT_LIVE,
 		core.RefuseDeadlinePassed:  pb.Refusal_REFUSAL_DEADLINE_PASSED,
 		core.RefuseRepositoryInUse: pb.Refusal_REFUSAL_REPOSITORY_IN_USE,
+		core.RefuseAgentNotAllowed: pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED,
+		core.RefuseHandoffNotYours: pb.Refusal_REFUSAL_HANDOFF_NOT_YOURS,
 	})
 	startFailures = newEnum(map[core.StartFailure]pb.StartFailureReason{
 		"":                              pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED,
@@ -138,10 +142,16 @@ var (
 		core.StartTimedOut:              pb.StartFailureReason_START_FAILURE_REASON_TIMED_OUT,
 		core.StartOther:                 pb.StartFailureReason_START_FAILURE_REASON_OTHER,
 		core.StartIncompatibleVersions:  pb.StartFailureReason_START_FAILURE_REASON_INCOMPATIBLE_VERSIONS,
+		core.StartStateLocationTooLong:  pb.StartFailureReason_START_FAILURE_REASON_STATE_LOCATION_TOO_LONG,
 	})
 	reportKinds = newEnum(map[core.ReportKind]pb.ReportKind{
 		core.ReportProgress: pb.ReportKind_REPORT_KIND_PROGRESS,
 		core.ReportFinal:    pb.ReportKind_REPORT_KIND_FINAL,
+	})
+	verdicts = newEnum(map[core.Verdict]pb.JudgeVerdict{
+		core.VerdictPass:       pb.JudgeVerdict_JUDGE_VERDICT_PASS,
+		core.VerdictFail:       pb.JudgeVerdict_JUDGE_VERDICT_FAIL,
+		core.VerdictUnmeasured: pb.JudgeVerdict_JUDGE_VERDICT_UNMEASURED,
 	})
 	timerKinds = newEnum(map[core.TimerKind]pb.TimerKind{
 		core.TimerRunDeadline:    pb.TimerKind_TIMER_KIND_RUN_DEADLINE,
@@ -150,3 +160,16 @@ var (
 		core.TimerLeadIdle:       pb.TimerKind_TIMER_KIND_LEAD_IDLE,
 	})
 )
+
+// RoleOut is the contract value of an agent's role, for the messages a program is started from.
+func RoleOut(r core.AgentRole) pb.AgentRole { return roles.out(r) }
+
+// RoleIn is the role a contract value names, or an error for the unspecified one or a value this
+// build does not know.
+func RoleIn(p pb.AgentRole) (core.AgentRole, error) {
+	r, ok := roles.toCore[p]
+	if !ok {
+		return "", fmt.Errorf("no agent role for %v", p)
+	}
+	return r, nil
+}

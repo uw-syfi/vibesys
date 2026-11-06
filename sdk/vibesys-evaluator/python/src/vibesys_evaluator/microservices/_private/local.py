@@ -89,6 +89,11 @@ class LocalDeployer:
         self._target = target
         self._env = env
 
+    @property
+    def target(self) -> str:
+        """The base URL of the system under test."""
+        return self._target
+
     @contextmanager
     def deploy(self, context: DeployContext) -> Iterator[LocalPhaseRunner]:
         """Run the seed command, then yield the runner (nothing to tear down)."""

@@ -62,9 +62,10 @@ event log, not the answer to `Open`.
 The host builds it, and this process interprets none of it. `AgentEnvironment` says what to set and
 what to unset over the login shell's environment (agentshim builds a provider's environment from
 that probe and never from this process's own), and each `ToolServer` carries its own whole
-environment. The names, what fills each and who reads it are in
-`proto/vibesys/cli/v1/conformance/identity_env.golden.json`, which the host's tests and the
-vibesys-cli's tests both read.
+environment. The names are the `env_name` of the fields of `AgentContext`, `SkillEnvironment`,
+`JobToolPlace` (`proto/vibesys/cli/v1/env.proto`) and `ToolServerCredentials`
+(`proto/vibesys/orchestrator/v1/tool_server.proto`), written by the host's environment codec; this
+process only lays the result over the login environment.
 
 A tool server's environment holds the session's token. It is not written to any file here, and
 agentshim passes the provider its tool server configuration through an inherited pipe, so it is on no
@@ -132,7 +133,8 @@ start. The daemon's own timer (`core.LaunchTimeout`) ends a session that never s
   closes) are settled `FAILED`.
 - **Raw log.** `raw.log` has every line crossing the provider pipe with the offset it followed,
   written without a sync and never under the engine's lock. It is for inspection and fixtures; no
-  test replays it into the event log.
+  test replays it into the event log. The file is private (mode 0600), and a credential the open
+  request names in `secret_env` is replaced by `[redacted]` before any line is written.
 
 ## Process lifetime
 

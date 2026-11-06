@@ -206,13 +206,16 @@ def worker(me: Me, messages: Sequence[str]) -> Script:
         "post_handoff",
         {
             "plan_number": plan,
-            "has_candidate": True,
             "claim": f"score {score}",
-            "commit": commit,
-            "parent_commit": base,
-            "branch": "HEAD",
-            "checks": "passed",
-            "measurement": shown.text.strip(),
+            "worker": {
+                "candidate": {
+                    "commit": commit,
+                    "parent_commit": base,
+                    "branch": "HEAD",
+                    "checks": "passed",
+                    "measurement": shown.text.strip(),
+                },
+            },
         },
     )
     return "Handed off."
@@ -230,9 +233,13 @@ def judge(me: Me, messages: Sequence[str]) -> Script:
     yield Mcp(
         "post_handoff",
         {
-            "has_candidate": False,
             "claim": "pass" if passed else "fail",
             "learned": verdict.text.strip(),
+            "judge": {
+                "commit": found.group(1),
+                "verdict": "pass" if passed else "fail",
+                "reasons": verdict.text.strip(),
+            },
         },
     )
     return "Judged."

@@ -100,8 +100,8 @@ func TestReplayingTwoLiveRunsInOneRepositoryChangesNothing(t *testing.T) {
 		agent := core.AgentID(fmt.Sprintf("agent-%d", i))
 		at := epoch.Add(time.Duration(i) * time.Minute)
 		log = append(log,
-			core.Event{Run: id, At: at, Body: core.Run{ID: id, Repository: "repo", Task: "task", Status: core.RunRunning, Lead: agent, CreatedAt: at}},
-			core.Event{Run: id, At: at, Body: core.Agent{ID: agent, Run: id, Role: core.RoleLead, Status: core.AgentLaunching, Session: 1, StartedAt: at}})
+			core.Event{Run: id, At: at, Body: core.Run{ID: id, Repository: "repo", Task: "task", Status: core.RunRunning, Lead: agent, CreatedAt: at, Allowed: []core.AgentChoice{{Harness: lead.Harness, Model: lead.Model}}}},
+			core.Event{Run: id, At: at, Body: core.Agent{ID: agent, Run: id, Role: core.RoleLead, Spec: lead, Status: core.AgentLaunching, Session: 1, StartedAt: at}})
 	}
 	w.s = core.Replay(core.State{}, log)
 	if got := w.s.Runs(); len(got) != 2 || got[0].Status != core.RunRunning || got[1].Status != core.RunRunning {

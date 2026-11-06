@@ -1,0 +1,24 @@
+# The environment messages of vibesys-cli's contract (proto/vibesys/cli/v1/env.proto), once more for
+# the vibesys-evaluator SDK's Go module, which reads what vibesys-cli writes with the same message
+# (its Python copy is buf.gen.evaluator-env.yaml). The SDK module cannot import vibesys-cli's, so
+# the file's go_package is overridden here. The two Go copies register the same file, so one program
+# must never link both: the SDK imports only its own, and vibesys-cli imports no package of the SDK
+# that imports it. It runs after buf.gen.evaluator.yaml, which cleans the directory.
+version: v2
+clean: false
+managed:
+  enabled: true
+  disable:
+    - module: buf.build/bufbuild/protovalidate
+  override:
+    - file_option: go_package
+      path: vibesys/cli/v1/env.proto
+      value: github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/cli/v1;cliv1
+inputs:
+  - directory: proto
+    paths: [proto/vibesys/cli/v1/env.proto]
+plugins:
+  - local: [go, -C, sdk/vibesys-evaluator/go, tool, protoc-gen-go]
+    strategy: all
+    out: sdk/vibesys-evaluator/go/gen
+    opt: paths=source_relative

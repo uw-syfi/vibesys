@@ -23,8 +23,14 @@
 //		})
 //	}
 //
+// The application runs on a System: Local (already running), or K8s (built and deployed into a
+// Kubernetes namespace of its own per sample).
+//
 // A benchmark only measures: whether the responses are right is for an accuracy check (package
 // check) to judge, from the history a run with Task.Capture records (every response body, the
-// loadgen client of each operation, the generator's info, the faults of Run.Fault). See
-// sdk/vibesys-evaluator/docs/spec.md, "A phase" and "Accuracy history".
+// loadgen client of each operation, the generator's info, the faults of Run.Fault). Task.Accuracy
+// is that check as a command of the same binary (`accuracy`): phases of a fixed open-loop load
+// with capture on, fault actions between them (Restart, RestartAll, Exec, FaultFunc), and the
+// oracle's specs judging the history. See sdk/vibesys-evaluator/docs/spec.md, "A phase",
+// "Accuracy history" and "Accuracy run".
 package microservices

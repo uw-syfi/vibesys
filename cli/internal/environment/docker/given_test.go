@@ -224,7 +224,8 @@ func TestARunSeesItsDirectoriesTheCacheAndTheMountsAtFixedPlaces(t *testing.T) {
 		t.Errorf("dir %q user %+v: want the caller's checkout path and the machine's user", spec.Dir, spec.User)
 	}
 	wantEnv := map[string]string{
-		"HOME": "/tmp", docker.EnvCacheDir: docker.CacheDir, docker.EnvArtifactsDir: docker.ArtifactsDir, "VIBESYS_MOUNTS": "hf-cache,models",
+		"HOME": "/tmp", "VIBESYS_CACHE_DIR": docker.CacheDir, "VIBESYS_ARTIFACTS_DIR": docker.ArtifactsDir, "VIBESYS_MOUNTS": "hf-cache,models",
+		"VIBESYS_JOB_TIMEOUT_SECONDS": "3600",
 	}
 	if !maps.Equal(spec.Env, wantEnv) {
 		t.Errorf("env %v, want %v", spec.Env, wantEnv)

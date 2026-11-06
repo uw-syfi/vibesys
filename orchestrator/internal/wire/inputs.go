@@ -16,6 +16,22 @@ func specIn(s *pb.AgentSpec, errs *errorList) core.AgentSpec {
 	}
 }
 
+func choicesIn(in []*pb.AllowedAgent, errs *errorList) []core.AgentChoice {
+	var out []core.AgentChoice
+	for _, c := range in {
+		out = append(out, core.AgentChoice{Harness: harnesses.in(c.GetHarness(), errs), Model: core.ModelName(c.GetModel())})
+	}
+	return out
+}
+
+func choicesOut(in []core.AgentChoice) []*pb.AllowedAgent {
+	var out []*pb.AllowedAgent
+	for _, c := range in {
+		out = append(out, &pb.AllowedAgent{Harness: harnesses.out(c.Harness), Model: string(c.Model)})
+	}
+	return out
+}
+
 // ParseCommand reads a command. The caller comes from the shell, which knows who is connected: the
 // contract has no field for it, so a caller cannot claim to be someone else.
 func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
@@ -35,6 +51,7 @@ func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
 		c.Body = core.StartRun{
 			Repository: r.GetRepository(), Task: r.GetTask(), FanoutLimit: r.GetFanoutLimit(),
 			Deadline: moment(r.GetDeadline(), &errs), Lead: specIn(r.GetLead(), &errs), Brief: r.GetBrief(),
+			Allow: choicesIn(r.GetAllowAgents(), &errs),
 		}
 	case *pb.Command_StopRun:
 		c.Body = core.StopRun{Run: core.RunID(b.StopRun.GetRunId())}
@@ -49,7 +66,7 @@ func ParseCommand(data []byte, caller core.Caller) (core.Command, error) {
 	case *pb.Command_SendMessage:
 		c.Body = core.SendMessage{Agent: core.AgentID(b.SendMessage.GetAgentId()), Text: b.SendMessage.GetText()}
 	case *pb.Command_PostHandoff:
-		c.Body = core.PostHandoff{Handoff: handoffIn(b.PostHandoff.GetHandoff())}
+		c.Body = core.PostHandoff{Handoff: handoffIn(b.PostHandoff.GetHandoff(), &errs)}
 	case *pb.Command_PostReport:
 		c.Body = core.PostReport{Report: reportIn(b.PostReport.GetReport(), &errs)}
 	default:
@@ -146,6 +163,8 @@ func EncodeEffect(e core.Effect) ([]byte, error) {
 		out.Body = &pb.Effect_Interrupt{Interrupt: &pb.Interrupt{Session: sessionRef(b.Session), TurnId: string(b.Turn)}}
 	case core.CloseSession:
 		out.Body = &pb.Effect_CloseSession{CloseSession: &pb.CloseSession{Session: sessionRef(b.Session), Force: b.Force}}
+	case core.ReleaseCheckouts:
+		out.Body = &pb.Effect_ReleaseCheckouts{ReleaseCheckouts: &pb.ReleaseCheckouts{RunId: string(b.Run)}}
 	case core.ArmTimer:
 		timer := &pb.ArmTimer{
 			Kind: timerKinds.out(b.Kind), RunId: string(b.Run), FireAt: when(b.FireAt),
@@ -194,6 +213,8 @@ func DecodeEffect(data []byte) (core.Effect, error) {
 		e = core.Interrupt{Session: session(b.Interrupt.GetSession()), Turn: core.TurnID(b.Interrupt.GetTurnId())}
 	case *pb.Effect_CloseSession:
 		e = core.CloseSession{Session: session(b.CloseSession.GetSession()), Force: b.CloseSession.GetForce()}
+	case *pb.Effect_ReleaseCheckouts:
+		e = core.ReleaseCheckouts{Run: core.RunID(b.ReleaseCheckouts.GetRunId())}
 	case *pb.Effect_ArmTimer:
 		t := b.ArmTimer
 		timer := core.ArmTimer{Kind: timerKinds.in(t.GetKind(), &errs), Run: core.RunID(t.GetRunId()), FireAt: moment(t.GetFireAt(), &errs)}

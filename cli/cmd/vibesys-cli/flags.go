@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
 	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/gitrepo"
 )
@@ -34,6 +35,9 @@ type common struct {
 	agent   string
 	// placement restricts a docker job a submit queues to one placement of the operator config.
 	placement string
+	// environment is why the context variables could not be read, which a command that needs the
+	// context says when it builds the call's context.
+	environment error
 }
 
 // newFlags makes the flag set of a command, with the common flags in it. Flag errors are
@@ -46,12 +50,15 @@ func newFlags(name string, d deps) (*flag.FlagSet, *common) {
 	}
 	c := &common{}
 	fs.BoolVar(&c.json, "json", false, "print the result as JSON")
-	fs.StringVar(&c.repo, "repo", d.getenv("VIBESYS_REPO"), "the git repository (default: the one containing the current directory)")
-	fs.StringVar(&c.task, "task", d.getenv("VIBESYS_TASK"), "the task the jobs belong to")
-	fs.StringVar(&c.run, "run", d.getenv("VIBESYS_RUN"), "the id of the optimization run")
-	fs.StringVar(&c.harness, "harness", d.getenv("VIBESYS_HARNESS"), "the agent harness, such as claude-code")
-	fs.StringVar(&c.agent, "agent", d.getenv("VIBESYS_AGENT"), "the agent making the call")
-	fs.StringVar(&c.placement, "placement", d.getenv("VIBESYS_PLACEMENT"), "submit: the one placement of the operator config a docker job may run on (default: any that gives what the task needs, chosen when it starts)")
+	// The defaults come from the environment through the codec, so the names are the fields' own.
+	agent, operator := &cliv1.AgentContext{}, &cliv1.OperatorContext{}
+	c.environment = errors.Join(envcodec.Decode(d.getenv, agent), envcodec.Decode(d.getenv, operator))
+	fs.StringVar(&c.repo, "repo", agent.GetRepository(), "the git repository (default: the one containing the current directory)")
+	fs.StringVar(&c.task, "task", agent.GetTask(), "the task the jobs belong to")
+	fs.StringVar(&c.run, "run", agent.GetRunId(), "the id of the optimization run")
+	fs.StringVar(&c.harness, "harness", agent.GetHarness(), "the agent harness, such as claude-code")
+	fs.StringVar(&c.agent, "agent", agent.GetAgent(), "the agent making the call")
+	fs.StringVar(&c.placement, "placement", operator.GetPlacement(), "submit: the one placement of the operator config a docker job may run on (default: any that gives what the task needs, chosen when it starts)")
 	return fs, c
 }
 
@@ -86,8 +93,11 @@ func splitDashes(args []string) (before, after []string, found bool) {
 // about. A task is required, since the daemon serves many. The daemon resolves the directory to its
 // repository, so the command line does not ask git which repository it is.
 func (c *common) callContext(d deps) (*cliv1.CallContext, error) {
+	if c.environment != nil {
+		return nil, usagef("the environment: %v", c.environment)
+	}
 	if c.task == "" {
-		return nil, usagef("--task: name the task (or set VIBESYS_TASK)")
+		return nil, usagef("--task: name the task (or set %s)", envcodec.NameOf(&cliv1.AgentContext{}, "task"))
 	}
 	dir := c.repo
 	switch {

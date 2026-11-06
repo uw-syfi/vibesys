@@ -26,10 +26,6 @@ func ResolveProjectRoot(argv []string, root string) []string {
 // environment chooses for each execution: machines are shared, so no port is fixed.
 const PortPlaceholder = "${PORT}"
 
-// EnvServiceURL names the variable a command of the task's image reaches the candidate's server
-// at: ServiceURL.
-const EnvServiceURL = "VIBESYS_SERVICE_URL"
-
 // ServiceURL is where the commands of the task's image reach the candidate's server on the port.
 func ServiceURL(port int) string { return fmt.Sprintf("http://127.0.0.1:%d", port) }
 

@@ -80,20 +80,6 @@ func lostBecause(doing string, err error) string {
 // buffered and returns ErrIdle when the buffer is empty, so the daemon never waits on one.
 var ErrIdle = errors.New("daemon: no sidecar event is ready")
 
-// LaunchEnv is what the daemon gives a session's tools at launch, so that they reach the daemon as
-// that agent. It names the agent-only socket and never the operator's.
-type LaunchEnv map[string]string
-
-// The names in a LaunchEnv. The agent's identity is here and nowhere in a tool's arguments.
-const (
-	EnvSocket  = "VIBESYS_ORCHESTRATOR_SOCKET"
-	EnvAgent   = "VIBESYS_ORCHESTRATOR_AGENT"
-	EnvSession = "VIBESYS_ORCHESTRATOR_SESSION"
-	EnvToken   = "VIBESYS_ORCHESTRATOR_TOKEN"
-	EnvRun     = "VIBESYS_ORCHESTRATOR_RUN"
-	EnvRole    = "VIBESYS_ORCHESTRATOR_ROLE"
-)
-
 // SessionStart is everything a session is started from: the effect the core decided, and what the
 // run says besides. The core does not store the rest with the effect, so a launch retried after a
 // restart reads the run as it is.
@@ -101,8 +87,10 @@ type SessionStart struct {
 	Launch     core.LaunchSession
 	Repository string
 	Task       string
-	Location   core.CliLocation
-	Tools      LaunchEnv
+	JobTool    core.JobToolEndpoint
+	// Tools is what the session's tool server is told: who it speaks for and how to reach the
+	// daemon as that agent. It holds the session's token, which goes to the tool server and nowhere else.
+	Tools *pb.ToolServerCredentials
 }
 
 // Sidecars starts sessions and finds the ones already running. How a session is held, and everything
@@ -145,6 +133,15 @@ type Sidecar interface {
 type EventStream interface {
 	Next() (*pb.SessionEvent, error)
 	Close()
+}
+
+// Checkouts removes the working copies that agents made of a repository once their run is over.
+type Checkouts interface {
+	// Release removes the working copy of each agent that has one and holds no change to a tracked file; untracked files are build output, not work. A commit
+	// such a copy made that no branch holds is first kept under a ref of the run. It
+	// returns the ones it left in place, because removing them would lose work, or because it could
+	// not tell. Repeating it is harmless: a working copy that is gone is not kept.
+	Release(ctx context.Context, repository string, run core.RunID, agents []core.AgentID) ([]core.Checkout, error)
 }
 
 // StartChecks refuses a StartRun that cannot work, before it is decided: no run, event or receipt

@@ -57,7 +57,6 @@ func newK8sFixture(t *testing.T) *k8sFixture {
 	for path, text := range map[string]string{
 		filepath.Join(f.taskDir, "k8s.yaml"):                "",
 		filepath.Join(f.taskDir, "Dockerfile"):              "FROM scratch\n",
-		filepath.Join(f.taskDir, "vibesys.input.toml"):      "[benchmark]\ntimeout_seconds = 600\n",
 		filepath.Join(root, "project", "web", "Dockerfile"): "FROM scratch\n",
 		filepath.Join(root, "probe.binpb"):                  "plan",
 	} {
@@ -84,7 +83,7 @@ func newK8sFixture(t *testing.T) *k8sFixture {
 	k8sConnect = func(env k8s.Environment, log func(string)) k8s.Cluster {
 		return k8s.Cluster{Env: env, Kube: f.kube, Builder: &k8stest.Builder{}, Clock: clock, Log: log, Token: func() string { return "t1" }}
 	}
-	vars := map[string]string{"KUBECONFIG": "/kc", "VIBESYS_K8S_REGISTRY": "reg:5000", "VIBESYS_K8S_BUILDER": "tcp://b:1"}
+	vars := map[string]string{"KUBECONFIG": "/kc", "VIBESYS_K8S_REGISTRY": "reg:5000", "VIBESYS_K8S_BUILDER": "tcp://b:1", "VIBESYS_JOB_TIMEOUT_SECONDS": "600"}
 	k8sEnv = func(k string) string { return vars[k] }
 	_ = f.projectRoot(root)
 	return f
@@ -116,6 +115,7 @@ func (f *k8sFixture) must(verb string, request map[string]any) map[string]any {
 
 func TestK8sDeployFaultsAndTeardown(t *testing.T) {
 	f := newK8sFixture(t)
+	f.app["wait_secs"] = 900
 	project := filepath.Join(filepath.Dir(f.taskDir), "project")
 	reply := f.must("deploy", map[string]any{
 		"app": f.app, "task_dir": f.taskDir, "project_root": project, "work_dir": f.workDir,
@@ -127,6 +127,9 @@ func TestK8sDeployFaultsAndTeardown(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(f.artifact, "manifest.rendered.yaml")); err != nil {
 		t.Fatal(err)
+	}
+	if wait := target["app"].(map[string]any)["wait_secs"]; wait != 900.0 {
+		t.Fatalf("the target carries the app's wait to every later verb: %v", wait)
 	}
 
 	// restart one pod without waiting, then wait for readiness
@@ -206,6 +209,9 @@ func TestK8sBadRequestsAreDomainErrors(t *testing.T) {
 		"no namespace":  {"restart", map[string]any{"deployments": []string{"web"}}, "invalid"},
 		"no role":       {"run-pod", map[string]any{"target": map[string]any{"namespace": "x"}}, "invalid"},
 		"bad app":       {"deploy", map[string]any{"app": map[string]any{"name": "Bad"}, "task_dir": f.taskDir, "work_dir": f.workDir}, "invalid"},
+		"bad wait": {"deploy", map[string]any{"app": map[string]any{
+			"name": "web", "manifest": "k8s.yaml", "gateway": "http://web:80", "wait_secs": -1,
+		}, "task_dir": f.taskDir, "work_dir": f.workDir}, "invalid"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			code, reply := f.call(c.verb, c.request)

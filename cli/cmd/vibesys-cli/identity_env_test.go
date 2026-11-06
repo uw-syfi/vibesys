@@ -2,35 +2,33 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"os"
+	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
+
+	"google.golang.org/protobuf/proto"
+
+	"github.com/uw-syfi/vibesys/cli/envcodec"
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 )
 
-// goldenPath is the one list of environment names the orchestrator gives an agent. The orchestrator's
-// sidecar tests read the same file and check the agent gets exactly those names.
-const goldenPath = "../../../proto/vibesys/cli/v1/conformance/identity_env.golden.json"
+// contextMessages are the messages the binary reads its context from.
+var contextMessages = []proto.Message{&cliv1.AgentContext{}, &cliv1.OperatorContext{}}
 
-type goldenName struct {
-	Name    string   `json:"name"`
-	Readers []string `json:"readers"`
-}
-
-func golden(t *testing.T) []goldenName {
+func declaredContextNames(t *testing.T) []string {
 	t.Helper()
-	data, err := os.ReadFile(goldenPath)
-	if err != nil {
-		t.Fatal(err)
+	var names []string
+	for _, m := range contextMessages {
+		some, err := envcodec.Names(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, some...)
 	}
-	var g struct {
-		Names []goldenName `json:"names"`
-	}
-	if err := json.Unmarshal(data, &g); err != nil {
-		t.Fatalf("%s: %v", goldenPath, err)
-	}
-	return g.Names
+	slices.Sort(names)
+	return names
 }
 
 // recorder is a getenv that remembers every name asked of it.
@@ -59,15 +57,24 @@ func (r *recorder) names() []string {
 }
 
 // Every command line, and the binary's wiring to its daemon and store, reads its environment through
-// the one getenv it is given, and the names it asks for are exactly the ones the golden lists with
-// the vibesys-cli as a reader. A name the CLI starts to read that the orchestrator does not set, or
-// one the orchestrator sets for the CLI that the CLI no longer reads, fails here.
-func TestTheCLIReadsExactlyTheNamesTheGoldenListsForIt(t *testing.T) {
-	// Every name the golden lists gets an absolute path as its value, so that every place resolves.
-	rec := &recorder{asked: map[string]bool{}, env: map[string]string{}}
-	for _, n := range golden(t) {
-		rec.env[n.Name] = "/value/" + n.Name
+// the one getenv it is given, and the VIBESYS_ names it asks for are exactly the fields of the
+// context messages. A name the binary starts to read that no message declares fails here, as does a
+// field it no longer reads. The user's own defaults for its daemon and store (HOME and the XDG names)
+// are not held here: they are what a person's plain command resolves.
+func TestTheCLIReadsExactlyTheNamesTheContextMessagesDeclare(t *testing.T) {
+	want := declaredContextNames(t)
+	// The usage does not name the place: the host sets it for its agents, and it is no flag's default.
+	place, err := envcodec.Names(&cliv1.JobToolPlace{})
+	if err != nil {
+		t.Fatal(err)
 	}
+	want = append(want, place...)
+	slices.Sort(want)
+	rec := &recorder{asked: map[string]bool{}, env: map[string]string{}}
+	for _, name := range want {
+		rec.env[name] = "/value/" + strings.ToLower(name)
+	}
+	rec.env["VIBESYS_HARNESS"] = "claude-code"
 	var stdout, stderr bytes.Buffer
 	d := depsFrom(&stdout, &stderr, rec.getenv)
 	// -h makes each command build its flags, which is where the context flags read their defaults,
@@ -82,19 +89,43 @@ func TestTheCLIReadsExactlyTheNamesTheGoldenListsForIt(t *testing.T) {
 			t.Fatalf("%v -h exited %d: %s", args, code, stderr.String())
 		}
 	}
-	// Reaching the daemon starts from where the runtime directory is, and the daemon process from
-	// where the task index is. Neither is opened: that touches the file system.
-	_ = d.process.RuntimePath()
-	_ = d.process.IndexDir()
+	// Reaching the daemon starts from where the runtime directory is. It is not opened: that touches
+	// the file system.
+	if _, err := d.process.RuntimePath(); err != nil {
+		t.Fatal(err)
+	}
 
-	var want []string
-	for _, n := range golden(t) {
-		if slices.Contains(n.Readers, "cli") {
-			want = append(want, n.Name)
+	var got []string
+	for _, name := range rec.names() {
+		if strings.HasPrefix(name, "VIBESYS_") {
+			got = append(got, name)
 		}
 	}
-	slices.Sort(want)
-	if got := rec.names(); !slices.Equal(got, want) {
-		t.Fatalf("the CLI read %v, the golden lists %v", got, want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("the CLI read %v, the messages declare %v", got, want)
+	}
+}
+
+// The usage text names the variables the flags default to, and those are the declared ones: a field
+// added to a context message that the help does not name, or a name in the help that no field has,
+// fails here.
+func TestTheUsageNamesTheDeclaredVariables(t *testing.T) {
+	named := regexp.MustCompile(`VIBESYS_[A-Z_]*[A-Z]`).FindAllString(usage, -1)
+	slices.Sort(named)
+	if want := declaredContextNames(t); !slices.Equal(slices.Compact(named), want) {
+		t.Fatalf("the usage names %v, the context messages declare %v", slices.Compact(named), want)
+	}
+}
+
+// A bad value is refused where a command builds its context, naming the variable and not the value.
+func TestABadContextVariableIsRefusedNamingIt(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	env := map[string]string{"VIBESYS_TASK": "kv", "VIBESYS_HARNESS": "Not A Harness"}
+	d := depsFrom(&stdout, &stderr, func(name string) string { return env[name] })
+	if code := run([]string{"jobs"}, d); code != exitInvalidInput {
+		t.Fatalf("exit %d, want a usage error: %s%s", code, stdout.String(), stderr.String())
+	}
+	if out := stdout.String() + stderr.String(); !strings.Contains(out, "VIBESYS_HARNESS") || strings.Contains(out, "Not A Harness") {
+		t.Fatalf("the refusal must name the variable and not repeat its value: %s", out)
 	}
 }

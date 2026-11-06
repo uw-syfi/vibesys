@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -13,18 +14,19 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/names"
 )
 
 // confinementNotice is printed on every start, to stderr so that --json stays clean.
 const confinementNotice = "note: agents run as your user with their permissions bypassed and no confinement."
-
-var harnesses = map[string]pb.Harness{"claude_code": pb.Harness_HARNESS_CLAUDE_CODE, "codex": pb.Harness_HARNESS_CODEX}
 
 // startArgs are the flags of `run start`.
 type startArgs struct {
 	repository, task, brief, harness, model, effort, deadline string
 	fanout                                                    uint
 	detach, json                                              bool
+	// allow is the --allow-agent values, each harness or harness:model.
+	allow []string
 }
 
 func parseStart(args []string) (startArgs, error) {
@@ -33,9 +35,13 @@ func parseStart(args []string) (startArgs, error) {
 	fs.StringVar(&a.repository, "repository", "", "the repository the run works in (default: the git root of the current directory)")
 	fs.StringVar(&a.task, "task", "", "the task to optimize")
 	fs.StringVar(&a.brief, "brief", "", "steering text for the lead")
-	fs.StringVar(&a.harness, "harness", "claude_code", "claude_code or codex")
+	fs.StringVar(&a.harness, "harness", names.Spell(pb.Harness_HARNESS_CLAUDE_CODE), names.List[pb.Harness]())
 	fs.StringVar(&a.model, "model", "", "the lead's model")
 	fs.StringVar(&a.effort, "effort", "", "the lead's reasoning effort")
+	fs.Func("allow-agent", "an agent the lead may also use, as harness or harness:model (repeatable)", func(v string) error {
+		a.allow = append(a.allow, v)
+		return nil
+	})
 	fs.StringVar(&a.deadline, "deadline", "", "RFC 3339 time the run stops by")
 	fs.UintVar(&a.fanout, "fanout", 4, "how many subagents may be live at once")
 	fs.BoolVar(&a.detach, "detach", false, "return once the lead is live instead of attaching")
@@ -54,13 +60,20 @@ func parseStart(args []string) (startArgs, error) {
 
 // command builds the StartRun command for repo.
 func (a startArgs) command(id, repo string) (*pb.Command, error) {
-	harness, ok := harnesses[a.harness]
+	harness, ok := names.Parse[pb.Harness](a.harness)
 	if !ok {
-		return nil, usageError("--harness %q is not claude_code or codex", a.harness)
+		return nil, usageError("--harness %q is not %s", a.harness, names.List[pb.Harness]())
 	}
 	start := &pb.StartRun{
 		Repository: repo, Task: a.task, FanoutLimit: uint32(a.fanout), Brief: a.brief,
 		Lead: &pb.AgentSpec{Harness: harness, Model: a.model, ReasoningEffort: a.effort},
+	}
+	for _, spec := range a.allow {
+		choice, err := parseAllowed(spec)
+		if err != nil {
+			return nil, err
+		}
+		start.AllowAgents = append(start.AllowAgents, choice)
 	}
 	if a.deadline != "" {
 		at, err := time.Parse(time.RFC3339, a.deadline)
@@ -70,6 +83,17 @@ func (a startArgs) command(id, repo string) (*pb.Command, error) {
 		start.Deadline = timestamppb.New(at)
 	}
 	return &pb.Command{Id: id, Body: &pb.Command_StartRun{StartRun: start}}, nil
+}
+
+// parseAllowed reads one --allow-agent value: a harness, or a harness and a model after the first colon.
+// A harness alone allows that harness on its default model only.
+func parseAllowed(spec string) (*pb.AllowedAgent, error) {
+	name, model, _ := strings.Cut(spec, ":")
+	harness, ok := names.Parse[pb.Harness](name)
+	if !ok {
+		return nil, usageError("--allow-agent %q does not start with %s", spec, names.List[pb.Harness]())
+	}
+	return &pb.AllowedAgent{Harness: harness, Model: model}, nil
 }
 
 // start dispatches a run and follows the stream until its lead is live or the run is dead. A
@@ -145,7 +169,7 @@ func (c *call) followUntilLive(ctx context.Context, s *session, run string) ([]C
 	}
 	switch {
 	case s.view.Run.GetStatus() == pb.RunStatus_RUN_STATUS_FAILED:
-		return nil, failed("run %s failed: %s", run, orUnknown(s.view.failureDetail(s.view.Run)))
+		return nil, c.runFailed(s.view)
 	case !s.view.Started():
 		return nil, failed("run %s ended before its lead was live", run)
 	}

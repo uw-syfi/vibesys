@@ -44,7 +44,7 @@ func TestRandomJobHistoriesTellEveryLiveSubmitterExactlyOnce(t *testing.T) {
 					resume = make(chan struct{})
 					r = &Reconciler{Store: new(search.Store)}
 					r.Follow = func(ctx context.Context, k Subscription, publish func(search.View)) {
-						f := clidaemon.Follower{Connect: func(context.Context) (clidaemon.Connection, error) {
+						f := clidaemon.Follower{Ensurer: clidaemontest.AnySocket{}, Connect: func(context.Context, clidaemon.Socket) (clidaemon.Connection, error) {
 							if offline {
 								return nil, &clidaemon.Unreadable{Reason: core.StreamLost, Detail: "offline"}
 							}

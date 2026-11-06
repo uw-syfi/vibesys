@@ -25,9 +25,10 @@ _sym_db = _symbol_database.Default()
 from vs_sidecar.gen.buf.validate import validate_pb2 as buf_dot_validate_dot_validate__pb2
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 from vs_sidecar.gen.vibesys.orchestrator.v1 import orchestrator_pb2 as vibesys_dot_orchestrator_dot_v1_dot_orchestrator__pb2
+from vs_sidecar.gen.vibesys.orchestrator.v1 import tool_options_pb2 as vibesys_dot_orchestrator_dot_v1_dot_tool__options__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\"w\n\rSessionSource\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12!\n\x07session\x18\x02 \x01(\rB\x07\xbaH\x04*\x02 \x00R\x07session\x12\x1f\n\x06offset\x18\x03 \x01(\x04\x42\x07\xbaH\x04\x32\x02 \x00R\x06offset\"\x91\x05\n\x05\x45vent\x12#\n\x08sequence\x18\x01 \x01(\x04\x42\x07\xbaH\x04\x32\x02 \x00R\x08sequence\x12\x15\n\x06run_id\x18\x02 \x01(\tR\x05runId\x12\x1d\n\ncommand_id\x18\x03 \x01(\tR\tcommandId\x12\x32\n\x02\x61t\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02\x61t\x12>\n\x06source\x18\x05 \x01(\x0b\x32&.vibesys.orchestrator.v1.SessionSourceR\x06source\x12?\n\x0brun_updated\x18\n \x01(\x0b\x32\x1c.vibesys.orchestrator.v1.RunH\x00R\nrunUpdated\x12\x45\n\ragent_updated\x18\x0b \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.AgentH\x00R\x0c\x61gentUpdated\x12\x42\n\x0cturn_updated\x18\x0c \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.TurnH\x00R\x0bturnUpdated\x12\x42\n\x0citem_updated\x18\r \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.ItemH\x00R\x0bitemUpdated\x12K\n\x0fmessage_updated\x18\x0e \x01(\x0b\x32 .vibesys.orchestrator.v1.MessageH\x00R\x0emessageUpdated\x12M\n\x10receipt_recorded\x18\x0f \x01(\x0b\x32 .vibesys.orchestrator.v1.ReceiptH\x00R\x0freceiptRecordedB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\x9b\x01\n\x05\x44\x65lta\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12 \n\x07item_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x06itemId\x12\x14\n\x04text\x18\x03 \x01(\tH\x00R\x04text\x12\'\n\x0e\x63ommand_output\x18\x04 \x01(\tH\x00R\rcommandOutputB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\x92\x01\n\tAgentSpec\x12\x44\n\x07harness\x18\x01 \x01(\x0e\x32 .vibesys.orchestrator.v1.HarnessB\x08\xbaH\x05\x82\x01\x02\x10\x01R\x07harness\x12\x14\n\x05model\x18\x02 \x01(\tR\x05model\x12)\n\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\xca\x02\n\x08StartRun\x12\'\n\nrepository\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\nrepository\x12\x1b\n\x04task\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x04task\x12!\n\x0c\x66\x61nout_limit\x18\x03 \x01(\rR\x0b\x66\x61noutLimit\x12\x36\n\x08\x64\x65\x61\x64line\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\x08\x64\x65\x61\x64line\x12\x86\x01\n\x04lead\x18\x05 \x01(\x0b\x32\".vibesys.orchestrator.v1.AgentSpecBN\xbaHK\xba\x01\x45\n\x16start_run.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x14\n\x05\x62rief\x18\x06 \x01(\tR\x05\x62rief\")\n\x07StopRun\x12\x1e\n\x06run_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\"\xea\x01\n\nSpawnAgent\x12\x1e\n\x06run_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\x12\x44\n\x04role\x18\x02 \x01(\x0e\x32\".vibesys.orchestrator.v1.AgentRoleB\x0c\xbaH\t\x82\x01\x06\x10\x01 \x00 \x01R\x04role\x12\x36\n\x04spec\x18\x03 \x01(\x0b\x32\".vibesys.orchestrator.v1.AgentSpecR\x04spec\x12\x1f\n\x0bplan_number\x18\x04 \x01(\rR\nplanNumber\x12\x1d\n\x05\x62rief\x18\x05 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05\x62rief\"/\n\tStopAgent\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\"N\n\x0bSendMessage\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12\x1b\n\x04text\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x04text\"Q\n\x0bPostHandoff\x12\x42\n\x07handoff\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.HandoffB\x06\xbaH\x03\xc8\x01\x01R\x07handoff\"M\n\nPostReport\x12?\n\x06report\x18\x01 \x01(\x0b\x32\x1f.vibesys.orchestrator.v1.ReportB\x06\xbaH\x03\xc8\x01\x01R\x06report\"\x9d\x04\n\x07\x43ommand\x12\x17\n\x02id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x02id\x12@\n\tstart_run\x18\n \x01(\x0b\x32!.vibesys.orchestrator.v1.StartRunH\x00R\x08startRun\x12=\n\x08stop_run\x18\x0b \x01(\x0b\x32 .vibesys.orchestrator.v1.StopRunH\x00R\x07stopRun\x12\x46\n\x0bspawn_agent\x18\x0c \x01(\x0b\x32#.vibesys.orchestrator.v1.SpawnAgentH\x00R\nspawnAgent\x12\x43\n\nstop_agent\x18\r \x01(\x0b\x32\".vibesys.orchestrator.v1.StopAgentH\x00R\tstopAgent\x12I\n\x0csend_message\x18\x0e \x01(\x0b\x32$.vibesys.orchestrator.v1.SendMessageH\x00R\x0bsendMessage\x12I\n\x0cpost_handoff\x18\x0f \x01(\x0b\x32$.vibesys.orchestrator.v1.PostHandoffH\x00R\x0bpostHandoff\x12\x46\n\x0bpost_report\x18\x10 \x01(\x0b\x32#.vibesys.orchestrator.v1.PostReportH\x00R\npostReportB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\xeb\x02\n\x07Receipt\x12&\n\ncommand_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\tcommandId\x12<\n\x0e\x63ommand_digest\x18\x02 \x01(\tB\x15\xbaH\x12r\x10\x32\x0e^[0-9a-f]{64}$R\rcommandDigest\x12\x44\n\x07refusal\x18\x03 \x01(\x0e\x32 .vibesys.orchestrator.v1.RefusalB\x08\xbaH\x05\x82\x01\x02\x10\x01R\x07refusal\x12\x15\n\x06run_id\x18\x04 \x01(\tR\x05runId\x12\x19\n\x08\x61gent_id\x18\x05 \x01(\tR\x07\x61gentId\x12\x1d\n\nmessage_id\x18\x06 \x01(\tR\tmessageId\x12G\n\x08\x64\x65livery\x18\x07 \x01(\x0e\x32!.vibesys.orchestrator.v1.DeliveryB\x08\xbaH\x05\x82\x01\x02\x10\x01R\x08\x64\x65livery\x12\x1a\n\x08sequence\x18\x08 \x01(\x04R\x08sequence*\x9f\x02\n\x07Refusal\x12\x17\n\x13REFUSAL_UNSPECIFIED\x10\x00\x12\x19\n\x15REFUSAL_RUN_NOT_FOUND\x10\x01\x12\x1b\n\x17REFUSAL_AGENT_NOT_FOUND\x10\x02\x12\x19\n\x15REFUSAL_NOT_PERMITTED\x10\x03\x12\x1b\n\x17REFUSAL_RUN_NOT_RUNNING\x10\x04\x12\x18\n\x14REFUSAL_FANOUT_LIMIT\x10\x05\x12\x19\n\x15REFUSAL_AGENT_IS_LEAD\x10\x06\x12\x1a\n\x16REFUSAL_AGENT_NOT_LIVE\x10\x07\x12\x1b\n\x17REFUSAL_DEADLINE_PASSED\x10\x08\x12\x1d\n\x19REFUSAL_REPOSITORY_IN_USE\x10\tBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1b\x62uf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xda\x03\n\tRunChange\x12#\n\x08sequence\x18\x01 \x01(\x04\x42\x07\xbaH\x04\x32\x02 \x00R\x08sequence\x12\x32\n\x02\x61t\x18\x02 \x01(\x0b\x32\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02\x61t\x12\x15\n\x06run_id\x18\x03 \x01(\tR\x05runId\x12\x30\n\x03run\x18\n \x01(\x0b\x32\x1c.vibesys.orchestrator.v1.RunH\x00R\x03run\x12\x36\n\x05\x61gent\x18\x0b \x01(\x0b\x32\x1e.vibesys.orchestrator.v1.AgentH\x00R\x05\x61gent\x12\x33\n\x04turn\x18\x0c \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.TurnH\x00R\x04turn\x12\x33\n\x04item\x18\r \x01(\x0b\x32\x1d.vibesys.orchestrator.v1.ItemH\x00R\x04item\x12<\n\x07message\x18\x0e \x01(\x0b\x32 .vibesys.orchestrator.v1.MessageH\x00R\x07message\x12<\n\x07receipt\x18\x0f \x01(\x0b\x32 .vibesys.orchestrator.v1.ReceiptH\x00R\x07receiptB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\x9b\x01\n\x05\x44\x65lta\x12\"\n\x08\x61gent_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x07\x61gentId\x12 \n\x07item_id\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x06itemId\x12\x14\n\x04text\x18\x03 \x01(\tH\x00R\x04text\x12\'\n\x0e\x63ommand_output\x18\x04 \x01(\tH\x00R\rcommandOutputB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\x92\x01\n\tAgentSpec\x12\x44\n\x07harness\x18\x01 \x01(\x0e\x32 .vibesys.orchestrator.v1.HarnessB\x08\xbaH\x05\x82\x01\x02\x10\x01R\x07harness\x12\x14\n\x05model\x18\x02 \x01(\tR\x05model\x12)\n\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\x94\x03\n\x08StartRun\x12\'\n\nrepository\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\nrepository\x12\x1b\n\x04task\x18\x02 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x04task\x12!\n\x0c\x66\x61nout_limit\x18\x03 \x01(\rR\x0b\x66\x61noutLimit\x12\x36\n\x08\x64\x65\x61\x64line\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampR\x08\x64\x65\x61\x64line\x12\x86\x01\n\x04lead\x18\x05 \x01(\x0b\x32\".vibesys.orchestrator.v1.AgentSpecBN\xbaHK\xba\x01\x45\n\x16start_run.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x14\n\x05\x62rief\x18\x06 \x01(\tR\x05\x62rief\x12H\n\x0c\x61llow_agents\x18\x07 \x03(\x0b\x32%.vibesys.orchestrator.v1.AllowedAgentR\x0b\x61llowAgents\")\n\x07StopRun\x12\x1e\n\x06run_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\"\xea\x01\n\nSpawnAgent\x12\x1e\n\x06run_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05runId\x12\x44\n\x04role\x18\x02 \x01(\x0e\x32\".vibesys.orchestrator.v1.AgentRoleB\x0c\xbaH\t\x82\x01\x06\x10\x01 \x00 \x01R\x04role\x12\x36\n\x04spec\x18\x03 \x01(\x0b\x32\".vibesys.orchestrator.v1.AgentSpecR\x04spec\x12\x1f\n\x0bplan_number\x18\x04 \x01(\rR\nplanNumber\x12\x1d\n\x05\x62rief\x18\x05 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x05\x62rief\"\xb3\x01\n\tStopAgent\x12;\n\x08\x61gent_id\x18\x01 \x01(\tB \xbaH\x04r\x02\x10\x01\xaa\xbb\x18\x15The subagent to stop.R\x07\x61gentId:i\xaa\xbb\x18\x65\n\nstop_agent\x12WStop one subagent of your run. It is asked to finish its turn, then its session closes.\"\x89\x02\n\x0bSendMessage\x12\x38\n\x08\x61gent_id\x18\x01 \x01(\tB\x1d\xbaH\x04r\x02\x10\x01\xaa\xbb\x18\x12The agent to tell.R\x07\x61gentId\x12+\n\x04text\x18\x02 \x01(\tB\x17\xbaH\x04r\x02\x10\x01\xaa\xbb\x18\x0cWhat to say.R\x04text:\x92\x01\xaa\xbb\x18\x8d\x01\n\x0csend_message\x12}Send text to one agent of your run. It reaches the agent as steering if it is working, or starts its next turn if it is idle.\"Q\n\x0bPostHandoff\x12\x42\n\x07handoff\x18\x01 \x01(\x0b\x32 .vibesys.orchestrator.v1.HandoffB\x06\xbaH\x03\xc8\x01\x01R\x07handoff\"M\n\nPostReport\x12?\n\x06report\x18\x01 \x01(\x0b\x32\x1f.vibesys.orchestrator.v1.ReportB\x06\xbaH\x03\xc8\x01\x01R\x06report\"\x9d\x04\n\x07\x43ommand\x12\x17\n\x02id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\x02id\x12@\n\tstart_run\x18\n \x01(\x0b\x32!.vibesys.orchestrator.v1.StartRunH\x00R\x08startRun\x12=\n\x08stop_run\x18\x0b \x01(\x0b\x32 .vibesys.orchestrator.v1.StopRunH\x00R\x07stopRun\x12\x46\n\x0bspawn_agent\x18\x0c \x01(\x0b\x32#.vibesys.orchestrator.v1.SpawnAgentH\x00R\nspawnAgent\x12\x43\n\nstop_agent\x18\r \x01(\x0b\x32\".vibesys.orchestrator.v1.StopAgentH\x00R\tstopAgent\x12I\n\x0csend_message\x18\x0e \x01(\x0b\x32$.vibesys.orchestrator.v1.SendMessageH\x00R\x0bsendMessage\x12I\n\x0cpost_handoff\x18\x0f \x01(\x0b\x32$.vibesys.orchestrator.v1.PostHandoffH\x00R\x0bpostHandoff\x12\x46\n\x0bpost_report\x18\x10 \x01(\x0b\x32#.vibesys.orchestrator.v1.PostReportH\x00R\npostReportB\r\n\x04\x62ody\x12\x05\xbaH\x02\x08\x01\"\x91\x03\n\x07Receipt\x12&\n\ncommand_id\x18\x01 \x01(\tB\x07\xbaH\x04r\x02\x10\x01R\tcommandId\x12\x44\n\x07refusal\x18\x03 \x01(\x0e\x32 .vibesys.orchestrator.v1.RefusalB\x08\xbaH\x05\x82\x01\x02\x10\x01R\x07refusal\x12\x15\n\x06run_id\x18\x04 \x01(\tR\x05runId\x12\x19\n\x08\x61gent_id\x18\x05 \x01(\tR\x07\x61gentId\x12\x1d\n\nmessage_id\x18\x06 \x01(\tR\tmessageId\x12G\n\x08\x64\x65livery\x18\x07 \x01(\x0e\x32!.vibesys.orchestrator.v1.DeliveryB\x08\xbaH\x05\x82\x01\x02\x10\x01R\x08\x64\x65livery\x12\x1a\n\x08sequence\x18\x08 \x01(\x04R\x08sequence\x12L\n\x0e\x61llowed_agents\x18\t \x03(\x0b\x32%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgentsJ\x04\x08\x02\x10\x03R\x0e\x63ommand_digest*\xdd\x02\n\x07Refusal\x12\x17\n\x13REFUSAL_UNSPECIFIED\x10\x00\x12\x19\n\x15REFUSAL_RUN_NOT_FOUND\x10\x01\x12\x1b\n\x17REFUSAL_AGENT_NOT_FOUND\x10\x02\x12\x19\n\x15REFUSAL_NOT_PERMITTED\x10\x03\x12\x1b\n\x17REFUSAL_RUN_NOT_RUNNING\x10\x04\x12\x18\n\x14REFUSAL_FANOUT_LIMIT\x10\x05\x12\x19\n\x15REFUSAL_AGENT_IS_LEAD\x10\x06\x12\x1a\n\x16REFUSAL_AGENT_NOT_LIVE\x10\x07\x12\x1b\n\x17REFUSAL_DEADLINE_PASSED\x10\x08\x12\x1d\n\x19REFUSAL_REPOSITORY_IN_USE\x10\t\x12\x1d\n\x19REFUSAL_AGENT_NOT_ALLOWED\x10\n\x12\x1d\n\x19REFUSAL_HANDOFF_NOT_YOURS\x10\x0b\x42TZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -35,18 +36,12 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'vibesys.orchestrator.v1.eve
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'ZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1'
-  _globals['_SESSIONSOURCE'].fields_by_name['agent_id']._loaded_options = None
-  _globals['_SESSIONSOURCE'].fields_by_name['agent_id']._serialized_options = b'\272H\004r\002\020\001'
-  _globals['_SESSIONSOURCE'].fields_by_name['session']._loaded_options = None
-  _globals['_SESSIONSOURCE'].fields_by_name['session']._serialized_options = b'\272H\004*\002 \000'
-  _globals['_SESSIONSOURCE'].fields_by_name['offset']._loaded_options = None
-  _globals['_SESSIONSOURCE'].fields_by_name['offset']._serialized_options = b'\272H\0042\002 \000'
-  _globals['_EVENT'].oneofs_by_name['body']._loaded_options = None
-  _globals['_EVENT'].oneofs_by_name['body']._serialized_options = b'\272H\002\010\001'
-  _globals['_EVENT'].fields_by_name['sequence']._loaded_options = None
-  _globals['_EVENT'].fields_by_name['sequence']._serialized_options = b'\272H\0042\002 \000'
-  _globals['_EVENT'].fields_by_name['at']._loaded_options = None
-  _globals['_EVENT'].fields_by_name['at']._serialized_options = b'\272H\003\310\001\001'
+  _globals['_RUNCHANGE'].oneofs_by_name['body']._loaded_options = None
+  _globals['_RUNCHANGE'].oneofs_by_name['body']._serialized_options = b'\272H\002\010\001'
+  _globals['_RUNCHANGE'].fields_by_name['sequence']._loaded_options = None
+  _globals['_RUNCHANGE'].fields_by_name['sequence']._serialized_options = b'\272H\0042\002 \000'
+  _globals['_RUNCHANGE'].fields_by_name['at']._loaded_options = None
+  _globals['_RUNCHANGE'].fields_by_name['at']._serialized_options = b'\272H\003\310\001\001'
   _globals['_DELTA'].oneofs_by_name['body']._loaded_options = None
   _globals['_DELTA'].oneofs_by_name['body']._serialized_options = b'\272H\002\010\001'
   _globals['_DELTA'].fields_by_name['agent_id']._loaded_options = None
@@ -70,11 +65,15 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_SPAWNAGENT'].fields_by_name['brief']._loaded_options = None
   _globals['_SPAWNAGENT'].fields_by_name['brief']._serialized_options = b'\272H\004r\002\020\001'
   _globals['_STOPAGENT'].fields_by_name['agent_id']._loaded_options = None
-  _globals['_STOPAGENT'].fields_by_name['agent_id']._serialized_options = b'\272H\004r\002\020\001'
+  _globals['_STOPAGENT'].fields_by_name['agent_id']._serialized_options = b'\272H\004r\002\020\001\252\273\030\025The subagent to stop.'
+  _globals['_STOPAGENT']._loaded_options = None
+  _globals['_STOPAGENT']._serialized_options = b'\252\273\030e\n\nstop_agent\022WStop one subagent of your run. It is asked to finish its turn, then its session closes.'
   _globals['_SENDMESSAGE'].fields_by_name['agent_id']._loaded_options = None
-  _globals['_SENDMESSAGE'].fields_by_name['agent_id']._serialized_options = b'\272H\004r\002\020\001'
+  _globals['_SENDMESSAGE'].fields_by_name['agent_id']._serialized_options = b'\272H\004r\002\020\001\252\273\030\022The agent to tell.'
   _globals['_SENDMESSAGE'].fields_by_name['text']._loaded_options = None
-  _globals['_SENDMESSAGE'].fields_by_name['text']._serialized_options = b'\272H\004r\002\020\001'
+  _globals['_SENDMESSAGE'].fields_by_name['text']._serialized_options = b'\272H\004r\002\020\001\252\273\030\014What to say.'
+  _globals['_SENDMESSAGE']._loaded_options = None
+  _globals['_SENDMESSAGE']._serialized_options = b'\252\273\030\215\001\n\014send_message\022}Send text to one agent of your run. It reaches the agent as steering if it is working, or starts its next turn if it is idle.'
   _globals['_POSTHANDOFF'].fields_by_name['handoff']._loaded_options = None
   _globals['_POSTHANDOFF'].fields_by_name['handoff']._serialized_options = b'\272H\003\310\001\001'
   _globals['_POSTREPORT'].fields_by_name['report']._loaded_options = None
@@ -85,38 +84,34 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_COMMAND'].fields_by_name['id']._serialized_options = b'\272H\004r\002\020\001'
   _globals['_RECEIPT'].fields_by_name['command_id']._loaded_options = None
   _globals['_RECEIPT'].fields_by_name['command_id']._serialized_options = b'\272H\004r\002\020\001'
-  _globals['_RECEIPT'].fields_by_name['command_digest']._loaded_options = None
-  _globals['_RECEIPT'].fields_by_name['command_digest']._serialized_options = b'\272H\022r\0202\016^[0-9a-f]{64}$'
   _globals['_RECEIPT'].fields_by_name['refusal']._loaded_options = None
   _globals['_RECEIPT'].fields_by_name['refusal']._serialized_options = b'\272H\005\202\001\002\020\001'
   _globals['_RECEIPT'].fields_by_name['delivery']._loaded_options = None
   _globals['_RECEIPT'].fields_by_name['delivery']._serialized_options = b'\272H\005\202\001\002\020\001'
-  _globals['_REFUSAL']._serialized_start=3074
-  _globals['_REFUSAL']._serialized_end=3361
-  _globals['_SESSIONSOURCE']._serialized_start=171
-  _globals['_SESSIONSOURCE']._serialized_end=290
-  _globals['_EVENT']._serialized_start=293
-  _globals['_EVENT']._serialized_end=950
-  _globals['_DELTA']._serialized_start=953
-  _globals['_DELTA']._serialized_end=1108
-  _globals['_AGENTSPEC']._serialized_start=1111
-  _globals['_AGENTSPEC']._serialized_end=1257
-  _globals['_STARTRUN']._serialized_start=1260
-  _globals['_STARTRUN']._serialized_end=1590
-  _globals['_STOPRUN']._serialized_start=1592
-  _globals['_STOPRUN']._serialized_end=1633
-  _globals['_SPAWNAGENT']._serialized_start=1636
-  _globals['_SPAWNAGENT']._serialized_end=1870
-  _globals['_STOPAGENT']._serialized_start=1872
-  _globals['_STOPAGENT']._serialized_end=1919
-  _globals['_SENDMESSAGE']._serialized_start=1921
-  _globals['_SENDMESSAGE']._serialized_end=1999
-  _globals['_POSTHANDOFF']._serialized_start=2001
-  _globals['_POSTHANDOFF']._serialized_end=2082
-  _globals['_POSTREPORT']._serialized_start=2084
-  _globals['_POSTREPORT']._serialized_end=2161
-  _globals['_COMMAND']._serialized_start=2164
-  _globals['_COMMAND']._serialized_end=2705
-  _globals['_RECEIPT']._serialized_start=2708
-  _globals['_RECEIPT']._serialized_end=3071
+  _globals['_REFUSAL']._serialized_start=3247
+  _globals['_REFUSAL']._serialized_end=3596
+  _globals['_RUNCHANGE']._serialized_start=216
+  _globals['_RUNCHANGE']._serialized_end=690
+  _globals['_DELTA']._serialized_start=693
+  _globals['_DELTA']._serialized_end=848
+  _globals['_AGENTSPEC']._serialized_start=851
+  _globals['_AGENTSPEC']._serialized_end=997
+  _globals['_STARTRUN']._serialized_start=1000
+  _globals['_STARTRUN']._serialized_end=1404
+  _globals['_STOPRUN']._serialized_start=1406
+  _globals['_STOPRUN']._serialized_end=1447
+  _globals['_SPAWNAGENT']._serialized_start=1450
+  _globals['_SPAWNAGENT']._serialized_end=1684
+  _globals['_STOPAGENT']._serialized_start=1687
+  _globals['_STOPAGENT']._serialized_end=1866
+  _globals['_SENDMESSAGE']._serialized_start=1869
+  _globals['_SENDMESSAGE']._serialized_end=2134
+  _globals['_POSTHANDOFF']._serialized_start=2136
+  _globals['_POSTHANDOFF']._serialized_end=2217
+  _globals['_POSTREPORT']._serialized_start=2219
+  _globals['_POSTREPORT']._serialized_end=2296
+  _globals['_COMMAND']._serialized_start=2299
+  _globals['_COMMAND']._serialized_end=2840
+  _globals['_RECEIPT']._serialized_start=2843
+  _globals['_RECEIPT']._serialized_end=3244
 # @@protoc_insertion_point(module_scope)

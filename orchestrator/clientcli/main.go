@@ -17,7 +17,7 @@ const Program = "vibesys-client"
 // Usage is the text printed for a usage error and for --help.
 const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... | release verify ...
   run start --task T [--repository DIR] [--brief TEXT] [--harness claude_code|codex] [--fanout N]
-            [--model M] [--effort E] [--deadline RFC3339] [--detach] [--json]
+            [--model M] [--effort E] [--allow-agent HARNESS[:MODEL]]... [--deadline RFC3339] [--detach] [--json]
   run list [--json]
   run attach [RUN]
   run get [RUN] [--json]
@@ -32,6 +32,8 @@ const Usage = `usage: vibesys-client [--root PATH] run VERB ... | host VERB ... 
   release verify [--installed] DIR
   --version
 
+A run starts subagents only on the lead's harness and model, and on each --allow-agent: a harness alone
+allows its default model. A spawn outside that is refused, and run get shows what is allowed.
 RUN is a run id, a unique prefix of one, or omitted for the one live run in this git repository. When
 no run is live there, an omitted RUN means its most recent run to run get, run stop and run attach: get
 shows it, attach replays it, and stop says it has already ended and exits 0, as for any RUN that has.
@@ -44,10 +46,11 @@ A host on another machine, seen through a shared disk, is named, and nothing her
 host configure records what the next host starts with, refusing what it can tell no host could use, and
 with no flag prints it. --clear never reads the file, so it also puts right one that does not read.
 release verify checks the release in DIR against its manifest, prints its version, and needs no host.
-wait --until report returns for a final report and --until progress for any report. Both count the
-reports posted after the wait began (reports are numbered from 1; run get --json shows the numbers),
-and --after N counts those numbered above N instead; for a run that has already ended, with no
---after, the report it already has counts. --until stalled returns when the run stands still: its
+wait --until report returns for a final report and --until progress for any report. Reports are numbered
+from 1 (run get --json shows the numbers). --until report returns at once with the final report a run
+already has, however late the wait begins, and otherwise waits for the next one; --until progress counts
+the reports posted after the wait began, and for a run that has ended the report it already has. --after N
+counts only reports numbered above N, for either. --until stalled returns when the run stands still: its
 lead is idle and no agent, job or message is outstanding. A wait for a report does not return for
 a stalled run: it runs to its timeout, which then says the run is stalled.
 Exit codes: 0 ok, 1 failed or refused, 2 usage, 3 timeout, 4 service unavailable.

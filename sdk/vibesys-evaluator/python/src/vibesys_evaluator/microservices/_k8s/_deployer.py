@@ -105,8 +105,7 @@ class KubePhaseRunner:
 class KubeDeployer:
     """Brings an App up in a fresh namespace per sample (the `Deployer` of `microservices.k8s`).
 
-    The cluster comes from the environment the core reads: KUBECONFIG, VIBESYS_K8S_REGISTRY and
-    VIBESYS_K8S_BUILDER.
+    The cluster and the job's time limit come from the job's environment, which the core reads.
     """
 
     def __init__(self, app: App[Any]) -> None:

@@ -69,7 +69,7 @@ func TestARetryOfAnAcceptedStartStillGetsItsReceiptWhateverTheChecksSayNow(t *te
 	r.Starts.Refuse(&daemon.StartRefusal{Reason: "gone"})
 	checks := len(r.Starts.Calls())
 	again := dispatch(t, r, startRun("c1"))
-	if again.GetRunId() != first.GetRunId() || again.GetCommandDigest() != first.GetCommandDigest() {
+	if again.GetRunId() != first.GetRunId() {
 		t.Fatalf("a retry answered %v, want %v", again, first)
 	}
 	other := startRun("c1")

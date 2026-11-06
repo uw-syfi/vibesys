@@ -10,6 +10,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
@@ -75,7 +76,7 @@ func TestARestartBeforeTheLaunchIsCarriedOutLosesNothing(t *testing.T) {
 func TestARestartLosesNoSubagentWhoseLaunchIsPending(t *testing.T) {
 	r := daemontest.NewRig(t)
 	run, lead := beginRun(t, r)
-	token := r.Sidecars.Session(core.Session{Agent: lead.ID, N: 1}).Env[daemon.EnvToken]
+	token := r.Sidecars.Session(core.Session{Agent: lead.ID, N: 1}).Credentials.GetToken()
 	resp, err := r.AgentService.Dispatch(agentContext(lead.ID, 1, token), &pb.DispatchRequest{Command: &pb.Command{Id: "spawn", Body: &pb.Command_SpawnAgent{SpawnAgent: &pb.SpawnAgent{
 		RunId: string(run.ID), Role: pb.AgentRole_AGENT_ROLE_WORKER, Brief: "work",
 	}}}})
@@ -100,7 +101,7 @@ func TestEachSocketServesOnlyItsOwnCallers(t *testing.T) {
 	r := daemontest.NewRig(t)
 	run, lead := beginRun(t, r)
 	session := r.Sidecars.Session(core.Session{Agent: lead.ID, N: 1})
-	ctx := agentContext(lead.ID, 1, session.Env[daemon.EnvToken])
+	ctx := agentContext(lead.ID, 1, session.Credentials.GetToken())
 	stop := &pb.DispatchRequest{Command: &pb.Command{Id: "stop", Body: &pb.Command_StopRun{StopRun: &pb.StopRun{RunId: string(run.ID)}}}}
 
 	if _, err := r.Service.Dispatch(ctx, stop); status.Code(err) != codes.PermissionDenied {
@@ -112,14 +113,15 @@ func TestEachSocketServesOnlyItsOwnCallers(t *testing.T) {
 	if got := run.ID; r.Daemon.State().Runs()[0].Status != core.RunRunning || got == "" {
 		t.Errorf("a refused call changed the run")
 	}
-	for name, value := range session.Env {
-		if name == daemon.EnvSocket {
-			if value != daemontest.AgentSocket {
-				t.Errorf("%s=%q, want the agent socket %q", name, value, daemontest.AgentSocket)
-			}
-			continue
-		}
-		if strings.Contains(value, ".sock") {
+	if got := session.Credentials.GetEndpoint(); got != daemontest.AgentSocket {
+		t.Errorf("the tool server is told the socket %q, want the agent socket %q", got, daemontest.AgentSocket)
+	}
+	env, err := envcodec.Encode(session.Credentials)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range env.Set {
+		if value != daemontest.AgentSocket && strings.Contains(value, ".sock") {
 			t.Errorf("%s=%q names a socket besides the agent's", name, value)
 		}
 	}
@@ -186,7 +188,7 @@ func TestACallThatHangsIsBoundedAndRetried(t *testing.T) {
 func TestALaunchErrorReachesTheRecord(t *testing.T) {
 	r := daemontest.NewRig(t)
 	run, lead := beginRun(t, r)
-	token := r.Sidecars.Session(core.Session{Agent: lead.ID, N: 1}).Env[daemon.EnvToken]
+	token := r.Sidecars.Session(core.Session{Agent: lead.ID, N: 1}).Credentials.GetToken()
 	r.Sidecars.LaunchFailures, r.Sidecars.LaunchError = 1, errors.New("no free gpu on this host")
 	resp, err := r.AgentService.Dispatch(agentContext(lead.ID, 1, token), &pb.DispatchRequest{Command: &pb.Command{Id: "spawn", Body: &pb.Command_SpawnAgent{SpawnAgent: &pb.SpawnAgent{
 		RunId: string(run.ID), Role: pb.AgentRole_AGENT_ROLE_WORKER, Brief: "work",

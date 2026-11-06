@@ -1,6 +1,7 @@
 package wire_test
 
 import (
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -235,6 +236,7 @@ func FuzzDecodePlan(f *testing.F) {
 		&cliv1.Plan{Status: 99},
 		&cliv1.Plan{Number: 3, Status: cliv1.PlanStatus_PLAN_STATUS_CHOSEN, Priority: cliv1.Priority_PRIORITY_HIGH},
 		&cliv1.Plan{Status: cliv1.PlanStatus_PLAN_STATUS_OPEN, Priority: 99},
+		&cliv1.Plan{Number: 3, Status: cliv1.PlanStatus_PLAN_STATUS_PARKED, GainBound: &cliv1.PlanGainBound{Share: 0.05, RelativeTo: cliv1.PlanGainReference_PLAN_GAIN_REFERENCE_HEADLINE}},
 	)
 	f.Fuzz(func(t *testing.T, data []byte) {
 		message := &cliv1.Plan{}
@@ -291,6 +293,36 @@ func FuzzDecodeDaemonDrain(f *testing.F) {
 		}
 		if !reflect.DeepEqual(again, first) {
 			t.Fatalf("a decoded drain changed when encoded and decoded again:\n got %+v\nwant %+v", again, first)
+		}
+	})
+}
+
+func FuzzDecodeGainBound(f *testing.F) {
+	headline := cliv1.PlanGainReference_PLAN_GAIN_REFERENCE_HEADLINE
+	seedMessages(f,
+		&cliv1.PlanGainBound{},
+		&cliv1.PlanGainBound{Share: 0.1, RelativeTo: headline},
+		&cliv1.PlanGainBound{Share: 7, RelativeTo: headline},
+		&cliv1.PlanGainBound{Share: -1, RelativeTo: headline},
+		&cliv1.PlanGainBound{Share: math.NaN(), RelativeTo: headline},
+		&cliv1.PlanGainBound{Share: math.Inf(1), RelativeTo: headline},
+		&cliv1.PlanGainBound{Share: 0.1, RelativeTo: 99},
+	)
+	f.Fuzz(func(t *testing.T, data []byte) {
+		message := &cliv1.PlanGainBound{}
+		decode(t, data, message)
+		bound, err := wire.ToGainBound("gain_bound", message)
+		if err != nil {
+			if !strings.Contains(err.Error(), "gain_bound") {
+				t.Fatalf("the refusal %q does not name the field", err)
+			}
+			return
+		}
+		if bound == nil || !(bound.Share >= 0) || math.IsInf(bound.Share, 0) || !bound.RelativeTo.Valid() {
+			t.Fatalf("a decoded bound %+v is not a finite share of a reference", bound)
+		}
+		if again, err := wire.ToGainBound("gain_bound", wire.GainBound(bound)); err != nil || *again != *bound {
+			t.Fatalf("a decoded bound %+v came back as %+v, %v", bound, again, err)
 		}
 	})
 }

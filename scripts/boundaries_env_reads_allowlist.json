@@ -1,0 +1,8 @@
+{
+  "clients/apps/desktop/scripts/build-gateway.mjs": {
+    "VIBESYS_GATEWAY_TARGETS": {
+      "count": 1,
+      "reason": "a build-time switch of the desktop packaging script, read by node on the developer's machine; no run's process receives it"
+    }
+  }
+}

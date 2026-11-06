@@ -1,24 +1,6 @@
 {
-  "cli/cmd/vibesys-cli/flags.go": {
-    "VIBESYS_AGENT": 1,
-    "VIBESYS_HARNESS": 1,
-    "VIBESYS_PLACEMENT": 1,
-    "VIBESYS_REPO": 1,
-    "VIBESYS_RUN": 1,
-    "VIBESYS_TASK": 1
-  },
-  "cli/internal/core/candidate.go": {
-    "VIBESYS_SERVICE_URL": 1
-  },
   "cli/internal/environment/apptainer/cluster.go": {
     "VIBESYS_BOX": 1
-  },
-  "cli/internal/environment/docker/plan.go": {
-    "VIBESYS_ARTIFACTS_DIR": 1,
-    "VIBESYS_CACHE_DIR": 1
-  },
-  "cli/internal/environment/host/run.go": {
-    "VIBESYS_ARTIFACTS_DIR": 1
   },
   "cli/internal/operator/operator.go": {
     "VIBESYS_CLI_CONFIG": 1,
@@ -33,13 +15,6 @@
   },
   "cli/internal/production/production.go": {
     "XDG_CACHE_HOME": 1
-  },
-  "cli/internal/resource/kubernetes/kubernetes.go": {
-    "VIBESYS_K8S_BUILDER": 1,
-    "VIBESYS_K8S_REGISTRY": 1
-  },
-  "cli/internal/resource/mounts/mounts.go": {
-    "VIBESYS_MOUNTS": 1
   },
   "cli/internal/runtimedir/runtimedir.go": {
     "XDG_RUNTIME_DIR": 1
@@ -70,42 +45,12 @@
     "XDG_RUNTIME_DIR": 1,
     "XDG_STATE_HOME": 1
   },
-  "orchestrator/internal/daemon/ports.go": {
-    "VIBESYS_ORCHESTRATOR_AGENT": 1,
-    "VIBESYS_ORCHESTRATOR_ROLE": 1,
-    "VIBESYS_ORCHESTRATOR_RUN": 1,
-    "VIBESYS_ORCHESTRATOR_SESSION": 1,
-    "VIBESYS_ORCHESTRATOR_SOCKET": 1,
-    "VIBESYS_ORCHESTRATOR_TOKEN": 1
-  },
   "orchestrator/internal/localfs/localfs.go": {
-    "XDG_STATE_HOME": 1
-  },
-  "orchestrator/internal/production/agentcli.go": {
-    "XDG_RUNTIME_DIR": 1,
-    "XDG_STATE_HOME": 1
-  },
-  "orchestrator/internal/production/cli_ensure.go": {
-    "XDG_RUNTIME_DIR": 2,
-    "XDG_STATE_HOME": 2
-  },
-  "orchestrator/internal/production/sidecars.go": {
-    "VIBESYS_AGENT": 1,
-    "VIBESYS_CLI": 1,
-    "VIBESYS_HARNESS": 1,
-    "VIBESYS_REPO": 1,
-    "VIBESYS_RUN": 1,
-    "VIBESYS_TASK": 1,
-    "XDG_RUNTIME_DIR": 1,
     "XDG_STATE_HOME": 1
   },
   "sdk/vibesys-evaluator/go/evaluator/files.go": {
     "VIBESYS_ARTIFACTS_DIR": 1,
     "VIBESYS_SAMPLE_SEED": 1
-  },
-  "sdk/vibesys-evaluator/go/k8s/deployment.go": {
-    "VIBESYS_K8S_BUILDER": 2,
-    "VIBESYS_K8S_REGISTRY": 2
   },
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_private/core.py": {
     "VIBESYS_EVALUATOR_BIN": 1,
@@ -113,27 +58,16 @@
     "VIBESYS_EVALUATOR_OTELCAPTURE": 1
   },
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_private/sample.py": {
-    "VIBESYS_ARTIFACTS_DIR": 1,
     "VIBESYS_SAMPLE_SEED": 1
   },
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto/vibesys/evaluator/v1/core_pb.py": {
     "VIBESYS_SAMPLE_SEED": 1
   },
-  "sdk/vibesys-evaluator/python/src/vibesys_evaluator/llm_serving/__init__.py": {
-    "VIBESYS_SERVICE_URL": 1
-  },
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/llm_serving/_agentx.py": {
     "XDG_CACHE_HOME": 1
   },
-  "sdk/vibesys-evaluator/python/src/vibesys_evaluator/llm_serving/_endpoint.py": {
-    "VIBESYS_SERVICE_URL": 3
-  },
   "sdk/vibesys-evaluator/python/src/vibesys_evaluator/microservices/_k8s/_deployment.py": {
     "VIBESYS_EVALUATOR_NAMESPACE": 1
-  },
-  "sdk/vibesys-evaluator/python/src/vibesys_evaluator/microservices/k8s.py": {
-    "VIBESYS_K8S_BUILDER": 1,
-    "VIBESYS_K8S_REGISTRY": 1
   },
   "skills/domains/kernel-rocprof-analysis/scripts/capture.py": {
     "VIBESYS_ARTIFACTS_DIR": 1

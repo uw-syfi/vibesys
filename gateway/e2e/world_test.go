@@ -29,6 +29,25 @@ type agentView struct {
 	Plan    int    `json:"planNumber"`
 }
 
+// handoffView is a handoff as the stream states it: a worker's carries its candidate.
+type handoffView struct {
+	PlanNumber int    `json:"planNumber"`
+	Claim      string `json:"claim"`
+	Worker     *struct {
+		Candidate *struct {
+			Commit string `json:"commit"`
+		} `json:"candidate"`
+	} `json:"worker"`
+}
+
+// Commit is the commit the handoff offers, empty when it offers none.
+func (h *handoffView) Commit() string {
+	if h.Worker == nil || h.Worker.Candidate == nil {
+		return ""
+	}
+	return h.Worker.Candidate.Commit
+}
+
 type messageView struct {
 	ID        string `json:"id"`
 	From      string `json:"fromAgentId"`
@@ -39,12 +58,8 @@ type messageView struct {
 		FanoutLimit int    `json:"fanoutLimit"`
 		Steering    string `json:"steering"`
 	} `json:"leadBrief"`
-	Handoff *struct {
-		PlanNumber int    `json:"planNumber"`
-		Claim      string `json:"claim"`
-		Commit     string `json:"commit"`
-	} `json:"handoff"`
-	Report *struct {
+	Handoff *handoffView `json:"handoff"`
+	Report  *struct {
 		Headline string `json:"headline"`
 	} `json:"report"`
 }
@@ -60,29 +75,29 @@ func newWorld() *world {
 	return &world{agents: map[string]*agentView{}, messages: map[string]*messageView{}}
 }
 
-// fold applies one line of the stream of runs. A line that is not an event (a snapshot) changes nothing.
+// fold applies one line of the stream of runs. A line that is not a change (a snapshot) changes nothing.
 func (w *world) fold(line string) {
 	var l struct {
-		Event *struct {
-			Sequence       string       `json:"sequence"`
-			AgentUpdated   *agentView   `json:"agentUpdated"`
-			MessageUpdated *messageView `json:"messageUpdated"`
-			RunUpdated     *runView     `json:"runUpdated"`
-		} `json:"event"`
+		Change *struct {
+			Sequence string       `json:"sequence"`
+			Agent    *agentView   `json:"agent"`
+			Message  *messageView `json:"message"`
+			Run      *runView     `json:"run"`
+		} `json:"change"`
 	}
-	if json.Unmarshal([]byte(line), &l) != nil || l.Event == nil {
+	if json.Unmarshal([]byte(line), &l) != nil || l.Change == nil {
 		return
 	}
-	if n, err := strconv.ParseUint(l.Event.Sequence, 10, 64); err == nil {
+	if n, err := strconv.ParseUint(l.Change.Sequence, 10, 64); err == nil {
 		w.last = n
 	}
-	if a := l.Event.AgentUpdated; a != nil {
+	if a := l.Change.Agent; a != nil {
 		w.agents[a.ID] = a
 	}
-	if m := l.Event.MessageUpdated; m != nil {
+	if m := l.Change.Message; m != nil {
 		w.messages[m.ID] = m
 	}
-	if run := l.Event.RunUpdated; run != nil {
+	if run := l.Change.Run; run != nil {
 		w.run = *run
 	}
 }

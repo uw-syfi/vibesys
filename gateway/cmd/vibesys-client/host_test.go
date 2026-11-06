@@ -280,20 +280,11 @@ func TestAStarterAndAFinderGetTheSameSocket(t *testing.T) {
 			}
 			p.stopHost(t, root)
 			env := map[string]string{"HOME": shortDir(t)}
-			if name == "long" {
-				// The host's own socket fits whatever the root, and the sockets of its state do not
-				// follow it there: a state directory this long is refused saying how to choose one.
-				code, _, stderr := p.clientIn(t, env, "--root", link, "run", "list")
-				if code != 1 || !strings.Contains(stderr, "--state-directory") {
-					t.Fatalf("a long default state: exit %d: %s", code, stderr)
-				}
-				noHostLeft(t, root)
-				if code, _, stderr := p.clientIn(t, env, "--root", link, "host", "configure", "--state-directory", shortDir(t)); code != 0 {
-					t.Fatalf("configure: exit %d: %s", code, stderr)
-				}
-			}
+			// The host's own socket and the sockets of its default state fit whatever the root:
+			// nothing is configured for a long one.
 			if code, _, stderr := p.clientIn(t, env, "--root", link, "run", "list"); code != 0 {
-				t.Fatalf("started through the link: exit %d: %s", code, stderr)
+				log, _ := os.ReadFile(lifecycle.LogPath(root))
+				t.Fatalf("started through the link: exit %d: %s\nhost log: %s", code, stderr, log)
 			}
 			for _, spelled := range []string{root, link, root + "/", link + "/."} {
 				if code, stdout, stderr := p.clientIn(t, env, "--root", spelled, "host", "status"); code != 0 || !strings.Contains(stdout, "serving") {
@@ -660,7 +651,13 @@ func TestAHostStartedFromAHostileEnvironmentKeepsTheJobToolSettings(t *testing.T
 	if err := os.WriteFile(filepath.Join(root, ".claude-plugin", "marketplace.json"), []byte(`{"plugins":[{"name":"vibesys"}]}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := hostconfig.Save(root, &pb.HostConfig{SessionHolderCommand: holder, JobTool: p.client, SkillsDirectory: root}); err != nil {
+	// A start asks the job tool for its daemon; this one answers with one that nobody needs to reach.
+	tool := filepath.Join(root, "job-tool.sh")
+	answer := `{"socket":"` + root + `/rt/daemon.sock","runtimeDirectory":"` + root + `/rt"}`
+	if err := os.WriteFile(tool, []byte("#!/bin/sh\necho '"+answer+"'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := hostconfig.Save(root, &pb.HostConfig{SessionHolderCommand: holder, JobTool: tool, SkillsDirectory: root}); err != nil {
 		t.Fatal(err)
 	}
 	repository := gitRepository(t)

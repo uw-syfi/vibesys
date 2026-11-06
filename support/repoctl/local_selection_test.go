@@ -132,7 +132,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"gateway/internal/server/host.go"},
 			wantCI:      []string{"desktop_path", "gateway", "managed_install"},
 			wantGroups:  []string{"always_on", "desktop_path_e2e", "gateway_checks"},
-			wantSkipped: []string{"managed_install_tests"},
+			wantSkipped: []string{"managed_install_macos_tests", "managed_install_tests"},
 			wantTargets: 0,
 		},
 		{
@@ -140,7 +140,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"gateway/gen/vibesys/api/v1/host.pb.go"},
 			wantCI:      []string{"desktop_path", "gateway", "managed_install", "proto"},
 			wantGroups:  []string{"always_on", "desktop_path_e2e", "gateway_checks", "proto"},
-			wantSkipped: []string{"managed_install_tests"},
+			wantSkipped: []string{"managed_install_macos_tests", "managed_install_tests"},
 			wantTargets: 0,
 		},
 		{

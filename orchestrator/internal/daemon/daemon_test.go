@@ -9,7 +9,6 @@ import (
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 )
 
@@ -48,10 +47,10 @@ func TestStartingARunLaunchesItsLeadAndRunsItsFirstTurn(t *testing.T) {
 	if session == nil {
 		t.Fatal("the lead's sidecar was never launched")
 	}
-	if got := session.Env[daemon.EnvAgent]; got != string(lead.ID) {
+	if got := session.Credentials.GetAgent(); got != string(lead.ID) {
 		t.Fatalf("session environment names agent %q, want %q", got, lead.ID)
 	}
-	if !r.Auth.Valid(core.Session{Agent: lead.ID, N: 1}, session.Env[daemon.EnvToken]) {
+	if !r.Auth.Valid(core.Session{Agent: lead.ID, N: 1}, session.Credentials.GetToken()) {
 		t.Fatal("the session's token does not verify")
 	}
 }
@@ -60,7 +59,7 @@ func TestARetryGetsTheSameReceiptAndAReusedIDIsAConflict(t *testing.T) {
 	r := daemontest.NewRig(t)
 	first := dispatch(t, r, startRun("c1"))
 	again := dispatch(t, r, startRun("c1"))
-	if first.GetRunId() != again.GetRunId() || first.GetCommandDigest() != again.GetCommandDigest() {
+	if first.GetRunId() != again.GetRunId() {
 		t.Fatalf("a retry answered %v, want %v", again, first)
 	}
 	other := startRun("c1")

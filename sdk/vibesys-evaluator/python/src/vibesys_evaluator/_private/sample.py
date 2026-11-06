@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from vibesys_evaluator._private import core
+from vibesys_evaluator._private.environment import job_environment
 from vibesys_evaluator._private.records import RecordError, RecordStream
 
 if TYPE_CHECKING:
@@ -38,8 +39,6 @@ if TYPE_CHECKING:
 
 #: The sample seed vibesys may pass; drawn fresh (``secrets``) when unset.
 SAMPLE_SEED_ENV = "VIBESYS_SAMPLE_SEED"
-#: The directory vibesys keeps with the job.
-ARTIFACTS_ENV = "VIBESYS_ARTIFACTS_DIR"
 SIGNALS = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 
 
@@ -164,7 +163,7 @@ def _new_sample(
     request: dict[str, Any] = {
         "mode": str(mode),
         "env_seed": env.get(SAMPLE_SEED_ENV, ""),
-        "env_artifacts_dir": env.get(ARTIFACTS_ENV, ""),
+        "env_artifacts_dir": job_environment(env).artifacts,
         "scratch_dir": str(scratch),
     }
     if seed_flag is not None:

@@ -2,10 +2,11 @@ package mounts_test
 
 import (
 	"errors"
+	"github.com/uw-syfi/vibesys/cli/envcodec"
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"maps"
 	"math/rand/v2"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/uw-syfi/vibesys/cli/internal/core"
@@ -43,7 +44,11 @@ func TestEachDirectoryIsMountedReadOnlyAtItsName(t *testing.T) {
 			t.Fatal(err)
 		}
 		names := slices.Sorted(maps.Keys(dirs))
-		if a.Env[mounts.EnvNames] != strings.Join(names, ",") || len(a.Mounts) != len(names) {
+		var job cliv1.JobEnvironment
+		if err := envcodec.Decode(func(n string) string { return a.Env[n] }, &job); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(job.GetMounts(), names) || len(a.Env) != 1 || len(a.Mounts) != len(names) {
 			t.Fatalf("%v: %+v", dirs, a)
 		}
 		for i, n := range names {

@@ -10,6 +10,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/jobs"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/prompts"
@@ -24,6 +25,9 @@ type Config struct {
 
 	Engine   EngineDeps
 	Sidecars Sidecars
+	// Checkouts removes the working copies of a run that is over. Nil means none is, which leaves
+	// them where they are and records that nothing was kept.
+	Checkouts Checkouts
 	// Jobs is the job source. Nil means there is none: no job is ever reported, which is the truth
 	// for a build with no vibesys-cli wired in, and not the same as a source that reports no jobs.
 	Jobs      jobs.JobSource
@@ -342,6 +346,8 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 		// The store offers a timer only once it is due.
 		_, err := d.Apply(core.TimerFired{Timer: b})
 		return err
+	case core.ReleaseCheckouts:
+		return d.releaseCheckouts(ctx, b)
 	case core.LaunchSession:
 		if !isLive(state, b.Session) {
 			// The session ended before this launch was carried out, such as one that did not open in
@@ -382,6 +388,34 @@ func (d *Daemon) carryOut(ctx context.Context, e core.Effect) error {
 	return err
 }
 
+// releaseCheckouts removes the working copies of the agents of a run that is over, and tells the core
+// which stayed. A run that can still continue keeps every one: the core asks only once a run is over,
+// and this checks again against the state it carries out in.
+func (d *Daemon) releaseCheckouts(ctx context.Context, e core.ReleaseCheckouts) error {
+	run, ok := d.State().Run(e.Run)
+	if !ok || !run.Status.Final() {
+		return nil
+	}
+	var kept []core.Checkout
+	if d.cfg.Checkouts != nil {
+		var agents []core.AgentID
+		for _, a := range d.State().Agents(run.ID) {
+			if a.Role != core.RoleLead {
+				agents = append(agents, a.ID)
+			}
+		}
+		var err error
+		kept, err = bound(d.cfg.Bounds, ctx, func(c context.Context) ([]core.Checkout, error) {
+			return d.cfg.Checkouts.Release(c, run.Repository, run.ID, agents)
+		})
+		if err != nil {
+			return fmt.Errorf("release the checkouts of run %s: %w", run.ID, err)
+		}
+	}
+	_, err := d.Apply(core.CheckoutsReleased{Run: run.ID, Kept: kept})
+	return err
+}
+
 func effectSession(e core.Effect) core.Session {
 	switch b := e.(type) {
 	case core.LaunchSession:
@@ -411,10 +445,10 @@ func (d *Daemon) launch(ctx context.Context, l core.LaunchSession) error {
 		}
 	}
 	start := SessionStart{
-		Launch: l, Repository: run.Repository, Task: run.Task, Location: run.Location,
-		Tools: LaunchEnv{
-			EnvSocket: d.cfg.AgentSocket, EnvAgent: string(l.Session.Agent), EnvSession: fmt.Sprint(l.Session.N),
-			EnvToken: d.cfg.Authority.Token(l.Session), EnvRun: string(l.Run), EnvRole: string(l.Role),
+		Launch: l, Repository: run.Repository, Task: run.Task, JobTool: run.JobTool,
+		Tools: &pb.ToolServerCredentials{
+			Endpoint: d.cfg.AgentSocket, Agent: string(l.Session.Agent), Session: l.Session.N,
+			Token: d.cfg.Authority.Token(l.Session), Run: string(l.Run), Role: wire.RoleOut(l.Role),
 		},
 	}
 	sc, err := bound(d.cfg.Bounds, ctx, func(c context.Context) (Sidecar, error) {

@@ -10,13 +10,13 @@ import {
   Compatibility,
   DispatchRequestSchema,
   DispatchResponseSchema,
-  type Event,
   HelloResponseSchema,
   ItemsPageSchema,
   ListItemsRequestSchema,
   ListItemsResponseSchema,
   OrchestratorService,
   oneofIs,
+  type RunChange,
   WatchAgentRequestSchema,
   WatchAgentResponseSchema,
   WatchRunsRequestSchema,
@@ -59,31 +59,31 @@ const lost = (message: string): Step => ({end: {message, status: RpcStatus.UNAVA
 
 /** The per-agent frame an event becomes for `agentId`, or null when it is not about that agent. */
 function agentFrameOf(
-  event: Event,
+  event: RunChange,
   agentId: string,
 ): Parameters<typeof create<typeof WatchAgentResponseSchema>>[1] | null {
   const {body} = event;
   if (
-    oneofIs(body, 'itemUpdated', {
-      runUpdated: true,
-      agentUpdated: true,
-      turnUpdated: true,
-      itemUpdated: true,
-      messageUpdated: true,
-      receiptRecorded: true,
+    oneofIs(body, 'item', {
+      run: true,
+      agent: true,
+      turn: true,
+      item: true,
+      message: true,
+      receipt: true,
     }) &&
     body.value.agentId === agentId
   ) {
     return {sequence: event.sequence, body: {case: 'item', value: body.value}};
   }
   if (
-    oneofIs(body, 'turnUpdated', {
-      runUpdated: true,
-      agentUpdated: true,
-      turnUpdated: true,
-      itemUpdated: true,
-      messageUpdated: true,
-      receiptRecorded: true,
+    oneofIs(body, 'turn', {
+      run: true,
+      agent: true,
+      turn: true,
+      item: true,
+      message: true,
+      receipt: true,
     }) &&
     body.value.agentId === agentId
   ) {
@@ -144,8 +144,8 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
       steps.push(encode({body: {case: 'snapshot', value: snapshot}}));
       for (const search of snapshot.searches) seen.set(search.runId, search.revision);
     }
-    for (const event of daemon.eventsAfter(after)) {
-      steps.push(encode({body: {case: 'event', value: event}}));
+    for (const event of daemon.changesAfter(after)) {
+      steps.push(encode({body: {case: 'change', value: event}}));
     }
     for (const search of daemon.snapshot().searches) {
       if (search.revision > (seen.get(search.runId) ?? 0n))
@@ -171,7 +171,7 @@ export function daemonRecording(daemon: FakeDaemon, options: DaemonOptions = {})
         }
       }
     }
-    for (const event of daemon.eventsAfter(after)) {
+    for (const event of daemon.changesAfter(after)) {
       const init = agentFrameOf(event, request.agentId);
       if (init !== null) steps.push(encode(init));
     }

@@ -11,8 +11,13 @@ ROOT = Path(__file__).resolve().parents[2]
 # A module that is published on its own cannot require a local module (a `replace` does not reach
 # its dependents) and has no released module to require instead, so it keeps a private copy in an
 # internal package. Evaluators use that module alone, never beside the module the copy comes from.
+#
+# The evaluator module reads the job environment vibesys-cli writes (vibesys/cli/v1/env.proto, with
+# its go_package overridden by buf.gen.evaluator-env-go.yaml). vibesys-cli requires that module and
+# imports none of the packages that import the copy; the module imports nothing of vibesys-cli's.
 STANDALONE_COPIES = {
     ("github.com/uw-syfi/vibesys/sdk/vs-evaluator/vseval", "vibesys/evaluator/v1"),
+    ("github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go", "vibesys/cli/v1"),
 }
 
 

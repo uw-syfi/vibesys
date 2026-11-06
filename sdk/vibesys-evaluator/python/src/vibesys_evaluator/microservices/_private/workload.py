@@ -37,7 +37,11 @@ class Operation(Generic[M]):
     def __post_init__(self) -> None:
         """Reject a name or weight the plan cannot carry."""
         if not isinstance(self.name, str) or not _NAME.match(self.name):
-            msg = f"Operation name {self.name!r} must match {_NAME.pattern}"
+            msg = (
+                f"Operation name {self.name!r} is not one loadgen takes: a lowercase letter, then "
+                f"up to 62 lowercase letters, digits and underscores ({_NAME.pattern}; no dots "
+                "or dashes)"
+            )
             raise ValueError(msg)
         if isinstance(self.weight, bool) or not (self.weight > 0 and math.isfinite(self.weight)):
             msg = f"Operation {self.name}: weight must be a finite number > 0, got {self.weight!r}"
@@ -74,7 +78,7 @@ class Workload(Generic[D, M]):
                 msg = f"Workload operations are Operation, got {type(operation).__name__}"
                 raise TypeError(msg)
             if operation.name in seen:
-                msg = f"Workload has two operations named {operation.name!r}"
+                msg = f"two operations are named {operation.name!r}: operation names are unique"
                 raise ValueError(msg)
             seen.add(operation.name)
 

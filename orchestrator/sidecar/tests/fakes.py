@@ -71,7 +71,7 @@ class ScriptedDriver:
         if self.start_error is not None:
             raise self.start_error
         return Opened(
-            self.conversation_id, orch.Capabilities(streams_text=True, steers=True, resumes=True)
+            self.conversation_id, orch.Capabilities(steers=True, resumes=True)
         )
 
     def begin_turn(self, turn_id: str, prompt: str) -> None:

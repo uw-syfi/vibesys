@@ -35,8 +35,13 @@ All worktrees of the repository share one store per task, so any agent sees the 
   a remote branch at the same commit, delete it (`git branch -d vibesys`); otherwise stop and
   report the collision. Never rename the result branch.
 - Candidate branches: `vibesys-work/<task>/plan-N`, where N is the plan number.
-- Worktrees: the lead picks one directory outside the repository's working tree and puts every
-  worktree there (`git worktree add`), one per plan, one per judge or profile question. Each brief
+- Worktrees: the lead puts every worktree outside the repository's directory tree, in
+  `<parent>/<name>.worktrees/`, where `<parent>` is the directory that holds the repository and
+  `<name>` is the repository directory's name (for a repository at `/work/kv`, a worktree is
+  `/work/kv.worktrees/plan-3`, never `/work/kv/kv.worktrees/plan-3`, which git reports as an
+  untracked directory of the user's checkout). Never under `/tmp`. Add with `git worktree add`,
+  one per plan, one per judge or profile question. The run does not remove these when it ends, so
+  the lead removes a plan's worktree when the plan closes (see Housekeeping). Each brief
   names its worktree. `git worktree list` is the truth about which exist. A new worktree has its
   submodules empty: when the repository has any (`.gitmodules`), run
   `git -C <path> submodule update --init --recursive` after `git worktree add`, so the agent can
@@ -58,14 +63,15 @@ Statuses: `open` (proposed, undecided), `chosen` (a worker is on it), `won` (pro
 
 | Writer | Writes |
 | --- | --- |
-| Planner | `plan create`, and `plan edit` of its own body |
+| Planner | `plan create`, and `plan edit` of its own body and its gain bound (`--gain-bound`, the most the plan could gain as a share of the headline) |
 | Lead | status (`plan edit <n> --status`, `plan close <n> --status s --comment ...`) and comments: the decision (chosen, rejected, deferred and why; duplicates; disjoint files), the worker brief text, the result (branch, commit, job ids, judge verdict, lessons), and on close the gain with its `compare` verdict or the reason |
 
 Workers and judges never write plans; they link jobs with `--plan <n>` and hand back evidence.
 Write each comment when the thing happens, not at the end.
 
 Cheap index of all plans, without reading bodies: `vibesys-cli plan list --json`. What is live:
-`plan list --status open,chosen`. A plan's linked jobs: `plan view <n>`.
+`plan list --status open,chosen`. A plan's linked jobs: `plan view <n>`. Whether every open or
+parked plan's gain bound is under a share: `plan check-gain --under 10%`.
 
 ## Resume
 
@@ -80,5 +86,7 @@ Cheap index of all plans, without reading bodies: `vibesys-cli plan list --json`
 
 ## Housekeeping
 
-Remove the worktrees of closed plans (`git worktree remove`); keep their branches, and never
-rewrite measured commits.
+When a plan closes, remove its worktree (`git worktree remove --force <path>`: build output in it
+is not work); keep its branch, and never rewrite measured commits. Before the final report, run
+`git worktree list`: only the repository itself should be listed, and `git status` should show no
+untracked `*.worktrees` directory.

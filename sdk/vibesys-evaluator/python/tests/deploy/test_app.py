@@ -35,6 +35,12 @@ def test_a_valid_app_freezes_its_collections() -> None:
         ({"seed": None}, "data_tier="),
         ({"restartable": ["frontend", "frontend"]}, "restartable"),
         ({"caches": {"cache": "varnish"}}, "caches['cache']"),
+        ({"wait_secs": 0}, "wait_secs="),
+        ({"wait_secs": -5.0}, "wait_secs="),
+        ({"wait_secs": float("inf")}, "wait_secs="),
+        ({"wait_secs": float("nan")}, "wait_secs="),
+        ({"wait_secs": True}, "wait_secs="),
+        ({"wait_secs": "600"}, "wait_secs="),
     ],
 )
 def test_a_wrong_field_is_named(overrides: dict[str, object], names: str) -> None:

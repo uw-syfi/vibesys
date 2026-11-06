@@ -21,13 +21,13 @@ func TestFollowerEveryFailureReplacesReadableReason(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		v := search.View{Reason: core.Readable}
 		f := clidaemon.Follower{
-			Connect: func(context.Context) (clidaemon.Connection, error) {
+			Connect: func(context.Context, clidaemon.Socket) (clidaemon.Connection, error) {
 				return nil, &clidaemon.Unreadable{Reason: reason, Detail: "failure"}
 			},
 			Bound: func(c context.Context) (context.Context, context.CancelFunc) {
 				return context.WithDeadline(c, time.Unix(1<<40, 0))
 			},
-			Ensurer: availableEnsurer{},
+			Ensurer: clidaemontest.AnySocket{},
 			Sleep:   func(context.Context, time.Duration) error { cancel(); return context.Canceled },
 		}
 		followSearch(ctx, f, Subscription{Repository: "/repo", Task: "task"}, &v, func(search.View) {})
@@ -37,10 +37,6 @@ func TestFollowerEveryFailureReplacesReadableReason(t *testing.T) {
 		}
 	}
 }
-
-type availableEnsurer struct{}
-
-func (availableEnsurer) Ensure(context.Context, clidaemon.Location) error { return nil }
 
 func TestReconcilerGeneratedLifetimes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -61,7 +57,7 @@ func TestReconcilerGeneratedLifetimes(t *testing.T) {
 			mu.Unlock()
 			defer func() { mu.Lock(); delete(active, k); mu.Unlock() }()
 			fake := clidaemontest.New()
-			f := clidaemon.Follower{Connect: func(context.Context) (clidaemon.Connection, error) { return fake, nil }, Bound: func(c context.Context) (context.Context, context.CancelFunc) {
+			f := clidaemon.Follower{Ensurer: clidaemontest.AnySocket{}, Connect: func(context.Context, clidaemon.Socket) (clidaemon.Connection, error) { return fake, nil }, Bound: func(c context.Context) (context.Context, context.CancelFunc) {
 				return context.WithDeadline(c, time.Unix(1<<40, 0))
 			}, Sleep: func(c context.Context, _ time.Duration) error { <-c.Done(); return c.Err() }}
 			v := search.View{}
@@ -73,7 +69,7 @@ func TestReconcilerGeneratedLifetimes(t *testing.T) {
 			var runs []core.Run
 			want := map[Subscription]bool{}
 			for i := range 5 {
-				run := core.Run{ID: core.RunID(string(rune('a' + i))), Repository: "/repo", Task: "task", Location: core.CliLocation{CLI: []string{"/a/cli", "/b/cli"}[random.IntN(2)]}, Status: core.RunEnded}
+				run := core.Run{ID: core.RunID(string(rune('a' + i))), Repository: "/repo", Task: "task", JobTool: core.JobToolEndpoint{Executable: []string{"/a/cli", "/b/cli"}[random.IntN(2)]}, Status: core.RunEnded}
 				if random.IntN(2) == 0 {
 					run.Status = core.RunRunning
 					want[subscription(run)] = true
@@ -125,7 +121,7 @@ func TestTerminalFollowerRestartsOnlyWithChangedSubscription(t *testing.T) {
 			calls++
 			publish(search.View{Reason: core.CLINotInstalled})
 		}}
-		run := core.Run{ID: "r", Status: core.RunRunning, Location: core.CliLocation{CLI: "/old/cli"}}
+		run := core.Run{ID: "r", Status: core.RunRunning, JobTool: core.JobToolEndpoint{Executable: "/old/cli"}}
 		defer r.Close()
 		r.Sync(context.Background(), []core.Run{run})
 		synctest.Wait()
@@ -137,7 +133,7 @@ func TestTerminalFollowerRestartsOnlyWithChangedSubscription(t *testing.T) {
 		if calls != 1 || v.Reason != core.CLINotInstalled {
 			t.Fatal(calls, v)
 		}
-		run.Location.CLI = "/new/cli"
+		run.JobTool.Executable = "/new/cli"
 		r.Sync(context.Background(), []core.Run{run})
 		synctest.Wait()
 		if calls != 2 {

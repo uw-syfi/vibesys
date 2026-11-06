@@ -24,6 +24,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// TaskObjectiveDirection is the way an objective improves.
+type TaskObjectiveDirection int32
+
+const (
+	TaskObjectiveDirection_TASK_OBJECTIVE_DIRECTION_UNSPECIFIED TaskObjectiveDirection = 0
+	// Larger is better, written `direction = "max"`.
+	TaskObjectiveDirection_TASK_OBJECTIVE_DIRECTION_MAX TaskObjectiveDirection = 1
+	// Smaller is better, written `direction = "min"`.
+	TaskObjectiveDirection_TASK_OBJECTIVE_DIRECTION_MIN TaskObjectiveDirection = 2
+)
+
+// Enum value maps for TaskObjectiveDirection.
+var (
+	TaskObjectiveDirection_name = map[int32]string{
+		0: "TASK_OBJECTIVE_DIRECTION_UNSPECIFIED",
+		1: "TASK_OBJECTIVE_DIRECTION_MAX",
+		2: "TASK_OBJECTIVE_DIRECTION_MIN",
+	}
+	TaskObjectiveDirection_value = map[string]int32{
+		"TASK_OBJECTIVE_DIRECTION_UNSPECIFIED": 0,
+		"TASK_OBJECTIVE_DIRECTION_MAX":         1,
+		"TASK_OBJECTIVE_DIRECTION_MIN":         2,
+	}
+)
+
+func (x TaskObjectiveDirection) Enum() *TaskObjectiveDirection {
+	p := new(TaskObjectiveDirection)
+	*p = x
+	return p
+}
+
+func (x TaskObjectiveDirection) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (TaskObjectiveDirection) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_cli_v1_task_proto_enumTypes[0].Descriptor()
+}
+
+func (TaskObjectiveDirection) Type() protoreflect.EnumType {
+	return &file_vibesys_cli_v1_task_proto_enumTypes[0]
+}
+
+func (x TaskObjectiveDirection) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use TaskObjectiveDirection.Descriptor instead.
+func (TaskObjectiveDirection) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{0}
+}
+
 // TaskSchema is the schema version a manifest message is: its major version, and the newest minor
 // version its fields belong to.
 type TaskSchema struct {
@@ -743,6 +795,179 @@ func (x *TaskAgentV02) GetInterface() string {
 	return ""
 }
 
+// TaskObjectives is objectives.toml, beside a task's manifest, of every task schema: what a
+// benchmark's result is judged on. vibesys-cli decodes the TOML file into it by its field names,
+// refuses a key this message has no field for, naming the key, and holds it to its protovalidate
+// rules. A task with [pareto] and more than one objective is judged on all of them together; any
+// other task is judged on the one metric it scores. A task with no file has no objectives, and its
+// manifest must then say what it measures.
+type TaskObjectives struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The objectives, each `[[objective]]`, in the order the file lists them. The first is the one a
+	// protocol 2 benchmark scores unless the manifest names another.
+	Objective []*TaskObjective `protobuf:"bytes,1,rep,name=objective,proto3" json:"objective,omitempty"`
+	// `[pareto]`: the task is judged on every objective together.
+	Pareto        *TaskPareto `protobuf:"bytes,2,opt,name=pareto,proto3" json:"pareto,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskObjectives) Reset() {
+	*x = TaskObjectives{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskObjectives) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskObjectives) ProtoMessage() {}
+
+func (x *TaskObjectives) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskObjectives.ProtoReflect.Descriptor instead.
+func (*TaskObjectives) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TaskObjectives) GetObjective() []*TaskObjective {
+	if x != nil {
+		return x.Objective
+	}
+	return nil
+}
+
+func (x *TaskObjectives) GetPareto() *TaskPareto {
+	if x != nil {
+		return x.Pareto
+	}
+	return nil
+}
+
+// TaskObjective is one `[[objective]]`: a measured quantity and the way it improves.
+type TaskObjective struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The name of the quantity: the field of the benchmark's result, or the series of a protocol 2
+	// record.
+	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Direction TaskObjectiveDirection `protobuf:"varint,2,opt,name=direction,proto3,enum=vibesys.cli.v1.TaskObjectiveDirection" json:"direction,omitempty"`
+	// The relative change below which two measurements of this objective are one, for this objective
+	// alone, instead of the [pareto] floor. Zero declares no floor. Absent takes the [pareto] floor.
+	RelativeNoise *float64 `protobuf:"fixed64,3,opt,name=relative_noise,json=relativeNoise,proto3,oneof" json:"relative_noise,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskObjective) Reset() {
+	*x = TaskObjective{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskObjective) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskObjective) ProtoMessage() {}
+
+func (x *TaskObjective) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskObjective.ProtoReflect.Descriptor instead.
+func (*TaskObjective) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TaskObjective) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *TaskObjective) GetDirection() TaskObjectiveDirection {
+	if x != nil {
+		return x.Direction
+	}
+	return TaskObjectiveDirection_TASK_OBJECTIVE_DIRECTION_UNSPECIFIED
+}
+
+func (x *TaskObjective) GetRelativeNoise() float64 {
+	if x != nil && x.RelativeNoise != nil {
+		return *x.RelativeNoise
+	}
+	return 0
+}
+
+// TaskPareto is `[pareto]`.
+type TaskPareto struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The relative change below which two measurements of an objective are one, unless the objective
+	// declares its own. At least 0 and less than 1.
+	RelativeNoise float64 `protobuf:"fixed64,1,opt,name=relative_noise,json=relativeNoise,proto3" json:"relative_noise,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TaskPareto) Reset() {
+	*x = TaskPareto{}
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskPareto) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskPareto) ProtoMessage() {}
+
+func (x *TaskPareto) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_task_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskPareto.ProtoReflect.Descriptor instead.
+func (*TaskPareto) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_task_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *TaskPareto) GetRelativeNoise() float64 {
+	if x != nil {
+		return x.RelativeNoise
+	}
+	return 0
+}
+
 var file_vibesys_cli_v1_task_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
@@ -845,7 +1070,26 @@ const file_vibesys_cli_v1_task_proto_rawDesc = "" +
 	"\x05modal\x18\x03 \x01(\v2\x17.google.protobuf.StructB\x04\xd0\xf3\x18\x02R\x05modal\"t\n" +
 	"\fTaskAgentV02\x12#\n" +
 	"\x06domain\x18\x01 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xd0\xf3\x18\x02R\x06domain\x12?\n" +
-	"\tinterface\x18\x02 \x01(\tB!\xbaH\x1ar\x182\x16^(inprocess|service)?$\xd0\xf3\x18\x02R\tinterface:^\n" +
+	"\tinterface\x18\x02 \x01(\tB!\xbaH\x1ar\x182\x16^(inprocess|service)?$\xd0\xf3\x18\x02R\tinterface\"\xab\x05\n" +
+	"\x0eTaskObjectives\x12;\n" +
+	"\tobjective\x18\x01 \x03(\v2\x1d.vibesys.cli.v1.TaskObjectiveR\tobjective\x122\n" +
+	"\x06pareto\x18\x02 \x01(\v2\x1a.vibesys.cli.v1.TaskParetoR\x06pareto:\xa7\x04\xbaH\xa3\x04\x1a\xfe\x01\n" +
+	"\x17objectives.names_unique\x1a\xe2\x01this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1).size() == 0 ? '' : 'objective \"' + this.objective.filter(o, this.objective.filter(p, p.name == o.name).size() > 1)[0].name + '\" is declared twice'\x1a\x9f\x02\n" +
+	"\x1dobjectives.noise_needs_pareto\x1a\xfd\x01!this.objective.exists(o, has(o.relative_noise)) || (has(this.pareto) && this.objective.size() > 1) ? '' : 'objective \"' + this.objective.filter(o, has(o.relative_noise))[0].name + '\": relative_noise needs a [pareto] section and more than one objective'\"\xde\x03\n" +
+	"\rTaskObjective\x12\x1b\n" +
+	"\x04name\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04name\x12P\n" +
+	"\tdirection\x18\x02 \x01(\x0e2&.vibesys.cli.v1.TaskObjectiveDirectionB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12*\n" +
+	"\x0erelative_noise\x18\x03 \x01(\x01H\x00R\rrelativeNoise\x88\x01\x01:\x9e\x02\xbaH\x9a\x02\x1a\x97\x02\n" +
+	"\x1eobjective.relative_noise_range\x1a\xf4\x01!has(this.relative_noise) || (!this.relative_noise.isNan() && this.relative_noise >= 0.0 && this.relative_noise < 1.0) ? '' : 'objective \"' + this.name + '\": relative_noise must be at least 0 and less than 1, got ' + string(this.relative_noise)B\x11\n" +
+	"\x0f_relative_noise\"N\n" +
+	"\n" +
+	"TaskPareto\x12@\n" +
+	"\x0erelative_noise\x18\x01 \x01(\x01B\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00R\rrelativeNoise*\x86\x01\n" +
+	"\x16TaskObjectiveDirection\x12(\n" +
+	"$TASK_OBJECTIVE_DIRECTION_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cTASK_OBJECTIVE_DIRECTION_MAX\x10\x01\x12 \n" +
+	"\x1cTASK_OBJECTIVE_DIRECTION_MIN\x10\x02:^\n" +
 	"\vtask_schema\x12\x1f.google.protobuf.MessageOptions\x18\xb9\x8e\x03 \x01(\v2\x1a.vibesys.cli.v1.TaskSchemaR\n" +
 	"taskSchema:Y\n" +
 	"\x17task_schema_since_minor\x12\x1d.google.protobuf.FieldOptions\x18\xba\x8e\x03 \x01(\rR\x14taskSchemaSinceMinor\x88\x01\x01B9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
@@ -862,47 +1106,55 @@ func file_vibesys_cli_v1_task_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_task_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_vibesys_cli_v1_task_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_vibesys_cli_v1_task_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_vibesys_cli_v1_task_proto_goTypes = []any{
-	(*TaskSchema)(nil),                  // 0: vibesys.cli.v1.TaskSchema
-	(*TaskManifestV02)(nil),             // 1: vibesys.cli.v1.TaskManifestV02
-	(*TaskCandidateV02)(nil),            // 2: vibesys.cli.v1.TaskCandidateV02
-	(*TaskCommandV02)(nil),              // 3: vibesys.cli.v1.TaskCommandV02
-	(*TaskBuildV02)(nil),                // 4: vibesys.cli.v1.TaskBuildV02
-	(*TaskBenchmarkV02)(nil),            // 5: vibesys.cli.v1.TaskBenchmarkV02
-	(*TaskResultV02)(nil),               // 6: vibesys.cli.v1.TaskResultV02
-	(*TaskEnvironmentV02)(nil),          // 7: vibesys.cli.v1.TaskEnvironmentV02
-	(*TaskAgentV02)(nil),                // 8: vibesys.cli.v1.TaskAgentV02
-	(*structpb.Struct)(nil),             // 9: google.protobuf.Struct
-	(*descriptorpb.MessageOptions)(nil), // 10: google.protobuf.MessageOptions
-	(*descriptorpb.FieldOptions)(nil),   // 11: google.protobuf.FieldOptions
+	(TaskObjectiveDirection)(0),         // 0: vibesys.cli.v1.TaskObjectiveDirection
+	(*TaskSchema)(nil),                  // 1: vibesys.cli.v1.TaskSchema
+	(*TaskManifestV02)(nil),             // 2: vibesys.cli.v1.TaskManifestV02
+	(*TaskCandidateV02)(nil),            // 3: vibesys.cli.v1.TaskCandidateV02
+	(*TaskCommandV02)(nil),              // 4: vibesys.cli.v1.TaskCommandV02
+	(*TaskBuildV02)(nil),                // 5: vibesys.cli.v1.TaskBuildV02
+	(*TaskBenchmarkV02)(nil),            // 6: vibesys.cli.v1.TaskBenchmarkV02
+	(*TaskResultV02)(nil),               // 7: vibesys.cli.v1.TaskResultV02
+	(*TaskEnvironmentV02)(nil),          // 8: vibesys.cli.v1.TaskEnvironmentV02
+	(*TaskAgentV02)(nil),                // 9: vibesys.cli.v1.TaskAgentV02
+	(*TaskObjectives)(nil),              // 10: vibesys.cli.v1.TaskObjectives
+	(*TaskObjective)(nil),               // 11: vibesys.cli.v1.TaskObjective
+	(*TaskPareto)(nil),                  // 12: vibesys.cli.v1.TaskPareto
+	(*structpb.Struct)(nil),             // 13: google.protobuf.Struct
+	(*descriptorpb.MessageOptions)(nil), // 14: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 15: google.protobuf.FieldOptions
 }
 var file_vibesys_cli_v1_task_proto_depIdxs = []int32{
-	2,  // 0: vibesys.cli.v1.TaskManifestV02.candidate:type_name -> vibesys.cli.v1.TaskCandidateV02
-	3,  // 1: vibesys.cli.v1.TaskManifestV02.accuracy:type_name -> vibesys.cli.v1.TaskCommandV02
-	5,  // 2: vibesys.cli.v1.TaskManifestV02.benchmark:type_name -> vibesys.cli.v1.TaskBenchmarkV02
-	3,  // 3: vibesys.cli.v1.TaskManifestV02.profile:type_name -> vibesys.cli.v1.TaskCommandV02
-	7,  // 4: vibesys.cli.v1.TaskManifestV02.environment:type_name -> vibesys.cli.v1.TaskEnvironmentV02
-	4,  // 5: vibesys.cli.v1.TaskManifestV02.build:type_name -> vibesys.cli.v1.TaskBuildV02
-	3,  // 6: vibesys.cli.v1.TaskManifestV02.check:type_name -> vibesys.cli.v1.TaskCommandV02
-	5,  // 7: vibesys.cli.v1.TaskManifestV02.measure:type_name -> vibesys.cli.v1.TaskBenchmarkV02
-	8,  // 8: vibesys.cli.v1.TaskManifestV02.agent:type_name -> vibesys.cli.v1.TaskAgentV02
-	9,  // 9: vibesys.cli.v1.TaskManifestV02.profile_guided:type_name -> google.protobuf.Struct
-	9,  // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
-	9,  // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
-	9,  // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
-	9,  // 13: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> google.protobuf.Struct
-	9,  // 14: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
-	6,  // 15: vibesys.cli.v1.TaskBenchmarkV02.result:type_name -> vibesys.cli.v1.TaskResultV02
-	9,  // 16: vibesys.cli.v1.TaskEnvironmentV02.modal:type_name -> google.protobuf.Struct
-	10, // 17: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
-	11, // 18: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
-	0,  // 19: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	19, // [19:20] is the sub-list for extension type_name
-	17, // [17:19] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	3,  // 0: vibesys.cli.v1.TaskManifestV02.candidate:type_name -> vibesys.cli.v1.TaskCandidateV02
+	4,  // 1: vibesys.cli.v1.TaskManifestV02.accuracy:type_name -> vibesys.cli.v1.TaskCommandV02
+	6,  // 2: vibesys.cli.v1.TaskManifestV02.benchmark:type_name -> vibesys.cli.v1.TaskBenchmarkV02
+	4,  // 3: vibesys.cli.v1.TaskManifestV02.profile:type_name -> vibesys.cli.v1.TaskCommandV02
+	8,  // 4: vibesys.cli.v1.TaskManifestV02.environment:type_name -> vibesys.cli.v1.TaskEnvironmentV02
+	5,  // 5: vibesys.cli.v1.TaskManifestV02.build:type_name -> vibesys.cli.v1.TaskBuildV02
+	4,  // 6: vibesys.cli.v1.TaskManifestV02.check:type_name -> vibesys.cli.v1.TaskCommandV02
+	6,  // 7: vibesys.cli.v1.TaskManifestV02.measure:type_name -> vibesys.cli.v1.TaskBenchmarkV02
+	9,  // 8: vibesys.cli.v1.TaskManifestV02.agent:type_name -> vibesys.cli.v1.TaskAgentV02
+	13, // 9: vibesys.cli.v1.TaskManifestV02.profile_guided:type_name -> google.protobuf.Struct
+	13, // 10: vibesys.cli.v1.TaskManifestV02.resources:type_name -> google.protobuf.Struct
+	13, // 11: vibesys.cli.v1.TaskManifestV02.workspace:type_name -> google.protobuf.Struct
+	13, // 12: vibesys.cli.v1.TaskManifestV02.plan:type_name -> google.protobuf.Struct
+	13, // 13: vibesys.cli.v1.TaskManifestV02.catalogue:type_name -> google.protobuf.Struct
+	13, // 14: vibesys.cli.v1.TaskManifestV02.comparison:type_name -> google.protobuf.Struct
+	7,  // 15: vibesys.cli.v1.TaskBenchmarkV02.result:type_name -> vibesys.cli.v1.TaskResultV02
+	13, // 16: vibesys.cli.v1.TaskEnvironmentV02.modal:type_name -> google.protobuf.Struct
+	11, // 17: vibesys.cli.v1.TaskObjectives.objective:type_name -> vibesys.cli.v1.TaskObjective
+	12, // 18: vibesys.cli.v1.TaskObjectives.pareto:type_name -> vibesys.cli.v1.TaskPareto
+	0,  // 19: vibesys.cli.v1.TaskObjective.direction:type_name -> vibesys.cli.v1.TaskObjectiveDirection
+	14, // 20: vibesys.cli.v1.task_schema:extendee -> google.protobuf.MessageOptions
+	15, // 21: vibesys.cli.v1.task_schema_since_minor:extendee -> google.protobuf.FieldOptions
+	1,  // 22: vibesys.cli.v1.task_schema:type_name -> vibesys.cli.v1.TaskSchema
+	23, // [23:23] is the sub-list for method output_type
+	23, // [23:23] is the sub-list for method input_type
+	22, // [22:23] is the sub-list for extension type_name
+	20, // [20:22] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_cli_v1_task_proto_init() }
@@ -911,18 +1163,20 @@ func file_vibesys_cli_v1_task_proto_init() {
 		return
 	}
 	file_vibesys_cli_v1_task_proto_msgTypes[5].OneofWrappers = []any{}
+	file_vibesys_cli_v1_task_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_task_proto_rawDesc), len(file_vibesys_cli_v1_task_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   9,
+			NumEnums:      1,
+			NumMessages:   12,
 			NumExtensions: 2,
 			NumServices:   0,
 		},
 		GoTypes:           file_vibesys_cli_v1_task_proto_goTypes,
 		DependencyIndexes: file_vibesys_cli_v1_task_proto_depIdxs,
+		EnumInfos:         file_vibesys_cli_v1_task_proto_enumTypes,
 		MessageInfos:      file_vibesys_cli_v1_task_proto_msgTypes,
 		ExtensionInfos:    file_vibesys_cli_v1_task_proto_extTypes,
 	}.Build()

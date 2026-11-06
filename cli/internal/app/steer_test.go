@@ -120,7 +120,7 @@ func TestPriorityOrdersTheQueueAndAgingKeepsALowJobFromStarving(t *testing.T) {
 	if !w.gates.Reached(ctx, "gate") {
 		t.Fatalf("the first job did not start")
 	}
-	plan, err := a.CreatePlan(ctx, call, "the integration line", "")
+	plan, err := a.CreatePlan(ctx, call, "the integration line", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

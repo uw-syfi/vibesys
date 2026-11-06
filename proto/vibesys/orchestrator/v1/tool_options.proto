@@ -1,0 +1,36 @@
+syntax = "proto3";
+package vibesys.orchestrator.v1;
+
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1";
+
+// The tool server an agent talks to (internal/mcp) offers a message as a tool. Its input schema,
+// the checks on its arguments and the words an agent reads about each argument are generated from
+// the message, so a field added to it reaches the agent without a second edit. A message is the
+// input of a tool when it carries the mcp_tool option.
+extend google.protobuf.MessageOptions {
+  // Makes the message the input of a tool.
+  McpTool mcp_tool = 50101;
+}
+
+extend google.protobuf.FieldOptions {
+  // What the agent reads about this argument. Every argument that is not hidden has one.
+  string tool_field_doc = 50101;
+  // The argument is the server's to fill, so the agent is not offered it and a call that gives it
+  // is refused.
+  bool tool_field_hidden = 50102;
+}
+
+extend google.protobuf.OneofOptions {
+  // What a one-of group is, in the sentence that tells the agent to give exactly one of its fields.
+  string tool_oneof_doc = 50101;
+}
+
+// McpTool is how a message is offered as a tool.
+message McpTool {
+  // The tool's name, as the agent calls it.
+  string name = 1;
+  // What the agent reads about the tool.
+  string description = 2;
+}

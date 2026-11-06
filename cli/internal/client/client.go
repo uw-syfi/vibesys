@@ -34,6 +34,16 @@ type Rendezvous interface {
 	// AwaitExit returns once no daemon holds the machine. It does not poll. It can wait as long as
 	// a daemon lives, so a caller bounds it.
 	AwaitExit(ctx context.Context) error
+	// Place says where the daemon of this rendezvous is reached and what serves it.
+	Place() Place
+}
+
+// Place is where a daemon is, for a caller that hands it to another program.
+type Place struct {
+	// Socket is the daemon's Unix socket.
+	Socket string
+	// RuntimeDirectory is the runtime directory the daemon serves.
+	RuntimeDirectory string
 }
 
 // LocalRendezvous is the Rendezvous of the opened runtime directory.
@@ -65,6 +75,11 @@ func (l LocalRendezvous) AwaitExit(ctx context.Context) error {
 	return lock.Unlock()
 }
 
+// Place implements Rendezvous.
+func (l LocalRendezvous) Place() Place {
+	return Place{Socket: l.Dir.Socket(), RuntimeDirectory: l.Dir.Path()}
+}
+
 // Options is what a client needs to reach a daemon.
 type Options struct {
 	// Rendezvous is how to reach the daemon.
@@ -73,6 +88,9 @@ type Options struct {
 	Version string
 	// Starter starts a daemon when none runs. Nil means never start one.
 	Starter Starter
+	// SetUp makes the rendezvous ready for whoever Ensure speaks for, before it looks for a daemon.
+	// Nil means nothing to do.
+	SetUp func() error
 	// Timers makes the timeouts of a client. It defaults to the system's.
 	Timers clock.Timers
 	// Clock measures how much of a wait's timeout is left when it connects again. It defaults to

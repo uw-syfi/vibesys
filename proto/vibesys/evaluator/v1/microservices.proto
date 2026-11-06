@@ -8,10 +8,13 @@ syntax = "proto3";
 // ({"event": PhaseEvent}), and ends with its response. See sdk/vibesys-evaluator/docs/spec.md
 // ("A phase" and "Core command line").
 //
-//   phase pod    run one phase where the phase pod runs: loadgen and the generator (long; events)
-//   phase judge  whether a phase's output is a measurement: the saturation guard and validity
+//   phase pod     run one phase where the phase pod runs: loadgen and the generator (long; events)
+//   phase judge   whether a phase's output is a measurement: the saturation guard and validity
+//   accuracy run  a language SDK's accuracy check: deploy, phases under capture with faults
+//                 between them, the oracle on the history (long; events)
 package vibesys.evaluator.v1;
 
+import "vibesys/evaluator/v1/k8s.proto";
 import "vibesys/evaluator/v1/phase.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1";
@@ -101,4 +104,88 @@ message PhaseJudgeResponse {
   string failure = 2;
   // Progress lines for people (what the phase measured, how the generator kept up).
   repeated string log = 3;
+}
+
+// AccuracyFaultAction is what a fault of an accuracy run does to the deployed application.
+enum AccuracyFaultAction {
+  ACCURACY_FAULT_ACTION_UNSPECIFIED = 0;
+  // Delete one pod of the Deployment (the first by name) and wait until it serves again.
+  ACCURACY_FAULT_ACTION_RESTART = 1;
+  // Delete every pod of the Deployment at once and wait until it serves again.
+  ACCURACY_FAULT_ACTION_RESTART_ALL = 2;
+  // Run argv in the Deployment's first pod; a nonzero exit fails the run.
+  ACCURACY_FAULT_ACTION_EXEC = 3;
+  // Empty the cache Deployment in place, in every pod (memcached's flush_all, redis's FLUSHALL).
+  ACCURACY_FAULT_ACTION_FLUSH = 4;
+}
+
+// AccuracyFault is a fault an accuracy run applies between two phases, recorded in the history
+// as a FaultEvent.
+message AccuracyFault {
+  // The phase it follows, from 0; the last phase is followed by none.
+  uint32 after_phase = 1;
+  AccuracyFaultAction action = 2;
+  // The Deployment it acts on: one of the App's restartable ones or caches; FLUSH: one of its
+  // caches.
+  string deployment = 3;
+  // EXEC: the command.
+  repeated string argv = 4;
+  // The FaultEvent's kind; empty: restart, restart_all, exec or flush.
+  string kind = 5;
+}
+
+// AccuracyLocal is an application already running at target (no Kubernetes): the seed and the
+// phases run as child processes of the core.
+message AccuracyLocal {
+  string target = 1;
+  // The seed command; empty when the task has none.
+  repeated string seed = 2;
+}
+
+// AccuracyRunRequest is a language SDK's accuracy check (`accuracy run`): the core deploys and
+// seeds the application, runs `phases` open-loop phases of `load` with capture on, the faults
+// between them, writes the accuracy history into history_dir, tears the application down and runs
+// the oracle on the history. No phase is judged as a measurement: the oracle judges every
+// response. Progress is written as {"event": PhaseEvent} lines.
+message AccuracyRunRequest {
+  // 8 was validity, the rules a phase was judged by for the log; the phases are not judged.
+  reserved 8;
+  reserved "validity";
+
+  oneof system {
+    // On Kubernetes: the request of `k8s deploy` (app, task_dir, project_root, work_dir,
+    // artifacts_dir, probe_plan_file, seed).
+    K8sDeployRequest k8s = 1;
+    AccuracyLocal local = 2;
+  }
+  // The phase pod's command, before `--work DIR --target URL` (python bench.py phase --accuracy).
+  repeated string phase_command = 3;
+  // The sample's seed: every phase's streams derive from it.
+  uint64 sample_seed = 4;
+  uint32 phases = 5;
+  // Each phase's load: an open loop's rate, arrivals, secs and warmup_secs.
+  PhaseInput load = 6;
+  repeated AccuracyFault faults = 7;
+  // Where the history goes: a new or empty directory holding the dataset file (dataset.json),
+  // written by the caller. A path because the history is files on the caller's machine: the
+  // phases write them, the oracle program is given the directory (--history), and the caller
+  // keeps it as the run's artifact.
+  string history_dir = 9;
+  // The oracle (a program on go/check's Main), before `--history DIR --out DIR`; empty: the
+  // history is only recorded.
+  repeated string oracle = 10;
+  // Where the oracle writes its report (/vibesys/artifacts/accuracy when empty). A path because
+  // the report and the failures' timelines are files the oracle program writes (--out) for the
+  // job's artifacts.
+  string out_dir = 11;
+}
+
+// AccuracyRunResponse is the verdict, when an oracle ran.
+message AccuracyRunResponse {
+  // PASS, FAIL or UNKNOWN; empty when no oracle ran.
+  string verdict = 1;
+  // The accuracy command's exit status: 0 PASS, 1 FAIL, 2 UNKNOWN.
+  int32 exit_code = 2;
+  uint32 phases = 3;
+  uint32 faults = 4;
 }

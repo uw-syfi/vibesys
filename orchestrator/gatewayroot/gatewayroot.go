@@ -84,13 +84,16 @@ func StateDirectory(root, home string, getenv func(string) string) string {
 
 // CheckState says whether a host of root could keep its state where chosen says, or where its root
 // says when chosen is empty, as the host itself would find when it started: a local disk, a place a
-// directory can be made by this user, and a path short enough for the agent socket. It changes nothing.
+// directory can be made by this user, and, for a directory the operator chose, a path short enough for the sockets. It changes nothing.
 func CheckState(chosen, root, home string, getenv func(string) string) error {
 	state, err := localfs.StateDir(chosen, StateDirectory(root, home, getenv), localfs.SystemDetector{})
 	if err != nil {
 		return err
 	}
 	if _, err := state.AgentSocket(); err != nil {
+		return err
+	}
+	if err := state.CheckSessionSockets(); err != nil {
 		return err
 	}
 	existing := state.Path()

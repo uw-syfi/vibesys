@@ -52,17 +52,24 @@ type Process struct {
 	MachineDir string
 }
 
-// RuntimePath is where the user's runtime directory is: under XDG_RUNTIME_DIR when it is an
-// absolute path, and otherwise a private directory under /tmp.
-func (p Process) RuntimePath() string { return runtimedir.Resolve(p.Getenv, p.UID) }
-
-// RuntimeDir opens the user's runtime directory.
-func (p Process) RuntimeDir() (runtimedir.Dir, error) {
-	return runtimedir.Open(p.RuntimePath(), p.UID, runtimedir.System())
+// RuntimePath is the runtime directory of this process: the one it was told to use (JobToolPlace), and
+// otherwise the user's, which runtimedir resolves.
+func (p Process) RuntimePath() (string, error) {
+	chosen, err := p.chosenRuntime()
+	if err != nil || chosen != "" {
+		return chosen, err
+	}
+	return runtimedir.Resolve(p.Getenv, p.UID), nil
 }
 
-// IndexDir is where the task index is, which filestore decides from the environment and the home.
-func (p Process) IndexDir() string { return filestore.IndexDir(p.Getenv, p.Home) }
+// RuntimeDir opens the runtime directory of this process.
+func (p Process) RuntimeDir() (runtimedir.Dir, error) {
+	path, err := p.RuntimePath()
+	if err != nil {
+		return runtimedir.Dir{}, err
+	}
+	return runtimedir.Open(path, p.UID, runtimedir.System())
+}
 
 const daemonName = "vibesysd"
 
@@ -85,6 +92,10 @@ func (p Process) ClientOptions() (client.Options, error) {
 			cmd.Args[0] = daemonName
 			return cmd
 		}},
+		SetUp: func() error {
+			_, err := p.recordPlaces(dir)
+			return err
+		},
 	}, nil
 }
 
@@ -95,7 +106,12 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	if err != nil {
 		return err
 	}
-	index, err := filestore.OpenIndex(p.IndexDir())
+	places, err := p.daemonPlaces(dir)
+	if err != nil {
+		return err
+	}
+	indexDir := filestore.IndexDirIn(places.GetStateHome())
+	index, err := filestore.OpenIndex(indexDir)
 	if err != nil {
 		return fmt.Errorf("opening the task index: %w", err)
 	}
@@ -129,6 +145,9 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "%s %s: %s\n", clk.Now().UTC().Format("2006-01-02T15:04:05Z"), daemonName, fmt.Sprintf(format, args...))
 	}
+	if here := filestore.StateHome(p.Getenv, p.Home); here != places.GetStateHome() {
+		logf("this daemon keeps its state in %s, as %s records; this environment alone would say %s", places.GetStateHome(), dir.Path(), here)
+	}
 	return daemon.Run(ctx, daemon.Config{
 		Dir:     dir,
 		Version: p.Version,
@@ -143,7 +162,7 @@ func (p Process) RunDaemon(ctx context.Context, ready io.WriteCloser) error {
 			Stores: filestores.New(index, app.Rules(task.DefaultSamples), owner),
 			Supervisors: host.New(host.Config{
 				Root:    dir.Supervisors(),
-				Records: host.RecordsDir(p.IndexDir(), machine, dir.Path()),
+				Records: host.RecordsDir(indexDir, machine, dir.Path()),
 				BootID:  runtimedir.BootID,
 				Command: func(runDir string) *exec.Cmd {
 					return exec.Command(p.Executable, "supervisor", "serve", "--run-dir", runDir)

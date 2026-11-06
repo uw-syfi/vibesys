@@ -116,7 +116,10 @@ message CallContext {
 message HelloRequest {
   // The daemon serves the command line tool and the orchestrator.
   Component component = 1 [(buf.validate.field).enum = {
-    in: [1, 4]
+    in: [
+      1,
+      4
+    ]
   }];
   BuildVersions versions = 2;
 }
@@ -128,6 +131,18 @@ message HelloResponse {
 }
 
 message StatusRequest {}
+
+// DaemonEnsureResponse is what `vibesys-cli daemon ensure --json` prints when a daemon answers: how to
+// reach it, for a program that starts the daemon and then talks to it, and where it is, for the
+// processes that program hands the tool to (JobToolPlace).
+message DaemonEnsureResponse {
+  // The daemon's Unix socket.
+  string socket = 1 [(buf.validate.field).string.pattern = "^/"];
+  // The build of the daemon that answers.
+  BuildVersions versions = 2;
+  // The runtime directory the daemon serves.
+  string runtime_directory = 3 [(buf.validate.field).string.pattern = "^/"];
+}
 
 message StatusResponse {
   BuildVersions versions = 1;
@@ -264,7 +279,9 @@ message WaitRequest {
   CallContext context = 1;
   repeated string job_ids = 2 [(buf.validate.field).repeated = {
     min_items: 1
-    items: {string: {min_len: 1}}
+    items: {
+      string: {min_len: 1}
+    }
   }];
   // The wait is over when one job is final, and not when all are.
   bool any = 3;
@@ -515,6 +532,8 @@ message CreatePlanRequest {
   CallContext context = 1;
   string title = 2 [(buf.validate.field).string.min_len = 1];
   string body = 3;
+  // The bound on the plan's possible gain, when the planner states one.
+  PlanGainBound gain_bound = 4;
 }
 
 message CreatePlanResponse {
@@ -547,8 +566,8 @@ message ViewPlanResponse {
 message EditPlanRequest {
   option (buf.validate.message).cel = {
     id: "edit_plan.sets_something"
-    message: "set at least one of title, body, status or priority"
-    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.priority)"
+    message: "set at least one of title, body, status, gain_bound or priority"
+    expression: "has(this.title) || has(this.body) || has(this.status) || has(this.gain_bound) || has(this.priority)"
   };
   CallContext context = 1;
   uint32 number = 2 [(buf.validate.field).uint32.gt = 0];
@@ -559,11 +578,13 @@ message EditPlanRequest {
     defined_only: true
     not_in: [0]
   }];
+  // Replaces the plan's bound. A plan's bound is replaced and never cleared.
+  PlanGainBound gain_bound = 6;
   // A new priority for the plan's queued jobs that set none of their own. Protocol 6.
-  optional Priority priority = 6 [(buf.validate.field).enum.defined_only = true];
+  optional Priority priority = 7 [(buf.validate.field).enum.defined_only = true];
   // Why the priority changes: required with priority, and refused without it. The change and the
   // reason are kept as a comment on the plan.
-  string reason = 7;
+  string reason = 8;
 }
 
 message EditPlanResponse {

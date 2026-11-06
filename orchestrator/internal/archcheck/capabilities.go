@@ -26,23 +26,25 @@ type allowance struct {
 // boundaries holds the baseline, keyed by the file's path under orchestrator/.
 var boundaries = map[string]allowance{
 	"cmd/release-manifest/main.go":               {reason: "the build-time tool takes its output path from the command line and writes the release manifest; process-boundaries.md, release manifest", args: 1, writes: 1},
+	"privatesocket/placement.go":                 {reason: "makes and checks the private directory that holds a socket too long for its own place; process-boundaries.md, host control", reads: 1, writes: 1},
 	"privatesocket/privatesocket.go":             {reason: "binds a private socket in a directory of its own and renames it into place; process-boundaries.md, host control", writes: 6},
 	"release/releasetest/releasetest.go":         {reason: "test support that writes release fixtures; process-boundaries.md, release manifest", writes: 2},
 	"clientcli/start.go":                         {reason: "run get --json prints the protojson of a run snapshot", json: 1},
 	"gatewayroot/gatewayroot.go":                 {reason: "says before a host starts whether its state directory can be made, as the host itself would find; process-boundaries.md, host control", reads: 1},
 	"hostconfig/hostconfig.go":                   {reason: "the host's configuration file in its root, a HostConfig message, and whether what it names is there; process-boundaries.md, host control", reads: 3, writes: 5},
 	"hostlock/hostlock.go":                       {reason: "the state directory's lock and the HostLock record its holder writes, read to name the holder, and only while the lock is held; process-boundaries.md, host control", reads: 2},
-	"hosted/command.go":                          {reason: "the tool server reads its identity from the environment; process-boundaries.md, environment codec", env: 1},
+	"hosted/command.go":                          {reason: "the tool server reads its credentials from the environment, through the environment codec (cli/envcodec); process-boundaries.md, environment codec", env: 1},
 	"internal/clidaemon/clidaemontest/corpus.go": {reason: "the conformance corpus is JSON beside the CLI's own", json: 2},
-	"internal/mcp/mcp.go":                        {reason: "external:MCP framing is JSON-RPC; tool schemas move to descriptors, see process-boundaries.md, tool schemas", json: 17},
-	"internal/mcp/tools.go":                      {reason: "hand tool schemas beside the protos; process-boundaries.md, tool schemas", json: 7},
+	"internal/mcp/args.go":                       {reason: "external:the arguments of a tool call are JSON, read against the input message's descriptor; process-boundaries.md, tool schemas", json: 3},
+	"internal/mcp/mcp.go":                        {reason: "external:MCP framing is JSON-RPC; process-boundaries.md, tool schemas", json: 14},
+	"internal/mcp/tools.go":                      {reason: "external:a tool call's arguments arrive as raw JSON; process-boundaries.md, tool schemas", json: 2},
 	"internal/production/agentcli.go":            {reason: "checks that the chosen vibesys-cli is an executable file", reads: 1},
+	"internal/production/checkouts.go":           {reason: "removes the clean worktrees agents made when their run is over, keeps the others, and holds the commits they made under a ref of the run; process-boundaries.md, session lock", reads: 2, exec: 6},
 	"internal/production/cli_ensure.go":          {reason: "the callee owns shared daemon startup through daemon ensure; process-boundaries.md, job tool endpoint", env: 1, exec: 1},
-	"internal/production/cli_transport.go":       {reason: "the callee-owned discovery contract requires inspecting socket directory metadata", reads: 1},
 	"internal/production/holder.go":              {reason: "the orchestrator's own holder record; process-boundaries.md, host control", reads: 1, writes: 2},
-	"internal/production/holders.go":             {reason: "the holder's log, the agents' directory listing, a group leader's start time from ps and git worktree creation; process-boundaries.md, process identity", reads: 3, writes: 2, exec: 3},
+	"internal/production/holders.go":             {reason: "the holder's log, a group leader's start time from ps and git worktree creation; process-boundaries.md, process identity", reads: 2, writes: 2, exec: 3},
 	"internal/production/production.go":          {reason: "the orchestrator's own boot identity and state directory", reads: 1, writes: 6},
-	"internal/production/sidecars.go":            {reason: "where the holder is installed, and its directory; process-boundaries.md, host control", reads: 2, writes: 1},
+	"internal/production/sidecars.go":            {reason: "where the holder is installed, its directory, and the listing of an agent's session directories; process-boundaries.md, host control", reads: 3, writes: 1},
 	"internal/production/sessionprocesses.go":    {reason: "the lock a session's process holds and the SessionProcesses record it keeps beside it, which the host reads only to end what a gone process left; process-boundaries.md, process identity", reads: 2, writes: 2},
 	"internal/production/startchecks.go":         {reason: "checks a start's repository and task directory exist, and reads the repository with git", reads: 1, exec: 1},
 	"internal/store/lock_unix.go":                {reason: "the store's own advisory lock", reads: 1, writes: 1},
@@ -52,6 +54,7 @@ var boundaries = map[string]allowance{
 
 // execFiles may import os/exec; their start counts are in boundaries.
 var execFiles = map[string]string{
+	"internal/production/checkouts.go":   "removing the git worktrees agents made, as holders.go made them, and keeping their commits under a ref",
 	"internal/production/cli_ensure.go":  "the callee owns shared daemon startup through daemon ensure",
 	"internal/production/holders.go":     "the lifetime of a session's process, ps for a group leader's start time, and git worktree creation",
 	"internal/production/startchecks.go": "start checks read the repository's history with git",
@@ -86,8 +89,8 @@ func capabilities(name, source string) []string {
 			alias = imp.Name.Name
 		}
 		aliases[alias] = target
-		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") {
-			report("cli-contract-importers", "CLI contract belongs to clidaemon, search and the client verbs that show a search view")
+		if target == "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1" && !strings.HasPrefix(rel, "internal/clidaemon/") && !strings.HasPrefix(rel, "internal/search/") && !strings.HasPrefix(rel, "clientcli/") && rel != "internal/production/agentenv.go" && rel != "internal/production/cli_ensure.go" {
+			report("cli-contract-importers", "CLI contract belongs to clidaemon, search, the client verbs that show a search view, the agent environment and the job tool's answer, whose messages are the CLI's")
 		}
 		if target == "os/exec" && execFiles[rel] == "" {
 			report("exec-confined", "process execution belongs to listed production files")

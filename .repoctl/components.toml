@@ -346,7 +346,7 @@ id = "proto"
 class = "manual"
 job = "proto"
 roots = ["proto", "scripts/corevalue", "scripts/host_operations", "libs/vs-core/src/vs_core/_generated", "libs/vs-runtime/src/vs_runtime/_core_values", "libs/vs-proto", "clients/libs/proto", "clients/libs/orchestrator-proto/src/generated", "gateway/gen", "gateway/schemahash", "gateway/cmd/schema-hashes", "cli/gen", "orchestrator/gen", "sdk/vibesys-evaluator/go/gen", "sdk/vibesys-evaluator/python/src/vibesys_evaluator/_proto", "sdk/vs-evaluator/vseval/internal/gen"]
-files = ["buf.yaml", "buf.gen.yaml", "buf.gen.core.yaml", "buf.gen.cli.yaml", "buf.gen.orchestrator.yaml", "buf.gen.orchestrator-ts.yaml", "buf.gen.evaluator.yaml", "buf.gen.vseval.yaml", "scripts/check_proto_layers.py", "scripts/protoc_gen_corevalue.py", "scripts/generate_proto.sh", "scripts/check_schema_hashes.sh", "scripts/generate_proto_framing.py", "scripts/check_proto.sh", "scripts/check_proto_breaking.sh", "scripts/tests/test_proto_breaking.sh", "gateway/go.mod", "gateway/go.sum", "cli/go.mod", "cli/go.sum", "orchestrator/go.mod", "orchestrator/go.sum", "sdk/vibesys-evaluator/go/go.mod", "sdk/vibesys-evaluator/go/go.sum", "sdk/vs-evaluator/vseval/go.mod", "sdk/vs-evaluator/vseval/go.sum", "clients/package.json", "clients/pnpm-lock.yaml", "pyproject.toml", "uv.lock"]
+files = ["buf.yaml", "buf.gen.yaml", "buf.gen.core.yaml", "buf.gen.cli.yaml", "buf.gen.orchestrator.yaml", "buf.gen.orchestrator-ts.yaml", "buf.gen.evaluator.yaml", "buf.gen.evaluator-env.yaml", "buf.gen.evaluator-env-go.yaml", "buf.gen.vseval.yaml", "scripts/check_proto_layers.py", "scripts/protoc_gen_corevalue.py", "scripts/generate_proto.sh", "scripts/check_schema_hashes.sh", "scripts/generate_proto_framing.py", "scripts/check_proto.sh", "scripts/check_proto_breaking.sh", "scripts/tests/test_proto_breaking.sh", "gateway/go.mod", "gateway/go.sum", "cli/go.mod", "cli/go.sum", "orchestrator/go.mod", "orchestrator/go.sum", "sdk/vibesys-evaluator/go/go.mod", "sdk/vibesys-evaluator/go/go.sum", "sdk/vs-evaluator/vseval/go.mod", "sdk/vs-evaluator/vseval/go.sum", "clients/package.json", "clients/pnpm-lock.yaml", "pyproject.toml", "uv.lock"]
 
 [[components]]
 id = "gateway"
@@ -399,4 +399,4 @@ job = "managed_install"
 # workflow that publishes bundles, what a bundle carries (the sidecar, the skills and the plugin
 # manifest), or the code of the binaries it holds (gateway, cli and orchestrator) changes.
 roots = ["gateway", "cli", "orchestrator", "skills"]
-files = ["install.sh", "scripts/build_release_bundle.sh", "scripts/tests/test_install.sh", "scripts/tests/test_install_in_container.sh", ".github/workflows/managed-release.yml", ".claude-plugin/marketplace.json"]
+files = ["install.sh", "scripts/build_release_bundle.sh", "scripts/tests/test_install.sh", "scripts/tests/test_install_in_container.sh", "scripts/tests/test_install_macos.sh", ".github/workflows/managed-release.yml", ".claude-plugin/marketplace.json"]

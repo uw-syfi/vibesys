@@ -161,8 +161,16 @@ jobs:
           wheel="$root/$(basename "$WHEEL")"
           uv_bin="$(command -v uv)"
           python_path="$(uv python find 3.12)"
-          # No Go toolchain on this PATH: the wheel alone must carry everything.
-          clean_path="/usr/bin:/bin"
+          # No Go toolchain on this PATH: the wheel alone must carry everything. The runner image
+          # has go in /usr/bin, so the clean PATH is one directory linking every system command
+          # but the Go toolchain's.
+          clean_path="$root/clean-bin"
+          mkdir -p "$clean_path"
+          for cmd in /usr/bin/* /bin/*; do
+            name="$(basename "$cmd")"
+            case "$name" in go | gofmt | go[0-9]*) continue ;; esac
+            [[ -e "$clean_path/$name" ]] || ln -s "$cmd" "$clean_path/$name"
+          done
           if PATH="$clean_path" command -v go > /dev/null; then
             echo "::error::a Go toolchain is on the clean PATH ($clean_path); the smoke test needs none"
             exit 1
@@ -404,18 +412,22 @@ jobs:
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
+          # The project's simple index (PEP 691 JSON), not the version's JSON API: PyPI purges the
+          # index on upload, while its CDN may keep serving a 404 it cached for the version's JSON
+          # (fetched here before the upload) for minutes after it.
           status="$(curl -sS -o "$RUNNER_TEMP/pypi.json" -w '%{http_code}' \
-            "https://pypi.org/pypi/vibesys-evaluator/$VERSION/json")"
+            -H 'Accept: application/vnd.pypi.simple.v1+json' \
+            "https://pypi.org/simple/vibesys-evaluator/")"
           case "$status" in
             200) ;;
-            404) echo '{"urls": []}' > "$RUNNER_TEMP/pypi.json" ;;
-            *) echo "::error::PyPI answered $status for vibesys-evaluator $VERSION"; exit 1 ;;
+            404) echo '{"files": []}' > "$RUNNER_TEMP/pypi.json" ;;
+            *) echo "::error::PyPI answered $status for vibesys-evaluator's index"; exit 1 ;;
           esac
           remaining=0
           for file in dist/evaluator/*; do
             name="$(basename "$file")"
             ours="$(sha256sum "$file" | cut -d' ' -f1)"
-            held="$(jq -r --arg name "$name" '.urls[] | select(.filename == $name) | .digests.sha256' "$RUNNER_TEMP/pypi.json")"
+            held="$(jq -r --arg name "$name" '.files[] | select(.filename == $name) | .hashes.sha256' "$RUNNER_TEMP/pypi.json")"
             if [[ -z "$held" ]]; then
               remaining=$((remaining + 1))
             elif [[ "$held" == "$ours" ]]; then
@@ -441,8 +453,17 @@ jobs:
         env:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
-          curl -fsS "https://pypi.org/pypi/vibesys-evaluator/$VERSION/json" \
-            | jq -r '.urls[].filename' | sort > "$RUNNER_TEMP/files.txt"
+          # The release's five files, from the project's simple index (PEP 691 JSON; see the step
+          # that keeps only the files PyPI does not hold yet), waiting for it to list them.
+          for attempt in 1 2 3 4 5 6; do
+            curl -fsS -H 'Accept: application/vnd.pypi.simple.v1+json' \
+              "https://pypi.org/simple/vibesys-evaluator/" \
+              | jq -r --arg v "$VERSION" '.files[].filename
+                  | select(startswith("vibesys_evaluator-\($v)-") or . == "vibesys_evaluator-\($v).tar.gz")' \
+              | sort > "$RUNNER_TEMP/files.txt"
+            [[ "$(wc -l < "$RUNNER_TEMP/files.txt" | tr -d ' ')" -eq 5 ]] && break
+            sleep 20
+          done
           test "$(wc -l < "$RUNNER_TEMP/files.txt" | tr -d ' ')" -eq 5
           while read -r name; do
             for attempt in 1 2 3 4 5 6; do
@@ -586,6 +607,6 @@ jobs:
             fi
           done
           if ! grep -qF "Go module: \`$GO_TAG\`" "$RUNNER_TEMP/notes.md"; then
-            printf '\n\nGo module: \`%s\`.\n' "$GO_TAG" >> "$RUNNER_TEMP/notes.md"
+            printf '\n\nGo module: `%s`.\n' "$GO_TAG" >> "$RUNNER_TEMP/notes.md"
           fi
           gh release edit "$TAG" --verify-tag --latest=false --notes-file "$RUNNER_TEMP/notes.md"

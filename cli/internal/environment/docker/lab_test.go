@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/environment/docker"
@@ -75,8 +77,8 @@ func TestALabHoldsTheTwoContainersOfARunOfTwoImages(t *testing.T) {
 		if cand.Spec.Image != x.Candidate.Image || cand.Spec.GPUs.Devices != "device=0" || beside.Spec.GPUs != (docker.GPUs{}) {
 			t.Errorf("the candidate's container %+v or the task's %+v has the wrong image or GPUs", cand.Spec, beside.Spec)
 		}
-		if beside.Spec.Network != docker.NetworkOf(cand.Name) || !strings.HasSuffix(beside.Spec.Env[core.EnvServiceURL], ":"+strconv.Itoa(b.Port)) {
-			t.Errorf("the task's container is in %q at %q, want the candidate's network at port %d", beside.Spec.Network, beside.Spec.Env[core.EnvServiceURL], b.Port)
+		if beside.Spec.Network != docker.NetworkOf(cand.Name) || !strings.HasSuffix(beside.Spec.Env[envcodec.NameOf(&cliv1.JobEnvironment{}, "service_url")], ":"+strconv.Itoa(b.Port)) {
+			t.Errorf("the task's container is in %q at %q, want the candidate's network at port %d", beside.Spec.Network, beside.Spec.Env[envcodec.NameOf(&cliv1.JobEnvironment{}, "service_url")], b.Port)
 		}
 		for _, box := range boxes {
 			if !slices.Contains(box.Spec.Mounts, docker.Mount{Host: "/far/art/01-lab", Container: docker.ArtifactsDir}) {

@@ -37,8 +37,9 @@ func (p Process) machineDir() (runtimedir.Machine, error) {
 }
 
 // sandbox says whether this process is of a sandbox daemon, as EnvSandbox says. A sandbox daemon
-// needs a runtime directory of its own: XDG_RUNTIME_DIR set, and not the runtime directory of the
-// daemon that holds the machine, whose socket its commands would otherwise reach.
+// needs a runtime directory of its own: one it was told to use or XDG_RUNTIME_DIR set, and not the
+// runtime directory of the daemon that holds the machine, whose socket its commands would otherwise
+// reach.
 func (p Process) sandbox() (bool, error) {
 	switch v := p.Getenv(EnvSandbox); v {
 	case "":
@@ -47,7 +48,15 @@ func (p Process) sandbox() (bool, error) {
 	default:
 		return false, invalid("%s: %q is not 1; set it to 1 for a sandbox daemon, or leave it unset", EnvSandbox, v)
 	}
-	if rt := p.Getenv("XDG_RUNTIME_DIR"); rt == "" || !filepath.IsAbs(rt) {
+	own, err := p.RuntimePath()
+	if err != nil {
+		return false, err
+	}
+	chosen, err := p.chosenRuntime()
+	if err != nil {
+		return false, err
+	}
+	if rt := p.Getenv("XDG_RUNTIME_DIR"); chosen == "" && (rt == "" || !filepath.IsAbs(rt)) {
 		return false, invalid("%s=1 is a sandbox daemon, which needs a runtime directory of its own: set XDG_RUNTIME_DIR to an absolute directory", EnvSandbox)
 	}
 	m, err := p.machineDir()
@@ -58,9 +67,9 @@ func (p Process) sandbox() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if holder.GetRuntimeDir() == p.RuntimePath() {
+	if holder.GetRuntimeDir() == own {
 		return false, invalid("%s=1 is a sandbox daemon, and its runtime directory %s is that of the daemon that holds this machine (pid %d); "+
-			"set XDG_RUNTIME_DIR to a directory of its own", EnvSandbox, p.RuntimePath(), holder.GetPid())
+			"set XDG_RUNTIME_DIR to a directory of its own", EnvSandbox, own, holder.GetPid())
 	}
 	return true, nil
 }

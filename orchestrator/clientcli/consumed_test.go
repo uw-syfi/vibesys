@@ -32,7 +32,7 @@ func (l *live) awaitConsumed(t testing.TB, text string) {
 				return
 			}
 		}
-		if taken(event.GetMessageUpdated()) {
+		if taken(event.GetMessage()) {
 			return
 		}
 	}

@@ -8,19 +8,19 @@ import {
   AgentStatus,
   AgentStopStage,
   decodeValidated,
-  EventSchema,
   encodeMessage,
   Harness,
+  RunChangeSchema,
 } from './index.js';
 
 describe('the orchestrator bindings', () => {
   test('an event survives the wire', () => {
-    const event = create(EventSchema, {
+    const event = create(RunChangeSchema, {
       sequence: 7n,
       runId: 'run-1',
       at: timestampFromMs(1_000),
       body: {
-        case: 'runUpdated',
+        case: 'run',
         value: create(RunSchema, {
           id: 'run-1',
           repository: 'repo',
@@ -31,8 +31,8 @@ describe('the orchestrator bindings', () => {
         }),
       },
     });
-    const decoded = decodeValidated(EventSchema, encodeMessage(EventSchema, event));
-    expect(decoded.body.case).toBe('runUpdated');
+    const decoded = decodeValidated(RunChangeSchema, encodeMessage(RunChangeSchema, event));
+    expect(decoded.body.case).toBe('run');
     expect(decoded.sequence).toBe(7n);
   });
 

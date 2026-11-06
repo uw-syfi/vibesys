@@ -8,6 +8,14 @@ removed use cannot make room for a new one:
     is a contract between two processes, so each use is listed in
     ``scripts/boundaries_env_allowlist.json`` until a message carries it.
 
+``env-read``
+    A read of a ``VIBESYS_*`` variable by name (``os.Getenv``, ``os.environ`` and the like) anywhere
+    but the environment codec (``cli/envcodec``). A variable VibeSys hands a process is a field of a
+    message (``env_name`` in ``proto/vibesys/cli/v1/env.proto``) and is read by the codec, so a
+    hand read is either out of scope for now or a bug. Each read left is listed in
+    ``scripts/boundaries_env_reads_allowlist.json`` with its exact count and a reason, and the list
+    only shrinks.
+
 ``unvalidated`` (C5)
     Messages of ``cli.v1`` that carry no protovalidate rule, and are not empty. A message with
     fields that nothing constrains is a message whose receiver trusts its peer. Each is listed in
@@ -36,6 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
 ENV_ALLOWLIST = "scripts/boundaries_env_allowlist.json"
+ENV_READS_ALLOWLIST = "scripts/boundaries_env_reads_allowlist.json"
 PROTO_ALLOWLIST = "scripts/boundaries_proto_allowlist.json"
 UNVALIDATED_ALLOWLIST = "scripts/boundaries_unvalidated_allowlist.json"
 DOC = "docs/contributing/process-boundaries.md"
@@ -63,6 +72,18 @@ ENV_NAME = re.compile(
     r"""["'`]((?:VIBESYS|XDG)_[A-Z0-9_]*[A-Z0-9])(?=[=\s"'`])"""
     r"""|\b(?:process\.env|env)\.((?:VIBESYS|XDG)_[A-Z0-9_]*[A-Z0-9])\b"""
 )
+
+_VIBESYS_NAME = r"VIBESYS_[A-Z0-9_]*[A-Z0-9]"
+ENV_READ = re.compile(
+    r"""(?:\bos\.(?:Getenv|LookupEnv)|\b[gG]etenv|\b[lL]ookupEnv|\bos\.getenv|\bos\.environ\.get"""
+    r"""|\benviron\.get)\(\s*["'`](""" + _VIBESYS_NAME + r""")["'`]"""
+    r"""|\bos\.environ\[\s*["'](""" + _VIBESYS_NAME + r""")["']\s*\]"""
+    r"""|\bprocess\.env(?:\.(""" + _VIBESYS_NAME + r""")\b|\[\s*["'](""" + _VIBESYS_NAME + r""")["']\s*\])"""
+)
+"""A read of a variable by its literal name, in Go, Python and TypeScript."""
+
+CODEC_ROOTS = ("cli/envcodec/",)
+"""The environment codec: the one place that reads a variable because a message field names it."""
 
 MECHANISM_WORDS = frozenset(
     {
@@ -95,6 +116,54 @@ def env_uses(sources: Mapping[str, str]) -> dict[str, dict[str, int]]:
         if names:
             found[path] = dict(sorted(names.items()))
     return found
+
+
+def env_reads(sources: Mapping[str, str]) -> dict[str, dict[str, int]]:
+    """Count each ``VIBESYS_*`` variable read by its literal name in each file but the codec's."""
+    found: dict[str, dict[str, int]] = {}
+    for path, text in sorted(sources.items()):
+        if not is_product_code(path) or path.startswith(CODEC_ROOTS):
+            continue
+        names = Counter(next(name for name in groups if name) for groups in ENV_READ.findall(text))
+        if names:
+            found[path] = dict(sorted(names.items()))
+    return found
+
+
+def env_read_violations(
+    sources: Mapping[str, str], allowed: Mapping[str, Mapping[str, Mapping[str, object]]]
+) -> list[str]:
+    """Diagnostics for every read the allowlist does not hold exactly, or holds without a reason.
+
+    An entry is ``{"count": n, "reason": "..."}``. The count is exact so a removed read cannot make
+    room for a new one, and the reason says why that read is not a message field yet.
+    """
+    found = env_reads(sources)
+    problems: list[str] = []
+    for path in sorted(set(found) | set(allowed)):
+        have, want = found.get(path, {}), allowed.get(path, {})
+        for name in sorted(set(have) | set(want)):
+            count = have.get(name, 0)
+            entry = want.get(name, {})
+            listed = entry.get("count", 0)
+            if count > listed:
+                problems.append(
+                    f"{path}: env-read: {name} read {count} times by name, allowlist {listed}; "
+                    f"a variable is a field of a message (env_name in proto/vibesys/cli/v1/env.proto) "
+                    f"and read through cli/envcodec ({DOC}); or list it in {ENV_READS_ALLOWLIST} "
+                    "with a reason it is out of scope"
+                )
+            elif count < listed:
+                problems.append(
+                    f"{path}: env-read: {name} read {count} times by name, allowlist {listed}; "
+                    f"a read was removed; shrink the entry in {ENV_READS_ALLOWLIST}"
+                )
+            elif count and not str(entry.get("reason", "")).strip():
+                problems.append(
+                    f"{path}: env-read: {name} is listed in {ENV_READS_ALLOWLIST} without a reason; "
+                    "say why this read is not a message field yet"
+                )
+    return problems
 
 
 def env_violations(
@@ -319,16 +388,36 @@ def _sources(root: Path) -> tuple[dict[str, str], dict[str, str]]:
 
 
 def violations(root: Path) -> list[str]:
-    """Every violation of both ratchets in the tree under ``root``."""
+    """Every violation of the ratchets in the tree under ``root``."""
     env_allowed = json.loads((root / ENV_ALLOWLIST).read_text(encoding="utf-8"))
+    reads_allowed = json.loads((root / ENV_READS_ALLOWLIST).read_text(encoding="utf-8"))
     proto_allowed = json.loads((root / PROTO_ALLOWLIST).read_text(encoding="utf-8"))
     unvalidated_allowed = json.loads((root / UNVALIDATED_ALLOWLIST).read_text(encoding="utf-8"))
     sources, protos = _sources(root)
     return (
         env_violations(sources, env_allowed)
+        + env_read_violations(sources, reads_allowed)
         + mechanism_violations(protos, proto_allowed)
         + unvalidated_violations(protos, unvalidated_allowed)
     )
+
+
+def _write_reads(root: Path, sources: Mapping[str, str]) -> None:
+    """Rewrite the read allowlist to today's counts, keeping the reasons already written.
+
+    A read with no reason yet is written with an empty one, which the check refuses until a person
+    says why the read is out of scope.
+    """
+    path = root / ENV_READS_ALLOWLIST
+    old = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    new = {
+        file: {
+            name: {"count": count, "reason": old.get(file, {}).get(name, {}).get("reason", "")}
+            for name, count in names.items()
+        }
+        for file, names in env_reads(sources).items()
+    }
+    path.write_text(json.dumps(new, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main(argv: list[str]) -> int:
@@ -339,6 +428,7 @@ def main(argv: list[str]) -> int:
         (root / ENV_ALLOWLIST).write_text(
             json.dumps(env_uses(sources), indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
+        _write_reads(root, sources)
         (root / PROTO_ALLOWLIST).write_text(
             json.dumps(mechanism_hits(protos), indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )

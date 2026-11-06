@@ -1,0 +1,22 @@
+{
+  "at": "2026-01-01T00:00:00Z",
+  "delivery": "DELIVERY_NEW_TURN",
+  "fromAgentId": "agent-x1",
+  "handoff": {
+    "claim": "Two parts applied.",
+    "combiner": {
+      "applied": "plans 2 and 3",
+      "branch": "combined",
+      "checks": "unit tests passed",
+      "commit": "cccccccccccccccccccccccccccccccccccccccc",
+      "measurement": "job 41: better",
+      "unapplied": "plan 5, which conflicts in kernel.cu"
+    },
+    "learned": "They do not overlap.",
+    "next": "Judge it.",
+    "planNumber": 4
+  },
+  "id": "m1",
+  "runId": "r1",
+  "toAgentId": "agent-a"
+}
