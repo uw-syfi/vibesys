@@ -37,9 +37,10 @@ from vibesys_evaluator._private.files import (
     SchemaFileError,
     check_refs,
 )
-from vibesys_evaluator._private.hdr import Histogram, encode
 from vibesys_evaluator._private.loadgen import LoadgenExit
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
+
+from .hdr_encode import Histogram, encode
 
 #: Runs a generator command (its argv) writing its stream to the given output; how it ended.
 GeneratorRun = Callable[[Sequence[str], IO[bytes]], LoadgenExit]

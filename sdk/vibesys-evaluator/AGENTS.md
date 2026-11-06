@@ -4,8 +4,11 @@ The repository's root [`AGENTS.md`](../../AGENTS.md) applies here too. This
 package is what task writers build benchmark evaluators on: the Python
 package `vibesys_evaluator` (a domain-free core and the domains
 `microservices` and `llm_serving`), the Go SDK `go/workload` (request
-generators in Go, for the microservices domain), loadgen (the Go binary in
-`loadgen/` that sends the microservices requests), the schema in
+generators in Go, for the microservices domain), the Go core `go/evaluator`
+(sample lifecycle, records, histograms; `evaluator.Main` is the Go `main`) with
+its command line `vibesys-evaluator <group> <verb>` that the Python package
+wraps, loadgen (the Go binary in `go/cmd/loadgen` that sends the microservices
+requests), the schema in
 `proto/vibesys/evaluator/v1/`, and one image per domain,
 `vibesys-evaluator-microservices` and `vibesys-evaluator-llm-serving`. The
 design is [`docs/spec.md`](docs/spec.md).

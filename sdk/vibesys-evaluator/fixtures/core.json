@@ -1,0 +1,4495 @@
+{
+ "about": "Cross-language fixtures of the vibesys-evaluator core, written from the Python implementation the Go core replaced (vibesys-evaluator 0.2.0rc1): HDR histogram summaries and merges, result-protocol-2 record streams byte for byte, Metric and Validity rules, sample seeds. Read by go/evaluator and by the Python tests, which run the core through the wrapper. Non-finite numbers are the strings NaN, Infinity and -Infinity.",
+ "percentiles": [
+  0,
+  0.1,
+  1,
+  25,
+  50,
+  75,
+  90,
+  99,
+  99.9,
+  99.99,
+  100,
+  -5,
+  120
+ ],
+ "histograms": [
+  {
+   "name": "1-3600000000-3/empty",
+   "encoded": "HISTFAAAABx4nJNpmSzMgADMUJoRRFybvITB/gNEAABQ2gSH",
+   "count": 0,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-3600000000-3/single",
+   "encoded": "HISTFAAAACJ4nJNpmSzMwMDAzAABMJoRRFybvITB/gNEYLEwEwBg7AVC",
+   "count": 1,
+   "max": 1234,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    0,
+    1234
+   ]
+  },
+  {
+   "name": "1-3600000000-3/zeros",
+   "encoded": "HISTFAAAACB4nJNpmSzMwMDAyAABzFAazL82eQmD/QeIABsAVYkEjg==",
+   "count": 3,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-3600000000-3/ones",
+   "encoded": "HISTFAAAACF4nJNpmSzMwMDAxAABzFCaEURcm7yEwf4DVCAFAFqUBO4=",
+   "count": 50,
+   "max": 1,
+   "percentiles": [
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "name": "1-3600000000-3/beyond-range",
+   "encoded": "HISTFAAAACh4nJNpmSzMwMDAwQABzFCaEURcm7yEwf4DRICTiZHp+ismJgB84AZi",
+   "count": 3,
+   "max": 3600809983,
+   "percentiles": [
+    0,
+    0,
+    0,
+    5,
+    7,
+    7,
+    3600809983,
+    3600809983,
+    3600809983,
+    3600809983,
+    3600809983,
+    0,
+    3600809983
+   ]
+  },
+  {
+   "name": "1-3600000000-3/uniform",
+   "encoded": "HISTFAAAAgd4nD2SP2sVQRTF35y5k8eyLMuyyCLPRwghvELCq4KEEEIQCWKRQsTCQiytLCxELCy0EwtJ4QdQSCF+DCsROy38BHZaio2/eyf4hp0/Z+45594778rLs3E2yw9n9Zcv1uTTt7P3s6NfFfgs/Zae613SV+mRjvVCep31TF+kt6ZBB/ornehP0nlSr0m7+iT9kD5It3Wtcj8mPdUb6VXSPtybSlrpVJfUaakn2tS22H5P6N0FTVrrvhZqI3JPRyq6jsnPpB3dwiMRdBmw4Diq0SHYwJeR7xktpwH8HrcL8AKyB2vSDT1m3ZUrrRHeFCEnIoFBW3pA9Kk1QK61Buv49nE7jN0CHsYrQhskR4R3CPRRNAeZMxpDQZNdjQq2HTV4GWJidFBQmNhkhCfS9csOG2hzMRfzVsrbi18xIK5C2kPvYNaZU6VsVDCEb1SMG1PyyTPswVd8nl2Ph2fTcTO4xP+sU1SwFSsQ6yIS9bM5uXEhdhloyUyXnGJQN5ZgJYRQyvTEtTpaUBTSzgZpwilHSS7TRkGpJt9gVnnRw2KeH96Kl8sXrea23yi1Pq+wtRINi8ZbCouoO/nkPSfFHCn00Uhvagvi3co1LnJJXqUfxii6VRTUREQb97yBzCPcJce1ddibZz9ZNleuNBv9gV2WP5f3XP6Yo9XHbqyL1g7m0lV8srn9A9feMv0=",
+   "count": 500,
+   "max": 59903,
+   "percentiles": [
+    0,
+    166,
+    669,
+    15967,
+    29327,
+    44319,
+    51647,
+    59263,
+    59903,
+    59903,
+    59903,
+    0,
+    59903
+   ]
+  },
+  {
+   "name": "1-3600000000-3/latency-like",
+   "encoded": "HISTFAAABHR4nEVWW4olRRDtiIzMumVRXC6XphnaZmiGYZDBDz8GHETED/HLT3EBrkFcgLqC2YKuwRXMEhTchTvQ88jq6epblZWPkyciTkTWx7++u97cfPT5jf/afAZvf7/7/earf93xvucXueZvkX9G/piv89t8SDy+zpZv81O8fIPWMzwXXHtm5GNes9eGVsdvz+8zl+robrj2YveeW16wuuO55HM88WjJZyT60MT/I1DPHOlFnJZ3dc47zqzCfRNUw27BZVsmiN4KTR0LeXD5KmDcEyjcEnNuibyh0TgVk+sTbHMn0gvuFy7YMH8X3IrfrVhgQWh8G5zA2Rfud6tlXW7QjQZ1YHp0RMl+wuIaG7flK1bVkvc2gPwJ0fNaGu+6E3e1Z+QctM6jxENOu2J0nw4wUCOhOjwRRQuyunYUVIhf6KoSDreNAplc4V/0LJUYGV3DvGfKhqhWbeAnhCYvaB89DhYFSkSfK4GoBZSAI4yYaKQ53Ody+CfjWganFLmPWitkDrHKIav15Nlb2RBCcc4AETBM79omr0azMbMYQnliMzPToDcWTefQyj26nDD9Ex9ct8It6fCQHMOnrUHSdgK0Dcqgc4DO0nQZehV9wop11hTUUFdI0ryk95Brs59Mg56pfVqUthjoDE+ZWpcVmmc3otFNimwWsQbfdZxtjxxmyrJ3LkJ/DLJyO4/MTHo7GQ8b16aDw/Dqozu4adUMT0r6G/ujvOYJzf5v0lfaS2ZbXD89U9iQrgrpUTbpKXaaNAhaY8QY1o9hQoADFraTRRjy+1zm7cLRIO7JyeZxqb7W6RAuLS9lPAeTTOGNGnGolkw0s8kDUAFx5yqFgqgjJ16TEHNaYxqWd2oTztnqA3Qj4IkxjlGLs4ZcnHY1TByEis6kr8fcKWamQpY1ZducDc6RYXbsWUzYZaSO8riKHknMJLbCVFOtpP1EAVjXSluXPzriaf/igKqMksOV2mUTaSv10ieOH9+YELXULOdtHg6D/YuDhHfKaS3hKIyulFXbwSAUjfDeh5SPoOg4aVJtOHtcLFfnqRRbwxWSw1MPKpT0WfkMWFMKnyXBRPoMnGwsy8/WKd2PE6DiqBrDAifyOAqLk5oHlKThBFEZDLtTnTvPWESelrIO9aloScT43RkRY5mGR838kxSG4MiSy0Fkq0m/+nDazHNZMmqHkYj8DPFROZThaj/1l8/f7fB+91lQsy5bNqp+oeDiiFhnirjW47W7hBNIaUM+HFIlY0FSsBcUyCs+Ei6g5flnJ5NLq6SGrRYcL8uIeXR1wZ+nAPE103yE+YCXrDeH3tplPw+gXMatMuCcVjS+UB7yBQC6sO4SXCias47oFc/XyW8HHILktT6d8CRanJf6rNnTn1JhjXwGxJDdzmIgrErQNS/4vngQ0IVr7lOQ/CR6hu8rUnqu88wietTnD0x8g7kveeji9cqlqeZZdv5Dp70F1VdY8h26fshfAkte5R+BzV5iu/v8GS34rK75JVo/wdYX+Vfmf4Xx95H/A4s+Nxs=",
+   "count": 2000,
+   "max": 61567,
+   "percentiles": [
+    0,
+    386,
+    880,
+    2903,
+    4879,
+    8503,
+    13295,
+    31247,
+    57727,
+    61567,
+    61567,
+    0,
+    61567
+   ]
+  },
+  {
+   "name": "1-3600000000-3/wide",
+   "encoded": "HISTFAAAAzl4nC2UQWgTQRSGM//ObtymS7vEEGIspYRaaimhhFCKlCBFQhAJUqSHIiIiIiJFRIp4KKIg4kmKiIiIqHgQKSIinsSDiAfxpgfxKB68CB7Ek35v0m5nd+bNe///vzdvsvvqZrlQiFUY/EXbX2evz5uPCp1f24a9e3aNDo/uTHYO70iSIe/l/Q6fRErkpcRJ8s4r0pB8JJd4OR5v25HMnom1/TOi8JXzRSYxSxUJVx7mOYuSuZe2I7LgizVlGvGMGIDPjbJqwTZcmDqV8Rmx2GZS9ZOqqKoaq7oOS01pUWNsG2mKrhqzfZpQQ9Nax2eVJxY8s+CkOqElTYFn4WsKcf/EXgaIQTjsHZOuJ05PBNy43jmdYjKle5bmgg7iNYLdMu2ykTGf0nnpoYO2Assg56Y+OthX1GMxj+pXgzItE2kpxCgqEfHT6YqD/wCWWSzzauN1jO97p6cO37a+m+GO0wcHVsa45rSfiG8OQS2LX5BhtEi+hMJLKCuCt867hbozMMcGxl7GuhsOAeZJZBbJL+M9hxGOVqiOqetjauDdpqDLKB5jB6oaW5+cXggdPUz7QNkgwIJmdNRENlC9oudB/xhHMQNGTuB80PHcCtfQLac/DkFvHVXLAMnZnfAlpFzUF6eX0oK/aYK6jDfWL6/sVWc1CfMF3baOJHULz6C8bU3YRhJn7a3KHdgO4t5k/tWFEqXhuFNdNuDITwAY6W84g/Nhez/RbRRMknnON9dZolOxGVOIHh1nipbY6IKF15jO6b4LDbah6w62W1ZeOpLUu4waCt/J08VLlCULHVvlXSbYLsZxWqiBkDbxc1i2BLtlgaj71jHTCvetSNwqMk8jsq9n1gzVQfO0dMO666geWCuUYKWUoFasUx47lByBoU86ZTop1SF2DvOtU8VDqLCUkbfKSdUAB2zRznHZyrRpqUW+Dy2p5XQLIkGJYZrWDxeuY4ZPTnJWT0qwAdBvKwL3aJxAKzaHN8MNrONfD72/CGUfmDXmMc+WQb22jp+mU3oWW8Y8QoelIZtZVh1YLbu3dpxrsDVZpDidpFuqnHYM7jhJdUlwA74OePajEXNfKvhbX9x1djn/A4UDf+k=",
+   "count": 800,
+   "max": 31621119,
+   "percentiles": [
+    0,
+    1,
+    1,
+    93,
+    8583,
+    510975,
+    6348799,
+    27394047,
+    29917183,
+    31621119,
+    31621119,
+    0,
+    31621119
+   ]
+  },
+  {
+   "name": "1-60000000-3/empty",
+   "encoded": "HISTFAAAABt4nJNpmSzMgADMUJoRzJnczmD/ASIAAEXUA5c=",
+   "count": 0,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-60000000-3/single",
+   "encoded": "HISTFAAAACF4nJNpmSzMwMDAzAABMJoRzJnczmD/ASKwWJgJAFMWBFI=",
+   "count": 1,
+   "max": 1234,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    0,
+    1234
+   ]
+  },
+  {
+   "name": "1-60000000-3/zeros",
+   "encoded": "HISTFAAAACB4nJNpmSzMwMDAyAABzFAazGee3M5g/wEiwAYASZMDng==",
+   "count": 3,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-60000000-3/ones",
+   "encoded": "HISTFAAAACB4nJNpmSzMwMDAxAABzFCaEcyZ3M5g/wEqkAIATa4D/g==",
+   "count": 50,
+   "max": 1,
+   "percentiles": [
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "name": "1-60000000-3/beyond-range",
+   "encoded": "HISTFAAAACd4nJNpmSzMwMDAwQABzFCaEcyZ3M5g/wEiwMnEyLS3h4kJAGjYBPo=",
+   "count": 3,
+   "max": 60030975,
+   "percentiles": [
+    0,
+    0,
+    0,
+    5,
+    7,
+    7,
+    60030975,
+    60030975,
+    60030975,
+    60030975,
+    60030975,
+    0,
+    60030975
+   ]
+  },
+  {
+   "name": "1-60000000-3/uniform",
+   "encoded": "HISTFAAAAgZ4nD2SP2sVQRTF35y5k8eyLMuyyCIvjxBCeIWEVwUJEoKIhJAihYiFhVhaWViIWFgoWIiFpPADWFiIH8MqiKWFn8BOS7Hxd+8E37Dz58y959x75m2+Oh9ns/xoVn/5ck1xOH89O/pVgQvpt/RCH5K+SY91Uy+lt1nP9VV6bxp0Q3+lY/1J+pjUa9Kevkg/pE/SHV2vuZ+Tnumd9CbpgNwTJa10pivqtNRTbWlHbL8n+O6BJq31QAu1EbmvIxXdQuRn0q5O0UgEXQUsKI5qdAg28GXoe0bLaQC/z+0CvIDskzXptp6w7smZ1hBviZBjUcCgbT0k+swaIOdag3V8B6gdxm5BHsIrQhsoR4h3CfRRNAeZMxqDQZNdiw52HDXyMomJ0ZECw8QmQzxRrl92yJA2F3Mxt1JuL3rFgLgKag+9i1hnniplo4MhdKNj1JiST15hD77i8+p6NLyajpvBKf5XnaKD7ViBWBdRqJ/NkxsnYpeBlsy45ClG6sYSrAQRTBlPnKvDgqKg9myQJpRytOQ0bTSUavENYjUvPCzm9aGteLl8aTW3/Uap/XmHrZUwLIy3FBLRd/LJPafEHCX0YaSb2oK4W7nGRS3Ju/TDGE23ioaaiGjjnjeQeYSr5Li2Dnnz6ifL5sw1zUZ/YKflz+Weyx9ztPrYjXVh7WBOXcknm9s/mjsyDQ==",
+   "count": 500,
+   "max": 59903,
+   "percentiles": [
+    0,
+    166,
+    669,
+    15967,
+    29327,
+    44319,
+    51647,
+    59263,
+    59903,
+    59903,
+    59903,
+    0,
+    59903
+   ]
+  },
+  {
+   "name": "1-60000000-3/latency-like",
+   "encoded": "HISTFAAABHN4nEVWW4olRRDtiIzMumVxKS6XphnaZmiGYZDBDz8EB5FhPsQvP8UFuAZxASouYNbgGlzBLMEPd+EO9Dyyerr6VmXl4+SJiBOR9elv7683N598deO/Np+hl/d/3Lz91x0fen6da/4e+VfkT/k6v8uHxONdtnyTn+PlW7Se4bngOmdGPuY1e21odfzO+UPmUh3dDde52H3OLS9Y3fFc8jmeeLTkMxJ9aOL/Eag7R3oRp+Vd7XnHmVW4b4Jq2C24bMsE0VuhqWMhDy5fBYx7AoVbYs4tkTc0Gqdicn2Gbe5EesH9wgUb5p8Ft+J3KxZYEBrfBidw9oX73WpZlxt0o0EdmB4dUbKfsLjGxm35ilW15L0NIH9C9LyWxrvuxF3tGTkHrX2UeMhpV4yepwMM1EioDk9E0YKsrh0FFeIXuqqEw22jQCZX+Bc9SyVGRtcw75myIapVG/gJockL2kePg0WBEtHnSiBqASXgCCMmGmkO914O/2Rcy+CUIvdRa4XMIVY5ZLWePHsrG0IozhkgAobpXdvk1Wg2ZhZDKE9sZmYa9Mai6RxauUeXE6Z/4qPrVrglHR6SY/i0NUjaToC2QRl0DtBZmi5Dr6JPWLHOmoIa6gpJmpf0HnJt9pNp0DN1nhalLQY6w1Om1mWF5tmNaHSTIptFrMF3HbvtkcNMWfbOReiPQVZu55GZSW8n42Hj2nRwGF59dAc3rZrhSUl/Y3+U1zyh2f9N+kp7yWyL66dnChvSVSE9yiY9xU6TBkFrjBjD+jFMCHDAwnayCEN+n8u8XTgaxD052Twu1dc6HcKl5aWM52CSKbxRIw7VkolmNnkAKiDuXKVQEHXkxGsSYk5rTMPyTm3COVt9hG4EPDHGMWpx1pCL066GiYNQ0Zn09Zg7xcxUyLKmbJuzwTkyzI49iwm7jNRRHlfRI4mZxFaYaqqVdD5RANa10tblj4542r84oCqj5HCldtlE2kq99InjxzcmRC01y3mbh8Ng/+Ig4Z1yWks4CqMrZdV2MAhFI7z3IeUjKDpOmlQbzh4Xy9V5KsXWcIXk8NSDCiV9Vj4D1pTCZ0kwkT4DJxvL8rN1SvfjBKg4qsawwIk8jsLipOYBJWk4QVQGw+5U55lnLCJPS1mH+lS0JGL87oyIsUzDo2b+SQpDcGTJ5SCy1aRffTht5rksGbXDSER+hvioHMpwtZ/6y+fvdni/+yyoWZctG1W/UHBxRKwzRVzr8dpdwgmktCEfDqmSsSAp2AsK5BUfCRfQ8vzdyeTSKqlhqwXHyzJiHl1d8PsUIL5mmo8wH/CS9ebQW7vs5wGUy7hVBuxpReML5SFfAKAL6y7BhaLZdUSveL5OfjvgECSv9emEJ9HivNRnzTn9KRXWyBdADNntLAbCqgRd84LviwcBXbjmPgXJT6Jn+L4ipec6zyyiR33+wMQvMfclD128Xrk01dxl5z902htQfYUl36Prx/w1sORV/hnY7CW2u89f0ILP6prfoPUzbH2Rf2f+Vxj/EPk/6yI2Kw==",
+   "count": 2000,
+   "max": 61567,
+   "percentiles": [
+    0,
+    386,
+    880,
+    2903,
+    4879,
+    8503,
+    13295,
+    31247,
+    57727,
+    61567,
+    61567,
+    0,
+    61567
+   ]
+  },
+  {
+   "name": "1-60000000-3/wide",
+   "encoded": "HISTFAAAAzd4nC2UQWgTQRSGM//OJq7p0i4xhBhDKaGWWEqQEEqREkqREKSEUsRDEREREZEiIiIegiiIeJJSioiIiPQgIiIinsRDEQ/i0YN4FA9eBA/iSb83bbezO/Pmvf//35s3OXBrvZTLxcrt/EW7XxcW67dz3V+7hkMH94+NjO3L7xvZk8/v9V7e7/H5SHl5Ke8keecVaa98JJf3cjzetiOZPRVr+2dE4SvnC0xilioQrizMMxZFcy/uRqTBF2vCNOIZNQCfGWXFgm24MHUq4TNqsa18xU+qrIqqrGpallrSvOpsG2mCriqzI5pQQ01dxWeVJxY8M+AkOqNFTYFn4WsKcf/EXgqIQTjsXZOuLactATeubadzTKb00NKc0zG8RrFbpj02UuZTuiw9cdCWYdnJuaVPDvYT6rOYRfWbnTKtEGkpxCgqEvHT6aaD/yiWGSyz6uB1iu8Hp2cO346+m+G+00cHVsq47bRAxDeHoLbFz8kw2iRfROF1lBXAu8q7jboLMMcGxl7KuhcOAeZJZBbIL+V9GCMc7VAdUzfA1MC7Q0FXUFxnB6oqW5+dXgkdfUxHQBkSYEHTOmkiG6g+oZdBf52jmAYjI3A26HhphWtow+mPQ9B7R9VSQDJ2J3wRKdf0xem1NOfvmaAe4531yxt71VhNwnxFm9aRpG7hKZSb1oQdJHHW3qrche0Y7i3mX10oURKOO9ENA478BICR/oYzuBy2F4juoGCSzDO+mS4SnYjNmEL06ThTtMhGDyy86rqkRy402FB3HGwbVl46ktR7jCoKt+Xp4kXKkoaOrfAuEWwX4zQt1EBIh/jDWF4IdssCUY+sY5oK961A3CoyzyNyoOfWDJWd5mnrrnXXST22VijCSilBLVunPHUoOQ7DgHRKdFKiJXaW+dao4hIqLGXkrXJSVcABm7dzXLEyrVtqkR9AS2oZ3YJIUGKYmvrhwnVM8clIzupJCYYA/bYicI/GCbRic3jT3MAa/rXQ+/NQDoBZYx7zvDCot9bxTTqlb7ElzKN0WBKymWHVhdWye2/HuQZbi0WC01m6pcJpx+COk1SPBIfwdcGzH42Y+1LG3/rigbPL+R/H0n75",
+   "count": 800,
+   "max": 31621119,
+   "percentiles": [
+    0,
+    1,
+    1,
+    93,
+    8583,
+    510975,
+    6348799,
+    27394047,
+    29917183,
+    31621119,
+    31621119,
+    0,
+    31621119
+   ]
+  },
+  {
+   "name": "1-60000000-1/empty",
+   "encoded": "HISTFAAAABl4nJNpmSzMgACMyDTz5HYG+w8QAQBFogOV",
+   "count": 0,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-60000000-1/single",
+   "encoded": "HISTFAAAACB4nJNpmSzMwMDAzAABjMg08+R2BvsPEIGnjEwAU4AEgA==",
+   "count": 1,
+   "max": 1279,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    1279,
+    1279,
+    1279,
+    1279,
+    1279,
+    1279,
+    1279,
+    0,
+    1279
+   ]
+  },
+  {
+   "name": "1-60000000-1/zeros",
+   "encoded": "HISTFAAAAB14nJNpmSzMwMDAyAABKDTz5HYG+w8QATYASV8DnA==",
+   "count": 3,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-60000000-1/ones",
+   "encoded": "HISTFAAAAB54nJNpmSzMwMDAxAABjMg08+R2BvsPUIEUAE14A/w=",
+   "count": 50,
+   "max": 1,
+   "percentiles": [
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "name": "1-60000000-1/beyond-range",
+   "encoded": "HISTFAAAACR4nJNpmSzMwMDAzgABjMg08+R2BvsPEAFOJkam46xMAGKGBHg=",
+   "count": 3,
+   "max": 60817407,
+   "percentiles": [
+    0,
+    0,
+    0,
+    5,
+    7,
+    7,
+    60817407,
+    60817407,
+    60817407,
+    60817407,
+    60817407,
+    0,
+    60817407
+   ]
+  },
+  {
+   "name": "1-60000000-1/uniform",
+   "encoded": "HISTFAAAAHV4nE2JwQ2DMAxFHccY14qqKHCIUBRRThwQK3SfzlGJAViUETDlUn89PX+7fPcOAD5wj/u33zd4H/dhc/jCBluLQ1seaG6Q/GU2vEHX7wcTCxKTsBWKohIYlZQpqGgaYgxp1ZyfqRSpY53quMzLlPtBTrAuCMM=",
+   "count": 500,
+   "max": 61439,
+   "percentiles": [
+    0,
+    167,
+    671,
+    16383,
+    29695,
+    45055,
+    53247,
+    59391,
+    61439,
+    61439,
+    61439,
+    0,
+    61439
+   ]
+  },
+  {
+   "name": "1-60000000-1/latency-like",
+   "encoded": "HISTFAAAAIt4nJNpmSzMwMBQzAABjMg08+R2BvsPEIHVjEyMLKxM7ExAwMLEAkQcHAKMXCISYgpyMiJiEjIyGipyBlJOXnZ2fgFmDhFuVk4uYUEOVQ2MEQlhYQUeXlZGThZWXgY5LjERdg4eeiJmUipaPCJ8KmJyfEJiPCJsTGwcIJM52DhYWJiZ2FkYmQDsERRu",
+   "count": 2000,
+   "max": 63487,
+   "percentiles": [
+    0,
+    399,
+    895,
+    2943,
+    5119,
+    8703,
+    13311,
+    31743,
+    59391,
+    63487,
+    63487,
+    0,
+    63487
+   ]
+  },
+  {
+   "name": "1-60000000-1/wide",
+   "encoded": "HISTFAAAANJ4nE1QQWrEQAyLPUIYM4RAcyp73kM/0W/sgxb6gHy0T6g028MOIR7bkiXP7Xl9bFs8tteJ9ziun+3797/wdf885nHynEU2kECBI5lI/8CYjGwlxagMkFnqIZ04QkxFoOMQPqmqykOhW5dApCiRYA22aCaJVpozjWUIKAXNcU9HSmtI+QMlGp7fulp8UKVcUJOkoWRPNzw5hIld6qKVfRsmXzbKWp6zahRbGYcXma+qvaO9ZVphDRdbu8osYj2Q9pFj2UfJFPwwCs5pZHmJP1VKCmE=",
+   "count": 800,
+   "max": 32505855,
+   "percentiles": [
+    0,
+    1,
+    1,
+    95,
+    8703,
+    524287,
+    6553599,
+    28311551,
+    30408703,
+    32505855,
+    32505855,
+    0,
+    32505855
+   ]
+  },
+  {
+   "name": "1-1000000-2/empty",
+   "encoded": "HISTFAAAABt4nJNpmSzMgABMUJoRTPI7Odh/gAgAAD95Awo=",
+   "count": 0,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-1000000-2/single",
+   "encoded": "HISTFAAAACJ4nJNpmSzMwMDAzAABTFCaEUzyOznYf4AIbOZgAgBLLgPK",
+   "count": 1,
+   "max": 1239,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    1239,
+    1239,
+    1239,
+    1239,
+    1239,
+    1239,
+    1239,
+    0,
+    1239
+   ]
+  },
+  {
+   "name": "1-1000000-2/zeros",
+   "encoded": "HISTFAAAAB94nJNpmSzMwMDAyAABTFAawud3crD/ABFgAwBCqwMR",
+   "count": 3,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-1000000-2/ones",
+   "encoded": "HISTFAAAAB94nJNpmSzMwMDAxAABMJoRTPI7Odh/gAqkAABGOQNx",
+   "count": 50,
+   "max": 1,
+   "percentiles": [
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "name": "1-1000000-2/beyond-range",
+   "encoded": "HISTFAAAACZ4nJNpmSzMwMDAzgABTFCaEUzyOznYf4AIcDIxMl2XZgIAWOwEEw==",
+   "count": 3,
+   "max": 1003519,
+   "percentiles": [
+    0,
+    0,
+    0,
+    5,
+    7,
+    7,
+    1003519,
+    1003519,
+    1003519,
+    1003519,
+    1003519,
+    0,
+    1003519
+   ]
+  },
+  {
+   "name": "1-1000000-2/uniform",
+   "encoded": "HISTFAAAAPp4nD2PwU3FMBBE4/Fm7eQLIvRPCBDihBA1oI/ogBMN0QCiBbqhGUrgTYxYycns7sx4fP3+eZym8jWN0t+/7N/t5fn0Mwbf0of0pFe96VLbjs50r5OKZj2q6UYXYFWGD7rTAtoYHaHdgmYd1KJChFRoimpg5QHjxeMWs+ZocK9QzywKR9Rsjc39pRb3rKpscMDAftDwbLHHsGNDbPexdVJQln+fEhGKHub4gBKLOpZKBBFdPZPDRQrksJVW5mAxdA7GeGXt7DCSTCSCsheZiypcbLynBZVc5UtL7wSxKHLtMaqvlu2250nM0RGmpt/IQ9LXOxSo/wKDiw2k",
+   "count": 500,
+   "max": 59903,
+   "percentiles": [
+    0,
+    166,
+    671,
+    15999,
+    29439,
+    44543,
+    51711,
+    59391,
+    59903,
+    59903,
+    59903,
+    0,
+    59903
+   ]
+  },
+  {
+   "name": "1-1000000-2/latency-like",
+   "encoded": "HISTFAAAAY54nC2SYW5UMQyEN/O8rmtMmr6uVJCA/5wCqMRPbsUNOAXH4gYcgc8pu1LyYs9kJrY//Pz1dLno9+X1p//72OvDy9cvf18Df0wfdeibvutZd3rU1e71Vnqje131IJarpGFsh4xdQ0/WR3MSOjpiFhYkhthASSU3OYgjbLjCZbbzGt5fxtma3xucgOUAG2c+JhSDNBoEwCBZjOUYQDdGpoe7T0+rqkjORqQsTqBeIGomqQayllshEmkJLivszKg5vRoaM2cb8QmIYF+wPORkKleFnzYxVJNgrEif65bvYOWnddatWgkUF1rOBQUGIsl9E77Pc55n+qqVGOYP00uJL1xn1w6DaBQCyz15FzXlWRGGd7eE3o9U209bK+u2MmDVLLMbjlFk5dk8gysSw0SARJTqRGfCdurDPbuR6uKHh83+ou67CCjQEMpC3cfuGvEufI8BDR+7eXTaGsp4WHaTOr8nhDbCOprjPQt+3Vr89sTYe+1hInS3h60Pj2rG4NRahAYj2NKf9YP1Wf8AIacWxg==",
+   "count": 2000,
+   "max": 61695,
+   "percentiles": [
+    0,
+    387,
+    883,
+    2911,
+    4895,
+    8511,
+    13311,
+    31359,
+    57855,
+    61695,
+    61695,
+    0,
+    61695
+   ]
+  },
+  {
+   "name": "1-1000000-2/wide",
+   "encoded": "HISTFAAAAYJ4nDVSbU7DMAxdnp1kXVZ1VVdN4+MXAiQkzgDibNyAe3EBLsEReM8py9o47rPfs527z69lt8PPrv+w7Sne08f72+/meHm6OR1P53I+7ks5uMN978VQ4EBJADw5DAe4IRVH4nJ9Nsg/gmf9+VjsSF5pZB5RGY457JmHJnjbIsbA0jvQNK5JCXwW5UJD+yBoZXz1jLU0fh24Gj0Nz8AKxmaBQySdNdYtnSuXEyxVK5PXTtvcXwVNqi6jLHjQ4SJdVOniUokbnDpJaqqD70vQ563WtQyeQqmRcYyiBTVkF+rCouW7Mmbmib9JtdBBiJR7CouuUbQhwSgRC/nVHGdipvAGz11HcvXM0CNTlJUQ7KR4jJ7n3t7EGQ10poCtocY6oQx2WcEzKWqos5g1I5Unu+YhJjZ59R6pEc4l98nNRXJK6Kt93lfitKs2ttfvaYxxIWJiFlJaPPDUx58jbzTBdMdEERmmuDUeguNqPTunM+B/MEE0dDPHHeIot6tVv/EHo3ETAw==",
+   "count": 800,
+   "max": 1003519,
+   "percentiles": [
+    0,
+    1,
+    1,
+    93,
+    8639,
+    511999,
+    1003519,
+    1003519,
+    1003519,
+    1003519,
+    1003519,
+    0,
+    1003519
+   ]
+  },
+  {
+   "name": "1-10000000-4/empty",
+   "encoded": "HISTFAAAABt4nJNpmSzMgAAsUJoRTM6Y1mD/ASIAAEsWBCk=",
+   "count": 0,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-10000000-4/single",
+   "encoded": "HISTFAAAACJ4nJNpmSzMwMDAzAABLFCaEUzOmNZg/wEisFiYCQBaDgTk",
+   "count": 1,
+   "max": 1234,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    0,
+    1234
+   ]
+  },
+  {
+   "name": "1-10000000-4/zeros",
+   "encoded": "HISTFAAAAB94nJNpmSzMwMDAyAABLFAawp8xrcH+A0SADQBPZwQw",
+   "count": 3,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-10000000-4/ones",
+   "encoded": "HISTFAAAACB4nJNpmSzMwMDAxAABLFCaEUzOmNZg/wEqkAIAVBQEkA==",
+   "count": 50,
+   "max": 1,
+   "percentiles": [
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "name": "1-10000000-4/beyond-range",
+   "encoded": "HISTFAAAACd4nJNpmSzMwMDAwQABLFCaEUzOmNZg/wEiwMnEyNS6UYQJAHJdBYs=",
+   "count": 3,
+   "max": 10000383,
+   "percentiles": [
+    0,
+    0,
+    0,
+    5,
+    7,
+    7,
+    10000383,
+    10000383,
+    10000383,
+    10000383,
+    10000383,
+    0,
+    10000383
+   ]
+  },
+  {
+   "name": "1-10000000-4/uniform",
+   "encoded": "HISTFAAAA0l4nC2UcWSdZxjF8/ze9+uVxURFzJXVFZU/aiaqpqoqZqJ/VFXVNTExUzFTE1M1MdVe3VREVFxZFlUVETERMVNTVVEVVVFRsUXlj4qpmIhtaqpq9Jyvvdf33e97Pe95znPOee/73zc7WlryHy1vPvntb5T3n3683PfPm4VV+BcuMRuswTAfcwXGE9/xCKYyeznKKzjOy2Aj6OYgnzFecKfgSebn4Bsa8BA24UXwuOBW5u/geWIR2lgIluFz+hhhO/FDMBlU9Lq1h9NswaCKHgZXExeEvQDtbOoV9jEFs7BUYVokM+vBe6wET4MjArgaLAYDNDIPwvx/Dw6wkZgIrgVfMRM0gy/ZLVgKdsJ7P2GIu0l1el7O3KqozQuocRvGEqOZSegw65VMq1dvBtd132OAsYIQYQGvudd02esiN4Se+CW8/TzzwUKSYD38mrzjceZu8CjYtc6Ngn7JPGglpoOtYDzcTvwTVTpd285cypsF68lN17Lvo4HEP6UBVgx+yH4Iq5uZwnaNW8iXcqyUvYcvaMJchScWW31q3Atx6+Qw86hPd27lHhxjv/gbRmMuBx+pUP4smUy/jB5tk7/P/fafjEhi1stAbma6WMGV162DTJM3Vc+4GrKz3+oe4E7Y2CUJqwkLdxixITNawKpsh4Mi2ZTBb+34CRolohoeE8hZVrNGHaTUqJOTrCbdNPhBudoh2kIbK229hk1pdSY+VSSeJdm/lph/R4oN4U69RJ7IGn9YMqh2n7ucYgNVnmQCPPSIWMvZE5wzaE21t0vlt136AB2OugjteHerw9enQEruxXIKpf8Dka3zqpxLxC6oSrsuckYyFzpKXSYoqb7mfljRS5pKc8s8qTbknh+q8owB/wpsWJWp0FKzTP2sxe1xQm6WCWyzvUf0I2/3CqpDkxSSJnSyDjuaTVNut3oS/V12I599q1kZ07p2dOlsHhVITTmZC6Ef0sOOzluIh+C77Mk567BuIju2ptfYSaHp1KWhq/rWHeIBp/q8RKyoF95Zg/t4dTGJ2mldc2bypyUc1p/MfhFfK093t7Q7LrArmRv4P6Uq7srqU7SpbrVmE7+FXhoO+P/h/BaqeRY+//2afcwBnXQOXgONd/Ob",
+   "count": 500,
+   "max": 59903,
+   "percentiles": [
+    0,
+    166,
+    669,
+    15961,
+    29319,
+    44313,
+    51627,
+    59243,
+    59903,
+    59903,
+    59903,
+    0,
+    59903
+   ]
+  },
+  {
+   "name": "1-10000000-4/latency-like",
+   "encoded": "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",
+   "count": 2000,
+   "max": 61543,
+   "percentiles": [
+    0,
+    386,
+    880,
+    2902,
+    4877,
+    8499,
+    13289,
+    31243,
+    57703,
+    61543,
+    61543,
+    0,
+    61543
+   ]
+  },
+  {
+   "name": "1-10000000-4/wide",
+   "encoded": "HISTFAAAA/F4nC2Tb0hkVRjGPb9z7rlz5/+oo+vaJhGrbRHLEn2IWCQiluhDREQfIvoQERHRp4hYgpVNBhERETMTERGRQWQQWUREFhGRISSWRQaRRUQkFhlMRBYRmd53cu7cmXPPff8853me96XfhpsaGoI/G/7/uKt/U//94/cH3f9ebbzeeT2bzDb75mTM+7hzOBdz3uJx4A3gjMMSx1mMdxi5nL626H4Kedav3Lb+j3GhLAJ5JJR0cvV1Th4SGp64ykjVY2U3kqWVK6MFXE5btmqy3qa+NDRJTEZzb/tWd5M8rbTJUzufwG24yw15rU0jwdUmq3d5hVe5xc8S84VcAdLnTakT8TXv0yX1NP1H6nk15F1KimgJI/vdCp1ZwyxSroMNw7ey6GJCj/kOH0lURjrr2YYMb0lIt2B5ruz8BffkVV4KhpLxFZOWZcOCYcRwU1re4UTRBMxpkTu8LZG3pOmHVCx98B1T2nVd6+4b9pSrXsuhoeh5FEjFA8NoSMFSdcx7QXOXT5l2mjwJPXF2LHPSNcae8lozLFmOLN9z6qiGbDg+lpxyyGeULI/h1AuE9ziOC0XPHffZhB0nNN/nLM0i9FuJldQBGDQse0nfbOJvr1h2Lb9wJr3jiubI0RvQH7Li2IpTthQcu4ZnWVYt+5J/nb1O1qAcKbFHoaKaylIQ7iy/chRwmmC9jQPHtGUqwWQLF3lOLKWAs4B9zzpsWoohn/MD2y0MRRpda2Skg+2IlWv0WU4MhYBlJKQkdq4Y5g2rGSba2e9kS20638iRZzai4hm/xpiI1Mqo4dTqzqVTjAdpJpv4QBRaDRm0XBiODUOCrEn2ujjzKtNx3S+h2mFckMX4iWrEjqffK/uVdvHEoGPNcBKoImKJlaw2v6eeEQKMaLjewX6WJ2kuLKuGcowKFEKmMwwEDAaUYSGj4vSnr3yVp6bCbjkWI4Zj7Hol4zCm1p2MKHgxwFTAqKOUZqqZp6izxrIs5Vj0nDdyboT0JcOaqBaxHTBjGbC8eA2GEFscxxhMqLdEACk6bOlxHKBVRVax5XqSCaf8DxteeJZFaK9NJjoV8pahCltZFpqpxFkMeENOemmUqSI8SVBNU0rxOEYpTk+L9hiz/JOl37HhOczJzJwnKDazFvLMqFrfqKDjjgsYzdGXZ9NwGVfHjkiHDOdy9iRF0THioRg8rnAOZAbS1CLmAoVf8zxEsFQEQMAjy1KMao7DkO02BbqaZa9RCf9SZkKsvZSS6R3wbEFvSuZTpG1lJCk6b4QsBIzf0PkVRuRo21ASCAmdAWG2mFPCxbnll+mBmTwzjoWUTP6hZ6ZVOX+a5MzqMArKVR6Y/wDWsiDV",
+   "count": 800,
+   "max": 10000383,
+   "percentiles": [
+    0,
+    1,
+    1,
+    93,
+    8579,
+    510847,
+    6348543,
+    10000383,
+    10000383,
+    10000383,
+    10000383,
+    0,
+    10000383
+   ]
+  },
+  {
+   "name": "1-100000-5/empty",
+   "encoded": "HISTFAAAABp4nJNpmSzMgACsUJoRQrYtsP8AEQAARTIDow==",
+   "count": 0,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-100000-5/single",
+   "encoded": "HISTFAAAACF4nJNpmSzMwMDAzAABrFCaEUK2LbD/ABFYLMwEAFKYBF4=",
+   "count": 1,
+   "max": 1234,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    1234,
+    0,
+    1234
+   ]
+  },
+  {
+   "name": "1-100000-5/zeros",
+   "encoded": "HISTFAAAAB94nJNpmSzMwMDAyAABrFAawmdsW2D/ASLABgBI/QOq",
+   "count": 3,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1-100000-5/ones",
+   "encoded": "HISTFAAAAB94nJNpmSzMwMDAxAABrFCaEUK2LbD/ABVIAQBNJAQK",
+   "count": 50,
+   "max": 1,
+   "percentiles": [
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "name": "1-100000-5/beyond-range",
+   "encoded": "HISTFAAAACZ4nJNpmSzMwMDAwQABrFCaEUK2LbD/ABHgZGJkWj+LhwkAaJwFEA==",
+   "count": 3,
+   "max": 100000,
+   "percentiles": [
+    0,
+    0,
+    0,
+    5,
+    7,
+    7,
+    100000,
+    100000,
+    100000,
+    100000,
+    100000,
+    0,
+    100000
+   ]
+  },
+  {
+   "name": "1-100000-5/uniform",
+   "encoded": "HISTFAAAA214nC2UcWSdZxTGc37nfW+aZVUT11Q7EVET+6OqpqYqqiIqqqZ/VFXM1Mz+qpmpmprIuoiIq6Iiatq4roioqIipioiJqCsioiIiKmJqqrqqiarqnvOl9/Ld733v+z3nOc/znO/wbyMtDQ3544a9T/7wa3vX3+91/ru3UYdX8CtVYwWucpp+GHZ+YRlGE59wkrfQzRtj3WjjGJcZzjzKbCQmjR/pg8ewCbvGamY28dJ47dyHZqaMefiGTq7zzLlp3DYatdwu8TXb0KtDj40B52dhT8EBNrWEzxiFKkw3MiaSiTXjUxaNp8ZXAhgw7huX6EssWfB/YnSw7twyKsYPjBsjxve8yEwbzy2ePcN3zLnO6X4+MduoMrvQykMYcgYTt6ElWC8mmmL3rnFH11IADGVMhAW8ErXGilo3+EPozgOLx39iwphyCXaEGY8nVhNzxrLxInTuy3RJ5t5QYszYNoYtyom/c5BynD1AzdNmZs2j6EqK66Ah8c+rgcUAPx5+CKuN8Rx2DYeQb+RYIfsRvmUEao1shNiq08qCiVuZE0ygOm2piQU4Rbv4B4zanDe+1EH5Mx1kumT0YLP8fR2r/2SEi9lRLqWRxCEWiZN3QgeZJm8ORo91k51doW4HjyyMnZaw6jBHhethyLg2CFWeWQRFsimD18LxHvoKRBU8JZAr1JNa7aXQqMw56q6LGj8mV1tEW2hDha0VwpSmyMRFReJvl/0rzsRHYZBoWayuqA2q+9TRjvGPRQcnwzgRm8nRgW5qCXYIBhcZ91BOCkrfznBKQZGqqx5mVXIUmyoituHiW2aL4H+UpyluA8XFZa6I6a6z4xFoddzCrcy74uFuKdquNAt2wiPYGoOXmfcBU0ncTXzQVdnslT7KlqCfuEyVeid4AGfD0L+cJWRKD++Jeau6RuVPl+OH6Hc+5wt9pex+ViMQtRhbjdZkihi2R8AV91a2PGmUJokN4a8R1DvET+G5pu9p0dVb4pzU1ZTm0FmMZl0nZN96oZD66IkpvKEM1pAn3SrdRUhxXIwFuAEzFolVrC/oBbPl+ldvnTMwmGN/qxQjEGyXk+ZzKeSV/G+tmKpqZqdJiPPFmF9mYF9Mcn9SeOWIcrWQ9aTqPM/US/F2a+Zm0ui80+snx6JIQ8UjVbJ8tCQFFOEy/wNgtQ4i",
+   "count": 500,
+   "max": 59902,
+   "percentiles": [
+    0,
+    166,
+    669,
+    15961,
+    29319,
+    44313,
+    51627,
+    59242,
+    59902,
+    59902,
+    59902,
+    0,
+    59902
+   ]
+  },
+  {
+   "name": "1-100000-5/latency-like",
+   "encoded": "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",
+   "count": 2000,
+   "max": 61542,
+   "percentiles": [
+    0,
+    386,
+    880,
+    2902,
+    4877,
+    8499,
+    13289,
+    31243,
+    57702,
+    61542,
+    61542,
+    0,
+    61542
+   ]
+  },
+  {
+   "name": "1-100000-5/wide",
+   "encoded": "HISTFAAAAkZ4nC2STUhUURTH5/7uffc5zxkdG03UPohQsRITaRFhQ7QIaRERrVq0aBFR0DJCWgSZiIhESIsIkwgREYkIGYaQkMEGiZYiEoNICxmkRFzMIqZzxnn3fZx77//rnfeOvXidjsVsKnZ4BLWnOby/fJ/5W1s409WeSqSafXOizvvIOZyrc97iceAN4IzDEuEsxjuMDKfbFl1PInM95bLVJ8aFUgQyJRQ6TdW6SSb1Cq+vMZJVrKzGpbQyGlXANallq5L1MtXSkBZMo3L7fKvrpIVW2mTWwU3og0GOy7aaxiVXm1SXOMVpengimDsyAsSnV3Ti3OMq3aKn9MdUeRVkLykiKmFkPaPRmTXMInInyRvuS9HNO33Ni1wXVKM467u9MgwIJCNZdrQ7a3BNtlpEMBTGXaYtWcMnw5ShUyz72dM0AfMq0s8FQfaI6RDrljF4wIy6rqjulqGovRqx/DbMeb4EorhteBMyatl1LHhJM8gtPjglT8PziA3LvLjWUdS+VgxLlpLlIfuO3ZC844ZwCiG3WbQsw76XCFf4E0mLdhzDrMKGkzYPc9DAZxi3ghXqBEwasl7oq2l+es2yaXnKgXhHmqbkGAkYD8k5fkQULKOOTcOvFF8tW8Jvp9jFNyjEtbGlUFPNpBiV3lmeUQrYTDE2wFqcgmflKCvnKJ9lO2Q7olRPPsl4wGTIeoO2VbQXevl4RPGVThYvs5CmfJ4pz37AXDOlODlLXn/BHU8u4N8g5UdMvDUsn5BvmB1iqYO9xHf3HyIOgWg=",
+   "count": 800,
+   "max": 100000,
+   "percentiles": [
+    0,
+    1,
+    1,
+    93,
+    8579,
+    100000,
+    100000,
+    100000,
+    100000,
+    100000,
+    100000,
+    0,
+    100000
+   ]
+  },
+  {
+   "name": "1000-3600000000-3/empty",
+   "encoded": "HISTFAAAABx4nJNpmSzMgADMUOoFiLw2eQmD/QeICABgZwVx",
+   "count": 0,
+   "max": 0,
+   "percentiles": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "1000-3600000000-3/single",
+   "encoded": "HISTFAAAACF4nJNpmSzMwMDAxAABzFDqBYi8NnkJg/0HqAgTAGuXBXg=",
+   "count": 1,
+   "max": 1535,
+   "percentiles": [
+    511,
+    511,
+    511,
+    511,
+    1535,
+    1535,
+    1535,
+    1535,
+    1535,
+    1535,
+    1535,
+    511,
+    1535
+   ]
+  },
+  {
+   "name": "1000-3600000000-3/zeros",
+   "encoded": "HISTFAAAACF4nJNpmSzMwMDAyAABzFDqBYi8NnkJg/0HiAgbAGYABXg=",
+   "count": 3,
+   "max": 511,
+   "percentiles": [
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511
+   ]
+  },
+  {
+   "name": "1000-3600000000-3/ones",
+   "encoded": "HISTFAAAACF4nJNpmSzMwMDAyAABzFDqBYi8NnkJg/0HiEgKAGZeBdY=",
+   "count": 50,
+   "max": 511,
+   "percentiles": [
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    511
+   ]
+  },
+  {
+   "name": "1000-3600000000-3/beyond-range",
+   "encoded": "HISTFAAAACV4nJNpmSzMwMDAygABzFDqBYi8NnkJg/0HiAjL01uMTACClAc8",
+   "count": 3,
+   "max": 3600809983,
+   "percentiles": [
+    511,
+    511,
+    511,
+    511,
+    511,
+    511,
+    3600809983,
+    3600809983,
+    3600809983,
+    3600809983,
+    3600809983,
+    511,
+    3600809983
+   ]
+  },
+  {
+   "name": "1000-3600000000-3/uniform",
+   "encoded": "HISTFAAAAHJ4nC2MwQkCURBDP+MQHmGQzyriwV6syg7sYFuwJmvwaAnOsuaQMMNLbs/1NMZ4jF2Hf3w2f6+vcf/uH1A5UGK7yJyYUjitLEPgBblSwtdLUC3R+DKbOzapxrJLpKYUc7tnAV1E554VFcoUoZ7hBwqyCc4=",
+   "count": 500,
+   "max": 59903,
+   "percentiles": [
+    511,
+    511,
+    1023,
+    16383,
+    29695,
+    44543,
+    51711,
+    59391,
+    59903,
+    59903,
+    59903,
+    511,
+    59903
+   ]
+  },
+  {
+   "name": "1000-3600000000-3/latency-like",
+   "encoded": "HISTFAAAAHh4nJNpmSzMwMCQwAABzFDqBYi8NnkJg/0HiAiH2zHGFqYOpilMs5jWMP1i3MG4BohbGEuKqnJcYiLsHDz0RMykVLR4RPgERIRYhHg42HjY+DjY2Dh42JiZmFhYWBiZGJmYQJiFiRXIB7GAEkzCTKpMTNxMAHahE1M=",
+   "count": 2000,
+   "max": 61951,
+   "percentiles": [
+    511,
+    511,
+    1023,
+    3071,
+    5119,
+    8703,
+    13311,
+    31743,
+    57855,
+    61951,
+    61951,
+    511,
+    61951
+   ]
+  },
+  {
+   "name": "1000-3600000000-3/wide",
+   "encoded": "HISTFAAAAd94nC2SP2sUURTF9555M5PNuKzJuA5rXCQsEpcgQcKiISxLkBCChCWIpBARCUFSpRALKxGFEFJuaSGCooUhZbC0sLCwzVfQUsgXyO++OG/eu//PuffNXH83Lms1fatdPMl/8dfP0/Gn2vDfhedruHfr2tXpK5cvTSgLmgwKmvA3ZCHLzEUSMuENGBaUKA+Khkx1CUddOdJE1LI6CnYDUXi212BVuqk0NL2c3ZJawVDcLDSlUKCCoFTdrJDFQo6GCBYwJOqHNDICf0NF5pTLaDOUyHELLZI7BeAyu4+dBO+iqa46amuWlbNbDtnQXY1iK0Pdx7WuNJKW6rHaeH6KboltkdsBpOIsNQdsQ8/g7UaS17qD51hMVxB+a/pgeghE7D2n7rFeaFcrsB0ZxJXndGj10Ome6KNpidI1jFlQW9o3ffYxH8Ew0itAn2JtENlEzugl+hzePtiAz9PsioMN9MuZ35jGRjgJI2i1AOVz0SQoKUw9/TEqfIiS0Fa8kwNjjnmdGd4vRhe73MWiTgznNpRtdknNAMoRMHvoKevYob4bM/W4znWvLXE3+QD1OM1trCGsPt0P/7p7sC3EP6apHS2FSg9IGZC6QdImbWxTUDFshX8VmbMqvTf9Np0DH749FA==",
+   "count": 800,
+   "max": 31621119,
+   "percentiles": [
+    511,
+    511,
+    511,
+    511,
+    8703,
+    510975,
+    6348799,
+    27394047,
+    29917183,
+    31621119,
+    31621119,
+    511,
+    31621119
+   ]
+  }
+ ],
+ "merges": [
+  {
+   "name": "three-of-one-layout",
+   "encoded": [
+    "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"
+   ],
+   "count": 3300,
+   "max": 31621119,
+   "percentiles": [
+    0,
+    1,
+    2,
+    2715,
+    6075,
+    17679,
+    57599,
+    16367615,
+    28409855,
+    31621119,
+    31621119,
+    0,
+    31621119
+   ]
+  },
+  {
+   "name": "with-empty",
+   "encoded": [
+    "HISTFAAAABx4nJNpmSzMgADMUJoRRFybvITB/gNEAABQ2gSH",
+    "HISTFAAABHR4nEVWW4olRRDtiIzMumVRXC6XphnaZmiGYZDBDz8GHETED/HLT3EBrkFcgLqC2YKuwRXMEhTchTvQ88jq6epblZWPkyciTkTWx7++u97cfPT5jf/afAZvf7/7/earf93xvucXueZvkX9G/piv89t8SDy+zpZv81O8fIPWMzwXXHtm5GNes9eGVsdvz+8zl+robrj2YveeW16wuuO55HM88WjJZyT60MT/I1DPHOlFnJZ3dc47zqzCfRNUw27BZVsmiN4KTR0LeXD5KmDcEyjcEnNuibyh0TgVk+sTbHMn0gvuFy7YMH8X3IrfrVhgQWh8G5zA2Rfud6tlXW7QjQZ1YHp0RMl+wuIaG7flK1bVkvc2gPwJ0fNaGu+6E3e1Z+QctM6jxENOu2J0nw4wUCOhOjwRRQuyunYUVIhf6KoSDreNAplc4V/0LJUYGV3DvGfKhqhWbeAnhCYvaB89DhYFSkSfK4GoBZSAI4yYaKQ53Ody+CfjWganFLmPWitkDrHKIav15Nlb2RBCcc4AETBM79omr0azMbMYQnliMzPToDcWTefQyj26nDD9Ex9ct8It6fCQHMOnrUHSdgK0Dcqgc4DO0nQZehV9wop11hTUUFdI0ryk95Brs59Mg56pfVqUthjoDE+ZWpcVmmc3otFNimwWsQbfdZxtjxxmyrJ3LkJ/DLJyO4/MTHo7GQ8b16aDw/Dqozu4adUMT0r6G/ujvOYJzf5v0lfaS2ZbXD89U9iQrgrpUTbpKXaaNAhaY8QY1o9hQoADFraTRRjy+1zm7cLRIO7JyeZxqb7W6RAuLS9lPAeTTOGNGnGolkw0s8kDUAFx5yqFgqgjJ16TEHNaYxqWd2oTztnqA3Qj4IkxjlGLs4ZcnHY1TByEis6kr8fcKWamQpY1ZducDc6RYXbsWUzYZaSO8riKHknMJLbCVFOtpP1EAVjXSluXPzriaf/igKqMksOV2mUTaSv10ieOH9+YELXULOdtHg6D/YuDhHfKaS3hKIyulFXbwSAUjfDeh5SPoOg4aVJtOHtcLFfnqRRbwxWSw1MPKpT0WfkMWFMKnyXBRPoMnGwsy8/WKd2PE6DiqBrDAifyOAqLk5oHlKThBFEZDLtTnTvPWESelrIO9aloScT43RkRY5mGR838kxSG4MiSy0Fkq0m/+nDazHNZMmqHkYj8DPFROZThaj/1l8/f7fB+91lQsy5bNqp+oeDiiFhnirjW47W7hBNIaUM+HFIlY0FSsBcUyCs+Ei6g5flnJ5NLq6SGrRYcL8uIeXR1wZ+nAPE103yE+YCXrDeH3tplPw+gXMatMuCcVjS+UB7yBQC6sO4SXCias47oFc/XyW8HHILktT6d8CRanJf6rNnTn1JhjXwGxJDdzmIgrErQNS/4vngQ0IVr7lOQ/CR6hu8rUnqu88wietTnD0x8g7kveeji9cqlqeZZdv5Dp70F1VdY8h26fshfAkte5R+BzV5iu/v8GS34rK75JVo/wdYX+Vfmf4Xx95H/A4s+Nxs="
+   ],
+   "count": 2000,
+   "max": 61567,
+   "percentiles": [
+    0,
+    386,
+    880,
+    2903,
+    4879,
+    8503,
+    13295,
+    31247,
+    57727,
+    61567,
+    61567,
+    0,
+    61567
+   ]
+  },
+  {
+   "name": "single",
+   "encoded": [
+    "HISTFAAABHR4nEVWW4olRRDtiIzMumVRXC6XphnaZmiGYZDBDz8GHETED/HLT3EBrkFcgLqC2YKuwRXMEhTchTvQ88jq6epblZWPkyciTkTWx7++u97cfPT5jf/afAZvf7/7/earf93xvucXueZvkX9G/piv89t8SDy+zpZv81O8fIPWMzwXXHtm5GNes9eGVsdvz+8zl+robrj2YveeW16wuuO55HM88WjJZyT60MT/I1DPHOlFnJZ3dc47zqzCfRNUw27BZVsmiN4KTR0LeXD5KmDcEyjcEnNuibyh0TgVk+sTbHMn0gvuFy7YMH8X3IrfrVhgQWh8G5zA2Rfud6tlXW7QjQZ1YHp0RMl+wuIaG7flK1bVkvc2gPwJ0fNaGu+6E3e1Z+QctM6jxENOu2J0nw4wUCOhOjwRRQuyunYUVIhf6KoSDreNAplc4V/0LJUYGV3DvGfKhqhWbeAnhCYvaB89DhYFSkSfK4GoBZSAI4yYaKQ53Ody+CfjWganFLmPWitkDrHKIav15Nlb2RBCcc4AETBM79omr0azMbMYQnliMzPToDcWTefQyj26nDD9Ex9ct8It6fCQHMOnrUHSdgK0Dcqgc4DO0nQZehV9wop11hTUUFdI0ryk95Brs59Mg56pfVqUthjoDE+ZWpcVmmc3otFNimwWsQbfdZxtjxxmyrJ3LkJ/DLJyO4/MTHo7GQ8b16aDw/Dqozu4adUMT0r6G/ujvOYJzf5v0lfaS2ZbXD89U9iQrgrpUTbpKXaaNAhaY8QY1o9hQoADFraTRRjy+1zm7cLRIO7JyeZxqb7W6RAuLS9lPAeTTOGNGnGolkw0s8kDUAFx5yqFgqgjJ16TEHNaYxqWd2oTztnqA3Qj4IkxjlGLs4ZcnHY1TByEis6kr8fcKWamQpY1ZducDc6RYXbsWUzYZaSO8riKHknMJLbCVFOtpP1EAVjXSluXPzriaf/igKqMksOV2mUTaSv10ieOH9+YELXULOdtHg6D/YuDhHfKaS3hKIyulFXbwSAUjfDeh5SPoOg4aVJtOHtcLFfnqRRbwxWSw1MPKpT0WfkMWFMKnyXBRPoMnGwsy8/WKd2PE6DiqBrDAifyOAqLk5oHlKThBFEZDLtTnTvPWESelrIO9aloScT43RkRY5mGR838kxSG4MiSy0Fkq0m/+nDazHNZMmqHkYj8DPFROZThaj/1l8/f7fB+91lQsy5bNqp+oeDiiFhnirjW47W7hBNIaUM+HFIlY0FSsBcUyCs+Ei6g5flnJ5NLq6SGrRYcL8uIeXR1wZ+nAPE103yE+YCXrDeH3tplPw+gXMatMuCcVjS+UB7yBQC6sO4SXCias47oFc/XyW8HHILktT6d8CRanJf6rNnTn1JhjXwGxJDdzmIgrErQNS/4vngQ0IVr7lOQ/CR6hu8rUnqu88wietTnD0x8g7kveeji9cqlqeZZdv5Dp70F1VdY8h26fshfAkte5R+BzV5iu/v8GS34rK75JVo/wdYX+Vfmf4Xx95H/A4s+Nxs="
+   ],
+   "count": 2000,
+   "max": 61567,
+   "percentiles": [
+    0,
+    386,
+    880,
+    2903,
+    4879,
+    8503,
+    13295,
+    31247,
+    57727,
+    61567,
+    61567,
+    0,
+    61567
+   ]
+  },
+  {
+   "name": "mixed-layouts",
+   "encoded": [
+    "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"
+   ],
+   "count": 3300,
+   "max": 31473663,
+   "percentiles": [
+    0,
+    1,
+    2,
+    2715,
+    6075,
+    17679,
+    57599,
+    16261119,
+    28327935,
+    31473663,
+    31473663,
+    0,
+    31473663
+   ]
+  },
+  {
+   "name": "coarse-into-fine",
+   "encoded": [
+    "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"
+   ],
+   "count": 1300,
+   "max": 100000,
+   "percentiles": [
+    0,
+    1,
+    1,
+    1343,
+    24006,
+    57780,
+    100000,
+    100000,
+    100000,
+    100000,
+    100000,
+    0,
+    100000
+   ]
+  },
+  {
+   "name": "clamped",
+   "encoded": [
+    "HISTFAAAACZ4nJNpmSzMwMDAzgABTFCaEUzyOznYf4AIcDIxMl2XZgIAWOwEEw==",
+    "HISTFAAAAzl4nC2UQWgTQRSGM//ObtymS7vEEGIspYRaaimhhFCKlCBFQhAJUqSHIiIiIiJFRIp4KKIg4kmKiIiIqHgQKSIinsSDiAfxpgfxKB68CB7Ek35v0m5nd+bNe///vzdvsvvqZrlQiFUY/EXbX2evz5uPCp1f24a9e3aNDo/uTHYO70iSIe/l/Q6fRErkpcRJ8s4r0pB8JJd4OR5v25HMnom1/TOi8JXzRSYxSxUJVx7mOYuSuZe2I7LgizVlGvGMGIDPjbJqwTZcmDqV8Rmx2GZS9ZOqqKoaq7oOS01pUWNsG2mKrhqzfZpQQ9Nax2eVJxY8s+CkOqElTYFn4WsKcf/EXgaIQTjsHZOuJ05PBNy43jmdYjKle5bmgg7iNYLdMu2ykTGf0nnpoYO2Assg56Y+OthX1GMxj+pXgzItE2kpxCgqEfHT6YqD/wCWWSzzauN1jO97p6cO37a+m+GO0wcHVsa45rSfiG8OQS2LX5BhtEi+hMJLKCuCt867hbozMMcGxl7GuhsOAeZJZBbJL+M9hxGOVqiOqetjauDdpqDLKB5jB6oaW5+cXggdPUz7QNkgwIJmdNRENlC9oudB/xhHMQNGTuB80PHcCtfQLac/DkFvHVXLAMnZnfAlpFzUF6eX0oK/aYK6jDfWL6/sVWc1CfMF3baOJHULz6C8bU3YRhJn7a3KHdgO4t5k/tWFEqXhuFNdNuDITwAY6W84g/Nhez/RbRRMknnON9dZolOxGVOIHh1nipbY6IKF15jO6b4LDbah6w62W1ZeOpLUu4waCt/J08VLlCULHVvlXSbYLsZxWqiBkDbxc1i2BLtlgaj71jHTCvetSNwqMk8jsq9n1gzVQfO0dMO666geWCuUYKWUoFasUx47lByBoU86ZTop1SF2DvOtU8VDqLCUkbfKSdUAB2zRznHZyrRpqUW+Dy2p5XQLIkGJYZrWDxeuY4ZPTnJWT0qwAdBvKwL3aJxAKzaHN8MNrONfD72/CGUfmDXmMc+WQb22jp+mU3oWW8Y8QoelIZtZVh1YLbu3dpxrsDVZpDidpFuqnHYM7jhJdUlwA74OePajEXNfKvhbX9x1djn/A4UDf+k="
+   ],
+   "count": 803,
+   "max": 1003519,
+   "percentiles": [
+    0,
+    1,
+    1,
+    92,
+    8639,
+    511999,
+    1003519,
+    1003519,
+    1003519,
+    1003519,
+    1003519,
+    0,
+    1003519
+   ]
+  }
+ ],
+ "records": [
+  {
+   "name": "hello-result",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       5300.0
+      ],
+      [
+       "latency_ms.p99",
+       7.25
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"operations_per_second\":5300.0,\"latency_ms.p99\":7.25}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "no-unit",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "score",
+       "unit": "",
+       "direction": "max"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "score",
+       1
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"score\":{\"direction\":\"max\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"score\":1.0}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-0",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       5300.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":5300.0}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-1",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       7.123456789
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":7.123456789}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-2",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       1e-05
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":1e-05}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-3",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       0.0001
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":0.0001}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-4",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       1e+16
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":1e+16}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-5",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       1.2345678901234568e+17
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":1.2345678901234568e+17}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-6",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       0.1
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":0.1}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-7",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       100000.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":100000.0}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-8",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       1.5e+300
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":1.5e+300}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-9",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       5e-324
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":5e-324}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-10",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       12345.6789
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":12345.6789}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-11",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       -2.5
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":-2.5}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-12",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       0.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":0.0}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-13",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       -0.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":-0.0}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-14",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       1e+22
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":1e+22}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-15",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       9007199254740992.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":9007199254740992.0}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-16",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       9007199254740992.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":9007199254740992.0}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "float-17",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "x",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "x",
+       0.3333333333333333
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"x\":{\"direction\":\"min\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"x\":0.3333333333333333}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "unicode",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "d\u00e9lai.ms",
+       "unit": "\u00b5s \u2603",
+       "direction": "min"
+      },
+      {
+       "name": "q\"uote",
+       "unit": "back\\slash\ttab",
+       "direction": "max"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "d\u00e9lai.ms",
+       1.0
+      ],
+      [
+       "q\"uote",
+       2.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"d\\u00e9lai.ms\":{\"direction\":\"min\",\"unit\":\"\\u00b5s \\u2603\"},\"q\\\"uote\":{\"direction\":\"max\",\"unit\":\"back\\\\slash\\ttab\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"d\\u00e9lai.ms\":1.0,\"q\\\"uote\":2.0}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-only",
+   "ops": [
+    {
+     "op": "error",
+     "message": "it broke",
+     "partial": null
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"error\",\"message\":\"it broke\"}\n",
+    "errors": [
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-unicode",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "fail \u00e9\u4e2d\ud83d\ude00 \"q\" \\ \n\t\u0001 <&> \u007f",
+     "partial": null
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"fail \\u00e9\\u4e2d\\ud83d\\ude00 \\\"q\\\" \\\\ \\n\\t\\u0001 <&> \\u007f\"}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-partial",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "phase 1 failed",
+     "partial": {
+      "name": "last_phase_ops_per_sec",
+      "value": 4821.5,
+      "direction": "max",
+      "unit": "ops/s"
+     }
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"phase 1 failed\",\"partial\":{\"name\":\"last_phase_ops_per_sec\",\"value\":4821.5,\"direction\":\"max\",\"unit\":\"ops/s\"}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-partial-no-unit",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "x",
+     "partial": {
+      "name": "m",
+      "value": 1,
+      "direction": "min"
+     }
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"x\",\"partial\":{\"name\":\"m\",\"value\":1.0,\"direction\":\"min\"}}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-partial-dropped-name",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "x",
+     "partial": {
+      "name": "bad name",
+      "value": 1.0,
+      "direction": "min"
+     }
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"x\"}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-partial-dropped-value",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "x",
+     "partial": {
+      "name": "m",
+      "value": "Infinity",
+      "direction": "min"
+     }
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"x\"}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-blank",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "  \n ",
+     "partial": null
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"the benchmark failed without a message\"}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-cut",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9\u00e9",
+     "partial": null
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9\\u00e9...\"}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-cut-ascii",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "partial": null
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-just-under",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "partial": null
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\"}\n",
+    "errors": [
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-after-result",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       1.0
+      ],
+      [
+       "latency_ms.p99",
+       2.0
+      ]
+     ]
+    },
+    {
+     "op": "error",
+     "message": "teardown failed",
+     "partial": null
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"operations_per_second\":1.0,\"latency_ms.p99\":2.0}}\n{\"kind\":\"error\",\"message\":\"teardown failed\"}\n",
+    "errors": [
+     null,
+     null,
+     null
+    ]
+   }
+  },
+  {
+   "name": "error-twice",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "error",
+     "message": "a",
+     "partial": null
+    },
+    {
+     "op": "error",
+     "message": "b",
+     "partial": null
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"error\",\"message\":\"a\"}\n",
+    "errors": [
+     null,
+     null,
+     "the stream already ended with an error"
+    ]
+   }
+  },
+  {
+   "name": "result-twice",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       1.0
+      ],
+      [
+       "latency_ms.p99",
+       2.0
+      ]
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       1.0
+      ],
+      [
+       "latency_ms.p99",
+       2.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"operations_per_second\":1.0,\"latency_ms.p99\":2.0}}\n",
+    "errors": [
+     null,
+     null,
+     "the stream already has its outcome (result); report once"
+    ]
+   }
+  },
+  {
+   "name": "hello-twice",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n",
+    "errors": [
+     null,
+     "hello is written once, first"
+    ]
+   }
+  },
+  {
+   "name": "hello-after-result",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       1.0
+      ],
+      [
+       "latency_ms.p99",
+       2.0
+      ]
+     ]
+    },
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"operations_per_second\":1.0,\"latency_ms.p99\":2.0}}\n",
+    "errors": [
+     null,
+     null,
+     "hello is written once, first"
+    ]
+   }
+  },
+  {
+   "name": "hello-empty",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": []
+    }
+   ],
+   "expect": {
+    "file": "",
+    "errors": [
+     "declare at least one metric"
+    ]
+   }
+  },
+  {
+   "name": "hello-space-name",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "p99 latency",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "file": "",
+    "errors": [
+     "metric name 'p99 latency' must be non-empty and contain no whitespace"
+    ]
+   }
+  },
+  {
+   "name": "hello-empty-name",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "",
+       "unit": "",
+       "direction": "min"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "file": "",
+    "errors": [
+     "metric name '' must be non-empty and contain no whitespace"
+    ]
+   }
+  },
+  {
+   "name": "result-before-hello",
+   "ops": [
+    {
+     "op": "result",
+     "values": [
+      [
+       "a",
+       1.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "",
+    "errors": [
+     "write hello before the result"
+    ]
+   }
+  },
+  {
+   "name": "result-missing",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       1.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n",
+    "errors": [
+     null,
+     "declared ['latency_ms.p99'] but did not report them"
+    ]
+   }
+  },
+  {
+   "name": "result-unknown",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       1.0
+      ],
+      [
+       "latency_ms.p99",
+       2.0
+      ],
+      [
+       "zzz",
+       1.0
+      ],
+      [
+       "p50",
+       1.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n",
+    "errors": [
+     null,
+     "reported ['p50', 'zzz'] but declared only ['latency_ms.p99', 'operations_per_second']"
+    ]
+   }
+  },
+  {
+   "name": "result-infinite",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       1.0
+      ],
+      [
+       "latency_ms.p99",
+       "Infinity"
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n",
+    "errors": [
+     null,
+     "metric latency_ms.p99 is inf; report a finite number"
+    ]
+   }
+  },
+  {
+   "name": "result-nan",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       "NaN"
+      ],
+      [
+       "latency_ms.p99",
+       1.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n",
+    "errors": [
+     null,
+     "metric operations_per_second is nan; report a finite number"
+    ]
+   }
+  },
+  {
+   "name": "result-then-ok-after-failed",
+   "ops": [
+    {
+     "op": "hello",
+     "metrics": [
+      {
+       "name": "operations_per_second",
+       "unit": "ops/s",
+       "direction": "max"
+      },
+      {
+       "name": "latency_ms.p99",
+       "unit": "ms",
+       "direction": "min"
+      }
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       1.0
+      ]
+     ]
+    },
+    {
+     "op": "result",
+     "values": [
+      [
+       "operations_per_second",
+       1.0
+      ],
+      [
+       "latency_ms.p99",
+       2.0
+      ]
+     ]
+    }
+   ],
+   "expect": {
+    "file": "{\"kind\":\"hello\",\"protocol\":2,\"metrics\":{\"operations_per_second\":{\"direction\":\"max\",\"unit\":\"ops/s\"},\"latency_ms.p99\":{\"direction\":\"min\",\"unit\":\"ms\"}}}\n{\"kind\":\"result\",\"label\":\"\",\"values\":{\"operations_per_second\":1.0,\"latency_ms.p99\":2.0}}\n",
+    "errors": [
+     null,
+     "declared ['latency_ms.p99'] but did not report them",
+     null
+    ]
+   }
+  }
+ ],
+ "validity": [
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 1,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 0,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 7,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_ops_per_operation is an int >= 0, got -1"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 1,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 0,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 7,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_ops_per_operation is an int >= 0, got -1"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 1,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 0,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 7,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_ops_per_operation is an int >= 0, got -1"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 0.0,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 1,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 0,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 7,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_ops_per_operation is an int >= 0, got -1"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 1,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 0,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 7,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_ops_per_operation is an int >= 0, got -1"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 1,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 0,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 7,
+   "error": null
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_ops_per_operation is an int >= 0, got -1"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 0.05,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 1,
+   "error": null
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 0,
+   "error": null
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 7,
+   "error": null
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_ops_per_operation is an int >= 0, got -1"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 1,
+   "error": null
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 0,
+   "error": null
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 7,
+   "error": null
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_ops_per_operation is an int >= 0, got -1"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 1,
+   "error": null
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 0,
+   "error": null
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 7,
+   "error": null
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_ops_per_operation is an int >= 0, got -1"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 0.0"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got -1.0"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 0,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 7,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": 1.0,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": -1,
+   "error": "Validity min_sustained_ratio is in (0, 1], got nan"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": -0.1,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got -0.1"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": 1.5,
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got 1.5"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "NaN",
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got nan"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.95,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 0.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": -1.0,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": 1.5,
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 0,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": 7,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  },
+  {
+   "max_error_rate": "Infinity",
+   "min_sustained_ratio": "NaN",
+   "min_ops_per_operation": -1,
+   "error": "Validity max_error_rate is in [0, 1], got inf"
+  }
+ ],
+ "metrics": [
+  {
+   "direction": "max",
+   "error": null
+  },
+  {
+   "direction": "min",
+   "error": null
+  },
+  {
+   "direction": "up",
+   "error": "Metric direction is 'max' or 'min', got 'up'"
+  },
+  {
+   "direction": "",
+   "error": "Metric direction is 'max' or 'min', got ''"
+  },
+  {
+   "direction": "MAX",
+   "error": "Metric direction is 'max' or 'min', got 'MAX'"
+  },
+  {
+   "direction": "it's",
+   "error": "Metric direction is 'max' or 'min', got \"it's\""
+  },
+  {
+   "direction": "a\"b'c",
+   "error": "Metric direction is 'max' or 'min', got 'a\"b\\'c'"
+  }
+ ],
+ "seeds": [
+  {
+   "flag": null,
+   "env": "",
+   "expect": {
+    "source": "drawn"
+   }
+  },
+  {
+   "flag": null,
+   "env": "0x10",
+   "expect": {
+    "seed": "16",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": "010",
+   "expect": {
+    "error": "$VIBESYS_SAMPLE_SEED='010' is not an integer in [0, 2**64)"
+   }
+  },
+  {
+   "flag": null,
+   "env": "0",
+   "expect": {
+    "seed": "0",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": "00",
+   "expect": {
+    "seed": "0",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": "1_000",
+   "expect": {
+    "seed": "1000",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": " 5 ",
+   "expect": {
+    "seed": "5",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": "abc",
+   "expect": {
+    "error": "$VIBESYS_SAMPLE_SEED='abc' is not an integer in [0, 2**64)"
+   }
+  },
+  {
+   "flag": null,
+   "env": "-3",
+   "expect": {
+    "error": "$VIBESYS_SAMPLE_SEED='-3' is not an integer in [0, 2**64)"
+   }
+  },
+  {
+   "flag": null,
+   "env": "0b11",
+   "expect": {
+    "seed": "3",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": "0o17",
+   "expect": {
+    "seed": "15",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": "18446744073709551615",
+   "expect": {
+    "seed": "18446744073709551615",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": "18446744073709551616",
+   "expect": {
+    "error": "$VIBESYS_SAMPLE_SEED='18446744073709551616' is not an integer in [0, 2**64)"
+   }
+  },
+  {
+   "flag": null,
+   "env": "1e3",
+   "expect": {
+    "error": "$VIBESYS_SAMPLE_SEED='1e3' is not an integer in [0, 2**64)"
+   }
+  },
+  {
+   "flag": null,
+   "env": "+7",
+   "expect": {
+    "seed": "7",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": "0x",
+   "expect": {
+    "error": "$VIBESYS_SAMPLE_SEED='0x' is not an integer in [0, 2**64)"
+   }
+  },
+  {
+   "flag": null,
+   "env": "1__0",
+   "expect": {
+    "error": "$VIBESYS_SAMPLE_SEED='1__0' is not an integer in [0, 2**64)"
+   }
+  },
+  {
+   "flag": null,
+   "env": "_1",
+   "expect": {
+    "error": "$VIBESYS_SAMPLE_SEED='_1' is not an integer in [0, 2**64)"
+   }
+  },
+  {
+   "flag": null,
+   "env": "0_0",
+   "expect": {
+    "seed": "0",
+    "source": "VIBESYS_SAMPLE_SEED"
+   }
+  },
+  {
+   "flag": null,
+   "env": "0_1",
+   "expect": {
+    "error": "$VIBESYS_SAMPLE_SEED='0_1' is not an integer in [0, 2**64)"
+   }
+  },
+  {
+   "flag": "0",
+   "env": "",
+   "expect": {
+    "seed": "0",
+    "source": "--seed"
+   }
+  },
+  {
+   "flag": "7",
+   "env": "",
+   "expect": {
+    "seed": "7",
+    "source": "--seed"
+   }
+  },
+  {
+   "flag": "9223372036854775808",
+   "env": "",
+   "expect": {
+    "seed": "9223372036854775808",
+    "source": "--seed"
+   }
+  },
+  {
+   "flag": "18446744073709551615",
+   "env": "",
+   "expect": {
+    "seed": "18446744073709551615",
+    "source": "--seed"
+   }
+  },
+  {
+   "flag": "18446744073709551616",
+   "env": "",
+   "expect": {
+    "error": "--seed must be in [0, 2**64), got 18446744073709551616"
+   }
+  },
+  {
+   "flag": "-1",
+   "env": "",
+   "expect": {
+    "error": "--seed must be in [0, 2**64), got -1"
+   }
+  }
+ ],
+ "combine": [
+  {
+   "aggregation": "median",
+   "trials": [
+    5.0
+   ],
+   "want": 5.0
+  },
+  {
+   "aggregation": "median",
+   "trials": [
+    3.0,
+    1.0,
+    2.0
+   ],
+   "want": 2.0
+  },
+  {
+   "aggregation": "median",
+   "trials": [
+    4.0,
+    1.0,
+    3.0,
+    2.0
+   ],
+   "want": 2.5
+  },
+  {
+   "aggregation": "median",
+   "trials": [
+    0.5,
+    0.25
+   ],
+   "want": 0.375
+  },
+  {
+   "aggregation": "median",
+   "trials": [
+    10.0,
+    20.0,
+    30.0,
+    40.0,
+    50.0
+   ],
+   "want": 30.0
+  },
+  {
+   "aggregation": "mean",
+   "trials": [
+    5.0
+   ],
+   "want": 5.0
+  },
+  {
+   "aggregation": "mean",
+   "trials": [
+    3.0,
+    1.0,
+    2.0
+   ],
+   "want": 2.0
+  },
+  {
+   "aggregation": "mean",
+   "trials": [
+    4.0,
+    1.0,
+    3.0,
+    2.0
+   ],
+   "want": 2.5
+  },
+  {
+   "aggregation": "mean",
+   "trials": [
+    0.5,
+    0.25
+   ],
+   "want": 0.375
+  },
+  {
+   "aggregation": "mean",
+   "trials": [
+    10.0,
+    20.0,
+    30.0,
+    40.0,
+    50.0
+   ],
+   "want": 30.0
+  },
+  {
+   "aggregation": "min",
+   "trials": [
+    5.0
+   ],
+   "want": 5.0
+  },
+  {
+   "aggregation": "min",
+   "trials": [
+    3.0,
+    1.0,
+    2.0
+   ],
+   "want": 1.0
+  },
+  {
+   "aggregation": "min",
+   "trials": [
+    4.0,
+    1.0,
+    3.0,
+    2.0
+   ],
+   "want": 1.0
+  },
+  {
+   "aggregation": "min",
+   "trials": [
+    0.5,
+    0.25
+   ],
+   "want": 0.25
+  },
+  {
+   "aggregation": "min",
+   "trials": [
+    10.0,
+    20.0,
+    30.0,
+    40.0,
+    50.0
+   ],
+   "want": 10.0
+  },
+  {
+   "aggregation": "max",
+   "trials": [
+    5.0
+   ],
+   "want": 5.0
+  },
+  {
+   "aggregation": "max",
+   "trials": [
+    3.0,
+    1.0,
+    2.0
+   ],
+   "want": 3.0
+  },
+  {
+   "aggregation": "max",
+   "trials": [
+    4.0,
+    1.0,
+    3.0,
+    2.0
+   ],
+   "want": 4.0
+  },
+  {
+   "aggregation": "max",
+   "trials": [
+    0.5,
+    0.25
+   ],
+   "want": 0.5
+  },
+  {
+   "aggregation": "max",
+   "trials": [
+    10.0,
+    20.0,
+    30.0,
+    40.0,
+    50.0
+   ],
+   "want": 50.0
+  },
+  {
+   "aggregation": "sum",
+   "trials": [
+    5.0
+   ],
+   "want": 5.0
+  },
+  {
+   "aggregation": "sum",
+   "trials": [
+    3.0,
+    1.0,
+    2.0
+   ],
+   "want": 6.0
+  },
+  {
+   "aggregation": "sum",
+   "trials": [
+    4.0,
+    1.0,
+    3.0,
+    2.0
+   ],
+   "want": 10.0
+  },
+  {
+   "aggregation": "sum",
+   "trials": [
+    0.5,
+    0.25
+   ],
+   "want": 0.75
+  },
+  {
+   "aggregation": "sum",
+   "trials": [
+    10.0,
+    20.0,
+    30.0,
+    40.0,
+    50.0
+   ],
+   "want": 150.0
+  }
+ ]
+}
