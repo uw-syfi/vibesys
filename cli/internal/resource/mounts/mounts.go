@@ -1,5 +1,5 @@
 // Package mounts is the resource of read-only directories: by name, a directory of the engine's
-// machine that every container sees at Dir/<name>, with the names in the variable EnvNames. It is
+// machine that every container sees at Dir/<name>, with the names in the job environment (JobEnvironment.mounts). It is
 // what [placements.<name>.resources.mounts] configures, and what the [docker.mounts] section of the
 // earlier operator config shape did.
 package mounts
@@ -12,6 +12,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
@@ -19,8 +21,6 @@ import (
 const (
 	// Dir holds the mounts in the container, one directory per name.
 	Dir = "/vibesys/mounts"
-	// EnvNames lists the names of the mounts, separated by commas.
-	EnvNames = "VIBESYS_MOUNTS"
 	// Fact is the fingerprint fact: the names of the mounts.
 	Fact = "mounts"
 )
@@ -75,7 +75,12 @@ func (m *Mounts) Attach(ctx context.Context) (resource.Attachment, error) {
 	if err := ctx.Err(); err != nil {
 		return resource.Attachment{}, err
 	}
-	a := resource.Attachment{Env: map[string]string{EnvNames: strings.Join(m.names, ",")}}
+	// Only the mounts are this resource's to state; the rest of the job environment is the run's.
+	job, err := envcodec.Encode(&cliv1.JobEnvironment{Mounts: m.names})
+	if err != nil {
+		return resource.Attachment{}, invalid("the names of the mounts are not a valid job environment: %v", err)
+	}
+	a := resource.Attachment{Env: job.Set}
 	for _, n := range m.names {
 		a.Mounts = append(a.Mounts, resource.Mount{Host: m.dirs[n], Container: Dir + "/" + n, ReadOnly: true})
 	}

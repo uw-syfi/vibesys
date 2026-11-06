@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/environment"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
@@ -294,16 +295,15 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 	if err != nil {
 		return ContainerSpec{}, err
 	}
-	// The user has no home in the image, and tools want one they can write to.
-	env := map[string]string{"HOME": "/tmp"}
+	job := &cliv1.JobEnvironment{TimeoutSeconds: environment.TimeoutSeconds(r.x.Timeout)}
 	mounts := r.mounts(staged)
 	if cache != "" {
 		mounts = append(mounts, Mount{Host: cache, Container: CacheDir})
-		env[EnvCacheDir] = CacheDir
+		job.Cache = CacheDir
 	}
 	if staged.Artifacts != "" {
 		mounts = append(mounts, Mount{Host: staged.Artifacts, Container: ArtifactsDir})
-		env[EnvArtifactsDir] = ArtifactsDir
+		job.Artifacts = ArtifactsDir
 	}
 	if as == roleBeside {
 		probe, err := m.Program(r.ctx, p.cfg.Probe)
@@ -311,8 +311,15 @@ func (r *run) containerSpec(b *box, id string, img Image, as role, url string) (
 			return ContainerSpec{}, err
 		}
 		mounts = append(mounts, Mount{Host: probe, Container: ProbeMount, ReadOnly: true})
-		env[core.EnvServiceURL] = url
+		job.ServiceUrl = url
 	}
+	jobVariables, err := environment.JobVariables(job)
+	if err != nil {
+		return ContainerSpec{}, &core.Failure{Kind: core.FailureInternal, Message: fmt.Sprintf("docker: the job environment is not valid: %v", err)}
+	}
+	// The user has no home in the image, and tools want one they can write to.
+	env := map[string]string{"HOME": "/tmp"}
+	maps.Copy(env, jobVariables.Set)
 	given, err := r.attachments(as)
 	if err != nil {
 		return ContainerSpec{}, err

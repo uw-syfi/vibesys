@@ -25,10 +25,6 @@ func ResolveProjectRoot(argv []string, root string) []string {
 // environment chooses for each execution: machines are shared, so no port is fixed.
 const PortPlaceholder = "${PORT}"
 
-// EnvServiceURL names the variable a command of the task's image reaches the candidate's server
-// at: http://127.0.0.1:<port>.
-const EnvServiceURL = "VIBESYS_SERVICE_URL"
-
 // CandidateBuild is how a candidate's image is built from its commit.
 type CandidateBuild struct {
 	// Dockerfile is the path of the Dockerfile in the checkout of the commit.

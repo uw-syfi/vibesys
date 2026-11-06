@@ -203,6 +203,162 @@ func (x *SkillEnvironment) GetCli() string {
 	return ""
 }
 
+// JobEnvironment is what a job's commands may read about the job they run in. A command that reads
+// none of it works as it does without VibeSys. A field that does not apply to a job is not set, and
+// the rules require none: the program that needs one says which is missing.
+type JobEnvironment struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Where the job keeps files that stay with the job after it ends: an absolute location, empty
+	// when the job keeps none.
+	Artifacts string `protobuf:"bytes,1,opt,name=artifacts,proto3" json:"artifacts,omitempty"`
+	// Where the job keeps files between runs of the same task image: an absolute location, empty when
+	// the job has none.
+	Cache string `protobuf:"bytes,2,opt,name=cache,proto3" json:"cache,omitempty"`
+	// The address of the candidate's server, for a command that sends it requests: an http or https URL.
+	ServiceUrl string `protobuf:"bytes,3,opt,name=service_url,json=serviceUrl,proto3" json:"service_url,omitempty"`
+	// The longest the job may run, in seconds. The job is stopped when it passes it; a command that
+	// keeps something outside the job, such as a deployment, uses it to know when that is left over.
+	// Zero when the job has no limit.
+	TimeoutSeconds uint32 `protobuf:"varint,4,opt,name=timeout_seconds,json=timeoutSeconds,proto3" json:"timeout_seconds,omitempty"`
+	// The names of the read-only data sets the job may read, each a name in the operator's
+	// configuration.
+	Mounts        []string `protobuf:"bytes,5,rep,name=mounts,proto3" json:"mounts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *JobEnvironment) Reset() {
+	*x = JobEnvironment{}
+	mi := &file_vibesys_cli_v1_env_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *JobEnvironment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*JobEnvironment) ProtoMessage() {}
+
+func (x *JobEnvironment) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_env_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use JobEnvironment.ProtoReflect.Descriptor instead.
+func (*JobEnvironment) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_env_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *JobEnvironment) GetArtifacts() string {
+	if x != nil {
+		return x.Artifacts
+	}
+	return ""
+}
+
+func (x *JobEnvironment) GetCache() string {
+	if x != nil {
+		return x.Cache
+	}
+	return ""
+}
+
+func (x *JobEnvironment) GetServiceUrl() string {
+	if x != nil {
+		return x.ServiceUrl
+	}
+	return ""
+}
+
+func (x *JobEnvironment) GetTimeoutSeconds() uint32 {
+	if x != nil {
+		return x.TimeoutSeconds
+	}
+	return 0
+}
+
+func (x *JobEnvironment) GetMounts() []string {
+	if x != nil {
+		return x.Mounts
+	}
+	return nil
+}
+
+// KubernetesEnvironment is what a job that needs a Kubernetes cluster is given: the cluster's
+// credentials, the registry it pulls images from, and the service that builds images for it. A job
+// without the need gets none of it.
+type KubernetesEnvironment struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The cluster's credentials, in the form kubectl and the client libraries read: an absolute
+	// location.
+	Kubeconfig string `protobuf:"bytes,1,opt,name=kubeconfig,proto3" json:"kubeconfig,omitempty"`
+	// The registry the cluster pulls images from.
+	Registry string `protobuf:"bytes,2,opt,name=registry,proto3" json:"registry,omitempty"`
+	// The address of the service that builds images the registry holds.
+	Builder       string `protobuf:"bytes,3,opt,name=builder,proto3" json:"builder,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *KubernetesEnvironment) Reset() {
+	*x = KubernetesEnvironment{}
+	mi := &file_vibesys_cli_v1_env_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *KubernetesEnvironment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*KubernetesEnvironment) ProtoMessage() {}
+
+func (x *KubernetesEnvironment) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_cli_v1_env_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use KubernetesEnvironment.ProtoReflect.Descriptor instead.
+func (*KubernetesEnvironment) Descriptor() ([]byte, []int) {
+	return file_vibesys_cli_v1_env_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *KubernetesEnvironment) GetKubeconfig() string {
+	if x != nil {
+		return x.Kubeconfig
+	}
+	return ""
+}
+
+func (x *KubernetesEnvironment) GetRegistry() string {
+	if x != nil {
+		return x.Registry
+	}
+	return ""
+}
+
+func (x *KubernetesEnvironment) GetBuilder() string {
+	if x != nil {
+		return x.Builder
+	}
+	return ""
+}
+
 var file_vibesys_cli_v1_env_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
 		ExtendedType:  (*descriptorpb.FieldOptions)(nil),
@@ -257,7 +413,21 @@ const file_vibesys_cli_v1_env_proto_rawDesc = "" +
 	"\x0fOperatorContext\x12;\n" +
 	"\tplacement\x18\x01 \x01(\tB\x1d\xbaH\x05r\x03(\x80\x02\xa2\xbb\x18\x11VIBESYS_PLACEMENTR\tplacement\"J\n" +
 	"\x10SkillEnvironment\x126\n" +
-	"\x03cli\x18\x01 \x01(\tB$\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\vVIBESYS_CLIR\x03cli::\n" +
+	"\x03cli\x18\x01 \x01(\tB$\xbaH\x12r\x102\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\vVIBESYS_CLIR\x03cli\"\xa8\x03\n" +
+	"\x0eJobEnvironment\x12O\n" +
+	"\tartifacts\x18\x01 \x01(\tB1\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x15VIBESYS_ARTIFACTS_DIRR\tartifacts\x12C\n" +
+	"\x05cache\x18\x02 \x01(\tB-\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\x11VIBESYS_CACHE_DIRR\x05cache\x12V\n" +
+	"\vservice_url\x18\x03 \x01(\tB5\xbaH\x1br\x19(\x80\x102\x14^(https?://[^\\s]+)?$\xa2\xbb\x18\x13VIBESYS_SERVICE_URLR\n" +
+	"serviceUrl\x12R\n" +
+	"\x0ftimeout_seconds\x18\x04 \x01(\rB)\xbaH\a*\x05\x18\x80\xe7\x84\x0f\xa2\xbb\x18\x1bVIBESYS_JOB_TIMEOUT_SECONDSR\x0etimeoutSeconds\x12T\n" +
+	"\x06mounts\x18\x05 \x03(\tB<\xbaH'\x92\x01$\x10@\x18\x01\"\x1er\x1c2\x1a^[a-z0-9][a-z0-9_-]{0,62}$\xa2\xbb\x18\x0eVIBESYS_MOUNTSR\x06mounts\"\x86\x02\n" +
+	"\x15KubernetesEnvironment\x12F\n" +
+	"\n" +
+	"kubeconfig\x18\x01 \x01(\tB&\xbaH\x15r\x13(\x80 2\x0e^(/[^\\x00]*)?$\xa2\xbb\x18\n" +
+	"KUBECONFIGR\n" +
+	"kubeconfig\x12S\n" +
+	"\bregistry\x18\x02 \x01(\tB7\xbaH\x1cr\x1a(\x80\x042\x15^[A-Za-z0-9._:/@+-]*$\xa2\xbb\x18\x14VIBESYS_K8S_REGISTRYR\bregistry\x12P\n" +
+	"\abuilder\x18\x03 \x01(\tB6\xbaH\x1cr\x1a(\x80\x042\x15^[A-Za-z0-9._:/@+-]*$\xa2\xbb\x18\x13VIBESYS_K8S_BUILDERR\abuilder::\n" +
 	"\benv_name\x12\x1d.google.protobuf.FieldOptions\x18\xb4\x87\x03 \x01(\tR\aenvName:F\n" +
 	"\renv_namespace\x12\x1f.google.protobuf.MessageOptions\x18\xb4\x87\x03 \x01(\tR\fenvNamespaceB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
@@ -273,17 +443,19 @@ func file_vibesys_cli_v1_env_proto_rawDescGZIP() []byte {
 	return file_vibesys_cli_v1_env_proto_rawDescData
 }
 
-var file_vibesys_cli_v1_env_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_vibesys_cli_v1_env_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_vibesys_cli_v1_env_proto_goTypes = []any{
 	(*AgentContext)(nil),                // 0: vibesys.cli.v1.AgentContext
 	(*OperatorContext)(nil),             // 1: vibesys.cli.v1.OperatorContext
 	(*SkillEnvironment)(nil),            // 2: vibesys.cli.v1.SkillEnvironment
-	(*descriptorpb.FieldOptions)(nil),   // 3: google.protobuf.FieldOptions
-	(*descriptorpb.MessageOptions)(nil), // 4: google.protobuf.MessageOptions
+	(*JobEnvironment)(nil),              // 3: vibesys.cli.v1.JobEnvironment
+	(*KubernetesEnvironment)(nil),       // 4: vibesys.cli.v1.KubernetesEnvironment
+	(*descriptorpb.FieldOptions)(nil),   // 5: google.protobuf.FieldOptions
+	(*descriptorpb.MessageOptions)(nil), // 6: google.protobuf.MessageOptions
 }
 var file_vibesys_cli_v1_env_proto_depIdxs = []int32{
-	3, // 0: vibesys.cli.v1.env_name:extendee -> google.protobuf.FieldOptions
-	4, // 1: vibesys.cli.v1.env_namespace:extendee -> google.protobuf.MessageOptions
+	5, // 0: vibesys.cli.v1.env_name:extendee -> google.protobuf.FieldOptions
+	6, // 1: vibesys.cli.v1.env_namespace:extendee -> google.protobuf.MessageOptions
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -302,7 +474,7 @@ func file_vibesys_cli_v1_env_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_cli_v1_env_proto_rawDesc), len(file_vibesys_cli_v1_env_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   5,
 			NumExtensions: 2,
 			NumServices:   0,
 		},

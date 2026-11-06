@@ -12,8 +12,8 @@ It is the Go core behind the Python `microservices.k8s.App` and the
 behind the KubeAPI and Builder interfaces; package k8stest holds an in-memory
 cluster and builder for tests.
 
-The cluster is the one the environment gives: KUBECONFIG, VIBESYS_K8S_REGISTRY
-and VIBESYS_K8S_BUILDER (see ParseEnvironment).
+The cluster is the one the job gives: the fields of KubernetesEnvironment (see
+ParseEnvironment).
 
 CONSTANTS
 
@@ -174,13 +174,9 @@ func Sweep(ctx context.Context, src AppSource, c Cluster) ([]string, error)
     returns their names.
 
     Only namespaces labelled with the App's name, named with its prefix and
-    older than the longest a job may run plus a margin are deleted, each only if
-    it still has the UID it was listed with, so a concurrent sample's namespace
-    or another task's is never touched.
-
-func TaskTimeout(taskDir string) (time.Duration, error)
-    TaskTimeout is the longest a job of the task may run: the larger of the two
-    timeout_seconds of the task's vibesys.input.toml.
+    older than the job's own limit (Environment.JobTimeout) plus a margin
+    are deleted, each only if it still has the UID it was listed with, so a
+    concurrent sample's namespace or another task's is never touched.
 
 func TreeDigest(root string) (string, error)
     TreeDigest is 16 hex digits over every file's relative path, mode
@@ -423,15 +419,19 @@ type Environment struct {
 	ArtifactsDir string // "" when the job has none
 	WorkDir      string
 	Job          string
+	// JobTimeout is the longest the job may run; zero when the job does not say. Sweep needs it.
+	JobTimeout time.Duration
 }
-    Environment is what vibesys-cli's `kubernetes` resource and the job give the
-    deploy layer.
+    Environment is what the job gives the deploy layer: the cluster's registry
+    and image builder, the job's time limit, and where the job keeps its files.
 
 func ParseEnvironment(getenv func(string) string, workDir, artifacts string) (Environment, error)
-    ParseEnvironment reads the cluster the job gives (KUBECONFIG,
-    VIBESYS_K8S_REGISTRY and VIBESYS_K8S_BUILDER, from vibesys-cli's kubernetes
-    resource) through getenv. artifacts is the job's artifacts directory
-    (.../<job>/<step>), which also names the job in the namespace labels.
+    ParseEnvironment reads the cluster the job gives (the fields of
+    KubernetesEnvironment, from vibesys-cli's kubernetes resource) and its time
+    limit (JobEnvironment.timeout_seconds) through getenv. artifacts is the
+    job's artifacts directory (.../<job>/<step>), which also names the job in
+    the namespace labels. A variable that is missing or malformed is refused
+    naming it.
 
 type Error struct {
 	Kind    string

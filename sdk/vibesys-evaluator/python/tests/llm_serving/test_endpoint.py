@@ -18,7 +18,7 @@ def test_the_url_comes_back_without_a_trailing_slash(host: str, port: int, slash
         assert endpoint() == f"http://{host}:{port}"
 
 
-@pytest.mark.parametrize("value", ["", "   "])
+@pytest.mark.parametrize("value", [""])
 def test_an_unset_url_names_the_variable_and_who_sets_it(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
@@ -34,7 +34,7 @@ def test_an_absent_variable_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize(
-    "value", ["127.0.0.1:8000", "ftp://host:21", "http://", "http://host:8000/v1", "http://a b"]
+    "value", ["127.0.0.1:8000", "ftp://host:21", "http://", "http://host:8000/v1", "http://a b", "   "]
 )
 def test_a_url_that_is_not_a_base_url_is_refused(
     monkeypatch: pytest.MonkeyPatch, value: str

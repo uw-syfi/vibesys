@@ -92,7 +92,6 @@
     "FlowPlan",
     "HandshakeResponse",
     "OutputChunk",
-    "ResultFormat",
     "SupervisorOutcome"
   ],
   "proto/vibesys/cli/v1/task.proto": [

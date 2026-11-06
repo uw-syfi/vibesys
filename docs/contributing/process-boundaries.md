@@ -232,14 +232,18 @@ so `$VIBESYS_RUN` and `$VIBESYS_CLI` still read from a shell. The messages are
 `OperatorContext` (`VIBESYS_PLACEMENT`, which the operator sets and the
 orchestrator leaves alone), `SkillEnvironment` (`VIBESYS_CLI`, which only the
 skills' shell commands read) and `ToolServerCredentials` (what only the tool
-server reads), and later `JobEnvironment` (what a job's commands may read).
-Resource-specific variables stay with their resource as their own small
-message. Variables that belong to external tools (`KUBECONFIG`, `HOME` for the
-agent harness) are not ours to declare.
+server reads), `JobEnvironment` (what a job's commands may read: where its
+artifacts and cache are, the candidate's address, its time limit and the
+read-only data sets) and `KubernetesEnvironment` (the cluster a job that needs
+one is given). Resource-specific variables stay with their resource as their own
+small message. `KUBECONFIG` is a field of `KubernetesEnvironment` because
+`vibesys-cli` writes it, under the name `kubectl` reads; `HOME` for the agent
+harness is not ours to declare.
 
 How a value is written: a string is itself, an unsigned integer is its decimal
 digits, and an enum is its value's name without the enum's prefix, in lower
-case. A field at its zero value is not set, and a variable that is unset or
+case, and a repeated string is its elements separated by commas, so an element
+holds no comma. A field at its zero value is not set, and a variable that is unset or
 empty reads as the zero value, which the field's protovalidate rules then allow
 or refuse. A refusal names the variable and never repeats the value, because
 one of them is a secret. The writer holds a message to the same rules before it
@@ -320,7 +324,6 @@ part they wait for.
 | Tool calls | the `ToolCall` `oneof` | `args_json`, `provider_call_id`, the screen's `cmd`/`command` guess |
 | Tool schemas | descriptors to JSON Schema, `Handoff` `oneof`, templates | hand schemas and decode structs in the tool server |
 | Result records | `ResultRecord` generated for Go and the SDK | the hand parser and writer |
-| Job environment | `JobEnvironment`, `ResultFormat` as a `oneof` | the SDK's manifest reader and name copies |
 | Manifest 0.1 | `TaskManifestV01`: 48 example tasks and the Python input synthesis still write `version = "0.1"`, so it stays until they move | the hand TOML structs of the single-image reader |
 | `cli.v1` validation | rules on the remaining data messages (jobs, results, outcomes, plan) and the responses; the allowlist lists them | the gap against the data rule |
 
@@ -390,7 +393,8 @@ validated message; the other rows are what the parts above replace.
 
 | Boundary | Carrier | Owner | State |
 | --- | --- | --- | --- |
-| job places and candidate | `VIBESYS_ARTIFACTS_DIR`, `VIBESYS_CACHE_DIR`, `VIBESYS_SERVICE_URL`, `VIBESYS_MOUNTS` | several packages, copied in the SDK | untyped: job environment |
+| job places, candidate, limit and data sets | `JobEnvironment`, `KubernetesEnvironment` as variables | `env.proto`; `cli/envcodec`, and the SDK's codec held to the same corpus | typed |
+| benchmark result format | `ResultFormat`, a `oneof` (plans written before it still read) | `supervisor.proto` | typed |
 | benchmark result | result protocol 2, hand JSON on both sides | `sdk/vibesys-evaluator/PROTOCOL.md` | untyped: result records |
 | load generator and phases | binary `PhaseInput`, `PhaseOutput`, `loadgen.proto` | `evaluator/v1` | typed |
 | SDK to Go core | `Capabilities` as protojson | `loadgen.proto` | typed |

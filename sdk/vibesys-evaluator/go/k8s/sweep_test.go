@@ -12,7 +12,7 @@ import (
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/k8s"
 )
 
-// ttl is the task's longest timeout_seconds plus the margin.
+// ttl is the job's time limit plus the margin.
 const ttl = 3600*time.Second + 600*time.Second
 
 // The sweep deletes exactly this task's stale namespaces, never another's.

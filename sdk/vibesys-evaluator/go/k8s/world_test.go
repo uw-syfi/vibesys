@@ -153,14 +153,13 @@ func newWorld(t *testing.T) *world {
 		artifacts: filepath.Join(root, "artifacts", "job-7", "benchmark-0")}
 	write(t, filepath.Join(w.taskDir, "k8s", "manifest.yaml"), manifest)
 	write(t, filepath.Join(w.taskDir, "Dockerfile"), "FROM vibesys-evaluator\nCOPY . /task\n")
-	write(t, filepath.Join(w.taskDir, "vibesys.input.toml"), "[accuracy]\ntimeout_seconds = 1800\n[benchmark]\ntimeout_seconds = 3600\n")
 	write(t, filepath.Join(w.project, "app", "Dockerfile"), "FROM scratch\n")
 	if err := os.MkdirAll(w.artifacts, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	env := map[string]string{
 		"KUBECONFIG": "/vibesys/kubeconfig", "VIBESYS_K8S_REGISTRY": "registry:5000",
-		"VIBESYS_K8S_BUILDER": "tcp://builder:1234",
+		"VIBESYS_K8S_BUILDER": "tcp://builder:1234", "VIBESYS_JOB_TIMEOUT_SECONDS": "3600",
 	}
 	var err error
 	w.env, err = k8s.ParseEnvironment(func(k string) string { return env[k] }, filepath.Join(root, "work"), w.artifacts)

@@ -1,7 +1,7 @@
 // Package kubernetes is the resource of a Kubernetes cluster: a container that has it gets the
 // cluster's kubeconfig, read-only, at the path KUBECONFIG names, the network mode that reaches the
 // cluster's API server, and the addresses of the registry the cluster pulls from and of the image
-// builder, as VIBESYS_K8S_REGISTRY and VIBESYS_K8S_BUILDER. It is what
+// builder, as the fields of KubernetesEnvironment. It is what
 // [placements.<name>.resources.kubernetes] configures. A task that deploys to a cluster needs it
 // ([environment] needs = ["kubernetes"]).
 //
@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
+	cliv1 "github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1"
 	"github.com/uw-syfi/vibesys/cli/internal/core"
 	"github.com/uw-syfi/vibesys/cli/internal/resource"
 )
@@ -25,12 +27,6 @@ import (
 const (
 	// ConfigPath is where the container finds the kubeconfig.
 	ConfigPath = "/vibesys/kubeconfig"
-	// EnvConfig names ConfigPath, as kubectl and the client libraries read it.
-	EnvConfig = "KUBECONFIG"
-	// EnvRegistry is the registry the cluster pulls images from, when the config names one.
-	EnvRegistry = "VIBESYS_K8S_REGISTRY"
-	// EnvBuilder is the image builder's address, when the config names one.
-	EnvBuilder = "VIBESYS_K8S_BUILDER"
 )
 
 // The fingerprint facts.
@@ -137,16 +133,15 @@ func (k *Kubernetes) Attach(ctx context.Context) (resource.Attachment, error) {
 	if err := ctx.Err(); err != nil {
 		return resource.Attachment{}, err
 	}
+	// The registry and the builder are left out of the message when the config names none.
+	cluster, err := envcodec.Encode(&cliv1.KubernetesEnvironment{Kubeconfig: ConfigPath, Registry: k.cfg.Registry, Builder: k.cfg.Builder})
+	if err != nil {
+		return resource.Attachment{}, invalid("the cluster is not a valid kubernetes environment: %v", err)
+	}
 	a := resource.Attachment{
 		Mounts:  []resource.Mount{{Host: k.cfg.Kubeconfig, Container: ConfigPath, ReadOnly: true}},
-		Env:     map[string]string{EnvConfig: ConfigPath},
+		Env:     cluster.Set,
 		Network: k.cfg.Network,
-	}
-	if k.cfg.Registry != "" {
-		a.Env[EnvRegistry] = k.cfg.Registry
-	}
-	if k.cfg.Builder != "" {
-		a.Env[EnvBuilder] = k.cfg.Builder
 	}
 	return a, nil
 }

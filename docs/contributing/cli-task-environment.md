@@ -121,6 +121,40 @@ server's network namespace, with `VIBESYS_SERVICE_URL=http://127.0.0.1:<port>`.
 such as a profiler's command line, and drives it with `[profile]`; it is a
 command job, never cached or scored, and its artifacts are kept with it.
 
+## What a job's commands are told
+
+A command of a job, on the host and in a container alike, finds the job it runs in
+in one message, `JobEnvironment` (`proto/vibesys/cli/v1/env.proto`), written as
+variables by `cli/envcodec` and read by the evaluator package (a Python reader and a
+Go one, each small). One corpus
+(`proto/vibesys/cli/v1/conformance/environment.json`) holds all three to the same bytes:
+
+| Field | Variable | Meaning |
+| --- | --- | --- |
+| `artifacts` | `VIBESYS_ARTIFACTS_DIR` | where the job keeps files that stay with it |
+| `cache` | `VIBESYS_CACHE_DIR` | files kept between runs of the same task image (containers) |
+| `service_url` | `VIBESYS_SERVICE_URL` | the candidate's server, for a task of two images |
+| `timeout_seconds` | `VIBESYS_JOB_TIMEOUT_SECONDS` | the longest the job may run, in whole seconds, rounded up |
+| `mounts` | `VIBESYS_MOUNTS` | the names of the read-only data sets, separated by commas |
+
+A job that needs a cluster also gets `KubernetesEnvironment`: `KUBECONFIG`,
+`VIBESYS_K8S_REGISTRY` and `VIBESYS_K8S_BUILDER`. A variable that does not apply
+to a job is removed from its environment, even if the daemon's own holds it.
+A value that breaks a rule is refused by the reader with an error naming the
+variable.
+
+Evaluator packages are versioned and published, and a task image pins one. The
+variable names and values are the ones the last release (0.2.0rc1) reads, and the
+task directory still holds `vibesys.input.toml`, which that release reads for the
+time limit itself, so a job built against it runs unchanged. The new variable is
+read only by a newer evaluator package: the time limit that its Kubernetes
+deploy sweeps by comes from `VIBESYS_JOB_TIMEOUT_SECONDS` and not from the
+manifest, so a newer package run by an older `vibesys-cli`, which does not write
+it, fails its deploy with an error saying the variable is not set (and, to run
+by hand, to set it to the seconds the job may run). Nothing else in the package
+needs it. A package that reads a malformed value of any of the variables above
+refuses it naming the variable, where the release took it as it was.
+
 ## What the CLI owns
 
 | Concern | How |

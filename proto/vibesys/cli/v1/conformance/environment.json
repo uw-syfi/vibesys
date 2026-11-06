@@ -1,0 +1,77 @@
+{
+  "description": "Each case is the variables a process is started with and what reading them as `message` gives: the message as protojson, or the variables the read refuses. A case with a message also says that writing it gives the variables back, exactly. Read by cli/envcodec (Go) and by vibesys_evaluator (Python).",
+  "cases": [
+    {"name": "nothing is set", "message": "JobEnvironment", "variables": {}, "decoded": {}},
+    {
+      "name": "a host job",
+      "message": "JobEnvironment",
+      "variables": {"VIBESYS_ARTIFACTS_DIR": "/data/job/artifacts", "VIBESYS_JOB_TIMEOUT_SECONDS": "1800"},
+      "decoded": {"artifacts": "/data/job/artifacts", "timeoutSeconds": 1800}
+    },
+    {
+      "name": "a container job with everything",
+      "message": "JobEnvironment",
+      "variables": {
+        "VIBESYS_ARTIFACTS_DIR": "/vibesys/artifacts",
+        "VIBESYS_CACHE_DIR": "/vibesys/cache",
+        "VIBESYS_SERVICE_URL": "http://127.0.0.1:41207",
+        "VIBESYS_JOB_TIMEOUT_SECONDS": "31536000",
+        "VIBESYS_MOUNTS": "models,data-set_2"
+      },
+      "decoded": {
+        "artifacts": "/vibesys/artifacts",
+        "cache": "/vibesys/cache",
+        "serviceUrl": "http://127.0.0.1:41207",
+        "timeoutSeconds": 31536000,
+        "mounts": ["models", "data-set_2"]
+      }
+    },
+    {
+      "name": "one mount",
+      "message": "JobEnvironment",
+      "variables": {"VIBESYS_MOUNTS": "0"},
+      "decoded": {"mounts": ["0"]}
+    },
+    {
+      "name": "a variable that is set and empty is not set",
+      "message": "JobEnvironment",
+      "variables": {"VIBESYS_CACHE_DIR": "", "VIBESYS_MOUNTS": ""},
+      "decoded": {},
+      "writes": {}
+    },
+    {
+      "name": "a variable of another message is ignored",
+      "message": "JobEnvironment",
+      "variables": {"VIBESYS_K8S_REGISTRY": "registry.example", "PATH": "/bin"},
+      "decoded": {},
+      "writes": {}
+    },
+    {
+      "name": "a cluster",
+      "message": "KubernetesEnvironment",
+      "variables": {"KUBECONFIG": "/vibesys/kubeconfig", "VIBESYS_K8S_REGISTRY": "registry.example:5000/team", "VIBESYS_K8S_BUILDER": "tcp://builder.example:1234"},
+      "decoded": {"kubeconfig": "/vibesys/kubeconfig", "registry": "registry.example:5000/team", "builder": "tcp://builder.example:1234"}
+    },
+    {"name": "a relative artifacts location", "message": "JobEnvironment", "variables": {"VIBESYS_ARTIFACTS_DIR": "artifacts"}, "error": ["VIBESYS_ARTIFACTS_DIR"]},
+    {"name": "a relative cache location", "message": "JobEnvironment", "variables": {"VIBESYS_CACHE_DIR": "cache"}, "error": ["VIBESYS_CACHE_DIR"]},
+    {"name": "a service address that is not http", "message": "JobEnvironment", "variables": {"VIBESYS_SERVICE_URL": "ftp://host"}, "error": ["VIBESYS_SERVICE_URL"]},
+    {"name": "a service address with a space", "message": "JobEnvironment", "variables": {"VIBESYS_SERVICE_URL": "http://a b"}, "error": ["VIBESYS_SERVICE_URL"]},
+    {"name": "a timeout that is not a number", "message": "JobEnvironment", "variables": {"VIBESYS_JOB_TIMEOUT_SECONDS": "soon"}, "error": ["VIBESYS_JOB_TIMEOUT_SECONDS"]},
+    {"name": "a negative timeout", "message": "JobEnvironment", "variables": {"VIBESYS_JOB_TIMEOUT_SECONDS": "-1"}, "error": ["VIBESYS_JOB_TIMEOUT_SECONDS"]},
+    {"name": "a timeout with a sign", "message": "JobEnvironment", "variables": {"VIBESYS_JOB_TIMEOUT_SECONDS": "+5"}, "error": ["VIBESYS_JOB_TIMEOUT_SECONDS"]},
+    {"name": "a timeout past 32 bits", "message": "JobEnvironment", "variables": {"VIBESYS_JOB_TIMEOUT_SECONDS": "4294967296"}, "error": ["VIBESYS_JOB_TIMEOUT_SECONDS"]},
+    {"name": "a timeout past a year", "message": "JobEnvironment", "variables": {"VIBESYS_JOB_TIMEOUT_SECONDS": "31536001"}, "error": ["VIBESYS_JOB_TIMEOUT_SECONDS"]},
+    {"name": "a mount name in upper case", "message": "JobEnvironment", "variables": {"VIBESYS_MOUNTS": "models,Data"}, "error": ["VIBESYS_MOUNTS"]},
+    {"name": "a mount named twice", "message": "JobEnvironment", "variables": {"VIBESYS_MOUNTS": "models,models"}, "error": ["VIBESYS_MOUNTS"]},
+    {"name": "an empty mount name", "message": "JobEnvironment", "variables": {"VIBESYS_MOUNTS": "models,,data"}, "error": ["VIBESYS_MOUNTS"]},
+    {"name": "a mount name that is too long", "message": "JobEnvironment", "variables": {"VIBESYS_MOUNTS": "a123456789012345678901234567890123456789012345678901234567890123"}, "error": ["VIBESYS_MOUNTS"]},
+    {
+      "name": "every bad variable is named",
+      "message": "JobEnvironment",
+      "variables": {"VIBESYS_ARTIFACTS_DIR": "x", "VIBESYS_SERVICE_URL": "ftp://h", "VIBESYS_MOUNTS": "X", "VIBESYS_CACHE_DIR": "/ok"},
+      "error": ["VIBESYS_ARTIFACTS_DIR", "VIBESYS_MOUNTS", "VIBESYS_SERVICE_URL"]
+    },
+    {"name": "a registry with a space", "message": "KubernetesEnvironment", "variables": {"VIBESYS_K8S_REGISTRY": "registry example"}, "error": ["VIBESYS_K8S_REGISTRY"]},
+    {"name": "a relative cluster credentials location", "message": "KubernetesEnvironment", "variables": {"KUBECONFIG": "config"}, "error": ["KUBECONFIG"]}
+  ]
+}

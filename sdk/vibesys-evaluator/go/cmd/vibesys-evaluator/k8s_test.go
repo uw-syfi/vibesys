@@ -57,7 +57,6 @@ func newK8sFixture(t *testing.T) *k8sFixture {
 	for path, text := range map[string]string{
 		filepath.Join(f.taskDir, "k8s.yaml"):                "",
 		filepath.Join(f.taskDir, "Dockerfile"):              "FROM scratch\n",
-		filepath.Join(f.taskDir, "vibesys.input.toml"):      "[benchmark]\ntimeout_seconds = 600\n",
 		filepath.Join(root, "project", "web", "Dockerfile"): "FROM scratch\n",
 		filepath.Join(root, "probe.binpb"):                  "plan",
 	} {
@@ -84,7 +83,7 @@ func newK8sFixture(t *testing.T) *k8sFixture {
 	k8sConnect = func(env k8s.Environment, log func(string)) k8s.Cluster {
 		return k8s.Cluster{Env: env, Kube: f.kube, Builder: &k8stest.Builder{}, Clock: clock, Log: log, Token: func() string { return "t1" }}
 	}
-	vars := map[string]string{"KUBECONFIG": "/kc", "VIBESYS_K8S_REGISTRY": "reg:5000", "VIBESYS_K8S_BUILDER": "tcp://b:1"}
+	vars := map[string]string{"KUBECONFIG": "/kc", "VIBESYS_K8S_REGISTRY": "reg:5000", "VIBESYS_K8S_BUILDER": "tcp://b:1", "VIBESYS_JOB_TIMEOUT_SECONDS": "600"}
 	k8sEnv = func(k string) string { return vars[k] }
 	_ = f.projectRoot(root)
 	return f

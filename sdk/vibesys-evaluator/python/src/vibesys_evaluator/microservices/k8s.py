@@ -2,8 +2,8 @@
 
 A task describes its application with one `App`; the package builds its
 images, deploys it into a fresh namespace of the cluster that vibesys-cli's
-`kubernetes` resource gives (`KUBECONFIG`, `VIBESYS_K8S_REGISTRY`,
-`VIBESYS_K8S_BUILDER`), seeds it, waits until it serves, runs every phase in
+`kubernetes` resource gives (its credentials, the registry it pulls from and the
+image builder), seeds it, waits until it serves, runs every phase in
 a pod of that namespace and deletes the namespace on every exit path. The work is the Go core's
 (``vibesys-evaluator k8s ...``); `attach` gives an accuracy check its fault actions on the sample's
 namespace: restart one or every pod of a Deployment, exec a command in a pod, flush a cache and

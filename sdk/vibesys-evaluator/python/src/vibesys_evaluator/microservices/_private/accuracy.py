@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from vibesys_evaluator._private import core
-from vibesys_evaluator._private.sample import ARTIFACTS_ENV, SAMPLE_SEED_ENV, log
+from vibesys_evaluator._private.environment import job_environment
+from vibesys_evaluator._private.sample import SAMPLE_SEED_ENV, log
 from vibesys_evaluator.microservices._k8s._deployment import app_message, probe_plan
 from vibesys_evaluator.microservices._private import dataset as dataset_file
 from vibesys_evaluator.microservices._private.local import LocalDeployer
@@ -194,7 +195,7 @@ def _load(accuracy: Accuracy) -> dict[str, Any]:
 
 def report_dir(env: Mapping[str, str]) -> Path:
     """Where ``bench.py accuracy`` writes by default: accuracy/ in the job's artifacts."""
-    artifacts = env.get(ARTIFACTS_ENV, "")
+    artifacts = job_environment(env).artifacts
     return Path(artifacts) / "accuracy" if artifacts else DEFAULT_REPORT_DIR
 
 
@@ -278,7 +279,7 @@ def run_accuracy(
                 project_root=project_root,
                 # The deploy's logs go to the job's artifacts directory, which also names the
                 # job in the namespace's labels; out when the check is not a job's.
-                artifacts=Path(env.get(ARTIFACTS_ENV) or out),
+                artifacts=Path(job_environment(env).artifacts or out),
                 scratch=Path(scratch),
             ),
             "phase_command": [script.python, script.script, "phase", "--accuracy"],
