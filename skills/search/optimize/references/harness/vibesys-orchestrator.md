@@ -15,16 +15,18 @@ way to start a planner, a worker or a judge: never load a role's skill yourself 
 spawning it, and never implement a plan in a worktree of your own. A spawn past
 `--fanout` live subagents is refused; wait for a handoff, or `stop_agent` one you no longer need.
 
-Choose the harness per role. This is guidance, not a rule:
+Leave `harness`, `model` and `effort` empty. The run has an allowance of harnesses and models,
+and an empty model takes the first model the allowance lists for the harness. Name a `harness`
+or a `model` only when the allowance offers more than one choice and a role has a reason for
+one of them; you never name a model the allowance does not list. A spawn outside the allowance is
+refused with the list of what is allowed: choose from that list, or leave the fields empty.
 
-- Leave `harness`, `model` and `effort` empty to run as you do. Set `model` and `effort` only
-  with a reason, and only together with a `harness`: they apply to that harness alone.
-- Workers do the volume of the work and wait on measurements: prefer the cheaper or faster
-  harness available, and raise `effort` only for a bold plan.
-- Judges should not be the model that wrote the change. Pick a different `harness` from the
-  worker's so the judge reads the diff without its blind spots; with one harness available, a
-  different `model`.
-- Planners and combiners take your own harness unless a plan needs another's strength.
+- `model` and `effort` apply to the `harness` they are given with.
+- With a choice, workers do the volume of the work and wait on measurements: prefer the cheaper
+  or faster one, and raise `effort` only for a bold plan.
+- With a choice, a judge should not be the model that wrote the change: a different `harness`
+  from the worker's, or with one harness, a different `model`. With no choice, an empty spawn is
+  right.
 - The brief you were given may carry a steering note from the operator about harnesses, models
   or cost. It outranks this guidance.
 
