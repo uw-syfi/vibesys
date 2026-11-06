@@ -46,7 +46,11 @@ REPO = Path(__file__).resolve().parent.parent
 SDK = REPO / "sdk" / "vibesys-evaluator"
 SRC = SDK / "python" / "src"
 SNAPSHOT = SDK / "api" / "public-api.txt"
-GO_SNAPSHOTS = (SDK / "api" / "go-workload.txt", SDK / "api" / "go-check.txt")
+GO_SNAPSHOTS = (
+    SDK / "api" / "go-workload.txt",
+    SDK / "api" / "go-check.txt",
+    SDK / "api" / "go-microservices.txt",
+)
 EXAMPLES = SDK / "examples"
 PACKAGE = "vibesys_evaluator"
 #: The public modules, in the snapshot's order.
@@ -200,7 +204,9 @@ def _last_release() -> str | None:
     if not newest:
         return None
     # A tag of the new prefix wins a tie: the same version was re-cut under the module's new path.
-    versions = sorted(newest, key=lambda pair: (_semver_key(pair[0]), pair[1].startswith(RELEASE_TAG_PREFIX)))
+    versions = sorted(
+        newest, key=lambda pair: (_semver_key(pair[0]), pair[1].startswith(RELEASE_TAG_PREFIX))
+    )
     return versions[-1][1]
 
 
@@ -271,14 +277,14 @@ def _check_go_snapshot(snapshot: Path) -> bool:
     tag = _last_release()
     path = snapshot.relative_to(REPO).as_posix()
     git = shutil.which("git") or "git"
-    released = (
-        _run([git, "show", f"{tag}:{path}"], cwd=REPO, capture_output=True) if tag else None
-    )
+    released = _run([git, "show", f"{tag}:{path}"], cwd=REPO, capture_output=True) if tag else None
     if released is None or released.returncode != 0:
         print(f"go api: no release has {path} yet; skipped")
         return True
     current = set(snapshot.read_text().splitlines())
-    removed = [line for line in released.stdout.splitlines() if line.strip() and line not in current]
+    removed = [
+        line for line in released.stdout.splitlines() if line.strip() and line not in current
+    ]
     if not removed:
         print(f"go api: every declaration of {tag}'s {path} is kept")
         return True
@@ -286,7 +292,9 @@ def _check_go_snapshot(snapshot: Path) -> bool:
     print("\n".join(f"  {line}" for line in removed))
     approved = _approved_break(tag)
     if approved is not None:
-        print(f"go api: the changes above are approved in {APPROVED_BREAKS.relative_to(REPO)}: {approved}")
+        print(
+            f"go api: the changes above are approved in {APPROVED_BREAKS.relative_to(REPO)}: {approved}"
+        )
         return True
     print(
         "A breaking change of the Go SDK needs the user's approval first "

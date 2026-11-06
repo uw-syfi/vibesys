@@ -31,10 +31,18 @@ func validName(name string) bool {
 func validPointer(pointer string) bool { return strings.HasPrefix(pointer, "/") }
 
 const (
-	maxSteps     = 16
-	maxCaptures  = 16
-	maxExclusive = 256
+	maxSteps    = 16
+	maxCaptures = 16
 )
+
+// methods are the HTTP methods a step may send (loadgen.proto's HttpMethod).
+var methods = map[string]pb.HttpMethod{
+	"GET":    pb.HttpMethod_HTTP_METHOD_GET,
+	"POST":   pb.HttpMethod_HTTP_METHOD_POST,
+	"PUT":    pb.HttpMethod_HTTP_METHOD_PUT,
+	"DELETE": pb.HttpMethod_HTTP_METHOD_DELETE,
+	"PATCH":  pb.HttpMethod_HTTP_METHOD_PATCH,
+}
 
 // part is a literal text or, when ref is set, a captured value.
 type part struct {
@@ -138,7 +146,7 @@ func literalTemplate(text string) *pb.Template {
 	return &pb.Template{Parts: []*pb.Template_Part{{Part: &pb.Template_Part_Literal{Literal: text}}}}
 }
 
-// Step is one HTTP call of a request, built by Get, Post or Put with Options.
+// Step is one HTTP call of a request, built by HTTP (or Get, Post and Put) with Options.
 type Step struct {
 	message  *pb.Step
 	refs     map[string]bool
@@ -257,18 +265,28 @@ func Expect(statuses ...int) Option {
 	}
 }
 
-// Get is a GET of path (starting with "/") below the target.
+// HTTP is a request with method of path (starting with "/") below the target, with at most one
+// of Form, JSON and Body. The method is GET, POST, PUT, DELETE or PATCH, in any case; HTTP panics
+// on another. Get, Post and Put are its shorthands.
+func HTTP[P Text](method string, path P, options ...Option) Step {
+	m, ok := methods[strings.ToUpper(method)]
+	if !ok {
+		panic(fmt.Sprintf("workload.HTTP: method %q is not one of GET, POST, PUT, DELETE and PATCH", method))
+	}
+	return step(m, path, options)
+}
+
+// Get is HTTP("GET", path, options...).
 func Get[P Text](path P, options ...Option) Step {
 	return step(pb.HttpMethod_HTTP_METHOD_GET, path, options)
 }
 
-// Post is a POST of path (starting with "/") below the target, with at most one of Form, JSON
-// and Body.
+// Post is HTTP("POST", path, options...).
 func Post[P Text](path P, options ...Option) Step {
 	return step(pb.HttpMethod_HTTP_METHOD_POST, path, options)
 }
 
-// Put is a PUT of path (starting with "/") below the target; its options are Post's.
+// Put is HTTP("PUT", path, options...).
 func Put[P Text](path P, options ...Option) Step {
 	return step(pb.HttpMethod_HTTP_METHOD_PUT, path, options)
 }
@@ -325,22 +343,17 @@ func step[P Text](method pb.HttpMethod, path P, options []Option) Step {
 // Request is what one operation sends: Steps in order on one client, with one latency.
 //
 // Info describes what the request was built from (a JSON object: a map, a struct or an Object;
-// nil is {}); it is not sent, and comes back as JSON in the Call that Check and Apply receive.
-// Requests with the same non-empty Exclusive key (at most 256 bytes) never run at the same time,
-// and run in stream order.
+// nil is {}). It is not sent; under accuracy capture it is kept with the operation, for the
+// task's oracle to read (package check).
 type Request struct {
-	Steps     []Step
-	Info      any
-	Exclusive string
+	Steps []Step
+	Info  any
 }
 
 // planned is the stream message of request as operation number operation.
 func planned(request Request, operation int, keepBodies bool) (*pb.PlannedOperation, error) {
 	if len(request.Steps) < 1 || len(request.Steps) > maxSteps {
 		return nil, fmt.Errorf("Request takes 1 to %d steps, got %d", maxSteps, len(request.Steps))
-	}
-	if len(request.Exclusive) > maxExclusive {
-		return nil, fmt.Errorf("Request Exclusive is at most %d bytes, got %d", maxExclusive, len(request.Exclusive))
 	}
 	captured := map[string]bool{}
 	steps := make([]*pb.Step, len(request.Steps))
@@ -362,10 +375,5 @@ func planned(request Request, operation int, keepBodies bool) (*pb.PlannedOperat
 		}
 		steps[n] = s.message
 	}
-	return &pb.PlannedOperation{
-		Operation:    uint32(operation),
-		Steps:        steps,
-		ExclusiveKey: request.Exclusive,
-		KeepBodies:   keepBodies,
-	}, nil
+	return &pb.PlannedOperation{Operation: uint32(operation), Steps: steps, KeepBodies: keepBodies}, nil
 }

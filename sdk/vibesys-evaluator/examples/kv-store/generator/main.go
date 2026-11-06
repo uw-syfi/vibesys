@@ -1,36 +1,47 @@
-// Command generator is the kv-store example's request generator in Go: the same workload as
-// bench.py's WORKLOAD, operation for operation and draw for draw, so for the same phase it writes
-// the same request stream as the Python generator (python/tests/e2e checks it). bench_go.py runs
-// the task with it.
+// Command generator is the kv-store example in Go: bench.py's workload, operation for operation
+// and draw for draw, so for the same phase it writes the same request stream as the Python
+// generator (python/tests/e2e checks it), and the whole task as a Go benchmark
+// (go/microservices).
 //
-// Build it into the task image next to bench.py (go build -o /task/kv-generator .); the phase
-// pod runs it as `kv-generator generate ...` under loadgen and `kv-generator check ...` after.
+// As the generator, the task image builds it next to bench.py (go build -o /task/kv-generator .)
+// and bench_go.py names it: the phase pod runs `kv-generator generate ...` under loadgen. As a
+// whole benchmark it is the task script itself:
+//
+//	kv-generator benchmark --vs-output records.jsonl [--seed N]
+//
+// against the application at $KV_TARGET (microservices.Local: started by whoever runs it).
+// Whether the responses are right is the accuracy check's to judge (../oracle), from the history
+// a run with KV_CAPTURE=1 records.
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/evaluator"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/microservices"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/workload"
 )
 
-// Scale is what bench.py's constants and mix say; the dataset itself is read from the file
-// the orchestrator writes from bench.py's Data.
+// Scale is what bench.py's constants and mix say.
 type Scale struct {
-	Keys                    int
-	MinValue, MaxValue      int
-	ReadWeight, WriteWeight float64
-	ReadSample              float64
+	Seed                                  uint64
+	Keys, Users                           int
+	MinValue, MaxValue                    int
+	ReadWeight, WriteWeight, DeleteWeight float64
 }
 
 // Example is bench.py's scale. Test is the end-to-end test's task (python/tests/vse_support/kv.py),
 // chosen with KV_STORE_SCALE=test.
 var (
-	Example = Scale{Keys: 100_000, MinValue: 16, MaxValue: 512, ReadWeight: 90, WriteWeight: 10, ReadSample: 0.25}
-	Test    = Scale{Keys: 64, MinValue: 4, MaxValue: 32, ReadWeight: 80, WriteWeight: 20, ReadSample: 0.5}
+	Example = Scale{Seed: 7, Keys: 100_000, Users: 100, MinValue: 16, MaxValue: 512, ReadWeight: 88, WriteWeight: 10, DeleteWeight: 2}
+	Test    = Scale{Seed: 11, Keys: 64, Users: 4, MinValue: 4, MaxValue: 32, ReadWeight: 75, WriteWeight: 20, DeleteWeight: 5}
 )
 
 // Data is bench.py's Data as its dataset file holds it: the accounts as [user, password] pairs
@@ -38,6 +49,18 @@ var (
 type Data struct {
 	Users  [][2]string `json:"users"`
 	Values [][]byte    `json:"values"`
+}
+
+// Data is bench.py's Data(): the accounts and the values of half the keys.
+func (s Scale) Data() (*Data, error) {
+	data := &Data{}
+	for n := range s.Users {
+		data.Users = append(data.Users, [2]string{fmt.Sprintf("u%d", n), fmt.Sprintf("pw-%x", workload.NewRand(s.Seed, "user", n).Below(1<<40))})
+	}
+	for k := range s.Keys / 2 {
+		data.Values = append(data.Values, s.value(workload.NewRand(s.Seed, "key", k)))
+	}
+	return data, nil
 }
 
 func readData(path string) (*Data, error) {
@@ -55,24 +78,9 @@ func readData(path string) (*Data, error) {
 	return data, nil
 }
 
-// stored is a key's value as a read may see it: absent (404) or a body.
-type stored struct {
-	present bool
-	body    string
-}
-
-// Model is the dataset and the values written, with the visibility rule of bound 0 (a read
-// sees every acknowledged write at once).
+// Model is the dataset the operations draw accounts from.
 type Model struct {
-	data   *Data
-	values *workload.Versions[int, stored]
-}
-
-func (m *Model) seeded(key int) stored {
-	if key < len(m.data.Values) {
-		return stored{true, string(m.data.Values[key])}
-	}
-	return stored{}
+	data *Data
 }
 
 // value is bench.py's value(rand): a length, then that many lowercase letters.
@@ -114,53 +122,72 @@ func (s Scale) Workload() workload.Workload[*Data, *Model] {
 		return workload.Request{
 			Steps: []workload.Step{login(m, rand),
 				workload.Put(fmt.Sprintf("/kv/k%d", key), workload.Body(s.value(workload.NewRand(seed))), workload.Header("Authorization", auth))},
-			Info:      info{Key: key, Seed: seed},
-			Exclusive: fmt.Sprintf("k%d", key),
+			Info: info{Key: key, Seed: seed},
 		}
 	}
-	applyWrite := func(m *Model, call workload.Call) error {
-		var i info
-		if err := call.DecodeInfo(&i); err != nil {
-			return err
+	remove := func(m *Model, rand *workload.Rand) workload.Request {
+		key := rand.Zipf(s.Keys, 0.99)
+		return workload.Request{
+			Steps: []workload.Step{login(m, rand),
+				workload.HTTP("DELETE", fmt.Sprintf("/kv/k%d", key), workload.Header("Authorization", auth), workload.Expect(200, 404))},
+			Info: info{Key: key},
 		}
-		m.values.Write(i.Key, stored{true, string(s.value(workload.NewRand(i.Seed)))}, call)
-		return nil
-	}
-	checkRead := func(m *Model, call workload.Call) error {
-		var i info
-		if err := call.DecodeInfo(&i); err != nil {
-			return err
-		}
-		response := call.Responses[1]
-		got := stored{}
-		if response.Status == 200 {
-			got = stored{true, string(response.Body)}
-		}
-		allowed := m.values.Allowed(i.Key, m.seeded(i.Key), call.Start, call.End)
-		for _, v := range allowed {
-			if v == got {
-				return nil
-			}
-		}
-		return fmt.Errorf("k%d: %.40q, allowed %d values", i.Key, got.body, len(allowed))
-	}
-	checkWrite := func(_ *Model, call workload.Call) error {
-		if status := call.Responses[1].Status; status != 200 {
-			return fmt.Errorf("PUT: HTTP %d", status)
-		}
-		return nil
 	}
 	return workload.Workload[*Data, *Model]{
 		Dataset: readData,
-		Model: func(data *Data, _ *workload.Rand) (*Model, error) {
-			return &Model{data: data, values: workload.NewVersions[int, stored](time.Duration(0))}, nil
-		},
+		Model:   func(data *Data, _ *workload.Rand) (*Model, error) { return &Model{data: data}, nil },
 		Operations: []workload.Operation[*Model]{
-			// A share of the reads is checked: the bodies of the others are kept as hash and length.
-			{Name: "read", Weight: s.ReadWeight, Build: read, Check: checkRead, Sample: s.ReadSample},
-			{Name: "write", Weight: s.WriteWeight, Build: write, Check: checkWrite, Apply: applyWrite},
+			{Name: "read", Weight: s.ReadWeight, Build: read},
+			{Name: "write", Weight: s.WriteWeight, Build: write},
+			{Name: "delete", Weight: s.DeleteWeight, Build: remove},
 		},
 	}
+}
+
+// seed is bench.py's seed(data): the accounts and the keys, through the service's own API.
+func seed(ctx context.Context, target string, data *Data) error {
+	send := func(method, path, token string, body []byte) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, method, target+path, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil && resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			return nil, fmt.Errorf("%s %s: HTTP %d", method, path, resp.StatusCode)
+		}
+		return resp, err
+	}
+	for _, user := range data.Users {
+		account, _ := json.Marshal(map[string]string{"user": user[0], "password": user[1]})
+		resp, err := send("POST", "/register", "", account)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+	}
+	account, _ := json.Marshal(map[string]string{"user": data.Users[0][0], "password": data.Users[0][1]})
+	resp, err := send("POST", "/login", "", account)
+	if err != nil {
+		return err
+	}
+	var login struct{ Token string }
+	err = json.NewDecoder(resp.Body).Decode(&login)
+	resp.Body.Close()
+	if err != nil {
+		return err
+	}
+	for key, value := range data.Values {
+		resp, err := send("PUT", fmt.Sprintf("/kv/k%d", key), login.Token, value)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+	}
+	return nil
 }
 
 func main() {
@@ -168,5 +195,41 @@ func main() {
 	if os.Getenv("KV_STORE_SCALE") == "test" {
 		scale = Test
 	}
-	workload.Main(scale.Workload())
+	target := os.Getenv("KV_TARGET")
+	capture := os.Getenv("KV_CAPTURE") != ""
+	kv := scale.Workload()
+	microservices.Main(microservices.Task[*Data, *Model]{
+		Metrics: map[string]evaluator.Metric{
+			"latency_ms.p50":        {Unit: "ms", Direction: evaluator.Min},
+			"latency_ms.p99":        {Unit: "ms", Direction: evaluator.Min},
+			"operations_per_second": {Unit: "ops/s", Direction: evaluator.Max},
+		},
+		Validity: &evaluator.Validity{MaxErrorRate: 0.001, MinSustainedRatio: 0.99, MinOpsPerOperation: 1},
+		Dataset:  scale.Data,
+		System:   microservices.Local(target),
+		Seed:     func(ctx context.Context, data *Data) error { return seed(ctx, target, data) },
+		Workload: &kv,
+		Capture:  capture,
+		Benchmark: func(ctx context.Context, run *microservices.Run) error {
+			rate, secs, warmup := 2000.0, 60*time.Second, 15*time.Second // bench.py's
+			if scale == Test {
+				rate, secs, warmup = 100, 2*time.Second, time.Second
+			}
+			if capture { // an accuracy run: a phase, a pause between, another phase
+				if _, err := run.OpenLoop(ctx, microservices.Open{Rate: rate, Secs: secs, Warmup: warmup}); err != nil {
+					return err
+				}
+				if err := run.Fault(ctx, "pause", "kv", func(context.Context) error { return nil }); err != nil {
+					return err
+				}
+			}
+			phase, err := run.OpenLoop(ctx, microservices.Open{Rate: rate, Secs: secs, Warmup: warmup})
+			if err != nil {
+				return err
+			}
+			return run.Report(map[string]float64{
+				"latency_ms.p50": phase.P50Ms, "latency_ms.p99": phase.P99Ms, "operations_per_second": phase.OpsPerSec,
+			})
+		},
+	})
 }

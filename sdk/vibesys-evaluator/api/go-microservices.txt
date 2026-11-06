@@ -1,0 +1,167 @@
+package microservices // import "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/microservices"
+
+Package microservices is vibesys-evaluator's phase runner for applications
+served over HTTP: load phases (Run.ClosedLoop, Run.OpenLoop) against a deployed
+application, each in a phase pod next to it where loadgen sends the request
+stream of the task's generator (package workload), then the saturation guard and
+the task's validity rules decide whether the phase is a measurement. It is the
+Go form of Python's vibesys_evaluator.microservices, whose Run calls the same
+code through the `vibesys-evaluator phase` subcommands.
+
+A Go task script is a whole benchmark:
+
+    func main() {
+    	microservices.Main(microservices.Task[Data, *Model]{
+    		Metrics:  map[string]evaluator.Metric{"ops_per_sec": {Unit: "ops/s", Direction: evaluator.Max}},
+    		Dataset:  dataset,
+    		System:   microservices.Local("http://127.0.0.1:8080"),
+    		Workload: &kvWorkload,
+    		Benchmark: func(ctx context.Context, run *microservices.Run) error {
+    			capacity, err := run.ClosedLoop(ctx, microservices.Closed{Clients: 64, Secs: 30 * time.Second, Warmup: 10 * time.Second})
+    			if err != nil {
+    				return err
+    			}
+    			return run.Report(map[string]float64{"ops_per_sec": capacity.OpsPerSec})
+    		},
+    	})
+    }
+
+A benchmark only measures: whether the responses are right is for an accuracy
+check (package check) to judge, from the history a run with Task.Capture records
+(every response body, the loadgen client of each operation, the generator's
+info, the faults of Run.Fault). See sdk/vibesys-evaluator/docs/spec.md,
+"A phase" and "Accuracy history".
+
+FUNCTIONS
+
+func Main[D, M any](task Task[D, M])
+    Main runs the command in os.Args and exits: `benchmark` is one sample (the
+    core's benchmark, see evaluator.Main), whose body deploys the application on
+    the Task's System, runs Benchmark on a Run and tears the application down on
+    every path; `phase` is the phase pod's command; `generate` the generator's
+    (with Task.Workload); `seed` the seed pod's.
+
+
+TYPES
+
+type Arrivals string
+    Arrivals is the arrival process of an open loop.
+
+const (
+	// Poisson spaces arrivals by exponential gaps of mean 1/rate (the default).
+	Poisson Arrivals = "poisson"
+	// Uniform spaces arrivals 1/rate apart.
+	Uniform Arrivals = "uniform"
+)
+    The arrival processes.
+
+type Closed struct {
+	// Clients is at least 1.
+	Clients int
+	// Secs is the measurement window (> 0); Warmup the load before it (>= 0).
+	Secs, Warmup time.Duration
+}
+    Closed is capacity: Clients clients, each sending its next operation when
+    its last one completed, for Secs after a Warmup. Latency is end minus start.
+
+type Load interface {
+	// Has unexported methods.
+}
+    Load is how a phase offers load: Closed or Open.
+
+type Open struct {
+	// Rate is the operations per second offered (> 0).
+	Rate float64
+	// Secs is the measurement window (> 0); Warmup the load before it (>= 0).
+	Secs, Warmup time.Duration
+	// Arrivals is Poisson when empty.
+	Arrivals Arrivals
+}
+    Open is latency at a fixed offered rate: operations arrive on schedule,
+    whatever the responses, for Secs after a Warmup. Latency is end minus the
+    scheduled arrival.
+
+type PhaseResult struct {
+	// OpsPerSec is the operations completed in the window divided by its length.
+	OpsPerSec float64
+	// P50Ms and P99Ms are the latency's median and 99th percentile, milliseconds.
+	P50Ms, P99Ms float64
+}
+    PhaseResult is what one phase measured in its window.
+
+type Run struct {
+	*evaluator.Run
+	// Has unexported fields.
+}
+    Run is the sample a microservices Benchmark receives: the core's Run
+    (Seed, Phase, Report) and the load phases. Each phase runs in a phase
+    pod next to the deployed system and returns what it measured, or a
+    *evaluator.SampleError that names the phase and why it is not a measurement
+    (return it: it ends the sample with an error record). Every phase builds
+    its requests from a model made afresh, and nothing is reset between phases:
+    the application keeps what earlier phases wrote.
+
+func (r *Run) ClosedLoop(ctx context.Context, load Closed) (PhaseResult, error)
+    ClosedLoop runs a closed-loop phase: capacity, Clients clients each sending
+    its next operation when the last completed. The result's latency is end
+    minus start.
+
+func (r *Run) Fault(ctx context.Context, kind, target string, action func(context.Context) error) error
+    Fault runs action between two phases, after at least one, and records it
+    as a fault of kind (^[a-z][a-z0-9_]{0,62}$, a name the task's oracle gives
+    meaning: "restart", "flush") on target (for messages): no phase runs while
+    it does, and its start and end are taken on the clock loadgen stamps its
+    results with. Under capture (Task.Capture) the faults go into the accuracy
+    history (history.binpb in the artifacts). An error of action is returned,
+    wrapped, after it is recorded.
+
+func (r *Run) OpenLoop(ctx context.Context, load Open) (PhaseResult, error)
+    OpenLoop runs an open-loop phase: latency at a fixed offered rate. The
+    result's latency is end minus the scheduled arrival.
+
+type System interface {
+	// Has unexported methods.
+}
+    System is where a sample's application runs and its phase pods with it:
+    Local (an application already running), or a Kubernetes namespace of its own
+    (package k8s).
+
+func Local(target string) System
+    Local is an application already running at target (a base URL,
+    http://host:port), started by whoever runs the benchmark: the seed and each
+    phase run as child processes here, with the same files and command lines a
+    phase pod gets, so a benchmark runs without a cluster.
+
+type Task[D, M any] struct {
+	// Metrics the benchmark reports, by name.
+	Metrics map[string]evaluator.Metric
+	// Validity is when a phase is a measurement; evaluator.DefaultValidity() when nil.
+	Validity *evaluator.Validity
+	// Dataset builds the initial data, a pure function of the task's constants: every process of
+	// a sample builds it (the orchestrator, the seed, each phase), and the seed refuses one that
+	// differs from the orchestrator's. It is written as JSON (encoding/json) into dataset.json in
+	// the artifacts and for the generator (--dataset). Nil: D's zero value.
+	Dataset func() (D, error)
+	// System is where the application runs: Local, or a Kubernetes namespace (package k8s).
+	System System
+	// Seed writes the dataset into the deployed application before the phases, from a process
+	// next to it (a seed pod); nil when there is nothing to write.
+	Seed func(ctx context.Context, data D) error
+	// Workload is the request generator, in this binary (`generate`); or Generator is its
+	// command, another program built on package workload, in the task image. Exactly one is set.
+	// A relative Generator program with a slash is taken from this binary's directory.
+	Workload  *workload.Workload[D, M]
+	Generator []string
+	// Benchmark is the scoring definition: it runs phases on run and calls run.Report. An error
+	// ends the sample with an error record.
+	Benchmark func(ctx context.Context, run *Run) error
+	// Capture records every phase's whole history for an accuracy check, which benchmarks leave
+	// off: every response body, the loadgen client of every operation and the generator's info
+	// of every operation are kept in the phase directories, and history.binpb lists the phases
+	// and the faults (Run.Fault). See docs/spec.md, "Accuracy history".
+	Capture bool
+}
+    Task is everything a microservices task script passes to Main: the Go form
+    of Python's microservices.main. D is the dataset's type and M the workload's
+    model (any type when the workload is another program).
+

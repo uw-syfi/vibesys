@@ -40,8 +40,8 @@ type NamedMetric struct {
 
 // Validity is when a phase is a measurement; a phase that breaks a rule fails the sample.
 type Validity struct {
-	// MaxErrorRate is the most errors (a load generator's plus failed checks) over the window's
-	// operations a phase may have, in [0, 1].
+	// MaxErrorRate is the most errors (the load generator's: transport, timeout, status,
+	// capture) over the window's operations a phase may have, in [0, 1].
 	MaxErrorRate float64
 	// MinSustainedRatio is, open loop, the least offered rate over target rate, in (0, 1].
 	MinSustainedRatio float64

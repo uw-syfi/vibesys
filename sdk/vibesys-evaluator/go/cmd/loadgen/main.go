@@ -68,10 +68,12 @@ func usage(format string, args ...any) error { return usageError{fmt.Errorf(form
 
 const help = `usage:
   loadgen closed   --target URL --clients N --secs S --warmup W --results F --summary F
-                   [--timeout S] [--buffer N] [--format binpb|json] -- GENERATOR [ARG...]
+                   [--timeout S] [--buffer N] [--record-clients] [--format binpb|json]
+                   -- GENERATOR [ARG...]
   loadgen open     --target URL --rate R [--arrivals uniform|poisson] [--seed N] [--max-in-flight N]
                    [--min-sustained RATIO] --secs S --warmup W --results F --summary F
-                   [--timeout S] [--buffer N] [--format binpb|json] -- GENERATOR [ARG...]
+                   [--timeout S] [--buffer N] [--record-clients] [--format binpb|json]
+                   -- GENERATOR [ARG...]
   loadgen probe    --target URL --requests F --rounds N --deadline S [--timeout S] [--format binpb|json]
   loadgen selftest --summary F [--step-secs S] [--max-rate R] [--format binpb|json]
   loadgen --capabilities [--format binpb|json]
@@ -185,6 +187,7 @@ func phaseCommand(ctx context.Context, model string, args []string, stderr io.Wr
 	seed := set.Uint64("seed", 0, "open loop: Poisson arrivals seed")
 	maxInFlight := set.Int("max-in-flight", 512, "open loop: concurrent operations")
 	minSustained := set.Float64("min-sustained", 0.95, "open loop: sustained when offered >= this x rate")
+	recordClients := set.Bool("record-clients", false, "record the client of each operation in its result")
 	required := []string{"target", "secs", "warmup", "results", "summary"}
 	if model == "closed" {
 		required = append(required, "clients")
@@ -209,7 +212,7 @@ func phaseCommand(ctx context.Context, model string, args []string, stderr io.Wr
 		load = engine.Open{Rate: *rate, Arrivals: kind, Seed: *seed, MaxInFlight: *maxInFlight, MinSustained: *minSustained}
 		conns = *maxInFlight
 	}
-	config := engine.Config{Load: load}
+	config := engine.Config{Load: load, RecordClients: *recordClients}
 	var err error
 	if config.Window, err = seconds(*secs, "secs"); err != nil {
 		return err

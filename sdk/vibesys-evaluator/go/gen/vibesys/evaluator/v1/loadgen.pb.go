@@ -221,7 +221,7 @@ func (RefEncoding) EnumDescriptor() ([]byte, []int) {
 }
 
 // ErrorKind is why an operation or a step failed, as loadgen sees it.
-// Application-level validity is the Python side's (the validation sample).
+// Whether a response is right is the accuracy check's (go/check).
 type ErrorKind int32
 
 const (
@@ -561,10 +561,13 @@ type PlannedOperation struct {
 	Steps     []*Step `protobuf:"bytes,2,rep,name=steps,proto3" json:"steps,omitempty"`
 	// Operations with the same non-empty key never run at the same time; loadgen
 	// grants the key in stream order, so operations on one key are applied in
-	// stream order. Time spent waiting for the key counts as latency.
+	// stream order. Time spent waiting for the key counts as latency. The SDKs
+	// no longer set it (benchmarks do not check responses); loadgen still
+	// honours it.
 	ExclusiveKey string `protobuf:"bytes,3,opt,name=exclusive_key,json=exclusiveKey,proto3" json:"exclusive_key,omitempty"`
-	// Keep every response body in the results file. Otherwise only a digest and
-	// the length are kept (the operation is outside the validation sample).
+	// Keep every response body in the results file (the SDKs set it on every
+	// operation under accuracy capture). Otherwise only a digest and the length
+	// are kept.
 	KeepBodies    bool `protobuf:"varint,4,opt,name=keep_bodies,json=keepBodies,proto3" json:"keep_bodies,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1229,8 +1232,8 @@ type OperationResult struct {
 	// The client that ran it: in a closed loop the client's number (0 to
 	// clients - 1), in an open loop the in-flight slot it held (0 to
 	// max-in-flight - 1). Two operations of one client never overlap in time.
-	// Unset in files written before it was defined; the accuracy checker then
-	// assigns display lanes itself.
+	// Unset in files written before it was defined, and without
+	// --record-clients; the accuracy checker then assigns display lanes itself.
 	Client        *uint32 `protobuf:"varint,8,opt,name=client,proto3,oneof" json:"client,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2033,6 +2036,8 @@ type Capabilities struct {
 	// The phase commands read the request stream of a generator command (after
 	// "--") and report GeneratorStats; the only request input of a phase.
 	RequestStream bool `protobuf:"varint,9,opt,name=request_stream,json=requestStream,proto3" json:"request_stream,omitempty"`
+	// The phase commands take --record-clients (OperationResult.client).
+	RecordClients bool `protobuf:"varint,10,opt,name=record_clients,json=recordClients,proto3" json:"record_clients,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2126,6 +2131,13 @@ func (x *Capabilities) GetRefEncodings() []RefEncoding {
 func (x *Capabilities) GetRequestStream() bool {
 	if x != nil {
 		return x.RequestStream
+	}
+	return false
+}
+
+func (x *Capabilities) GetRecordClients() bool {
+	if x != nil {
+		return x.RecordClients
 	}
 	return false
 }
@@ -2432,7 +2444,7 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\x04rate\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x04rate\x12/\n" +
 	"\n" +
 	"ready_secs\x18\x06 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\treadySecs\x12\x16\n" +
-	"\x06buffer\x18\a \x01(\rR\x06buffer\"\xb3\x04\n" +
+	"\x06buffer\x18\a \x01(\rR\x06buffer\"\xda\x04\n" +
 	"\fCapabilities\x120\n" +
 	"\x0floadgen_version\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x0eloadgenVersion\x125\n" +
 	"\x12min_schema_version\x18\x02 \x01(\rB\a\xbaH\x04*\x02(\x01R\x10minSchemaVersion\x125\n" +
@@ -2442,7 +2454,9 @@ const file_vibesys_evaluator_v1_loadgen_proto_rawDesc = "" +
 	"\barrivals\x18\x06 \x03(\x0e2\x1e.vibesys.evaluator.v1.ArrivalsB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\barrivals\x12%\n" +
 	"\x0eexclusive_keys\x18\a \x01(\bR\rexclusiveKeys\x12W\n" +
 	"\rref_encodings\x18\b \x03(\x0e2!.vibesys.evaluator.v1.RefEncodingB\x0f\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00R\frefEncodings\x12%\n" +
-	"\x0erequest_stream\x18\t \x01(\bR\rrequestStream\"\xaf\x02\n" +
+	"\x0erequest_stream\x18\t \x01(\bR\rrequestStream\x12%\n" +
+	"\x0erecord_clients\x18\n" +
+	" \x01(\bR\rrecordClients\"\xaf\x02\n" +
 	"\x0eSelftestResult\x12+\n" +
 	"\bmax_rate\x18\x01 \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00R\amaxRate\x12O\n" +
 	"\radded_latency\x18\x02 \x01(\v2\".vibesys.evaluator.v1.HdrHistogramB\x06\xbaH\x03\xc8\x01\x01R\faddedLatency\x129\n" +

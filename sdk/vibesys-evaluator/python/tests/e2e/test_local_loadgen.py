@@ -2,9 +2,11 @@
 
 The service is ``KvService`` over HTTP on localhost; loadgen is built from
 ``sdk/vibesys-evaluator/go`` with go (or taken from
-``VIBESYS_EVALUATOR_LOADGEN``). The sample must end with a valid result
-record, and a service that loses writes must fail it by its checks, with the
-Python generator and with the kv-store example's Go generator alike; the two
+``VIBESYS_EVALUATOR_LOADGEN``), and each phase runs in the core
+(``vibesys-evaluator phase pod``). The sample must end with a valid result
+record, with the Python generator and with the kv-store example's Go
+generator alike; under capture it records a history that the kv-store
+example's oracle passes, and fails when the service loses writes. The two
 generators must write the same request stream.
 """
 
@@ -23,7 +25,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vibesys_evaluator._private.files import read_summary
+from vibesys_evaluator._private.files import read_results, read_summary
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
 
@@ -40,6 +42,7 @@ if TYPE_CHECKING:
 TESTS = Path(__file__).resolve().parents[1]
 LOADGEN_SOURCE = TESTS.parents[1] / "go"
 GO_GENERATOR_SOURCE = TESTS.parents[1] / "examples" / "kv-store" / "generator"
+ORACLE_SOURCE = TESTS.parents[1] / "examples" / "kv-store" / "oracle"
 SCRIPT = Path(__file__).with_name("bench_local.py")
 # Bounds that only guard against hangs: a build, a sample of two short phases, a stream read.
 BUILD_TIMEOUT_SECS = 600
@@ -85,6 +88,12 @@ def built_loadgen(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 @pytest.fixture(scope="session")
+def oracle(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """The kv-store example's accuracy oracle, built with go."""
+    return _go_build(ORACLE_SOURCE, ".", tmp_path_factory.mktemp("oracle") / "kv-oracle")
+
+
+@pytest.fixture(scope="session")
 def go_generator(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """The kv-store example's Go generator, built with go."""
     return _go_build(
@@ -123,6 +132,9 @@ def _serving(service: kv.KvService) -> Iterator[str]:
         def do_PUT(self) -> None:
             self._answer()
 
+        def do_DELETE(self) -> None:
+            self._answer()
+
         def _answer(self) -> None:
             body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
             headers = {name.lower(): value for name, value in self.headers.items()}
@@ -150,7 +162,12 @@ def _serving(service: kv.KvService) -> Iterator[str]:
 
 
 def _sample(
-    service: kv.KvService, loadgen: Path, tmp_path: Path, generator: Path | None = None
+    service: kv.KvService,
+    loadgen: Path,
+    tmp_path: Path,
+    generator: Path | None = None,
+    *,
+    capture: bool = False,
 ) -> tuple[int, str, str]:
     """Run one sample (with the Go ``generator``, or the Python one); its status, records, log."""
     kv.seed_service(service, kv.Data())
@@ -162,6 +179,7 @@ def _sample(
             "VIBESYS_EVALUATOR_LOADGEN": str(loadgen),
             "VIBESYS_ARTIFACTS_DIR": str(artifacts),
             "KV_GO_GENERATOR": str(generator) if generator else "",
+            "KV_CAPTURE": "1" if capture else "",
             "KV_STORE_SCALE": "test",
             "PYTHONPATH": os.pathsep.join([str(TESTS), os.environ.get("PYTHONPATH", "")]),
         }
@@ -206,28 +224,68 @@ def test_a_sample_against_a_real_service_reports_a_valid_result(
     assert summary.generator.read >= summary.completed > 0
 
 
-def test_lost_writes_fail_a_real_sample_by_its_checks(
-    built_loadgen: Path, generator: Path | None, tmp_path: Path
+#: The service, and the oracle's verdict on its history: PASS (0), FAIL (1).
+_JUDGED = {"right": (kv.KvService, 0), "losing-writes": (lambda: kv.KvService(lose_writes=True), 1)}
+
+
+@pytest.mark.parametrize("case", sorted(_JUDGED))
+def test_a_captured_history_is_judged_by_the_oracle(
+    built_loadgen: Path, oracle: Path, generator: Path | None, tmp_path: Path, case: str
 ) -> None:
-    code, records, log = _sample(kv.KvService(lose_writes=True), built_loadgen, tmp_path, generator)
-    failure = read_measurement(parse_records(records)).failure
-    assert code == 1, records + log
-    assert failure is not None
-    assert "failed checks" in failure
+    make, verdict = _JUDGED[case]
+    service = make()
+    code, records, log = _sample(service, built_loadgen, tmp_path, generator, capture=True)
+    assert code == 0, records + log  # a benchmark only measures
+    artifacts = tmp_path / "artifacts"
+    manifest = phase_pb.HistoryManifest.from_binary((artifacts / "history.binpb").read_bytes())
+    assert manifest.phases == 2
+    assert [(f.kind, f.after_phase) for f in manifest.faults] == [("pause", 0)]
+    results = read_results(artifacts / "phase-0" / "results.binpb")
+    assert results
+    assert all(r.client is not None for r in results)
+    judged = _run(
+        [str(oracle), "--history", str(artifacts), "--out", str(tmp_path / "accuracy")],
+        env={**os.environ, "KV_STORE_SCALE": "test"},
+        timeout=SAMPLE_TIMEOUT_SECS,
+    )
+    assert judged.returncode == verdict, judged.stdout + judged.stderr
 
 
-def _phase_input(path: Path) -> Path:
-    """A closed-loop phase with a history of writes (as a later phase of a sample has)."""
-    history = [
-        phase_pb.HistoryEntry(
-            operation="write",
-            info_json=f'{{"key":{key},"seed":{seed}}}',
-            start_unix_nanos=1_800_000_000_000_000_000 + n,
-            end_unix_nanos=1_800_000_000_000_000_100 + n,
-            ok=True,
+def test_the_go_example_is_a_whole_benchmark(
+    built_loadgen: Path, go_generator: Path, oracle: Path, tmp_path: Path
+) -> None:
+    # The kv-store example's Go binary as the task script (go/microservices): it seeds the
+    # service itself, runs its phases through the same phase runner, and under capture records
+    # a history the oracle passes.
+    output, artifacts = tmp_path / "records.jsonl", tmp_path / "artifacts"
+    with _serving(kv.KvService()) as target:
+        env = {
+            **os.environ,
+            "KV_TARGET": target,
+            "KV_CAPTURE": "1",
+            "KV_STORE_SCALE": "test",
+            "VIBESYS_EVALUATOR_LOADGEN": str(built_loadgen),
+            "VIBESYS_ARTIFACTS_DIR": str(artifacts),
+        }
+        done = _run(
+            [str(go_generator), "benchmark", "--vs-output", str(output), "--seed", "7"],
+            env=env,
+            timeout=SAMPLE_TIMEOUT_SECS,
         )
-        for n, (key, seed) in enumerate([(3, 12345), (0, 99), (63, 7), (3, 1 << 61)])
-    ]
+    measurement = read_measurement(parse_records(output.read_text()))
+    assert done.returncode == 0, output.read_text() + done.stderr
+    assert measurement.values is not None
+    assert measurement.values["operations_per_second"] > 0
+    judged = _run(
+        [str(oracle), "--history", str(artifacts), "--out", str(tmp_path / "accuracy")],
+        env={**os.environ, "KV_STORE_SCALE": "test"},
+        timeout=SAMPLE_TIMEOUT_SECS,
+    )
+    assert judged.returncode == 0, judged.stdout + judged.stderr
+
+
+def _phase_input(path: Path, *, capture: bool) -> Path:
+    """A closed-loop phase of a sample (a later one: its index is not 0)."""
     phase = phase_pb.PhaseInput(
         sample_seed=424242,
         phase_index=2,
@@ -235,7 +293,7 @@ def _phase_input(path: Path) -> Path:
         clients=4,
         secs=1.0,
         warmup_secs=0.5,
-        history=history,
+        capture=capture,
     )
     path.write_bytes(phase.to_binary())
     return path
@@ -273,10 +331,13 @@ def _messages(data: bytes) -> list[bytes]:
     return frames[1:]
 
 
+@pytest.mark.parametrize("capture", [False, True])
 def test_the_python_and_the_go_generator_write_the_same_stream(
-    go_generator: Path, tmp_path: Path
+    go_generator: Path,
+    tmp_path: Path,
+    capture: bool,  # noqa: FBT001  # LW-731405 [FBT001]; a pytest parameter, not an API flag
 ) -> None:
-    phase = _phase_input(tmp_path / "input.binpb")
+    phase = _phase_input(tmp_path / "input.binpb", capture=capture)
     dataset = tmp_path / "dataset.json"
     dataset.write_bytes(dataset_file.encode(kv.Data()))
     env = {

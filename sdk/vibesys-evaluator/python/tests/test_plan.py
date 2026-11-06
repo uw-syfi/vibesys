@@ -1,46 +1,47 @@
 """The request stream: what a Python workload's ``generate`` writes for loadgen.
 
-The stream is a pure function of the phase input; writes are applied as
-pending while it is written; the validation sample is drawn with it; every
-request is encoded as the schema says; sampled operations and writes are
-kept, before they are written, for the check.
+The stream is a pure function of the phase input; ``build`` may change the
+model, and later operations see it; every request is encoded as the schema
+says; under capture every operation keeps its bodies and is kept, with its
+info, before it is written.
 """
 
 from __future__ import annotations
 
-import gc
 import json
-import weakref
 from typing import TYPE_CHECKING
 
 # test-isolation: generation is the phase pod's private step; its output is the schema's file.
-from vibesys_evaluator._private.files import read_requests
+from vibesys_evaluator._private.files import read_records, read_requests
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
 from vibesys_evaluator.microservices import (
-    Call,
     Operation,
     Request,
-    Versions,
     Workload,
+    http,
     post,
     put,
     ref,
 )
-from vibesys_evaluator.microservices._private.phase import KEPT_FILE, check, generate, read_kept
+from vibesys_evaluator.microservices._private.phase import KEPT_FILE, generate
 
 from .vse_support import kv
 from .vse_support.fake_loadgen import Capped, whole_frames
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
     from vibesys_evaluator import Rand
 
 
 def _phase(
-    index: int = 0, *, rate: float = 50.0, secs: float = 1.0, warmup_secs: float = 1.0
+    index: int = 0,
+    *,
+    rate: float = 50.0,
+    secs: float = 1.0,
+    warmup_secs: float = 1.0,
+    capture: bool = False,
 ) -> phase_pb.PhaseInput:
     """An open-loop phase input."""
     return phase_pb.PhaseInput(
@@ -51,6 +52,7 @@ def _phase(
         arrivals=pb.Arrivals.UNIFORM,
         secs=secs,
         warmup_secs=warmup_secs,
+        capture=capture,
     )
 
 
@@ -116,29 +118,37 @@ def test_a_longer_stream_starts_with_the_shorter_one(tmp_path: Path) -> None:
     assert long[: len(short)] == short
 
 
-def test_every_sampled_operation_and_write_is_kept_before_it_is_written(tmp_path: Path) -> None:
+def test_a_benchmark_keeps_no_body_and_no_record(tmp_path: Path) -> None:
     plan = _plan(tmp_path / "p", kv.WORKLOAD, _phase())
-    kept = read_kept(tmp_path / "p" / KEPT_FILE)
-    for index, op in enumerate(plan):
-        if op.keep_bodies:  # the sample and the writes
-            assert kept[index].operation == op.operation
-            assert kept[index].sampled  # every kv operation that is kept has a check
-        else:
-            assert index not in kept
-    writes = [kept[n] for n, op in enumerate(plan) if op.operation == 1]
-    assert all(json.loads(k.info_json).keys() == {"key", "seed"} for k in writes)
+    assert not any(op.keep_bodies for op in plan)
+    assert not (tmp_path / "p" / KEPT_FILE).exists()
 
 
-def test_the_mix_and_the_sample_follow_the_weights(tmp_path: Path) -> None:
+def test_capture_keeps_every_operation_before_it_is_written(tmp_path: Path) -> None:
+    plan = _plan(tmp_path / "p", kv.WORKLOAD, _phase(index=2, capture=True))
+    kept = list(read_records(tmp_path / "p" / KEPT_FILE, phase_pb.KeptOperation))
+    assert all(op.keep_bodies for op in plan)
+    assert len(kept) >= len(plan)  # the last ones are kept, then not written: the stream closed
+    assert [k.index for k in kept] == list(range(len(kept)))
+    assert [k.operation for k in kept[: len(plan)]] == [op.operation for op in plan]
+    writes = [json.loads(k.info_json) for k in kept if k.operation == 1]
+    assert writes
+    assert all(w.keys() == {"key", "seed", "phase", "nth"} and w["phase"] == 2 for w in writes)
+
+
+def test_capture_does_not_change_what_is_sent(tmp_path: Path) -> None:
+    plain = _plan(tmp_path / "plain", kv.WORKLOAD, _phase())
+    captured = _plan(tmp_path / "captured", kv.WORKLOAD, _phase(capture=True))
+    common = min(len(plain), len(captured))  # bodies kept make each operation longer
+    assert common > 100
+    assert [op.steps for op in plain[:common]] == [op.steps for op in captured[:common]]
+
+
+def test_the_mix_follows_the_weights(tmp_path: Path) -> None:
     plan = _plan(tmp_path / "p", kv.WORKLOAD, _phase(), cap=1 << 19)
     assert len(plan) > 1000
     writes = [op for op in plan if op.operation == 1]
-    reads = [op for op in plan if op.operation == 0]
     assert 0.15 < len(writes) / len(plan) < 0.25  # weight 20 of 100
-    assert all(op.keep_bodies for op in writes)  # writes are always in the sample
-    assert 0.4 < sum(op.keep_bodies for op in reads) / len(reads) < 0.6  # sample=0.5
-    # a write's exclusive key is the key it puts
-    assert all(_parts(_http(op.steps[1]).path) == [f"/kv/{op.exclusive_key}"] for op in writes)
 
 
 def test_a_template_ref_is_encoded_for_where_it_is_used(tmp_path: Path) -> None:
@@ -190,59 +200,36 @@ def test_a_template_ref_is_encoded_for_where_it_is_used(tmp_path: Path) -> None:
     assert _body(raw) == ("raw", b"\x00")
 
 
-def test_a_pending_write_is_seen_by_the_requests_built_after_it(tmp_path: Path) -> None:
+def test_a_model_change_by_build_is_seen_by_the_requests_built_after_it(tmp_path: Path) -> None:
     class Model:
         def __init__(self, _data: object, _rand: Rand) -> None:
-            self.counter: Versions[str, int] = Versions()
-            self.pending: list[Call] = []
+            self.counter = 0
 
     def increment(m: Model, _rand: Rand) -> Request:
-        n = m.counter.latest("c", 0) + 1
-        return Request(post("/set", query={"n": str(n)}), info={"n": n}, exclusive="c")
+        m.counter += 1
+        return Request(post("/set", query={"n": str(m.counter)}), info={"n": m.counter})
 
-    def apply(m: Model, call: Call) -> None:
-        m.pending.append(call)
-        m.counter.write("c", call.info["n"], call)
-
-    workload = Workload(
-        model=Model,
-        operations=[
-            Operation(name="inc", weight=1, build=increment, apply=apply, check=lambda _m, _c: None)
-        ],
-    )
+    workload = Workload(model=Model, operations=[Operation(name="inc", weight=1, build=increment)])
     plan = _plan(tmp_path / "p", workload, _phase())
     sent = [int(str(_parts(_http(op.steps[0]).query[0].value)[0])) for op in plan]
     assert sent == list(range(1, len(plan) + 1))
 
 
-def test_the_check_keeps_only_the_results_of_writes_and_sampled_operations(tmp_path: Path) -> None:
-    # A long phase's results do not fit in the phase pod as objects: the check streams them and
-    # keeps only those it applies or checks. Every result it drops is freed while it runs.
-    data = kv.Data()
-    phase = _phase()
-    plan = _plan(tmp_path / "p", kv.WORKLOAD, phase, data, cap=1 << 18)
-    kept = read_kept(tmp_path / "p" / KEPT_FILE)
-    alive: list[weakref.ref[pb.OperationResult]] = []
-    kept_alive: list[int] = []
+def test_begin_phase_sees_the_phase_before_the_first_build(tmp_path: Path) -> None:
+    class Model:
+        def __init__(self, _data: object, _rand: Rand) -> None:
+            self.phase = -1
 
-    def results() -> Iterator[pb.OperationResult]:
-        for index, op in enumerate(plan):
-            result = pb.OperationResult(
-                index=index,
-                operation=op.operation,
-                start_unix_nanos=1 + index,
-                end_unix_nanos=2 + index,
-                steps=[pb.StepResult(status=200), pb.StepResult(status=200)],
-            )
-            alive.append(weakref.ref(result))
-            yield result
-            del result
-        gc.collect()
-        kept_alive.append(sum(ref() is not None for ref in alive))
+    def begin(m: Model, phase: int) -> None:
+        m.phase = phase
 
-    summary = pb.PhaseSummary(window_start_unix_nanos=0, window_end_unix_nanos=10**12)
-    output = check(kv.WORKLOAD, data, phase, kept, summary, results())
-    in_stream = [index for index in kept if index < len(plan)]
-    assert kept_alive == [len(in_stream)]
-    assert len(in_stream) < len(plan)
-    assert len(output.writes) == sum(1 for op in plan if op.operation == 1)
+    def build(m: Model, _rand: Rand) -> Request:
+        return Request(http("DELETE", f"/phase/{m.phase}"))
+
+    workload = Workload(
+        model=Model, operations=[Operation(name="op", weight=1, build=build)], begin_phase=begin
+    )
+    plan = _plan(tmp_path / "p", workload, _phase(index=4))
+    first = _http(plan[0].steps[0])
+    assert first.method == pb.HttpMethod.DELETE
+    assert _parts(first.path) == ["/phase/4"]

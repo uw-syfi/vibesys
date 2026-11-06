@@ -24,6 +24,7 @@ func Capabilities() *pb.Capabilities {
 		Arrivals:         []pb.Arrivals{pb.Arrivals_ARRIVALS_UNIFORM, pb.Arrivals_ARRIVALS_POISSON},
 		ExclusiveKeys:    true,
 		RequestStream:    true,
+		RecordClients:    true,
 		RefEncodings: []pb.RefEncoding{
 			pb.RefEncoding_REF_ENCODING_RAW, pb.RefEncoding_REF_ENCODING_JSON_STRING, pb.RefEncoding_REF_ENCODING_JSON_VALUE,
 		},

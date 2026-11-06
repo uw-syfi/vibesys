@@ -11,18 +11,21 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
+	"google.golang.org/protobuf/encoding/protodelim"
 	"google.golang.org/protobuf/proto"
 
 	pb "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/files"
 )
 
-// counters is a test workload: keys with counters; a write sets a key to a value, a read checks
-// the value seen. Its writes depend on the model (they add one to the latest value), so a
-// stream is only reproduced when pending writes are applied in order.
-type counters struct{ values *Versions[int, int] }
+// counters is a test workload: keys with counters; a write sets a key to one more than the
+// model's value, which Build updates, so a stream is only reproduced when every Build runs in
+// order on the phase's own model.
+type counters struct {
+	values map[int]int
+	phase  int
+}
 
 type info struct {
 	Key   int `json:"key"`
@@ -39,43 +42,25 @@ func counterWorkload() Workload[int, *counters] {
 			if size == 0 {
 				return nil, errors.New("empty dataset")
 			}
-			return &counters{values: NewVersions[int, int](0)}, nil
+			return &counters{values: map[int]int{}}, nil
+		},
+		BeginPhase: func(m *counters, phase int) error {
+			m.phase = phase
+			return nil
 		},
 		Operations: []Operation[*counters]{
-			{Name: "read", Weight: 3, Sample: 0.5,
+			{Name: "read", Weight: 3,
 				Build: func(m *counters, r *Rand) Request {
 					key := r.Below(4)
 					return Request{Steps: []Step{Get(fmt.Sprintf("/k%d", key))}, Info: info{Key: key}}
-				},
-				Check: func(m *counters, c Call) error {
-					var i info
-					if err := c.DecodeInfo(&i); err != nil {
-						return err
-					}
-					got := 0
-					fmt.Sscan(string(c.Responses[0].Body), &got)
-					for _, v := range m.values.Allowed(i.Key, 0, c.Start, c.End) {
-						if v == got {
-							return nil
-						}
-					}
-					return fmt.Errorf("k%d: %d", i.Key, got)
 				}},
 			{Name: "write", Weight: 1,
 				Build: func(m *counters, r *Rand) Request {
 					key := r.Below(4)
-					value := m.values.Latest(key, 0) + 1
-					return Request{Steps: []Step{Put(fmt.Sprintf("/k%d", key), Body([]byte(fmt.Sprint(value))))},
-						Info: info{Key: key, Value: value}, Exclusive: fmt.Sprintf("k%d", key)}
-				},
-				Check: func(m *counters, c Call) error { return nil },
-				Apply: func(m *counters, c Call) error {
-					var i info
-					if err := c.DecodeInfo(&i); err != nil {
-						return err
-					}
-					m.values.Write(i.Key, i.Value, c)
-					return nil
+					m.values[key]++
+					value := m.values[key] + 1000*m.phase
+					return Request{Steps: []Step{HTTP("PATCH", fmt.Sprintf("/k%d", key), Body([]byte(fmt.Sprint(value))))},
+						Info: info{Key: key, Value: value}}
 				}},
 		},
 	}
@@ -135,8 +120,9 @@ func stream(t *testing.T, w Workload[int, *counters], input, state string, n int
 	return frames[1:]
 }
 
-// The stream is a function of the PhaseInput: two runs write the same bytes, and the writes'
-// pending Apply shapes the later operations (write values count up per key).
+// The stream is a function of the PhaseInput: two runs write the same bytes, a Build's change to
+// the model shapes the later operations (write values count up per key), the phase index reaches
+// the model, and a benchmark keeps no bodies and no records.
 func TestGenerateWritesADeterministicStream(t *testing.T) {
 	dir := t.TempDir()
 	input := phaseInput(t, dir, &pb.PhaseInput{SampleSeed: 7, PhaseIndex: 1})
@@ -156,116 +142,65 @@ func TestGenerateWritesADeterministicStream(t *testing.T) {
 		if err := proto.Unmarshal(first[i], op); err != nil {
 			t.Fatal(err)
 		}
+		if op.GetKeepBodies() || op.GetExclusiveKey() != "" {
+			t.Fatalf("operation %d keeps bodies or has an exclusive key: %v", i-1, op)
+		}
 		if op.GetOperation() == 1 {
 			writes++
-			key := op.GetExclusiveKey()
+			call := op.GetSteps()[0].GetHttp()
+			key := call.GetPath().GetParts()[0].GetLiteral()
 			value := 0
-			fmt.Sscan(string(op.GetSteps()[0].GetHttp().GetRaw()), &value)
-			if value != latest[key]+1 || !op.GetKeepBodies() {
+			fmt.Sscan(string(call.GetRaw()), &value)
+			if _, seen := latest[key]; !seen {
+				latest[key] = 1000 // phase 1's values count from 1000
+			}
+			if call.GetMethod() != pb.HttpMethod_HTTP_METHOD_PATCH || value != latest[key]+1 {
 				t.Fatalf("operation %d: %s set to %d after %d", i-1, key, value, latest[key])
 			}
 			latest[key] = value
 		}
 	}
-	kept, err := readKept(filepath.Join(a, keptFile))
-	if err != nil || writes == 0 {
-		t.Fatalf("%d writes, %v", writes, err)
+	if writes == 0 {
+		t.Fatal("no writes")
 	}
-	for index, k := range kept {
-		if k.GetOperation() == 0 && !k.GetSampled() {
-			t.Fatalf("an unsampled read %d was kept", index)
-		}
+	if entries, err := os.ReadDir(a); err != nil || len(entries) != 1 { // the dataset file only
+		t.Fatalf("a benchmark's generator left %v in --state (%v)", entries, err)
 	}
 }
 
-// check: the phase's sent writes go to the history in start order, with their info; a read
-// that saw a value no write allows is a violation of the window; the warmup's are reported only.
-func TestCheckFindsViolationsAndCollectsWrites(t *testing.T) {
-	dir, state := t.TempDir(), t.TempDir()
-	input := phaseInput(t, dir, &pb.PhaseInput{SampleSeed: 3})
-	frames := stream(t, counterWorkload(), input, state, 300)
-	kept, err := readKept(filepath.Join(state, keptFile))
+// Under accuracy capture every operation keeps its bodies and has a KeptOperation, with its info,
+// in stream order; the stream's requests are a benchmark's.
+func TestCaptureKeepsEveryOperation(t *testing.T) {
+	dir := t.TempDir()
+	plain := stream(t, counterWorkload(), phaseInput(t, dir, &pb.PhaseInput{SampleSeed: 3}), t.TempDir(), 300)
+	state := t.TempDir()
+	captured := stream(t, counterWorkload(), phaseInput(t, dir, &pb.PhaseInput{SampleSeed: 3, Capture: true}), state, 300)
+	file, err := os.Open(filepath.Join(state, keptFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := time.Unix(1_700_000_000, 0).UnixNano()
-	window := [2]int64{base + 100*int64(time.Second), base + 200*int64(time.Second)}
-	// Operation i runs over [base + 1 s * i, + 1 ms]: one at a time; reads see what a correct
-	// store would show, except the first sampled read of the warmup (i < 100) and of the window
-	// (100 <= i < 200), which see 99.
-	values := map[string]int{}
-	var results []*pb.OperationResult
-	wrong := map[uint64]bool{}
-	var wrongWarmup, wrongWindow int = -1, -1
-	for i := range 200 {
-		k := kept[uint64(i)]
-		if k == nil || k.GetOperation() != 0 || !k.GetSampled() {
-			continue
+	defer func() { _ = file.Close() }()
+	in := bufio.NewReader(file)
+	for i := 1; i < len(captured); i++ {
+		op, base := &pb.PlannedOperation{}, &pb.PlannedOperation{}
+		if err := proto.Unmarshal(captured[i], op); err != nil {
+			t.Fatal(err)
 		}
-		if i < 100 && wrongWarmup < 0 {
-			wrongWarmup = i
-		} else if i >= 100 && wrongWindow < 0 {
-			wrongWindow = i
+		_ = proto.Unmarshal(plain[i], base)
+		if !op.GetKeepBodies() {
+			t.Fatalf("operation %d does not keep its bodies", i-1)
 		}
-	}
-	for i, frame := range frames[1:] {
-		op := &pb.PlannedOperation{}
-		_ = proto.Unmarshal(frame, op)
-		at := base + int64(i)*int64(time.Second)
-		path := op.GetSteps()[0].GetHttp().GetPath().GetParts()[0].GetLiteral()
-		body := []byte(fmt.Sprint(values[path]))
-		if op.GetOperation() == 1 {
-			v := 0
-			fmt.Sscan(string(op.GetSteps()[0].GetHttp().GetRaw()), &v)
-			values[path], body = v, nil
-		} else if i == wrongWarmup || i == wrongWindow {
-			body, wrong[uint64(i)] = []byte("99"), true
+		op.KeepBodies = false
+		if !proto.Equal(op, base) {
+			t.Fatalf("operation %d differs from the benchmark's", i-1)
 		}
-		results = append(results, &pb.OperationResult{Index: uint64(i), Operation: op.GetOperation(),
-			ScheduledUnixNanos: at, StartUnixNanos: at, EndUnixNanos: at + int64(time.Millisecond),
-			Steps: []*pb.StepResult{{Status: 200, Response: &pb.StepResult_Body{Body: body}}}})
-	}
-	// Results arrive in completion order, not start order.
-	results[10], results[11] = results[11], results[10]
-	resultsPath, summaryPath, outputPath := filepath.Join(dir, "results"), filepath.Join(dir, "summary"), filepath.Join(dir, "output")
-	writeFile(t, resultsPath, pb.FileKind_FILE_KIND_RESULTS, toMessages(results)...)
-	summary := &pb.PhaseSummary{WindowStartUnixNanos: window[0], WindowEndUnixNanos: window[1]}
-	writeFile(t, summaryPath, pb.FileKind_FILE_KIND_SUMMARY, summary)
-	var stderr bytes.Buffer
-	code := run(counterWorkload(), []string{"check", "--phase-input", input, "--dataset", datasetFile(t, dir), "--state", state, "--results", resultsPath,
-		"--summary", summaryPath, "--output", outputPath}, io.Discard, &stderr)
-	if code != exitOK {
-		t.Fatalf("check exited %d: %s", code, stderr.String())
-	}
-	output := &pb.PhaseOutput{}
-	if err := readMessage(outputPath, output); err != nil {
-		t.Fatal(err)
-	}
-	if !proto.Equal(output.GetSummary(), summary) {
-		t.Fatalf("summary %v", output.GetSummary())
-	}
-	var last int64
-	for _, w := range output.GetWrites() {
-		if w.GetOperation() != "write" || w.GetStartUnixNanos() < last || !strings.Contains(w.GetInfoJson(), `"value"`) {
-			t.Fatalf("write %v after %d", w, last)
+		kept := &pb.KeptOperation{}
+		if err := protodelim.UnmarshalFrom(in, kept); err != nil {
+			t.Fatalf("kept %d: %v", i-1, err)
 		}
-		last = w.GetStartUnixNanos()
-	}
-	var messages []string
-	for _, v := range output.GetViolations() {
-		messages = append(messages, fmt.Sprint(v.GetIndex(), ":", v.GetMessage()))
-	}
-	if len(wrong) != 2 || output.GetInvalid() != 1 || len(messages) != 2 ||
-		!strings.HasPrefix(messages[0], fmt.Sprintf("%d:", wrongWindow)) || !strings.HasPrefix(messages[1], fmt.Sprintf("%d:(warmup)", wrongWarmup)) {
-		t.Fatalf("wrong %v; invalid %d, checked %d, violations %v", wrong, output.GetInvalid(), output.GetChecked(), messages)
-	}
-	if output.GetChecked() == 0 {
-		t.Fatal("nothing checked")
-	}
-	// The history replays: a later phase's generate builds on these writes.
-	next := phaseInput(t, t.TempDir(), &pb.PhaseInput{SampleSeed: 3, PhaseIndex: 1, History: output.GetWrites()})
-	if frames := stream(t, counterWorkload(), next, t.TempDir(), 10); len(frames) != 11 {
-		t.Fatalf("%d frames", len(frames))
+		if kept.GetIndex() != uint64(i-1) || kept.GetOperation() != op.GetOperation() || !strings.HasPrefix(kept.GetInfoJson(), `{"key":`) {
+			t.Fatalf("kept %d: %v", i-1, kept)
+		}
 	}
 }
 
@@ -300,14 +235,19 @@ func writeFile(t *testing.T, path string, kind pb.FileKind, messages ...proto.Me
 
 func TestUsageAndWorkloadErrors(t *testing.T) {
 	var stderr bytes.Buffer
-	if code := run(counterWorkload(), []string{"check", "--phase-input", "x"}, io.Discard, &stderr); code != exitUsage {
-		t.Fatalf("exit %d", code)
+	if code := run(counterWorkload(), []string{"check", "--phase-input", "x"}, io.Discard, &stderr); code != exitUsage ||
+		!strings.Contains(stderr.String(), "there is no check command") {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	stderr.Reset()
+	if code := run(counterWorkload(), []string{"generate", "--phase-input", "x", "--dataset", "d", "--state", "y", "--results", "r"}, io.Discard, &stderr); code != exitUsage {
+		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	bad := counterWorkload()
-	bad.Operations[1].Sample = 0.5
+	bad.Operations[1].Weight = 0
 	stderr.Reset()
 	if code := run(bad, []string{"generate", "--phase-input", "x", "--dataset", "d", "--state", "y"}, io.Discard, &stderr); code != exitFailure ||
-		!strings.Contains(stderr.String(), "always checked") {
+		!strings.Contains(stderr.String(), "weight must be a finite number > 0") {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	panics := counterWorkload()
@@ -317,6 +257,13 @@ func TestUsageAndWorkloadErrors(t *testing.T) {
 	stderr.Reset()
 	if code := run(panics, []string{"generate", "--phase-input", input, "--dataset", datasetFile(t, dir), "--state", dir}, io.Discard, &stderr); code != exitFailure ||
 		!strings.Contains(stderr.String(), "operation read: Build panicked: no keys") {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	refuses := counterWorkload()
+	refuses.BeginPhase = func(*counters, int) error { return errors.New("phase 0 has no keys") }
+	stderr.Reset()
+	if code := run(refuses, []string{"generate", "--phase-input", input, "--dataset", datasetFile(t, dir), "--state", dir}, io.Discard, &stderr); code != exitFailure ||
+		!strings.Contains(stderr.String(), "Workload BeginPhase: phase 0 has no keys") {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	empty := filepath.Join(dir, "empty")

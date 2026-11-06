@@ -102,21 +102,21 @@ The microservices domain:
                                │  result/error record ─▶ F        │          │
                                │  teardown (every exit path)      │          │
                                └──────────────────────────────────┼──────────┘
-              kubectl cp PhaseInput (seeds, load, history) ──────▼
+              kubectl cp PhaseInput (seeds, load, capture) ──────▼
  ┌──────────────── phase pod (task image, in the namespace) ─────────────────┐
- │ python bench.py phase: writes the dataset file, then runs                 │
- │  1 loadgen open|closed ... -- GENERATOR generate --phase-input F ...      │
+ │ python bench.py phase: writes the dataset file, then the core's           │
+ │ `vibesys-evaluator phase pod` (a Go task binary: its own `phase`) runs    │
+ │  loadgen open|closed ... -- GENERATOR generate --phase-input F ...        │
  │      GENERATOR (python bench.py, or the task's Go binary):                │
- │        dataset ─▶ model ─▶ replay history (apply); then for i = 0, 1, ... │
+ │        dataset ─▶ model ─▶ begin_phase; then for i = 0, 1, ...            │
  │        pick op by weight, op.build(model, rand) ─▶ stdout (the stream)    │
- │        (writes applied as pending; sampled ops and writes kept in --state)│
+ │        (under capture: every op kept, with its info, in --state)          │
  │      loadgen: buffer filled before t0, refilled while it sends            │
  │        ──▶ gateway Service ──▶ application pods; results + summary files  │
  │      window over: loadgen closes the stream, the generator exits          │
- │  2 GENERATOR check: rebuild model, replay history + this phase's writes,  │
- │      check each sampled call in start order ─▶ PhaseOutput                │
- │  3 saturation and validity guards; PhaseOutput ─▶ kubectl cp back         │
+ │  PhaseOutput (summary) and the files ─▶ kubectl cp back                   │
  └───────────────────────────────────────────────────────────────────────────┘
+   orchestrator: `phase judge` (saturation guard, validity) ─▶ PhaseResult
 ```
 
 The diagram is the microservices domain. Dependencies point one way:
@@ -132,6 +132,7 @@ models or tasks.
           └─▶ vibesys_evaluator.llm_serving ────┼──▶ vibesys_evaluator (core)
           └─▶ vibesys_evaluator (core) ─────────┘
  a Go generator ──▶ go/workload (the microservices domain's Go SDK)
+ a Go benchmark ──▶ go/microservices (the phase runner) ──▶ go/evaluator
  a Go oracle ─────▶ go/check (the accuracy checker)
 ```
 
@@ -148,11 +149,12 @@ names:
 | A harness subprocess | `Runner(argv, timeout_secs=, cwd=)`: runs in its own process group, killed with the group on every exit path |
 
 A domain composes these into its own `main` and may subclass `Run` with its
-phase primitives (`microservices.Run` adds `closed_loop` and `open_loop`).
+phase primitives (`microservices.Run` adds `closed_loop`, `open_loop` and
+`fault`).
 The core's `main` is enough for a domain whose phases are plain functions
 (`llm_serving`). A domain's `main` has its own command line: the
-microservices script's commands are `benchmark`, `phase`, `generate`,
-`check` (the generator's, see "Generator command line"), `seed` and `ctl`.
+microservices script's commands are `benchmark`, `phase`, `generate` (the
+generator's, see "Generator command line"), `seed` and `ctl`.
 
 The rule "the core imports no domain; a domain imports the core and itself
 only" is checked by `python/tests/test_layering.py`, which reads every
@@ -182,38 +184,45 @@ SDK is microservices code in Go; it imports only loadgen's generated schema.
 
 ### A phase (phase pod)
 
-1. **Model.** Generate the dataset, build `workload.model(data, rand)` with
-   the sample's model stream (the same in every phase), and replay the
-   sample's history: every write of the earlier phases, in start order, as a
-   `Call` with its outcome and times, through the operation's `apply`. This
-   is how state crosses phases: social network's open phases see the closed
-   phases' composes and follow changes, and hotel's phases continue from the
-   values the earlier ones wrote, so nothing is reset between phases.
+The orchestrator writes the `PhaseInput` (sample seed, phase index, load,
+capture) into the phase pod; the pod runs the core's `phase pod`
+(`vibesys-evaluator phase pod`, or the Go `microservices.Main`'s `phase`),
+which runs loadgen with the generator; the orchestrator copies the pod's
+files back and judges them (`phase judge`, or the Go phase runner in
+process). The phase runner is Go (`go/microservices`, `go/internal/phase`);
+the Python `Run` drives it through those two verbs.
+
+1. **Model.** The generator builds `workload.model(data, rand)` with the
+   sample's model stream (the same in every phase), then
+   `begin_phase(model, index)` when the workload has one. Every phase starts
+   from a model built afresh: nothing an earlier phase sent is replayed into
+   it, and nothing is reset in the application between phases, so a later
+   phase works on what the earlier ones wrote.
 2. **Generate.** The generator draws operations from the mix by weight with
    the phase stream, one after another for as long as loadgen reads; operation
-   `i` gets its own child stream. `build(model, rand)` returns a `Request`.
-   For a write (an operation with `apply`), `apply` runs at once with a
-   pending `Call` (no times, `ok` None), so later operations of the same
-   stream build on it (a follow, then an unfollow of that edge). Whether the
-   operation is in the validation sample is drawn here too, so the sample does
-   not depend on timing. There is no plan size: the stream has no end.
+   `i` gets its own child stream. `build(model, rand)` returns a `Request`,
+   and may change the model so that later operations build on it (an update,
+   then a read of the new value). There is no plan size: the stream has no
+   end.
 3. **Run.** `loadgen` starts the generator, fills its buffer from the stream
-   (the generator's start-up: dataset, model, history), then starts t0.
-   Clients take operations in stream order; at the window's end no new
-   operation starts, loadgen closes the stream (the generator exits), and
-   those in flight complete, bounded by the request timeout. Operations
-   generated but never taken are never sent and do not enter the history.
-4. **Check.** The generator's `check` rebuilds the model from the history
-   plus this phase's sent writes, then calls `check(model, call)` for every
-   sampled operation in order of start time. The results file is streamed
-   and only the results of writes and sampled operations are kept, so the
-   check's memory grows with the sample, not the phase (a model may learn
-   from earlier responses, as social network's first sight of a live post
-   does). Writes
-   are always in the sample. A check returns `None` (Go: nil) or what is
-   wrong.
-5. **Judge.** Apply the saturation guard and the validity rules; leave a
-   `PhaseOutput`. The results file is kept as an artifact, compressed.
+   (the generator's start-up: dataset and model), then starts t0. Clients take
+   operations in stream order; at the window's end no new operation starts,
+   loadgen closes the stream (the generator exits), and those in flight
+   complete, bounded by the request timeout. Operations generated but never
+   taken are never sent.
+4. **Files.** The pod leaves loadgen's summary and results (compressed) and a
+   `PhaseOutput` (the summary and loadgen's run time) in its work directory.
+5. **Judge.** The orchestrator applies the saturation guard and the validity
+   rules to the summary: the phase is a measurement, or the sample ends with
+   an `error` record naming the phase and the reason.
+
+A benchmark only measures. Whether the responses are right is an accuracy
+check's to judge (`go/check`), from the history a run with capture records:
+under `capture` every operation keeps its response bodies and its loadgen
+client, the generator keeps every operation's info (`KeptOperation`), the
+pod leaves loadgen's results whole, and the orchestrator writes
+`history.binpb` with the phases and the faults run between them
+(`Run.fault`; see "Accuracy history").
 
 ### Time windows
 
@@ -223,19 +232,13 @@ warmup and `S` the window: the warmup is `[t0, t0+W)`, the measurement window
 the operations scheduled (open loop) or started (closed loop) in the window.
 Throughput is the operations completed in the window divided by `S`;
 operations started in the window that end after it are counted as `spilled`.
-Checks run on sampled operations of both the warmup and the window; a failed
-check in the window is an error, one in the warmup is reported only (as the
-servicebench engine does today).
 
-`Call.start` is when the first step was sent (after any wait for the
-exclusive key) and `Call.end` when the last step's response was complete.
-`Versions` (below) turns them into the visibility rule: a read may show, per
-key, the latest value acknowledged more than `bound_secs` before it started
-(the default if none) or any value whose write started before it ended; a
-write that failed counts as possibly applied. Times are conservative, so
-slack only favours the application. Times of different phases come from
-different pods' clocks; the 1 s bound of both yardsticks is far larger than
-the skew of a cluster's synchronized clocks.
+A fault (`Run.fault`) runs between two phases, and its start and end are
+taken on the orchestrator's clock, which must agree with the phase pods'
+(loadgen stamps its results with theirs): a cluster's synchronized clocks,
+or one machine. The phase runner logs a fault that starts before the last
+phase's window ended on loadgen's clock: the clocks disagree by at least as
+much.
 
 ## The Python API
 
@@ -244,7 +247,7 @@ Listing: [`api/public-api.txt`](../api/public-api.txt).
 | Module | Names |
 | --- | --- |
 | `vibesys_evaluator` | `main`, `Run`, `Metric`, `Validity`, `Rand` |
-| `vibesys_evaluator.microservices` | `main`, `Run`, `PhaseResult`, `Versions`, `Call`, `Response`, `Workload`, `Generator`, `Operation`, `Request`, `Step`, `Template`, `get`, `post`, `put`, `ref` |
+| `vibesys_evaluator.microservices` | `main`, `Run`, `PhaseResult`, `Workload`, `Generator`, `Operation`, `Request`, `Step`, `Template`, `http`, `get`, `post`, `put`, `ref` |
 | `vibesys_evaluator.microservices.k8s` | `App` |
 | `vibesys_evaluator.llm_serving` | `endpoint` |
 | `vibesys_evaluator.llm_serving.agentx` | `replay`, `METRICS`, `HARNESS_VERSION` |
@@ -252,15 +255,18 @@ Listing: [`api/public-api.txt`](../api/public-api.txt).
 
 The microservices names:
 
-- `Operation(name, weight, build, check, apply, sample)`. `apply` makes an
-  operation a write; `sample` defaults to 1.0 for writes and 0.1 otherwise,
-  and a write may not set it lower.
-- `Request(*steps, info, exclusive)`. Steps are sent in order on one client
+- `Workload(model, operations, begin_phase)`. `begin_phase(model, index)`,
+  when given, is called once per phase before the first `build`.
+- `Operation(name, weight, build)`. `build(model, rand)` may change the
+  model; later operations of the stream see the change.
+- `Request(*steps, info)`. Steps are sent in order on one client
   and form one operation with one latency. `info` (JSON) holds what the
-  request was built from; it is not sent and comes back in the `Call`.
-  Operations with the same `exclusive` key never overlap; loadgen grants the
-  key in stream order, so writes to one item are applied in stream order.
-- `get`/`post`/`put(path, *, query, form, json, body, headers, capture, expect)`.
+  request was built from; it is not sent, and under capture it is kept for
+  the accuracy check (`KeptOperation.info_json`).
+- `http(method, path, *, query, form, json, body, headers, capture, expect)`
+  for `GET`, `POST`, `PUT`, `DELETE` and `PATCH` (the methods `loadgen.proto`
+  has), and the shorthands `get(path, *, query, headers, capture, expect)`,
+  `post` and `put` (the arguments of `http`).
   `capture={"token": "/token"}` takes a value from the step's response by
   JSON pointer; `ref("token")` puts it into a later step (`"Bearer " +
   ref("token")` is a `Template`). `expect` is the status (or statuses) that
@@ -274,18 +280,17 @@ The microservices names:
   Go SDK's `workload.Rand` bit for bit on every platform
   (`fixtures/rand.json`), so a dataset is reproducible across versions and a
   port from Go can be exact.
-- `Versions(bound_secs)`: `write(key, value, call)`, `latest(key, default)`
-  (generation: pending writes included), `allowed(key, default, start=, end=)`
-  (checks).
 - `Run.closed_loop(clients, secs, warmup)`,
-  `Run.open_loop(rate, secs, warmup, arrivals)`, and the core's
+  `Run.open_loop(rate, secs, warmup, arrivals)`, `Run.fault(kind, target,
+  action)` (between phases; recorded under capture), and the core's
   `Run.report(values)` and `Run.phase(name)`. `PhaseResult` has
   `ops_per_sec`, `p50_ms`, `p99_ms`.
-- `Generator(command)`: a workload whose requests and checks are another
-  program (a Go generator built on `go/workload`, in the task image),
-  run as `command + ["generate", ...]` and `command + ["check", ...]`
-  ("Generator command line"); `microservices.main(workload=Generator([...]))`.
-- `main(dataset, system, workload, benchmark, metrics, validity)`.
+- `Generator(command)`: a workload whose requests are another program (a Go
+  generator built on `go/workload`, in the task image), run as
+  `command + ["generate", ...]` ("Generator command line");
+  `microservices.main(workload=Generator([...]))`.
+- `main(dataset, system, workload, benchmark, metrics, validity, capture)`.
+  `capture=True` records the accuracy history; benchmarks leave it off.
 
 ## The Go SDK
 
@@ -297,22 +302,33 @@ module (with its reference model) imports it cheaply. Listing:
 [`api/go-workload.txt`](../api/go-workload.txt). The concepts are the Python
 service API's:
 
-- `Workload[D, M]{Dataset, Model, Operations}`: `Dataset(path)` loads the
-  dataset file the orchestrator writes (the JSON of `bench.py`'s `dataset()`),
-  `Model(data, rand)` builds the model; D and M are any Go types (a task's
-  existing reference state).
-- `Operation[M]{Name, Weight, Build, Check, Apply, Sample}`: `Build(m, rand)
-  Request`, `Check(m, call) error` (nil when right), `Apply(m, call) error`
-  makes it a write; `Sample` 0 is the default (1 for writes, 0.1 otherwise).
-- `Request{Steps, Info, Exclusive}`; `Get`/`Post`/`Put(path, options...)` with
-  `Query`, `Header`, `Form`, `JSON`, `Body`, `Capture`, `Expect`; `Ref` and
-  `Concat` build a `Template`. `JSON` encodes as Python's `json.dumps` does
-  (compact, non-ASCII escaped; `Object` keeps key order, a map sorts its keys,
-  a struct follows its fields), so a Go and a Python workload send the same
-  bytes.
-- `Call`, `Response`, `Versions[K, V]` (the visibility rule), `Rand`
-  (bit-identical to Python's; `Uint64` is Python's `below(2**64)`).
+- `Workload[D, M]{Dataset, Model, BeginPhase, Operations}`: `Dataset(path)`
+  loads the dataset file the orchestrator writes (the JSON of `bench.py`'s
+  `dataset()`), `Model(data, rand)` builds the model, `BeginPhase(model,
+  index)` tells it the phase; D and M are any Go types (a task's existing
+  reference state).
+- `Operation[M]{Name, Weight, Build}`: `Build(m, rand) Request`, which may
+  change the model.
+- `Request{Steps, Info}`; `HTTP(method, path, options...)` for GET, POST,
+  PUT, DELETE and PATCH, and its shorthands `Get`/`Post`/`Put(path,
+  options...)`, with `Query`, `Header`, `Form`, `JSON`, `Body`, `Capture`,
+  `Expect`; `Ref` and `Concat` build a `Template`. `JSON` encodes as Python's
+  `json.dumps` does (compact, non-ASCII escaped; `Object` keeps key order, a
+  map sorts its keys, a struct follows its fields), so a Go and a Python
+  workload send the same bytes.
+- `Rand` (bit-identical to Python's; `Uint64` is Python's `below(2**64)`).
 - `Main(workload)` is the generator command.
+
+`go/microservices` is the phase runner (listing:
+[`api/go-microservices.txt`](../api/go-microservices.txt)), and a whole
+benchmark in Go: `microservices.Main(microservices.Task[D, M]{Metrics,
+Validity, Dataset, System, Seed, Workload or Generator, Benchmark,
+Capture})` has the Python main's command line (`benchmark`, `phase`,
+`generate`, `seed`); `Run` adds `ClosedLoop(ctx, Closed{Clients, Secs,
+Warmup})`, `OpenLoop(ctx, Open{Rate, Secs, Warmup, Arrivals})` and
+`Fault(ctx, kind, target, action)` to the core's `evaluator.Run`;
+`Local(target)` is a `System` already running here (seed and phases as
+child processes).
 
 ## Accuracy checks (`go/check`)
 
@@ -433,7 +449,8 @@ other exit, or a reply that is not JSON) or `CoreNotFoundError`. `loadgen` and
 `otelcapture` are found the same way (`$VIBESYS_EVALUATOR_LOADGEN`,
 `$VIBESYS_EVALUATOR_OTELCAPTURE`). See "Distribution".
 
-The verbs (messages in `proto/vibesys/evaluator/v1/core.proto`):
+The verbs (messages in `proto/vibesys/evaluator/v1/core.proto`, and
+`microservices.proto` for `phase`):
 
 | Verb | What it does |
 |---|---|
@@ -443,9 +460,12 @@ The verbs (messages in `proto/vibesys/evaluator/v1/core.proto`):
 | `sample combine` | combine each metric's trials into the sample's value (median, mean, min, max, sum) |
 | `records write` | append one result-protocol-2 record (`hello`, `result` or `error`) to the `--vs-output` file, enforcing the protocol against what the file holds |
 | `hist summary` | merge HDR histograms and read percentiles from the sum |
+| `phase pod` | run one phase where the phase pod runs: loadgen and the generator, the pod's files (long: `{"event": PhaseEvent}` lines, then the response) |
+| `phase judge` | whether a phase's files are a measurement: the saturation guard and the validity rules |
 
 Error kinds a wrapper sees: `record` (a record the protocol refuses),
-`histogram`, `phase`, `invalid_argument`, `bad_request`, `io`.
+`histogram`, `phase`, `invalid_argument`, `bad_request`, `io`, `cancelled`
+(a signal stopped a long verb).
 
 The logic is the Go package `evaluator` (`go/evaluator`), which task authors
 can use directly: `evaluator.Main(evaluator.Task{Metrics, Benchmark, Check,
@@ -495,31 +515,27 @@ The phase pod runs every generator, Python or Go, alike:
 
 ```text
 GENERATOR generate --phase-input F --dataset F --state DIR
-GENERATOR check    --phase-input F --dataset F --state DIR
-                   --results F --summary F --output F
 ```
 
-- `GENERATOR` is `python bench.py` for a Python workload (its `generate` and
-  `check` commands) or the `microservices.Generator` command.
+- `GENERATOR` is `python bench.py` for a Python workload (its `generate`
+  command), the `microservices.Generator` command, or a Go task binary of
+  `microservices.Main` with its `Workload`.
 - `generate` writes the request stream (`FileHeader` kind requests,
   `RequestsHeader`, then `PlannedOperation`s, binpb) to standard output until
-  the stream is closed, then exits 0. It keeps a `KeptOperation` for every
-  sampled operation and write in `--state`, written before the operation, so
-  every operation loadgen read has its record. Standard error carries only
-  logs. It never ends the stream itself.
-- `check` reads the `PhaseInput`, its `--state`, loadgen's results and summary
-  files, and writes the `PhaseOutput` (summary, checks, violations, this
-  phase's writes for the history).
+  the stream is closed, then exits 0. Under capture (`PhaseInput.capture`)
+  every operation keeps its bodies, and the generator keeps a
+  `KeptOperation` (its info) for every operation in `--state/kept.binpb`,
+  written before the operation, so every operation loadgen read has its
+  record. Standard error carries only logs. It never ends the stream itself.
+- There is no `check` command: a benchmark only measures.
 - Exit 0 on success, 2 for a usage error, 1 for any other failure (a `build`,
-  `apply` or dataset error, naming the operation).
+  `begin_phase` or dataset error, naming the operation).
 
 Where the examples show the hard parts:
 
 - Multi-step template: `examples/kv-store/bench.py` (`login`: log in, capture
   the token, send it).
-- The larger tasks, with cross-phase state (the history replaces the write
-  journal, `--state-out`/`--state-in` and run.py's ConfigMaps) and writes
-  checked within the 1 s bound, are the `hotel-k8s` and `social-network-k8s`
+- The larger tasks are the `hotel-k8s` and `social-network-k8s`
   tasks under `.vibesys/tasks/` in the DeathStarBench fork
   (`vibesys-playground/DeathStarBench`, `vibesys` branch), which the
   repository's `examples/microservices/repositories/deathstarbench` submodule
@@ -530,11 +546,11 @@ Where the examples show the hard parts:
 ```text
 loadgen closed --target URL --clients N --secs S --warmup W
                --results F --summary F [--timeout S] [--buffer N]
-               [--format binpb|json] -- GENERATOR [ARG...]
+               [--record-clients] [--format binpb|json] -- GENERATOR [ARG...]
 loadgen open   --target URL --rate R [--arrivals uniform|poisson] [--seed N]
                [--max-in-flight N] [--min-sustained RATIO] --secs S --warmup W
                --results F --summary F [--timeout S] [--buffer N]
-               [--format binpb|json] -- GENERATOR [ARG...]
+               [--record-clients] [--format binpb|json] -- GENERATOR [ARG...]
 loadgen probe  --target URL --requests F --rounds N --deadline S
                [--timeout S] [--format binpb|json]
 loadgen selftest --summary F [--step-secs S] [--max-rate R] [--format binpb|json]
@@ -554,6 +570,9 @@ loadgen --capabilities [--format binpb|json]
   `--timeout` is per step (default 10 s). `--max-in-flight` bounds the open
   loop's concurrent operations (default 512, as today); beyond it operations
   wait, which shows as send lag.
+- `--record-clients` sets `OperationResult.client`: the closed loop's client,
+  or the open loop's in-flight slot, that ran the operation (the accuracy
+  capture's; two operations of one client never overlap).
 - `--arrivals` defaults to `poisson`; `uniform` spaces arrivals `1/rate`
   apart, as the servicebench engine does, and the yardsticks keep it.
   `--min-sustained` defaults to 0.95 (the default `min_sustained_ratio`).
@@ -598,10 +617,13 @@ All in `proto/vibesys/evaluator/v1/`; see the comments there for every field.
   operations that waited for the generator and the wait histogram, the rate
   the generator sustained while the buffer had room, its start-up time). Selftest file: `SelftestResult`; `--capabilities` prints a
   `Capabilities`; both after their own `FileHeader` kind.
-- `phase.proto`: `PhaseInput` (sample seed, phase index, load, history),
-  `HistoryEntry`, `PhaseOutput`, `KeptOperation` (a generator's own
-  record, in `--state`, of what it must check), and the accuracy history's
-  `HistoryManifest` and `FaultEvent` (see "Accuracy history").
+- `phase.proto`: `PhaseInput` (sample seed, phase index, load, capture),
+  `PhaseOutput` (loadgen's summary and run time), `KeptOperation` (under
+  capture, a generator's record of every operation and its info, in
+  `--state`), and the accuracy history's `HistoryManifest` and `FaultEvent`
+  (see "Accuracy history"). `HistoryEntry`, `Violation` and the fields of
+  the checks are no longer written.
+- `microservices.proto`: the core's `phase pod` and `phase judge`.
 
 Length-delimited binary is the default; `--format json` writes proto3 JSON,
 one message per line. Histograms are microseconds in the standard compressed
@@ -613,11 +635,10 @@ reader must reject.
 
 Sizes: a request of the yardsticks encodes in about 100 to 300 bytes; loadgen
 holds only its buffer (8,192 operations, a few MB), whatever the phase's
-length or rate. Unsampled bodies are kept as 40 bytes.
-A phase pod killed at its memory limit (OOMKilled) fails the sample with an
-error that says so and names the limit; what to lower is the generator's
-model or the sample (`Operation.sample`), since loadgen's own memory is
-bounded by its buffer.
+length or rate. Bodies are kept as 40 bytes (SHA-256 and length) except under
+capture. A phase pod killed at its memory limit (OOMKilled) fails the sample
+with an error that says so and names the limit; what to lower is the
+generator's model, since loadgen's own memory is bounded by its buffer.
 
 ## Saturation guard and validity
 
@@ -640,8 +661,8 @@ budget. A phase fails, and with it the sample, when:
   application. A wait for the generator is never counted as saturation, so
   the two rules cannot excuse each other.
 
-`Validity` is the task's: `max_error_rate` (loadgen errors plus failed checks,
-over the window's operations), `min_sustained_ratio` (open loop: offered rate
+`Validity` is the task's: `max_error_rate` (loadgen's errors over the
+window's operations), `min_sustained_ratio` (open loop: offered rate
 over target rate) and `min_ops_per_operation` (every operation of the mix
 completed at least this many times in the window). Both yardsticks use 0.0,
 0.95 and 1, their current `[constraints]` and `min_offered_rate_ratio`.
@@ -662,8 +683,7 @@ refuse a target rate above what loadgen can send.
 - Phase stream: `Rand(sample, "phase", index)`; operation `i` uses
   `child(i)`; the open loop's Poisson seed is drawn from the phase stream.
 
-Every request of a sample is a function of the dataset, the sample seed and
-the outcomes of the earlier phases' writes.
+Every request of a sample is a function of the dataset and the sample seed.
 
 ## Deploy layer (`microservices.k8s.App`)
 
@@ -746,9 +766,9 @@ CI against the code (griffe) and against the last release (`griffe check`);
 breaking it needs the user's approval ([`AGENTS.md`](../AGENTS.md)), and
 an approved Python break is recorded in `api/approved-breaks.toml` against
 the release it breaks, which the check then accepts for that release only.
-The public Go API is `api/go-workload.txt` and `api/go-check.txt` (`go doc
--all` of `go/workload` and `go/check`), checked against the code (a Go test
-each) and against the last release (no declaration of them may change or go
+The public Go API is `api/go-workload.txt`, `api/go-check.txt` and
+`api/go-microservices.txt` (`go doc -all` of `go/workload`, `go/check` and
+`go/microservices`), checked against the code (a Go test each) and against the last release (no declaration of them may change or go
 away).
 `Rand`'s algorithms are part of the API: changing a stream is a break.
 

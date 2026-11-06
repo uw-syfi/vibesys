@@ -4,7 +4,9 @@ The repository's root [`AGENTS.md`](../../AGENTS.md) applies here too. This
 package is what task writers build benchmark evaluators on: the Python
 package `vibesys_evaluator` (a domain-free core and the domains
 `microservices` and `llm_serving`), the Go SDK `go/workload` (request
-generators in Go, for the microservices domain), the Go core `go/evaluator`
+generators in Go, for the microservices domain), the Go phase runner
+`go/microservices` (load phases; the Python `microservices.Run` calls it
+through `vibesys-evaluator phase`), the Go core `go/evaluator`
 (sample lifecycle, records, histograms; `evaluator.Main` is the Go `main`) with
 its command line `vibesys-evaluator <group> <verb>` that the Python package
 wraps, the Go accuracy checker `go/check` (a task's oracle is written against
@@ -20,9 +22,11 @@ design is [`docs/spec.md`](docs/spec.md).
 The public API is everything listed in [`api/public-api.txt`](api/public-api.txt)
 (the names in each public module's `__all__`, their signatures and the
 behaviour documented for them), the Go SDK listed in
-[`api/go-workload.txt`](api/go-workload.txt) and
-[`api/go-check.txt`](api/go-check.txt) (`go doc -all` of `go/workload` and
-`go/check`: their exported names, signatures and documented behaviour),
+[`api/go-workload.txt`](api/go-workload.txt),
+[`api/go-check.txt`](api/go-check.txt) and
+[`api/go-microservices.txt`](api/go-microservices.txt) (`go doc -all` of
+`go/workload`, `go/check` and `go/microservices`: their exported names,
+signatures and documented behaviour),
 and the schema in `proto/vibesys/evaluator/v1/*.proto`, including the loadgen
 and generator command lines it describes. Task writers depend on them through
 a pinned image and a pinned Go module version.
@@ -33,16 +37,15 @@ a pinned image and a pinned Go module version.
   parameter removed, renamed, reordered, made required, or a positional one
   added); a narrowed parameter or widened return type; a changed default; a
   change of behaviour that tasks rely on (including any change to a `Rand`
-  stream, the visibility rule of `Versions`, or how latency and throughput
-  are computed); for the Go SDK the same, Go's way (an exported name removed
-  or renamed, a changed function signature, a struct field removed, a type
-  parameter added, a changed default such as `Operation.Sample` 0); a change
+  stream, or how latency and throughput are computed); for the Go SDK the
+  same, Go's way (an exported name removed or renamed, a changed function
+  signature, a struct field removed, a type parameter added, a changed
+  default); a change
   of the request stream a workload writes (Python and Go must keep writing
   the same one); and any change to the `.proto` files that `buf breaking`
   reports or that changes a field's meaning. Enforced in CI by `griffe check`
   against the last release, by `scripts/check_vibesys_evaluator_api.py`
-  comparing `api/go-workload.txt` and `api/go-check.txt` with the last
-  release's, and `buf
+  comparing the `api/go-*.txt` listings with the last release's, and `buf
   breaking`; the approval itself is this rule, since no check can ask the
   user. Record an approved Python break in `api/approved-breaks.toml`
   (`against` the last release tag, `approved_by`, `reason`); the API check
@@ -52,10 +55,10 @@ a pinned image and a pinned Go module version.
   one example. Unenforced until the examples run in CI (work package 6); a
   reviewer checks it.
 - **Never hand-edit the snapshots.** `api/public-api.txt` is generated
-  (griffe) from the code and `api/go-workload.txt` and `api/go-check.txt` by
-  `go doc -all`; CI regenerates them and fails on a difference (the Python
-  script and each Go package's test `TestAPISnapshotIsCurrent`). Regenerate
-  them (`--write`; `go test ./workload ./check -run APISnapshot -update`) and
+  (griffe) from the code and the `api/go-*.txt` listings by `go doc -all`;
+  CI regenerates them and fails on a difference (the Python script and each
+  Go package's test `TestAPISnapshotIsCurrent`). Regenerate them (`--write`;
+  `go test ./workload ./check ./microservices -run APISnapshot -update`) and
   review the diff.
 
 ## Working rules

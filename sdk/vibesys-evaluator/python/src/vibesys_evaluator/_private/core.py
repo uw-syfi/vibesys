@@ -1,7 +1,9 @@
 """The Go core's command line (``docs/spec.md``, "Wrapper calling convention") behind one helper.
 
 ``call(group, verb, request)`` runs ``vibesys-evaluator <group> <verb>``, writes the request as
-one JSON message on its stdin and decodes the one JSON message it writes to stdout. Its stderr
+one JSON message on its stdin and decodes the one JSON message it writes to stdout;
+``stream(group, verb, request, on_event)`` does the same for a long verb, which writes
+``{"event": ...}`` lines before its response. Its stderr
 (progress and logs) passes through to the user. Exit 0 is the response; exit 1 is a domain error
 (``CoreDomainError``, from the response's ``error_kind`` and ``message``); any other exit, a
 reply that is not JSON, or a missing binary is a ``CoreError`` of the core itself.
@@ -23,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
 
 #: Names the core binary; consulted after the wheel's bundled one.
 BIN_ENV = "VIBESYS_EVALUATOR_BIN"
@@ -131,5 +133,82 @@ def call(
         raise CoreCrashError(msg, code=done.returncode)
     if done.returncode == _DOMAIN_EXIT:
         kind = response.get("error_kind", response.get("errorKind", ""))
+        raise CoreDomainError(str(kind), str(response.get("message", "")), response)
+    return response
+
+
+def stream(
+    group: str,
+    verb: str,
+    request: Mapping[str, Any] | None = None,
+    *,
+    on_event: Callable[[dict[str, Any]], None],
+) -> dict[str, Any]:
+    """Run a long verb: each ``{"event": E}`` line it writes goes to ``on_event(E)`` as it comes.
+
+    The last line is the response, decoded as ``call`` decodes it. The core is stopped (SIGTERM)
+    when this returns early: an exception of ``on_event``, or a signal that raised here.
+    """
+    binary = find_binary()
+    try:
+        process = subprocess.Popen(
+            [binary, group, verb], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
+        )
+    except FileNotFoundError as error:
+        msg = f"cannot run {BIN_NAME} at {binary!r}: {error.strerror}"
+        raise CoreNotFoundError(msg) from error
+    try:
+        last = _events(process, f"{BIN_NAME} {group} {verb}", request, on_event)
+        code = process.wait()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait()
+    return _reply(f"{BIN_NAME} {group} {verb}", code, last)
+
+
+def _events(
+    process: subprocess.Popen[str],
+    what: str,
+    request: Mapping[str, Any] | None,
+    on_event: Callable[[dict[str, Any]], None],
+) -> str:
+    """Write the request, pass each event on, and return the last line that is not an event."""
+    stdin, stdout = process.stdin, process.stdout
+    if stdin is None or stdout is None:
+        msg = f"{what}: no pipes to the core"
+        raise CoreCrashError(msg)
+    stdin.write(json.dumps({} if request is None else request))
+    stdin.close()
+    last = ""
+    for line in stdout:
+        text = line.strip()
+        if not text.startswith('{"event":'):
+            last = text or last
+            continue
+        try:
+            event = json.loads(text)["event"]
+        except (ValueError, KeyError, TypeError) as error:
+            msg = f"{what} wrote an event that is not JSON: {text[:200]!r}"
+            raise CoreCrashError(msg) from error
+        on_event(event)
+    return last
+
+
+def _reply(what: str, code: int, last: str) -> dict[str, Any]:
+    """The response line of a streamed verb, or the error it carries."""
+    if code not in {0, _DOMAIN_EXIT}:
+        msg = f"{what} exited {code}"
+        raise CoreCrashError(msg, code=code)
+    try:
+        response = json.loads(last)
+    except ValueError as error:
+        msg = f"{what} wrote a reply that is not JSON: {last[:200]!r}"
+        raise CoreCrashError(msg, code=code) from error
+    if not isinstance(response, dict):
+        msg = f"{what} wrote a reply that is not a JSON object"
+        raise CoreCrashError(msg, code=code)
+    if code == _DOMAIN_EXIT:
+        kind = response.get("error_kind", "")
         raise CoreDomainError(str(kind), str(response.get("message", "")), response)
     return response

@@ -2,13 +2,15 @@
 
     bench.py benchmark --project-root DIR --vs-output FILE [--seed N]   one sample (vibesys)
     bench.py phase --work DIR --target URL                              one phase (a phase pod)
-    bench.py generate|check --phase-input F --dataset F --state DIR ... the generator (under a phase)
+    bench.py generate --phase-input F --dataset F --state DIR           the generator (under loadgen)
     bench.py seed --dataset-digest HEX                                  the seed (a seed Job)
     bench.py ctl ARGS...                                                deploy hooks (accuracy)
 
 ``benchmark`` is the core's benchmark sample (records, seed, signals) whose
 body deploys the system, runs ``benchmark(run)`` on a microservices ``Run``
-and tears the system down on every path.
+and tears the system down on every path. ``phase`` writes the dataset file
+and hands the phase to the core (``vibesys-evaluator phase pod``), which runs
+loadgen and the generator.
 """
 
 from __future__ import annotations
@@ -17,24 +19,17 @@ import argparse
 import os
 import sys
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
+from vibesys_evaluator._private import core
 from vibesys_evaluator._private.files import SchemaFileError, read_message
-from vibesys_evaluator._private.loadgen import ProcessCommands, ProcessLoadgen
 from vibesys_evaluator._private.sample import benchmark_sample, log, with_signals
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import phase_pb
 from vibesys_evaluator.microservices._private import dataset as dataset_file
 from vibesys_evaluator.microservices._private.deploy import DeployContext, TaskCommand
-from vibesys_evaluator.microservices._private.phase import (
-    PhaseError,
-    PodTask,
-    check_files,
-    generate,
-    run_pod,
-)
+from vibesys_evaluator.microservices._private.phase import PhaseError, generate
 from vibesys_evaluator.microservices._private.run import PhaseDriver, new_run
 from vibesys_evaluator.microservices._private.workload import Generator
 
@@ -60,6 +55,7 @@ class Task:
     benchmark: Callable[[Run], None]
     metrics: Mapping[str, Metric]
     validity: Validity
+    capture: bool = False
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -72,14 +68,10 @@ def _parser() -> argparse.ArgumentParser:
     phase = commands.add_parser("phase", help="run one phase (in a phase pod)")
     phase.add_argument("--work", type=Path, required=True)
     phase.add_argument("--target", required=True)
-    for name in ("generate", "check"):
-        command = commands.add_parser(name, help=f"the request generator's {name} (in a phase)")
-        command.add_argument("--phase-input", type=Path, required=True)
-        command.add_argument("--dataset", type=Path, required=True)
-        command.add_argument("--state", type=Path, required=True)
-        if name == "check":
-            for flag in ("--results", "--summary", "--output"):
-                command.add_argument(flag, type=Path, required=True)
+    generate_command = commands.add_parser("generate", help="the request generator (in a phase)")
+    generate_command.add_argument("--phase-input", type=Path, required=True)
+    generate_command.add_argument("--dataset", type=Path, required=True)
+    generate_command.add_argument("--state", type=Path, required=True)
     seed = commands.add_parser("seed", help="write the dataset into the system (in a seed Job)")
     seed.add_argument("--dataset-digest", required=True)
     ctl = commands.add_parser("ctl", help="the deploy layer's hooks for accuracy checkers")
@@ -107,6 +99,7 @@ def _deploy_and_run(
             sample=sample,
             validity=task.validity,
             log=log,
+            capture=task.capture,
         )
         task.benchmark(new_run(sample, driver))
 
@@ -162,38 +155,47 @@ def generator_command(task: Task, script: TaskCommand) -> list[str]:
 
 
 def phase(task: Task, *, work: Path, target: str, script: TaskCommand) -> int:
-    """Run one phase in this process (the phase pod's command)."""
+    """Run one phase here (the phase pod's command): the core's ``phase pod``."""
     with tempfile.TemporaryDirectory(prefix="vibesys-phase-") as scratch:
         try:
-            run_pod(
-                PodTask(
-                    dataset=task.dataset,
-                    generator=generator_command(task, script),
-                    min_sustained_ratio=task.validity.min_sustained_ratio,
-                ),
-                work=work,
-                scratch=Path(scratch),
-                target=target,
-                loadgen=ProcessLoadgen(),
-                commands=ProcessCommands(),
+            encoded = dataset_file.encode(task.dataset())
+        except Exception as error:
+            log(f"phase failed: dataset raised {type(error).__name__}: {error}")
+            return 1
+        dataset_path = Path(scratch) / "dataset.json"
+        dataset_path.write_bytes(encoded)
+        try:
+            loadgen = core.find_binary("loadgen")
+        except core.CoreNotFoundError as error:
+            log(f"phase failed: {error}")
+            return 1
+        request = {
+            "work_dir": str(work),
+            "target": target,
+            "generator": generator_command(task, script),
+            "dataset_file": str(dataset_path),
+            "min_sustained_ratio": task.validity.min_sustained_ratio,
+            "loadgen": loadgen,
+        }
+        try:
+            core.stream(
+                "phase", "pod", request, on_event=lambda event: log(str(event.get("message", "")))
             )
-        except PhaseError as error:
+        except core.CoreError as error:
             log(f"phase failed: {error}")
             return 1
     return 0
 
 
-def generator(
-    task: Task, argv: Sequence[str], *, stdout: IO[bytes], clock: Callable[[], float]
-) -> int:
-    """The Python workload's ``generate`` or ``check`` (``docs/spec.md``, "Generator command line").
+def generator(task: Task, argv: Sequence[str], *, stdout: IO[bytes]) -> int:
+    """The Python workload's ``generate`` (``docs/spec.md``, "Generator command line").
 
     ``argv`` starts with the command name. The dataset is ``task.dataset()``,
     built here (``--dataset`` is its file, for generators in other languages).
     Returns the exit status.
     """
     args = _parser().parse_args(list(argv))
-    if args.command not in ("generate", "check"):
+    if args.command != "generate":
         log(f"not a generator command: {args.command}")
         return 2
     if isinstance(task.workload, Generator):
@@ -201,25 +203,11 @@ def generator(
         return 2
     try:
         phase_input = read_message(args.phase_input, phase_pb.PhaseInput)
-        data = task.dataset()
-        if args.command == "generate":
-            written = generate(task.workload, data, phase_input, out=stdout, state=args.state)
-            log(f"generate: the stream was closed after {written} operations")
-            return 0
-        output = check_files(
-            task.workload,
-            data,
-            phase_input,
-            state=args.state,
-            results=args.results,
-            summary=args.summary,
-            output=args.output,
-            clock=clock,
-        )
+        written = generate(task.workload, task.dataset(), phase_input, out=stdout, state=args.state)
     except (PhaseError, SchemaFileError) as error:
-        log(f"{args.command} failed: {error}")
+        log(f"generate failed: {error}")
         return 1
-    log(f"check: {output.checked} checked, {output.invalid} failed, {len(output.writes)} writes")
+    log(f"generate: the stream was closed after {written} operations")
     return 0
 
 
@@ -227,11 +215,11 @@ def _generator_on_stdout(task: Task, argv: Sequence[str]) -> int:
     """``generator`` on this process's standard output, which loadgen closes to end the stream."""
     stdout = sys.stdout.buffer
     try:
-        code = generator(task, argv, stdout=stdout, clock=time.monotonic)
+        code = generator(task, argv, stdout=stdout)
         stdout.flush()
     except BrokenPipeError:
         code = 0
-    if code == 0 and argv[0] == "generate":
+    if code == 0:
         # The buffer holds operations loadgen will never read: drop them, so the
         # interpreter's own flush at exit does not fail on the closed pipe.
         devnull = os.open(os.devnull, os.O_WRONLY)
@@ -265,7 +253,7 @@ def run(
             )
         if args.command == "phase":
             return phase(task, work=args.work, target=args.target, script=script)
-        if args.command in ("generate", "check"):
+        if args.command == "generate":
             return _generator_on_stdout(task, argv)
         if args.command == "seed":
             return seed(task, expected_digest=args.dataset_digest)

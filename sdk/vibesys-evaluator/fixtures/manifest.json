@@ -13,7 +13,7 @@
       "file": "results.binpb",
       "kind": "results",
       "format": "binpb",
-      "description": "Results in completion order: kept bodies, digests, a status error, a transport error, an operation spilled past the window after an exclusive-key wait, and one never sent (start 0).",
+      "description": "Results in completion order: kept bodies, digests, a status error, a transport error, an operation spilled past the window after an exclusive-key wait, and one never sent (start 0); the first two name their client (--record-clients).",
       "valid": true,
       "messages": 7
     },
@@ -115,7 +115,7 @@
       "file": "results.json",
       "kind": "results",
       "format": "json",
-      "description": "Results in completion order: kept bodies, digests, a status error, a transport error, an operation spilled past the window after an exclusive-key wait, and one never sent (start 0).",
+      "description": "Results in completion order: kept bodies, digests, a status error, a transport error, an operation spilled past the window after an exclusive-key wait, and one never sent (start 0); the first two name their client (--record-clients).",
       "valid": true,
       "messages": 7
     },

@@ -37,10 +37,18 @@ from vibesys_evaluator._private.files import (
     SchemaFileError,
     check_refs,
 )
-from vibesys_evaluator._private.loadgen import LoadgenExit
 from vibesys_evaluator._proto.vibesys.evaluator.v1 import loadgen_pb as pb
 
 from .hdr_encode import Histogram, encode
+
+
+@dataclass(frozen=True, kw_only=True)
+class LoadgenExit:
+    """How a run of loadgen (or of the generator) ended."""
+
+    code: int
+    stderr: str
+
 
 #: Runs a generator command (its argv) writing its stream to the given output; how it ended.
 GeneratorRun = Callable[[Sequence[str], IO[bytes]], LoadgenExit]
@@ -215,6 +223,7 @@ class FakeLoadgen:
         parser.add_argument("--clients", type=int, default=0)
         parser.add_argument("--seed", type=int, default=0)
         parser.add_argument("--arrivals", choices=["uniform", "poisson"], default="poisson")
+        parser.add_argument("--record-clients", action="store_true")
         try:
             options = parser.parse_args(list(args))
         except (argparse.ArgumentError, SystemExit) as error:
@@ -319,6 +328,7 @@ class FakeLoadgen:
                         end_unix_nanos=end,
                         steps=steps,
                         error=error,
+                        client=client if options.record_clients else None,
                     )
                 )
                 index += 1
@@ -352,6 +362,7 @@ class FakeLoadgen:
                         end_unix_nanos=end,
                         steps=steps,
                         error=error,
+                        client=index if options.record_clients else None,  # a slot of its own
                     )
                 )
         self.clock = max([window_end, *(r.end_unix_nanos for r in results)]) + 10**9

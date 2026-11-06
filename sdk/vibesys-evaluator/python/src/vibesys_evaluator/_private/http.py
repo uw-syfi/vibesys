@@ -1,7 +1,8 @@
 """HTTP steps and requests: what an operation's ``build`` returns, ready for the plan.
 
-``get``/``post``/``put`` build a ``Step`` straight into its ``loadgen.proto``
-message, so writing the plan costs one encode per operation. A ``Template``
+``http(method, path, ...)`` (and its shorthands ``get``, ``post``, ``put``)
+builds a ``Step`` straight into its ``loadgen.proto`` message, so writing the
+plan costs one encode per operation. A ``Template``
 inserts values captured from an earlier step's response; its encoding is
 fixed by where it is used (as is in a path, query, header or form value, as a
 JSON string inside a JSON body).
@@ -22,7 +23,6 @@ _NAME = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 _POINTER = re.compile(r"^(/[^/]*)+$")
 _MAX_STEPS = 16
 _MAX_CAPTURES = 16
-_MAX_EXCLUSIVE = 256
 _MIN_STATUS, _MAX_STATUS = 100, 599
 _JSON_CONTENT_TYPE = "application/json"
 
@@ -100,7 +100,7 @@ def ref(name: str) -> Template:
 
 
 class Step:
-    """One HTTP call of a request, built by ``get``, ``post`` or ``put``."""
+    """One HTTP call of a request, built by ``http``, ``get``, ``post`` or ``put``."""
 
     __slots__ = ("_captures", "_message", "_refs")
     _message: pb.Step
@@ -311,6 +311,61 @@ def _step(
     return step
 
 
+_METHODS = {
+    "GET": pb.HttpMethod.GET,
+    "POST": pb.HttpMethod.POST,
+    "PUT": pb.HttpMethod.PUT,
+    "DELETE": pb.HttpMethod.DELETE,
+    "PATCH": pb.HttpMethod.PATCH,
+}
+
+
+def http(
+    method: str,
+    path: str | Template,
+    *,
+    query: Mapping[str, str | Template] | None = None,
+    form: Mapping[str, str | Template] | None = None,
+    json: Any = None,
+    body: bytes | None = None,
+    headers: Mapping[str, str | Template] | None = None,
+    capture: Mapping[str, str] | None = None,
+    expect: int | Sequence[int] = 200,
+) -> Step:
+    """A ``method`` request of ``path`` below the target, with at most one of ``form``, ``json`` and ``body``.
+
+    Args:
+        method: ``GET``, ``POST``, ``PUT``, ``DELETE`` or ``PATCH`` (any case).
+        path: Starts with ``/``.
+        query: Query parameters, URL-encoded by loadgen.
+        form: A URL-encoded form body.
+        json: A JSON body (``Content-Type: application/json`` unless headers set one);
+            a ``Template`` inside it becomes a JSON string.
+        body: A body sent as is.
+        headers: Request headers.
+        capture: Values to take from the response by JSON pointer, for later steps.
+        expect: The status or statuses that count as success.
+
+    Returns:
+        The step.
+    """
+    found = _METHODS.get(method.upper()) if isinstance(method, str) else None
+    if found is None:
+        msg = f"http method {method!r} is not one of {', '.join(_METHODS)}"
+        raise ValueError(msg)
+    return _step(
+        found,
+        path,
+        query=query,
+        form=form,
+        json=json,
+        body=body,
+        headers=headers,
+        capture=capture,
+        expect=expect,
+    )
+
+
 def get(
     path: str | Template,
     *,
@@ -319,7 +374,7 @@ def get(
     capture: Mapping[str, str] | None = None,
     expect: int | Sequence[int] = 200,
 ) -> Step:
-    """A GET of ``path`` below the target.
+    """A GET of ``path`` below the target: ``http("GET", ...)`` without a body.
 
     Args:
         path: Starts with ``/``.
@@ -347,18 +402,7 @@ def post(
     capture: Mapping[str, str] | None = None,
     expect: int | Sequence[int] = 200,
 ) -> Step:
-    """A POST of ``path`` below the target, with at most one of ``form``, ``json`` and ``body``.
-
-    Args:
-        path: Starts with ``/``.
-        query: Query parameters, URL-encoded by loadgen.
-        form: A URL-encoded form body.
-        json: A JSON body (``Content-Type: application/json`` unless headers set one);
-            a ``Template`` inside it becomes a JSON string.
-        body: A body sent as is.
-        headers: Request headers.
-        capture: Values to take from the response by JSON pointer, for later steps.
-        expect: The status or statuses that count as success.
+    """A POST of ``path`` below the target: ``http("POST", ...)``, with the same arguments.
 
     Returns:
         The step.
@@ -387,7 +431,7 @@ def put(
     capture: Mapping[str, str] | None = None,
     expect: int | Sequence[int] = 200,
 ) -> Step:
-    """A PUT of ``path`` below the target; the arguments are those of ``post``.
+    """A PUT of ``path`` below the target: ``http("PUT", ...)``, with the same arguments.
 
     Returns:
         The step.
@@ -408,23 +452,19 @@ def put(
 class Request:
     """What one operation sends: steps in order on one client, one latency.
 
-    ``info`` holds what the request was built from; it is not sent, and comes
-    back (as JSON) in the ``Call`` that ``check`` and ``apply`` receive.
-    Requests with the same ``exclusive`` key never run at the same time, and
-    run in plan order.
+    ``info`` holds what the request was built from; it is not sent. Under
+    accuracy capture it is kept with the operation's responses, for the
+    accuracy check to read.
     """
 
-    __slots__ = ("_exclusive", "_info", "_steps")
+    __slots__ = ("_info", "_steps")
 
-    def __init__(
-        self, *steps: Step, info: Mapping[str, Any] | None = None, exclusive: str | None = None
-    ) -> None:
+    def __init__(self, *steps: Step, info: Mapping[str, Any] | None = None) -> None:
         """Build the request.
 
         Args:
             *steps: 1 to 16 steps; a step may ``ref`` only what an earlier one captured.
             info: A JSON object describing the request.
-            exclusive: A key (at most 256 characters) no two running requests share.
         """
         if not 1 <= len(steps) <= _MAX_STEPS:
             msg = f"Request takes 1 to {_MAX_STEPS} steps, got {len(steps)}"
@@ -432,7 +472,7 @@ class Request:
         captured: set[str] = set()
         for n, step in enumerate(steps):
             if not isinstance(step, Step):
-                msg = f"Request step {n} is a {type(step).__name__}, not a Step (from get, post or put)"
+                msg = f"Request step {n} is a {type(step).__name__}, not a Step (from http, get, post or put)"
                 raise TypeError(msg)
             missing = step._refs - captured
             if missing:
@@ -442,14 +482,8 @@ class Request:
         if info is not None and not isinstance(info, Mapping):
             msg = f"Request info is a mapping (a JSON object), got {type(info).__name__}"
             raise TypeError(msg)
-        if exclusive is not None and (
-            not isinstance(exclusive, str) or not 1 <= len(exclusive) <= _MAX_EXCLUSIVE
-        ):
-            msg = f"Request exclusive is a string of 1 to {_MAX_EXCLUSIVE} characters, got {exclusive!r}"
-            raise ValueError(msg)
         self._steps = steps
         self._info: Mapping[str, Any] = info if info is not None else {}
-        self._exclusive = exclusive or ""
 
     def __repr__(self) -> str:
         """The steps."""
@@ -459,10 +493,7 @@ class Request:
 def planned(request: Request, operation: int, *, keep_bodies: bool) -> pb.PlannedOperation:
     """The plan entry of ``request`` as operation number ``operation``."""
     return pb.PlannedOperation(
-        operation=operation,
-        steps=[s._message for s in request._steps],
-        exclusive_key=request._exclusive,
-        keep_bodies=keep_bodies,
+        operation=operation, steps=[s._message for s in request._steps], keep_bodies=keep_bodies
     )
 
 
