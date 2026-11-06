@@ -11,7 +11,7 @@ import (
 // never opened, what to do about it when its typed reason has a remedy. The advice follows the reason
 // the orchestrator recorded and reads no text.
 func (c *call) runFailed(v *View) error {
-	text := "run " + v.RunID + " failed: " + orUnknown(v.failureDetail(v.Run))
+	text := "run " + v.RunID + " failed: " + orUnknown(v.FailureDetail(v.Run))
 	if advice := c.startAdvice(v.Lead().GetStartFailureReason()); advice != "" {
 		text += "\n" + advice
 	}

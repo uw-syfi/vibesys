@@ -1,11 +1,15 @@
 package clientmain
 
 import (
+	"context"
 	"errors"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/uw-syfi/vibesys/orchestrator/release/releasetest"
 )
@@ -90,5 +94,55 @@ func TestCommandIDsAreDistinct(t *testing.T) {
 			t.Fatalf("id %s was minted twice", id)
 		}
 		seen[id] = true
+	}
+}
+
+// Every signal that ends the command cancels its context, which is what makes a view in key mode put
+// the terminal back: Ctrl-C, a plain kill, and the hangup of a closed window alike.
+func TestEverySignalThatEndsTheCommandCancelsItsContext(t *testing.T) {
+	for _, sig := range []syscall.Signal{syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP} {
+		ctx, stop := signal.NotifyContext(context.Background(), stopSignals...)
+		if err := syscall.Kill(os.Getpid(), sig); err != nil {
+			stop()
+			t.Fatal(err)
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(30 * time.Second): // only a guard against a hang.
+			stop()
+			t.Fatalf("%v did not cancel the context", sig)
+		}
+		stop()
+	}
+}
+
+// Colour is wanted at a terminal unless NO_COLOR holds anything (no-color.org) or TERM says the
+// terminal cannot show it.
+func TestColourIsWantedUnlessNoColourOrADumbTerminal(t *testing.T) {
+	env := func(pairs ...string) func(string) string {
+		return func(name string) string {
+			for i := 0; i < len(pairs); i += 2 {
+				if pairs[i] == name {
+					return pairs[i+1]
+				}
+			}
+			return ""
+		}
+	}
+	for _, c := range []struct {
+		name string
+		env  func(string) string
+		want bool
+	}{
+		{"an ordinary terminal", env("TERM", "xterm-256color"), true},
+		{"NO_COLOR set to anything", env("TERM", "xterm", "NO_COLOR", "1"), false},
+		{"NO_COLOR set to a word", env("TERM", "xterm", "NO_COLOR", "please"), false},
+		{"NO_COLOR set to nothing", env("TERM", "xterm", "NO_COLOR", ""), true},
+		{"a dumb terminal", env("TERM", "dumb"), false},
+		{"no TERM", env(), false},
+	} {
+		if got := wantsColor(c.env); got != c.want {
+			t.Errorf("%s: wantsColor = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

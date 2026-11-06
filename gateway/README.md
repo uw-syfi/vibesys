@@ -148,6 +148,8 @@ See [Host composition](../docs/contributing/architecture.md#host-composition) fo
 - `internal/lifecycle` owns socket publication, locks, and connection idleness.
 - `internal/connect` owns detached startup and socket readiness.
 - `internal/pipe` owns bidirectional copy and cancellation cleanup.
+- `internal/terminal` owns the real terminal behind the keyed `run attach` view: single-key mode and its
+  exact restore, the size, and resize signals. It decides nothing; the client composes it into `Env.Screen`.
 
 Go's `internal` visibility and import-cycle checks enforce the module's private
 surface and one-way dependencies. No existing Python or TypeScript module

@@ -49,7 +49,7 @@ func goldenScript() []*pb.WatchRunsResponse {
 		agentEvent(11, failing, 5),
 		messageEvent(12, settled, 7),
 		eventFrame(13, "run-1", 8, func(ev *pb.RunChange) {
-			ev.Body = &pb.RunChange_Turn{Turn: &pb.Turn{Id: "t3", AgentId: "lead-run-1", Ordinal: 2, Status: pb.TurnStatus_TURN_STATUS_FAILED, StartedAt: at(7), EndedAt: at(8)}}
+			ev.Body = &pb.RunChange_Turn{Turn: &pb.Turn{Id: "t3", AgentId: "worker-2", Ordinal: 1, Status: pb.TurnStatus_TURN_STATUS_FAILED, StartedAt: at(7), EndedAt: at(8)}}
 		}),
 		messageEvent(14, jobDone, 8),
 		searchFrame("run-1", 1, jobOf("job-1", cliv1.JobState_JOB_STATE_RUNNING, true)),
@@ -88,6 +88,9 @@ func searchFrame(run string, revision uint64, jobs ...*cliv1.Job) *pb.WatchRunsR
 
 // Attach renders typed messages as lines, and the same messages always render the same lines.
 func TestAttachRendersTheRunAsReadableLines(t *testing.T) {
+	// The lead's turns are the lead's own stream's to say, in order with its items, so the run's stream
+	// does not repeat them: here that stream says nothing live, and the turns the run's stream knew of
+	// are caught up when the run ends.
 	w := newWorld(t, serveFake(t, &fakeService{frames: goldenScript()}))
 	got := w.run(context.Background(), "run", "attach", "run-1")
 	if got.code != 0 {
@@ -131,7 +134,7 @@ func TestAttachCtrlCDetachesWithoutSendingAnything(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	w.onStdout = func(written string) {
-		if strings.Contains(written, "lead lead-run-1 started") {
+		if strings.Contains(written, "lead started") {
 			cancel()
 		}
 	}

@@ -35,7 +35,7 @@ var commands = []command{
 		module + "gateway/schemahash", module + "orchestrator/gatewayroot", module + "orchestrator/hostconfig", module + "orchestrator/hosted", module + "orchestrator/hostlock",
 	}},
 	{ClientDirectory, "gateway/internal/clientmain", []string{
-		module + "gateway/internal/buildinfo", module + "gateway/internal/connect", module + "gateway/internal/lifecycle",
+		module + "gateway/internal/buildinfo", module + "gateway/internal/connect", module + "gateway/internal/lifecycle", module + "gateway/internal/terminal",
 		module + "orchestrator/clientcli", module + "orchestrator/gatewayroot", module + "orchestrator/gen/vibesys/orchestrator/v1", module + "orchestrator/hostconfig", module + "orchestrator/hostlock", module + "orchestrator/release",
 		"github.com/mattn/go-isatty",
 	}},

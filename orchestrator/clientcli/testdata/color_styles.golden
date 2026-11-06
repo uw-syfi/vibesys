@@ -1,0 +1,42 @@
+assistant text is the terminal's own
+    * The planner proposes plan 1.
+assistant text, a later line
+      A worker will build it.
+tool call
+    \e[2m  $ pytest -x tests/\e[0m
+tool call that failed
+    \e[31m  $ pytest -x tests/\e[0m
+what went wrong
+    \e[31m    failed (exit 1): KeyError: 'ab'\e[0m
+prompt
+    \e[36m  [steer] Try the cache first.\e[0m
+turn started
+    \e[2m03:00:00  \e[0m\e[1mlead\e[0m\e[2m turn 1 started: its brief\e[0m
+turn completed
+    \e[2m03:01:00  \e[0m\e[1mlead\e[0m\e[2m turn 1 completed, 3 tool calls, cost $0.0421, 1.2k out\e[0m
+turn failed
+    \e[2m03:02:00  \e[0m\e[1mlead\e[0m\e[2m \e[0m\e[31mturn 2 failed\e[0m\e[2m, 1 tool call\e[0m
+milestone
+    \e[2m03:01:00  planner-1 started (claude_code)\e[0m
+milestone, a handoff
+    \e[2m03:05:00  \e[0m\e[32mplanner-1 handed off\e[0m\e[2m: plan 1\e[0m
+milestone, a job that succeeded
+    \e[2m03:06:00  \e[0m\e[32mjob j1 succeeded\e[0m
+milestone, a measurement
+    \e[2m03:07:00  \e[0m\e[32mmeasured 1a2b3c4d\e[0m\e[2m: tokens_per_s = 1200\e[0m
+milestone, an agent that failed
+    \e[2m03:08:00  \e[0m\e[31mworker-1 failed\e[0m\e[2m: out of memory\e[0m
+milestone, a limit reached
+    \e[2m03:09:00  lead was told the run \e[0m\e[33mreached its cost limit\e[0m\e[2m and to finish\e[0m
+milestone, a final report
+    \e[1m03:10:00  lead reported (final, number 2): 9% faster\e[0m
+header
+    \e[2m-- \e[0m\e[1mworker-1\e[0m\e[2m: worker, ended, started by lead (id agent-9f01b7d4e5a2) --\e[0m
+notice
+    \e[2magents (type a number, Enter to open it, Esc to cancel):\e[0m
+agent list, an agent that is going
+       1  \e[1mlead\e[0m         lead      active   agent-1\e[0m
+agent list, an agent that failed
+       3  \e[1mworker-1\e[0m     worker    \e[31mfailed\e[0m   agent-3\e[0m
+footer
+    \e[2m0:12 | 2 active | $0.07 | viewing lead | a agents, Ctrl-C detaches\e[0m

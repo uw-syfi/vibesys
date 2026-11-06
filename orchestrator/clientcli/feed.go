@@ -55,24 +55,27 @@ func openFeed(ctx context.Context, clock Clock, c *client.Client) (*feed, *pb.Ru
 	return f, snapshot, nil
 }
 
-// next folds the next frame into the view and returns its changes. A closed stream is an error:
-// no verb waits for the end of a stream.
-func (f *feed) next(v *View) ([]Change, error) {
+// frame reads the next frame of the stream, classified. A closed stream is an error: no verb waits
+// for the end of a stream.
+func (f *feed) frame() (*pb.RunsSnapshot, *pb.RunChange, *pb.SearchState, error) {
 	frame, err := f.stream.Recv()
 	if errors.Is(err, io.EOF) {
-		return nil, unavailable("the connection to the orchestrator closed")
+		return nil, nil, nil, unavailable("the connection to the orchestrator closed")
 	}
 	if err != nil {
-		return nil, classify(err)
+		return nil, nil, nil, classify(err)
 	}
 	snapshot, change, search := client.DecodeWatchRuns(frame)
-	switch {
-	case snapshot != nil:
-		return v.Load(snapshot), nil
-	case change != nil:
-		return v.Apply(change), nil
+	return snapshot, change, search, nil
+}
+
+// next folds the next frame into the view and returns its changes.
+func (f *feed) next(v *View) ([]Change, error) {
+	snapshot, change, search, err := f.frame()
+	if err != nil {
+		return nil, err
 	}
-	return v.ApplySearch(search), nil
+	return v.Fold(snapshot, change, search), nil
 }
 
 const (

@@ -4,69 +4,54 @@ import (
 	"context"
 	"fmt"
 
-	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
+	"github.com/uw-syfi/vibesys/orchestrator/clientcli/attachview"
 )
 
 // attach follows one run, showing what it did and what it does, until the run ends or the
-// caller detaches. A run that has already ended is only replayed.
+// caller detaches. A run that has already ended is only replayed. See conversation.go for what is shown.
 func attach(ctx context.Context, c *call, args []string) error {
-	arg, err := optionalRun(args, "attach")
-	if err != nil {
+	fs := flags("attach")
+	agent := fs.String("agent", "", "start in the conversation of this agent (a name such as worker-1, or an id), and with no terminal follow only it")
+	full := fs.Bool("full-history", false, "replay every item of each agent viewed, not only the newest 200")
+	positional, err := parse(fs, args)
+	switch {
+	case err != nil:
 		return err
+	case len(positional) > 1:
+		return usageError("run attach takes at most one RUN, got %d arguments", len(positional))
+	}
+	arg := ""
+	if len(positional) == 1 {
+		arg = positional[0]
 	}
 	s, ctx, err := c.join(ctx, arg)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
-	return c.watchRun(ctx, s)
-}
-
-// optionalRun reads the arguments of a verb that takes only an optional RUN.
-func optionalRun(args []string, verb string) (string, error) {
-	positional, err := parse(flags(verb), args)
-	switch {
-	case err != nil:
-		return "", err
-	case len(positional) > 1:
-		return "", usageError("run %s takes at most one RUN, got %d arguments", verb, len(positional))
-	case len(positional) == 1:
-		return positional[0], nil
+	start := ""
+	if *agent != "" {
+		if start, err = s.view.ResolveAgent(*agent); err != nil {
+			return failed("%v", err)
+		}
 	}
-	return "", nil
+	history := attachview.DefaultHistory
+	if *full {
+		history = 0
+	}
+	return c.watchRun(ctx, s, start, history)
 }
 
 // watchRun shows the session's history, then each change as it comes. Ctrl-C (a cancelled ctx)
 // only detaches: nothing here can stop a run. It returns nil when the run ended normally.
-func (c *call) watchRun(ctx context.Context, s *session) error {
+func (c *call) watchRun(ctx context.Context, s *session, start string, history int) error {
 	run := s.view.RunID
 	if s.view.Over() {
 		fmt.Fprintf(c.Stderr, "run %s (task %s in %s) has %s; this is what it did.\n", run, s.view.Run.GetTask(), s.view.Run.GetRepository(), statusWord(s.view.Run.GetStatus().String(), "RUN_STATUS_"))
 	} else {
 		fmt.Fprintf(c.Stderr, "attached to run %s (task %s in %s). Ctrl-C detaches and leaves the run going.\n", run, s.view.Run.GetTask(), s.view.Run.GetRepository())
 	}
-	c.show(s.view, s.history)
-	for !s.view.Over() {
-		changes, err := s.feed.next(s.view)
-		if err != nil {
-			if ctx.Err() != nil {
-				c.detached(run)
-				return nil
-			}
-			return err
-		}
-		c.show(s.view, changes)
-	}
-	if s.view.Run.GetStatus() == pb.RunStatus_RUN_STATUS_FAILED {
-		return &failure{code: ExitFailed}
-	}
-	return nil
-}
-
-func (c *call) show(v *View, changes []Change) {
-	for _, change := range changes {
-		fmt.Fprintln(c.Stdout, v.Describe(change, c.Zone))
-	}
+	return c.converse(ctx, s, start, history)
 }
 
 // detached tells the caller the run goes on, and how to come back to it or end it.

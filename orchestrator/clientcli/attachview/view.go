@@ -1,4 +1,4 @@
-package clientcli
+package attachview
 
 import (
 	"cmp"
@@ -64,6 +64,8 @@ type View struct {
 	Sequence uint64
 	// Truncated says a snapshot left out part of the history, so counts over it are not the run's.
 	Truncated bool
+	// names is AgentName's cache, rebuilt when the set of agents changes.
+	names map[string]string
 }
 
 // NewView is the empty view of a run.
@@ -102,6 +104,17 @@ func (v *View) Load(s *pb.RunsSnapshot) []Change {
 	}
 	slices.SortStableFunc(out, func(a, b Change) int { return a.At.Compare(b.At) })
 	return out
+}
+
+// Fold folds in whichever part of a classified WatchRuns frame is set, and returns its changes.
+func (v *View) Fold(snapshot *pb.RunsSnapshot, change *pb.RunChange, search *pb.SearchState) []Change {
+	switch {
+	case snapshot != nil:
+		return v.Load(snapshot)
+	case change != nil:
+		return v.Apply(change)
+	}
+	return v.ApplySearch(search)
 }
 
 // Apply folds one committed change in. A change of another run, or one the view has already passed,
@@ -282,8 +295,13 @@ func (v *View) Started() bool {
 	return lead.GetStartFailureReason() == pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED
 }
 
+// Live says a run has not reached a final status.
+func Live(r *pb.Run) bool {
+	return r.GetStatus() != pb.RunStatus_RUN_STATUS_ENDED && r.GetStatus() != pb.RunStatus_RUN_STATUS_FAILED
+}
+
 // Over says the run has a final status.
-func (v *View) Over() bool { return v.Run != nil && !live(v.Run) }
+func (v *View) Over() bool { return v.Run != nil && !Live(v.Run) }
 
 // Reports are the reports posted in the run, oldest first: in the order the orchestrator numbered
 // them.

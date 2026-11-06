@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
+	"github.com/uw-syfi/vibesys/orchestrator/clientcli/attachview"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/names"
 )
@@ -171,7 +172,7 @@ func start(ctx context.Context, c *call, args []string) error {
 		return nil
 	}
 	s.history = history
-	return c.watchRun(ctx, s)
+	return c.watchRun(ctx, s, "", attachview.DefaultHistory)
 }
 
 // followUntilLive reads the stream until the run's lead is live. A run that ends first is an

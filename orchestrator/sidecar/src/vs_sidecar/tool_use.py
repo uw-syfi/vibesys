@@ -5,7 +5,8 @@ takes ``command``, Codex's ``execute`` takes ``command`` and its ``exec_command`
 and a file edit is ``Edit`` for one and ``file_change`` for the other. This is the one place that
 knows those spellings. It gives each call exactly one body of ``ToolCall``: a command, a file read,
 write or edit, a search, or, for any tool it does not name, ``OtherCall`` with the tool's own name
-and its arguments as text. A call is never dropped, and no argument is passed on as raw JSON.
+and its arguments as text. A tool of our own MCP server is named plainly (``spawn_agent``), not as
+the harness prefixes it, so no client learns a provider's spelling. A call is never dropped, and no argument is passed on as raw JSON.
 
 The mapping is pure: the same name and arguments always give the same call.
 """
@@ -35,6 +36,9 @@ _PATH_KEYS: Final = ("file_path", "path", "absolute_path", "notebook_path")
 _COMMAND_KEYS: Final = ("command", "cmd")
 _PATTERN_KEYS: Final = ("pattern", "query")
 _UNNAMED: Final = "unknown"
+#: The name our tool server goes by (``internal/mcp.ServerName``). Claude shows its tools as
+#: ``mcp__<server>__<tool>``; Codex hands the server and the tool apart, so it needs no stripping.
+_OWN_PREFIX: Final = "mcp__vibesys__"
 
 
 def describe_call(tool: str, args: object) -> orch.ToolCall:
@@ -123,8 +127,13 @@ def _other(
     if key in _WRAPPED and arguments is not None:
         inner = arguments.get("tool")
         if isinstance(inner, str) and inner:
-            return inner, arguments.get("arguments")
-    return name, arguments if arguments is not None else args
+            return _own_name(inner), arguments.get("arguments")
+    return _own_name(name), arguments if arguments is not None else args
+
+
+def _own_name(name: str) -> str:
+    """A tool of our server by its plain name (``spawn_agent``), however the harness prefixes it."""
+    return name.removeprefix(_OWN_PREFIX) or name
 
 
 def _text(args: object) -> str:
