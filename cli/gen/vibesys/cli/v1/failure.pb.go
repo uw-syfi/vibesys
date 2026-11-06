@@ -39,6 +39,9 @@ const (
 	// A commit has no measurement the command could use.
 	FailureKind_FAILURE_KIND_NOT_MEASURED FailureKind = 7
 	FailureKind_FAILURE_KIND_INTERNAL     FailureKind = 8
+	// The daemon that runs for this user is another build than the command line and has jobs queued
+	// or running, so the command line did not replace it. The message names both builds and the jobs.
+	FailureKind_FAILURE_KIND_DAEMON_OTHER_BUILD FailureKind = 9
 )
 
 // Enum value maps for FailureKind.
@@ -53,6 +56,7 @@ var (
 		6: "FAILURE_KIND_ENVIRONMENT_MISMATCH",
 		7: "FAILURE_KIND_NOT_MEASURED",
 		8: "FAILURE_KIND_INTERNAL",
+		9: "FAILURE_KIND_DAEMON_OTHER_BUILD",
 	}
 	FailureKind_value = map[string]int32{
 		"FAILURE_KIND_UNSPECIFIED":          0,
@@ -64,6 +68,7 @@ var (
 		"FAILURE_KIND_ENVIRONMENT_MISMATCH": 6,
 		"FAILURE_KIND_NOT_MEASURED":         7,
 		"FAILURE_KIND_INTERNAL":             8,
+		"FAILURE_KIND_DAEMON_OTHER_BUILD":   9,
 	}
 )
 
@@ -157,7 +162,7 @@ const file_vibesys_cli_v1_failure_proto_rawDesc = "" +
 	"\x1cvibesys/cli/v1/failure.proto\x12\x0evibesys.cli.v1\"T\n" +
 	"\aFailure\x12/\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1b.vibesys.cli.v1.FailureKindR\x04kind\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage*\xa0\x02\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage*\xc5\x02\n" +
 	"\vFailureKind\x12\x1c\n" +
 	"\x18FAILURE_KIND_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aFAILURE_KIND_INVALID_INPUT\x10\x01\x12\x1a\n" +
@@ -167,7 +172,8 @@ const file_vibesys_cli_v1_failure_proto_rawDesc = "" +
 	"\x19FAILURE_KIND_INCOMPATIBLE\x10\x05\x12%\n" +
 	"!FAILURE_KIND_ENVIRONMENT_MISMATCH\x10\x06\x12\x1d\n" +
 	"\x19FAILURE_KIND_NOT_MEASURED\x10\a\x12\x19\n" +
-	"\x15FAILURE_KIND_INTERNAL\x10\bB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
+	"\x15FAILURE_KIND_INTERNAL\x10\b\x12#\n" +
+	"\x1fFAILURE_KIND_DAEMON_OTHER_BUILD\x10\tB9Z7github.com/uw-syfi/vibesys/cli/gen/vibesys/cli/v1;cliv1b\x06proto3"
 
 var (
 	file_vibesys_cli_v1_failure_proto_rawDescOnce sync.Once

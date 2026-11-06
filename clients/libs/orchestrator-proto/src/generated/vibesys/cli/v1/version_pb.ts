@@ -19,8 +19,10 @@ export const file_vibesys_cli_v1_version: GenFile = /*@__PURE__*/
  */
 export type BuildVersions = Message<"vibesys.cli.v1.BuildVersions"> & {
   /**
-   * The release version, or "dev" for a build that is not a release. Display only: callers never
-   * compare it.
+   * The identity of this build: its release version, or "dev" for a build that is not a release.
+   * Two peers with the same value are the same build; a command line that meets a daemon with
+   * another value replaces it when it has no job and refuses it when it has one
+   * (FAILURE_KIND_DAEMON_OTHER_BUILD). Callers compare it for equality, never parse or order it.
    *
    * @generated from field: string binary_version = 1;
    */

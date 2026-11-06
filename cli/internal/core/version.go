@@ -40,8 +40,8 @@ const (
 // number for the other side of the contract, and a test holds this to it.
 const WatchTaskSince uint32 = 3
 
-// Versions is what one build carries, less the release version, which is display only and which
-// no caller compares.
+// Versions is what one build carries, less the build identity (BuildVersions.binary_version),
+// which names a build and is not a version to order.
 type Versions struct {
 	Protocol    uint32
 	MinProtocol uint32
@@ -84,5 +84,37 @@ func CheckCompatibility(client, daemon Versions) Compatibility {
 		return DaemonTooOld
 	default:
 		return Compatible
+	}
+}
+
+// DaemonDecision is what a command line does with a daemon that answered its handshake with
+// COMPATIBLE.
+type DaemonDecision string
+
+// The decisions.
+const (
+	// UseDaemon: the daemon is the same build as the command line.
+	UseDaemon DaemonDecision = "use"
+	// ReplaceDaemon: the daemon is another build and has no job, so the command line stops it and
+	// starts its own build. The user ran one install command and manages no daemon.
+	ReplaceDaemon DaemonDecision = "replace"
+	// RefuseDaemon: the daemon is another build and has a job queued or running. It is left as it
+	// is, and the command says so, naming both builds.
+	RefuseDaemon DaemonDecision = "refuse"
+)
+
+// DecideDaemon is the one rule for a daemon of a compatible protocol. Build identities are the
+// strings builds report as BuildVersions.binary_version: equal means the same build, and they are
+// never parsed or ordered, so a release build and a local build compare the same way. A daemon that
+// reports no identity (an empty string) is another build than any command line, which always has
+// one. liveJobs is the daemon's queued and running jobs.
+func DecideDaemon(client, daemon string, liveJobs uint32) DaemonDecision {
+	switch {
+	case client != "" && client == daemon:
+		return UseDaemon
+	case liveJobs == 0:
+		return ReplaceDaemon
+	default:
+		return RefuseDaemon
 	}
 }

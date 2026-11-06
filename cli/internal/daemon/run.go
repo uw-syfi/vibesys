@@ -153,7 +153,7 @@ func Run(ctx context.Context, cfg Config) (err error) {
 		Supervisors:   cfg.Runtime.Supervisors,
 		Branches:      cfg.Runtime.Branches,
 		Repositories:  cfg.Runtime.Repositories,
-		Tasks:         cfg.Runtime.Tasks,
+		Tasks:         named(cfg.Runtime.Tasks, cfg.Version),
 		Scheduler:     cfg.Runtime.Scheduler,
 		Leasing:       cfg.Runtime.Leasing,
 		Logf:          cfg.Logf,

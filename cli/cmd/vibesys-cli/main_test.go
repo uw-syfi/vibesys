@@ -39,6 +39,16 @@ type cli struct {
 	cannotStart bool
 	// cwd is the directory the command runs in, /repo unless a test moves it.
 	cwd string
+	// build is the build identity the command line reports, the test binary's version unless a
+	// test sets another.
+	build string
+}
+
+func (c *cli) buildIdentity() string {
+	if c.build != "" {
+		return c.build
+	}
+	return version
 }
 
 func newCLI(t *testing.T) *cli {
@@ -79,7 +89,7 @@ func (c *cli) run(args ...string) result {
 			if c.cannotStart {
 				starter = nil
 			}
-			return client.Options{Rendezvous: client.LocalRendezvous{Dir: c.starter.Dir}, Version: version, Starter: starter, Timers: c.timers,
+			return client.Options{Rendezvous: client.LocalRendezvous{Dir: c.starter.Dir}, Version: c.buildIdentity(), Starter: starter, Timers: c.timers,
 				// The command line's time holds still, so a wait asks the daemon for its whole timeout.
 				Clock: clock.NewManual(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), 0)}, nil
 		},

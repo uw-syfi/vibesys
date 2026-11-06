@@ -20,6 +20,8 @@ const (
 	FailureEnvironmentMismatch FailureKind = "environment_mismatch"
 	FailureNotMeasured         FailureKind = "not_measured"
 	FailureInternal            FailureKind = "internal"
+	// FailureDaemonOtherBuild is a daemon of another build with jobs, which a command line leaves be.
+	FailureDaemonOtherBuild FailureKind = "daemon_other_build"
 )
 
 // Failure is a typed error. Callers branch on Kind with errors.As; Message is display text.

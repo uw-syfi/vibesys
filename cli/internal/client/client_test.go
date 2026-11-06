@@ -3,7 +3,9 @@ package client_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -576,5 +578,123 @@ func TestANoCacheSubmissionIsNotSentAgain(t *testing.T) {
 	jobs, err := s.connect(t).ListJobs(ctxFor(t), &cliv1.ListJobsRequest{Context: call})
 	if err != nil || len(jobs.GetJobs()) != 0 {
 		t.Fatalf("jobs = %v, %v; want none", jobs.GetJobs(), err)
+	}
+}
+
+// What a client did with the daemon it met.
+type meeting string
+
+const (
+	sameBuild meeting = "same build"
+	replaced  meeting = "replaced"
+	refused   meeting = "refused with both versions"
+	// broken is anything else: the test fails on it.
+	broken meeting = "broken"
+)
+
+// meet starts a daemon of the build daemonBuild, gives it a job when live, and connects a client of
+// the build clientBuild to it. The starter then starts clientBuild, as a client's own does.
+func meet(t *testing.T, daemonBuild, clientBuild string, live bool) meeting {
+	t.Helper()
+	s := newSetup(t)
+	s.starter.Version = daemonBuild
+	opts := s.options(true)
+	opts.Version = daemonBuild
+	first, err := client.Connect(ctxFor(t), opts)
+	if err != nil {
+		t.Fatalf("the daemon of build %q did not start: %v", daemonBuild, err)
+	}
+	if live {
+		job := submit(t, first, "print", "kept", ";", "hold", "g", ";", "exit", "0")
+		if err := first.Logs(ctxFor(t), &cliv1.ReadLogsRequest{Context: call, JobId: job.GetId(), Follow: true},
+			func(*cliv1.ReadLogsResponse) error { return errStop }); !errors.Is(err, errStop) {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { s.world.Gates.Release("g") })
+	}
+	first.Close()
+
+	s.starter.Version = clientBuild
+	opts.Version = clientBuild
+	c, err := client.Connect(ctxFor(t), opts)
+	if err != nil {
+		var f *core.Failure
+		if errors.As(err, &f) && f.Kind == core.FailureDaemonOtherBuild &&
+			strings.Contains(f.Message, clientBuild) && strings.Contains(f.Message, daemonBuild) &&
+			s.starter.Calls() == 1 {
+			// The daemon was left as it was and still answers, with its job.
+			kept, err := client.Dial(ctxFor(t), opts)
+			if err != nil {
+				return broken
+			}
+			defer kept.Close()
+			st, err := kept.Status(ctxFor(t))
+			if err != nil || st.GetVersions().GetBinaryVersion() != daemonBuild {
+				return broken
+			}
+			return refused
+		}
+		t.Logf("client %q, daemon %q: %v", clientBuild, daemonBuild, err)
+		return broken
+	}
+	defer c.Close()
+	st, err := c.Status(ctxFor(t))
+	switch {
+	case err != nil || st.GetVersions().GetBinaryVersion() != clientBuild:
+		return broken
+	case s.starter.Calls() == 1:
+		return sameBuild
+	case s.starter.Calls() == 2:
+		return replaced
+	}
+	return broken
+}
+
+// A client never uses a daemon of another build without saying so. Over pairs of build identities,
+// release and local builds alike (the pair of the live finding is the first), and daemons that are
+// idle or have a job, exactly one thing happens: the same build is used, an idle daemon of another
+// build is replaced by the client's, or a daemon of another build with a job is refused with both
+// versions and left running.
+func TestAClientAndADaemonOfAnotherBuild(t *testing.T) {
+	builds := []string{"0.0.1-live", "0.1.0-local.9342cd403", "dev", "0.1.0-local.9342cd404"}
+	for _, clientBuild := range builds {
+		for _, daemonBuild := range append([]string{""}, builds...) {
+			for _, live := range []bool{false, true} {
+				name := fmt.Sprintf("client %s daemon %q live %v", clientBuild, daemonBuild, live)
+				want := sameBuild
+				switch {
+				case clientBuild == daemonBuild:
+				case live:
+					want = refused
+				default:
+					want = replaced
+				}
+				if got := meet(t, daemonBuild, clientBuild, live); got != want {
+					t.Errorf("%s: %s, want %s", name, got, want)
+				}
+			}
+		}
+	}
+}
+
+// Dial addresses whichever daemon runs, so that status and stop work on a daemon of another build
+// that has a job.
+func TestDialReachesADaemonOfAnotherBuild(t *testing.T) {
+	s := newSetup(t)
+	s.starter.Version = "0.1.0-local.9342cd403"
+	first, err := client.Connect(ctxFor(t), s.options(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.Close()
+	opts := s.options(false)
+	opts.Version = "0.0.1-live"
+	c, err := client.Dial(ctxFor(t), opts)
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	if st, err := c.Status(ctxFor(t)); err != nil || st.GetVersions().GetBinaryVersion() != "0.1.0-local.9342cd403" {
+		t.Fatalf("status = %v, %v", st, err)
 	}
 }

@@ -24,6 +24,7 @@ var failureKinds = []struct {
 	{core.FailureEnvironmentMismatch, cliv1.FailureKind_FAILURE_KIND_ENVIRONMENT_MISMATCH, codes.FailedPrecondition},
 	{core.FailureNotMeasured, cliv1.FailureKind_FAILURE_KIND_NOT_MEASURED, codes.FailedPrecondition},
 	{core.FailureInternal, cliv1.FailureKind_FAILURE_KIND_INTERNAL, codes.Internal},
+	{core.FailureDaemonOtherBuild, cliv1.FailureKind_FAILURE_KIND_DAEMON_OTHER_BUILD, codes.FailedPrecondition},
 }
 
 // Failure returns the contract's message for a failure.

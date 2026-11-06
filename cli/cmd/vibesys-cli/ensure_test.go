@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/uw-syfi/vibesys/cli/internal/task"
+	"github.com/uw-syfi/vibesys/cli/internal/task/tasktest"
 	"strings"
 	"sync"
 	"testing"
@@ -96,5 +98,80 @@ func TestEnsureRacingCommandsStartsOneDaemon(t *testing.T) {
 	}
 	if c.starter.Calls() != 1 {
 		t.Fatalf("starts = %d, want 1", c.starter.Calls())
+	}
+}
+
+// The live finding: a bundled release command line met the daemon of an older local build that
+// was already running for the user, used it, and every manifest was refused by the old daemon with
+// a message that named neither it nor the file. The command line now replaces an idle daemon of
+// another build with its own.
+func TestDaemonEnsureReplacesAnIdleDaemonOfAnotherBuild(t *testing.T) {
+	c := newCLI(t)
+	c.starter.Version = "0.1.0-local.9342cd403"
+	c.build = "0.1.0-local.9342cd403"
+	if r := c.run("daemon", "ensure"); r.code != exitOK {
+		t.Fatalf("first ensure = %+v", r)
+	}
+	c.build = "0.0.1-live"
+	c.starter.Version = "0.0.1-live"
+	r := c.run("daemon", "ensure")
+	if r.code != exitOK || !strings.Contains(r.stdout, "version 0.0.1-live") {
+		t.Fatalf("ensure from another build = %+v, want a daemon of build 0.0.1-live", r)
+	}
+	if c.starter.Calls() != 2 {
+		t.Fatalf("starts = %d, want the old daemon replaced once", c.starter.Calls())
+	}
+}
+
+// With a job on the old daemon the command line leaves it alone and says why: a failure of the
+// named kind, exit 4, both builds, the daemon and what to do. status still shows that daemon.
+func TestDaemonEnsureRefusesADaemonOfAnotherBuildThatHasAJob(t *testing.T) {
+	c := newCLI(t)
+	c.starter.Version = "0.1.0-local.9342cd403"
+	c.build = "0.1.0-local.9342cd403"
+	if r := c.run("daemon", "ensure"); r.code != exitOK {
+		t.Fatalf("first ensure = %+v", r)
+	}
+	c.submit("print", "x", ";", "hold", "g", ";", "exit", "0")
+	c.build = "0.0.1-live"
+	c.starter.Version = "0.0.1-live"
+	r := c.run("daemon", "ensure")
+	if r.code != exitNoAnswer || r.stdout != "" {
+		t.Fatalf("ensure = %+v, want exit %d with the reason on stderr", r, exitNoAnswer)
+	}
+	for _, want := range []string{"0.0.1-live", "0.1.0-local.9342cd403", "daemon restart", "pid "} {
+		if !strings.Contains(r.stderr, want) {
+			t.Errorf("the refusal %q does not say %q", r.stderr, want)
+		}
+	}
+	j := c.run("daemon", "ensure", "--json")
+	var failure struct{ Kind string }
+	if err := json.Unmarshal([]byte(j.stderr), &failure); err != nil || failure.Kind != "FAILURE_KIND_DAEMON_OTHER_BUILD" {
+		t.Fatalf("ensure --json = %+v (%v), want the kind FAILURE_KIND_DAEMON_OTHER_BUILD", j, err)
+	}
+	if c.starter.Calls() != 1 {
+		t.Fatalf("starts = %d: the daemon with a job was replaced", c.starter.Calls())
+	}
+	if s := c.run("daemon", "status"); s.code != exitOK || !strings.Contains(s.stdout, "version 0.1.0-local.9342cd403") {
+		t.Fatalf("status = %+v, want the old daemon still answering", s)
+	}
+	c.world.Gates.Release("g")
+}
+
+// A task the daemon cannot read is refused with the daemon's build and the manifest's file, so
+// that an agent that reads it reports the daemon and the file and not a bare TOML error.
+func TestATaskTheDaemonCannotReadNamesTheDaemonAndTheFile(t *testing.T) {
+	c := newCLI(t)
+	files := tasktest.Files("kv")
+	files[".vibesys/tasks/kv/vibesys.input.toml"] = task.File{Data: []byte("version = 1\n")}
+	c.world.Tasks.Put("/repo", full, files)
+	r := c.run(withTask("submit", "check", "HEAD", "--wait")...)
+	if r.code != exitInvalidInput {
+		t.Fatalf("submit check = %+v, want exit %d", r, exitInvalidInput)
+	}
+	for _, want := range []string{"daemon of build " + version, "vibesys.input.toml", ".vibesys/tasks/kv"} {
+		if !strings.Contains(r.stderr, want) {
+			t.Errorf("the refusal %q does not say %q", r.stderr, want)
+		}
 	}
 }

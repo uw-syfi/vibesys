@@ -140,8 +140,10 @@ func (Compatibility) EnumDescriptor() ([]byte, []int) {
 // BuildVersions is what one build of the binary carries.
 type BuildVersions struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The release version, or "dev" for a build that is not a release. Display only: callers never
-	// compare it.
+	// The identity of this build: its release version, or "dev" for a build that is not a release.
+	// Two peers with the same value are the same build; a command line that meets a daemon with
+	// another value replaces it when it has no job and refuses it when it has one
+	// (FAILURE_KIND_DAEMON_OTHER_BUILD). Callers compare it for equality, never parse or order it.
 	BinaryVersion string `protobuf:"bytes,1,opt,name=binary_version,json=binaryVersion,proto3" json:"binary_version,omitempty"`
 	// The revision of this contract's behavior the build speaks. It starts at 1 and increases only
 	// when a change breaks an older peer.

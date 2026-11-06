@@ -163,6 +163,11 @@ func Read(fsys fs.FS, name string) (Task, error) {
 	}
 	t, err := Parse(name, manifest, objectives)
 	if err != nil {
+		// Parse names the file by its name, so the refusal also says whose directory it is in.
+		var f *core.Failure
+		if errors.As(err, &f) {
+			return Task{}, &core.Failure{Kind: f.Kind, Message: fmt.Sprintf("task %q (%s): %s", name, dir, f.Message)}
+		}
 		return Task{}, err
 	}
 	switch text, err := fs.ReadFile(fsys, path.Join(dir, dockerfile)); {

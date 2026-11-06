@@ -34,7 +34,8 @@ func exitOfFailure(kind cliv1.FailureKind) int {
 		cliv1.FailureKind_FAILURE_KIND_NOT_MEASURED:
 		return exitFailed
 	case cliv1.FailureKind_FAILURE_KIND_UNSPECIFIED, cliv1.FailureKind_FAILURE_KIND_UNAVAILABLE,
-		cliv1.FailureKind_FAILURE_KIND_INCOMPATIBLE, cliv1.FailureKind_FAILURE_KIND_INTERNAL:
+		cliv1.FailureKind_FAILURE_KIND_INCOMPATIBLE, cliv1.FailureKind_FAILURE_KIND_INTERNAL,
+		cliv1.FailureKind_FAILURE_KIND_DAEMON_OTHER_BUILD:
 		return exitNoAnswer
 	}
 	// No default above, so archcheck holds the switch to every kind the contract names.
