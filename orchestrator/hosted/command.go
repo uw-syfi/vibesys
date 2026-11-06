@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
+	"strings"
 
+	"github.com/uw-syfi/vibesys/cli/envcodec"
+	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/mcp"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/production"
+	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
 )
 
 // HostProgram is the executable name used by host commands and remote connections.
@@ -30,7 +32,7 @@ func Command(ctx context.Context, version string, args []string, stdin io.Reader
 		fmt.Fprint(stderr, "usage:\n"+Usage)
 		return 2
 	}
-	return runMCP(ctx, version, stdin, stdout, func(err error) int {
+	return runMCP(ctx, version, stdin, stdout, stderr, func(err error) int {
 		fmt.Fprintf(stderr, "%s: %v\n", HostProgram, err)
 		return 1
 	})
@@ -38,39 +40,42 @@ func Command(ctx context.Context, version string, args []string, stdin io.Reader
 
 // runMCP serves the tools of the session this process was launched for. Its identity is read from
 // the environment the orchestrator gave the agent, and nowhere else.
-func runMCP(ctx context.Context, version string, stdin io.Reader, stdout io.Writer, fail func(error) int) int {
-	need := func(name string) (string, error) {
-		v := os.Getenv(name)
-		if v == "" {
-			return "", fmt.Errorf("%s is not set: run this tool server from the environment the orchestrator launched the agent with", name)
-		}
-		return v, nil
-	}
-	var env = map[string]string{}
-	for _, name := range []string{daemon.EnvSocket, daemon.EnvAgent, daemon.EnvSession, daemon.EnvToken, daemon.EnvRun, daemon.EnvRole} {
-		v, err := need(name)
-		if err != nil {
-			return fail(err)
-		}
-		env[name] = v
-	}
-	n, err := strconv.ParseUint(env[daemon.EnvSession], 10, 32)
+func runMCP(ctx context.Context, version string, stdin io.Reader, stdout, stderr io.Writer, fail func(error) int) int {
+	credentials, unknown, err := credentialsFrom(os.Environ())
 	if err != nil {
-		return fail(fmt.Errorf("%s=%q is not a session number", daemon.EnvSession, env[daemon.EnvSession]))
+		return fail(fmt.Errorf("run this tool server from the environment the orchestrator launched the agent with: %w", err))
 	}
-	c, err := client.Dial(ctx, production.UnixDialer(env[daemon.EnvSocket]), client.Options{
+	if len(unknown) > 0 {
+		// Reported and not refused: the environment is inherited, and a name in the prefix can be
+		// another program's setting.
+		fmt.Fprintf(stderr, "%s: ignoring %s, which the tool server does not read\n", HostProgram, strings.Join(unknown, ", "))
+	}
+	role, err := wire.RoleIn(credentials.GetRole())
+	if err != nil {
+		return fail(err)
+	}
+	c, err := client.Dial(ctx, production.UnixDialer(credentials.GetEndpoint()), client.Options{
 		BinaryVersion: version,
-		Session:       &client.Session{Agent: env[daemon.EnvAgent], Session: uint32(n), Token: env[daemon.EnvToken]},
+		Session:       &client.Session{Agent: credentials.GetAgent(), Session: credentials.GetSession(), Token: credentials.GetToken()},
 	})
 	if err != nil {
 		return fail(err)
 	}
 	defer c.Close()
-	server := mcp.New(mcp.Identity{
-		Agent: core.AgentID(env[daemon.EnvAgent]), Run: core.RunID(env[daemon.EnvRun]), Role: core.AgentRole(env[daemon.EnvRole]),
-	}, c, production.RandomHex(6))
+	server := mcp.New(mcp.Identity{Agent: core.AgentID(credentials.GetAgent()), Run: core.RunID(credentials.GetRun()), Role: role}, c, production.RandomHex(6))
 	if err := server.Serve(ctx, stdin, stdout); err != nil {
 		return fail(err)
 	}
 	return 0
+}
+
+// credentialsFrom reads the tool server's credentials from an environment in the form os.Environ
+// returns it. Every variable is required, and one that breaks its rule is refused naming its
+// variable. It also returns the names in the credentials' namespace that no field reads.
+func credentialsFrom(environ []string) (*pb.ToolServerCredentials, []string, error) {
+	credentials := &pb.ToolServerCredentials{}
+	if err := envcodec.Decode(envcodec.FromEnviron(environ), credentials); err != nil {
+		return nil, nil, err
+	}
+	return credentials, envcodec.Unknown(environ, credentials), nil
 }

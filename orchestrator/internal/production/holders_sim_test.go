@@ -449,8 +449,11 @@ func TestABadFieldIsRefusedByNameBeforeAnythingStarts(t *testing.T) {
 		{"a relative agent root", "agent_data_directory", func(_ *daemon.SessionStart, p *ProcessSidecars) { p.Root = "relative" }},
 		{"a relative marketplace", SettingSkills, func(_ *daemon.SessionStart, p *ProcessSidecars) { p.Parts = holderParts("skills") }},
 		{"a relative tool server", "tools[0].argv", func(_ *daemon.SessionStart, p *ProcessSidecars) { p.Executable = "vibesys-host" }},
-		{"a tool environment name that is no name", "tools[0].env", func(s *daemon.SessionStart, _ *ProcessSidecars) {
-			s.Tools = daemon.LaunchEnv{"A=B": "x"}
+		{"no token for the tool server", "VIBESYS_ORCHESTRATOR_TOKEN", func(s *daemon.SessionStart, _ *ProcessSidecars) {
+			s.Tools.Token = ""
+		}},
+		{"a tool server role that is no role", "VIBESYS_ORCHESTRATOR_ROLE", func(s *daemon.SessionStart, _ *ProcessSidecars) {
+			s.Tools.Role = pb.AgentRole_AGENT_ROLE_UNSPECIFIED
 		}},
 		{"no harness", "harness", func(s *daemon.SessionStart, _ *ProcessSidecars) { s.Launch.Spec.Harness = "" }},
 	} {
@@ -474,15 +477,15 @@ func TestABadFieldIsRefusedByNameBeforeAnythingStarts(t *testing.T) {
 // starts one agent, or it refuses having started nothing.
 func FuzzOpenSessionRequest(f *testing.F) {
 	f.Add("/repo", "/skills", "/bin/vibesys-host", "TOKEN", "a-model", "/cli")
-	f.Add("repo", "", "", "A=B", "", "cli")
+	f.Add("repo", "", "", "", "", "cli")
 	f.Add("", "/skills\x00", "/x", "1A", "\xff", "")
-	f.Fuzz(func(t *testing.T, repository, marketplace, executable, envName, model, cli string) {
+	f.Fuzz(func(t *testing.T, repository, marketplace, executable, token, model, cli string) {
 		w := newHolderWorld()
 		sidecars := w.sidecars("/sessions")
 		sidecars.Parts = holderParts(marketplace)
 		sidecars.Executable = executable
 		start := sessionStart("agent-1", core.RoleLead, repository)
-		start.Tools = daemon.LaunchEnv{envName: "x"}
+		start.Tools.Token = token
 		start.Launch.Spec.Model = core.ModelName(model)
 		start.Location.CLI = cli
 		_, err := sidecars.Launch(context.Background(), start)

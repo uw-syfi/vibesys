@@ -1,6 +1,8 @@
 package wire
 
 import (
+	"fmt"
+
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
@@ -150,3 +152,16 @@ var (
 		core.TimerLeadIdle:       pb.TimerKind_TIMER_KIND_LEAD_IDLE,
 	})
 )
+
+// RoleOut is the contract value of an agent's role, for the messages a program is started from.
+func RoleOut(r core.AgentRole) pb.AgentRole { return roles.out(r) }
+
+// RoleIn is the role a contract value names, or an error for the unspecified one or a value this
+// build does not know.
+func RoleIn(p pb.AgentRole) (core.AgentRole, error) {
+	r, ok := roles.toCore[p]
+	if !ok {
+		return "", fmt.Errorf("no agent role for %v", p)
+	}
+	return r, nil
+}

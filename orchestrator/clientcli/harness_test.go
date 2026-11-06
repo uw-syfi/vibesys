@@ -18,7 +18,6 @@ import (
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
-	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon/daemontest"
 )
 
@@ -259,9 +258,7 @@ func (l *live) postReportOf(t testing.TB, lead, headline string, kind pb.ReportK
 		if string(s.Launch.Session.Agent) != lead {
 			continue
 		}
-		var n uint32
-		fmt.Sscan(s.Env[daemon.EnvSession], &n)
-		agent, err := client.Dial(ctx, l.AgentListener.Dial, client.Options{Session: &client.Session{Agent: s.Env[daemon.EnvAgent], Session: n, Token: s.Env[daemon.EnvToken]}})
+		agent, err := client.Dial(ctx, l.AgentListener.Dial, client.Options{Session: &client.Session{Agent: s.Credentials.GetAgent(), Session: s.Credentials.GetSession(), Token: s.Credentials.GetToken()}})
 		if err != nil {
 			t.Fatal(err)
 		}

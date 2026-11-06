@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -340,12 +339,14 @@ func (s *ProcessSidecars) openRequest(start daemon.SessionStart, plugin Plugin) 
 	if l.Role != core.RoleLead {
 		workdir = filepath.Join(s.agentDir(l.Session.Agent), "worktree")
 	}
-	environment := agentEnvironment(start)
-	toolEnv := maps.Clone(start.Tools)
-	if toolEnv == nil {
-		toolEnv = map[string]string{}
+	environment, err := agentEnvironment(start)
+	if err != nil {
+		return nil, err
 	}
-	maps.Copy(toolEnv, environment.GetSet())
+	toolEnv, err := toolServerEnvironment(start.Tools, environment)
+	if err != nil {
+		return nil, err
+	}
 	return &pb.OpenSessionRequest{
 		Session: launch.GetSession(), Harness: launch.GetHarness(), Model: launch.GetModel(), ReasoningEffort: launch.GetReasoningEffort(),
 		WorkingDirectory: workdir, AgentDataDirectory: filepath.Join(s.agentDir(l.Session.Agent), "plugin-home"), ResumeToken: launch.GetResumeToken(),
@@ -358,34 +359,6 @@ func (s *ProcessSidecars) openRequest(start daemon.SessionStart, plugin Plugin) 
 // ToolServerName is the name every agent's tool server is registered under, so the tools show up
 // as mcp__vibesys__spawn_agent and so on. The harness skills name it; a test holds the two together.
 const ToolServerName = "vibesys"
-
-// agentEnvironment is what the session's processes get over their login environment. The names are
-// listed, with what fills each, in proto/vibesys/cli/v1/conformance/identity_env.golden.json, which
-// a test holds this to. An empty value unsets its name, so the program resolves it as this process
-// would, except HOME, which the agent's own program needs.
-func agentEnvironment(start daemon.SessionStart) *pb.AgentEnvironment {
-	l, where := start.Launch, start.Location
-	out := &pb.AgentEnvironment{Set: map[string]string{}}
-	for _, name := range []struct{ name, value string }{
-		{"VIBESYS_REPO", start.Repository},
-		{"VIBESYS_TASK", start.Task},
-		{"VIBESYS_RUN", string(l.Run)},
-		{"VIBESYS_AGENT", string(l.Session.Agent)},
-		{"VIBESYS_HARNESS", strings.ReplaceAll(string(l.Spec.Harness), "_", "-")},
-		{"VIBESYS_CLI", where.CLI},
-		{"XDG_RUNTIME_DIR", where.RuntimeDir},
-		{"XDG_STATE_HOME", where.StateHome},
-		{"HOME", where.Home},
-	} {
-		switch {
-		case name.value != "":
-			out.Set[name.name] = name.value
-		case name.name != "HOME":
-			out.Unset = append(out.Unset, name.name)
-		}
-	}
-	return out
-}
 
 func launchMessage(l core.LaunchSession) (*pb.LaunchSession, error) {
 	data, err := wire.EncodeEffect(l)

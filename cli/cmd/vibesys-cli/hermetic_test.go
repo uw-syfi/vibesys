@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -15,7 +14,7 @@ import (
 
 // operatorPrefixes are the prefixes of every environment name the tool reads, through its one getenv
 // and otherwise, but HOME: the context flags' defaults, the sandbox switch, the operator config, the
-// runtime, state, config and cache directories (see the README's list and the identity golden). A
+// runtime, state, config and cache directories (see the README's list). A
 // developer's shell that runs a live daemon exports them, and a test that starts the tool, its daemon
 // or a supervisor from os.Environ would reach that daemon's socket, its index or the operator's
 // config. A whole prefix is taken, so a name the tool starts to read later is covered without being
@@ -46,16 +45,11 @@ func TestRealTestsIgnoreTheOperatorEnvironmentTheyAreRunFrom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Every name the identity golden lists for the tool but HOME, and the operator's own (the sandbox
-	// switch, the operator config, its directory and the cache), points at a directory of this test,
-	// as a live daemon's would.
+	// Every name the context messages declare, the places the tool reads but HOME, and the operator's
+	// own (the sandbox switch, the operator config, its directory and the cache), points at a
+	// directory of this test, as a live daemon's would.
 	live := t.TempDir()
-	names := []string{"VIBESYS_CLI_CONFIG", "XDG_CONFIG_HOME", "XDG_CACHE_HOME"}
-	for _, n := range golden(t) {
-		if slices.Contains(n.Readers, "cli") && n.Name != "HOME" {
-			names = append(names, n.Name)
-		}
-	}
+	names := append([]string{"VIBESYS_CLI_CONFIG", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"}, declaredContextNames(t)...)
 	env := append(os.Environ(), production.EnvSandbox+"=1")
 	var dirs []string
 	for _, name := range names {

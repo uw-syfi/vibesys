@@ -1,0 +1,18 @@
+{
+  "clients/apps/desktop/scripts/build-gateway.mjs": {
+    "VIBESYS_GATEWAY_TARGETS": {
+      "count": 1,
+      "reason": "a build-time switch of the desktop packaging script, read by node on the developer's machine; no run's process receives it"
+    }
+  },
+  "sdk/vibesys-evaluator/go/k8s/deployment.go": {
+    "VIBESYS_K8S_BUILDER": {
+      "count": 1,
+      "reason": "a setting of a task's own Kubernetes evaluator, set by its author in the job's environment; it becomes a field of the job environment message (JobEnvironment, redesign item 15)"
+    },
+    "VIBESYS_K8S_REGISTRY": {
+      "count": 1,
+      "reason": "a setting of a task's own Kubernetes evaluator, set by its author in the job's environment; it becomes a field of the job environment message (JobEnvironment, redesign item 15)"
+    }
+  }
+}
