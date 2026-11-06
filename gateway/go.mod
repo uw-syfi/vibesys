@@ -46,3 +46,5 @@ tool (
 replace github.com/uw-syfi/vibesys/orchestrator => ../orchestrator
 
 replace github.com/uw-syfi/vibesys/cli => ../cli
+
+replace github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go => ../sdk/vibesys-evaluator/go

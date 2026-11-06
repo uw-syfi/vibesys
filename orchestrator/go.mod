@@ -14,6 +14,7 @@ require (
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect
 	github.com/moby/patternmatcher v0.6.0 // indirect
+	github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go v0.0.0 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 )
@@ -47,3 +48,5 @@ tool (
 )
 
 replace github.com/uw-syfi/vibesys/cli => ../cli
+
+replace github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go => ../sdk/vibesys-evaluator/go
