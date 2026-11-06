@@ -34,9 +34,10 @@ type Limits struct{ MaxItems, MaxBytes int }
 // DefaultLimits is 1,000 queued items or 8 MiB, whichever comes first.
 var DefaultLimits = Limits{MaxItems: DefaultMaxItems, MaxBytes: DefaultMaxBytes}
 
-// Stored is a committed event on its way to watchers.
+// Stored is what watchers receive of a committed event, on its way to them: its public part, so that
+// nothing the host keeps for itself is in the hub at all.
 type Stored struct {
-	Event *pb.Event
+	Change *pb.RunChange
 	// Agent is the agent the event concerns, or empty when it concerns none in particular. A
 	// subscription to one agent receives only its events.
 	Agent core.AgentID
@@ -94,7 +95,7 @@ func (h *Hub) Subscribe(in Interest) *Subscription {
 // PublishStored hands a committed event to the subscriptions that want it. Events must be
 // published in sequence order.
 func (h *Hub) PublishStored(st Stored) {
-	size := proto.Size(st.Event)
+	size := proto.Size(st.Change)
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for s := range h.subs {

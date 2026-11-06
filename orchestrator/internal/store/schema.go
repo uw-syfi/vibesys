@@ -7,7 +7,9 @@ package store
 // renamed its provider conversation id to a resume token. Version 6 gave a run the agents it may use. Version 7 gave a finished run the working copies it kept.
 // Version 8 gave a handoff the body of its role, so a stored handoff no longer has the flat fields of the version before.
 // Version 9 replaced a run's CLI location, which named the tool's places, with its job tool endpoint.
-const schemaVersion = 9
+// Version 10 split what clients receive from what is stored: a run, an agent and a receipt are held
+// in records with their private parts, and a capabilities message no longer says a session streams text.
+const schemaVersion = 10
 
 // The schema. It follows the draft in the design notes, with these deliberate differences:
 //

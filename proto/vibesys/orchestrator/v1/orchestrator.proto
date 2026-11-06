@@ -205,8 +205,8 @@ message Run {
   // Set when the run left RUNNING.
   RunStopReason stop_reason = 9 [(buf.validate.field).enum.defined_only = true];
   google.protobuf.Timestamp ended_at = 10;
-  reserved 11;
-  reserved "cli_location";
+  reserved 11, 20;
+  reserved "cli_location", "job_tool";
   // How many reports the run's lead has posted. The next report is numbered one more.
   uint32 reports_posted = 12;
   // Set while the run has nothing left that could move it: its lead is idle, no other agent is
@@ -230,10 +230,6 @@ message Run {
   // because they hold changes git does not have. Empty while the run is live, and for a run that left
   // none. The run's operator decides what becomes of them.
   repeated KeptCheckout kept_checkouts = 19;
-  // The job tool this run's agents use. Recorded when the run starts and never changed, so a relaunch
-  // of any of its sessions meets the same daemon. It is stored; item 10 of the redesign moves it out
-  // of what clients receive.
-  JobToolEndpoint job_tool = 20;
 }
 
 // KeptCheckout is one agent's working copy of the run's repository, left in place because removing
@@ -253,16 +249,6 @@ message AllowedAgent {
     not_in: [0]
   }];
   string model = 2;
-}
-
-// JobToolEndpoint is the vibesys-cli a run's agents run and the daemon it serves, as that tool named
-// it when the run started (`daemon ensure --json`). Both are absolute paths, and neither says
-// anything about how the tool lays out what it keeps there.
-message JobToolEndpoint {
-  // The program the agents run. It becomes SkillEnvironment.cli (vibesys/cli/v1/env.proto).
-  string executable = 1 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
-  // The tool's runtime directory. It becomes JobToolPlace.runtime_directory.
-  string runtime_directory = 2 [(buf.validate.field).string.pattern = "^/[^\\x00]*$"];
 }
 
 message Agent {
@@ -286,10 +272,9 @@ message Agent {
     defined_only: true
     not_in: [0]
   }];
-  // What the next session of this agent resumes with. Opaque; empty until a session that can resume
-  // opened.
-  bytes resume_token = 11 [(buf.validate.field).bytes.max_len = 4096];
-  // Absent until the session opened.
+  reserved 11;
+  reserved "resume_token";
+  // Absent until the session opened, and for a session that can neither steer nor resume.
   Capabilities capabilities = 12;
   google.protobuf.Timestamp started_at = 13 [(buf.validate.field).required = true];
   google.protobuf.Timestamp ended_at = 14;
@@ -318,7 +303,8 @@ message Agent {
 // Capabilities are what a session can do. It reports them when it opens, so
 // that the orchestrator never branches on a harness.
 message Capabilities {
-  bool streams_text = 1;
+  reserved 1;
+  reserved "streams_text";
   bool steers = 2;
   bool resumes = 3;
 }

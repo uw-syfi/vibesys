@@ -102,13 +102,13 @@ func (e *Engine) apply(body core.InputBody) (Applied, error) {
 }
 
 func (e *Engine) publish(seq uint64, ev core.Event) {
-	msg, err := wire.EventMessage(seq, ev)
+	msg, err := wire.ChangeMessage(seq, ev)
 	if err != nil {
 		// The store accepted the event, so it encodes; a failure here is a bug in this build.
 		e.Log.Error("cannot show a committed event to watchers", "sequence", seq, "err", err)
 		return
 	}
-	st := hub.Stored{Event: msg}
+	st := hub.Stored{Change: msg}
 	switch b := ev.Body.(type) {
 	case core.Item:
 		st.Agent, st.Item, st.ItemFinal = b.Agent, b.ID, b.Status != core.ItemRunning

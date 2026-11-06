@@ -121,7 +121,7 @@ func (w *Workload) answer(e core.Effect) core.InputBody {
 	switch e := e.(type) {
 	case core.LaunchSession:
 		return w.fact(e.Session, core.SessionOpened{
-			ResumeToken: "conv-" + string(e.Session.Agent), Capabilities: core.Capabilities{StreamsText: true, Steers: true, Resumes: true},
+			ResumeToken: "conv-" + string(e.Session.Agent), Capabilities: core.Capabilities{Steers: true, Resumes: true},
 		})
 	case core.StartTurn:
 		w.turns = append(w.turns, turnPlan{session: e.Session, turn: e.Turn, left: 1 + w.r.IntN(6)})

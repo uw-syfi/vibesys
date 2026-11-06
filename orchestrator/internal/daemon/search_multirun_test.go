@@ -79,7 +79,7 @@ func TestMultipleRunsConvergeAcrossLagReconnectAndSnapshotOmissions(t *testing.T
 			put(runs[int(n)%len(runs)], fmt.Sprint(i, n))
 			r.Settle(t)
 			if i%3 == 0 {
-				r.Hub.PublishStored(hub.Stored{Event: &pb.Event{Sequence: 1}})
+				r.Hub.PublishStored(hub.Stored{Change: &pb.RunChange{Sequence: 1}})
 			}
 			if n%2 == 0 {
 				frames, err = w.Poll()

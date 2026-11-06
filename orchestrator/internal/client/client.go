@@ -120,7 +120,7 @@ func (c *Client) Dispatch(ctx context.Context, cmd *pb.Command) (*pb.Receipt, er
 	return resp.GetReceipt(), nil
 }
 
-// WatchRuns opens the stream of runs: a snapshot, then events after it. After zero starts with a
+// WatchRuns opens the stream of runs: a snapshot, then changes after it. After zero starts with a
 // snapshot; otherwise it continues after that sequence.
 func (c *Client) WatchRuns(ctx context.Context, after uint64) (grpc.ServerStreamingClient[pb.WatchRunsResponse], error) {
 	return c.svc.WatchRuns(ctx, &pb.WatchRunsRequest{AfterSequence: after})

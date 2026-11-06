@@ -23,10 +23,10 @@ const guard = 30 * time.Second
 // feed reads a stream of runs in the background, so a test can wait for an event by predicate.
 type feed struct {
 	t      testing.TB
-	events chan *pb.Event
+	events chan *pb.RunChange
 	snap   chan *pb.RunsSnapshot
 	// seen is every event read so far, so that waiting for one never loses another.
-	seen []*pb.Event
+	seen []*pb.RunChange
 }
 
 func watchRuns(ctx context.Context, t testing.TB, c *client.Client, after uint64) *feed {
@@ -35,7 +35,7 @@ func watchRuns(ctx context.Context, t testing.TB, c *client.Client, after uint64
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &feed{t: t, events: make(chan *pb.Event, 4096), snap: make(chan *pb.RunsSnapshot, 16)}
+	f := &feed{t: t, events: make(chan *pb.RunChange, 4096), snap: make(chan *pb.RunsSnapshot, 16)}
 	go func() {
 		var _ grpc.ServerStreamingClient[pb.WatchRunsResponse] = stream
 		for {
@@ -57,7 +57,7 @@ func watchRuns(ctx context.Context, t testing.TB, c *client.Client, after uint64
 }
 
 // until returns the first event, already read or still to come, that satisfies the predicate.
-func (f *feed) until(what string, match func(*pb.Event) bool) *pb.Event {
+func (f *feed) until(what string, match func(*pb.RunChange) bool) *pb.RunChange {
 	f.t.Helper()
 	for _, ev := range f.seen {
 		if match(ev) {
@@ -81,9 +81,9 @@ func (f *feed) until(what string, match func(*pb.Event) bool) *pb.Event {
 	}
 }
 
-func turnDone(agent string, ordinal uint32) func(*pb.Event) bool {
-	return func(ev *pb.Event) bool {
-		t := ev.GetTurnUpdated()
+func turnDone(agent string, ordinal uint32) func(*pb.RunChange) bool {
+	return func(ev *pb.RunChange) bool {
+		t := ev.GetTurn()
 		return t != nil && t.GetAgentId() == agent && t.GetOrdinal() == ordinal && t.GetStatus() == pb.TurnStatus_TURN_STATUS_COMPLETED
 	}
 }
@@ -167,8 +167,8 @@ func TestAWholeRunFromAClient(t *testing.T) {
 	leadTools, _ := toolClient(ctx, t, live, core.AgentID(lead), core.RoleLead, run)
 	spawned := callTool(t, leadTools, 1, "spawn_agent", map[string]any{"role": "worker", "brief": "try plan 1", "plan_number": 1})
 	worker := strings.TrimSuffix(strings.TrimPrefix(spawned, "started agent "), ". It will post a handoff when it is done; list_agents shows where it stands.")
-	feed.until("the worker's turn to start", func(ev *pb.Event) bool {
-		t := ev.GetTurnUpdated()
+	feed.until("the worker's turn to start", func(ev *pb.RunChange) bool {
+		t := ev.GetTurn()
 		return t != nil && t.GetAgentId() == worker && t.GetStatus() == pb.TurnStatus_TURN_STATUS_RUNNING
 	})
 	if listing := callTool(t, leadTools, 2, "list_agents", nil); !strings.Contains(listing, worker) {
@@ -187,23 +187,23 @@ func TestAWholeRunFromAClient(t *testing.T) {
 		}
 	}
 	workerSession.EmitEvents(&pb.SessionEvent{Body: &pb.SessionEvent_TurnEnded{TurnEnded: &pb.TurnEnded{TurnId: turnID, Status: pb.TurnStatus_TURN_STATUS_COMPLETED}}})
-	feed.until("the worker's session to end", func(ev *pb.Event) bool {
-		a := ev.GetAgentUpdated()
+	feed.until("the worker's session to end", func(ev *pb.RunChange) bool {
+		a := ev.GetAgent()
 		return a != nil && a.GetId() == worker && a.GetStatus() == pb.AgentStatus_AGENT_STATUS_ENDED
 	})
 
 	// The lead reports; the operator sees it.
 	callTool(t, leadTools, 3, "post_report", map[string]any{"kind": "final", "headline": "plan 1 won"})
-	feed.until("the report", func(ev *pb.Event) bool {
-		return ev.GetMessageUpdated().GetReport().GetHeadline() == "plan 1 won"
+	feed.until("the report", func(ev *pb.RunChange) bool {
+		return ev.GetMessage().GetReport().GetHeadline() == "plan 1 won"
 	})
 
 	// The operator stops the run.
 	if r, err := op.Dispatch(ctx, &pb.Command{Id: "stop-1", Body: &pb.Command_StopRun{StopRun: &pb.StopRun{RunId: string(run)}}}); err != nil || r.GetRefusal() != 0 {
 		t.Fatalf("stop: %v %v", r, err)
 	}
-	feed.until("the run to end", func(ev *pb.Event) bool {
-		r := ev.GetRunUpdated()
+	feed.until("the run to end", func(ev *pb.RunChange) bool {
+		r := ev.GetRun()
 		return r != nil && r.GetId() == string(run) && r.GetStatus() == pb.RunStatus_RUN_STATUS_ENDED
 	})
 }

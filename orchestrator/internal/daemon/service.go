@@ -235,11 +235,11 @@ func (s *Service) WatchRunsFrom(caller core.Caller, after uint64) (*RunsWatch, [
 		snapshot: func(state core.State, last uint64) (*pb.WatchRunsResponse, error) {
 			return s.runsSnapshot(state, last, run, scoped, seen)
 		},
-		event: func(ev *pb.Event) (*pb.WatchRunsResponse, bool) {
-			if scoped && core.RunID(ev.GetRunId()) != run {
+		change: func(c *pb.RunChange) (*pb.WatchRunsResponse, bool) {
+			if scoped && core.RunID(c.GetRunId()) != run {
 				return nil, false
 			}
-			return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Event{Event: ev}}, true
+			return &pb.WatchRunsResponse{Body: &pb.WatchRunsResponse_Change{Change: c}}, true
 		},
 		delta:  func(*pb.Delta) (*pb.WatchRunsResponse, bool) { return nil, false },
 		latest: latest,
@@ -284,7 +284,7 @@ func (s *Service) addHistory(snap *pb.RunsSnapshot, run core.RunID) error {
 	}
 }
 
-// WatchRuns streams a snapshot of runs and agents, then every event after it.
+// WatchRuns streams a snapshot of runs and agents, then the public part of every event after it.
 func (s *Service) WatchRuns(req *pb.WatchRunsRequest, stream grpc.ServerStreamingServer[pb.WatchRunsResponse]) error {
 	caller, err := s.caller(stream.Context())
 	if err != nil {
@@ -314,15 +314,15 @@ func (s *Service) WatchAgentFrom(agent core.AgentID, pageSize uint32, after uint
 			page.Sequence = last
 			return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Page{Page: page}}, nil
 		},
-		event: func(ev *pb.Event) (*pb.WatchAgentResponse, bool) {
-			switch b := ev.GetBody().(type) {
-			case *pb.Event_ItemUpdated:
-				if b.ItemUpdated.GetAgentId() == string(agent) {
-					return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Item{Item: b.ItemUpdated}}, true
+		change: func(c *pb.RunChange) (*pb.WatchAgentResponse, bool) {
+			switch b := c.GetBody().(type) {
+			case *pb.RunChange_Item:
+				if b.Item.GetAgentId() == string(agent) {
+					return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Item{Item: b.Item}}, true
 				}
-			case *pb.Event_TurnUpdated:
-				if b.TurnUpdated.GetAgentId() == string(agent) {
-					return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Turn{Turn: b.TurnUpdated}}, true
+			case *pb.RunChange_Turn:
+				if b.Turn.GetAgentId() == string(agent) {
+					return &pb.WatchAgentResponse{Body: &pb.WatchAgentResponse_Turn{Turn: b.Turn}}, true
 				}
 			}
 			return nil, false

@@ -17,7 +17,7 @@ import fc from 'fast-check';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {describe, expect, it} from 'vitest';
 import {
-  applyEvent,
+  applyChange,
   type CommandProgress,
   emptyState,
   type OrchestratorState,
@@ -39,7 +39,7 @@ const PROTOCOL = /UNSPECIFIED|AGENT_ROLE|TURN_|ITEM_STATUS|undefined|\[object/;
 
 function stateOf(seed: number, subagents: number, live: boolean) {
   const scenario = generateScenario({seed, subagents, live, depth: 2});
-  const state = scenario.events.reduce(applyEvent, emptyState);
+  const state = scenario.changes.reduce(applyChange, emptyState);
   return {scenario, state, runId: scenario.runId};
 }
 

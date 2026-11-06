@@ -48,8 +48,8 @@ func goldenScript() []*pb.WatchRunsResponse {
 		snapshot,
 		agentEvent(11, failing, 5),
 		messageEvent(12, settled, 7),
-		eventFrame(13, "run-1", 8, func(ev *pb.Event) {
-			ev.Body = &pb.Event_TurnUpdated{TurnUpdated: &pb.Turn{Id: "t3", AgentId: "lead-run-1", Ordinal: 2, Status: pb.TurnStatus_TURN_STATUS_FAILED, StartedAt: at(7), EndedAt: at(8)}}
+		eventFrame(13, "run-1", 8, func(ev *pb.RunChange) {
+			ev.Body = &pb.RunChange_Turn{Turn: &pb.Turn{Id: "t3", AgentId: "lead-run-1", Ordinal: 2, Status: pb.TurnStatus_TURN_STATUS_FAILED, StartedAt: at(7), EndedAt: at(8)}}
 		}),
 		messageEvent(14, jobDone, 8),
 		searchFrame("run-1", 1, jobOf("job-1", cliv1.JobState_JOB_STATE_RUNNING, true)),

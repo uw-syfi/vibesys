@@ -26,7 +26,7 @@ service OrchestratorService {
   // Dispatch carries out a command as the operator. Retrying an id answers with the same receipt,
   // and reusing an id for another command is an error.
   rpc Dispatch(DispatchRequest) returns (DispatchResponse);
-  // Snapshot of runs and agents, then every event after its sequence.
+  // Snapshot of runs and agents, then every change after its sequence.
   rpc WatchRuns(WatchRunsRequest) returns (stream WatchRunsResponse);
   // One agent: a page of items, then items and deltas after the sequence.
   rpc WatchAgent(WatchAgentRequest) returns (stream WatchAgentResponse);
@@ -79,7 +79,7 @@ message WatchRunsResponse {
   oneof body {
     option (buf.validate.oneof).required = true;
     RunsSnapshot snapshot = 1;
-    Event event = 2;
+    RunChange change = 2;
     SearchState search = 3;
   }
 }

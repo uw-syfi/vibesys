@@ -78,8 +78,8 @@ func TestLatestThousandPublishesAndLag(t *testing.T) {
 	if msgs, lag := agent.Take(); lag || len(msgs) != 0 {
 		t.Fatal(msgs, lag)
 	}
-	h.PublishStored(hub.Stored{Event: &pb.Event{Sequence: 1}})
-	h.PublishStored(hub.Stored{Event: &pb.Event{Sequence: 2}})
+	h.PublishStored(hub.Stored{Change: &pb.RunChange{Sequence: 1}})
+	h.PublishStored(hub.Stored{Change: &pb.RunChange{Sequence: 2}})
 	h.PublishLatest("a", &pb.SearchState{RunId: "a", Revision: 1001})
 	if _, lag := s.Take(); !lag {
 		t.Fatal("expected stored lag")

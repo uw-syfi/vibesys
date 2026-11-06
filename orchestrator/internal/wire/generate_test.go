@@ -70,6 +70,7 @@ func set(r *rand.Rand, m protoreflect.Message, fd protoreflect.FieldDescriptor) 
 // to skip the field, so whether a body was ever accepted would depend on the seed.
 var absolutePathFields = map[string]bool{
 	"marketplace": true, "home": true, "cli": true, "xdg_runtime_dir": true, "xdg_state_home": true,
+	"executable": true, "runtime_directory": true, "location": true,
 }
 
 func scalar(r *rand.Rand, fd protoreflect.FieldDescriptor) protoreflect.Value {

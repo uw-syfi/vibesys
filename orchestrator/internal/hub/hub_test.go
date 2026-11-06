@@ -22,7 +22,7 @@ func itemEvent(seq uint64, agent, item, text string, running bool) hub.Stored {
 	}
 	return hub.Stored{
 		Agent: core.AgentID(agent), Item: core.ItemID(item), ItemFinal: !running,
-		Event: &pb.Event{Sequence: seq, At: timestamppb.Now(), Body: &pb.Event_ItemUpdated{ItemUpdated: &pb.Item{
+		Change: &pb.RunChange{Sequence: seq, At: timestamppb.Now(), Body: &pb.RunChange_Item{Item: &pb.Item{
 			Id: item, AgentId: agent, Status: status, Body: &pb.Item_Assistant{Assistant: &pb.Text{Text: text}},
 		}}},
 	}
@@ -98,7 +98,7 @@ func TestASlowClientLagsAndTheWriterIsNeverBlocked(t *testing.T) {
 	sub.Resume()
 	h.PublishStored(itemEvent(11, "a", "i11", "x", false))
 	got, lagged := sub.Take()
-	if lagged || len(got) != 1 || got[0].Stored.Event.GetSequence() != 11 {
+	if lagged || len(got) != 1 || got[0].Stored.Change.GetSequence() != 11 {
 		t.Fatalf("after resuming got %v lagged=%v, want event 11 only", got, lagged)
 	}
 }
@@ -134,12 +134,12 @@ type view struct {
 func (v *view) apply(m hub.Message) error {
 	switch {
 	case m.Stored != nil:
-		seq := m.Stored.Event.GetSequence()
+		seq := m.Stored.Change.GetSequence()
 		if seq <= v.seq {
 			return fmt.Errorf("stored event %d arrived after %d", seq, v.seq)
 		}
 		v.seq = seq
-		it := m.Stored.Event.GetItemUpdated()
+		it := m.Stored.Change.GetItem()
 		v.items[it.GetId()] = it.GetAssistant().GetText()
 	case m.Delta != nil:
 		v.items[m.Delta.GetItemId()] += m.Delta.GetText()

@@ -19,7 +19,7 @@ import (
 // holds state from a different history. It starts again from a snapshot.
 var ErrAheadOfLog = errors.New("daemon: that sequence is ahead of the log; start again from a snapshot")
 
-// watch is the shared machinery of a stream: a snapshot, then every event after it, and a fresh
+// watch is the shared machinery of a stream: a snapshot, then the public part of every event after it, and a fresh
 // snapshot for a client that fell behind its bounds. It never blocks: Poll returns what is ready,
 // and Ready says when to call it again. R is the response type of the stream.
 type watch[R any] struct {
@@ -31,7 +31,7 @@ type watch[R any] struct {
 	run core.RunID
 	// snapshot builds the stream's snapshot from the instant of a Cut.
 	snapshot func(state core.State, last uint64) (R, error)
-	event    func(*pb.Event) (R, bool)
+	change   func(*pb.RunChange) (R, bool)
 	delta    func(*pb.Delta) (R, bool)
 	latest   func(*pb.SearchState) (R, bool)
 	current  func(core.State) []R
@@ -76,12 +76,12 @@ func (w *watch[R]) open(interest hub.Interest, after uint64) ([]R, error) {
 		}
 		for _, rec := range records {
 			w.sent = rec.Sequence
-			msg, err := wire.EventMessage(rec.Sequence, rec.Event)
+			msg, err := wire.ChangeMessage(rec.Sequence, rec.Event)
 			if err != nil {
 				w.sub.Close()
 				return nil, err
 			}
-			if r, ok := w.event(msg); ok {
+			if r, ok := w.change(msg); ok {
 				first = append(first, r)
 			}
 		}
@@ -135,12 +135,12 @@ func (w *watch[R]) Poll() ([]R, error) {
 	for _, m := range msgs {
 		switch {
 		case m.Stored != nil:
-			seq := m.Stored.Event.GetSequence()
+			seq := m.Stored.Change.GetSequence()
 			if seq <= w.sent {
 				continue
 			}
 			w.sent = seq
-			if r, ok := w.event(m.Stored.Event); ok {
+			if r, ok := w.change(m.Stored.Change); ok {
 				out = append(out, r)
 			}
 		case m.Search != nil && w.latest != nil:

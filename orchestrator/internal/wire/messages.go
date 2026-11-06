@@ -31,17 +31,27 @@ func ItemMessage(i core.Item) *pb.Item { return itemOut(i) }
 // ReceiptMessage returns a receipt, with the sequence of the event that holds it.
 func ReceiptMessage(r core.Receipt, sequence uint64) *pb.Receipt { return receiptOut(r, sequence) }
 
-// EventMessage returns an event as it is stored, without the bytes.
-func EventMessage(sequence uint64, e core.Event) (*pb.Event, error) {
-	data, err := EncodeEvent(sequence, e)
-	if err != nil {
-		return nil, err
+// ChangeMessage returns what a watcher receives for a committed event: its public part, and nothing
+// the host keeps for itself.
+func ChangeMessage(sequence uint64, e core.Event) (*pb.RunChange, error) {
+	out := &pb.RunChange{Sequence: sequence, At: when(e.At), RunId: string(e.Run)}
+	switch b := e.Body.(type) {
+	case core.Run:
+		out.Body = &pb.RunChange_Run{Run: runOut(b)}
+	case core.Agent:
+		out.Body = &pb.RunChange_Agent{Agent: agentOut(b)}
+	case core.Turn:
+		out.Body = &pb.RunChange_Turn{Turn: turnOut(b)}
+	case core.Item:
+		out.Body = &pb.RunChange_Item{Item: itemOut(b)}
+	case core.Message:
+		out.Body = &pb.RunChange_Message{Message: messageOut(b)}
+	case core.Receipt:
+		out.Body = &pb.RunChange_Receipt{Receipt: receiptOut(b, sequence)}
+	default:
+		return nil, describe("event", e.Body)
 	}
-	var m pb.Event
-	if err := proto.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("event %d: %w", sequence, err)
-	}
-	return &m, nil
+	return out, nil
 }
 
 // ParseCommandMessage reads a command that already arrived as a message. It holds the command to

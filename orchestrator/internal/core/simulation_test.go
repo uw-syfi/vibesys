@@ -509,7 +509,7 @@ func (w *sim) work() {
 func (w *sim) capabilities(agent core.AgentID) core.Capabilities {
 	c, ok := w.caps[agent]
 	if !ok {
-		c = core.Capabilities{StreamsText: w.r.IntN(2) == 0, Steers: w.r.IntN(2) == 0, Resumes: w.r.IntN(4) != 0}
+		c = core.Capabilities{Steers: w.r.IntN(2) == 0, Resumes: w.r.IntN(4) != 0}
 		w.caps[agent] = c
 	}
 	return c

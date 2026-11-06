@@ -11,7 +11,7 @@ import (
 )
 
 func TestWatchRunsReadersUseDecoder(t *testing.T) {
-	for _, expression := range []string{"m.GetEvent()", "m.GetSnapshot()", "m.GetSearch()", "m.GetBody()", "m.Body", "w.Event", "m.Body.(*WatchRunsResponse_Event)", "m.Body.(*WatchRunsResponse_Snapshot)", "m.Body.(*WatchRunsResponse_Search)", "func() any {switch m.Body.(type) {case *WatchRunsResponse_Event:}; return nil}()", "m.GetEvent", "(*WatchRunsResponse).GetEvent", "(*Alias)(m).GetEvent()", "other.GetEvent()", "embedded.GetEvent()", "embedded.Body", "(*Rebased)(m).Body"} {
+	for _, expression := range []string{"m.GetChange()", "m.GetSnapshot()", "m.GetSearch()", "m.GetBody()", "m.Body", "w.Change", "m.Body.(*WatchRunsResponse_Change)", "m.Body.(*WatchRunsResponse_Snapshot)", "m.Body.(*WatchRunsResponse_Search)", "func() any {switch m.Body.(type) {case *WatchRunsResponse_Change:}; return nil}()", "m.GetChange", "(*WatchRunsResponse).GetChange", "(*Alias)(m).GetChange()", "other.GetChange()", "embedded.GetChange()", "embedded.Body", "(*Rebased)(m).Body"} {
 		t.Run(expression, func(t *testing.T) {
 			fs := token.NewFileSet()
 			file, err := parser.ParseFile(fs, "reader.go", `package pb
@@ -21,15 +21,15 @@ func TestWatchRunsReadersUseDecoder(t *testing.T) {
  type Embedded struct {*WatchRunsResponse}
  type Alias = WatchRunsResponse
  type FollowResponse struct{}
- func (*FollowResponse) GetEvent() any {return nil}
- type WatchRunsResponse_Event struct { Event any }
+ func (*FollowResponse) GetChange() any {return nil}
+ type WatchRunsResponse_Change struct { Change any }
  type WatchRunsResponse_Snapshot struct { Snapshot any }
  type WatchRunsResponse_Search struct { Search any }
- func (*WatchRunsResponse) GetEvent() any {return nil}
+ func (*WatchRunsResponse) GetChange() any {return nil}
  func (*WatchRunsResponse) GetSnapshot() any {return nil}
  func (*WatchRunsResponse) GetSearch() any {return nil}
  func (*WatchRunsResponse) GetBody() any {return nil}
- func read(m *WatchRunsResponse, w *WatchRunsResponse_Event, other *FollowResponse, embedded *Embedded) { _ = `+expression+` }
+ func read(m *WatchRunsResponse, w *WatchRunsResponse_Change, other *FollowResponse, embedded *Embedded) { _ = `+expression+` }
  `, 0)
 			if err != nil {
 				t.Fatal(err)
@@ -42,7 +42,7 @@ func TestWatchRunsReadersUseDecoder(t *testing.T) {
 			}
 			for _, name := range []string{"orchestrator/internal/client/reader_test.go", "gateway/e2e/reader_test.go"} {
 				got := archcheck.WatchRunsReaders(name, file, fs, info)
-				if (len(got) > 0) != (expression != "other.GetEvent()") {
+				if (len(got) > 0) != (expression != "other.GetChange()") {
 					t.Fatalf("%s: %v", expression, got)
 				}
 			}
