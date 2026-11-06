@@ -89,9 +89,9 @@ func (a startArgs) command(id, repo string) (*pb.Command, error) {
 // A harness alone allows that harness on its default model only.
 func parseAllowed(spec string) (*pb.AllowedAgent, error) {
 	name, model, _ := strings.Cut(spec, ":")
-	harness, ok := harnesses[name]
+	harness, ok := names.Parse[pb.Harness](name)
 	if !ok {
-		return nil, usageError("--allow-agent %q does not start with claude_code or codex", spec)
+		return nil, usageError("--allow-agent %q does not start with %s", spec, names.List[pb.Harness]())
 	}
 	return &pb.AllowedAgent{Harness: harness, Model: model}, nil
 }
