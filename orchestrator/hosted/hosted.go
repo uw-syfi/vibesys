@@ -13,7 +13,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"path/filepath"
 	"time"
 
 	"google.golang.org/grpc"
@@ -80,10 +79,11 @@ func Start(ctx context.Context, o Options) *Orchestrator {
 	if err != nil {
 		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", "the orchestrator's state directory is refused: "+err.Error())
 	}
-	sidecars, err := production.SidecarsFor(parts, filepath.Join(layout.State.Path(), "sessions"), o.Executable, o.Log)
+	sidecars, err := production.SidecarsFor(parts, layout.State.Sessions(), o.Executable, o.Log)
 	if err != nil {
 		return x.unavailable(o.Log, pb.UnservedReason_UNSERVED_REASON_STATE_REFUSED, "", err.Error())
 	}
+	sidecars.Place = layout.State.Place
 	searches := production.SearchFor()
 	wiring := production.Wiring{Sidecars: sidecars, Search: searches, Jobs: search.Source{Store: searches.Store}, Tree: production.OSTree{}, Version: o.Version, Locate: parts.Location, Parts: parts, Root: o.Root}
 	d, err := production.AwaitHandOver(ctx, o.Root, time.After, func() (*production.Daemon, error) { return production.Open(layout, wiring, o.Log) })

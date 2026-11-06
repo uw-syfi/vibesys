@@ -387,7 +387,11 @@ func TestAHolderLivesExactlyWhileItHoldsItsLock(t *testing.T) {
 
 // ReapAgent ends what every dead session of an agent left, and leaves the live one alone.
 func TestReapingAnAgentEndsOnlyWhatNoHolderHolds(t *testing.T) {
-	agentDirectory := t.TempDir()
+	sidecars := &ProcessSidecars{Root: t.TempDir()}
+	agentDirectory := sidecars.agentDir("agent-1")
+	if err := os.MkdirAll(agentDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	signals := &recordingSignals{}
 	var live *fakeProcess
 	for n, groups := range map[string][]uint32{"1": {10}, "2": {20, 21}, "3": {30}} {
@@ -406,7 +410,7 @@ func TestReapingAnAgentEndsOnlyWhatNoHolderHolds(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(agentDirectory, "worktree"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := (&ProcessHolders{Signals: signals}).ReapAgent(agentDirectory); err != nil {
+	if err := (&ProcessHolders{Signals: signals}).ReapAgent(sidecars.agentPlaces("agent-1")); err != nil {
 		t.Fatal(err)
 	}
 	got := signals.groups()

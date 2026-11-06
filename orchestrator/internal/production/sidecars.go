@@ -25,6 +25,7 @@ import (
 	"github.com/uw-syfi/vibesys/orchestrator/internal/daemon"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/mcp"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/wire"
+	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
 	"github.com/uw-syfi/vibesys/orchestrator/release"
 )
 
@@ -78,6 +79,9 @@ func sidecarSetting(setting string) ([]string, error) {
 // none of it, only a session that started and then opened or failed with a reason.
 type ProcessSidecars struct {
 	Root string
+	// Place says where the socket whose natural path is given goes; nil keeps it there. A path that
+	// still does not fit a socket address refuses the launch (core.StartStateLocationTooLong).
+	Place func(natural string) string
 	// Parts gives the command that holds a session and the plugin every session loads. A launch
 	// with a part that cannot be resolved is refused.
 	Parts Parts
@@ -98,7 +102,30 @@ func (s *ProcessSidecars) agentDir(agent core.AgentID) string {
 
 func (s *ProcessSidecars) place(session core.Session) HolderPlace {
 	dir := filepath.Join(s.agentDir(session.Agent), strconv.FormatUint(uint64(session.N), 10))
-	return HolderPlace{Socket: filepath.Join(dir, "sock"), Directory: dir}
+	return s.holderPlace(dir)
+}
+
+// holderPlace is the place of the holder whose files are in dir: its socket is dir/sock, or where
+// Place puts that.
+func (s *ProcessSidecars) holderPlace(dir string) HolderPlace {
+	socket := filepath.Join(dir, "sock")
+	if s.Place != nil {
+		socket = s.Place(socket)
+	}
+	return HolderPlace{Socket: socket, Directory: dir}
+}
+
+// agentPlaces are the places of every session an agent has had, live or not.
+func (s *ProcessSidecars) agentPlaces(agent core.AgentID) []HolderPlace {
+	root := s.agentDir(agent)
+	entries, _ := os.ReadDir(root)
+	var places []HolderPlace
+	for _, e := range entries {
+		if _, err := strconv.ParseUint(e.Name(), 10, 32); err == nil && e.IsDir() {
+			places = append(places, s.holderPlace(filepath.Join(root, e.Name())))
+		}
+	}
+	return places
 }
 
 // Launch implements daemon.Sidecars. Its parts and what it asks for are checked first, so a missing
@@ -115,8 +142,13 @@ func (s *ProcessSidecars) Launch(ctx context.Context, start daemon.SessionStart)
 	}
 	session := start.Launch.Session
 	place := s.place(session)
-	if len(place.Socket) > maxSocketPath {
-		return nil, &daemon.LaunchError{Reason: core.StartStateLocationTooLong, Err: fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold", place.Socket, maxSocketPath)}
+	if !privatesocket.Fits(place.Socket) {
+		return nil, &daemon.LaunchError{Reason: core.StartStateLocationTooLong, Err: fmt.Errorf("the agent session's socket path %s is longer than %d bytes, which a Unix socket cannot hold", place.Socket, privatesocket.MaxPath)}
+	}
+	// A socket that was moved to the short private place needs its directory, made by this user and
+	// closed to everyone else, before the holder binds there.
+	if err := privatesocket.EnsureDirectory(place.Socket); err != nil {
+		return nil, err
 	}
 	request, err := s.openRequest(start, plugin)
 	if err != nil {
@@ -161,7 +193,7 @@ func (s *ProcessSidecars) holderFor(ctx context.Context, session core.Session, p
 		// place's lock and may not listen yet: it is waited for, and no second one is started.
 		exited := s.startingProcess(session)
 		if exited == nil && !s.Holders.Alive(place) {
-			if err := s.Holders.ReapAgent(s.agentDir(session.Agent)); err != nil {
+			if err := s.Holders.ReapAgent(s.agentPlaces(session.Agent)); err != nil {
 				return nil, fmt.Errorf("end the agent processes an earlier session left: %w", err)
 			}
 			s.forgetConn(session)

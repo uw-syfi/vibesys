@@ -11,18 +11,23 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 )
 
-// bindName is the socket's name in the private directory. With the directory's name it adds at most 12
-// bytes to the directory of the socket, so a path that fits with a name of 10 bytes, as every socket
-// here does under its 100-byte limit, fits while it is bound too.
+// bindName is the socket's name in the private directory. With the directory's name (".b", a process
+// id of at most 7 digits, "-" and a count of a digit or two) it adds at most 15 bytes to the
+// directory of the socket, so a path that fits with a name of 9 bytes or more, as the host's and the
+// agent socket do under their 100-byte limit, fits while it is bound too.
 const bindName = "s"
 
+// binds numbers the sockets this process has bound, so that two bound at once in one directory, as
+// the host's socket and the agent socket are in the short private directory, never share a name.
+var binds atomic.Uint32
+
 // Listen listens on path, replacing what a crash left there, with mode 0600. The caller must own path,
-// by holding the lock of whatever it belongs to, and must be the only one in this process binding in
-// that directory. Closing the listener does not remove path: the caller removes it, with Remove.
+// by holding the lock of whatever it belongs to. Closing the listener does not remove path: the caller removes it, with Remove.
 func Listen(path string) (*net.UnixListener, error) {
-	private := filepath.Join(filepath.Dir(path), fmt.Sprintf(".b%d", os.Getpid()))
+	private := filepath.Join(filepath.Dir(path), fmt.Sprintf(".b%d-%d", os.Getpid(), binds.Add(1)))
 	if err := os.RemoveAll(private); err != nil {
 		return nil, err
 	}

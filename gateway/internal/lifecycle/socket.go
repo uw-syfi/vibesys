@@ -1,15 +1,12 @@
 package lifecycle
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"syscall"
 
 	"github.com/uw-syfi/vibesys/orchestrator/privatesocket"
@@ -20,10 +17,8 @@ const (
 	lockFileName   = "host.lock"
 	logFileName    = "host.log"
 
-	// MaxSocketPath is the longest socket path a root gets to keep inside itself. A Unix socket
-	// address holds 104 bytes on macOS and 108 on Linux with its terminating NUL; one limit for both
-	// means a root behaves the same on either.
-	MaxSocketPath = 100
+	// MaxSocketPath is the longest socket path a root gets to keep inside itself.
+	MaxSocketPath = privatesocket.MaxPath
 )
 
 var ErrServing = errors.New("gateway already serving")
@@ -31,43 +26,18 @@ var ErrServing = errors.New("gateway already serving")
 // SocketPath is the one socket of the host of root, a function of root alone: a client that starts
 // a host and a client that finds one compute the same path, whatever their environments. It is
 // ROOT/host.sock, unless that does not fit in a socket address. Then it is a name derived from root
-// in a private directory of this user under /tmp, which is short on every system. /tmp is written
-// out because $TMPDIR differs between shells and on macOS is too long itself.
+// in the private directory of this user (privatesocket.Directory).
 func SocketPath(root string) string {
 	inside := filepath.Join(root, socketFileName)
-	if len(inside) <= MaxSocketPath {
+	if privatesocket.Fits(inside) {
 		return inside
 	}
-	sum := sha256.Sum256([]byte(root))
-	return filepath.Join(shortSocketDirectory(), hex.EncodeToString(sum[:16])+".sock")
+	return privatesocket.Short(root)
 }
 
-func shortSocketDirectory() string {
-	return "/tmp/vibesys-" + strconv.Itoa(os.Getuid())
-}
-
-// CheckSocketDirectory refuses a socket whose directory another user could have made, which is only
-// possible for the directory under /tmp. Anything that reaches for a socket checks this first:
-// whoever owns that directory could otherwise answer as the host. A directory that does not exist
-// yet is fine, because nobody can be listening.
-func CheckSocketDirectory(socket string) error {
-	directory := filepath.Dir(socket)
-	if directory != shortSocketDirectory() {
-		return nil
-	}
-	info, err := os.Lstat(directory)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !info.IsDir() || !ok || int(stat.Uid) != os.Getuid() || info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("refusing the socket directory %s: it must be a directory of this user that nobody else can reach", directory)
-	}
-	return nil
-}
+// CheckSocketDirectory refuses a socket whose directory another user could have made; see
+// privatesocket.CheckDirectory.
+func CheckSocketDirectory(socket string) error { return privatesocket.CheckDirectory(socket) }
 
 // LogPath is where a host's stderr goes. It is appended to, so whoever starts a host can read what
 // that one attempt wrote and nothing older.
@@ -118,12 +88,7 @@ func (h *Held) Close() error { return h.lock.Close() }
 // Endpoint owns the lock from here on.
 func (h *Held) Publish() (*Endpoint, error) {
 	path := SocketPath(h.root)
-	if filepath.Dir(path) == shortSocketDirectory() {
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			return nil, err
-		}
-	}
-	if err := CheckSocketDirectory(path); err != nil {
+	if err := privatesocket.EnsureDirectory(path); err != nil {
 		return nil, err
 	}
 	if info, err := os.Lstat(path); err == nil {

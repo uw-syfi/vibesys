@@ -594,9 +594,11 @@ phase_macos() {
   "$marked" --version || rc_marked=$?
   echo "a quarantined, ad-hoc signed binary run from a shell exited $rc_marked"
 
-  check "a root whose socket paths do not fit in a Unix socket address is refused by name, and a short state directory fixes it"
+  check "a root whose socket paths do not fit in a Unix socket address needs no setting, and a chosen state directory that is too long is refused by name"
   # A Unix socket address holds 104 bytes on macOS. The user temp directory under /var/folders is
-  # already about 50 of them, so a root made there is as long as a person's can get.
+  # already about 50 of them, so a root made there is as long as a person's can get. The host places
+  # a socket that would not fit in a short private directory (/tmp/vibesys-UID), so a default state
+  # directory in such a root works with no setting.
   local long rc=0 client
   long="$(mktemp -d)/vibesys-root-with-a-long-name"
   echo "the root is ${#long} bytes long: $long"
@@ -605,15 +607,19 @@ phase_macos() {
     die "install into a long root failed"
   }
   client="$long-bin/vibesys-client"
+  # The run may fail for what a clean Mac lacks (an agent to launch); it must not fail for a socket.
   (cd "$HOME/repo-client" && "$client" run start --task toy --detach >"$scratch/long.out" 2>"$scratch/long.err") || rc=$?
   cat "$scratch/long.out" "$scratch/long.err"
-  [ "$rc" != 0 ] || die "a state directory whose socket does not fit was accepted"
-  grep -q "bytes" "$scratch/long.err" || die "the refusal does not say what is too long"
-  grep -q "state-directory" "$scratch/long.err" || die "the refusal does not say what to do"
+  ! grep -q "Unix socket cannot hold" "$scratch/long.out" "$scratch/long.err" || die "a default state directory in a long root was refused for its socket path"
+  "$client" run list >/dev/null || die "a host in a long root did not start with no setting"
   "$client" host stop >/dev/null 2>&1 || true
-  "$client" host configure --state-directory "$scratch/long-state" >/dev/null
-  "$client" run list >/dev/null || die "a host with a short state directory did not start in a long root"
-  "$client" host stop
+  local too_long="$scratch/$(printf 's%.0s' $(seq 1 120))"
+  if "$client" host configure --state-directory "$too_long" >"$scratch/long-config.out" 2>"$scratch/long-config.err"; then
+    die "a chosen state directory whose sockets cannot fit was accepted"
+  fi
+  cat "$scratch/long-config.err"
+  grep -q "bytes" "$scratch/long-config.err" || die "the refusal does not say what is too long"
+  grep -q "state-directory" "$scratch/long-config.err" || die "the refusal does not say what to do"
   echo "macos checks done"
 }
 
