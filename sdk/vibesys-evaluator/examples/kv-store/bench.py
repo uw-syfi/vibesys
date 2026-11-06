@@ -76,7 +76,16 @@ SYSTEM = k8s.App(
     seed=seed,  # no data_tier: the whole manifest is applied and ready before the seed
     gateway="http://kv:8080",
     ready=[post("/login", json={"user": "u0", "password": "wrong"}, expect=401)],
+    restartable=["kv"],  # the Deployments an accuracy check's fault actions may hit
 )
+
+
+def fault_between_phases() -> None:
+    """What an accuracy check does at a quiet point between two phases (k8s.attach, the fault actions)."""
+    kv = k8s.attach(SYSTEM)  # the namespace of the running sample
+    replaced = kv.restart("kv", every_pod=True, wait=False)  # delete every pod at once
+    kv.wait_ready(["kv"], replaced=replaced)  # until the replacements serve, then the probes pass
+    kv.exec(["sh", "-c", "kill -0 1"], deployment="kv", check=True)  # a command in the first pod
 
 
 # ------------------------------------------------------------- (3) workload

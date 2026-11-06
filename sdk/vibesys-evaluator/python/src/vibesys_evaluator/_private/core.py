@@ -16,6 +16,7 @@ found the same way (``find_binary(name)``), with ``$VIBESYS_EVALUATOR_LOADGEN`` 
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -101,37 +102,62 @@ def call(
     request: Mapping[str, Any] | None = None,
     *,
     timeout_secs: float | None = None,
+    terminate_grace_secs: float = 0.0,
 ) -> dict[str, Any]:
-    """Run ``vibesys-evaluator GROUP VERB`` with ``request`` and return its decoded response."""
+    """Run ``vibesys-evaluator GROUP VERB`` with ``request`` and return its decoded response.
+
+    When the wait is cut short (a signal handler raising, ``KeyboardInterrupt``), the core is killed
+    at once; with ``terminate_grace_secs`` it is sent SIGTERM first and given that long to clean up
+    (a verb that owns cluster state deletes it on SIGTERM), then killed.
+    """
     binary = find_binary()
     body = json.dumps({} if request is None else request)
     try:
-        done = subprocess.run(
+        process = subprocess.Popen(
             [binary, group, verb],
-            input=body,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             text=True,
-            timeout=timeout_secs,
-            check=False,
         )
     except FileNotFoundError as error:
         msg = f"cannot run {BIN_NAME} at {binary!r}: {error.strerror}"
         raise CoreNotFoundError(msg) from error
+    try:
+        stdout, _ = process.communicate(body, timeout=timeout_secs)
     except subprocess.TimeoutExpired as error:
+        _stop(process, 0.0)
         msg = f"{BIN_NAME} {group} {verb} ran past {timeout_secs}s"
         raise CoreCrashError(msg) from error
-    if done.returncode not in {0, _DOMAIN_EXIT}:
-        msg = f"{BIN_NAME} {group} {verb} exited {done.returncode}"
-        raise CoreCrashError(msg, code=done.returncode)
+    except BaseException:
+        _stop(process, terminate_grace_secs)
+        raise
+    return _decode(group, verb, process.returncode, stdout)
+
+
+def _stop(process: subprocess.Popen[str], grace_secs: float) -> None:
+    """End the child: SIGTERM and a grace period when asked, then SIGKILL."""
+    if grace_secs > 0 and process.poll() is None:
+        process.terminate()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=grace_secs)
+    if process.poll() is None:
+        process.kill()
+    process.wait()
+
+
+def _decode(group: str, verb: str, code: int, stdout: str) -> dict[str, Any]:
+    if code not in {0, _DOMAIN_EXIT}:
+        msg = f"{BIN_NAME} {group} {verb} exited {code}"
+        raise CoreCrashError(msg, code=code)
     try:
-        response = json.loads(done.stdout)
+        response = json.loads(stdout)
     except ValueError as error:
-        msg = f"{BIN_NAME} {group} {verb} wrote a reply that is not JSON: {done.stdout[:200]!r}"
-        raise CoreCrashError(msg, code=done.returncode) from error
+        msg = f"{BIN_NAME} {group} {verb} wrote a reply that is not JSON: {stdout[:200]!r}"
+        raise CoreCrashError(msg, code=code) from error
     if not isinstance(response, dict):
         msg = f"{BIN_NAME} {group} {verb} wrote a reply that is not a JSON object"
-        raise CoreCrashError(msg, code=done.returncode)
-    if done.returncode == _DOMAIN_EXIT:
+        raise CoreCrashError(msg, code=code)
+    if code == _DOMAIN_EXIT:
         kind = response.get("error_kind", response.get("errorKind", ""))
         raise CoreDomainError(str(kind), str(response.get("message", "")), response)
     return response

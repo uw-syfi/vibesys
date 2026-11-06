@@ -55,6 +55,23 @@ vibesys_evaluator.microservices.k8s.App.name: str
 vibesys_evaluator.microservices.k8s.App.ready: Sequence[Step]
 vibesys_evaluator.microservices.k8s.App.restartable: Sequence[str]
 vibesys_evaluator.microservices.k8s.App.seed: Callable[[D], None] | None
+class vibesys_evaluator.microservices.k8s.Deployment  (app: App[Any], target: Mapping[str, Any], *, scratch: object | None = None) -> None
+vibesys_evaluator.microservices.k8s.Deployment.exec(argv: Sequence[str], *, deployment: str | None = None, pod: str | None = None, all_pods: bool = False, timeout_secs: float = 60.0, check: bool = False) -> list[ExecResult]
+vibesys_evaluator.microservices.k8s.Deployment.flush(cache: str) -> None
+vibesys_evaluator.microservices.k8s.Deployment.namespace: str
+vibesys_evaluator.microservices.k8s.Deployment.restart(*deployments: str, every_pod: bool = False, wait: bool = True) -> list[ReplacedPod]
+vibesys_evaluator.microservices.k8s.Deployment.start() -> None
+vibesys_evaluator.microservices.k8s.Deployment.stop() -> None
+vibesys_evaluator.microservices.k8s.Deployment.wait_ready(deployments: Sequence[str] = (), *, replaced: Sequence[ReplacedPod | str] = (), timeout_secs: float = 300.0, probe: bool = True) -> None
+class vibesys_evaluator.microservices.k8s.ExecResult  (pod: str, exit_code: int, output: str) -> None
+vibesys_evaluator.microservices.k8s.ExecResult.exit_code: int
+vibesys_evaluator.microservices.k8s.ExecResult.output: str
+vibesys_evaluator.microservices.k8s.ExecResult.pod: str
+class vibesys_evaluator.microservices.k8s.ReplacedPod  (deployment: str, pod: str, uid: str) -> None
+vibesys_evaluator.microservices.k8s.ReplacedPod.deployment: str
+vibesys_evaluator.microservices.k8s.ReplacedPod.pod: str
+vibesys_evaluator.microservices.k8s.ReplacedPod.uid: str
+vibesys_evaluator.microservices.k8s.attach(app: App[Any], *, namespace: str | None = None, task_dir: str | os.PathLike[str] | None = None) -> Deployment
 vibesys_evaluator.llm_serving.endpoint() -> str
 vibesys_evaluator.llm_serving.agentx.HARNESS_VERSION: Final[str]
 vibesys_evaluator.llm_serving.agentx.METRICS: Final[Mapping[str, Metric]]

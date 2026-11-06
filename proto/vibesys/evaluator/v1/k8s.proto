@@ -1,0 +1,238 @@
+syntax = "proto3";
+
+// What the language SDKs and `vibesys-evaluator k8s <verb>` exchange to deploy a task's
+// application on Kubernetes and to act on it: the wrapper boundary of the Go package k8s (sdk/
+// vibesys-evaluator/go/k8s) and of Python's `microservices.k8s.App`. Each verb reads one request
+// message as proto3 JSON on stdin and writes one response message as proto3 JSON on stdout;
+// progress goes to stderr. A failure is the convention's domain error (exit status 1, stdout
+// {"error_kind", "message"}) with one of the kinds below; this file has no error
+// fields. See sdk/vibesys-evaluator/docs/spec.md ("Wrapper calling convention", "Kubernetes
+// deploy").
+//
+// Error kinds: deploy (a step failed), build (an image did not build), manifest (the manifest
+// cannot be applied), invalid (a field of the request or of the App is wrong), out_of_memory (a pod
+// of the package was OOMKilled; the message names the limit), kube (the cluster refused),
+// canceled (the verb was stopped by SIGINT or SIGTERM; a deploy deleted its namespace first).
+package vibesys.evaluator.v1;
+
+option go_package = "github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1";
+
+// K8sCacheKind is a cache's protocol, which says how its contents are flushed.
+enum K8sCacheKind {
+  K8S_CACHE_KIND_UNSPECIFIED = 0;
+  K8S_CACHE_KIND_MEMCACHED = 1;
+  K8S_CACHE_KIND_REDIS = 2;
+}
+
+// K8sRole is what a pod of the package is for; it sets the pod's size.
+enum K8sRole {
+  K8S_ROLE_UNSPECIFIED = 0;
+  // 4 CPUs, 2 GiB.
+  K8S_ROLE_SEED = 1;
+  // 500 millicores, 256 MiB.
+  K8S_ROLE_PROBE = 2;
+  // 6 CPUs, 4 GiB.
+  K8S_ROLE_PHASE = 3;
+}
+
+// K8sApp is `microservices.k8s.App` without its Python parts (the ready requests travel as a
+// file, the seed as a command).
+message K8sApp {
+  // Lowercase letters, digits and dashes, 1-40 characters; labels the task's namespaces.
+  string name = 1;
+  // The manifest's path relative to the task directory.
+  string manifest = 2;
+  // Manifest variable to candidate directory (relative to the project root).
+  map<string, string> images = 3;
+  // http://<service>:<port>.
+  string gateway = 4;
+  // key=value[,key=value]; empty applies the whole manifest before the seed.
+  string data_tier = 5;
+  // A seed pod runs (the deploy request then carries its command).
+  bool has_seed = 6;
+  // Deployments the fault actions may restart, exec in, stop and start.
+  repeated string restartable = 7;
+  // Cache Deployments the fault actions may flush, restart and exec in.
+  map<string, K8sCacheKind> caches = 8;
+}
+
+// K8sPodCommand is a command of the task image and the files written into its pod's work directory
+// first.
+message K8sPodCommand {
+  repeated string argv = 1;
+  // File name in the pod's work directory to the local file holding its content.
+  map<string, string> input_files = 2;
+}
+
+// K8sTarget is a deployed application: what every verb after `deploy` acts on. `deploy` returns
+// it; the other verbs take it back, and nothing else carries state between the processes.
+message K8sTarget {
+  K8sApp app = 1;
+  // The task directory (manifest, task image).
+  string task_dir = 2;
+  string namespace = 3;
+  // The task image the package's pods run; computed from the task directory when empty.
+  string task_image = 4;
+  // The namespace's UID (teardown deletes only a namespace that still has it).
+  string uid = 5;
+  // A directory the verbs keep scratch files in (copied pod outputs, the CPU snapshot).
+  string work_dir = 6;
+  // The job's artifacts directory; empty writes none.
+  string artifacts_dir = 7;
+  // The ready requests as a loadgen requests file (written by the SDK), used by probes.
+  string probe_plan_file = 8;
+}
+
+// K8sDeployRequest builds the images, deploys into a fresh namespace, seeds and probes.
+message K8sDeployRequest {
+  K8sApp app = 1;
+  string task_dir = 2;
+  // The candidate's checkout.
+  string project_root = 3;
+  string work_dir = 4;
+  string artifacts_dir = 5;
+  string probe_plan_file = 6;
+  // Present exactly when app.has_seed.
+  optional K8sPodCommand seed = 7;
+}
+
+message K8sDeployResponse {
+  // The serving application; the namespace is owned by the caller until `teardown`.
+  K8sTarget target = 1;
+  // Candidate images by manifest variable.
+  map<string, string> images = 2;
+  map<string, double> build_seconds = 3;
+}
+
+// K8sAttachRequest checks that a namespace is one of the App's and returns its target, for a
+// process that acts on a sample another one deployed (the fault actions of an accuracy check).
+message K8sAttachRequest {
+  // The target without task_image and uid.
+  K8sTarget target = 1;
+}
+
+message K8sAttachResponse {
+  K8sTarget target = 1;
+}
+
+// K8sTeardownRequest deletes the namespace `deploy` made.
+message K8sTeardownRequest {
+  K8sTarget target = 1;
+  // After a signal: ask for the deletion and return, without waiting.
+  bool fast = 2;
+  // The sample failed: save the pods and their log tails into the artifacts first.
+  bool failed = 3;
+}
+
+message K8sTeardownResponse {}
+
+// K8sRunPodRequest runs a command of the task image in a pod of the namespace and collects its
+// work directory.
+message K8sRunPodRequest {
+  K8sTarget target = 1;
+  K8sRole role = 2;
+  K8sPodCommand command = 3;
+  double timeout_secs = 4;
+  // The local directory the files the command leaves are copied into.
+  string outputs_dir = 5;
+  // The Job's name, unique in the namespace (vse-<role>-<random> when empty).
+  string pod_name = 6;
+}
+
+message K8sRunPodResponse {
+  string pod_name = 1;
+  // The command's exit status; nonzero is not a domain error.
+  int32 exit_code = 2;
+  // The files the command left in its work directory, inputs excepted.
+  repeated string files = 3;
+  string log = 4;
+  double seconds = 5;
+}
+
+// K8sRestartRequest deletes one pod (the first by name) or every pod of each Deployment, and
+// unless no_wait waits until the replacements serve and the probes pass.
+message K8sRestartRequest {
+  K8sTarget target = 1;
+  repeated string deployments = 2;
+  bool every_pod = 3;
+  // Return once the pods are deleted; wait with `k8s wait` and the replaced UIDs.
+  bool no_wait = 4;
+}
+
+message K8sReplacedPod {
+  string deployment = 1;
+  string pod = 2;
+  string uid = 3;
+}
+
+message K8sRestartResponse {
+  repeated K8sReplacedPod replaced = 1;
+}
+
+// K8sExecRequest runs a command in a pod, or in the pods of a Deployment of the App's restartable
+// or caches. Name a deployment or a pod.
+message K8sExecRequest {
+  K8sTarget target = 1;
+  string deployment = 2;
+  string pod = 3;
+  // With a deployment: every live pod, not only the first by name.
+  bool all_pods = 4;
+  repeated string argv = 5;
+  // 60 s when zero.
+  double timeout_secs = 6;
+}
+
+message K8sExecResult {
+  string pod = 1;
+  // A nonzero exit is a result, not a domain error.
+  int32 exit_code = 2;
+  // Standard output and standard error.
+  string output = 3;
+}
+
+message K8sExecResponse {
+  repeated K8sExecResult results = 1;
+}
+
+// K8sWaitRequest waits until every workload serves with all its replicas (none of them a replaced
+// pod), then probes through the gateway.
+message K8sWaitRequest {
+  K8sTarget target = 1;
+  // Every workload of the namespace when empty.
+  repeated string deployments = 2;
+  repeated string replaced_uids = 3;
+  // 300 s when zero.
+  double timeout_secs = 4;
+  bool no_probe = 5;
+}
+
+message K8sWaitResponse {}
+
+// K8sFlushRequest empties a cache of the App in place on every pod, then probes.
+message K8sFlushRequest {
+  K8sTarget target = 1;
+  string cache = 2;
+}
+
+message K8sFlushResponse {}
+
+// K8sScaleRequest is `k8s stop` (scale the restartable Deployments to 0 and wait) or `k8s start`
+// (back to the manifest's replicas, wait, probe).
+message K8sScaleRequest {
+  K8sTarget target = 1;
+}
+
+message K8sScaleResponse {}
+
+// K8sUsageRequest reads each app pod's CPU seconds from its node's kubelet.
+message K8sUsageRequest {
+  K8sTarget target = 1;
+  // Names pod-usage-<label>.json in the artifacts.
+  string label = 2;
+}
+
+message K8sUsageResponse {
+  // CPU seconds each pod used since the previous usage call of this deployment; empty when the
+  // cluster gives no kubelet stats.
+  map<string, double> cpu_seconds = 1;
+}
