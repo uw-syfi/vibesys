@@ -6,9 +6,11 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/uw-syfi/vibesys/orchestrator/clientcli"
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
@@ -86,14 +88,14 @@ func TestStartOnAnAgentWithoutItsToolsExitsOneNamingTheReason(t *testing.T) {
 
 func TestStartRefusalPrintsTheServicesReason(t *testing.T) {
 	f := &fakeService{dispatch: func(cmd *pb.Command) (*pb.DispatchResponse, error) {
-		return &pb.DispatchResponse{Receipt: &pb.Receipt{CommandId: cmd.GetId(), Refusal: pb.Refusal_REFUSAL_DEADLINE_PASSED}}, nil
+		return &pb.DispatchResponse{Receipt: &pb.Receipt{CommandId: cmd.GetId(), Refusal: pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED}}, nil
 	}}
 	w := newWorld(t, serveFake(t, f))
-	got := w.run(context.Background(), "run", "start", "--task", "toy", "--deadline", "2020-01-01T00:00:00Z")
+	got := w.run(context.Background(), "run", "start", "--task", "toy")
 	if got.code != 1 {
 		t.Fatalf("exit %d", got.code)
 	}
-	contains(t, "stderr", got.stderr, "refused: deadline passed")
+	contains(t, "stderr", got.stderr, "refused: agent not allowed")
 }
 
 func TestStartSendsEveryFlagInTheCommand(t *testing.T) {
@@ -103,7 +105,7 @@ func TestStartSendsEveryFlagInTheCommand(t *testing.T) {
 	w := newWorld(t, serveFake(t, f))
 	w.dir = "/elsewhere"
 	w.run(context.Background(), "run", "start", "--task", "toy", "--repository", "rel/repo", "--brief", "b", "--harness", "codex",
-		"--fanout", "7", "--model", "m", "--effort", "high", "--deadline", "2030-01-02T03:04:05Z")
+		"--fanout", "7", "--model", "m", "--effort", "high", "--max-time", "90m", "--max-cost", "5.5")
 	sent := f.sent()
 	if len(sent) != 1 {
 		t.Fatalf("sent %d commands", len(sent))
@@ -111,7 +113,7 @@ func TestStartSendsEveryFlagInTheCommand(t *testing.T) {
 	got := sent[0].GetStartRun()
 	if got.GetRepository() != "/elsewhere/rel/repo" || got.GetTask() != "toy" || got.GetBrief() != "b" || got.GetFanoutLimit() != 7 ||
 		got.GetLead().GetHarness() != pb.Harness_HARNESS_CODEX || got.GetLead().GetModel() != "m" || got.GetLead().GetReasoningEffort() != "high" ||
-		got.GetDeadline().AsTime().Year() != 2030 {
+		got.GetMaxTime().AsDuration() != 90*time.Minute || got.GetMaxCostUsd() != 5.5 {
 		t.Errorf("StartRun = %v", got)
 	}
 }
@@ -200,4 +202,53 @@ func TestEveryStartFailureReasonReachesStartAndGet(t *testing.T) {
 			contains(t, "get --json", got.stdout, name)
 		})
 	}
+}
+
+// A run has no limit unless it is given one, and a start without one says so, and how to give it one.
+func TestStartWithNoLimitSaysSoAndOneWithALimitDoesNot(t *testing.T) {
+	for _, limits := range [][]string{nil, {"--max-time", "30m"}, {"--max-cost", "5"}, {"--max-time", "30m", "--max-cost", "5"}} {
+		l := newLive(t, nil)
+		w := newWorld(t, l.Listener.Dial)
+		got := w.run(context.Background(), append([]string{"run", "start", "--task", "toy", "--json"}, limits...)...)
+		if got.code != 0 {
+			t.Fatalf("%v: exit %d, stderr %q", limits, got.code, got.stderr)
+		}
+		said := strings.Contains(got.stderr, "no time or spending limit")
+		if said != (len(limits) == 0) {
+			t.Errorf("%v: stderr %q", limits, got.stderr)
+		}
+		if said {
+			contains(t, "stderr", got.stderr, "--max-time", "--max-cost")
+		}
+		for _, r := range l.Daemon.State().Runs() {
+			if (len(limits) > 0) != (!r.Deadline.IsZero() || r.MaxCostUSD > 0) {
+				t.Errorf("%v: run = %+v", limits, r)
+			}
+		}
+	}
+}
+
+// A limit that is not a positive duration or a positive number of dollars is a usage error naming the
+// flag, and nothing is sent.
+func TestStartRefusesALimitThatIsNotPositive(t *testing.T) {
+	f := &fakeService{}
+	w := newWorld(t, serveFake(t, f))
+	for _, args := range [][]string{
+		{"--max-time", "0"}, {"--max-time", "-5m"}, {"--max-time", "soon"}, {"--max-time", "30"},
+		{"--max-cost", "0"}, {"--max-cost", "-1"}, {"--max-cost", "abc"}, {"--max-cost", "NaN"}, {"--max-cost", "Inf"},
+	} {
+		got := w.run(context.Background(), append([]string{"run", "start", "--task", "toy"}, args...)...)
+		if got.code != 2 {
+			t.Errorf("%v: exit %d, stderr %q", args, got.code, got.stderr)
+		}
+		contains(t, "stderr", got.stderr, args[0])
+	}
+	if sent := f.sent(); len(sent) != 0 {
+		t.Errorf("sent %d commands", len(sent))
+	}
+}
+
+// The usage text is where a person finds what a limit does, including what the cost can and cannot say.
+func TestTheUsageSaysWhatALimitDoes(t *testing.T) {
+	contains(t, "usage", clientcli.Usage, "--max-time", "--max-cost", "told once to finish", "10 minutes", "what is in flight", "reports no cost adds nothing")
 }

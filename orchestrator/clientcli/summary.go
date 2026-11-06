@@ -2,7 +2,9 @@ package clientcli
 
 import (
 	"fmt"
+	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +46,9 @@ func summarize(v *View, now time.Time, zone *time.Location) string {
 		row("measures", "%s", measures)
 	}
 	b.WriteString(usageRows(v))
+	if words := limitWords(v, zone); words != "" {
+		row("limits", "%s", words)
+	}
 	if kept := v.Run.GetKeptCheckouts(); len(kept) > 0 {
 		row("kept", "%d working copies hold uncommitted changes to tracked files; commit or discard them, then `git worktree remove` each:", len(kept))
 		for _, k := range kept {
@@ -252,4 +257,54 @@ func lastReport(v *View, zone *time.Location) string {
 	}
 	last := reports[len(reports)-1]
 	return fmt.Sprintf("%s, %s", clock(last.GetAt().AsTime(), zone), oneLine(last.GetReport().GetHeadline(), 200))
+}
+
+// limitWords says the limits a run has and, once one is reached, which and when. It is empty for a run
+// with none.
+func limitWords(v *View, zone *time.Location) string {
+	r := v.Run
+	var parts []string
+	if r.GetDeadline() != nil {
+		parts = append(parts, "time "+age(r.GetDeadline().AsTime(), r.GetCreatedAt().AsTime()))
+	}
+	if r.MaxCostUsd != nil {
+		cost := "cost " + dollars(r.GetMaxCostUsd())
+		switch {
+		case r.GetUsage() != nil && r.GetUsage().CostUsd != nil:
+			cost += " (reported so far " + dollars(r.GetUsage().GetCostUsd()) + ")"
+		case !v.Truncated && anyTurnEnded(v.Turns):
+			cost += " (no agent has reported a cost, so this limit cannot take effect)"
+		}
+		parts = append(parts, cost)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	words := strings.Join(parts, ", ")
+	if r.GetLimitReached() != pb.RunLimit_RUN_LIMIT_UNSPECIFIED {
+		words += fmt.Sprintf("; the %s was reached at %s and the lead was told to finish", limitWord(r.GetLimitReached()), clock(r.GetLimitReachedAt().AsTime(), zone))
+	}
+	return words
+}
+
+// dollars writes an amount of money to a hundredth of a dollar at least, and to a ten-thousandth when it
+// has that much to say, so a limit of half a cent is not shown as a cent.
+func dollars(usd float64) string {
+	s := strconv.FormatFloat(math.Round(usd*1e4)/1e4, 'f', -1, 64)
+	if i := strings.IndexByte(s, '.'); i < 0 {
+		s += ".00"
+	} else if places := len(s) - i - 1; places < 2 {
+		s += strings.Repeat("0", 2-places)
+	}
+	return "$" + s
+}
+
+// anyTurnEnded: a cost is reported when a turn ends, so only an ended turn can show that none was.
+func anyTurnEnded(turns map[string]*pb.Turn) bool {
+	for _, t := range turns {
+		if t.GetStatus() != pb.TurnStatus_TURN_STATUS_RUNNING {
+			return true
+		}
+	}
+	return false
 }

@@ -95,6 +95,8 @@ func reportWord(k pb.ReportKind) string {
 // reminderText is the line for a reminder the orchestrator sent.
 func (v *View) reminderText(c Change) string {
 	switch b := c.Message.GetBody().(type) {
+	case *pb.Message_RunLimitReached:
+		return fmt.Sprintf("%s was told the run reached its %s and to finish", agentLabel(c.Agent, c.Message.GetToAgentId()), limitWord(b.RunLimitReached.GetLimit()))
 	case *pb.Message_LeadIdleReminder:
 		return fmt.Sprintf("%s was reminded: the run had stood still for %s", agentLabel(c.Agent, c.Message.GetToAgentId()), time.Duration(b.LeadIdleReminder.GetIdleSeconds())*time.Second)
 	}
@@ -121,6 +123,11 @@ func (v *View) runText(r *pb.Run) string {
 		return fmt.Sprintf("run %s%s", statusWord(r.GetStatus().String(), "RUN_STATUS_"), withPrefix(" by ", stopReason(r)))
 	}
 	return "run " + statusWord(r.GetStatus().String(), "RUN_STATUS_")
+}
+
+// limitWord names a limit.
+func limitWord(l pb.RunLimit) string {
+	return statusWord(l.String(), "RUN_LIMIT_") + " limit"
 }
 
 func stopReason(r *pb.Run) string {

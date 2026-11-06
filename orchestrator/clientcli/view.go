@@ -249,7 +249,7 @@ func (v *View) setMessage(m *pb.Message, now time.Time) []Change {
 			return []Change{{Kind: JobFinishedMessage, At: at, Message: m}}
 		case *pb.Message_SubagentSettled:
 			return []Change{{Kind: SubagentSettled, At: at, Message: m}}
-		case *pb.Message_HandoffReminder, *pb.Message_LeadIdleReminder:
+		case *pb.Message_HandoffReminder, *pb.Message_LeadIdleReminder, *pb.Message_RunLimitReached:
 			return []Change{{Kind: ReminderSent, At: at, Message: m, Agent: v.Agents[m.GetToAgentId()]}}
 		}
 	}

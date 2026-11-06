@@ -47,6 +47,9 @@ func (s State) Violations() []string {
 				bad("run %s keeps a checkout of %s, which is not one of its subagents", run.ID, c.Agent)
 			}
 		}
+		for _, breach := range run.limitBreaches() {
+			bad("run %s %s", run.ID, breach)
+		}
 		if run.LeadReminders > MaxLeadReminders {
 			bad("run %s sent its lead %d reminders, over the limit of %d", run.ID, run.LeadReminders, MaxLeadReminders)
 		}
@@ -75,4 +78,24 @@ func (s State) liveLead(run Run) uint32 {
 		return 0
 	}
 	return 1
+}
+
+// limitBreaches says how a run's limit fields disagree with each other and with what the run spent.
+func (run Run) limitBreaches() []string {
+	var found []string
+	switch {
+	case run.LimitReached == "" && !run.LimitReachedAt.IsZero():
+		found = append(found, "reached no limit and has a time for it")
+	case run.LimitReached != "" && run.LimitReachedAt.IsZero():
+		found = append(found, "reached a limit with no time")
+	case run.LimitReached == LimitTime && (run.Deadline.IsZero() || run.LimitReachedAt.Before(run.Deadline)):
+		found = append(found, fmt.Sprintf("reached its time limit at %v, before its deadline %v", run.LimitReachedAt, run.Deadline))
+	case run.LimitReached == LimitCost && (run.MaxCostUSD <= 0 || run.Usage.CostUSD == nil || *run.Usage.CostUSD < run.MaxCostUSD):
+		found = append(found, fmt.Sprintf("reached its cost limit of %v with usage %v", run.MaxCostUSD, run.Usage.CostUSD))
+	}
+	limited := run.StopReason == StopTimeLimit || run.StopReason == StopCostLimit
+	if limited && (run.LimitReached == "" || run.StopReason != run.LimitReached.stopReason()) {
+		found = append(found, fmt.Sprintf("stopped for %s having reached %q", run.StopReason, run.LimitReached))
+	}
+	return found
 }

@@ -16,7 +16,7 @@ from agentshim.testing import FakeClock, FakeExecutor, SequentialIds
 from e2e.actor import Actor
 from e2e.effects import EffectFailedError, Mcp, Outcome, Shell, UnscriptedError, perform
 from e2e.peers import ActingClaudePeers, ActingCodex
-from e2e.scripts import ROLES, Me
+from e2e.scripts import LIMIT_ROLES, ROLES, Me
 from hypothesis import example, given
 from hypothesis import strategies as st
 
@@ -258,3 +258,21 @@ def test_job_notifications_never_advance_the_lead_handoff_script(
             actor.act(messages[index])
             perform(ROLES["lead"](ME, messages[: index + 1]), expected)
             assert machine.effects == expected.effects
+
+
+@given(text=st.text(max_size=40).filter(lambda t: "reached its" not in t))
+def test_the_limited_lead_does_nothing_until_its_run_reaches_a_limit(text: str) -> None:
+    machine = FakeMachine()
+    perform(LIMIT_ROLES["lead"](ME, ["brief", text]), machine)
+    assert machine.effects == []
+
+
+@pytest.mark.parametrize("limit", ["time", "cost"])
+def test_the_limited_lead_posts_its_final_report_when_told_a_limit_was_reached(limit: str) -> None:
+    machine = FakeMachine()
+    message = f"Your run has reached its {limit} limit: finish now."
+    done = perform(LIMIT_ROLES["lead"](ME, ["brief", message]), machine)
+    assert tools(machine) == ["post_report"]
+    effect = done.steps[0].effect
+    assert isinstance(effect, Mcp)
+    assert effect.arguments["kind"] == "final"

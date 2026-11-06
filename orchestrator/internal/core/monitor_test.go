@@ -4,19 +4,15 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
-
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/uw-syfi/vibesys/orchestrator/internal/core"
 )
-
-func timestamp(t time.Time) *timestamppb.Timestamp { return timestamppb.New(t) }
 
 // coverage counts what a simulation reached, so that a property cannot pass by never being tested.
 type coverage struct {
 	handoffs, handoffTurns, steers, resumes, refusedSpawns, stops, lost, rejected, jobs int
 	retriedDeliveries, operatorStops, deadlineStops, runsFailed, leadsOutOfResumes      int
+	costStops, limitMessages, limitRefusals, finishedStops                              int
 	startsFailed, startsTimedOut                                                        int
 	stalls, leadReminders, handoffReminders, reports                                    int
 }
@@ -34,6 +30,10 @@ func (c *coverage) add(o coverage) {
 	c.retriedDeliveries += o.retriedDeliveries
 	c.operatorStops += o.operatorStops
 	c.deadlineStops += o.deadlineStops
+	c.costStops += o.costStops
+	c.limitMessages += o.limitMessages
+	c.limitRefusals += o.limitRefusals
+	c.finishedStops += o.finishedStops
 	c.runsFailed += o.runsFailed
 	c.leadsOutOfResumes += o.leadsOutOfResumes
 	c.startsFailed += o.startsFailed
@@ -51,7 +51,8 @@ func (c coverage) require(t *testing.T) {
 		"handoffs": c.handoffs, "turns on a handoff": c.handoffTurns, "steers": c.steers, "resumes": c.resumes,
 		"refused spawns": c.refusedSpawns, "stops": c.stops, "lost agents": c.lost, "rejected messages": c.rejected,
 		"finished jobs": c.jobs, "redelivered messages": c.retriedDeliveries, "operator stops": c.operatorStops,
-		"deadline stops": c.deadlineStops, "failed runs": c.runsFailed, "leads out of resumes": c.leadsOutOfResumes,
+		"time limit stops": c.deadlineStops, "cost limit stops": c.costStops, "messages that a limit was reached": c.limitMessages,
+		"spawns refused for a limit": c.limitRefusals, "stops of a lead that had finished": c.finishedStops, "failed runs": c.runsFailed, "leads out of resumes": c.leadsOutOfResumes,
 		"sessions that failed to start": c.startsFailed, "sessions that timed out opening": c.startsTimedOut,
 		"stalled runs": c.stalls, "reminders to a lead": c.leadReminders, "reminders to hand off": c.handoffReminders,
 		"reports": c.reports,
@@ -105,8 +106,11 @@ type monitor struct {
 	leadReminders    map[core.RunID]int
 	handoffReminders map[core.Session]int
 	reports          map[core.RunID]uint32
-	// finished holds the runs whose lead's latest report is final and which it has had no new turn since.
+	// finished holds the runs whose lead's latest report is final and which have started no new work
+	// since: no agent spawned, no more jobs running, no progress report.
 	finished map[core.RunID]bool
+	// limited holds the runs that were told their limit was reached, with the message that told them.
+	limited map[core.RunID]core.MessageID
 
 	// The rest lasts one transaction.
 	refusedSteer core.MessageID
@@ -124,6 +128,7 @@ func newMonitor() *monitor {
 		receipts: map[core.CommandID]core.Receipt{}, offsets: map[core.Session]uint64{}, handed: map[core.AgentID]bool{},
 		failures: map[core.AgentID]uint32{}, leadReminders: map[core.RunID]int{}, handoffReminders: map[core.Session]int{},
 		reports: map[core.RunID]uint32{}, finished: map[core.RunID]bool{}, stalled: map[core.RunID]bool{},
+		limited: map[core.RunID]core.MessageID{},
 	}
 }
 
@@ -140,6 +145,13 @@ func (m *monitor) commit(body core.InputBody, events []core.Event) error {
 			return err
 		}
 	}
+	var graceTimer *core.ArmTimer
+	if fired, ok := body.(core.TimerFired); ok && fired.Timer.Kind == core.TimerLimitGrace {
+		pre := m.runs[fired.Timer.Run]
+		if pre.Status.Live() && pre.LimitReached != "" && pre.LimitReachedAt.Add(core.LimitGrace).Equal(fired.Timer.FireAt) {
+			graceTimer = &fired.Timer
+		}
+	}
 	var launchTimer *core.Session
 	if fired, ok := body.(core.TimerFired); ok && fired.Timer.Kind == core.TimerLaunchDeadline && len(events) > 0 {
 		session := fired.Timer.Session
@@ -151,6 +163,11 @@ func (m *monitor) commit(body core.InputBody, events []core.Event) error {
 	for _, e := range events {
 		if err := m.observe(e); err != nil {
 			return err
+		}
+	}
+	if graceTimer != nil {
+		if run := m.runs[graceTimer.Run]; run.Status.Live() {
+			return fmt.Errorf("the grace after a limit passed, and run %s is still %s", run.ID, run.Status)
 		}
 	}
 	if launchTimer != nil {
@@ -288,6 +305,18 @@ func (m *monitor) observe(e core.Event) error {
 }
 
 func (m *monitor) run(r core.Run) error {
+	if old, ok := m.runs[r.ID]; ok && r.ActiveJobs > old.ActiveJobs {
+		delete(m.finished, r.ID)
+	}
+	if limited := r.StopReason == core.StopTimeLimit || r.StopReason == core.StopCostLimit; limited {
+		want := map[core.RunLimit]core.RunStopReason{core.LimitTime: core.StopTimeLimit, core.LimitCost: core.StopCostLimit}
+		if want[r.LimitReached] != r.StopReason {
+			return fmt.Errorf("run %s stopped for %q having reached limit %q", r.ID, r.StopReason, r.LimitReached)
+		}
+		if m.finished[r.ID] {
+			m.covered.finishedStops++
+		}
+	}
 	if old, ok := m.runs[r.ID]; ok && old.Status.Final() {
 		// The one thing a finished run still learns is which working copies were kept.
 		old.Kept, r.Kept = nil, nil
@@ -310,8 +339,10 @@ func (m *monitor) run(r core.Run) error {
 		if lead.Capabilities.Resumes {
 			m.covered.leadsOutOfResumes++
 		}
-	case r.Status == core.RunEnded && r.StopReason == core.StopDeadline:
+	case r.Status == core.RunEnded && r.StopReason == core.StopTimeLimit:
 		m.covered.deadlineStops++
+	case r.Status == core.RunEnded && r.StopReason == core.StopCostLimit:
+		m.covered.costStops++
 	case r.Status == core.RunEnded:
 		m.covered.operatorStops++
 	}
@@ -359,6 +390,12 @@ func (m *monitor) agent(a core.Agent) error {
 	if a.Role == core.RoleLead {
 		return nil
 	}
+	if !known {
+		delete(m.finished, a.Run)
+		if limit := m.runs[a.Run].LimitReached; limit != "" {
+			return fmt.Errorf("agent %s was started in run %s after it reached its %s limit", a.ID, a.Run, limit)
+		}
+	}
 	var live uint32
 	for _, other := range m.agents {
 		if other.Run == a.Run && other.Role != core.RoleLead && !other.Status.Over() {
@@ -391,9 +428,6 @@ func (m *monitor) turn(t core.Turn) error {
 			return fmt.Errorf("turn %s starts as %+v after ordinal %d", t.ID, t, m.ordinals[t.Agent])
 		}
 		m.ordinals[t.Agent] = t.Ordinal
-		if agent := m.agents[t.Agent]; agent.Role == core.RoleLead {
-			delete(m.finished, agent.Run)
-		}
 		m.running[t.Agent] = t.ID
 		record.turns++
 		record.running++
@@ -462,6 +496,16 @@ func (m *monitor) message(msg core.Message) error {
 		case core.LeadIdleReminder:
 			if err := m.leadReminder(msg); err != nil {
 				return err
+			}
+		case core.RunLimitReached:
+			m.covered.limitMessages++
+			run := m.runs[msg.Run]
+			if first, told := m.limited[msg.Run]; told {
+				return fmt.Errorf("run %s told to finish twice: %s and %s", msg.Run, first, msg.ID)
+			}
+			m.limited[msg.Run] = msg.ID
+			if msg.To != run.Lead || b.Limit != run.LimitReached || run.LimitReached == "" || run.FinalReported {
+				return fmt.Errorf("limit message %+v to %s in run %+v", b, msg.To, run)
 			}
 		case core.HandoffReminder:
 			if err := m.handoffReminder(msg); err != nil {
@@ -567,6 +611,13 @@ func (m *monitor) receipt(r core.Receipt) error {
 	m.receipts[r.Command] = r
 	if r.Refusal == core.RefuseFanoutLimit {
 		m.covered.refusedSpawns++
+	}
+	if r.Refusal == core.RefuseTimeLimitReached || r.Refusal == core.RefuseCostLimitReached {
+		m.covered.limitRefusals++
+		want := map[core.RunLimit]core.Refusal{core.LimitTime: core.RefuseTimeLimitReached, core.LimitCost: core.RefuseCostLimitReached}
+		if run := m.runs[r.Run]; want[run.LimitReached] != r.Refusal {
+			return fmt.Errorf("spawn refused as %s in run %+v", r.Refusal, run)
+		}
 	}
 	return nil
 }

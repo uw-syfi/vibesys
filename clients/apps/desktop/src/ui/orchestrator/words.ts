@@ -121,10 +121,11 @@ const REFUSAL: Readonly<Record<Refusal, string>> = {
   [Refusal.FANOUT_LIMIT]: 'The run is already at its limit of agents.',
   [Refusal.AGENT_IS_LEAD]: 'That message cannot go to the lead.',
   [Refusal.AGENT_NOT_LIVE]: 'That agent has finished and cannot take messages.',
-  [Refusal.DEADLINE_PASSED]: 'The run passed its deadline.',
   [Refusal.REPOSITORY_IN_USE]: 'Another run is already working in this repository.',
   [Refusal.AGENT_NOT_ALLOWED]: 'The run was not allowed to use that agent.',
   [Refusal.HANDOFF_NOT_YOURS]: 'That handoff does not belong to the agent\u2019s role.',
+  [Refusal.TIME_LIMIT_REACHED]: 'The run reached its time limit and starts no new agent.',
+  [Refusal.COST_LIMIT_REACHED]: 'The run reached its cost limit and starts no new agent.',
 };
 
 export const refusalWord = (refusal: Refusal): string => REFUSAL[refusal];

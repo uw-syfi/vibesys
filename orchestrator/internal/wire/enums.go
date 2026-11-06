@@ -43,10 +43,16 @@ var (
 		core.RunFailed:   pb.RunStatus_RUN_STATUS_FAILED,
 	})
 	stopReasons = newEnum(map[core.RunStopReason]pb.RunStopReason{
-		"":                pb.RunStopReason_RUN_STOP_REASON_UNSPECIFIED,
-		core.StopOperator: pb.RunStopReason_RUN_STOP_REASON_OPERATOR,
-		core.StopDeadline: pb.RunStopReason_RUN_STOP_REASON_DEADLINE,
-		core.StopLeadGone: pb.RunStopReason_RUN_STOP_REASON_LEAD_GONE,
+		"":                 pb.RunStopReason_RUN_STOP_REASON_UNSPECIFIED,
+		core.StopOperator:  pb.RunStopReason_RUN_STOP_REASON_OPERATOR,
+		core.StopTimeLimit: pb.RunStopReason_RUN_STOP_REASON_TIME_LIMIT,
+		core.StopCostLimit: pb.RunStopReason_RUN_STOP_REASON_COST_LIMIT,
+		core.StopLeadGone:  pb.RunStopReason_RUN_STOP_REASON_LEAD_GONE,
+	})
+	runLimits = newEnum(map[core.RunLimit]pb.RunLimit{
+		"":             pb.RunLimit_RUN_LIMIT_UNSPECIFIED,
+		core.LimitTime: pb.RunLimit_RUN_LIMIT_TIME,
+		core.LimitCost: pb.RunLimit_RUN_LIMIT_COST,
 	})
 	roles = newEnum(map[core.AgentRole]pb.AgentRole{
 		core.RoleLead:     pb.AgentRole_AGENT_ROLE_LEAD,
@@ -127,10 +133,12 @@ var (
 		core.RefuseFanoutLimit:     pb.Refusal_REFUSAL_FANOUT_LIMIT,
 		core.RefuseAgentIsLead:     pb.Refusal_REFUSAL_AGENT_IS_LEAD,
 		core.RefuseAgentNotLive:    pb.Refusal_REFUSAL_AGENT_NOT_LIVE,
-		core.RefuseDeadlinePassed:  pb.Refusal_REFUSAL_DEADLINE_PASSED,
 		core.RefuseRepositoryInUse: pb.Refusal_REFUSAL_REPOSITORY_IN_USE,
 		core.RefuseAgentNotAllowed: pb.Refusal_REFUSAL_AGENT_NOT_ALLOWED,
 		core.RefuseHandoffNotYours: pb.Refusal_REFUSAL_HANDOFF_NOT_YOURS,
+
+		core.RefuseTimeLimitReached: pb.Refusal_REFUSAL_TIME_LIMIT_REACHED,
+		core.RefuseCostLimitReached: pb.Refusal_REFUSAL_COST_LIMIT_REACHED,
 	})
 	startFailures = newEnum(map[core.StartFailure]pb.StartFailureReason{
 		"":                              pb.StartFailureReason_START_FAILURE_REASON_UNSPECIFIED,
@@ -158,6 +166,7 @@ var (
 		core.TimerStopGrace:      pb.TimerKind_TIMER_KIND_STOP_GRACE,
 		core.TimerLaunchDeadline: pb.TimerKind_TIMER_KIND_LAUNCH_DEADLINE,
 		core.TimerLeadIdle:       pb.TimerKind_TIMER_KIND_LEAD_IDLE,
+		core.TimerLimitGrace:     pb.TimerKind_TIMER_KIND_LIMIT_GRACE,
 	})
 )
 

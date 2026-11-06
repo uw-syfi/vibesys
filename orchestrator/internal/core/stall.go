@@ -81,6 +81,9 @@ func (t *tx) jobsRunning(b JobsRunning) {
 	if !ok || run.ActiveJobs == b.Count || !run.Status.Live() {
 		return
 	}
+	if b.Count > run.ActiveJobs {
+		run.FinalReported = false
+	}
 	run.ActiveJobs = b.Count
 	t.emit(run.ID, run)
 	t.sweep(run.ID)

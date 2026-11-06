@@ -16,7 +16,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	pb "github.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1"
 	"github.com/uw-syfi/vibesys/orchestrator/internal/client"
@@ -397,7 +397,7 @@ func (s *sim) step() {
 			Lead: &pb.AgentSpec{Harness: pb.Harness_HARNESS_CLAUDE_CODE},
 		}}}
 		if s.pick(3) == 0 {
-			cmd.GetStartRun().Deadline = timestamppb.New(s.rig.Clock.Now().Add(time.Duration(1+s.pick(600)) * time.Second))
+			cmd.GetStartRun().MaxTime = durationpb.New(time.Duration(1+s.pick(600)) * time.Second)
 		}
 		s.note("operator starts a run (%s)", cmd.Id)
 		s.record(cmd)

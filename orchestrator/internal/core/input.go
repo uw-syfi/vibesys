@@ -52,9 +52,12 @@ type (
 		Repository  string
 		Task        string
 		FanoutLimit uint32
-		Deadline    time.Time
-		Lead        AgentSpec
-		Brief       string
+		// MaxTime is how long the run may take from its start, zero for no time limit.
+		MaxTime time.Duration
+		// MaxCostUSD is the run's cost limit in dollars, zero for none.
+		MaxCostUSD float64
+		Lead       AgentSpec
+		Brief      string
 		// Allow adds to what the run may use. The lead's own harness and model are always allowed.
 		Allow []AgentChoice
 		// JobTool is what the run's agents use. The shell sets it, as the tool answered it before the

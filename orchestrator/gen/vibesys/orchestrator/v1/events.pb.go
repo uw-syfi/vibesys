@@ -10,6 +10,7 @@ import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	durationpb "google.golang.org/protobuf/types/known/durationpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -39,8 +40,6 @@ const (
 	Refusal_REFUSAL_AGENT_IS_LEAD Refusal = 6
 	// The agent's session is already over or closing.
 	Refusal_REFUSAL_AGENT_NOT_LIVE Refusal = 7
-	// The deadline had passed when the command arrived.
-	Refusal_REFUSAL_DEADLINE_PASSED Refusal = 8
 	// Another run that is not over already works in the repository. The receipt's run_id is that run.
 	Refusal_REFUSAL_REPOSITORY_IN_USE Refusal = 9
 	// The harness and model asked for are outside what the run may use. The receipt's allowed_agents
@@ -48,6 +47,10 @@ const (
 	Refusal_REFUSAL_AGENT_NOT_ALLOWED Refusal = 10
 	// A handoff has no body, or the body of another role than the one posting it.
 	Refusal_REFUSAL_HANDOFF_NOT_YOURS Refusal = 11
+	// The run reached its time limit: it starts no new agent.
+	Refusal_REFUSAL_TIME_LIMIT_REACHED Refusal = 12
+	// The run reached its cost limit: it starts no new agent.
+	Refusal_REFUSAL_COST_LIMIT_REACHED Refusal = 13
 )
 
 // Enum value maps for Refusal.
@@ -61,24 +64,26 @@ var (
 		5:  "REFUSAL_FANOUT_LIMIT",
 		6:  "REFUSAL_AGENT_IS_LEAD",
 		7:  "REFUSAL_AGENT_NOT_LIVE",
-		8:  "REFUSAL_DEADLINE_PASSED",
 		9:  "REFUSAL_REPOSITORY_IN_USE",
 		10: "REFUSAL_AGENT_NOT_ALLOWED",
 		11: "REFUSAL_HANDOFF_NOT_YOURS",
+		12: "REFUSAL_TIME_LIMIT_REACHED",
+		13: "REFUSAL_COST_LIMIT_REACHED",
 	}
 	Refusal_value = map[string]int32{
-		"REFUSAL_UNSPECIFIED":       0,
-		"REFUSAL_RUN_NOT_FOUND":     1,
-		"REFUSAL_AGENT_NOT_FOUND":   2,
-		"REFUSAL_NOT_PERMITTED":     3,
-		"REFUSAL_RUN_NOT_RUNNING":   4,
-		"REFUSAL_FANOUT_LIMIT":      5,
-		"REFUSAL_AGENT_IS_LEAD":     6,
-		"REFUSAL_AGENT_NOT_LIVE":    7,
-		"REFUSAL_DEADLINE_PASSED":   8,
-		"REFUSAL_REPOSITORY_IN_USE": 9,
-		"REFUSAL_AGENT_NOT_ALLOWED": 10,
-		"REFUSAL_HANDOFF_NOT_YOURS": 11,
+		"REFUSAL_UNSPECIFIED":        0,
+		"REFUSAL_RUN_NOT_FOUND":      1,
+		"REFUSAL_AGENT_NOT_FOUND":    2,
+		"REFUSAL_NOT_PERMITTED":      3,
+		"REFUSAL_RUN_NOT_RUNNING":    4,
+		"REFUSAL_FANOUT_LIMIT":       5,
+		"REFUSAL_AGENT_IS_LEAD":      6,
+		"REFUSAL_AGENT_NOT_LIVE":     7,
+		"REFUSAL_REPOSITORY_IN_USE":  9,
+		"REFUSAL_AGENT_NOT_ALLOWED":  10,
+		"REFUSAL_HANDOFF_NOT_YOURS":  11,
+		"REFUSAL_TIME_LIMIT_REACHED": 12,
+		"REFUSAL_COST_LIMIT_REACHED": 13,
 	}
 )
 
@@ -454,15 +459,18 @@ type StartRun struct {
 	Repository  string                 `protobuf:"bytes,1,opt,name=repository,proto3" json:"repository,omitempty"`
 	Task        string                 `protobuf:"bytes,2,opt,name=task,proto3" json:"task,omitempty"`
 	FanoutLimit uint32                 `protobuf:"varint,3,opt,name=fanout_limit,json=fanoutLimit,proto3" json:"fanout_limit,omitempty"`
-	// Absent when the run has no deadline.
-	Deadline *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	// The lead has nothing to inherit from, so its harness is required.
 	Lead *AgentSpec `protobuf:"bytes,5,opt,name=lead,proto3" json:"lead,omitempty"`
 	// The operator's steering text for the lead, such as a note about cost or which harnesses to
 	// prefer. Empty when there is none; a template words the lead's first prompt around it.
 	Brief string `protobuf:"bytes,6,opt,name=brief,proto3" json:"brief,omitempty"`
 	// Agents the run may use besides the lead's own harness and model, which are always allowed.
-	AllowAgents   []*AllowedAgent `protobuf:"bytes,7,rep,name=allow_agents,json=allowAgents,proto3" json:"allow_agents,omitempty"`
+	AllowAgents []*AllowedAgent `protobuf:"bytes,7,rep,name=allow_agents,json=allowAgents,proto3" json:"allow_agents,omitempty"`
+	// The most the run may cost in dollars. Absent when the run has no cost limit.
+	MaxCostUsd *float64 `protobuf:"fixed64,8,opt,name=max_cost_usd,json=maxCostUsd,proto3,oneof" json:"max_cost_usd,omitempty"`
+	// How long the run may take, counted from its start by the host, so that a client's clock is not
+	// in it. Absent when the run has no time limit.
+	MaxTime       *durationpb.Duration `protobuf:"bytes,9,opt,name=max_time,json=maxTime,proto3" json:"max_time,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -518,13 +526,6 @@ func (x *StartRun) GetFanoutLimit() uint32 {
 	return 0
 }
 
-func (x *StartRun) GetDeadline() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Deadline
-	}
-	return nil
-}
-
 func (x *StartRun) GetLead() *AgentSpec {
 	if x != nil {
 		return x.Lead
@@ -542,6 +543,20 @@ func (x *StartRun) GetBrief() string {
 func (x *StartRun) GetAllowAgents() []*AllowedAgent {
 	if x != nil {
 		return x.AllowAgents
+	}
+	return nil
+}
+
+func (x *StartRun) GetMaxCostUsd() float64 {
+	if x != nil && x.MaxCostUsd != nil {
+		return *x.MaxCostUsd
+	}
+	return 0
+}
+
+func (x *StartRun) GetMaxTime() *durationpb.Duration {
+	if x != nil {
+		return x.MaxTime
 	}
 	return nil
 }
@@ -1136,7 +1151,7 @@ var File_vibesys_orchestrator_v1_events_proto protoreflect.FileDescriptor
 
 const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xda\x03\n" +
+	"$vibesys/orchestrator/v1/events.proto\x12\x17vibesys.orchestrator.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a*vibesys/orchestrator/v1/orchestrator.proto\x1a*vibesys/orchestrator/v1/tool_options.proto\"\xda\x03\n" +
 	"\tRunChange\x12#\n" +
 	"\bsequence\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\bsequence\x122\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampB\x06\xbaH\x03\xc8\x01\x01R\x02at\x12\x15\n" +
@@ -1158,18 +1173,21 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\tAgentSpec\x12D\n" +
 	"\aharness\x18\x01 \x01(\x0e2 .vibesys.orchestrator.v1.HarnessB\b\xbaH\x05\x82\x01\x02\x10\x01R\aharness\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12)\n" +
-	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\x94\x03\n" +
+	"\x10reasoning_effort\x18\x03 \x01(\tR\x0freasoningEffort\"\xf6\x03\n" +
 	"\bStartRun\x12'\n" +
 	"\n" +
 	"repository\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
 	"repository\x12\x1b\n" +
 	"\x04task\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04task\x12!\n" +
-	"\ffanout_limit\x18\x03 \x01(\rR\vfanoutLimit\x126\n" +
-	"\bdeadline\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline\x12\x86\x01\n" +
+	"\ffanout_limit\x18\x03 \x01(\rR\vfanoutLimit\x12\x86\x01\n" +
 	"\x04lead\x18\x05 \x01(\v2\".vibesys.orchestrator.v1.AgentSpecBN\xbaHK\xba\x01E\n" +
 	"\x16start_run.lead.harness\x12\x18the lead needs a harness\x1a\x11this.harness != 0\xc8\x01\x01R\x04lead\x12\x14\n" +
 	"\x05brief\x18\x06 \x01(\tR\x05brief\x12H\n" +
-	"\fallow_agents\x18\a \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\vallowAgents\")\n" +
+	"\fallow_agents\x18\a \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\vallowAgents\x127\n" +
+	"\fmax_cost_usd\x18\b \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\n" +
+	"maxCostUsd\x88\x01\x01\x12>\n" +
+	"\bmax_time\x18\t \x01(\v2\x19.google.protobuf.DurationB\b\xbaH\x05\xaa\x01\x02*\x00R\amaxTimeB\x0f\n" +
+	"\r_max_cost_usdJ\x04\b\x04\x10\x05R\bdeadline\")\n" +
 	"\aStopRun\x12\x1e\n" +
 	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\"\xea\x01\n" +
 	"\n" +
@@ -1217,7 +1235,7 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"message_id\x18\x06 \x01(\tR\tmessageId\x12G\n" +
 	"\bdelivery\x18\a \x01(\x0e2!.vibesys.orchestrator.v1.DeliveryB\b\xbaH\x05\x82\x01\x02\x10\x01R\bdelivery\x12\x1a\n" +
 	"\bsequence\x18\b \x01(\x04R\bsequence\x12L\n" +
-	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgentsJ\x04\b\x02\x10\x03R\x0ecommand_digest*\xdd\x02\n" +
+	"\x0eallowed_agents\x18\t \x03(\v2%.vibesys.orchestrator.v1.AllowedAgentR\rallowedAgentsJ\x04\b\x02\x10\x03R\x0ecommand_digest*\x9f\x03\n" +
 	"\aRefusal\x12\x17\n" +
 	"\x13REFUSAL_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15REFUSAL_RUN_NOT_FOUND\x10\x01\x12\x1b\n" +
@@ -1226,12 +1244,13 @@ const file_vibesys_orchestrator_v1_events_proto_rawDesc = "" +
 	"\x17REFUSAL_RUN_NOT_RUNNING\x10\x04\x12\x18\n" +
 	"\x14REFUSAL_FANOUT_LIMIT\x10\x05\x12\x19\n" +
 	"\x15REFUSAL_AGENT_IS_LEAD\x10\x06\x12\x1a\n" +
-	"\x16REFUSAL_AGENT_NOT_LIVE\x10\a\x12\x1b\n" +
-	"\x17REFUSAL_DEADLINE_PASSED\x10\b\x12\x1d\n" +
+	"\x16REFUSAL_AGENT_NOT_LIVE\x10\a\x12\x1d\n" +
 	"\x19REFUSAL_REPOSITORY_IN_USE\x10\t\x12\x1d\n" +
 	"\x19REFUSAL_AGENT_NOT_ALLOWED\x10\n" +
 	"\x12\x1d\n" +
-	"\x19REFUSAL_HANDOFF_NOT_YOURS\x10\vBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x19REFUSAL_HANDOFF_NOT_YOURS\x10\v\x12\x1e\n" +
+	"\x1aREFUSAL_TIME_LIMIT_REACHED\x10\f\x12\x1e\n" +
+	"\x1aREFUSAL_COST_LIMIT_REACHED\x10\r\"\x04\b\b\x10\b*\x17REFUSAL_DEADLINE_PASSEDBTZRgithub.com/uw-syfi/vibesys/orchestrator/gen/vibesys/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_vibesys_orchestrator_v1_events_proto_rawDescOnce sync.Once
@@ -1269,10 +1288,11 @@ var file_vibesys_orchestrator_v1_events_proto_goTypes = []any{
 	(*Message)(nil),               // 18: vibesys.orchestrator.v1.Message
 	(Harness)(0),                  // 19: vibesys.orchestrator.v1.Harness
 	(*AllowedAgent)(nil),          // 20: vibesys.orchestrator.v1.AllowedAgent
-	(AgentRole)(0),                // 21: vibesys.orchestrator.v1.AgentRole
-	(*Handoff)(nil),               // 22: vibesys.orchestrator.v1.Handoff
-	(*Report)(nil),                // 23: vibesys.orchestrator.v1.Report
-	(Delivery)(0),                 // 24: vibesys.orchestrator.v1.Delivery
+	(*durationpb.Duration)(nil),   // 21: google.protobuf.Duration
+	(AgentRole)(0),                // 22: vibesys.orchestrator.v1.AgentRole
+	(*Handoff)(nil),               // 23: vibesys.orchestrator.v1.Handoff
+	(*Report)(nil),                // 24: vibesys.orchestrator.v1.Report
+	(Delivery)(0),                 // 25: vibesys.orchestrator.v1.Delivery
 }
 var file_vibesys_orchestrator_v1_events_proto_depIdxs = []int32{
 	13, // 0: vibesys.orchestrator.v1.RunChange.at:type_name -> google.protobuf.Timestamp
@@ -1283,13 +1303,13 @@ var file_vibesys_orchestrator_v1_events_proto_depIdxs = []int32{
 	18, // 5: vibesys.orchestrator.v1.RunChange.message:type_name -> vibesys.orchestrator.v1.Message
 	12, // 6: vibesys.orchestrator.v1.RunChange.receipt:type_name -> vibesys.orchestrator.v1.Receipt
 	19, // 7: vibesys.orchestrator.v1.AgentSpec.harness:type_name -> vibesys.orchestrator.v1.Harness
-	13, // 8: vibesys.orchestrator.v1.StartRun.deadline:type_name -> google.protobuf.Timestamp
-	3,  // 9: vibesys.orchestrator.v1.StartRun.lead:type_name -> vibesys.orchestrator.v1.AgentSpec
-	20, // 10: vibesys.orchestrator.v1.StartRun.allow_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
-	21, // 11: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
+	3,  // 8: vibesys.orchestrator.v1.StartRun.lead:type_name -> vibesys.orchestrator.v1.AgentSpec
+	20, // 9: vibesys.orchestrator.v1.StartRun.allow_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
+	21, // 10: vibesys.orchestrator.v1.StartRun.max_time:type_name -> google.protobuf.Duration
+	22, // 11: vibesys.orchestrator.v1.SpawnAgent.role:type_name -> vibesys.orchestrator.v1.AgentRole
 	3,  // 12: vibesys.orchestrator.v1.SpawnAgent.spec:type_name -> vibesys.orchestrator.v1.AgentSpec
-	22, // 13: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
-	23, // 14: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
+	23, // 13: vibesys.orchestrator.v1.PostHandoff.handoff:type_name -> vibesys.orchestrator.v1.Handoff
+	24, // 14: vibesys.orchestrator.v1.PostReport.report:type_name -> vibesys.orchestrator.v1.Report
 	4,  // 15: vibesys.orchestrator.v1.Command.start_run:type_name -> vibesys.orchestrator.v1.StartRun
 	5,  // 16: vibesys.orchestrator.v1.Command.stop_run:type_name -> vibesys.orchestrator.v1.StopRun
 	6,  // 17: vibesys.orchestrator.v1.Command.spawn_agent:type_name -> vibesys.orchestrator.v1.SpawnAgent
@@ -1298,7 +1318,7 @@ var file_vibesys_orchestrator_v1_events_proto_depIdxs = []int32{
 	9,  // 20: vibesys.orchestrator.v1.Command.post_handoff:type_name -> vibesys.orchestrator.v1.PostHandoff
 	10, // 21: vibesys.orchestrator.v1.Command.post_report:type_name -> vibesys.orchestrator.v1.PostReport
 	0,  // 22: vibesys.orchestrator.v1.Receipt.refusal:type_name -> vibesys.orchestrator.v1.Refusal
-	24, // 23: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
+	25, // 23: vibesys.orchestrator.v1.Receipt.delivery:type_name -> vibesys.orchestrator.v1.Delivery
 	20, // 24: vibesys.orchestrator.v1.Receipt.allowed_agents:type_name -> vibesys.orchestrator.v1.AllowedAgent
 	25, // [25:25] is the sub-list for method output_type
 	25, // [25:25] is the sub-list for method input_type
@@ -1326,6 +1346,7 @@ func file_vibesys_orchestrator_v1_events_proto_init() {
 		(*Delta_Text)(nil),
 		(*Delta_CommandOutput)(nil),
 	}
+	file_vibesys_orchestrator_v1_events_proto_msgTypes[3].OneofWrappers = []any{}
 	file_vibesys_orchestrator_v1_events_proto_msgTypes[10].OneofWrappers = []any{
 		(*Command_StartRun)(nil),
 		(*Command_StopRun)(nil),

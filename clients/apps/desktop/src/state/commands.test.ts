@@ -21,7 +21,7 @@ const refusals = fc.constantFrom(
   Refusal.UNSPECIFIED,
   Refusal.RUN_NOT_FOUND,
   Refusal.NOT_PERMITTED,
-  Refusal.DEADLINE_PASSED,
+  Refusal.TIME_LIMIT_REACHED,
 );
 const ids = fc.constantFrom('c1', 'c2', 'c3');
 const progress: fc.Arbitrary<CommandProgress> = ids.chain(id =>

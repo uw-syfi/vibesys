@@ -119,12 +119,14 @@ the run already has the most subagents it may have live: wait for a handoff, or 
 the lead stops only with its run: ask the operator to stop the run
 {{- else if eq .Refusal "agent_not_live" -}}
 that agent's session is already over or closing: call list_agents to see which agents are live
-{{- else if eq .Refusal "deadline_passed" -}}
-the run's deadline has passed: post your report or handoff now
 {{- else if eq .Refusal "agent_not_allowed" -}}
 the operator did not allow that harness and model for this run. It allows only: {{range $i, $a := .Allowed}}{{if $i}}; {{end}}harness {{$a.Harness}} {{if $a.Model}}with model {{$a.Model}}{{else}}with its default model (leave model out){{end}}{{end}}. Spawn again with one of these, or leave the model out to take the first one on the harness; if none fits, tell the operator
 {{- else if eq .Refusal "repository_in_use" -}}
 another run is working in this repository: only an operator starts runs, so tell the operator
+{{- else if eq .Refusal "time_limit_reached" -}}
+the run reached its time limit and starts no new agent: finish with what you have, promote a judged candidate that beats the base if there is one, and post your final report with post_report
+{{- else if eq .Refusal "cost_limit_reached" -}}
+the run reached its cost limit and starts no new agent: finish with what you have, promote a judged candidate that beats the base if there is one, and post your final report with post_report
 {{- else if eq .Refusal "handoff_not_yours" -}}
 your handoff has no body for your role, or has another role's: give it again with the `{{.Role}}` field and no other body
 {{- else -}}

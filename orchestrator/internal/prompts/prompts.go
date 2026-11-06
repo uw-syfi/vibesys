@@ -101,6 +101,17 @@ type (
 		Detail string
 	}
 
+	// runLimitReachedData says which limit the run reached and what is left to say about it. HasSpent
+	// is false when no turn has reported a cost.
+	runLimitReachedData struct {
+		Limit          core.RunLimit
+		ElapsedMinutes uint32
+		HasSpent       bool
+		Spent          float64
+		MaxCost        float64
+		GraceMinutes   uint32
+	}
+
 	leadIdleReminderData struct {
 		IdleMinutes uint32
 		Subagents   uint32
@@ -131,6 +142,14 @@ func dataOf(m core.Message) (string, any, error) {
 		return "subagent_settled", subagentSettledData{Agent: b.Agent, Status: b.Status, Detail: b.Detail}, nil
 	case core.HandoffReminder:
 		return "handoff_reminder", struct{}{}, nil
+	case core.RunLimitReached:
+		d := runLimitReachedData{
+			Limit: b.Limit, ElapsedMinutes: uint32(b.Elapsed / time.Minute), MaxCost: b.MaxCost, GraceMinutes: uint32(b.Grace / time.Minute),
+		}
+		if b.Spent != nil {
+			d.HasSpent, d.Spent = true, *b.Spent
+		}
+		return "run_limit_reached", d, nil
 	case core.LeadIdleReminder:
 		// Whole seconds in a uint32, as the message is stored, so the minutes do not depend on
 		// whether the message was read back or is still the one that was built.
