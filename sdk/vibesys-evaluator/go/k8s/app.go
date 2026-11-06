@@ -2,12 +2,14 @@ package k8s
 
 import (
 	"fmt"
+	"math"
 	"net/url"
 	"path"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // CacheKind is the protocol of a cache Deployment, which says how its contents are flushed.
@@ -40,11 +42,25 @@ type App struct {
 	DataTier string
 	// HasSeed says the deploy runs a seed pod (Deploy is given its command).
 	HasSeed bool
-	// Restartable are the Deployments the fault actions may restart, exec in, stop and start.
+	// Restartable are the Deployments an accuracy check's faults may act on (microservices'
+	// Restart, RestartAll and Exec), as may Deployment's Restart, Exec, Stop and Start.
 	Restartable []string
-	// Caches are the cache Deployments the fault actions may empty in place, with their protocol.
-	// They may also be restarted and exec'd in.
+	// Caches are the cache Deployments, with their protocol, that microservices' Flush (and
+	// Deployment.Flush) empties in place; the other faults may act on them too.
 	Caches map[string]CacheKind
+	// WaitSecs bounds each wait of the deploy: for the data tier, for every replica, for a pod
+	// to start, and for a restarted Deployment to serve again. 0 is WaitSecs (300 s); an
+	// application whose pods load a large snapshot before they start needs more.
+	WaitSecs float64
+}
+
+// Wait is how long each wait of the deploy may take: WaitSecs, or the package's WaitSecs when it
+// is 0.
+func (a App) Wait() time.Duration {
+	if a.WaitSecs > 0 {
+		return time.Duration(a.WaitSecs * float64(time.Second))
+	}
+	return WaitSecs
 }
 
 var (
@@ -156,6 +172,9 @@ func (a App) Validate() error {
 			return fmt.Errorf("k8s.App(restartable): names repeat")
 		}
 		seen[deployment] = true
+	}
+	if a.WaitSecs < 0 || math.IsNaN(a.WaitSecs) || math.IsInf(a.WaitSecs, 0) {
+		return fmt.Errorf("k8s.App(wait_secs=%v): want a finite number of seconds > 0 (0 in Go: the default, %.0f)", a.WaitSecs, WaitSecs.Seconds())
 	}
 	for cache, kind := range sortedPairs(a.Caches) {
 		if !dnsLabel.MatchString(cache) {

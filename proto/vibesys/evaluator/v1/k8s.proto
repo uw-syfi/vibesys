@@ -54,6 +54,9 @@ message K8sApp {
   repeated string restartable = 7;
   // Cache Deployments the fault actions may flush, restart and exec in.
   map<string, K8sCacheKind> caches = 8;
+  // How long each wait of the deploy may take, in seconds: for the data tier, for every replica,
+  // for a pod to start, and for a restarted Deployment to serve again. 0: 300.
+  double wait_secs = 9;
 }
 
 // K8sPodCommand is a command of the task image and the files written into its pod's work directory

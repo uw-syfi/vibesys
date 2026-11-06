@@ -160,7 +160,10 @@ type K8SApp struct {
 	// Deployments the fault actions may restart, exec in, stop and start.
 	Restartable []string `protobuf:"bytes,7,rep,name=restartable,proto3" json:"restartable,omitempty"`
 	// Cache Deployments the fault actions may flush, restart and exec in.
-	Caches        map[string]K8SCacheKind `protobuf:"bytes,8,rep,name=caches,proto3" json:"caches,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value,enum=vibesys.evaluator.v1.K8SCacheKind"`
+	Caches map[string]K8SCacheKind `protobuf:"bytes,8,rep,name=caches,proto3" json:"caches,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value,enum=vibesys.evaluator.v1.K8SCacheKind"`
+	// How long each wait of the deploy may take, in seconds: for the data tier, for every replica,
+	// for a pod to start, and for a restarted Deployment to serve again. 0: 300.
+	WaitSecs      float64 `protobuf:"fixed64,9,opt,name=wait_secs,json=waitSecs,proto3" json:"wait_secs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -249,6 +252,13 @@ func (x *K8SApp) GetCaches() map[string]K8SCacheKind {
 		return x.Caches
 	}
 	return nil
+}
+
+func (x *K8SApp) GetWaitSecs() float64 {
+	if x != nil {
+		return x.WaitSecs
+	}
+	return 0
 }
 
 // K8sPodCommand is a command of the task image and the files written into its pod's work directory
@@ -1687,7 +1697,7 @@ var File_vibesys_evaluator_v1_k8s_proto protoreflect.FileDescriptor
 
 const file_vibesys_evaluator_v1_k8s_proto_rawDesc = "" +
 	"\n" +
-	"\x1evibesys/evaluator/v1/k8s.proto\x12\x14vibesys.evaluator.v1\"\xca\x03\n" +
+	"\x1evibesys/evaluator/v1/k8s.proto\x12\x14vibesys.evaluator.v1\"\xe7\x03\n" +
 	"\x06K8sApp\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
 	"\bmanifest\x18\x02 \x01(\tR\bmanifest\x12@\n" +
@@ -1696,7 +1706,8 @@ const file_vibesys_evaluator_v1_k8s_proto_rawDesc = "" +
 	"\tdata_tier\x18\x05 \x01(\tR\bdataTier\x12\x19\n" +
 	"\bhas_seed\x18\x06 \x01(\bR\ahasSeed\x12 \n" +
 	"\vrestartable\x18\a \x03(\tR\vrestartable\x12@\n" +
-	"\x06caches\x18\b \x03(\v2(.vibesys.evaluator.v1.K8sApp.CachesEntryR\x06caches\x1a9\n" +
+	"\x06caches\x18\b \x03(\v2(.vibesys.evaluator.v1.K8sApp.CachesEntryR\x06caches\x12\x1b\n" +
+	"\twait_secs\x18\t \x01(\x01R\bwaitSecs\x1a9\n" +
 	"\vImagesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a]\n" +

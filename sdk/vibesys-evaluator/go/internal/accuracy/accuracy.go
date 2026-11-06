@@ -65,23 +65,20 @@ func (p Plan) Validate() error {
 	return nil
 }
 
-// Run runs the plan on runner, which must capture: each phase, then the faults that follow it in
-// order. A phase that is not a measurement (the saturation guard, the validity rules) is logged
-// and checked like any other: the oracle judges its responses.
+// Run runs the plan on runner, which must capture and leave its phases unjudged: each phase, then
+// the faults that follow it in order. No phase is a measurement: the oracle judges every
+// response, so neither the saturation guard nor the validity rules apply (a workload may send
+// requests the application must refuse).
 func Run(ctx context.Context, runner *phase.Runner, plan Plan) error {
-	if !runner.Capture {
-		return errors.New("an accuracy run captures its phases")
+	if !runner.Capture || !runner.Unjudged {
+		return errors.New("an accuracy run captures its phases and leaves them unjudged")
 	}
 	if err := plan.Validate(); err != nil {
 		return err
 	}
 	for i := range plan.Phases {
-		ran, err := runner.Run(ctx, plan.Load)
-		if err != nil {
+		if _, err := runner.Run(ctx, plan.Load); err != nil {
 			return err
-		}
-		if ran.Verdict.Failure != "" {
-			runner.Log(fmt.Sprintf("phase %d is not a measurement (%s); its history is checked all the same", i, ran.Verdict.Failure))
 		}
 		for _, f := range plan.Faults {
 			if f.After == i {

@@ -115,6 +115,8 @@ enum AccuracyFaultAction {
   ACCURACY_FAULT_ACTION_RESTART_ALL = 2;
   // Run argv in the Deployment's first pod; a nonzero exit fails the run.
   ACCURACY_FAULT_ACTION_EXEC = 3;
+  // Empty the cache Deployment in place, in every pod (memcached's flush_all, redis's FLUSHALL).
+  ACCURACY_FAULT_ACTION_FLUSH = 4;
 }
 
 // AccuracyFault is a fault an accuracy run applies between two phases, recorded in the history
@@ -123,11 +125,12 @@ message AccuracyFault {
   // The phase it follows, from 0; the last phase is followed by none.
   uint32 after_phase = 1;
   AccuracyFaultAction action = 2;
-  // The Deployment it acts on: one of the App's restartable ones.
+  // The Deployment it acts on: one of the App's restartable ones or caches; FLUSH: one of its
+  // caches.
   string deployment = 3;
   // EXEC: the command.
   repeated string argv = 4;
-  // The FaultEvent's kind; empty: restart, restart_all or exec.
+  // The FaultEvent's kind; empty: restart, restart_all, exec or flush.
   string kind = 5;
 }
 
@@ -142,15 +145,20 @@ message AccuracyLocal {
 // AccuracyRunRequest is a language SDK's accuracy check (`accuracy run`): the core deploys and
 // seeds the application, runs `phases` open-loop phases of `load` with capture on, the faults
 // between them, writes the accuracy history into history_dir, tears the application down and runs
-// the oracle on the history. Progress is written as {"event": PhaseEvent} lines.
+// the oracle on the history. No phase is judged as a measurement: the oracle judges every
+// response. Progress is written as {"event": PhaseEvent} lines.
 message AccuracyRunRequest {
+  // 8 was validity, the rules a phase was judged by for the log; the phases are not judged.
+  reserved 8;
+  reserved "validity";
+
   oneof system {
     // On Kubernetes: the request of `k8s deploy` (app, task_dir, project_root, work_dir,
     // artifacts_dir, probe_plan_file, seed).
     K8sDeployRequest k8s = 1;
     AccuracyLocal local = 2;
   }
-  // The phase pod's command, before `--work DIR --target URL` (python bench.py phase).
+  // The phase pod's command, before `--work DIR --target URL` (python bench.py phase --accuracy).
   repeated string phase_command = 3;
   // The sample's seed: every phase's streams derive from it.
   uint64 sample_seed = 4;
@@ -158,8 +166,6 @@ message AccuracyRunRequest {
   // Each phase's load: an open loop's rate, arrivals, secs and warmup_secs.
   PhaseInput load = 6;
   repeated AccuracyFault faults = 7;
-  // How the phases are judged, for the log: a phase that is not a measurement is checked too.
-  PhaseValidity validity = 8;
   // Where the history goes: a new or empty directory holding the dataset file (dataset.json),
   // written by the caller. A path because the history is files on the caller's machine: the
   // phases write them, the oracle program is given the directory (--history), and the caller

@@ -190,17 +190,30 @@ func rules(s *pb.PhaseSummary, validity evaluator.Validity) string {
 
 // Log is the progress lines of a judged phase: how the generator kept up and what it measured.
 func Log(in *pb.PhaseInput, output *pb.PhaseOutput, verdict Verdict) []string {
-	var lines []string
-	if gen := output.GetSummary().GetGenerator(); gen != nil {
-		lines = append(lines, fmt.Sprintf("phase %d: the generator wrote %.0f ops/s, %d operations waited for it",
-			in.GetPhaseIndex(), gen.GetRate(), gen.GetWaited()))
-	}
+	lines := generatorLog(in, output)
 	if verdict.Failure == "" {
 		m := verdict.Measurement
 		lines = append(lines, fmt.Sprintf("phase %d (%s): %.1f ops/s, p50 %.2f ms, p99 %.2f ms",
 			in.GetPhaseIndex(), Describe(in), m.OpsPerSec, m.P50Ms, m.P99Ms))
 	}
 	return lines
+}
+
+// Counts is the log of a phase that is not judged (an accuracy run's): how the generator kept up,
+// what the phase sent and how many of its operations failed, by kind.
+func Counts(in *pb.PhaseInput, output *pb.PhaseOutput) []string {
+	s := output.GetSummary()
+	return append(generatorLog(in, output), fmt.Sprintf("phase %d (%s): %d operations sent, %d failed%s",
+		in.GetPhaseIndex(), Describe(in), s.GetSent(), s.GetErrors(), errorKinds(s)))
+}
+
+func generatorLog(in *pb.PhaseInput, output *pb.PhaseOutput) []string {
+	gen := output.GetSummary().GetGenerator()
+	if gen == nil {
+		return nil
+	}
+	return []string{fmt.Sprintf("phase %d: the generator wrote %.0f ops/s, %d operations waited for it",
+		in.GetPhaseIndex(), gen.GetRate(), gen.GetWaited())}
 }
 
 // Failure is the sample's error message for a phase that is not a measurement.

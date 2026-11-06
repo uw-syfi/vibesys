@@ -55,6 +55,7 @@ ms.main(
         phases=3, rate=200, secs=30, warmup=5,
         faults=[ms.Fault.restart_all("kv", after=0), ms.Fault.exec("kv", ["sync"], after=1)],
         oracle=["./kv-oracle"],  # the oracle program, built next to bench.py
+        workload=CHECK_WORKLOAD,  # optional: the check's own mix; None runs the benchmark's
     ),
 )
 ```
@@ -62,18 +63,28 @@ ms.main(
 and the `accuracy` command of a Go task, whose oracle runs in-process:
 
 ```go
-Accuracy: &microservices.Accuracy{
+Accuracy: &microservices.Accuracy[*Data, *Model]{
     Phases: 3,
     Load:   microservices.Open{Rate: 200, Secs: 30 * time.Second, Warmup: 5 * time.Second},
     Faults: []microservices.Fault{microservices.RestartAll(0, "kv"), microservices.Exec(1, "kv", "sync")},
     Oracle: oracle, // func(*check.History) ([]check.AnySpec, error), as for check.Main
+    // Workload: &checkWorkload, // optional: the check's own mix
 },
 ```
 
 Each fault is a `FaultEvent` of its kind (`restart`, `restart_all`, `exec`,
-or a `FaultFunc`'s) on the Deployment; `Spec.Fault` says what it does to the
-state, and without one a fault changes nothing, so a store that loses
-acknowledged writes in a restart fails. The kv-store example
+`flush`, or a `FaultFunc`'s) on the Deployment; `Spec.Fault` says what it
+does to the state, and without one a fault changes nothing, so a store that
+loses acknowledged writes in a restart fails. `Fault.flush(cache, after=i)`
+(Go `Flush(i, cache)`) empties one of the `k8s.App`'s `caches` in place: a
+cache-aside application must still answer right from a cold cache.
+
+The check's phases are never judged as measurements: a workload may send
+requests the application must refuse (a 400 for an invalid one), and the
+oracle, not the validity rules, says whether each answer was right. A check
+whose mix differs from the benchmark's passes its own workload
+(`Accuracy(workload=...)`, a `Workload` or a `Generator`; Go
+`Accuracy.Workload` or `Generator`), so one `bench.py` serves both. The kv-store example
 (`examples/kv-store`) has both forms.
 
 ### Projection

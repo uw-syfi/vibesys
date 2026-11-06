@@ -3,10 +3,12 @@
 The flow is the Go core's (``vibesys-evaluator accuracy run``, the same as a
 Go task's ``microservices.Main``): it deploys and seeds the system as a
 benchmark sample does, runs ``phases`` open-loop phases at a fixed rate with
-the whole history captured, applies the faults between them, tears the system
-down, and runs the task's oracle (a program on the Go SDK's ``check.Main``)
-on the history. This module builds the request and turns the verdict into
-the exit status: 0 PASS, 1 FAIL, 2 UNKNOWN.
+the whole history captured (each a phase pod running ``bench.py phase
+--accuracy``, whose generator is the check's own workload when it has one),
+applies the faults between them, tears the system down, and runs the task's
+oracle (a program on the Go SDK's ``check.Main``) on the history. This module
+builds the request and turns the verdict into the exit status: 0 PASS, 1
+FAIL, 2 UNKNOWN.
 """
 
 from __future__ import annotations
@@ -25,11 +27,11 @@ from vibesys_evaluator.microservices._k8s._deployment import app_message, probe_
 from vibesys_evaluator.microservices._private import dataset as dataset_file
 from vibesys_evaluator.microservices._private.local import LocalDeployer
 from vibesys_evaluator.microservices._private.run import DATASET_FILE
+from vibesys_evaluator.microservices._private.workload import Generator, Workload
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from vibesys_evaluator._private.results import Validity
     from vibesys_evaluator.microservices._private.deploy import Deployer, TaskCommand
     from vibesys_evaluator.microservices.k8s import App
 
@@ -44,6 +46,7 @@ _ACTIONS = {
     "restart": "ACCURACY_FAULT_ACTION_RESTART",
     "restart_all": "ACCURACY_FAULT_ACTION_RESTART_ALL",
     "exec": "ACCURACY_FAULT_ACTION_EXEC",
+    "flush": "ACCURACY_FAULT_ACTION_FLUSH",
 }
 _NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 
@@ -52,15 +55,16 @@ _NAME = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 class Fault:
     """A fault an accuracy check applies between two phases, recorded in the history.
 
-    Build one with ``Fault.restart``, ``Fault.restart_all`` or ``Fault.exec``:
-    each acts on a Deployment of the ``k8s.App`` (one of its ``restartable``)
-    after phase ``after`` (from 0), and is recorded as a fault of its kind
-    (``restart``, ``restart_all``, ``exec``) on the Deployment, with its start
-    and end and no operation in flight. The oracle's ``Spec.Fault`` says what
-    it does to the state.
+    Build one with ``Fault.restart``, ``Fault.restart_all``, ``Fault.exec``
+    or ``Fault.flush``: each acts on a Deployment of the ``k8s.App`` (one of
+    its ``restartable`` or ``caches``; a flush, one of its ``caches``) after
+    phase ``after`` (from 0), and is recorded as a fault of its kind
+    (``restart``, ``restart_all``, ``exec``, ``flush``) on the Deployment,
+    with its start and end and no operation in flight. The oracle's
+    ``Spec.Fault`` says what it does to the state.
     """
 
-    action: Literal["restart", "restart_all", "exec"]
+    action: Literal["restart", "restart_all", "exec", "flush"]
     deployment: str
     after: int
     argv: tuple[str, ...] = ()
@@ -68,7 +72,7 @@ class Fault:
     def __post_init__(self) -> None:
         """Check the fields."""
         if self.action not in _ACTIONS:
-            msg = f"Fault action is restart, restart_all or exec, got {self.action!r}"
+            msg = f"Fault action is restart, restart_all, exec or flush, got {self.action!r}"
             raise ValueError(msg)
         if not isinstance(self.deployment, str) or not _NAME.match(self.deployment):
             msg = f"Fault deployment must be a Deployment's name, got {self.deployment!r}"
@@ -95,6 +99,15 @@ class Fault:
         """Run ``argv`` in the first pod of ``deployment``; a nonzero exit ends the check."""
         return Fault("exec", deployment, after, tuple(argv))
 
+    @staticmethod
+    def flush(cache: str, *, after: int) -> Fault:
+        """Empty ``cache`` (one of the ``k8s.App``'s ``caches``) in place, in every pod.
+
+        Memcached's ``flush_all`` or redis's ``FLUSHALL``: the cache is cold
+        afterwards and the application must still answer right.
+        """
+        return Fault("flush", cache, after)
+
 
 @dataclass(frozen=True, kw_only=True)
 class Accuracy:
@@ -109,7 +122,12 @@ class Accuracy:
     when the run could not complete), with the report, the failures'
     timelines and the history in ``--out`` (``/vibesys/artifacts/accuracy``).
     A check runs at a fixed, modest rate, so that the responses are judged,
-    not the capacity.
+    not the capacity; no phase is a measurement, so ``main``'s ``validity``
+    does not apply (a workload may send requests the system must refuse).
+
+    ``workload`` is the check's own workload (a ``Workload`` or a
+    ``Generator``), when its mix is not the benchmark's: one ``bench.py``
+    then serves both. None: the phases run ``main``'s ``workload``.
     """
 
     phases: int
@@ -119,6 +137,7 @@ class Accuracy:
     warmup: float = 0.0
     arrivals: Literal["poisson", "uniform"] = "poisson"
     faults: Sequence[Fault] = field(default_factory=tuple)
+    workload: Workload[Any, Any] | Generator | None = None
 
     def __post_init__(self) -> None:
         """Check the fields."""
@@ -138,6 +157,9 @@ class Accuracy:
             raise ValueError(msg)
         if isinstance(self.oracle, str) or not self.oracle:
             msg = "Accuracy oracle is the oracle's command, a non-empty sequence of strings"
+            raise ValueError(msg)
+        if self.workload is not None and not isinstance(self.workload, (Workload, Generator)):
+            msg = f"Accuracy workload is a Workload, a Generator or None, got {self.workload!r}"
             raise ValueError(msg)
         for fault in self.faults:
             if not isinstance(fault, Fault) or fault.after >= self.phases - 1:
@@ -231,7 +253,6 @@ def run_accuracy(
     *,
     dataset: object,
     app: App[Any],
-    validity: Validity,
     project_root: Path,
     out: Path,
     seed: int | None,
@@ -260,16 +281,11 @@ def run_accuracy(
                 artifacts=Path(env.get(ARTIFACTS_ENV) or out),
                 scratch=Path(scratch),
             ),
-            "phase_command": [script.python, script.script, "phase"],
+            "phase_command": [script.python, script.script, "phase", "--accuracy"],
             "sample_seed": str(sample_seed),
             "phases": accuracy.phases,
             "load": _load(accuracy),
             "faults": [_fault_message(fault) for fault in accuracy.faults],
-            "validity": {
-                "max_error_rate": validity.max_error_rate,
-                "min_sustained_ratio": validity.min_sustained_ratio,
-                "min_ops_per_operation": validity.min_ops_per_operation,
-            },
             "history_dir": str(history),
             "oracle": oracle_command(accuracy.oracle, script),
             "out_dir": str(out),

@@ -422,7 +422,8 @@ class AccuracyFault(Message[_AccuracyFaultFields]):
             vibesys.evaluator.v1.AccuracyFaultAction action = 2;
             ```
         deployment:
-            The Deployment it acts on: one of the App's restartable ones.
+            The Deployment it acts on: one of the App's restartable ones or caches; FLUSH: one of its
+            caches.
 
             ```proto
             string deployment = 3;
@@ -434,7 +435,7 @@ class AccuracyFault(Message[_AccuracyFaultFields]):
             repeated string argv = 4;
             ```
         kind:
-            The FaultEvent's kind; empty: restart, restart_all or exec.
+            The FaultEvent's kind; empty: restart, restart_all, exec or flush.
 
             ```proto
             string kind = 5;
@@ -501,14 +502,15 @@ class AccuracyLocal(Message[_AccuracyLocalFields]):
         target: str
         seed: list[str]
 
-_AccuracyRunRequestFields: TypeAlias = Literal["k8s", "local", "phase_command", "sample_seed", "phases", "load", "faults", "validity", "history_dir", "oracle", "out_dir"]
+_AccuracyRunRequestFields: TypeAlias = Literal["k8s", "local", "phase_command", "sample_seed", "phases", "load", "faults", "history_dir", "oracle", "out_dir"]
 
 class AccuracyRunRequest(Message[_AccuracyRunRequestFields]):
     """
     AccuracyRunRequest is a language SDK's accuracy check (`accuracy run`): the core deploys and
     seeds the application, runs `phases` open-loop phases of `load` with capture on, the faults
     between them, writes the accuracy history into history_dir, tears the application down and runs
-    the oracle on the history. Progress is written as {"event": PhaseEvent} lines.
+    the oracle on the history. No phase is judged as a measurement: the oracle judges every
+    response. Progress is written as {"event": PhaseEvent} lines.
 
     ```proto
     message vibesys.evaluator.v1.AccuracyRunRequest
@@ -520,7 +522,7 @@ class AccuracyRunRequest(Message[_AccuracyRunRequestFields]):
             oneof system
             ```
         phase_command:
-            The phase pod's command, before `--work DIR --target URL` (python bench.py phase).
+            The phase pod's command, before `--work DIR --target URL` (python bench.py phase --accuracy).
 
             ```proto
             repeated string phase_command = 3;
@@ -544,12 +546,6 @@ class AccuracyRunRequest(Message[_AccuracyRunRequestFields]):
         faults:
             ```proto
             repeated vibesys.evaluator.v1.AccuracyFault faults = 7;
-            ```
-        validity:
-            How the phases are judged, for the log: a phase that is not a measurement is checked too.
-
-            ```proto
-            optional vibesys.evaluator.v1.PhaseValidity validity = 8;
             ```
         history_dir:
             Where the history goes: a new or empty directory holding the dataset file (dataset.json),
@@ -577,7 +573,7 @@ class AccuracyRunRequest(Message[_AccuracyRunRequestFields]):
             ```
     """
 
-    __slots__ = ("phase_command", "sample_seed", "phases", "load", "faults", "validity", "history_dir", "oracle", "out_dir", "system")
+    __slots__ = ("phase_command", "sample_seed", "phases", "load", "faults", "history_dir", "oracle", "out_dir", "system")
 
     if TYPE_CHECKING:
 
@@ -590,7 +586,6 @@ class AccuracyRunRequest(Message[_AccuracyRunRequestFields]):
             phases: int = 0,
             load: PhaseInput | None = None,
             faults: list[AccuracyFault] | None = None,
-            validity: PhaseValidity | None = None,
             history_dir: str = "",
             oracle: list[str] | None = None,
             out_dir: str = "",
@@ -603,7 +598,6 @@ class AccuracyRunRequest(Message[_AccuracyRunRequestFields]):
         phases: int
         load: PhaseInput | None
         faults: list[AccuracyFault]
-        validity: PhaseValidity | None
         history_dir: str
         oracle: list[str]
         out_dir: str
@@ -691,16 +685,23 @@ class AccuracyFaultAction(Enum):
             ```proto
             ACCURACY_FAULT_ACTION_EXEC = 3
             ```
+        FLUSH:
+            Empty the cache Deployment in place, in every pod (memcached's flush_all, redis's FLUSHALL).
+
+            ```proto
+            ACCURACY_FAULT_ACTION_FLUSH = 4
+            ```
     """
 
     UNSPECIFIED = 0
     RESTART = 1
     RESTART_ALL = 2
     EXEC = 3
+    FLUSH = 4
 
 
 _DESC = file_desc(
-    b'\n(vibesys/evaluator/v1/microservices.proto\x12\x14vibesys.evaluator.v1\x1a\x1evibesys/evaluator/v1/k8s.proto\x1a vibesys/evaluator/v1/phase.proto"\xcf\x01\n\x0fPhasePodRequest\x12\x19\n\x08work_dir\x18\x01 \x01(\tR\x07workDir\x12\x16\n\x06target\x18\x02 \x01(\tR\x06target\x12\x1c\n\tgenerator\x18\x03 \x03(\tR\tgenerator\x12!\n\x0cdataset_file\x18\x04 \x01(\tR\x0bdatasetFile\x12.\n\x13min_sustained_ratio\x18\x05 \x01(\x01R\x11minSustainedRatio\x12\x18\n\x07loadgen\x18\x06 \x01(\tR\x07loadgen"\xa4\x01\n\x10PhasePodResponse\x12\x12\n\x04sent\x18\x01 \x01(\x04R\x04sent\x12\x1c\n\tcompleted\x18\x02 \x01(\x04R\tcompleted\x12\x16\n\x06errors\x18\x03 \x01(\x04R\x06errors\x12#\n\rachieved_rate\x18\x04 \x01(\x01R\x0cachievedRate\x12!\n\x0cloadgen_secs\x18\x05 \x01(\x01R\x0bloadgenSecs"[\n\nPhaseEvent\x12\x14\n\x05stage\x18\x01 \x01(\tR\x05stage\x12\x18\n\x07message\x18\x02 \x01(\tR\x07message\x12\x1d\n\nunix_nanos\x18\x03 \x01(\x03R\tunixNanos"\x98\x01\n\rPhaseValidity\x12$\n\x0emax_error_rate\x18\x01 \x01(\x01R\x0cmaxErrorRate\x12.\n\x13min_sustained_ratio\x18\x02 \x01(\x01R\x11minSustainedRatio\x121\n\x15min_ops_per_operation\x18\x03 \x01(\rR\x12minOpsPerOperation"\xa9\x01\n\x11PhaseJudgeRequest\x12\x1b\n\tphase_dir\x18\x01 \x01(\tR\x08phaseDir\x126\n\x05input\x18\x02 \x01(\x0b2 .vibesys.evaluator.v1.PhaseInputR\x05input\x12?\n\x08validity\x18\x03 \x01(\x0b2#.vibesys.evaluator.v1.PhaseValidityR\x08validity"`\n\x10PhaseMeasurement\x12\x1e\n\x0bops_per_sec\x18\x01 \x01(\x01R\topsPerSec\x12\x15\n\x06p50_ms\x18\x02 \x01(\x01R\x05p50Ms\x12\x15\n\x06p99_ms\x18\x03 \x01(\x01R\x05p99Ms"\x8a\x01\n\x12PhaseJudgeResponse\x12H\n\x0bmeasurement\x18\x01 \x01(\x0b2&.vibesys.evaluator.v1.PhaseMeasurementR\x0bmeasurement\x12\x18\n\x07failure\x18\x02 \x01(\tR\x07failure\x12\x10\n\x03log\x18\x03 \x03(\tR\x03log"\xbb\x01\n\rAccuracyFault\x12\x1f\n\x0bafter_phase\x18\x01 \x01(\rR\nafterPhase\x12A\n\x06action\x18\x02 \x01(\x0e2).vibesys.evaluator.v1.AccuracyFaultActionR\x06action\x12\x1e\n\ndeployment\x18\x03 \x01(\tR\ndeployment\x12\x12\n\x04argv\x18\x04 \x03(\tR\x04argv\x12\x12\n\x04kind\x18\x05 \x01(\tR\x04kind";\n\rAccuracyLocal\x12\x16\n\x06target\x18\x01 \x01(\tR\x06target\x12\x12\n\x04seed\x18\x02 \x03(\tR\x04seed"\xfb\x03\n\x12AccuracyRunRequest\x12:\n\x03k8s\x18\x01 \x01(\x0b2&.vibesys.evaluator.v1.K8sDeployRequestH\x00R\x03k8s\x12;\n\x05local\x18\x02 \x01(\x0b2#.vibesys.evaluator.v1.AccuracyLocalH\x00R\x05local\x12#\n\rphase_command\x18\x03 \x03(\tR\x0cphaseCommand\x12\x1f\n\x0bsample_seed\x18\x04 \x01(\x04R\nsampleSeed\x12\x16\n\x06phases\x18\x05 \x01(\rR\x06phases\x124\n\x04load\x18\x06 \x01(\x0b2 .vibesys.evaluator.v1.PhaseInputR\x04load\x12;\n\x06faults\x18\x07 \x03(\x0b2#.vibesys.evaluator.v1.AccuracyFaultR\x06faults\x12?\n\x08validity\x18\x08 \x01(\x0b2#.vibesys.evaluator.v1.PhaseValidityR\x08validity\x12\x1f\n\x0bhistory_dir\x18\t \x01(\tR\nhistoryDir\x12\x16\n\x06oracle\x18\n \x03(\tR\x06oracle\x12\x17\n\x07out_dir\x18\x0b \x01(\tR\x06outDirB\x08\n\x06system"|\n\x13AccuracyRunResponse\x12\x18\n\x07verdict\x18\x01 \x01(\tR\x07verdict\x12\x1b\n\texit_code\x18\x02 \x01(\x05R\x08exitCode\x12\x16\n\x06phases\x18\x03 \x01(\rR\x06phases\x12\x16\n\x06faults\x18\x04 \x01(\rR\x06faults*\xa6\x01\n\x13AccuracyFaultAction\x12%\n!ACCURACY_FAULT_ACTION_UNSPECIFIED\x10\x00\x12!\n\x1dACCURACY_FAULT_ACTION_RESTART\x10\x01\x12%\n!ACCURACY_FAULT_ACTION_RESTART_ALL\x10\x02\x12\x1e\n\x1aACCURACY_FAULT_ACTION_EXEC\x10\x03BZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
+    b'\n(vibesys/evaluator/v1/microservices.proto\x12\x14vibesys.evaluator.v1\x1a\x1evibesys/evaluator/v1/k8s.proto\x1a vibesys/evaluator/v1/phase.proto"\xcf\x01\n\x0fPhasePodRequest\x12\x19\n\x08work_dir\x18\x01 \x01(\tR\x07workDir\x12\x16\n\x06target\x18\x02 \x01(\tR\x06target\x12\x1c\n\tgenerator\x18\x03 \x03(\tR\tgenerator\x12!\n\x0cdataset_file\x18\x04 \x01(\tR\x0bdatasetFile\x12.\n\x13min_sustained_ratio\x18\x05 \x01(\x01R\x11minSustainedRatio\x12\x18\n\x07loadgen\x18\x06 \x01(\tR\x07loadgen"\xa4\x01\n\x10PhasePodResponse\x12\x12\n\x04sent\x18\x01 \x01(\x04R\x04sent\x12\x1c\n\tcompleted\x18\x02 \x01(\x04R\tcompleted\x12\x16\n\x06errors\x18\x03 \x01(\x04R\x06errors\x12#\n\rachieved_rate\x18\x04 \x01(\x01R\x0cachievedRate\x12!\n\x0cloadgen_secs\x18\x05 \x01(\x01R\x0bloadgenSecs"[\n\nPhaseEvent\x12\x14\n\x05stage\x18\x01 \x01(\tR\x05stage\x12\x18\n\x07message\x18\x02 \x01(\tR\x07message\x12\x1d\n\nunix_nanos\x18\x03 \x01(\x03R\tunixNanos"\x98\x01\n\rPhaseValidity\x12$\n\x0emax_error_rate\x18\x01 \x01(\x01R\x0cmaxErrorRate\x12.\n\x13min_sustained_ratio\x18\x02 \x01(\x01R\x11minSustainedRatio\x121\n\x15min_ops_per_operation\x18\x03 \x01(\rR\x12minOpsPerOperation"\xa9\x01\n\x11PhaseJudgeRequest\x12\x1b\n\tphase_dir\x18\x01 \x01(\tR\x08phaseDir\x126\n\x05input\x18\x02 \x01(\x0b2 .vibesys.evaluator.v1.PhaseInputR\x05input\x12?\n\x08validity\x18\x03 \x01(\x0b2#.vibesys.evaluator.v1.PhaseValidityR\x08validity"`\n\x10PhaseMeasurement\x12\x1e\n\x0bops_per_sec\x18\x01 \x01(\x01R\topsPerSec\x12\x15\n\x06p50_ms\x18\x02 \x01(\x01R\x05p50Ms\x12\x15\n\x06p99_ms\x18\x03 \x01(\x01R\x05p99Ms"\x8a\x01\n\x12PhaseJudgeResponse\x12H\n\x0bmeasurement\x18\x01 \x01(\x0b2&.vibesys.evaluator.v1.PhaseMeasurementR\x0bmeasurement\x12\x18\n\x07failure\x18\x02 \x01(\tR\x07failure\x12\x10\n\x03log\x18\x03 \x03(\tR\x03log"\xbb\x01\n\rAccuracyFault\x12\x1f\n\x0bafter_phase\x18\x01 \x01(\rR\nafterPhase\x12A\n\x06action\x18\x02 \x01(\x0e2).vibesys.evaluator.v1.AccuracyFaultActionR\x06action\x12\x1e\n\ndeployment\x18\x03 \x01(\tR\ndeployment\x12\x12\n\x04argv\x18\x04 \x03(\tR\x04argv\x12\x12\n\x04kind\x18\x05 \x01(\tR\x04kind";\n\rAccuracyLocal\x12\x16\n\x06target\x18\x01 \x01(\tR\x06target\x12\x12\n\x04seed\x18\x02 \x03(\tR\x04seed"\xca\x03\n\x12AccuracyRunRequest\x12:\n\x03k8s\x18\x01 \x01(\x0b2&.vibesys.evaluator.v1.K8sDeployRequestH\x00R\x03k8s\x12;\n\x05local\x18\x02 \x01(\x0b2#.vibesys.evaluator.v1.AccuracyLocalH\x00R\x05local\x12#\n\rphase_command\x18\x03 \x03(\tR\x0cphaseCommand\x12\x1f\n\x0bsample_seed\x18\x04 \x01(\x04R\nsampleSeed\x12\x16\n\x06phases\x18\x05 \x01(\rR\x06phases\x124\n\x04load\x18\x06 \x01(\x0b2 .vibesys.evaluator.v1.PhaseInputR\x04load\x12;\n\x06faults\x18\x07 \x03(\x0b2#.vibesys.evaluator.v1.AccuracyFaultR\x06faults\x12\x1f\n\x0bhistory_dir\x18\t \x01(\tR\nhistoryDir\x12\x16\n\x06oracle\x18\n \x03(\tR\x06oracle\x12\x17\n\x07out_dir\x18\x0b \x01(\tR\x06outDirB\x08\n\x06systemJ\x04\x08\x08\x10\tR\x08validity"|\n\x13AccuracyRunResponse\x12\x18\n\x07verdict\x18\x01 \x01(\tR\x07verdict\x12\x1b\n\texit_code\x18\x02 \x01(\x05R\x08exitCode\x12\x16\n\x06phases\x18\x03 \x01(\rR\x06phases\x12\x16\n\x06faults\x18\x04 \x01(\rR\x06faults*\xc7\x01\n\x13AccuracyFaultAction\x12%\n!ACCURACY_FAULT_ACTION_UNSPECIFIED\x10\x00\x12!\n\x1dACCURACY_FAULT_ACTION_RESTART\x10\x01\x12%\n!ACCURACY_FAULT_ACTION_RESTART_ALL\x10\x02\x12\x1e\n\x1aACCURACY_FAULT_ACTION_EXEC\x10\x03\x12\x1f\n\x1bACCURACY_FAULT_ACTION_FLUSH\x10\x04BZZXgithub.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/gen/vibesys/evaluator/v1;evaluatorv1b\x06proto3',
     [
         k8s_pb.desc(),
         phase_pb.desc(),

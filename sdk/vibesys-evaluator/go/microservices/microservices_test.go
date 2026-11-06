@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +37,9 @@ const (
 	captureEnv  = "MS_TEST_CAPTURE"
 	openEnv     = "MS_TEST_OPEN_RATE"
 	accuracyEnv = "MS_TEST_ACCURACY" // the fault between the accuracy check's phases
+	// The accuracy check's own workload, instead of the task's: "puts" (writes only) or
+	// "refused" (writes, and a request the application refuses).
+	ownWorkloadEnv = "MS_TEST_ACCURACY_WORKLOAD"
 )
 
 func TestMain(m *testing.M) {
@@ -154,7 +158,7 @@ func testTask() Task[kvData, *kvModel] {
 
 // testAccuracy is the accuracy check of the test task: two phases with fault between them, and
 // kvOracle; nil without a fault.
-func testAccuracy(fault string) *Accuracy {
+func testAccuracy(fault string) *Accuracy[kvData, *kvModel] {
 	var f Fault
 	switch fault {
 	case "":
@@ -175,13 +179,27 @@ func testAccuracy(fault string) *Accuracy {
 		})
 	case "restart":
 		f = Restart(0, "kv")
+	case "flush":
+		f = Flush(0, "cache")
 	}
-	return &Accuracy{
+	a := &Accuracy[kvData, *kvModel]{
 		Phases: 2,
 		Load:   Open{Rate: 100, Secs: time.Second, Warmup: 200 * time.Millisecond, Arrivals: Uniform},
 		Faults: []Fault{f},
 		Oracle: func(*check.History) ([]check.AnySpec, error) { return []check.AnySpec{kvSpec()}, nil },
 	}
+	if own := os.Getenv(ownWorkloadEnv); own != "" {
+		w := kvWorkload()
+		w.Operations = w.Operations[1:] // put
+		if own == "refused" {
+			w.Operations = append(w.Operations, workload.Operation[*kvModel]{Name: "refused", Weight: 1,
+				Build: func(*kvModel, *workload.Rand) workload.Request {
+					return workload.Request{Steps: []workload.Step{workload.HTTP("POST", "/kv/0")}, Info: kvInfo{}}
+				}})
+		}
+		a.Workload = &w
+	}
+	return a
 }
 
 // kvSpec is the test application's oracle: a key reads the last value written to it (the seed's
@@ -196,6 +214,12 @@ func kvSpec() *check.Spec[check.Register[string], kvOp, string] {
 					var info kvInfo
 					if err := json.Unmarshal(c.Info, &info); err != nil {
 						return err
+					}
+					if c.Op == "refused" { // the application must refuse it: no state is read or written
+						if c.Steps[0].Status != http.StatusMethodNotAllowed {
+							out.Violation(c, "a POST was answered %d", c.Steps[0].Status)
+						}
+						continue
 					}
 					piece := check.Piece[kvOp, string]{Keys: []string{fmt.Sprint(info.Key)}, Origin: c, Unknown: c.Lost()}
 					switch c.Op {
@@ -469,15 +493,15 @@ func TestLoadsAreValidated(t *testing.T) {
 
 // accuracyRun runs the test binary's accuracy command with fault and returns the report
 // directory, the exit code and the standard error.
-func accuracyRun(t *testing.T, target, fault string, args ...string) (string, int, string) {
+func accuracyRun(t *testing.T, target, fault string, env ...string) (string, int, string) {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "accuracy")
-	cmd := exec.Command(exe, append([]string{"accuracy", "--out", out, "--seed", "7"}, args...)...)
-	cmd.Env = append(os.Environ(), targetEnv+"="+target, accuracyEnv+"="+fault)
+	cmd := exec.Command(exe, "accuracy", "--out", out, "--seed", "7")
+	cmd.Env = append(append(os.Environ(), targetEnv+"="+target, accuracyEnv+"="+fault), env...)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	err = cmd.Run()
@@ -539,11 +563,79 @@ func TestAKubernetesFaultMustActOnADeploymentTheAppOffers(t *testing.T) {
 		a.Faults = faults
 		return a.validate(system)
 	}
-	if err := check(Restart(0, "kv"), RestartAll(0, "kv"), Exec(0, "cache", "true"), FaultFunc(0, "flush", "elsewhere", func(context.Context) error { return nil })); err != nil {
+	if err := check(Restart(0, "kv"), RestartAll(0, "kv"), Exec(0, "cache", "true"), Flush(0, "cache"),
+		FaultFunc(0, "flush", "elsewhere", func(context.Context) error { return nil })); err != nil {
 		t.Fatal(err)
 	}
 	if err := check(RestartAll(0, "db")); err == nil || !strings.Contains(err.Error(), "restart_all on db: not one of the k8s.App's Restartable") {
 		t.Fatalf("got %v", err)
+	}
+	if err := check(Flush(0, "kv")); err == nil || !strings.Contains(err.Error(), "flush on kv: not one of the k8s.App's Caches") {
+		t.Fatalf("a flush of a Deployment that is not a cache: %v", err)
+	}
+}
+
+func TestAFlushOnALocalSystemEndsTheRunUnknown(t *testing.T) {
+	server := kvServer(t, 0)
+	_, code, stderr := accuracyRun(t, server.URL, "flush")
+	if code != 2 || !strings.Contains(stderr, "microservices.Local cannot flush cache") {
+		t.Fatalf("exit %d", code)
+	}
+}
+
+func TestAnAccuracyCheckRunsItsOwnWorkload(t *testing.T) {
+	server := kvServer(t, 0)
+	out, code, stderr := accuracyRun(t, server.URL, "pause", ownWorkloadEnv+"=refused")
+	if code != 0 {
+		t.Fatalf("exit %d", code)
+	}
+	history, err := check.OpenHistory(filepath.Join(out, "history"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := map[string]int{}
+	for i := range history.Phases {
+		calls, err := history.Phase(i)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range calls {
+			ops[c.Op]++
+		}
+	}
+	if ops["get"] != 0 || ops["put"] == 0 || ops["refused"] == 0 {
+		t.Fatalf("the check ran the task's workload, not its own: %v", ops)
+	}
+	// The refused requests are errors to loadgen, far above the Validity's error rate: no phase
+	// of a check is a measurement, so none is judged as one.
+	if strings.Contains(stderr, "not a measurement") || !strings.Contains(stderr, "operations sent") {
+		t.Fatalf("the phases were judged:\n%s", stderr)
+	}
+}
+
+func TestThePhasePodRunsTheChecksOwnGeneratorOnlyInACheck(t *testing.T) {
+	task := testTask()
+	if got := generatorCommand(task, "/t/bench", true); !slices.Equal(got, []string{"/t/bench"}) {
+		t.Fatalf("no Accuracy.Workload: %q", got)
+	}
+	w := kvWorkload()
+	task.Accuracy = &Accuracy[kvData, *kvModel]{Workload: &w}
+	if got := generatorCommand(task, "/t/bench", true); !slices.Equal(got, []string{"/t/bench", "accuracy-workload"}) {
+		t.Fatalf("Accuracy.Workload: %q", got)
+	}
+	if got := generatorCommand(task, "/t/bench", false); !slices.Equal(got, []string{"/t/bench"}) {
+		t.Fatalf("a benchmark's phase: %q", got)
+	}
+	task.Accuracy = &Accuracy[kvData, *kvModel]{Generator: []string{"./gen", "-x"}}
+	if got := generatorCommand(task, "/t/bench", true); !slices.Equal(got, []string{"/t/gen", "-x"}) {
+		t.Fatalf("Accuracy.Generator: %q", got)
+	}
+	if got := phaseCommand("/t/bench", true)("/w", "http://a"); !slices.Equal(got, []string{"/t/bench", "phase", "--accuracy", "--work", "/w", "--target", "http://a"}) {
+		t.Fatalf("an accuracy phase's command: %q", got)
+	}
+	both := &Accuracy[kvData, *kvModel]{Workload: &w, Generator: []string{"gen"}, Phases: 1, Oracle: testAccuracy("pause").Oracle}
+	if err := both.validate(task.System); err == nil || !strings.Contains(err.Error(), "at most one of Workload and Generator") {
+		t.Fatalf("both: %v", err)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/evaluator"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/accuracy"
 	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/internal/phase"
+	"github.com/uw-syfi/vibesys/sdk/vibesys-evaluator/go/workload"
 )
 
 // Accuracy is a task's accuracy check, the `accuracy` command of Main: it deploys and seeds the
@@ -24,8 +26,8 @@ import (
 // UNKNOWN (also when the run could not complete), and writes the report, the failures' timelines
 // and the history into --out (/vibesys/artifacts/accuracy, or accuracy/ in
 // $VIBESYS_ARTIFACTS_DIR). A check runs at a fixed, modest load, so that the responses are
-// judged, not the capacity.
-type Accuracy struct {
+// judged, not the capacity; no phase is a measurement, so the Task's Validity does not apply.
+type Accuracy[D, M any] struct {
 	// Phases is how many phases run, each an open loop of Load.
 	Phases int
 	Load   Open
@@ -35,27 +37,41 @@ type Accuracy struct {
 	Oracle func(h *check.History) ([]check.AnySpec, error)
 	// Options bound the check; a zero field takes check.DefaultOptions'.
 	Options check.Options
+	// Workload is the check's own request generator, in this binary (`accuracy-workload
+	// generate`); or Generator is its command, as the Task's. Neither: the check's phases run the
+	// Task's workload. One task binary so serves a benchmark's mix and a check's.
+	Workload  *workload.Workload[D, M]
+	Generator []string
 }
 
-// Fault is a fault an accuracy run applies between two phases: Restart, RestartAll and Exec act
-// on a Deployment of a Kubernetes application (K8s); FaultFunc is the task's own action. Each is
-// recorded in the history as a fault of its kind on its target, with its start and end on the
-// clock loadgen stamps its results with, and no operation in flight; the oracle's Spec.Fault
-// says what it does to the state.
+// Fault is a fault an accuracy run applies between two phases: Restart, RestartAll, Exec and
+// Flush act on a Deployment of a Kubernetes application (K8s); FaultFunc is the task's own
+// action. Each is recorded in the history as a fault of its kind on its target, with its start
+// and end on the clock loadgen stamps its results with, and no operation in flight; the oracle's
+// Spec.Fault says what it does to the state.
 type Fault struct {
 	after        int
 	kind, target string
 	action       func(d deployment) func(context.Context) error
-	// onDeployment: the fault acts on the Deployment target (Restart, RestartAll, Exec).
-	onDeployment bool
+	// on is what the target must be: one of the App's Deployments (restartable or caches), one
+	// of its caches, or anything (FaultFunc).
+	on faultTarget
 }
+
+type faultTarget int
+
+const (
+	onTask faultTarget = iota
+	onDeployment
+	onCache
+)
 
 // Restart deletes one pod of the Deployment name (the first by name) after phase after and waits
 // until it serves again: a fault of kind "restart" on the Deployment.
 func Restart(after int, name string) Fault {
 	return Fault{after, "restart", name, func(d deployment) func(context.Context) error {
 		return d.restart(name, false)
-	}, true}
+	}, onDeployment}
 }
 
 // RestartAll deletes every pod of the Deployment name at once after phase after and waits until it
@@ -63,7 +79,7 @@ func Restart(after int, name string) Fault {
 func RestartAll(after int, name string) Fault {
 	return Fault{after, "restart_all", name, func(d deployment) func(context.Context) error {
 		return d.restart(name, true)
-	}, true}
+	}, onDeployment}
 }
 
 // Exec runs argv in the first pod of the Deployment name after phase after: a fault of kind "exec" on the
@@ -72,17 +88,26 @@ func Exec(after int, name string, argv ...string) Fault {
 	argv = append([]string(nil), argv...)
 	return Fault{after, "exec", name, func(d deployment) func(context.Context) error {
 		return d.exec(name, argv)
-	}, true}
+	}, onDeployment}
+}
+
+// Flush empties the cache Deployment cache (one of the k8s.App's Caches) in place, in every pod,
+// after phase after: memcached's flush_all or redis's FLUSHALL. A fault of kind "flush" on the
+// cache.
+func Flush(after int, cache string) Fault {
+	return Fault{after, "flush", cache, func(d deployment) func(context.Context) error {
+		return d.flush(cache)
+	}, onCache}
 }
 
 // FaultFunc is a fault the task applies itself after phase after: action, recorded as a fault of
 // kind (^[a-z][a-z0-9_]{0,62}$) on target. An error of action ends the run.
 func FaultFunc(after int, kind, target string, action func(context.Context) error) Fault {
-	return Fault{after, kind, target, func(deployment) func(context.Context) error { return action }, false}
+	return Fault{after, kind, target, func(deployment) func(context.Context) error { return action }, onTask}
 }
 
 // plan is the run's plan on d; with d nil, its actions do nothing (to validate the plan).
-func (a *Accuracy) plan(d deployment) (accuracy.Plan, error) {
+func (a *Accuracy[D, M]) plan(d deployment) (accuracy.Plan, error) {
 	load, err := a.Load.input()
 	if err != nil {
 		return accuracy.Plan{}, err
@@ -98,21 +123,33 @@ func (a *Accuracy) plan(d deployment) (accuracy.Plan, error) {
 	return plan, plan.Validate()
 }
 
-func (a *Accuracy) validate(system System) error {
+func (a *Accuracy[D, M]) validate(system System) error {
 	if a.Oracle == nil {
 		return errors.New("microservices.Accuracy needs an Oracle")
 	}
-	if ks, ok := system.(kubeSystem); ok {
-		allowed := map[string]bool{}
-		for _, name := range ks.app.Restartable {
-			allowed[name] = true
+	if a.Workload != nil && len(a.Generator) > 0 {
+		return errors.New("microservices.Accuracy takes at most one of Workload and Generator")
+	}
+	if a.Workload != nil {
+		if err := checkOperationNames(a.Workload); err != nil {
+			return fmt.Errorf("microservices.Accuracy Workload: %w", err)
 		}
+	}
+	if ks, ok := system.(kubeSystem); ok {
+		caches := map[string]bool{}
 		for name := range ks.app.Caches {
-			allowed[name] = true
+			caches[name] = true
+		}
+		deployments := maps.Clone(caches)
+		for _, name := range ks.app.Restartable {
+			deployments[name] = true
 		}
 		for _, f := range a.Faults {
-			if f.onDeployment && !allowed[f.target] {
+			switch {
+			case f.on == onDeployment && !deployments[f.target]:
 				return fmt.Errorf("fault %s on %s: not one of the k8s.App's Restartable Deployments or Caches", f.kind, f.target)
+			case f.on == onCache && !caches[f.target]:
+				return fmt.Errorf("fault %s on %s: not one of the k8s.App's Caches", f.kind, f.target)
 			}
 		}
 	}
@@ -203,8 +240,8 @@ func runAccuracy[D, M any](ctx context.Context, task Task[D, M], root, out, dir 
 		return err
 	}
 	runner := &phase.Runner{
-		Pods: deployed, Command: phaseCommand(exe), Seed: seed, Dir: dir,
-		Validity: task.validity(), Capture: true, Log: logf, Now: time.Now,
+		Pods: deployed, Command: phaseCommand(exe, true), Seed: seed, Dir: dir,
+		Capture: true, Unjudged: true, Log: logf, Now: time.Now,
 	}
 	return accuracy.Run(ctx, runner, plan)
 }

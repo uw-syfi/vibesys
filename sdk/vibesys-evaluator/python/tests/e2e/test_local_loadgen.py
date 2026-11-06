@@ -298,6 +298,36 @@ def test_the_accuracy_check_runs_its_phases_and_the_oracle(
     assert all(r.client is not None for r in results)
 
 
+def test_the_accuracy_check_runs_its_own_workload(
+    built_loadgen: Path, oracle: Path, tmp_path: Path
+) -> None:
+    service = kv.KvService()
+    kv.seed_service(service, kv.Data())
+    out = tmp_path / "accuracy"
+    with _serving(service) as target:
+        env = {
+            **os.environ,
+            "KV_TARGET": target,
+            "KV_ACCURACY_WORKLOAD": "writes",
+            "KV_ORACLE": str(oracle),
+            "KV_STORE_SCALE": "test",
+            "VIBESYS_EVALUATOR_LOADGEN": str(built_loadgen),
+            "PYTHONPATH": os.pathsep.join([str(TESTS), os.environ.get("PYTHONPATH", "")]),
+        }
+        done = _run(
+            [sys.executable, str(SCRIPT), "accuracy", "--out", str(out), "--seed", "7"],
+            env=env,
+            timeout=SAMPLE_TIMEOUT_SECS,
+        )
+    assert done.returncode == 0, done.stdout + done.stderr
+    # The phases ran the check's workload (bench.py accuracy-workload generate), unjudged.
+    for index in range(2):
+        summary = read_summary(out / "history" / f"phase-{index}" / "summary.binpb")
+        assert list(summary.operation_names) == ["write", "read"]
+    assert "operations sent" in done.stderr
+    assert "not a measurement" not in done.stderr
+
+
 def test_the_go_example_is_a_whole_benchmark(
     built_loadgen: Path, go_generator: Path, oracle: Path, tmp_path: Path
 ) -> None:

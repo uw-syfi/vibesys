@@ -67,7 +67,7 @@ def main(
     capture: bool = False,
     accuracy: Accuracy | None = None,
 ) -> NoReturn:
-    """Run the task script's command (``benchmark``, ``accuracy``, ``phase``, ``generate``, ``seed`` or ``ctl``) and exit.
+    """Run the task script's command (``benchmark``, ``accuracy``, ``phase``, ``generate``, ``accuracy-workload``, ``seed`` or ``ctl``) and exit.
 
     Args:
         dataset: Builds the initial data; a pure function of the task's constants.

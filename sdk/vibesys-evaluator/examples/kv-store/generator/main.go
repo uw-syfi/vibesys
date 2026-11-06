@@ -219,7 +219,7 @@ func main() {
 		Capture:  capture,
 		// The accuracy check: on Kubernetes (microservices.K8s) its faults would be Restart,
 		// RestartAll or Exec on the kv Deployment; a local application is the task's to pause.
-		Accuracy: &microservices.Accuracy{
+		Accuracy: &microservices.Accuracy[*Data, *Model]{
 			Phases: 2,
 			Load:   microservices.Open{Rate: 40, Secs: time.Second, Warmup: 500 * time.Millisecond, Arrivals: microservices.Uniform},
 			Faults: []microservices.Fault{microservices.FaultFunc(0, "pause", "kv", func(context.Context) error { return nil })},

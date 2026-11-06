@@ -88,6 +88,10 @@ func (k kubeDeployment) exec(deployment string, argv []string) func(context.Cont
 	return kube.Exec(k.d, deployment, argv)
 }
 
+func (k kubeDeployment) flush(cache string) func(context.Context) error {
+	return kube.Flush(k.d, cache)
+}
+
 func (k kubeDeployment) close(ctx context.Context) error {
 	defer os.RemoveAll(k.work)
 	return k.d.Close(ctx, k8s.CloseOptions{})

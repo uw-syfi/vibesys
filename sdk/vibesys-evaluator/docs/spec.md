@@ -153,8 +153,9 @@ phase primitives (`microservices.Run` adds `closed_loop`, `open_loop` and
 `fault`).
 The core's `main` is enough for a domain whose phases are plain functions
 (`llm_serving`). A domain's `main` has its own command line: the
-microservices script's commands are `benchmark`, `phase`, `generate` (the
-generator's, see "Generator command line"), `seed` and `ctl`.
+microservices script's commands are `benchmark`, `accuracy`, `phase`,
+`generate` and `accuracy-workload generate` (the generators', see "Generator
+command line"), `seed` and `ctl`.
 
 The rule "the core imports no domain; a domain imports the core and itself
 only" is checked by `python/tests/test_layering.py`, which reads every
@@ -345,10 +346,12 @@ Warmup})`, `OpenLoop(ctx, Open{Rate, Secs, Warmup, Arrivals})` and
 `Local(target)` is a `System` already running here (seed and phases as
 child processes), `K8s(app, ready...)` an application on Kubernetes (package
 `k8s`). `Task.Accuracy` is the task's accuracy check, the `accuracy` command
-("Accuracy run"): `Accuracy{Phases, Load, Faults, Oracle, Options}` with the
+("Accuracy run"): `Accuracy[D, M]{Phases, Load, Faults, Oracle, Options,
+Workload or Generator}` (the check's own workload; neither: the Task's) with the
 faults `Restart(after, deployment)`, `RestartAll(after, deployment)`,
-`Exec(after, deployment, argv...)` (on `K8s`) and `FaultFunc(after, kind,
-target, action)` (the task's own), and the oracle's specs run in-process.
+`Exec(after, deployment, argv...)`, `Flush(after, cache)` (on `K8s`) and
+`FaultFunc(after, kind, target, action)` (the task's own), and the oracle's
+specs run in-process.
 
 ## Accuracy checks (`go/check`)
 
@@ -461,16 +464,23 @@ TASK_BINARY accuracy [--project-root DIR] [--out DIR] [--seed N] [--history DIR]
    Kubernetes, deleted on every path).
 2. `phases` open-loop phases of the check's load run through the phase
    runner with capture on: every response body, the loadgen client of each
-   operation and the generator's `info`. A phase that is not a measurement
-   (the saturation guard, the validity rules) is logged and checked all the
-   same.
+   operation and the generator's `info`. Each phase pod runs `phase
+   --accuracy`, whose generator is the check's own workload
+   (`Accuracy(workload=...)`, Go `Accuracy.Workload` or `Generator`) when it
+   has one and the task's otherwise, so one script serves a benchmark's mix
+   and a check's. No phase is judged as a measurement: neither the
+   saturation guard nor the validity rules apply (a workload may send
+   requests the application must refuse), and each phase logs what it sent
+   and how many of its operations failed; the oracle judges every response.
 3. After phase `i`, the faults with `after == i` run in order, each recorded
    as a `FaultEvent` with its start and end on the loadgen clock. `restart`
    deletes one pod of the Deployment (the first by name), `restart_all` every
    pod at once, and both wait until it serves again (replicas available, the
    ready steps through the gateway); `exec` runs a command in the first pod,
-   and a nonzero exit ends the run. A fault that cannot be applied (a
-   Kubernetes fault on a local application) ends it too.
+   and a nonzero exit ends the run; `flush` empties a cache Deployment (one
+   of `k8s.App(caches)`) in place, in every pod. A fault that cannot be
+   applied (a Kubernetes fault on a local application) ends it too. Each wait
+   is bounded by `k8s.App(wait_secs)`.
 4. The application is torn down, then the oracle judges `OUT/history`: in
    Go, the `Accuracy.Oracle` specs in-process (`check.Check`); in Python, the
    oracle program with `--history OUT/history --out OUT`.
@@ -519,7 +529,7 @@ The verbs (messages in `proto/vibesys/evaluator/v1/core.proto`, and
 | `hist summary` | merge HDR histograms and read percentiles from the sum |
 | `phase pod` | run one phase where the phase pod runs: loadgen and the generator, the pod's files (long: `{"event": PhaseEvent}` lines, then the response) |
 | `phase judge` | whether a phase's files are a measurement: the saturation guard and the validity rules |
-| `accuracy run` | an accuracy check: deploy and seed the application (Kubernetes, or a local one), run the phases with capture and the faults between them into the history directory, tear it down, run the oracle program (long: `{"event": PhaseEvent}` lines, then the verdict) |
+| `accuracy run` | an accuracy check: deploy and seed the application (Kubernetes, or a local one), run the phases with capture (not judged as measurements) and the faults between them into the history directory, tear it down, run the oracle program (long: `{"event": PhaseEvent}` lines, then the verdict) |
 
 Error kinds a wrapper sees: `record` (a record the protocol refuses),
 `histogram`, `phase`, `invalid_argument`, `bad_request`, `io`, `cancelled`
@@ -578,7 +588,10 @@ GENERATOR generate --phase-input F --dataset F --state DIR
 
 - `GENERATOR` is `python bench.py` for a Python workload (its `generate`
   command), the `microservices.Generator` command, or a Go task binary of
-  `microservices.Main` with its `Workload`.
+  `microservices.Main` with its `Workload`. In an accuracy check's phases
+  (`phase --accuracy`) with a workload of the check's own, it is `python
+  bench.py accuracy-workload` (or `TASK_BINARY accuracy-workload`) for a
+  Python (Go) one, or the check's `Generator` command.
 - `generate` writes the request stream (`FileHeader` kind requests,
   `RequestsHeader`, then `PlannedOperation`s, binpb) to standard output until
   the stream is closed, then exits 0. Under capture (`PhaseInput.capture`)
@@ -761,8 +774,10 @@ run.py: the cluster comes from the vibesys-cli `kubernetes` resource
 - `ready`: steps sent through `gateway` by `loadgen probe` from a pod once
   every Deployment has all its replicas available; each must succeed twice
   per ready endpoint of the gateway Service, on fresh connections.
-- `restartable`, `caches`: the Deployments the fault actions may act on, through
-  `python bench.py ctl restart DEPLOYMENT [--every-pod] | flush CACHE | stop | start`
+- `restartable`, `caches`: the Deployments an accuracy check's faults may act on
+  (`Fault.restart`, `Fault.restart_all` and `Fault.exec` on either, `Fault.flush`
+  on a cache; see "Accuracy run"). Outside an accuracy check, the same actions go
+  through `python bench.py ctl restart DEPLOYMENT [--every-pod] | flush CACHE | stop | start`
   or, from Python, `k8s.attach(app)` (the sample's namespace, by default
   `$VIBESYS_EVALUATOR_NAMESPACE`): `restart(*deployments, every_pod=False,
   wait=True)` deletes one pod (the first by name) or every pod and, with `wait`,
@@ -772,6 +787,10 @@ run.py: the cluster comes from the vibesys-cli `kubernetes` resource
   again; `flush(cache)` runs `FLUSHALL` or `flush_all` in place; `stop()` and
   `start()` scale every restartable Deployment to 0 and back. Only Deployments
   listed in `restartable` or `caches` can be restarted or exec'd in.
+- `wait_secs` (Go `App.WaitSecs`; default 300): how long each wait of the
+  deploy may take: for the data tier, for every replica, for a pod to start, and
+  for a restarted Deployment to serve again (a fault's wait too). An application
+  whose pods load a large snapshot before they start needs more.
 - Phase pods: one pod per phase in the namespace, the inputs copied in and
   the outputs copied out with `kubectl exec ... tar`, so no ConfigMap size limit
   applies; pods of the package carry its labels and die with the namespace.
