@@ -97,8 +97,13 @@ func spec(d *data, s scale) *check.Spec[check.Register[stored], op, stored] {
 	}
 }
 
-// project makes one piece per operation whose second step (the GET or PUT after the login) was
-// sent: an operation whose login failed did nothing.
+// unknown says whether a step's outcome is unknown: no response, or a 5xx (the request may or
+// may not have taken effect).
+func unknown(s check.Step) bool { return s.Status == 0 || s.Status >= 500 }
+
+// project makes one piece per operation on its key. An operation that stopped at its login (the
+// GET or PUT was never sent) touched no key: its piece has none, and an unknown login outcome
+// counts toward the check's limit on unknown outcomes like any other.
 func project(s scale) func(iter.Seq[[]check.Call], *check.Projection[op, stored]) error {
 	return func(phases iter.Seq[[]check.Call], out *check.Projection[op, stored]) error {
 		for calls := range phases {
@@ -109,24 +114,25 @@ func project(s scale) func(iter.Seq[[]check.Call], *check.Projection[op, stored]
 					return fmt.Errorf("%s %d: info: %w", c.Op, c.Index, err)
 				}
 				if len(c.Steps) < 2 {
+					out.Add(check.Piece[op, stored]{Origin: c, Unknown: len(c.Steps) == 0 || unknown(c.Steps[0])})
 					continue
 				}
 				step := c.Steps[1]
-				piece := check.Piece[op, stored]{Keys: []string{fmt.Sprintf("k%d", in.Key)}, In: op{Key: in.Key}, Origin: c, Unknown: step.Status == 0}
+				piece := check.Piece[op, stored]{Keys: []string{fmt.Sprintf("k%d", in.Key)}, In: op{Key: in.Key}, Origin: c, Unknown: unknown(step)}
 				switch c.Op {
 				case "write":
 					piece.Write = true
 					piece.In.Write, piece.In.Value = true, stored{true, s.value(in.Seed)}
-					if step.Status != 0 && step.Status != 200 {
+					if !piece.Unknown && step.Status != 200 {
 						out.Violation(c, "PUT answered HTTP %d", step.Status)
 						continue
 					}
 				case "read":
-					switch step.Status {
-					case 0:
-					case 200:
+					switch {
+					case piece.Unknown:
+					case step.Status == 200:
 						piece.Out = stored{true, string(step.Body)}
-					case 404:
+					case step.Status == 404:
 						piece.Out = stored{}
 					default:
 						out.Violation(c, "GET answered HTTP %d", step.Status)

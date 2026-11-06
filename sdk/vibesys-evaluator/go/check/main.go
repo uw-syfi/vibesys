@@ -22,14 +22,25 @@ const DefaultReportDir = "/vibesys/artifacts/accuracy"
 //
 // The flags' defaults are DefaultOptions. oracle gets the opened history, so the specs can read
 // its dataset (History.Dataset); an error from it is an UNKNOWN verdict.
+//
+// The import command makes a history directory from loadgen phase directories captured before
+// the accuracy capture wrote histories (WriteHistory), to check old runs; it exits 0, or 2 with
+// the reason:
+//
+//	ORACLE import --out DIR [--dataset FILE] [--fault SPEC]... PHASE_DIR...
+//
+// where a SPEC is kind=K,after=N[,target=T][,start=TIME][,end=TIME], TIME is Unix nanoseconds or
+// RFC 3339, and a fault without times is placed between phase N and the next.
 func Main(oracle func(h *History) ([]AnySpec, error)) {
 	os.Exit(run(os.Args[1:], oracle, os.Stdout, os.Stderr))
 }
 
 func run(args []string, oracle func(h *History) ([]AnySpec, error), stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "import" {
+		return runImport(args[1:], stdout, stderr)
+	}
 	d := DefaultOptions
-	fs := flag.NewFlagSet("oracle", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+	fs := newFlagSet("oracle", stderr)
 	dir := fs.String("history", "", "the captured history directory (required)")
 	out := fs.String("out", DefaultReportDir, "where to write report.txt and the failures' timelines")
 	var o Options
@@ -73,4 +84,10 @@ func run(args []string, oracle func(h *History) ([]AnySpec, error), stdout, stde
 		fmt.Fprintln(stderr, report.Reason)
 	}
 	return report.Verdict.ExitCode()
+}
+
+func newFlagSet(name string, stderr io.Writer) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	return fs
 }

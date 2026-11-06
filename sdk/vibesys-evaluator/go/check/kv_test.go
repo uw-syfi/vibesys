@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/maphash"
 	"iter"
+	"maps"
 	"math/rand"
 	"slices"
 	"strings"
@@ -332,26 +333,129 @@ func TestViolationsFailWithoutASearchAndStopTheProjection(t *testing.T) {
 func TestAFaultMustBeQuiescent(t *testing.T) {
 	h := check.NewHistory([][]check.Call{{w(0, 0, 10, "a", 1)}, {r(0, 100, 110, "a", 1)}}, []check.Fault{{Kind: "restart", Start: 5, End: 50}})
 	spec := kvSpec("kv", true)
-	spec.Fault = func(s kvState, _ check.Fault) []kvState { return []kvState{s} }
+	spec.Fault = func(s kvState, _ []string, _ check.Fault) []kvState { return []kvState{s} }
 	if rep := run(h, check.Options{}, spec); rep.Verdict != check.Unknown || !strings.Contains(rep.Reason, "not quiescent") {
 		t.Fatalf("got %s (%s), want UNKNOWN naming the fault", rep.Verdict, rep.Reason)
 	}
 }
 
 // A fault the model says loses state is checked like any op: a read after a restart that lost a
-// write passes only if the model says restarts lose it.
+// write passes only if the model says restarts lose it. Fault gets the partition's keys, as Init
+// does, so a restart can re-seed them.
 func TestFaultsStepTheModel(t *testing.T) {
-	h := check.NewHistory([][]check.Call{{w(0, 0, 10, "a", 1)}, {r(0, 100, 110, "a", 0)}}, []check.Fault{{Kind: "restart", Start: 50, End: 60, AfterPhase: 0}})
+	h := check.NewHistory([][]check.Call{{w(0, 0, 10, "a", 1), w(1, 0, 10, "b", 1)}, {r(0, 100, 110, "a", 0), r(1, 100, 110, "b", 7)}}, []check.Fault{{Kind: "restart", Start: 50, End: 60, AfterPhase: 0}})
 	durable := kvSpec("durable", true)
 	if rep := run(h, check.Options{}, durable); rep.Verdict != check.Fail {
 		t.Fatalf("a lost write with no Fault (durable): %s, want FAIL", rep.Verdict)
 	}
+	seed := map[string]int{"b": 7} // what a restart re-applies
 	volatile := kvSpec("volatile", true)
-	volatile.Fault = func(s kvState, _ check.Fault) []kvState {
-		return []kvState{{keys: s.keys, vals: make([]int, len(s.vals))}}
+	volatile.Fault = func(s kvState, keys []string, _ check.Fault) []kvState {
+		if !slices.Equal(keys, s.keys) {
+			panic(fmt.Sprintf("Fault got keys %v in a partition of %v", keys, s.keys))
+		}
+		n := kvState{keys: keys, vals: make([]int, len(keys))}
+		for i, k := range keys {
+			n.vals[i] = seed[k]
+		}
+		return []kvState{n}
 	}
 	if rep := run(h, check.Options{}, volatile); rep.Verdict != check.Pass {
-		t.Fatalf("a lost write when restarts forget: %s, want PASS\n%s", rep.Verdict, rep.Text(5))
+		t.Fatalf("a lost write when restarts forget and re-seed: %s, want PASS\n%s", rep.Verdict, rep.Text(5))
+	}
+}
+
+// A piece without keys touches no state (a lost login): it is counted, an unknown outcome
+// toward MaxLostShare too, and never searched.
+func TestPiecesWithoutKeysAreCountedNotSearched(t *testing.T) {
+	var calls []check.Call
+	for i := range 98 {
+		calls = append(calls, w(uint64(i), int64(10*i+1), int64(10*i+5), "k", i))
+	}
+	login := func(i uint64, lost bool) check.Call { return kvCall(i, -1, 2000, 2010, false, nil, nil, lost) }
+	calls = append(calls, login(98, false), login(99, true)) // a read of no keys: a login
+	rep := run(one(calls...), check.Options{}, kvSpec("atomic", false))
+	s := rep.Specs[0]
+	if rep.Verdict != check.Pass || s.Coverage.Keyless != 2 || s.Coverage.UnknownPieces != 1 || s.Coverage.Pieces != 100 || len(s.Partitions) != 1 {
+		t.Fatalf("got %s with coverage %+v and %d partitions; want PASS, 2 without keys (1 unknown) of 100 pieces, 1 partition\n%s", rep.Verdict, s.Coverage, len(s.Partitions), rep.Text(5))
+	}
+	calls = append(calls, login(100, true))
+	if rep := run(one(calls...), check.Options{}, kvSpec("atomic", false)); rep.Verdict != check.Fail || !rep.Specs[0].LostShareExceeded {
+		t.Fatalf("2 lost logins of 101 pieces: %s, want FAIL over MaxLostShare", rep.Verdict)
+	}
+}
+
+// scanSpec is kvSpec per key where a read of no keys is a scan: its answer lists the keys that
+// are not 0, and it is projected onto every key the history writes, in a second pass over the
+// phases (a key first written after the scan included, so the scan must not show it yet).
+func scanSpec() *check.Spec[kvState, kvIn, kvOut] {
+	sp := kvSpec("scan", true)
+	sp.Project = func(phases iter.Seq[[]check.Call], out *check.Projection[kvIn, kvOut]) error {
+		written := map[string]bool{}
+		for calls := range phases {
+			for i := range calls {
+				var in kvIn
+				if err := json.Unmarshal(calls[i].Info, &in); err != nil {
+					return err
+				}
+				for _, k := range in.Keys {
+					written[k] = written[k] || in.Write
+				}
+			}
+		}
+		keys := slices.Sorted(maps.Keys(written))
+		for calls := range phases {
+			for i := range calls {
+				c := &calls[i]
+				var in kvIn
+				var res struct {
+					Seen map[string]int `json:"seen"`
+				}
+				if err := json.Unmarshal(c.Info, &in); err != nil {
+					return err
+				}
+				if !in.Write {
+					if err := json.Unmarshal(c.Steps[0].Body, &res); err != nil {
+						return err
+					}
+					for _, k := range keys {
+						out.Add(check.Piece[kvIn, kvOut]{Keys: []string{k}, In: kvIn{Keys: []string{k}}, Out: kvOut{Vals: []int{res.Seen[k]}}, Origin: c})
+					}
+					continue
+				}
+				for j, k := range in.Keys {
+					out.Add(check.Piece[kvIn, kvOut]{Keys: []string{k}, In: kvIn{Write: true, Keys: []string{k}, Vals: []int{in.Vals[j]}}, Write: true, Origin: c})
+				}
+			}
+		}
+		return nil
+	}
+	return sp
+}
+
+// Project may range the phases more than once: facts about the whole history from a first pass
+// (every key written), pieces from a second. The calls are counted once.
+func TestProjectCanPassOverThePhasesTwice(t *testing.T) {
+	scan := func(i uint64, start, end int64, seen string) check.Call {
+		c := r(i, start, end, "x")
+		c.Info = []byte(`{"keys":[]}`)
+		c.Steps[0].Body = []byte(`{"seen":` + seen + `}`)
+		return c
+	}
+	ok := check.NewHistory([][]check.Call{
+		{w(0, 1, 10, "a", 1), scan(1, 20, 30, `{"a":1}`)},
+		{w(0, 100, 110, "b", 2), scan(1, 120, 130, `{"a":1,"b":2}`)},
+	}, nil)
+	rep := run(ok, check.Options{}, scanSpec())
+	if s := rep.Specs[0]; rep.Verdict != check.Pass || s.Coverage.Calls != 4 || s.Coverage.Pieces != 6 || len(s.Partitions) != 2 {
+		t.Fatalf("got %s, %d calls, %d pieces, %d partitions; want PASS, 4, 6 (each scan on a and b), 2\n%s", rep.Verdict, s.Coverage.Calls, s.Coverage.Pieces, len(s.Partitions), rep.Text(5))
+	}
+	early := check.NewHistory([][]check.Call{
+		{w(0, 1, 10, "a", 1), scan(1, 20, 30, `{"a":1,"b":2}`)}, // b is written only in phase 1
+		{w(0, 100, 110, "b", 2)},
+	}, nil)
+	if rep := run(early, check.Options{}, scanSpec()); rep.Verdict != check.Fail || !strings.Contains(rep.Reason, "(b)") {
+		t.Fatalf("a scan that shows a later write: %s (%s), want FAIL on b", rep.Verdict, rep.Reason)
 	}
 }
 

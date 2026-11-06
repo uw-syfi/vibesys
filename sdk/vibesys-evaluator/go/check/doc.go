@@ -10,7 +10,8 @@
 // never a pass), with what was covered.
 //
 // Main is the oracle's command line: it checks a history directory the accuracy capture wrote
-// (OpenHistory). Register, Window, Counter and PMap are building blocks for model states.
+// (OpenHistory), and its import command makes one of older loadgen phase directories
+// (WriteHistory). Register, Window, Counter and PMap are building blocks for model states.
 //
 // The authoring guide is sdk/vibesys-evaluator/docs/accuracy-checks.md; the history directory's
 // format is in sdk/vibesys-evaluator/docs/spec.md ("Accuracy history").

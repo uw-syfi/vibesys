@@ -48,10 +48,11 @@ func (sp *Spec[S, I, O]) run(h *History, r *runner) *SpecReport {
 		return rep
 	}
 
-	// Projection, phase by phase.
+	// Projection, phase by phase, in as many passes as Project makes.
 	out := &Projection[I, O]{spec: sp.Name}
 	var loadErr error
 	stopped := false
+	counted := 0 // phases whose calls are in the coverage
 	phases := func(yield func([]Call) bool) {
 		for i := range h.Phases {
 			calls, err := h.Phase(i)
@@ -60,10 +61,13 @@ func (sp *Spec[S, I, O]) run(h *History, r *runner) *SpecReport {
 				return
 			}
 			out.origins = map[*Call]*Call{}
-			rep.Coverage.Calls += len(calls)
-			for c := range calls {
-				if calls[c].Lost() {
-					rep.Coverage.LostCalls++
+			if i == counted {
+				counted++
+				rep.Coverage.Calls += len(calls)
+				for c := range calls {
+					if calls[c].Lost() {
+						rep.Coverage.LostCalls++
+					}
 				}
 			}
 			if !yield(calls) {
@@ -88,14 +92,15 @@ func (sp *Spec[S, I, O]) run(h *History, r *runner) *SpecReport {
 	if stopped {
 		rep.Warnings = append(rep.Warnings, "projection stopped after the first phase with violations")
 	}
-	rep.Coverage.Pieces = len(out.pieces)
+	rep.Coverage.Pieces = len(out.pieces) + out.keyless
 	rep.Coverage.UnknownPieces = out.unknown
+	rep.Coverage.Keyless = out.keyless
 	rep.Coverage.Faults = len(h.Faults)
 	if len(rep.Errors) > 0 || len(rep.Violations) > 0 {
 		rep.finish(o)
 		return rep
 	}
-	if n := len(out.pieces); n > 0 && o.MaxLostShare >= 0 && float64(out.unknown) > o.MaxLostShare*float64(n) {
+	if n := rep.Coverage.Pieces; n > 0 && o.MaxLostShare >= 0 && float64(out.unknown) > o.MaxLostShare*float64(n) {
 		rep.LostShareExceeded = true
 		rep.finish(o)
 		return rep

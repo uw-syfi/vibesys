@@ -2,6 +2,7 @@ package check_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"math/rand"
 	"os"
@@ -171,20 +172,135 @@ func TestOpenHistoryRejectsIncompleteDirectories(t *testing.T) {
 	}
 }
 
+// gzipResults replaces a phase directory's results.binpb with results.binpb.gz, as a phase's
+// artifacts keep it.
+func gzipResults(t *testing.T, phase string) {
+	raw, err := os.ReadFile(filepath.Join(phase, "results.binpb"))
+	must(t, err)
+	var packed bytes.Buffer
+	z := gzip.NewWriter(&packed)
+	_, err = z.Write(raw)
+	must(t, err)
+	must(t, z.Close())
+	must(t, os.WriteFile(filepath.Join(phase, "results.binpb.gz"), packed.Bytes(), 0o644))
+	must(t, os.Remove(filepath.Join(phase, "results.binpb")))
+}
+
+// WriteHistory makes a history directory of loadgen phase directories as a phase pod leaves
+// them (kept records in state/, results gzipped or not) and a fault list: a fault without times
+// is placed between the phases.
+func TestWriteHistoryImportsPhaseDirectories(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	phases := [][]check.Call{randomCalls(rng, 0, 30), randomCalls(rng, 1, 30), randomCalls(rng, 2, 30)}
+	src := t.TempDir()
+	writeHistory(t, src, phases, nil, true)
+	gzipResults(t, filepath.Join(src, "phase-1"))
+	dirs := []string{filepath.Join(src, "phase-0"), filepath.Join(src, "phase-1"), filepath.Join(src, "phase-2")}
+	faults := []check.Fault{
+		{Kind: "restart", Target: "app", AfterPhase: 0},
+		{Kind: "flush", Target: "cache", Start: 15e8, AfterPhase: 1},
+	}
+	dst := filepath.Join(t.TempDir(), "history")
+	must(t, check.WriteHistory(dst, dirs, faults, filepath.Join(src, "dataset.json")))
+	h, err := check.OpenHistory(dst)
+	must(t, err)
+	if h.Phases != 3 || h.Dataset != filepath.Join(dst, "dataset.json") {
+		t.Fatalf("phases %d, dataset %q", h.Phases, h.Dataset)
+	}
+	var lastEnd0, firstStart1 int64 = 0, 1 << 62
+	for _, c := range phases[0] {
+		lastEnd0 = max(lastEnd0, c.End)
+	}
+	for _, c := range phases[1] {
+		firstStart1 = min(firstStart1, c.Start)
+	}
+	want := []check.Fault{
+		{Kind: "restart", Target: "app", Start: lastEnd0 + 1, End: firstStart1 - 1, AfterPhase: 0},
+		{Kind: "flush", Target: "cache", Start: 15e8, End: 15e8, AfterPhase: 1},
+	}
+	if !reflect.DeepEqual(h.Faults, want) {
+		t.Fatalf("faults %+v, want %+v", h.Faults, want)
+	}
+	for i := range phases {
+		got, err := h.Phase(i)
+		must(t, err)
+		if len(got) != len(phases[i]) {
+			t.Fatalf("phase %d: %d calls, want %d", i, len(got), len(phases[i]))
+		}
+	}
+	for _, bad := range []struct {
+		name   string
+		dir    string
+		faults []check.Fault
+	}{
+		{"a directory that is not empty", dst, nil},
+		{"a kind the manifest refuses", "", []check.Fault{{Kind: "Restart", AfterPhase: 0}}},
+		{"a fault after no phase", "", []check.Fault{{Kind: "restart", AfterPhase: 3}}},
+		{"a fault that ends before it starts", "", []check.Fault{{Kind: "restart", Start: 9, End: 8}}},
+	} {
+		dir := bad.dir
+		if dir == "" {
+			dir = filepath.Join(t.TempDir(), "h")
+		}
+		if err := check.WriteHistory(dir, dirs, bad.faults, ""); err == nil {
+			t.Fatalf("%s: written", bad.name)
+		}
+	}
+}
+
+// oracle runs Main in a subprocess (this test binary, as TestOracleSubprocess) with args and
+// returns its exit code and output.
+func oracle(t *testing.T, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestOracleSubprocess$")
+	cmd.Env = append(os.Environ(), "CHECK_TEST_ARGS="+strings.Join(args, "\x1f"))
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
+	err := cmd.Run()
+	if e, ok := err.(*exec.ExitError); ok {
+		code = e.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return code, out.String(), errOut.String()
+}
+
+// TestOracleSubprocess is the subprocess oracle runs: a kv oracle on check.Main.
+func TestOracleSubprocess(t *testing.T) {
+	args := os.Getenv("CHECK_TEST_ARGS")
+	if args == "" {
+		t.Skip("the subprocess of oracle")
+	}
+	os.Args = append([]string{"oracle"}, strings.Split(args, "\x1f")...)
+	check.Main(func(h *check.History) ([]check.AnySpec, error) {
+		if h.Dataset == "" {
+			return nil, fmt.Errorf("no dataset")
+		}
+		return []check.AnySpec{kvSpec("kv", false)}, nil
+	})
+}
+
+// Main's import command writes a history Main then checks.
+func TestMainImportsPhaseDirectories(t *testing.T) {
+	src, dst := t.TempDir(), filepath.Join(t.TempDir(), "history")
+	writeHistory(t, src, [][]check.Call{{w(0, 1, 10, "a", 1)}, {r(0, 100, 110, "a", 1)}}, nil, true)
+	code, stdout, stderr := oracle(t, "import", "--out", dst, "--dataset", filepath.Join(src, "dataset.json"),
+		"--fault", "kind=restart,target=app,after=0", filepath.Join(src, "phase-0"), filepath.Join(src, "phase-1"))
+	if code != 0 || !strings.Contains(stdout, "2 phases, 1 faults") {
+		t.Fatalf("import: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if code, stdout, stderr := oracle(t, "--history", dst, "--out", t.TempDir()); code != 0 || !strings.Contains(stdout, "1 faults") {
+		t.Fatalf("check: exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if code, _, stderr := oracle(t, "import", "--out", filepath.Join(t.TempDir(), "h"), "--fault", "kind=restart", filepath.Join(src, "phase-0")); code != 2 || !strings.Contains(stderr, "after") {
+		t.Fatalf("a fault without after: exit %d, %s", code, stderr)
+	}
+}
+
 // Main is the oracle's command line: exit 0 PASS, 1 FAIL, 2 UNKNOWN, the reason on standard
 // error when it is not PASS, the report and timelines in --out. One subprocess per verdict
 // proves the wiring (the logic is Check's, tested above).
 func TestMainExitsWithTheVerdict(t *testing.T) {
-	if dir := os.Getenv("CHECK_TEST_HISTORY"); dir != "" {
-		os.Args = []string{"oracle", "--history", dir, "--out", os.Getenv("CHECK_TEST_OUT")}
-		check.Main(func(h *check.History) ([]check.AnySpec, error) {
-			if h.Dataset == "" {
-				return nil, fmt.Errorf("no dataset")
-			}
-			return []check.AnySpec{kvSpec("kv", false)}, nil
-		})
-		return
-	}
 	pass := [][]check.Call{{w(0, 1, 10, "a", 1), r(1, 20, 30, "a", 1)}}
 	fail := [][]check.Call{{w(0, 1, 10, "a,b", 1, 1), r(1, 5, 30, "a,b", 1, 0)}}
 	for _, c := range []struct {
@@ -198,22 +314,12 @@ func TestMainExitsWithTheVerdict(t *testing.T) {
 			if c.phases != nil {
 				writeHistory(t, dir, c.phases, nil, false)
 			}
-			cmd := exec.Command(os.Args[0], "-test.run=^TestMainExitsWithTheVerdict$")
-			cmd.Env = append(os.Environ(), "CHECK_TEST_HISTORY="+dir, "CHECK_TEST_OUT="+out)
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout, cmd.Stderr = &stdout, &stderr
-			err := cmd.Run()
-			code := 0
-			if e, ok := err.(*exec.ExitError); ok {
-				code = e.ExitCode()
-			} else if err != nil {
-				t.Fatal(err)
-			}
+			code, stdout, stderr := oracle(t, "--history", dir, "--out", out)
 			if code != c.code {
-				t.Fatalf("exit %d, want %d\nstdout:\n%s\nstderr:\n%s", code, c.code, stdout.String(), stderr.String())
+				t.Fatalf("exit %d, want %d\nstdout:\n%s\nstderr:\n%s", code, c.code, stdout, stderr)
 			}
-			if (c.code != 0) != (strings.TrimSpace(stderr.String()) != "") {
-				t.Fatalf("stderr %q for exit %d", stderr.String(), code)
+			if (c.code != 0) != (strings.TrimSpace(stderr) != "") {
+				t.Fatalf("stderr %q for exit %d", stderr, code)
 			}
 			written, _ := filepath.Glob(filepath.Join(out, "*"))
 			if len(written) != c.files {
